@@ -1,0 +1,66 @@
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    workspaceHeader:
+      type: apiKey
+      in: header
+      name: X-Workspace-Id
+
+  schemas:
+    Envelope:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 0
+        message:
+          type: string
+          example: ok
+        data:
+          type: object
+          additionalProperties: true
+        trace_id:
+          type: string
+          format: uuid
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 1
+        message:
+          type: string
+        data:
+          type: object
+          properties:
+            error_code:
+              type: string
+        trace_id:
+          type: string
+
+  parameters:
+    WorkspaceIdHeader:
+      name: X-Workspace-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"

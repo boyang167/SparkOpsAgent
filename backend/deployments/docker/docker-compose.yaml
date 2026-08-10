@@ -1,0 +1,92 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: sparkops
+      POSTGRES_PASSWORD: sparkops
+      POSTGRES_DB: sparkops
+    ports:
+      - "5432:5432"
+    volumes:
+      - sparkops_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sparkops -d sparkops"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: sparkops
+      RABBITMQ_DEFAULT_PASS: sparkops
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_DSN: postgres://sparkops:sparkops@postgres:5432/sparkops?sslmode=disable
+      REDIS_ADDR: redis:6379
+      JWT_SECRET: ${JWT_SECRET:-docker-dev-secret-min16}
+      MESSAGING_DRIVER: ${MESSAGING_DRIVER:-amqp}
+      AMQP_URL: amqp://sparkops:sparkops@rabbitmq:5672/
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      RUNTIME_DRIVER: ${RUNTIME_DRIVER:-mock}
+      DELIVERY_DRIVER: ${DELIVERY_DRIVER:-mock}
+      JENKINS_URL: ${JENKINS_URL:-}
+      JENKINS_USER: ${JENKINS_USER:-}
+      JENKINS_TOKEN: ${JENKINS_TOKEN:-}
+      GITLAB_BASE_URL: ${GITLAB_BASE_URL:-}
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  web:
+    build:
+      context: ../../../fronted
+      dockerfile: deployments/docker/Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      UPSTREAM_URL: http://api:8080
+      NODE_ENV: production
+
+volumes:
+  sparkops_pg:

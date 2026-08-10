@@ -1,0 +1,33 @@
+{
+  "name": "@sparkops/upstream",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./identity": "./src/identity.ts",
+    "./tenant": "./src/tenant.ts",
+    "./workspace": "./src/workspace.ts",
+    "./agent": "./src/agent.ts",
+    "./runtime": "./src/runtime.ts",
+    "./governance": "./src/governance.ts",
+    "./integration": "./src/integration.ts",
+    "./workflow": "./src/workflow.ts",
+    "./knowledge": "./src/knowledge.ts",
+    "./notification": "./src/notification.ts",
+    "./delivery": "./src/delivery.ts",
+    "./cluster": "./src/cluster.ts",
+    "./platform": "./src/platform.ts",
+    "./product": "./src/product.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@sparkops/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "typescript": "^5.8.3"
+  }
+}

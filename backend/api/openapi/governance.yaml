@@ -1,0 +1,306 @@
+paths:
+  /api/v1/workspaces/{wsId}/roles:
+    get:
+      tags: [governance]
+      summary: List roles
+      operationId: listRoles
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    post:
+      tags: [governance]
+      summary: Create role
+      operationId: createRole
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, permissions]
+              properties:
+                name:
+                  type: string
+                permissions:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/workspaces/{wsId}/roles/{roleId}:
+    patch:
+      tags: [governance]
+      summary: Update role permissions
+      operationId: updateRole
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [permissions]
+              properties:
+                permissions:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    delete:
+      tags: [governance]
+      summary: Delete role
+      operationId: deleteRole
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/workspaces/{wsId}/members:
+    get:
+      tags: [governance]
+      summary: List workspace members
+      operationId: listMembers
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    post:
+      tags: [governance]
+      summary: Invite member to workspace
+      operationId: inviteMember
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "200":
+          description: Invited
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/workspaces/{wsId}/members/{memberId}/roles:
+    get:
+      tags: [governance]
+      summary: List member roles
+      operationId: listMemberRoles
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    post:
+      tags: [governance]
+      summary: Assign role to member
+      operationId: assignRole
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role_id]
+              properties:
+                role_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Assigned
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/workspaces/{wsId}/members/{memberId}/roles/{roleId}:
+    delete:
+      tags: [governance]
+      summary: Remove role from member
+      operationId: removeMemberRole
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/workspaces/{wsId}/me/permissions:
+    get:
+      tags: [governance]
+      summary: My permissions in workspace
+      operationId: myPermissions
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"

@@ -1,0 +1,105 @@
+paths:
+  /api/v1/agents/{agentId}/chat:
+    post:
+      tags: [agent_runtime]
+      summary: Start chat run
+      operationId: startChat
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                conversation_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Run started
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/runs/{runId}/stream:
+    get:
+      tags: [agent_runtime]
+      summary: Stream run output (SSE)
+      operationId: streamRun
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /api/v1/conversations/{id}:
+    get:
+      tags: [agent_runtime]
+      summary: Get conversation messages
+      operationId: getConversation
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/agents/{agentId}/conversations:
+    get:
+      tags: [agent_runtime]
+      summary: List agent conversations
+      operationId: listAgentConversations
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"

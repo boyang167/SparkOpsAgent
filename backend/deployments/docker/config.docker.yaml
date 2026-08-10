@@ -1,0 +1,37 @@
+server:
+  addr: ":8080"
+database:
+  dsn: "postgres://sparkops:sparkops@postgres:5432/sparkops?sslmode=disable"
+redis:
+  addr: "redis:6379"
+messaging:
+  driver: "amqp"
+  amqp:
+    url: "amqp://sparkops:sparkops@rabbitmq:5672/"
+    exchange: "sparkops"
+    exchange_type: "direct"
+runtime:
+  driver: "mock"
+  cluster: ""
+delivery:
+  driver: "mock"
+jenkins:
+  url: ""
+  user: ""
+  token: ""
+  job_suffix: "-build"
+gitlab:
+  base_url: ""
+  token: ""
+  project_path_prefix: ""
+webhook:
+  secret: ""
+jwt:
+  secret: "docker-dev-secret-min16"
+  expire_hour: 24
+llm:
+  default_provider: openai
+  providers:
+    openai:
+      api_key: ""
+      base_url: https://api.openai.com/v1

@@ -1,0 +1,33 @@
+{
+  "name": "@sparkops/bff-modules",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./identity": "./src/identity/index.ts",
+    "./tenant": "./src/tenant/index.ts",
+    "./workspace": "./src/workspace/index.ts",
+    "./agent": "./src/agent/index.ts",
+    "./runtime": "./src/runtime/index.ts",
+    "./governance": "./src/governance/index.ts",
+    "./integration": "./src/integration/index.ts",
+    "./workflow": "./src/workflow/index.ts",
+    "./knowledge": "./src/knowledge/index.ts",
+    "./notification": "./src/notification/index.ts",
+    "./delivery": "./src/delivery/index.ts",
+    "./cluster": "./src/cluster/index.ts",
+    "./platform": "./src/platform/index.ts",
+    "./product": "./src/product/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@sparkops/bff-core": "workspace:*",
+    "@sparkops/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

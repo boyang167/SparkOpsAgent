@@ -1,0 +1,237 @@
+paths:
+  /api/v1/projects/{projectId}/workflows:
+    get:
+      tags: [workflow]
+      summary: List workflows
+      operationId: listWorkflows
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    post:
+      tags: [workflow]
+      summary: Create workflow
+      operationId: createWorkflow
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                definition:
+                  type: string
+                  description: JSON workflow definition
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/workflows/{workflowId}:
+    get:
+      tags: [workflow]
+      summary: Get workflow
+      operationId: getWorkflow
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    patch:
+      tags: [workflow]
+      summary: Update workflow
+      operationId: updateWorkflow
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                definition:
+                  type: string
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    delete:
+      tags: [workflow]
+      summary: Archive (delete) workflow
+      operationId: archiveWorkflow
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Archived
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/workflows/{workflowId}/activate:
+    post:
+      tags: [workflow]
+      summary: Activate workflow
+      operationId: activateWorkflow
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Activated
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/workflows/{workflowId}/runs:
+    get:
+      tags: [workflow]
+      summary: List workflow runs
+      operationId: listWorkflowRuns
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    post:
+      tags: [workflow]
+      summary: Start workflow run
+      operationId: startWorkflowRun
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: string
+                  description: Optional JSON input for the run
+      responses:
+        "200":
+          description: Run completed
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/workflow-runs/{runId}:
+    get:
+      tags: [workflow]
+      summary: Get workflow run
+      operationId: getWorkflowRun
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"

@@ -1,0 +1,76 @@
+paths:
+  /api/v1/orgs:
+    post:
+      tags: [tenant]
+      summary: Create organization
+      operationId: createOrganization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                name:
+                  type: string
+                slug:
+                  type: string
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/orgs/{orgId}/workspaces:
+    post:
+      tags: [tenant]
+      summary: Create workspace
+      operationId: createWorkspace
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                name:
+                  type: string
+                slug:
+                  type: string
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/workspaces:
+    get:
+      tags: [tenant]
+      summary: List my workspaces
+      operationId: listWorkspaces
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"

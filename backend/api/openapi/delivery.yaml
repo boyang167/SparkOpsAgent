@@ -1,0 +1,145 @@
+paths:
+  /api/v1/projects/{projectId}/builds:
+    get:
+      tags: [delivery]
+      summary: List project builds
+      operationId: listBuilds
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Build list
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    post:
+      tags: [delivery]
+      summary: Trigger build
+      operationId: triggerBuild
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch:
+                  type: string
+                  default: main
+      responses:
+        "200":
+          description: Build triggered
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/builds/{buildId}:
+    get:
+      tags: [delivery]
+      summary: Get build detail
+      operationId: getBuild
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: buildId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Build detail
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/builds/{buildId}/stream:
+    get:
+      tags: [delivery]
+      summary: Stream build console log (SSE)
+      operationId: streamBuildLogs
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: buildId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /api/v1/builds/{buildId}/abort:
+    post:
+      tags: [delivery]
+      summary: Abort running build
+      operationId: abortBuild
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: buildId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Build aborted
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/builds/{buildId}/rollback:
+    post:
+      tags: [delivery]
+      summary: Rollback to build version
+      operationId: rollbackBuild
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: buildId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Rollback build created
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"

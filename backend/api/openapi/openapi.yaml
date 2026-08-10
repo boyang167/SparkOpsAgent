@@ -1,0 +1,146 @@
+openapi: 3.0.3
+info:
+  title: SparkOps API
+  version: 1.0.0
+  description: SparkOps Greenfield MVP REST API
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: health
+  - name: identity
+  - name: tenant
+  - name: governance
+  - name: workspace_app
+  - name: agent
+  - name: workflow
+  - name: knowledge
+  - name: notification
+  - name: integration
+  - name: agent_runtime
+  - name: delivery
+  - name: runtime
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/auth/register:
+    $ref: "./identity.yaml#/paths/~1api~1v1~1auth~1register"
+  /api/v1/auth/login:
+    $ref: "./identity.yaml#/paths/~1api~1v1~1auth~1login"
+  /api/v1/auth/me:
+    $ref: "./identity.yaml#/paths/~1api~1v1~1auth~1me"
+  /api/v1/auth/password:
+    $ref: "./identity.yaml#/paths/~1api~1v1~1auth~1password"
+
+  /api/v1/orgs:
+    $ref: "./tenant.yaml#/paths/~1api~1v1~1orgs"
+  /api/v1/orgs/{orgId}/workspaces:
+    $ref: "./tenant.yaml#/paths/~1api~1v1~1orgs~1{orgId}~1workspaces"
+  /api/v1/workspaces:
+    $ref: "./tenant.yaml#/paths/~1api~1v1~1workspaces"
+
+  /api/v1/workspaces/{wsId}/roles:
+    $ref: "./governance.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1roles"
+  /api/v1/workspaces/{wsId}/roles/{roleId}:
+    $ref: "./governance.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1roles~1{roleId}"
+  /api/v1/workspaces/{wsId}/members:
+    $ref: "./governance.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1members"
+  /api/v1/workspaces/{wsId}/members/{memberId}/roles:
+    $ref: "./governance.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1members~1{memberId}~1roles"
+  /api/v1/workspaces/{wsId}/members/{memberId}/roles/{roleId}:
+    $ref: "./governance.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1members~1{memberId}~1roles~1{roleId}"
+  /api/v1/workspaces/{wsId}/me/permissions:
+    $ref: "./governance.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1me~1permissions"
+
+  /api/v1/workspaces/{wsId}/projects:
+    $ref: "./workspace_app.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1projects"
+  /api/v1/projects/{projectId}:
+    $ref: "./workspace_app.yaml#/paths/~1api~1v1~1projects~1{projectId}"
+
+  /api/v1/projects/{projectId}/agents:
+    $ref: "./agent.yaml#/paths/~1api~1v1~1projects~1{projectId}~1agents"
+  /api/v1/agents/{agentId}:
+    $ref: "./agent.yaml#/paths/~1api~1v1~1agents~1{agentId}"
+  /api/v1/agents/{agentId}/versions:
+    $ref: "./agent.yaml#/paths/~1api~1v1~1agents~1{agentId}~1versions"
+  /api/v1/agents/{agentId}/publish:
+    $ref: "./agent.yaml#/paths/~1api~1v1~1agents~1{agentId}~1publish"
+
+  /api/v1/projects/{projectId}/workflows:
+    $ref: "./workflow.yaml#/paths/~1api~1v1~1projects~1{projectId}~1workflows"
+  /api/v1/workflows/{workflowId}:
+    $ref: "./workflow.yaml#/paths/~1api~1v1~1workflows~1{workflowId}"
+  /api/v1/workflows/{workflowId}/activate:
+    $ref: "./workflow.yaml#/paths/~1api~1v1~1workflows~1{workflowId}~1activate"
+  /api/v1/workflows/{workflowId}/runs:
+    $ref: "./workflow.yaml#/paths/~1api~1v1~1workflows~1{workflowId}~1runs"
+  /api/v1/workflow-runs/{runId}:
+    $ref: "./workflow.yaml#/paths/~1api~1v1~1workflow-runs~1{runId}"
+
+  /api/v1/workspaces/{wsId}/knowledge-bases:
+    $ref: "./knowledge.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1knowledge-bases"
+  /api/v1/knowledge-bases/{kbId}:
+    $ref: "./knowledge.yaml#/paths/~1api~1v1~1knowledge-bases~1{kbId}"
+  /api/v1/knowledge-bases/{kbId}/documents:
+    $ref: "./knowledge.yaml#/paths/~1api~1v1~1knowledge-bases~1{kbId}~1documents"
+  /api/v1/knowledge-bases/{kbId}/search:
+    $ref: "./knowledge.yaml#/paths/~1api~1v1~1knowledge-bases~1{kbId}~1search"
+  /api/v1/documents/{docId}:
+    $ref: "./knowledge.yaml#/paths/~1api~1v1~1documents~1{docId}"
+
+  /api/v1/notifications:
+    $ref: "./notification.yaml#/paths/~1api~1v1~1notifications"
+  /api/v1/notifications/{notificationId}/read:
+    $ref: "./notification.yaml#/paths/~1api~1v1~1notifications~1{notificationId}~1read"
+  /api/v1/notifications/read-all:
+    $ref: "./notification.yaml#/paths/~1api~1v1~1notifications~1read-all"
+
+  /api/v1/models:
+    $ref: "./integration.yaml#/paths/~1api~1v1~1models"
+
+  /api/v1/agents/{agentId}/chat:
+    $ref: "./agent_runtime.yaml#/paths/~1api~1v1~1agents~1{agentId}~1chat"
+  /api/v1/agents/{agentId}/conversations:
+    $ref: "./agent_runtime.yaml#/paths/~1api~1v1~1agents~1{agentId}~1conversations"
+  /api/v1/runs/{runId}/stream:
+    $ref: "./agent_runtime.yaml#/paths/~1api~1v1~1runs~1{runId}~1stream"
+  /api/v1/conversations/{id}:
+    $ref: "./agent_runtime.yaml#/paths/~1api~1v1~1conversations~1{id}"
+
+  /api/v1/projects/{projectId}/builds:
+    $ref: "./delivery.yaml#/paths/~1api~1v1~1projects~1{projectId}~1builds"
+  /api/v1/builds/{buildId}:
+    $ref: "./delivery.yaml#/paths/~1api~1v1~1builds~1{buildId}"
+  /api/v1/builds/{buildId}/stream:
+    $ref: "./delivery.yaml#/paths/~1api~1v1~1builds~1{buildId}~1stream"
+  /api/v1/builds/{buildId}/abort:
+    $ref: "./delivery.yaml#/paths/~1api~1v1~1builds~1{buildId}~1abort"
+  /api/v1/builds/{buildId}/rollback:
+    $ref: "./delivery.yaml#/paths/~1api~1v1~1builds~1{buildId}~1rollback"
+
+  /api/v1/projects/{projectId}/pods:
+    $ref: "./runtime.yaml#/paths/~1api~1v1~1projects~1{projectId}~1pods"
+  /api/v1/projects/{projectId}/pods/{podId}:
+    $ref: "./runtime.yaml#/paths/~1api~1v1~1projects~1{projectId}~1pods~1{podId}"
+  /api/v1/projects/{projectId}/pods/{podId}/logs:
+    $ref: "./runtime.yaml#/paths/~1api~1v1~1projects~1{projectId}~1pods~1{podId}~1logs"
+  /api/v1/projects/{projectId}/pods/{podId}/terminal/stream:
+    $ref: "./runtime.yaml#/paths/~1api~1v1~1projects~1{projectId}~1pods~1{podId}~1terminal~1stream"
+
+components:
+  securitySchemes:
+    $ref: "./components.yaml#/components/securitySchemes"

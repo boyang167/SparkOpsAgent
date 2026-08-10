@@ -1,0 +1,59 @@
+server:
+  addr: ":8080"
+database:
+  # 方式一：结构化配置（推荐，密码可含 @/: 等特殊字符）
+  # host: 192.168.5.24
+  # port: 5432
+  # user: admin
+  # password: "admin@2025"
+  # name: sparkops_agent
+  # sslmode: disable
+  # 方式二：完整 DSN（密码含特殊字符需 URL 编码，如 @ → %40）
+  dsn: "postgres://sparkops:sparkops@localhost:5432/sparkops?sslmode=disable"
+redis:
+  addr: "localhost:6379"
+messaging:
+  driver: "inmemory"
+  amqp:
+    url: "amqp://sparkops:sparkops@localhost:5672/"
+    exchange: "sparkops"
+    exchange_type: "direct"
+k8s:
+  default_cluster: ""
+  kubeconfig_path: ""
+  clusters: []
+runtime:
+  driver: "mock"
+  cluster: ""
+  istio_enabled: false
+consul:
+  driver: "mock"
+  address: ""
+  token: ""
+  datacenter: ""
+  key_prefix: "sparkops"
+delivery:
+  driver: "mock"
+  url: ""
+  user: ""
+  token: ""
+jenkins:
+  url: ""
+  user: ""
+  token: ""
+  job_suffix: "-build"
+gitlab:
+  base_url: ""
+  token: ""
+  project_path_prefix: ""
+webhook:
+  secret: ""
+jwt:
+  secret: "change-me-in-production"
+  expire_hour: 24
+llm:
+  default_provider: openai
+  providers:
+    openai:
+      api_key: ""
+      base_url: https://api.openai.com/v1

@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sparkops.api.fullname" . }}
+  labels:
+    {{- include "sparkops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  {{- if not .Values.api.autoscaling.enabled }}
+  replicas: {{ .Values.api.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "sparkops.api.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sparkops.api.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "sparkops.serviceAccountName" . }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: APP_ENV
+              value: {{ .Values.api.env.APP_ENV | quote }}
+            - name: MESSAGING_DRIVER
+              value: {{ .Values.api.env.MESSAGING_DRIVER | quote }}
+            - name: RUNTIME_DRIVER
+              value: {{ .Values.api.env.RUNTIME_DRIVER | quote }}
+            - name: DELIVERY_DRIVER
+              value: {{ .Values.api.env.DELIVERY_DRIVER | quote }}
+            - name: REDIS_ADDR
+              value: {{ .Values.api.redis.addr | quote }}
+            - name: JENKINS_URL
+              value: {{ .Values.api.jenkins.url | quote }}
+            - name: JENKINS_USER
+              value: {{ .Values.api.jenkins.user | quote }}
+            - name: GITLAB_BASE_URL
+              value: {{ .Values.api.gitlab.baseUrl | quote }}
+            - name: KUBECONFIG
+              value: {{ .Values.api.k8s.kubeconfigPath | quote }}
+            - name: DATABASE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sparkops.fullname" . }}-secrets
+                  key: DATABASE_DSN
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sparkops.fullname" . }}-secrets
+                  key: JWT_SECRET
+            - name: WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sparkops.fullname" . }}-secrets
+                  key: WEBHOOK_SECRET
+            - name: AMQP_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sparkops.fullname" . }}-secrets
+                  key: AMQP_URL
+            - name: JENKINS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sparkops.fullname" . }}-secrets
+                  key: JENKINS_TOKEN
+            - name: GITLAB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sparkops.fullname" . }}-secrets
+                  key: GITLAB_TOKEN
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sparkops.fullname" . }}-secrets
+                  key: OPENAI_API_KEY
+          {{- if .Values.kubeconfig.enabled }}
+          volumeMounts:
+            - name: kubeconfig
+              mountPath: /secrets
+              readOnly: true
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+      {{- if .Values.kubeconfig.enabled }}
+      volumes:
+        - name: kubeconfig
+          secret:
+            secretName: {{ include "sparkops.fullname" . }}-kubeconfig
+            items:
+              - key: kubeconfig
+                path: kubeconfig
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

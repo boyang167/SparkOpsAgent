@@ -1,0 +1,218 @@
+paths:
+  /api/v1/projects/{projectId}/agents:
+    get:
+      tags: [agent]
+      summary: List agents
+      operationId: listAgents
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    post:
+      tags: [agent]
+      summary: Create agent
+      operationId: createAgent
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, system_prompt, model_name]
+              properties:
+                name:
+                  type: string
+                system_prompt:
+                  type: string
+                model_name:
+                  type: string
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/agents/{agentId}:
+    get:
+      tags: [agent]
+      summary: Get agent with versions
+      operationId: getAgent
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    patch:
+      tags: [agent]
+      summary: Update agent name
+      operationId: updateAgent
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    delete:
+      tags: [agent]
+      summary: Archive (delete) agent
+      operationId: archiveAgent
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Archived
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/agents/{agentId}/versions:
+    post:
+      tags: [agent]
+      summary: Add agent version
+      operationId: addAgentVersion
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [system_prompt, model_name]
+              properties:
+                system_prompt:
+                  type: string
+                model_name:
+                  type: string
+                model_config:
+                  type: object
+                  properties:
+                    temperature:
+                      type: number
+                    max_tokens:
+                      type: integer
+                tool_ids:
+                  type: array
+                  items:
+                    type: string
+                knowledge_base_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/agents/{agentId}/publish:
+    post:
+      tags: [agent]
+      summary: Publish agent version
+      operationId: publishAgent
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version_id]
+              properties:
+                version_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Published
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"

@@ -1,0 +1,110 @@
+paths:
+  /api/v1/projects/{projectId}/pods:
+    get:
+      tags: [runtime]
+      summary: List project pods
+      operationId: listPods
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Pod list
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/projects/{projectId}/pods/{podId}:
+    get:
+      tags: [runtime]
+      summary: Get pod detail
+      operationId: getPod
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: podId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Pod detail
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/projects/{projectId}/pods/{podId}/logs:
+    get:
+      tags: [runtime]
+      summary: Get pod logs
+      operationId: getPodLogs
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: podId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Pod logs
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/projects/{projectId}/pods/{podId}/terminal/stream:
+    get:
+      tags: [runtime]
+      summary: Stream pod terminal (SSE mock)
+      operationId: streamPodTerminal
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: podId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string

@@ -1,0 +1,15 @@
+paths:
+  /api/v1/models:
+    get:
+      tags: [integration]
+      summary: List available LLM models
+      operationId: listModels
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"

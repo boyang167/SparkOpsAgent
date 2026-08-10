@@ -1,0 +1,74 @@
+import type { BffContext } from "@sparkops/bff-core";
+import type { BuildVM, TriggerBuildCommand } from "@sparkops/contracts/delivery";
+
+export async function listBuilds(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+): Promise<BuildVM[]> {
+  const data = await ctx.upstream.delivery.listBuilds(workspaceId, projectId);
+  return data.items;
+}
+
+export async function triggerBuild(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  input: TriggerBuildCommand,
+): Promise<BuildVM> {
+  return ctx.upstream.delivery.triggerBuild(workspaceId, projectId, input.branch);
+}
+
+export async function getBuild(
+  ctx: BffContext,
+  workspaceId: string,
+  buildId: string,
+): Promise<BuildVM> {
+  return ctx.upstream.delivery.getBuild(workspaceId, buildId);
+}
+
+export async function abortBuild(
+  ctx: BffContext,
+  workspaceId: string,
+  buildId: string,
+): Promise<{ aborted: true }> {
+  return ctx.upstream.delivery.abortBuild(workspaceId, buildId);
+}
+
+export type RollbackBuildResult = {
+  id: string;
+  status: string;
+  build_number: number;
+  rollback_of_build_id: string;
+};
+
+export async function rollbackBuild(
+  ctx: BffContext,
+  workspaceId: string,
+  buildId: string,
+): Promise<RollbackBuildResult> {
+  return ctx.upstream.delivery.rollbackBuild(workspaceId, buildId);
+}
+
+export async function listCronJobs(ctx: BffContext, workspaceId: string, projectId: string) {
+  const data = await ctx.upstream.delivery.listCronJobs(workspaceId, projectId);
+  return data.items;
+}
+
+export async function createCronJob(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  input: { name: string; schedule: string; branch?: string },
+) {
+  return ctx.upstream.delivery.createCronJob(workspaceId, projectId, input);
+}
+
+export async function deleteCronJob(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  cronJobId: string,
+) {
+  return ctx.upstream.delivery.deleteCronJob(workspaceId, projectId, cronJobId);
+}

@@ -1,0 +1,133 @@
+paths:
+  /api/v1/workspaces/{wsId}/projects:
+    get:
+      tags: [workspace_app]
+      summary: List projects
+      operationId: listProjects
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    post:
+      tags: [workspace_app]
+      summary: Create project
+      operationId: createProject
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/projects/{projectId}:
+    get:
+      tags: [workspace_app]
+      summary: Get project
+      operationId: getProject
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    patch:
+      tags: [workspace_app]
+      summary: Update project
+      operationId: updateProject
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    delete:
+      tags: [workspace_app]
+      summary: Archive (delete) project
+      operationId: archiveProject
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Archived
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"

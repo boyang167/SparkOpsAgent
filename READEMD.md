@@ -1,0 +1,62 @@
+# Ai Plugin 
+- SuperPowers
+- BMAD
+    npx bmad-method install
+
+
+# SparkOps Agent Platform
+
+单体仓库：后端 + 前端 + 规格文档
+
+## 快速开始
+
+### 1. 后端
+
+```bash
+cd backend
+cp config.example.yaml config.yaml   # 编辑 database / redis
+go run ./cmd/seed                     # 初始化 demo 数据
+go run ./cmd/server                   # :8080
+```
+
+密码含 `@` 等特殊字符时，请用结构化 database 配置（见 `config.example.yaml`），不要用未编码的 DSN URL。
+
+### 2. 前端
+
+```bash
+cd fronted
+cp apps/web/.env.example apps/web/.env.local
+pnpm dev                              # :3000
+```
+
+### 3. Docker / Helm
+
+- Compose: `make docker-up`
+- Helm: `deployments/helm/sparkops/README.md`
+- 发布镜像: 打 tag `v1.0.0` 触发 GHCR 推送
+
+## 目录
+
+| 路径 | 说明 |
+|------|------|
+| [`backend/`](backend/) | Go DDD 后端 · `/api/v1` |
+| [`fronted/`](fronted/) | Next.js 前端 |
+| [`spec/`](spec/) | 架构与设计文档 |
+
+## 规格文档
+
+- [Greenfield Go DDD（后端）](spec/greenfield-go-ddd.md)
+- [前端架构 + BFF](spec/frontend-architecture.md)
+- [平台愿景](spec/architecture.md)
+
+## 旧系统（只读参考）
+
+- `A:\21-Agent\platformsuite` — 旧 Go DevOps 后端
+- `A:\21-Agent\platformsuite-fronted` — 旧 dva 前端
+
+不做数据迁移、不兼容旧 API。
+
+邮箱
+superadmin@sparkops.local
+密码
+SuperAdmin1234!

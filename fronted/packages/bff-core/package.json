@@ -1,0 +1,20 @@
+{
+  "name": "@sparkops/bff-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@sparkops/contracts": "workspace:*",
+    "@sparkops/upstream": "workspace:*",
+    "next": "^15.3.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,61 @@
+paths:
+  /api/v1/notifications:
+    get:
+      tags: [notification]
+      summary: List notifications
+      operationId: listNotifications
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+        "401":
+          $ref: "./components.yaml#/components/responses/Unauthorized"
+
+  /api/v1/notifications/{notificationId}/read:
+    patch:
+      tags: [notification]
+      summary: Mark notification as read
+      operationId: markNotificationRead
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Marked read
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+        "401":
+          $ref: "./components.yaml#/components/responses/Unauthorized"
+
+  /api/v1/notifications/read-all:
+    post:
+      tags: [notification]
+      summary: Mark all notifications as read
+      operationId: markAllNotificationsRead
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      responses:
+        "200":
+          description: All marked read
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+        "401":
+          $ref: "./components.yaml#/components/responses/Unauthorized"

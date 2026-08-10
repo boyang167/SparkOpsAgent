@@ -1,0 +1,302 @@
+paths:
+  /api/v1/workspaces/{wsId}/knowledge-bases:
+    get:
+      tags: [knowledge]
+      summary: List knowledge bases
+      operationId: listKnowledgeBases
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    post:
+      tags: [knowledge]
+      summary: Create knowledge base
+      operationId: createKnowledgeBase
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: wsId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/knowledge-bases/{kbId}:
+    get:
+      tags: [knowledge]
+      summary: Get knowledge base
+      operationId: getKnowledgeBase
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: kbId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    patch:
+      tags: [knowledge]
+      summary: Update knowledge base
+      operationId: updateKnowledgeBase
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: kbId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    delete:
+      tags: [knowledge]
+      summary: Archive (delete) knowledge base
+      operationId: archiveKnowledgeBase
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: kbId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Archived
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/knowledge-bases/{kbId}/documents:
+    get:
+      tags: [knowledge]
+      summary: List documents
+      operationId: listDocuments
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: kbId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    post:
+      tags: [knowledge]
+      summary: Create document
+      operationId: createDocument
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: kbId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                content:
+                  type: string
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/knowledge-bases/{kbId}/search:
+    post:
+      tags: [knowledge]
+      summary: Search documents in knowledge base
+      operationId: searchDocuments
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: kbId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                limit:
+                  type: integer
+                  default: 5
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+
+  /api/v1/documents/{docId}:
+    get:
+      tags: [knowledge]
+      summary: Get document
+      operationId: getDocument
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    patch:
+      tags: [knowledge]
+      summary: Update document
+      operationId: updateDocument
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                content:
+                  type: string
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
+    delete:
+      tags: [knowledge]
+      summary: Archive (delete) document
+      operationId: archiveDocument
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Archived
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Envelope"
