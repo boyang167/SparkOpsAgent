@@ -18,24 +18,22 @@ export function createWorkspaceUpstream(options: UpstreamRequestOptions = {}) {
       });
     },
 
-    async createProject(workspaceId: string, input: { name: string; description?: string }) {
-      return upstreamFetch<ProjectVM>(`/api/v1/workspaces/${workspaceId}/projects`, {
-        method: "POST",
-        body: JSON.stringify(input),
-        options: { ...options, workspaceId },
-      });
+    async createProject(workspaceId: string, input: import("@sparkops/contracts/workspace").CreateProjectCommand) {
+      return upstreamFetch<import("@sparkops/contracts/workspace").ProjectVM>(
+        `/api/v1/workspaces/${workspaceId}/projects`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
     },
 
     async updateProject(
       workspaceId: string,
       projectId: string,
-      input: { name: string; description?: string },
+      input: import("@sparkops/contracts/workspace").UpdateProjectCommand,
     ) {
-      return upstreamFetch<ProjectVM>(`/api/v1/projects/${projectId}`, {
-        method: "PATCH",
-        body: JSON.stringify(input),
-        options: { ...options, workspaceId },
-      });
+      return upstreamFetch<import("@sparkops/contracts/workspace").ProjectVM>(
+        `/api/v1/projects/${projectId}`,
+        { method: "PATCH", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
     },
 
     async archiveProject(workspaceId: string, projectId: string) {

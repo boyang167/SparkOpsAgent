@@ -44,7 +44,7 @@ export function MonitorOverviewPanel({ workspaceId }: MonitorOverviewPanelProps)
               {data.grafana_url}
             </a>
           ) : (
-            <p className="text-sm text-muted mt-2">未配置。Super Admin 可在「集群 / 密钥配置」中设置 grafana_url。</p>
+            <p className="text-sm text-muted mt-2">未配置 Grafana 地址。</p>
           )}
         </div>
         <div className="rounded-lg border border-[var(--border)] p-4">

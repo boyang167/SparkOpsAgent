@@ -16,6 +16,7 @@ export const PLATFORM_NAV_TREE: NavGroupConfig[] = [
     id: "delivery",
     label: "交付运维",
     items: [
+      { href: "/projects", label: "项目管理" },
       { href: "/delivery/builds", label: "构建" },
       { href: "/runtime/pods", label: "Pod 运维" },
       { href: "/cronjobs", label: "定时任务" },
@@ -30,7 +31,7 @@ export const PLATFORM_NAV_TREE: NavGroupConfig[] = [
     label: "基础设施",
     items: [
       { href: "/config/configmaps", label: "配置字典" },
-      { href: "/config/secrets", label: "秘钥管理" },
+      { href: "/config/secrets", label: "密钥配置" },
       { href: "/config/storage", label: "持久化存储" },
       { href: "/config/consul", label: "Consul KV" },
       { href: "/config/webhooks", label: "Webhooks" },
@@ -39,7 +40,6 @@ export const PLATFORM_NAV_TREE: NavGroupConfig[] = [
       { href: "/discovery/services", label: "服务发现" },
       { href: "/cluster/list", label: "集群列表" },
       { href: "/cluster/sync", label: "资源同步" },
-      { href: "/cluster/config", label: "密钥配置" },
     ],
   },
   {
@@ -110,7 +110,7 @@ export function filterNavGroups(options: { showRbac: boolean; showSuperAdmin: bo
     if (group.id === "infra") {
       return group.items.filter(
         (item) =>
-          !["/cluster/list", "/cluster/sync", "/cluster/config"].includes(item.href) ||
+          !["/cluster/list", "/cluster/sync"].includes(item.href) ||
           options.showSuperAdmin,
       ).length > 0;
     }
@@ -129,7 +129,7 @@ export function filterNavGroups(options: { showRbac: boolean; showSuperAdmin: bo
         ...group,
         items: group.items.filter(
           (item) =>
-            !["/cluster/list", "/cluster/sync", "/cluster/config"].includes(item.href) ||
+            !["/cluster/list", "/cluster/sync"].includes(item.href) ||
             options.showSuperAdmin,
         ),
       };

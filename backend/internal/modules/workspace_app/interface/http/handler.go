@@ -5,9 +5,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/query"
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
@@ -81,14 +81,79 @@ func NewHandler(
 	}
 }
 
-type createProjectRequest struct {
-	Name        string `json:"name" binding:"required"`
-	Description string `json:"description"`
+type projectResourcesRequest struct {
+	CPURequest    string              `json:"cpu_request"`
+	CPULimit      string              `json:"cpu_limit"`
+	MemoryRequest string              `json:"memory_request"`
+	MemoryLimit   string              `json:"memory_limit"`
+	Replicas      int                 `json:"replicas"`
+	Ports         []model.ProjectPort `json:"ports"`
+	Command       string              `json:"command"`
+	Args          string              `json:"args"`
+	ProjectConfig string              `json:"project_config"`
 }
 
-type updateProjectRequest struct {
-	Name        string `json:"name" binding:"required"`
-	Description string `json:"description"`
+type projectPayload struct {
+	Name           string                  `json:"name" binding:"required"`
+	DisplayName    string                  `json:"display_name"`
+	Description    string                  `json:"description"`
+	Namespace      string                  `json:"namespace"`
+	Language       string                  `json:"language"`
+	GitURL         string                  `json:"git_url"`
+	SecretID       string                  `json:"secret_id"`
+	GitRefType     string                  `json:"git_ref_type"`
+	GitRefValue    string                  `json:"git_ref_value"`
+	DockerfilePath string                  `json:"dockerfile_path"`
+	TemplateID     string                  `json:"template_id"`
+	Resources      projectResourcesRequest `json:"resources"`
+}
+
+func toProjectInput(req projectPayload) model.CreateProjectInput {
+	return model.CreateProjectInput{
+		Name:           req.Name,
+		DisplayName:    req.DisplayName,
+		Description:    req.Description,
+		Namespace:      req.Namespace,
+		Language:       req.Language,
+		GitURL:         req.GitURL,
+		SecretID:       req.SecretID,
+		GitRefType:     req.GitRefType,
+		GitRefValue:    req.GitRefValue,
+		DockerfilePath: req.DockerfilePath,
+		TemplateID:     req.TemplateID,
+		Resources: model.ProjectResources{
+			CPURequest:    req.Resources.CPURequest,
+			CPULimit:      req.Resources.CPULimit,
+			MemoryRequest: req.Resources.MemoryRequest,
+			MemoryLimit:   req.Resources.MemoryLimit,
+			Replicas:      req.Resources.Replicas,
+			Ports:         req.Resources.Ports,
+			Command:       req.Resources.Command,
+			Args:          req.Resources.Args,
+			ProjectConfig: req.Resources.ProjectConfig,
+		},
+	}
+}
+
+func projectResponse(project *model.Project) gin.H {
+	view := query.ToView(project)
+	return gin.H{
+		"id":              view.ID,
+		"name":            view.Name,
+		"display_name":    view.DisplayName,
+		"description":     view.Description,
+		"namespace":       view.Namespace,
+		"language":        view.Language,
+		"git_url":         view.GitURL,
+		"secret_id":       view.SecretID,
+		"git_ref_type":    view.GitRefType,
+		"git_ref_value":   view.GitRefValue,
+		"dockerfile_path": view.DockerfilePath,
+		"template_id":     view.TemplateID,
+		"resources":       view.Resources,
+		"status":          view.Status,
+		"created_at":      view.CreatedAt,
+	}
 }
 
 func (h *Handler) CreateProject(c *gin.Context) {
@@ -102,20 +167,17 @@ func (h *Handler) CreateProject(c *gin.Context) {
 		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
 		return
 	}
-	var req createProjectRequest
+	var req projectPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
-	project, err := h.create.Handle(c.Request.Context(), wsID, memberID, req.Name, req.Description)
+	project, err := h.create.Handle(c.Request.Context(), wsID, memberID, toProjectInput(req))
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
 	}
-	httpx.OK(c, gin.H{
-		"id": project.ID.String(), "name": project.Name.String(),
-		"description": project.Description, "status": project.Status,
-	})
+	httpx.OK(c, projectResponse(project))
 }
 
 func (h *Handler) ListProjects(c *gin.Context) {
@@ -177,20 +239,17 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
 		return
 	}
-	var req updateProjectRequest
+	var req projectPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
-	project, err := h.update.Handle(c.Request.Context(), wsID, memberID, projectID, req.Name, req.Description)
+	project, err := h.update.Handle(c.Request.Context(), wsID, memberID, projectID, toProjectInput(req))
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
 	}
-	httpx.OK(c, gin.H{
-		"id": project.ID.String(), "name": project.Name.String(),
-		"description": project.Description, "status": project.Status,
-	})
+	httpx.OK(c, projectResponse(project))
 }
 
 func (h *Handler) ArchiveProject(c *gin.Context) {

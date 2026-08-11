@@ -54,6 +54,19 @@ func (r *memoryRoleRepo) ListByWorkspace(_ context.Context, workspaceID kernel.W
 	return out, nil
 }
 
+func (r *memoryRoleRepo) ListByName(_ context.Context, name string) ([]*model.Role, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*model.Role, 0)
+	for _, role := range r.roles {
+		if role.Name == name {
+			copyRole := *role
+			out = append(out, &copyRole)
+		}
+	}
+	return out, nil
+}
+
 func (r *memoryRoleRepo) ExistsByName(_ context.Context, workspaceID kernel.WorkspaceID, name string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

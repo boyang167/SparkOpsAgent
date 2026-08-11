@@ -18,6 +18,8 @@ export const SecretCreatorVMSchema = z.object({
   display_name: z.string().optional(),
 });
 
+export type SecretCreatorVM = z.infer<typeof SecretCreatorVMSchema>;
+
 export const SecretVMSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -60,9 +62,7 @@ export const CreateSecretCommandSchema = z.object({
 
 export type CreateSecretCommand = z.infer<typeof CreateSecretCommandSchema>;
 
-export const UpdateSecretCommandSchema = CreateSecretCommandSchema.omit({ name: true }).extend({
-  display_name: z.string().optional(),
-});
+export const UpdateSecretCommandSchema = CreateSecretCommandSchema.omit({ name: true });
 
 export type UpdateSecretCommand = z.infer<typeof UpdateSecretCommandSchema>;
 

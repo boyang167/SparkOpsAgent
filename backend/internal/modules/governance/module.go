@@ -90,6 +90,10 @@ func (m *Module) Register(c *appctx.Container) error {
 	listMembers := query.NewListWorkspaceMembersHandler(acl.NewMemberACL(c.DB), bindingRepo)
 	listMemberRoles := query.NewListMemberRolesHandler(bindingRepo)
 	bootstrap := command.NewBootstrapWorkspaceHandler(roleRepo, bindingRepo, apiPolicySync)
+	ensureAdminPerms := command.NewEnsureDefaultAdminPermissionsHandler(roleRepo)
+	if err := ensureAdminPerms.Handle(context.Background()); err != nil {
+		return fmt.Errorf("ensure admin permissions: %w", err)
+	}
 
 	c.EventBus.Subscribe(integration.EventWorkspaceCreated, subscriber.NewOnWorkspaceCreated(bootstrap).Handle)
 
@@ -113,6 +117,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	)
 
 	seedMenus := command.NewSeedWorkspaceMenusHandler(menuStore)
+	if err := seedMenus.RepairRemovedMenusAllWorkspaces(context.Background()); err != nil {
+		return fmt.Errorf("repair removed menus: %w", err)
+	}
 	menuHandler := govhttp.NewMenuHandler(
 		query.NewListMenuTreeHandler(menuStore, seedMenus),
 		query.NewListNavMenusHandler(menuStore, seedMenus, checker, c.SystemRoleChecker),

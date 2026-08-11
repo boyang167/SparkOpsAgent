@@ -1,4 +1,4 @@
-import type { ProjectVM } from "@sparkops/contracts/workspace";
+import type { CreateProjectCommand } from "@sparkops/contracts/workspace";
 import { bffFetch, type BffFetchOptions } from "./client";
 
 function withWorkspace(workspaceId: string, options: BffFetchOptions = {}): BffFetchOptions {
@@ -6,7 +6,7 @@ function withWorkspace(workspaceId: string, options: BffFetchOptions = {}): BffF
 }
 
 export async function listProjects(workspaceId: string) {
-  const data = await bffFetch<{ items: ProjectVM[] }>(
+  const data = await bffFetch<{ items: import("@sparkops/contracts/workspace").ProjectVM[] }>(
     `/workspaces/${workspaceId}/projects`,
     withWorkspace(workspaceId),
   );
@@ -14,14 +14,14 @@ export async function listProjects(workspaceId: string) {
 }
 
 export function getProject(workspaceId: string, projectId: string) {
-  return bffFetch<ProjectVM>(
+  return bffFetch<import("@sparkops/contracts/workspace").ProjectVM>(
     `/workspaces/${workspaceId}/projects/${projectId}`,
     withWorkspace(workspaceId),
   );
 }
 
-export function createProject(workspaceId: string, input: { name: string; description?: string }) {
-  return bffFetch<ProjectVM>(`/workspaces/${workspaceId}/projects`, {
+export function createProject(workspaceId: string, input: CreateProjectCommand) {
+  return bffFetch<import("@sparkops/contracts/workspace").ProjectVM>(`/workspaces/${workspaceId}/projects`, {
     method: "POST",
     body: JSON.stringify(input),
     ...withWorkspace(workspaceId),
@@ -31,13 +31,16 @@ export function createProject(workspaceId: string, input: { name: string; descri
 export function updateProject(
   workspaceId: string,
   projectId: string,
-  input: { name: string; description?: string },
+  input: CreateProjectCommand,
 ) {
-  return bffFetch<ProjectVM>(`/workspaces/${workspaceId}/projects/${projectId}`, {
-    method: "PATCH",
-    body: JSON.stringify(input),
-    ...withWorkspace(workspaceId),
-  });
+  return bffFetch<import("@sparkops/contracts/workspace").ProjectVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(input),
+      ...withWorkspace(workspaceId),
+    },
+  );
 }
 
 export function archiveProject(workspaceId: string, projectId: string) {

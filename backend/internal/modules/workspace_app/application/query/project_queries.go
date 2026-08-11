@@ -11,11 +11,34 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
+type ProjectResourcesView struct {
+	CPURequest    string             `json:"cpu_request,omitempty"`
+	CPULimit      string             `json:"cpu_limit,omitempty"`
+	MemoryRequest string             `json:"memory_request,omitempty"`
+	MemoryLimit   string             `json:"memory_limit,omitempty"`
+	Replicas      int                `json:"replicas,omitempty"`
+	Ports         []model.ProjectPort `json:"ports,omitempty"`
+	Command       string             `json:"command,omitempty"`
+	Args          string             `json:"args,omitempty"`
+	ProjectConfig string             `json:"project_config,omitempty"`
+}
+
 type ProjectView struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
+	ID             string               `json:"id"`
+	Name           string               `json:"name"`
+	DisplayName    string               `json:"display_name,omitempty"`
+	Description    string               `json:"description"`
+	Namespace      string               `json:"namespace,omitempty"`
+	Language       string               `json:"language,omitempty"`
+	GitURL         string               `json:"git_url,omitempty"`
+	SecretID       string               `json:"secret_id,omitempty"`
+	GitRefType     string               `json:"git_ref_type,omitempty"`
+	GitRefValue    string               `json:"git_ref_value,omitempty"`
+	DockerfilePath string               `json:"dockerfile_path,omitempty"`
+	TemplateID     string               `json:"template_id,omitempty"`
+	Resources      ProjectResourcesView `json:"resources,omitempty"`
+	Status         string               `json:"status"`
+	CreatedAt      string               `json:"created_at,omitempty"`
 }
 
 type ListProjectsHandler struct {
@@ -52,7 +75,7 @@ func (h *ListProjectsHandler) Handle(ctx context.Context, wsID kernel.WorkspaceI
 			return nil, err
 		}
 		if isAdmin {
-			return toViews(projects), nil
+			return ToViews(projects), nil
 		}
 	}
 	allowedIDs, err := h.memberRepo.ListProjectIDsForMember(ctx, wsID, memberID)
@@ -69,7 +92,7 @@ func (h *ListProjectsHandler) Handle(ctx context.Context, wsID kernel.WorkspaceI
 			filtered = append(filtered, p)
 		}
 	}
-	return toViews(filtered), nil
+	return ToViews(filtered), nil
 }
 
 type GetProjectHandler struct {
@@ -99,23 +122,44 @@ func (h *GetProjectHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID,
 	if project.Status != model.ProjectStatusActive {
 		return nil, domain.ErrProjectNotFound
 	}
-	view := toView(project)
+	view := ToView(project)
 	return &view, nil
 }
 
-func toViews(projects []*model.Project) []ProjectView {
+func ToViews(projects []*model.Project) []ProjectView {
 	out := make([]ProjectView, 0, len(projects))
 	for _, p := range projects {
-		out = append(out, toView(p))
+		out = append(out, ToView(p))
 	}
 	return out
 }
 
-func toView(p *model.Project) ProjectView {
+func ToView(p *model.Project) ProjectView {
 	return ProjectView{
-		ID:          p.ID.String(),
-		Name:        p.Name.String(),
-		Description: p.Description,
-		Status:      string(p.Status),
+		ID:             p.ID.String(),
+		Name:           p.Name.String(),
+		DisplayName:    p.DisplayName,
+		Description:    p.Description,
+		Namespace:      p.Namespace,
+		Language:       p.Language,
+		GitURL:         p.GitURL,
+		SecretID:       p.SecretID,
+		GitRefType:     p.GitRefType,
+		GitRefValue:    p.GitRefValue,
+		DockerfilePath: p.DockerfilePath,
+		TemplateID:     p.TemplateID,
+		Resources: ProjectResourcesView{
+			CPURequest:    p.Resources.CPURequest,
+			CPULimit:      p.Resources.CPULimit,
+			MemoryRequest: p.Resources.MemoryRequest,
+			MemoryLimit:   p.Resources.MemoryLimit,
+			Replicas:      p.Resources.Replicas,
+			Ports:         p.Resources.Ports,
+			Command:       p.Resources.Command,
+			Args:          p.Resources.Args,
+			ProjectConfig: p.Resources.ProjectConfig,
+		},
+		Status:    string(p.Status),
+		CreatedAt: p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }

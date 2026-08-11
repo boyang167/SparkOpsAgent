@@ -24,7 +24,7 @@ func (h *UpdateProjectHandler) Handle(
 	wsID kernel.WorkspaceID,
 	memberID kernel.MemberID,
 	projectID kernel.ProjectID,
-	rawName, desc string,
+	input model.CreateProjectInput,
 ) (*model.Project, error) {
 	ok, err := h.wsChecker.MemberInWorkspace(ctx, memberID, wsID)
 	if err != nil {
@@ -42,7 +42,7 @@ func (h *UpdateProjectHandler) Handle(
 		return nil, domain.ErrProjectNotFound
 	}
 
-	name, err := model.NewProjectName(rawName)
+	name, err := model.NewProjectName(input.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +51,7 @@ func (h *UpdateProjectHandler) Handle(
 			return nil, domain.ErrProjectNameExists
 		}
 	}
-	if err := project.UpdateDetails(name, desc); err != nil {
+	if err := project.UpdateDetails(input); err != nil {
 		return nil, err
 	}
 	if err := h.repo.Update(ctx, project); err != nil {

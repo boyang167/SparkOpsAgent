@@ -11,6 +11,7 @@ type RoleRepository interface {
 	Save(ctx context.Context, role *model.Role) error
 	FindByID(ctx context.Context, id kernel.RoleID) (*model.Role, error)
 	ListByWorkspace(ctx context.Context, workspaceID kernel.WorkspaceID) ([]*model.Role, error)
+	ListByName(ctx context.Context, name string) ([]*model.Role, error)
 	ExistsByName(ctx context.Context, workspaceID kernel.WorkspaceID, name string) (bool, error)
 	Delete(ctx context.Context, id kernel.RoleID) error
 	CountChildren(ctx context.Context, id kernel.RoleID) (int, error)

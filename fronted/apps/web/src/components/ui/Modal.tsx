@@ -8,6 +8,7 @@ interface ModalProps {
   title: string;
   description?: string;
   size?: "md" | "lg" | "xl";
+  panelClassName?: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
 }
@@ -18,6 +19,7 @@ export function Modal({
   title,
   description,
   size = "md",
+  panelClassName,
   children,
   footer,
 }: ModalProps) {
@@ -54,7 +56,7 @@ export function Modal({
         onClick={() => onCloseRef.current()}
       />
       <div
-        className={`modal-panel modal-panel-${size}`}
+        className={`modal-panel modal-panel-${size}${panelClassName ? ` ${panelClassName}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

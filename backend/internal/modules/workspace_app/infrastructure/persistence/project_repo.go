@@ -24,12 +24,22 @@ func AutoMigrate(db *gorm.DB) error {
 }
 
 type projectModel struct {
-	ID          string `gorm:"column:id;primaryKey"`
-	WorkspaceID string
-	Name        string
-	Description string
-	Status      string
-	CreatedBy   string
+	ID             string `gorm:"column:id;primaryKey"`
+	WorkspaceID    string
+	Name           string
+	DisplayName    string
+	Description    string
+	Namespace      string
+	Language       string
+	GitURL         string
+	SecretID       *string
+	GitRefType     string
+	GitRefValue    string
+	DockerfilePath string
+	TemplateID     *string
+	Resources      []byte `gorm:"type:jsonb"`
+	Status         string
+	CreatedBy      string
 	postgres.AuditColumns
 }
 
@@ -42,22 +52,57 @@ func NewProjectRepository(db *gorm.DB) repository.ProjectRepository {
 }
 
 func (r *ProjectRepository) Save(ctx context.Context, project *model.Project) error {
+	resources, err := model.EncodeProjectResources(project.Resources)
+	if err != nil {
+		return err
+	}
 	row := projectModel{
 		ID: project.ID.String(), WorkspaceID: project.WorkspaceID.String(),
-		Name: project.Name.String(), Description: project.Description,
-		Status: string(project.Status), CreatedBy: project.CreatedBy.String(),
+		Name: project.Name.String(), DisplayName: project.DisplayName, Description: project.Description,
+		Namespace: project.Namespace, Language: project.Language, GitURL: project.GitURL,
+		GitRefType: project.GitRefType, GitRefValue: project.GitRefValue, DockerfilePath: project.DockerfilePath,
+		Resources: resources, Status: string(project.Status), CreatedBy: project.CreatedBy.String(),
 		AuditColumns: postgres.AuditColumns{CreatedAt: project.CreatedAt, UpdatedAt: project.CreatedAt},
+	}
+	if project.SecretID != "" {
+		row.SecretID = &project.SecretID
+	}
+	if project.TemplateID != "" {
+		row.TemplateID = &project.TemplateID
 	}
 	return r.db.WithContext(ctx).Save(&row).Error
 }
 
 func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) error {
-	return r.db.WithContext(ctx).Model(&projectModel{}).Where("id = ?", project.ID.String()).Updates(map[string]any{
-		"name":        project.Name.String(),
-		"description": project.Description,
-		"status":      string(project.Status),
-		"updated_at":  time.Now().UTC(),
-	}).Error
+	resources, err := model.EncodeProjectResources(project.Resources)
+	if err != nil {
+		return err
+	}
+	updates := map[string]any{
+		"name":            project.Name.String(),
+		"display_name":    project.DisplayName,
+		"description":     project.Description,
+		"namespace":       project.Namespace,
+		"language":        project.Language,
+		"git_url":         project.GitURL,
+		"git_ref_type":    project.GitRefType,
+		"git_ref_value":   project.GitRefValue,
+		"dockerfile_path": project.DockerfilePath,
+		"resources":       resources,
+		"status":          string(project.Status),
+		"updated_at":      time.Now().UTC(),
+	}
+	if project.SecretID != "" {
+		updates["secret_id"] = project.SecretID
+	} else {
+		updates["secret_id"] = nil
+	}
+	if project.TemplateID != "" {
+		updates["template_id"] = project.TemplateID
+	} else {
+		updates["template_id"] = nil
+	}
+	return r.db.WithContext(ctx).Model(&projectModel{}).Where("id = ?", project.ID.String()).Updates(updates).Error
 }
 
 func (r *ProjectRepository) FindByID(ctx context.Context, id kernel.ProjectID) (*model.Project, error) {
@@ -90,6 +135,7 @@ func (r *ProjectRepository) ListByWorkspace(ctx context.Context, wsID kernel.Wor
 	var rows []projectModel
 	err := r.db.WithContext(ctx).
 		Where("workspace_id = ? AND status = ?", wsID.String(), string(model.ProjectStatusActive)).
+		Order("created_at DESC").
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
@@ -114,17 +160,30 @@ func (r *ProjectRepository) CountByWorkspace(ctx context.Context, wsID kernel.Wo
 }
 
 func rowToProject(row projectModel) (*model.Project, error) {
-	name, err := model.NewProjectName(row.Name)
+	name, err := model.ProjectNameFromDB(row.Name)
 	if err != nil {
 		return nil, err
 	}
 	id, _ := kernel.ParseProjectID(row.ID)
 	wsID, _ := kernel.ParseWorkspaceID(row.WorkspaceID)
 	createdBy, _ := kernel.ParseMemberID(row.CreatedBy)
-	return &model.Project{
-		ID: id, WorkspaceID: wsID, Name: name, Description: row.Description,
-		Status: model.ProjectStatus(row.Status), CreatedBy: createdBy, CreatedAt: row.CreatedAt,
-	}, nil
+	resources, err := model.DecodeProjectResources(row.Resources)
+	if err != nil {
+		return nil, err
+	}
+	p := &model.Project{
+		ID: id, WorkspaceID: wsID, Name: name, DisplayName: row.DisplayName, Description: row.Description,
+		Namespace: row.Namespace, Language: row.Language, GitURL: row.GitURL,
+		GitRefType: row.GitRefType, GitRefValue: row.GitRefValue, DockerfilePath: row.DockerfilePath,
+		Resources: resources, Status: model.ProjectStatus(row.Status), CreatedBy: createdBy, CreatedAt: row.CreatedAt,
+	}
+	if row.SecretID != nil {
+		p.SecretID = *row.SecretID
+	}
+	if row.TemplateID != nil {
+		p.TemplateID = *row.TemplateID
+	}
+	return p, nil
 }
 
 var _ repository.ProjectRepository = (*ProjectRepository)(nil)

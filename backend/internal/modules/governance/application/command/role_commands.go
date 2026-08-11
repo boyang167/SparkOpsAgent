@@ -9,6 +9,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/persistence"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -227,12 +228,20 @@ func NewBootstrapWorkspaceHandler(
 }
 
 func (h *BootstrapWorkspaceHandler) Handle(ctx context.Context, workspaceID kernel.WorkspaceID, ownerID kernel.MemberID, permissions []string) error {
-	exists, err := h.roles.ExistsByName(ctx, workspaceID, "admin")
+	roles, err := h.roles.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return err
 	}
-	if exists {
-		return nil
+	for _, role := range roles {
+		if role.Name != "admin" {
+			continue
+		}
+		merged := authz.MergePermissions(role.Permissions, permissions)
+		if len(merged) == len(role.Permissions) {
+			return nil
+		}
+		role.UpdatePermissions(merged)
+		return h.roles.Save(ctx, role)
 	}
 	role := model.NewRole(workspaceID, "admin", permissions, nil)
 	if err := h.roles.Save(ctx, role); err != nil {
@@ -243,6 +252,32 @@ func (h *BootstrapWorkspaceHandler) Handle(ctx context.Context, workspaceID kern
 	}
 	if h.sync != nil {
 		return h.sync.SyncMemberRole(ctx, workspaceID, role.ID, ownerID, true)
+	}
+	return nil
+}
+
+type EnsureDefaultAdminPermissionsHandler struct {
+	roles repository.RoleRepository
+}
+
+func NewEnsureDefaultAdminPermissionsHandler(roles repository.RoleRepository) *EnsureDefaultAdminPermissionsHandler {
+	return &EnsureDefaultAdminPermissionsHandler{roles: roles}
+}
+
+func (h *EnsureDefaultAdminPermissionsHandler) Handle(ctx context.Context) error {
+	admins, err := h.roles.ListByName(ctx, "admin")
+	if err != nil {
+		return err
+	}
+	for _, role := range admins {
+		merged := authz.MergePermissions(role.Permissions, authz.DefaultAdminPermissions)
+		if len(merged) == len(role.Permissions) {
+			continue
+		}
+		role.UpdatePermissions(merged)
+		if err := h.roles.Save(ctx, role); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -4,12 +4,12 @@ import { UpdateSecretCommandSchema } from "@sparkops/contracts/secret";
 import { NextRequest } from "next/server";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ wsId: string; secretId: string }> },
 ) {
-  const traceId = createTraceId(_req);
+  const traceId = createTraceId(req);
   try {
-    const ctx = await createBffContext(_req);
+    const ctx = await createBffContext(req);
     const params = await context.params;
     const item = await getSecret(ctx, params.wsId, params.secretId);
     return ok(item, traceId);

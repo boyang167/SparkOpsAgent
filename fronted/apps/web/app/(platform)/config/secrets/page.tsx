@@ -8,9 +8,9 @@ export default async function SecretsPage() {
   return (
     <div className="stack-lg">
       <PageHeader
-        eyebrow="Secret"
-        title="服务连接配置"
-        description="管理 GitLab、Jenkins、Harbor 等外部服务的连接与认证信息"
+        eyebrow="Infrastructure"
+        title="服务连接配置管理"
+        description="管理各种服务的连接和认证信息，如 GitLab、Jenkins、Harbor 等"
       />
       <SecretPanel workspaceId={workspaceId} />
     </div>

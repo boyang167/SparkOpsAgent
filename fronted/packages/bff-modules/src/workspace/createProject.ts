@@ -6,8 +6,5 @@ export async function createProject(
   workspaceId: string,
   input: CreateProjectCommand,
 ): Promise<ProjectVM> {
-  return ctx.upstream.workspace.createProject(workspaceId, {
-    name: input.name,
-    description: input.description ?? "",
-  });
+  return ctx.upstream.workspace.createProject(workspaceId, input);
 }

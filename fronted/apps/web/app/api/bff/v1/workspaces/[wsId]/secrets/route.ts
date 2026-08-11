@@ -5,7 +5,9 @@ import { NextRequest } from "next/server";
 
 export const GET = createBffHandler(async (ctx, _req, { params }) => {
   const wsId = params?.wsId ?? ctx.workspaceId;
-  if (!wsId) throw new Error("workspace required");
+  if (!wsId) {
+    throw new Error("workspace required");
+  }
   const items = await listSecrets(ctx, wsId);
   return { items };
 });

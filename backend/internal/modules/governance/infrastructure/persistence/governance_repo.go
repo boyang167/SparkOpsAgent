@@ -105,6 +105,23 @@ func (s *Store) ListRolesByWorkspace(ctx context.Context, workspaceID kernel.Wor
 	return out, nil
 }
 
+func (s *Store) ListRolesByName(ctx context.Context, name string) ([]*model.Role, error) {
+	var rows []roleModel
+	err := s.db.WithContext(ctx).Where("name = ?", name).Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*model.Role, 0, len(rows))
+	for _, row := range rows {
+		role, err := rowToRole(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, role)
+	}
+	return out, nil
+}
+
 func (s *Store) ExistsRoleByName(ctx context.Context, workspaceID kernel.WorkspaceID, name string) (bool, error) {
 	var count int64
 	err := s.db.WithContext(ctx).Model(&roleModel{}).
@@ -222,6 +239,9 @@ func (r *roleRepo) FindByID(ctx context.Context, id kernel.RoleID) (*model.Role,
 }
 func (r *roleRepo) ListByWorkspace(ctx context.Context, workspaceID kernel.WorkspaceID) ([]*model.Role, error) {
 	return r.store.ListRolesByWorkspace(ctx, workspaceID)
+}
+func (r *roleRepo) ListByName(ctx context.Context, name string) ([]*model.Role, error) {
+	return r.store.ListRolesByName(ctx, name)
 }
 func (r *roleRepo) ExistsByName(ctx context.Context, workspaceID kernel.WorkspaceID, name string) (bool, error) {
 	return r.store.ExistsRoleByName(ctx, workspaceID, name)

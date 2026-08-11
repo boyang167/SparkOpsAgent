@@ -75,6 +75,9 @@ func (h *SeedWorkspaceMenusHandler) ensureDefaults(ctx context.Context, workspac
 	if err := h.repairLegacyMonitorMenus(ctx, workspaceID); err != nil {
 		return err
 	}
+	if err := h.repairRemovedMenus(ctx, workspaceID); err != nil {
+		return err
+	}
 	for _, group := range defaultMenuGroups {
 		parent, err := h.menus.FindGroupMenu(ctx, workspaceID, group.ID)
 		if err != nil {
@@ -150,6 +153,74 @@ func (h *SeedWorkspaceMenusHandler) repairLegacyMonitorMenus(ctx context.Context
 	}
 }
 
+var removedMenuPaths = []string{
+	"/cluster/config",
+}
+
+var removedMenuTitles = []string{
+	"秘钥管理",
+	"服务连接配置",
+}
+
+func normalizeMenuPathLocal(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	for len(path) > 1 && strings.HasSuffix(path, "/") {
+		path = strings.TrimSuffix(path, "/")
+	}
+	return path
+}
+
+func menuShouldBeRemoved(menu *model.Menu) bool {
+	normalized := normalizeMenuPathLocal(menu.Path)
+	for _, path := range removedMenuPaths {
+		if normalized == normalizeMenuPathLocal(path) {
+			return true
+		}
+	}
+	title := strings.TrimSpace(menu.Title)
+	for _, removedTitle := range removedMenuTitles {
+		if title == removedTitle {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *SeedWorkspaceMenusHandler) RepairRemovedMenusAllWorkspaces(ctx context.Context) error {
+	workspaceIDs, err := h.menus.ListDistinctWorkspaceIDs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, workspaceID := range workspaceIDs {
+		if err := h.repairRemovedMenus(ctx, workspaceID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *SeedWorkspaceMenusHandler) repairRemovedMenus(ctx context.Context, workspaceID kernel.WorkspaceID) error {
+	menus, err := h.menus.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, menu := range menus {
+		if !menuShouldBeRemoved(menu) {
+			continue
+		}
+		if err := h.menus.SoftDeleteSubtree(ctx, workspaceID, menu.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func isOperationLogTitle(title string) bool {
 	switch strings.TrimSpace(title) {
 	case "操作日志", "操作历史", "操作记录":
@@ -181,6 +252,7 @@ var defaultMenuGroups = []defaultMenuGroup{
 	{
 		ID: "delivery", Label: "交付运维",
 		Items: []struct{ Href, Label string }{
+			{"/projects", "项目管理"},
 			{"/delivery/builds", "构建"},
 			{"/runtime/pods", "Pod 运维"},
 			{"/cronjobs", "定时任务"},
@@ -194,7 +266,7 @@ var defaultMenuGroups = []defaultMenuGroup{
 		ID: "infra", Label: "基础设施",
 		Items: []struct{ Href, Label string }{
 			{"/config/configmaps", "配置字典"},
-			{"/config/secrets", "秘钥管理"},
+			{"/config/secrets", "密钥配置"},
 			{"/config/storage", "持久化存储"},
 			{"/config/consul", "Consul KV"},
 			{"/config/webhooks", "Webhooks"},
@@ -203,7 +275,6 @@ var defaultMenuGroups = []defaultMenuGroup{
 			{"/discovery/services", "服务发现"},
 			{"/cluster/list", "集群列表"},
 			{"/cluster/sync", "资源同步"},
-			{"/cluster/config", "密钥配置"},
 		},
 	},
 	{

@@ -491,6 +491,26 @@ func (s *MenuStore) ListByWorkspace(ctx context.Context, workspaceID kernel.Work
 	return out, nil
 }
 
+func (s *MenuStore) ListDistinctWorkspaceIDs(ctx context.Context) ([]kernel.WorkspaceID, error) {
+	var raw []string
+	err := s.db.WithContext(ctx).
+		Model(&menuModel{}).
+		Distinct("workspace_id").
+		Pluck("workspace_id", &raw).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]kernel.WorkspaceID, 0, len(raw))
+	for _, id := range raw {
+		wsID, err := kernel.ParseWorkspaceID(id)
+		if err != nil {
+			continue
+		}
+		out = append(out, wsID)
+	}
+	return out, nil
+}
+
 func (s *MenuStore) SoftDelete(ctx context.Context, workspaceID kernel.WorkspaceID, menuID string) error {
 	res := s.db.WithContext(ctx).
 		Where("id = ? AND workspace_id = ? AND deleted_at IS NULL", menuID, workspaceID.String()).

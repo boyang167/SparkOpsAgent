@@ -30,7 +30,7 @@ func NewCreateProjectHandler(
 	return &CreateProjectHandler{repo: repo, memberRepo: memberRepo, wsChecker: wsChecker, engine: engine, bus: bus}
 }
 
-func (h *CreateProjectHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID, rawName, desc string) (*model.Project, error) {
+func (h *CreateProjectHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID, input model.CreateProjectInput) (*model.Project, error) {
 	ok, err := h.wsChecker.MemberInWorkspace(ctx, memberID, wsID)
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func (h *CreateProjectHandler) Handle(ctx context.Context, wsID kernel.Workspace
 		return nil, domain.ErrWorkspaceAccessDenied
 	}
 
-	name, err := model.NewProjectName(rawName)
+	name, err := model.NewProjectName(input.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (h *CreateProjectHandler) Handle(ctx context.Context, wsID kernel.Workspace
 		return nil, err
 	}
 
-	project := model.NewProject(wsID, name, memberID, desc)
+	project := model.NewProject(wsID, name, memberID, input)
 	if err := h.repo.Save(ctx, project); err != nil {
 		return nil, err
 	}
