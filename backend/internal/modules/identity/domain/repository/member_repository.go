@@ -13,4 +13,5 @@ type MemberRepository interface {
 	FindByID(ctx context.Context, id kernel.MemberID) (*model.Member, error)
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
 	ListAll(ctx context.Context) ([]*model.Member, error)
+	SoftDelete(ctx context.Context, id kernel.MemberID) error
 }

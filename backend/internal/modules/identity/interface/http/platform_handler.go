@@ -17,6 +17,7 @@ type PlatformHandler struct {
 	create *command.CreatePlatformMemberHandler
 	update *command.UpdatePlatformMemberHandler
 	reset  *command.AdminResetPasswordHandler
+	delete *command.DeletePlatformMemberHandler
 }
 
 func NewPlatformHandler(
@@ -24,8 +25,11 @@ func NewPlatformHandler(
 	create *command.CreatePlatformMemberHandler,
 	update *command.UpdatePlatformMemberHandler,
 	reset *command.AdminResetPasswordHandler,
+	deleteMember *command.DeletePlatformMemberHandler,
 ) *PlatformHandler {
-	return &PlatformHandler{list: list, create: create, update: update, reset: reset}
+	return &PlatformHandler{
+		list: list, create: create, update: update, reset: reset, delete: deleteMember,
+	}
 }
 
 func (h *PlatformHandler) ListMembers(c *gin.Context) {
@@ -114,4 +118,22 @@ func (h *PlatformHandler) ResetPassword(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"updated": true})
+}
+
+func (h *PlatformHandler) DeleteMember(c *gin.Context) {
+	actorID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	targetID, err := kernel.ParseMemberID(c.Param("memberId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid member id", http.StatusBadRequest)
+		return
+	}
+	if err := h.delete.Handle(c.Request.Context(), actorID, targetID); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"deleted": true})
 }

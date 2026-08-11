@@ -38,10 +38,6 @@ func (h *CreatePlatformOrganizationHandler) Handle(
 	input CreatePlatformOrganizationInput,
 ) (*model.Organization, error) {
 	ownerEmail := strings.TrimSpace(strings.ToLower(input.OwnerEmail))
-	owner, err := h.identity.FindMemberByEmail(ctx, ownerEmail)
-	if err != nil {
-		return nil, err
-	}
 	org := model.NewOrganization(input.Name, input.Slug)
 	exists, err := h.repo.ExistsBySlug(ctx, org.Slug)
 	if err != nil {
@@ -53,12 +49,19 @@ func (h *CreatePlatformOrganizationHandler) Handle(
 	if err := h.repo.Save(ctx, org); err != nil {
 		return nil, err
 	}
-	if err := h.repo.AddMember(ctx, org.ID, owner.MemberID, domain.OrgRoleOwner); err != nil {
-		return nil, err
+	auditMeta := map[string]any{"name": org.Name, "slug": org.Slug}
+	if ownerEmail != "" {
+		owner, err := h.identity.FindMemberByEmail(ctx, ownerEmail)
+		if err != nil {
+			return nil, err
+		}
+		if err := h.repo.AddMember(ctx, org.ID, owner.MemberID, domain.OrgRoleOwner); err != nil {
+			return nil, err
+		}
+		auditMeta["owner_email"] = owner.Email
+		auditMeta["owner_id"] = owner.MemberID.String()
 	}
-	logAudit(h.audit, ctx, orgAuditEntry(actorID, audit.ActionPlatformOrgCreate, org.ID.String(), org.ID, map[string]any{
-		"name": org.Name, "slug": org.Slug, "owner_email": owner.Email, "owner_id": owner.MemberID.String(),
-	}))
+	logAudit(h.audit, ctx, orgAuditEntry(actorID, audit.ActionPlatformOrgCreate, org.ID.String(), org.ID, auditMeta))
 	return org, nil
 }
 
@@ -179,4 +182,27 @@ func (h *TransferOrgOwnerHandler) Handle(
 		NewOwnerID:      newOwner.MemberID,
 		NewOwnerEmail:   newOwner.Email,
 	}, nil
+}
+
+type DeletePlatformOrganizationHandler struct {
+	repo  repository.OrganizationRepository
+	audit audit.Logger
+}
+
+func NewDeletePlatformOrganizationHandler(repo repository.OrganizationRepository, auditLogger audit.Logger) *DeletePlatformOrganizationHandler {
+	return &DeletePlatformOrganizationHandler{repo: repo, audit: auditLogger}
+}
+
+func (h *DeletePlatformOrganizationHandler) Handle(ctx context.Context, actorID kernel.MemberID, orgID kernel.OrgID) error {
+	org, err := h.repo.FindByID(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	if err := h.repo.SoftDelete(ctx, orgID); err != nil {
+		return err
+	}
+	logAudit(h.audit, ctx, orgAuditEntry(actorID, audit.ActionPlatformOrgDelete, orgID.String(), orgID, map[string]any{
+		"name": org.Name, "slug": org.Slug,
+	}))
+	return nil
 }

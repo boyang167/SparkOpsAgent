@@ -142,6 +142,45 @@ func NewAdminResetPasswordHandler(repo repository.MemberRepository) *AdminResetP
 	return &AdminResetPasswordHandler{repo: repo, hasher: model.BcryptHasher{}}
 }
 
+type DeletePlatformMemberHandler struct {
+	repo        repository.MemberRepository
+	systemRoles *persistence.SystemRoleStore
+}
+
+func NewDeletePlatformMemberHandler(
+	repo repository.MemberRepository,
+	systemRoles *persistence.SystemRoleStore,
+) *DeletePlatformMemberHandler {
+	return &DeletePlatformMemberHandler{repo: repo, systemRoles: systemRoles}
+}
+
+func (h *DeletePlatformMemberHandler) Handle(
+	ctx context.Context,
+	actorID kernel.MemberID,
+	targetID kernel.MemberID,
+) error {
+	if actorID == targetID {
+		return domain.ErrCannotDeleteSelf
+	}
+	if _, err := h.repo.FindByID(ctx, targetID); err != nil {
+		return err
+	}
+	isSuper, err := h.systemRoles.IsSuperAdmin(ctx, targetID)
+	if err != nil {
+		return err
+	}
+	if isSuper {
+		count, err := h.systemRoles.CountByRole(ctx, authz.SystemRoleSuperAdmin)
+		if err != nil {
+			return err
+		}
+		if count <= 1 {
+			return domain.ErrLastSuperAdmin
+		}
+	}
+	return h.repo.SoftDelete(ctx, targetID)
+}
+
 func (h *AdminResetPasswordHandler) Handle(ctx context.Context, targetID kernel.MemberID, newPassword string) error {
 	member, err := h.repo.FindByID(ctx, targetID)
 	if err != nil {

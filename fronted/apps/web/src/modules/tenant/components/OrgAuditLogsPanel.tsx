@@ -38,7 +38,7 @@ export function OrgAuditLogsPanel() {
   }
 
   if (orgs.length === 0) {
-    return <div className="empty-state">暂无组织，无法查看操作历史</div>;
+    return <div className="empty-state">暂无组织，无法查看组织审计</div>;
   }
 
   return (
@@ -54,7 +54,7 @@ export function OrgAuditLogsPanel() {
           ))}
         </select>
       </label>
-      {orgId ? <PlatformAuditLogsPanel orgId={orgId} title="组织操作历史" /> : null}
+      {orgId ? <PlatformAuditLogsPanel orgId={orgId} title="组织审计日志" /> : null}
     </div>
   );
 }

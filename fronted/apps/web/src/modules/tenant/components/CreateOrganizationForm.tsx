@@ -27,6 +27,7 @@ export function CreateOrganizationForm({
   const router = useRouter();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
+  const [slugManual, setSlugManual] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -40,6 +41,7 @@ export function CreateOrganizationForm({
       const org = await tenant.createOrganization({ name, slug });
       setName("");
       setSlug("");
+      setSlugManual(false);
       setSuccess(`组织「${org.name}」已创建`);
       onCreated?.(org);
       router.refresh();
@@ -63,8 +65,9 @@ export function CreateOrganizationForm({
             placeholder="Acme Corporation"
             value={name}
             onChange={(e) => {
-              setName(e.target.value);
-              if (!slug) setSlug(slugify(e.target.value));
+              const nextName = e.target.value;
+              setName(nextName);
+              if (!slugManual) setSlug(slugify(nextName));
             }}
             required
           />
@@ -78,7 +81,10 @@ export function CreateOrganizationForm({
             className="input"
             placeholder="acme-corp"
             value={slug}
-            onChange={(e) => setSlug(e.target.value)}
+            onChange={(e) => {
+              setSlugManual(true);
+              setSlug(e.target.value);
+            }}
             required
           />
         </div>
@@ -115,8 +121,9 @@ export function CreateOrganizationForm({
             placeholder="例如：Acme Corporation"
             value={name}
             onChange={(e) => {
-              setName(e.target.value);
-              if (!slug) setSlug(slugify(e.target.value));
+              const nextName = e.target.value;
+              setName(nextName);
+              if (!slugManual) setSlug(slugify(nextName));
             }}
             required
           />
@@ -131,7 +138,10 @@ export function CreateOrganizationForm({
             className="input"
             placeholder="例如：acme-corp"
             value={slug}
-            onChange={(e) => setSlug(e.target.value)}
+            onChange={(e) => {
+              setSlugManual(true);
+              setSlug(e.target.value);
+            }}
             required
           />
           {!compact ? <p className="field-hint">全局唯一标识，用于路由与系统集成</p> : null}

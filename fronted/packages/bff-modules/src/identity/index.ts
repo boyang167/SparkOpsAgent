@@ -6,4 +6,5 @@ export {
   createPlatformMember,
   updatePlatformMember,
   resetPlatformMemberPassword,
+  deletePlatformMember,
 } from "./platformMembers";

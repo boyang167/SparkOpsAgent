@@ -12,6 +12,7 @@ export {
   listPlatformOrganizations,
   createPlatformOrganization,
   updatePlatformOrganizationStatus,
+  deletePlatformOrganization,
   transferPlatformOrgOwner,
   transferOrgOwner,
   listOrgAuditLogs,

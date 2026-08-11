@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"strings"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain"
@@ -89,11 +90,19 @@ func NewUpdateRoleHandler(repo repository.RoleRepository) *UpdateRoleHandler {
 	return &UpdateRoleHandler{repo: repo}
 }
 
+type UpdateRoleInput struct {
+	Name              *string
+	ParentID          *kernel.RoleID
+	UpdateParent      bool
+	Permissions       []string
+	UpdatePermissions bool
+}
+
 func (h *UpdateRoleHandler) Handle(
 	ctx context.Context,
 	workspaceID kernel.WorkspaceID,
 	roleID kernel.RoleID,
-	permissions []string,
+	input UpdateRoleInput,
 ) (*model.Role, error) {
 	role, err := h.repo.FindByID(ctx, roleID)
 	if err != nil {
@@ -102,10 +111,46 @@ func (h *UpdateRoleHandler) Handle(
 	if role.WorkspaceID != workspaceID {
 		return nil, domain.ErrRoleNotFound
 	}
-	if len(permissions) == 0 {
-		return nil, domain.ErrPermissionsRequired
+	if !input.UpdatePermissions && !input.UpdateParent && input.Name == nil {
+		return nil, domain.ErrInvalidRoleUpdate
 	}
-	role.UpdatePermissions(permissions)
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if name == "" {
+			return nil, domain.ErrInvalidRoleUpdate
+		}
+		if name != role.Name {
+			exists, err := h.repo.ExistsByName(ctx, workspaceID, name)
+			if err != nil {
+				return nil, err
+			}
+			if exists {
+				return nil, domain.ErrRoleAlreadyExists
+			}
+			role.Name = name
+		}
+	}
+	if input.UpdateParent {
+		if input.ParentID != nil {
+			if *input.ParentID == roleID {
+				return nil, domain.ErrInvalidParentRole
+			}
+			parent, err := h.repo.FindByID(ctx, *input.ParentID)
+			if err != nil {
+				return nil, err
+			}
+			if parent.WorkspaceID != workspaceID {
+				return nil, domain.ErrInvalidParentRole
+			}
+		}
+		role.ParentID = input.ParentID
+	}
+	if input.UpdatePermissions {
+		if len(input.Permissions) == 0 {
+			return nil, domain.ErrPermissionsRequired
+		}
+		role.UpdatePermissions(input.Permissions)
+	}
 	if err := h.repo.Save(ctx, role); err != nil {
 		return nil, err
 	}
@@ -113,19 +158,23 @@ func (h *UpdateRoleHandler) Handle(
 }
 
 type DeleteRoleHandler struct {
-	roles    repository.RoleRepository
-	bindings repository.BindingRepository
-	store    *persistence.RoleAPIPolicyStore
-	sync     *service.APIPolicySync
+	roles      repository.RoleRepository
+	bindings   repository.BindingRepository
+	apiStore   *persistence.RoleAPIPolicyStore
+	dataStore  *persistence.DataPolicyStore
+	sync       *service.APIPolicySync
 }
 
 func NewDeleteRoleHandler(
 	roles repository.RoleRepository,
 	bindings repository.BindingRepository,
-	store *persistence.RoleAPIPolicyStore,
+	apiStore *persistence.RoleAPIPolicyStore,
+	dataStore *persistence.DataPolicyStore,
 	sync *service.APIPolicySync,
 ) *DeleteRoleHandler {
-	return &DeleteRoleHandler{roles: roles, bindings: bindings, store: store, sync: sync}
+	return &DeleteRoleHandler{
+		roles: roles, bindings: bindings, apiStore: apiStore, dataStore: dataStore, sync: sync,
+	}
 }
 
 func (h *DeleteRoleHandler) Handle(ctx context.Context, workspaceID kernel.WorkspaceID, roleID kernel.RoleID) error {
@@ -149,8 +198,11 @@ func (h *DeleteRoleHandler) Handle(ctx context.Context, workspaceID kernel.Works
 	if err := h.bindings.DeleteByRoleID(ctx, roleID); err != nil {
 		return err
 	}
-	if h.store != nil {
-		_ = h.store.DeleteByRole(ctx, roleID.String())
+	if h.apiStore != nil {
+		_ = h.apiStore.DeleteByRole(ctx, roleID.String())
+	}
+	if h.dataStore != nil {
+		_ = h.dataStore.DeleteByRole(ctx, roleID.String())
 	}
 	if h.sync != nil {
 		if err := h.sync.RemoveRolePolicies(ctx, roleID, workspaceID); err != nil {
@@ -196,11 +248,23 @@ func (h *BootstrapWorkspaceHandler) Handle(ctx context.Context, workspaceID kern
 }
 
 type CopyRoleHandler struct {
-	repo repository.RoleRepository
+	repo      repository.RoleRepository
+	apiStore  *persistence.RoleAPIPolicyStore
+	menuStore *persistence.MenuStore
+	dataStore *persistence.DataPolicyStore
+	sync      *service.APIPolicySync
 }
 
-func NewCopyRoleHandler(repo repository.RoleRepository) *CopyRoleHandler {
-	return &CopyRoleHandler{repo: repo}
+func NewCopyRoleHandler(
+	repo repository.RoleRepository,
+	apiStore *persistence.RoleAPIPolicyStore,
+	menuStore *persistence.MenuStore,
+	dataStore *persistence.DataPolicyStore,
+	sync *service.APIPolicySync,
+) *CopyRoleHandler {
+	return &CopyRoleHandler{
+		repo: repo, apiStore: apiStore, menuStore: menuStore, dataStore: dataStore, sync: sync,
+	}
 }
 
 func (h *CopyRoleHandler) Handle(ctx context.Context, workspaceID kernel.WorkspaceID, roleID kernel.RoleID, name string) (*model.Role, error) {
@@ -221,9 +285,49 @@ func (h *CopyRoleHandler) Handle(ctx context.Context, workspaceID kernel.Workspa
 	if exists {
 		return nil, domain.ErrRoleAlreadyExists
 	}
-	copy := model.NewRole(workspaceID, name, source.Permissions, source.ParentID)
-	if err := h.repo.Save(ctx, copy); err != nil {
+	copyRole := model.NewRole(workspaceID, name, source.Permissions, source.ParentID)
+	if err := h.repo.Save(ctx, copyRole); err != nil {
 		return nil, err
 	}
-	return copy, nil
+
+	sourceID := roleID.String()
+	copyID := copyRole.ID.String()
+
+	if h.apiStore != nil {
+		apiPolicies, err := h.apiStore.ListByRole(ctx, sourceID)
+		if err != nil {
+			return nil, err
+		}
+		if err := h.apiStore.ReplaceForRole(ctx, copyID, apiPolicies); err != nil {
+			return nil, err
+		}
+	}
+
+	if h.menuStore != nil {
+		menuIDs, err := h.menuStore.ListMenuIDsByRole(ctx, workspaceID, sourceID)
+		if err != nil {
+			return nil, err
+		}
+		if err := h.menuStore.SetMenuIDsForRole(ctx, workspaceID, copyID, menuIDs); err != nil {
+			return nil, err
+		}
+	}
+
+	if h.dataStore != nil {
+		dataPolicies, err := h.dataStore.ListByRole(ctx, sourceID)
+		if err != nil {
+			return nil, err
+		}
+		if err := h.dataStore.ReplaceForRole(ctx, copyID, dataPolicies); err != nil {
+			return nil, err
+		}
+	}
+
+	if h.sync != nil {
+		if err := h.sync.SyncRolePolicies(ctx, copyRole.ID, workspaceID); err != nil {
+			return nil, err
+		}
+	}
+
+	return copyRole, nil
 }

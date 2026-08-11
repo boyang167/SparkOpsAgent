@@ -88,7 +88,11 @@ func (s *APIRegistryStore) Diff(
 		ignoreMap[key(item.Method, item.Path)] = struct{}{}
 	}
 	routeMap := map[string]struct{}{}
-	diff := APISyncDiff{}
+	diff := APISyncDiff{
+		New:    []RegisteredAPI{},
+		Delete: []RegisteredAPI{},
+		Ignore: []RegisteredAPI{},
+	}
 	for _, route := range routes {
 		k := key(route.Method, route.Path)
 		routeMap[k] = struct{}{}
@@ -138,6 +142,24 @@ func (s *APIRegistryStore) UpdateMeta(ctx context.Context, id string, group, des
 		Updates(map[string]interface{}{
 			"api_group": group, "description": description, "updated_at": time.Now().UTC(),
 		}).Error
+}
+
+func (s *APIRegistryStore) DeleteByID(ctx context.Context, id string) error {
+	res := s.db.WithContext(ctx).Where("id = ?", id).Delete(&apiModel{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (s *APIRegistryStore) DeleteByIDs(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return s.db.WithContext(ctx).Where("id IN ?", ids).Delete(&apiModel{}).Error
 }
 
 func (s *APIRegistryStore) listIgnore(ctx context.Context) ([]RegisteredAPI, error) {

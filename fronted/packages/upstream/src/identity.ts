@@ -124,6 +124,12 @@ export function createIdentityUpstream(options: UpstreamRequestOptions = {}) {
         options,
       });
     },
+    async deletePlatformMember(memberId: string) {
+      return upstreamFetch<{ deleted: true }>(`/api/v1/platform/members/${memberId}`, {
+        method: "DELETE",
+        options,
+      });
+    },
   };
 }
 

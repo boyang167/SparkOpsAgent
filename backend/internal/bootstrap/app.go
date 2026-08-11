@@ -25,6 +25,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/tenant"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workflow"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/applog"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
@@ -33,6 +34,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/k8s"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/observability"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/operationlog"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/redis"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/routes"
@@ -89,6 +91,22 @@ func Run(ctx context.Context) error {
 	httpx.RegisterReadiness(c.Engine, httpx.ReadinessDeps{DB: db, Redis: redisClient})
 
 	tokens := authn.NewTokenProvider(cfg.JWT)
+
+	if db != nil {
+		appLogStore := applog.NewStore(db)
+		if err := appLogStore.AutoMigrate(); err != nil {
+			return fmt.Errorf("app log migrate: %w", err)
+		}
+		observability.SetAppLogStore(appLogStore)
+
+		opStore := operationlog.NewStore(db)
+		if err := opStore.AutoMigrate(); err != nil {
+			return fmt.Errorf("operation log migrate: %w", err)
+		}
+		httpx.SetOperationLogMiddleware(operationlog.Middleware(opStore))
+	}
+
+	c.Engine.Use(observability.RequestLogMiddleware(logger))
 
 	modules := []appctx.Module{}
 	if db != nil {

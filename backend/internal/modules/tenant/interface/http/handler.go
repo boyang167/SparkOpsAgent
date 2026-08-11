@@ -29,6 +29,7 @@ type Handler struct {
 	listPlatformOrgs *query.ListPlatformOrganizationsHandler
 	createPlatformOrg *command.CreatePlatformOrganizationHandler
 	updateOrgStatus  *command.UpdateOrganizationStatusHandler
+	deletePlatformOrg *command.DeletePlatformOrganizationHandler
 	transferOwner    *command.TransferOrgOwnerHandler
 	listAuditLogs    *query.ListAuditLogsHandler
 	getOrgQuota      *query.GetOrgQuotaHandler
@@ -52,6 +53,7 @@ func NewHandler(
 	listPlatformOrgs *query.ListPlatformOrganizationsHandler,
 	createPlatformOrg *command.CreatePlatformOrganizationHandler,
 	updateOrgStatus *command.UpdateOrganizationStatusHandler,
+	deletePlatformOrg *command.DeletePlatformOrganizationHandler,
 	transferOwner *command.TransferOrgOwnerHandler,
 	listAuditLogs *query.ListAuditLogsHandler,
 	getOrgQuota *query.GetOrgQuotaHandler,
@@ -65,7 +67,7 @@ func NewHandler(
 		getOrg: getOrg, listOrgMembers: listOrgMembers, myOrgPerms: myOrgPerms,
 		inviteOrgMember: inviteOrgMember, updateOrgRole: updateOrgRole, removeOrgMember: removeOrgMember,
 		listPlatformOrgs: listPlatformOrgs, createPlatformOrg: createPlatformOrg,
-		updateOrgStatus: updateOrgStatus, transferOwner: transferOwner, listAuditLogs: listAuditLogs,
+		updateOrgStatus: updateOrgStatus, deletePlatformOrg: deletePlatformOrg, transferOwner: transferOwner, listAuditLogs: listAuditLogs,
 		getOrgQuota: getOrgQuota, getOrgQuotaUsage: getOrgQuotaUsage, updateOrgQuota: updateOrgQuota,
 		systemRoles: systemRoles, orgAccess: orgAccess,
 	}
@@ -312,7 +314,7 @@ func (h *Handler) ListWorkspaces(c *gin.Context) {
 type createPlatformOrgRequest struct {
 	Name       string `json:"name" binding:"required"`
 	Slug       string `json:"slug" binding:"required"`
-	OwnerEmail string `json:"owner_email" binding:"required,email"`
+	OwnerEmail string `json:"owner_email" binding:"omitempty,email"`
 }
 
 type updateOrgStatusRequest struct {
@@ -374,6 +376,24 @@ func (h *Handler) UpdatePlatformOrganizationStatus(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"updated": true})
+}
+
+func (h *Handler) DeletePlatformOrganization(c *gin.Context) {
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	orgID, ok := httpx.OrgIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_ORG_REQUIRED", "organization required", http.StatusBadRequest)
+		return
+	}
+	if err := h.deletePlatformOrg.Handle(c.Request.Context(), memberID, orgID); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"deleted": true})
 }
 
 func (h *Handler) TransferPlatformOrgOwner(c *gin.Context) {

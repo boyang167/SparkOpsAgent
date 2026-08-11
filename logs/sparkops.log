@@ -1,0 +1,25 @@
+{"level":"info","ts":"2026-08-11T14:34:22.803+0800","caller":"bootstrap/app.go:196","msg":"database connected"}
+{"level":"info","ts":"2026-08-11T14:34:23.808+0800","caller":"bootstrap/app.go:213","msg":"redis connected","addr":"192.168.5.24:16379"}
+{"level":"warn","ts":"2026-08-11T14:34:23.808+0800","caller":"bootstrap/app.go:219","msg":"kubernetes not configured, runtime will use mock adapters"}
+{"level":"info","ts":"2026-08-11T14:34:25.158+0800","caller":"bootstrap/app.go:155","msg":"server starting","addr":":8080"}
+{"level":"info","ts":"2026-08-11T14:45:34.434+0800","caller":"bootstrap/app.go:166","msg":"server shutting down"}
+{"level":"info","ts":"2026-08-11T14:45:43.397+0800","caller":"bootstrap/app.go:196","msg":"database connected"}
+{"level":"info","ts":"2026-08-11T14:45:44.304+0800","caller":"bootstrap/app.go:213","msg":"redis connected","addr":"192.168.5.24:16379"}
+{"level":"warn","ts":"2026-08-11T14:45:44.304+0800","caller":"bootstrap/app.go:219","msg":"kubernetes not configured, runtime will use mock adapters"}
+{"level":"info","ts":"2026-08-11T14:45:45.441+0800","caller":"bootstrap/app.go:155","msg":"server starting","addr":":8080"}
+{"level":"info","ts":"2026-08-11T14:53:41.169+0800","caller":"bootstrap/app.go:166","msg":"server shutting down"}
+{"level":"info","ts":"2026-08-11T14:53:53.291+0800","caller":"bootstrap/app.go:196","msg":"database connected"}
+{"level":"info","ts":"2026-08-11T14:53:53.968+0800","caller":"bootstrap/app.go:213","msg":"redis connected","addr":"192.168.5.24:16379"}
+{"level":"warn","ts":"2026-08-11T14:53:53.969+0800","caller":"bootstrap/app.go:219","msg":"kubernetes not configured, runtime will use mock adapters"}
+{"level":"info","ts":"2026-08-11T14:53:54.830+0800","caller":"bootstrap/app.go:155","msg":"server starting","addr":":8080"}
+{"level":"info","ts":"2026-08-11T14:59:06.923+0800","caller":"bootstrap/app.go:166","msg":"server shutting down"}
+{"level":"info","ts":"2026-08-11T14:59:22.269+0800","caller":"bootstrap/app.go:196","msg":"database connected"}
+{"level":"info","ts":"2026-08-11T14:59:23.560+0800","caller":"bootstrap/app.go:213","msg":"redis connected","addr":"192.168.5.24:16379"}
+{"level":"warn","ts":"2026-08-11T14:59:23.561+0800","caller":"bootstrap/app.go:219","msg":"kubernetes not configured, runtime will use mock adapters"}
+{"level":"info","ts":"2026-08-11T14:59:24.861+0800","caller":"bootstrap/app.go:155","msg":"server starting","addr":":8080"}
+{"level":"info","ts":"2026-08-11T15:03:58.330+0800","caller":"bootstrap/app.go:166","msg":"server shutting down"}
+{"level":"info","ts":"2026-08-11T15:04:06.690+0800","caller":"bootstrap/app.go:196","msg":"database connected"}
+{"level":"info","ts":"2026-08-11T15:04:07.652+0800","caller":"bootstrap/app.go:213","msg":"redis connected","addr":"192.168.5.24:16379"}
+{"level":"warn","ts":"2026-08-11T15:04:07.652+0800","caller":"bootstrap/app.go:219","msg":"kubernetes not configured, runtime will use mock adapters"}
+{"level":"info","ts":"2026-08-11T15:04:08.631+0800","caller":"bootstrap/app.go:155","msg":"server starting","addr":":8080"}
+{"level":"info","ts":"2026-08-11T15:07:57.328+0800","caller":"bootstrap/app.go:166","msg":"server shutting down"}

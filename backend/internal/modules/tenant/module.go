@@ -63,6 +63,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewListPlatformOrganizationsHandler(orgRepo),
 		command.NewCreatePlatformOrganizationHandler(orgRepo, identityACL, auditSvc),
 		command.NewUpdateOrganizationStatusHandler(orgRepo, auditSvc),
+		command.NewDeletePlatformOrganizationHandler(orgRepo, auditSvc),
 		command.NewTransferOrgOwnerHandler(orgRepo, identityACL, auditSvc),
 		query.NewListAuditLogsHandler(auditStore),
 		query.NewGetOrgQuotaHandler(orgRepo),
@@ -100,6 +101,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.GET("/api/v1/platform/orgs", auth, superAdmin, handler.ListPlatformOrganizations)
 	c.Engine.POST("/api/v1/platform/orgs", auth, superAdmin, handler.CreatePlatformOrganization)
 	c.Engine.PATCH("/api/v1/platform/orgs/:orgId/status", auth, superAdmin, org, handler.UpdatePlatformOrganizationStatus)
+	c.Engine.DELETE("/api/v1/platform/orgs/:orgId", auth, superAdmin, org, handler.DeletePlatformOrganization)
 	c.Engine.POST("/api/v1/platform/orgs/:orgId/owners/transfer", auth, superAdmin, org, handler.TransferPlatformOrgOwner)
 	c.Engine.GET("/api/v1/platform/audit-logs", auth, superAdmin, handler.ListPlatformAuditLogs)
 

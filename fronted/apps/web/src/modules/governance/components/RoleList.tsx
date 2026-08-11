@@ -42,7 +42,7 @@ export function RoleList({ workspaceId, roles }: RoleListProps) {
     setLoadingId(roleId);
     setError(null);
     try {
-      await governance.updateRole(workspaceId, roleId, permissions);
+      await governance.updateRole(workspaceId, roleId, { permissions });
       setEditingId(null);
       router.refresh();
     } catch (err) {

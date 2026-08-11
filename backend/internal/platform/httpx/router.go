@@ -13,6 +13,7 @@ func NewEngine() *gin.Engine {
 	r.Use(gin.Recovery())
 	r.Use(SecurityHeaders())
 	r.Use(TraceID())
+	r.Use(OperationLogMiddleware())
 	r.Use(observability.MetricsMiddleware())
 	r.GET("/health", func(c *gin.Context) {
 		OK(c, map[string]string{"status": "up"})

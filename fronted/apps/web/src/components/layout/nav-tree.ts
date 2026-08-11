@@ -58,6 +58,7 @@ export const PLATFORM_NAV_TREE: NavGroupConfig[] = [
       { href: "/permission/members", label: "成员绑定" },
       { href: "/permission/menus", label: "菜单管理" },
       { href: "/permission/apis", label: "API 管理" },
+      { href: "/permission/data", label: "数据权限" },
       { href: "/permission/api-tokens", label: "API Token" },
     ],
   },
@@ -65,11 +66,13 @@ export const PLATFORM_NAV_TREE: NavGroupConfig[] = [
     id: "monitor",
     label: "运维监控",
     items: [
+      { href: "/monitor/operation", label: "操作日志" },
+      { href: "/monitor/log-viewer", label: "日志查看器" },
+      { href: "/monitor/server", label: "服务器状态" },
       { href: "/monitor/overview", label: "监控概览" },
       { href: "/monitor/statistics", label: "部署统计" },
-      { href: "/monitor/audit", label: "操作历史" },
+      { href: "/monitor/org-audit", label: "组织审计" },
       { href: "/monitor/platform-audit", label: "平台审计" },
-      { href: "/monitor/server", label: "服务器状态" },
     ],
   },
   {

@@ -16,6 +16,7 @@ const (
 	ActionOrgMemberRemove   = "org.member.remove"
 	ActionOrgOwnerTransfer  = "org.owner.transfer"
 	ActionPlatformOrgCreate = "platform.org.create"
+	ActionPlatformOrgDelete = "platform.org.delete"
 )
 
 type Entry struct {

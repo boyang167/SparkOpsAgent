@@ -30,6 +30,7 @@ type OrganizationRepository interface {
 	ListByMember(ctx context.Context, memberID kernel.MemberID) ([]*model.Organization, error)
 	ListAll(ctx context.Context) ([]*model.Organization, error)
 	UpdateStatus(ctx context.Context, orgID kernel.OrgID, status string) error
+	SoftDelete(ctx context.Context, orgID kernel.OrgID) error
 	AddMember(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID, role string) error
 	IsMember(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID) (bool, error)
 	GetMemberRole(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID) (string, error)

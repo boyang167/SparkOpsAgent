@@ -12,6 +12,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/applog"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/operationlog"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -57,11 +59,17 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewCreateProclaimHandler(repo),
 		command.NewCloneToolHandler(),
 	)
+	opStore := operationlog.NewStore(c.DB)
+	opHandler := adminhttp.NewOperationRecordsHandler(opStore)
+	appLogStore := applog.NewStore(c.DB)
+	obsHandler := adminhttp.NewObservabilityHandler(appLogStore, opStore, c.Config)
 
 	auth := authn.RequireAuth(m.tokens)
 	superAdmin := authz.RequireSuperAdmin(c.SystemRoleChecker)
 	ws := httpx.RequireWorkspace()
 	wsMember := authz.RequireWorkspaceMember(c.WorkspaceMemberChecker)
+	govAdmin := authz.RequirePermission(c.PermissionChecker, authz.PermGovernanceAdmin)
+	projectRead := authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead)
 
 	c.Engine.GET("/api/v1/admin/sysconfig", auth, superAdmin, handler.GetSysConfig)
 	c.Engine.PATCH("/api/v1/admin/sysconfig", auth, superAdmin, handler.UpdateSysConfig)
@@ -76,13 +84,31 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.GET("/api/v1/admin/server/status", auth, superAdmin, handler.GetServerStatus)
 
 	c.Engine.GET("/api/v1/workspaces/:wsId/dashboard",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetDashboard)
+		auth, ws, wsMember, projectRead, handler.GetDashboard)
 	c.Engine.GET("/api/v1/workspaces/:wsId/statistics",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetStatistics)
+		auth, ws, wsMember, projectRead, handler.GetStatistics)
 	c.Engine.GET("/api/v1/workspaces/:wsId/monitor/overview",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetMonitorOverview)
+		auth, ws, wsMember, projectRead, handler.GetMonitorOverview)
 	c.Engine.GET("/api/v1/workspaces/:wsId/statistics/deployments",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListDeploymentStats)
+		auth, ws, wsMember, projectRead, handler.ListDeploymentStats)
+	c.Engine.GET("/api/v1/workspaces/:wsId/operation-records",
+		auth, ws, wsMember, govAdmin, opHandler.List)
+	c.Engine.DELETE("/api/v1/workspaces/:wsId/operation-records/:recordId",
+		auth, ws, wsMember, govAdmin, opHandler.Delete)
+	c.Engine.POST("/api/v1/workspaces/:wsId/operation-records/batch-delete",
+		auth, ws, wsMember, govAdmin, opHandler.BatchDelete)
+	c.Engine.GET("/api/v1/workspaces/:wsId/monitor/server/status",
+		auth, ws, wsMember, govAdmin, handler.GetServerStatus)
+	c.Engine.GET("/api/v1/workspaces/:wsId/observability/logs",
+		auth, ws, wsMember, govAdmin, obsHandler.ListLogs)
+	c.Engine.GET("/api/v1/workspaces/:wsId/observability/log-files",
+		auth, ws, wsMember, govAdmin, obsHandler.ListLogFiles)
+	c.Engine.GET("/api/v1/workspaces/:wsId/observability/log-files/:fileName/tail",
+		auth, ws, wsMember, govAdmin, obsHandler.TailLogFile)
+	c.Engine.GET("/api/v1/workspaces/:wsId/observability/traces/:traceId",
+		auth, ws, wsMember, govAdmin, obsHandler.GetTrace)
+	c.Engine.GET("/api/v1/workspaces/:wsId/observability/metrics/summary",
+		auth, ws, wsMember, govAdmin, obsHandler.MetricsSummary)
 
 	c.SyncJobCreator = &syncJobCreatorPort{handler: createSyncJob}
 

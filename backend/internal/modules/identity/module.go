@@ -64,9 +64,10 @@ func (m *Module) Register(c *appctx.Container) error {
 	createPlatformMember := command.NewCreatePlatformMemberHandler(repo, systemRoleStore, c.EventBus)
 	updatePlatformMember := command.NewUpdatePlatformMemberHandler(repo, systemRoleStore)
 	resetPlatformPassword := command.NewAdminResetPasswordHandler(repo)
+	deletePlatformMember := command.NewDeletePlatformMemberHandler(repo, systemRoleStore)
 	listPlatformMembers := query.NewListPlatformMembersHandler(repo, systemRoleStore)
 	platformHandler := identityhttp.NewPlatformHandler(
-		listPlatformMembers, createPlatformMember, updatePlatformMember, resetPlatformPassword,
+		listPlatformMembers, createPlatformMember, updatePlatformMember, resetPlatformPassword, deletePlatformMember,
 	)
 	superAdmin := authz.RequireSuperAdmin(c.SystemRoleChecker)
 
@@ -86,6 +87,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	platform.POST("/members", authn.RequireAuth(m.tokens), superAdmin, platformHandler.CreateMember)
 	platform.PATCH("/members/:memberId", authn.RequireAuth(m.tokens), superAdmin, platformHandler.UpdateMember)
 	platform.PATCH("/members/:memberId/password", authn.RequireAuth(m.tokens), superAdmin, platformHandler.ResetPassword)
+	platform.DELETE("/members/:memberId", authn.RequireAuth(m.tokens), superAdmin, platformHandler.DeleteMember)
 
 	return nil
 }

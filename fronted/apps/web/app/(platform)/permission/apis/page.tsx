@@ -1,10 +1,8 @@
 import { PermissionApisPanel } from "@/modules/governance/components/PermissionApisPanel";
 import { loadGovernanceContext } from "@/server/loaders/governance-context";
-import { loadSession } from "@/server/loaders/session";
 
 export default async function PermissionApisPage() {
   const { workspaceId, canManage } = await loadGovernanceContext();
-  const session = await loadSession();
 
   if (!canManage) {
     return (
@@ -14,5 +12,5 @@ export default async function PermissionApisPage() {
     );
   }
 
-  return <PermissionApisPanel workspaceId={workspaceId} canSync={session?.is_super_admin ?? false} />;
+  return <PermissionApisPanel workspaceId={workspaceId} canManage={canManage} />;
 }

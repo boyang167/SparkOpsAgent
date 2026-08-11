@@ -1,5 +1,5 @@
 import type { BffContext } from "@sparkops/bff-core";
-import type { RegisteredAPI, RoleTreeVM } from "@sparkops/contracts/governance";
+import type { RegisteredAPI, RoleTreeVM, APISyncDiff } from "@sparkops/contracts/governance";
 
 function normalizeRegisteredAPI(raw: RegisteredAPI & Record<string, unknown>): RegisteredAPI {
   return {
@@ -30,15 +30,42 @@ export async function listPlatformApis(ctx: BffContext) {
   return data.items.map((item) => normalizeRegisteredAPI(item as RegisteredAPI & Record<string, unknown>));
 }
 
-export async function previewApiSync(ctx: BffContext) {
-  return ctx.upstream.governance.previewApiSync();
+export async function previewApiSync(ctx: BffContext, workspaceId: string): Promise<APISyncDiff> {
+  const diff = await ctx.upstream.governance.previewApiSync(workspaceId);
+  return {
+    new: diff.new ?? [],
+    delete: diff.delete ?? [],
+    ignore: diff.ignore ?? [],
+  };
 }
 
 export async function confirmApiSync(
   ctx: BffContext,
+  workspaceId: string,
   input: { new: unknown[]; delete: unknown[] },
 ) {
-  return ctx.upstream.governance.confirmApiSync(input);
+  return ctx.upstream.governance.confirmApiSync(workspaceId, input);
+}
+
+export async function updateApiMeta(
+  ctx: BffContext,
+  workspaceId: string,
+  apiId: string,
+  input: import("@sparkops/contracts/governance").UpdateAPIMetaCommand,
+) {
+  return ctx.upstream.governance.updateApiMeta(workspaceId, apiId, input);
+}
+
+export async function deleteApi(ctx: BffContext, workspaceId: string, apiId: string) {
+  return ctx.upstream.governance.deleteApi(workspaceId, apiId);
+}
+
+export async function deleteApisByIds(
+  ctx: BffContext,
+  workspaceId: string,
+  input: import("@sparkops/contracts/governance").DeleteApisCommand,
+) {
+  return ctx.upstream.governance.deleteApisByIds(workspaceId, input);
 }
 
 export async function listApiTokens(ctx: BffContext, workspaceId: string) {

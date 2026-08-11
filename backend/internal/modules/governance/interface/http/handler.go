@@ -73,7 +73,9 @@ type inviteMemberRequest struct {
 }
 
 type updateRoleRequest struct {
-	Permissions []string `json:"permissions" binding:"required"`
+	Name        *string   `json:"name"`
+	ParentID    *string   `json:"parent_id"`
+	Permissions *[]string `json:"permissions"`
 }
 
 func (h *Handler) ListRoleTree(c *gin.Context) {
@@ -148,7 +150,26 @@ func (h *Handler) UpdateRole(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
-	role, err := h.updateRole.Handle(c.Request.Context(), wsID, roleID, req.Permissions)
+	input := command.UpdateRoleInput{}
+	if req.Name != nil {
+		input.Name = req.Name
+	}
+	if req.ParentID != nil {
+		input.UpdateParent = true
+		if *req.ParentID != "" {
+			pid, err := kernel.ParseRoleID(*req.ParentID)
+			if err != nil {
+				httpx.Fail(c, "INVALID_REQUEST", "invalid parent_id", http.StatusBadRequest)
+				return
+			}
+			input.ParentID = &pid
+		}
+	}
+	if req.Permissions != nil {
+		input.UpdatePermissions = true
+		input.Permissions = *req.Permissions
+	}
+	role, err := h.updateRole.Handle(c.Request.Context(), wsID, roleID, input)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return

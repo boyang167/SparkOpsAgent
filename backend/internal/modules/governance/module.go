@@ -64,6 +64,14 @@ func (m *Module) Register(c *appctx.Container) error {
 	if err := roleAPIPolicyStore.AutoMigrate(); err != nil {
 		return fmt.Errorf("role api policy migrate: %w", err)
 	}
+	dataPolicyStore := persistence.NewDataPolicyStore(c.DB)
+	if err := dataPolicyStore.AutoMigrate(); err != nil {
+		return fmt.Errorf("data policy migrate: %w", err)
+	}
+	menuStore := persistence.NewMenuStore(c.DB)
+	if err := menuStore.AutoMigrate(); err != nil {
+		return fmt.Errorf("menu migrate: %w", err)
+	}
 	apiPolicySync := service.NewAPIPolicySync(engine, roleRepo, bindingRepo, roleAPIPolicyStore)
 	if err := apiPolicySync.Bootstrap(context.Background()); err != nil {
 		return fmt.Errorf("api policy casbin bootstrap: %w", err)
@@ -72,8 +80,8 @@ func (m *Module) Register(c *appctx.Container) error {
 
 	createRole := command.NewCreateRoleHandler(roleRepo)
 	updateRole := command.NewUpdateRoleHandler(roleRepo)
-	deleteRole := command.NewDeleteRoleHandler(roleRepo, bindingRepo, roleAPIPolicyStore, apiPolicySync)
-	copyRole := command.NewCopyRoleHandler(roleRepo)
+	deleteRole := command.NewDeleteRoleHandler(roleRepo, bindingRepo, roleAPIPolicyStore, dataPolicyStore, apiPolicySync)
+	copyRole := command.NewCopyRoleHandler(roleRepo, roleAPIPolicyStore, menuStore, dataPolicyStore, apiPolicySync)
 	assignRole := command.NewAssignRoleHandler(roleRepo, bindingRepo, apiPolicySync)
 	inviteMember := command.NewInviteWorkspaceMemberHandler(acl.NewIdentityACL(c.DB), acl.NewTenantACL(c.DB))
 	removeBinding := command.NewRemoveRoleBindingHandler(roleRepo, bindingRepo, apiPolicySync)
@@ -98,6 +106,26 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewListRoleAPIPoliciesHandler(roleRepo, roleAPIPolicyStore),
 		command.NewUpdateRoleAPIPoliciesHandler(roleRepo, roleAPIPolicyStore, apiPolicySync),
 	)
+	dataPolicyHandler := govhttp.NewDataPolicyHandler(
+		query.NewListDataResourcesHandler(dataPolicyStore),
+		query.NewListRoleDataPoliciesHandler(roleRepo, dataPolicyStore),
+		command.NewUpdateRoleDataPoliciesHandler(roleRepo, dataPolicyStore),
+	)
+
+	seedMenus := command.NewSeedWorkspaceMenusHandler(menuStore)
+	menuHandler := govhttp.NewMenuHandler(
+		query.NewListMenuTreeHandler(menuStore, seedMenus),
+		query.NewListNavMenusHandler(menuStore, seedMenus, checker, c.SystemRoleChecker),
+		query.NewListMyMenuButtonsHandler(menuStore, checker, c.SystemRoleChecker),
+		query.NewGetMenuHandler(menuStore),
+		query.NewGetMenuRolesHandler(menuStore),
+		query.NewGetRoleMenusHandler(menuStore, roleRepo),
+		command.NewCreateMenuHandler(menuStore),
+		command.NewUpdateMenuHandler(menuStore),
+		command.NewDeleteMenuHandler(menuStore),
+		command.NewSetMenuRolesHandler(menuStore, roleRepo),
+		command.NewSetRoleMenusHandler(menuStore, roleRepo),
+	)
 
 	auth := authn.RequireAuth(m.tokens)
 	ws := httpx.RequireWorkspace()
@@ -115,12 +143,22 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, govAdmin, handler.CopyRole)
 	c.Engine.PATCH("/api/v1/workspaces/:wsId/roles/:roleId",
 		auth, ws, wsMember, govAdmin, handler.UpdateRole)
+	c.Engine.GET("/api/v1/workspaces/:wsId/roles/:roleId/menus",
+		auth, ws, wsMember, govAdmin, menuHandler.GetRoleMenus)
+	c.Engine.PUT("/api/v1/workspaces/:wsId/roles/:roleId/menus",
+		auth, ws, wsMember, govAdmin, menuHandler.SetRoleMenus)
 	c.Engine.DELETE("/api/v1/workspaces/:wsId/roles/:roleId",
 		auth, ws, wsMember, govAdmin, handler.DeleteRole)
 	c.Engine.GET("/api/v1/workspaces/:wsId/roles/:roleId/api-policies",
 		auth, ws, wsMember, govAdmin, roleAPIPolicyHandler.List)
 	c.Engine.PUT("/api/v1/workspaces/:wsId/roles/:roleId/api-policies",
 		auth, ws, wsMember, govAdmin, roleAPIPolicyHandler.Update)
+	c.Engine.GET("/api/v1/workspaces/:wsId/data-resources",
+		auth, ws, wsMember, govAdmin, dataPolicyHandler.ListResources)
+	c.Engine.GET("/api/v1/workspaces/:wsId/roles/:roleId/data-policies",
+		auth, ws, wsMember, govAdmin, dataPolicyHandler.ListRolePolicies)
+	c.Engine.PUT("/api/v1/workspaces/:wsId/roles/:roleId/data-policies",
+		auth, ws, wsMember, govAdmin, dataPolicyHandler.UpdateRolePolicies)
 	c.Engine.POST("/api/v1/workspaces/:wsId/members/:memberId/roles",
 		auth, ws, wsMember, govAdmin, handler.AssignRole)
 	c.Engine.GET("/api/v1/workspaces/:wsId/members",
@@ -135,6 +173,35 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, handler.MyPermissions)
 	c.Engine.GET("/api/v1/workspaces/:wsId/apis",
 		auth, ws, wsMember, govAdmin, platformAPI.List)
+	c.Engine.GET("/api/v1/workspaces/:wsId/apis/sync",
+		auth, ws, wsMember, govAdmin, platformAPI.SyncPreview)
+	c.Engine.POST("/api/v1/workspaces/:wsId/apis/sync",
+		auth, ws, wsMember, govAdmin, platformAPI.SyncConfirm)
+	c.Engine.POST("/api/v1/workspaces/:wsId/apis/batch-delete",
+		auth, ws, wsMember, govAdmin, platformAPI.BatchDelete)
+	c.Engine.PATCH("/api/v1/workspaces/:wsId/apis/:apiId",
+		auth, ws, wsMember, govAdmin, platformAPI.UpdateMeta)
+	c.Engine.DELETE("/api/v1/workspaces/:wsId/apis/:apiId",
+		auth, ws, wsMember, govAdmin, platformAPI.Delete)
+
+	c.Engine.GET("/api/v1/workspaces/:wsId/me/menus",
+		auth, ws, wsMember, menuHandler.ListNav)
+	c.Engine.GET("/api/v1/workspaces/:wsId/me/menu-buttons",
+		auth, ws, wsMember, menuHandler.ListMyButtons)
+	c.Engine.GET("/api/v1/workspaces/:wsId/menus/tree",
+		auth, ws, wsMember, govAdmin, menuHandler.ListTree)
+	c.Engine.POST("/api/v1/workspaces/:wsId/menus",
+		auth, ws, wsMember, govAdmin, menuHandler.Create)
+	c.Engine.GET("/api/v1/workspaces/:wsId/menus/:menuId",
+		auth, ws, wsMember, govAdmin, menuHandler.Get)
+	c.Engine.PATCH("/api/v1/workspaces/:wsId/menus/:menuId",
+		auth, ws, wsMember, govAdmin, menuHandler.Update)
+	c.Engine.DELETE("/api/v1/workspaces/:wsId/menus/:menuId",
+		auth, ws, wsMember, govAdmin, menuHandler.Delete)
+	c.Engine.GET("/api/v1/workspaces/:wsId/menus/:menuId/roles",
+		auth, ws, wsMember, govAdmin, menuHandler.GetRoles)
+	c.Engine.PUT("/api/v1/workspaces/:wsId/menus/:menuId/roles",
+		auth, ws, wsMember, govAdmin, menuHandler.SetRoles)
 
 	c.Engine.GET("/api/v1/workspaces/:wsId/api-tokens",
 		auth, ws, wsMember, govAdmin, apiTokenHandler.List)
@@ -147,7 +214,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	platform.GET("/apis", auth, superAdmin, platformAPI.List)
 	platform.GET("/apis/sync", auth, superAdmin, platformAPI.SyncPreview)
 	platform.POST("/apis/sync", auth, superAdmin, platformAPI.SyncConfirm)
+	platform.POST("/apis/batch-delete", auth, superAdmin, platformAPI.BatchDelete)
 	platform.PATCH("/apis/:apiId", auth, superAdmin, platformAPI.UpdateMeta)
+	platform.DELETE("/apis/:apiId", auth, superAdmin, platformAPI.Delete)
 
 	return nil
 }

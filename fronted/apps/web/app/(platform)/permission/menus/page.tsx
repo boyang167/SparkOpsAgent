@@ -2,7 +2,7 @@ import { PermissionMenusPanel } from "@/modules/governance/components/Permission
 import { loadGovernanceContext } from "@/server/loaders/governance-context";
 
 export default async function PermissionMenusPage() {
-  const { canManage } = await loadGovernanceContext();
+  const { workspaceId, canManage } = await loadGovernanceContext();
 
   if (!canManage) {
     return (
@@ -12,5 +12,9 @@ export default async function PermissionMenusPage() {
     );
   }
 
-  return <PermissionMenusPanel />;
+  return (
+    <section className="section !p-0 !border-0 !shadow-none !bg-transparent stack-lg">
+      <PermissionMenusPanel workspaceId={workspaceId} />
+    </section>
+  );
 }

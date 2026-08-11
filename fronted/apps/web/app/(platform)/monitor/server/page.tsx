@@ -1,15 +1,16 @@
-import { PageHeader } from "@/components/ui/PageHeader";
 import { ServerStatusPanel } from "@/modules/platform_admin/components/ServerStatusPanel";
+import { loadGovernanceContext } from "@/server/loaders/governance-context";
 
-export default function MonitorServerPage() {
-  return (
-    <div className="stack-lg">
-      <PageHeader
-        eyebrow="Monitor"
-        title="服务器状态"
-        description="API 进程运行时指标（参照 GVA / PlatformSuite 监控）"
-      />
-      <ServerStatusPanel />
-    </div>
-  );
+export default async function MonitorServerPage() {
+  const { workspaceId, canManage } = await loadGovernanceContext();
+
+  if (!canManage) {
+    return (
+      <div className="alert alert-warning">
+        你没有 governance:admin 权限，无法查看服务器状态。请联系 Workspace 管理员。
+      </div>
+    );
+  }
+
+  return <ServerStatusPanel workspaceId={workspaceId} />;
 }

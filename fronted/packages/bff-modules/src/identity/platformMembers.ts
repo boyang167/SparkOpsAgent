@@ -30,3 +30,7 @@ export async function resetPlatformMemberPassword(
 ) {
   return ctx.upstream.identity.resetPlatformMemberPassword(memberId, input);
 }
+
+export async function deletePlatformMember(ctx: BffContext, memberId: string) {
+  return ctx.upstream.identity.deletePlatformMember(memberId);
+}

@@ -9,5 +9,6 @@ var (
 	ErrMemberNotFound       = kernel.NewDomainError("IDENTITY_MEMBER_NOT_FOUND", "member not found")
 	ErrInvalidProfile       = kernel.NewDomainError("IDENTITY_INVALID_PROFILE", "invalid profile data")
 	ErrCannotModifySelf     = kernel.NewDomainError("IDENTITY_CANNOT_MODIFY_SELF", "cannot modify your own platform role or status")
+	ErrCannotDeleteSelf     = kernel.NewDomainError("IDENTITY_CANNOT_DELETE_SELF", "cannot delete your own account")
 	ErrLastSuperAdmin       = kernel.NewDomainError("IDENTITY_LAST_SUPER_ADMIN", "cannot remove the last super admin")
 )

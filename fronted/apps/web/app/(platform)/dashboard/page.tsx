@@ -1,10 +1,6 @@
-import Link from "next/link";
-
 import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/ui/PageHeader";
-
-import { CreateWorkspaceForm } from "@/modules/tenant/components/CreateWorkspaceForm";
 
 import { TenantSetupPanel } from "@/modules/tenant/components/TenantSetupPanel";
 
@@ -96,21 +92,7 @@ export default async function DashboardPage() {
           </div>
 
           {workspaceId ? (
-
-            <div className="flex flex-wrap items-center gap-2">
-
-              <CreateWorkspaceForm organizations={organizations} workspaces={workspaces} />
-
-              <CreateProjectForm workspaceId={workspaceId} />
-
-              <Link href="/settings/tenant" className="btn-ghost text-sm">
-
-                组织管理
-
-              </Link>
-
-            </div>
-
+            <CreateProjectForm workspaceId={workspaceId} />
           ) : null}
 
         </div>

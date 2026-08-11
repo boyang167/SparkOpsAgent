@@ -108,7 +108,7 @@ export type PlatformOrganizationVM = z.infer<typeof PlatformOrganizationVMSchema
 export const CreatePlatformOrganizationCommandSchema = z.object({
   name: z.string().min(1),
   slug: z.string().min(1),
-  owner_email: z.string().email(),
+  owner_email: z.string().email().optional(),
 });
 
 export type CreatePlatformOrganizationCommand = z.infer<typeof CreatePlatformOrganizationCommandSchema>;

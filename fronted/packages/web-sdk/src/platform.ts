@@ -23,8 +23,101 @@ export async function listDeploymentStats(workspaceId: string) {
   return data.items;
 }
 
-export async function getServerStatus() {
-  return bffFetch<ServerStatusVM>("/admin/server/status");
+export function getServerStatus(workspaceId: string) {
+  return bffFetch<ServerStatusVM>(`/workspaces/${workspaceId}/monitor/server/status`, {
+    workspaceId,
+  });
+}
+
+export function listOperationRecords(
+  workspaceId: string,
+  query: import("@sparkops/contracts/platform").ListOperationRecordsQuery = {},
+) {
+  const params = new URLSearchParams();
+  if (query.page) params.set("page", String(query.page));
+  if (query.page_size) params.set("page_size", String(query.page_size));
+  if (query.ip) params.set("ip", query.ip);
+  if (query.method) params.set("method", query.method);
+  if (query.path) params.set("path", query.path);
+  if (query.status != null) params.set("status", String(query.status));
+  if (query.member_id) params.set("member_id", query.member_id);
+  if (query.trace_id) params.set("trace_id", query.trace_id);
+  const qs = params.toString();
+  return bffFetch<import("@sparkops/contracts/platform").OperationRecordListVM>(
+    `/workspaces/${workspaceId}/operation-records${qs ? `?${qs}` : ""}`,
+    { workspaceId },
+  );
+}
+
+export function deleteOperationRecord(workspaceId: string, recordId: string) {
+  return bffFetch<{ deleted: boolean }>(
+    `/workspaces/${workspaceId}/operation-records/${recordId}`,
+    { method: "DELETE", workspaceId },
+  );
+}
+
+export function batchDeleteOperationRecords(
+  workspaceId: string,
+  input: import("@sparkops/contracts/platform").BatchDeleteOperationRecordsCommand,
+) {
+  return bffFetch<{ deleted: number }>(
+    `/workspaces/${workspaceId}/operation-records/batch-delete`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function listAppLogs(
+  workspaceId: string,
+  query: import("@sparkops/contracts/platform").ListAppLogsQuery = {},
+) {
+  const params = new URLSearchParams();
+  if (query.page) params.set("page", String(query.page));
+  if (query.page_size) params.set("page_size", String(query.page_size));
+  if (query.level) params.set("level", query.level);
+  if (query.category) params.set("category", query.category);
+  if (query.trace_id) params.set("trace_id", query.trace_id);
+  if (query.keyword) params.set("keyword", query.keyword);
+  const qs = params.toString();
+  return bffFetch<import("@sparkops/contracts/platform").AppLogListVM>(
+    `/workspaces/${workspaceId}/observability/logs${qs ? `?${qs}` : ""}`,
+    { workspaceId },
+  );
+}
+
+export function listLogFiles(workspaceId: string) {
+  return bffFetch<import("@sparkops/contracts/platform").LogFileListVM>(
+    `/workspaces/${workspaceId}/observability/log-files`,
+    { workspaceId },
+  );
+}
+
+export function tailLogFile(
+  workspaceId: string,
+  fileName: string,
+  offset = 0,
+  limit = 200,
+) {
+  const params = new URLSearchParams();
+  params.set("offset", String(offset));
+  params.set("limit", String(limit));
+  return bffFetch<import("@sparkops/contracts/platform").LogTailVM>(
+    `/workspaces/${workspaceId}/observability/log-files/${encodeURIComponent(fileName)}/tail?${params}`,
+    { workspaceId },
+  );
+}
+
+export function getTraceDetail(workspaceId: string, traceId: string) {
+  return bffFetch<import("@sparkops/contracts/platform").TraceDetailVM>(
+    `/workspaces/${workspaceId}/observability/traces/${encodeURIComponent(traceId)}`,
+    { workspaceId },
+  );
+}
+
+export function getMetricsSummary(workspaceId: string) {
+  return bffFetch<import("@sparkops/contracts/platform").MetricsSummaryVM>(
+    `/workspaces/${workspaceId}/observability/metrics/summary`,
+    { workspaceId },
+  );
 }
 
 export async function listClusters() {

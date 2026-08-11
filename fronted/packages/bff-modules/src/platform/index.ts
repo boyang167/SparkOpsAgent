@@ -39,8 +39,66 @@ export async function updateSysConfig(ctx: BffContext, input: Record<string, unk
   return ctx.upstream.platform.updateSysConfig(input);
 }
 
-export async function getServerStatus(ctx: BffContext) {
+export async function getServerStatus(ctx: BffContext, workspaceId: string) {
+  return ctx.upstream.platform.getWorkspaceServerStatus(workspaceId);
+}
+
+export async function getAdminServerStatus(ctx: BffContext) {
   return ctx.upstream.platform.getServerStatus();
+}
+
+export async function listOperationRecords(
+  ctx: BffContext,
+  workspaceId: string,
+  query: import("@sparkops/contracts/platform").ListOperationRecordsQuery,
+) {
+  return ctx.upstream.platform.listOperationRecords(workspaceId, query);
+}
+
+export async function deleteOperationRecord(
+  ctx: BffContext,
+  workspaceId: string,
+  recordId: string,
+) {
+  return ctx.upstream.platform.deleteOperationRecord(workspaceId, recordId);
+}
+
+export async function batchDeleteOperationRecords(
+  ctx: BffContext,
+  workspaceId: string,
+  input: import("@sparkops/contracts/platform").BatchDeleteOperationRecordsCommand,
+) {
+  return ctx.upstream.platform.batchDeleteOperationRecords(workspaceId, input);
+}
+
+export async function listAppLogs(
+  ctx: BffContext,
+  workspaceId: string,
+  query: import("@sparkops/contracts/platform").ListAppLogsQuery,
+) {
+  return ctx.upstream.platform.listAppLogs(workspaceId, query);
+}
+
+export async function listLogFiles(ctx: BffContext, workspaceId: string) {
+  return ctx.upstream.platform.listLogFiles(workspaceId);
+}
+
+export async function tailLogFile(
+  ctx: BffContext,
+  workspaceId: string,
+  fileName: string,
+  offset = 0,
+  limit = 200,
+) {
+  return ctx.upstream.platform.tailLogFile(workspaceId, fileName, offset, limit);
+}
+
+export async function getTraceDetail(ctx: BffContext, workspaceId: string, traceId: string) {
+  return ctx.upstream.platform.getTraceDetail(workspaceId, traceId);
+}
+
+export async function getMetricsSummary(ctx: BffContext, workspaceId: string) {
+  return ctx.upstream.platform.getMetricsSummary(workspaceId);
 }
 
 export async function listProclaims(ctx: BffContext) {

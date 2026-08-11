@@ -56,6 +56,17 @@ func (r *MemberRepository) ExistsByEmail(ctx context.Context, email string) (boo
 	return count > 0, err
 }
 
+func (r *MemberRepository) SoftDelete(ctx context.Context, id kernel.MemberID) error {
+	res := r.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", id.String()).Delete(&memberModel{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return domain.ErrMemberNotFound
+	}
+	return nil
+}
+
 func (r *MemberRepository) ListAll(ctx context.Context) ([]*model.Member, error) {
 	var rows []memberModel
 	err := r.db.WithContext(ctx).Where("deleted_at IS NULL").Order("created_at DESC").Find(&rows).Error

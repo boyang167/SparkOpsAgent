@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { governance } from "@sparkops/web-sdk";
+import type { MenuTreeVM } from "@sparkops/contracts/governance";
 import { NavGroup } from "@/components/layout/NavGroup";
 import { filterNavGroups } from "@/components/layout/nav-tree";
 
 interface PlatformNavProps {
-  showRbac: boolean;
-  showSuperAdmin: boolean;
+  workspaceId?: string;
 }
 
 function NavItem({
@@ -86,6 +88,12 @@ const icons = {
       <path d="M4 20c0-4 4-6 8-6s8 2 8 6" strokeLinecap="round" />
     </svg>
   ),
+  default: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="2" />
+      <path d="M12 2v4M12 18v4M2 12h4M18 12h4" strokeLinecap="round" />
+    </svg>
+  ),
 } as const;
 
 const groupIcons: Record<string, React.ReactNode> = {
@@ -98,9 +106,62 @@ const groupIcons: Record<string, React.ReactNode> = {
   settings: icons.settings,
 };
 
-export function PlatformNav({ showRbac, showSuperAdmin }: PlatformNavProps) {
+function resolveGroupIcon(key?: string) {
+  if (!key) return icons.default;
+  return groupIcons[key] ?? icons.default;
+}
+
+function menuTreeToNavGroups(tree: MenuTreeVM[]) {
+  return tree
+    .map((group) => ({
+      id: group.icon || group.name,
+      label: group.title,
+      items: (group.children ?? [])
+        .filter((child) => !child.hidden && child.path.startsWith("/"))
+        .map((child) => ({ href: child.path, label: child.title })),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
+export function PlatformNav({ workspaceId }: PlatformNavProps) {
   const pathname = usePathname();
-  const groups = filterNavGroups({ showRbac, showSuperAdmin });
+  const [menuTree, setMenuTree] = useState<MenuTreeVM[] | null>(null);
+
+  const loadNav = useCallback(async () => {
+    if (!workspaceId) {
+      setMenuTree(null);
+      return;
+    }
+    try {
+      setMenuTree(await governance.listNavMenus(workspaceId));
+    } catch {
+      setMenuTree(null);
+    }
+  }, [workspaceId]);
+
+  useEffect(() => {
+    void loadNav();
+  }, [loadNav]);
+
+  useEffect(() => {
+    function onMenusUpdated() {
+      void loadNav();
+    }
+    window.addEventListener("sparkops:menus-updated", onMenusUpdated);
+    return () => window.removeEventListener("sparkops:menus-updated", onMenusUpdated);
+  }, [loadNav]);
+
+  const dynamicGroups = useMemo(
+    () => (menuTree ? menuTreeToNavGroups(menuTree) : null),
+    [menuTree],
+  );
+
+  const fallbackGroups = useMemo(
+    () => filterNavGroups({ showRbac: true, showSuperAdmin: true }),
+    [],
+  );
+
+  const groups = dynamicGroups ?? fallbackGroups;
 
   return (
     <>
@@ -119,9 +180,9 @@ export function PlatformNav({ showRbac, showSuperAdmin }: PlatformNavProps) {
 
       {groups.map((group) => (
         <NavGroup
-          key={group.id}
+          key={group.id + group.label}
           label={group.label}
-          icon={groupIcons[group.id]}
+          icon={resolveGroupIcon(group.id)}
           items={group.items}
           pathname={pathname}
         />

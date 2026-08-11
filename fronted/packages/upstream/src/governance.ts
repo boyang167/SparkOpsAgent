@@ -38,6 +38,28 @@ export function createGovernanceUpstream(options: UpstreamRequestOptions = {}) {
         { method: "PUT", body: JSON.stringify({ items }), options },
       );
     },
+    async listDataResources(wsId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/governance").DataResourceVM[] }>(
+        `/api/v1/workspaces/${wsId}/data-resources`,
+        { method: "GET", options },
+      );
+    },
+    async listRoleDataPolicies(wsId: string, roleId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/governance").RoleDataPolicyVM[] }>(
+        `/api/v1/workspaces/${wsId}/roles/${roleId}/data-policies`,
+        { method: "GET", options },
+      );
+    },
+    async updateRoleDataPolicies(
+      wsId: string,
+      roleId: string,
+      input: import("@sparkops/contracts/governance").UpdateRoleDataPoliciesCommand,
+    ) {
+      return upstreamFetch<{ updated: boolean }>(
+        `/api/v1/workspaces/${wsId}/roles/${roleId}/data-policies`,
+        { method: "PUT", body: JSON.stringify(input), options },
+      );
+    },
     async listWorkspaceApis(wsId: string) {
       return upstreamFetch<{ items: import("@sparkops/contracts/governance").RegisteredAPI[] }>(
         `/api/v1/workspaces/${wsId}/apis`,
@@ -50,14 +72,77 @@ export function createGovernanceUpstream(options: UpstreamRequestOptions = {}) {
         { method: "GET", options },
       );
     },
-    async previewApiSync() {
+    async previewApiSync(wsId: string) {
+      return upstreamFetch<import("@sparkops/contracts/governance").APISyncDiff>(
+        `/api/v1/workspaces/${wsId}/apis/sync`,
+        { method: "GET", options },
+      );
+    },
+    async confirmApiSync(wsId: string, input: { new: unknown[]; delete: unknown[] }) {
+      return upstreamFetch<{ synced: boolean }>(`/api/v1/workspaces/${wsId}/apis/sync`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        options,
+      });
+    },
+    async updateApiMeta(
+      wsId: string,
+      apiId: string,
+      input: import("@sparkops/contracts/governance").UpdateAPIMetaCommand,
+    ) {
+      return upstreamFetch<{ updated: boolean }>(`/api/v1/workspaces/${wsId}/apis/${apiId}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+        options,
+      });
+    },
+    async deleteApi(wsId: string, apiId: string) {
+      return upstreamFetch<{ deleted: boolean }>(`/api/v1/workspaces/${wsId}/apis/${apiId}`, {
+        method: "DELETE",
+        options,
+      });
+    },
+    async deleteApisByIds(wsId: string, input: import("@sparkops/contracts/governance").DeleteApisCommand) {
+      return upstreamFetch<{ deleted: boolean; count: number }>(
+        `/api/v1/workspaces/${wsId}/apis/batch-delete`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          options,
+        },
+      );
+    },
+    async previewPlatformApiSync() {
       return upstreamFetch<import("@sparkops/contracts/governance").APISyncDiff>(
         "/api/v1/platform/apis/sync",
         { method: "GET", options },
       );
     },
-    async confirmApiSync(input: { new: unknown[]; delete: unknown[] }) {
+    async confirmPlatformApiSync(input: { new: unknown[]; delete: unknown[] }) {
       return upstreamFetch<{ synced: boolean }>("/api/v1/platform/apis/sync", {
+        method: "POST",
+        body: JSON.stringify(input),
+        options,
+      });
+    },
+    async updatePlatformApiMeta(
+      apiId: string,
+      input: import("@sparkops/contracts/governance").UpdateAPIMetaCommand,
+    ) {
+      return upstreamFetch<{ updated: boolean }>(`/api/v1/platform/apis/${apiId}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+        options,
+      });
+    },
+    async deletePlatformApi(apiId: string) {
+      return upstreamFetch<{ deleted: boolean }>(`/api/v1/platform/apis/${apiId}`, {
+        method: "DELETE",
+        options,
+      });
+    },
+    async deletePlatformApisByIds(input: import("@sparkops/contracts/governance").DeleteApisCommand) {
+      return upstreamFetch<{ deleted: boolean; count: number }>("/api/v1/platform/apis/batch-delete", {
         method: "POST",
         body: JSON.stringify(input),
         options,
@@ -144,6 +229,86 @@ export function createGovernanceUpstream(options: UpstreamRequestOptions = {}) {
         method: "GET",
         options,
       });
+    },
+    async listMenuTree(wsId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/governance").MenuTreeVM[] }>(
+        `/api/v1/workspaces/${wsId}/menus/tree`,
+        { method: "GET", options },
+      );
+    },
+    async listNavMenus(wsId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/governance").MenuTreeVM[] }>(
+        `/api/v1/workspaces/${wsId}/me/menus`,
+        { method: "GET", options },
+      );
+    },
+    async listMyMenuButtons(wsId: string, path: string) {
+      const query = new URLSearchParams({ path });
+      return upstreamFetch<import("@sparkops/contracts/governance").MyMenuButtonsVM>(
+        `/api/v1/workspaces/${wsId}/me/menu-buttons?${query.toString()}`,
+        { method: "GET", options },
+      );
+    },
+    async getMenu(wsId: string, menuId: string) {
+      return upstreamFetch<import("@sparkops/contracts/governance").MenuVM>(
+        `/api/v1/workspaces/${wsId}/menus/${menuId}`,
+        { method: "GET", options },
+      );
+    },
+    async createMenu(wsId: string, input: import("@sparkops/contracts/governance").UpsertMenuCommand) {
+      return upstreamFetch<import("@sparkops/contracts/governance").MenuVM>(
+        `/api/v1/workspaces/${wsId}/menus`,
+        { method: "POST", body: JSON.stringify(input), options },
+      );
+    },
+    async updateMenu(
+      wsId: string,
+      menuId: string,
+      input: import("@sparkops/contracts/governance").UpsertMenuCommand,
+    ) {
+      return upstreamFetch<{ updated: true }>(`/api/v1/workspaces/${wsId}/menus/${menuId}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+        options,
+      });
+    },
+    async deleteMenu(wsId: string, menuId: string) {
+      return upstreamFetch<{ deleted: true }>(`/api/v1/workspaces/${wsId}/menus/${menuId}`, {
+        method: "DELETE",
+        options,
+      });
+    },
+    async getMenuRoles(wsId: string, menuId: string) {
+      return upstreamFetch<{ role_ids: string[] }>(
+        `/api/v1/workspaces/${wsId}/menus/${menuId}/roles`,
+        { method: "GET", options },
+      );
+    },
+    async setMenuRoles(
+      wsId: string,
+      menuId: string,
+      input: import("@sparkops/contracts/governance").SetMenuRolesCommand,
+    ) {
+      return upstreamFetch<{ updated: true }>(
+        `/api/v1/workspaces/${wsId}/menus/${menuId}/roles`,
+        { method: "PUT", body: JSON.stringify(input), options },
+      );
+    },
+    async getRoleMenus(wsId: string, roleId: string) {
+      return upstreamFetch<{ menu_ids: string[] }>(
+        `/api/v1/workspaces/${wsId}/roles/${roleId}/menus`,
+        { method: "GET", options },
+      );
+    },
+    async setRoleMenus(
+      wsId: string,
+      roleId: string,
+      input: import("@sparkops/contracts/governance").SetRoleMenusCommand,
+    ) {
+      return upstreamFetch<{ updated: true }>(
+        `/api/v1/workspaces/${wsId}/roles/${roleId}/menus`,
+        { method: "PUT", body: JSON.stringify(input), options },
+      );
     },
   };
 }

@@ -14,9 +14,30 @@ export {
   listPlatformApis,
   previewApiSync,
   confirmApiSync,
+  updateApiMeta,
+  deleteApi,
+  deleteApisByIds,
   listApiTokens,
   createApiToken,
   revokeApiToken,
   listRoleAPIPolicies,
   updateRoleAPIPolicies,
 } from "./gvaFeatures";
+export {
+  listDataResources,
+  listRoleDataPolicies,
+  updateRoleDataPolicies,
+} from "./dataPolicies";
+export {
+  listMenuTree,
+  listNavMenus,
+  getMenu,
+  createMenu,
+  updateMenu,
+  deleteMenu,
+  getMenuRoles,
+  setMenuRoles,
+  getRoleMenus,
+  setRoleMenus,
+  listMyMenuButtons,
+} from "./menus";

@@ -26,6 +26,10 @@ export async function updatePlatformOrganizationStatus(
   return ctx.upstream.tenant.updatePlatformOrganizationStatus(orgId, input);
 }
 
+export async function deletePlatformOrganization(ctx: BffContext, orgId: string) {
+  return ctx.upstream.tenant.deletePlatformOrganization(orgId);
+}
+
 export async function transferPlatformOrgOwner(
   ctx: BffContext,
   orgId: string,

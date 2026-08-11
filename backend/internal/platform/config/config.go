@@ -8,21 +8,22 @@ import (
 )
 
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Database  DatabaseConfig  `yaml:"database"`
-	Redis     RedisConfig     `yaml:"redis"`
-	Messaging MessagingConfig `yaml:"messaging"`
-	K8s       K8sConfig       `yaml:"k8s"`
-	Runtime   RuntimeConfig   `yaml:"runtime"`
-	Consul    ConsulConfig    `yaml:"consul"`
-	Delivery  DeliveryConfig  `yaml:"delivery"`
-	Jenkins   JenkinsConfig   `yaml:"jenkins"`
-	GitLab    GitLabConfig    `yaml:"gitlab"`
-	Webhook   WebhookConfig   `yaml:"webhook"`
-	JWT       JWTConfig       `yaml:"jwt"`
-	Auth      AuthConfig      `yaml:"auth"`
-	Policy    PolicyConfig    `yaml:"policy"`
-	LLM       LLMConfig       `yaml:"llm"`
+	Server        ServerConfig        `yaml:"server"`
+	Database      DatabaseConfig      `yaml:"database"`
+	Redis         RedisConfig         `yaml:"redis"`
+	Messaging     MessagingConfig     `yaml:"messaging"`
+	K8s           K8sConfig           `yaml:"k8s"`
+	Runtime       RuntimeConfig       `yaml:"runtime"`
+	Consul        ConsulConfig        `yaml:"consul"`
+	Delivery      DeliveryConfig      `yaml:"delivery"`
+	Jenkins       JenkinsConfig       `yaml:"jenkins"`
+	GitLab        GitLabConfig        `yaml:"gitlab"`
+	Webhook       WebhookConfig       `yaml:"webhook"`
+	JWT           JWTConfig           `yaml:"jwt"`
+	Auth          AuthConfig          `yaml:"auth"`
+	Policy        PolicyConfig        `yaml:"policy"`
+	LLM           LLMConfig           `yaml:"llm"`
+	Observability ObservabilityConfig `yaml:"observability"`
 }
 
 type PolicyConfig struct {

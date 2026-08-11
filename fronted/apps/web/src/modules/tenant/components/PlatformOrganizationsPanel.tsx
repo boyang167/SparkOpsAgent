@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { tenant } from "@sparkops/web-sdk";
+import { identity, tenant } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
+import type { PlatformMemberVM } from "@sparkops/contracts/identity";
 import type { PlatformOrganizationVM } from "@sparkops/contracts/tenant";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { InlineAlert } from "@/components/ui/InlineAlert";
@@ -18,7 +19,10 @@ export function PlatformOrganizationsPanel() {
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
+  const [slugManual, setSlugManual] = useState(false);
   const [ownerEmail, setOwnerEmail] = useState("");
+  const [platformMembers, setPlatformMembers] = useState<PlatformMemberVM[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [actionOrgId, setActionOrgId] = useState<string | null>(null);
   const [transferOrg, setTransferOrg] = useState<PlatformOrganizationVM | null>(null);
@@ -40,16 +44,31 @@ export function PlatformOrganizationsPanel() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (!createOpen) return;
+    setMembersLoading(true);
+    void identity
+      .listPlatformMembers()
+      .then(setPlatformMembers)
+      .catch(() => setPlatformMembers([]))
+      .finally(() => setMembersLoading(false));
+  }, [createOpen]);
+
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!isValidSlug(slug)) return;
     setCreating(true);
     setError(null);
     try {
-      await tenant.createPlatformOrganization({ name, slug, owner_email: ownerEmail });
+      await tenant.createPlatformOrganization({
+        name,
+        slug,
+        ...(ownerEmail ? { owner_email: ownerEmail } : {}),
+      });
       setCreateOpen(false);
       setName("");
       setSlug("");
+      setSlugManual(false);
       setOwnerEmail("");
       await load();
       router.refresh();
@@ -91,15 +110,40 @@ export function PlatformOrganizationsPanel() {
     }
   }
 
+  async function onDelete(org: PlatformOrganizationVM) {
+    if (!window.confirm(`确定删除组织「${org.name}」？此操作为软删除，数据仍保留在数据库中。`)) return;
+    setActionOrgId(org.id);
+    setError(null);
+    try {
+      await tenant.deletePlatformOrganization(org.id);
+      await load();
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "删除失败");
+    } finally {
+      setActionOrgId(null);
+    }
+  }
+
   return (
     <div className="stack-lg">
       <Breadcrumb items={[{ label: "设置", href: "/settings/profile" }, { label: "平台组织" }]} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">平台组织管理</h1>
-          <p className="text-sm text-muted mt-1">Super Admin 创建组织、启停与 Owner 转让</p>
+          <p className="text-sm text-muted mt-1">Super Admin 创建组织、启停、转让 Owner 与软删除</p>
         </div>
-        <button type="button" className="btn" onClick={() => setCreateOpen(true)}>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => {
+            setName("");
+            setSlug("");
+            setSlugManual(false);
+            setOwnerEmail("");
+            setCreateOpen(true);
+          }}
+        >
           创建组织
         </button>
       </div>
@@ -154,6 +198,14 @@ export function PlatformOrganizationsPanel() {
                       >
                         转让 Owner
                       </button>
+                      <button
+                        type="button"
+                        className="text-xs text-red-600 hover:underline"
+                        disabled={actionOrgId === org.id}
+                        onClick={() => void onDelete(org)}
+                      >
+                        删除
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -163,7 +215,14 @@ export function PlatformOrganizationsPanel() {
         </div>
       )}
 
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="创建组织（平台）">
+      <Modal
+        open={createOpen}
+        onClose={() => {
+          setCreateOpen(false);
+          setSlugManual(false);
+        }}
+        title="创建组织（平台）"
+      >
         <form onSubmit={onCreate} className="stack-md">
           <label className="stack-xs">
             <span className="label">组织名称</span>
@@ -171,25 +230,43 @@ export function PlatformOrganizationsPanel() {
               className="input"
               value={name}
               onChange={(e) => {
-                setName(e.target.value);
-                if (!slug) setSlug(slugify(e.target.value));
+                const nextName = e.target.value;
+                setName(nextName);
+                if (!slugManual) setSlug(slugify(nextName));
               }}
               required
             />
           </label>
           <label className="stack-xs">
             <span className="label">Slug</span>
-            <input className="input" value={slug} onChange={(e) => setSlug(e.target.value)} required />
-          </label>
-          <label className="stack-xs">
-            <span className="label">Owner 邮箱</span>
             <input
               className="input"
-              type="email"
-              value={ownerEmail}
-              onChange={(e) => setOwnerEmail(e.target.value)}
+              value={slug}
+              onChange={(e) => {
+                setSlugManual(true);
+                setSlug(e.target.value);
+              }}
               required
             />
+          </label>
+          <label className="stack-xs">
+            <span className="label">Owner</span>
+            <select
+              className="input"
+              value={ownerEmail}
+              onChange={(e) => setOwnerEmail(e.target.value)}
+              disabled={membersLoading}
+            >
+              <option value="">暂不指定 Owner</option>
+              {platformMembers.map((member) => (
+                <option key={member.id} value={member.email}>
+                  {member.display_name} ({member.email})
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted">
+              从平台用户中选择；留空时可稍后在「转让 Owner」中指定
+            </p>
           </label>
           <div className="flex justify-end gap-2">
             <button type="button" className="btn-secondary" onClick={() => setCreateOpen(false)}>

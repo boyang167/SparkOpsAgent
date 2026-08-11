@@ -7,6 +7,7 @@ import { delivery } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { BuildVM } from "@sparkops/contracts/delivery";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
+import { MenuButtonGuard } from "@/components/auth/MenuButtonGuard";
 
 interface DeliveryBuildPanelProps {
   workspaceId: string;
@@ -101,9 +102,16 @@ export function DeliveryBuildPanel({
             onChange={(e) => setBranch(e.target.value)}
             placeholder="分支"
           />
-          <button className="btn" type="button" disabled={loading || !projectId} onClick={onTrigger}>
-            {loading ? "构建中..." : "触发构建"}
-          </button>
+          <MenuButtonGuard workspaceId={workspaceId} code="trigger" menuPath="/delivery/builds">
+            <button
+              className="btn"
+              type="button"
+              disabled={loading || !projectId}
+              onClick={onTrigger}
+            >
+              {loading ? "构建中..." : "触发构建"}
+            </button>
+          </MenuButtonGuard>
         </div>
       </div>
 

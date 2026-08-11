@@ -77,3 +77,27 @@ func (h *PlatformAPIHandler) UpdateMeta(c *gin.Context) {
 	}
 	httpx.OK(c, gin.H{"updated": true})
 }
+
+func (h *PlatformAPIHandler) Delete(c *gin.Context) {
+	id := c.Param("apiId")
+	if err := h.store.DeleteByID(c.Request.Context(), id); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"deleted": true})
+}
+
+func (h *PlatformAPIHandler) BatchDelete(c *gin.Context) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := h.store.DeleteByIDs(c.Request.Context(), body.IDs); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"deleted": true, "count": len(body.IDs)})
+}

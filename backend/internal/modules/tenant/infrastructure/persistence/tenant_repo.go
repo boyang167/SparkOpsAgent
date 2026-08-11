@@ -29,7 +29,30 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return db.AutoMigrate(&organizationModel{}, &organizationMemberModel{}, &workspaceModel{}, &workspaceMemberModel{})
+	if err := db.AutoMigrate(&organizationModel{}, &organizationMemberModel{}, &workspaceModel{}, &workspaceMemberModel{}); err != nil {
+		return err
+	}
+	return ensureOrganizationSlugPartialUniqueIndex(db)
+}
+
+func ensureOrganizationSlugPartialUniqueIndex(db *gorm.DB) error {
+	if db.Dialector.Name() != "postgres" {
+		return nil
+	}
+	// Slug must be unique among active rows only so soft-deleted orgs can release their slug.
+	stmts := []string{
+		`ALTER TABLE tenant.organizations DROP CONSTRAINT IF EXISTS organizations_slug_key`,
+		`DROP INDEX IF EXISTS tenant.organizations_slug_key`,
+		`DROP INDEX IF EXISTS tenant.idx_tenant_organizations_slug`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_organizations_slug_active
+		 ON tenant.organizations (slug) WHERE deleted_at IS NULL`,
+	}
+	for _, stmt := range stmts {
+		if err := db.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type organizationMemberModel struct {
@@ -45,7 +68,7 @@ func (organizationMemberModel) TableName() string { return "tenant.organization_
 type organizationModel struct {
 	ID            string `gorm:"column:id;primaryKey"`
 	Name          string
-	Slug          string `gorm:"uniqueIndex"`
+	Slug          string
 	Status        string
 	MaxWorkspaces int
 	MaxAgents     int
@@ -93,7 +116,7 @@ func (s *TenantStore) SaveOrganization(ctx context.Context, org *model.Organizat
 
 func (s *TenantStore) FindOrganizationByID(ctx context.Context, id kernel.OrgID) (*model.Organization, error) {
 	var row organizationModel
-	err := s.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrOrganizationNotFound
 	}
@@ -129,8 +152,21 @@ func (s *TenantStore) ListAllOrganizations(ctx context.Context) ([]*model.Organi
 
 func (s *TenantStore) UpdateOrganizationStatus(ctx context.Context, orgID kernel.OrgID, status string) error {
 	res := s.db.WithContext(ctx).Model(&organizationModel{}).
-		Where("id = ?", orgID.String()).
+		Where("id = ? AND deleted_at IS NULL", orgID.String()).
 		Updates(map[string]interface{}{"status": status, "updated_at": time.Now().UTC()})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return domain.ErrOrganizationNotFound
+	}
+	return nil
+}
+
+func (s *TenantStore) SoftDeleteOrganization(ctx context.Context, orgID kernel.OrgID) error {
+	res := s.db.WithContext(ctx).
+		Where("id = ? AND deleted_at IS NULL", orgID.String()).
+		Delete(&organizationModel{})
 	if res.Error != nil {
 		return res.Error
 	}
@@ -178,7 +214,9 @@ func (s *TenantStore) TransferOrganizationOwner(ctx context.Context, orgID kerne
 
 func (s *TenantStore) ExistsOrganizationBySlug(ctx context.Context, slug string) (bool, error) {
 	var count int64
-	err := s.db.WithContext(ctx).Model(&organizationModel{}).Where("slug = ?", slug).Count(&count).Error
+	err := s.db.WithContext(ctx).Model(&organizationModel{}).
+		Where("slug = ? AND deleted_at IS NULL", slug).
+		Count(&count).Error
 	return count > 0, err
 }
 
@@ -445,6 +483,9 @@ func (r *orgRepo) ListAll(ctx context.Context) ([]*model.Organization, error) {
 }
 func (r *orgRepo) UpdateStatus(ctx context.Context, orgID kernel.OrgID, status string) error {
 	return r.store.UpdateOrganizationStatus(ctx, orgID, status)
+}
+func (r *orgRepo) SoftDelete(ctx context.Context, orgID kernel.OrgID) error {
+	return r.store.SoftDeleteOrganization(ctx, orgID)
 }
 func (r *orgRepo) AddMember(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID, role string) error {
 	return r.store.AddOrganizationMember(ctx, orgID, memberID, role)

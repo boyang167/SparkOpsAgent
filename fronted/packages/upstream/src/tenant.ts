@@ -108,6 +108,12 @@ export function createTenantUpstream(options: UpstreamRequestOptions = {}) {
         options,
       });
     },
+    async deletePlatformOrganization(orgId: string) {
+      return upstreamFetch<{ deleted: true }>(`/api/v1/platform/orgs/${orgId}`, {
+        method: "DELETE",
+        options,
+      });
+    },
     async transferPlatformOrgOwner(orgId: string, input: TransferOrgOwnerCommand) {
       return upstreamFetch<{ previous_owner_id: string; new_owner_id: string; new_owner_email: string }>(
         `/api/v1/platform/orgs/${orgId}/owners/transfer`,

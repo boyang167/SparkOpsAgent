@@ -11,6 +11,8 @@ var processStartedAt = time.Now()
 type ServerStatus struct {
 	Hostname     string  `json:"hostname"`
 	GoVersion    string  `json:"go_version"`
+	GoOS         string  `json:"go_os"`
+	GoArch       string  `json:"go_arch"`
 	NumCPU       int     `json:"num_cpu"`
 	Goroutines   int     `json:"goroutines"`
 	UptimeSec    int64   `json:"uptime_sec"`
@@ -29,6 +31,8 @@ func GetServerStatus() ServerStatus {
 	return ServerStatus{
 		Hostname:    hostname,
 		GoVersion:   runtime.Version(),
+		GoOS:        runtime.GOOS,
+		GoArch:      runtime.GOARCH,
 		NumCPU:      runtime.NumCPU(),
 		Goroutines:  runtime.NumGoroutine(),
 		UptimeSec:   int64(time.Since(processStartedAt).Seconds()),

@@ -78,4 +78,8 @@ export function resetPlatformMemberPassword(
   });
 }
 
+export function deletePlatformMember(memberId: string) {
+  return bffFetch<{ deleted: true }>(`/platform/members/${memberId}`, { method: "DELETE" });
+}
+
 export { updateProfile, changePassword } from "./profile";

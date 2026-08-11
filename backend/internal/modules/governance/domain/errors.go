@@ -13,4 +13,7 @@ var (
 	ErrPermissionsRequired   = kernel.NewDomainError("GOVERNANCE_PERMISSIONS_REQUIRED", "at least one permission required")
 	ErrRoleHasChildren       = kernel.NewDomainError("GOVERNANCE_ROLE_HAS_CHILDREN", "role has child roles")
 	ErrInvalidParentRole     = kernel.NewDomainError("GOVERNANCE_INVALID_PARENT", "invalid parent role")
+	ErrInvalidRoleUpdate     = kernel.NewDomainError("GOVERNANCE_INVALID_ROLE_UPDATE", "no fields to update")
+	ErrMenuNotFound          = kernel.NewDomainError("GOVERNANCE_MENU_NOT_FOUND", "menu not found")
+	ErrMenuHasChildren       = kernel.NewDomainError("GOVERNANCE_MENU_HAS_CHILDREN", "menu has child menus")
 )

@@ -5,7 +5,6 @@ import { LogoutButton } from "@/modules/identity/components/LogoutButton";
 import { WorkspaceSwitcher } from "@/modules/tenant/components/WorkspaceSwitcher";
 import { loadSession } from "@/server/loaders/session";
 import { loadResolvedWorkspaceId } from "@/server/loaders/workspace-context";
-import { loadMyPermissions } from "@/server/loaders/governance";
 
 
 
@@ -21,26 +20,16 @@ export default async function PlatformLayout({ children }: { children: React.Rea
 
   const session = await loadSession();
 
-  let showRbac = false;
-  let showSuperAdmin = false;
-
   let workspaces: Awaited<ReturnType<typeof loadResolvedWorkspaceId>>["workspaces"] = [];
   let workspaceId: string | undefined;
 
   if (session) {
-    showSuperAdmin = session.is_super_admin ?? false;
-
     try {
       const resolved = await loadResolvedWorkspaceId();
       workspaces = resolved.workspaces;
       workspaceId = resolved.workspaceId;
-
-      if (workspaceId) {
-        const permissions = await loadMyPermissions(workspaceId);
-        showRbac = permissions.includes("governance:admin");
-      }
     } catch {
-      showRbac = false;
+      // ignore
     }
   }
 
@@ -66,7 +55,7 @@ export default async function PlatformLayout({ children }: { children: React.Rea
 
         <nav className="sidebar-nav">
 
-          <PlatformNav showRbac={showRbac} showSuperAdmin={showSuperAdmin} />
+          <PlatformNav workspaceId={workspaceId} />
 
         </nav>
 

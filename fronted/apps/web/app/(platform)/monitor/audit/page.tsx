@@ -1,5 +1,6 @@
-import { OrgAuditLogsPanel } from "@/modules/tenant/components/OrgAuditLogsPanel";
+import { redirect } from "next/navigation";
 
-export default function MonitorAuditPage() {
-  return <OrgAuditLogsPanel />;
+/** 旧路径兼容：操作日志已迁移至 /monitor/operation */
+export default function MonitorAuditRedirectPage() {
+  redirect("/monitor/operation");
 }

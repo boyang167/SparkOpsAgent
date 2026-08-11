@@ -82,7 +82,7 @@ export function listPlatformOrganizations() {
 export function createPlatformOrganization(input: {
   name: string;
   slug: string;
-  owner_email: string;
+  owner_email?: string;
 }) {
   return bffFetch<import("@sparkops/contracts/tenant").PlatformOrganizationVM>("/platform/orgs", {
     method: "POST",
@@ -94,6 +94,12 @@ export function updatePlatformOrganizationStatus(orgId: string, status: "active"
   return bffFetch<{ updated: true }>(`/platform/orgs/${orgId}/status`, {
     method: "PATCH",
     body: JSON.stringify({ status }),
+  });
+}
+
+export function deletePlatformOrganization(orgId: string) {
+  return bffFetch<{ deleted: true }>(`/platform/orgs/${orgId}`, {
+    method: "DELETE",
   });
 }
 
