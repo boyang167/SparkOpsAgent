@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { WORKSPACE_COOKIE } from "@sparkops/bff-core";
 import type { WorkspaceVM } from "@sparkops/contracts/tenant";
@@ -13,10 +14,10 @@ export function resolveWorkspaceId(
   return workspaces[0]?.id;
 }
 
-export async function loadResolvedWorkspaceId(): Promise<{
+export const loadResolvedWorkspaceId = cache(async (): Promise<{
   workspaces: WorkspaceVM[];
   workspaceId: string | undefined;
-}> {
+}> => {
   const workspaces = await loadWorkspaces();
   const cookieStore = await cookies();
   const workspaceId = resolveWorkspaceId(
@@ -24,4 +25,4 @@ export async function loadResolvedWorkspaceId(): Promise<{
     cookieStore.get(WORKSPACE_COOKIE)?.value,
   );
   return { workspaces, workspaceId };
-}
+});

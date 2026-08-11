@@ -8,6 +8,14 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
+type TemplateStatus string
+
+const (
+	TemplateStatusActive   TemplateStatus = "active"
+	TemplateStatusInactive TemplateStatus = "inactive"
+	TemplateStatusDraft    TemplateStatus = "draft"
+)
+
 type TemplateName struct {
 	value string
 }
@@ -30,11 +38,25 @@ type Template struct {
 	Language    string
 	Detail      string
 	Rules       string
+	Status      TemplateStatus
+	IsPublic    bool
 	CreatedBy   kernel.MemberID
 	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
-func NewTemplate(wsID kernel.WorkspaceID, name TemplateName, kind, language, detail, rules string, createdBy kernel.MemberID) *Template {
+func NewTemplate(
+	wsID kernel.WorkspaceID,
+	name TemplateName,
+	kind, language, detail, rules string,
+	status TemplateStatus,
+	isPublic bool,
+	createdBy kernel.MemberID,
+) *Template {
+	now := time.Now().UTC()
+	if status == "" {
+		status = TemplateStatusActive
+	}
 	return &Template{
 		ID:          kernel.NewTemplateID(),
 		WorkspaceID: wsID,
@@ -43,7 +65,23 @@ func NewTemplate(wsID kernel.WorkspaceID, name TemplateName, kind, language, det
 		Language:    strings.TrimSpace(language),
 		Detail:      detail,
 		Rules:       rules,
+		Status:      status,
+		IsPublic:    isPublic,
 		CreatedBy:   createdBy,
-		CreatedAt:   time.Now().UTC(),
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
+}
+
+func (t *Template) Update(name TemplateName, kind, language, detail, rules string, status TemplateStatus, isPublic bool) {
+	t.Name = name
+	t.Kind = strings.TrimSpace(kind)
+	t.Language = strings.TrimSpace(language)
+	t.Detail = detail
+	t.Rules = rules
+	if status != "" {
+		t.Status = status
+	}
+	t.IsPublic = isPublic
+	t.UpdatedAt = time.Now().UTC()
 }

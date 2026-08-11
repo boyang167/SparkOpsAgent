@@ -5,6 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/acl"
@@ -13,6 +14,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/policy"
 )
@@ -41,8 +43,15 @@ func (m *Module) Register(c *appctx.Container) error {
 	repo := persistence.NewProjectRepository(c.DB)
 	memberRepo := persistence.NewProjectMemberRepository(c.DB)
 	templateRepo := persistence.NewTemplateRepository(c.DB)
+	secretRepo := persistence.NewSecretRepository(c.DB)
 	marketRepo := persistence.NewMarketRepository(c.DB)
 	wsChecker := acl.NewTenantACL(c.DB)
+	memberLookup := acl.NewMemberLookup(c.DB)
+	secretBox, err := crypto.NewSecretBoxFromConfig(c.Config)
+	if err != nil {
+		return fmt.Errorf("secret crypto: %w", err)
+	}
+	secretCrypto := application.NewSecretCrypto(secretBox)
 
 	if c.ProjectAccessChecker == nil {
 		c.ProjectAccessChecker = authz.NewProjectAccessChecker(c.PermissionChecker, c.PolicyEngine, memberRepo)
@@ -58,13 +67,24 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewListProjectsHandler(repo, memberRepo, wsChecker, c.PermissionChecker),
 		query.NewGetProjectHandler(repo, wsChecker),
 		command.NewCreateTemplateHandler(templateRepo, wsChecker),
-		query.NewListTemplatesHandler(templateRepo, wsChecker),
+		command.NewUpdateTemplateHandler(templateRepo, wsChecker),
+		command.NewDeleteTemplateHandler(templateRepo, wsChecker),
+		query.NewListTemplatesHandler(templateRepo, wsChecker, memberLookup),
+		query.NewGetTemplateHandler(templateRepo, wsChecker, memberLookup),
+		command.NewCreateSecretHandler(secretRepo, wsChecker, secretCrypto),
+		command.NewUpdateSecretHandler(secretRepo, wsChecker, secretCrypto),
+		command.NewDeleteSecretHandler(secretRepo, wsChecker),
+		query.NewListSecretsHandler(secretRepo, wsChecker, memberLookup, secretCrypto),
+		query.NewGetSecretHandler(secretRepo, wsChecker, memberLookup, secretCrypto),
+		query.NewTestSecretConnectionHandler(secretRepo, wsChecker, secretCrypto),
+		secretCrypto,
 		command.NewCreateDockerfileHandler(marketRepo, wsChecker),
 		query.NewListDockerfilesHandler(marketRepo, wsChecker),
 		command.NewAddProjectMemberHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
 		command.NewUpdateProjectMemberRoleHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
 		command.NewRemoveProjectMemberHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
 		query.NewListProjectMembersHandler(repo, memberRepo),
+		memberLookup,
 	)
 
 	auth := authn.RequireAuth(m.tokens)
@@ -96,6 +116,24 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListTemplates)
 	c.Engine.POST("/api/v1/workspaces/:wsId/templates",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CreateTemplate)
+	c.Engine.GET("/api/v1/workspaces/:wsId/templates/:templateId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetTemplate)
+	c.Engine.PATCH("/api/v1/workspaces/:wsId/templates/:templateId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.UpdateTemplate)
+	c.Engine.DELETE("/api/v1/workspaces/:wsId/templates/:templateId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.DeleteTemplate)
+	c.Engine.GET("/api/v1/workspaces/:wsId/secrets",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermSecretRead), handler.ListSecrets)
+	c.Engine.POST("/api/v1/workspaces/:wsId/secrets",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermSecretWrite), handler.CreateSecret)
+	c.Engine.GET("/api/v1/workspaces/:wsId/secrets/:secretId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermSecretRead), handler.GetSecret)
+	c.Engine.PATCH("/api/v1/workspaces/:wsId/secrets/:secretId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermSecretWrite), handler.UpdateSecret)
+	c.Engine.DELETE("/api/v1/workspaces/:wsId/secrets/:secretId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermSecretWrite), handler.DeleteSecret)
+	c.Engine.POST("/api/v1/workspaces/:wsId/secrets/:secretId/test",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermSecretWrite), handler.TestSecretConnection)
 	c.Engine.GET("/api/v1/workspaces/:wsId/market/dockerfiles",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListDockerfiles)
 	c.Engine.POST("/api/v1/workspaces/:wsId/market/dockerfiles",

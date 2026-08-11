@@ -1,9 +1,10 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { createBffContextFromToken } from "@sparkops/bff-core";
 import { getSession } from "@sparkops/bff-modules/identity";
 import type { MeVM } from "@sparkops/contracts/identity";
 
-export async function loadSession(): Promise<MeVM | null> {
+export const loadSession = cache(async (): Promise<MeVM | null> => {
   const cookieStore = await cookies();
   const token = cookieStore.get("sparkops_token")?.value;
   if (!token) {
@@ -15,4 +16,4 @@ export async function loadSession(): Promise<MeVM | null> {
   } catch {
     return null;
   }
-}
+});

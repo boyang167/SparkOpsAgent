@@ -20,7 +20,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return db.AutoMigrate(&projectModel{}, &templateModel{}, &dockerfileModel{}, &projectMemberModel{})
+	return db.AutoMigrate(&projectModel{}, &templateModel{}, &secretModel{}, &dockerfileModel{}, &projectMemberModel{})
 }
 
 type projectModel struct {

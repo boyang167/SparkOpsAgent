@@ -30,6 +30,7 @@ export const PLATFORM_NAV_TREE: NavGroupConfig[] = [
     label: "基础设施",
     items: [
       { href: "/config/configmaps", label: "配置字典" },
+      { href: "/config/secrets", label: "秘钥管理" },
       { href: "/config/storage", label: "持久化存储" },
       { href: "/config/consul", label: "Consul KV" },
       { href: "/config/webhooks", label: "Webhooks" },

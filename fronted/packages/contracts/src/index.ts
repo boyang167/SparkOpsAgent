@@ -12,3 +12,4 @@ export * from "./notification/index";
 export * from "./k8s/index";
 export * from "./platform/index";
 export * from "./product/index";
+export * from "./secret/index";

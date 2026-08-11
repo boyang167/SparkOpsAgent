@@ -3,6 +3,8 @@ import { z } from "zod";
 export const PERMISSION_OPTIONS = [
   { value: "project:read", label: "项目 · 查看" },
   { value: "project:write", label: "项目 · 创建/编辑" },
+  { value: "secret:read", label: "密钥 · 查看" },
+  { value: "secret:write", label: "密钥 · 管理" },
   { value: "agent:read", label: "Agent · 查看" },
   { value: "agent:write", label: "Agent · 创建/编辑" },
   { value: "agent:publish", label: "Agent · 发布" },

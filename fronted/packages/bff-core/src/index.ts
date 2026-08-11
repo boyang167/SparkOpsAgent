@@ -31,6 +31,8 @@ import {
   type PlatformUpstream,
   createProductUpstream,
   type ProductUpstream,
+  createSecretUpstream,
+  type SecretUpstream,
 } from "@sparkops/upstream";
 
 export const AUTH_COOKIE = "sparkops_token";
@@ -55,6 +57,7 @@ export interface BffContext {
     cluster: ClusterUpstream;
     platform: PlatformUpstream;
     product: ProductUpstream;
+    secret: SecretUpstream;
   };
 }
 
@@ -115,6 +118,7 @@ function buildBffContext(input: {
       cluster: createClusterUpstream(baseOptions),
       platform: createPlatformUpstream(baseOptions),
       product: createProductUpstream(baseOptions),
+      secret: createSecretUpstream(baseOptions),
     },
   };
 }

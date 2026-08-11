@@ -194,6 +194,7 @@ var defaultMenuGroups = []defaultMenuGroup{
 		ID: "infra", Label: "基础设施",
 		Items: []struct{ Href, Label string }{
 			{"/config/configmaps", "配置字典"},
+			{"/config/secrets", "秘钥管理"},
 			{"/config/storage", "持久化存储"},
 			{"/config/consul", "Consul KV"},
 			{"/config/webhooks", "Webhooks"},

@@ -20,6 +20,7 @@ type Config struct {
 	GitLab        GitLabConfig        `yaml:"gitlab"`
 	Webhook       WebhookConfig       `yaml:"webhook"`
 	JWT           JWTConfig           `yaml:"jwt"`
+	Security      SecurityConfig      `yaml:"security"`
 	Auth          AuthConfig          `yaml:"auth"`
 	Policy        PolicyConfig        `yaml:"policy"`
 	LLM           LLMConfig           `yaml:"llm"`
@@ -155,6 +156,10 @@ type WebhookConfig struct {
 type JWTConfig struct {
 	Secret     string `yaml:"secret"`
 	ExpireHour int    `yaml:"expire_hour"`
+}
+
+type SecurityConfig struct {
+	SecretEncryptionKey string `yaml:"secret_encryption_key"`
 }
 
 func LoadFromEnv() (*Config, error) {

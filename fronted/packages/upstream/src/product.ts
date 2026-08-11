@@ -72,6 +72,34 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async getTemplate(workspaceId: string, templateId: string) {
+      return upstreamFetch<import("@sparkops/contracts/product").TemplateVM>(
+        `/api/v1/workspaces/${workspaceId}/templates/${templateId}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async createTemplate(workspaceId: string, input: Record<string, unknown>) {
+      return upstreamFetch<import("@sparkops/contracts/product").TemplateVM>(
+        `/api/v1/workspaces/${workspaceId}/templates`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async updateTemplate(workspaceId: string, templateId: string, input: Record<string, unknown>) {
+      return upstreamFetch<import("@sparkops/contracts/product").TemplateVM>(
+        `/api/v1/workspaces/${workspaceId}/templates/${templateId}`,
+        { method: "PATCH", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async deleteTemplate(workspaceId: string, templateId: string) {
+      return upstreamFetch<{ deleted: boolean }>(
+        `/api/v1/workspaces/${workspaceId}/templates/${templateId}`,
+        { method: "DELETE", options: { ...options, workspaceId } },
+      );
+    },
+
     async listDockerfiles(workspaceId: string) {
       return upstreamFetch<{ items: import("@sparkops/contracts/product").DockerfileVM[] }>(
         `/api/v1/workspaces/${workspaceId}/market/dockerfiles`,

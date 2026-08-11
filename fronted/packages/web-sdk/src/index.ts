@@ -14,4 +14,5 @@ export * as delivery from "./delivery";
 export * as cluster from "./cluster";
 export * as platform from "./platform";
 export * as product from "./product";
+export * as secret from "./secret";
 export * as infra from "./infra";

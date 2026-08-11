@@ -28,3 +28,5 @@ export { createPlatformUpstream } from "./platform";
 export type { PlatformUpstream } from "./platform";
 export { createProductUpstream } from "./product";
 export type { ProductUpstream } from "./product";
+export { createSecretUpstream } from "./secret";
+export type { SecretUpstream } from "./secret";

@@ -3,6 +3,8 @@ package authz
 const (
 	PermProjectRead   = "project:read"
 	PermProjectWrite  = "project:write"
+	PermSecretRead    = "secret:read"
+	PermSecretWrite   = "secret:write"
 	PermAgentRead     = "agent:read"
 	PermAgentWrite    = "agent:write"
 	PermAgentPublish  = "agent:publish"
@@ -14,6 +16,8 @@ const (
 var DefaultAdminPermissions = []string{
 	PermProjectRead,
 	PermProjectWrite,
+	PermSecretRead,
+	PermSecretWrite,
 	PermAgentRead,
 	PermAgentWrite,
 	PermAgentPublish,
@@ -25,6 +29,8 @@ var DefaultAdminPermissions = []string{
 var AllPermissions = []string{
 	PermProjectRead,
 	PermProjectWrite,
+	PermSecretRead,
+	PermSecretWrite,
 	PermAgentRead,
 	PermAgentWrite,
 	PermAgentPublish,

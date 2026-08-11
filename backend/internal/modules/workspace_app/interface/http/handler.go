@@ -7,6 +7,9 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/query"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -19,13 +22,24 @@ type Handler struct {
 	list    *query.ListProjectsHandler
 	get     *query.GetProjectHandler
 	createTemplate   *command.CreateTemplateHandler
+	updateTemplate   *command.UpdateTemplateHandler
+	deleteTemplate   *command.DeleteTemplateHandler
 	listTemplates    *query.ListTemplatesHandler
+	getTemplate      *query.GetTemplateHandler
+	createSecret     *command.CreateSecretHandler
+	updateSecret     *command.UpdateSecretHandler
+	deleteSecret     *command.DeleteSecretHandler
+	listSecrets      *query.ListSecretsHandler
+	getSecret        *query.GetSecretHandler
+	testSecret       *query.TestSecretConnectionHandler
+	secretCrypto     *application.SecretCrypto
 	createDockerfile *command.CreateDockerfileHandler
 	listDockerfiles  *query.ListDockerfilesHandler
 	addMember        *command.AddProjectMemberHandler
 	updateMemberRole *command.UpdateProjectMemberRoleHandler
 	removeMember     *command.RemoveProjectMemberHandler
 	listMembers      *query.ListProjectMembersHandler
+	memberLookup     port.MemberLookup
 }
 
 func NewHandler(
@@ -35,20 +49,35 @@ func NewHandler(
 	list *query.ListProjectsHandler,
 	get *query.GetProjectHandler,
 	createTemplate *command.CreateTemplateHandler,
+	updateTemplate *command.UpdateTemplateHandler,
+	deleteTemplate *command.DeleteTemplateHandler,
 	listTemplates *query.ListTemplatesHandler,
+	getTemplate *query.GetTemplateHandler,
+	createSecret *command.CreateSecretHandler,
+	updateSecret *command.UpdateSecretHandler,
+	deleteSecret *command.DeleteSecretHandler,
+	listSecrets *query.ListSecretsHandler,
+	getSecret *query.GetSecretHandler,
+	testSecret *query.TestSecretConnectionHandler,
+	secretCrypto *application.SecretCrypto,
 	createDockerfile *command.CreateDockerfileHandler,
 	listDockerfiles *query.ListDockerfilesHandler,
 	addMember *command.AddProjectMemberHandler,
 	updateMemberRole *command.UpdateProjectMemberRoleHandler,
 	removeMember *command.RemoveProjectMemberHandler,
 	listMembers *query.ListProjectMembersHandler,
+	memberLookup port.MemberLookup,
 ) *Handler {
 	return &Handler{
 		create: create, update: update, archive: archive, list: list, get: get,
-		createTemplate: createTemplate, listTemplates: listTemplates,
+		createTemplate: createTemplate, updateTemplate: updateTemplate, deleteTemplate: deleteTemplate,
+		listTemplates: listTemplates, getTemplate: getTemplate,
+		createSecret: createSecret, updateSecret: updateSecret, deleteSecret: deleteSecret,
+		listSecrets: listSecrets, getSecret: getSecret, testSecret: testSecret,
+		secretCrypto: secretCrypto,
 		createDockerfile: createDockerfile, listDockerfiles: listDockerfiles,
 		addMember: addMember, updateMemberRole: updateMemberRole, removeMember: removeMember,
-		listMembers: listMembers,
+		listMembers: listMembers, memberLookup: memberLookup,
 	}
 }
 
@@ -193,6 +222,18 @@ type createTemplateRequest struct {
 	Language string `json:"language"`
 	Detail   string `json:"detail"`
 	Rules    string `json:"rules"`
+	Status   string `json:"status"`
+	IsPublic bool   `json:"is_public"`
+}
+
+type updateTemplateRequest struct {
+	Name     string `json:"name" binding:"required"`
+	Kind     string `json:"kind"`
+	Language string `json:"language"`
+	Detail   string `json:"detail"`
+	Rules    string `json:"rules"`
+	Status   string `json:"status"`
+	IsPublic bool   `json:"is_public"`
 }
 
 type createDockerfileRequest struct {
@@ -220,15 +261,98 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
-	t, err := h.createTemplate.Handle(c.Request.Context(), wsID, memberID, req.Name, req.Kind, req.Language, req.Detail, req.Rules)
+	t, err := h.createTemplate.Handle(c.Request.Context(), wsID, memberID, req.Name, req.Kind, req.Language, req.Detail, req.Rules, model.TemplateStatus(req.Status), req.IsPublic)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
 	}
-	httpx.OK(c, gin.H{
-		"id": t.ID.String(), "name": t.Name.String(), "kind": t.Kind,
-		"language": t.Language, "detail": t.Detail, "rules": t.Rules,
-	})
+	item, err := query.EnrichTemplateMap(c.Request.Context(), h.memberLookup, t)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, item)
+}
+
+func (h *Handler) GetTemplate(c *gin.Context) {
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	templateID, err := kernel.ParseTemplateID(c.Param("templateId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid template id", http.StatusBadRequest)
+		return
+	}
+	item, err := h.getTemplate.Handle(c.Request.Context(), wsID, memberID, templateID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, item)
+}
+
+func (h *Handler) UpdateTemplate(c *gin.Context) {
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	templateID, err := kernel.ParseTemplateID(c.Param("templateId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid template id", http.StatusBadRequest)
+		return
+	}
+	var req updateTemplateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+	t, err := h.updateTemplate.Handle(c.Request.Context(), wsID, memberID, templateID, req.Name, req.Kind, req.Language, req.Detail, req.Rules, model.TemplateStatus(req.Status), req.IsPublic)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	item, err := query.EnrichTemplateMap(c.Request.Context(), h.memberLookup, t)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, item)
+}
+
+func (h *Handler) DeleteTemplate(c *gin.Context) {
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	templateID, err := kernel.ParseTemplateID(c.Param("templateId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid template id", http.StatusBadRequest)
+		return
+	}
+	if err := h.deleteTemplate.Handle(c.Request.Context(), wsID, memberID, templateID); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"deleted": true})
 }
 
 func (h *Handler) ListTemplates(c *gin.Context) {
