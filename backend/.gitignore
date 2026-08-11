@@ -1,5 +1,9 @@
+# Inherited from root .gitignore; kept for IDE/tooling that only scans this package.
 config.yaml
 /bin/
+/vendor/
 *.exe
 *.test
-/vendor/
+*.out
+coverage.out
+coverage.html

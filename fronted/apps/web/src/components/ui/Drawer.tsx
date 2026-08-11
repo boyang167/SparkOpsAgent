@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 interface DrawerProps {
   open: boolean;
@@ -10,6 +11,7 @@ interface DrawerProps {
   tabs?: React.ReactNode;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  panelClassName?: string;
 }
 
 export function Drawer({
@@ -20,11 +22,17 @@ export function Drawer({
   tabs,
   children,
   footer,
+  panelClassName,
 }: DrawerProps) {
   const titleId = useId();
   const descId = useId();
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -43,9 +51,9 @@ export function Drawer({
     };
   }, [open]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  return createPortal(
     <div className="drawer-root" role="presentation">
       <button
         type="button"
@@ -54,7 +62,7 @@ export function Drawer({
         onClick={() => onCloseRef.current()}
       />
       <div
-        className="drawer-panel"
+        className={panelClassName ? `drawer-panel ${panelClassName}` : "drawer-panel"}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -86,6 +94,7 @@ export function Drawer({
         <div className="drawer-body">{children}</div>
         {footer ? <footer className="drawer-footer">{footer}</footer> : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

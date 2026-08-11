@@ -1,7 +1,12 @@
-node_modules
-.next
-dist
-.turbo
+# Inherited from root .gitignore; kept for IDE/tooling that only scans this package.
+node_modules/
+.next/
+out/
+dist/
+build/
+.turbo/
+.pnpm-store/
+*.tsbuildinfo
+
 .env.local
 .env*.local
-pnpm-lock.yaml
