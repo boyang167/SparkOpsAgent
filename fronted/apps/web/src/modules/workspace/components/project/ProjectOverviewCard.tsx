@@ -14,9 +14,11 @@ import { computeProjectProgress, type ProjectProgressStep } from "./project-prog
 interface ProjectOverviewCardProps {
   project: ProjectVM;
   heading?: "h2" | "h3";
-  detailsHref: string;
+  detailsHref?: string;
   continueHref?: string;
+  onViewDetails?: () => void;
   onContinueConfig?: () => void;
+  onSubmitReview?: (project: ProjectVM) => void;
   onArchive?: (project: ProjectVM) => void;
 }
 
@@ -93,10 +95,12 @@ export function ProjectOverviewCard({
   heading = "h3",
   detailsHref,
   continueHref,
+  onViewDetails,
   onContinueConfig,
+  onSubmitReview,
   onArchive,
 }: ProjectOverviewCardProps) {
-  const { steps, statusLabel } = computeProjectProgress(project);
+  const { steps, statusLabel, configComplete } = computeProjectProgress(project);
   const langColor = languageColor(project.language);
   const initial = languageLabel(project.language).charAt(0).toUpperCase() || "P";
   const TitleTag = heading;
@@ -147,15 +151,29 @@ export function ProjectOverviewCard({
       <footer className="project-workbench-footer">
         <span className="text-muted">创建于 {formatDateTime(project.created_at)}</span>
         <div className="project-workbench-actions">
-          <Link href={detailsHref} className="project-action-btn is-view">
-            查看详情
-          </Link>
-          {onContinueConfig ? (
+          {onViewDetails ? (
+            <button type="button" className="project-action-btn is-view" onClick={onViewDetails}>
+              查看详情
+            </button>
+          ) : (
+            <Link href={detailsHref ?? `/projects/${project.id}`} className="project-action-btn is-view">
+              查看详情
+            </Link>
+          )}
+          {configComplete ? (
+            <button
+              type="button"
+              className="project-action-btn is-submit"
+              onClick={() => onSubmitReview?.(project)}
+            >
+              提交审核
+            </button>
+          ) : onContinueConfig ? (
             <button type="button" className="project-action-btn is-config" onClick={onContinueConfig}>
               继续配置
             </button>
           ) : (
-            <Link href={continueHref ?? detailsHref} className="project-action-btn is-config">
+            <Link href={continueHref ?? detailsHref ?? `/projects/${project.id}`} className="project-action-btn is-config">
               继续配置
             </Link>
           )}

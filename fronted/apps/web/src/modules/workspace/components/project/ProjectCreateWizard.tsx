@@ -11,6 +11,7 @@ import type { WorkspaceVM } from "@sparkops/contracts/tenant";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { CharCounter, FormRow } from "./project-form-shared";
 import { ProjectCreateStep2 } from "./ProjectCreateStep2";
+import { ProjectCreateStep3 } from "./ProjectCreateStep3";
 import {
   EMPTY_PROJECT_FORM,
   getProjectNameError,
@@ -433,34 +434,14 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
         ) : null}
 
         {step === 3 ? (
-          <div className="project-form-section is-horizontal is-ref">
-            <FormRow label="项目模板:" hint="可从模板库选择 Deployment / Service 等配置模板（可选）">
-              <select
-                className="input"
-                value={form.template_id ?? ""}
-                onChange={(e) => updateForm({ template_id: e.target.value })}
-              >
-                <option value="">{loadingTemplates ? "加载中…" : "不选择模板"}</option>
-                {templates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name} {t.kind ? `(${t.kind})` : ""}
-                  </option>
-                ))}
-              </select>
-            </FormRow>
-            {form.template_id ? (
-              <div className="project-template-preview">
-                {templates
-                  .filter((t) => t.id === form.template_id)
-                  .map((t) => (
-                    <div key={t.id}>
-                      <strong>{t.name}</strong>
-                      <p>{t.detail?.slice(0, 200) || "暂无模板说明"}</p>
-                    </div>
-                  ))}
-              </div>
-            ) : null}
-          </div>
+          <ProjectCreateStep3
+            form={form}
+            updateForm={updateForm}
+            templates={templates}
+            secrets={secrets}
+            loadingTemplates={loadingTemplates}
+            loadingSecrets={loadingSecrets}
+          />
         ) : null}
         </div>
 

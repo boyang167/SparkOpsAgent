@@ -84,6 +84,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewUpdateProjectMemberRoleHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
 		command.NewRemoveProjectMemberHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
 		query.NewListProjectMembersHandler(repo, memberRepo),
+		query.NewGenerateProjectTemplatesHandler(repo, templateRepo, wsChecker),
 		memberLookup,
 	)
 
@@ -100,6 +101,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListProjects)
 	c.Engine.GET("/api/v1/projects/:projectId",
 		auth, ws, wsMember, projectRead, handler.GetProject)
+	c.Engine.GET("/api/v1/projects/:projectId/generated-templates",
+		auth, ws, wsMember, projectRead, handler.GenerateProjectTemplates)
 	c.Engine.PATCH("/api/v1/projects/:projectId",
 		auth, ws, wsMember, projectWrite, handler.UpdateProject)
 	c.Engine.DELETE("/api/v1/projects/:projectId",

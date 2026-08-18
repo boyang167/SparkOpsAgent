@@ -7,6 +7,7 @@ export function FormRow({
   error,
   labelExtra,
   compactHint,
+  align = "start",
   children,
 }: {
   label: string;
@@ -15,10 +16,11 @@ export function FormRow({
   error?: string | null;
   labelExtra?: React.ReactNode;
   compactHint?: boolean;
+  align?: "start" | "center";
   children: React.ReactNode;
 }) {
   return (
-    <div className={`project-form-row${error ? " has-error" : ""}`}>
+    <div className={`project-form-row${error ? " has-error" : ""}${align === "center" ? " is-center" : ""}`}>
       <label className="project-form-label">
         {required ? <span className="project-required">*</span> : null}
         {label}

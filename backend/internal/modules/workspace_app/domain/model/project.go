@@ -55,15 +55,22 @@ type ProjectPort struct {
 }
 
 type ProjectResources struct {
-	CPURequest     string        `json:"cpu_request,omitempty"`
-	CPULimit       string        `json:"cpu_limit,omitempty"`
-	MemoryRequest  string        `json:"memory_request,omitempty"`
-	MemoryLimit    string        `json:"memory_limit,omitempty"`
-	Replicas       int           `json:"replicas,omitempty"`
-	Ports          []ProjectPort `json:"ports,omitempty"`
-	Command        string        `json:"command,omitempty"`
-	Args           string        `json:"args,omitempty"`
-	ProjectConfig  string        `json:"project_config,omitempty"`
+	CPURequest             string        `json:"cpu_request,omitempty"`
+	CPULimit               string        `json:"cpu_limit,omitempty"`
+	MemoryRequest          string        `json:"memory_request,omitempty"`
+	MemoryLimit            string        `json:"memory_limit,omitempty"`
+	Replicas               int           `json:"replicas,omitempty"`
+	Ports                  []ProjectPort `json:"ports,omitempty"`
+	Command                string        `json:"command,omitempty"`
+	Args                   string        `json:"args,omitempty"`
+	ProjectConfig          string        `json:"project_config,omitempty"`
+	ServiceTemplateID      string        `json:"service_template_id,omitempty"`
+	DeploymentTemplateID  string        `json:"deployment_template_id,omitempty"`
+	JenkinsfileTemplateID string        `json:"jenkinsfile_template_id,omitempty"`
+	RegistryType           string        `json:"registry_type,omitempty"`
+	RegistrySecretID      string        `json:"registry_secret_id,omitempty"`
+	SonarqubeSecretID      string        `json:"sonarqube_secret_id,omitempty"`
+	EnableStaticScan       bool          `json:"enable_static_scan,omitempty"`
 }
 
 type Project struct {

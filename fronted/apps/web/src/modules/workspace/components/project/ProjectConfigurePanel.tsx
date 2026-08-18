@@ -8,9 +8,9 @@ import type { SecretVM } from "@sparkops/contracts/secret";
 import type { TemplateVM } from "@sparkops/contracts/product";
 import { Modal } from "@/components/ui/Modal";
 import { InlineAlert } from "@/components/ui/InlineAlert";
-import { FormRow } from "./project-form-shared";
 import { ProjectCreateStep2 } from "./ProjectCreateStep2";
-import { EMPTY_PROJECT_FORM } from "./project-utils";
+import { ProjectCreateStep3 } from "./ProjectCreateStep3";
+import { EMPTY_PROJECT_FORM, hasSelectedProjectTemplate, resolvePrimaryTemplateId } from "./project-utils";
 
 interface ProjectConfigurePanelProps {
   open: boolean;
@@ -23,6 +23,22 @@ interface ProjectConfigurePanelProps {
 const CONFIG_STEPS = ["填写项目基本信息", "填写项目配置信息", "选择项目模板"] as const;
 
 function projectToForm(project: ProjectVM): CreateProjectCommand {
+  const resources = {
+    ...EMPTY_PROJECT_FORM.resources,
+    ...project.resources,
+    ports: project.resources?.ports ?? [],
+    command: project.resources?.command ?? "",
+    args: project.resources?.args ?? "",
+    project_config: project.resources?.project_config ?? "",
+    service_template_id: project.resources?.service_template_id ?? "",
+    deployment_template_id: project.resources?.deployment_template_id ?? "",
+    jenkinsfile_template_id: project.resources?.jenkinsfile_template_id ?? "",
+    registry_type: project.resources?.registry_type ?? "Harbor",
+    registry_secret_id: project.resources?.registry_secret_id ?? "",
+    sonarqube_secret_id: project.resources?.sonarqube_secret_id ?? "",
+    enable_static_scan: project.resources?.enable_static_scan ?? false,
+  };
+
   return {
     ...EMPTY_PROJECT_FORM,
     name: project.name,
@@ -35,15 +51,8 @@ function projectToForm(project: ProjectVM): CreateProjectCommand {
     git_ref_type: project.git_ref_type ?? "branch",
     git_ref_value: project.git_ref_value ?? "main",
     dockerfile_path: project.dockerfile_path || "./Dockerfile",
-    template_id: project.template_id ?? "",
-    resources: {
-      ...EMPTY_PROJECT_FORM.resources,
-      ...project.resources,
-      ports: project.resources?.ports ?? [],
-      command: project.resources?.command ?? "",
-      args: project.resources?.args ?? "",
-      project_config: project.resources?.project_config ?? "",
-    },
+    template_id: project.template_id || resolvePrimaryTemplateId(resources),
+    resources,
   };
 }
 
@@ -76,12 +85,20 @@ export function ProjectConfigurePanel({
     setError(null);
     void (async () => {
       setLoadingTemplates(true);
+      setLoadingSecrets(true);
       try {
-        setTemplates(await product.listTemplates(workspaceId));
+        const [templateList, secretList] = await Promise.all([
+          product.listTemplates(workspaceId),
+          secret.listSecrets(workspaceId),
+        ]);
+        setTemplates(templateList);
+        setSecrets(secretList);
       } catch {
         setTemplates([]);
+        setSecrets([]);
       } finally {
         setLoadingTemplates(false);
+        setLoadingSecrets(false);
       }
     })();
   }, [open, project, workspaceId]);
@@ -108,7 +125,15 @@ export function ProjectConfigurePanel({
     return null;
   }
 
+  function validateStep3() {
+    if (!hasSelectedProjectTemplate(form.resources)) {
+      return "请至少选择一个模板（Service / Deployment / Jenkinsfile）";
+    }
+    return null;
+  }
+
   async function persistProject() {
+    const templateId = form.template_id || resolvePrimaryTemplateId(form.resources);
     await workspace.updateProject(workspaceId, project.id, {
       name: project.name,
       display_name: project.display_name ?? project.name,
@@ -120,7 +145,7 @@ export function ProjectConfigurePanel({
       git_ref_type: form.git_ref_type,
       git_ref_value: form.git_ref_value?.trim(),
       dockerfile_path: form.dockerfile_path?.trim() || "./Dockerfile",
-      template_id: form.template_id || undefined,
+      template_id: templateId || undefined,
       resources: form.resources,
     });
   }
@@ -154,6 +179,12 @@ export function ProjectConfigurePanel({
       return;
     }
 
+    const message = validateStep3();
+    if (message) {
+      setError(message);
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     try {
@@ -170,7 +201,7 @@ export function ProjectConfigurePanel({
     <Modal
       open={open}
       onClose={onClose}
-      title="继续配置"
+      title="继续配置项目"
       description="请仔细核对每一项内容和参数。"
       size="xl"
       panelClassName="project-create-modal"
@@ -211,37 +242,14 @@ export function ProjectConfigurePanel({
               loadSecrets={() => void loadSecrets()}
             />
           ) : (
-            <div className="project-form-section is-horizontal is-ref">
-              <FormRow
-                label="项目模板:"
-                hint="可从模板库选择 Deployment / Service 等配置模板（可选）"
-              >
-                <select
-                  className="input"
-                  value={form.template_id ?? ""}
-                  onChange={(e) => updateForm({ template_id: e.target.value })}
-                >
-                  <option value="">{loadingTemplates ? "加载中…" : "不选择模板"}</option>
-                  {templates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} {t.kind ? `(${t.kind})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </FormRow>
-              {form.template_id ? (
-                <div className="project-template-preview">
-                  {templates
-                    .filter((t) => t.id === form.template_id)
-                    .map((t) => (
-                      <div key={t.id}>
-                        <strong>{t.name}</strong>
-                        <p>{t.detail?.slice(0, 200) || "暂无模板说明"}</p>
-                      </div>
-                    ))}
-                </div>
-              ) : null}
-            </div>
+            <ProjectCreateStep3
+              form={form}
+              updateForm={updateForm}
+              templates={templates}
+              secrets={secrets}
+              loadingTemplates={loadingTemplates}
+              loadingSecrets={loadingSecrets}
+            />
           )}
         </div>
 

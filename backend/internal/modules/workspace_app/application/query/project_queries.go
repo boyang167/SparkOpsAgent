@@ -12,15 +12,22 @@ import (
 )
 
 type ProjectResourcesView struct {
-	CPURequest    string             `json:"cpu_request,omitempty"`
-	CPULimit      string             `json:"cpu_limit,omitempty"`
-	MemoryRequest string             `json:"memory_request,omitempty"`
-	MemoryLimit   string             `json:"memory_limit,omitempty"`
-	Replicas      int                `json:"replicas,omitempty"`
-	Ports         []model.ProjectPort `json:"ports,omitempty"`
-	Command       string             `json:"command,omitempty"`
-	Args          string             `json:"args,omitempty"`
-	ProjectConfig string             `json:"project_config,omitempty"`
+	CPURequest             string              `json:"cpu_request,omitempty"`
+	CPULimit               string              `json:"cpu_limit,omitempty"`
+	MemoryRequest          string              `json:"memory_request,omitempty"`
+	MemoryLimit            string              `json:"memory_limit,omitempty"`
+	Replicas               int                 `json:"replicas,omitempty"`
+	Ports                  []model.ProjectPort `json:"ports,omitempty"`
+	Command                string              `json:"command,omitempty"`
+	Args                   string              `json:"args,omitempty"`
+	ProjectConfig          string              `json:"project_config,omitempty"`
+	ServiceTemplateID      string              `json:"service_template_id,omitempty"`
+	DeploymentTemplateID  string              `json:"deployment_template_id,omitempty"`
+	JenkinsfileTemplateID string              `json:"jenkinsfile_template_id,omitempty"`
+	RegistryType           string              `json:"registry_type,omitempty"`
+	RegistrySecretID       string              `json:"registry_secret_id,omitempty"`
+	SonarqubeSecretID      string              `json:"sonarqube_secret_id,omitempty"`
+	EnableStaticScan       bool                `json:"enable_static_scan,omitempty"`
 }
 
 type ProjectView struct {
@@ -149,15 +156,22 @@ func ToView(p *model.Project) ProjectView {
 		DockerfilePath: p.DockerfilePath,
 		TemplateID:     p.TemplateID,
 		Resources: ProjectResourcesView{
-			CPURequest:    p.Resources.CPURequest,
-			CPULimit:      p.Resources.CPULimit,
-			MemoryRequest: p.Resources.MemoryRequest,
-			MemoryLimit:   p.Resources.MemoryLimit,
-			Replicas:      p.Resources.Replicas,
-			Ports:         p.Resources.Ports,
-			Command:       p.Resources.Command,
-			Args:          p.Resources.Args,
-			ProjectConfig: p.Resources.ProjectConfig,
+			CPURequest:             p.Resources.CPURequest,
+			CPULimit:               p.Resources.CPULimit,
+			MemoryRequest:          p.Resources.MemoryRequest,
+			MemoryLimit:            p.Resources.MemoryLimit,
+			Replicas:               p.Resources.Replicas,
+			Ports:                  p.Resources.Ports,
+			Command:                p.Resources.Command,
+			Args:                   p.Resources.Args,
+			ProjectConfig:          p.Resources.ProjectConfig,
+			ServiceTemplateID:      p.Resources.ServiceTemplateID,
+			DeploymentTemplateID:  p.Resources.DeploymentTemplateID,
+			JenkinsfileTemplateID: p.Resources.JenkinsfileTemplateID,
+			RegistryType:           p.Resources.RegistryType,
+			RegistrySecretID:       p.Resources.RegistrySecretID,
+			SonarqubeSecretID:      p.Resources.SonarqubeSecretID,
+			EnableStaticScan:       p.Resources.EnableStaticScan,
 		},
 		Status:    string(p.Status),
 		CreatedAt: p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),

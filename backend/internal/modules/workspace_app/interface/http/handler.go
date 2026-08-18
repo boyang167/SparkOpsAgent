@@ -39,6 +39,7 @@ type Handler struct {
 	updateMemberRole *command.UpdateProjectMemberRoleHandler
 	removeMember     *command.RemoveProjectMemberHandler
 	listMembers      *query.ListProjectMembersHandler
+	generateTemplates *query.GenerateProjectTemplatesHandler
 	memberLookup     port.MemberLookup
 }
 
@@ -66,6 +67,7 @@ func NewHandler(
 	updateMemberRole *command.UpdateProjectMemberRoleHandler,
 	removeMember *command.RemoveProjectMemberHandler,
 	listMembers *query.ListProjectMembersHandler,
+	generateTemplates *query.GenerateProjectTemplatesHandler,
 	memberLookup port.MemberLookup,
 ) *Handler {
 	return &Handler{
@@ -77,20 +79,27 @@ func NewHandler(
 		secretCrypto: secretCrypto,
 		createDockerfile: createDockerfile, listDockerfiles: listDockerfiles,
 		addMember: addMember, updateMemberRole: updateMemberRole, removeMember: removeMember,
-		listMembers: listMembers, memberLookup: memberLookup,
+		listMembers: listMembers, generateTemplates: generateTemplates, memberLookup: memberLookup,
 	}
 }
 
 type projectResourcesRequest struct {
-	CPURequest    string              `json:"cpu_request"`
-	CPULimit      string              `json:"cpu_limit"`
-	MemoryRequest string              `json:"memory_request"`
-	MemoryLimit   string              `json:"memory_limit"`
-	Replicas      int                 `json:"replicas"`
-	Ports         []model.ProjectPort `json:"ports"`
-	Command       string              `json:"command"`
-	Args          string              `json:"args"`
-	ProjectConfig string              `json:"project_config"`
+	CPURequest             string              `json:"cpu_request"`
+	CPULimit               string              `json:"cpu_limit"`
+	MemoryRequest          string              `json:"memory_request"`
+	MemoryLimit            string              `json:"memory_limit"`
+	Replicas               int                 `json:"replicas"`
+	Ports                  []model.ProjectPort `json:"ports"`
+	Command                string              `json:"command"`
+	Args                   string              `json:"args"`
+	ProjectConfig          string              `json:"project_config"`
+	ServiceTemplateID      string              `json:"service_template_id"`
+	DeploymentTemplateID  string              `json:"deployment_template_id"`
+	JenkinsfileTemplateID string              `json:"jenkinsfile_template_id"`
+	RegistryType           string              `json:"registry_type"`
+	RegistrySecretID       string              `json:"registry_secret_id"`
+	SonarqubeSecretID      string              `json:"sonarqube_secret_id"`
+	EnableStaticScan       bool                `json:"enable_static_scan"`
 }
 
 type projectPayload struct {
@@ -122,15 +131,22 @@ func toProjectInput(req projectPayload) model.CreateProjectInput {
 		DockerfilePath: req.DockerfilePath,
 		TemplateID:     req.TemplateID,
 		Resources: model.ProjectResources{
-			CPURequest:    req.Resources.CPURequest,
-			CPULimit:      req.Resources.CPULimit,
-			MemoryRequest: req.Resources.MemoryRequest,
-			MemoryLimit:   req.Resources.MemoryLimit,
-			Replicas:      req.Resources.Replicas,
-			Ports:         req.Resources.Ports,
-			Command:       req.Resources.Command,
-			Args:          req.Resources.Args,
-			ProjectConfig: req.Resources.ProjectConfig,
+			CPURequest:             req.Resources.CPURequest,
+			CPULimit:               req.Resources.CPULimit,
+			MemoryRequest:          req.Resources.MemoryRequest,
+			MemoryLimit:            req.Resources.MemoryLimit,
+			Replicas:               req.Resources.Replicas,
+			Ports:                  req.Resources.Ports,
+			Command:                req.Resources.Command,
+			Args:                   req.Resources.Args,
+			ProjectConfig:          req.Resources.ProjectConfig,
+			ServiceTemplateID:      req.Resources.ServiceTemplateID,
+			DeploymentTemplateID:  req.Resources.DeploymentTemplateID,
+			JenkinsfileTemplateID: req.Resources.JenkinsfileTemplateID,
+			RegistryType:           req.Resources.RegistryType,
+			RegistrySecretID:       req.Resources.RegistrySecretID,
+			SonarqubeSecretID:      req.Resources.SonarqubeSecretID,
+			EnableStaticScan:       req.Resources.EnableStaticScan,
 		},
 	}
 }
@@ -221,6 +237,30 @@ func (h *Handler) GetProject(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, item)
+}
+
+func (h *Handler) GenerateProjectTemplates(c *gin.Context) {
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	items, err := h.generateTemplates.Handle(c.Request.Context(), wsID, memberID, projectID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"items": items})
 }
 
 func (h *Handler) UpdateProject(c *gin.Context) {

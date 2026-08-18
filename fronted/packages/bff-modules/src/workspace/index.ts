@@ -8,3 +8,4 @@ export {
   updateProjectMemberRole,
   removeProjectMember,
 } from "./projectMembers";
+export { listGeneratedTemplates } from "./generatedTemplates";

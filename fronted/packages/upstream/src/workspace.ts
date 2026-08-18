@@ -81,6 +81,13 @@ export function createWorkspaceUpstream(options: UpstreamRequestOptions = {}) {
         options: { ...options, workspaceId },
       });
     },
+
+    async listGeneratedTemplates(workspaceId: string, projectId: string) {
+      return upstreamFetch<import("@sparkops/contracts/workspace").GeneratedTemplateListVM>(
+        `/api/v1/projects/${projectId}/generated-templates`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
   };
 }
 

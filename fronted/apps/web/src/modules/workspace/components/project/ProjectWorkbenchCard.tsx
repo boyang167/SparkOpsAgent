@@ -6,14 +6,19 @@ import { ProjectOverviewCard } from "./ProjectOverviewCard";
 interface ProjectWorkbenchCardProps {
   project: ProjectVM;
   onContinueConfig: () => void;
+  onViewDetails: () => void;
 }
 
-export function ProjectWorkbenchCard({ project, onContinueConfig }: ProjectWorkbenchCardProps) {
+export function ProjectWorkbenchCard({
+  project,
+  onContinueConfig,
+  onViewDetails,
+}: ProjectWorkbenchCardProps) {
   return (
     <ProjectOverviewCard
       project={project}
       heading="h2"
-      detailsHref="#project-relations"
+      onViewDetails={onViewDetails}
       onContinueConfig={onContinueConfig}
     />
   );

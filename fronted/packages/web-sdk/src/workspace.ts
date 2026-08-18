@@ -94,3 +94,11 @@ export function removeProjectMember(workspaceId: string, projectId: string, memb
     },
   );
 }
+
+export async function listGeneratedTemplates(workspaceId: string, projectId: string) {
+  const data = await bffFetch<import("@sparkops/contracts/workspace").GeneratedTemplateListVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/generated-templates`,
+    withWorkspace(workspaceId),
+  );
+  return data.items;
+}

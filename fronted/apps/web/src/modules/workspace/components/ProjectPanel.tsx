@@ -9,6 +9,7 @@ import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { ProjectCard } from "./project/ProjectCard";
 import { ProjectCreateModal } from "./project/ProjectCreateModal";
+import { ProjectDetailModal } from "./project/ProjectDetailModal";
 import {
   formatDateTime,
   labelOf,
@@ -41,6 +42,7 @@ export function ProjectPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(initialCreateOpen);
+  const [detailProject, setDetailProject] = useState<ProjectVM | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("card");
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -208,7 +210,12 @@ export function ProjectPanel({
           {viewMode === "card" ? (
             <div className="project-card-grid">
               {paged.map((project) => (
-                <ProjectCard key={project.id} project={project} onArchive={(p) => void onArchive(p)} />
+                <ProjectCard
+                  key={project.id}
+                  project={project}
+                  onArchive={(p) => void onArchive(p)}
+                  onViewDetails={(p) => setDetailProject(p)}
+                />
               ))}
             </div>
           ) : (
@@ -255,7 +262,9 @@ export function ProjectPanel({
                       <td>{formatDateTime(project.created_at)}</td>
                       <td>
                         <div className="project-row-actions">
-                          <Link href={`/projects/${project.id}`}>进入</Link>
+                          <button type="button" onClick={() => setDetailProject(project)}>
+                            查看详情
+                          </button>
                           <Link href={`/projects/${project.id}?configure=1`}>继续配置</Link>
                           <button type="button" className="is-danger" onClick={() => void onArchive(project)}>
                             归档
@@ -312,6 +321,13 @@ export function ProjectPanel({
           if (initialCreateOpen) router.replace(createQueryPath);
         }}
         onSuccess={handleCreateSuccess}
+      />
+
+      <ProjectDetailModal
+        open={Boolean(detailProject)}
+        workspaceId={workspaceId}
+        project={detailProject}
+        onClose={() => setDetailProject(null)}
       />
     </div>
   );

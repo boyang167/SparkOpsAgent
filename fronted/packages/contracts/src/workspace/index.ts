@@ -19,6 +19,13 @@ export const ProjectResourcesSchema = z.object({
   command: z.string().optional(),
   args: z.string().optional(),
   project_config: z.string().optional(),
+  service_template_id: z.string().optional(),
+  deployment_template_id: z.string().optional(),
+  jenkinsfile_template_id: z.string().optional(),
+  registry_type: z.enum(["Harbor", "Docker_Registry"]).optional(),
+  registry_secret_id: z.string().optional(),
+  sonarqube_secret_id: z.string().optional(),
+  enable_static_scan: z.boolean().optional(),
 });
 
 export type ProjectResources = z.infer<typeof ProjectResourcesSchema>;
@@ -115,3 +122,21 @@ export const UpdateProjectMemberRoleCommandSchema = z.object({
 });
 
 export type UpdateProjectMemberRoleCommand = z.infer<typeof UpdateProjectMemberRoleCommandSchema>;
+
+export const GeneratedTemplateArtifactSchema = z.object({
+  key: z.string(),
+  kind: z.enum(["Service", "Deployment", "jenkinsFile"]),
+  title: z.string(),
+  filename: z.string(),
+  content: z.string(),
+  template_id: z.string().optional(),
+  template_name: z.string().optional(),
+});
+
+export type GeneratedTemplateArtifact = z.infer<typeof GeneratedTemplateArtifactSchema>;
+
+export const GeneratedTemplateListVMSchema = z.object({
+  items: z.array(GeneratedTemplateArtifactSchema),
+});
+
+export type GeneratedTemplateListVM = z.infer<typeof GeneratedTemplateListVMSchema>;

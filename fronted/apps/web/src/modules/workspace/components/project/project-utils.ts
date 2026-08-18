@@ -42,6 +42,13 @@ export const EMPTY_PROJECT_FORM: CreateProjectCommand = {
     command: "",
     args: "",
     project_config: "",
+    service_template_id: "",
+    deployment_template_id: "",
+    jenkinsfile_template_id: "",
+    registry_type: "Harbor",
+    registry_secret_id: "",
+    sonarqube_secret_id: "",
+    enable_static_scan: false,
   },
 };
 
@@ -72,4 +79,73 @@ export function getProjectNameError(name: string): string | null {
 
 export function validateProjectName(name: string) {
   return getProjectNameError(name) === null;
+}
+
+export interface ProjectConfigEntry {
+  key: string;
+  value: string;
+}
+
+export function parseProjectConfig(raw?: string): ProjectConfigEntry[] {
+  const text = raw?.trim();
+  if (!text) return [{ key: "", value: "" }];
+
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const entries = Object.entries(parsed as Record<string, unknown>).map(([key, value]) => ({
+        key,
+        value: value == null ? "" : String(value),
+      }));
+      return entries.length > 0 ? entries : [{ key: "", value: "" }];
+    }
+  } catch {
+    // KEY=VALUE or YAML-style KEY: VALUE
+  }
+
+  const entries = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => {
+      const eq = line.indexOf("=");
+      const colon = line.indexOf(":");
+      const sep = eq >= 0 && (colon < 0 || eq < colon) ? eq : colon;
+      if (sep < 0) return { key: line, value: "" };
+      return { key: line.slice(0, sep).trim(), value: line.slice(sep + 1).trim() };
+    })
+    .filter((entry) => entry.key);
+
+  return entries.length > 0 ? entries : [{ key: "", value: "" }];
+}
+
+export function serializeProjectConfig(entries: ProjectConfigEntry[]): string {
+  const obj: Record<string, string> = {};
+  for (const entry of entries) {
+    const key = entry.key.trim();
+    if (!key) continue;
+    obj[key] = entry.value;
+  }
+  return Object.keys(obj).length > 0 ? JSON.stringify(obj) : "";
+}
+
+export function resolvePrimaryTemplateId(resources?: {
+  service_template_id?: string;
+  deployment_template_id?: string;
+  jenkinsfile_template_id?: string;
+}) {
+  return (
+    resources?.deployment_template_id?.trim() ||
+    resources?.service_template_id?.trim() ||
+    resources?.jenkinsfile_template_id?.trim() ||
+    ""
+  );
+}
+
+export function hasSelectedProjectTemplate(resources?: {
+  service_template_id?: string;
+  deployment_template_id?: string;
+  jenkinsfile_template_id?: string;
+}) {
+  return Boolean(resolvePrimaryTemplateId(resources));
 }

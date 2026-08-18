@@ -7,6 +7,11 @@ import type { SecretVM } from "@sparkops/contracts/secret";
 import { Modal } from "@/components/ui/Modal";
 import { FormRow } from "./project-form-shared";
 import {
+  parseProjectConfig,
+  serializeProjectConfig,
+  type ProjectConfigEntry,
+} from "./project-utils";
+import {
   CPU_MARKS,
   DEFAULT_GIT_BRANCHES,
   DOCKERFILE_SUGGESTIONS,
@@ -304,6 +309,7 @@ export function ProjectCreateStep2({
   const [gitRefQuery, setGitRefQuery] = useState("");
   const [portModalOpen, setPortModalOpen] = useState(false);
   const [configModalOpen, setConfigModalOpen] = useState(false);
+  const [configDraft, setConfigDraft] = useState<ProjectConfigEntry[]>([{ key: "", value: "" }]);
   const [browseOpen, setBrowseOpen] = useState(false);
 
   const resources = form.resources ?? {};
@@ -324,6 +330,20 @@ export function ProjectCreateStep2({
 
   function updateResources(patch: Partial<NonNullable<CreateProjectCommand["resources"]>>) {
     updateForm({ resources: { ...resources, ...patch } });
+  }
+
+  function openConfigModal() {
+    setConfigDraft(parseProjectConfig(resources.project_config));
+    setConfigModalOpen(true);
+  }
+
+  function updateConfigDraft(index: number, patch: Partial<ProjectConfigEntry>) {
+    setConfigDraft((prev) => prev.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
+  }
+
+  function saveConfigDraft() {
+    updateResources({ project_config: serializeProjectConfig(configDraft) });
+    setConfigModalOpen(false);
   }
 
   function handleRefTypeChange(next: "branch" | "tag" | "commit") {
@@ -572,9 +592,9 @@ export function ProjectCreateStep2({
         </div>
       </FormRow>
 
-      <FormRow label="项目配置:">
+      <FormRow label="项目配置:" align="center">
         <div className="project-extra-config is-inline">
-          <button type="button" className="project-link-btn" onClick={() => setConfigModalOpen(true)}>
+          <button type="button" className="project-link-btn" onClick={openConfigModal}>
             编辑配置
           </button>
           {resources.project_config?.trim() ? (
@@ -661,15 +681,54 @@ export function ProjectCreateStep2({
         </div>
       </Modal>
 
-      <Modal open={configModalOpen} onClose={() => setConfigModalOpen(false)} title="项目配置" size="lg">
-        <div className="project-config-modal">
-          <p className="project-form-hint">可填写额外的 Kubernetes 配置（YAML），将在部署时合并到项目模板。</p>
-          <textarea
-            className="input min-h-48 font-mono text-sm"
-            placeholder="apiVersion: v1&#10;kind: ConfigMap&#10;..."
-            value={resources.project_config ?? ""}
-            onChange={(e) => updateResources({ project_config: e.target.value })}
-          />
+      <Modal
+        open={configModalOpen}
+        onClose={() => setConfigModalOpen(false)}
+        title="编辑项目配置"
+        size="lg"
+        panelClassName="project-kv-modal-panel"
+        footer={
+          <div className="modal-footer-actions">
+            <button type="button" className="btn-secondary" onClick={() => setConfigModalOpen(false)}>
+              取消
+            </button>
+            <button type="button" className="btn project-btn-primary" onClick={saveConfigDraft}>
+              保存
+            </button>
+          </div>
+        }
+      >
+        <div className="project-kv-modal">
+          {configDraft.map((entry, index) => (
+            <div key={index} className="project-kv-row">
+              <input
+                className="input"
+                placeholder="配置键"
+                value={entry.key}
+                onChange={(e) => updateConfigDraft(index, { key: e.target.value })}
+              />
+              <input
+                className="input"
+                placeholder="配置值"
+                value={entry.value}
+                onChange={(e) => updateConfigDraft(index, { value: e.target.value })}
+              />
+              <button
+                type="button"
+                className="project-action-btn is-delete"
+                onClick={() => setConfigDraft((prev) => prev.filter((_, i) => i !== index))}
+              >
+                删除
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="btn project-btn-primary project-kv-add"
+            onClick={() => setConfigDraft((prev) => [...prev, { key: "", value: "" }])}
+          >
+            添加配置
+          </button>
         </div>
       </Modal>
 

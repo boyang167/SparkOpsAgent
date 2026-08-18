@@ -1,4 +1,5 @@
 import type { ProjectVM } from "@sparkops/contracts/workspace";
+import { hasSelectedProjectTemplate } from "./project-utils";
 
 export type ProgressStatus = "done" | "active" | "pending";
 
@@ -10,13 +11,13 @@ export interface ProjectProgressStep {
 }
 
 export function isProjectConfigComplete(
-  project: Pick<ProjectVM, "git_url" | "git_ref_value" | "dockerfile_path" | "template_id">,
+  project: Pick<ProjectVM, "git_url" | "git_ref_value" | "dockerfile_path" | "template_id" | "resources">,
 ) {
   return Boolean(
     project.git_url?.trim() &&
       project.git_ref_value?.trim() &&
       (project.dockerfile_path?.trim() || "./Dockerfile") &&
-      project.template_id?.trim(),
+      (project.template_id?.trim() || hasSelectedProjectTemplate(project.resources)),
   );
 }
 
