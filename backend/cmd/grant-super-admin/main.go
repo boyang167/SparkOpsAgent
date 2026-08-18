@@ -12,10 +12,12 @@ import (
 	identityquery "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain"
 	identitypersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/infrastructure/persistence"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -71,13 +73,19 @@ func main() {
 				Email: normalizedEmail, Password: *password, DisplayName: name,
 			})
 			if regErr != nil {
-				log.Fatal(regErr)
+				restored, restoreErr := restoreSoftDeletedMember(ctx, db, normalizedEmail, *password, name)
+				if restoreErr != nil {
+					log.Fatal(regErr)
+				}
+				member = restored
+				fmt.Printf("restored member: %s (%s)\n", member.Email, member.ID.String())
+			} else {
+				member, err = memberRepo.FindByID(ctx, res.MemberID)
+				if err != nil {
+					log.Fatal(err)
+				}
+				fmt.Printf("registered member: %s (%s)\n", member.Email, member.ID.String())
 			}
-			member, err = memberRepo.FindByID(ctx, res.MemberID)
-			if err != nil {
-				log.Fatal(err)
-			}
-			fmt.Printf("registered member: %s (%s)\n", member.Email, member.ID.String())
 		} else {
 			log.Fatal(err)
 		}
@@ -96,4 +104,49 @@ func main() {
 	}
 	fmt.Println()
 	fmt.Println("Re-login or call GET /api/v1/auth/me to refresh is_super_admin.")
+}
+
+type softDeletedMember struct {
+	ID           string `gorm:"column:id;primaryKey"`
+	Email        string `gorm:"column:email"`
+	DisplayName  string `gorm:"column:display_name"`
+	PasswordHash string `gorm:"column:password_hash"`
+	Status       string `gorm:"column:status"`
+	DeletedAt    gorm.DeletedAt
+}
+
+func (softDeletedMember) TableName() string { return "identity.members" }
+
+func restoreSoftDeletedMember(ctx context.Context, db *gorm.DB, email, password, displayName string) (*model.Member, error) {
+	var row softDeletedMember
+	err := db.WithContext(ctx).Unscoped().Where("email = ?", email).First(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	if !row.DeletedAt.Valid {
+		return nil, fmt.Errorf("member %q exists but is not deleted", email)
+	}
+	hash, err := (model.BcryptHasher{}).Hash(password)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.WithContext(ctx).Unscoped().Model(&row).Updates(map[string]any{
+		"deleted_at":    nil,
+		"password_hash": hash,
+		"display_name":  displayName,
+		"status":        string(model.MemberStatusActive),
+	}).Error; err != nil {
+		return nil, err
+	}
+	id, err := kernel.ParseMemberID(row.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &model.Member{
+		ID:           id,
+		Email:        row.Email,
+		DisplayName:  displayName,
+		PasswordHash: hash,
+		Status:       model.MemberStatusActive,
+	}, nil
 }

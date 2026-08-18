@@ -4,17 +4,21 @@ export function FormRow({
   label,
   required,
   hint,
+  error,
   labelExtra,
+  compactHint,
   children,
 }: {
   label: string;
   required?: boolean;
   hint?: string;
+  error?: string | null;
   labelExtra?: React.ReactNode;
+  compactHint?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div className="project-form-row">
+    <div className={`project-form-row${error ? " has-error" : ""}`}>
       <label className="project-form-label">
         {required ? <span className="project-required">*</span> : null}
         {label}
@@ -22,7 +26,15 @@ export function FormRow({
       <div className="project-form-control">
         {labelExtra}
         {children}
-        {hint ? <p className="project-form-hint">{hint}</p> : null}
+        {error ? <p className="project-form-error">{error}</p> : null}
+        {!error && hint ? (
+          <p
+            className={`project-form-hint${compactHint ? " is-compact" : ""}`}
+            title={compactHint ? hint : undefined}
+          >
+            {hint}
+          </p>
+        ) : null}
       </div>
     </div>
   );

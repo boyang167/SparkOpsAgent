@@ -56,7 +56,15 @@ pnpm dev                              # :3000
 
 不做数据迁移、不兼容旧 API。
 
-邮箱
-superadmin@sparkops.local
-密码
-SuperAdmin1234!
+## 默认 Super Admin
+
+| 项 | 值 |
+|---|---|
+| 邮箱 | `superadmin@sparkops.local` |
+| 密码 | `SuperAdmin1234!` |
+
+账号不存在或登录 401 时，在 `backend` 目录执行（PowerShell 单行）：
+
+```powershell
+go run ./cmd/grant-super-admin -email superadmin@sparkops.local -password "SuperAdmin1234!" -display-name "Platform Super Admin" -register
+```

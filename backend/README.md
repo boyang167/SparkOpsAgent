@@ -79,6 +79,14 @@ ON CONFLICT (member_id) DO UPDATE SET role = EXCLUDED.role;
 
 新建 Super Admin 账号（推荐）：
 
+**PowerShell（单行，推荐）：**
+
+```powershell
+go run ./cmd/grant-super-admin -email superadmin@sparkops.local -password "SuperAdmin1234!" -display-name "Platform Super Admin" -register
+```
+
+**Bash / Linux：**
+
 ```bash
 go run ./cmd/grant-super-admin \
   -email superadmin@sparkops.local \
@@ -86,6 +94,8 @@ go run ./cmd/grant-super-admin \
   -display-name "Platform Super Admin" \
   -register
 ```
+
+> PowerShell 不支持 `\` 换行；多行请用反引号 `` ` `` 结尾，或直接用上面单行命令。
 
 已有用户仅授予角色：
 

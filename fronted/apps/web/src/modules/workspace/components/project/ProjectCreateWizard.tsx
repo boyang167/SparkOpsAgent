@@ -13,7 +13,8 @@ import { CharCounter, FormRow } from "./project-form-shared";
 import { ProjectCreateStep2 } from "./ProjectCreateStep2";
 import {
   EMPTY_PROJECT_FORM,
-  validateProjectName,
+  getProjectNameError,
+  PROJECT_NAME_RULE_HINT,
 } from "./project-utils";
 
 interface ProjectCreateWizardProps {
@@ -46,6 +47,7 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
   const [error, setError] = useState<string | null>(null);
   const [displayNameManual, setDisplayNameManual] = useState(false);
   const [draftProject, setDraftProject] = useState<{ id: string; workspaceId: string } | null>(null);
+  const [nameTouched, setNameTouched] = useState(false);
 
   const gitSecrets = useMemo(
     () => secrets.filter((s) => s.service_type === gitServiceType),
@@ -60,6 +62,7 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
     setWorkspaceMode("select");
     setDisplayNameManual(false);
     setDraftProject(null);
+    setNameTouched(false);
     setError(null);
     void loadWorkspaces();
   }, [open, workspaceId]);
@@ -151,7 +154,12 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
       name,
       ...(displayNameManual ? {} : { display_name: name }),
     }));
+    if (nameTouched && error && getProjectNameError(name) === null) {
+      setError(null);
+    }
   }
+
+  const projectNameError = nameTouched ? getProjectNameError(form.name) : null;
 
   function handleDisplayNameChange(display_name: string) {
     setDisplayNameManual(true);
@@ -165,7 +173,8 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
       } else if (!form.namespace?.trim()) {
         return "请填写业务空间（命名空间）";
       }
-      if (!validateProjectName(form.name)) return "项目英文名格式不正确（小写字母、数字、连字符）";
+      const nameError = getProjectNameError(form.name);
+      if (nameError) return nameError;
       if (!form.display_name?.trim()) return "请填写显示名称";
     }
     if (current === 2) {
@@ -214,6 +223,7 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
   }
 
   async function handleNext() {
+    if (step === 1) setNameTouched(true);
     const message = validateStep(step);
     if (message) {
       setError(message);
@@ -222,6 +232,14 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
     setSubmitting(true);
     setError(null);
     try {
+      if (step === 1) {
+        const project = await persistProject();
+        onSuccess?.(project);
+        onClose();
+        router.push(`/projects/${project.id}`);
+        router.refresh();
+        return;
+      }
       await persistProject();
       setStep((s) => Math.min(3, s + 1));
     } catch (err) {
@@ -263,12 +281,7 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
 
   return (
     <div className="project-wizard project-wizard-modal">
-      <div className="project-wizard-hero">
-        <h3>创建项目</h3>
-        <p>请仔细核对每一项内容和参数。</p>
-      </div>
-
-      <div className="project-wizard-steps is-modal">
+      <div className="project-wizard-steps is-modal is-ref">
         {STEPS.map((title, index) => {
           const n = index + 1;
           const done = step > n;
@@ -285,80 +298,92 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
         })}
       </div>
 
-      <form className="project-wizard-form" onSubmit={handleSubmit}>
-        {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+      <form className="project-wizard-form is-modal-layout" onSubmit={handleSubmit}>
+        <div className="project-wizard-scroll">
+          {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
 
         {step === 1 ? (
-          <div className="project-form-section is-horizontal">
+          <div className="project-form-section is-horizontal is-ref">
             <FormRow
               label="业务空间:"
               required
               hint={
-                workspaceMode === "select"
-                  ? loadingWorkspaces
-                    ? "正在加载可访问的业务空间..."
-                    : workspaces.length > 0
-                      ? `共 ${workspaces.length} 个可访问业务空间，默认为当前工作区，可切换到手动输入`
-                      : "暂无可访问的业务空间，可切换到手动输入"
-                  : "手动输入命名空间名称，支持小写字母、数字和连字符(-)，不超过63个字符"
+                workspaceMode === "manual"
+                  ? "手动输入命名空间名称，支持小写字母、数字和连字符(-)，不超过63个字符"
+                  : undefined
               }
             >
-              <div className="project-namespace-group">
-                {workspaceMode === "select" ? (
-                  <select
-                    className="input"
-                    value={targetWorkspaceId}
-                    disabled={loadingWorkspaces || workspaces.length === 0}
-                    onFocus={() => {
-                      if (workspaces.length === 0) void loadWorkspaces();
-                    }}
-                    onChange={(e) => handleWorkspaceChange(e.target.value)}
+              <div className="project-namespace-row">
+                <div className="project-namespace-group">
+                  {workspaceMode === "select" ? (
+                    <select
+                      className="input"
+                      value={targetWorkspaceId}
+                      disabled={loadingWorkspaces || workspaces.length === 0}
+                      onFocus={() => {
+                        if (workspaces.length === 0) void loadWorkspaces();
+                      }}
+                      onChange={(e) => handleWorkspaceChange(e.target.value)}
+                    >
+                      {loadingWorkspaces ? (
+                        <option value={targetWorkspaceId}>正在加载业务空间...</option>
+                      ) : workspaces.length === 0 ? (
+                        <option value="">暂无命名空间</option>
+                      ) : (
+                        workspaces.map((ws) => (
+                          <option key={ws.id} value={ws.id}>
+                            {workspaceOptionLabel(ws)}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  ) : (
+                    <input
+                      className="input"
+                      placeholder="请输入命名空间名称，如 default、production"
+                      value={form.namespace ?? ""}
+                      onChange={(e) => updateForm({ namespace: e.target.value })}
+                      maxLength={63}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    className="project-icon-btn"
+                    title={workspaceMode === "select" ? "切换到手动输入" : "切换到下拉选择"}
+                    onClick={toggleWorkspaceMode}
                   >
-                    {loadingWorkspaces ? (
-                      <option value={targetWorkspaceId}>正在加载业务空间...</option>
-                    ) : workspaces.length === 0 ? (
-                      <option value="">暂无业务空间</option>
-                    ) : (
-                      workspaces.map((ws) => (
-                        <option key={ws.id} value={ws.id}>
-                          {workspaceOptionLabel(ws)}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                ) : (
-                  <input
-                    className="input"
-                    placeholder="请输入命名空间名称，如 default、production"
-                    value={form.namespace ?? ""}
-                    onChange={(e) => updateForm({ namespace: e.target.value })}
-                    maxLength={63}
-                  />
-                )}
-                <button
-                  type="button"
-                  className="project-icon-btn"
-                  title={workspaceMode === "select" ? "切换到手动输入" : "切换到下拉选择"}
-                  onClick={toggleWorkspaceMode}
-                >
-                  {workspaceMode === "select" ? "✎" : "☰"}
-                </button>
+                    {workspaceMode === "select" ? "✎" : "☰"}
+                  </button>
+                </div>
+                {workspaceMode === "select" ? (
+                  <p className="project-inline-hint">
+                    <span className="project-hint-icon" title="帮助">
+                      i
+                    </span>
+                    {loadingWorkspaces
+                      ? "正在加载命名空间..."
+                      : "点击下拉框加载命名空间，或切换到手动输入"}
+                  </p>
+                ) : null}
               </div>
             </FormRow>
 
             <FormRow
               label="项目英文名:"
               required
-              hint="仅支持英文小写字母数字 - 名称不能纯数字,不能有大写,不能有'_'"
+              hint={PROJECT_NAME_RULE_HINT}
+              error={projectNameError}
             >
               <div className="project-input-counter-wrap">
                 <input
-                  className="input"
+                  className={`input${projectNameError ? " is-invalid" : ""}`}
                   placeholder="请输入项目英文名"
                   value={form.name}
                   onChange={(e) => handleNameChange(e.target.value)}
+                  onBlur={() => setNameTouched(true)}
                   maxLength={50}
                   required
+                  aria-invalid={Boolean(projectNameError)}
                 />
                 <CharCounter value={form.name} max={50} />
               </div>
@@ -381,8 +406,9 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
             <FormRow label="项目描述:">
               <div className="project-textarea-wrap">
                 <textarea
-                  className="input min-h-24"
+                  className="input project-desc-input"
                   placeholder="请填写项目描述..."
+                  rows={3}
                   value={form.description ?? ""}
                   onChange={(e) => updateForm({ description: e.target.value })}
                   maxLength={200}
@@ -407,7 +433,7 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
         ) : null}
 
         {step === 3 ? (
-          <div className="project-form-section is-horizontal">
+          <div className="project-form-section is-horizontal is-ref">
             <FormRow label="项目模板:" hint="可从模板库选择 Deployment / Service 等配置模板（可选）">
               <select
                 className="input"
@@ -436,8 +462,10 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
             ) : null}
           </div>
         ) : null}
+        </div>
 
-        <div className="project-wizard-actions is-centered">
+        <div className="project-wizard-bottom">
+          <div className="project-wizard-actions is-centered">
           {step > 1 ? (
             <button type="button" className="btn-secondary" onClick={handlePrev}>
               上一步
@@ -446,24 +474,24 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
           {step < 3 ? (
             <button
               type="button"
-              className="btn project-btn-primary"
+              className="btn project-btn-primary project-btn-next"
               onClick={() => void handleNext()}
               disabled={submitting}
             >
               {submitting ? "保存中…" : "下一步"}
             </button>
           ) : (
-            <button type="submit" className="btn project-btn-primary" disabled={submitting}>
+            <button type="submit" className="btn project-btn-primary project-btn-next" disabled={submitting}>
               {submitting ? "创建中…" : "创建项目"}
             </button>
           )}
+          </div>
+          <div className="project-wizard-tips">
+            <strong>提示</strong>
+            <p>请根据项目实际需求，设置合理的参数</p>
+          </div>
         </div>
       </form>
-
-      <div className="project-wizard-tips">
-        <strong>提示</strong>
-        <p>请根据项目实际需求，设置合理的参数</p>
-      </div>
     </div>
   );
 }

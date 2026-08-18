@@ -23,11 +23,19 @@ import {
 interface ProjectPanelProps {
   workspaceId: string;
   initialCreateOpen?: boolean;
+  /** When create was opened via ?create=1, close clears this path instead of always /projects */
+  createQueryPath?: string;
 }
 
 type ViewMode = "card" | "table";
 
-export function ProjectPanel({ workspaceId, initialCreateOpen = false }: ProjectPanelProps) {
+const PAGE_SIZES = [6, 9, 12, 24] as const;
+
+export function ProjectPanel({
+  workspaceId,
+  initialCreateOpen = false,
+  createQueryPath = "/projects",
+}: ProjectPanelProps) {
   const router = useRouter();
   const [items, setItems] = useState<ProjectVM[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,6 +46,8 @@ export function ProjectPanel({ workspaceId, initialCreateOpen = false }: Project
   const [statusFilter, setStatusFilter] = useState("");
   const [languageFilter, setLanguageFilter] = useState("");
   const [namespaceFilter, setNamespaceFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(9);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,6 +76,17 @@ export function ProjectPanel({ workspaceId, initialCreateOpen = false }: Project
         .some((v) => v?.toLowerCase().includes(kw));
     });
   }, [items, keyword, statusFilter, languageFilter, namespaceFilter]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [keyword, statusFilter, languageFilter, namespaceFilter, pageSize, viewMode]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paged = useMemo(() => {
+    const current = Math.min(page, totalPages);
+    const start = (current - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, page, pageSize, totalPages]);
 
   async function onArchive(item: ProjectVM) {
     if (!window.confirm(`确定归档项目「${projectDisplayName(item)}」？`)) return;
@@ -182,67 +203,105 @@ export function ProjectPanel({ workspaceId, initialCreateOpen = false }: Project
             创建第一个项目
           </button>
         </div>
-      ) : viewMode === "card" ? (
-        <div className="project-card-grid">
-          {filtered.map((project) => (
-            <ProjectCard key={project.id} project={project} onArchive={(p) => void onArchive(p)} />
-          ))}
-        </div>
       ) : (
-        <div className="project-table-shell">
-          <table className="data-table project-table">
-            <thead>
-              <tr>
-                <th>项目名称</th>
-                <th>命名空间</th>
-                <th>语言</th>
-                <th>状态</th>
-                <th>Git 地址</th>
-                <th>创建时间</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((project) => (
-                <tr key={project.id}>
-                  <td>
-                    <div className="project-table-name">
-                      <span
-                        className="project-lang-icon is-sm"
-                        style={{ backgroundColor: languageColor(project.language) }}
-                      >
-                        {languageLabel(project.language).charAt(0).toUpperCase()}
-                      </span>
-                      <div>
-                        <div className="font-medium">{projectDisplayName(project)}</div>
-                        <div className="text-xs text-muted-foreground">{project.name}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td>{project.namespace || "-"}</td>
-                  <td>{languageLabel(project.language)}</td>
-                  <td>
-                    <span className={statusBadgeClass(project.status)}>
-                      {labelOf(PROJECT_STATUS_OPTIONS, project.status)}
-                    </span>
-                  </td>
-                  <td className="project-url-cell" title={project.git_url}>
-                    {project.git_url || "-"}
-                  </td>
-                  <td>{formatDateTime(project.created_at)}</td>
-                  <td>
-                    <div className="project-row-actions">
-                      <Link href={`/projects/${project.id}`}>进入</Link>
-                      <button type="button" className="is-danger" onClick={() => void onArchive(project)}>
-                        归档
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+        <>
+          {viewMode === "card" ? (
+            <div className="project-card-grid">
+              {paged.map((project) => (
+                <ProjectCard key={project.id} project={project} onArchive={(p) => void onArchive(p)} />
               ))}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          ) : (
+            <div className="project-table-shell">
+              <table className="data-table project-table">
+                <thead>
+                  <tr>
+                    <th>项目名称</th>
+                    <th>命名空间</th>
+                    <th>语言</th>
+                    <th>状态</th>
+                    <th>Git 地址</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paged.map((project) => (
+                    <tr key={project.id}>
+                      <td>
+                        <div className="project-table-name">
+                          <span
+                            className="project-lang-icon is-sm"
+                            style={{ backgroundColor: languageColor(project.language) }}
+                          >
+                            {languageLabel(project.language).charAt(0).toUpperCase()}
+                          </span>
+                          <div>
+                            <div className="font-medium">{projectDisplayName(project)}</div>
+                            <div className="text-xs text-muted-foreground">{project.name}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td>{project.namespace || "-"}</td>
+                      <td>{languageLabel(project.language)}</td>
+                      <td>
+                        <span className={statusBadgeClass(project.status)}>
+                          {labelOf(PROJECT_STATUS_OPTIONS, project.status)}
+                        </span>
+                      </td>
+                      <td className="project-url-cell" title={project.git_url}>
+                        {project.git_url || "-"}
+                      </td>
+                      <td>{formatDateTime(project.created_at)}</td>
+                      <td>
+                        <div className="project-row-actions">
+                          <Link href={`/projects/${project.id}`}>进入</Link>
+                          <Link href={`/projects/${project.id}?configure=1`}>继续配置</Link>
+                          <button type="button" className="is-danger" onClick={() => void onArchive(project)}>
+                            归档
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="project-pagination">
+            <span className="project-pagination-total">共 {filtered.length} 个项目</span>
+            <select
+              className="input project-page-size"
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value) as (typeof PAGE_SIZES)[number])}
+            >
+              {PAGE_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size} 条/页
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn-secondary text-sm"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              上一页
+            </button>
+            <span className="project-page-indicator">
+              {Math.min(page, totalPages)} / {totalPages}
+            </span>
+            <button
+              type="button"
+              className="btn-secondary text-sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              下一页
+            </button>
+          </div>
+        </>
       )}
 
       <ProjectCreateModal
@@ -250,7 +309,7 @@ export function ProjectPanel({ workspaceId, initialCreateOpen = false }: Project
         workspaceId={workspaceId}
         onClose={() => {
           setCreateOpen(false);
-          if (initialCreateOpen) router.replace("/projects");
+          if (initialCreateOpen) router.replace(createQueryPath);
         }}
         onSuccess={handleCreateSuccess}
       />
