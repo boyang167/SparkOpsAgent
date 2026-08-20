@@ -79,7 +79,7 @@ export function ProjectConfigurePanel({
   );
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || project.review_status === "pending") return;
     setStep(2);
     setForm(projectToForm(project));
     setError(null);
@@ -195,6 +195,14 @@ export function ProjectConfigurePanel({
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (project.review_status === "pending") {
+    return (
+      <Modal open={open} onClose={onClose} title="项目审核中">
+        <InlineAlert tone="error">项目审核中，无法修改配置。请等待审核通过或驳回后再操作。</InlineAlert>
+      </Modal>
+    );
   }
 
   return (

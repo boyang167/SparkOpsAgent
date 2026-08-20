@@ -43,6 +43,24 @@ export function createWorkspaceUpstream(options: UpstreamRequestOptions = {}) {
       });
     },
 
+    async submitProjectReview(workspaceId: string, projectId: string) {
+      return upstreamFetch<import("@sparkops/contracts/workspace").ProjectVM>(
+        `/api/v1/projects/${projectId}/submit-review`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async reviewProject(
+      workspaceId: string,
+      projectId: string,
+      input: import("@sparkops/contracts/workspace").DecideProjectReviewCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/workspace").ProjectVM>(
+        `/api/v1/projects/${projectId}/review`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
     async listProjectMembers(workspaceId: string, projectId: string) {
       return upstreamFetch<{ items: import("@sparkops/contracts/workspace").ProjectMemberVM[] }>(
         `/api/v1/projects/${projectId}/members`,

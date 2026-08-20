@@ -30,6 +30,9 @@ export const ProjectResourcesSchema = z.object({
 
 export type ProjectResources = z.infer<typeof ProjectResourcesSchema>;
 
+export const ProjectReviewStatusSchema = z.enum(["none", "pending", "approved", "rejected"]);
+export type ProjectReviewStatus = z.infer<typeof ProjectReviewStatusSchema>;
+
 export const ProjectVMSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -45,6 +48,14 @@ export const ProjectVMSchema = z.object({
   template_id: z.string().optional(),
   resources: ProjectResourcesSchema.optional(),
   status: z.string(),
+  review_status: ProjectReviewStatusSchema.optional().default("none"),
+  submitted_by: z.string().optional(),
+  submitted_at: z.string().optional(),
+  reviewed_by: z.string().optional(),
+  reviewed_at: z.string().optional(),
+  review_comment: z.string().optional().default(""),
+  can_submit_review: z.boolean().optional().default(false),
+  can_review: z.boolean().optional().default(false),
   created_at: z.string().optional(),
 });
 
@@ -76,6 +87,23 @@ export type CreateProjectCommand = z.infer<typeof CreateProjectCommandSchema>;
 export const UpdateProjectCommandSchema = CreateProjectCommandSchema;
 
 export type UpdateProjectCommand = z.infer<typeof UpdateProjectCommandSchema>;
+
+export const DecideProjectReviewCommandSchema = z
+  .object({
+    decision: z.enum(["approved", "rejected"]),
+    comment: z.string().optional().default(""),
+  })
+  .superRefine((value, ctx) => {
+    if (value.decision === "rejected" && !value.comment.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["comment"],
+        message: "驳回意见不能为空",
+      });
+    }
+  });
+
+export type DecideProjectReviewCommand = z.infer<typeof DecideProjectReviewCommandSchema>;
 
 export const PROJECT_LANGUAGE_OPTIONS = [
   { value: "go", label: "Go", color: "#00ADD8" },

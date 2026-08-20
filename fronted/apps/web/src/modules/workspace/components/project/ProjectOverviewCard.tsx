@@ -9,16 +9,23 @@ import {
   languageLabel,
   projectDisplayName,
 } from "./project-utils";
-import { computeProjectProgress, type ProjectProgressStep } from "./project-progress";
+import {
+  computeProjectProgress,
+  projectPrimaryAction,
+  type ProjectProgressStep,
+} from "./project-progress";
 
 interface ProjectOverviewCardProps {
   project: ProjectVM;
   heading?: "h2" | "h3";
   detailsHref?: string;
   continueHref?: string;
+  deployHref?: string;
   onViewDetails?: () => void;
   onContinueConfig?: () => void;
+  onDeploy?: () => void;
   onSubmitReview?: (project: ProjectVM) => void;
+  onReview?: (project: ProjectVM) => void;
   onArchive?: (project: ProjectVM) => void;
 }
 
@@ -95,12 +102,16 @@ export function ProjectOverviewCard({
   heading = "h3",
   detailsHref,
   continueHref,
+  deployHref,
   onViewDetails,
   onContinueConfig,
+  onDeploy,
   onSubmitReview,
+  onReview,
   onArchive,
 }: ProjectOverviewCardProps) {
-  const { steps, statusLabel, configComplete } = computeProjectProgress(project);
+  const { steps, statusLabel } = computeProjectProgress(project);
+  const primaryAction = projectPrimaryAction(project);
   const langColor = languageColor(project.language);
   const initial = languageLabel(project.language).charAt(0).toUpperCase() || "P";
   const TitleTag = heading;
@@ -160,7 +171,7 @@ export function ProjectOverviewCard({
               查看详情
             </Link>
           )}
-          {configComplete ? (
+          {primaryAction === "submit" ? (
             <button
               type="button"
               className="project-action-btn is-submit"
@@ -168,6 +179,31 @@ export function ProjectOverviewCard({
             >
               提交审核
             </button>
+          ) : primaryAction === "review" ? (
+            <button
+              type="button"
+              className="project-action-btn is-submit"
+              onClick={() => onReview?.(project)}
+            >
+              审核
+            </button>
+          ) : primaryAction === "pending" ? (
+            <button type="button" className="project-action-btn is-submit" disabled>
+              审核中
+            </button>
+          ) : primaryAction === "deploy" ? (
+            onDeploy ? (
+              <button type="button" className="project-action-btn is-deploy" onClick={onDeploy}>
+                部署
+              </button>
+            ) : (
+              <Link
+                href={deployHref ?? detailsHref ?? `/projects/${project.id}`}
+                className="project-action-btn is-deploy"
+              >
+                部署
+              </Link>
+            )
           ) : onContinueConfig ? (
             <button type="button" className="project-action-btn is-config" onClick={onContinueConfig}>
               继续配置

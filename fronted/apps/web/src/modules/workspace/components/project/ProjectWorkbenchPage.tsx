@@ -1,15 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { BffError } from "@sparkops/contracts";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
+import { workspace } from "@sparkops/web-sdk";
 import type { AgentVM } from "@sparkops/contracts/agent";
 import type { WorkflowVM } from "@sparkops/contracts/workflow";
+import { InlineAlert } from "@/components/ui/InlineAlert";
 import { EditProjectForm, DeleteProjectButton } from "../ProjectSettings";
 import { ProjectWorkbenchCard } from "./ProjectWorkbenchCard";
 import { ProjectConfigurePanel } from "./ProjectConfigurePanel";
 import { ProjectDetailModal } from "./ProjectDetailModal";
+import { ProjectReviewModal } from "./ProjectReviewModal";
+import { projectDisplayName } from "./project-utils";
 
 interface ProjectWorkbenchPageProps {
   workspaceId: string;
@@ -29,6 +34,41 @@ export function ProjectWorkbenchPage({
   const router = useRouter();
   const [configureOpen, setConfigureOpen] = useState(initialConfigure);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [currentProject, setCurrentProject] = useState(project);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCurrentProject(project);
+  }, [project]);
+
+  async function submitReview() {
+    if (!window.confirm(`确定提交项目「${projectDisplayName(currentProject)}」审核？提交后配置将暂时锁定。`)) {
+      return;
+    }
+    setError(null);
+    try {
+      setCurrentProject(await workspace.submitProjectReview(workspaceId, currentProject.id));
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "提交审核失败");
+    }
+  }
+
+  async function reviewProject(input: Parameters<typeof workspace.reviewProject>[2]) {
+    setReviewLoading(true);
+    setError(null);
+    try {
+      setCurrentProject(await workspace.reviewProject(workspaceId, currentProject.id, input));
+      setReviewOpen(false);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "项目审核失败");
+    } finally {
+      setReviewLoading(false);
+    }
+  }
 
   return (
     <div className="stack-lg">
@@ -36,25 +76,30 @@ export function ProjectWorkbenchPage({
         ← 返回项目管理
       </Link>
 
+      {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+
       <ProjectWorkbenchCard
-        project={project}
+        project={currentProject}
         onContinueConfig={() => setConfigureOpen(true)}
+        onDeploy={() => setDetailOpen(true)}
         onViewDetails={() => setDetailOpen(true)}
+        onSubmitReview={() => void submitReview()}
+        onReview={() => setReviewOpen(true)}
       />
 
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <EditProjectForm workspaceId={workspaceId} project={project} />
+        <EditProjectForm workspaceId={workspaceId} project={currentProject} />
         <DeleteProjectButton
           workspaceId={workspaceId}
-          projectId={project.id}
-          projectName={project.name}
+          projectId={currentProject.id}
+          projectName={currentProject.name}
         />
       </div>
 
       <ProjectConfigurePanel
         open={configureOpen}
         workspaceId={workspaceId}
-        project={project}
+        project={currentProject}
         onClose={() => setConfigureOpen(false)}
         onSaved={() => {
           setConfigureOpen(false);
@@ -65,10 +110,20 @@ export function ProjectWorkbenchPage({
       <ProjectDetailModal
         open={detailOpen}
         workspaceId={workspaceId}
-        project={project}
+        project={currentProject}
         agents={agents}
         workflows={workflows}
         onClose={() => setDetailOpen(false)}
+      />
+      <ProjectReviewModal
+        open={reviewOpen}
+        workspaceId={workspaceId}
+        project={currentProject}
+        loading={reviewLoading}
+        onClose={() => {
+          if (!reviewLoading) setReviewOpen(false);
+        }}
+        onSubmit={(input) => void reviewProject(input)}
       />
     </div>
   );

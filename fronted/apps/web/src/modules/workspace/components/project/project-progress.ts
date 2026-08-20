@@ -10,6 +10,8 @@ export interface ProjectProgressStep {
   status: ProgressStatus;
 }
 
+export type ProjectPrimaryAction = "configure" | "submit" | "review" | "pending" | "deploy";
+
 export function isProjectConfigComplete(
   project: Pick<ProjectVM, "git_url" | "git_ref_value" | "dockerfile_path" | "template_id" | "resources">,
 ) {
@@ -27,6 +29,9 @@ export function computeProjectProgress(project: ProjectVM): {
   statusLabel: string;
 } {
   const configComplete = isProjectConfigComplete(project);
+  const reviewStatus = project.review_status ?? "none";
+  const submitted = reviewStatus === "pending" || reviewStatus === "approved";
+  const approved = reviewStatus === "approved";
   const steps: ProjectProgressStep[] = [
     { key: "created", title: "创建项目", subtitle: "基本信息", status: "done" },
     {
@@ -38,14 +43,43 @@ export function computeProjectProgress(project: ProjectVM): {
     {
       key: "submitted",
       title: "提交审核",
-      subtitle: "等待审核",
-      status: configComplete ? "active" : "pending",
+      subtitle:
+        reviewStatus === "rejected"
+          ? "重新提交"
+          : reviewStatus === "pending"
+            ? "等待审核"
+            : submitted
+              ? "已提交"
+              : "等待提交",
+      status: submitted ? "done" : configComplete ? "active" : "pending",
     },
-    { key: "approved", title: "审核完成", subtitle: "审核通过", status: "pending" },
+    {
+      key: "approved",
+      title: "审核完成",
+      subtitle: approved ? "待部署" : reviewStatus === "pending" ? "等待审核" : "未开始",
+      status: approved ? "done" : reviewStatus === "pending" ? "active" : "pending",
+    },
   ];
   return {
     steps,
     configComplete,
-    statusLabel: "创建完成",
+    statusLabel: !configComplete
+      ? "配置中"
+      : reviewStatus === "pending"
+        ? "审核中"
+        : reviewStatus === "approved"
+          ? "待部署"
+          : reviewStatus === "rejected"
+            ? "审核驳回"
+            : "待提交审核",
   };
+}
+
+export function projectPrimaryAction(project: ProjectVM): ProjectPrimaryAction {
+  if (project.review_status === "approved") return "deploy";
+  if (!isProjectConfigComplete(project)) return "configure";
+  if (project.can_review) return "review";
+  if (project.can_submit_review) return "submit";
+  if (project.review_status === "pending") return "pending";
+  return "configure";
 }

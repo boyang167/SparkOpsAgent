@@ -6,7 +6,7 @@ import { BffError, PERMISSION_OPTIONS } from "@sparkops/contracts";
 import type { RoleTreeVM } from "@sparkops/contracts/governance";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
-import { collectRoleParentOptions } from "./role-utils";
+import { collectRoleParentOptions, isProtectedRole } from "./role-utils";
 
 export type RoleFormMode = "create" | "edit" | "copy";
 
@@ -110,6 +110,7 @@ export function RoleFormModal({
             placeholder="请输入角色名称"
             value={name}
             onChange={(e) => setName(e.target.value)}
+            disabled={mode === "edit" && Boolean(role && isProtectedRole(role.name))}
             required
           />
         </label>

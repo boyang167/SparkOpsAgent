@@ -6305,3 +6305,200 @@ textarea {
   }
 }
 
+/* Project review modal */
+.project-review-modal .modal-body {
+  background: #f5f7fa;
+  padding-top: 0.75rem;
+}
+
+.project-review-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.project-review-section {
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 1rem 1.125rem 1.125rem;
+}
+
+.project-review-section-title {
+  margin: 0 0 0.875rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #303133;
+}
+
+.project-review-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1.5rem;
+}
+
+.project-review-field {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: start;
+}
+
+.project-review-field.is-full {
+  grid-column: 1 / -1;
+}
+
+.project-review-field-label {
+  font-size: 0.8125rem;
+  color: #909399;
+  text-align: right;
+  line-height: 1.5;
+}
+
+.project-review-field-value {
+  font-size: 0.875rem;
+  color: #303133;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.project-generated-review .project-generated-tabs {
+  margin-top: 0;
+}
+
+.project-generated-code-review {
+  max-height: 16rem;
+}
+
+.project-review-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.project-review-form-row {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.project-review-form-row.is-vertical {
+  align-items: start;
+}
+
+.project-review-form-label {
+  font-size: 0.8125rem;
+  color: #606266;
+  text-align: right;
+  line-height: 1.5;
+  padding-top: 0.15rem;
+}
+
+.project-review-required {
+  color: #f56c6c;
+  margin-right: 0.15rem;
+}
+
+.project-review-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+
+.project-review-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+  color: #606266;
+  cursor: pointer;
+  user-select: none;
+}
+
+.project-review-radio input {
+  width: 0.95rem;
+  height: 0.95rem;
+  margin: 0;
+  accent-color: #409eff;
+}
+
+.project-review-radio.is-checked {
+  color: #303133;
+}
+
+.project-review-textarea-wrap {
+  position: relative;
+}
+
+.project-review-textarea {
+  width: 100%;
+  min-height: 6.5rem;
+  padding: 0.65rem 0.75rem 1.75rem;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: #303133;
+  resize: vertical;
+  background: #fff;
+}
+
+.project-review-textarea:focus {
+  outline: none;
+  border-color: #409eff;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.12);
+}
+
+.project-review-textarea:disabled {
+  background: #f5f7fa;
+  cursor: not-allowed;
+}
+
+.project-review-counter {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.5rem;
+  font-size: 0.75rem;
+  color: #909399;
+  pointer-events: none;
+}
+
+.project-review-submit {
+  background: #67c23a;
+  border-color: #67c23a;
+  color: #fff;
+}
+
+.project-review-submit:hover:not(:disabled) {
+  background: #85ce61;
+  border-color: #85ce61;
+  color: #fff;
+}
+
+.project-review-submit.is-reject {
+  background: #f56c6c;
+  border-color: #f56c6c;
+}
+
+.project-review-submit.is-reject:hover:not(:disabled) {
+  background: #f78989;
+  border-color: #f78989;
+}
+
+@media (max-width: 768px) {
+  .project-review-info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .project-review-field,
+  .project-review-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .project-review-field-label,
+  .project-review-form-label {
+    text-align: left;
+  }
+}
+

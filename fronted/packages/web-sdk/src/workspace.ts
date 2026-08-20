@@ -1,4 +1,7 @@
-import type { CreateProjectCommand } from "@sparkops/contracts/workspace";
+import type {
+  CreateProjectCommand,
+  DecideProjectReviewCommand,
+} from "@sparkops/contracts/workspace";
 import { bffFetch, type BffFetchOptions } from "./client";
 
 function withWorkspace(workspaceId: string, options: BffFetchOptions = {}): BffFetchOptions {
@@ -48,6 +51,31 @@ export function archiveProject(workspaceId: string, projectId: string) {
     method: "DELETE",
     ...withWorkspace(workspaceId),
   });
+}
+
+export function submitProjectReview(workspaceId: string, projectId: string) {
+  return bffFetch<import("@sparkops/contracts/workspace").ProjectVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/submit-review`,
+    {
+      method: "POST",
+      ...withWorkspace(workspaceId),
+    },
+  );
+}
+
+export function reviewProject(
+  workspaceId: string,
+  projectId: string,
+  input: DecideProjectReviewCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/workspace").ProjectVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/review`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+      ...withWorkspace(workspaceId),
+    },
+  );
 }
 
 export function listProjectMembers(workspaceId: string, projectId: string) {

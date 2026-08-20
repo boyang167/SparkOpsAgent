@@ -12,7 +12,9 @@ import { RoleFormModal, type RoleFormMode } from "./roles/RoleFormModal";
 import {
   computeRoleStats,
   flattenRoleTree,
+  isProtectedRole,
   parentRoleLabel,
+  roleDisplayName,
 } from "./roles/role-utils";
 
 function permissionLabel(value: string) {
@@ -181,8 +183,8 @@ export function RoleTreePanel({ workspaceId }: RoleTreePanelProps) {
                   <td className="font-mono text-xs text-muted">{role.id.slice(0, 8)}…</td>
                   <td className="font-medium" style={{ paddingLeft: `${role.depth * 1.25 + 0.75}rem` }}>
                     {role.depth > 0 ? "↳ " : null}
-                    {role.name}
-                    {role.name === "admin" ? <span className="badge badge-neutral ml-2">系统</span> : null}
+                    {roleDisplayName(role.name)}
+                    {isProtectedRole(role.name) ? <span className="badge badge-neutral ml-2">系统</span> : null}
                   </td>
                   <td className="text-sm">{parentRoleLabel(tree, role.parent_id)}</td>
                   <td>
@@ -228,7 +230,7 @@ export function RoleTreePanel({ workspaceId }: RoleTreePanelProps) {
                       >
                         编辑
                       </button>
-                      {role.name !== "admin" ? (
+                      {!isProtectedRole(role.name) ? (
                         <button
                           type="button"
                           className="text-xs text-red-600 hover:underline"

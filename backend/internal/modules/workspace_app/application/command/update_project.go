@@ -24,7 +24,7 @@ func (h *UpdateProjectHandler) Handle(
 	wsID kernel.WorkspaceID,
 	memberID kernel.MemberID,
 	projectID kernel.ProjectID,
-	input model.CreateProjectInput,
+	input model.UpdateProjectInput,
 ) (*model.Project, error) {
 	ok, err := h.wsChecker.MemberInWorkspace(ctx, memberID, wsID)
 	if err != nil {
@@ -42,16 +42,18 @@ func (h *UpdateProjectHandler) Handle(
 		return nil, domain.ErrProjectNotFound
 	}
 
-	name, err := model.NewProjectName(input.Name)
-	if err != nil {
-		return nil, err
-	}
-	if name.String() != project.Name.String() {
-		if existing, _ := h.repo.FindByWorkspaceAndName(ctx, wsID, name); existing != nil {
-			return nil, domain.ErrProjectNameExists
+	if input.Name != nil {
+		name, err := model.NewProjectName(*input.Name)
+		if err != nil {
+			return nil, err
+		}
+		if name.String() != project.Name.String() {
+			if existing, _ := h.repo.FindByWorkspaceAndName(ctx, wsID, name); existing != nil {
+				return nil, domain.ErrProjectNameExists
+			}
 		}
 	}
-	if err := project.UpdateDetails(input); err != nil {
+	if err := project.ApplyPatch(input); err != nil {
 		return nil, err
 	}
 	if err := h.repo.Update(ctx, project); err != nil {

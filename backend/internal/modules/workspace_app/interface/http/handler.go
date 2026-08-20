@@ -16,31 +16,33 @@ import (
 )
 
 type Handler struct {
-	create  *command.CreateProjectHandler
-	update  *command.UpdateProjectHandler
-	archive *command.ArchiveProjectHandler
-	list    *query.ListProjectsHandler
-	get     *query.GetProjectHandler
-	createTemplate   *command.CreateTemplateHandler
-	updateTemplate   *command.UpdateTemplateHandler
-	deleteTemplate   *command.DeleteTemplateHandler
-	listTemplates    *query.ListTemplatesHandler
-	getTemplate      *query.GetTemplateHandler
-	createSecret     *command.CreateSecretHandler
-	updateSecret     *command.UpdateSecretHandler
-	deleteSecret     *command.DeleteSecretHandler
-	listSecrets      *query.ListSecretsHandler
-	getSecret        *query.GetSecretHandler
-	testSecret       *query.TestSecretConnectionHandler
-	secretCrypto     *application.SecretCrypto
-	createDockerfile *command.CreateDockerfileHandler
-	listDockerfiles  *query.ListDockerfilesHandler
-	addMember        *command.AddProjectMemberHandler
-	updateMemberRole *command.UpdateProjectMemberRoleHandler
-	removeMember     *command.RemoveProjectMemberHandler
-	listMembers      *query.ListProjectMembersHandler
+	create            *command.CreateProjectHandler
+	update            *command.UpdateProjectHandler
+	archive           *command.ArchiveProjectHandler
+	list              *query.ListProjectsHandler
+	get               *query.GetProjectHandler
+	createTemplate    *command.CreateTemplateHandler
+	updateTemplate    *command.UpdateTemplateHandler
+	deleteTemplate    *command.DeleteTemplateHandler
+	listTemplates     *query.ListTemplatesHandler
+	getTemplate       *query.GetTemplateHandler
+	createSecret      *command.CreateSecretHandler
+	updateSecret      *command.UpdateSecretHandler
+	deleteSecret      *command.DeleteSecretHandler
+	listSecrets       *query.ListSecretsHandler
+	getSecret         *query.GetSecretHandler
+	testSecret        *query.TestSecretConnectionHandler
+	secretCrypto      *application.SecretCrypto
+	createDockerfile  *command.CreateDockerfileHandler
+	listDockerfiles   *query.ListDockerfilesHandler
+	addMember         *command.AddProjectMemberHandler
+	updateMemberRole  *command.UpdateProjectMemberRoleHandler
+	removeMember      *command.RemoveProjectMemberHandler
+	listMembers       *query.ListProjectMembersHandler
 	generateTemplates *query.GenerateProjectTemplatesHandler
-	memberLookup     port.MemberLookup
+	submitReview      *command.SubmitProjectReviewHandler
+	reviewProject     *command.ReviewProjectHandler
+	memberLookup      port.MemberLookup
 }
 
 func NewHandler(
@@ -68,6 +70,8 @@ func NewHandler(
 	removeMember *command.RemoveProjectMemberHandler,
 	listMembers *query.ListProjectMembersHandler,
 	generateTemplates *query.GenerateProjectTemplatesHandler,
+	submitReview *command.SubmitProjectReviewHandler,
+	reviewProject *command.ReviewProjectHandler,
 	memberLookup port.MemberLookup,
 ) *Handler {
 	return &Handler{
@@ -76,30 +80,31 @@ func NewHandler(
 		listTemplates: listTemplates, getTemplate: getTemplate,
 		createSecret: createSecret, updateSecret: updateSecret, deleteSecret: deleteSecret,
 		listSecrets: listSecrets, getSecret: getSecret, testSecret: testSecret,
-		secretCrypto: secretCrypto,
+		secretCrypto:     secretCrypto,
 		createDockerfile: createDockerfile, listDockerfiles: listDockerfiles,
 		addMember: addMember, updateMemberRole: updateMemberRole, removeMember: removeMember,
-		listMembers: listMembers, generateTemplates: generateTemplates, memberLookup: memberLookup,
+		listMembers: listMembers, generateTemplates: generateTemplates,
+		submitReview: submitReview, reviewProject: reviewProject, memberLookup: memberLookup,
 	}
 }
 
 type projectResourcesRequest struct {
-	CPURequest             string              `json:"cpu_request"`
-	CPULimit               string              `json:"cpu_limit"`
-	MemoryRequest          string              `json:"memory_request"`
-	MemoryLimit            string              `json:"memory_limit"`
-	Replicas               int                 `json:"replicas"`
-	Ports                  []model.ProjectPort `json:"ports"`
-	Command                string              `json:"command"`
-	Args                   string              `json:"args"`
-	ProjectConfig          string              `json:"project_config"`
-	ServiceTemplateID      string              `json:"service_template_id"`
+	CPURequest            string              `json:"cpu_request"`
+	CPULimit              string              `json:"cpu_limit"`
+	MemoryRequest         string              `json:"memory_request"`
+	MemoryLimit           string              `json:"memory_limit"`
+	Replicas              int                 `json:"replicas"`
+	Ports                 []model.ProjectPort `json:"ports"`
+	Command               string              `json:"command"`
+	Args                  string              `json:"args"`
+	ProjectConfig         string              `json:"project_config"`
+	ServiceTemplateID     string              `json:"service_template_id"`
 	DeploymentTemplateID  string              `json:"deployment_template_id"`
 	JenkinsfileTemplateID string              `json:"jenkinsfile_template_id"`
-	RegistryType           string              `json:"registry_type"`
-	RegistrySecretID       string              `json:"registry_secret_id"`
-	SonarqubeSecretID      string              `json:"sonarqube_secret_id"`
-	EnableStaticScan       bool                `json:"enable_static_scan"`
+	RegistryType          string              `json:"registry_type"`
+	RegistrySecretID      string              `json:"registry_secret_id"`
+	SonarqubeSecretID     string              `json:"sonarqube_secret_id"`
+	EnableStaticScan      bool                `json:"enable_static_scan"`
 }
 
 type projectPayload struct {
@@ -117,6 +122,21 @@ type projectPayload struct {
 	Resources      projectResourcesRequest `json:"resources"`
 }
 
+type projectUpdatePayload struct {
+	Name           *string                  `json:"name"`
+	DisplayName    *string                  `json:"display_name"`
+	Description    *string                  `json:"description"`
+	Namespace      *string                  `json:"namespace"`
+	Language       *string                  `json:"language"`
+	GitURL         *string                  `json:"git_url"`
+	SecretID       *string                  `json:"secret_id"`
+	GitRefType     *string                  `json:"git_ref_type"`
+	GitRefValue    *string                  `json:"git_ref_value"`
+	DockerfilePath *string                  `json:"dockerfile_path"`
+	TemplateID     *string                  `json:"template_id"`
+	Resources      *projectResourcesRequest `json:"resources"`
+}
+
 func toProjectInput(req projectPayload) model.CreateProjectInput {
 	return model.CreateProjectInput{
 		Name:           req.Name,
@@ -131,44 +151,77 @@ func toProjectInput(req projectPayload) model.CreateProjectInput {
 		DockerfilePath: req.DockerfilePath,
 		TemplateID:     req.TemplateID,
 		Resources: model.ProjectResources{
-			CPURequest:             req.Resources.CPURequest,
-			CPULimit:               req.Resources.CPULimit,
-			MemoryRequest:          req.Resources.MemoryRequest,
-			MemoryLimit:            req.Resources.MemoryLimit,
-			Replicas:               req.Resources.Replicas,
-			Ports:                  req.Resources.Ports,
-			Command:                req.Resources.Command,
-			Args:                   req.Resources.Args,
-			ProjectConfig:          req.Resources.ProjectConfig,
-			ServiceTemplateID:      req.Resources.ServiceTemplateID,
+			CPURequest:            req.Resources.CPURequest,
+			CPULimit:              req.Resources.CPULimit,
+			MemoryRequest:         req.Resources.MemoryRequest,
+			MemoryLimit:           req.Resources.MemoryLimit,
+			Replicas:              req.Resources.Replicas,
+			Ports:                 req.Resources.Ports,
+			Command:               req.Resources.Command,
+			Args:                  req.Resources.Args,
+			ProjectConfig:         req.Resources.ProjectConfig,
+			ServiceTemplateID:     req.Resources.ServiceTemplateID,
 			DeploymentTemplateID:  req.Resources.DeploymentTemplateID,
 			JenkinsfileTemplateID: req.Resources.JenkinsfileTemplateID,
-			RegistryType:           req.Resources.RegistryType,
-			RegistrySecretID:       req.Resources.RegistrySecretID,
-			SonarqubeSecretID:      req.Resources.SonarqubeSecretID,
-			EnableStaticScan:       req.Resources.EnableStaticScan,
+			RegistryType:          req.Resources.RegistryType,
+			RegistrySecretID:      req.Resources.RegistrySecretID,
+			SonarqubeSecretID:     req.Resources.SonarqubeSecretID,
+			EnableStaticScan:      req.Resources.EnableStaticScan,
 		},
 	}
+}
+
+func toProjectUpdateInput(req projectUpdatePayload) model.UpdateProjectInput {
+	input := model.UpdateProjectInput{
+		Name: req.Name, DisplayName: req.DisplayName, Description: req.Description,
+		Namespace: req.Namespace, Language: req.Language, GitURL: req.GitURL,
+		SecretID: req.SecretID, GitRefType: req.GitRefType, GitRefValue: req.GitRefValue,
+		DockerfilePath: req.DockerfilePath, TemplateID: req.TemplateID,
+	}
+	if req.Resources != nil {
+		input.Resources = &model.ProjectResources{
+			CPURequest: req.Resources.CPURequest, CPULimit: req.Resources.CPULimit,
+			MemoryRequest: req.Resources.MemoryRequest, MemoryLimit: req.Resources.MemoryLimit,
+			Replicas: req.Resources.Replicas, Ports: req.Resources.Ports,
+			Command: req.Resources.Command, Args: req.Resources.Args,
+			ProjectConfig:         req.Resources.ProjectConfig,
+			ServiceTemplateID:     req.Resources.ServiceTemplateID,
+			DeploymentTemplateID:  req.Resources.DeploymentTemplateID,
+			JenkinsfileTemplateID: req.Resources.JenkinsfileTemplateID,
+			RegistryType:          req.Resources.RegistryType, RegistrySecretID: req.Resources.RegistrySecretID,
+			SonarqubeSecretID: req.Resources.SonarqubeSecretID,
+			EnableStaticScan:  req.Resources.EnableStaticScan,
+		}
+	}
+	return input
 }
 
 func projectResponse(project *model.Project) gin.H {
 	view := query.ToView(project)
 	return gin.H{
-		"id":              view.ID,
-		"name":            view.Name,
-		"display_name":    view.DisplayName,
-		"description":     view.Description,
-		"namespace":       view.Namespace,
-		"language":        view.Language,
-		"git_url":         view.GitURL,
-		"secret_id":       view.SecretID,
-		"git_ref_type":    view.GitRefType,
-		"git_ref_value":   view.GitRefValue,
-		"dockerfile_path": view.DockerfilePath,
-		"template_id":     view.TemplateID,
-		"resources":       view.Resources,
-		"status":          view.Status,
-		"created_at":      view.CreatedAt,
+		"id":                view.ID,
+		"name":              view.Name,
+		"display_name":      view.DisplayName,
+		"description":       view.Description,
+		"namespace":         view.Namespace,
+		"language":          view.Language,
+		"git_url":           view.GitURL,
+		"secret_id":         view.SecretID,
+		"git_ref_type":      view.GitRefType,
+		"git_ref_value":     view.GitRefValue,
+		"dockerfile_path":   view.DockerfilePath,
+		"template_id":       view.TemplateID,
+		"resources":         view.Resources,
+		"status":            view.Status,
+		"review_status":     view.ReviewStatus,
+		"submitted_by":      view.SubmittedBy,
+		"submitted_at":      view.SubmittedAt,
+		"reviewed_by":       view.ReviewedBy,
+		"reviewed_at":       view.ReviewedAt,
+		"review_comment":    view.ReviewComment,
+		"can_submit_review": view.CanSubmitReview,
+		"can_review":        view.CanReview,
+		"created_at":        view.CreatedAt,
 	}
 }
 
@@ -279,17 +332,88 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
 		return
 	}
-	var req projectPayload
+	var req projectUpdatePayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
-	project, err := h.update.Handle(c.Request.Context(), wsID, memberID, projectID, toProjectInput(req))
+	project, err := h.update.Handle(c.Request.Context(), wsID, memberID, projectID, toProjectUpdateInput(req))
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
 	}
 	httpx.OK(c, projectResponse(project))
+}
+
+func (h *Handler) SubmitProjectReview(c *gin.Context) {
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	_, err = h.submitReview.Handle(c.Request.Context(), wsID, memberID, projectID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	view, err := h.get.Handle(c.Request.Context(), wsID, memberID, projectID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, view)
+}
+
+type projectReviewRequest struct {
+	Decision string `json:"decision" binding:"required,oneof=approved rejected"`
+	Comment  string `json:"comment"`
+}
+
+func (h *Handler) ReviewProject(c *gin.Context) {
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	var req projectReviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+	_, err = h.reviewProject.Handle(
+		c.Request.Context(), wsID, memberID, projectID,
+		model.ProjectReviewStatus(req.Decision), req.Comment,
+	)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	view, err := h.get.Handle(c.Request.Context(), wsID, memberID, projectID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, view)
 }
 
 func (h *Handler) ArchiveProject(c *gin.Context) {

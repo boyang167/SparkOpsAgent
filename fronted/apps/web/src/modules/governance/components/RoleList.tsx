@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { governance } from "@sparkops/web-sdk";
 import { BffError, PERMISSION_OPTIONS } from "@sparkops/contracts";
 import type { RoleVM } from "@sparkops/contracts/governance";
+import { isProtectedRole, roleDisplayName } from "./roles/role-utils";
 
 function permissionLabel(value: string) {
   return PERMISSION_OPTIONS.find((p) => p.value === value)?.label ?? value;
@@ -53,7 +54,7 @@ export function RoleList({ workspaceId, roles }: RoleListProps) {
   }
 
   async function onDelete(role: RoleVM) {
-    if (role.name === "admin") {
+    if (isProtectedRole(role.name)) {
       return;
     }
     if (!window.confirm(`确定删除角色「${role.name}」？相关成员绑定也会一并移除。`)) {
@@ -93,11 +94,11 @@ export function RoleList({ workspaceId, roles }: RoleListProps) {
           <tbody>
             {roles.map((role) => {
               const isEditing = editingId === role.id;
-              const isProtected = role.name === "admin";
+              const isProtected = isProtectedRole(role.name);
               return (
                 <tr key={role.id}>
                   <td className="font-medium">
-                    {role.name}
+                    {roleDisplayName(role.name)}
                     {isProtected ? (
                       <span className="badge badge-neutral ml-2">系统</span>
                     ) : null}

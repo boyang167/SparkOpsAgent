@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { identity } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 
-export default function AuthCallbackPage() {
+function AuthCallbackContent() {
   const router = useRouter();
   const params = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -34,5 +34,21 @@ export default function AuthCallbackPage() {
         {error ? <p className="error">{error}</p> : <p className="text-muted">正在完成 SSO 登录…</p>}
       </div>
     </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="auth-shell">
+          <div className="auth-card text-center">
+            <p className="text-muted">正在完成 SSO 登录…</p>
+          </div>
+        </div>
+      }
+    >
+      <AuthCallbackContent />
+    </Suspense>
   );
 }

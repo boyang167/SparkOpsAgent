@@ -8,9 +8,9 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/subscriber"
-	govhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/persistence"
+	govhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/interface/http"
 	identitycommand "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/application/command"
 	identitypersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
@@ -90,9 +90,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	listMembers := query.NewListWorkspaceMembersHandler(acl.NewMemberACL(c.DB), bindingRepo)
 	listMemberRoles := query.NewListMemberRolesHandler(bindingRepo)
 	bootstrap := command.NewBootstrapWorkspaceHandler(roleRepo, bindingRepo, apiPolicySync)
-	ensureAdminPerms := command.NewEnsureDefaultAdminPermissionsHandler(roleRepo)
-	if err := ensureAdminPerms.Handle(context.Background()); err != nil {
-		return fmt.Errorf("ensure admin permissions: %w", err)
+	ensureDefaultRoles := command.NewEnsureDefaultWorkspaceRolesHandler(roleRepo)
+	if err := ensureDefaultRoles.Handle(context.Background()); err != nil {
+		return fmt.Errorf("ensure default workspace roles: %w", err)
 	}
 
 	c.EventBus.Subscribe(integration.EventWorkspaceCreated, subscriber.NewOnWorkspaceCreated(bootstrap).Handle)

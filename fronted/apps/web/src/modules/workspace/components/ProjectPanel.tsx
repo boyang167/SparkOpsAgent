@@ -10,6 +10,7 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 import { ProjectCard } from "./project/ProjectCard";
 import { ProjectCreateModal } from "./project/ProjectCreateModal";
 import { ProjectDetailModal } from "./project/ProjectDetailModal";
+import { ProjectReviewModal } from "./project/ProjectReviewModal";
 import {
   formatDateTime,
   labelOf,
@@ -20,6 +21,7 @@ import {
   projectDisplayName,
   statusBadgeClass,
 } from "./project/project-utils";
+import { projectPrimaryAction } from "./project/project-progress";
 
 interface ProjectPanelProps {
   workspaceId: string;
@@ -43,6 +45,8 @@ export function ProjectPanel({
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(initialCreateOpen);
   const [detailProject, setDetailProject] = useState<ProjectVM | null>(null);
+  const [reviewProject, setReviewProject] = useState<ProjectVM | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("card");
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -98,6 +102,32 @@ export function ProjectPanel({
       await load();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "归档失败");
+    }
+  }
+
+  async function onSubmitReview(item: ProjectVM) {
+    if (!window.confirm(`确定提交项目「${projectDisplayName(item)}」审核？提交后配置将暂时锁定。`)) return;
+    setError(null);
+    try {
+      await workspace.submitProjectReview(workspaceId, item.id);
+      await load();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "提交审核失败");
+    }
+  }
+
+  async function onReview(input: Parameters<typeof workspace.reviewProject>[2]) {
+    if (!reviewProject) return;
+    setReviewLoading(true);
+    setError(null);
+    try {
+      await workspace.reviewProject(workspaceId, reviewProject.id, input);
+      setReviewProject(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "项目审核失败");
+    } finally {
+      setReviewLoading(false);
     }
   }
 
@@ -215,6 +245,8 @@ export function ProjectPanel({
                   project={project}
                   onArchive={(p) => void onArchive(p)}
                   onViewDetails={(p) => setDetailProject(p)}
+                  onSubmitReview={(p) => void onSubmitReview(p)}
+                  onReview={(p) => setReviewProject(p)}
                 />
               ))}
             </div>
@@ -265,7 +297,15 @@ export function ProjectPanel({
                           <button type="button" onClick={() => setDetailProject(project)}>
                             查看详情
                           </button>
-                          <Link href={`/projects/${project.id}?configure=1`}>继续配置</Link>
+                          {(() => {
+                            const action = projectPrimaryAction(project);
+                            if (action === "deploy") {
+                              return <Link href={`/projects/${project.id}`}>部署</Link>;
+                            }
+                            return (
+                              <Link href={`/projects/${project.id}?configure=1`}>继续配置</Link>
+                            );
+                          })()}
                           <button type="button" className="is-danger" onClick={() => void onArchive(project)}>
                             归档
                           </button>
@@ -328,6 +368,16 @@ export function ProjectPanel({
         workspaceId={workspaceId}
         project={detailProject}
         onClose={() => setDetailProject(null)}
+      />
+      <ProjectReviewModal
+        open={Boolean(reviewProject)}
+        workspaceId={workspaceId}
+        project={reviewProject}
+        loading={reviewLoading}
+        onClose={() => {
+          if (!reviewLoading) setReviewProject(null);
+        }}
+        onSubmit={(input) => void onReview(input)}
       />
     </div>
   );

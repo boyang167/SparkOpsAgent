@@ -20,7 +20,30 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return db.AutoMigrate(&projectModel{}, &templateModel{}, &secretModel{}, &dockerfileModel{}, &projectMemberModel{})
+	if err := db.AutoMigrate(&projectModel{}, &templateModel{}, &secretModel{}, &dockerfileModel{}, &projectMemberModel{}); err != nil {
+		return err
+	}
+	if db.Dialector.Name() == "postgres" {
+		if err := db.Exec(`
+			UPDATE workspace_app.projects SET review_status = 'none'
+			WHERE review_status IS NULL OR review_status = '';
+			CREATE INDEX IF NOT EXISTS idx_projects_review_status
+				ON workspace_app.projects(workspace_id, review_status);
+			DO $$
+			BEGIN
+				IF NOT EXISTS (
+					SELECT 1 FROM pg_constraint WHERE conname = 'chk_projects_review_status'
+				) THEN
+					ALTER TABLE workspace_app.projects
+						ADD CONSTRAINT chk_projects_review_status
+						CHECK (review_status IN ('none', 'pending', 'approved', 'rejected'));
+				END IF;
+			END $$;
+		`).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type projectModel struct {
@@ -39,6 +62,12 @@ type projectModel struct {
 	TemplateID     *string
 	Resources      []byte `gorm:"type:jsonb"`
 	Status         string
+	ReviewStatus   string `gorm:"default:none;not null"`
+	SubmittedBy    *string
+	SubmittedAt    *time.Time
+	ReviewedBy     *string
+	ReviewedAt     *time.Time
+	ReviewComment  string `gorm:"default:'';not null"`
 	CreatedBy      string
 	postgres.AuditColumns
 }
@@ -62,7 +91,17 @@ func (r *ProjectRepository) Save(ctx context.Context, project *model.Project) er
 		Namespace: project.Namespace, Language: project.Language, GitURL: project.GitURL,
 		GitRefType: project.GitRefType, GitRefValue: project.GitRefValue, DockerfilePath: project.DockerfilePath,
 		Resources: resources, Status: string(project.Status), CreatedBy: project.CreatedBy.String(),
+		ReviewStatus: string(project.ReviewStatus), SubmittedAt: project.SubmittedAt,
+		ReviewedAt: project.ReviewedAt, ReviewComment: project.ReviewComment,
 		AuditColumns: postgres.AuditColumns{CreatedAt: project.CreatedAt, UpdatedAt: project.CreatedAt},
+	}
+	if project.SubmittedBy != nil {
+		value := project.SubmittedBy.String()
+		row.SubmittedBy = &value
+	}
+	if project.ReviewedBy != nil {
+		value := project.ReviewedBy.String()
+		row.ReviewedBy = &value
 	}
 	if project.SecretID != "" {
 		row.SecretID = &project.SecretID
@@ -90,7 +129,21 @@ func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) 
 		"dockerfile_path": project.DockerfilePath,
 		"resources":       resources,
 		"status":          string(project.Status),
+		"review_status":   string(project.ReviewStatus),
+		"submitted_at":    project.SubmittedAt,
+		"reviewed_at":     project.ReviewedAt,
+		"review_comment":  project.ReviewComment,
 		"updated_at":      time.Now().UTC(),
+	}
+	if project.SubmittedBy != nil {
+		updates["submitted_by"] = project.SubmittedBy.String()
+	} else {
+		updates["submitted_by"] = nil
+	}
+	if project.ReviewedBy != nil {
+		updates["reviewed_by"] = project.ReviewedBy.String()
+	} else {
+		updates["reviewed_by"] = nil
 	}
 	if project.SecretID != "" {
 		updates["secret_id"] = project.SecretID
@@ -176,6 +229,25 @@ func rowToProject(row projectModel) (*model.Project, error) {
 		Namespace: row.Namespace, Language: row.Language, GitURL: row.GitURL,
 		GitRefType: row.GitRefType, GitRefValue: row.GitRefValue, DockerfilePath: row.DockerfilePath,
 		Resources: resources, Status: model.ProjectStatus(row.Status), CreatedBy: createdBy, CreatedAt: row.CreatedAt,
+		ReviewStatus: model.ProjectReviewStatus(row.ReviewStatus), SubmittedAt: row.SubmittedAt,
+		ReviewedAt: row.ReviewedAt, ReviewComment: row.ReviewComment,
+	}
+	if p.ReviewStatus == "" {
+		p.ReviewStatus = model.ProjectReviewNone
+	}
+	if row.SubmittedBy != nil {
+		submittedBy, err := kernel.ParseMemberID(*row.SubmittedBy)
+		if err != nil {
+			return nil, err
+		}
+		p.SubmittedBy = &submittedBy
+	}
+	if row.ReviewedBy != nil {
+		reviewedBy, err := kernel.ParseMemberID(*row.ReviewedBy)
+		if err != nil {
+			return nil, err
+		}
+		p.ReviewedBy = &reviewedBy
 	}
 	if row.SecretID != nil {
 		p.SecretID = *row.SecretID

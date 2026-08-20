@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -17,6 +18,15 @@ type ProjectStatus string
 const (
 	ProjectStatusActive   ProjectStatus = "active"
 	ProjectStatusArchived ProjectStatus = "archived"
+)
+
+type ProjectReviewStatus string
+
+const (
+	ProjectReviewNone     ProjectReviewStatus = "none"
+	ProjectReviewPending  ProjectReviewStatus = "pending"
+	ProjectReviewApproved ProjectReviewStatus = "approved"
+	ProjectReviewRejected ProjectReviewStatus = "rejected"
 )
 
 var projectSlugPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$`)
@@ -55,22 +65,22 @@ type ProjectPort struct {
 }
 
 type ProjectResources struct {
-	CPURequest             string        `json:"cpu_request,omitempty"`
-	CPULimit               string        `json:"cpu_limit,omitempty"`
-	MemoryRequest          string        `json:"memory_request,omitempty"`
-	MemoryLimit            string        `json:"memory_limit,omitempty"`
-	Replicas               int           `json:"replicas,omitempty"`
-	Ports                  []ProjectPort `json:"ports,omitempty"`
-	Command                string        `json:"command,omitempty"`
-	Args                   string        `json:"args,omitempty"`
-	ProjectConfig          string        `json:"project_config,omitempty"`
-	ServiceTemplateID      string        `json:"service_template_id,omitempty"`
+	CPURequest            string        `json:"cpu_request,omitempty"`
+	CPULimit              string        `json:"cpu_limit,omitempty"`
+	MemoryRequest         string        `json:"memory_request,omitempty"`
+	MemoryLimit           string        `json:"memory_limit,omitempty"`
+	Replicas              int           `json:"replicas,omitempty"`
+	Ports                 []ProjectPort `json:"ports,omitempty"`
+	Command               string        `json:"command,omitempty"`
+	Args                  string        `json:"args,omitempty"`
+	ProjectConfig         string        `json:"project_config,omitempty"`
+	ServiceTemplateID     string        `json:"service_template_id,omitempty"`
 	DeploymentTemplateID  string        `json:"deployment_template_id,omitempty"`
 	JenkinsfileTemplateID string        `json:"jenkinsfile_template_id,omitempty"`
-	RegistryType           string        `json:"registry_type,omitempty"`
+	RegistryType          string        `json:"registry_type,omitempty"`
 	RegistrySecretID      string        `json:"registry_secret_id,omitempty"`
-	SonarqubeSecretID      string        `json:"sonarqube_secret_id,omitempty"`
-	EnableStaticScan       bool          `json:"enable_static_scan,omitempty"`
+	SonarqubeSecretID     string        `json:"sonarqube_secret_id,omitempty"`
+	EnableStaticScan      bool          `json:"enable_static_scan,omitempty"`
 }
 
 type Project struct {
@@ -89,6 +99,12 @@ type Project struct {
 	TemplateID     string
 	Resources      ProjectResources
 	Status         ProjectStatus
+	ReviewStatus   ProjectReviewStatus
+	SubmittedBy    *kernel.MemberID
+	SubmittedAt    *time.Time
+	ReviewedBy     *kernel.MemberID
+	ReviewedAt     *time.Time
+	ReviewComment  string
 	CreatedBy      kernel.MemberID
 	CreatedAt      time.Time
 
@@ -108,6 +124,21 @@ type CreateProjectInput struct {
 	DockerfilePath string
 	TemplateID     string
 	Resources      ProjectResources
+}
+
+type UpdateProjectInput struct {
+	Name           *string
+	DisplayName    *string
+	Description    *string
+	Namespace      *string
+	Language       *string
+	GitURL         *string
+	SecretID       *string
+	GitRefType     *string
+	GitRefValue    *string
+	DockerfilePath *string
+	TemplateID     *string
+	Resources      *ProjectResources
 }
 
 func NewProject(wsID kernel.WorkspaceID, name ProjectName, createdBy kernel.MemberID, input CreateProjectInput) *Project {
@@ -136,6 +167,7 @@ func NewProject(wsID kernel.WorkspaceID, name ProjectName, createdBy kernel.Memb
 		TemplateID:     strings.TrimSpace(input.TemplateID),
 		Resources:      resources,
 		Status:         ProjectStatusActive,
+		ReviewStatus:   ProjectReviewNone,
 		CreatedBy:      createdBy,
 		CreatedAt:      time.Now().UTC(),
 	}
@@ -160,32 +192,186 @@ func (p *Project) Rename(name ProjectName) error {
 }
 
 func (p *Project) UpdateDetails(input CreateProjectInput) error {
+	return p.ApplyPatch(UpdateProjectInput{
+		Name: &input.Name, DisplayName: &input.DisplayName, Description: &input.Description,
+		Namespace: &input.Namespace, Language: &input.Language, GitURL: &input.GitURL,
+		SecretID: &input.SecretID, GitRefType: &input.GitRefType, GitRefValue: &input.GitRefValue,
+		DockerfilePath: &input.DockerfilePath, TemplateID: &input.TemplateID, Resources: &input.Resources,
+	})
+}
+
+func (p *Project) ApplyPatch(input UpdateProjectInput) error {
 	if p.Status != ProjectStatusActive {
 		return domain.ErrProjectNotActive
 	}
-	name, err := NewProjectName(input.Name)
-	if err != nil {
-		return err
+	configChanged := p.patchChangesConfiguration(input)
+	if p.ReviewStatus == ProjectReviewPending && configChanged {
+		return domain.ErrProjectReviewLocked
 	}
-	p.Name = name
-	p.DisplayName = strings.TrimSpace(input.DisplayName)
-	p.Description = strings.TrimSpace(input.Description)
-	p.Namespace = strings.TrimSpace(input.Namespace)
-	p.Language = strings.TrimSpace(input.Language)
-	p.GitURL = strings.TrimSpace(input.GitURL)
-	p.SecretID = strings.TrimSpace(input.SecretID)
-	p.GitRefType = strings.TrimSpace(input.GitRefType)
-	p.GitRefValue = strings.TrimSpace(input.GitRefValue)
-	if dockerfile := strings.TrimSpace(input.DockerfilePath); dockerfile != "" {
+	if input.Name != nil {
+		name, err := NewProjectName(*input.Name)
+		if err != nil {
+			return err
+		}
+		p.Name = name
+	}
+	if input.DisplayName != nil {
+		p.DisplayName = strings.TrimSpace(*input.DisplayName)
+	}
+	if input.Description != nil {
+		p.Description = strings.TrimSpace(*input.Description)
+	}
+	if input.Namespace != nil {
+		p.Namespace = strings.TrimSpace(*input.Namespace)
+	}
+	if input.Language != nil {
+		p.Language = strings.TrimSpace(*input.Language)
+	}
+	if input.GitURL != nil {
+		p.GitURL = strings.TrimSpace(*input.GitURL)
+	}
+	if input.SecretID != nil {
+		p.SecretID = strings.TrimSpace(*input.SecretID)
+	}
+	if input.GitRefType != nil {
+		p.GitRefType = strings.TrimSpace(*input.GitRefType)
+	}
+	if input.GitRefValue != nil {
+		p.GitRefValue = strings.TrimSpace(*input.GitRefValue)
+	}
+	if input.DockerfilePath != nil {
+		dockerfile := strings.TrimSpace(*input.DockerfilePath)
+		if dockerfile == "" {
+			dockerfile = "./Dockerfile"
+		}
 		p.DockerfilePath = dockerfile
 	}
-	p.TemplateID = strings.TrimSpace(input.TemplateID)
-	resources := input.Resources
-	if resources.Replicas <= 0 {
-		resources.Replicas = 1
+	if input.TemplateID != nil {
+		p.TemplateID = strings.TrimSpace(*input.TemplateID)
 	}
-	p.Resources = resources
+	if input.Resources != nil {
+		resources := *input.Resources
+		if resources.Replicas <= 0 {
+			resources.Replicas = 1
+		}
+		p.Resources = resources
+	}
+	if p.ReviewStatus == ProjectReviewApproved && configChanged {
+		p.resetReview()
+	}
 	return nil
+}
+
+func (p *Project) IsConfigComplete() bool {
+	hasTemplate := strings.TrimSpace(p.TemplateID) != "" ||
+		strings.TrimSpace(p.Resources.ServiceTemplateID) != "" ||
+		strings.TrimSpace(p.Resources.DeploymentTemplateID) != "" ||
+		strings.TrimSpace(p.Resources.JenkinsfileTemplateID) != ""
+	dockerfile := strings.TrimSpace(p.DockerfilePath)
+	if dockerfile == "" {
+		dockerfile = "./Dockerfile"
+	}
+	return strings.TrimSpace(p.GitURL) != "" &&
+		strings.TrimSpace(p.GitRefValue) != "" &&
+		dockerfile != "" &&
+		hasTemplate
+}
+
+func (p *Project) SubmitReview(actor kernel.MemberID) error {
+	if p.Status != ProjectStatusActive {
+		return domain.ErrProjectNotActive
+	}
+	if !p.IsConfigComplete() {
+		return domain.ErrProjectConfigIncomplete
+	}
+	if p.ReviewStatus != ProjectReviewNone && p.ReviewStatus != ProjectReviewRejected {
+		return domain.ErrProjectReviewInvalidState
+	}
+	now := time.Now().UTC()
+	p.ReviewStatus = ProjectReviewPending
+	p.SubmittedBy = &actor
+	p.SubmittedAt = &now
+	p.ReviewedBy = nil
+	p.ReviewedAt = nil
+	p.ReviewComment = ""
+	return nil
+}
+
+func (p *Project) DecideReview(actor kernel.MemberID, decision ProjectReviewStatus, comment string) error {
+	if p.Status != ProjectStatusActive {
+		return domain.ErrProjectNotActive
+	}
+	if p.ReviewStatus != ProjectReviewPending {
+		return domain.ErrProjectReviewInvalidState
+	}
+	if p.SubmittedBy != nil && *p.SubmittedBy == actor {
+		return domain.ErrProjectReviewSelf
+	}
+	if decision != ProjectReviewApproved && decision != ProjectReviewRejected {
+		return domain.ErrProjectReviewInvalidState
+	}
+	comment = strings.TrimSpace(comment)
+	if decision == ProjectReviewRejected && comment == "" {
+		return domain.ErrProjectReviewCommentRequired
+	}
+	now := time.Now().UTC()
+	p.ReviewStatus = decision
+	p.ReviewedBy = &actor
+	p.ReviewedAt = &now
+	p.ReviewComment = comment
+	return nil
+}
+
+func (p *Project) patchChangesConfiguration(input UpdateProjectInput) bool {
+	if input.Namespace != nil && p.Namespace != strings.TrimSpace(*input.Namespace) {
+		return true
+	}
+	if input.Language != nil && p.Language != strings.TrimSpace(*input.Language) {
+		return true
+	}
+	if input.GitURL != nil && p.GitURL != strings.TrimSpace(*input.GitURL) {
+		return true
+	}
+	if input.SecretID != nil && p.SecretID != strings.TrimSpace(*input.SecretID) {
+		return true
+	}
+	if input.GitRefType != nil && p.GitRefType != strings.TrimSpace(*input.GitRefType) {
+		return true
+	}
+	if input.GitRefValue != nil && p.GitRefValue != strings.TrimSpace(*input.GitRefValue) {
+		return true
+	}
+	if input.DockerfilePath != nil {
+		dockerfile := strings.TrimSpace(*input.DockerfilePath)
+		if dockerfile == "" {
+			dockerfile = "./Dockerfile"
+		}
+		if p.DockerfilePath != dockerfile {
+			return true
+		}
+	}
+	if input.TemplateID != nil && p.TemplateID != strings.TrimSpace(*input.TemplateID) {
+		return true
+	}
+	if input.Resources != nil {
+		resources := *input.Resources
+		if resources.Replicas <= 0 {
+			resources.Replicas = 1
+		}
+		if !reflect.DeepEqual(p.Resources, resources) {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Project) resetReview() {
+	p.ReviewStatus = ProjectReviewNone
+	p.SubmittedBy = nil
+	p.SubmittedAt = nil
+	p.ReviewedBy = nil
+	p.ReviewedAt = nil
+	p.ReviewComment = ""
 }
 
 func (p *Project) IsActive() bool { return p.Status == ProjectStatusActive }

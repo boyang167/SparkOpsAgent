@@ -7,12 +7,12 @@ import (
 )
 
 type Role struct {
-	ID           kernel.RoleID
-	WorkspaceID  kernel.WorkspaceID
-	ParentID     *kernel.RoleID
-	Name         string
-	Permissions  []string
-	CreatedAt    time.Time
+	ID          kernel.RoleID
+	WorkspaceID kernel.WorkspaceID
+	ParentID    *kernel.RoleID
+	Name        string
+	Permissions []string
+	CreatedAt   time.Time
 }
 
 func NewRole(workspaceID kernel.WorkspaceID, name string, permissions []string, parentID *kernel.RoleID) *Role {
@@ -41,21 +41,26 @@ func (r *Role) UpdatePermissions(permissions []string) {
 }
 
 func (r *Role) IsProtected() bool {
-	return r.Name == "admin"
+	switch r.Name {
+	case "admin", "developer", "reviewer", "operator", "viewer":
+		return true
+	default:
+		return false
+	}
 }
 
 type RoleBinding struct {
-	ID       kernel.RoleBindingID
-	RoleID   kernel.RoleID
-	MemberID kernel.MemberID
+	ID        kernel.RoleBindingID
+	RoleID    kernel.RoleID
+	MemberID  kernel.MemberID
 	CreatedAt time.Time
 }
 
 func NewRoleBinding(roleID kernel.RoleID, memberID kernel.MemberID) *RoleBinding {
 	return &RoleBinding{
-		ID:       kernel.NewRoleBindingID(),
-		RoleID:   roleID,
-		MemberID: memberID,
+		ID:        kernel.NewRoleBindingID(),
+		RoleID:    roleID,
+		MemberID:  memberID,
 		CreatedAt: time.Now().UTC(),
 	}
 }

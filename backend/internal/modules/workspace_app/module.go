@@ -65,7 +65,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewUpdateProjectHandler(repo, wsChecker),
 		command.NewArchiveProjectHandler(repo, wsChecker),
 		query.NewListProjectsHandler(repo, memberRepo, wsChecker, c.PermissionChecker),
-		query.NewGetProjectHandler(repo, wsChecker),
+		query.NewGetProjectHandler(repo, memberRepo, wsChecker, c.PermissionChecker),
 		command.NewCreateTemplateHandler(templateRepo, wsChecker),
 		command.NewUpdateTemplateHandler(templateRepo, wsChecker),
 		command.NewDeleteTemplateHandler(templateRepo, wsChecker),
@@ -85,6 +85,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewRemoveProjectMemberHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
 		query.NewListProjectMembersHandler(repo, memberRepo),
 		query.NewGenerateProjectTemplatesHandler(repo, templateRepo, wsChecker),
+		command.NewSubmitProjectReviewHandler(repo, c.ProjectAccessChecker, c.PermissionChecker),
+		command.NewReviewProjectHandler(repo, c.ProjectAccessChecker, c.PermissionChecker),
 		memberLookup,
 	)
 
@@ -105,6 +107,10 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, projectRead, handler.GenerateProjectTemplates)
 	c.Engine.PATCH("/api/v1/projects/:projectId",
 		auth, ws, wsMember, projectWrite, handler.UpdateProject)
+	c.Engine.POST("/api/v1/projects/:projectId/submit-review",
+		auth, ws, wsMember, projectWrite, handler.SubmitProjectReview)
+	c.Engine.POST("/api/v1/projects/:projectId/review",
+		auth, ws, wsMember, projectRead, handler.ReviewProject)
 	c.Engine.DELETE("/api/v1/projects/:projectId",
 		auth, ws, wsMember, projectAdmin, handler.ArchiveProject)
 	c.Engine.GET("/api/v1/projects/:projectId/members",

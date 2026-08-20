@@ -2,6 +2,22 @@ import type { RoleTreeVM } from "@sparkops/contracts/governance";
 
 export type RoleTreeNode = RoleTreeVM & { depth: number };
 
+const DEFAULT_ROLE_LABELS: Record<string, string> = {
+  admin: "管理员",
+  developer: "研发",
+  reviewer: "审核员",
+  operator: "运维",
+  viewer: "只读",
+};
+
+export function isProtectedRole(name: string) {
+  return Object.hasOwn(DEFAULT_ROLE_LABELS, name);
+}
+
+export function roleDisplayName(name: string) {
+  return DEFAULT_ROLE_LABELS[name] ?? name;
+}
+
 export function flattenRoleTree(nodes: RoleTreeVM[], depth = 0): RoleTreeNode[] {
   const rows: RoleTreeNode[] = [];
   for (const node of nodes) {
@@ -44,7 +60,7 @@ export function collectRoleParentOptions(
 export function computeRoleStats(tree: RoleTreeVM[]) {
   const flat = flattenRoleTree(tree);
   const rootCount = tree.length;
-  const systemCount = flat.filter((role) => role.name === "admin").length;
+  const systemCount = flat.filter((role) => isProtectedRole(role.name)).length;
   return {
     total: flat.length,
     rootCount,

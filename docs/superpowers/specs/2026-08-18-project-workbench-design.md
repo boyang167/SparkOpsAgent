@@ -45,7 +45,7 @@
 
 - “创建项目”完成：项目已存在。
 - “配置完成”完成：已填写 `git_url`、`git_ref_value`、`dockerfile_path`，且已选择 `template_id`。
-- “提交审核”“审核完成”：当前领域模型尚无审核状态，不增加伪持久化状态；概览中显示未开始，保留后续审核功能扩展位。
+- “提交审核”“审核完成”：以 `2026-08-20-project-review-roles-design.md` 为准（Workspace 默认角色 + 项目 `review_status`）。
 
 ## 错误处理
 

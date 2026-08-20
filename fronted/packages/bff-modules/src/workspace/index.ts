@@ -9,3 +9,4 @@ export {
   removeProjectMember,
 } from "./projectMembers";
 export { listGeneratedTemplates } from "./generatedTemplates";
+export { submitProjectReview, reviewProject } from "./projectReview";

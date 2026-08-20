@@ -121,6 +121,9 @@ func (h *UpdateRoleHandler) Handle(
 			return nil, domain.ErrInvalidRoleUpdate
 		}
 		if name != role.Name {
+			if role.IsProtected() {
+				return nil, domain.ErrRoleProtected
+			}
 			exists, err := h.repo.ExistsByName(ctx, workspaceID, name)
 			if err != nil {
 				return nil, err
@@ -159,11 +162,11 @@ func (h *UpdateRoleHandler) Handle(
 }
 
 type DeleteRoleHandler struct {
-	roles      repository.RoleRepository
-	bindings   repository.BindingRepository
-	apiStore   *persistence.RoleAPIPolicyStore
-	dataStore  *persistence.DataPolicyStore
-	sync       *service.APIPolicySync
+	roles     repository.RoleRepository
+	bindings  repository.BindingRepository
+	apiStore  *persistence.RoleAPIPolicyStore
+	dataStore *persistence.DataPolicyStore
+	sync      *service.APIPolicySync
 }
 
 func NewDeleteRoleHandler(
@@ -232,51 +235,95 @@ func (h *BootstrapWorkspaceHandler) Handle(ctx context.Context, workspaceID kern
 	if err != nil {
 		return err
 	}
+	byName := make(map[string]*model.Role, len(roles))
 	for _, role := range roles {
-		if role.Name != "admin" {
-			continue
-		}
-		merged := authz.MergePermissions(role.Permissions, permissions)
-		if len(merged) == len(role.Permissions) {
-			return nil
-		}
-		role.UpdatePermissions(merged)
-		return h.roles.Save(ctx, role)
+		byName[role.Name] = role
 	}
-	role := model.NewRole(workspaceID, "admin", permissions, nil)
-	if err := h.roles.Save(ctx, role); err != nil {
+	var admin *model.Role
+	for _, definition := range authz.DefaultWorkspaceRoles {
+		role := byName[definition.Name]
+		if role == nil {
+			role = model.NewRole(workspaceID, definition.Name, definition.Permissions, nil)
+			if err := h.roles.Save(ctx, role); err != nil {
+				return err
+			}
+		} else if definition.Name == "admin" {
+			merged := authz.MergePermissions(role.Permissions, permissions)
+			if len(merged) != len(role.Permissions) {
+				role.UpdatePermissions(merged)
+				if err := h.roles.Save(ctx, role); err != nil {
+					return err
+				}
+			}
+		}
+		if definition.Name == "admin" {
+			admin = role
+		}
+	}
+	if admin == nil {
+		return nil
+	}
+	exists, err := h.bindings.Exists(ctx, admin.ID, ownerID)
+	if err != nil {
 		return err
 	}
-	if err := h.bindings.Save(ctx, model.NewRoleBinding(role.ID, ownerID)); err != nil {
-		return err
+	if !exists {
+		if err := h.bindings.Save(ctx, model.NewRoleBinding(admin.ID, ownerID)); err != nil {
+			return err
+		}
 	}
 	if h.sync != nil {
-		return h.sync.SyncMemberRole(ctx, workspaceID, role.ID, ownerID, true)
+		return h.sync.SyncMemberRole(ctx, workspaceID, admin.ID, ownerID, true)
 	}
 	return nil
 }
 
-type EnsureDefaultAdminPermissionsHandler struct {
+type EnsureDefaultWorkspaceRolesHandler struct {
 	roles repository.RoleRepository
 }
 
-func NewEnsureDefaultAdminPermissionsHandler(roles repository.RoleRepository) *EnsureDefaultAdminPermissionsHandler {
-	return &EnsureDefaultAdminPermissionsHandler{roles: roles}
+func NewEnsureDefaultWorkspaceRolesHandler(roles repository.RoleRepository) *EnsureDefaultWorkspaceRolesHandler {
+	return &EnsureDefaultWorkspaceRolesHandler{roles: roles}
 }
 
-func (h *EnsureDefaultAdminPermissionsHandler) Handle(ctx context.Context) error {
-	admins, err := h.roles.ListByName(ctx, "admin")
+func (h *EnsureDefaultWorkspaceRolesHandler) Handle(ctx context.Context) error {
+	type workspaceLister interface {
+		ListWorkspaceIDs(context.Context) ([]kernel.WorkspaceID, error)
+	}
+	lister, ok := h.roles.(workspaceLister)
+	if !ok {
+		return nil
+	}
+	workspaceIDs, err := lister.ListWorkspaceIDs(ctx)
 	if err != nil {
 		return err
 	}
-	for _, role := range admins {
-		merged := authz.MergePermissions(role.Permissions, authz.DefaultAdminPermissions)
-		if len(merged) == len(role.Permissions) {
-			continue
-		}
-		role.UpdatePermissions(merged)
-		if err := h.roles.Save(ctx, role); err != nil {
+	for _, workspaceID := range workspaceIDs {
+		roles, err := h.roles.ListByWorkspace(ctx, workspaceID)
+		if err != nil {
 			return err
+		}
+		byName := make(map[string]*model.Role, len(roles))
+		for _, role := range roles {
+			byName[role.Name] = role
+		}
+		for _, definition := range authz.DefaultWorkspaceRoles {
+			role := byName[definition.Name]
+			if role == nil {
+				if err := h.roles.Save(ctx, model.NewRole(workspaceID, definition.Name, definition.Permissions, nil)); err != nil {
+					return err
+				}
+				continue
+			}
+			if definition.Name == "admin" {
+				merged := authz.MergePermissions(role.Permissions, definition.Permissions)
+				if len(merged) != len(role.Permissions) {
+					role.UpdatePermissions(merged)
+					if err := h.roles.Save(ctx, role); err != nil {
+						return err
+					}
+				}
+			}
 		}
 	}
 	return nil

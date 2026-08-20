@@ -132,7 +132,7 @@ func (s *Store) ExistsRoleByName(ctx context.Context, workspaceID kernel.Workspa
 func (s *Store) SaveBinding(ctx context.Context, binding *model.RoleBinding) error {
 	row := bindingModel{
 		ID: binding.ID.String(), RoleID: binding.RoleID.String(),
-		MemberID: binding.MemberID.String(),
+		MemberID:     binding.MemberID.String(),
 		AuditColumns: postgres.AuditColumns{CreatedAt: binding.CreatedAt, UpdatedAt: binding.CreatedAt},
 	}
 	return s.db.WithContext(ctx).Save(&row).Error
@@ -242,6 +242,24 @@ func (r *roleRepo) ListByWorkspace(ctx context.Context, workspaceID kernel.Works
 }
 func (r *roleRepo) ListByName(ctx context.Context, name string) ([]*model.Role, error) {
 	return r.store.ListRolesByName(ctx, name)
+}
+func (r *roleRepo) ListWorkspaceIDs(ctx context.Context) ([]kernel.WorkspaceID, error) {
+	var rows []string
+	if err := r.store.db.WithContext(ctx).
+		Table("tenant.workspaces").
+		Where("deleted_at IS NULL").
+		Pluck("id", &rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]kernel.WorkspaceID, 0, len(rows))
+	for _, raw := range rows {
+		id, err := kernel.ParseWorkspaceID(raw)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, nil
 }
 func (r *roleRepo) ExistsByName(ctx context.Context, workspaceID kernel.WorkspaceID, name string) (bool, error) {
 	return r.store.ExistsRoleByName(ctx, workspaceID, name)

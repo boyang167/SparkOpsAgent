@@ -1,14 +1,17 @@
 package authz
 
 const (
-	PermProjectRead   = "project:read"
-	PermProjectWrite  = "project:write"
-	PermSecretRead    = "secret:read"
-	PermSecretWrite   = "secret:write"
-	PermAgentRead     = "agent:read"
-	PermAgentWrite    = "agent:write"
-	PermAgentPublish  = "agent:publish"
-	PermChatUse       = "chat:use"
+	PermProjectRead     = "project:read"
+	PermProjectWrite    = "project:write"
+	PermProjectSubmit   = "project:submit"
+	PermProjectReview   = "project:review"
+	PermProjectOperate  = "project:operate"
+	PermSecretRead      = "secret:read"
+	PermSecretWrite     = "secret:write"
+	PermAgentRead       = "agent:read"
+	PermAgentWrite      = "agent:write"
+	PermAgentPublish    = "agent:publish"
+	PermChatUse         = "chat:use"
 	PermGovernanceAdmin = "governance:admin"
 	PermPlatformAdmin   = "platform:admin"
 )
@@ -16,6 +19,9 @@ const (
 var DefaultAdminPermissions = []string{
 	PermProjectRead,
 	PermProjectWrite,
+	PermProjectSubmit,
+	PermProjectReview,
+	PermProjectOperate,
 	PermSecretRead,
 	PermSecretWrite,
 	PermAgentRead,
@@ -56,6 +62,9 @@ func MergePermissions(existing, defaults []string) []string {
 var AllPermissions = []string{
 	PermProjectRead,
 	PermProjectWrite,
+	PermProjectSubmit,
+	PermProjectReview,
+	PermProjectOperate,
 	PermSecretRead,
 	PermSecretWrite,
 	PermAgentRead,
@@ -63,4 +72,24 @@ var AllPermissions = []string{
 	PermAgentPublish,
 	PermChatUse,
 	PermGovernanceAdmin,
+}
+
+type DefaultRoleDefinition struct {
+	Name        string
+	Permissions []string
+}
+
+var DefaultWorkspaceRoles = []DefaultRoleDefinition{
+	{Name: "admin", Permissions: DefaultAdminPermissions},
+	{Name: "developer", Permissions: []string{
+		PermProjectRead, PermProjectWrite, PermProjectSubmit,
+		PermSecretRead, PermAgentRead, PermChatUse,
+	}},
+	{Name: "reviewer", Permissions: []string{
+		PermProjectRead, PermProjectReview, PermSecretRead,
+	}},
+	{Name: "operator", Permissions: []string{
+		PermProjectRead, PermProjectOperate, PermSecretRead,
+	}},
+	{Name: "viewer", Permissions: []string{PermProjectRead}},
 }

@@ -68,3 +68,23 @@ pnpm dev                              # :3000
 ```powershell
 go run ./cmd/grant-super-admin -email superadmin@sparkops.local -password "SuperAdmin1234!" -display-name "Platform Super Admin" -register
 ```
+
+
+Demo / 平台超管（空间 owner）
+demo@sparkops.local
+Demo1234!
+管理员
+admin@sparkops.local
+Demo1234!
+研发
+developer@sparkops.local
+Demo1234!
+审核员
+reviewer@sparkops.local
+Demo1234!
+运维
+operator@sparkops.local
+Demo1234!
+只读
+viewer@sparkops.local
+Demo1234!

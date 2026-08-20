@@ -259,7 +259,13 @@ export function ProjectDetailModal({
     );
   }
 
-  const currentStepLabel = configComplete ? "审核中" : "配置中";
+  const currentStepLabel = progress?.statusLabel ?? (configComplete ? "待提交审核" : "配置中");
+  const reviewStatusLabel = {
+    none: configComplete ? "待提交" : "未配置完成",
+    pending: "审核中",
+    approved: "审核通过",
+    rejected: "审核驳回",
+  }[project.review_status ?? "none"];
 
   return (
     <Modal open={open} onClose={onClose} title="项目详情" size="xl" panelClassName="project-detail-modal">
@@ -291,7 +297,20 @@ export function ProjectDetailModal({
               { label: "所属产品ID", value: "-" },
               {
                 label: "审核状态",
-                value: <Tag>{configComplete ? "未审核" : "未配置完成"}</Tag>,
+                value: <Tag>{reviewStatusLabel}</Tag>,
+              },
+              {
+                label: "提交时间",
+                value: project.submitted_at ? formatDateTime(project.submitted_at) : "-",
+              },
+              {
+                label: "审批时间",
+                value: project.reviewed_at ? formatDateTime(project.reviewed_at) : "-",
+              },
+              {
+                label: "审批意见",
+                value: project.review_comment || "-",
+                full: true,
               },
               { label: "发布状态", value: <Tag>未发布</Tag> },
               {

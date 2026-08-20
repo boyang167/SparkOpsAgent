@@ -9,11 +9,14 @@ import { generateProjectTemplates } from "./project-template-render";
 interface ProjectGeneratedTemplatesProps {
   workspaceId: string;
   project: ProjectVM;
+  /** review：审核弹窗只读预览，隐藏刷新/复制/下载 */
+  variant?: "default" | "review";
 }
 
 export function ProjectGeneratedTemplates({
   workspaceId,
   project,
+  variant = "default",
 }: ProjectGeneratedTemplatesProps) {
   const [artifacts, setArtifacts] = useState<GeneratedTemplateArtifact[]>([]);
   const [activeKey, setActiveKey] = useState("");
@@ -85,33 +88,41 @@ export function ProjectGeneratedTemplates({
     URL.revokeObjectURL(url);
   }
 
+  const isReview = variant === "review";
+
   if (loading && artifacts.length === 0) {
-    return <p className="text-muted">生成模板中…</p>;
+    return <p className="text-muted">{isReview ? "加载模板中…" : "生成模板中…"}</p>;
   }
 
   if (artifacts.length === 0) {
     return (
       <div className="project-generated-empty">
-        <p className="text-muted">{message || "暂无已选模板，完成第 3 步配置后可在此生成配置文件。"}</p>
-        <button type="button" className="btn-secondary text-sm" onClick={() => void load()} disabled={loading}>
-          刷新模板
-        </button>
+        <p className="text-muted">
+          {message || (isReview ? "暂无生成模板，请确认项目已完成模板配置。" : "暂无已选模板，完成第 3 步配置后可在此生成配置文件。")}
+        </p>
+        {!isReview ? (
+          <button type="button" className="btn-secondary text-sm" onClick={() => void load()} disabled={loading}>
+            刷新模板
+          </button>
+        ) : null}
       </div>
     );
   }
 
   return (
-    <div className="project-generated">
-      <div className="project-generated-toolbar">
-        <button
-          type="button"
-          className="btn project-btn-primary text-sm"
-          onClick={() => void load()}
-          disabled={loading}
-        >
-          {loading ? "刷新中…" : "刷新模板"}
-        </button>
-      </div>
+    <div className={`project-generated${isReview ? " project-generated-review" : ""}`}>
+      {!isReview ? (
+        <div className="project-generated-toolbar">
+          <button
+            type="button"
+            className="btn project-btn-primary text-sm"
+            onClick={() => void load()}
+            disabled={loading}
+          >
+            {loading ? "刷新中…" : "刷新模板"}
+          </button>
+        </div>
+      ) : null}
 
       <div className="project-generated-tabs">
         {artifacts.map((item) => (
@@ -137,15 +148,19 @@ export function ProjectGeneratedTemplates({
               ) : null}
             </div>
             <div className="project-generated-actions">
-              <button type="button" className="btn project-btn-primary text-sm" onClick={() => void handleCopy()}>
-                {copied ? "已复制" : "复制"}
-              </button>
-              <button type="button" className="btn-secondary text-sm" onClick={handleDownload}>
-                下载
-              </button>
+              {!isReview ? (
+                <>
+                  <button type="button" className="btn project-btn-primary text-sm" onClick={() => void handleCopy()}>
+                    {copied ? "已复制" : "复制"}
+                  </button>
+                  <button type="button" className="btn-secondary text-sm" onClick={handleDownload}>
+                    下载
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
-          <pre className="project-generated-code">
+          <pre className={`project-generated-code${isReview ? " project-generated-code-review" : ""}`}>
             <code>{active.content}</code>
           </pre>
         </div>

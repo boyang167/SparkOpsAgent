@@ -73,6 +73,29 @@ func (r *memoryMemberRepo) ExistsByEmail(_ context.Context, email string) (bool,
 	return ok, nil
 }
 
+func (r *memoryMemberRepo) ListAll(_ context.Context) ([]*model.Member, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*model.Member, 0, len(r.byID))
+	for _, member := range r.byID {
+		copyMember := *member
+		out = append(out, &copyMember)
+	}
+	return out, nil
+}
+
+func (r *memoryMemberRepo) SoftDelete(_ context.Context, id kernel.MemberID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	member, ok := r.byID[id.String()]
+	if !ok {
+		return kernel.NewDomainError("IDENTITY_MEMBER_NOT_FOUND", "member not found")
+	}
+	delete(r.byID, id.String())
+	delete(r.byEmail, member.Email)
+	return nil
+}
+
 var _ repository.MemberRepository = (*memoryMemberRepo)(nil)
 
 func setupIdentityRouter(t *testing.T) *gin.Engine {
