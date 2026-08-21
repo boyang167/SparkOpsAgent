@@ -59,7 +59,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 	oidcClient := auth.NewOIDCClient(c.Config.Auth.OIDC)
 	stateStore := command.NewOIDCStateStore()
-	ssoHandler := identityhttp.NewSSOHandler(oidcClient, ldapLogin, resolver, stateStore)
+	ssoHandler := identityhttp.NewSSOHandler(c.DB, oidcClient, ldapLogin, resolver, stateStore)
 
 	createPlatformMember := command.NewCreatePlatformMemberHandler(repo, systemRoleStore, c.EventBus)
 	updatePlatformMember := command.NewUpdatePlatformMemberHandler(repo, systemRoleStore)

@@ -39,7 +39,7 @@ export function PermissionDataPanel({ workspaceId }: PermissionDataPanelProps) {
         <p className="text-sm text-muted">
           查看系统已注册的数据资源。为角色分配数据范围请前往
           {" "}
-          <Link href="/permission/roles" className="text-primary hover:underline">
+          <Link href="/admin/roles" className="text-primary hover:underline">
             角色管理
           </Link>
           ，点击「数据权限」。

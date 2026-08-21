@@ -122,7 +122,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 	menuHandler := govhttp.NewMenuHandler(
 		query.NewListMenuTreeHandler(menuStore, seedMenus),
-		query.NewListNavMenusHandler(menuStore, seedMenus, checker, c.SystemRoleChecker),
+		query.NewListNavMenusHandler(menuStore, seedMenus, checker, c.SystemRoleChecker, c.DB),
 		query.NewListMyMenuButtonsHandler(menuStore, checker, c.SystemRoleChecker),
 		query.NewGetMenuHandler(menuStore),
 		query.NewGetMenuRolesHandler(menuStore),

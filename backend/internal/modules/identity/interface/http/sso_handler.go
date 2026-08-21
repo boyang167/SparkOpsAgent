@@ -4,13 +4,16 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/application/command"
 	idauth "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/infrastructure/auth"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/entitlements"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 )
 
 type SSOHandler struct {
+	db       *gorm.DB
 	oidc     *idauth.OIDCClient
 	ldap     *command.LDAPLoginHandler
 	resolver *command.ResolveExternalIdentityHandler
@@ -18,18 +21,21 @@ type SSOHandler struct {
 }
 
 func NewSSOHandler(
+	db *gorm.DB,
 	oidc *idauth.OIDCClient,
 	ldap *command.LDAPLoginHandler,
 	resolver *command.ResolveExternalIdentityHandler,
 	states *command.OIDCStateStore,
 ) *SSOHandler {
-	return &SSOHandler{oidc: oidc, ldap: ldap, resolver: resolver, states: states}
+	return &SSOHandler{db: db, oidc: oidc, ldap: ldap, resolver: resolver, states: states}
 }
 
 func (h *SSOHandler) AuthProviders(c *gin.Context) {
+	ui, _ := entitlements.LoadLoginUIConfig(c.Request.Context(), h.db)
 	httpx.OK(c, gin.H{
-		"oidc_enabled":  h.oidc != nil && h.oidc.Enabled(),
-		"ldap_enabled":  h.ldap != nil,
+		"oidc_enabled":        h.oidc != nil && h.oidc.Enabled(),
+		"ldap_enabled":        h.ldap != nil,
+		"sso_ui":              ui,
 	})
 }
 

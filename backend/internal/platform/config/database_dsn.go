@@ -24,7 +24,7 @@ func (d DatabaseConfig) EffectiveDSN() (string, error) {
 		sslmode = "disable"
 	}
 	user := url.UserPassword(d.User, d.Password)
-	return fmt.Sprintf("postgres://%s@%s:%d/%s?sslmode=%s",
+	return fmt.Sprintf("postgres://%s@%s:%d/%s?sslmode=%s&connect_timeout=5",
 		user.String(), d.Host, port, d.Name, sslmode), nil
 }
 

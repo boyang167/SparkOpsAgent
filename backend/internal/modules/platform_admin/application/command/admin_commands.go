@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/entitlements"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -34,6 +35,7 @@ func (h *UpdateSysConfigHandler) Handle(ctx context.Context, kind, name string, 
 	if err := h.repo.UpsertSysConfig(ctx, current); err != nil {
 		return nil, err
 	}
+	entitlements.InvalidateCache()
 	return current, nil
 }
 
@@ -54,6 +56,7 @@ func (h *CreateClusterHandler) Handle(ctx context.Context, memberID kernel.Membe
 	if err := h.repo.SaveCluster(ctx, cluster); err != nil {
 		return nil, err
 	}
+	entitlements.InvalidateCache()
 	return cluster, nil
 }
 

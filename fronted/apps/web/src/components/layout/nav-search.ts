@@ -1,4 +1,10 @@
-import { PLATFORM_NAV_TREE, filterNavGroups } from "./nav-tree";
+import {
+  ADMIN_NAV_SECTIONS,
+  BUSINESS_NAV_TREE,
+  PLATFORM_OPS_NAV_TREE,
+} from "./nav-tree";
+import type { WorkspaceEntitlementsVM } from "@sparkops/contracts/platform";
+import { isPathEntitled } from "./entitlements";
 
 export interface NavSearchItem {
   href: string;
@@ -7,23 +13,43 @@ export interface NavSearchItem {
 }
 
 export function buildNavSearchItems(options?: {
-  showRbac?: boolean;
-  showSuperAdmin?: boolean;
+  showAdmin?: boolean;
+  showPlatform?: boolean;
+  entitlements?: WorkspaceEntitlementsVM;
 }) {
-  const groups = filterNavGroups({
-    showRbac: options?.showRbac ?? true,
-    showSuperAdmin: options?.showSuperAdmin ?? true,
-  });
+  const showAdmin = options?.showAdmin ?? true;
+  const showPlatform = options?.showPlatform ?? true;
+  const entitlements = options?.entitlements;
+
   const items: NavSearchItem[] = [
-    { href: "/dashboard", label: "工作台", group: "导航" },
-    { href: "/dashboard/workplace", label: "工作台首页", group: "导航" },
-    { href: "/settings/profile", label: "个人设置", group: "导航" },
+    { href: "/dashboard/workplace", label: "工作台", group: "概览" },
+    { href: "/settings/profile", label: "个人资料", group: "账户中心" },
+    { href: "/notifications", label: "消息中心", group: "账户中心" },
   ];
-  for (const group of groups) {
+
+  for (const group of BUSINESS_NAV_TREE) {
     for (const item of group.items) {
+      if (entitlements && !isPathEntitled(item.href, entitlements)) continue;
       items.push({ href: item.href, label: item.label, group: group.label });
     }
   }
+
+  if (showAdmin) {
+    for (const section of ADMIN_NAV_SECTIONS) {
+      for (const item of section.items) {
+        items.push({ href: item.href, label: item.label, group: `管理 · ${section.label}` });
+      }
+    }
+  }
+
+  if (showPlatform) {
+    for (const group of PLATFORM_OPS_NAV_TREE) {
+      for (const item of group.items) {
+        items.push({ href: item.href, label: item.label, group: "平台运营" });
+      }
+    }
+  }
+
   const seen = new Set<string>();
   return items.filter((item) => {
     if (seen.has(item.href)) return false;

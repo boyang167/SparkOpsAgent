@@ -78,6 +78,9 @@ func (h *SeedWorkspaceMenusHandler) ensureDefaults(ctx context.Context, workspac
 	if err := h.repairRemovedMenus(ctx, workspaceID); err != nil {
 		return err
 	}
+	if err := h.repairEnterpriseNavMenus(ctx, workspaceID); err != nil {
+		return err
+	}
 	for _, group := range defaultMenuGroups {
 		parent, err := h.menus.FindGroupMenu(ctx, workspaceID, group.ID)
 		if err != nil {
@@ -250,80 +253,113 @@ type defaultMenuGroup struct {
 
 var defaultMenuGroups = []defaultMenuGroup{
 	{
-		ID: "delivery", Label: "交付运维",
+		ID: "application", Label: "应用中心",
 		Items: []struct{ Href, Label string }{
 			{"/projects", "项目管理"},
-			{"/delivery/builds", "构建"},
-			{"/runtime/pods", "Pod 运维"},
-			{"/cronjobs", "定时任务"},
-			{"/publish/products", "产品清单"},
-			{"/publish/plans", "迭代计划"},
-			{"/publish/releases", "应用发布"},
-			{"/templates", "模板"},
-		},
-	},
-	{
-		ID: "infra", Label: "基础设施",
-		Items: []struct{ Href, Label string }{
-			{"/config/configmaps", "配置字典"},
-			{"/config/secrets", "密钥配置"},
-			{"/config/storage", "持久化存储"},
-			{"/config/consul", "Consul KV"},
-			{"/config/webhooks", "Webhooks"},
-			{"/security/ingress", "Ingress"},
-			{"/security/virtualservices", "VirtualService"},
-			{"/discovery/services", "服务发现"},
-			{"/cluster/list", "集群列表"},
-			{"/cluster/sync", "资源同步"},
-		},
-	},
-	{
-		ID: "resource", Label: "资源中心",
-		Items: []struct{ Href, Label string }{
-			{"/market/dockerfiles", "市场"},
 			{"/knowledge", "知识库"},
+			{"/market/dockerfiles", "能力目录"},
 		},
 	},
 	{
-		ID: "permission", Label: "权限管理",
+		ID: "ops-delivery", Label: "持续交付",
 		Items: []struct{ Href, Label string }{
-			{"/permission/roles", "角色管理"},
-			{"/permission/members", "成员绑定"},
-			{"/permission/menus", "菜单管理"},
-			{"/permission/apis", "API 管理"},
-			{"/permission/data", "数据权限"},
-			{"/permission/api-tokens", "API Token"},
+			{"/delivery/builds", "构建管理"},
+			{"/publish/products", "产品管理"},
+			{"/publish/plans", "版本计划"},
+			{"/publish/releases", "发布管理"},
 		},
 	},
 	{
-		ID: "monitor", Label: "运维监控",
+		ID: "ops-runtime", Label: "运行管理",
 		Items: []struct{ Href, Label string }{
-			{"/monitor/operation", "操作日志"},
-			{"/monitor/log-viewer", "日志查看器"},
-			{"/monitor/server", "服务器状态"},
+			{"/runtime/pods", "运行实例"},
+			{"/cronjobs", "定时任务"},
+		},
+	},
+	{
+		ID: "ops-observability", Label: "可观测性",
+		Items: []struct{ Href, Label string }{
 			{"/monitor/overview", "监控概览"},
+			{"/monitor/log-viewer", "日志查询"},
 			{"/monitor/statistics", "部署统计"},
-			{"/monitor/org-audit", "组织审计"},
-			{"/monitor/platform-audit", "平台审计"},
 		},
 	},
 	{
-		ID: "platform", Label: "平台治理",
+		ID: "ops-infra", Label: "基础设施",
 		Items: []struct{ Href, Label string }{
-			{"/settings/platform/members", "平台用户"},
-			{"/settings/platform/orgs", "平台组织"},
-			{"/tools", "工具箱"},
-			{"/proclaims", "公告"},
+			{"/config/configmaps", "配置管理"},
+			{"/config/secrets", "密钥管理"},
+			{"/config/storage", "存储管理"},
+			{"/discovery/services", "服务发现"},
+			{"/security/ingress", "网络入口"},
+			{"/security/virtualservices", "流量策略"},
+			{"/config/webhooks", "外部集成"},
+			{"/config/consul", "配置中心"},
 		},
 	},
-	{
-		ID: "settings", Label: "设置",
-		Items: []struct{ Href, Label string }{
-			{"/settings/tenant", "组织与工作区"},
-			{"/notifications", "站内信"},
-			{"/settings/profile", "个人设置"},
-		},
-	},
+}
+
+var legacyBusinessNavGroupIDs = []string{
+	"delivery", "infra", "resource", "monitor", "permission", "platform", "settings",
+}
+
+var enterpriseMenuTitleByPath = map[string]string{
+	"/projects":                 "项目管理",
+	"/knowledge":                "知识库",
+	"/market/dockerfiles":       "能力目录",
+	"/delivery/builds":          "构建管理",
+	"/publish/products":         "产品管理",
+	"/publish/plans":            "版本计划",
+	"/publish/releases":         "发布管理",
+	"/runtime/pods":             "运行实例",
+	"/cronjobs":                 "定时任务",
+	"/monitor/overview":         "监控概览",
+	"/monitor/log-viewer":       "日志查询",
+	"/monitor/statistics":       "部署统计",
+	"/config/configmaps":        "配置管理",
+	"/config/secrets":           "密钥管理",
+	"/config/storage":           "存储管理",
+	"/discovery/services":       "服务发现",
+	"/security/ingress":         "网络入口",
+	"/security/virtualservices": "流量策略",
+	"/config/webhooks":          "外部集成",
+	"/config/consul":            "配置中心",
+}
+
+func (h *SeedWorkspaceMenusHandler) repairEnterpriseNavMenus(ctx context.Context, workspaceID kernel.WorkspaceID) error {
+	if _, err := h.menus.FindGroupMenu(ctx, workspaceID, "application"); err != nil {
+		for _, groupID := range legacyBusinessNavGroupIDs {
+			parent, findErr := h.menus.FindGroupMenu(ctx, workspaceID, groupID)
+			if findErr != nil {
+				if parent, findErr = h.menus.FindByPath(ctx, workspaceID, groupID); findErr != nil {
+					continue
+				}
+			}
+			if err := h.menus.SoftDeleteSubtree(ctx, workspaceID, parent.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return h.syncEnterpriseMenuTitles(ctx, workspaceID)
+}
+
+func (h *SeedWorkspaceMenusHandler) syncEnterpriseMenuTitles(ctx context.Context, workspaceID kernel.WorkspaceID) error {
+	menus, err := h.menus.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, menu := range menus {
+		title, ok := enterpriseMenuTitleByPath[menu.Path]
+		if !ok || menu.Title == title {
+			continue
+		}
+		menu.Title = title
+		menu.Name = menuNameFromPath(menu.Path)
+		if err := h.menus.Save(ctx, menu); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type CreateMenuInput struct {

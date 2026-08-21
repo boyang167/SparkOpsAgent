@@ -3,6 +3,15 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { BffError } from "@sparkops/contracts";
 import {
+  apiPathEntitlement,
+  bffPathToApiPath,
+  isModuleEnabled,
+} from "./entitlements";
+import {
+  invalidateEntitlementsCache,
+  resolveWorkspaceEntitlements,
+} from "./entitlements-cache";
+import {
   createAgentUpstream,
   type AgentUpstream,
   createIdentityUpstream,
@@ -70,6 +79,47 @@ export type BffHandler<T = unknown> = (
   req: NextRequest,
   args: BffHandlerArgs,
 ) => Promise<T>;
+
+async function assertApiEntitlement(ctx: BffContext, apiPath: string, traceId: string) {
+  const moduleKey = apiPathEntitlement(apiPath);
+  if (!moduleKey) return;
+
+  const entitlements = await resolveWorkspaceEntitlements(ctx.workspaceId, (wsId) =>
+    ctx.upstream.platform.getWorkspaceEntitlements(wsId),
+  );
+  if (!isModuleEnabled(entitlements, moduleKey)) {
+    throw new BffError(
+      `feature module disabled: ${moduleKey}`,
+      "ENTITLEMENT_MODULE_DISABLED",
+      403,
+      traceId,
+    );
+  }
+}
+
+async function assertBffEntitlement(ctx: BffContext, req: NextRequest, traceId: string) {
+  await assertApiEntitlement(ctx, bffPathToApiPath(req.nextUrl.pathname), traceId);
+}
+
+export {
+  apiPathEntitlement,
+  bffPathEntitlement,
+  bffPathToApiPath,
+  DEFAULT_ENTITLEMENTS,
+  isModuleEnabled,
+} from "./entitlements";
+export type { EntitlementModuleKey } from "./entitlements";
+export {
+  configureEntitlementsCacheTtlSeconds,
+  getEntitlementsCacheTtlMs,
+  isEntitlementsCacheEnabled,
+  readEntitlementsCacheTtlMs,
+} from "./entitlements-cache-config";
+export {
+  getCachedEntitlements,
+  invalidateEntitlementsCache,
+  resolveWorkspaceEntitlements,
+} from "./entitlements-cache";
 
 export function createTraceId(req: NextRequest): string {
   return req.headers.get("x-trace-id") ?? randomUUID();
@@ -159,6 +209,7 @@ export function createBffHandler(handler: BffHandler) {
     const traceId = createTraceId(req);
     try {
       const ctx = await createBffContext(req);
+      await assertBffEntitlement(ctx, req, traceId);
       const params = await context.params;
       const data = await handler(ctx, req, { params });
       return ok(data, traceId);
@@ -212,6 +263,7 @@ export async function proxyUpstreamStream(ctx: BffContext, path: string): Promis
   if (!ctx.token) {
     throw new BffError("unauthorized", "AUTH_UNAUTHORIZED", 401, ctx.traceId);
   }
+  await assertApiEntitlement(ctx, path, ctx.traceId);
   const { buildUpstreamStreamHeaders, getUpstreamBaseUrl } = await import("@sparkops/upstream");
   const upstream = await fetch(`${getUpstreamBaseUrl()}${path}`, {
     headers: buildUpstreamStreamHeaders({

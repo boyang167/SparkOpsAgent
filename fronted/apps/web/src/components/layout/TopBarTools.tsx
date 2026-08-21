@@ -33,7 +33,7 @@ export function TopBarTools() {
           type="button"
           className="topbar-tool-btn"
           aria-label="搜索"
-          title="搜索 (Ctrl+K)"
+          title="命令面板 (Ctrl+K)"
           onClick={() => setSearchOpen(true)}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>

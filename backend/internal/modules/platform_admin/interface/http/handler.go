@@ -10,6 +10,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/observability"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type Handler struct {
@@ -23,10 +24,11 @@ type Handler struct {
 	getStatistics      *query.GetStatisticsHandler
 	getMonitorOverview *query.GetMonitorOverviewHandler
 	listDeploymentStats *query.ListDeploymentStatsHandler
-	listTools          *query.ListToolsHandler
-	listProclaims      *query.ListProclaimsHandler
-	createProclaim  *command.CreateProclaimHandler
-	cloneTool       *command.CloneToolHandler
+	listTools                 *query.ListToolsHandler
+	listProclaims             *query.ListProclaimsHandler
+	createProclaim            *command.CreateProclaimHandler
+	cloneTool                 *command.CloneToolHandler
+	getWorkspaceEntitlements  *query.GetWorkspaceEntitlementsHandler
 }
 
 func NewHandler(
@@ -44,6 +46,7 @@ func NewHandler(
 	listProclaims *query.ListProclaimsHandler,
 	createProclaim *command.CreateProclaimHandler,
 	cloneTool *command.CloneToolHandler,
+	getWorkspaceEntitlements *query.GetWorkspaceEntitlementsHandler,
 ) *Handler {
 	return &Handler{
 		getSysConfig: getSysConfig, updateSysConfig: updateSysConfig,
@@ -54,6 +57,7 @@ func NewHandler(
 		listTools: listTools,
 		listProclaims: listProclaims, createProclaim: createProclaim,
 		cloneTool: cloneTool,
+		getWorkspaceEntitlements: getWorkspaceEntitlements,
 	}
 }
 
@@ -125,6 +129,20 @@ func (h *Handler) ListClusters(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) GetWorkspaceEntitlements(c *gin.Context) {
+	wsID, err := kernel.ParseWorkspaceID(c.Param("wsId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid workspace id", http.StatusBadRequest)
+		return
+	}
+	item, err := h.getWorkspaceEntitlements.Handle(c.Request.Context(), wsID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, item)
 }
 
 func (h *Handler) CreateCluster(c *gin.Context) {

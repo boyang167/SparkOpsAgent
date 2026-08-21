@@ -1,5 +1,6 @@
 "use client";
 
+import type { AuthProvidersVM } from "@sparkops/contracts/identity";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { identity } from "@sparkops/web-sdk";
@@ -11,7 +12,10 @@ export function LoginForm() {
   const [password, setPassword] = useState("Demo1234!");
   const [ldapUser, setLdapUser] = useState("");
   const [ldapPassword, setLdapPassword] = useState("");
-  const [providers, setProviders] = useState({ oidc_enabled: false, ldap_enabled: false });
+  const [providers, setProviders] = useState<AuthProvidersVM>({
+    oidc_enabled: false,
+    ldap_enabled: false,
+  });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [ldapLoading, setLdapLoading] = useState(false);
@@ -60,9 +64,15 @@ export function LoginForm() {
     }
   }
 
+  const showPassword = providers.sso_ui?.show_password_login !== false;
+  const showEnterprise =
+    providers.sso_ui?.enabled !== false &&
+    (providers.oidc_enabled || providers.ldap_enabled);
+
   return (
     <div className="space-y-6">
-      <form className="space-y-4" onSubmit={onSubmit}>
+      {showPassword ? (
+        <form className="space-y-4" onSubmit={onSubmit}>
         <div>
           <label className="label" htmlFor="email">
             邮箱
@@ -93,16 +103,19 @@ export function LoginForm() {
           {loading ? "登录中..." : "登录"}
         </button>
       </form>
+      ) : null}
 
-      {providers.oidc_enabled || providers.ldap_enabled ? (
+      {showEnterprise ? (
         <div className="space-y-4 border-t border-[var(--border)] pt-4">
           <p className="text-sm text-muted text-center">或使用企业身份</p>
-          {providers.oidc_enabled ? (
+          {providers.oidc_enabled &&
+          (providers.sso_ui?.provider !== "ldap" || !providers.ldap_enabled) ? (
             <button type="button" className="btn-secondary w-full" onClick={() => void onOIDCLogin()}>
               SSO / OIDC 登录
             </button>
           ) : null}
-          {providers.ldap_enabled ? (
+          {providers.ldap_enabled &&
+          (providers.sso_ui?.provider === "ldap" || !providers.oidc_enabled) ? (
             <form className="space-y-3" onSubmit={onLDAPLogin}>
               <input
                 className="input"

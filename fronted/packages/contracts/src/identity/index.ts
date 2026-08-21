@@ -46,9 +46,18 @@ export const ChangePasswordCommandSchema = z.object({
 
 export type ChangePasswordCommand = z.infer<typeof ChangePasswordCommandSchema>;
 
+export const LoginUIConfigSchema = z.object({
+  enabled: z.boolean().optional().default(false),
+  provider: z.string().optional().default("oidc"),
+  show_password_login: z.boolean().optional().default(true),
+});
+
+export type LoginUIConfigVM = z.infer<typeof LoginUIConfigSchema>;
+
 export const AuthProvidersVMSchema = z.object({
   oidc_enabled: z.boolean(),
   ldap_enabled: z.boolean(),
+  sso_ui: LoginUIConfigSchema.optional(),
 });
 
 export type AuthProvidersVM = z.infer<typeof AuthProvidersVMSchema>;

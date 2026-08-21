@@ -1,4 +1,5 @@
 import type { BffContext } from "@sparkops/bff-core";
+import { invalidateEntitlementsCache, resolveWorkspaceEntitlements } from "@sparkops/bff-core";
 
 export async function getDashboard(ctx: BffContext, workspaceId: string) {
   return ctx.upstream.platform.getDashboard(workspaceId);
@@ -19,7 +20,9 @@ export async function listClusters(ctx: BffContext) {
 }
 
 export async function createCluster(ctx: BffContext, input: Record<string, unknown>) {
-  return ctx.upstream.platform.createCluster(input);
+  const result = await ctx.upstream.platform.createCluster(input);
+  invalidateEntitlementsCache();
+  return result;
 }
 
 export async function listSyncJobs(ctx: BffContext) {
@@ -36,7 +39,9 @@ export async function getSysConfig(ctx: BffContext) {
 }
 
 export async function updateSysConfig(ctx: BffContext, input: Record<string, unknown>) {
-  return ctx.upstream.platform.updateSysConfig(input);
+  const result = await ctx.upstream.platform.updateSysConfig(input);
+  invalidateEntitlementsCache();
+  return result;
 }
 
 export async function getServerStatus(ctx: BffContext, workspaceId: string) {
@@ -99,6 +104,20 @@ export async function getTraceDetail(ctx: BffContext, workspaceId: string, trace
 
 export async function getMetricsSummary(ctx: BffContext, workspaceId: string) {
   return ctx.upstream.platform.getMetricsSummary(workspaceId);
+}
+
+export async function getWorkspaceEntitlements(ctx: BffContext, workspaceId: string) {
+  return resolveWorkspaceEntitlements(
+    workspaceId,
+    (wsId) => ctx.upstream.platform.getWorkspaceEntitlements(wsId),
+    { fresh: true },
+  );
+}
+
+export async function getWorkspaceEntitlementsCached(ctx: BffContext, workspaceId: string) {
+  return resolveWorkspaceEntitlements(workspaceId, (wsId) =>
+    ctx.upstream.platform.getWorkspaceEntitlements(wsId),
+  );
 }
 
 export async function listProclaims(ctx: BffContext) {

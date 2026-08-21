@@ -30,6 +30,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/entitlements"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/k8s"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
@@ -136,9 +137,14 @@ func Run(ctx context.Context) error {
 		}
 	}
 
+	entitlements.ConfigureFromEnv()
+
 	if c.PolicyEngine != nil && c.PermissionChecker != nil && c.APIPolicyChecker != nil {
 		c.Engine.Use(authn.OptionalAuth(tokens))
 		c.Engine.Use(authz.APIAccessMiddleware(c.PolicyEngine, c.PermissionChecker, c.APIPolicyChecker))
+	}
+	if c.DB != nil {
+		c.Engine.Use(entitlements.Middleware(c.DB))
 	}
 
 	c.RouteRegistry = routes.Collect(c.Engine)
@@ -191,7 +197,10 @@ func openDatabase(cfg *config.Config, logger *zap.Logger) (*gorm.DB, error) {
 	}
 	db, err := postgres.Open(cfg.Database.DSN)
 	if err != nil {
-		return nil, fmt.Errorf("connect database: %w", err)
+		return nil, fmt.Errorf(
+			"connect database: %w (host unreachable? use local Postgres via `make docker-up`, or restore VPN/network to remote DB in config.yaml)",
+			err,
+		)
 	}
 	logger.Info("database connected")
 	return db, nil

@@ -58,6 +58,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewListProclaimsHandler(repo),
 		command.NewCreateProclaimHandler(repo),
 		command.NewCloneToolHandler(),
+		query.NewGetWorkspaceEntitlementsHandler(c.DB),
 	)
 	opStore := operationlog.NewStore(c.DB)
 	opHandler := adminhttp.NewOperationRecordsHandler(opStore)
@@ -83,6 +84,8 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.POST("/api/v1/admin/tools/clone", auth, superAdmin, handler.CloneTool)
 	c.Engine.GET("/api/v1/admin/server/status", auth, superAdmin, handler.GetServerStatus)
 
+	c.Engine.GET("/api/v1/workspaces/:wsId/entitlements",
+		auth, ws, wsMember, handler.GetWorkspaceEntitlements)
 	c.Engine.GET("/api/v1/workspaces/:wsId/dashboard",
 		auth, ws, wsMember, projectRead, handler.GetDashboard)
 	c.Engine.GET("/api/v1/workspaces/:wsId/statistics",

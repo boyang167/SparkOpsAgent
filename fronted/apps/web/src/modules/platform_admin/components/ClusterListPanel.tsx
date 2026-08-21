@@ -5,6 +5,7 @@ import { platform } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
+import { notifyEntitlementsUpdated } from "@/components/layout/shell-context";
 
 export function ClusterListPanel() {
   const [items, setItems] = useState<Record<string, unknown>[]>([]);
@@ -38,6 +39,7 @@ export function ClusterListPanel() {
       setClusterName("");
       setServer("");
       await load();
+      notifyEntitlementsUpdated();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "创建失败");
     }

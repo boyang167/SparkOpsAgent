@@ -10,7 +10,9 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/entitlements"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
+	"gorm.io/gorm"
 )
 
 type MyMenuButtonItem struct {
@@ -31,6 +33,7 @@ type ListNavMenusHandler struct {
 	seed        *command.SeedWorkspaceMenusHandler
 	checker     *Checker
 	systemRoles authz.SystemRoleChecker
+	db          *gorm.DB
 }
 
 func NewListNavMenusHandler(
@@ -38,8 +41,9 @@ func NewListNavMenusHandler(
 	seed *command.SeedWorkspaceMenusHandler,
 	checker *Checker,
 	systemRoles authz.SystemRoleChecker,
+	db *gorm.DB,
 ) *ListNavMenusHandler {
-	return &ListNavMenusHandler{menus: menus, seed: seed, checker: checker, systemRoles: systemRoles}
+	return &ListNavMenusHandler{menus: menus, seed: seed, checker: checker, systemRoles: systemRoles, db: db}
 }
 
 func (h *ListNavMenusHandler) Handle(
@@ -74,7 +78,11 @@ func (h *ListNavMenusHandler) Handle(
 	if err != nil {
 		return nil, err
 	}
-	filtered := persistence.FilterMenusForNav(menus, menuRoles, memberRoleIDs, isSuperAdmin, hasGovAdmin)
+	ents, err := entitlements.ResolveCachedForWorkspace(ctx, h.db, workspaceID.String())
+	if err != nil {
+		return nil, err
+	}
+	filtered := persistence.FilterMenusForNav(menus, menuRoles, memberRoleIDs, isSuperAdmin, hasGovAdmin, ents)
 	return persistence.BuildMenuTree(filtered), nil
 }
 

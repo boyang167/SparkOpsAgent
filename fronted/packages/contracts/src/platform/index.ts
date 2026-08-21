@@ -224,3 +224,25 @@ export const SysConfigVMSchema = z.object({
 });
 
 export type SysConfigVM = z.infer<typeof SysConfigVMSchema>;
+
+export const WorkspaceEntitlementsVMSchema = z.object({
+  agent: z.boolean(),
+  knowledge: z.boolean(),
+  marketplace: z.boolean(),
+  delivery: z.boolean(),
+  k8s: z.boolean(),
+  observability: z.boolean(),
+  mcp: z.boolean(),
+});
+
+export type WorkspaceEntitlementsVM = z.infer<typeof WorkspaceEntitlementsVMSchema>;
+
+export const FEATURE_MODULE_LABELS: Record<keyof WorkspaceEntitlementsVM, string> = {
+  agent: "智能体 / 项目",
+  knowledge: "知识库",
+  marketplace: "能力目录",
+  delivery: "持续交付",
+  k8s: "Kubernetes 运行",
+  observability: "可观测性",
+  mcp: "MCP 集成",
+};

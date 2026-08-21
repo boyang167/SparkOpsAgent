@@ -120,6 +120,13 @@ export function getMetricsSummary(workspaceId: string) {
   );
 }
 
+export function getWorkspaceEntitlements(workspaceId: string) {
+  return bffFetch<import("@sparkops/contracts/platform").WorkspaceEntitlementsVM>(
+    `/workspaces/${workspaceId}/entitlements`,
+    { workspaceId },
+  );
+}
+
 export async function listClusters() {
   const data = await bffFetch<{ items: Record<string, unknown>[] }>("/admin/clusters");
   return data.items;

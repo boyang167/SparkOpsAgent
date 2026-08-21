@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BffError } from "@sparkops/contracts";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
@@ -72,10 +71,6 @@ export function ProjectWorkbenchPage({
 
   return (
     <div className="stack-lg">
-      <Link href="/projects" className="link-back">
-        ← 返回项目管理
-      </Link>
-
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
 
       <ProjectWorkbenchCard

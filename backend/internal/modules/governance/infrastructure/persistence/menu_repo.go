@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/entitlements"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -689,8 +690,13 @@ func (s *MenuStore) ListRoleMenusByWorkspace(ctx context.Context, workspaceID ke
 
 func IsSuperAdminOnlyPath(path string) bool {
 	return strings.HasPrefix(path, "/settings/platform") ||
+		strings.HasPrefix(path, "/platform/") ||
 		strings.HasPrefix(path, "/cluster/") ||
 		path == "/monitor/platform-audit"
+}
+
+func IsAdminConsolePath(path string) bool {
+	return strings.HasPrefix(path, "/admin/") || strings.HasPrefix(path, "/permission/")
 }
 
 func FilterMenusForNav(
@@ -699,6 +705,7 @@ func FilterMenusForNav(
 	memberRoleIDs map[string]struct{},
 	isSuperAdmin bool,
 	hasGovAdmin bool,
+	ents entitlements.WorkspaceEntitlements,
 ) []*model.Menu {
 	byID := make(map[string]*model.Menu, len(menus))
 	for _, menu := range menus {
@@ -710,7 +717,13 @@ func FilterMenusForNav(
 		if menu.Hidden {
 			continue
 		}
+		if !ents.Allows(menu.Path) {
+			continue
+		}
 		if IsSuperAdminOnlyPath(menu.Path) && !isSuperAdmin {
+			continue
+		}
+		if IsAdminConsolePath(menu.Path) {
 			continue
 		}
 		if strings.HasPrefix(menu.Path, "/permission/") && !hasGovAdmin {

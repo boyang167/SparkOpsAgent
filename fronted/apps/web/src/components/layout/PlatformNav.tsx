@@ -6,7 +6,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { governance } from "@sparkops/web-sdk";
 import type { MenuTreeVM } from "@sparkops/contracts/governance";
 import { NavGroup } from "@/components/layout/NavGroup";
-import { filterNavGroups } from "@/components/layout/nav-tree";
+import { filterBusinessNavGroups } from "@/components/layout/nav-tree";
+import { useShellContext } from "@/components/layout/shell-context";
 
 interface PlatformNavProps {
   workspaceId?: string;
@@ -46,46 +47,31 @@ const icons = {
       <rect x="14" y="14" width="7" height="7" rx="1" />
     </svg>
   ),
-  project: (
+  application: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M3 7h18M3 12h18M3 17h18" strokeLinecap="round" />
     </svg>
   ),
-  delivery: (
+  "ops-delivery": (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M12 3v4M12 17v4M3 12h4M17 12h4" strokeLinecap="round" />
       <circle cx="12" cy="12" r="3" />
     </svg>
   ),
-  infra: (
+  "ops-runtime": (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M4 6h16M4 12h16M4 18h10" strokeLinecap="round" />
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <path d="M9 9h6v6H9z" />
     </svg>
   ),
-  resource: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M6 6h12v12H6zM9 6V4h6v2M9 18v2h6v-2" strokeLinejoin="round" />
-    </svg>
-  ),
-  permission: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M12 3l7 4v5c0 4.4-3 8.5-7 9-4-.5-7-4.6-7-9V7l7-4z" strokeLinejoin="round" />
-    </svg>
-  ),
-  monitor: (
+  "ops-observability": (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M4 19V5M4 19h16M8 15v-4M12 15V9M16 15v-2" strokeLinecap="round" />
     </svg>
   ),
-  platform: (
+  "ops-infra": (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M3 21h18M6 21V7l6-3 6 3v14M9 21v-6h6v6" strokeLinejoin="round" />
-    </svg>
-  ),
-  settings: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="8" r="4" />
-      <path d="M4 20c0-4 4-6 8-6s8 2 8 6" strokeLinecap="round" />
+      <path d="M4 6h16M4 12h16M4 18h10" strokeLinecap="round" />
     </svg>
   ),
   default: (
@@ -96,19 +82,11 @@ const icons = {
   ),
 } as const;
 
-const groupIcons: Record<string, React.ReactNode> = {
-  delivery: icons.delivery,
-  infra: icons.infra,
-  resource: icons.resource,
-  permission: icons.permission,
-  monitor: icons.monitor,
-  platform: icons.platform,
-  settings: icons.settings,
-};
+const collapsedByDefault = new Set(["ops-infra"]);
 
 function resolveGroupIcon(key?: string) {
   if (!key) return icons.default;
-  return groupIcons[key] ?? icons.default;
+  return icons[key as keyof typeof icons] ?? icons.default;
 }
 
 function menuTreeToNavGroups(tree: MenuTreeVM[]) {
@@ -116,6 +94,7 @@ function menuTreeToNavGroups(tree: MenuTreeVM[]) {
     .map((group) => ({
       id: group.icon || group.name,
       label: group.title,
+      defaultCollapsed: collapsedByDefault.has(group.icon || group.name),
       items: (group.children ?? [])
         .filter((child) => !child.hidden && child.path.startsWith("/"))
         .map((child) => ({ href: child.path, label: child.title })),
@@ -125,6 +104,7 @@ function menuTreeToNavGroups(tree: MenuTreeVM[]) {
 
 export function PlatformNav({ workspaceId }: PlatformNavProps) {
   const pathname = usePathname();
+  const { entitlements } = useShellContext();
   const [menuTree, setMenuTree] = useState<MenuTreeVM[] | null>(null);
 
   const loadNav = useCallback(async () => {
@@ -157,8 +137,12 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
   );
 
   const fallbackGroups = useMemo(
-    () => filterNavGroups({ showRbac: true, showSuperAdmin: true }),
-    [],
+    () =>
+      filterBusinessNavGroups({ showSuperAdmin: false, entitlements }).map((group) => ({
+        ...group,
+        defaultCollapsed: group.defaultCollapsed ?? false,
+      })),
+    [entitlements],
   );
 
   const groups = dynamicGroups ?? fallbackGroups;
@@ -171,12 +155,6 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
         active={isActive(pathname, "/dashboard/workplace", "/dashboard/workplace")}
         icon={icons.grid}
       />
-      <NavItem
-        href="/dashboard"
-        label="项目"
-        active={pathname === "/dashboard" || pathname.startsWith("/projects")}
-        icon={icons.project}
-      />
 
       {groups.map((group) => (
         <NavGroup
@@ -185,6 +163,7 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
           icon={resolveGroupIcon(group.id)}
           items={group.items}
           pathname={pathname}
+          defaultOpen={!group.defaultCollapsed}
         />
       ))}
     </>

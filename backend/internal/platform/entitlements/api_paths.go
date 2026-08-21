@@ -1,0 +1,114 @@
+package entitlements
+
+import "strings"
+
+// APIPathEntitlement maps an HTTP API path to a module key. Empty means no check.
+func APIPathEntitlement(path string) string {
+	if !strings.HasPrefix(path, "/api/v1/") {
+		return ""
+	}
+	if shouldSkipAPIEntitlement(path) {
+		return ""
+	}
+	if isGovernanceWorkspaceAPI(path) {
+		return ""
+	}
+
+	switch {
+	case strings.Contains(path, "/knowledge-bases"), strings.HasPrefix(path, "/api/v1/documents/"):
+		return "knowledge"
+	case strings.Contains(path, "/market/"):
+		return "marketplace"
+	case strings.Contains(path, "/builds"), strings.Contains(path, "/products"):
+		return "delivery"
+	case strings.Contains(path, "/webhooks"), strings.Contains(path, "/mcp/"):
+		return "mcp"
+	case strings.Contains(path, "/cronjobs"), strings.Contains(path, "/pods"),
+		strings.Contains(path, "/k8s/"), strings.Contains(path, "/secrets"),
+		strings.Contains(path, "/consul/"), strings.Contains(path, "/deployments"),
+		strings.Contains(path, "/ingresses"), strings.Contains(path, "/configmaps"),
+		strings.Contains(path, "/services"), strings.Contains(path, "/pvcs"),
+		strings.Contains(path, "/virtualservices"), strings.Contains(path, "/storageclasses"):
+		return "k8s"
+	case strings.Contains(path, "/monitor/"), strings.Contains(path, "/observability/"),
+		strings.Contains(path, "/statistics"):
+		return "observability"
+	case strings.Contains(path, "/projects"), strings.HasPrefix(path, "/api/v1/agents/"),
+		strings.HasPrefix(path, "/api/v1/runs/"), strings.HasPrefix(path, "/api/v1/conversations/"),
+		strings.HasPrefix(path, "/api/v1/workflows/"), strings.HasPrefix(path, "/api/v1/workflow-runs/"),
+		strings.Contains(path, "/templates"):
+		return "agent"
+	default:
+		return ""
+	}
+}
+
+func shouldSkipAPIEntitlement(path string) bool {
+	prefixes := []string{
+		"/api/v1/admin/",
+		"/api/v1/auth/",
+		"/api/v1/public/",
+		"/api/v1/platform/",
+		"/api/v1/orgs/",
+		"/api/v1/notifications",
+		"/api/v1/models",
+		"/api/v1/identity/",
+		"/api/v1/members/",
+	}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	if strings.HasSuffix(path, "/entitlements") || strings.HasSuffix(path, "/dashboard") {
+		return true
+	}
+	if path == "/api/v1/workspaces" || strings.HasSuffix(path, "/workspaces/select") {
+		return true
+	}
+	return false
+}
+
+func isGovernanceWorkspaceAPI(path string) bool {
+	if !strings.Contains(path, "/workspaces/") {
+		return false
+	}
+	markers := []string{
+		"/roles", "/members", "/me/", "/menus", "/apis", "/api-tokens", "/data-resources",
+		"/operation-records",
+	}
+	for _, marker := range markers {
+		if strings.Contains(path, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e WorkspaceEntitlements) AllowsModule(key string) bool {
+	if key == "" {
+		return true
+	}
+	switch key {
+	case "agent":
+		return e.Agent
+	case "knowledge":
+		return e.Knowledge
+	case "marketplace":
+		return e.Marketplace
+	case "delivery":
+		return e.Delivery
+	case "k8s":
+		return e.K8s
+	case "observability":
+		return e.Observability
+	case "mcp":
+		return e.Mcp
+	default:
+		return true
+	}
+}
+
+func (e WorkspaceEntitlements) AllowsAPI(path string) bool {
+	return e.AllowsModule(APIPathEntitlement(path))
+}

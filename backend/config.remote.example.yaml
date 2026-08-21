@@ -1,0 +1,24 @@
+# 复制为 config.yaml 使用（需本机能访问 192.168.5.24）
+server:
+  addr: ":8080"
+database:
+  host: 192.168.5.24
+  port: 5432
+  user: admin
+  password: "admin@2025"
+  name: sparkops_agent
+  sslmode: disable
+redis:
+  addr: "192.168.5.24:16379"
+messaging:
+  driver: inmemory
+jwt:
+  secret: "sparkops-agent-secret"
+  expire_hour: 24
+observability:
+  log:
+    level: info
+    directory: "A:/21-Agent/SparkOpsAgent/logs"
+    console: true
+    max_size_mb: 100
+    max_backups: 7

@@ -183,6 +183,13 @@ export function createPlatformUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async getWorkspaceEntitlements(wsId: string) {
+      return upstreamFetch<import("@sparkops/contracts/platform").WorkspaceEntitlementsVM>(
+        `/api/v1/workspaces/${wsId}/entitlements`,
+        { method: "GET", options: { ...options, workspaceId: wsId } },
+      );
+    },
+
     async listProclaims() {
       return upstreamFetch<{ items: ProclaimVM[] }>("/api/v1/admin/proclaims", {
         method: "GET",
