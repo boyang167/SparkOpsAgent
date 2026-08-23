@@ -20,7 +20,6 @@ const legacyRedirects = [
   { source: "/settings/platform/members", destination: "/platform/accounts", permanent: false },
   { source: "/settings/platform/orgs", destination: "/platform/organizations", permanent: false },
   { source: "/cluster/list", destination: "/platform/clusters", permanent: false },
-  { source: "/cluster/sync", destination: "/platform/clusters/sync", permanent: false },
   { source: "/monitor/platform-audit", destination: "/platform/audit", permanent: false },
   { source: "/templates", destination: "/market/dockerfiles", permanent: false },
 ];

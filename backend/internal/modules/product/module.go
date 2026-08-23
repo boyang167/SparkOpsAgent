@@ -48,7 +48,6 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewApproveRequirementHandler(repo),
 		command.NewRejectRequirementHandler(repo),
 		command.NewReleaseRequirementHandler(repo, c.BuildTrigger),
-		command.NewCrossReleaseRequirementHandler(repo, c.SyncJobCreator),
 		query.NewListProductsHandler(repo, wsChecker),
 		query.NewGetProductHandler(repo, wsChecker),
 		query.NewListProductPlansHandler(repo),
@@ -81,8 +80,6 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.RejectRequirement)
 	c.Engine.POST("/api/v1/products/:productId/requirements/:reqId/release",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.ReleaseRequirement)
-	c.Engine.POST("/api/v1/products/:productId/requirements/:reqId/cross-release",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CrossReleaseRequirement)
 
 	c.EventBus.Subscribe(deliveryevent.BuildCompletedName, subscriber.NewOnBuildCompleted(repo).Handle)
 

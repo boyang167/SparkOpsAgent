@@ -43,7 +43,6 @@ type Container struct {
 	RouteRegistry        *routes.Registry
 	AuditLogger          audit.Logger
 	BuildTrigger         BuildTrigger
-	SyncJobCreator       SyncJobCreator
 	APIPolicyChecker     authz.WorkspaceAPIPolicyChecker
 	LLMClient         integrationport.LLMClient
 	Server            *http.Server

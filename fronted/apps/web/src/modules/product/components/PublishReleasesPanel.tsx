@@ -29,10 +29,6 @@ export function PublishReleasesPanel({ workspaceId, products }: PublishReleasesP
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectTarget, setRejectTarget] = useState<ProductRequirementVM | null>(null);
   const [rejectReason, setRejectReason] = useState("");
-  const [crossOpen, setCrossOpen] = useState(false);
-  const [crossTarget, setCrossTarget] = useState<ProductRequirementVM | null>(null);
-  const [sourceCluster, setSourceCluster] = useState("");
-  const [targetCluster, setTargetCluster] = useState("");
 
   const load = useCallback(async () => {
     if (!productId) {
@@ -67,7 +63,7 @@ export function PublishReleasesPanel({ workspaceId, products }: PublishReleasesP
     }
   }
 
-    async function onReject(e: React.FormEvent) {
+  async function onReject(e: React.FormEvent) {
     e.preventDefault();
     if (!rejectTarget) return;
     const target = rejectTarget;
@@ -77,21 +73,6 @@ export function PublishReleasesPanel({ workspaceId, products }: PublishReleasesP
     setRejectOpen(false);
     setRejectTarget(null);
     setRejectReason("");
-  }
-
-  async function onCrossRelease(e: React.FormEvent) {
-    e.preventDefault();
-    if (!crossTarget) return;
-    await runAction(crossTarget.id, () =>
-      product.crossReleaseRequirement(workspaceId, productId, crossTarget.id, {
-        source_cluster: sourceCluster,
-        target_cluster: targetCluster,
-      }),
-    );
-    setCrossOpen(false);
-    setCrossTarget(null);
-    setSourceCluster("");
-    setTargetCluster("");
   }
 
   return (
@@ -116,7 +97,6 @@ export function PublishReleasesPanel({ workspaceId, products }: PublishReleasesP
                 <th>标签</th>
                 <th>描述</th>
                 <th>状态</th>
-                <th>跨集群</th>
                 <th>操作人</th>
                 <th>操作</th>
               </tr>
@@ -130,7 +110,6 @@ export function PublishReleasesPanel({ workspaceId, products }: PublishReleasesP
                   <td>
                     <span className="badge badge-neutral">{STATUS_LABEL[row.status] ?? row.status}</span>
                   </td>
-                  <td>{row.multicluster_status ?? "-"}</td>
                   <td>{row.operator ?? "-"}</td>
                   <td>
                     <div className="flex flex-wrap gap-2">
@@ -175,19 +154,6 @@ export function PublishReleasesPanel({ workspaceId, products }: PublishReleasesP
                           发布
                         </button>
                       ) : null}
-                      {row.status === "approved" || row.status === "running" ? (
-                        <button
-                          type="button"
-                          className="btn-secondary !py-1 !px-2 text-xs"
-                          disabled={actionId === row.id}
-                          onClick={() => {
-                            setCrossTarget(row);
-                            setCrossOpen(true);
-                          }}
-                        >
-                          跨集群发布
-                        </button>
-                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -210,31 +176,6 @@ export function PublishReleasesPanel({ workspaceId, products }: PublishReleasesP
               取消
             </button>
             <button type="submit" className="btn">确认驳回</button>
-          </div>
-        </form>
-      </Modal>
-
-      <Modal open={crossOpen} onClose={() => setCrossOpen(false)} title="跨集群发布">
-        <form onSubmit={onCrossRelease} className="stack-md">
-          <input
-            className="input"
-            placeholder="源集群"
-            value={sourceCluster}
-            onChange={(e) => setSourceCluster(e.target.value)}
-            required
-          />
-          <input
-            className="input"
-            placeholder="目标集群"
-            value={targetCluster}
-            onChange={(e) => setTargetCluster(e.target.value)}
-            required
-          />
-          <div className="flex justify-end gap-2">
-            <button type="button" className="btn-secondary" onClick={() => setCrossOpen(false)}>
-              取消
-            </button>
-            <button type="submit" className="btn">提交</button>
           </div>
         </form>
       </Modal>

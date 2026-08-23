@@ -198,6 +198,13 @@ export function createGovernanceUpstream(options: UpstreamRequestOptions = {}) {
         options,
       });
     },
+    async searchMemberCandidates(wsId: string, q: string, limit = 10) {
+      const params = new URLSearchParams({ q, limit: String(limit) });
+      return upstreamFetch<{ items: import("@sparkops/contracts/governance").MemberCandidateVM[] }>(
+        `/api/v1/workspaces/${wsId}/member-candidates?${params.toString()}`,
+        { method: "GET", options },
+      );
+    },
     async inviteMember(wsId: string, input: InviteMemberCommand) {
       return upstreamFetch<InvitedMemberVM>(`/api/v1/workspaces/${wsId}/members`, {
         method: "POST",
@@ -307,6 +314,28 @@ export function createGovernanceUpstream(options: UpstreamRequestOptions = {}) {
     ) {
       return upstreamFetch<{ updated: true }>(
         `/api/v1/workspaces/${wsId}/roles/${roleId}/menus`,
+        { method: "PUT", body: JSON.stringify(input), options },
+      );
+    },
+    async listWorkspaceMenuButtons(wsId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/governance").WorkspaceMenuButtonVM[] }>(
+        `/api/v1/workspaces/${wsId}/menu-buttons`,
+        { method: "GET", options },
+      );
+    },
+    async getRoleMenuButtons(wsId: string, roleId: string) {
+      return upstreamFetch<{ button_ids: string[] }>(
+        `/api/v1/workspaces/${wsId}/roles/${roleId}/menu-buttons`,
+        { method: "GET", options },
+      );
+    },
+    async setRoleMenuButtons(
+      wsId: string,
+      roleId: string,
+      input: import("@sparkops/contracts/governance").SetRoleMenuButtonsCommand,
+    ) {
+      return upstreamFetch<{ updated: true }>(
+        `/api/v1/workspaces/${wsId}/roles/${roleId}/menu-buttons`,
         { method: "PUT", body: JSON.stringify(input), options },
       );
     },

@@ -18,6 +18,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/integration"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/mcp"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/notification"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product"
@@ -126,6 +127,7 @@ func Run(ctx context.Context) error {
 			runtime.New(tokens),
 			integration.New(tokens),
 			agent_runtime.New(tokens),
+			mcp.New(tokens),
 		)
 	} else {
 		logger.Warn("database unavailable, skipping business modules")

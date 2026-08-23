@@ -32,7 +32,7 @@ export async function loadGovernanceContext(): Promise<GovernanceContext> {
     permissions = [];
   }
 
-  const canManage = permissions.includes("governance:admin");
+  const canManage = permissions.includes("governance:admin") || (session.is_super_admin ?? false);
   let roles: RoleVM[] = [];
   let members: WorkspaceMemberVM[] = [];
 

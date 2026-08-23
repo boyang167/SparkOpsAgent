@@ -1,7 +1,6 @@
 package platform_admin
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/application/command"
@@ -14,7 +13,6 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/applog"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/operationlog"
-	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type Module struct {
@@ -42,14 +40,11 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 
 	repo := persistence.NewAdminRepository(c.DB)
-	createSyncJob := command.NewCreateSyncJobHandler(repo)
 	handler := adminhttp.NewHandler(
 		query.NewGetSysConfigHandler(repo),
 		command.NewUpdateSysConfigHandler(repo),
 		query.NewListClustersHandler(repo),
 		command.NewCreateClusterHandler(repo),
-		query.NewListSyncJobsHandler(repo),
-		createSyncJob,
 		query.NewGetDashboardHandler(repo),
 		query.NewGetStatisticsHandler(repo),
 		query.NewGetMonitorOverviewHandler(repo),
@@ -76,8 +71,6 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.PATCH("/api/v1/admin/sysconfig", auth, superAdmin, handler.UpdateSysConfig)
 	c.Engine.GET("/api/v1/admin/clusters", auth, superAdmin, handler.ListClusters)
 	c.Engine.POST("/api/v1/admin/clusters", auth, superAdmin, handler.CreateCluster)
-	c.Engine.GET("/api/v1/admin/sync/jobs", auth, superAdmin, handler.ListSyncJobs)
-	c.Engine.POST("/api/v1/admin/sync/jobs", auth, superAdmin, handler.CreateSyncJob)
 	c.Engine.GET("/api/v1/admin/tools", auth, superAdmin, handler.ListTools)
 	c.Engine.GET("/api/v1/admin/proclaims", auth, superAdmin, handler.ListProclaims)
 	c.Engine.POST("/api/v1/admin/proclaims", auth, superAdmin, handler.CreateProclaim)
@@ -113,24 +106,5 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.GET("/api/v1/workspaces/:wsId/observability/metrics/summary",
 		auth, ws, wsMember, govAdmin, obsHandler.MetricsSummary)
 
-	c.SyncJobCreator = &syncJobCreatorPort{handler: createSyncJob}
-
 	return nil
-}
-
-type syncJobCreatorPort struct {
-	handler *command.CreateSyncJobHandler
-}
-
-func (p *syncJobCreatorPort) CreateSyncJob(
-	ctx context.Context,
-	memberID kernel.MemberID,
-	wsID kernel.WorkspaceID,
-	name, version, sourceCluster, targetCluster, syncResources string,
-) (kernel.SyncJobID, error) {
-	job, err := p.handler.Handle(ctx, memberID, wsID, name, version, sourceCluster, targetCluster, syncResources)
-	if err != nil {
-		return kernel.SyncJobID{}, err
-	}
-	return job.ID, nil
 }

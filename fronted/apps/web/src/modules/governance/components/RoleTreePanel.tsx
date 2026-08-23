@@ -7,8 +7,7 @@ import { BffError, PERMISSION_OPTIONS } from "@sparkops/contracts";
 import type { RoleTreeVM } from "@sparkops/contracts/governance";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { MetricCard } from "@/components/ui/MetricCard";
-import { RoleAuthorityDrawer } from "./roles/RoleAuthorityDrawer";
-import { RoleFormModal, type RoleFormMode } from "./roles/RoleFormModal";
+import { RoleAuthorityEditor, type RoleAuthorityMode } from "./roles/RoleAuthorityEditor";
 import {
   computeRoleStats,
   flattenRoleTree,
@@ -33,11 +32,10 @@ export function RoleTreePanel({ workspaceId }: RoleTreePanelProps) {
   const [success, setSuccess] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
-  const [authorityRole, setAuthorityRole] = useState<RoleTreeVM | null>(null);
-  const [formOpen, setFormOpen] = useState(false);
-  const [formMode, setFormMode] = useState<RoleFormMode>("create");
-  const [formRole, setFormRole] = useState<RoleTreeVM | null>(null);
-  const [formParentId, setFormParentId] = useState<string | undefined>();
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorMode, setEditorMode] = useState<RoleAuthorityMode>("create");
+  const [editorRole, setEditorRole] = useState<RoleTreeVM | null>(null);
+  const [editorParentId, setEditorParentId] = useState<string | undefined>();
 
   const stats = useMemo(() => computeRoleStats(tree), [tree]);
   const rows = useMemo(() => flattenRoleTree(tree), [tree]);
@@ -63,25 +61,27 @@ export function RoleTreePanel({ workspaceId }: RoleTreePanelProps) {
     window.setTimeout(() => setSuccess(null), 3200);
   }
 
+  function openEditor(mode: RoleAuthorityMode, role?: RoleTreeVM | null, parentId?: string) {
+    setEditorMode(mode);
+    setEditorRole(role ?? null);
+    setEditorParentId(parentId);
+    setEditorOpen(true);
+  }
+
   function openCreate(parentId?: string) {
-    setFormMode("create");
-    setFormRole(null);
-    setFormParentId(parentId);
-    setFormOpen(true);
+    openEditor("create", null, parentId);
   }
 
   function openEdit(role: RoleTreeVM) {
-    setFormMode("edit");
-    setFormRole(role);
-    setFormParentId(undefined);
-    setFormOpen(true);
+    openEditor("edit", role);
   }
 
   function openCopy(role: RoleTreeVM) {
-    setFormMode("copy");
-    setFormRole(role);
-    setFormParentId(undefined);
-    setFormOpen(true);
+    openEditor("copy", role);
+  }
+
+  function openAuthority(role: RoleTreeVM) {
+    openEditor("authority", role);
   }
 
   async function onDelete(role: RoleTreeVM) {
@@ -204,7 +204,7 @@ export function RoleTreePanel({ workspaceId }: RoleTreePanelProps) {
                       <button
                         type="button"
                         className="btn-secondary !py-1 !px-2 text-xs"
-                        onClick={() => setAuthorityRole(role)}
+                        onClick={() => openAuthority(role)}
                       >
                         设置权限
                       </button>
@@ -249,26 +249,22 @@ export function RoleTreePanel({ workspaceId }: RoleTreePanelProps) {
         </div>
       )}
 
-      <RoleAuthorityDrawer
+      <RoleAuthorityEditor
+        open={editorOpen}
+        mode={editorMode}
         workspaceId={workspaceId}
-        role={authorityRole}
-        onClose={() => setAuthorityRole(null)}
-        onSaved={() => {
-          void load();
-          router.refresh();
-        }}
-      />
-
-      <RoleFormModal
-        open={formOpen}
-        mode={formMode}
         tree={tree}
-        parentId={formParentId}
-        role={formRole}
-        workspaceId={workspaceId}
-        onClose={() => setFormOpen(false)}
+        role={editorRole}
+        parentId={editorParentId}
+        onClose={() => setEditorOpen(false)}
         onSaved={() => {
-          flashSuccess(formMode === "create" ? "角色已创建" : formMode === "copy" ? "角色已拷贝" : "角色已更新");
+          flashSuccess(
+            editorMode === "create"
+              ? "角色已创建"
+              : editorMode === "copy"
+                ? "角色已拷贝"
+                : "角色权限已保存",
+          );
           void load();
           router.refresh();
         }}

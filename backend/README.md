@@ -131,6 +131,29 @@ Org 成员管理 API 需 `org:member:manage`；创建工作区需 `org:workspace
 
 审计表：`platform.audit_logs`，记录组织创建、成员变更、Owner 转让、平台开户等操作。
 
+## MCP 集成（外部 AI 客户端）
+
+| 能力 | 路径 | 权限 |
+|------|------|------|
+| 工具列表 | `GET /api/v1/mcp/tools` | `project:read` + 工作区成员 |
+| JSON-RPC | `POST /api/v1/mcp/rpc` | `project:read` + `chat:use` |
+
+需在平台配置中启用 **MCP 集成** 模块（`entitlements.mcp`）。鉴权使用工作区 **API Token**（Bearer）+ `X-Workspace-Id` 请求头。
+
+内置 Tools：`list_projects`、`list_knowledge_bases`、`list_agents`、`search_knowledge`、`chat_with_agent`。
+
+本地 stdio 桥接（供 Cursor / Claude Desktop）：
+
+```bash
+cd backend
+SPARKOPS_API_URL=http://localhost:8080 \
+SPARKOPS_TOKEN=<api-token> \
+SPARKOPS_WORKSPACE_ID=<workspace-uuid> \
+go run ./cmd/mcp-server
+```
+
+前端配置页：`/config/mcp`（需 MCP 模块 entitlement）。
+
 ## MVP API 概览
 
 | BC | Method | Path |

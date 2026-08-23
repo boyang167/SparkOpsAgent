@@ -18,7 +18,7 @@ export function pathEntitlement(path: string): EntitlementKey | "" {
   if (path.startsWith("/market")) return "marketplace";
   if (path.startsWith("/delivery") || path.startsWith("/publish")) return "delivery";
   if (path.startsWith("/monitor")) return "observability";
-  if (path.startsWith("/config/webhooks")) return "mcp";
+  if (path.startsWith("/config/webhooks") || path.startsWith("/config/mcp")) return "mcp";
   if (
     path.startsWith("/runtime") ||
     path.startsWith("/cronjobs") ||

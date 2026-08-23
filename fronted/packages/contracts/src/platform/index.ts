@@ -202,19 +202,6 @@ export const TraceDetailVMSchema = z.object({
 
 export type TraceDetailVM = z.infer<typeof TraceDetailVMSchema>;
 
-export const SyncJobVMSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  workspace_id: z.string().optional(),
-  version: z.string().optional(),
-  source_cluster: z.string().optional(),
-  target_cluster: z.string().optional(),
-  status: z.string().optional(),
-  result: z.string().optional(),
-});
-
-export type SyncJobVM = z.infer<typeof SyncJobVMSchema>;
-
 export const SysConfigVMSchema = z.object({
   id: z.string().optional(),
   kind: z.string().optional(),

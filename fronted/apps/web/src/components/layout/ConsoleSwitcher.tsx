@@ -26,7 +26,7 @@ function buildOptions(isSuperAdmin: boolean, canManageAdmin: boolean): ConsoleOp
   const options: ConsoleOption[] = [
     { kind: "business", label: CONSOLE_LABELS.business, href: "/dashboard/workplace" },
   ];
-  if (canManageAdmin) {
+  if (canManageAdmin || isSuperAdmin) {
     options.push({ kind: "admin", label: CONSOLE_LABELS.admin, href: "/admin/members" });
   }
   if (isSuperAdmin) {

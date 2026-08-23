@@ -4,7 +4,6 @@ import type {
   MonitorOverviewVM,
   ProclaimVM,
   ServerStatusVM,
-  SyncJobVM,
   SysConfigVM,
   ToolVM,
 } from "@sparkops/contracts/platform";
@@ -134,18 +133,6 @@ export async function listClusters() {
 
 export function createCluster(input: Record<string, unknown>) {
   return bffFetch<{ id: string; cluster_name: string }>("/admin/clusters", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-
-export async function listSyncJobs() {
-  const data = await bffFetch<{ items: SyncJobVM[] }>("/admin/sync/jobs");
-  return data.items;
-}
-
-export function createSyncJob(input: Record<string, unknown>) {
-  return bffFetch<{ id: string; name: string; status: string }>("/admin/sync/jobs", {
     method: "POST",
     body: JSON.stringify(input),
   });

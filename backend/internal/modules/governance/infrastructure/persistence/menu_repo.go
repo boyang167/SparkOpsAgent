@@ -688,6 +688,69 @@ func (s *MenuStore) ListRoleMenusByWorkspace(ctx context.Context, workspaceID ke
 	return out, nil
 }
 
+type WorkspaceMenuButtonRow struct {
+	ButtonID  string
+	MenuID    string
+	MenuTitle string
+	MenuPath  string
+	Name      string
+	Code      string
+	Remark    string
+}
+
+func (s *MenuStore) ListAllButtonsInWorkspace(ctx context.Context, workspaceID kernel.WorkspaceID) ([]WorkspaceMenuButtonRow, error) {
+	var rows []WorkspaceMenuButtonRow
+	err := s.db.WithContext(ctx).Raw(`
+		SELECT
+			b.id AS button_id,
+			b.menu_id AS menu_id,
+			m.title AS menu_title,
+			m.path AS menu_path,
+			b.name AS name,
+			b.code AS code,
+			COALESCE(b.remark, '') AS remark
+		FROM governance.menu_buttons b
+		INNER JOIN governance.menus m ON m.id = b.menu_id
+		WHERE m.workspace_id = ? AND m.deleted_at IS NULL
+		ORDER BY m.sort ASC, b.sort ASC, b.created_at ASC
+	`, workspaceID.String()).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *MenuStore) ListButtonIDsByRole(ctx context.Context, roleID string) ([]string, error) {
+	var ids []string
+	err := s.db.WithContext(ctx).Model(&roleMenuButtonModel{}).
+		Where("role_id = ?", roleID).
+		Pluck("button_id", &ids).Error
+	return ids, err
+}
+
+func (s *MenuStore) SetButtonIDsForRole(ctx context.Context, roleID string, buttonIDs []string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("role_id = ?", roleID).Delete(&roleMenuButtonModel{}).Error; err != nil {
+			return err
+		}
+		seen := make(map[string]struct{}, len(buttonIDs))
+		for _, buttonID := range buttonIDs {
+			buttonID = strings.TrimSpace(buttonID)
+			if buttonID == "" {
+				continue
+			}
+			if _, ok := seen[buttonID]; ok {
+				continue
+			}
+			seen[buttonID] = struct{}{}
+			if err := tx.Create(&roleMenuButtonModel{RoleID: roleID, ButtonID: buttonID}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func IsSuperAdminOnlyPath(path string) bool {
 	return strings.HasPrefix(path, "/settings/platform") ||
 		strings.HasPrefix(path, "/platform/") ||

@@ -24,18 +24,22 @@ func (a *TenantACL) MemberInWorkspace(ctx context.Context, wsID kernel.Workspace
 
 func (a *TenantACL) AddWorkspaceMember(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID, role string) error {
 	now := time.Now().UTC()
-	row := struct {
-		WorkspaceID string
-		MemberID    string
-		Role        string
-		JoinedAt    time.Time
-		postgres.AuditColumns
-	}{
+	row := workspaceMemberInsertRow{
 		WorkspaceID: wsID.String(),
 		MemberID:    memberID.String(),
 		Role:        role,
 		JoinedAt:    now,
 		AuditColumns: postgres.AuditColumns{CreatedAt: now, UpdatedAt: now},
 	}
-	return a.db.WithContext(ctx).Table("tenant.workspace_members").Save(&row).Error
+	return a.db.WithContext(ctx).Create(&row).Error
 }
+
+type workspaceMemberInsertRow struct {
+	WorkspaceID string `gorm:"column:workspace_id;primaryKey"`
+	MemberID    string `gorm:"column:member_id;primaryKey"`
+	Role        string `gorm:"column:role"`
+	JoinedAt    time.Time `gorm:"column:joined_at"`
+	postgres.AuditColumns
+}
+
+func (workspaceMemberInsertRow) TableName() string { return "tenant.workspace_members" }

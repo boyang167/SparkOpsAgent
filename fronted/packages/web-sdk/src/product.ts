@@ -50,18 +50,6 @@ export function releaseRequirement(workspaceId: string, productId: string, reqId
   );
 }
 
-export function crossReleaseRequirement(
-  workspaceId: string,
-  productId: string,
-  reqId: string,
-  input: { source_cluster: string; target_cluster: string },
-) {
-  return bffFetch<{ id: string; multicluster_status: string }>(
-    `/workspaces/${workspaceId}/products/${productId}/requirements/${reqId}/cross-release`,
-    { method: "POST", body: JSON.stringify(input), workspaceId },
-  );
-}
-
 export async function listTemplates(workspaceId: string) {
   const data = await bffFetch<{ items: import("@sparkops/contracts/product").TemplateVM[] }>(
     `/workspaces/${workspaceId}/templates`,

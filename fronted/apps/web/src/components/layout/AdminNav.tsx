@@ -1,15 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NavGroup } from "@/components/layout/NavGroup";
-import { ADMIN_HOME_HREF, ADMIN_NAV_SECTIONS } from "@/components/layout/nav-tree";
-
-const adminHomeIcon = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M12 3l7 4v5c0 4.4-3 8.5-7 9-4-.5-7-4.6-7-9V7l7-4z" strokeLinejoin="round" />
-  </svg>
-);
+import { ADMIN_NAV_SECTIONS } from "@/components/layout/nav-tree";
 
 const sectionIcons: Record<string, React.ReactNode> = {
   identity: (
@@ -44,28 +37,22 @@ const sectionIcons: Record<string, React.ReactNode> = {
   ),
 };
 
-function isAdminHomeActive(pathname: string) {
-  return pathname === ADMIN_HOME_HREF;
-}
+const defaultSectionIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M12 3l7 4v5c0 4.4-3 8.5-7 9-4-.5-7-4.6-7-9V7l7-4z" strokeLinejoin="round" />
+  </svg>
+);
 
 export function AdminNav() {
   const pathname = usePathname();
 
   return (
     <>
-      <Link
-        href={ADMIN_HOME_HREF}
-        className={`nav-link mb-1 ${isAdminHomeActive(pathname) ? "nav-link-active" : ""}`}
-      >
-        <span className="nav-icon">{adminHomeIcon}</span>
-        管理控制台
-      </Link>
-
       {ADMIN_NAV_SECTIONS.map((section) => (
         <NavGroup
           key={section.id}
           label={section.label}
-          icon={sectionIcons[section.id] ?? adminHomeIcon}
+          icon={sectionIcons[section.id] ?? defaultSectionIcon}
           items={section.items}
           pathname={pathname}
         />

@@ -5,7 +5,6 @@ import type {
   MonitorOverviewVM,
   ProclaimVM,
   ServerStatusVM,
-  SyncJobVM,
   SysConfigVM,
   ToolVM,
 } from "@sparkops/contracts/platform";
@@ -48,24 +47,6 @@ export function createPlatformUpstream(options: UpstreamRequestOptions = {}) {
         body: JSON.stringify(input),
         options,
       });
-    },
-
-    async listSyncJobs() {
-      return upstreamFetch<{ items: SyncJobVM[] }>("/api/v1/admin/sync/jobs", {
-        method: "GET",
-        options,
-      });
-    },
-
-    async createSyncJob(input: Record<string, unknown>) {
-      return upstreamFetch<{ id: string; name: string; status: string }>(
-        "/api/v1/admin/sync/jobs",
-        {
-          method: "POST",
-          body: JSON.stringify(input),
-          options,
-        },
-      );
     },
 
     async getSysConfig() {

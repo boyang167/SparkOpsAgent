@@ -18,8 +18,6 @@ type Handler struct {
 	updateSysConfig *command.UpdateSysConfigHandler
 	listClusters    *query.ListClustersHandler
 	createCluster   *command.CreateClusterHandler
-	listSyncJobs    *query.ListSyncJobsHandler
-	createSyncJob   *command.CreateSyncJobHandler
 	getDashboard       *query.GetDashboardHandler
 	getStatistics      *query.GetStatisticsHandler
 	getMonitorOverview *query.GetMonitorOverviewHandler
@@ -36,8 +34,6 @@ func NewHandler(
 	updateSysConfig *command.UpdateSysConfigHandler,
 	listClusters *query.ListClustersHandler,
 	createCluster *command.CreateClusterHandler,
-	listSyncJobs *query.ListSyncJobsHandler,
-	createSyncJob *command.CreateSyncJobHandler,
 	getDashboard *query.GetDashboardHandler,
 	getStatistics *query.GetStatisticsHandler,
 	getMonitorOverview *query.GetMonitorOverviewHandler,
@@ -51,7 +47,6 @@ func NewHandler(
 	return &Handler{
 		getSysConfig: getSysConfig, updateSysConfig: updateSysConfig,
 		listClusters: listClusters, createCluster: createCluster,
-		listSyncJobs: listSyncJobs, createSyncJob: createSyncJob,
 		getDashboard: getDashboard, getStatistics: getStatistics,
 		getMonitorOverview: getMonitorOverview, listDeploymentStats: listDeploymentStats,
 		listTools: listTools,
@@ -77,14 +72,6 @@ type createClusterRequest struct {
 	ClientKeyData            string `json:"client_key_data"`
 	IsBuildEnv               bool   `json:"is_build_env"`
 	PriorityID               int    `json:"priority_id"`
-}
-
-type createSyncJobRequest struct {
-	Name           string `json:"name" binding:"required"`
-	Version        string `json:"version"`
-	SourceCluster  string `json:"source_cluster"`
-	TargetCluster  string `json:"target_cluster"`
-	SyncResources  string `json:"sync_resources"`
 }
 
 type createProclaimRequest struct {
@@ -162,39 +149,6 @@ func (h *Handler) CreateCluster(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"id": cluster.ID.String(), "cluster_name": cluster.ClusterName})
-}
-
-func (h *Handler) ListSyncJobs(c *gin.Context) {
-	items, err := h.listSyncJobs.Handle(c.Request.Context())
-	if err != nil {
-		httpx.HandleError(c, err)
-		return
-	}
-	httpx.OK(c, gin.H{"items": items})
-}
-
-func (h *Handler) CreateSyncJob(c *gin.Context) {
-	memberID, ok := authn.MemberIDFromContext(c)
-	if !ok {
-		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
-		return
-	}
-	wsID, ok := httpx.WorkspaceIDFromContext(c)
-	if !ok {
-		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
-		return
-	}
-	var req createSyncJobRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
-		return
-	}
-	job, err := h.createSyncJob.Handle(c.Request.Context(), memberID, wsID, req.Name, req.Version, req.SourceCluster, req.TargetCluster, req.SyncResources)
-	if err != nil {
-		httpx.HandleError(c, err)
-		return
-	}
-	httpx.OK(c, gin.H{"id": job.ID.String(), "name": job.Name, "status": job.Status})
 }
 
 func (h *Handler) GetDashboard(c *gin.Context) {

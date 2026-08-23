@@ -1,0 +1,64 @@
+openapi: 3.0.3
+info:
+  title: SparkOps MCP API
+  version: 0.1.0
+  description: |
+    Model Context Protocol (JSON-RPC 2.0) over HTTP for external AI clients.
+    Requires Bearer token (workspace API token) and `X-Workspace-Id` header.
+
+paths:
+  /api/v1/mcp/tools:
+    get:
+      summary: List MCP tool definitions (REST discovery)
+      tags: [mcp]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdHeader'
+      responses:
+        '200':
+          description: Tool catalog
+  /api/v1/mcp/rpc:
+    post:
+      summary: MCP JSON-RPC endpoint (initialize, tools/list, tools/call)
+      tags: [mcp]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jsonrpc:
+                  type: string
+                  example: "2.0"
+                id:
+                  oneOf:
+                    - type: string
+                    - type: integer
+                method:
+                  type: string
+                  enum: [initialize, tools/list, tools/call, ping]
+                params:
+                  type: object
+      responses:
+        '200':
+          description: JSON-RPC response
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    WorkspaceIdHeader:
+      name: X-Workspace-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid

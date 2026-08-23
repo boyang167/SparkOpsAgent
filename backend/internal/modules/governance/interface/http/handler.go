@@ -2,6 +2,8 @@ package http
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -13,18 +15,19 @@ import (
 )
 
 type Handler struct {
-	createRole      *command.CreateRoleHandler
-	updateRole      *command.UpdateRoleHandler
-	deleteRole      *command.DeleteRoleHandler
-	copyRole        *command.CopyRoleHandler
-	assignRole      *command.AssignRoleHandler
-	inviteMember    *command.InviteWorkspaceMemberHandler
-	removeBinding   *command.RemoveRoleBindingHandler
-	listRoles       *query.ListRolesHandler
-	listRoleTree    *query.ListRoleTreeHandler
-	listMembers     *query.ListWorkspaceMembersHandler
-	listMemberRoles *query.ListMemberRolesHandler
-	checker         *query.Checker
+	createRole          *command.CreateRoleHandler
+	updateRole          *command.UpdateRoleHandler
+	deleteRole          *command.DeleteRoleHandler
+	copyRole            *command.CopyRoleHandler
+	assignRole          *command.AssignRoleHandler
+	inviteMember        *command.InviteWorkspaceMemberHandler
+	removeBinding       *command.RemoveRoleBindingHandler
+	listRoles           *query.ListRolesHandler
+	listRoleTree        *query.ListRoleTreeHandler
+	listMembers         *query.ListWorkspaceMembersHandler
+	listMemberRoles     *query.ListMemberRolesHandler
+	searchCandidates    *query.SearchMemberCandidatesHandler
+	checker             *query.Checker
 }
 
 func NewHandler(
@@ -39,6 +42,7 @@ func NewHandler(
 	listRoleTree *query.ListRoleTreeHandler,
 	listMembers *query.ListWorkspaceMembersHandler,
 	listMemberRoles *query.ListMemberRolesHandler,
+	searchCandidates *query.SearchMemberCandidatesHandler,
 	checker *query.Checker,
 ) *Handler {
 	return &Handler{
@@ -46,7 +50,7 @@ func NewHandler(
 		assignRole: assignRole,
 		inviteMember: inviteMember, removeBinding: removeBinding,
 		listRoles: listRoles, listRoleTree: listRoleTree, listMembers: listMembers,
-		listMemberRoles: listMemberRoles, checker: checker,
+		listMemberRoles: listMemberRoles, searchCandidates: searchCandidates, checker: checker,
 	}
 }
 
@@ -270,6 +274,27 @@ func (h *Handler) ListMemberRoles(c *gin.Context) {
 		return
 	}
 	items, err := h.listMemberRoles.Handle(c.Request.Context(), wsID, memberID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) SearchMemberCandidates(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	q := strings.TrimSpace(c.Query("q"))
+	limit := query.DefaultMemberSearchLimit
+	if raw := c.Query("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	items, err := h.searchCandidates.Handle(c.Request.Context(), wsID, q, limit)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return

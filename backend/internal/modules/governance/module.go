@@ -83,12 +83,14 @@ func (m *Module) Register(c *appctx.Container) error {
 	deleteRole := command.NewDeleteRoleHandler(roleRepo, bindingRepo, roleAPIPolicyStore, dataPolicyStore, apiPolicySync)
 	copyRole := command.NewCopyRoleHandler(roleRepo, roleAPIPolicyStore, menuStore, dataPolicyStore, apiPolicySync)
 	assignRole := command.NewAssignRoleHandler(roleRepo, bindingRepo, apiPolicySync)
-	inviteMember := command.NewInviteWorkspaceMemberHandler(acl.NewIdentityACL(c.DB), acl.NewTenantACL(c.DB))
+	identityACL := acl.NewIdentityACL(c.DB)
+	inviteMember := command.NewInviteWorkspaceMemberHandler(identityACL, acl.NewTenantACL(c.DB))
 	removeBinding := command.NewRemoveRoleBindingHandler(roleRepo, bindingRepo, apiPolicySync)
 	listRoles := query.NewListRolesHandler(roleRepo)
 	listRoleTree := query.NewListRoleTreeHandler(roleRepo)
 	listMembers := query.NewListWorkspaceMembersHandler(acl.NewMemberACL(c.DB), bindingRepo)
 	listMemberRoles := query.NewListMemberRolesHandler(bindingRepo)
+	searchCandidates := query.NewSearchMemberCandidatesHandler(identityACL)
 	bootstrap := command.NewBootstrapWorkspaceHandler(roleRepo, bindingRepo, apiPolicySync)
 	ensureDefaultRoles := command.NewEnsureDefaultWorkspaceRolesHandler(roleRepo)
 	if err := ensureDefaultRoles.Handle(context.Background()); err != nil {
@@ -99,7 +101,7 @@ func (m *Module) Register(c *appctx.Container) error {
 
 	handler := govhttp.NewHandler(
 		createRole, updateRole, deleteRole, copyRole, assignRole, inviteMember, removeBinding,
-		listRoles, listRoleTree, listMembers, listMemberRoles, checker,
+		listRoles, listRoleTree, listMembers, listMemberRoles, searchCandidates, checker,
 	)
 
 	platformAPI := govhttp.NewPlatformAPIHandler(apiRegistry, c.Engine)
@@ -127,11 +129,14 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewGetMenuHandler(menuStore),
 		query.NewGetMenuRolesHandler(menuStore),
 		query.NewGetRoleMenusHandler(menuStore, roleRepo),
+		query.NewListWorkspaceMenuButtonsHandler(menuStore, seedMenus),
+		query.NewGetRoleMenuButtonsHandler(menuStore, roleRepo),
 		command.NewCreateMenuHandler(menuStore),
 		command.NewUpdateMenuHandler(menuStore),
 		command.NewDeleteMenuHandler(menuStore),
 		command.NewSetMenuRolesHandler(menuStore, roleRepo),
 		command.NewSetRoleMenusHandler(menuStore, roleRepo),
+		command.NewSetRoleMenuButtonsHandler(menuStore, roleRepo),
 	)
 
 	auth := authn.RequireAuth(m.tokens)
@@ -154,6 +159,12 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, govAdmin, menuHandler.GetRoleMenus)
 	c.Engine.PUT("/api/v1/workspaces/:wsId/roles/:roleId/menus",
 		auth, ws, wsMember, govAdmin, menuHandler.SetRoleMenus)
+	c.Engine.GET("/api/v1/workspaces/:wsId/menu-buttons",
+		auth, ws, wsMember, govAdmin, menuHandler.ListWorkspaceMenuButtons)
+	c.Engine.GET("/api/v1/workspaces/:wsId/roles/:roleId/menu-buttons",
+		auth, ws, wsMember, govAdmin, menuHandler.GetRoleMenuButtons)
+	c.Engine.PUT("/api/v1/workspaces/:wsId/roles/:roleId/menu-buttons",
+		auth, ws, wsMember, govAdmin, menuHandler.SetRoleMenuButtons)
 	c.Engine.DELETE("/api/v1/workspaces/:wsId/roles/:roleId",
 		auth, ws, wsMember, govAdmin, handler.DeleteRole)
 	c.Engine.GET("/api/v1/workspaces/:wsId/roles/:roleId/api-policies",
@@ -168,6 +179,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, govAdmin, dataPolicyHandler.UpdateRolePolicies)
 	c.Engine.POST("/api/v1/workspaces/:wsId/members/:memberId/roles",
 		auth, ws, wsMember, govAdmin, handler.AssignRole)
+	c.Engine.GET("/api/v1/workspaces/:wsId/member-candidates",
+		auth, ws, wsMember, govAdmin, handler.SearchMemberCandidates)
 	c.Engine.GET("/api/v1/workspaces/:wsId/members",
 		auth, ws, wsMember, govAdmin, handler.ListMembers)
 	c.Engine.POST("/api/v1/workspaces/:wsId/members",

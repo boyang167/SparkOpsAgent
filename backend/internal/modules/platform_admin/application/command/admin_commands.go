@@ -60,26 +60,6 @@ func (h *CreateClusterHandler) Handle(ctx context.Context, memberID kernel.Membe
 	return cluster, nil
 }
 
-type CreateSyncJobHandler struct {
-	repo repository.AdminRepository
-}
-
-func NewCreateSyncJobHandler(repo repository.AdminRepository) *CreateSyncJobHandler {
-	return &CreateSyncJobHandler{repo: repo}
-}
-
-func (h *CreateSyncJobHandler) Handle(ctx context.Context, memberID kernel.MemberID, wsID kernel.WorkspaceID, name, version, sourceCluster, targetCluster, syncResources string) (*repository.SyncJob, error) {
-	job := &repository.SyncJob{
-		ID: kernel.NewSyncJobID(), Name: name, WorkspaceID: wsID, Version: version,
-		SourceCluster: sourceCluster, TargetCluster: targetCluster, SyncResources: syncResources,
-		Status: "pending", Result: "queued", CreatedBy: memberID,
-	}
-	if err := h.repo.SaveSyncJob(ctx, job); err != nil {
-		return nil, err
-	}
-	return job, nil
-}
-
 type CreateProclaimHandler struct {
 	repo repository.AdminRepository
 }

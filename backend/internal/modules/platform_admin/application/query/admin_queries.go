@@ -49,30 +49,6 @@ func (h *ListClustersHandler) Handle(ctx context.Context) ([]map[string]any, err
 	return out, nil
 }
 
-type ListSyncJobsHandler struct {
-	repo repository.AdminRepository
-}
-
-func NewListSyncJobsHandler(repo repository.AdminRepository) *ListSyncJobsHandler {
-	return &ListSyncJobsHandler{repo: repo}
-}
-
-func (h *ListSyncJobsHandler) Handle(ctx context.Context) ([]map[string]any, error) {
-	items, err := h.repo.ListSyncJobs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]map[string]any, 0, len(items))
-	for _, job := range items {
-		out = append(out, map[string]any{
-			"id": job.ID.String(), "name": job.Name, "workspace_id": job.WorkspaceID.String(),
-			"version": job.Version, "source_cluster": job.SourceCluster,
-			"target_cluster": job.TargetCluster, "status": job.Status, "result": job.Result,
-		})
-	}
-	return out, nil
-}
-
 type GetDashboardHandler struct {
 	repo repository.AdminRepository
 }
@@ -179,8 +155,6 @@ func NewListToolsHandler() *ListToolsHandler { return &ListToolsHandler{} }
 func (h *ListToolsHandler) Handle(_ context.Context) []map[string]any {
 	return []map[string]any{
 		{"id": "clone", "name": "Git Clone", "description": "Clone repository to workspace", "path": "/admin/tools/clone"},
-		{"id": "sync-db", "name": "DB Sync", "description": "Cross-cluster database sync", "path": "/admin/sync/jobs"},
-		{"id": "sync-res", "name": "Resource Sync", "description": "Cross-cluster resource sync", "path": "/admin/sync/jobs"},
 	}
 }
 

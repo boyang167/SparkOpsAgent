@@ -45,6 +45,15 @@ export async function listMembers(workspaceId: string) {
   return data.items;
 }
 
+export async function searchMemberCandidates(workspaceId: string, q: string, limit = 10) {
+  const params = new URLSearchParams({ q, limit: String(limit) });
+  const data = await bffFetch<{ items: import("@sparkops/contracts/governance").MemberCandidateVM[] }>(
+    `/workspaces/${workspaceId}/member-candidates?${params.toString()}`,
+    { workspaceId },
+  );
+  return data.items;
+}
+
 export function inviteMember(workspaceId: string, email: string) {
   return bffFetch<{ member_id: string; email: string; display_name: string }>(
     `/workspaces/${workspaceId}/members`,
@@ -333,6 +342,34 @@ export function setRoleMenus(
   input: import("@sparkops/contracts/governance").SetRoleMenusCommand,
 ) {
   return bffFetch<{ updated: true }>(`/workspaces/${workspaceId}/roles/${roleId}/menus`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+    workspaceId,
+  });
+}
+
+export async function listWorkspaceMenuButtons(workspaceId: string) {
+  const data = await bffFetch<{ items: import("@sparkops/contracts/governance").WorkspaceMenuButtonVM[] }>(
+    `/workspaces/${workspaceId}/menu-buttons`,
+    { workspaceId },
+  );
+  return data.items;
+}
+
+export async function getRoleMenuButtons(workspaceId: string, roleId: string) {
+  const data = await bffFetch<{ button_ids: string[] }>(
+    `/workspaces/${workspaceId}/roles/${roleId}/menu-buttons`,
+    { workspaceId },
+  );
+  return data.button_ids;
+}
+
+export function setRoleMenuButtons(
+  workspaceId: string,
+  roleId: string,
+  input: import("@sparkops/contracts/governance").SetRoleMenuButtonsCommand,
+) {
+  return bffFetch<{ updated: true }>(`/workspaces/${workspaceId}/roles/${roleId}/menu-buttons`, {
     method: "PUT",
     body: JSON.stringify(input),
     workspaceId,

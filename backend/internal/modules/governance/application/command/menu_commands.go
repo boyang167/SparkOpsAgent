@@ -582,3 +582,35 @@ func (h *SetRoleMenusHandler) Handle(ctx context.Context, workspaceID kernel.Wor
 	}
 	return h.menus.SetMenuIDsForRole(ctx, workspaceID, roleID, valid)
 }
+
+type SetRoleMenuButtonsHandler struct {
+	menus    *persistence.MenuStore
+	roleRepo repository.RoleRepository
+}
+
+func NewSetRoleMenuButtonsHandler(menus *persistence.MenuStore, roleRepo repository.RoleRepository) *SetRoleMenuButtonsHandler {
+	return &SetRoleMenuButtonsHandler{menus: menus, roleRepo: roleRepo}
+}
+
+func (h *SetRoleMenuButtonsHandler) Handle(ctx context.Context, workspaceID kernel.WorkspaceID, roleID string, buttonIDs []string) error {
+	id, err := kernel.ParseRoleID(roleID)
+	if err != nil {
+		return domain.ErrRoleNotFound
+	}
+	role, err := h.roleRepo.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if role.WorkspaceID != workspaceID {
+		return domain.ErrRoleNotFound
+	}
+	valid := make([]string, 0, len(buttonIDs))
+	for _, buttonID := range buttonIDs {
+		buttonID = strings.TrimSpace(buttonID)
+		if buttonID == "" {
+			continue
+		}
+		valid = append(valid, buttonID)
+	}
+	return h.menus.SetButtonIDsForRole(ctx, roleID, valid)
+}

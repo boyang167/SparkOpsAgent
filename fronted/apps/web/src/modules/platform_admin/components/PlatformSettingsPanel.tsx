@@ -13,14 +13,29 @@ import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
 import { notifyEntitlementsUpdated } from "@/components/layout/shell-context";
 
 type FeatureKey = keyof WorkspaceEntitlementsVM;
+type SettingsTab = "features" | "sso" | "license" | "workspace";
 
 const FEATURE_KEYS = Object.keys(FEATURE_MODULE_LABELS) as FeatureKey[];
 
+const FEATURE_HINTS: Partial<Record<FeatureKey, string>> = {
+  k8s: "运行实例、定时任务、基础设施等依赖 Kubernetes 的能力",
+  mcp: "外部集成 / Webhook / MCP 工具链",
+  delivery: "构建流水线、发布与交付相关能力",
+  observability: "监控概览、日志、链路追踪与指标",
+};
+
 const LICENSE_EDITIONS = [
-  { value: "community", label: "Community" },
-  { value: "professional", label: "Professional" },
-  { value: "enterprise", label: "Enterprise" },
+  { value: "community", label: "Community", desc: "基础能力" },
+  { value: "professional", label: "Professional", desc: "交付与可观测" },
+  { value: "enterprise", label: "Enterprise", desc: "全模块 + MCP" },
 ] as const;
+
+const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
+  { id: "features", label: "功能模块" },
+  { id: "sso", label: "单点登录" },
+  { id: "license", label: "许可证" },
+  { id: "workspace", label: "工作区覆盖" },
+];
 
 type WorkspaceFeatureOverrides = Record<string, Partial<WorkspaceEntitlementsVM>>;
 
@@ -30,18 +45,21 @@ function FeatureSwitch({
   checked,
   disabled,
   onChange,
+  platformStyle = false,
 }: {
   label: string;
   description?: string;
   checked: boolean;
   disabled?: boolean;
   onChange: (next: boolean) => void;
+  platformStyle?: boolean;
 }) {
+  const rowClass = platformStyle ? "platform-settings-switch-row" : "config-switch-row";
   return (
-    <div className="config-switch-row">
-      <div>
-        <div>{label}</div>
-        {description ? <div className="text-muted text-xs mt-1">{description}</div> : null}
+    <div className={rowClass}>
+      <div className="platform-settings-switch-copy">
+        <div className="platform-settings-switch-label">{label}</div>
+        {description ? <div className="platform-settings-switch-desc">{description}</div> : null}
       </div>
       <button
         type="button"
@@ -105,6 +123,7 @@ function isLicenseExpired(expiresAt: string | null): boolean {
 
 export function PlatformSettingsPanel({ variant = "default" }: { variant?: "platform" | "default" }) {
   const isPlatform = variant === "platform";
+  const [activeTab, setActiveTab] = useState<SettingsTab>("features");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -124,6 +143,10 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
   const [licenseExpiresAt, setLicenseExpiresAt] = useState("");
 
   const licenseExpired = useMemo(() => isLicenseExpired(licenseExpiresAt || null), [licenseExpiresAt]);
+  const enabledFeatureCount = useMemo(
+    () => FEATURE_KEYS.filter((key) => features[key]).length,
+    [features],
+  );
 
   const selectedWorkspaceOverrides = useMemo(() => {
     if (!selectedWorkspaceId) {
@@ -201,54 +224,6 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
     }
   }
 
-  async function onSaveFeatures() {
-    const nextConfig = {
-      ...config,
-      features: { ...features },
-      sso: buildSsoConfig(),
-      license: buildLicenseConfig(),
-      workspace_features: workspaceFeatures,
-    };
-    await persistConfig(nextConfig, "功能模块配置已保存，菜单将按新能力过滤。");
-  }
-
-  async function onSaveSso() {
-    const nextConfig = {
-      ...config,
-      features: config.features ?? { ...features },
-      sso: buildSsoConfig(),
-      license: buildLicenseConfig(),
-      workspace_features: workspaceFeatures,
-    };
-    await persistConfig(nextConfig, "SSO 登录策略已保存。");
-  }
-
-  async function onSaveLicense() {
-    const nextConfig = {
-      ...config,
-      features: config.features ?? { ...features },
-      sso: buildSsoConfig(),
-      license: buildLicenseConfig(),
-      workspace_features: workspaceFeatures,
-    };
-    await persistConfig(
-      nextConfig,
-      licenseExpired ? "许可证已保存（当前已过期，部分模块将被限制）。" : "许可证已保存。",
-    );
-  }
-
-  async function onSaveWorkspaceOverrides() {
-    if (!selectedWorkspaceId) return;
-    const nextConfig = {
-      ...config,
-      features: config.features ?? { ...features },
-      sso: buildSsoConfig(),
-      license: buildLicenseConfig(),
-      workspace_features: workspaceFeatures,
-    };
-    await persistConfig(nextConfig, "工作区能力覆盖已保存。");
-  }
-
   function buildSsoConfig() {
     return {
       enabled: ssoEnabled,
@@ -264,6 +239,59 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
     };
   }
 
+  async function onSaveFeatures() {
+    await persistConfig(
+      {
+        ...config,
+        features: { ...features },
+        sso: buildSsoConfig(),
+        license: buildLicenseConfig(),
+        workspace_features: workspaceFeatures,
+      },
+      "功能模块配置已保存，菜单将按新能力过滤。",
+    );
+  }
+
+  async function onSaveSso() {
+    await persistConfig(
+      {
+        ...config,
+        features: config.features ?? { ...features },
+        sso: buildSsoConfig(),
+        license: buildLicenseConfig(),
+        workspace_features: workspaceFeatures,
+      },
+      "SSO 登录策略已保存。",
+    );
+  }
+
+  async function onSaveLicense() {
+    await persistConfig(
+      {
+        ...config,
+        features: config.features ?? { ...features },
+        sso: buildSsoConfig(),
+        license: buildLicenseConfig(),
+        workspace_features: workspaceFeatures,
+      },
+      licenseExpired ? "许可证已保存（当前已过期，部分模块将被限制）。" : "许可证已保存。",
+    );
+  }
+
+  async function onSaveWorkspaceOverrides() {
+    if (!selectedWorkspaceId) return;
+    await persistConfig(
+      {
+        ...config,
+        features: config.features ?? { ...features },
+        sso: buildSsoConfig(),
+        license: buildLicenseConfig(),
+        workspace_features: workspaceFeatures,
+      },
+      "工作区能力覆盖已保存。",
+    );
+  }
+
   function updateWorkspaceOverride(key: FeatureKey, value: boolean) {
     if (!selectedWorkspaceId) return;
     setWorkspaceFeatures((prev) => ({
@@ -275,172 +303,257 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
     }));
   }
 
-  if (loading) {
-    return <div className="empty-state">加载平台配置…</div>;
+  function handleSaveActiveTab() {
+    if (activeTab === "features") void onSaveFeatures();
+    else if (activeTab === "sso") void onSaveSso();
+    else if (activeTab === "license") void onSaveLicense();
+    else void onSaveWorkspaceOverrides();
   }
 
-  const sections = (
-    <>
-      {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-      {message ? <InlineAlert tone="success">{message}</InlineAlert> : null}
+  function saveLabelForTab(tab: SettingsTab) {
+    if (tab === "features") return "保存模块配置";
+    if (tab === "sso") return "保存 SSO 配置";
+    if (tab === "license") return "保存许可证";
+    return "保存工作区覆盖";
+  }
 
-      <section className="card stack-md">
+  const featureGrid = (values: WorkspaceEntitlementsVM, onChange: (key: FeatureKey, next: boolean) => void) => (
+    <div className={isPlatform ? "platform-settings-feature-grid" : "stack-sm"}>
+      {FEATURE_KEYS.map((key) => (
+        <FeatureSwitch
+          key={key}
+          platformStyle={isPlatform}
+          label={FEATURE_MODULE_LABELS[key]}
+          description={FEATURE_HINTS[key]}
+          checked={values[key]}
+          onChange={(next) => onChange(key, next)}
+        />
+      ))}
+    </div>
+  );
+
+  const featuresSection = (
+    <>
+      {isPlatform ? (
+        <p className="platform-settings-section-desc">
+          控制业务控制台菜单与 Cmd+K 可见性。K8s 模块在未接入集群时默认关闭；接入集群后会自动启用（除非在此显式关闭）。
+        </p>
+      ) : (
         <div>
           <h2 className="text-lg font-semibold">功能模块</h2>
           <p className="text-muted text-sm mt-1">
             控制业务控制台菜单与 Cmd+K 可见性。K8s 模块在未接入集群时默认关闭；接入集群后会自动启用（除非在此显式关闭）。
           </p>
         </div>
-        <div className="stack-sm">
-          {FEATURE_KEYS.map((key) => (
-            <FeatureSwitch
-              key={key}
-              label={FEATURE_MODULE_LABELS[key]}
-              description={
-                key === "k8s"
-                  ? "运行实例、定时任务、基础设施等依赖 Kubernetes 的能力"
-                  : key === "mcp"
-                    ? "外部集成 / Webhook / MCP 工具链"
-                    : undefined
-              }
-              checked={features[key]}
-              onChange={(next) => setFeatures((prev) => ({ ...prev, [key]: next }))}
-            />
-          ))}
+      )}
+      {isPlatform ? (
+        <div className="platform-settings-summary">
+          <span className="platform-settings-summary-label">已启用模块</span>
+          <span className="platform-settings-summary-value">
+            {enabledFeatureCount} / {FEATURE_KEYS.length}
+          </span>
         </div>
+      ) : null}
+      {featureGrid(features, (key, next) => setFeatures((prev) => ({ ...prev, [key]: next })))}
+      {!isPlatform ? (
         <div className="flex justify-end">
           <button type="button" className="btn" disabled={saving} onClick={() => void onSaveFeatures()}>
             {saving ? "保存中…" : "保存模块配置"}
           </button>
         </div>
-      </section>
+      ) : null}
+    </>
+  );
 
-      <section className="card stack-md">
+  const ssoSection = (
+    <>
+      {isPlatform ? (
+        <p className="platform-settings-section-desc">
+          运行时 OIDC/LDAP 由服务端 config.yaml 控制；此处配置登录页展示策略。
+        </p>
+      ) : (
         <div>
           <h2 className="text-lg font-semibold">单点登录 (SSO)</h2>
           <p className="text-muted text-sm mt-1">
             运行时 OIDC/LDAP 由服务端 config.yaml 控制；此处配置登录页展示策略。
           </p>
         </div>
-        <div className="stack-sm text-sm">
-          <div className="config-row">
-            <span>OIDC 运行时</span>
-            <span className="text-muted">{providers?.oidc_enabled ? "已启用" : "未配置"}</span>
-          </div>
-          <div className="config-row">
-            <span>LDAP 运行时</span>
-            <span className="text-muted">{providers?.ldap_enabled ? "已启用" : "未配置"}</span>
-          </div>
-          <FeatureSwitch
-            label="登录页展示企业 SSO"
-            description="关闭后登录页仅显示邮箱密码（若允许）"
-            checked={ssoEnabled}
-            onChange={setSsoEnabled}
-          />
-          <div className="config-row">
-            <label htmlFor="sso-provider">默认 SSO 提供商</label>
-            <select
-              id="sso-provider"
-              className="input max-w-xs"
-              value={ssoProvider}
-              onChange={(e) => setSsoProvider(e.target.value)}
-            >
-              <option value="oidc">OIDC</option>
-              <option value="ldap">LDAP</option>
-            </select>
-          </div>
-          <FeatureSwitch
-            label="允许邮箱密码登录"
-            checked={showPasswordLogin}
-            onChange={setShowPasswordLogin}
-          />
+      )}
+      <div className={isPlatform ? "platform-settings-status-grid" : "stack-sm text-sm"}>
+        <div className="platform-settings-status-item">
+          <span className="platform-settings-status-name">OIDC 运行时</span>
+          <span
+            className={
+              providers?.oidc_enabled
+                ? "platform-settings-badge platform-settings-badge-on"
+                : "platform-settings-badge"
+            }
+          >
+            {providers?.oidc_enabled ? "已启用" : "未配置"}
+          </span>
         </div>
+        <div className="platform-settings-status-item">
+          <span className="platform-settings-status-name">LDAP 运行时</span>
+          <span
+            className={
+              providers?.ldap_enabled
+                ? "platform-settings-badge platform-settings-badge-on"
+                : "platform-settings-badge"
+            }
+          >
+            {providers?.ldap_enabled ? "已启用" : "未配置"}
+          </span>
+        </div>
+      </div>
+      <div className={isPlatform ? "platform-settings-form-stack" : "stack-sm text-sm"}>
+        <FeatureSwitch
+          platformStyle={isPlatform}
+          label="登录页展示企业 SSO"
+          description="关闭后登录页仅显示邮箱密码（若允许）"
+          checked={ssoEnabled}
+          onChange={setSsoEnabled}
+        />
+        <div className={isPlatform ? "platform-settings-field" : "config-row"}>
+          <label htmlFor="sso-provider" className="platform-settings-field-label">
+            默认 SSO 提供商
+          </label>
+          <select
+            id="sso-provider"
+            className="input platform-settings-field-input"
+            value={ssoProvider}
+            onChange={(e) => setSsoProvider(e.target.value)}
+          >
+            <option value="oidc">OIDC</option>
+            <option value="ldap">LDAP</option>
+          </select>
+        </div>
+        <FeatureSwitch
+          platformStyle={isPlatform}
+          label="允许邮箱密码登录"
+          checked={showPasswordLogin}
+          onChange={setShowPasswordLogin}
+        />
+      </div>
+      {!isPlatform ? (
         <div className="flex justify-end">
           <button type="button" className="btn" disabled={saving} onClick={() => void onSaveSso()}>
             {saving ? "保存中…" : "保存 SSO 配置"}
           </button>
         </div>
-      </section>
+      ) : null}
+    </>
+  );
 
-      <section className="card stack-md">
+  const licenseSection = (
+    <>
+      {isPlatform ? (
+        <p className="platform-settings-section-desc">
+          版本决定 MCP 等高级模块上限；到期后将降级为基础能力（智能体 + 知识库）。
+        </p>
+      ) : (
         <div>
           <h2 className="text-lg font-semibold">许可证</h2>
           <p className="text-muted text-sm mt-1">
             版本决定 MCP 等高级模块上限；到期后将降级为基础能力（智能体 + 知识库）。
           </p>
         </div>
-        {licenseExpired ? (
-          <InlineAlert tone="error">许可证已过期，交付/K8s/可观测等模块将被自动禁用。</InlineAlert>
-        ) : null}
-        <div className="stack-sm text-sm">
-          <div className="config-row">
-            <label htmlFor="license-edition">版本</label>
-            <select
-              id="license-edition"
-              className="input max-w-xs"
-              value={licenseEdition}
-              onChange={(e) => setLicenseEdition(e.target.value)}
+      )}
+      {licenseExpired ? (
+        <InlineAlert tone="error">许可证已过期，交付/K8s/可观测等模块将被自动禁用。</InlineAlert>
+      ) : null}
+      {isPlatform ? (
+        <div className="platform-settings-edition-grid">
+          {LICENSE_EDITIONS.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              className={`platform-settings-edition-card${
+                licenseEdition === item.value ? " platform-settings-edition-card-active" : ""
+              }`}
+              onClick={() => setLicenseEdition(item.value)}
             >
-              {LICENSE_EDITIONS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="config-row">
-            <label htmlFor="license-expires">到期日期</label>
-            <input
-              id="license-expires"
-              className="input max-w-xs"
-              type="date"
-              value={licenseExpiresAt}
-              onChange={(e) => setLicenseExpiresAt(e.target.value)}
-            />
-          </div>
+              <span className="platform-settings-edition-name">{item.label}</span>
+              <span className="platform-settings-edition-desc">{item.desc}</span>
+            </button>
+          ))}
         </div>
+      ) : (
+        <div className="config-row">
+          <label htmlFor="license-edition">版本</label>
+          <select
+            id="license-edition"
+            className="input max-w-xs"
+            value={licenseEdition}
+            onChange={(e) => setLicenseEdition(e.target.value)}
+          >
+            {LICENSE_EDITIONS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      <div className={isPlatform ? "platform-settings-field" : "config-row text-sm"}>
+        <label htmlFor="license-expires" className="platform-settings-field-label">
+          到期日期
+        </label>
+        <input
+          id="license-expires"
+          className="input platform-settings-field-input"
+          type="date"
+          value={licenseExpiresAt}
+          onChange={(e) => setLicenseExpiresAt(e.target.value)}
+        />
+      </div>
+      {!isPlatform ? (
         <div className="flex justify-end">
           <button type="button" className="btn" disabled={saving} onClick={() => void onSaveLicense()}>
             {saving ? "保存中…" : "保存许可证"}
           </button>
         </div>
-      </section>
+      ) : null}
+    </>
+  );
 
-      <section className="card stack-md">
+  const workspaceSection = (
+    <>
+      {isPlatform ? (
+        <p className="platform-settings-section-desc">
+          在平台默认模块基础上，为单个工作区收紧或放开能力（例如试点空间关闭 K8s）。
+        </p>
+      ) : (
         <div>
           <h2 className="text-lg font-semibold">工作区能力覆盖</h2>
           <p className="text-muted text-sm mt-1">
             在平台默认模块基础上，为单个工作区收紧或放开能力（例如试点空间关闭 K8s）。
           </p>
         </div>
-        <div className="config-row">
-          <label htmlFor="workspace-select">工作区</label>
-          <select
-            id="workspace-select"
-            className="input max-w-md"
-            value={selectedWorkspaceId}
-            onChange={(e) => setSelectedWorkspaceId(e.target.value)}
-          >
-            {workspaces.length === 0 ? <option value="">暂无工作区</option> : null}
-            {workspaces.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        {selectedWorkspaceId ? (
-          <div className="stack-sm">
-            {FEATURE_KEYS.map((key) => (
-              <FeatureSwitch
-                key={key}
-                label={FEATURE_MODULE_LABELS[key]}
-                checked={selectedWorkspaceOverrides[key]}
-                onChange={(next) => updateWorkspaceOverride(key, next)}
-              />
-            ))}
-          </div>
-        ) : null}
+      )}
+      <div className={isPlatform ? "platform-settings-field" : "config-row"}>
+        <label htmlFor="workspace-select" className="platform-settings-field-label">
+          工作区
+        </label>
+        <select
+          id="workspace-select"
+          className="input platform-settings-field-input"
+          value={selectedWorkspaceId}
+          onChange={(e) => setSelectedWorkspaceId(e.target.value)}
+        >
+          {workspaces.length === 0 ? <option value="">暂无工作区</option> : null}
+          {workspaces.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {selectedWorkspaceId ? (
+        featureGrid(selectedWorkspaceOverrides, updateWorkspaceOverride)
+      ) : (
+        <div className={isPlatform ? "platform-table-empty" : "empty-state"}>请先选择工作区</div>
+      )}
+      {!isPlatform ? (
         <div className="flex justify-end">
           <button
             type="button"
@@ -451,21 +564,98 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
             {saving ? "保存中…" : "保存工作区覆盖"}
           </button>
         </div>
-      </section>
+      ) : null}
     </>
   );
 
+  if (loading) {
+    if (isPlatform) {
+      return (
+        <div className="platform-orgs-page">
+          <section className="platform-table-card platform-orgs-card">
+            <PlatformPanelHead
+              title="平台配置"
+              description="功能模块、SSO 登录策略、许可证与工作区能力覆盖。"
+            />
+            <div className="platform-table-empty">加载平台配置…</div>
+          </section>
+        </div>
+      );
+    }
+    return <div className="empty-state">加载平台配置…</div>;
+  }
+
   if (isPlatform) {
     return (
-      <div className="platform-orgs-page stack-lg">
-        <PlatformPanelHead
-          title="平台配置"
-          description="功能模块、SSO 登录策略、许可证与工作区能力覆盖。"
-        />
-        {sections}
+      <div className="platform-orgs-page">
+        <section className="platform-table-card platform-orgs-card">
+          <PlatformPanelHead
+            title="平台配置"
+            description="功能模块、SSO 登录策略、许可证与工作区能力覆盖。"
+          />
+
+          {error ? (
+            <div className="platform-settings-alerts">
+              <InlineAlert tone="error">{error}</InlineAlert>
+            </div>
+          ) : null}
+          {message ? (
+            <div className="platform-settings-alerts">
+              <InlineAlert tone="success">{message}</InlineAlert>
+            </div>
+          ) : null}
+
+          <div className="platform-settings-toolbar">
+            <div className="platform-orgs-tabs platform-settings-tabs" role="tablist" aria-label="配置分类">
+              {SETTINGS_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === tab.id}
+                  className={`platform-orgs-tab${activeTab === tab.id ? " platform-orgs-tab-active" : ""}`}
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    setMessage(null);
+                    setError(null);
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="platform-settings-body" role="tabpanel">
+            {activeTab === "features" ? featuresSection : null}
+            {activeTab === "sso" ? ssoSection : null}
+            {activeTab === "license" ? licenseSection : null}
+            {activeTab === "workspace" ? workspaceSection : null}
+          </div>
+
+          <div className="platform-settings-footer">
+            <button
+              type="button"
+              className="btn"
+              disabled={saving || (activeTab === "workspace" && !selectedWorkspaceId)}
+              onClick={handleSaveActiveTab}
+            >
+              {saving ? "保存中…" : saveLabelForTab(activeTab)}
+            </button>
+          </div>
+        </section>
       </div>
     );
   }
 
-  return <div className="stack-lg">{sections}</div>;
+  return (
+    <div className="stack-lg">
+      {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+      {message ? <InlineAlert tone="success">{message}</InlineAlert> : null}
+      <section className="card stack-md">{featuresSection}</section>
+      <section className="card stack-md">{ssoSection}</section>
+      <section className="card stack-md">{licenseSection}</section>
+      <section className="card stack-md">{workspaceSection}</section>
+    </div>
+  );
 }

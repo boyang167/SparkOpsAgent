@@ -25,15 +25,6 @@ export async function createCluster(ctx: BffContext, input: Record<string, unkno
   return result;
 }
 
-export async function listSyncJobs(ctx: BffContext) {
-  const data = await ctx.upstream.platform.listSyncJobs();
-  return data.items;
-}
-
-export async function createSyncJob(ctx: BffContext, input: Record<string, unknown>) {
-  return ctx.upstream.platform.createSyncJob(input);
-}
-
 export async function getSysConfig(ctx: BffContext) {
   return ctx.upstream.platform.getSysConfig();
 }

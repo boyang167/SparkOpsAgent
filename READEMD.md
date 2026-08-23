@@ -88,3 +88,5 @@ Demo1234!
 只读
 viewer@sparkops.local
 Demo1234!
+
+SparkOps = 多租户 Agent 控制面 + 可编排数据面；对外通过 REST/OpenAPI 给系统集成，通过 MCP 给 AI 客户端集成，通过 Webhook 给事件驱动集成。

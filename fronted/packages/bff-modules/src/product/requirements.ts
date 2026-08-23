@@ -43,14 +43,4 @@ export async function releaseRequirement(
   return ctx.upstream.product.releaseRequirement(workspaceId, productId, reqId);
 }
 
-export async function crossReleaseRequirement(
-  ctx: BffContext,
-  workspaceId: string,
-  productId: string,
-  reqId: string,
-  input: { source_cluster: string; target_cluster: string },
-) {
-  return ctx.upstream.product.crossReleaseRequirement(workspaceId, productId, reqId, input);
-}
-
 export type { ProductRequirementVM };

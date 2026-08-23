@@ -393,6 +393,13 @@ func (h *CopyRoleHandler) Handle(ctx context.Context, workspaceID kernel.Workspa
 		if err := h.menuStore.SetMenuIDsForRole(ctx, workspaceID, copyID, menuIDs); err != nil {
 			return nil, err
 		}
+		buttonIDs, err := h.menuStore.ListButtonIDsByRole(ctx, sourceID)
+		if err != nil {
+			return nil, err
+		}
+		if err := h.menuStore.SetButtonIDsForRole(ctx, copyID, buttonIDs); err != nil {
+			return nil, err
+		}
 	}
 
 	if h.dataStore != nil {

@@ -69,7 +69,6 @@ const SEGMENT_LABELS: Record<string, string> = {
   configmaps: "配置管理",
   secrets: "密钥管理",
   clusters: "集群管理",
-  sync: "资源同步",
 };
 
 function labelFromPathSegments(pathname: string): string | null {

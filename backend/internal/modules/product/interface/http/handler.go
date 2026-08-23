@@ -20,7 +20,6 @@ type Handler struct {
 	approveRequirement  *command.ApproveRequirementHandler
 	rejectRequirement   *command.RejectRequirementHandler
 	releaseRequirement  *command.ReleaseRequirementHandler
-	crossRelease        *command.CrossReleaseRequirementHandler
 	listProducts        *query.ListProductsHandler
 	getProduct          *query.GetProductHandler
 	listPlans           *query.ListProductPlansHandler
@@ -35,7 +34,6 @@ func NewHandler(
 	approveRequirement *command.ApproveRequirementHandler,
 	rejectRequirement *command.RejectRequirementHandler,
 	releaseRequirement *command.ReleaseRequirementHandler,
-	crossRelease *command.CrossReleaseRequirementHandler,
 	listProducts *query.ListProductsHandler,
 	getProduct *query.GetProductHandler,
 	listPlans *query.ListProductPlansHandler,
@@ -45,7 +43,7 @@ func NewHandler(
 		createProduct: createProduct, updateProduct: updateProduct,
 		createPlan: createPlan, createRequirement: createRequirement,
 		approveRequirement: approveRequirement, rejectRequirement: rejectRequirement,
-		releaseRequirement: releaseRequirement, crossRelease: crossRelease,
+		releaseRequirement: releaseRequirement,
 		listProducts: listProducts, getProduct: getProduct,
 		listPlans: listPlans, listRequirements: listRequirements,
 	}
@@ -290,31 +288,6 @@ func (h *Handler) ReleaseRequirement(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"id": item.ID.String(), "status": item.Status, "build_id": item.BuildID.String()})
-}
-
-func (h *Handler) CrossReleaseRequirement(c *gin.Context) {
-	wsID, memberID, ok := memberAndWorkspace(c)
-	if !ok {
-		return
-	}
-	productID, reqID, ok := parseProductRequirementIDs(c)
-	if !ok {
-		return
-	}
-	var req struct {
-		SourceCluster string `json:"source_cluster"`
-		TargetCluster string `json:"target_cluster"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
-		return
-	}
-	item, err := h.crossRelease.Handle(c.Request.Context(), memberID, wsID, productID, reqID, req.SourceCluster, req.TargetCluster)
-	if err != nil {
-		httpx.HandleError(c, err)
-		return
-	}
-	httpx.OK(c, gin.H{"id": item.ID.String(), "multicluster_status": item.MulticlusterStatus})
 }
 
 func parseProductRequirementIDs(c *gin.Context) (kernel.ProductID, kernel.ProductRequirementID, bool) {

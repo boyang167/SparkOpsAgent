@@ -28,19 +28,6 @@ type ClusterInfo struct {
 	CreatedBy                kernel.MemberID
 }
 
-type SyncJob struct {
-	ID             kernel.SyncJobID
-	Name           string
-	WorkspaceID    kernel.WorkspaceID
-	Version        string
-	SourceCluster  string
-	TargetCluster  string
-	SyncResources  string
-	Status         string
-	Result         string
-	CreatedBy      kernel.MemberID
-}
-
 type Proclaim struct {
 	ID              kernel.ProclaimID
 	Title           string
@@ -56,8 +43,6 @@ type AdminRepository interface {
 	UpsertSysConfig(ctx context.Context, cfg *SysConfig) error
 	ListClusters(ctx context.Context) ([]*ClusterInfo, error)
 	SaveCluster(ctx context.Context, cluster *ClusterInfo) error
-	ListSyncJobs(ctx context.Context) ([]*SyncJob, error)
-	SaveSyncJob(ctx context.Context, job *SyncJob) error
 	GetStatisticsCache(ctx context.Context, wsID kernel.WorkspaceID, key string) (map[string]any, error)
 	UpsertStatisticsCache(ctx context.Context, wsID kernel.WorkspaceID, key string, payload map[string]any) error
 	ListProclaims(ctx context.Context) ([]*Proclaim, error)

@@ -88,6 +88,24 @@ export const SetRoleMenusCommandSchema = z.object({
 
 export type SetRoleMenusCommand = z.infer<typeof SetRoleMenusCommandSchema>;
 
+export const SetRoleMenuButtonsCommandSchema = z.object({
+  button_ids: z.array(z.string()),
+});
+
+export type SetRoleMenuButtonsCommand = z.infer<typeof SetRoleMenuButtonsCommandSchema>;
+
+export const WorkspaceMenuButtonVMSchema = z.object({
+  button_id: z.string(),
+  menu_id: z.string(),
+  menu_title: z.string(),
+  menu_path: z.string(),
+  name: z.string(),
+  code: z.string(),
+  remark: z.string().optional().default(""),
+});
+
+export type WorkspaceMenuButtonVM = z.infer<typeof WorkspaceMenuButtonVMSchema>;
+
 export const RoleMenusVMSchema = z.object({
   menu_ids: z.array(z.string()),
 });
@@ -142,6 +160,20 @@ export const InvitedMemberVMSchema = z.object({
 });
 
 export type InvitedMemberVM = z.infer<typeof InvitedMemberVMSchema>;
+
+export const MemberCandidateVMSchema = z.object({
+  member_id: z.string(),
+  email: z.string(),
+  display_name: z.string(),
+});
+
+export type MemberCandidateVM = z.infer<typeof MemberCandidateVMSchema>;
+
+export const MemberCandidateListVMSchema = z.object({
+  items: z.array(MemberCandidateVMSchema),
+});
+
+export type MemberCandidateListVM = z.infer<typeof MemberCandidateListVMSchema>;
 
 export const RegisteredAPISchema = z.object({
   ID: z.string().optional(),

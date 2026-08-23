@@ -27,7 +27,6 @@ type DockerfileID struct{ uuid.UUID }
 type ProductID struct{ uuid.UUID }
 type ProductPlanID struct{ uuid.UUID }
 type ProductRequirementID struct{ uuid.UUID }
-type SyncJobID struct{ uuid.UUID }
 type ClusterInfoID struct{ uuid.UUID }
 type ProclaimID struct{ uuid.UUID }
 
@@ -63,7 +62,6 @@ func NewProductPlanID() ProductPlanID         { return ProductPlanID{UUID: uuid.
 func NewProductRequirementID() ProductRequirementID {
 	return ProductRequirementID{UUID: uuid.New()}
 }
-func NewSyncJobID() SyncJobID                 { return SyncJobID{UUID: uuid.New()} }
 func NewClusterInfoID() ClusterInfoID         { return ClusterInfoID{UUID: uuid.New()} }
 func NewProclaimID() ProclaimID               { return ProclaimID{UUID: uuid.New()} }
 
@@ -182,11 +180,6 @@ func ParseProductRequirementID(s string) (ProductRequirementID, error) {
 	return ProductRequirementID{UUID: id}, err
 }
 
-func ParseSyncJobID(s string) (SyncJobID, error) {
-	id, err := uuid.Parse(s)
-	return SyncJobID{UUID: id}, err
-}
-
 func ParseClusterInfoID(s string) (ClusterInfoID, error) {
 	id, err := uuid.Parse(s)
 	return ClusterInfoID{UUID: id}, err
@@ -221,6 +214,5 @@ func (id DockerfileID) String() string        { return id.UUID.String() }
 func (id ProductID) String() string           { return id.UUID.String() }
 func (id ProductPlanID) String() string       { return id.UUID.String() }
 func (id ProductRequirementID) String() string { return id.UUID.String() }
-func (id SyncJobID) String() string           { return id.UUID.String() }
 func (id ClusterInfoID) String() string       { return id.UUID.String() }
 func (id ProclaimID) String() string          { return id.UUID.String() }

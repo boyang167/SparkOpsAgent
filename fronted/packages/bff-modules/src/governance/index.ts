@@ -3,6 +3,7 @@ export { createRole } from "./createRole";
 export { updateRole } from "./updateRole";
 export { deleteRole } from "./deleteRole";
 export { listMembers } from "./listMembers";
+export { searchMemberCandidates } from "./searchMemberCandidates";
 export { assignRole } from "./assignRole";
 export { getMyPermissions } from "./myPermissions";
 export { inviteMember } from "./inviteMember";
@@ -39,5 +40,8 @@ export {
   setMenuRoles,
   getRoleMenus,
   setRoleMenus,
+  listWorkspaceMenuButtons,
+  getRoleMenuButtons,
+  setRoleMenuButtons,
   listMyMenuButtons,
 } from "./menus";

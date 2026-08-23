@@ -33,30 +33,37 @@ export function AdminContextHint({
   }
 
   if (consoleKind === "platform") {
-    return <span className="topbar-hint hidden sm:inline">平台运营 · 跨租户治理</span>;
+    return null;
+  }
+
+  if (!current) {
+    return null;
+  }
+
+  if (workspaces.length <= 1) {
+    return (
+      <span className="admin-context-pill" title="当前工作区">
+        {current.name}
+      </span>
+    );
   }
 
   return (
-    <div className="context-bar">
-      <span className="topbar-hint hidden sm:inline">IAM 上下文</span>
-      <span className="context-bar-sep hidden sm:inline" aria-hidden>
-        /
-      </span>
-      <label className="context-bar-field">
-        <span className="context-bar-label">工作区</span>
-        <select
-          className="context-bar-select"
-          value={current?.id ?? ""}
-          disabled={loading || workspaces.length <= 1}
-          onChange={(e) => void onWorkspaceChange(e.target.value)}
-        >
-          {workspaces.map((ws) => (
-            <option key={ws.id} value={ws.id}>
-              {ws.name}
-            </option>
-          ))}
-        </select>
-      </label>
-    </div>
+    <label className="admin-context-bar">
+      <span className="sr-only">工作区</span>
+      <select
+        className="admin-context-select"
+        value={current.id}
+        disabled={loading}
+        aria-label="切换工作区"
+        onChange={(e) => void onWorkspaceChange(e.target.value)}
+      >
+        {workspaces.map((ws) => (
+          <option key={ws.id} value={ws.id}>
+            {ws.name}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

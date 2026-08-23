@@ -63,3 +63,22 @@ export async function setRoleMenus(
 ) {
   return ctx.upstream.governance.setRoleMenus(workspaceId, roleId, input);
 }
+
+export async function listWorkspaceMenuButtons(ctx: BffContext, workspaceId: string) {
+  const data = await ctx.upstream.governance.listWorkspaceMenuButtons(workspaceId);
+  return data.items;
+}
+
+export async function getRoleMenuButtons(ctx: BffContext, workspaceId: string, roleId: string) {
+  const data = await ctx.upstream.governance.getRoleMenuButtons(workspaceId, roleId);
+  return data.button_ids;
+}
+
+export async function setRoleMenuButtons(
+  ctx: BffContext,
+  workspaceId: string,
+  roleId: string,
+  input: import("@sparkops/contracts/governance").SetRoleMenuButtonsCommand,
+) {
+  return ctx.upstream.governance.setRoleMenuButtons(workspaceId, roleId, input);
+}

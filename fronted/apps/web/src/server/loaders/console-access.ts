@@ -16,20 +16,24 @@ export async function loadConsoleAccess(): Promise<ConsoleAccess> {
     return { session: null, isSuperAdmin: false, canManageAdmin: false };
   }
 
-  let canManageAdmin = false;
-  try {
-    const { workspaceId } = await loadResolvedWorkspaceId();
-    if (workspaceId) {
-      const permissions = await loadMyPermissions(workspaceId);
-      canManageAdmin = permissions.includes("governance:admin");
+  const isSuperAdmin = session.is_super_admin ?? false;
+
+  let canManageAdmin = isSuperAdmin;
+  if (!canManageAdmin) {
+    try {
+      const { workspaceId } = await loadResolvedWorkspaceId();
+      if (workspaceId) {
+        const permissions = await loadMyPermissions(workspaceId);
+        canManageAdmin = permissions.includes("governance:admin");
+      }
+    } catch {
+      canManageAdmin = false;
     }
-  } catch {
-    canManageAdmin = false;
   }
 
   return {
     session,
-    isSuperAdmin: session.is_super_admin ?? false,
+    isSuperAdmin,
     canManageAdmin,
   };
 }

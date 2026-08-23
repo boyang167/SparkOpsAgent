@@ -19,7 +19,10 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return db.AutoMigrate(&sysCfgModel{}, &clusterInfoModel{}, &syncJobModel{}, &statisticsCacheModel{}, &proclaimModel{})
+	if err := db.Exec("DROP TABLE IF EXISTS platform_admin.sync_jobs").Error; err != nil {
+		return err
+	}
+	return db.AutoMigrate(&sysCfgModel{}, &clusterInfoModel{}, &statisticsCacheModel{}, &proclaimModel{})
 }
 
 type sysCfgModel struct {
@@ -49,22 +52,6 @@ type clusterInfoModel struct {
 }
 
 func (clusterInfoModel) TableName() string { return "platform_admin.cluster_info" }
-
-type syncJobModel struct {
-	ID             string `gorm:"column:id;primaryKey"`
-	Name           string
-	WorkspaceID    string
-	Version        string
-	SourceCluster  string
-	TargetCluster  string
-	SyncResources  string `gorm:"type:text"`
-	Status         string
-	Result         string `gorm:"type:text"`
-	CreatedBy      string
-	postgres.AuditColumns
-}
-
-func (syncJobModel) TableName() string { return "platform_admin.sync_jobs" }
 
 type statisticsCacheModel struct {
 	ID          string `gorm:"column:id;primaryKey"`
@@ -148,29 +135,6 @@ func (r *AdminRepository) SaveCluster(ctx context.Context, cluster *repository.C
 		AuditColumns: postgres.AuditColumns{CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
 	}
 	return r.db.WithContext(ctx).Save(&row).Error
-}
-
-func (r *AdminRepository) ListSyncJobs(ctx context.Context) ([]*repository.SyncJob, error) {
-	var rows []syncJobModel
-	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]*repository.SyncJob, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, rowToSyncJob(row))
-	}
-	return out, nil
-}
-
-func (r *AdminRepository) SaveSyncJob(ctx context.Context, job *repository.SyncJob) error {
-	row := syncJobModel{
-		ID: job.ID.String(), Name: job.Name, WorkspaceID: job.WorkspaceID.String(),
-		Version: job.Version, SourceCluster: job.SourceCluster, TargetCluster: job.TargetCluster,
-		SyncResources: job.SyncResources, Status: job.Status, Result: job.Result,
-		CreatedBy: job.CreatedBy.String(),
-		AuditColumns: postgres.AuditColumns{CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
-	}
-	return r.db.WithContext(ctx).Create(&row).Error
 }
 
 func (r *AdminRepository) GetStatisticsCache(ctx context.Context, wsID kernel.WorkspaceID, key string) (map[string]any, error) {
@@ -268,17 +232,6 @@ func rowToCluster(row clusterInfoModel) *repository.ClusterInfo {
 		CertificateAuthorityData: row.CertificateAuthorityData,
 		ClientCertificateData: row.ClientCertificateData, ClientKeyData: row.ClientKeyData,
 		IsBuildEnv: row.IsBuildEnv, PriorityID: row.PriorityID, CreatedBy: createdBy,
-	}
-}
-
-func rowToSyncJob(row syncJobModel) *repository.SyncJob {
-	id, _ := kernel.ParseSyncJobID(row.ID)
-	wsID, _ := kernel.ParseWorkspaceID(row.WorkspaceID)
-	createdBy, _ := kernel.ParseMemberID(row.CreatedBy)
-	return &repository.SyncJob{
-		ID: id, Name: row.Name, WorkspaceID: wsID, Version: row.Version,
-		SourceCluster: row.SourceCluster, TargetCluster: row.TargetCluster,
-		SyncResources: row.SyncResources, Status: row.Status, Result: row.Result, CreatedBy: createdBy,
 	}
 }
 

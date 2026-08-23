@@ -157,6 +157,67 @@ func (h *GetRoleMenusHandler) Handle(ctx context.Context, workspaceID kernel.Wor
 	return h.menus.ListMenuIDsByRole(ctx, workspaceID, roleID)
 }
 
+type WorkspaceMenuButtonView struct {
+	ButtonID  string `json:"button_id"`
+	MenuID    string `json:"menu_id"`
+	MenuTitle string `json:"menu_title"`
+	MenuPath  string `json:"menu_path"`
+	Name      string `json:"name"`
+	Code      string `json:"code"`
+	Remark    string `json:"remark"`
+}
+
+type ListWorkspaceMenuButtonsHandler struct {
+	menus *persistence.MenuStore
+	seed  *command.SeedWorkspaceMenusHandler
+}
+
+func NewListWorkspaceMenuButtonsHandler(menus *persistence.MenuStore, seed *command.SeedWorkspaceMenusHandler) *ListWorkspaceMenuButtonsHandler {
+	return &ListWorkspaceMenuButtonsHandler{menus: menus, seed: seed}
+}
+
+func (h *ListWorkspaceMenuButtonsHandler) Handle(ctx context.Context, workspaceID kernel.WorkspaceID) ([]WorkspaceMenuButtonView, error) {
+	if err := h.seed.Handle(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	rows, err := h.menus.ListAllButtonsInWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]WorkspaceMenuButtonView, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, WorkspaceMenuButtonView{
+			ButtonID: row.ButtonID, MenuID: row.MenuID, MenuTitle: row.MenuTitle,
+			MenuPath: row.MenuPath, Name: row.Name, Code: row.Code, Remark: row.Remark,
+		})
+	}
+	return out, nil
+}
+
+type GetRoleMenuButtonsHandler struct {
+	menus    *persistence.MenuStore
+	roleRepo repository.RoleRepository
+}
+
+func NewGetRoleMenuButtonsHandler(menus *persistence.MenuStore, roleRepo repository.RoleRepository) *GetRoleMenuButtonsHandler {
+	return &GetRoleMenuButtonsHandler{menus: menus, roleRepo: roleRepo}
+}
+
+func (h *GetRoleMenuButtonsHandler) Handle(ctx context.Context, workspaceID kernel.WorkspaceID, roleID string) ([]string, error) {
+	id, err := kernel.ParseRoleID(roleID)
+	if err != nil {
+		return nil, domain.ErrRoleNotFound
+	}
+	role, err := h.roleRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if role.WorkspaceID != workspaceID {
+		return nil, domain.ErrRoleNotFound
+	}
+	return h.menus.ListButtonIDsByRole(ctx, roleID)
+}
+
 type ListMyMenuButtonsHandler struct {
 	menus       *persistence.MenuStore
 	checker     *Checker

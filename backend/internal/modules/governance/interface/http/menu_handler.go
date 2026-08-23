@@ -19,11 +19,14 @@ type MenuHandler struct {
 	getMenu        *query.GetMenuHandler
 	getRoles       *query.GetMenuRolesHandler
 	getRoleMenus   *query.GetRoleMenusHandler
+	listWsButtons  *query.ListWorkspaceMenuButtonsHandler
+	getRoleButtons *query.GetRoleMenuButtonsHandler
 	create         *command.CreateMenuHandler
 	update         *command.UpdateMenuHandler
 	delete         *command.DeleteMenuHandler
 	setRoles       *command.SetMenuRolesHandler
 	setRoleMenus   *command.SetRoleMenusHandler
+	setRoleButtons *command.SetRoleMenuButtonsHandler
 }
 
 func NewMenuHandler(
@@ -33,17 +36,21 @@ func NewMenuHandler(
 	getMenu *query.GetMenuHandler,
 	getRoles *query.GetMenuRolesHandler,
 	getRoleMenus *query.GetRoleMenusHandler,
+	listWsButtons *query.ListWorkspaceMenuButtonsHandler,
+	getRoleButtons *query.GetRoleMenuButtonsHandler,
 	create *command.CreateMenuHandler,
 	update *command.UpdateMenuHandler,
 	deleteMenu *command.DeleteMenuHandler,
 	setRoles *command.SetMenuRolesHandler,
 	setRoleMenus *command.SetRoleMenusHandler,
+	setRoleButtons *command.SetRoleMenuButtonsHandler,
 ) *MenuHandler {
 	return &MenuHandler{
 		listTree: listTree, listNav: listNav, listMyButtons: listMyButtons,
 		getMenu: getMenu, getRoles: getRoles, getRoleMenus: getRoleMenus,
+		listWsButtons: listWsButtons, getRoleButtons: getRoleButtons,
 		create: create, update: update, delete: deleteMenu,
-		setRoles: setRoles, setRoleMenus: setRoleMenus,
+		setRoles: setRoles, setRoleMenus: setRoleMenus, setRoleButtons: setRoleButtons,
 	}
 }
 
@@ -310,6 +317,56 @@ func (h *MenuHandler) SetRoleMenus(c *gin.Context) {
 		return
 	}
 	if err := h.setRoleMenus.Handle(c.Request.Context(), wsID, c.Param("roleId"), req.MenuIDs); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"updated": true})
+}
+
+func (h *MenuHandler) ListWorkspaceMenuButtons(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "INVALID_REQUEST", "workspace required", http.StatusBadRequest)
+		return
+	}
+	items, err := h.listWsButtons.Handle(c.Request.Context(), wsID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *MenuHandler) GetRoleMenuButtons(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "INVALID_REQUEST", "workspace required", http.StatusBadRequest)
+		return
+	}
+	buttonIDs, err := h.getRoleButtons.Handle(c.Request.Context(), wsID, c.Param("roleId"))
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"button_ids": buttonIDs})
+}
+
+type setRoleMenuButtonsRequest struct {
+	ButtonIDs []string `json:"button_ids"`
+}
+
+func (h *MenuHandler) SetRoleMenuButtons(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "INVALID_REQUEST", "workspace required", http.StatusBadRequest)
+		return
+	}
+	var req setRoleMenuButtonsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := h.setRoleButtons.Handle(c.Request.Context(), wsID, c.Param("roleId"), req.ButtonIDs); err != nil {
 		httpx.HandleError(c, err)
 		return
 	}

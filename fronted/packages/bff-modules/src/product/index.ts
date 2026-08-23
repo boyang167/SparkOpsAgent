@@ -16,7 +16,6 @@ export {
   approveRequirement,
   rejectRequirement,
   releaseRequirement,
-  crossReleaseRequirement,
 } from "./requirements";
 
 export async function listTemplates(ctx: BffContext, workspaceId: string) {

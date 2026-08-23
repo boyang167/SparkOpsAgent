@@ -67,7 +67,8 @@ export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
       { href: "/discovery/services", label: "服务发现", entitlement: "k8s" },
       { href: "/security/ingress", label: "网络入口", entitlement: "k8s" },
       { href: "/security/virtualservices", label: "流量策略", entitlement: "k8s" },
-      { href: "/config/webhooks", label: "外部集成", entitlement: "mcp" },
+      { href: "/config/webhooks", label: "Webhook", entitlement: "mcp" },
+      { href: "/config/mcp", label: "MCP 集成", entitlement: "mcp" },
       { href: "/config/consul", label: "配置中心", entitlement: "k8s" },
     ],
   },
@@ -124,18 +125,19 @@ export const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
 ];
 
 /** 平台运营中心 */
+export const PLATFORM_OPS_NAV_ITEMS: NavLeafConfig[] = [
+  { href: "/platform/accounts", label: "平台账号" },
+  { href: "/platform/organizations", label: "平台组织" },
+  { href: "/platform/clusters", label: "集群管理" },
+  { href: "/platform/audit", label: "平台审计" },
+  { href: "/platform/settings", label: "平台配置" },
+];
+
 export const PLATFORM_OPS_NAV_TREE: NavGroupConfig[] = [
   {
     id: "platform-ops",
     label: "平台运营",
-    items: [
-      { href: "/platform/accounts", label: "平台账号" },
-      { href: "/platform/organizations", label: "平台组织" },
-      { href: "/platform/clusters", label: "集群管理" },
-      { href: "/platform/clusters/sync", label: "资源同步" },
-      { href: "/platform/audit", label: "平台审计" },
-      { href: "/platform/settings", label: "平台配置" },
-    ],
+    items: PLATFORM_OPS_NAV_ITEMS,
   },
 ];
 

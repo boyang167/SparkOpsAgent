@@ -53,18 +53,6 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
-    async crossReleaseRequirement(
-      workspaceId: string,
-      productId: string,
-      reqId: string,
-      input: { source_cluster: string; target_cluster: string },
-    ) {
-      return upstreamFetch<{ id: string; multicluster_status: string }>(
-        `/api/v1/products/${productId}/requirements/${reqId}/cross-release`,
-        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
-      );
-    },
-
     async listTemplates(workspaceId: string) {
       return upstreamFetch<{ items: import("@sparkops/contracts/product").TemplateVM[] }>(
         `/api/v1/workspaces/${workspaceId}/templates`,
