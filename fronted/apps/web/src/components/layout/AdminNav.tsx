@@ -29,12 +29,6 @@ const sectionIcons: Record<string, React.ReactNode> = {
       <path d="M9 14l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
-  tools: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.7-3.7a1 1 0 00-1.4-1.4l-1.6 1.6a1 1 0 00-1.4 0l-3.7 3.7z" />
-      <path d="M3 21l6.5-6.5M7 17l2 2" strokeLinecap="round" />
-    </svg>
-  ),
 };
 
 const defaultSectionIcon = (

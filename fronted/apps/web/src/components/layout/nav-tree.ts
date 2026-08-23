@@ -18,8 +18,16 @@ export interface NavGroupConfig {
 
 export type ConsoleKind = "business" | "admin" | "platform";
 
-/** 业务控制台：应用中心 + 运行保障 */
+/** 业务控制台 Dashboard 分组（工作台为二级菜单） */
+export const DASHBOARD_NAV_GROUP: NavGroupConfig = {
+  id: "dashboard",
+  label: "Dashboard",
+  items: [{ href: "/dashboard/workplace", label: "工作台" }],
+};
+
+/** 业务控制台：Dashboard + 应用中心 + 运行保障 */
 export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
+  DASHBOARD_NAV_GROUP,
   {
     id: "application",
     label: "应用中心",
@@ -117,11 +125,6 @@ export const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
       { href: "/admin/server-status", label: "服务器状态" },
     ],
   },
-  {
-    id: "tools",
-    label: "运维工具",
-    items: [{ href: "/admin/tools", label: "运维工具" }],
-  },
 ];
 
 /** 平台运营中心 */
@@ -195,7 +198,6 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   "/admin/operation-logs": "操作日志",
   "/admin/org-audit": "组织审计",
   "/admin/server-status": "服务器状态",
-  "/admin/tools": "运维工具",
 };
 
 export const ADMIN_PAGE_DESCRIPTIONS: Record<string, string> = {
@@ -209,7 +211,6 @@ export const ADMIN_PAGE_DESCRIPTIONS: Record<string, string> = {
   "/admin/operation-logs": "查看工作区内的操作审计记录。",
   "/admin/org-audit": "查看组织级合规与变更审计。",
   "/admin/server-status": "查看平台服务健康与运行状态。",
-  "/admin/tools": "执行诊断、清理等运维工具。",
 };
 
 /** 管理控制台首页（IAM 概览） */

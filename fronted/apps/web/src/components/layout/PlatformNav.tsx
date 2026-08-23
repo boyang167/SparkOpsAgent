@@ -1,45 +1,19 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { governance } from "@sparkops/web-sdk";
 import type { MenuTreeVM } from "@sparkops/contracts/governance";
 import { NavGroup } from "@/components/layout/NavGroup";
-import { filterBusinessNavGroups } from "@/components/layout/nav-tree";
+import { DASHBOARD_NAV_GROUP, filterBusinessNavGroups } from "@/components/layout/nav-tree";
 import { useShellContext } from "@/components/layout/shell-context";
 
 interface PlatformNavProps {
   workspaceId?: string;
 }
 
-function NavItem({
-  href,
-  label,
-  icon,
-  active,
-}: {
-  href: string;
-  label: string;
-  icon: React.ReactNode;
-  active: boolean;
-}) {
-  return (
-    <Link href={href} className={`nav-link ${active ? "nav-link-active" : ""}`}>
-      <span className="nav-icon">{icon}</span>
-      {label}
-    </Link>
-  );
-}
-
-function isActive(pathname: string, href: string, prefix?: string) {
-  if (pathname === href) return true;
-  if (prefix && pathname.startsWith(prefix)) return true;
-  return false;
-}
-
 const icons = {
-  grid: (
+  dashboard: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="3" y="3" width="7" height="7" rx="1" />
       <rect x="14" y="3" width="7" height="7" rx="1" />
@@ -138,10 +112,12 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
 
   const fallbackGroups = useMemo(
     () =>
-      filterBusinessNavGroups({ showSuperAdmin: false, entitlements }).map((group) => ({
-        ...group,
-        defaultCollapsed: group.defaultCollapsed ?? false,
-      })),
+      filterBusinessNavGroups({ showSuperAdmin: false, entitlements })
+        .filter((group) => group.id !== DASHBOARD_NAV_GROUP.id)
+        .map((group) => ({
+          ...group,
+          defaultCollapsed: group.defaultCollapsed ?? false,
+        })),
     [entitlements],
   );
 
@@ -149,11 +125,12 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
 
   return (
     <>
-      <NavItem
-        href="/dashboard/workplace"
-        label="工作台"
-        active={isActive(pathname, "/dashboard/workplace", "/dashboard/workplace")}
-        icon={icons.grid}
+      <NavGroup
+        label={DASHBOARD_NAV_GROUP.label}
+        icon={icons.dashboard}
+        items={[...DASHBOARD_NAV_GROUP.items]}
+        pathname={pathname}
+        defaultOpen
       />
 
       {groups.map((group) => (
