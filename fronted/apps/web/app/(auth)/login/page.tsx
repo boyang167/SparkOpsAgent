@@ -3,19 +3,21 @@ import { LoginForm } from "@/modules/identity/components/LoginForm";
 
 export default function LoginPage() {
   return (
-    <div className="card p-8">
-      <div className="mb-8">
-        <p className="eyebrow">SparkOps Platform</p>
-        <h1 className="page-title mt-2">登录</h1>
-        <p className="text-muted mt-2">通过 BFF 安全接入，Cookie 会话管理。</p>
-      </div>
+    <div className="auth-card">
+      <header className="auth-card-header">
+        <p className="auth-card-eyebrow">Welcome back</p>
+        <h1 className="auth-card-title">登录 SparkOps</h1>
+        <p className="auth-card-desc">使用企业账号或邮箱密码进入控制台</p>
+      </header>
+
       <LoginForm />
-      <p className="text-muted mt-8 text-center text-sm">
-        还没有账号？{" "}
-        <Link href="/register" className="link-primary">
-          注册
+
+      <footer className="auth-card-footer">
+        <span className="text-muted text-sm">还没有账号？</span>
+        <Link href="/register" className="auth-card-link">
+          创建账号
         </Link>
-      </p>
+      </footer>
     </div>
   );
 }

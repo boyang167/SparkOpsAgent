@@ -131,8 +131,22 @@ func (s *TenantStore) FindOrganizationByID(ctx context.Context, id kernel.OrgID)
 }
 
 func (s *TenantStore) ListAllOrganizations(ctx context.Context) ([]*model.Organization, error) {
+	return s.listOrganizations(ctx, false)
+}
+
+func (s *TenantStore) ListAllOrganizationsIncludingDeleted(ctx context.Context) ([]*model.Organization, error) {
+	return s.listOrganizations(ctx, true)
+}
+
+func (s *TenantStore) listOrganizations(ctx context.Context, includeDeleted bool) ([]*model.Organization, error) {
 	var rows []organizationModel
-	err := s.db.WithContext(ctx).Where("deleted_at IS NULL").Order("name ASC").Find(&rows).Error
+	q := s.db.WithContext(ctx).Order("name ASC")
+	if includeDeleted {
+		q = q.Unscoped()
+	} else {
+		q = q.Where("deleted_at IS NULL")
+	}
+	err := q.Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -142,9 +156,13 @@ func (s *TenantStore) ListAllOrganizations(ctx context.Context) ([]*model.Organi
 		if parseErr != nil {
 			continue
 		}
+		status := row.Status
+		if includeDeleted && row.DeletedAt.Valid {
+			status = "deleted"
+		}
 		out = append(out, &model.Organization{
 			ID: orgID, Name: row.Name, Slug: row.Slug,
-			Status: row.Status, Quota: rowToOrgQuota(row), CreatedAt: row.CreatedAt,
+			Status: status, Quota: rowToOrgQuota(row), CreatedAt: row.CreatedAt,
 		})
 	}
 	return out, nil
@@ -405,6 +423,54 @@ func (s *TenantStore) FindWorkspaceByID(ctx context.Context, id kernel.Workspace
 	return rowToWorkspace(row), nil
 }
 
+func (s *TenantStore) ListAllWorkspacesWithMembership(ctx context.Context, memberID kernel.MemberID) ([]repository.WorkspaceWithMembership, error) {
+	var rows []struct {
+		ID          string
+		OrgID       string
+		Name        string
+		Slug        string
+		Status      string
+		MaxAgents   int
+		MaxProjects int
+		CreatedAt   time.Time
+		IsMember    bool
+	}
+	err := s.db.WithContext(ctx).Raw(`
+		SELECT w.id, w.org_id, w.name, w.slug, w.status, w.max_agents, w.max_projects,
+		       w.created_at,
+		       (wm.member_id IS NOT NULL) AS is_member
+		FROM tenant.workspaces w
+		LEFT JOIN tenant.workspace_members wm
+		  ON wm.workspace_id = w.id AND wm.member_id = ?
+		WHERE w.deleted_at IS NULL
+		ORDER BY w.name ASC
+	`, memberID.String()).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]repository.WorkspaceWithMembership, 0, len(rows))
+	for _, row := range rows {
+		wsID, parseErr := kernel.ParseWorkspaceID(row.ID)
+		if parseErr != nil {
+			continue
+		}
+		orgID, parseErr := kernel.ParseOrgID(row.OrgID)
+		if parseErr != nil {
+			continue
+		}
+		out = append(out, repository.WorkspaceWithMembership{
+			Workspace: &model.Workspace{
+				ID: wsID, OrgID: orgID,
+				Name: row.Name, Slug: row.Slug, Status: row.Status,
+				Quota: model.WorkspaceQuota{MaxAgents: row.MaxAgents, MaxProjects: row.MaxProjects},
+				CreatedAt: row.CreatedAt,
+			},
+			IsMember: row.IsMember,
+		})
+	}
+	return out, nil
+}
+
 func (s *TenantStore) ListWorkspacesByMember(ctx context.Context, memberID kernel.MemberID) ([]*model.Workspace, error) {
 	var rows []workspaceModel
 	err := s.db.WithContext(ctx).
@@ -480,6 +546,9 @@ func (r *orgRepo) ListByMember(ctx context.Context, memberID kernel.MemberID) ([
 }
 func (r *orgRepo) ListAll(ctx context.Context) ([]*model.Organization, error) {
 	return r.store.ListAllOrganizations(ctx)
+}
+func (r *orgRepo) ListAllIncludingDeleted(ctx context.Context) ([]*model.Organization, error) {
+	return r.store.ListAllOrganizationsIncludingDeleted(ctx)
 }
 func (r *orgRepo) UpdateStatus(ctx context.Context, orgID kernel.OrgID, status string) error {
 	return r.store.UpdateOrganizationStatus(ctx, orgID, status)
@@ -603,6 +672,9 @@ func (r *wsRepo) FindByID(ctx context.Context, id kernel.WorkspaceID) (*model.Wo
 }
 func (r *wsRepo) ListByMember(ctx context.Context, memberID kernel.MemberID) ([]*model.Workspace, error) {
 	return r.store.ListWorkspacesByMember(ctx, memberID)
+}
+func (r *wsRepo) ListAllWithMembership(ctx context.Context, memberID kernel.MemberID) ([]repository.WorkspaceWithMembership, error) {
+	return r.store.ListAllWorkspacesWithMembership(ctx, memberID)
 }
 func (r *wsRepo) ExistsByOrgSlug(ctx context.Context, orgID kernel.OrgID, slug string) (bool, error) {
 	return r.store.ExistsWorkspaceByOrgSlug(ctx, orgID, slug)

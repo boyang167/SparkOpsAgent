@@ -7,9 +7,13 @@ import type { PlatformMemberVM } from "@sparkops/contracts/identity";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
+import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
+import { orgAccentColor, orgInitial } from "@/modules/tenant/lib/org-display";
 
 interface PlatformMembersPanelProps {
   currentMemberId: string;
+  /** platform：平台运营页；settings：旧设置入口 */
+  variant?: "platform" | "settings";
 }
 
 type MemberForm = {
@@ -43,7 +47,50 @@ function shortId(id: string): string {
   return id.length > 8 ? `${id.slice(0, 8)}…` : id;
 }
 
-export function PlatformMembersPanel({ currentMemberId }: PlatformMembersPanelProps) {
+function MemberAvatar({ member }: { member: PlatformMemberVM }) {
+  const color = orgAccentColor(member.id);
+  const label = member.display_name || member.email;
+  return (
+    <span
+      className="platform-member-avatar"
+      style={{ background: `${color}18`, color, boxShadow: `inset 0 0 0 1px ${color}30` }}
+      aria-hidden
+    >
+      {orgInitial(label)}
+    </span>
+  );
+}
+
+function PlatformToggle({
+  checked,
+  disabled,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={`platform-toggle ${checked ? "platform-toggle-on" : ""}`}
+      aria-pressed={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+    >
+      <span className="platform-toggle-thumb" />
+    </button>
+  );
+}
+
+export function PlatformMembersPanel({
+  currentMemberId,
+  variant = "platform",
+}: PlatformMembersPanelProps) {
+  const isPlatform = variant === "platform";
   const [members, setMembers] = useState<PlatformMemberVM[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +128,15 @@ export function PlatformMembersPanel({ currentMemberId }: PlatformMembersPanelPr
   useEffect(() => {
     void load();
   }, [load]);
+
+  const stats = useMemo(
+    () => ({
+      total: members.length,
+      superAdmins: members.filter((m) => m.is_super_admin).length,
+      active: members.filter((m) => m.status === "active").length,
+    }),
+    [members],
+  );
 
   const filteredMembers = useMemo(() => {
     const emailQ = appliedEmail.trim().toLowerCase();
@@ -268,135 +324,167 @@ export function PlatformMembersPanel({ currentMemberId }: PlatformMembersPanelPr
   );
 
   return (
-    <div className="stack-lg">
-      <Breadcrumb items={[{ label: "设置", href: "/settings/profile" }, { label: "平台用户" }]} />
-
-      <div>
-        <h1 className="text-xl font-semibold">用户管理</h1>
-        <p className="text-sm text-muted mt-1">
-          管理平台全局账号：查询、新建、编辑、启停、Super Admin 权限与密码重置
-        </p>
-      </div>
+    <div className={isPlatform ? "platform-members-page" : "stack-lg"}>
+      {!isPlatform ? (
+        <>
+          <Breadcrumb items={[{ label: "设置", href: "/settings/profile" }, { label: "平台用户" }]} />
+          <div>
+            <h1 className="text-xl font-semibold">用户管理</h1>
+            <p className="text-sm text-muted mt-1">
+              管理平台全局账号：查询、新建、编辑、启停、Super Admin 权限与密码重置
+            </p>
+          </div>
+        </>
+      ) : null}
 
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       {success ? <InlineAlert tone="success">{success}</InlineAlert> : null}
 
-      <section className="card p-4">
-        <form onSubmit={onSearch} className="flex flex-wrap items-end gap-3">
-          <label className="stack-xs min-w-[180px] flex-1">
-            <span className="label">显示名称</span>
-            <input
-              className="input"
-              placeholder="昵称"
-              value={searchName}
-              onChange={(e) => setSearchName(e.target.value)}
-            />
-          </label>
-          <label className="stack-xs min-w-[220px] flex-1">
-            <span className="label">邮箱</span>
-            <input
-              className="input"
-              type="email"
-              placeholder="搜索用户邮箱"
-              value={searchEmail}
-              onChange={(e) => setSearchEmail(e.target.value)}
-            />
-          </label>
-          <div className="flex gap-2">
-            <button type="submit" className="btn">
-              查询
-            </button>
-            <button type="button" className="btn-secondary" onClick={onResetSearch}>
-              重置
-            </button>
-          </div>
-        </form>
-      </section>
+      <section className={isPlatform ? "platform-table-card platform-orgs-card" : "card p-4 stack-md"}>
+        {isPlatform ? (
+          <PlatformPanelHead
+            title="平台账号"
+            description="管理全平台用户账号、状态与超级管理员授权。"
+            action={
+              <button type="button" className="btn platform-add-btn" onClick={openCreate}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                  <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+                </svg>
+                新增用户
+              </button>
+            }
+          />
+        ) : null}
 
-      <section className="card p-4 stack-md">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-medium">用户列表</h2>
-          <button type="button" className="btn" onClick={openCreate}>
-            新增用户
-          </button>
+        <div className="platform-table-toolbar">
+          <form onSubmit={onSearch} className="platform-filter-form">
+            <label className="platform-filter-field">
+              <span className="platform-filter-label">显示名称</span>
+              <input
+                className="input platform-filter-input"
+                placeholder="搜索昵称"
+                value={searchName}
+                onChange={(e) => setSearchName(e.target.value)}
+              />
+            </label>
+            <label className="platform-filter-field">
+              <span className="platform-filter-label">邮箱</span>
+              <input
+                className="input platform-filter-input"
+                type="email"
+                placeholder="搜索邮箱"
+                value={searchEmail}
+                onChange={(e) => setSearchEmail(e.target.value)}
+              />
+            </label>
+            <div className="platform-filter-actions">
+              <button type="submit" className="btn">
+                查询
+              </button>
+              <button type="button" className="btn-secondary" onClick={onResetSearch}>
+                重置
+              </button>
+            </div>
+          </form>
+          {!isPlatform ? (
+            <button type="button" className="btn platform-add-btn" onClick={openCreate}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+              </svg>
+              新增用户
+            </button>
+          ) : null}
         </div>
 
         {loading ? (
-          <div className="empty-state">加载中…</div>
+          <div className="platform-table-empty">加载中…</div>
         ) : pageItems.length === 0 ? (
-          <div className="empty-state">{total === 0 ? "暂无用户" : "无匹配用户"}</div>
+          <div className="platform-table-empty">
+            <div className="platform-empty-icon" aria-hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="12" cy="8" r="3" />
+                <path d="M5 20a7 7 0 0114 0" strokeLinecap="round" />
+              </svg>
+            </div>
+            <p>{total === 0 ? "暂无平台用户" : "无匹配用户，请调整筛选条件"}</p>
+          </div>
         ) : (
-          <div className="table-wrap">
-            <table className="data-table">
+          <div className="platform-table-wrap">
+            <table className="platform-table">
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>显示名称</th>
-                  <th>邮箱</th>
-                  <th>Super Admin</th>
-                  <th>启用</th>
+                  <th>用户</th>
+                  <th>权限</th>
+                  <th>状态</th>
                   <th>创建时间</th>
-                  <th>操作</th>
+                  <th className="platform-table-actions-col">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {pageItems.map((member) => {
                   const isSelf = member.id === currentMemberId;
-                  const busy = actionId === member.id || actionId === `sa:${member.id}` || actionId === `del:${member.id}`;
+                  const busy =
+                    actionId === member.id ||
+                    actionId === `sa:${member.id}` ||
+                    actionId === `del:${member.id}`;
+                  const isActive = member.status === "active";
+
                   return (
-                    <tr key={member.id}>
-                      <td className="font-mono text-xs text-muted" title={member.id}>
-                        {shortId(member.id)}
+                    <tr key={member.id} className={isSelf ? "platform-table-row-self" : undefined}>
+                      <td>
+                        <div className="platform-member-cell">
+                          <MemberAvatar member={member} />
+                          <div className="min-w-0">
+                            <div className="platform-member-name-row">
+                              <p className="platform-member-name">{member.display_name}</p>
+                              {isSelf ? <span className="badge badge-primary">当前</span> : null}
+                            </div>
+                            <p className="platform-member-email">{member.email}</p>
+                            <p className="platform-member-id" title={member.id}>
+                              ID {shortId(member.id)}
+                            </p>
+                          </div>
+                        </div>
                       </td>
                       <td>
-                        <p className="font-medium">{member.display_name}</p>
-                        {isSelf ? <p className="text-xs text-muted">当前登录</p> : null}
-                      </td>
-                      <td className="text-sm">{member.email}</td>
-                      <td>
-                        <label className="inline-flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4"
+                        <div className="platform-member-role">
+                          {member.is_super_admin ? (
+                            <span className="badge badge-primary">Super Admin</span>
+                          ) : (
+                            <span className="badge badge-neutral">标准用户</span>
+                          )}
+                          <PlatformToggle
                             checked={member.is_super_admin}
                             disabled={isSelf || busy}
-                            onChange={(e) => void switchSuperAdmin(member, e.target.checked)}
+                            label={`切换 ${member.display_name} 的超级管理员权限`}
+                            onChange={(next) => void switchSuperAdmin(member, next)}
                           />
-                          <span className={member.is_super_admin ? "text-primary font-medium" : "text-muted"}>
-                            {member.is_super_admin ? "是" : "否"}
-                          </span>
-                        </label>
+                        </div>
                       </td>
                       <td>
-                        <label className="inline-flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            role="switch"
-                            className="h-4 w-4"
-                            checked={member.status === "active"}
-                            disabled={isSelf || busy}
-                            onChange={(e) => void switchStatus(member, e.target.checked)}
-                          />
-                          <span className={member.status === "active" ? "text-emerald-700" : "text-amber-700"}>
-                            {member.status === "active" ? "启用" : "停用"}
+                        <div className="platform-member-status">
+                          <span className={`badge ${isActive ? "badge-success" : "badge-warning"}`}>
+                            {isActive ? "启用" : "停用"}
                           </span>
-                        </label>
+                          <PlatformToggle
+                            checked={isActive}
+                            disabled={isSelf || busy}
+                            label={`切换 ${member.display_name} 的启用状态`}
+                            onChange={(next) => void switchStatus(member, next)}
+                          />
+                        </div>
                       </td>
-                      <td className="text-sm text-muted whitespace-nowrap">
+                      <td className="platform-table-time">
                         {new Date(member.created_at).toLocaleString()}
                       </td>
                       <td>
-                        <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
-                          <button
-                            type="button"
-                            className="text-primary hover:underline"
-                            onClick={() => openEdit(member)}
-                          >
+                        <div className="platform-row-actions">
+                          <button type="button" className="platform-row-action" onClick={() => openEdit(member)}>
                             编辑
                           </button>
                           <button
                             type="button"
-                            className="text-primary hover:underline"
+                            className="platform-row-action"
                             onClick={() => {
                               setResetMember(member);
                               setNewPassword("");
@@ -406,7 +494,7 @@ export function PlatformMembersPanel({ currentMemberId }: PlatformMembersPanelPr
                           </button>
                           <button
                             type="button"
-                            className="text-red-600 hover:underline disabled:opacity-50"
+                            className="platform-row-action platform-row-action-danger"
                             disabled={isSelf || busy}
                             onClick={() => void onDelete(member)}
                           >
@@ -423,8 +511,13 @@ export function PlatformMembersPanel({ currentMemberId }: PlatformMembersPanelPr
         )}
 
         {!loading && total > 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[var(--border)]">
-            <p className="text-sm text-muted">共 {total} 条</p>
+          <div className="platform-table-footer">
+            <p className="text-sm text-muted">
+              共 {total} 条
+              {isPlatform
+                ? ` · ${stats.superAdmins} Super Admin · ${stats.active} 已启用`
+                : null}
+            </p>
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-2 text-sm text-muted">
                 每页

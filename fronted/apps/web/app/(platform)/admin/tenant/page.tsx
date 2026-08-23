@@ -25,6 +25,7 @@ export default async function AdminTenantPage() {
       organizations={organizations}
       workspaces={workspaces}
       currentWorkspaceId={currentWorkspaceId}
+      variant="admin"
     />
   );
 }

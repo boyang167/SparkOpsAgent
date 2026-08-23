@@ -1,14 +1,11 @@
 import { headers } from "next/headers";
-import { AdminNav } from "@/components/layout/AdminNav";
 import { AppShell } from "@/components/layout/AppShell";
 import { extractProjectId } from "@/components/layout/context-utils";
-import { PlatformNav } from "@/components/layout/PlatformNav";
-import { PlatformOpsNav } from "@/components/layout/PlatformOpsNav";
-import { ProjectNav } from "@/components/layout/ProjectNav";
+import { SidebarNav } from "@/components/layout/SidebarNav";
 import { resolveConsoleKind } from "@/components/layout/nav-tree";
 import { loadConsoleAccess } from "@/server/loaders/console-access";
 import { requirePathEntitlement } from "@/server/loaders/require-path-entitlement";
-import { loadProject, loadProjects } from "@/server/loaders/projects";
+import { loadProjects } from "@/server/loaders/projects";
 import { loadTenantContext } from "@/server/loaders/tenant-context";
 
 export default async function PlatformLayout({ children }: { children: React.ReactNode }) {
@@ -20,7 +17,6 @@ export default async function PlatformLayout({ children }: { children: React.Rea
   const { session, isSuperAdmin, canManageAdmin } = await loadConsoleAccess();
 
   let tenantContext: Awaited<ReturnType<typeof loadTenantContext>> | null = null;
-  let projectName: string | undefined;
   let projectOptions: { id: string; name: string }[] = [];
 
   if (session) {
@@ -39,13 +35,9 @@ export default async function PlatformLayout({ children }: { children: React.Rea
       await requirePathEntitlement(pathname, tenantContext.workspaceId);
     }
 
-    if (projectId && tenantContext?.workspaceId && consoleKind === "business") {
+    if (tenantContext?.workspaceId) {
       try {
-        const [project, projects] = await Promise.all([
-          loadProject(tenantContext.workspaceId, projectId).catch(() => null),
-          loadProjects(tenantContext.workspaceId).catch(() => []),
-        ]);
-        projectName = project?.name;
+        const projects = await loadProjects(tenantContext.workspaceId).catch(() => []);
         projectOptions = projects.map((item) => ({ id: item.id, name: item.name }));
       } catch {
         // ignore project load errors
@@ -53,22 +45,11 @@ export default async function PlatformLayout({ children }: { children: React.Rea
     }
   }
 
-  let nav =
-    consoleKind === "admin" ? (
-      <AdminNav />
-    ) : consoleKind === "platform" ? (
-      <PlatformOpsNav />
-    ) : (
-      <PlatformNav workspaceId={tenantContext?.workspaceId} />
-    );
-
-  if (projectId && projectName && consoleKind === "business") {
-    nav = <ProjectNav projectId={projectId} projectName={projectName} />;
-  }
-
   return (
     <AppShell
-      nav={nav}
+      nav={
+        <SidebarNav workspaceId={tenantContext?.workspaceId} projects={projectOptions} />
+      }
       session={session}
       organizations={tenantContext?.organizations ?? []}
       workspaces={tenantContext?.workspaces ?? []}
@@ -77,7 +58,6 @@ export default async function PlatformLayout({ children }: { children: React.Rea
       currentProjectId={projectId ?? undefined}
       isSuperAdmin={isSuperAdmin}
       canManageAdmin={canManageAdmin}
-      consoleKind={consoleKind}
     >
       {children}
     </AppShell>

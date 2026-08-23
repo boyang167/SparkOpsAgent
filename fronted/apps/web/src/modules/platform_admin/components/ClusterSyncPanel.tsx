@@ -6,12 +6,15 @@ import { BffError } from "@sparkops/contracts";
 import type { SyncJobVM } from "@sparkops/contracts/platform";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
+import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
 
 interface ClusterSyncPanelProps {
   workspaceId: string;
+  variant?: "platform" | "default";
 }
 
-export function ClusterSyncPanel({ workspaceId }: ClusterSyncPanelProps) {
+export function ClusterSyncPanel({ workspaceId, variant = "default" }: ClusterSyncPanelProps) {
+  const isPlatform = variant === "platform";
   const [items, setItems] = useState<SyncJobVM[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,19 +58,25 @@ export function ClusterSyncPanel({ workspaceId }: ClusterSyncPanelProps) {
     }
   }
 
-  return (
-    <div className="stack-md">
-      <div className="flex justify-end">
-        <button type="button" className="btn" onClick={() => setOpen(true)}>新建同步任务</button>
-      </div>
+  const createBtn = (
+    <button type="button" className="btn platform-add-btn" onClick={() => setOpen(true)}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+        <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+      </svg>
+      新建同步任务
+    </button>
+  );
+
+  const body = (
+    <>
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       {loading ? (
-        <div className="empty-state">加载中…</div>
+        <div className={isPlatform ? "platform-table-empty" : "empty-state"}>加载中…</div>
       ) : items.length === 0 ? (
-        <div className="empty-state">暂无同步任务</div>
+        <div className={isPlatform ? "platform-table-empty" : "empty-state"}>暂无同步任务</div>
       ) : (
-        <div className="table-wrap">
-          <table className="data-table text-sm">
+        <div className={isPlatform ? "platform-table-wrap" : "table-wrap"}>
+          <table className={isPlatform ? "platform-table" : "data-table text-sm"}>
             <thead>
               <tr>
                 <th>名称</th>
@@ -90,6 +99,31 @@ export function ClusterSyncPanel({ workspaceId }: ClusterSyncPanelProps) {
             </tbody>
           </table>
         </div>
+      )}
+      {!loading && items.length > 0 && isPlatform ? (
+        <div className="platform-table-footer">
+          <span className="text-sm text-muted">共 {items.length} 个同步任务</span>
+        </div>
+      ) : null}
+    </>
+  );
+
+  return (
+    <div className={isPlatform ? "platform-orgs-page" : "stack-md"}>
+      {isPlatform ? (
+        <section className="platform-table-card platform-orgs-card">
+          <PlatformPanelHead
+            title="资源同步"
+            description="跨集群资源同步任务管理。"
+            action={createBtn}
+          />
+          <div className="platform-orgs-card-body">{body}</div>
+        </section>
+      ) : (
+        <>
+          <div className="flex justify-end">{createBtn}</div>
+          {body}
+        </>
       )}
       <Modal open={open} onClose={() => setOpen(false)} title="跨集群资源同步">
         <form onSubmit={onCreate} className="stack-md">

@@ -7,5 +7,5 @@ export default async function PlatformOrgsPage() {
   if (!session) redirect("/login");
   if (!session.is_super_admin) redirect("/dashboard");
 
-  return <PlatformOrganizationsPanel />;
+  return <PlatformOrganizationsPanel variant="settings" />;
 }

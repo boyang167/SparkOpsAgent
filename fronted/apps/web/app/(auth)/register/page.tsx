@@ -3,19 +3,21 @@ import { RegisterForm } from "@/modules/identity/components/RegisterForm";
 
 export default function RegisterPage() {
   return (
-    <div className="card p-8">
-      <div className="mb-8">
-        <p className="eyebrow">SparkOps Platform</p>
-        <h1 className="page-title mt-2">注册</h1>
-        <p className="text-muted mt-2">创建账号后即可创建 Org 与 Workspace。</p>
-      </div>
+    <div className="auth-card">
+      <header className="auth-card-header">
+        <p className="auth-card-eyebrow">Get started</p>
+        <h1 className="auth-card-title">创建账号</h1>
+        <p className="auth-card-desc">注册后即可创建组织与工作区，开始使用 Agent 运营平台</p>
+      </header>
+
       <RegisterForm />
-      <p className="text-muted mt-8 text-center text-sm">
-        已有账号？{" "}
-        <Link href="/login" className="link-primary">
+
+      <footer className="auth-card-footer">
+        <span className="text-muted text-sm">已有账号？</span>
+        <Link href="/login" className="auth-card-link">
           登录
         </Link>
-      </p>
+      </footer>
     </div>
   );
 }

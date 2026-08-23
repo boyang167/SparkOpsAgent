@@ -2,10 +2,50 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ADMIN_NAV_SECTIONS } from "@/components/layout/nav-tree";
+import { NavGroup } from "@/components/layout/NavGroup";
+import { ADMIN_HOME_HREF, ADMIN_NAV_SECTIONS } from "@/components/layout/nav-tree";
 
-function isActive(pathname: string, href: string) {
-  return pathname === href || pathname.startsWith(`${href}/`);
+const adminHomeIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M12 3l7 4v5c0 4.4-3 8.5-7 9-4-.5-7-4.6-7-9V7l7-4z" strokeLinejoin="round" />
+  </svg>
+);
+
+const sectionIcons: Record<string, React.ReactNode> = {
+  identity: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="8" r="3" />
+      <path d="M5 20a7 7 0 0114 0" strokeLinecap="round" />
+    </svg>
+  ),
+  policy: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 3l7 4v5c0 4.4-3 8.5-7 9-4-.5-7-4.6-7-9V7l7-4z" strokeLinejoin="round" />
+      <path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  tenant: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M3 21h18M6 21V7l6-3 6 3v14M10 21v-4h4v4" strokeLinejoin="round" />
+    </svg>
+  ),
+  compliance: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
+      <rect x="9" y="3" width="6" height="4" rx="1" />
+      <path d="M9 14l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  tools: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.7-3.7a1 1 0 00-1.4-1.4l-1.6 1.6a1 1 0 00-1.4 0l-3.7 3.7z" />
+      <path d="M3 21l6.5-6.5M7 17l2 2" strokeLinecap="round" />
+    </svg>
+  ),
+};
+
+function isAdminHomeActive(pathname: string) {
+  return pathname === ADMIN_HOME_HREF;
 }
 
 export function AdminNav() {
@@ -14,35 +54,21 @@ export function AdminNav() {
   return (
     <>
       <Link
-        href="/admin/members"
-        className={`nav-link mb-1 ${pathname.startsWith("/admin") ? "nav-link-active" : ""}`}
+        href={ADMIN_HOME_HREF}
+        className={`nav-link mb-1 ${isAdminHomeActive(pathname) ? "nav-link-active" : ""}`}
       >
-        <span className="nav-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 3l7 4v5c0 4.4-3 8.5-7 9-4-.5-7-4.6-7-9V7l7-4z" strokeLinejoin="round" />
-          </svg>
-        </span>
-        系统管理
+        <span className="nav-icon">{adminHomeIcon}</span>
+        管理控制台
       </Link>
 
       {ADMIN_NAV_SECTIONS.map((section) => (
-        <div key={section.id} className="nav-admin-section">
-          <p className="nav-section-label">{section.label}</p>
-          <div className="nav-admin-items">
-            {section.items.map((item) => {
-              const active = isActive(pathname, item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`nav-sublink ${active ? "nav-sublink-active" : ""}`}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        </div>
+        <NavGroup
+          key={section.id}
+          label={section.label}
+          icon={sectionIcons[section.id] ?? adminHomeIcon}
+          items={section.items}
+          pathname={pathname}
+        />
       ))}
     </>
   );

@@ -24,7 +24,7 @@ func NewListPlatformOrganizationsHandler(repo repository.OrganizationRepository)
 }
 
 func (h *ListPlatformOrganizationsHandler) Handle(ctx context.Context) ([]PlatformOrganizationView, error) {
-	items, err := h.repo.ListAll(ctx)
+	items, err := h.repo.ListAllIncludingDeleted(ctx)
 	if err != nil {
 		return nil, err
 	}

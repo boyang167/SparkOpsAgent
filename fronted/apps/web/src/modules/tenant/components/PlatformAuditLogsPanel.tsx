@@ -6,6 +6,7 @@ import { BffError } from "@sparkops/contracts";
 import type { AuditLogVM } from "@sparkops/contracts/tenant";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { InlineAlert } from "@/components/ui/InlineAlert";
+import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
 
 const ACTION_LABELS: Record<string, string> = {
   "org.create": "创建组织",
@@ -21,13 +22,16 @@ interface PlatformAuditLogsPanelProps {
   orgId?: string;
   title?: string;
   showBreadcrumb?: boolean;
+  variant?: "platform" | "default";
 }
 
 export function PlatformAuditLogsPanel({
   orgId,
   title = "平台审计日志",
   showBreadcrumb = true,
+  variant = "default",
 }: PlatformAuditLogsPanelProps) {
+  const isPlatform = variant === "platform" && !orgId;
   const [logs, setLogs] = useState<AuditLogVM[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,23 +52,16 @@ export function PlatformAuditLogsPanel({
     void load();
   }, [load]);
 
-  return (
-    <div className="stack-lg">
-      {!orgId && showBreadcrumb ? (
-        <Breadcrumb items={[{ label: "设置", href: "/settings/profile" }, { label: "审计日志" }]} />
-      ) : null}
-      <div>
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <p className="text-sm text-muted mt-1">权限变更与平台操作记录</p>
-      </div>
+  const table = (
+    <>
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       {loading ? (
-        <div className="empty-state">加载中…</div>
+        <div className={isPlatform ? "platform-table-empty" : "empty-state"}>加载中…</div>
       ) : logs.length === 0 ? (
-        <div className="empty-state">暂无审计记录</div>
+        <div className={isPlatform ? "platform-table-empty" : "empty-state"}>暂无审计记录</div>
       ) : (
-        <div className="table-wrap">
-          <table className="data-table text-sm">
+        <div className={isPlatform ? "platform-table-wrap" : "table-wrap"}>
+          <table className={isPlatform ? "platform-table" : "data-table text-sm"}>
             <thead>
               <tr>
                 <th>时间</th>
@@ -81,10 +78,8 @@ export function PlatformAuditLogsPanel({
                   </td>
                   <td>{ACTION_LABELS[log.action] ?? log.action}</td>
                   <td className="font-mono text-xs">{log.actor_id.slice(0, 8)}…</td>
-                  <td>
-                    <pre className="text-xs text-muted whitespace-pre-wrap break-all max-w-md">
-                      {JSON.stringify(log.detail, null, 0)}
-                    </pre>
+                  <td className="text-xs text-muted max-w-md truncate">
+                    {JSON.stringify(log.detail)}
                   </td>
                 </tr>
               ))}
@@ -92,6 +87,38 @@ export function PlatformAuditLogsPanel({
           </table>
         </div>
       )}
+      {!loading && logs.length > 0 && isPlatform ? (
+        <div className="platform-table-footer">
+          <span className="text-sm text-muted">共 {logs.length} 条记录</span>
+        </div>
+      ) : null}
+    </>
+  );
+
+  if (isPlatform) {
+    return (
+      <div className="platform-orgs-page">
+        <section className="platform-table-card platform-orgs-card">
+          <PlatformPanelHead
+            title="平台审计"
+            description="跨租户操作与变更审计记录。"
+          />
+          <div className="platform-orgs-card-body">{table}</div>
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="stack-lg">
+      {!orgId && showBreadcrumb ? (
+        <Breadcrumb items={[{ label: "设置", href: "/settings/profile" }, { label: "审计日志" }]} />
+      ) : null}
+      <div>
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <p className="text-sm text-muted mt-1">权限变更与平台操作记录</p>
+      </div>
+      {table}
     </div>
   );
 }

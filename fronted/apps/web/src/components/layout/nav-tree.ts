@@ -195,3 +195,20 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   "/admin/server-status": "服务器状态",
   "/admin/tools": "运维工具",
 };
+
+export const ADMIN_PAGE_DESCRIPTIONS: Record<string, string> = {
+  "/admin/members": "邀请成员加入当前工作区，并分配 RBAC 角色。",
+  "/admin/roles": "管理工作区角色树与权限绑定。",
+  "/admin/api-tokens": "创建与管理 API 访问密钥。",
+  "/admin/menus": "配置工作区菜单可见性与排序。",
+  "/admin/apis": "配置接口访问策略与 RBAC 映射。",
+  "/admin/data-policies": "定义数据资源隔离与访问范围。",
+  "/admin/tenant": "管理组织与工作区结构，创建租户边界并切换协作上下文。",
+  "/admin/operation-logs": "查看工作区内的操作审计记录。",
+  "/admin/org-audit": "查看组织级合规与变更审计。",
+  "/admin/server-status": "查看平台服务健康与运行状态。",
+  "/admin/tools": "执行诊断、清理等运维工具。",
+};
+
+/** 管理控制台首页（IAM 概览） */
+export const ADMIN_HOME_HREF = "/admin/members";

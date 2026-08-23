@@ -7,6 +7,8 @@ export const WorkspaceVMSchema = z.object({
   slug: z.string(),
   max_agents: z.number(),
   max_projects: z.number(),
+  is_member: z.boolean().optional().default(true),
+  read_only: z.boolean().optional().default(false),
 });
 
 export type WorkspaceVM = z.infer<typeof WorkspaceVMSchema>;
@@ -35,6 +37,8 @@ export const OrganizationVMSchema = z.object({
   name: z.string(),
   slug: z.string(),
   my_role: z.string().optional(),
+  is_member: z.boolean().optional().default(true),
+  read_only: z.boolean().optional().default(false),
 });
 
 export type OrganizationVM = z.infer<typeof OrganizationVMSchema>;
@@ -99,7 +103,7 @@ export const PlatformOrganizationVMSchema = z.object({
   id: z.string(),
   name: z.string(),
   slug: z.string(),
-  status: z.enum(["active", "suspended"]),
+  status: z.enum(["active", "suspended", "deleted"]),
   created_at: z.string(),
 });
 

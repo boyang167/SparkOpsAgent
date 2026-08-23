@@ -52,8 +52,8 @@ func (m *Module) Register(c *appctx.Container) error {
 	handler := tenanthttp.NewHandler(
 		command.NewCreateOrganizationHandler(orgRepo, auditSvc),
 		command.NewCreateWorkspaceHandler(orgRepo, wsRepo, c.EventBus),
-		query.NewListWorkspacesHandler(wsRepo),
-		query.NewListOrganizationsHandler(orgRepo),
+		query.NewListWorkspacesHandler(wsRepo, c.SystemRoleChecker),
+		query.NewListOrganizationsHandler(orgRepo, c.SystemRoleChecker),
 		query.NewGetOrganizationHandler(orgRepo),
 		query.NewListOrgMembersHandler(orgRepo),
 		query.NewMyOrgPermissionsHandler(orgRepo),

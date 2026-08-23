@@ -1,7 +1,11 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { MeVM } from "@sparkops/contracts/identity";
 import type { OrganizationVM, WorkspaceVM } from "@sparkops/contracts/tenant";
 import { ConsoleSwitcher } from "@/components/layout/ConsoleSwitcher";
+import { AdminContextHint } from "@/components/layout/AdminContextHint";
 import { ContextBar } from "@/components/layout/ContextBar";
 import { RouteVisitRecorder } from "@/components/layout/RouteVisitRecorder";
 import { ShellProvider } from "@/components/layout/shell-context";
@@ -9,6 +13,7 @@ import { PlatformShell } from "@/components/layout/PlatformShell";
 import { TopBarTools } from "@/components/layout/TopBarTools";
 import type { ConsoleKind } from "@/components/layout/nav-tree";
 import { LogoutButton } from "@/modules/identity/components/LogoutButton";
+import { resolveConsoleKind } from "@/components/layout/nav-tree";
 
 interface ProjectOption {
   id: string;
@@ -26,7 +31,6 @@ interface AppShellProps {
   currentProjectId?: string;
   isSuperAdmin: boolean;
   canManageAdmin: boolean;
-  consoleKind: ConsoleKind;
   topbarHint?: string;
 }
 
@@ -51,9 +55,10 @@ export function AppShell({
   currentProjectId,
   isSuperAdmin,
   canManageAdmin,
-  consoleKind,
   topbarHint,
 }: AppShellProps) {
+  const pathname = usePathname();
+  const consoleKind = resolveConsoleKind(pathname);
   const shellClass =
     consoleKind === "platform"
       ? "app-shell app-shell-platform"
@@ -94,13 +99,21 @@ export function AppShell({
             <div className="topbar-leading">
               <ConsoleSwitcher isSuperAdmin={isSuperAdmin} canManageAdmin={canManageAdmin} />
               {session && workspaces.length > 0 ? (
-                <ContextBar
-                  organizations={organizations}
-                  workspaces={workspaces}
-                  currentWorkspaceId={workspaceId}
-                  projects={projects}
-                  currentProjectId={currentProjectId}
-                />
+                consoleKind === "business" ? (
+                  <ContextBar
+                    organizations={organizations}
+                    workspaces={workspaces}
+                    currentWorkspaceId={workspaceId}
+                    projects={projects}
+                    currentProjectId={currentProjectId}
+                  />
+                ) : (
+                  <AdminContextHint
+                    consoleKind={consoleKind}
+                    workspaces={workspaces}
+                    currentWorkspaceId={workspaceId}
+                  />
+                )
               ) : (
                 <span className="topbar-hint hidden sm:inline">{topbarHint ?? TOPBAR_HINTS[consoleKind]}</span>
               )}

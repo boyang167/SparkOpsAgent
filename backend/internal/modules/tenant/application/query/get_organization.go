@@ -26,6 +26,7 @@ func (h *GetOrganizationHandler) Handle(ctx context.Context, orgID kernel.OrgID,
 		return nil, domain.ErrOrgAccessDenied
 	}
 	return &OrganizationView{
-		ID: org.ID.String(), Name: org.Name, Slug: org.Slug, Role: role,
+		ID: org.ID.String(), Name: org.Name, Slug: org.Slug,
+		MyRole: role, IsMember: true, ReadOnly: false,
 	}, nil
 }

@@ -9,6 +9,7 @@ import type { AuthProvidersVM } from "@sparkops/contracts/identity";
 import { identity, platform, tenant } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import { InlineAlert } from "@/components/ui/InlineAlert";
+import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
 import { notifyEntitlementsUpdated } from "@/components/layout/shell-context";
 
 type FeatureKey = keyof WorkspaceEntitlementsVM;
@@ -102,7 +103,8 @@ function isLicenseExpired(expiresAt: string | null): boolean {
   return !Number.isNaN(date.getTime()) && date.getTime() < Date.now();
 }
 
-export function PlatformSettingsPanel() {
+export function PlatformSettingsPanel({ variant = "default" }: { variant?: "platform" | "default" }) {
+  const isPlatform = variant === "platform";
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -277,8 +279,8 @@ export function PlatformSettingsPanel() {
     return <div className="empty-state">加载平台配置…</div>;
   }
 
-  return (
-    <div className="stack-lg">
+  const sections = (
+    <>
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       {message ? <InlineAlert tone="success">{message}</InlineAlert> : null}
 
@@ -450,6 +452,20 @@ export function PlatformSettingsPanel() {
           </button>
         </div>
       </section>
-    </div>
+    </>
   );
+
+  if (isPlatform) {
+    return (
+      <div className="platform-orgs-page stack-lg">
+        <PlatformPanelHead
+          title="平台配置"
+          description="功能模块、SSO 登录策略、许可证与工作区能力覆盖。"
+        />
+        {sections}
+      </div>
+    );
+  }
+
+  return <div className="stack-lg">{sections}</div>;
 }

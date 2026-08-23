@@ -2,6 +2,15 @@ export interface OrgMeta {
   id: string;
   name: string;
   slug: string;
+  read_only?: boolean;
+}
+
+export function isOrgReadOnly(org: { read_only?: boolean }): boolean {
+  return org.read_only === true;
+}
+
+export function isWorkspaceReadOnly(ws: { read_only?: boolean }): boolean {
+  return ws.read_only === true;
 }
 
 const ORG_COLORS = ["#0ea5e9", "#8b5cf6", "#10b981", "#f59e0b", "#6366f1", "#ec4899"];

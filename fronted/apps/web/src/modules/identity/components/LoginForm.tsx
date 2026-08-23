@@ -6,10 +6,14 @@ import { useRouter } from "next/navigation";
 import { identity } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 
+function FieldIcon({ children }: { children: React.ReactNode }) {
+  return <span className="auth-field-icon">{children}</span>;
+}
+
 export function LoginForm() {
   const router = useRouter();
-  const [email, setEmail] = useState("demo@sparkops.local");
-  const [password, setPassword] = useState("Demo1234!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [ldapUser, setLdapUser] = useState("");
   const [ldapPassword, setLdapPassword] = useState("");
   const [providers, setProviders] = useState<AuthProvidersVM>({
@@ -30,10 +34,10 @@ export function LoginForm() {
     setError(null);
     try {
       await identity.login({ email, password });
-      router.push("/dashboard");
+      router.push("/dashboard/workplace");
       router.refresh();
     } catch (err) {
-      setError(err instanceof BffError ? err.message : "登录失败");
+      setError(err instanceof BffError ? err.message : "登录失败，请检查邮箱与密码");
     } finally {
       setLoading(false);
     }
@@ -55,7 +59,7 @@ export function LoginForm() {
     setError(null);
     try {
       await identity.ldapLogin({ username: ldapUser, password: ldapPassword });
-      router.push("/dashboard");
+      router.push("/dashboard/workplace");
       router.refresh();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "LDAP 登录失败");
@@ -70,77 +74,125 @@ export function LoginForm() {
     (providers.oidc_enabled || providers.ldap_enabled);
 
   return (
-    <div className="space-y-6">
+    <div className="auth-form stack-md">
+      {error ? (
+        <div className="auth-alert auth-alert-error" role="alert">
+          {error}
+        </div>
+      ) : null}
+
       {showPassword ? (
-        <form className="space-y-4" onSubmit={onSubmit}>
-        <div>
-          <label className="label" htmlFor="email">
-            邮箱
+        <form className="auth-form-fields" onSubmit={onSubmit}>
+          <label className="auth-field" htmlFor="email">
+            <span className="auth-field-label">工作邮箱</span>
+            <div className="auth-field-control">
+              <FieldIcon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                  <path d="M4 6h16v12H4z" strokeLinejoin="round" />
+                  <path d="M4 7l8 6 8-6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </FieldIcon>
+              <input
+                id="email"
+                className="auth-input"
+                type="email"
+                autoComplete="email"
+                placeholder="name@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
           </label>
-          <input
-            id="email"
-            className="input"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="password">
-            密码
+
+          <label className="auth-field" htmlFor="password">
+            <span className="auth-field-label">密码</span>
+            <div className="auth-field-control">
+              <FieldIcon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                  <rect x="5" y="11" width="14" height="10" rx="2" />
+                  <path d="M8 11V8a4 4 0 118 0v3" strokeLinecap="round" />
+                </svg>
+              </FieldIcon>
+              <input
+                id="password"
+                className="auth-input"
+                type="password"
+                autoComplete="current-password"
+                placeholder="请输入密码"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
           </label>
-          <input
-            id="password"
-            className="input"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </div>
-        <button className="btn w-full" type="submit" disabled={loading}>
-          {loading ? "登录中..." : "登录"}
-        </button>
-      </form>
+
+          <button className="auth-submit" type="submit" disabled={loading}>
+            {loading ? (
+              <>
+                <span className="auth-spinner" aria-hidden />
+                登录中…
+              </>
+            ) : (
+              "进入控制台"
+            )}
+          </button>
+        </form>
       ) : null}
 
       {showEnterprise ? (
-        <div className="space-y-4 border-t border-[var(--border)] pt-4">
-          <p className="text-sm text-muted text-center">或使用企业身份</p>
+        <div className="auth-sso-block">
+          {showPassword ? (
+            <div className="auth-divider">
+              <span>或使用企业身份</span>
+            </div>
+          ) : null}
+
           {providers.oidc_enabled &&
           (providers.sso_ui?.provider !== "ldap" || !providers.ldap_enabled) ? (
-            <button type="button" className="btn-secondary w-full" onClick={() => void onOIDCLogin()}>
+            <button type="button" className="auth-sso-btn" onClick={() => void onOIDCLogin()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+                <path d="M12 3l7 4v5c0 4.4-3 8.5-7 9-4-.5-7-4.6-7-9V7l7-4z" strokeLinejoin="round" />
+              </svg>
               SSO / OIDC 登录
             </button>
           ) : null}
+
           {providers.ldap_enabled &&
           (providers.sso_ui?.provider === "ldap" || !providers.oidc_enabled) ? (
-            <form className="space-y-3" onSubmit={onLDAPLogin}>
-              <input
-                className="input"
-                placeholder="LDAP 用户名"
-                value={ldapUser}
-                onChange={(e) => setLdapUser(e.target.value)}
-                required
-              />
-              <input
-                className="input"
-                type="password"
-                placeholder="LDAP 密码"
-                value={ldapPassword}
-                onChange={(e) => setLdapPassword(e.target.value)}
-                required
-              />
-              <button className="btn-secondary w-full" type="submit" disabled={ldapLoading}>
-                {ldapLoading ? "LDAP 登录中..." : "LDAP 登录"}
+            <form className="auth-form-fields auth-ldap-form" onSubmit={onLDAPLogin}>
+              <label className="auth-field">
+                <span className="auth-field-label">LDAP 用户名</span>
+                <input
+                  className="auth-input auth-input-plain"
+                  placeholder="域账号"
+                  value={ldapUser}
+                  onChange={(e) => setLdapUser(e.target.value)}
+                  required
+                />
+              </label>
+              <label className="auth-field">
+                <span className="auth-field-label">LDAP 密码</span>
+                <input
+                  className="auth-input auth-input-plain"
+                  type="password"
+                  placeholder="密码"
+                  value={ldapPassword}
+                  onChange={(e) => setLdapPassword(e.target.value)}
+                  required
+                />
+              </label>
+              <button className="auth-sso-btn" type="submit" disabled={ldapLoading}>
+                {ldapLoading ? "LDAP 登录中…" : "LDAP 登录"}
               </button>
             </form>
           ) : null}
         </div>
       ) : null}
 
-      {error ? <p className="error">{error}</p> : null}
+      <p className="auth-form-note">
+        登录即表示您同意平台安全策略与会话管理规范
+      </p>
     </div>
   );
 }

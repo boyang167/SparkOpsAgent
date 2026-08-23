@@ -7,5 +7,5 @@ export default async function PlatformMembersPage() {
   if (!session) redirect("/login");
   if (!session.is_super_admin) redirect("/dashboard");
 
-  return <PlatformMembersPanel currentMemberId={session.id} />;
+  return <PlatformMembersPanel currentMemberId={session.id} variant="settings" />;
 }

@@ -29,6 +29,7 @@ type OrganizationRepository interface {
 	ExistsBySlug(ctx context.Context, slug string) (bool, error)
 	ListByMember(ctx context.Context, memberID kernel.MemberID) ([]*model.Organization, error)
 	ListAll(ctx context.Context) ([]*model.Organization, error)
+	ListAllIncludingDeleted(ctx context.Context) ([]*model.Organization, error)
 	UpdateStatus(ctx context.Context, orgID kernel.OrgID, status string) error
 	SoftDelete(ctx context.Context, orgID kernel.OrgID) error
 	AddMember(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID, role string) error
@@ -41,10 +42,16 @@ type OrganizationRepository interface {
 	TransferOwner(ctx context.Context, orgID kernel.OrgID, fromID, toID kernel.MemberID) error
 }
 
+type WorkspaceWithMembership struct {
+	Workspace *model.Workspace
+	IsMember  bool
+}
+
 type WorkspaceRepository interface {
 	Save(ctx context.Context, ws *model.Workspace) error
 	FindByID(ctx context.Context, id kernel.WorkspaceID) (*model.Workspace, error)
 	ListByMember(ctx context.Context, memberID kernel.MemberID) ([]*model.Workspace, error)
+	ListAllWithMembership(ctx context.Context, memberID kernel.MemberID) ([]WorkspaceWithMembership, error)
 	ExistsByOrgSlug(ctx context.Context, orgID kernel.OrgID, slug string) (bool, error)
 	AddMember(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID, role string) error
 }

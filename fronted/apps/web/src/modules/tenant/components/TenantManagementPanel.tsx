@@ -9,12 +9,14 @@ import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { CreateOrganizationDialog } from "./CreateOrganizationDialog";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
 import { OrgMembersDialog } from "./OrgMembersDialog";
-import { orgAccentColor, orgInitial, type OrgMeta } from "@/modules/tenant/lib/org-display";
+import { orgAccentColor, orgInitial, isOrgReadOnly, isWorkspaceReadOnly, type OrgMeta } from "@/modules/tenant/lib/org-display";
 
 interface TenantManagementPanelProps {
   organizations: OrganizationVM[];
   workspaces: WorkspaceVM[];
   currentWorkspaceId?: string;
+  /** settings：个人设置入口；admin：管理控制台 IAM */
+  variant?: "settings" | "admin";
 }
 
 function OrgAvatar({ label, orgId }: { label: string; orgId: string }) {
@@ -55,6 +57,7 @@ export function TenantManagementPanel({
   organizations,
   workspaces,
   currentWorkspaceId,
+  variant = "settings",
 }: TenantManagementPanelProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -63,21 +66,36 @@ export function TenantManagementPanel({
   const [wsDialogOrgId, setWsDialogOrgId] = useState<string | undefined>();
   const [membersDialogOrg, setMembersDialogOrg] = useState<OrgMeta | null>(null);
 
+  const orgMetaById = useMemo(
+    () => new Map(organizations.map((org) => [org.id, org])),
+    [organizations],
+  );
+
   const orgOptions = useMemo<OrgMeta[]>(
     () =>
       [...organizations]
-        .map((org) => ({ id: org.id, name: org.name, slug: org.slug }))
+        .map((org) => ({
+          id: org.id,
+          name: org.name,
+          slug: org.slug,
+          read_only: org.read_only,
+        }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     [organizations],
+  );
+
+  const writableOrgOptions = useMemo(
+    () => orgOptions.filter((org) => !isOrgReadOnly(orgMetaById.get(org.id) ?? org)),
+    [orgOptions, orgMetaById],
   );
 
   const orgCount = orgOptions.length;
 
   useEffect(() => {
-    if (orgCount === 0) {
+    if (variant === "settings" && orgCount === 0) {
       setOrgDialogOpen(true);
     }
-  }, [orgCount]);
+  }, [orgCount, variant]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, WorkspaceVM[]>();
@@ -121,6 +139,8 @@ export function TenantManagementPanel({
   }
 
   async function onSelectWorkspace(workspaceId: string) {
+    const target = workspaces.find((ws) => ws.id === workspaceId);
+    if (!target || isWorkspaceReadOnly(target)) return;
     if (workspaceId === currentWorkspaceId) return;
     await tenant.selectWorkspace(workspaceId);
     router.refresh();
@@ -155,7 +175,7 @@ export function TenantManagementPanel({
           setWsDialogOpen(false);
           setWsDialogOrgId(undefined);
         }}
-        organizations={orgOptions}
+        organizations={writableOrgOptions}
         defaultOrgId={wsDialogOrgId}
       />
       {membersDialogOrg ? (
@@ -167,21 +187,25 @@ export function TenantManagementPanel({
         />
       ) : null}
 
-      <Breadcrumb
-        items={[
-          { label: "设置", href: "/settings/profile" },
-          { label: "组织与工作区" },
-        ]}
-      />
+      {variant === "settings" ? (
+        <Breadcrumb
+          items={[
+            { label: "设置", href: "/settings/profile" },
+            { label: "组织与工作区" },
+          ]}
+        />
+      ) : null}
 
-      <section className="tenant-hero tenant-hero-compact">
+      <section className={`tenant-hero ${variant === "admin" ? "tenant-hero-admin" : "tenant-hero-compact"}`}>
         <div className="tenant-hero-main">
-          <div>
-            <h1 className="tenant-hero-title">组织与工作区</h1>
-            <p className="tenant-hero-desc">
-              管理租户结构、切换协作上下文，在同一视图完成创建与浏览。
-            </p>
-          </div>
+          {variant === "settings" ? (
+            <div>
+              <h1 className="tenant-hero-title">组织与工作区</h1>
+              <p className="tenant-hero-desc">
+                管理租户结构、切换协作上下文，在同一视图完成创建与浏览。
+              </p>
+            </div>
+          ) : null}
           <div className="tenant-hero-stats" aria-label="概览">
             <div className="tenant-stat-chip">
               <span className="tenant-stat-value">{orgCount}</span>
@@ -206,7 +230,7 @@ export function TenantManagementPanel({
               {currentOrg?.name ?? "组织"} / <strong>{currentWorkspace.name}</strong>
               <span className="tenant-hero-slug">{currentWorkspace.slug}</span>
             </span>
-            <Link href="/dashboard" className="btn-secondary !py-1 !px-2.5 text-xs ml-auto shrink-0">
+            <Link href="/dashboard/workplace" className="btn-secondary !py-1 !px-2.5 text-xs ml-auto shrink-0">
               进入控制台
             </Link>
           </div>
@@ -262,11 +286,13 @@ export function TenantManagementPanel({
                 const items = filterWorkspaceItems(grouped.get(org.id) ?? []);
                 if (query.trim() && items.length === 0) return null;
                 const accent = orgAccentColor(org.id);
+                const orgMeta = orgMetaById.get(org.id);
+                const readOnly = orgMeta ? isOrgReadOnly(orgMeta) : false;
 
                 return (
                   <article
                     key={org.id}
-                    className="tenant-org-card"
+                    className={`tenant-org-card${readOnly ? " tenant-org-card-readonly" : ""}`}
                     style={{ ["--org-accent" as string]: accent }}
                   >
                     <header className="tenant-org-header">
@@ -275,26 +301,40 @@ export function TenantManagementPanel({
                         <p className="tenant-org-name">{org.name}</p>
                         <p className="tenant-org-slug">{org.slug}</p>
                       </div>
-                      <span className="tenant-count-chip">{items.length} 工作区</span>
-                      <button
-                        type="button"
-                        className="btn-secondary !py-1 !px-2.5 text-xs shrink-0"
-                        onClick={() => setMembersDialogOrg(org)}
-                      >
-                        成员
-                      </button>
+                      {readOnly ? (
+                        <span className="badge tenant-readonly-badge">仅查看</span>
+                      ) : (
+                        <span className="tenant-count-chip">{items.length} 工作区</span>
+                      )}
+                      {!readOnly ? (
+                        <button
+                          type="button"
+                          className="btn-secondary !py-1 !px-2.5 text-xs shrink-0"
+                          onClick={() => setMembersDialogOrg(org)}
+                        >
+                          成员
+                        </button>
+                      ) : null}
                     </header>
 
                     <ul className="tenant-ws-list">
                       {items.map((ws) => {
                         const active = currentWorkspaceId === ws.id;
+                        const wsReadOnly = isWorkspaceReadOnly(ws) || readOnly;
                         return (
                           <li key={ws.id}>
-                            <div className={`tenant-ws-row ${active ? "tenant-ws-row-active" : ""}`}>
+                            <div
+                              className={`tenant-ws-row${active ? " tenant-ws-row-active" : ""}${wsReadOnly ? " tenant-ws-row-readonly" : ""}`}
+                            >
                               <div className="tenant-ws-main">
                                 <div className="tenant-ws-title-row">
                                   <p className="tenant-ws-name">{ws.name}</p>
-                                  {active ? <span className="badge badge-primary">当前</span> : null}
+                                  {active && !wsReadOnly ? (
+                                    <span className="badge badge-primary">当前</span>
+                                  ) : null}
+                                  {wsReadOnly ? (
+                                    <span className="badge tenant-readonly-badge">仅查看</span>
+                                  ) : null}
                                 </div>
                                 <p className="tenant-ws-slug">{ws.slug}</p>
                                 <div className="tenant-ws-meta">
@@ -304,9 +344,9 @@ export function TenantManagementPanel({
                                 </div>
                               </div>
                               <div className="tenant-ws-actions">
-                                {active ? (
+                                {wsReadOnly ? null : active ? (
                                   <Link
-                                    href="/dashboard"
+                                    href="/dashboard/workplace"
                                     className="btn-secondary !py-1.5 !px-3 text-xs"
                                   >
                                     控制台
@@ -337,39 +377,56 @@ export function TenantManagementPanel({
                   matchesQuery(org.name, query) ||
                   matchesQuery(org.slug, query),
               )
-              .map((org) => (
-                <article
-                  key={org.id}
-                  className="tenant-org-card tenant-org-card-empty"
-                  style={{ ["--org-accent" as string]: orgAccentColor(org.id) }}
-                >
-                  <header className="tenant-org-header">
-                    <OrgAvatar label={org.name} orgId={org.id} />
-                    <div className="min-w-0 flex-1">
-                      <p className="tenant-org-name">{org.name}</p>
-                      <p className="tenant-org-slug">{org.slug}</p>
+              .map((org) => {
+                const orgMeta = orgMetaById.get(org.id);
+                const readOnly = orgMeta ? isOrgReadOnly(orgMeta) : false;
+
+                return (
+                  <article
+                    key={org.id}
+                    className={`tenant-org-card tenant-org-card-empty${readOnly ? " tenant-org-card-readonly" : ""}`}
+                    style={{ ["--org-accent" as string]: orgAccentColor(org.id) }}
+                  >
+                    <header className="tenant-org-header">
+                      <OrgAvatar label={org.name} orgId={org.id} />
+                      <div className="min-w-0 flex-1">
+                        <p className="tenant-org-name">{org.name}</p>
+                        <p className="tenant-org-slug">{org.slug}</p>
+                      </div>
+                      {readOnly ? (
+                        <span className="badge tenant-readonly-badge">仅查看</span>
+                      ) : (
+                        <>
+                          <span className="badge badge-warning">待配置</span>
+                          <button
+                            type="button"
+                            className="btn-secondary !py-1 !px-2.5 text-xs shrink-0"
+                            onClick={() => setMembersDialogOrg(org)}
+                          >
+                            成员
+                          </button>
+                        </>
+                      )}
+                    </header>
+                    <div className="tenant-org-empty-body">
+                      {readOnly ? (
+                        <p>尚未加入此组织，仅可查看基本信息</p>
+                      ) : (
+                        <>
+                          <p>尚未创建工作区</p>
+                          <button
+                            type="button"
+                            className="btn-secondary text-xs !py-1.5 !px-3"
+                            onClick={() => openWsDialog(org.id)}
+                          >
+                            立即创建
+                          </button>
+                        </>
+                      )}
                     </div>
-                    <span className="badge badge-warning">待配置</span>
-                    <button
-                      type="button"
-                      className="btn-secondary !py-1 !px-2.5 text-xs shrink-0"
-                      onClick={() => setMembersDialogOrg(org)}
-                    >
-                      成员
-                    </button>
-                  </header>
-                  <div className="tenant-org-empty-body">
-                    <p>尚未创建工作区</p>
-                    <button
-                      type="button"
-                      className="btn-secondary text-xs !py-1.5 !px-3"
-                      onClick={() => openWsDialog(org.id)}
-                    >
-                      立即创建
-                    </button>
-                  </div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
           </div>
         )}
       </section>
