@@ -7,6 +7,7 @@ interface ProjectCardProps {
   project: ProjectVM;
   onArchive?: (project: ProjectVM) => void;
   onViewDetails?: (project: ProjectVM) => void;
+  onContinueConfig?: (project: ProjectVM) => void;
   onSubmitReview?: (project: ProjectVM) => void;
   onReview?: (project: ProjectVM) => void;
 }
@@ -15,6 +16,7 @@ export function ProjectCard({
   project,
   onArchive,
   onViewDetails,
+  onContinueConfig,
   onSubmitReview,
   onReview,
 }: ProjectCardProps) {
@@ -22,8 +24,8 @@ export function ProjectCard({
     <ProjectOverviewCard
       project={project}
       detailsHref={`/projects/${project.id}`}
-      continueHref={`/projects/${project.id}?configure=1`}
       onViewDetails={onViewDetails ? () => onViewDetails(project) : undefined}
+      onContinueConfig={onContinueConfig ? () => onContinueConfig(project) : undefined}
       onSubmitReview={onSubmitReview}
       onReview={onReview}
       onArchive={onArchive}

@@ -440,6 +440,7 @@ func (s *TenantStore) ListAllWorkspacesWithMembership(ctx context.Context, membe
 		       w.created_at,
 		       (wm.member_id IS NOT NULL) AS is_member
 		FROM tenant.workspaces w
+		INNER JOIN tenant.organizations o ON o.id = w.org_id AND o.deleted_at IS NULL
 		LEFT JOIN tenant.workspace_members wm
 		  ON wm.workspace_id = w.id AND wm.member_id = ?
 		WHERE w.deleted_at IS NULL
@@ -474,8 +475,12 @@ func (s *TenantStore) ListAllWorkspacesWithMembership(ctx context.Context, membe
 func (s *TenantStore) ListWorkspacesByMember(ctx context.Context, memberID kernel.MemberID) ([]*model.Workspace, error) {
 	var rows []workspaceModel
 	err := s.db.WithContext(ctx).
+		Table("tenant.workspaces").
+		Select("tenant.workspaces.*").
 		Joins("JOIN tenant.workspace_members wm ON wm.workspace_id = tenant.workspaces.id").
+		Joins("JOIN tenant.organizations o ON o.id = tenant.workspaces.org_id AND o.deleted_at IS NULL").
 		Where("wm.member_id = ?", memberID.String()).
+		Where("tenant.workspaces.deleted_at IS NULL").
 		Find(&rows).Error
 	if err != nil {
 		return nil, err

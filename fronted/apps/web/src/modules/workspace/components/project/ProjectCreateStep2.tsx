@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import type { CreateProjectCommand, ProjectPort } from "@sparkops/contracts/workspace";
+import type { CreateProjectCommand } from "@sparkops/contracts/workspace";
 import { PROJECT_LANGUAGE_OPTIONS } from "@sparkops/contracts/workspace";
 import type { SecretVM } from "@sparkops/contracts/secret";
 import { Modal } from "@/components/ui/Modal";
 import { FormRow } from "./project-form-shared";
+import { ProjectPortsField } from "./ProjectPortsField";
 import {
   parseProjectConfig,
   serializeProjectConfig,
@@ -307,7 +308,6 @@ export function ProjectCreateStep2({
 }: ProjectCreateStep2Props) {
   const [gitRefMode, setGitRefMode] = useState<"select" | "manual">("select");
   const [gitRefQuery, setGitRefQuery] = useState("");
-  const [portModalOpen, setPortModalOpen] = useState(false);
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [configDraft, setConfigDraft] = useState<ProjectConfigEntry[]>([{ key: "", value: "" }]);
   const [browseOpen, setBrowseOpen] = useState(false);
@@ -503,6 +503,16 @@ export function ProjectCreateStep2({
         </div>
       </FormRow>
 
+      <FormRow
+        label="端口及协议:"
+        hint="如果不提供容器端口号，将不创建 service，外部无法直接访问，脚本或内部任务的容器可不填写"
+      >
+        <ProjectPortsField
+          ports={ports}
+          onChange={(next) => updateResources({ ports: next })}
+        />
+      </FormRow>
+
       <FormRow label="资源配置:">
         <div className="project-resource-card">
           <ResourceRangeField
@@ -563,9 +573,6 @@ export function ProjectCreateStep2({
                 </button>
               </div>
             </label>
-            <button type="button" className="project-link-btn" onClick={() => setPortModalOpen(true)}>
-              配置端口
-            </button>
           </div>
           <div className="project-resource-textareas">
             <label className="project-textarea-field">
@@ -602,84 +609,6 @@ export function ProjectCreateStep2({
           ) : null}
         </div>
       </FormRow>
-
-      <Modal open={portModalOpen} onClose={() => setPortModalOpen(false)} title="配置端口" size="md">
-        <div className="project-port-modal">
-          {ports.length === 0 ? (
-            <p className="project-form-hint">暂无端口，点击下方按钮添加。</p>
-          ) : (
-            ports.map((port, index) => (
-              <div key={index} className="project-port-row">
-                <input
-                  className="input"
-                  placeholder="名称"
-                  value={port.name ?? ""}
-                  onChange={(e) => {
-                    const next = [...ports];
-                    next[index] = { ...port, name: e.target.value };
-                    updateResources({ ports: next });
-                  }}
-                />
-                <input
-                  className="input"
-                  type="number"
-                  placeholder="容器端口"
-                  value={port.container_port || ""}
-                  onChange={(e) => {
-                    const next = [...ports];
-                    next[index] = { ...port, container_port: Number(e.target.value) || 0 };
-                    updateResources({ ports: next });
-                  }}
-                />
-                <input
-                  className="input"
-                  type="number"
-                  placeholder="服务端口"
-                  value={port.service_port ?? ""}
-                  onChange={(e) => {
-                    const next = [...ports];
-                    next[index] = {
-                      ...port,
-                      service_port: e.target.value ? Number(e.target.value) : undefined,
-                    };
-                    updateResources({ ports: next });
-                  }}
-                />
-                <select
-                  className="input"
-                  value={port.protocol ?? "TCP"}
-                  onChange={(e) => {
-                    const next = [...ports];
-                    next[index] = { ...port, protocol: e.target.value as ProjectPort["protocol"] };
-                    updateResources({ ports: next });
-                  }}
-                >
-                  <option value="TCP">TCP</option>
-                  <option value="UDP">UDP</option>
-                </select>
-                <button
-                  type="button"
-                  className="project-action-btn is-delete"
-                  onClick={() => updateResources({ ports: ports.filter((_, i) => i !== index) })}
-                >
-                  删除
-                </button>
-              </div>
-            ))
-          )}
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() =>
-              updateResources({
-                ports: [...ports, { name: "", container_port: 8080, service_port: 8080, protocol: "TCP" }],
-              })
-            }
-          >
-            添加端口
-          </button>
-        </div>
-      </Modal>
 
       <Modal
         open={configModalOpen}

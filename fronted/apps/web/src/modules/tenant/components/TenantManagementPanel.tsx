@@ -9,7 +9,7 @@ import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { CreateOrganizationDialog } from "./CreateOrganizationDialog";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
 import { OrgMembersDialog } from "./OrgMembersDialog";
-import { orgAccentColor, orgInitial, isOrgReadOnly, isWorkspaceReadOnly, type OrgMeta } from "@/modules/tenant/lib/org-display";
+import { orgAccentColor, orgInitial, isOrgReadOnly, isWorkspaceReadOnly, extendOrgsWithWorkspaceOrgs, type OrgMeta } from "@/modules/tenant/lib/org-display";
 
 interface TenantManagementPanelProps {
   organizations: OrganizationVM[];
@@ -66,22 +66,25 @@ export function TenantManagementPanel({
   const [wsDialogOrgId, setWsDialogOrgId] = useState<string | undefined>();
   const [membersDialogOrg, setMembersDialogOrg] = useState<OrgMeta | null>(null);
 
-  const orgMetaById = useMemo(
-    () => new Map(organizations.map((org) => [org.id, org])),
-    [organizations],
-  );
-
   const orgOptions = useMemo<OrgMeta[]>(
     () =>
-      [...organizations]
-        .map((org) => ({
-          id: org.id,
-          name: org.name,
-          slug: org.slug,
-          read_only: org.read_only,
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [organizations],
+      extendOrgsWithWorkspaceOrgs(
+        [...organizations]
+          .map((org) => ({
+            id: org.id,
+            name: org.name,
+            slug: org.slug,
+            read_only: org.read_only,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+        workspaces,
+      ),
+    [organizations, workspaces],
+  );
+
+  const orgMetaById = useMemo(
+    () => new Map(orgOptions.map((org) => [org.id, org])),
+    [orgOptions],
   );
 
   const writableOrgOptions = useMemo(
@@ -90,6 +93,7 @@ export function TenantManagementPanel({
   );
 
   const orgCount = orgOptions.length;
+  const workspaceCount = workspaces.length;
 
   useEffect(() => {
     if (variant === "settings" && orgCount === 0) {
@@ -212,7 +216,7 @@ export function TenantManagementPanel({
               <span className="tenant-stat-label">组织</span>
             </div>
             <div className="tenant-stat-chip">
-              <span className="tenant-stat-value">{workspaces.length}</span>
+              <span className="tenant-stat-value">{workspaceCount}</span>
               <span className="tenant-stat-label">工作区</span>
             </div>
             <div className="tenant-stat-chip tenant-stat-chip-active">
@@ -249,9 +253,6 @@ export function TenantManagementPanel({
             />
           </div>
           <div className="tenant-toolbar-actions">
-            <button type="button" className="btn-secondary" onClick={openOrgDialog}>
-              新建组织
-            </button>
             <button type="button" className="btn" onClick={() => openWsDialog()}>
               新建工作区
             </button>
@@ -302,7 +303,10 @@ export function TenantManagementPanel({
                         <p className="tenant-org-slug">{org.slug}</p>
                       </div>
                       {readOnly ? (
-                        <span className="badge tenant-readonly-badge">仅查看</span>
+                        <>
+                          <span className="tenant-count-chip">{items.length} 工作区</span>
+                          <span className="badge tenant-readonly-badge">仅查看</span>
+                        </>
                       ) : (
                         <span className="tenant-count-chip">{items.length} 工作区</span>
                       )}

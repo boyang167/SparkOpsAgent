@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import {
   formatDateTime,
@@ -29,9 +30,12 @@ interface ProjectOverviewCardProps {
   onArchive?: (project: ProjectVM) => void;
 }
 
-function statusTagClass(label: string) {
-  if (label === "提交审核") return "project-tag project-tag-blue";
-  return "project-tag project-tag-green";
+function statusLabelTagClass(label: string) {
+  if (label === "审核中") return "project-tag project-tag-blue";
+  if (label === "配置中") return "project-tag project-tag-orange";
+  if (label === "审核驳回") return "project-tag project-tag-red";
+  if (label === "待部署" || label === "待提交审核") return "project-tag project-tag-green";
+  return "project-tag project-tag-gray";
 }
 
 function ProgressTrack({ steps }: { steps: ProjectProgressStep[] }) {
@@ -110,14 +114,38 @@ export function ProjectOverviewCard({
   onReview,
   onArchive,
 }: ProjectOverviewCardProps) {
+  const router = useRouter();
   const { steps, statusLabel } = computeProjectProgress(project);
   const primaryAction = projectPrimaryAction(project);
   const langColor = languageColor(project.language);
   const initial = languageLabel(project.language).charAt(0).toUpperCase() || "P";
   const TitleTag = heading;
+  const targetHref = detailsHref ?? `/projects/${project.id}`;
+  const cardInteractive = Boolean(detailsHref);
+
+  function handleCardClick(event: React.MouseEvent<HTMLElement>) {
+    if (!cardInteractive) return;
+    if ((event.target as HTMLElement).closest("a, button, .project-card-more-wrap")) {
+      return;
+    }
+    router.push(targetHref);
+  }
+
+  function handleCardKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (!cardInteractive) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    router.push(targetHref);
+  }
 
   return (
-    <article className="project-overview-card">
+    <article
+      className={`project-overview-card${cardInteractive ? " project-overview-card-interactive" : ""}`}
+      onClick={handleCardClick}
+      onKeyDown={handleCardKeyDown}
+      role={cardInteractive ? "link" : undefined}
+      tabIndex={cardInteractive ? 0 : undefined}
+    >
       <header className="project-workbench-header">
         <div className="project-workbench-title-wrap">
           <div className="project-lang-icon" style={{ backgroundColor: langColor }}>
@@ -127,11 +155,11 @@ export function ProjectOverviewCard({
             <div className="project-overview-heading-row">
               <TitleTag>{projectDisplayName(project)}</TitleTag>
               <div className="project-card-tags">
+                <span className="project-tag project-tag-lang">{languageLabel(project.language)}</span>
                 {project.namespace ? (
                   <span className="project-tag project-tag-gray">{project.namespace}</span>
                 ) : null}
-                <span className="project-tag project-tag-gray">草稿</span>
-                <span className={statusTagClass(statusLabel)}>{statusLabel}</span>
+                <span className={statusLabelTagClass(statusLabel)}>{statusLabel}</span>
               </div>
             </div>
             <p className="project-card-subtitle">{project.name}</p>

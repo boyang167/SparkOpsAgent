@@ -32,3 +32,27 @@ export function orgInitial(label: string): string {
 export function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
 }
+
+/** 补齐工作区所属但不在组织列表中的 org（如已删除/历史组织），避免统计与卡片不一致 */
+export function extendOrgsWithWorkspaceOrgs(
+  organizations: OrgMeta[],
+  workspaces: ReadonlyArray<{ org_id: string }>,
+): OrgMeta[] {
+  const byId = new Map(organizations.map((org) => [org.id, org]));
+  const extras: OrgMeta[] = [];
+
+  for (const ws of workspaces) {
+    if (byId.has(ws.org_id)) continue;
+    if (extras.some((org) => org.id === ws.org_id)) continue;
+    const stub: OrgMeta = {
+      id: ws.org_id,
+      name: "未关联组织",
+      slug: shortId(ws.org_id),
+      read_only: true,
+    };
+    extras.push(stub);
+    byId.set(ws.org_id, stub);
+  }
+
+  return [...organizations, ...extras].sort((a, b) => a.name.localeCompare(b.name));
+}

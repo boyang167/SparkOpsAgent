@@ -6,9 +6,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { workspace } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
+import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { ProjectCard } from "./project/ProjectCard";
 import { ProjectCreateModal } from "./project/ProjectCreateModal";
+import { ProjectConfigurePanel } from "./project/ProjectConfigurePanel";
 import { ProjectDetailModal } from "./project/ProjectDetailModal";
 import { ProjectReviewModal } from "./project/ProjectReviewModal";
 import {
@@ -34,6 +36,19 @@ type ViewMode = "card" | "table";
 
 const PAGE_SIZES = [6, 9, 12, 24] as const;
 
+function SearchIcon() {
+  return (
+    <svg className="projects-search-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M9 3.5a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <path d="M13.5 13.5 17 17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function ProjectPanel({
   workspaceId,
   initialCreateOpen = false,
@@ -45,6 +60,7 @@ export function ProjectPanel({
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(initialCreateOpen);
   const [detailProject, setDetailProject] = useState<ProjectVM | null>(null);
+  const [configureProject, setConfigureProject] = useState<ProjectVM | null>(null);
   const [reviewProject, setReviewProject] = useState<ProjectVM | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("card");
@@ -83,6 +99,10 @@ export function ProjectPanel({
     });
   }, [items, keyword, statusFilter, languageFilter, namespaceFilter]);
 
+  const hasActiveFilters = Boolean(
+    keyword.trim() || statusFilter || languageFilter || namespaceFilter.trim(),
+  );
+
   useEffect(() => {
     setPage(1);
   }, [keyword, statusFilter, languageFilter, namespaceFilter, pageSize, viewMode]);
@@ -93,6 +113,13 @@ export function ProjectPanel({
     const start = (current - 1) * pageSize;
     return filtered.slice(start, start + pageSize);
   }, [filtered, page, pageSize, totalPages]);
+
+  function resetFilters() {
+    setKeyword("");
+    setStatusFilter("");
+    setLanguageFilter("");
+    setNamespaceFilter("");
+  }
 
   async function onArchive(item: ProjectVM) {
     if (!window.confirm(`确定归档项目「${projectDisplayName(item)}」？`)) return;
@@ -136,222 +163,248 @@ export function ProjectPanel({
   }
 
   return (
-    <div className="project-panel">
-      <div className="project-page-header">
-        <div>
-          <h2 className="project-page-title">项目管理</h2>
-          <p className="project-page-desc">管理产品下的项目</p>
-        </div>
-        <button type="button" className="btn project-btn-primary" onClick={() => setCreateOpen(true)}>
-          + 创建项目
-        </button>
-      </div>
+    <div className="projects-page">
+      <section className="platform-table-card projects-card">
+        <PlatformPanelHead
+          title="项目管理"
+          description="管理产品下的项目，创建、配置并进入项目工作区。"
+          action={
+            <button type="button" className="btn platform-add-btn" onClick={() => setCreateOpen(true)}>
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+              </svg>
+              创建项目
+            </button>
+          }
+        />
 
-      <div className="project-search-bar">
-        <label className="project-inline-field">
-          <span>关键词</span>
-          <input
-            className="input"
-            placeholder="请输入项目名称或描述"
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-          />
-        </label>
-        <label className="project-inline-field">
-          <span>状态</span>
-          <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-            <option value="">请选择状态</option>
-            {PROJECT_STATUS_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="project-inline-field">
-          <span>开发语言</span>
-          <select className="input" value={languageFilter} onChange={(e) => setLanguageFilter(e.target.value)}>
-            <option value="">请选择开发语言</option>
-            {PROJECT_LANGUAGE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="project-inline-field">
-          <span>命名空间</span>
-          <input
-            className="input"
-            placeholder="请输入命名空间"
-            value={namespaceFilter}
-            onChange={(e) => setNamespaceFilter(e.target.value)}
-          />
-        </label>
-        <button
-          type="button"
-          className="btn-secondary"
-          onClick={() => {
-            setKeyword("");
-            setStatusFilter("");
-            setLanguageFilter("");
-            setNamespaceFilter("");
-          }}
-        >
-          重置
-        </button>
-      </div>
-
-      <div className="project-view-controls">
-        <div className="project-view-switch">
-          <button
-            type="button"
-            className={viewMode === "card" ? "is-active" : ""}
-            onClick={() => setViewMode("card")}
-          >
-            卡片视图
-          </button>
-          <button
-            type="button"
-            className={viewMode === "table" ? "is-active" : ""}
-            onClick={() => setViewMode("table")}
-          >
-            表格视图
-          </button>
-        </div>
-        <button type="button" className="btn-secondary text-sm" onClick={() => void load()} disabled={loading}>
-          ↻ 刷新
-        </button>
-      </div>
-
-      {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-
-      {loading ? (
-        <div className="project-loading">加载中…</div>
-      ) : filtered.length === 0 ? (
-        <div className="project-empty">
-          <p>暂无项目</p>
-          <button type="button" className="btn project-btn-primary" onClick={() => setCreateOpen(true)}>
-            创建第一个项目
-          </button>
-        </div>
-      ) : (
-        <>
-          {viewMode === "card" ? (
-            <div className="project-card-grid">
-              {paged.map((project) => (
-                <ProjectCard
-                  key={project.id}
-                  project={project}
-                  onArchive={(p) => void onArchive(p)}
-                  onViewDetails={(p) => setDetailProject(p)}
-                  onSubmitReview={(p) => void onSubmitReview(p)}
-                  onReview={(p) => setReviewProject(p)}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="project-table-shell">
-              <table className="data-table project-table">
-                <thead>
-                  <tr>
-                    <th>项目名称</th>
-                    <th>命名空间</th>
-                    <th>语言</th>
-                    <th>状态</th>
-                    <th>Git 地址</th>
-                    <th>创建时间</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paged.map((project) => (
-                    <tr key={project.id}>
-                      <td>
-                        <div className="project-table-name">
-                          <span
-                            className="project-lang-icon is-sm"
-                            style={{ backgroundColor: languageColor(project.language) }}
-                          >
-                            {languageLabel(project.language).charAt(0).toUpperCase()}
-                          </span>
-                          <div>
-                            <div className="font-medium">{projectDisplayName(project)}</div>
-                            <div className="text-xs text-muted-foreground">{project.name}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td>{project.namespace || "-"}</td>
-                      <td>{languageLabel(project.language)}</td>
-                      <td>
-                        <span className={statusBadgeClass(project.status)}>
-                          {labelOf(PROJECT_STATUS_OPTIONS, project.status)}
-                        </span>
-                      </td>
-                      <td className="project-url-cell" title={project.git_url}>
-                        {project.git_url || "-"}
-                      </td>
-                      <td>{formatDateTime(project.created_at)}</td>
-                      <td>
-                        <div className="project-row-actions">
-                          <button type="button" onClick={() => setDetailProject(project)}>
-                            查看详情
-                          </button>
-                          {(() => {
-                            const action = projectPrimaryAction(project);
-                            if (action === "deploy") {
-                              return <Link href={`/projects/${project.id}`}>部署</Link>;
-                            }
-                            return (
-                              <Link href={`/projects/${project.id}?configure=1`}>继续配置</Link>
-                            );
-                          })()}
-                          <button type="button" className="is-danger" onClick={() => void onArchive(project)}>
-                            归档
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <div className="project-pagination">
-            <span className="project-pagination-total">共 {filtered.length} 个项目</span>
+        <div className="projects-toolbar">
+          <div className="projects-toolbar-filters">
+            <label className="projects-search-wrap">
+              <SearchIcon />
+              <input
+                className="projects-search-input"
+                placeholder="搜索项目名称或描述"
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+              />
+            </label>
             <select
-              className="input project-page-size"
-              value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value) as (typeof PAGE_SIZES)[number])}
+              className="projects-filter-select"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              aria-label="状态筛选"
             >
-              {PAGE_SIZES.map((size) => (
-                <option key={size} value={size}>
-                  {size} 条/页
+              <option value="">全部状态</option>
+              {PROJECT_STATUS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
                 </option>
               ))}
             </select>
+            <select
+              className="projects-filter-select"
+              value={languageFilter}
+              onChange={(e) => setLanguageFilter(e.target.value)}
+              aria-label="开发语言筛选"
+            >
+              <option value="">全部语言</option>
+              {PROJECT_LANGUAGE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <input
+              className="projects-filter-input"
+              placeholder="命名空间"
+              value={namespaceFilter}
+              onChange={(e) => setNamespaceFilter(e.target.value)}
+              aria-label="命名空间筛选"
+            />
+            {hasActiveFilters ? (
+              <button type="button" className="btn-secondary projects-reset-btn" onClick={resetFilters}>
+                重置
+              </button>
+            ) : null}
+          </div>
+
+          <div className="projects-toolbar-actions">
+            <span className="projects-count">{filtered.length} 个项目</span>
+            <div className="projects-view-toggle" role="group" aria-label="视图切换">
+              <button
+                type="button"
+                className={viewMode === "card" ? "is-active" : ""}
+                onClick={() => setViewMode("card")}
+              >
+                卡片
+              </button>
+              <button
+                type="button"
+                className={viewMode === "table" ? "is-active" : ""}
+                onClick={() => setViewMode("table")}
+              >
+                表格
+              </button>
+            </div>
             <button
               type="button"
-              className="btn-secondary text-sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="btn-secondary projects-refresh-btn"
+              onClick={() => void load()}
+              disabled={loading}
+              aria-label="刷新"
             >
-              上一页
-            </button>
-            <span className="project-page-indicator">
-              {Math.min(page, totalPages)} / {totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn-secondary text-sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              下一页
+              ↻
             </button>
           </div>
-        </>
-      )}
+        </div>
+
+        {error ? (
+          <div className="projects-alert">
+            <InlineAlert tone="error">{error}</InlineAlert>
+          </div>
+        ) : null}
+
+        <div className="projects-body">
+          {loading ? (
+            <div className="projects-state">加载中…</div>
+          ) : filtered.length === 0 ? (
+            <div className="projects-state">
+              <p>{hasActiveFilters ? "没有符合筛选条件的项目" : "暂无项目"}</p>
+              {!hasActiveFilters ? (
+                <button type="button" className="btn platform-add-btn" onClick={() => setCreateOpen(true)}>
+                  创建第一个项目
+                </button>
+              ) : (
+                <button type="button" className="btn-secondary" onClick={resetFilters}>
+                  清除筛选
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              {viewMode === "card" ? (
+                <div className="project-card-grid">
+                  {paged.map((project) => (
+                    <ProjectCard
+                      key={project.id}
+                      project={project}
+                      onArchive={(p) => void onArchive(p)}
+                      onViewDetails={(p) => setDetailProject(p)}
+                      onContinueConfig={(p) => setConfigureProject(p)}
+                      onSubmitReview={(p) => void onSubmitReview(p)}
+                      onReview={(p) => setReviewProject(p)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="project-table-shell">
+                  <table className="data-table project-table">
+                    <thead>
+                      <tr>
+                        <th>项目名称</th>
+                        <th>命名空间</th>
+                        <th>语言</th>
+                        <th>状态</th>
+                        <th>Git 地址</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paged.map((project) => (
+                        <tr key={project.id}>
+                          <td>
+                            <Link href={`/projects/${project.id}`} className="project-table-name project-table-name-link">
+                              <span
+                                className="project-lang-icon is-sm"
+                                style={{ backgroundColor: languageColor(project.language) }}
+                              >
+                                {languageLabel(project.language).charAt(0).toUpperCase()}
+                              </span>
+                              <div>
+                                <div className="font-medium">{projectDisplayName(project)}</div>
+                                <div className="text-xs text-muted-foreground">{project.name}</div>
+                              </div>
+                            </Link>
+                          </td>
+                          <td>{project.namespace || "-"}</td>
+                          <td>{languageLabel(project.language)}</td>
+                          <td>
+                            <span className={statusBadgeClass(project.status)}>
+                              {labelOf(PROJECT_STATUS_OPTIONS, project.status)}
+                            </span>
+                          </td>
+                          <td className="project-url-cell" title={project.git_url}>
+                            {project.git_url || "-"}
+                          </td>
+                          <td>{formatDateTime(project.created_at)}</td>
+                          <td>
+                            <div className="project-row-actions">
+                              <button type="button" onClick={() => setDetailProject(project)}>
+                                查看详情
+                              </button>
+                              <Link href={`/projects/${project.id}`}>进入项目</Link>
+                              {(() => {
+                                const action = projectPrimaryAction(project);
+                                if (action === "deploy") {
+                                  return <Link href={`/projects/${project.id}`}>部署</Link>;
+                                }
+                                return (
+                                  <button type="button" onClick={() => setConfigureProject(project)}>
+                                    继续配置
+                                  </button>
+                                );
+                              })()}
+                              <button type="button" className="is-danger" onClick={() => void onArchive(project)}>
+                                归档
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="project-pagination">
+                <span className="project-pagination-total">共 {filtered.length} 个项目</span>
+                <select
+                  className="input project-page-size"
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value) as (typeof PAGE_SIZES)[number])}
+                >
+                  {PAGE_SIZES.map((size) => (
+                    <option key={size} value={size}>
+                      {size} 条/页
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn-secondary text-sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  上一页
+                </button>
+                <span className="project-page-indicator">
+                  {Math.min(page, totalPages)} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  className="btn-secondary text-sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  下一页
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </section>
 
       <ProjectCreateModal
         open={createOpen}
@@ -363,12 +416,26 @@ export function ProjectPanel({
         onSuccess={handleCreateSuccess}
       />
 
+      {configureProject ? (
+        <ProjectConfigurePanel
+          open={Boolean(configureProject)}
+          workspaceId={workspaceId}
+          project={configureProject}
+          onClose={() => setConfigureProject(null)}
+          onSaved={() => {
+            setConfigureProject(null);
+            void load();
+          }}
+        />
+      ) : null}
+
       <ProjectDetailModal
         open={Boolean(detailProject)}
         workspaceId={workspaceId}
         project={detailProject}
         onClose={() => setDetailProject(null)}
       />
+
       <ProjectReviewModal
         open={Boolean(reviewProject)}
         workspaceId={workspaceId}
