@@ -29,6 +29,17 @@ export function statusBadgeClass(status?: string) {
   return "badge badge-neutral";
 }
 
+export function templateIsEditable(template: TemplateVM) {
+  return template.editable ?? !template.shared;
+}
+
+export function templateVisibilityLabel(template: TemplateVM) {
+  if (template.shared) {
+    return template.workspace_name ? `组织共享 · ${template.workspace_name}` : "组织共享";
+  }
+  return template.is_public ? "公开（本工作区）" : "私有";
+}
+
 export function truncateContent(content?: string, max = 100) {
   if (!content) return "暂无描述";
   if (content.length <= max) return content;

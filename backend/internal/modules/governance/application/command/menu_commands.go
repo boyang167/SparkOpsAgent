@@ -81,6 +81,9 @@ func (h *SeedWorkspaceMenusHandler) ensureDefaults(ctx context.Context, workspac
 	if err := h.repairEnterpriseNavMenus(ctx, workspaceID); err != nil {
 		return err
 	}
+	if err := h.repairSecretConfigMenu(ctx, workspaceID); err != nil {
+		return err
+	}
 	for _, group := range defaultMenuGroups {
 		parent, err := h.menus.FindGroupMenu(ctx, workspaceID, group.ID)
 		if err != nil {
@@ -158,11 +161,13 @@ func (h *SeedWorkspaceMenusHandler) repairLegacyMonitorMenus(ctx context.Context
 
 var removedMenuPaths = []string{
 	"/cluster/config",
+	"/market/dockerfiles",
 }
 
 var removedMenuTitles = []string{
 	"秘钥管理",
 	"服务连接配置",
+	"能力目录",
 }
 
 func normalizeMenuPathLocal(path string) string {
@@ -256,8 +261,8 @@ var defaultMenuGroups = []defaultMenuGroup{
 		ID: "application", Label: "应用中心",
 		Items: []struct{ Href, Label string }{
 			{"/projects", "项目管理"},
+			{"/templates", "模板管理"},
 			{"/knowledge", "知识库"},
-			{"/market/dockerfiles", "能力目录"},
 		},
 	},
 	{
@@ -267,6 +272,7 @@ var defaultMenuGroups = []defaultMenuGroup{
 			{"/publish/products", "产品管理"},
 			{"/publish/plans", "版本计划"},
 			{"/publish/releases", "发布管理"},
+			{"/config/secrets", "密钥配置"},
 		},
 	},
 	{
@@ -288,7 +294,6 @@ var defaultMenuGroups = []defaultMenuGroup{
 		ID: "ops-infra", Label: "基础设施",
 		Items: []struct{ Href, Label string }{
 			{"/config/configmaps", "配置管理"},
-			{"/config/secrets", "密钥管理"},
 			{"/config/storage", "存储管理"},
 			{"/discovery/services", "服务发现"},
 			{"/security/ingress", "网络入口"},
@@ -305,25 +310,57 @@ var legacyBusinessNavGroupIDs = []string{
 
 var enterpriseMenuTitleByPath = map[string]string{
 	"/projects":                 "项目管理",
+	"/templates":                "模板管理",
 	"/knowledge":                "知识库",
-	"/market/dockerfiles":       "能力目录",
 	"/delivery/builds":          "构建管理",
 	"/publish/products":         "产品管理",
 	"/publish/plans":            "版本计划",
 	"/publish/releases":         "发布管理",
+	"/config/secrets":           "密钥配置",
 	"/runtime/pods":             "运行实例",
 	"/cronjobs":                 "定时任务",
 	"/monitor/overview":         "监控概览",
 	"/monitor/log-viewer":       "日志查询",
 	"/monitor/statistics":       "部署统计",
 	"/config/configmaps":        "配置管理",
-	"/config/secrets":           "密钥管理",
 	"/config/storage":           "存储管理",
 	"/discovery/services":       "服务发现",
 	"/security/ingress":         "网络入口",
 	"/security/virtualservices": "流量策略",
 	"/config/webhooks":          "外部集成",
 	"/config/consul":            "配置中心",
+}
+
+func (h *SeedWorkspaceMenusHandler) repairSecretConfigMenu(ctx context.Context, workspaceID kernel.WorkspaceID) error {
+	menu, err := h.menus.FindByPath(ctx, workspaceID, "/config/secrets")
+	if err != nil {
+		return nil
+	}
+	changed := false
+	if menu.Title != "密钥配置" {
+		menu.Title = "密钥配置"
+		menu.Name = menuNameFromPath(menu.Path)
+		changed = true
+	}
+	deliveryGroup, err := h.menus.FindGroupMenu(ctx, workspaceID, "ops-delivery")
+	if err != nil {
+		if deliveryGroup, err = h.menus.FindByPath(ctx, workspaceID, "ops-delivery"); err != nil {
+			if !changed {
+				return nil
+			}
+			return h.menus.Save(ctx, menu)
+		}
+	}
+	if menu.ParentID == nil || *menu.ParentID != deliveryGroup.ID {
+		pid := deliveryGroup.ID
+		menu.ParentID = &pid
+		menu.Sort = 5
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return h.menus.Save(ctx, menu)
 }
 
 func (h *SeedWorkspaceMenusHandler) repairEnterpriseNavMenus(ctx context.Context, workspaceID kernel.WorkspaceID) error {

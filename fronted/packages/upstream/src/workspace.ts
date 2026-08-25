@@ -106,6 +106,34 @@ export function createWorkspaceUpstream(options: UpstreamRequestOptions = {}) {
         { method: "GET", options: { ...options, workspaceId } },
       );
     },
+
+    async listGitRefs(
+      workspaceId: string,
+      input: import("@sparkops/contracts/workspace").ListGitRefsCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/workspace").GitRefListVM>(
+        `/api/v1/workspaces/${workspaceId}/git/refs`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
+    async listGitTree(
+      workspaceId: string,
+      input: import("@sparkops/contracts/workspace").ListGitTreeCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/workspace").GitTreeListVM>(
+        `/api/v1/workspaces/${workspaceId}/git/tree`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          options: { ...options, workspaceId },
+        },
+      );
+    },
   };
 }
 

@@ -9,7 +9,6 @@ const MODULE_HINTS: Partial<Record<EntitlementKey, string>> = {
   delivery: "当前工作区未开通持续交付能力，请联系管理员在平台配置中启用。",
   observability: "可观测性模块未启用，请联系平台管理员。",
   knowledge: "知识库模块未启用，请联系平台管理员。",
-  marketplace: "能力目录未启用，请联系平台管理员。",
   agent: "智能体 / 项目模块未启用，请联系平台管理员。",
   mcp: "MCP 集成未启用，请联系平台管理员。",
 };

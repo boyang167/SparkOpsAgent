@@ -17,14 +17,13 @@ func APIPathEntitlement(path string) string {
 	switch {
 	case strings.Contains(path, "/knowledge-bases"), strings.HasPrefix(path, "/api/v1/documents/"):
 		return "knowledge"
-	case strings.Contains(path, "/market/"):
-		return "marketplace"
-	case strings.Contains(path, "/builds"), strings.Contains(path, "/products"):
+	case strings.Contains(path, "/builds"), strings.Contains(path, "/products"),
+		strings.Contains(path, "/workspaces/") && strings.Contains(path, "/secrets"):
 		return "delivery"
 	case strings.Contains(path, "/webhooks"), strings.Contains(path, "/mcp/"):
 		return "mcp"
 	case strings.Contains(path, "/cronjobs"), strings.Contains(path, "/pods"),
-		strings.Contains(path, "/k8s/"), strings.Contains(path, "/secrets"),
+		strings.Contains(path, "/k8s/"),
 		strings.Contains(path, "/consul/"), strings.Contains(path, "/deployments"),
 		strings.Contains(path, "/ingresses"), strings.Contains(path, "/configmaps"),
 		strings.Contains(path, "/services"), strings.Contains(path, "/pvcs"),
@@ -94,8 +93,6 @@ func (e WorkspaceEntitlements) AllowsModule(key string) bool {
 		return e.Agent
 	case "knowledge":
 		return e.Knowledge
-	case "marketplace":
-		return e.Marketplace
 	case "delivery":
 		return e.Delivery
 	case "k8s":

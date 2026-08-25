@@ -1,4 +1,4 @@
-import type { CreateProjectCommand } from "@sparkops/contracts/workspace";
+import type { CreateProjectCommand, ProjectVM } from "@sparkops/contracts/workspace";
 import {
   languageColor,
   languageLabel,
@@ -29,7 +29,7 @@ export const EMPTY_PROJECT_FORM: CreateProjectCommand = {
   git_url: "",
   secret_id: "",
   git_ref_type: "branch",
-  git_ref_value: "main",
+  git_ref_value: "",
   dockerfile_path: "./Dockerfile",
   template_id: "",
   resources: {
@@ -140,6 +140,28 @@ export function resolvePrimaryTemplateId(resources?: {
     resources?.jenkinsfile_template_id?.trim() ||
     ""
   );
+}
+
+export function buildProjectUpdatePayload(
+  form: CreateProjectCommand,
+  base?: Pick<ProjectVM, "name" | "display_name" | "description" | "namespace">,
+): CreateProjectCommand {
+  const templateId = form.template_id || resolvePrimaryTemplateId(form.resources);
+  const namespace = (base?.namespace ?? form.namespace)?.trim();
+  return {
+    name: base?.name ?? form.name.trim(),
+    display_name: (base?.display_name ?? form.display_name)?.trim(),
+    description: (base?.description ?? form.description)?.trim() ?? "",
+    namespace: namespace || undefined,
+    language: form.language,
+    git_url: form.git_url?.trim(),
+    secret_id: form.secret_id || undefined,
+    git_ref_type: form.git_ref_type,
+    git_ref_value: form.git_ref_value?.trim(),
+    dockerfile_path: form.dockerfile_path?.trim() || "./Dockerfile",
+    template_id: templateId || undefined,
+    resources: form.resources,
+  };
 }
 
 export function hasSelectedProjectTemplate(resources?: {

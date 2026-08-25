@@ -48,7 +48,6 @@ const DYNAMIC_RULES: RouteLabelRule[] = [
   { prefix: "/projects/", label: "项目详情", group: "项目" },
   { prefix: "/knowledge/", label: "知识库", group: "应用中心" },
   { prefix: "/delivery/builds/", label: "构建详情", group: "持续交付" },
-  { prefix: "/market/", label: "能力目录", group: "应用中心" },
 ];
 
 export const ROUTE_LABEL_RULES: RouteLabelRule[] = [
@@ -67,7 +66,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   pods: "运行实例",
   cronjobs: "定时任务",
   configmaps: "配置管理",
-  secrets: "密钥管理",
+  secrets: "密钥配置",
   clusters: "集群管理",
 };
 

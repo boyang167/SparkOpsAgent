@@ -40,7 +40,6 @@ func applyLicense(ents *WorkspaceEntitlements, lic licenseConfig, now time.Time)
 	if lic.expired(now) {
 		ents.Agent = true
 		ents.Knowledge = true
-		ents.Marketplace = false
 		ents.Delivery = false
 		ents.K8s = false
 		ents.Observability = false
@@ -91,9 +90,6 @@ func applyWorkspaceOverrides(ents *WorkspaceEntitlements, overrides map[string]b
 	}
 	if v, ok := overrides["knowledge"]; ok {
 		ents.Knowledge = v
-	}
-	if v, ok := overrides["marketplace"]; ok {
-		ents.Marketplace = v
 	}
 	if v, ok := overrides["delivery"]; ok {
 		ents.Delivery = v

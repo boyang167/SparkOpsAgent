@@ -5,7 +5,7 @@ export interface NavLeafConfig {
   href: string;
   label: string;
   /** 所需功能模块，未设置则始终可见 */
-  entitlement?: "agent" | "knowledge" | "marketplace" | "delivery" | "k8s" | "observability" | "mcp";
+  entitlement?: "agent" | "knowledge" | "delivery" | "k8s" | "observability" | "mcp";
 }
 
 export interface NavGroupConfig {
@@ -33,8 +33,8 @@ export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
     label: "应用中心",
     items: [
       { href: "/projects", label: "项目管理", entitlement: "agent" },
+      { href: "/templates", label: "模板管理", entitlement: "agent" },
       { href: "/knowledge", label: "知识库", entitlement: "knowledge" },
-      { href: "/market/dockerfiles", label: "能力目录", entitlement: "marketplace" },
     ],
   },
   {
@@ -45,6 +45,7 @@ export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
       { href: "/publish/products", label: "产品管理", entitlement: "delivery" },
       { href: "/publish/plans", label: "版本计划", entitlement: "delivery" },
       { href: "/publish/releases", label: "发布管理", entitlement: "delivery" },
+      { href: "/config/secrets", label: "密钥配置", entitlement: "delivery" },
     ],
   },
   {
@@ -70,7 +71,6 @@ export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
     defaultCollapsed: true,
     items: [
       { href: "/config/configmaps", label: "配置管理", entitlement: "k8s" },
-      { href: "/config/secrets", label: "密钥管理", entitlement: "k8s" },
       { href: "/config/storage", label: "存储管理", entitlement: "k8s" },
       { href: "/discovery/services", label: "服务发现", entitlement: "k8s" },
       { href: "/security/ingress", label: "网络入口", entitlement: "k8s" },

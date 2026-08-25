@@ -1,11 +1,14 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import type { CreateProjectCommand } from "@sparkops/contracts/workspace";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CreateProjectCommand, GitRefVM } from "@sparkops/contracts/workspace";
 import { PROJECT_LANGUAGE_OPTIONS } from "@sparkops/contracts/workspace";
 import type { SecretVM } from "@sparkops/contracts/secret";
+import { BffError } from "@sparkops/contracts";
+import { workspace } from "@sparkops/web-sdk";
 import { Modal } from "@/components/ui/Modal";
 import { FormRow } from "./project-form-shared";
+import { DockerfilePickerModal } from "./DockerfilePickerModal";
 import { ProjectPortsField } from "./ProjectPortsField";
 import {
   parseProjectConfig,
@@ -14,8 +17,6 @@ import {
 } from "./project-utils";
 import {
   CPU_MARKS,
-  DEFAULT_GIT_BRANCHES,
-  DOCKERFILE_SUGGESTIONS,
   MEMORY_MARKS,
   formatCpuMillicores,
   formatMemoryMi,
@@ -24,7 +25,10 @@ import {
   snapToNearestMark,
 } from "./project-resource-utils";
 
+const GIT_REF_UNSELECTED = "__unset__";
+
 interface ProjectCreateStep2Props {
+  workspaceId: string;
   form: CreateProjectCommand;
   updateForm: (patch: Partial<CreateProjectCommand>) => void;
   gitServiceType: "GitLab" | "GitHub";
@@ -289,15 +293,33 @@ function gitRefPlaceholder(refType?: string) {
   return "请输入分支名称，如：main, develop, feature/xxx";
 }
 
-function gitRefHint(refType?: string, manual?: boolean) {
-  if (refType === "commit") return "输入 Git 提交的完整 SHA 值";
-  if (refType === "tag") {
-    return manual ? "手动输入 Git 标签名称" : "从 Git 仓库获取的标签列表，支持搜索";
+function gitRefKindLabel(refType?: string) {
+  if (refType === "tag") return "标签";
+  if (refType === "commit") return "提交";
+  return "分支";
+}
+
+function formatGitRefOption(item: GitRefVM) {
+  if (item.title) {
+    const short = item.name.length > 8 ? item.name.slice(0, 8) : item.name;
+    const title = item.title.length > 60 ? `${item.title.slice(0, 60)}…` : item.title;
+    return `${short} - ${title}`;
   }
-  return manual ? "手动输入 Git 分支名称" : "从 Git 仓库获取的分支列表，支持搜索";
+  return item.name;
+}
+
+function gitRefHint(refType?: string, manual?: boolean) {
+  if (refType === "commit") {
+    return manual ? "手动输入 Git 提交的完整 SHA 值" : "从 Git 仓库获取的提交列表";
+  }
+  if (refType === "tag") {
+    return manual ? "手动输入 Git 标签名称" : "从 Git 仓库获取的标签列表";
+  }
+  return manual ? "手动输入 Git 分支名称" : "从 Git 仓库获取的分支列表";
 }
 
 export function ProjectCreateStep2({
+  workspaceId,
   form,
   updateForm,
   gitServiceType,
@@ -307,7 +329,9 @@ export function ProjectCreateStep2({
   loadSecrets,
 }: ProjectCreateStep2Props) {
   const [gitRefMode, setGitRefMode] = useState<"select" | "manual">("select");
-  const [gitRefQuery, setGitRefQuery] = useState("");
+  const [remoteRefs, setRemoteRefs] = useState<GitRefVM[]>([]);
+  const [loadingGitRefs, setLoadingGitRefs] = useState(false);
+  const [gitRefsError, setGitRefsError] = useState<string | null>(null);
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [configDraft, setConfigDraft] = useState<ProjectConfigEntry[]>([{ key: "", value: "" }]);
   const [browseOpen, setBrowseOpen] = useState(false);
@@ -315,18 +339,87 @@ export function ProjectCreateStep2({
   const resources = form.resources ?? {};
   const ports = resources.ports ?? [];
   const refType = form.git_ref_type ?? "branch";
-  const refManualOnly = refType === "commit";
-  const refSelectMode = !refManualOnly && gitRefMode === "select";
+  const refSelectMode = gitRefMode === "select";
+  const gitRefContextRef = useRef<string | null>(null);
 
-  const branchOptions = useMemo(() => {
-    const branchList = form.git_url?.trim() ? [...DEFAULT_GIT_BRANCHES] : [];
+  useEffect(() => {
+    const contextKey = `${form.git_url?.trim() ?? ""}|${form.secret_id?.trim() ?? ""}|${refType}`;
+    if (gitRefContextRef.current === null) {
+      gitRefContextRef.current = contextKey;
+      return;
+    }
+    if (gitRefContextRef.current !== contextKey) {
+      gitRefContextRef.current = contextKey;
+      updateForm({ git_ref_value: "" });
+    }
+  }, [form.git_url, form.secret_id, refType, updateForm]);
+
+  useEffect(() => {
+    if (!refSelectMode || !workspaceId) {
+      setRemoteRefs([]);
+      setGitRefsError(null);
+      return;
+    }
+    const gitUrl = form.git_url?.trim();
+    const secretId = form.secret_id?.trim();
+    if (!gitUrl || !secretId || gitServiceType !== "GitLab") {
+      setRemoteRefs([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setLoadingGitRefs(true);
+      setGitRefsError(null);
+      void workspace
+        .listGitRefs(workspaceId, {
+          git_url: gitUrl,
+          secret_id: secretId,
+          ref_type: refType,
+        })
+        .then((items) => {
+          if (cancelled) return;
+          setRemoteRefs(items);
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          setRemoteRefs([]);
+          const message =
+            err instanceof BffError
+              ? err.message
+              : err instanceof Error
+                ? err.message
+                : "加载 Git 引用列表失败";
+          setGitRefsError(message);
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingGitRefs(false);
+        });
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    workspaceId,
+    refSelectMode,
+    form.git_url,
+    form.secret_id,
+    refType,
+    gitServiceType,
+  ]);
+
+  const refOptions = useMemo(() => {
+    const list = remoteRefs;
     const current = form.git_ref_value?.trim();
-    const merged =
-      current && !branchList.includes(current) ? [current, ...branchList] : branchList;
-    if (!gitRefQuery.trim()) return merged;
-    const q = gitRefQuery.trim().toLowerCase();
-    return merged.filter((item) => item.toLowerCase().includes(q));
-  }, [form.git_ref_value, form.git_url, gitRefQuery]);
+    if (current && !list.some((item) => item.name === current)) {
+      return [{ name: current }, ...list];
+    }
+    return list;
+  }, [form.git_ref_value, remoteRefs]);
+
+  const selectedGitRef = form.git_ref_value?.trim() ? form.git_ref_value : GIT_REF_UNSELECTED;
 
   function updateResources(patch: Partial<NonNullable<CreateProjectCommand["resources"]>>) {
     updateForm({ resources: { ...resources, ...patch } });
@@ -347,9 +440,8 @@ export function ProjectCreateStep2({
   }
 
   function handleRefTypeChange(next: "branch" | "tag" | "commit") {
-    updateForm({ git_ref_type: next, git_ref_value: next === "branch" ? "main" : "" });
-    setGitRefMode(next === "commit" ? "manual" : "select");
-    setGitRefQuery("");
+    updateForm({ git_ref_type: next, git_ref_value: "" });
+    setGitRefMode("select");
   }
 
   return (
@@ -443,37 +535,53 @@ export function ProjectCreateStep2({
       <FormRow
         label={`${gitRefLabel(refType)}:`}
         required
-        hint={gitRefHint(refType, refManualOnly || gitRefMode === "manual")}
+        hint={gitRefHint(refType, gitRefMode === "manual")}
         labelExtra={
-          !refManualOnly ? (
-            <button
-              type="button"
-              className="project-manual-link"
-              onClick={() => setGitRefMode((mode) => (mode === "select" ? "manual" : "select"))}
-            >
-              {gitRefMode === "select" ? "手动输入" : "从列表选择"}
-            </button>
-          ) : null
+          <button
+            type="button"
+            className="project-manual-link"
+            onClick={() => setGitRefMode((mode) => (mode === "select" ? "manual" : "select"))}
+          >
+            {gitRefMode === "select" ? "手动输入" : "下拉选择"}
+          </button>
         }
       >
         {refSelectMode ? (
           <div className="project-git-ref-select">
-            <input
+            <select
               className="input"
-              list="project-git-ref-options"
-              placeholder={gitRefPlaceholder(refType)}
-              value={gitRefQuery || form.git_ref_value || ""}
+              value={selectedGitRef}
+              disabled={loadingGitRefs}
               onChange={(e) => {
-                setGitRefQuery(e.target.value);
-                updateForm({ git_ref_value: e.target.value });
+                const next = e.target.value;
+                updateForm({ git_ref_value: next === GIT_REF_UNSELECTED ? "" : next });
               }}
-              onFocus={() => setGitRefQuery(form.git_ref_value ?? "")}
-            />
-            <datalist id="project-git-ref-options">
-              {branchOptions.map((item) => (
-                <option key={item} value={item} />
+            >
+              <option value={GIT_REF_UNSELECTED} disabled>
+                {loadingGitRefs
+                  ? `正在加载${gitRefKindLabel(refType)}…`
+                  : refOptions.length
+                    ? `请选择${gitRefKindLabel(refType)}`
+                    : `暂无可用${gitRefKindLabel(refType)}`}
+              </option>
+              {refOptions.map((item) => (
+                <option key={item.name} value={item.name}>
+                  {formatGitRefOption(item)}
+                </option>
               ))}
-            </datalist>
+            </select>
+            {loadingGitRefs ? (
+              <p className="project-form-hint">正在从 Git 仓库加载{gitRefKindLabel(refType)}列表…</p>
+            ) : null}
+            {!loadingGitRefs && gitRefsError ? (
+              <p className="project-form-hint">{gitRefsError}</p>
+            ) : null}
+            {!loadingGitRefs && !gitRefsError && !form.secret_id?.trim() ? (
+              <p className="project-form-hint">请选择 Git 认证秘钥以从仓库加载列表</p>
+            ) : null}
+            {!loadingGitRefs && !gitRefsError && form.secret_id?.trim() && gitServiceType !== "GitLab" ? (
+              <p className="project-form-hint">当前仅 GitLab 支持从仓库加载列表</p>
+            ) : null}
           </div>
         ) : (
           <input
@@ -488,7 +596,7 @@ export function ProjectCreateStep2({
       <FormRow
         label="Dockerfile路径:"
         required
-        hint="Dockerfile在Git仓库中的相对路径，默认为 ./Dockerfile。点击「浏览文件」可从常用路径中选择。"
+        hint="Dockerfile在Git仓库中的相对路径，默认为 ./Dockerfile。点击「浏览文件」可从仓库中选择文件。"
       >
         <div className="project-input-group">
           <input
@@ -661,26 +769,16 @@ export function ProjectCreateStep2({
         </div>
       </Modal>
 
-      <Modal open={browseOpen} onClose={() => setBrowseOpen(false)} title="选择 Dockerfile 路径" size="md">
-        <div className="project-browse-modal">
-          {DOCKERFILE_SUGGESTIONS.map((path) => (
-            <button
-              key={path}
-              type="button"
-              className="project-browse-item"
-              onClick={() => {
-                updateForm({ dockerfile_path: path });
-                setBrowseOpen(false);
-              }}
-            >
-              {path}
-            </button>
-          ))}
-          {!form.git_url?.trim() ? (
-            <p className="project-form-hint">填写 Git 仓库地址后，可在创建项目后从仓库浏览更多文件。</p>
-          ) : null}
-        </div>
-      </Modal>
+      <DockerfilePickerModal
+        open={browseOpen}
+        onClose={() => setBrowseOpen(false)}
+        workspaceId={workspaceId}
+        gitUrl={form.git_url ?? ""}
+        secretId={form.secret_id ?? ""}
+        gitRef={form.git_ref_value ?? ""}
+        gitServiceType={gitServiceType}
+        onConfirm={(path) => updateForm({ dockerfile_path: path })}
+      />
     </div>
   );
 }

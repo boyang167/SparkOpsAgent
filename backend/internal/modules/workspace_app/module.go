@@ -44,7 +44,6 @@ func (m *Module) Register(c *appctx.Container) error {
 	memberRepo := persistence.NewProjectMemberRepository(c.DB)
 	templateRepo := persistence.NewTemplateRepository(c.DB)
 	secretRepo := persistence.NewSecretRepository(c.DB)
-	marketRepo := persistence.NewMarketRepository(c.DB)
 	wsChecker := acl.NewTenantACL(c.DB)
 	memberLookup := acl.NewMemberLookup(c.DB)
 	secretBox, err := crypto.NewSecretBoxFromConfig(c.Config)
@@ -77,9 +76,9 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewListSecretsHandler(secretRepo, wsChecker, memberLookup, secretCrypto),
 		query.NewGetSecretHandler(secretRepo, wsChecker, memberLookup, secretCrypto),
 		query.NewTestSecretConnectionHandler(secretRepo, wsChecker, secretCrypto),
+		query.NewListGitRefsHandler(secretRepo, wsChecker, secretCrypto),
+		query.NewListGitTreeHandler(secretRepo, wsChecker, secretCrypto),
 		secretCrypto,
-		command.NewCreateDockerfileHandler(marketRepo, wsChecker),
-		query.NewListDockerfilesHandler(marketRepo, wsChecker),
 		command.NewAddProjectMemberHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
 		command.NewUpdateProjectMemberRoleHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
 		command.NewRemoveProjectMemberHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
@@ -143,10 +142,10 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermSecretWrite), handler.DeleteSecret)
 	c.Engine.POST("/api/v1/workspaces/:wsId/secrets/:secretId/test",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermSecretWrite), handler.TestSecretConnection)
-	c.Engine.GET("/api/v1/workspaces/:wsId/market/dockerfiles",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListDockerfiles)
-	c.Engine.POST("/api/v1/workspaces/:wsId/market/dockerfiles",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CreateDockerfile)
+	c.Engine.POST("/api/v1/workspaces/:wsId/git/refs",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListGitRefs)
+	c.Engine.POST("/api/v1/workspaces/:wsId/git/tree",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListGitTree)
 
 	return nil
 }

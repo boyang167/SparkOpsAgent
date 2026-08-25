@@ -130,3 +130,33 @@ export async function listGeneratedTemplates(workspaceId: string, projectId: str
   );
   return data.items;
 }
+
+export async function listGitRefs(
+  workspaceId: string,
+  input: import("@sparkops/contracts/workspace").ListGitRefsCommand,
+) {
+  const data = await bffFetch<import("@sparkops/contracts/workspace").GitRefListVM>(
+    `/workspaces/${workspaceId}/git/refs`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+      ...withWorkspace(workspaceId),
+    },
+  );
+  return data.items;
+}
+
+export async function listGitTree(
+  workspaceId: string,
+  input: import("@sparkops/contracts/workspace").ListGitTreeCommand,
+) {
+  const data = await bffFetch<import("@sparkops/contracts/workspace").GitTreeListVM>(
+    `/workspaces/${workspaceId}/git/tree`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+      ...withWorkspace(workspaceId),
+    },
+  );
+  return data.items;
+}

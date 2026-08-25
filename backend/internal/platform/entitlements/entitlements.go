@@ -11,7 +11,6 @@ import (
 type WorkspaceEntitlements struct {
 	Agent         bool `json:"agent"`
 	Knowledge     bool `json:"knowledge"`
-	Marketplace   bool `json:"marketplace"`
 	Delivery      bool `json:"delivery"`
 	K8s           bool `json:"k8s"`
 	Observability bool `json:"observability"`
@@ -22,7 +21,6 @@ func Default() WorkspaceEntitlements {
 	return WorkspaceEntitlements{
 		Agent:         true,
 		Knowledge:     true,
-		Marketplace:   true,
 		Delivery:      true,
 		Observability: true,
 		K8s:           false,
@@ -49,9 +47,6 @@ func applyFeatureMap(ents *WorkspaceEntitlements, features map[string]bool) {
 	}
 	if v, ok := features["knowledge"]; ok {
 		ents.Knowledge = v
-	}
-	if v, ok := features["marketplace"]; ok {
-		ents.Marketplace = v
 	}
 	if v, ok := features["delivery"]; ok {
 		ents.Delivery = v
@@ -90,9 +85,8 @@ func PathEntitlement(path string) string {
 	switch {
 	case strings.HasPrefix(path, "/knowledge"):
 		return "knowledge"
-	case strings.HasPrefix(path, "/market"):
-		return "marketplace"
-	case strings.HasPrefix(path, "/delivery"), strings.HasPrefix(path, "/publish"):
+	case strings.HasPrefix(path, "/delivery"), strings.HasPrefix(path, "/publish"),
+		strings.HasPrefix(path, "/config/secrets"):
 		return "delivery"
 	case strings.HasPrefix(path, "/monitor"):
 		return "observability"
@@ -102,7 +96,7 @@ func PathEntitlement(path string) string {
 		strings.HasPrefix(path, "/config") || strings.HasPrefix(path, "/discovery") ||
 		strings.HasPrefix(path, "/security"):
 		return "k8s"
-	case strings.HasPrefix(path, "/projects"):
+	case strings.HasPrefix(path, "/projects"), strings.HasPrefix(path, "/templates"):
 		return "agent"
 	default:
 		return ""

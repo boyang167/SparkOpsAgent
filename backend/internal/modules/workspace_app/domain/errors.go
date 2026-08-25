@@ -19,7 +19,6 @@ var (
 	ErrProjectReviewForbidden       = kernel.NewDomainError("AUTH_FORBIDDEN", "project review permission required")
 	ErrInvalidTemplateName          = kernel.NewDomainError("WORKSPACE_APP_INVALID_TEMPLATE_NAME", "invalid template name")
 	ErrTemplateNotFound             = kernel.NewDomainError("WORKSPACE_APP_TEMPLATE_NOT_FOUND", "template not found")
-	ErrInvalidDockerfileName        = kernel.NewDomainError("WORKSPACE_APP_INVALID_DOCKERFILE_NAME", "invalid dockerfile name")
 	ErrInvalidSecretName            = kernel.NewDomainError("WORKSPACE_APP_INVALID_SECRET_NAME", "invalid secret name")
 	ErrSecretNotFound               = kernel.NewDomainError("WORKSPACE_APP_SECRET_NOT_FOUND", "secret not found")
 )

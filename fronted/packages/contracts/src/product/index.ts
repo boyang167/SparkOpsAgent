@@ -19,6 +19,10 @@ export const TemplateVMSchema = z.object({
   rules: z.string().optional(),
   status: TemplateStatusSchema.optional(),
   is_public: z.boolean().optional(),
+  workspace_id: z.string().optional(),
+  workspace_name: z.string().optional(),
+  shared: z.boolean().optional(),
+  editable: z.boolean().optional(),
   created_by: z.string().optional(),
   creator: TemplateCreatorVMSchema.optional(),
   created_at: z.string().optional(),
@@ -118,13 +122,3 @@ export const ProductRequirementVMSchema = z.object({
 });
 
 export type ProductRequirementVM = z.infer<typeof ProductRequirementVMSchema>;
-
-export const DockerfileVMSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string().optional(),
-  base_image: z.string().optional(),
-  created_at: z.string().optional(),
-});
-
-export type DockerfileVM = z.infer<typeof DockerfileVMSchema>;

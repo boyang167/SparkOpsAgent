@@ -32,9 +32,9 @@ type Handler struct {
 	listSecrets       *query.ListSecretsHandler
 	getSecret         *query.GetSecretHandler
 	testSecret        *query.TestSecretConnectionHandler
+	listGitRefs       *query.ListGitRefsHandler
+	listGitTree       *query.ListGitTreeHandler
 	secretCrypto      *application.SecretCrypto
-	createDockerfile  *command.CreateDockerfileHandler
-	listDockerfiles   *query.ListDockerfilesHandler
 	addMember         *command.AddProjectMemberHandler
 	updateMemberRole  *command.UpdateProjectMemberRoleHandler
 	removeMember      *command.RemoveProjectMemberHandler
@@ -62,9 +62,9 @@ func NewHandler(
 	listSecrets *query.ListSecretsHandler,
 	getSecret *query.GetSecretHandler,
 	testSecret *query.TestSecretConnectionHandler,
+	listGitRefs *query.ListGitRefsHandler,
+	listGitTree *query.ListGitTreeHandler,
 	secretCrypto *application.SecretCrypto,
-	createDockerfile *command.CreateDockerfileHandler,
-	listDockerfiles *query.ListDockerfilesHandler,
 	addMember *command.AddProjectMemberHandler,
 	updateMemberRole *command.UpdateProjectMemberRoleHandler,
 	removeMember *command.RemoveProjectMemberHandler,
@@ -80,8 +80,9 @@ func NewHandler(
 		listTemplates: listTemplates, getTemplate: getTemplate,
 		createSecret: createSecret, updateSecret: updateSecret, deleteSecret: deleteSecret,
 		listSecrets: listSecrets, getSecret: getSecret, testSecret: testSecret,
-		secretCrypto:     secretCrypto,
-		createDockerfile: createDockerfile, listDockerfiles: listDockerfiles,
+		listGitRefs:  listGitRefs,
+		listGitTree:  listGitTree,
+		secretCrypto: secretCrypto,
 		addMember: addMember, updateMemberRole: updateMemberRole, removeMember: removeMember,
 		listMembers: listMembers, generateTemplates: generateTemplates,
 		submitReview: submitReview, reviewProject: reviewProject, memberLookup: memberLookup,
@@ -459,15 +460,6 @@ type updateTemplateRequest struct {
 	IsPublic bool   `json:"is_public"`
 }
 
-type createDockerfileRequest struct {
-	Name        string `json:"name" binding:"required"`
-	Language    string `json:"language"`
-	Description string `json:"description"`
-	Detail      string `json:"detail"`
-	Dockerfile  string `json:"dockerfile" binding:"required"`
-	Version     string `json:"version"`
-}
-
 func (h *Handler) CreateTemplate(c *gin.Context) {
 	memberID, ok := authn.MemberIDFromContext(c)
 	if !ok {
@@ -590,52 +582,6 @@ func (h *Handler) ListTemplates(c *gin.Context) {
 		return
 	}
 	items, err := h.listTemplates.Handle(c.Request.Context(), wsID, memberID)
-	if err != nil {
-		httpx.HandleError(c, err)
-		return
-	}
-	httpx.OK(c, gin.H{"items": items})
-}
-
-func (h *Handler) CreateDockerfile(c *gin.Context) {
-	memberID, ok := authn.MemberIDFromContext(c)
-	if !ok {
-		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
-		return
-	}
-	wsID, ok := httpx.WorkspaceIDFromContext(c)
-	if !ok {
-		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
-		return
-	}
-	var req createDockerfileRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
-		return
-	}
-	df, err := h.createDockerfile.Handle(c.Request.Context(), wsID, memberID, req.Name, req.Language, req.Description, req.Detail, req.Dockerfile, req.Version)
-	if err != nil {
-		httpx.HandleError(c, err)
-		return
-	}
-	httpx.OK(c, gin.H{
-		"id": df.ID.String(), "name": df.Name.String(), "language": df.Language,
-		"description": df.Description, "dockerfile": df.Dockerfile, "version": df.Version,
-	})
-}
-
-func (h *Handler) ListDockerfiles(c *gin.Context) {
-	memberID, ok := authn.MemberIDFromContext(c)
-	if !ok {
-		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
-		return
-	}
-	wsID, ok := httpx.WorkspaceIDFromContext(c)
-	if !ok {
-		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
-		return
-	}
-	items, err := h.listDockerfiles.Handle(c.Request.Context(), wsID, memberID)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return

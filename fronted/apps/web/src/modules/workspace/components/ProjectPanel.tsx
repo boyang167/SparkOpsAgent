@@ -422,6 +422,7 @@ export function ProjectPanel({
           workspaceId={workspaceId}
           project={configureProject}
           onClose={() => setConfigureProject(null)}
+          onProjectUpdated={(updated) => setConfigureProject(updated)}
           onSaved={() => {
             setConfigureProject(null);
             void load();

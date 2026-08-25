@@ -422,7 +422,7 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
 
         {step === 2 ? (
           <ProjectCreateStep2
-            key={open === false ? "closed" : workspaceId}
+            workspaceId={workspaceId}
             form={form}
             updateForm={updateForm}
             gitServiceType={gitServiceType}

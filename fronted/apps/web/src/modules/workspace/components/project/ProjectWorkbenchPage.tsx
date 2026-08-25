@@ -96,6 +96,7 @@ export function ProjectWorkbenchPage({
         workspaceId={workspaceId}
         project={currentProject}
         onClose={() => setConfigureOpen(false)}
+        onProjectUpdated={(updated) => setCurrentProject(updated)}
         onSaved={() => {
           setConfigureOpen(false);
           router.refresh();

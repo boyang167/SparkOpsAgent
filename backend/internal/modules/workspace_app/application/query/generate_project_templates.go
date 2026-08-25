@@ -65,7 +65,7 @@ func (h *GenerateProjectTemplatesHandler) Handle(
 		return nil, domain.ErrProjectNotFound
 	}
 
-	allTemplates, err := h.templateRepo.ListByWorkspace(ctx, wsID)
+	allTemplates, err := ListAccessibleTemplates(ctx, h.templateRepo, h.wsChecker, wsID)
 	if err != nil {
 		return nil, err
 	}

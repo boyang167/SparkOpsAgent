@@ -9,6 +9,7 @@ import {
   TEMPLATE_KIND_OPTIONS,
   TEMPLATE_LANGUAGE_OPTIONS,
   TEMPLATE_STATUS_OPTIONS,
+  templateVisibilityLabel,
 } from "./template-utils";
 import { TemplateCreator } from "./TemplateCreator";
 
@@ -66,7 +67,10 @@ export function TemplateDetail({ template, onCopyContent, onDownload }: Template
               <div><dt>模板分类</dt><dd><span className="badge badge-primary">{labelOf(TEMPLATE_KIND_OPTIONS, template.kind)}</span></dd></div>
               <div><dt>开发语言</dt><dd><span className="badge badge-neutral">{labelOf(TEMPLATE_LANGUAGE_OPTIONS, template.language)}</span></dd></div>
               <div><dt>模板状态</dt><dd><span className={statusBadgeClass(template.status)}>{labelOf(TEMPLATE_STATUS_OPTIONS, template.status)}</span></dd></div>
-              <div><dt>可见性</dt><dd>{template.is_public ? "公开" : "私有"}</dd></div>
+              <div><dt>可见性</dt><dd>{templateVisibilityLabel(template)}</dd></div>
+              {template.workspace_name ? (
+                <div><dt>来源工作区</dt><dd>{template.workspace_name}</dd></div>
+              ) : null}
               <div><dt>创建时间</dt><dd>{formatDateTime(template.created_at)}</dd></div>
               <div><dt>更新时间</dt><dd>{formatDateTime(template.updated_at)}</dd></div>
               <div><dt>创建者</dt><dd><TemplateCreator template={template} /></dd></div>

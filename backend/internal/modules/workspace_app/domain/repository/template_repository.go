@@ -13,4 +13,6 @@ type TemplateRepository interface {
 	Delete(ctx context.Context, id kernel.TemplateID) error
 	FindByID(ctx context.Context, wsID kernel.WorkspaceID, id kernel.TemplateID) (*model.Template, error)
 	ListByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) ([]*model.Template, error)
+	ListAccessible(ctx context.Context, wsID kernel.WorkspaceID, orgID kernel.OrgID) ([]*model.TemplateView, error)
+	FindAccessible(ctx context.Context, wsID kernel.WorkspaceID, orgID kernel.OrgID, id kernel.TemplateID) (*model.TemplateView, error)
 }

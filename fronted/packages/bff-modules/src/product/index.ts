@@ -47,7 +47,3 @@ export async function updateTemplate(
 export async function deleteTemplate(ctx: BffContext, workspaceId: string, templateId: string) {
   return ctx.upstream.product.deleteTemplate(workspaceId, templateId);
 }
-
-export async function listDockerfiles(ctx: BffContext, workspaceId: string) {
-  return ctx.upstream.product.listDockerfiles(workspaceId);
-}

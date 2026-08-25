@@ -24,6 +24,7 @@ interface TemplateCardProps {
 export function TemplateCard({ template, onView, onEdit, onCopy, onDelete }: TemplateCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const editable = template.editable ?? !template.shared;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -57,6 +58,11 @@ export function TemplateCard({ template, onView, onEdit, onCopy, onDelete }: Tem
             <span className="badge badge-neutral">
               {labelOf(TEMPLATE_LANGUAGE_OPTIONS, template.language)}
             </span>
+            {template.shared ? (
+              <span className="badge badge-primary" title={template.workspace_name ?? "其他工作区"}>
+                组织共享{template.workspace_name ? ` · ${template.workspace_name}` : ""}
+              </span>
+            ) : null}
           </div>
         </div>
         <div className="template-card-actions" ref={menuRef} onClick={(e) => e.stopPropagation()}>
@@ -71,9 +77,13 @@ export function TemplateCard({ template, onView, onEdit, onCopy, onDelete }: Tem
           {menuOpen ? (
             <div className="template-card-menu">
               <button type="button" onClick={() => { setMenuOpen(false); onView(template); }}>查看详情</button>
-              <button type="button" onClick={() => { setMenuOpen(false); onEdit(template); }}>编辑模板</button>
-              <button type="button" onClick={() => { setMenuOpen(false); onCopy(template); }}>复制模板</button>
-              <button type="button" className="is-danger" onClick={() => { setMenuOpen(false); onDelete(template); }}>删除模板</button>
+              {editable ? (
+                <>
+                  <button type="button" onClick={() => { setMenuOpen(false); onEdit(template); }}>编辑模板</button>
+                  <button type="button" className="is-danger" onClick={() => { setMenuOpen(false); onDelete(template); }}>删除模板</button>
+                </>
+              ) : null}
+              <button type="button" onClick={() => { setMenuOpen(false); onCopy(template); }}>复制到本工作区</button>
             </div>
           ) : null}
         </div>

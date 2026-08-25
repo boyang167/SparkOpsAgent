@@ -87,13 +87,6 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
         { method: "DELETE", options: { ...options, workspaceId } },
       );
     },
-
-    async listDockerfiles(workspaceId: string) {
-      return upstreamFetch<{ items: import("@sparkops/contracts/product").DockerfileVM[] }>(
-        `/api/v1/workspaces/${workspaceId}/market/dockerfiles`,
-        { method: "GET", options: { ...options, workspaceId } },
-      );
-    },
   };
 }
 

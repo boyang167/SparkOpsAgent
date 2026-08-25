@@ -94,7 +94,9 @@ export function TemplateForm({
             >
               <span className="template-switch-thumb" />
             </button>
-            <span className="text-sm text-muted-foreground">{form.is_public ? "公开" : "私有"}</span>
+            <span className="text-sm text-muted-foreground">
+              {form.is_public ? "组织内所有工作区可见" : "仅当前工作区可见"}
+            </span>
           </div>
         </label>
       </div>

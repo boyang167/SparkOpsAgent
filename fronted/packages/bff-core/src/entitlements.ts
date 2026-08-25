@@ -61,14 +61,13 @@ export function apiPathEntitlement(path: string): EntitlementModuleKey | "" {
   if (path.includes("/knowledge-bases") || path.startsWith("/api/v1/documents/")) {
     return "knowledge";
   }
-  if (path.includes("/market/")) return "marketplace";
   if (path.includes("/builds") || path.includes("/products")) return "delivery";
+  if (path.includes("/workspaces/") && path.includes("/secrets")) return "delivery";
   if (path.includes("/webhooks") || path.includes("/mcp/")) return "mcp";
   if (
     path.includes("/cronjobs") ||
     path.includes("/pods") ||
     path.includes("/k8s/") ||
-    path.includes("/secrets") ||
     path.includes("/consul/") ||
     path.includes("/deployments") ||
     path.includes("/ingresses") ||
@@ -116,7 +115,6 @@ export function isModuleEnabled(
 export const DEFAULT_ENTITLEMENTS: WorkspaceEntitlementsVM = {
   agent: true,
   knowledge: true,
-  marketplace: true,
   delivery: true,
   observability: true,
   k8s: false,

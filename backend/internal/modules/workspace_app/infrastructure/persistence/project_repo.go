@@ -20,7 +20,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	if err := db.AutoMigrate(&projectModel{}, &templateModel{}, &secretModel{}, &dockerfileModel{}, &projectMemberModel{}); err != nil {
+	if err := db.AutoMigrate(&projectModel{}, &templateModel{}, &secretModel{}, &projectMemberModel{}); err != nil {
 		return err
 	}
 	if db.Dialector.Name() == "postgres" {

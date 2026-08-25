@@ -8695,6 +8695,10 @@ textarea {
 }
 
 .project-browse-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
   text-align: left;
   border: 1px solid #ebeef5;
   border-radius: 4px;
@@ -8707,6 +8711,128 @@ textarea {
 .project-browse-item:hover {
   border-color: #409eff;
   color: #409eff;
+}
+
+.project-browse-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.125rem;
+  font-size: 0.875rem;
+}
+
+.project-browse-crumb-sep {
+  color: #909399;
+  margin: 0 0.125rem;
+}
+
+.project-browse-item-icon {
+  flex-shrink: 0;
+}
+
+.project-dockerfile-picker-panel .modal-body {
+  padding-top: 0.5rem;
+}
+
+.project-dockerfile-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.project-dockerfile-picker-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.125rem;
+  font-size: 0.875rem;
+}
+
+.project-dockerfile-picker-crumb-sep {
+  color: #909399;
+  margin: 0 0.25rem;
+}
+
+.project-dockerfile-picker-list {
+  min-height: 18rem;
+  max-height: 22rem;
+  overflow: auto;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.project-dockerfile-picker-list .project-form-hint {
+  padding: 1rem;
+}
+
+.project-dockerfile-picker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-bottom: 1px solid #f2f6fc;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  color: #303133;
+  font-size: 0.875rem;
+}
+
+.project-dockerfile-picker-row:last-child {
+  border-bottom: none;
+}
+
+.project-dockerfile-picker-row:hover,
+.project-dockerfile-picker-row.is-selected {
+  background: #ecf5ff;
+}
+
+.project-dockerfile-picker-row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
+}
+
+.project-dockerfile-picker-row-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.project-dockerfile-picker-tag {
+  flex-shrink: 0;
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  background: #f0f9eb;
+  color: #67c23a;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.project-dockerfile-picker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+}
+
+.project-dockerfile-picker-status {
+  font-size: 0.875rem;
+  color: #606266;
+}
+
+.project-dockerfile-picker-status .is-empty {
+  color: #409eff;
+}
+
+.project-dockerfile-picker-status .is-set {
+  color: #303133;
+  font-weight: 500;
 }
 
 @media (max-width: 768px) {

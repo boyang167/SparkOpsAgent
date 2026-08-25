@@ -78,7 +78,6 @@ function readFeatures(config: Record<string, unknown> | undefined): WorkspaceEnt
   const defaults: WorkspaceEntitlementsVM = {
     agent: true,
     knowledge: true,
-    marketplace: true,
     delivery: true,
     observability: true,
     k8s: false,
@@ -153,7 +152,6 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
       return {
         agent: true,
         knowledge: true,
-        marketplace: true,
         delivery: true,
         observability: true,
         k8s: true,

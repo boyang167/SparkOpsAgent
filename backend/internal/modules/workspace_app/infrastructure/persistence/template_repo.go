@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain"
@@ -84,6 +85,128 @@ func (r *TemplateRepository) ListByWorkspace(ctx context.Context, wsID kernel.Wo
 			return nil, err
 		}
 		out = append(out, t)
+	}
+	return out, nil
+}
+
+func (r *TemplateRepository) ListAccessible(ctx context.Context, wsID kernel.WorkspaceID, orgID kernel.OrgID) ([]*model.TemplateView, error) {
+	if orgID.UUID == uuid.Nil {
+		items, err := r.ListByWorkspace(ctx, wsID)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*model.TemplateView, 0, len(items))
+		for _, item := range items {
+			out = append(out, &model.TemplateView{Template: item})
+		}
+		return out, nil
+	}
+
+	orgWorkspaceIDs, err := r.listWorkspaceIDsByOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	if len(orgWorkspaceIDs) == 0 {
+		return r.ListAccessible(ctx, wsID, kernel.OrgID{})
+	}
+
+	var rows []templateModel
+	err = r.db.WithContext(ctx).
+		Where("workspace_id = ?", wsID.String()).
+		Or("is_public = ? AND workspace_id IN ?", true, orgWorkspaceIDs).
+		Order("created_at DESC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	nameByWS, err := r.workspaceNames(ctx, orgWorkspaceIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]*model.TemplateView, 0, len(rows))
+	for _, row := range rows {
+		t, err := rowToTemplate(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, &model.TemplateView{
+			Template:      t,
+			WorkspaceName: nameByWS[t.WorkspaceID.String()],
+		})
+	}
+	return out, nil
+}
+
+func (r *TemplateRepository) FindAccessible(ctx context.Context, wsID kernel.WorkspaceID, orgID kernel.OrgID, id kernel.TemplateID) (*model.TemplateView, error) {
+	var row templateModel
+	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrTemplateNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	t, err := rowToTemplate(row)
+	if err != nil {
+		return nil, err
+	}
+	if t.WorkspaceID == wsID {
+		return &model.TemplateView{Template: t}, nil
+	}
+	if !t.IsPublic {
+		return nil, domain.ErrTemplateNotFound
+	}
+	if orgID.UUID == uuid.Nil {
+		return nil, domain.ErrTemplateNotFound
+	}
+	var count int64
+	err = r.db.WithContext(ctx).Table("tenant.workspaces").
+		Where("id = ? AND org_id = ? AND deleted_at IS NULL", t.WorkspaceID.String(), orgID.String()).
+		Count(&count).Error
+	if err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, domain.ErrTemplateNotFound
+	}
+	names, err := r.workspaceNames(ctx, []string{t.WorkspaceID.String()})
+	if err != nil {
+		return nil, err
+	}
+	return &model.TemplateView{
+		Template:      t,
+		WorkspaceName: names[t.WorkspaceID.String()],
+	}, nil
+}
+
+func (r *TemplateRepository) listWorkspaceIDsByOrg(ctx context.Context, orgID kernel.OrgID) ([]string, error) {
+	var ids []string
+	err := r.db.WithContext(ctx).Table("tenant.workspaces").
+		Where("org_id = ? AND deleted_at IS NULL", orgID.String()).
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
+func (r *TemplateRepository) workspaceNames(ctx context.Context, workspaceIDs []string) (map[string]string, error) {
+	out := make(map[string]string, len(workspaceIDs))
+	if len(workspaceIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		ID   string
+		Name string
+	}
+	err := r.db.WithContext(ctx).Table("tenant.workspaces").
+		Select("id, name").
+		Where("id IN ?", workspaceIDs).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.ID] = row.Name
 	}
 	return out, nil
 }

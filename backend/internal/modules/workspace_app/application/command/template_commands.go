@@ -112,31 +112,3 @@ func (h *DeleteTemplateHandler) Handle(
 	}
 	return h.repo.Delete(ctx, templateID)
 }
-
-type CreateDockerfileHandler struct {
-	repo      repository.MarketRepository
-	wsChecker port.WorkspaceChecker
-}
-
-func NewCreateDockerfileHandler(repo repository.MarketRepository, wsChecker port.WorkspaceChecker) *CreateDockerfileHandler {
-	return &CreateDockerfileHandler{repo: repo, wsChecker: wsChecker}
-}
-
-func (h *CreateDockerfileHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID, rawName, language, description, detail, dockerfile, version string) (*model.Dockerfile, error) {
-	ok, err := h.wsChecker.MemberInWorkspace(ctx, memberID, wsID)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, domain.ErrWorkspaceAccessDenied
-	}
-	name, err := model.NewDockerfileName(rawName)
-	if err != nil {
-		return nil, err
-	}
-	df := model.NewDockerfile(wsID, name, language, description, detail, dockerfile, version, memberID)
-	if err := h.repo.SaveDockerfile(ctx, df); err != nil {
-		return nil, err
-	}
-	return df, nil
-}

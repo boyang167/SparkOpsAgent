@@ -23,7 +23,6 @@ type CronJobID struct{ uuid.UUID }
 type PodID struct{ uuid.UUID }
 type TemplateID struct{ uuid.UUID }
 type SecretID struct{ uuid.UUID }
-type DockerfileID struct{ uuid.UUID }
 type ProductID struct{ uuid.UUID }
 type ProductPlanID struct{ uuid.UUID }
 type ProductRequirementID struct{ uuid.UUID }
@@ -56,7 +55,6 @@ func NewCronJobID() CronJobID                 { return CronJobID{UUID: uuid.New(
 func NewPodID() PodID                         { return PodID{UUID: uuid.New()} }
 func NewTemplateID() TemplateID               { return TemplateID{UUID: uuid.New()} }
 func NewSecretID() SecretID                   { return SecretID{UUID: uuid.New()} }
-func NewDockerfileID() DockerfileID           { return DockerfileID{UUID: uuid.New()} }
 func NewProductID() ProductID                 { return ProductID{UUID: uuid.New()} }
 func NewProductPlanID() ProductPlanID         { return ProductPlanID{UUID: uuid.New()} }
 func NewProductRequirementID() ProductRequirementID {
@@ -160,11 +158,6 @@ func ParseSecretID(s string) (SecretID, error) {
 	return SecretID{UUID: id}, err
 }
 
-func ParseDockerfileID(s string) (DockerfileID, error) {
-	id, err := uuid.Parse(s)
-	return DockerfileID{UUID: id}, err
-}
-
 func ParseProductID(s string) (ProductID, error) {
 	id, err := uuid.Parse(s)
 	return ProductID{UUID: id}, err
@@ -210,7 +203,6 @@ func (id CronJobID) String() string          { return id.UUID.String() }
 func (id PodID) String() string               { return id.UUID.String() }
 func (id TemplateID) String() string          { return id.UUID.String() }
 func (id SecretID) String() string            { return id.UUID.String() }
-func (id DockerfileID) String() string        { return id.UUID.String() }
 func (id ProductID) String() string           { return id.UUID.String() }
 func (id ProductPlanID) String() string       { return id.UUID.String() }
 func (id ProductRequirementID) String() string { return id.UUID.String() }

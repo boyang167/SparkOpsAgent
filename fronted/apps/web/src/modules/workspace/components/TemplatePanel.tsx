@@ -16,6 +16,8 @@ import {
   labelOf,
   sortTemplates,
   statusBadgeClass,
+  templateIsEditable,
+  templateVisibilityLabel,
   TEMPLATE_KIND_OPTIONS,
   TEMPLATE_LANGUAGE_OPTIONS,
   TEMPLATE_STATUS_OPTIONS,
@@ -131,6 +133,7 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
   }
 
   function openEdit(item: TemplateVM) {
+    if (!templateIsEditable(item)) return;
     setEditingId(item.id);
     setForm({
       name: item.name,
@@ -362,15 +365,19 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
                     <td><span className="badge badge-primary">{labelOf(TEMPLATE_KIND_OPTIONS, item.kind)}</span></td>
                     <td><span className="badge badge-neutral">{labelOf(TEMPLATE_LANGUAGE_OPTIONS, item.language)}</span></td>
                     <td><span className={statusBadgeClass(item.status)}>{labelOf(TEMPLATE_STATUS_OPTIONS, item.status)}</span></td>
-                    <td><span className={`badge ${item.is_public ? "badge-success" : "badge-neutral"}`}>{item.is_public ? "公开" : "私有"}</span></td>
+                    <td><span className={`badge ${item.is_public || item.shared ? "badge-success" : "badge-neutral"}`}>{templateVisibilityLabel(item)}</span></td>
                     <td><TemplateCreator template={item} compact /></td>
                     <td>{formatDateTime(item.created_at)}</td>
                     <td>
                       <div className="template-row-actions">
                         <button type="button" onClick={() => openDetail(item)}>查看</button>
-                        <button type="button" onClick={() => openEdit(item)}>编辑</button>
+                        {templateIsEditable(item) ? (
+                          <>
+                            <button type="button" onClick={() => openEdit(item)}>编辑</button>
+                            <button type="button" className="is-danger" onClick={() => void onDelete(item)}>删除</button>
+                          </>
+                        ) : null}
                         <button type="button" onClick={() => void onCopy(item)}>复制</button>
-                        <button type="button" className="is-danger" onClick={() => void onDelete(item)}>删除</button>
                       </div>
                     </td>
                   </tr>

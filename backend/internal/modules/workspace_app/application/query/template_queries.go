@@ -32,7 +32,11 @@ func (h *ListTemplatesHandler) Handle(ctx context.Context, wsID kernel.Workspace
 	if !ok {
 		return nil, domain.ErrWorkspaceAccessDenied
 	}
-	items, err := h.repo.ListByWorkspace(ctx, wsID)
+	orgID, err := h.wsChecker.OrgIDForWorkspace(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	items, err := h.repo.ListAccessible(ctx, wsID, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -41,8 +45,8 @@ func (h *ListTemplatesHandler) Handle(ctx context.Context, wsID kernel.Workspace
 		return nil, err
 	}
 	out := make([]map[string]any, 0, len(items))
-	for _, t := range items {
-		out = append(out, TemplateToMap(t, creators))
+	for _, item := range items {
+		out = append(out, TemplateViewToMap(wsID, item, creators))
 	}
 	return out, nil
 }
@@ -69,21 +73,25 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID
 	if !ok {
 		return nil, domain.ErrWorkspaceAccessDenied
 	}
-	t, err := h.repo.FindByID(ctx, wsID, templateID)
+	orgID, err := h.wsChecker.OrgIDForWorkspace(ctx, wsID)
 	if err != nil {
 		return nil, err
 	}
-	creators, err := h.memberLookup.FindByIDs(ctx, []kernel.MemberID{t.CreatedBy})
+	view, err := h.repo.FindAccessible(ctx, wsID, orgID, templateID)
 	if err != nil {
 		return nil, err
 	}
-	return TemplateToMap(t, creators), nil
+	creators, err := h.memberLookup.FindByIDs(ctx, []kernel.MemberID{view.Template.CreatedBy})
+	if err != nil {
+		return nil, err
+	}
+	return TemplateViewToMap(wsID, view, creators), nil
 }
 
-func (h *ListTemplatesHandler) loadCreators(ctx context.Context, items []*model.Template) (map[kernel.MemberID]port.MemberSummary, error) {
+func (h *ListTemplatesHandler) loadCreators(ctx context.Context, items []*model.TemplateView) (map[kernel.MemberID]port.MemberSummary, error) {
 	ids := make([]kernel.MemberID, 0, len(items))
-	for _, t := range items {
-		ids = append(ids, t.CreatedBy)
+	for _, item := range items {
+		ids = append(ids, item.Template.CreatedBy)
 	}
 	return h.memberLookup.FindByIDs(ctx, ids)
 }
@@ -94,6 +102,17 @@ func EnrichTemplateMap(ctx context.Context, lookup port.MemberLookup, t *model.T
 		return nil, err
 	}
 	return TemplateToMap(t, creators), nil
+}
+
+func TemplateViewToMap(currentWS kernel.WorkspaceID, view *model.TemplateView, creators map[kernel.MemberID]port.MemberSummary) map[string]any {
+	m := TemplateToMap(view.Template, creators)
+	m["workspace_id"] = view.Template.WorkspaceID.String()
+	if view.WorkspaceName != "" {
+		m["workspace_name"] = view.WorkspaceName
+	}
+	m["shared"] = view.Template.WorkspaceID != currentWS
+	m["editable"] = view.Template.WorkspaceID == currentWS
+	return m
 }
 
 func TemplateToMap(t *model.Template, creators map[kernel.MemberID]port.MemberSummary) map[string]any {
@@ -112,35 +131,23 @@ func TemplateToMap(t *model.Template, creators map[kernel.MemberID]port.MemberSu
 	return m
 }
 
-type ListDockerfilesHandler struct {
-	repo      repository.MarketRepository
-	wsChecker port.WorkspaceChecker
-}
-
-func NewListDockerfilesHandler(repo repository.MarketRepository, wsChecker port.WorkspaceChecker) *ListDockerfilesHandler {
-	return &ListDockerfilesHandler{repo: repo, wsChecker: wsChecker}
-}
-
-func (h *ListDockerfilesHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID) ([]map[string]any, error) {
-	ok, err := h.wsChecker.MemberInWorkspace(ctx, memberID, wsID)
+func ListAccessibleTemplates(
+	ctx context.Context,
+	repo repository.TemplateRepository,
+	wsChecker port.WorkspaceChecker,
+	wsID kernel.WorkspaceID,
+) ([]*model.Template, error) {
+	orgID, err := wsChecker.OrgIDForWorkspace(ctx, wsID)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, domain.ErrWorkspaceAccessDenied
-	}
-	items, err := h.repo.ListDockerfilesByWorkspace(ctx, wsID)
+	views, err := repo.ListAccessible(ctx, wsID, orgID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]map[string]any, 0, len(items))
-	for _, df := range items {
-		out = append(out, map[string]any{
-			"id": df.ID.String(), "name": df.Name.String(), "language": df.Language,
-			"description": df.Description, "detail": df.Detail, "dockerfile": df.Dockerfile,
-			"version": df.Version, "download_count": df.DownloadCount, "score": df.Score,
-			"created_at": df.CreatedAt,
-		})
+	out := make([]*model.Template, 0, len(views))
+	for _, view := range views {
+		out = append(out, view.Template)
 	}
 	return out, nil
 }

@@ -85,3 +85,9 @@ func (t *Template) Update(name TemplateName, kind, language, detail, rules strin
 	t.IsPublic = isPublic
 	t.UpdatedAt = time.Now().UTC()
 }
+
+// TemplateView enriches a template with source workspace metadata for cross-workspace listing.
+type TemplateView struct {
+	Template      *Template
+	WorkspaceName string
+}

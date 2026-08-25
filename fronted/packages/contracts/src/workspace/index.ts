@@ -84,7 +84,9 @@ export const CreateProjectCommandSchema = z.object({
 
 export type CreateProjectCommand = z.infer<typeof CreateProjectCommandSchema>;
 
-export const UpdateProjectCommandSchema = CreateProjectCommandSchema;
+export const UpdateProjectCommandSchema = CreateProjectCommandSchema.extend({
+  namespace: z.string().max(63).optional(),
+});
 
 export type UpdateProjectCommand = z.infer<typeof UpdateProjectCommandSchema>;
 
@@ -168,3 +170,49 @@ export const GeneratedTemplateListVMSchema = z.object({
 });
 
 export type GeneratedTemplateListVM = z.infer<typeof GeneratedTemplateListVMSchema>;
+
+export const GitRefVMSchema = z.object({
+  name: z.string(),
+  title: z.string().optional(),
+  default: z.boolean().optional(),
+  protected: z.boolean().optional(),
+});
+
+export type GitRefVM = z.infer<typeof GitRefVMSchema>;
+
+export const ListGitRefsCommandSchema = z.object({
+  git_url: z.string().min(1),
+  secret_id: z.string().min(1),
+  ref_type: z.enum(["branch", "tag", "commit"]).optional().default("branch"),
+});
+
+export type ListGitRefsCommand = z.infer<typeof ListGitRefsCommandSchema>;
+
+export const GitRefListVMSchema = z.object({
+  items: z.array(GitRefVMSchema),
+});
+
+export type GitRefListVM = z.infer<typeof GitRefListVMSchema>;
+
+export const GitTreeEntryVMSchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  type: z.string(),
+});
+
+export type GitTreeEntryVM = z.infer<typeof GitTreeEntryVMSchema>;
+
+export const ListGitTreeCommandSchema = z.object({
+  git_url: z.string().min(1),
+  secret_id: z.string().min(1),
+  ref: z.string().min(1),
+  path: z.string().optional().default(""),
+});
+
+export type ListGitTreeCommand = z.infer<typeof ListGitTreeCommandSchema>;
+
+export const GitTreeListVMSchema = z.object({
+  items: z.array(GitTreeEntryVMSchema),
+});
+
+export type GitTreeListVM = z.infer<typeof GitTreeListVMSchema>;

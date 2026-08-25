@@ -3,6 +3,7 @@ package acl
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -75,6 +76,26 @@ func (a *TenantACL) CanCreateProject(ctx context.Context, wsID kernel.WorkspaceI
 		return err
 	}
 	return orgQuota.CanCreateProject(int(orgProjectCount))
+}
+
+func (a *TenantACL) OrgIDForWorkspace(ctx context.Context, wsID kernel.WorkspaceID) (kernel.OrgID, error) {
+	var row struct {
+		OrgID string
+	}
+	err := a.db.WithContext(ctx).Table("tenant.workspaces").
+		Select("org_id").
+		Where("id = ? AND deleted_at IS NULL", wsID.String()).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return kernel.OrgID{}, tenantdomain.ErrWorkspaceNotFound
+	}
+	if err != nil {
+		return kernel.OrgID{}, err
+	}
+	if strings.TrimSpace(row.OrgID) == "" {
+		return kernel.OrgID{}, nil
+	}
+	return kernel.ParseOrgID(row.OrgID)
 }
 
 var _ port.WorkspaceChecker = (*TenantACL)(nil)

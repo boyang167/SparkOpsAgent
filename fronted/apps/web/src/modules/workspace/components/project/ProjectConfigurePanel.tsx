@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { product, secret, workspace } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { CreateProjectCommand, ProjectVM } from "@sparkops/contracts/workspace";
@@ -10,7 +10,13 @@ import { Modal } from "@/components/ui/Modal";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { ProjectCreateStep2 } from "./ProjectCreateStep2";
 import { ProjectCreateStep3 } from "./ProjectCreateStep3";
-import { EMPTY_PROJECT_FORM, hasSelectedProjectTemplate, resolvePrimaryTemplateId } from "./project-utils";
+import {
+  buildProjectUpdatePayload,
+  EMPTY_PROJECT_FORM,
+  hasSelectedProjectTemplate,
+  resolvePrimaryTemplateId,
+} from "./project-utils";
+import { isProjectConfigComplete } from "./project-progress";
 
 interface ProjectConfigurePanelProps {
   open: boolean;
@@ -18,6 +24,7 @@ interface ProjectConfigurePanelProps {
   project: ProjectVM;
   onClose: () => void;
   onSaved: () => void;
+  onProjectUpdated?: (project: ProjectVM) => void;
 }
 
 const CONFIG_STEPS = ["填写项目基本信息", "填写项目配置信息", "选择项目模板"] as const;
@@ -49,7 +56,13 @@ function projectToForm(project: ProjectVM): CreateProjectCommand {
     git_url: project.git_url ?? "",
     secret_id: project.secret_id ?? "",
     git_ref_type: project.git_ref_type ?? "branch",
-    git_ref_value: project.git_ref_value ?? "main",
+    git_ref_value: (() => {
+      const value = project.git_ref_value?.trim() ?? "";
+      if (value === "main" && (project.git_ref_type ?? "branch") === "branch" && !isProjectConfigComplete(project)) {
+        return "";
+      }
+      return value;
+    })(),
     dockerfile_path: project.dockerfile_path || "./Dockerfile",
     template_id: project.template_id || resolvePrimaryTemplateId(resources),
     resources,
@@ -62,9 +75,11 @@ export function ProjectConfigurePanel({
   project,
   onClose,
   onSaved,
+  onProjectUpdated,
 }: ProjectConfigurePanelProps) {
   const [step, setStep] = useState(2);
   const [form, setForm] = useState<CreateProjectCommand>(() => projectToForm(project));
+  const openedRef = useRef(false);
   const [gitServiceType, setGitServiceType] = useState<"GitLab" | "GitHub">("GitLab");
   const [secrets, setSecrets] = useState<SecretVM[]>([]);
   const [templates, setTemplates] = useState<TemplateVM[]>([]);
@@ -79,7 +94,13 @@ export function ProjectConfigurePanel({
   );
 
   useEffect(() => {
-    if (!open || project.review_status === "pending") return;
+    if (!open) {
+      openedRef.current = false;
+      return;
+    }
+    if (project.review_status === "pending") return;
+    if (openedRef.current) return;
+    openedRef.current = true;
     setStep(2);
     setForm(projectToForm(project));
     setError(null);
@@ -133,21 +154,12 @@ export function ProjectConfigurePanel({
   }
 
   async function persistProject() {
-    const templateId = form.template_id || resolvePrimaryTemplateId(form.resources);
-    await workspace.updateProject(workspaceId, project.id, {
-      name: project.name,
-      display_name: project.display_name ?? project.name,
-      description: project.description ?? "",
-      namespace: project.namespace,
-      language: form.language,
-      git_url: form.git_url?.trim(),
-      secret_id: form.secret_id || undefined,
-      git_ref_type: form.git_ref_type,
-      git_ref_value: form.git_ref_value?.trim(),
-      dockerfile_path: form.dockerfile_path?.trim() || "./Dockerfile",
-      template_id: templateId || undefined,
-      resources: form.resources,
-    });
+    const payload = buildProjectUpdatePayload(form, project);
+    return workspace.updateProject(workspaceId, project.id, payload);
+  }
+
+  function notifyProjectUpdated(updated: ProjectVM) {
+    onProjectUpdated?.(updated);
   }
 
   function handlePrev() {
@@ -169,7 +181,8 @@ export function ProjectConfigurePanel({
       setSubmitting(true);
       setError(null);
       try {
-        await persistProject();
+        const updated = await persistProject();
+        notifyProjectUpdated(updated);
         setStep(3);
       } catch (err) {
         setError(err instanceof BffError ? err.message : "保存配置失败");
@@ -188,7 +201,8 @@ export function ProjectConfigurePanel({
     setSubmitting(true);
     setError(null);
     try {
-      await persistProject();
+      const updated = await persistProject();
+      notifyProjectUpdated(updated);
       onSaved();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "保存失败");
@@ -241,6 +255,7 @@ export function ProjectConfigurePanel({
 
           {step === 2 ? (
             <ProjectCreateStep2
+              workspaceId={workspaceId}
               form={form}
               updateForm={updateForm}
               gitServiceType={gitServiceType}
