@@ -2,8 +2,6 @@ package query
 
 import (
 	"context"
-	"net/http"
-	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain"
@@ -121,20 +119,12 @@ func (h *TestSecretConnectionHandler) Handle(ctx context.Context, wsID kernel.Wo
 	if s.Status != model.SecretStatusActive {
 		return map[string]any{"success": false, "message": "配置未启用"}, nil
 	}
-	client := &http.Client{Timeout: 8 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.ServiceURL, nil)
+	creds, err := h.crypto.DecryptCredentials(s.CredentialBlob)
 	if err != nil {
-		return map[string]any{"success": false, "message": "无效的服务地址"}, nil
+		return nil, err
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return map[string]any{"success": false, "message": "连接失败"}, nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 200 && resp.StatusCode < 500 {
-		return map[string]any{"success": true, "message": "连接成功"}, nil
-	}
-	return map[string]any{"success": false, "message": "服务返回异常状态"}, nil
+	success, message := testSecretConnectivity(ctx, s, creds)
+	return map[string]any{"success": success, "message": message}, nil
 }
 
 func (h *ListSecretsHandler) loadCreators(ctx context.Context, items []*model.Secret) (map[kernel.MemberID]port.MemberSummary, error) {

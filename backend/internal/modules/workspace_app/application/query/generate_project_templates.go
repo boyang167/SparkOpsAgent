@@ -7,6 +7,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"text/template"
+
+	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
@@ -28,18 +31,24 @@ type GeneratedTemplateArtifact struct {
 type GenerateProjectTemplatesHandler struct {
 	projectRepo  repository.ProjectRepository
 	templateRepo repository.TemplateRepository
+	secretRepo   repository.SecretRepository
 	wsChecker    port.WorkspaceChecker
+	db           *gorm.DB
 }
 
 func NewGenerateProjectTemplatesHandler(
 	projectRepo repository.ProjectRepository,
 	templateRepo repository.TemplateRepository,
+	secretRepo repository.SecretRepository,
 	wsChecker port.WorkspaceChecker,
+	db *gorm.DB,
 ) *GenerateProjectTemplatesHandler {
 	return &GenerateProjectTemplatesHandler{
 		projectRepo:  projectRepo,
 		templateRepo: templateRepo,
+		secretRepo:   secretRepo,
 		wsChecker:    wsChecker,
+		db:           db,
 	}
 }
 
@@ -74,7 +83,7 @@ func (h *GenerateProjectTemplatesHandler) Handle(
 		byID[t.ID.String()] = t
 	}
 
-	return GenerateArtifacts(project, byID), nil
+	return GenerateArtifacts(project, byID, h.loadRenderContext(ctx, wsID, project)), nil
 }
 
 type genPick struct {
@@ -82,28 +91,9 @@ type genPick struct {
 	templateID string
 }
 
-func GenerateArtifacts(project *model.Project, byID map[string]*model.Template) []GeneratedTemplateArtifact {
-	vars := buildTemplateVars(project)
-	picks := make([]genPick, 0, 3)
-
-	if id := strings.TrimSpace(project.Resources.ServiceTemplateID); id != "" {
-		picks = append(picks, genPick{kind: "Service", templateID: id})
-	}
-	if id := strings.TrimSpace(project.Resources.JenkinsfileTemplateID); id != "" {
-		picks = append(picks, genPick{kind: "jenkinsFile", templateID: id})
-	}
-	if id := strings.TrimSpace(project.Resources.DeploymentTemplateID); id != "" {
-		picks = append(picks, genPick{kind: "Deployment", templateID: id})
-	}
-	if len(picks) == 0 && strings.TrimSpace(project.TemplateID) != "" {
-		kind := "Deployment"
-		if t := byID[project.TemplateID]; t != nil {
-			if n := normalizeKind(t.Kind); n != "" {
-				kind = n
-			}
-		}
-		picks = append(picks, genPick{kind: kind, templateID: project.TemplateID})
-	}
+func GenerateArtifacts(project *model.Project, byID map[string]*model.Template, renderCtx TemplateRenderContext) []GeneratedTemplateArtifact {
+	vars := buildTemplateVars(project, renderCtx)
+	picks := collectTemplatePicks(project, byID)
 
 	order := map[string]int{"Service": 0, "jenkinsFile": 1, "Deployment": 2}
 	sort.SliceStable(picks, func(i, j int) bool {
@@ -123,10 +113,14 @@ func GenerateArtifacts(project *model.Project, byID map[string]*model.Template) 
 			templateName = template.Name.String()
 		}
 		content := ""
-		if source != "" && looksLikeManifest(source) {
-			content = renderPlaceholders(source, vars)
+		usedCustomTemplate := source != "" && looksLikeManifest(source)
+		if usedCustomTemplate {
+			content = renderTemplateSource(source, project, pick.kind, renderCtx)
 		} else {
-			content = defaultContent(pick.kind, project, vars)
+			content = defaultContent(pick.kind, project, vars, renderCtx)
+		}
+		if usedCustomTemplate && pick.kind == "Deployment" {
+			content = injectProjectConfigEnv(content, project.Resources.ProjectConfig)
 		}
 		if !strings.HasSuffix(content, "\n") {
 			content += "\n"
@@ -146,6 +140,61 @@ func GenerateArtifacts(project *model.Project, byID map[string]*model.Template) 
 		})
 	}
 	return out
+}
+
+func collectTemplatePicks(project *model.Project, byID map[string]*model.Template) []genPick {
+	resolved := map[string]string{}
+
+	addPick := func(kind, id string) {
+		id = strings.TrimSpace(id)
+		if id == "" || resolved[kind] != "" {
+			return
+		}
+		resolved[kind] = id
+	}
+
+	addByTemplateID := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		kind := "Deployment"
+		if t := byID[id]; t != nil {
+			if k := normalizeKind(t.Kind); k != "" {
+				kind = k
+			}
+		}
+		addPick(kind, id)
+	}
+
+	addPick("Service", project.Resources.ServiceTemplateID)
+	addPick("jenkinsFile", project.Resources.JenkinsfileTemplateID)
+	addPick("Deployment", project.Resources.DeploymentTemplateID)
+	addByTemplateID(project.TemplateID)
+
+	picks := make([]genPick, 0, 3)
+	if id, ok := resolved["Service"]; ok {
+		picks = append(picks, genPick{kind: "Service", templateID: id})
+	} else if resolved["Deployment"] != "" {
+		picks = append(picks, genPick{kind: "Service", templateID: ""})
+	}
+	if id, ok := resolved["jenkinsFile"]; ok {
+		picks = append(picks, genPick{kind: "jenkinsFile", templateID: id})
+	}
+	if id, ok := resolved["Deployment"]; ok {
+		picks = append(picks, genPick{kind: "Deployment", templateID: id})
+	}
+
+	if len(picks) == 0 && strings.TrimSpace(project.TemplateID) != "" {
+		kind := "Deployment"
+		if t := byID[project.TemplateID]; t != nil {
+			if k := normalizeKind(t.Kind); k != "" {
+				kind = k
+			}
+		}
+		picks = append(picks, genPick{kind: kind, templateID: project.TemplateID})
+	}
+	return picks
 }
 
 func normalizeKind(kind string) string {
@@ -175,10 +224,216 @@ func looksLikeManifest(text string) bool {
 }
 
 var (
-	mustacheRe = regexp.MustCompile(`\{\{\s*\.?([a-zA-Z0-9_.-]+)\s*\}\}`)
-	dollarRe   = regexp.MustCompile(`\$\{\s*([a-zA-Z0-9_.-]+)\s*\}`)
-	percentRe  = regexp.MustCompile(`%([A-Z0-9_]+)%`)
+	mustacheRe       = regexp.MustCompile(`\{\{\s*\.?([a-zA-Z0-9_.-]+)\s*\}\}`)
+	dollarRe         = regexp.MustCompile(`\$\{\s*([a-zA-Z0-9_.-]+)\s*\}`)
+	percentRe        = regexp.MustCompile(`%([A-Z0-9_]+)%`)
+	portRangeStartRe = regexp.MustCompile(`\{\{-?\s*range\s+\$k,\$v\s*:=\s*\.ports\s*\}\}`)
+	resourceTypeIfRe = regexp.MustCompile(`\{\{-?\s*if\s+eq\s+\.resourceType\s+"service"\s*\}\}`)
 )
+
+func buildTemplatePorts(ports []model.ProjectPort, kind string) []map[string]interface{} {
+	if len(ports) == 0 {
+		port := 80
+		if kind == "Deployment" {
+			port = 8080
+		}
+		return []map[string]interface{}{
+			{"port": port, "name": "http-80", "protocol": "TCP", "targetPort": port, "container_port": port, "service_port": port},
+		}
+	}
+	out := make([]map[string]interface{}, 0, len(ports))
+	for _, p := range ports {
+		container := p.ContainerPort
+		if container == 0 {
+			container = 80
+		}
+		service := p.ServicePort
+		if service == 0 {
+			service = container
+		}
+		name := strings.TrimSpace(p.Name)
+		if name == "" {
+			name = fmt.Sprintf("http-%d", service)
+		}
+		protocol := orDefault(p.Protocol, "TCP")
+		portVal := service
+		if kind == "Deployment" {
+			portVal = container
+		}
+		out = append(out, map[string]interface{}{
+			"port":           portVal,
+			"name":           name,
+			"protocol":       protocol,
+			"targetPort":     container,
+			"container_port": container,
+			"service_port":   service,
+		})
+	}
+	return out
+}
+
+func applyLegacyTemplateAliases(
+	data map[string]interface{},
+	vars map[string]string,
+	project *model.Project,
+	cpuReq, cpuLim, memReq, memLim string,
+) {
+	legacy := map[string]string{
+		"memory":     memReq,
+		"maxMemory":  memLim,
+		"max_memory": memLim,
+		"cpu":        cpuReq,
+		"max_cpu":    cpuLim,
+		"git_addr":   project.GitURL,
+		"git_buildpath": orDefault(strings.TrimSpace(project.DockerfilePath), "./Dockerfile"),
+	}
+	if project.Resources.EnableStaticScan {
+		legacy["enable_static_scan"] = "true"
+	} else {
+		legacy["enable_static_scan"] = "false"
+	}
+	for k, v := range legacy {
+		vars[k] = v
+		data[k] = v
+	}
+	commands := nonEmptyLines(project.Resources.Command)
+	args := nonEmptyLines(project.Resources.Args)
+	data["command"] = commands
+	data["commands"] = commands
+	data["args"] = args
+}
+
+func buildTemplateData(project *model.Project, kind string, renderCtx TemplateRenderContext) map[string]interface{} {
+	vars := buildTemplateVars(project, renderCtx)
+	data := make(map[string]interface{}, len(vars)+12)
+	for k, v := range vars {
+		data[k] = v
+	}
+	replicas := project.Resources.Replicas
+	if replicas <= 0 {
+		replicas = 1
+	}
+	data["replicas"] = replicas
+	data["resourceType"] = resourceTypeForKind(kind)
+	data["ports"] = buildTemplatePorts(project.Resources.Ports, kind)
+
+	res := project.Resources
+	cpuReq := orDefault(res.CPURequest, "500m")
+	cpuLim := orDefault(res.CPULimit, "1000m")
+	memReq := orDefault(res.MemoryRequest, "512Mi")
+	memLim := orDefault(res.MemoryLimit, "1Gi")
+	resourceMap := map[string]interface{}{
+		"requests": map[string]interface{}{
+			"cpu":    cpuReq,
+			"memory": memReq,
+		},
+		"limits": map[string]interface{}{
+			"cpu":    cpuLim,
+			"memory": memLim,
+		},
+	}
+	data["resources"] = resourceMap
+	data["Resources"] = resourceMap
+	projectEnv := buildProjectEnvData(project.Resources.ProjectConfig)
+	data["project_env"] = projectEnv
+	vars["project_env_yaml"] = formatProjectEnvYAML(buildProjectEnvEntries(project.Resources.ProjectConfig))
+	applyRenderContextData(data, renderCtx, project.Name.String(), orDefault(project.GitRefValue, "latest"))
+	applyLegacyTemplateAliases(data, vars, project, cpuReq, cpuLim, memReq, memLim)
+	return data
+}
+
+func resourceTypeForKind(kind string) string {
+	switch kind {
+	case "Service":
+		return "service"
+	case "Deployment":
+		return "deployment"
+	case "jenkinsFile":
+		return "jenkinsfile"
+	default:
+		return strings.ToLower(kind)
+	}
+}
+
+func renderGoTemplate(source string, data map[string]interface{}) (string, error) {
+	tpl, err := template.New("manifest").Parse(source)
+	if err != nil {
+		return "", err
+	}
+	var buf strings.Builder
+	if err := tpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+func expandPortRangeBlocks(source string, ports []map[string]interface{}) string {
+	loc := portRangeStartRe.FindStringIndex(source)
+	if loc == nil {
+		return source
+	}
+	prefix := source[:loc[0]]
+	rest := source[loc[1]:]
+	endIdx, endLen := portRangeBlockEnd(rest)
+	block := rest[:endIdx]
+	suffix := rest[endIdx+endLen:]
+
+	var b strings.Builder
+	b.WriteString(prefix)
+	for _, p := range ports {
+		line := block
+		for key, val := range p {
+			repl := fmt.Sprint(val)
+			for _, token := range []string{
+				fmt.Sprintf("{{$v.%s}}", key),
+				fmt.Sprintf("{{ $v.%s }}", key),
+				fmt.Sprintf("{{$v.%s}}", strings.ToLower(key)),
+				fmt.Sprintf("{{ $v.%s }}", strings.ToLower(key)),
+			} {
+				line = strings.ReplaceAll(line, token, repl)
+			}
+		}
+		b.WriteString(line)
+	}
+	b.WriteString(suffix)
+	return b.String()
+}
+
+func portRangeBlockEnd(rest string) (idx int, skip int) {
+	for _, marker := range []string{"{{- end }}", "{{- end}}", "{{ end }}", "{{end}}"} {
+		if i := strings.Index(rest, marker); i >= 0 {
+			return i, len(marker)
+		}
+	}
+	for _, marker := range []string{"{{- if", "{{if", "{{- with", "{{with"} {
+		if i := strings.Index(rest, marker); i >= 0 {
+			return i, 0
+		}
+	}
+	return len(rest), 0
+}
+
+func expandResourceTypeConditionals(source, kind string) string {
+	if kind != "Service" {
+		return resourceTypeIfRe.ReplaceAllString(source, "")
+	}
+	return resourceTypeIfRe.ReplaceAllString(source, "")
+}
+
+func renderTemplateSource(source string, project *model.Project, kind string, renderCtx TemplateRenderContext) string {
+	data := buildTemplateData(project, kind, renderCtx)
+	vars := buildTemplateVars(project, renderCtx)
+
+	if strings.Contains(source, "{{") {
+		if out, err := renderGoTemplate(source, data); err == nil {
+			return renderPlaceholders(out, vars)
+		}
+		ports, _ := data["ports"].([]map[string]interface{})
+		source = expandPortRangeBlocks(source, ports)
+		source = expandResourceTypeConditionals(source, kind)
+	}
+	return renderPlaceholders(source, vars)
+}
 
 func renderPlaceholders(source string, vars map[string]string) string {
 	out := mustacheRe.ReplaceAllStringFunc(source, func(m string) string {
@@ -215,7 +470,7 @@ func lookupVar(vars map[string]string, key string) string {
 	return ""
 }
 
-func buildTemplateVars(project *model.Project) map[string]string {
+func buildTemplateVars(project *model.Project, renderCtx TemplateRenderContext) map[string]string {
 	name := project.Name.String()
 	if name == "" {
 		name = "app"
@@ -273,6 +528,19 @@ func buildTemplateVars(project *model.Project) map[string]string {
 
 	for k, v := range parseProjectConfigMap(res.ProjectConfig) {
 		vars[k] = v
+	}
+	applyRenderContextVars(vars, renderCtx, name, gitRefValue)
+	vars["memory"] = memReq
+	vars["maxMemory"] = memLim
+	vars["max_memory"] = memLim
+	vars["cpu"] = cpuReq
+	vars["max_cpu"] = cpuLim
+	vars["git_addr"] = project.GitURL
+	vars["git_buildpath"] = dockerfile
+	if res.EnableStaticScan {
+		vars["enable_static_scan"] = "true"
+	} else {
+		vars["enable_static_scan"] = "false"
 	}
 	return vars
 }
@@ -342,7 +610,7 @@ func escapeYAML(value string) string {
 	return value
 }
 
-func defaultContent(kind string, project *model.Project, vars map[string]string) string {
+func defaultContent(kind string, project *model.Project, vars map[string]string, _ TemplateRenderContext) string {
 	switch kind {
 	case "Service":
 		return defaultService(vars)
@@ -425,6 +693,16 @@ func defaultDeployment(project *model.Project, vars map[string]string) string {
 		}
 	}
 
+	image := vars["image"]
+	if image == "" {
+		image = vars["app_label"] + ":latest"
+	}
+	pullSecret := vars["image_pull_secret_name"]
+	pullSecretBlock := ""
+	if pullSecret != "" {
+		pullSecretBlock = fmt.Sprintf("      imagePullSecrets:\n        - name: %s\n", escapeYAML(pullSecret))
+	}
+
 	return fmt.Sprintf(`apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -442,9 +720,9 @@ spec:
       labels:
         app: %s
     spec:
-      containers:
+%s      containers:
         - name: %s
-          image: %s:latest
+          image: %s
 %s%s%s          ports:
 %s
           resources:
@@ -457,7 +735,8 @@ spec:
 ---
 `,
 		vars["deployment_name"], vars["namespace"], vars["app_label"], vars["replicas"], vars["app_label"], vars["app_label"],
-		vars["app_label"], vars["app_label"],
+		pullSecretBlock,
+		vars["app_label"], image,
 		commandBlock.String(), argsBlock.String(), envBlock.String(),
 		containerPorts.String(),
 		vars["cpu_request"], vars["memory_request"], vars["cpu_limit"], vars["memory_limit"],

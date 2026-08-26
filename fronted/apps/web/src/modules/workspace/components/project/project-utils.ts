@@ -144,10 +144,23 @@ export function resolvePrimaryTemplateId(resources?: {
 
 export function buildProjectUpdatePayload(
   form: CreateProjectCommand,
-  base?: Pick<ProjectVM, "name" | "display_name" | "description" | "namespace">,
+  base?: Pick<ProjectVM, "name" | "display_name" | "description" | "namespace" | "resources">,
+  options?: { preserveTemplateIds?: boolean },
 ): CreateProjectCommand {
   const templateId = form.template_id || resolvePrimaryTemplateId(form.resources);
   const namespace = (base?.namespace ?? form.namespace)?.trim();
+  let resources = form.resources;
+  if (options?.preserveTemplateIds && base?.resources) {
+    resources = {
+      ...form.resources,
+      service_template_id:
+        form.resources?.service_template_id?.trim() || base.resources.service_template_id || "",
+      deployment_template_id:
+        form.resources?.deployment_template_id?.trim() || base.resources.deployment_template_id || "",
+      jenkinsfile_template_id:
+        form.resources?.jenkinsfile_template_id?.trim() || base.resources.jenkinsfile_template_id || "",
+    };
+  }
   return {
     name: base?.name ?? form.name.trim(),
     display_name: (base?.display_name ?? form.display_name)?.trim(),
@@ -160,7 +173,7 @@ export function buildProjectUpdatePayload(
     git_ref_value: form.git_ref_value?.trim(),
     dockerfile_path: form.dockerfile_path?.trim() || "./Dockerfile",
     template_id: templateId || undefined,
-    resources: form.resources,
+    resources,
   };
 }
 

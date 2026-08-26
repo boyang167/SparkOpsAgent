@@ -35,6 +35,32 @@ func TestProject_Rename_NotActive(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrProjectNotActive)
 }
 
+func TestApplyPatch_PreservesTemplateIDsWhenIncomingEmpty(t *testing.T) {
+	name, err := model.NewProjectName("demo")
+	require.NoError(t, err)
+	p := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{
+		Name: "demo",
+		Resources: model.ProjectResources{
+			ServiceTemplateID:     "svc-1",
+			DeploymentTemplateID:  "dep-1",
+			JenkinsfileTemplateID: "jen-1",
+			Replicas:              2,
+		},
+	})
+
+	incoming := p.Resources
+	incoming.ServiceTemplateID = ""
+	incoming.DeploymentTemplateID = ""
+	incoming.JenkinsfileTemplateID = ""
+	incoming.CPURequest = "250m"
+
+	require.NoError(t, p.ApplyPatch(model.UpdateProjectInput{Resources: &incoming}))
+	require.Equal(t, "svc-1", p.Resources.ServiceTemplateID)
+	require.Equal(t, "dep-1", p.Resources.DeploymentTemplateID)
+	require.Equal(t, "jen-1", p.Resources.JenkinsfileTemplateID)
+	require.Equal(t, "250m", p.Resources.CPURequest)
+}
+
 func TestProject_UpdateDetails(t *testing.T) {
 	p := model.NewProject(kernel.NewWorkspaceID(), mustName(t, "demo"), kernel.NewMemberID(), sampleInput("old"))
 	require.NoError(t, p.UpdateDetails(model.CreateProjectInput{Name: "new-name", Description: "new desc"}))

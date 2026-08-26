@@ -153,8 +153,8 @@ export function ProjectConfigurePanel({
     return null;
   }
 
-  async function persistProject() {
-    const payload = buildProjectUpdatePayload(form, project);
+  async function persistProject(preserveTemplateIds = false) {
+    const payload = buildProjectUpdatePayload(form, project, { preserveTemplateIds });
     return workspace.updateProject(workspaceId, project.id, payload);
   }
 
@@ -181,7 +181,7 @@ export function ProjectConfigurePanel({
       setSubmitting(true);
       setError(null);
       try {
-        const updated = await persistProject();
+        const updated = await persistProject(true);
         notifyProjectUpdated(updated);
         setStep(3);
       } catch (err) {

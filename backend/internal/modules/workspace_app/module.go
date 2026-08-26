@@ -83,7 +83,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewUpdateProjectMemberRoleHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
 		command.NewRemoveProjectMemberHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
 		query.NewListProjectMembersHandler(repo, memberRepo),
-		query.NewGenerateProjectTemplatesHandler(repo, templateRepo, wsChecker),
+		query.NewGenerateProjectTemplatesHandler(repo, templateRepo, secretRepo, wsChecker, c.DB),
 		command.NewSubmitProjectReviewHandler(repo, c.ProjectAccessChecker, c.PermissionChecker),
 		command.NewReviewProjectHandler(repo, c.ProjectAccessChecker, c.PermissionChecker),
 		memberLookup,

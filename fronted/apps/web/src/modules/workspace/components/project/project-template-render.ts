@@ -41,11 +41,85 @@ function escapeYaml(value: string) {
   return value;
 }
 
-export function buildTemplateVars(project: ProjectVM): Record<string, string> {
+function sanitizeTemplateSegment(raw: string) {
+  const s = raw.trim().toLowerCase();
+  if (!s) return "na";
+  let out = "";
+  let lastDash = false;
+  for (const ch of s) {
+    if (/[a-z0-9]/.test(ch)) {
+      out += ch;
+      lastDash = false;
+    } else if (ch === "-" && !lastDash) {
+      out += "-";
+      lastDash = true;
+    } else if (/[_\s.]/.test(ch) && !lastDash) {
+      out += "-";
+      lastDash = true;
+    }
+  }
+  const trimmed = out.replace(/^-+|-+$/g, "");
+  return trimmed || "na";
+}
+
+function registryHostFromURL(raw?: string) {
+  const trimmed = raw?.trim() ?? "";
+  if (!trimmed) return "";
+  try {
+    const url = trimmed.includes("://") ? new URL(trimmed) : new URL(`http://${trimmed}`);
+    return url.host || trimmed.replace(/^\/+|\/+$/g, "");
+  } catch {
+    return trimmed.replace(/^\/+|\/+$/g, "");
+  }
+}
+
+function buildImagePullSecretName(
+  orgSlug: string,
+  workspaceSlug: string,
+  registrySecretName: string,
+  projectName: string,
+) {
+  const random4 = String(Math.floor(Math.random() * 10000)).padStart(4, "0");
+  const parts = [
+    sanitizeTemplateSegment(orgSlug),
+    sanitizeTemplateSegment(workspaceSlug),
+    sanitizeTemplateSegment(registrySecretName),
+    sanitizeTemplateSegment(projectName),
+    random4,
+  ];
+  return parts.join("-").slice(0, 253).replace(/^-+|-+$/g, "");
+}
+
+export interface TemplateRenderHints {
+  orgSlug?: string;
+  orgName?: string;
+  workspaceSlug?: string;
+  workspaceName?: string;
+  registrySecretName?: string;
+  registryURL?: string;
+}
+
+export function buildTemplateVars(
+  project: ProjectVM,
+  hints: TemplateRenderHints = {},
+): Record<string, string> {
   const name = project.name || "app";
   const namespace = project.namespace?.trim() || "default";
   const ports = project.resources?.ports ?? [];
   const configEntries = parseProjectConfig(project.resources?.project_config).filter((e) => e.key.trim());
+  const gitRefValue = project.git_ref_value?.trim() || "main";
+  const cpuRequest = project.resources?.cpu_request || "500m";
+  const cpuLimit = project.resources?.cpu_limit || "1000m";
+  const memoryRequest = project.resources?.memory_request || "512Mi";
+  const memoryLimit = project.resources?.memory_limit || "1Gi";
+
+  const workspaceSlug =
+    hints.workspaceSlug?.trim() || sanitizeTemplateSegment(project.namespace?.trim() || name);
+  const orgSlug = hints.orgSlug?.trim() || "org";
+  const registrySecretName = hints.registrySecretName?.trim() || "registry";
+  const registryHost = registryHostFromURL(hints.registryURL) || "harbor.local";
+  const containerImage = `${registryHost}/${workspaceSlug}/${name}:${gitRefValue}`;
+  const imagePullSecretName = buildImagePullSecretName(orgSlug, workspaceSlug, registrySecretName, name);
 
   const vars: Record<string, string> = {
     name,
@@ -55,12 +129,16 @@ export function buildTemplateVars(project: ProjectVM): Record<string, string> {
     language: project.language || "go",
     git_url: project.git_url ?? "",
     git_ref_type: project.git_ref_type || "branch",
-    git_ref_value: project.git_ref_value || "main",
+    git_ref_value: gitRefValue,
     dockerfile_path: project.dockerfile_path || "./Dockerfile",
-    cpu_request: project.resources?.cpu_request || "500m",
-    cpu_limit: project.resources?.cpu_limit || "1000m",
-    memory_request: project.resources?.memory_request || "512Mi",
-    memory_limit: project.resources?.memory_limit || "1Gi",
+    cpu_request: cpuRequest,
+    cpu_limit: cpuLimit,
+    memory_request: memoryRequest,
+    memory_limit: memoryLimit,
+    "resources.requests.cpu": cpuRequest,
+    "resources.requests.memory": memoryRequest,
+    "resources.limits.cpu": cpuLimit,
+    "resources.limits.memory": memoryLimit,
     replicas: String(project.resources?.replicas ?? 1),
     command: project.resources?.command ?? "",
     args: project.resources?.args ?? "",
@@ -68,6 +146,36 @@ export function buildTemplateVars(project: ProjectVM): Record<string, string> {
     service_name: `${name}-service`,
     deployment_name: `${name}-deployment`,
     app_label: name,
+    org_name: hints.orgName?.trim() || orgSlug,
+    org_slug: orgSlug,
+    workspace_name: hints.workspaceName?.trim() || workspaceSlug,
+    workspace_slug: workspaceSlug,
+    registry_secret_name: registrySecretName,
+    registry_url: hints.registryURL?.trim() ?? "",
+    registry_host: registryHost,
+    image_pull_secret_name: imagePullSecretName,
+    imagesecret: imagePullSecretName,
+    image_secret_name: imagePullSecretName,
+    imagePullSecretName: imagePullSecretName,
+    ImagePullSecretName: imagePullSecretName,
+    image: containerImage,
+    image_name: containerImage,
+    Image: containerImage,
+    container_image: containerImage,
+    memory: memoryRequest,
+    maxMemory: memoryLimit,
+    max_memory: memoryLimit,
+    cpu: cpuRequest,
+    max_cpu: cpuLimit,
+    git_addr: project.git_url ?? "",
+    git_version: gitRefValue,
+    git_buildpath: project.dockerfile_path || "./Dockerfile",
+    hub_addr: registryHost,
+    hub_namespace: workspaceSlug,
+    HubAddr: registryHost,
+    HubNameSpace: workspaceSlug,
+    ProjectName: name,
+    CodeVersion: gitRefValue,
   };
 
   for (const entry of configEntries) {
@@ -77,6 +185,50 @@ export function buildTemplateVars(project: ProjectVM): Record<string, string> {
   vars.ports_yaml = formatPortsYaml(ports);
   vars.ports_json = JSON.stringify(ports);
   return vars;
+}
+
+function formatProjectEnvYaml(entries: Array<{ key: string; value: string }>) {
+  return entries
+    .filter((e) => e.key.trim())
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map(
+      (e) =>
+        `        - name: ${escapeYaml(e.key)}\n          value: ${escapeYaml(e.value)}`,
+    )
+    .join("\n");
+}
+
+function existingDeploymentEnvNames(yaml: string) {
+  const names = new Set<string>();
+  for (const match of yaml.matchAll(/^\s*-\s+name:\s+(\S+)/gm)) {
+    names.add(match[1].replace(/^["']|["']$/g, ""));
+  }
+  return names;
+}
+
+export function injectProjectConfigEnv(yamlContent: string, projectConfig?: string) {
+  const entries = parseProjectConfig(projectConfig).filter((e) => e.key.trim());
+  if (entries.length === 0) return yamlContent;
+
+  const existing = existingDeploymentEnvNames(yamlContent);
+  const toAdd = entries.filter((e) => !existing.has(e.key.trim()));
+  if (toAdd.length === 0) return yamlContent;
+
+  const itemBlock = formatProjectEnvYaml(toAdd);
+  const hasEnv = yamlContent.includes("\n        env:");
+  const block = hasEnv ? itemBlock : `        env:\n${itemBlock}`;
+  const anchors = ["\n        envFrom:", "\n        volumeMounts:", "\n        resources:"];
+  for (const anchor of anchors) {
+    const idx = yamlContent.indexOf(anchor);
+    if (idx >= 0) {
+      return `${yamlContent.slice(0, idx)}\n${block}${yamlContent.slice(idx)}`;
+    }
+  }
+
+  if (hasEnv) {
+    return `${yamlContent}\n${itemBlock}`;
+  }
+  return `${yamlContent}\n${block}\n`;
 }
 
 function formatPortsYaml(ports: ProjectPort[]) {
@@ -104,6 +256,60 @@ export function renderPlaceholders(source: string, vars: Record<string, string>)
     .replace(/\{\{\s*\.?([a-zA-Z0-9_.-]+)\s*\}\}/g, (_, key: string) => vars[key] ?? vars[key.toLowerCase()] ?? "")
     .replace(/\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g, (_, key: string) => vars[key] ?? vars[key.toLowerCase()] ?? "")
     .replace(/%([A-Z0-9_]+)%/g, (_, key: string) => vars[key.toLowerCase()] ?? vars[key] ?? "");
+}
+
+function buildTemplatePorts(ports: ProjectPort[]) {
+  const items =
+    ports.length > 0
+      ? ports
+      : [{ container_port: 80, name: "http-80", protocol: "TCP" as const }];
+  return items.map((p) => {
+    const container = p.container_port || 80;
+    const service = p.service_port ?? container;
+    const name = p.name?.trim() || `http-${service}`;
+    const protocol = p.protocol || "TCP";
+    return {
+      port: service,
+      name,
+      protocol,
+      targetPort: container,
+      container_port: container,
+      service_port: service,
+    };
+  });
+}
+
+function expandPortRangeBlocks(source: string, ports: ReturnType<typeof buildTemplatePorts>) {
+  const re = /\{\{-?\s*range\s+\$k,\$v\s*:=\s*\.ports\s*\}\}([\s\S]*?)(?:\{\{-?\s*end\s*\}\}|(?=\{\{-?\s*if\s))/g;
+  return source.replace(re, (_, block: string) =>
+    ports
+      .map((p) => {
+        let line = block;
+        for (const [key, val] of Object.entries(p)) {
+          for (const token of [`{{$v.${key}}}`, `{{ $v.${key} }}`]) {
+            line = line.split(token).join(String(val));
+          }
+        }
+        return line;
+      })
+      .join(""),
+  );
+}
+
+function expandResourceTypeConditionals(source: string, kind: GeneratedKind) {
+  const re = /\{\{-?\s*if\s+eq\s+\.resourceType\s+"service"\s*\}\}/g;
+  return kind === "Service" ? source.replace(re, "") : source.replace(re, "");
+}
+
+function renderTemplateSource(source: string, project: ProjectVM, kind: GeneratedKind) {
+  const vars = buildTemplateVars(project);
+  const ports = buildTemplatePorts(project.resources?.ports ?? []);
+  let out = source;
+  if (out.includes("{{")) {
+    out = expandPortRangeBlocks(out, ports);
+    out = expandResourceTypeConditionals(out, kind);
+  }
+  return renderPlaceholders(out, vars);
 }
 
 function defaultService(vars: Record<string, string>) {
@@ -164,6 +370,11 @@ function defaultDeployment(vars: Record<string, string>, project: ProjectVM) {
           name: http
           protocol: TCP`;
 
+  const image = vars.image || `${vars.app_label}:latest`;
+  const pullSecretBlock = vars.image_pull_secret_name
+    ? `      imagePullSecrets:\n        - name: ${vars.image_pull_secret_name}\n`
+    : "";
+
   return `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -181,9 +392,9 @@ spec:
       labels:
         app: ${vars.app_label}
     spec:
-      containers:
+${pullSecretBlock}      containers:
         - name: ${vars.app_label}
-          image: ${vars.app_label}:latest
+          image: ${image}
 ${commandBlock}${argsBlock}${envBlock}          ports:
 ${containerPorts}
           resources:
@@ -255,6 +466,54 @@ function filenameFor(kind: GeneratedKind, name: string) {
   return `${name}-deployment.yaml`;
 }
 
+function collectTemplatePicks(project: ProjectVM, byId: Map<string, TemplateVM>) {
+  const resolved = new Map<GeneratedKind, string>();
+
+  const addPick = (kind: GeneratedKind, id?: string) => {
+    const value = id?.trim();
+    if (!value || resolved.has(kind)) return;
+    resolved.set(kind, value);
+  };
+
+  const addByTemplateId = (id?: string) => {
+    const value = id?.trim();
+    if (!value) return;
+    const template = byId.get(value);
+    const kind = kindNorm(template?.kind) ?? "Deployment";
+    addPick(kind, value);
+  };
+
+  addPick("Service", project.resources?.service_template_id);
+  addPick("jenkinsFile", project.resources?.jenkinsfile_template_id);
+  addPick("Deployment", project.resources?.deployment_template_id);
+  addByTemplateId(project.template_id);
+
+  const picks: Array<{ kind: GeneratedKind; templateId?: string }> = [];
+  if (resolved.has("Service")) {
+    picks.push({ kind: "Service", templateId: resolved.get("Service") });
+  } else if (resolved.has("Deployment")) {
+    picks.push({ kind: "Service", templateId: undefined });
+  }
+  if (resolved.has("jenkinsFile")) {
+    picks.push({ kind: "jenkinsFile", templateId: resolved.get("jenkinsFile") });
+  }
+  if (resolved.has("Deployment")) {
+    picks.push({ kind: "Deployment", templateId: resolved.get("Deployment") });
+  }
+
+  if (picks.length === 0 && project.template_id?.trim()) {
+    const template = byId.get(project.template_id);
+    picks.push({ kind: kindNorm(template?.kind) ?? "Deployment", templateId: project.template_id });
+  }
+  return picks;
+}
+
+/** 与后端 GenerateArtifacts / generateProjectTemplates 一致的生成数量 */
+export function countGeneratedTemplates(project: ProjectVM, templates: TemplateVM[] = []) {
+  const byId = new Map(templates.map((t) => [t.id, t]));
+  return collectTemplatePicks(project, byId).length;
+}
+
 export function generateProjectTemplates(
   project: ProjectVM,
   templates: TemplateVM[],
@@ -262,21 +521,7 @@ export function generateProjectTemplates(
   const vars = buildTemplateVars(project);
   const byId = new Map(templates.map((t) => [t.id, t]));
 
-  const picks: Array<{ kind: GeneratedKind; templateId?: string }> = [];
-  const serviceId = project.resources?.service_template_id?.trim();
-  const deployId = project.resources?.deployment_template_id?.trim();
-  const jenkinsId = project.resources?.jenkinsfile_template_id?.trim();
-
-  if (serviceId) picks.push({ kind: "Service", templateId: serviceId });
-  if (jenkinsId) picks.push({ kind: "jenkinsFile", templateId: jenkinsId });
-  if (deployId) picks.push({ kind: "Deployment", templateId: deployId });
-
-  // Fallback: if only legacy template_id is set
-  if (picks.length === 0 && project.template_id?.trim()) {
-    const t = byId.get(project.template_id);
-    const kind = kindNorm(t?.kind) ?? "Deployment";
-    picks.push({ kind, templateId: project.template_id });
-  }
+  const picks = collectTemplatePicks(project, byId);
 
   // Stable UI order: Service → Jenkinsfile → Deployment
   const order: GeneratedKind[] = ["Service", "jenkinsFile", "Deployment"];
@@ -285,10 +530,13 @@ export function generateProjectTemplates(
   return picks.map(({ kind, templateId }) => {
     const template = templateId ? byId.get(templateId) : undefined;
     const source = template?.detail?.trim() ?? "";
-    const content =
-      source && looksLikeManifest(source)
-        ? renderPlaceholders(source, vars)
-        : defaultContent(kind, project, vars);
+    const usedCustomTemplate = Boolean(source && looksLikeManifest(source));
+    let content = usedCustomTemplate
+      ? renderTemplateSource(source, project, kind)
+      : defaultContent(kind, project, vars);
+    if (usedCustomTemplate && kind === "Deployment") {
+      content = injectProjectConfigEnv(content, project.resources?.project_config);
+    }
 
     return {
       key: `${kind}-${templateId || "default"}`,

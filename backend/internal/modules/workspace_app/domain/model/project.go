@@ -250,16 +250,33 @@ func (p *Project) ApplyPatch(input UpdateProjectInput) error {
 		p.TemplateID = strings.TrimSpace(*input.TemplateID)
 	}
 	if input.Resources != nil {
-		resources := *input.Resources
-		if resources.Replicas <= 0 {
-			resources.Replicas = 1
-		}
-		p.Resources = resources
+		p.Resources = mergeProjectResources(p.Resources, *input.Resources)
 	}
 	if p.ReviewStatus == ProjectReviewApproved && configChanged {
 		p.resetReview()
 	}
 	return nil
+}
+
+func mergeProjectResources(existing, incoming ProjectResources) ProjectResources {
+	out := incoming
+	if out.Replicas <= 0 {
+		if existing.Replicas > 0 {
+			out.Replicas = existing.Replicas
+		} else {
+			out.Replicas = 1
+		}
+	}
+	if strings.TrimSpace(out.ServiceTemplateID) == "" {
+		out.ServiceTemplateID = existing.ServiceTemplateID
+	}
+	if strings.TrimSpace(out.DeploymentTemplateID) == "" {
+		out.DeploymentTemplateID = existing.DeploymentTemplateID
+	}
+	if strings.TrimSpace(out.JenkinsfileTemplateID) == "" {
+		out.JenkinsfileTemplateID = existing.JenkinsfileTemplateID
+	}
+	return out
 }
 
 func (p *Project) IsConfigComplete() bool {

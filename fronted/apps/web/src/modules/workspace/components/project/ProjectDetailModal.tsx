@@ -20,6 +20,7 @@ import {
 } from "./project-utils";
 import { computeProjectProgress, isProjectConfigComplete } from "./project-progress";
 import { ProjectGeneratedTemplates } from "./ProjectGeneratedTemplates";
+import { countGeneratedTemplates } from "./project-template-render";
 
 interface ProjectDetailModalProps {
   open: boolean;
@@ -227,17 +228,10 @@ export function ProjectDetailModal({
   const progress = project ? computeProjectProgress(project) : null;
   const configComplete = project ? isProjectConfigComplete(project) : false;
 
-  const selectedTemplates = useMemo(() => {
-    if (!project) return [];
-    const ids = [
-      project.resources?.service_template_id,
-      project.resources?.deployment_template_id,
-      project.resources?.jenkinsfile_template_id,
-      project.template_id,
-    ].filter(Boolean) as string[];
-    const unique = [...new Set(ids)];
-    return unique.map((id) => templates.find((t) => t.id === id) ?? { id, name: id, kind: "" });
-  }, [project, templates]);
+  const generatedTemplateCount = useMemo(
+    () => (project ? countGeneratedTemplates(project, templates) : 0),
+    [project, templates],
+  );
 
   const gitSecret = secrets.find((s) => s.id === project?.secret_id);
   const registrySecret = secrets.find((s) => s.id === project?.resources?.registry_secret_id);
@@ -396,8 +390,8 @@ export function ProjectDetailModal({
           open={isOpen("templates")}
           onToggle={() => toggle("templates")}
           badge={
-            selectedTemplates.length > 0 ? (
-              <span className="project-detail-badge is-green">{selectedTemplates.length} 个模板</span>
+            generatedTemplateCount > 0 ? (
+              <span className="project-detail-badge is-green">{generatedTemplateCount} 个模板</span>
             ) : null
           }
         >

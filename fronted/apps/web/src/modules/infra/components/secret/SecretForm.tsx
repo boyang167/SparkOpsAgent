@@ -70,7 +70,11 @@ export function SecretForm({ form, isEdit, submitting, onChange, onSubmit, onCan
             <input
               className="input"
               required
-              placeholder="https://gitlab.example.com"
+              placeholder={
+                form.service_type === "Harbor"
+                  ? "https://192.168.5.24 或 http://harbor.example.com"
+                  : "https://gitlab.example.com"
+              }
               value={form.service_url}
               onChange={(e) => onChange({ ...form, service_url: e.target.value })}
             />
