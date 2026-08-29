@@ -78,6 +78,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewTestSecretConnectionHandler(secretRepo, wsChecker, secretCrypto),
 		query.NewListGitRefsHandler(secretRepo, wsChecker, secretCrypto),
 		query.NewListGitTreeHandler(secretRepo, wsChecker, secretCrypto),
+		query.NewGetGitFileContentHandler(secretRepo, wsChecker, secretCrypto),
 		secretCrypto,
 		command.NewAddProjectMemberHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
 		command.NewUpdateProjectMemberRoleHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
@@ -146,6 +147,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListGitRefs)
 	c.Engine.POST("/api/v1/workspaces/:wsId/git/tree",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListGitTree)
+	c.Engine.POST("/api/v1/workspaces/:wsId/git/file",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetGitFileContent)
 
 	return nil
 }

@@ -233,13 +233,13 @@ export function injectProjectConfigEnv(yamlContent: string, projectConfig?: stri
 
 function formatPortsYaml(ports: ProjectPort[]) {
   if (ports.length === 0) {
-    return `    - port: 80
+    return `    - port: 8080
       name: http-80
       protocol: TCP`;
   }
   return ports
     .map((p) => {
-      const container = p.container_port || 80;
+      const container = p.container_port || 8080;
       const service = p.service_port ?? container;
       const protocol = p.protocol || "TCP";
       const name = p.name?.trim() || `http-${service}`;
@@ -262,9 +262,9 @@ function buildTemplatePorts(ports: ProjectPort[]) {
   const items =
     ports.length > 0
       ? ports
-      : [{ container_port: 80, name: "http-80", protocol: "TCP" as const }];
+      : [{ container_port: 8080, name: "http-80", protocol: "TCP" as const }];
   return items.map((p) => {
-    const container = p.container_port || 80;
+    const container = p.container_port || 8080;
     const service = p.service_port ?? container;
     const name = p.name?.trim() || `http-${service}`;
     const protocol = p.protocol || "TCP";

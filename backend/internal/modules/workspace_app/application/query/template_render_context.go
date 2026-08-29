@@ -17,6 +17,8 @@ type TemplateRenderContext struct {
 	OrgSlug            string
 	WorkspaceName      string
 	WorkspaceSlug      string
+	GitSecretName      string
+	GitCredentialID    string
 	RegistrySecretName string
 	RegistryURL        string
 	RegistryHost       string
@@ -66,6 +68,14 @@ func (h *GenerateProjectTemplatesHandler) loadRenderContext(
 	}
 
 	if h.secretRepo != nil {
+		gitSecretID := strings.TrimSpace(project.SecretID)
+		if gitSecretID != "" {
+			if sid, err := kernel.ParseSecretID(gitSecretID); err == nil {
+				if sec, err := h.secretRepo.FindByID(ctx, wsID, sid); err == nil && sec != nil {
+					out.GitSecretName = sec.Name.String()
+				}
+			}
+		}
 		secretID := strings.TrimSpace(project.Resources.RegistrySecretID)
 		if secretID != "" {
 			if sid, err := kernel.ParseSecretID(secretID); err == nil {
@@ -80,18 +90,26 @@ func (h *GenerateProjectTemplatesHandler) loadRenderContext(
 	if out.RegistrySecretName == "" {
 		out.RegistrySecretName = "registry"
 	}
+	if out.GitSecretName == "" {
+		out.GitSecretName = "gitlab"
+	}
 	if out.RegistryHost == "" {
 		out.RegistryHost = "harbor.local"
 	}
+
+	wsSegment := out.WorkspaceSlug
+	if wsSegment == "" {
+		wsSegment = sanitizeTemplateSegment(project.Namespace)
+	}
+	if wsSegment == "" {
+		wsSegment = sanitizeTemplateSegment(project.Name.String())
+	}
+	out.GitCredentialID = fmt.Sprintf("git-%s-%s", sanitizeTemplateSegment(wsSegment), sanitizeTemplateSegment(out.GitSecretName))
 
 	projectName := project.Name.String()
 	gitRef := strings.TrimSpace(project.GitRefValue)
 	if gitRef == "" {
 		gitRef = "latest"
-	}
-	wsSegment := out.WorkspaceSlug
-	if wsSegment == "" {
-		wsSegment = sanitizeTemplateSegment(projectName)
 	}
 
 	out.ContainerImage = fmt.Sprintf("%s/%s/%s:%s", out.RegistryHost, wsSegment, projectName, gitRef)
@@ -185,6 +203,8 @@ func applyRenderContextVars(vars map[string]string, renderCtx TemplateRenderCont
 	vars["ProjectName"] = projectName
 	vars["CodeVersion"] = gitRefValue
 	vars["git_version"] = gitRefValue
+	vars["git_credential_id"] = renderCtx.GitCredentialID
+	vars["CodeCrendentialId"] = renderCtx.GitCredentialID
 }
 
 func applyRenderContextData(data map[string]interface{}, renderCtx TemplateRenderContext, projectName, gitRefValue string) {
@@ -212,4 +232,6 @@ func applyRenderContextData(data map[string]interface{}, renderCtx TemplateRende
 	data["ProjectName"] = projectName
 	data["CodeVersion"] = gitRefValue
 	data["git_version"] = gitRefValue
+	data["git_credential_id"] = renderCtx.GitCredentialID
+	data["CodeCrendentialId"] = renderCtx.GitCredentialID
 }

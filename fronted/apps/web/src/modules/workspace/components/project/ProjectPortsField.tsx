@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { ProjectPort } from "@sparkops/contracts/workspace";
 
 interface ProjectPortsFieldProps {
@@ -9,12 +9,22 @@ interface ProjectPortsFieldProps {
 }
 
 const DEFAULT_PROTOCOL: NonNullable<ProjectPort["protocol"]> = "TCP";
+const DEFAULT_PORT_NUMBER = 8080;
+const DEFAULT_PORT_NAME = "http-80";
+
+function defaultPort(): ProjectPort {
+  return {
+    name: DEFAULT_PORT_NAME,
+    container_port: DEFAULT_PORT_NUMBER,
+    protocol: DEFAULT_PROTOCOL,
+  };
+}
 
 function emptyPort(): ProjectPort {
   return { name: "", container_port: 0, protocol: DEFAULT_PROTOCOL };
 }
 
-function commitPort(port: ProjectPort): ProjectPort {
+function normalizePort(port: ProjectPort): ProjectPort {
   const containerPort = Math.max(0, port.container_port || 0);
   return {
     ...port,
@@ -24,89 +34,80 @@ function commitPort(port: ProjectPort): ProjectPort {
   };
 }
 
-function committedPorts(ports: ProjectPort[]) {
-  return ports.filter((port) => port.container_port > 0).map(commitPort);
+function normalizePorts(ports: ProjectPort[]): ProjectPort[] {
+  return ports.filter((port) => port.container_port > 0).map(normalizePort);
 }
 
-function draftHasContent(port: ProjectPort) {
+function portHasContent(port: ProjectPort) {
   return port.container_port > 0 || Boolean(port.name?.trim());
 }
 
 export function ProjectPortsField({ ports, onChange }: ProjectPortsFieldProps) {
-  const saved = committedPorts(ports);
-  const [draft, setDraft] = useState<ProjectPort>(emptyPort);
+  const rows = normalizePorts(ports);
+  const [trailing, setTrailing] = useState<ProjectPort>(emptyPort);
 
-  useEffect(() => {
-    if (saved.length === 0) {
-      setDraft(emptyPort());
-    }
-  }, [ports, saved.length]);
-
-  // 首行草稿有有效端口时同步到表单，避免点「下一步」时端口未提交
-  useEffect(() => {
-    if (saved.length > 0 || draft.container_port <= 0) return;
-    onChange([commitPort(draft)]);
-    setDraft(emptyPort());
-  }, [draft.container_port, draft.name, draft.protocol, draft.service_port, saved.length, onChange]);
-
-  function replaceSaved(next: ProjectPort[]) {
-    onChange(next.filter((port) => port.container_port > 0).map(commitPort));
+  function replaceRows(next: ProjectPort[]) {
+    onChange(normalizePorts(next));
   }
 
-  function updateSavedRow(index: number, patch: Partial<ProjectPort>) {
-    replaceSaved(saved.map((port, i) => (i === index ? commitPort({ ...port, ...patch }) : port)));
-  }
-
-  function updateDraft(patch: Partial<ProjectPort>) {
-    setDraft((prev) => ({ ...prev, ...patch }));
-  }
-
-  function appendDraft() {
-    const merged = commitPort(draft);
-    if (merged.container_port <= 0) return;
-    replaceSaved([...saved, merged]);
-    setDraft(emptyPort());
-  }
-
-  function addRow(afterIndex: number) {
-    const nextPort = commitPort({ name: "", container_port: 8080, protocol: DEFAULT_PROTOCOL });
-    if (afterIndex >= saved.length - 1) {
-      replaceSaved([...saved, nextPort]);
-      return;
-    }
-    const next = [...saved];
-    next.splice(afterIndex + 1, 0, nextPort);
-    replaceSaved(next);
+  function updateRow(index: number, patch: Partial<ProjectPort>) {
+    replaceRows(rows.map((row, i) => (i === index ? normalizePort({ ...row, ...patch }) : row)));
   }
 
   function removeRow(index: number) {
-    replaceSaved(saved.filter((_, i) => i !== index));
+    replaceRows(rows.filter((_, i) => i !== index));
   }
 
-  function clearDraft() {
-    setDraft(emptyPort());
+  function insertRow(afterIndex: number, port: ProjectPort) {
+    const next = [...rows];
+    next.splice(afterIndex + 1, 0, normalizePort(port));
+    replaceRows(next);
   }
 
-  function stepPort(index: number, delta: number, isDraft: boolean) {
-    const current = isDraft ? draft : saved[index] ?? emptyPort();
-    const base = current.container_port > 0 ? current.container_port : 8080;
-    const next = Math.min(65535, Math.max(80, base + delta));
-    if (isDraft) {
-      updateDraft({ container_port: next });
-      return;
-    }
-    updateSavedRow(index, { container_port: next });
+  function appendRow(port: ProjectPort) {
+    replaceRows([...rows, normalizePort(port)]);
   }
 
-  function renderRow(port: ProjectPort, index: number, isDraft: boolean) {
+  function commitTrailing() {
+    if (trailing.container_port <= 0) return;
+    appendRow(trailing);
+    setTrailing(emptyPort());
+  }
+
+  function updateTrailing(patch: Partial<ProjectPort>) {
+    setTrailing((prev) => normalizePort({ ...prev, ...patch }));
+  }
+
+  function clearTrailing() {
+    setTrailing(emptyPort());
+  }
+
+  function stepPort(port: ProjectPort, delta: number, onUpdate: (patch: Partial<ProjectPort>) => void) {
+    const base = port.container_port > 0 ? port.container_port : DEFAULT_PORT_NUMBER;
+    onUpdate({ container_port: Math.min(65535, Math.max(80, base + delta)) });
+  }
+
+  function renderRow(
+    port: ProjectPort,
+    index: number,
+    options: {
+      key: string;
+      onUpdate: (patch: Partial<ProjectPort>) => void;
+      onAdd: () => void;
+      onRemove: () => void;
+      showRemove: boolean;
+      onBlur?: () => void;
+    },
+  ) {
+    const { key, onUpdate, onAdd, onRemove, showRemove, onBlur } = options;
     return (
-      <div key={isDraft ? "draft" : index} className="project-ports-row">
+      <div key={key} className="project-ports-row">
         <div className="project-ports-port-wrap">
           <button
             type="button"
             className="project-ports-stepper-btn"
             aria-label="减少端口"
-            onClick={() => stepPort(index, -1, isDraft)}
+            onClick={() => stepPort(port, -1, onUpdate)}
           >
             −
           </button>
@@ -119,19 +120,15 @@ export function ProjectPortsField({ ports, onChange }: ProjectPortsFieldProps) {
             value={port.container_port > 0 ? port.container_port : ""}
             onChange={(e) => {
               const raw = e.target.value;
-              const container_port = raw === "" ? 0 : Number(raw) || 0;
-              if (isDraft) {
-                updateDraft({ container_port });
-                return;
-              }
-              updateSavedRow(index, { container_port });
+              onUpdate({ container_port: raw === "" ? 0 : Number(raw) || 0 });
             }}
+            onBlur={onBlur}
           />
           <button
             type="button"
             className="project-ports-stepper-btn"
             aria-label="增加端口"
-            onClick={() => stepPort(index, 1, isDraft)}
+            onClick={() => stepPort(port, 1, onUpdate)}
           >
             +
           </button>
@@ -139,14 +136,7 @@ export function ProjectPortsField({ ports, onChange }: ProjectPortsFieldProps) {
         <select
           className="input project-ports-protocol"
           value={port.protocol ?? DEFAULT_PROTOCOL}
-          onChange={(e) => {
-            const protocol = e.target.value as ProjectPort["protocol"];
-            if (isDraft) {
-              updateDraft({ protocol });
-              return;
-            }
-            updateSavedRow(index, { protocol });
-          }}
+          onChange={(e) => onUpdate({ protocol: e.target.value as ProjectPort["protocol"] })}
         >
           <option value="TCP">TCP</option>
           <option value="UDP">UDP</option>
@@ -155,29 +145,13 @@ export function ProjectPortsField({ ports, onChange }: ProjectPortsFieldProps) {
           className="input project-ports-name"
           placeholder="端口名称: http-80..."
           value={port.name ?? ""}
-          onChange={(e) => {
-            if (isDraft) {
-              updateDraft({ name: e.target.value });
-              return;
-            }
-            updateSavedRow(index, { name: e.target.value });
-          }}
+          onChange={(e) => onUpdate({ name: e.target.value })}
         />
-        <button
-          type="button"
-          className="project-ports-add-btn"
-          aria-label="添加端口"
-          onClick={() => (isDraft ? appendDraft() : addRow(index))}
-        >
+        <button type="button" className="project-ports-add-btn" aria-label="添加端口" onClick={onAdd}>
           +
         </button>
-        {!isDraft || draftHasContent(port) ? (
-          <button
-            type="button"
-            className="project-ports-remove-btn"
-            aria-label={isDraft ? "清除端口" : "删除端口"}
-            onClick={() => (isDraft ? clearDraft() : removeRow(index))}
-          >
+        {showRemove ? (
+          <button type="button" className="project-ports-remove-btn" aria-label="删除端口" onClick={onRemove}>
             ×
           </button>
         ) : null}
@@ -187,8 +161,33 @@ export function ProjectPortsField({ ports, onChange }: ProjectPortsFieldProps) {
 
   return (
     <div className="project-ports-field">
-      {saved.map((port, index) => renderRow(port, index, false))}
-      {renderRow(draft, saved.length, true)}
+      {rows.map((port, index) =>
+        renderRow(port, index, {
+          key: `saved-${index}`,
+          onUpdate: (patch) => updateRow(index, patch),
+          onAdd: () => insertRow(index, defaultPort()),
+          onRemove: () => removeRow(index),
+          showRemove: true,
+        }),
+      )}
+      {renderRow(trailing, rows.length, {
+        key: "trailing",
+        onUpdate: (patch) => updateTrailing(patch),
+        onAdd: () => {
+          if (trailing.container_port > 0) {
+            commitTrailing();
+            return;
+          }
+          appendRow(defaultPort());
+        },
+        onRemove: () => clearTrailing(),
+        showRemove: portHasContent(trailing),
+        onBlur: () => {
+          if (trailing.container_port > 0) {
+            commitTrailing();
+          }
+        },
+      })}
     </div>
   );
 }

@@ -298,6 +298,40 @@ func (s *TenantStore) GetOrganizationMemberRole(ctx context.Context, orgID kerne
 	return row.Role, nil
 }
 
+func (s *TenantStore) ListOrganizationOwners(ctx context.Context) ([]repository.OrgOwner, error) {
+	type row struct {
+		OrgID       string
+		MemberID    string
+		Email       string
+		DisplayName string
+	}
+	var rows []row
+	err := s.db.WithContext(ctx).Raw(`
+		SELECT om.org_id, om.member_id, m.email, m.display_name
+		FROM tenant.organization_members om
+		JOIN identity.members m ON m.id = om.member_id
+		WHERE om.role = ? AND om.deleted_at IS NULL AND m.deleted_at IS NULL
+	`, domain.OrgRoleOwner).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]repository.OrgOwner, 0, len(rows))
+	for _, r := range rows {
+		orgID, parseErr := kernel.ParseOrgID(r.OrgID)
+		if parseErr != nil {
+			continue
+		}
+		memberID, parseErr := kernel.ParseMemberID(r.MemberID)
+		if parseErr != nil {
+			continue
+		}
+		out = append(out, repository.OrgOwner{
+			OrgID: orgID, MemberID: memberID, Email: r.Email, DisplayName: r.DisplayName,
+		})
+	}
+	return out, nil
+}
+
 func (s *TenantStore) ListOrganizationMembers(ctx context.Context, orgID kernel.OrgID) ([]repository.OrgMember, error) {
 	type row struct {
 		MemberID    string
@@ -572,6 +606,9 @@ func (r *orgRepo) GetMemberRole(ctx context.Context, orgID kernel.OrgID, memberI
 }
 func (r *orgRepo) ListMembers(ctx context.Context, orgID kernel.OrgID) ([]repository.OrgMember, error) {
 	return r.store.ListOrganizationMembers(ctx, orgID)
+}
+func (r *orgRepo) ListOwners(ctx context.Context) ([]repository.OrgOwner, error) {
+	return r.store.ListOrganizationOwners(ctx)
 }
 func (r *orgRepo) UpdateMemberRole(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID, role string) error {
 	return r.store.UpdateOrganizationMemberRole(ctx, orgID, memberID, role)

@@ -134,6 +134,20 @@ export function createWorkspaceUpstream(options: UpstreamRequestOptions = {}) {
         },
       );
     },
+
+    async getGitFileContent(
+      workspaceId: string,
+      input: import("@sparkops/contracts/workspace").GetGitFileContentCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/workspace").GitFileContentVM>(
+        `/api/v1/workspaces/${workspaceId}/git/file`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          options: { ...options, workspaceId },
+        },
+      );
+    },
   };
 }
 

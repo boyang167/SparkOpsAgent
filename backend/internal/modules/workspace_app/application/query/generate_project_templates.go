@@ -233,10 +233,7 @@ var (
 
 func buildTemplatePorts(ports []model.ProjectPort, kind string) []map[string]interface{} {
 	if len(ports) == 0 {
-		port := 80
-		if kind == "Deployment" {
-			port = 8080
-		}
+		port := 8080
 		return []map[string]interface{}{
 			{"port": port, "name": "http-80", "protocol": "TCP", "targetPort": port, "container_port": port, "service_port": port},
 		}
@@ -575,7 +572,7 @@ func parseProjectConfigMap(raw string) map[string]string {
 
 func formatPortsYAML(ports []model.ProjectPort) string {
 	if len(ports) == 0 {
-		return `    - port: 80
+		return `    - port: 8080
       name: http-80
       protocol: TCP`
 	}

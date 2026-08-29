@@ -11,4 +11,5 @@ export {
 export { listGeneratedTemplates } from "./generatedTemplates";
 export { listGitRefs } from "./gitRefs";
 export { listGitTree } from "./gitTree";
+export { getGitFileContent } from "./gitFile";
 export { submitProjectReview, reviewProject } from "./projectReview";

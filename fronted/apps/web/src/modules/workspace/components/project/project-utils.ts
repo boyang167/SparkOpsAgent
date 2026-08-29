@@ -38,7 +38,7 @@ export const EMPTY_PROJECT_FORM: CreateProjectCommand = {
     memory_request: "512Mi",
     memory_limit: "1Gi",
     replicas: 1,
-    ports: [],
+    ports: [{ name: "http-80", container_port: 8080, service_port: 8080, protocol: "TCP" }],
     command: "",
     args: "",
     project_config: "",

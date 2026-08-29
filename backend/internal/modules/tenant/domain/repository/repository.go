@@ -15,6 +15,13 @@ type OrgMember struct {
 	JoinedAt    string
 }
 
+type OrgOwner struct {
+	OrgID       kernel.OrgID
+	MemberID    kernel.MemberID
+	Email       string
+	DisplayName string
+}
+
 type OrgUsage struct {
 	Workspaces int
 	Agents     int
@@ -36,6 +43,7 @@ type OrganizationRepository interface {
 	IsMember(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID) (bool, error)
 	GetMemberRole(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID) (string, error)
 	ListMembers(ctx context.Context, orgID kernel.OrgID) ([]OrgMember, error)
+	ListOwners(ctx context.Context) ([]OrgOwner, error)
 	UpdateMemberRole(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID, role string) error
 	RemoveMember(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID) error
 	CountMembersByRole(ctx context.Context, orgID kernel.OrgID, role string) (int, error)

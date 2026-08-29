@@ -20,6 +20,7 @@ import {
 } from "./project-utils";
 import { computeProjectProgress, isProjectConfigComplete } from "./project-progress";
 import { ProjectGeneratedTemplates } from "./ProjectGeneratedTemplates";
+import { ProjectDockerfileViewer } from "./ProjectDockerfileViewer";
 import { countGeneratedTemplates } from "./project-template-render";
 
 interface ProjectDetailModalProps {
@@ -34,6 +35,7 @@ interface ProjectDetailModalProps {
 type SectionKey =
   | "basic"
   | "git"
+  | "dockerfile"
   | "secret"
   | "templates"
   | "stats"
@@ -166,6 +168,15 @@ function IconBot() {
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="5" y="8" width="14" height="10" rx="2" />
       <path d="M12 4v4M9 13h.01M15 13h.01M8 18v2M16 18v2" />
+    </svg>
+  );
+}
+
+function IconDocker() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M4 10h16v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8z" />
+      <path d="M7 10V7h2v3M11 10V6h2v4M15 10V8h2v2" />
     </svg>
   );
 }
@@ -339,13 +350,17 @@ export function ProjectDetailModal({
                 value: project.git_ref_type || "branch",
               },
               { label: "引用值", value: project.git_ref_value || "-" },
-              {
-                label: "Dockerfile 路径",
-                value: project.dockerfile_path || "./Dockerfile",
-                full: true,
-              },
             ]}
           />
+        </DetailAccordion>
+
+        <DetailAccordion
+          title="Dockerfile"
+          icon={<IconDocker />}
+          open={isOpen("dockerfile")}
+          onToggle={() => toggle("dockerfile")}
+        >
+          <ProjectDockerfileViewer workspaceId={workspaceId} project={project} />
         </DetailAccordion>
 
         <DetailAccordion

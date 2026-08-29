@@ -89,7 +89,15 @@ func (h *ListProjectsHandler) Handle(ctx context.Context, wsID kernel.WorkspaceI
 	if err != nil {
 		return nil, err
 	}
-	if !isAdmin {
+	canSeeAllProjects := isAdmin
+	if !canSeeAllProjects {
+		hasReview, reviewErr := hasPermission(ctx, h.governance, wsID, memberID, authz.PermProjectReview)
+		if reviewErr != nil {
+			return nil, reviewErr
+		}
+		canSeeAllProjects = hasReview
+	}
+	if !canSeeAllProjects {
 		allowedIDs, err := h.memberRepo.ListProjectIDsForMember(ctx, wsID, memberID)
 		if err != nil {
 			return nil, err
@@ -184,8 +192,6 @@ func applyReviewCapabilities(
 	if err != nil {
 		return err
 	}
-	canWrite := isAdmin || (hasProject && (role == model.ProjectRoleLead || role == model.ProjectRoleMember))
-	canRead := isAdmin || hasProject
 	hasSubmit, err := hasPermission(ctx, governance, wsID, memberID, authz.PermProjectSubmit)
 	if err != nil {
 		return err
@@ -194,6 +200,8 @@ func applyReviewCapabilities(
 	if err != nil {
 		return err
 	}
+	canWrite := isAdmin || (hasProject && (role == model.ProjectRoleLead || role == model.ProjectRoleMember))
+	canRead := isAdmin || hasProject || hasReview
 	view.CanSubmitReview = CanSubmitReview(project, canWrite, isAdmin || hasSubmit)
 	view.CanReview = CanReviewProject(project, memberID, canRead, isAdmin || hasReview)
 	return nil

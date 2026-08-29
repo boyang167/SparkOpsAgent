@@ -34,6 +34,7 @@ type Handler struct {
 	testSecret        *query.TestSecretConnectionHandler
 	listGitRefs       *query.ListGitRefsHandler
 	listGitTree       *query.ListGitTreeHandler
+	getGitFileContent *query.GetGitFileContentHandler
 	secretCrypto      *application.SecretCrypto
 	addMember         *command.AddProjectMemberHandler
 	updateMemberRole  *command.UpdateProjectMemberRoleHandler
@@ -64,6 +65,7 @@ func NewHandler(
 	testSecret *query.TestSecretConnectionHandler,
 	listGitRefs *query.ListGitRefsHandler,
 	listGitTree *query.ListGitTreeHandler,
+	getGitFileContent *query.GetGitFileContentHandler,
 	secretCrypto *application.SecretCrypto,
 	addMember *command.AddProjectMemberHandler,
 	updateMemberRole *command.UpdateProjectMemberRoleHandler,
@@ -81,8 +83,9 @@ func NewHandler(
 		createSecret: createSecret, updateSecret: updateSecret, deleteSecret: deleteSecret,
 		listSecrets: listSecrets, getSecret: getSecret, testSecret: testSecret,
 		listGitRefs:  listGitRefs,
-		listGitTree:  listGitTree,
-		secretCrypto: secretCrypto,
+		listGitTree:       listGitTree,
+		getGitFileContent: getGitFileContent,
+		secretCrypto:      secretCrypto,
 		addMember: addMember, updateMemberRole: updateMemberRole, removeMember: removeMember,
 		listMembers: listMembers, generateTemplates: generateTemplates,
 		submitReview: submitReview, reviewProject: reviewProject, memberLookup: memberLookup,

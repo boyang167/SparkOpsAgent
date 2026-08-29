@@ -105,6 +105,9 @@ export const PlatformOrganizationVMSchema = z.object({
   slug: z.string(),
   status: z.enum(["active", "suspended", "deleted"]),
   created_at: z.string(),
+  owner_id: z.string().optional(),
+  owner_email: z.string().optional(),
+  owner_display_name: z.string().optional(),
 });
 
 export type PlatformOrganizationVM = z.infer<typeof PlatformOrganizationVMSchema>;

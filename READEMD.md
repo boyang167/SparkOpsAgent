@@ -95,3 +95,13 @@ https://docker.aityp.com/i/search?search=jenkins
 
 gitlab: root asdf!123456
 glpat-emaYfTem-JstBup3_U43d286MQp1OjEH.01.0w0hwoe9p
+
+admin 
+Harbor12345
+
+test-gitlab  glpat-LOYje5HyX9RQd1Kjs-4Vx286MQp1OjMH.01.0w16qu9hd
+ssh://git@192.168.5.24:2224/cicd/test-repo.git
+http://192.168.5.24:8929/cicd/test-repo.git
+
+
+jenkins : root 123456

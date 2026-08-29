@@ -160,3 +160,17 @@ export async function listGitTree(
   );
   return data.items;
 }
+
+export async function getGitFileContent(
+  workspaceId: string,
+  input: import("@sparkops/contracts/workspace").GetGitFileContentCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/workspace").GitFileContentVM>(
+    `/workspaces/${workspaceId}/git/file`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+      ...withWorkspace(workspaceId),
+    },
+  );
+}

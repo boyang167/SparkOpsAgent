@@ -8,11 +8,14 @@ import (
 )
 
 type PlatformOrganizationView struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Slug      string `json:"slug"`
-	Status    string `json:"status"`
-	CreatedAt string `json:"created_at"`
+	ID                string  `json:"id"`
+	Name              string  `json:"name"`
+	Slug              string  `json:"slug"`
+	Status            string  `json:"status"`
+	CreatedAt         string  `json:"created_at"`
+	OwnerID           *string `json:"owner_id,omitempty"`
+	OwnerEmail        *string `json:"owner_email,omitempty"`
+	OwnerDisplayName  *string `json:"owner_display_name,omitempty"`
 }
 
 type ListPlatformOrganizationsHandler struct {
@@ -28,16 +31,33 @@ func (h *ListPlatformOrganizationsHandler) Handle(ctx context.Context) ([]Platfo
 	if err != nil {
 		return nil, err
 	}
-	return toPlatformOrgViews(items), nil
+	owners, err := h.repo.ListOwners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ownerByOrg := make(map[string]repository.OrgOwner, len(owners))
+	for _, owner := range owners {
+		ownerByOrg[owner.OrgID.String()] = owner
+	}
+	return toPlatformOrgViews(items, ownerByOrg), nil
 }
 
-func toPlatformOrgViews(items []*model.Organization) []PlatformOrganizationView {
+func toPlatformOrgViews(items []*model.Organization, ownerByOrg map[string]repository.OrgOwner) []PlatformOrganizationView {
 	out := make([]PlatformOrganizationView, 0, len(items))
 	for _, org := range items {
-		out = append(out, PlatformOrganizationView{
+		view := PlatformOrganizationView{
 			ID: org.ID.String(), Name: org.Name, Slug: org.Slug,
 			Status: org.Status, CreatedAt: org.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
-		})
+		}
+		if owner, ok := ownerByOrg[org.ID.String()]; ok {
+			ownerID := owner.MemberID.String()
+			ownerEmail := owner.Email
+			ownerName := owner.DisplayName
+			view.OwnerID = &ownerID
+			view.OwnerEmail = &ownerEmail
+			view.OwnerDisplayName = &ownerName
+		}
+		out = append(out, view)
 	}
 	return out
 }

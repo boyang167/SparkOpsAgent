@@ -216,3 +216,19 @@ export const GitTreeListVMSchema = z.object({
 });
 
 export type GitTreeListVM = z.infer<typeof GitTreeListVMSchema>;
+
+export const GetGitFileContentCommandSchema = z.object({
+  git_url: z.string().min(1),
+  secret_id: z.string().min(1),
+  ref: z.string().min(1),
+  path: z.string().min(1),
+});
+
+export type GetGitFileContentCommand = z.infer<typeof GetGitFileContentCommandSchema>;
+
+export const GitFileContentVMSchema = z.object({
+  path: z.string(),
+  content: z.string(),
+});
+
+export type GitFileContentVM = z.infer<typeof GitFileContentVMSchema>;

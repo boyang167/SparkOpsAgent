@@ -45,6 +45,15 @@ func (p *projectAccessImpl) HasProjectAccess(
 		if isAdmin {
 			return true, nil
 		}
+		if action == policy.ActionRead {
+			canReview, err := p.governance.HasPermission(ctx, workspaceID, memberID, PermProjectReview)
+			if err != nil {
+				return false, err
+			}
+			if canReview {
+				return true, nil
+			}
+		}
 	}
 	if p.engine == nil {
 		if p.members != nil {

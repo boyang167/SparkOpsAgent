@@ -72,6 +72,12 @@ function statusBadgeClass(status: PlatformOrganizationVM["status"]): string {
   return "platform-org-badge platform-org-badge-suspended";
 }
 
+function ownerLabel(org: PlatformOrganizationVM): string {
+  if (!org.owner_email?.trim()) return "未指定";
+  const name = org.owner_display_name?.trim();
+  return name ? `${name} (${org.owner_email})` : org.owner_email;
+}
+
 function ViewModeToggle({ mode, onChange }: { mode: ViewMode; onChange: (mode: ViewMode) => void }) {
   return (
     <div className="platform-orgs-view-toggle" role="group" aria-label="视图切换">
@@ -170,6 +176,7 @@ function OrgCardItem({
             <span className={statusBadgeClass(org.status)}>{statusLabel(org.status)}</span>
           </div>
           <p className="platform-org-slug">{org.slug}</p>
+          <p className="platform-org-owner">Owner：{ownerLabel(org)}</p>
         </div>
       </div>
       <p className="platform-org-card-time">
@@ -251,7 +258,10 @@ export function PlatformOrganizationsPanel({ variant = "platform" }: PlatformOrg
     const filtered = orgs.filter((org) => {
       if (statusFilter !== "all" && org.status !== statusFilter) return false;
       if (!q) return true;
-      return org.name.toLowerCase().includes(q) || org.slug.toLowerCase().includes(q);
+      return org.name.toLowerCase().includes(q) ||
+        org.slug.toLowerCase().includes(q) ||
+        (org.owner_email?.toLowerCase().includes(q) ?? false) ||
+        (org.owner_display_name?.toLowerCase().includes(q) ?? false);
     });
     return sortOrganizations(filtered);
   }, [orgs, searchQuery, statusFilter]);
@@ -397,7 +407,7 @@ export function PlatformOrganizationsPanel({ variant = "platform" }: PlatformOrg
             </svg>
             <input
               className="input platform-orgs-search"
-              placeholder="搜索组织名称或 Slug…"
+              placeholder="搜索组织名称、Slug 或 Owner…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -491,6 +501,7 @@ export function PlatformOrganizationsPanel({ variant = "platform" }: PlatformOrg
               <thead>
                 <tr>
                   <th>组织</th>
+                  <th>Owner</th>
                   <th>状态</th>
                   <th>创建时间</th>
                   <th className="platform-table-actions-col">操作</th>
@@ -511,7 +522,7 @@ export function PlatformOrganizationsPanel({ variant = "platform" }: PlatformOrg
                     <Fragment key={org.id}>
                       {showDeletedDivider ? (
                         <tr className="platform-orgs-divider-row">
-                          <td colSpan={4}>
+                          <td colSpan={5}>
                             <span className="platform-orgs-divider-label">已删除组织</span>
                           </td>
                         </tr>
@@ -526,6 +537,7 @@ export function PlatformOrganizationsPanel({ variant = "platform" }: PlatformOrg
                             </div>
                           </div>
                         </td>
+                        <td className="platform-org-owner-cell">{ownerLabel(org)}</td>
                         <td>
                           <span className={statusBadgeClass(org.status)}>{statusLabel(org.status)}</span>
                         </td>
