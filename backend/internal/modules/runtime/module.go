@@ -37,6 +37,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	if err != nil {
 		return fmt.Errorf("runtime adapters: %w", err)
 	}
+	c.ManifestDeployer = adapters.Deployer
 
 	k8sQuery := query.NewK8sResources(checker, adapters.Resources)
 	resHandler := runtimehttp.NewResourcesHandler(k8sQuery)

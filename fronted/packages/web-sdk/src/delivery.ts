@@ -1,4 +1,12 @@
-import type { BuildVM, CronJobVM } from "@sparkops/contracts/delivery";
+import type {
+  BuildVM,
+  CreateDeploymentCommand,
+  CronJobVM,
+  DeploymentOptionsVM,
+  DeploymentRunListVM,
+  DeploymentRunVM,
+} from "@sparkops/contracts/delivery";
+import { DeploymentEventVMSchema } from "@sparkops/contracts/delivery";
 import { bffFetch } from "./client";
 
 export async function listBuilds(projectId: string, workspaceId: string) {
@@ -40,6 +48,84 @@ export function rollbackBuild(buildId: string, workspaceId: string) {
     method: "POST",
     workspaceId,
   });
+}
+
+export async function listDeployments(projectId: string, workspaceId: string) {
+  return bffFetch<DeploymentRunListVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/deployments`,
+    { workspaceId },
+  );
+}
+
+export function createDeployment(
+  projectId: string,
+  workspaceId: string,
+  input: CreateDeploymentCommand,
+) {
+  return bffFetch<DeploymentRunVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/deployments`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function getDeployment(runId: string, workspaceId: string) {
+  return bffFetch<DeploymentRunVM>(`/deployments/${runId}`, { workspaceId });
+}
+
+export function abortDeployment(runId: string, workspaceId: string) {
+  return bffFetch<DeploymentRunVM>(`/deployments/${runId}/abort`, {
+    method: "POST",
+    workspaceId,
+  });
+}
+
+export function getDeploymentOptions(projectId: string, workspaceId: string) {
+  return bffFetch<DeploymentOptionsVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/deployments/options`,
+    { workspaceId },
+  );
+}
+
+export interface DeploymentEvent {
+  delta?: string;
+  done?: true;
+}
+
+export function parseDeploymentEvent(data: string): DeploymentEvent {
+  const payload = DeploymentEventVMSchema.parse(JSON.parse(data));
+  if (payload.done) return { done: true };
+  return typeof payload.delta === "string" ? { delta: payload.delta } : {};
+}
+
+export interface StreamDeploymentHandlers {
+  onDelta: (delta: string) => void;
+  onDone: () => void;
+  onError?: (error: Error) => void;
+}
+
+export function streamDeployment(
+  runId: string,
+  handlers: StreamDeploymentHandlers,
+): () => void {
+  const es = new EventSource(`/api/bff/v1/deployments/${runId}/stream`);
+  es.onmessage = (event) => {
+    try {
+      const payload = parseDeploymentEvent(event.data);
+      if (payload.done) {
+        handlers.onDone();
+        es.close();
+      } else if (payload.delta) {
+        handlers.onDelta(payload.delta);
+      }
+    } catch (err) {
+      handlers.onError?.(err instanceof Error ? err : new Error("stream parse error"));
+    }
+  };
+  es.onerror = () => {
+    handlers.onError?.(new Error("stream connection error"));
+    es.close();
+  };
+  return () => es.close();
 }
 
 export interface StreamBuildHandlers {

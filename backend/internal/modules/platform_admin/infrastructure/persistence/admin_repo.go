@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -22,7 +24,7 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.Exec("DROP TABLE IF EXISTS platform_admin.sync_jobs").Error; err != nil {
 		return err
 	}
-	return db.AutoMigrate(&sysCfgModel{}, &clusterInfoModel{}, &statisticsCacheModel{}, &proclaimModel{})
+	return db.AutoMigrate(&sysCfgModel{}, &clusterInfoModel{}, &workspaceClusterModel{}, &statisticsCacheModel{}, &proclaimModel{})
 }
 
 type sysCfgModel struct {
@@ -52,6 +54,15 @@ type clusterInfoModel struct {
 }
 
 func (clusterInfoModel) TableName() string { return "platform_admin.cluster_info" }
+
+type workspaceClusterModel struct {
+	WorkspaceID string `gorm:"column:workspace_id;primaryKey"`
+	ClusterID   string `gorm:"column:cluster_id;primaryKey"`
+	CreatedBy   string
+	CreatedAt   time.Time
+}
+
+func (workspaceClusterModel) TableName() string { return "platform_admin.workspace_clusters" }
 
 type statisticsCacheModel struct {
 	ID          string `gorm:"column:id;primaryKey"`
@@ -135,6 +146,53 @@ func (r *AdminRepository) SaveCluster(ctx context.Context, cluster *repository.C
 		AuditColumns: postgres.AuditColumns{CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
 	}
 	return r.db.WithContext(ctx).Save(&row).Error
+}
+
+func (r *AdminRepository) GrantWorkspaceCluster(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID, createdBy kernel.MemberID) error {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&clusterInfoModel{}).
+		Where("id = ?", clusterID.String()).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return domain.ErrClusterNotFound
+	}
+	row := workspaceClusterModel{
+		WorkspaceID: wsID.String(), ClusterID: clusterID.String(),
+		CreatedBy: createdBy.String(), CreatedAt: time.Now().UTC(),
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
+}
+
+func (r *AdminRepository) RevokeWorkspaceCluster(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) error {
+	return r.db.WithContext(ctx).
+		Where("workspace_id = ? AND cluster_id = ?", wsID.String(), clusterID.String()).
+		Delete(&workspaceClusterModel{}).Error
+}
+
+func (r *AdminRepository) ListWorkspaceClusters(ctx context.Context, wsID kernel.WorkspaceID) ([]*repository.ClusterInfo, error) {
+	var rows []clusterInfoModel
+	if err := r.db.WithContext(ctx).
+		Table("platform_admin.cluster_info AS c").
+		Joins("INNER JOIN platform_admin.workspace_clusters AS g ON g.cluster_id = c.id").
+		Where("g.workspace_id = ?", wsID.String()).
+		Order("c.priority_id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*repository.ClusterInfo, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, rowToCluster(row))
+	}
+	return out, nil
+}
+
+func (r *AdminRepository) WorkspaceClusterGranted(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&workspaceClusterModel{}).
+		Where("workspace_id = ? AND cluster_id = ?", wsID.String(), clusterID.String()).
+		Count(&count).Error
+	return count > 0, err
 }
 
 func (r *AdminRepository) GetStatisticsCache(ctx context.Context, wsID kernel.WorkspaceID, key string) (map[string]any, error) {
@@ -230,7 +288,7 @@ func rowToCluster(row clusterInfoModel) *repository.ClusterInfo {
 	return &repository.ClusterInfo{
 		ID: id, ClusterName: row.ClusterName, Server: row.Server, UserName: row.UserName,
 		CertificateAuthorityData: row.CertificateAuthorityData,
-		ClientCertificateData: row.ClientCertificateData, ClientKeyData: row.ClientKeyData,
+		ClientCertificateData:    row.ClientCertificateData, ClientKeyData: row.ClientKeyData,
 		IsBuildEnv: row.IsBuildEnv, PriorityID: row.PriorityID, CreatedBy: createdBy,
 	}
 }

@@ -1,6 +1,68 @@
-import type { BuildVM, CronJobVM } from "@sparkops/contracts/delivery";
+import type {
+  BuildVM,
+  CreateDeploymentCommand,
+  CronJobVM,
+  DeploymentOptionsVM,
+  DeploymentRunListVM,
+  DeploymentRunVM,
+} from "@sparkops/contracts/delivery";
+import { DeploymentRunVMSchema } from "@sparkops/contracts/delivery";
 import type { UpstreamRequestOptions } from "./core";
 import { getUpstreamBaseUrl, upstreamFetch } from "./core";
+
+interface DeploymentOptionsWire {
+  clusters: Array<{
+    id: string;
+    name: string;
+    server?: string;
+    available: boolean;
+    reason?: string;
+  }>;
+}
+
+export function normalizeDeploymentOptions(input: DeploymentOptionsWire): DeploymentOptionsVM {
+  return {
+    clusters: input.clusters
+      .filter((cluster) => cluster.available)
+      .map((cluster) => ({
+        id: cluster.id,
+        cluster_name: cluster.name,
+        server: cluster.server,
+      })),
+    missing: [
+      ...new Set(
+        input.clusters
+          .filter((cluster) => !cluster.available)
+          .map((cluster) => cluster.reason)
+          .filter((reason): reason is string => Boolean(reason)),
+      ),
+    ],
+  };
+}
+
+export function normalizeDeploymentRun(input: unknown): DeploymentRunVM {
+  const wire = input as Record<string, unknown>;
+  return DeploymentRunVMSchema.parse({
+    ...wire,
+    current_stage: wire.current_stage ?? "",
+    error_message: wire.error_message ?? "",
+  });
+}
+
+export function normalizeDeploymentList(input: {
+  items?: unknown[];
+  total?: number;
+  page?: number;
+  page_size?: number;
+}): DeploymentRunListVM {
+  const items = (input.items ?? []).map(normalizeDeploymentRun);
+  return {
+    items,
+    total: input.total ?? items.length,
+    page: input.page ?? 1,
+    page_size: input.page_size ?? 20,
+  };
+}
 
 export function createDeliveryUpstream(options: UpstreamRequestOptions = {}) {
   return {
@@ -47,6 +109,60 @@ export function createDeliveryUpstream(options: UpstreamRequestOptions = {}) {
         method: "POST",
         options: { ...options, workspaceId },
       });
+    },
+
+    async listDeployments(workspaceId: string, projectId: string) {
+      const data = await upstreamFetch<{
+        items?: unknown[];
+        total?: number;
+        page?: number;
+        page_size?: number;
+      }>(
+        `/api/v1/projects/${projectId}/deployments`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+      return normalizeDeploymentList(data);
+    },
+
+    async createDeployment(
+      workspaceId: string,
+      projectId: string,
+      input: CreateDeploymentCommand,
+    ) {
+      const data = await upstreamFetch<unknown>(`/api/v1/projects/${projectId}/deployments`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        options: { ...options, workspaceId },
+      });
+      return normalizeDeploymentRun(data);
+    },
+
+    async getDeployment(workspaceId: string, runId: string) {
+      const data = await upstreamFetch<unknown>(`/api/v1/deployments/${runId}`, {
+        method: "GET",
+        options: { ...options, workspaceId },
+      });
+      return normalizeDeploymentRun(data);
+    },
+
+    async abortDeployment(workspaceId: string, runId: string) {
+      const data = await upstreamFetch<unknown>(`/api/v1/deployments/${runId}/abort`, {
+        method: "POST",
+        options: { ...options, workspaceId },
+      });
+      return normalizeDeploymentRun(data);
+    },
+
+    async getDeploymentOptions(workspaceId: string, projectId: string) {
+      const data = await upstreamFetch<DeploymentOptionsWire>(
+        `/api/v1/projects/${projectId}/deployments/options`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+      return normalizeDeploymentOptions(data);
+    },
+
+    deploymentStreamUrl(runId: string) {
+      return `${getUpstreamBaseUrl()}/api/v1/deployments/${runId}/stream`;
     },
 
     async listCronJobs(workspaceId: string, projectId: string) {

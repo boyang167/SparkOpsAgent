@@ -1,0 +1,90 @@
+<h2>状态机、数据流与项目页</h2>
+<p class="subtitle">这一节覆盖 DeploymentRun 如何推进、消息如何带 ID、以及「部署」按钮实际做什么。</p>
+
+<div class="section">
+  <p class="label">DeploymentRun 状态机</p>
+  <div class="mockup">
+    <div class="mockup-header">queued → preparing → building → deploying → succeeded / failed / aborted</div>
+    <div class="mockup-body" style="padding:16px;font-size:13px;line-height:1.65;">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;margin-bottom:12px;">
+        <div style="background:#475569;color:#fff;padding:8px 10px;border-radius:8px;">queued</div>
+        <span>→</span>
+        <div style="background:#7c3aed;color:#fff;padding:8px 10px;border-radius:8px;">preparing<br><small>校验审核/密钥/集群<br>upsert Jenkins Job</small></div>
+        <span>→</span>
+        <div style="background:#b45309;color:#fff;padding:8px 10px;border-radius:8px;">building<br><small>关联 delivery.Build</small></div>
+        <span>→</span>
+        <div style="background:#1d4ed8;color:#fff;padding:8px 10px;border-radius:8px;">deploying<br><small>Apply 模板并等 Rollout</small></div>
+        <span>→</span>
+        <div style="background:#15803d;color:#fff;padding:8px 10px;border-radius:8px;">succeeded</div>
+      </div>
+      <p style="margin:0;color:#64748b;">任意阶段失败 → <strong>failed</strong>（保留错误与日志指针）。用户中止 → <strong>aborted</strong>。同一项目同时只允许一条 queued/preparing/building/deploying 记录。</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p class="label">数据流要点</p>
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">RabbitMQ</div>
+      <div class="mockup-body" style="padding:14px;font-size:13px;">
+        <p>Topic：<code>deploy.sparkops</code></p>
+        <p>消息体只含：<code>{"run_id":"...","workspace_id":"..."}</code></p>
+        <p>消费者按 DB 当前状态推进下一步；处理失败写失败原因并 ACK，<strong>不</strong> Nack 死循环。Jenkins 结果走已有 webhook 或有限轮询，再发布「阶段完成」消息继续 CD。</p>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">持久化</div>
+      <div class="mockup-body" style="padding:14px;font-size:13px;">
+        <p><strong>deployment_runs</strong>：项目、集群、git ref、镜像 tag、状态、阶段时间线、失败原因、build_id</p>
+        <p><strong>deployment_run_events</strong>：阶段日志（供 SSE）</p>
+        <p>Build 表保持 CI 专用；DeploymentRun 引用 Build，不把 K8s 状态塞进 Build。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p class="label">项目页交互（替换「部署只打开详情」）</p>
+  <div class="mockup">
+    <div class="mockup-header">Preview: 部署弹窗 + 进度</div>
+    <div class="mockup-body" style="padding:16px;">
+      <div class="mock-nav">项目工作台 · 概览</div>
+      <div style="display:flex;gap:16px;margin-top:12px;">
+        <div style="flex:1;border:1px dashed #94a3b8;border-radius:8px;padding:12px;">
+          <p class="label">部署弹窗</p>
+          <p>目标集群（默认项目绑定，可切换）</p>
+          <input class="mock-input" placeholder="Git branch / tag">
+          <input class="mock-input" placeholder="镜像版本（可选，默认 git SHA）">
+          <button class="mock-button">开始部署</button>
+          <p style="font-size:12px;color:#64748b;margin-top:8px;">未审核通过、缺少 Git/Harbor/Sonar/K8s 密钥、或已有进行中部署 → 按钮禁用并说明原因。</p>
+        </div>
+        <div style="flex:1;border:1px dashed #94a3b8;border-radius:8px;padding:12px;">
+          <p class="label">进度面板</p>
+          <p>1. 准备 CI — Job 已更新</p>
+          <p>2. 构建中 — 复用现有构建日志 SSE</p>
+          <p>3. 发布中 — Apply / Rollout 事件</p>
+          <p>4. 成功 — 展示镜像与 Service</p>
+          <p style="font-size:12px;color:#64748b;">详情 Modal 的「部署次数 / 最近部署」改为读 DeploymentRun 列表，不再硬编码 0 / N/A。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="flow-ok" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>这一节可以</h3>
+      <p>继续看失败处理与测试范围</p>
+    </div>
+  </div>
+  <div class="option" data-choice="flow-change" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>要改状态机或交互</h3>
+      <p>请在对话里指出具体一步</p>
+    </div>
+  </div>
+</div>

@@ -26,8 +26,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/tenant"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workflow"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app"
-	"github.com/sparkops/sparkops-agent/backend/internal/platform/applog"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/applog"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
@@ -81,6 +81,7 @@ func Run(ctx context.Context) error {
 	}
 
 	c := &appctx.Container{
+		Context:      ctx,
 		Config:       cfg,
 		DB:           db,
 		Redis:        redisClient,
@@ -118,13 +119,13 @@ func Run(ctx context.Context) error {
 			governance.New(tokens),
 			workspace_app.New(tokens),
 			platform_admin.New(tokens),
+			runtime.New(tokens),
 			delivery.New(tokens),
 			product.New(tokens),
 			agent.New(tokens),
 			workflow.New(tokens),
 			knowledge.New(tokens),
 			notification.New(tokens),
-			runtime.New(tokens),
 			integration.New(tokens),
 			agent_runtime.New(tokens),
 			mcp.New(tokens),

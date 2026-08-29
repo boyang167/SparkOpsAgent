@@ -8,6 +8,7 @@ import type {
   SysConfigVM,
   ToolVM,
 } from "@sparkops/contracts/platform";
+import type { AuthorizedClusterVM } from "@sparkops/contracts/delivery";
 import type { UpstreamRequestOptions } from "./core";
 import { upstreamFetch } from "./core";
 
@@ -47,6 +48,31 @@ export function createPlatformUpstream(options: UpstreamRequestOptions = {}) {
         body: JSON.stringify(input),
         options,
       });
+    },
+
+    async listWorkspaceClusters(workspaceId: string) {
+      return upstreamFetch<{ items: AuthorizedClusterVM[] }>(
+        `/api/v1/admin/workspaces/${workspaceId}/clusters`,
+        { method: "GET", options },
+      );
+    },
+
+    async grantWorkspaceCluster(workspaceId: string, clusterId: string) {
+      return upstreamFetch<{ granted: true }>(
+        `/api/v1/admin/workspaces/${workspaceId}/clusters`,
+        {
+          method: "POST",
+          body: JSON.stringify({ cluster_id: clusterId }),
+          options,
+        },
+      );
+    },
+
+    async revokeWorkspaceCluster(workspaceId: string, clusterId: string) {
+      return upstreamFetch<{ revoked: true }>(
+        `/api/v1/admin/workspaces/${workspaceId}/clusters/${clusterId}`,
+        { method: "DELETE", options },
+      );
     },
 
     async getSysConfig() {

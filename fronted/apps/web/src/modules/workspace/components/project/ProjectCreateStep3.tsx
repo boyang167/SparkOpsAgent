@@ -58,6 +58,14 @@ export function ProjectCreateStep3({
     () => secrets.filter((s) => s.service_type === "SonarQube"),
     [secrets],
   );
+  const jenkinsSecrets = useMemo(
+    () => secrets.filter((s) => s.service_type === "Jenkins"),
+    [secrets],
+  );
+  const kubernetesSecrets = useMemo(
+    () => secrets.filter((s) => s.service_type === "Kubernetes"),
+    [secrets],
+  );
 
   function updateResources(patch: Partial<NonNullable<CreateProjectCommand["resources"]>>) {
     const next = { ...resources, ...patch };
@@ -157,6 +165,48 @@ export function ProjectCreateStep3({
           {registrySecrets.map((s) => (
             <option key={s.id} value={s.id}>
               {s.display_name?.trim() || s.name}
+            </option>
+          ))}
+        </select>
+      </FormRow>
+
+      <FormRow label="默认集群 ID:" hint="部署时将优先选择此集群；最终可选范围以工作空间授权为准">
+        <input
+          className="input"
+          aria-label="默认集群 ID"
+          value={form.default_cluster_id ?? ""}
+          onChange={(e) => updateForm({ default_cluster_id: e.target.value })}
+          placeholder="请输入已授权的 cluster_id（可选）"
+        />
+      </FormRow>
+
+      <FormRow label="Jenkins 密钥:" hint="选择用于执行构建流水线的 Jenkins 密钥">
+        <select
+          className="input"
+          aria-label="Jenkins 密钥"
+          value={form.jenkins_secret_id ?? ""}
+          onChange={(e) => updateForm({ jenkins_secret_id: e.target.value })}
+        >
+          <option value="">{loadingSecrets ? "加载中…" : "请选择 Jenkins 密钥"}</option>
+          {jenkinsSecrets.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.display_name?.trim() || item.name}
+            </option>
+          ))}
+        </select>
+      </FormRow>
+
+      <FormRow label="Kubernetes 密钥:" hint="选择用于部署到集群的 Kubernetes 密钥">
+        <select
+          className="input"
+          aria-label="Kubernetes 密钥"
+          value={form.kubernetes_secret_id ?? ""}
+          onChange={(e) => updateForm({ kubernetes_secret_id: e.target.value })}
+        >
+          <option value="">{loadingSecrets ? "加载中…" : "请选择 Kubernetes 密钥"}</option>
+          {kubernetesSecrets.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.display_name?.trim() || item.name}
             </option>
           ))}
         </select>

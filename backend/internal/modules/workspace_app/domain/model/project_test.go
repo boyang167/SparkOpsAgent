@@ -183,6 +183,35 @@ func TestProject_PartialConfigurationPatchResetsApprovedReview(t *testing.T) {
 	require.Equal(t, model.ProjectReviewNone, p.ReviewStatus)
 }
 
+func TestProject_DeploymentBindingChangesResetApprovedReview(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		patch func(string) model.UpdateProjectInput
+	}{
+		{"default cluster", func(value string) model.UpdateProjectInput {
+			return model.UpdateProjectInput{DefaultClusterID: &value}
+		}},
+		{"jenkins secret", func(value string) model.UpdateProjectInput {
+			return model.UpdateProjectInput{JenkinsSecretID: &value}
+		}},
+		{"kubernetes secret", func(value string) model.UpdateProjectInput {
+			return model.UpdateProjectInput{KubernetesSecretID: &value}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			submitter := kernel.NewMemberID()
+			reviewer := kernel.NewMemberID()
+			p := model.NewProject(kernel.NewWorkspaceID(), mustName(t, "demo"), submitter, completeInput())
+			require.NoError(t, p.SubmitReview(submitter))
+			require.NoError(t, p.DecideReview(reviewer, model.ProjectReviewApproved, "ok"))
+
+			require.NoError(t, p.ApplyPatch(tc.patch(kernel.NewSecretID().String())))
+
+			require.Equal(t, model.ProjectReviewNone, p.ReviewStatus)
+		})
+	}
+}
+
 func TestProject_ApprovedConfigurationChangeResetsReview(t *testing.T) {
 	submitter := kernel.NewMemberID()
 	reviewer := kernel.NewMemberID()

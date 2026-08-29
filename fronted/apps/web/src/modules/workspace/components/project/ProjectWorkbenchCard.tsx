@@ -1,6 +1,8 @@
 "use client";
 
 import type { ProjectVM } from "@sparkops/contracts/workspace";
+import type { DeploymentRunVM } from "@sparkops/contracts/delivery";
+import type { DeploymentEntryAction } from "./deployment-gate";
 import { ProjectOverviewCard } from "./ProjectOverviewCard";
 
 interface ProjectWorkbenchCardProps {
@@ -10,6 +12,13 @@ interface ProjectWorkbenchCardProps {
   onViewDetails: () => void;
   onSubmitReview: (project: ProjectVM) => void;
   onReview: (project: ProjectVM) => void;
+  deploymentAction: DeploymentEntryAction;
+  deploymentSummary: {
+    total: number | null;
+    latest: DeploymentRunVM | null;
+    loading: boolean;
+    error: string | null;
+  };
 }
 
 export function ProjectWorkbenchCard({
@@ -19,6 +28,8 @@ export function ProjectWorkbenchCard({
   onViewDetails,
   onSubmitReview,
   onReview,
+  deploymentAction,
+  deploymentSummary,
 }: ProjectWorkbenchCardProps) {
   return (
     <ProjectOverviewCard
@@ -29,6 +40,8 @@ export function ProjectWorkbenchCard({
       onDeploy={onDeploy}
       onSubmitReview={onSubmitReview}
       onReview={onReview}
+      deploymentAction={deploymentAction}
+      deploymentSummary={deploymentSummary}
     />
   );
 }

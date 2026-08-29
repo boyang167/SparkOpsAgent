@@ -1,5 +1,12 @@
 import type { BffContext } from "@sparkops/bff-core";
-import type { BuildVM, TriggerBuildCommand } from "@sparkops/contracts/delivery";
+import type {
+  BuildVM,
+  CreateDeploymentCommand,
+  DeploymentOptionsVM,
+  DeploymentRunListVM,
+  DeploymentRunVM,
+  TriggerBuildCommand,
+} from "@sparkops/contracts/delivery";
 
 export async function listBuilds(
   ctx: BffContext,
@@ -48,6 +55,47 @@ export async function rollbackBuild(
   buildId: string,
 ): Promise<RollbackBuildResult> {
   return ctx.upstream.delivery.rollbackBuild(workspaceId, buildId);
+}
+
+export async function listDeployments(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+): Promise<DeploymentRunListVM> {
+  return ctx.upstream.delivery.listDeployments(workspaceId, projectId);
+}
+
+export async function createDeployment(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  input: CreateDeploymentCommand,
+): Promise<DeploymentRunVM> {
+  return ctx.upstream.delivery.createDeployment(workspaceId, projectId, input);
+}
+
+export async function getDeployment(
+  ctx: BffContext,
+  workspaceId: string,
+  runId: string,
+): Promise<DeploymentRunVM> {
+  return ctx.upstream.delivery.getDeployment(workspaceId, runId);
+}
+
+export async function abortDeployment(
+  ctx: BffContext,
+  workspaceId: string,
+  runId: string,
+): Promise<DeploymentRunVM> {
+  return ctx.upstream.delivery.abortDeployment(workspaceId, runId);
+}
+
+export async function getDeploymentOptions(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+): Promise<DeploymentOptionsVM> {
+  return ctx.upstream.delivery.getDeploymentOptions(workspaceId, projectId);
 }
 
 export async function listCronJobs(ctx: BffContext, workspaceId: string, projectId: string) {

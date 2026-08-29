@@ -35,6 +35,12 @@ export const ClusterVMSchema = z.object({
 
 export type ClusterVM = z.infer<typeof ClusterVMSchema>;
 
+export const GrantWorkspaceClusterCommandSchema = z.object({
+  cluster_id: z.string().uuid(),
+});
+
+export type GrantWorkspaceClusterCommand = z.infer<typeof GrantWorkspaceClusterCommandSchema>;
+
 export const ProclaimVMSchema = z.object({
   id: z.string(),
   title: z.string(),

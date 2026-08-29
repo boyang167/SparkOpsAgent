@@ -10,26 +10,27 @@ import (
 type BuildStatus string
 
 const (
-	BuildStatusRunning  BuildStatus = "running"
-	BuildStatusSuccess  BuildStatus = "success"
-	BuildStatusFailed   BuildStatus = "failed"
-	BuildStatusAborted  BuildStatus = "aborted"
+	BuildStatusRunning BuildStatus = "running"
+	BuildStatusSuccess BuildStatus = "success"
+	BuildStatusFailed  BuildStatus = "failed"
+	BuildStatusAborted BuildStatus = "aborted"
 )
 
 type Build struct {
-	ID                kernel.BuildID
-	ProjectID         kernel.ProjectID
-	MemberID          kernel.MemberID
-	WorkspaceID       kernel.WorkspaceID
-	Status            BuildStatus
-	Branch            string
-	BuildNumber       int
-	JenkinsJob        string
-	ConsoleLog        string
-	Error             string
-	RollbackOfBuildID string
-	StartedAt         time.Time
-	CompletedAt       *time.Time
+	ID                 kernel.BuildID
+	ProjectID          kernel.ProjectID
+	MemberID           kernel.MemberID
+	WorkspaceID        kernel.WorkspaceID
+	Status             BuildStatus
+	Branch             string
+	BuildNumber        int
+	JenkinsJob         string
+	ConsoleLog         string
+	Error              string
+	RollbackOfBuildID  string
+	StartedAt          time.Time
+	ExecutionStartedAt *time.Time
+	CompletedAt        *time.Time
 }
 
 func NewBuild(

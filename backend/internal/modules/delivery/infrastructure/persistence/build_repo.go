@@ -24,19 +24,20 @@ func AutoMigrate(db *gorm.DB) error {
 }
 
 type buildModel struct {
-	ID           string `gorm:"column:id;primaryKey"`
-	ProjectID    string
-	MemberID     string
-	WorkspaceID  string
-	Status       string
-	Branch       string
-	BuildNumber  int
-	JenkinsJob   string
-	ConsoleLog   string `gorm:"type:text"`
-	Error        string
-	RollbackOfBuildID string
-	StartedAt    time.Time
-	CompletedAt  *time.Time
+	ID                 string `gorm:"column:id;primaryKey"`
+	ProjectID          string
+	MemberID           string
+	WorkspaceID        string
+	Status             string
+	Branch             string
+	BuildNumber        int
+	JenkinsJob         string
+	ConsoleLog         string `gorm:"type:text"`
+	Error              string
+	RollbackOfBuildID  string
+	StartedAt          time.Time
+	ExecutionStartedAt *time.Time
+	CompletedAt        *time.Time
 	postgres.AuditColumns
 }
 
@@ -56,14 +57,15 @@ func (r *BuildRepository) Save(ctx context.Context, build *model.Build) error {
 
 func (r *BuildRepository) Update(ctx context.Context, build *model.Build) error {
 	return r.db.WithContext(ctx).Model(&buildModel{}).Where("id = ?", build.ID.String()).Updates(map[string]any{
-		"status":        string(build.Status),
-		"build_number":  build.BuildNumber,
-		"jenkins_job":   build.JenkinsJob,
-		"console_log":   build.ConsoleLog,
-		"error":         build.Error,
+		"status":               string(build.Status),
+		"build_number":         build.BuildNumber,
+		"jenkins_job":          build.JenkinsJob,
+		"console_log":          build.ConsoleLog,
+		"error":                build.Error,
 		"rollback_of_build_id": build.RollbackOfBuildID,
-		"completed_at":  build.CompletedAt,
-		"updated_at":    time.Now().UTC(),
+		"completed_at":         build.CompletedAt,
+		"updated_at":           time.Now().UTC(),
+		"execution_started_at": build.ExecutionStartedAt,
 	}).Error
 }
 
@@ -134,7 +136,8 @@ func buildToRow(build *model.Build) buildModel {
 		BuildNumber: build.BuildNumber, JenkinsJob: build.JenkinsJob,
 		ConsoleLog: build.ConsoleLog, Error: build.Error,
 		RollbackOfBuildID: build.RollbackOfBuildID,
-		StartedAt: build.StartedAt, CompletedAt: build.CompletedAt,
+		StartedAt:         build.StartedAt, CompletedAt: build.CompletedAt,
+		ExecutionStartedAt: build.ExecutionStartedAt,
 	}
 }
 
@@ -149,7 +152,8 @@ func buildRowToModel(row buildModel) (*model.Build, error) {
 		BuildNumber: row.BuildNumber, JenkinsJob: row.JenkinsJob,
 		ConsoleLog: row.ConsoleLog, Error: row.Error,
 		RollbackOfBuildID: row.RollbackOfBuildID,
-		StartedAt: row.StartedAt, CompletedAt: row.CompletedAt,
+		StartedAt:         row.StartedAt, CompletedAt: row.CompletedAt,
+		ExecutionStartedAt: row.ExecutionStartedAt,
 	}, nil
 }
 

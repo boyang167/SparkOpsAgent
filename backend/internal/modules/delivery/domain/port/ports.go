@@ -2,6 +2,7 @@ package port
 
 import (
 	"context"
+	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -10,12 +11,39 @@ type ProjectChecker interface {
 	ProjectInWorkspace(ctx context.Context, projectID kernel.ProjectID, wsID kernel.WorkspaceID) (bool, error)
 	ProjectIsActive(ctx context.Context, projectID kernel.ProjectID) (bool, error)
 	ProjectName(ctx context.Context, projectID kernel.ProjectID) (string, error)
+	ProjectNamespace(ctx context.Context, projectID kernel.ProjectID) (string, error)
 	ProjectAutomationContext(ctx context.Context, projectID kernel.ProjectID) (ProjectAutomationContext, error)
 }
 
 type ProjectAutomationContext struct {
 	WorkspaceID kernel.WorkspaceID
 	MemberID    kernel.MemberID
+}
+
+type JenkinsCredential struct {
+	ID       string
+	Username string
+	Secret   string
+	Kind     string
+}
+
+type JenkinsJobSpec struct {
+	Folder         string
+	Job            string
+	PipelineScript string
+	Credentials    []JenkinsCredential
+}
+
+type BuildRequest struct {
+	Namespace       string
+	ProjectName     string
+	Folder          string
+	Job             string
+	GitRefValue     string
+	ImageTag        string
+	ImageRepository string
+	RollbackOf      int
+	Timeout         time.Duration
 }
 
 type GitBranchLister interface {
@@ -29,12 +57,11 @@ type GitBranch struct {
 }
 
 type JenkinsExecutor interface {
+	CreateOrUpdate(ctx context.Context, spec JenkinsJobSpec) error
 	RunStreaming(
 		ctx context.Context,
 		buildID kernel.BuildID,
-		projectName, branch string,
-		buildNumber int,
-		rollbackOf int,
+		req BuildRequest,
 		hub LogPublisher,
 	) (consoleLog string, err error)
 }

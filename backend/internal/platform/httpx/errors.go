@@ -49,6 +49,12 @@ func HandleError(c *gin.Context, err error) {
 			status = http.StatusForbidden
 		case "DELIVERY_PROJECT_NOT_ACTIVE", "DELIVERY_BUILD_RUNNING", "DELIVERY_BUILD_NOT_RUNNING", "DELIVERY_BUILD_NOT_ROLLBACKABLE":
 			status = http.StatusBadRequest
+		case "DELIVERY_DEPLOYMENT_RUNNING":
+			status = http.StatusConflict
+		case "DELIVERY_DEPLOYMENT_NOT_FOUND":
+			status = http.StatusNotFound
+		case "DELIVERY_DEPLOYMENT_CLUSTER_NOT_AUTHORIZED", "DELIVERY_KUBECONFIG_MISSING", "DELIVERY_DEPLOYMENT_BINDING_MISSING", "DELIVERY_PROJECT_NOT_APPROVED", "DELIVERY_DEPLOYMENT_CLUSTER_NOT_FOUND":
+			status = http.StatusBadRequest
 		case "K8S_POD_NOT_FOUND":
 			status = http.StatusNotFound
 		case "K8S_PROJECT_ACCESS_DENIED":

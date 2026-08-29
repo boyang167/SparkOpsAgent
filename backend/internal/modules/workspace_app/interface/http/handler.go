@@ -82,11 +82,11 @@ func NewHandler(
 		listTemplates: listTemplates, getTemplate: getTemplate,
 		createSecret: createSecret, updateSecret: updateSecret, deleteSecret: deleteSecret,
 		listSecrets: listSecrets, getSecret: getSecret, testSecret: testSecret,
-		listGitRefs:  listGitRefs,
+		listGitRefs:       listGitRefs,
 		listGitTree:       listGitTree,
 		getGitFileContent: getGitFileContent,
 		secretCrypto:      secretCrypto,
-		addMember: addMember, updateMemberRole: updateMemberRole, removeMember: removeMember,
+		addMember:         addMember, updateMemberRole: updateMemberRole, removeMember: removeMember,
 		listMembers: listMembers, generateTemplates: generateTemplates,
 		submitReview: submitReview, reviewProject: reviewProject, memberLookup: memberLookup,
 	}
@@ -112,48 +112,57 @@ type projectResourcesRequest struct {
 }
 
 type projectPayload struct {
-	Name           string                  `json:"name" binding:"required"`
-	DisplayName    string                  `json:"display_name"`
-	Description    string                  `json:"description"`
-	Namespace      string                  `json:"namespace"`
-	Language       string                  `json:"language"`
-	GitURL         string                  `json:"git_url"`
-	SecretID       string                  `json:"secret_id"`
-	GitRefType     string                  `json:"git_ref_type"`
-	GitRefValue    string                  `json:"git_ref_value"`
-	DockerfilePath string                  `json:"dockerfile_path"`
-	TemplateID     string                  `json:"template_id"`
-	Resources      projectResourcesRequest `json:"resources"`
+	Name               string                  `json:"name" binding:"required"`
+	DisplayName        string                  `json:"display_name"`
+	Description        string                  `json:"description"`
+	Namespace          string                  `json:"namespace"`
+	Language           string                  `json:"language"`
+	GitURL             string                  `json:"git_url"`
+	SecretID           string                  `json:"secret_id"`
+	GitRefType         string                  `json:"git_ref_type"`
+	GitRefValue        string                  `json:"git_ref_value"`
+	DockerfilePath     string                  `json:"dockerfile_path"`
+	TemplateID         string                  `json:"template_id"`
+	DefaultClusterID   string                  `json:"default_cluster_id"`
+	JenkinsSecretID    string                  `json:"jenkins_secret_id"`
+	KubernetesSecretID string                  `json:"kubernetes_secret_id"`
+	Resources          projectResourcesRequest `json:"resources"`
 }
 
 type projectUpdatePayload struct {
-	Name           *string                  `json:"name"`
-	DisplayName    *string                  `json:"display_name"`
-	Description    *string                  `json:"description"`
-	Namespace      *string                  `json:"namespace"`
-	Language       *string                  `json:"language"`
-	GitURL         *string                  `json:"git_url"`
-	SecretID       *string                  `json:"secret_id"`
-	GitRefType     *string                  `json:"git_ref_type"`
-	GitRefValue    *string                  `json:"git_ref_value"`
-	DockerfilePath *string                  `json:"dockerfile_path"`
-	TemplateID     *string                  `json:"template_id"`
-	Resources      *projectResourcesRequest `json:"resources"`
+	Name               *string                  `json:"name"`
+	DisplayName        *string                  `json:"display_name"`
+	Description        *string                  `json:"description"`
+	Namespace          *string                  `json:"namespace"`
+	Language           *string                  `json:"language"`
+	GitURL             *string                  `json:"git_url"`
+	SecretID           *string                  `json:"secret_id"`
+	GitRefType         *string                  `json:"git_ref_type"`
+	GitRefValue        *string                  `json:"git_ref_value"`
+	DockerfilePath     *string                  `json:"dockerfile_path"`
+	TemplateID         *string                  `json:"template_id"`
+	DefaultClusterID   *string                  `json:"default_cluster_id"`
+	JenkinsSecretID    *string                  `json:"jenkins_secret_id"`
+	KubernetesSecretID *string                  `json:"kubernetes_secret_id"`
+	Resources          *projectResourcesRequest `json:"resources"`
 }
 
 func toProjectInput(req projectPayload) model.CreateProjectInput {
 	return model.CreateProjectInput{
-		Name:           req.Name,
-		DisplayName:    req.DisplayName,
-		Description:    req.Description,
-		Namespace:      req.Namespace,
-		Language:       req.Language,
-		GitURL:         req.GitURL,
-		SecretID:       req.SecretID,
-		GitRefType:     req.GitRefType,
-		GitRefValue:    req.GitRefValue,
-		DockerfilePath: req.DockerfilePath,
-		TemplateID:     req.TemplateID,
+		Name:               req.Name,
+		DisplayName:        req.DisplayName,
+		Description:        req.Description,
+		Namespace:          req.Namespace,
+		Language:           req.Language,
+		GitURL:             req.GitURL,
+		SecretID:           req.SecretID,
+		GitRefType:         req.GitRefType,
+		GitRefValue:        req.GitRefValue,
+		DockerfilePath:     req.DockerfilePath,
+		TemplateID:         req.TemplateID,
+		DefaultClusterID:   req.DefaultClusterID,
+		JenkinsSecretID:    req.JenkinsSecretID,
+		KubernetesSecretID: req.KubernetesSecretID,
 		Resources: model.ProjectResources{
 			CPURequest:            req.Resources.CPURequest,
 			CPULimit:              req.Resources.CPULimit,
@@ -181,6 +190,8 @@ func toProjectUpdateInput(req projectUpdatePayload) model.UpdateProjectInput {
 		Namespace: req.Namespace, Language: req.Language, GitURL: req.GitURL,
 		SecretID: req.SecretID, GitRefType: req.GitRefType, GitRefValue: req.GitRefValue,
 		DockerfilePath: req.DockerfilePath, TemplateID: req.TemplateID,
+		DefaultClusterID: req.DefaultClusterID, JenkinsSecretID: req.JenkinsSecretID,
+		KubernetesSecretID: req.KubernetesSecretID,
 	}
 	if req.Resources != nil {
 		input.Resources = &model.ProjectResources{
@@ -203,29 +214,32 @@ func toProjectUpdateInput(req projectUpdatePayload) model.UpdateProjectInput {
 func projectResponse(project *model.Project) gin.H {
 	view := query.ToView(project)
 	return gin.H{
-		"id":                view.ID,
-		"name":              view.Name,
-		"display_name":      view.DisplayName,
-		"description":       view.Description,
-		"namespace":         view.Namespace,
-		"language":          view.Language,
-		"git_url":           view.GitURL,
-		"secret_id":         view.SecretID,
-		"git_ref_type":      view.GitRefType,
-		"git_ref_value":     view.GitRefValue,
-		"dockerfile_path":   view.DockerfilePath,
-		"template_id":       view.TemplateID,
-		"resources":         view.Resources,
-		"status":            view.Status,
-		"review_status":     view.ReviewStatus,
-		"submitted_by":      view.SubmittedBy,
-		"submitted_at":      view.SubmittedAt,
-		"reviewed_by":       view.ReviewedBy,
-		"reviewed_at":       view.ReviewedAt,
-		"review_comment":    view.ReviewComment,
-		"can_submit_review": view.CanSubmitReview,
-		"can_review":        view.CanReview,
-		"created_at":        view.CreatedAt,
+		"id":                   view.ID,
+		"name":                 view.Name,
+		"display_name":         view.DisplayName,
+		"description":          view.Description,
+		"namespace":            view.Namespace,
+		"language":             view.Language,
+		"git_url":              view.GitURL,
+		"secret_id":            view.SecretID,
+		"git_ref_type":         view.GitRefType,
+		"git_ref_value":        view.GitRefValue,
+		"dockerfile_path":      view.DockerfilePath,
+		"template_id":          view.TemplateID,
+		"default_cluster_id":   view.DefaultClusterID,
+		"jenkins_secret_id":    view.JenkinsSecretID,
+		"kubernetes_secret_id": view.KubernetesSecretID,
+		"resources":            view.Resources,
+		"status":               view.Status,
+		"review_status":        view.ReviewStatus,
+		"submitted_by":         view.SubmittedBy,
+		"submitted_at":         view.SubmittedAt,
+		"reviewed_by":          view.ReviewedBy,
+		"reviewed_at":          view.ReviewedAt,
+		"review_comment":       view.ReviewComment,
+		"can_submit_review":    view.CanSubmitReview,
+		"can_review":           view.CanReview,
+		"created_at":           view.CreatedAt,
 	}
 }
 

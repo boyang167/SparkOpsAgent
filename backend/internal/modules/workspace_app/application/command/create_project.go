@@ -13,21 +13,26 @@ import (
 )
 
 type CreateProjectHandler struct {
-	repo       repository.ProjectRepository
-	memberRepo repository.ProjectMemberRepository
-	wsChecker  port.WorkspaceChecker
-	engine     policy.Engine
-	bus        eventbus.Bus
+	repo           repository.ProjectRepository
+	memberRepo     repository.ProjectMemberRepository
+	wsChecker      port.WorkspaceChecker
+	clusterChecker port.WorkspaceClusterChecker
+	engine         policy.Engine
+	bus            eventbus.Bus
 }
 
 func NewCreateProjectHandler(
 	repo repository.ProjectRepository,
 	memberRepo repository.ProjectMemberRepository,
 	wsChecker port.WorkspaceChecker,
+	clusterChecker port.WorkspaceClusterChecker,
 	engine policy.Engine,
 	bus eventbus.Bus,
 ) *CreateProjectHandler {
-	return &CreateProjectHandler{repo: repo, memberRepo: memberRepo, wsChecker: wsChecker, engine: engine, bus: bus}
+	return &CreateProjectHandler{
+		repo: repo, memberRepo: memberRepo, wsChecker: wsChecker,
+		clusterChecker: clusterChecker, engine: engine, bus: bus,
+	}
 }
 
 func (h *CreateProjectHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID, input model.CreateProjectInput) (*model.Project, error) {
@@ -53,6 +58,19 @@ func (h *CreateProjectHandler) Handle(ctx context.Context, wsID kernel.Workspace
 	}
 	if err := h.wsChecker.CanCreateProject(ctx, wsID, count); err != nil {
 		return nil, err
+	}
+	if input.DefaultClusterID != "" {
+		clusterID, err := kernel.ParseClusterInfoID(input.DefaultClusterID)
+		if err != nil {
+			return nil, domain.ErrClusterNotAuthorized
+		}
+		granted, err := h.clusterChecker.WorkspaceClusterGranted(ctx, wsID, clusterID)
+		if err != nil {
+			return nil, err
+		}
+		if !granted {
+			return nil, domain.ErrClusterNotAuthorized
+		}
 	}
 
 	project := model.NewProject(wsID, name, memberID, input)

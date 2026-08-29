@@ -60,6 +60,30 @@ func (h *CreateClusterHandler) Handle(ctx context.Context, memberID kernel.Membe
 	return cluster, nil
 }
 
+type GrantWorkspaceClusterHandler struct {
+	repo repository.AdminRepository
+}
+
+func NewGrantWorkspaceClusterHandler(repo repository.AdminRepository) *GrantWorkspaceClusterHandler {
+	return &GrantWorkspaceClusterHandler{repo: repo}
+}
+
+func (h *GrantWorkspaceClusterHandler) Handle(ctx context.Context, memberID kernel.MemberID, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) error {
+	return h.repo.GrantWorkspaceCluster(ctx, wsID, clusterID, memberID)
+}
+
+type RevokeWorkspaceClusterHandler struct {
+	repo repository.AdminRepository
+}
+
+func NewRevokeWorkspaceClusterHandler(repo repository.AdminRepository) *RevokeWorkspaceClusterHandler {
+	return &RevokeWorkspaceClusterHandler{repo: repo}
+}
+
+func (h *RevokeWorkspaceClusterHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) error {
+	return h.repo.RevokeWorkspaceCluster(ctx, wsID, clusterID)
+}
+
 type CreateProclaimHandler struct {
 	repo repository.AdminRepository
 }

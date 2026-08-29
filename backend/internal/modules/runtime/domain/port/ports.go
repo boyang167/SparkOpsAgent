@@ -2,6 +2,7 @@ package port
 
 import (
 	"context"
+	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -24,4 +25,26 @@ type PodLogReader interface {
 
 type PodTerminal interface {
 	StreamLines(ctx context.Context, pod *model.Pod) []string
+}
+
+type Manifest struct {
+	YAML string
+}
+
+type DeploymentTarget struct {
+	// ClusterID and Server must come from the same workspace-authorized
+	// ProjectDeploymentContext. Runtime validates the kubeconfig endpoint but
+	// deliberately does not query platform_admin to reconstruct that binding.
+	ClusterID      string
+	Server         string
+	Kubeconfig     string
+	Namespace      string
+	DeploymentName string
+	ServiceName    string
+	ImageTag       string
+	RolloutTimeout time.Duration
+}
+
+type ManifestDeployer interface {
+	Deploy(ctx context.Context, target DeploymentTarget, manifests []Manifest) error
 }

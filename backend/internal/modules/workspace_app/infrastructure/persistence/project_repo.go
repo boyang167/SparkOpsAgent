@@ -47,28 +47,31 @@ func AutoMigrate(db *gorm.DB) error {
 }
 
 type projectModel struct {
-	ID             string `gorm:"column:id;primaryKey"`
-	WorkspaceID    string
-	Name           string
-	DisplayName    string
-	Description    string
-	Namespace      string
-	Language       string
-	GitURL         string
-	SecretID       *string
-	GitRefType     string
-	GitRefValue    string
-	DockerfilePath string
-	TemplateID     *string
-	Resources      []byte `gorm:"type:jsonb"`
-	Status         string
-	ReviewStatus   string `gorm:"default:none;not null"`
-	SubmittedBy    *string
-	SubmittedAt    *time.Time
-	ReviewedBy     *string
-	ReviewedAt     *time.Time
-	ReviewComment  string `gorm:"default:'';not null"`
-	CreatedBy      string
+	ID                 string `gorm:"column:id;primaryKey"`
+	WorkspaceID        string
+	Name               string
+	DisplayName        string
+	Description        string
+	Namespace          string
+	Language           string
+	GitURL             string
+	SecretID           *string
+	GitRefType         string
+	GitRefValue        string
+	DockerfilePath     string
+	TemplateID         *string
+	DefaultClusterID   *string
+	JenkinsSecretID    *string
+	KubernetesSecretID *string
+	Resources          []byte `gorm:"type:jsonb"`
+	Status             string
+	ReviewStatus       string `gorm:"default:none;not null"`
+	SubmittedBy        *string
+	SubmittedAt        *time.Time
+	ReviewedBy         *string
+	ReviewedAt         *time.Time
+	ReviewComment      string `gorm:"default:'';not null"`
+	CreatedBy          string
 	postgres.AuditColumns
 }
 
@@ -108,6 +111,15 @@ func (r *ProjectRepository) Save(ctx context.Context, project *model.Project) er
 	}
 	if project.TemplateID != "" {
 		row.TemplateID = &project.TemplateID
+	}
+	if project.DefaultClusterID != "" {
+		row.DefaultClusterID = &project.DefaultClusterID
+	}
+	if project.JenkinsSecretID != "" {
+		row.JenkinsSecretID = &project.JenkinsSecretID
+	}
+	if project.KubernetesSecretID != "" {
+		row.KubernetesSecretID = &project.KubernetesSecretID
 	}
 	return r.db.WithContext(ctx).Save(&row).Error
 }
@@ -154,6 +166,21 @@ func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) 
 		updates["template_id"] = project.TemplateID
 	} else {
 		updates["template_id"] = nil
+	}
+	if project.DefaultClusterID != "" {
+		updates["default_cluster_id"] = project.DefaultClusterID
+	} else {
+		updates["default_cluster_id"] = nil
+	}
+	if project.JenkinsSecretID != "" {
+		updates["jenkins_secret_id"] = project.JenkinsSecretID
+	} else {
+		updates["jenkins_secret_id"] = nil
+	}
+	if project.KubernetesSecretID != "" {
+		updates["kubernetes_secret_id"] = project.KubernetesSecretID
+	} else {
+		updates["kubernetes_secret_id"] = nil
 	}
 	return r.db.WithContext(ctx).Model(&projectModel{}).Where("id = ?", project.ID.String()).Updates(updates).Error
 }
@@ -254,6 +281,15 @@ func rowToProject(row projectModel) (*model.Project, error) {
 	}
 	if row.TemplateID != nil {
 		p.TemplateID = *row.TemplateID
+	}
+	if row.DefaultClusterID != nil {
+		p.DefaultClusterID = *row.DefaultClusterID
+	}
+	if row.JenkinsSecretID != nil {
+		p.JenkinsSecretID = *row.JenkinsSecretID
+	}
+	if row.KubernetesSecretID != nil {
+		p.KubernetesSecretID = *row.KubernetesSecretID
 	}
 	return p, nil
 }

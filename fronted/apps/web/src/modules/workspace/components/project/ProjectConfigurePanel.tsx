@@ -55,6 +55,9 @@ function projectToForm(project: ProjectVM): CreateProjectCommand {
     language: project.language || "go",
     git_url: project.git_url ?? "",
     secret_id: project.secret_id ?? "",
+    default_cluster_id: project.default_cluster_id ?? "",
+    jenkins_secret_id: project.jenkins_secret_id ?? "",
+    kubernetes_secret_id: project.kubernetes_secret_id ?? "",
     git_ref_type: project.git_ref_type ?? "branch",
     git_ref_value: (() => {
       const value = project.git_ref_value?.trim() ?? "";
@@ -104,6 +107,7 @@ export function ProjectConfigurePanel({
     setStep(2);
     setForm(projectToForm(project));
     setError(null);
+    let cancelled = false;
     void (async () => {
       setLoadingTemplates(true);
       setLoadingSecrets(true);
@@ -112,16 +116,23 @@ export function ProjectConfigurePanel({
           product.listTemplates(workspaceId),
           secret.listSecrets(workspaceId),
         ]);
+        if (cancelled) return;
         setTemplates(templateList);
         setSecrets(secretList);
       } catch {
+        if (cancelled) return;
         setTemplates([]);
         setSecrets([]);
       } finally {
-        setLoadingTemplates(false);
-        setLoadingSecrets(false);
+        if (!cancelled) {
+          setLoadingTemplates(false);
+          setLoadingSecrets(false);
+        }
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [open, project, workspaceId]);
 
   function updateForm(patch: Partial<CreateProjectCommand>) {

@@ -25,6 +25,27 @@ export async function createCluster(ctx: BffContext, input: Record<string, unkno
   return result;
 }
 
+export async function listWorkspaceClusters(ctx: BffContext, workspaceId: string) {
+  const data = await ctx.upstream.platform.listWorkspaceClusters(workspaceId);
+  return data.items;
+}
+
+export async function grantWorkspaceCluster(
+  ctx: BffContext,
+  workspaceId: string,
+  clusterId: string,
+) {
+  return ctx.upstream.platform.grantWorkspaceCluster(workspaceId, clusterId);
+}
+
+export async function revokeWorkspaceCluster(
+  ctx: BffContext,
+  workspaceId: string,
+  clusterId: string,
+) {
+  return ctx.upstream.platform.revokeWorkspaceCluster(workspaceId, clusterId);
+}
+
 export async function getSysConfig(ctx: BffContext) {
   return ctx.upstream.platform.getSysConfig();
 }

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -16,6 +17,7 @@ type Config struct {
 	Runtime       RuntimeConfig       `yaml:"runtime"`
 	Consul        ConsulConfig        `yaml:"consul"`
 	Delivery      DeliveryConfig      `yaml:"delivery"`
+	Deploy        DeployConfig        `yaml:"deploy"`
 	Jenkins       JenkinsConfig       `yaml:"jenkins"`
 	GitLab        GitLabConfig        `yaml:"gitlab"`
 	Webhook       WebhookConfig       `yaml:"webhook"`
@@ -105,9 +107,9 @@ type AMQPConfig struct {
 }
 
 type K8sConfig struct {
-	DefaultCluster string              `yaml:"default_cluster"`
-	KubeconfigPath string              `yaml:"kubeconfig_path"`
-	Clusters       []K8sClusterConfig  `yaml:"clusters"`
+	DefaultCluster string             `yaml:"default_cluster"`
+	KubeconfigPath string             `yaml:"kubeconfig_path"`
+	Clusters       []K8sClusterConfig `yaml:"clusters"`
 }
 
 type K8sClusterConfig struct {
@@ -136,16 +138,22 @@ type DeliveryConfig struct {
 	Token  string `yaml:"token"`
 }
 
+type DeployConfig struct {
+	JenkinsTimeout    time.Duration `yaml:"jenkins_timeout"`
+	RolloutTimeout    time.Duration `yaml:"rollout_timeout"`
+	ReconcileInterval time.Duration `yaml:"reconcile_interval"`
+}
+
 type JenkinsConfig struct {
-	URL      string `yaml:"url"`
-	User     string `yaml:"user"`
-	Token    string `yaml:"token"`
+	URL       string `yaml:"url"`
+	User      string `yaml:"user"`
+	Token     string `yaml:"token"`
 	JobSuffix string `yaml:"job_suffix"`
 }
 
 type GitLabConfig struct {
-	BaseURL    string `yaml:"base_url"`
-	Token      string `yaml:"token"`
+	BaseURL     string `yaml:"base_url"`
+	Token       string `yaml:"token"`
 	ProjectPath string `yaml:"project_path_prefix"` // optional group prefix, e.g. "platform"
 }
 
@@ -180,14 +188,16 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	cfg.applyDefaults()
-	cfg.applyEnvOverrides()
+	if err := cfg.applyEnvOverrides(); err != nil {
+		return nil, fmt.Errorf("environment override: %w", err)
+	}
 	if err := cfg.resolveDatabaseDSN(); err != nil {
 		return nil, fmt.Errorf("database dsn: %w", err)
 	}
 	return &cfg, nil
 }
 
-func (c *Config) applyEnvOverrides() {
+func (c *Config) applyEnvOverrides() error {
 	if v := os.Getenv("DATABASE_DSN"); v != "" {
 		c.Database.DSN = v
 	}
@@ -259,6 +269,28 @@ func (c *Config) applyEnvOverrides() {
 		p.APIKey = v
 		c.LLM.Providers["openai"] = p
 	}
+	if v := os.Getenv("DEPLOY_JENKINS_TIMEOUT"); v != "" {
+		duration, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("DEPLOY_JENKINS_TIMEOUT: %w", err)
+		}
+		c.Deploy.JenkinsTimeout = duration
+	}
+	if v := os.Getenv("DEPLOY_ROLLOUT_TIMEOUT"); v != "" {
+		duration, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("DEPLOY_ROLLOUT_TIMEOUT: %w", err)
+		}
+		c.Deploy.RolloutTimeout = duration
+	}
+	if v := os.Getenv("DEPLOY_RECONCILE_INTERVAL"); v != "" {
+		duration, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("DEPLOY_RECONCILE_INTERVAL: %w", err)
+		}
+		c.Deploy.ReconcileInterval = duration
+	}
+	return nil
 }
 
 func (c *Config) applyDefaults() {
@@ -294,6 +326,15 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Delivery.Driver == "" {
 		c.Delivery.Driver = "mock"
+	}
+	if c.Deploy.JenkinsTimeout == 0 {
+		c.Deploy.JenkinsTimeout = 30 * time.Minute
+	}
+	if c.Deploy.RolloutTimeout == 0 {
+		c.Deploy.RolloutTimeout = 10 * time.Minute
+	}
+	if c.Deploy.ReconcileInterval == 0 {
+		c.Deploy.ReconcileInterval = 30 * time.Second
 	}
 	if c.Jenkins.JobSuffix == "" {
 		c.Jenkins.JobSuffix = "-build"

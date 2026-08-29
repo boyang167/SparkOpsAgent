@@ -45,5 +45,10 @@ func (h *AbortBuildHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID,
 	if !h.registry.Cancel(build.ID.String()) {
 		return domain.ErrBuildNotRunning
 	}
+	build.Abort(build.ConsoleLog)
+	if err := h.builds.Update(ctx, build); err != nil {
+		return err
+	}
+	h.hub.Complete(build.ID, build.ConsoleLog)
 	return nil
 }

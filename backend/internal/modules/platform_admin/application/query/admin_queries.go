@@ -49,6 +49,29 @@ func (h *ListClustersHandler) Handle(ctx context.Context) ([]map[string]any, err
 	return out, nil
 }
 
+type ListWorkspaceClustersHandler struct {
+	repo repository.AdminRepository
+}
+
+func NewListWorkspaceClustersHandler(repo repository.AdminRepository) *ListWorkspaceClustersHandler {
+	return &ListWorkspaceClustersHandler{repo: repo}
+}
+
+func (h *ListWorkspaceClustersHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID) ([]map[string]any, error) {
+	items, err := h.repo.ListWorkspaceClusters(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, cluster := range items {
+		out = append(out, map[string]any{
+			"id": cluster.ID.String(), "cluster_name": cluster.ClusterName, "server": cluster.Server,
+			"is_build_env": cluster.IsBuildEnv, "priority_id": cluster.PriorityID,
+		})
+	}
+	return out, nil
+}
+
 type GetDashboardHandler struct {
 	repo repository.AdminRepository
 }

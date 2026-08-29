@@ -1,3 +1,18 @@
+# Project Deploy Pipeline SDD Progress
+
+Baseline: `6f439fb4eca37148d35faf15ffed36fac435733b`
+Plan: `docs/superpowers/plans/2026-08-29-project-deploy-pipeline.md`
+Execution: current `master` working tree by explicit user choice; no commits without separate authorization.
+
+Task 1: complete (uncommitted working tree, review clean; Minor: terminal immutability test covers `succeeded` explicitly, while implementation covers all terminal states).
+Task 2: complete (uncommitted working tree, review clean).
+Task 3: complete (uncommitted working tree, review clean; Minor: AMQP consumer channel natural-end cleanup and lock-held broker I/O remain for final review).
+Task 4: complete (uncommitted working tree, review clean).
+Task 5: complete (uncommitted working tree, review clean; Minor: client-go fake cannot assert SSA FieldManager/Force although production sets both).
+Task 6: complete (uncommitted working tree, review clean).
+Task 7: complete (uncommitted working tree, review clean; cross-task gap: deployment stage SSE hub is not yet fed by orchestration events, assigned to Task 8).
+Task 8: complete (uncommitted working tree, review clean; real PostgreSQL and external Jenkins/Harbor/Kubernetes/AMQP E2E not available locally).
+
 # PlatformSuite Migration — SDD Progress
 
 ## Phase A–G — 完成 ✅

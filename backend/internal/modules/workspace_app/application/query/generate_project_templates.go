@@ -28,6 +28,14 @@ type GeneratedTemplateArtifact struct {
 	TemplateName string `json:"template_name,omitempty"`
 }
 
+type DeploymentPipelineRenderInput struct {
+	GitRefValue          string
+	ImageTag             string
+	ImageRepository      string
+	GitCredentialID      string
+	RegistryCredentialID string
+}
+
 type GenerateProjectTemplatesHandler struct {
 	projectRepo  repository.ProjectRepository
 	templateRepo repository.TemplateRepository
@@ -84,6 +92,49 @@ func (h *GenerateProjectTemplatesHandler) Handle(
 	}
 
 	return GenerateArtifacts(project, byID, h.loadRenderContext(ctx, wsID, project)), nil
+}
+
+func (h *GenerateProjectTemplatesHandler) RenderDeploymentPipeline(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	projectID kernel.ProjectID,
+	input DeploymentPipelineRenderInput,
+) (string, error) {
+	project, err := h.projectRepo.FindByID(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	if project.WorkspaceID != wsID || project.Status != model.ProjectStatusActive {
+		return "", domain.ErrProjectNotFound
+	}
+	allTemplates, err := ListAccessibleTemplates(ctx, h.templateRepo, h.wsChecker, wsID)
+	if err != nil {
+		return "", err
+	}
+	byID := make(map[string]*model.Template, len(allTemplates))
+	for _, item := range allTemplates {
+		byID[item.ID.String()] = item
+	}
+	return RenderDeploymentPipelineArtifact(project, byID, h.loadRenderContext(ctx, wsID, project), input), nil
+}
+
+func RenderDeploymentPipelineArtifact(
+	project *model.Project,
+	byID map[string]*model.Template,
+	renderCtx TemplateRenderContext,
+	input DeploymentPipelineRenderInput,
+) string {
+	deploymentProject := *project
+	deploymentProject.GitRefValue = strings.TrimSpace(input.GitRefValue)
+	renderCtx.ContainerImage = strings.TrimSuffix(strings.TrimSpace(input.ImageRepository), "/") + ":" + strings.TrimSpace(input.ImageTag)
+	renderCtx.GitCredentialID = strings.TrimSpace(input.GitCredentialID)
+	renderCtx.RegistryCredentialID = strings.TrimSpace(input.RegistryCredentialID)
+	for _, artifact := range GenerateArtifacts(&deploymentProject, byID, renderCtx) {
+		if artifact.Kind == "jenkinsFile" {
+			return artifact.Content
+		}
+	}
+	return ""
 }
 
 type genPick struct {
@@ -276,12 +327,12 @@ func applyLegacyTemplateAliases(
 	cpuReq, cpuLim, memReq, memLim string,
 ) {
 	legacy := map[string]string{
-		"memory":     memReq,
-		"maxMemory":  memLim,
-		"max_memory": memLim,
-		"cpu":        cpuReq,
-		"max_cpu":    cpuLim,
-		"git_addr":   project.GitURL,
+		"memory":        memReq,
+		"maxMemory":     memLim,
+		"max_memory":    memLim,
+		"cpu":           cpuReq,
+		"max_cpu":       cpuLim,
+		"git_addr":      project.GitURL,
 		"git_buildpath": orDefault(strings.TrimSpace(project.DockerfilePath), "./Dockerfile"),
 	}
 	if project.Resources.EnableStaticScan {

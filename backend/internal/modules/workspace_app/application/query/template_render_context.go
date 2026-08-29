@@ -13,17 +13,18 @@ import (
 )
 
 type TemplateRenderContext struct {
-	OrgName            string
-	OrgSlug            string
-	WorkspaceName      string
-	WorkspaceSlug      string
-	GitSecretName      string
-	GitCredentialID    string
-	RegistrySecretName string
-	RegistryURL        string
-	RegistryHost       string
-	ImagePullSecret    string
-	ContainerImage     string
+	OrgName              string
+	OrgSlug              string
+	WorkspaceName        string
+	WorkspaceSlug        string
+	GitSecretName        string
+	GitCredentialID      string
+	RegistrySecretName   string
+	RegistryCredentialID string
+	RegistryURL          string
+	RegistryHost         string
+	ImagePullSecret      string
+	ContainerImage       string
 }
 
 func (h *GenerateProjectTemplatesHandler) loadRenderContext(
@@ -90,6 +91,7 @@ func (h *GenerateProjectTemplatesHandler) loadRenderContext(
 	if out.RegistrySecretName == "" {
 		out.RegistrySecretName = "registry"
 	}
+	out.RegistryCredentialID = out.RegistrySecretName
 	if out.GitSecretName == "" {
 		out.GitSecretName = "gitlab"
 	}
@@ -205,6 +207,7 @@ func applyRenderContextVars(vars map[string]string, renderCtx TemplateRenderCont
 	vars["git_version"] = gitRefValue
 	vars["git_credential_id"] = renderCtx.GitCredentialID
 	vars["CodeCrendentialId"] = renderCtx.GitCredentialID
+	vars["registry_credential_id"] = renderCtx.RegistryCredentialID
 }
 
 func applyRenderContextData(data map[string]interface{}, renderCtx TemplateRenderContext, projectName, gitRefValue string) {
@@ -215,7 +218,7 @@ func applyRenderContextData(data map[string]interface{}, renderCtx TemplateRende
 	data["registry_secret_name"] = renderCtx.RegistrySecretName
 	data["registry_url"] = renderCtx.RegistryURL
 	data["registry_host"] = renderCtx.RegistryHost
-	data["registry_credential_id"] = renderCtx.RegistrySecretName
+	data["registry_credential_id"] = renderCtx.RegistryCredentialID
 	data["image_pull_secret_name"] = renderCtx.ImagePullSecret
 	data["imagePullSecretName"] = renderCtx.ImagePullSecret
 	data["ImagePullSecretName"] = renderCtx.ImagePullSecret

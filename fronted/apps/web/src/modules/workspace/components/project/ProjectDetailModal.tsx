@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { agent, product, secret, workflow } from "@sparkops/web-sdk";
+import { agent, delivery, product, secret, workflow } from "@sparkops/web-sdk";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import type { AgentVM } from "@sparkops/contracts/agent";
 import type { WorkflowVM } from "@sparkops/contracts/workflow";
 import type { TemplateVM } from "@sparkops/contracts/product";
 import type { SecretVM } from "@sparkops/contracts/secret";
+import type { DeploymentRunListVM } from "@sparkops/contracts/delivery";
 import { Modal } from "@/components/ui/Modal";
 import { AgentList } from "@/modules/agent/components/AgentList";
 import { CreateAgentForm } from "@/modules/agent/components/CreateAgentForm";
@@ -22,6 +23,7 @@ import { computeProjectProgress, isProjectConfigComplete } from "./project-progr
 import { ProjectGeneratedTemplates } from "./ProjectGeneratedTemplates";
 import { ProjectDockerfileViewer } from "./ProjectDockerfileViewer";
 import { countGeneratedTemplates } from "./project-template-render";
+import { deploymentSummaryState } from "./deployment-summary";
 
 interface ProjectDetailModalProps {
   open: boolean;
@@ -205,6 +207,9 @@ export function ProjectDetailModal({
   const [workflows, setWorkflows] = useState<WorkflowVM[]>(workflowsProp ?? []);
   const [templates, setTemplates] = useState<TemplateVM[]>([]);
   const [secrets, setSecrets] = useState<SecretVM[]>([]);
+  const [deploymentPage, setDeploymentPage] = useState<DeploymentRunListVM | null>(null);
+  const [deploymentLoading, setDeploymentLoading] = useState(false);
+  const [deploymentError, setDeploymentError] = useState<string | null>(null);
   const [loadingExtra, setLoadingExtra] = useState(false);
 
   useEffect(() => {
@@ -213,6 +218,7 @@ export function ProjectDetailModal({
     setAgents(agentsProp ?? []);
     setWorkflows(workflowsProp ?? []);
 
+    let cancelled = false;
     void (async () => {
       setLoadingExtra(true);
       try {
@@ -226,15 +232,43 @@ export function ProjectDetailModal({
             ? Promise.resolve(workflowsProp)
             : workflow.listWorkflows(workspaceId, project.id).catch(() => [] as WorkflowVM[]),
         ]);
+        if (cancelled) return;
         setTemplates(templateList);
         setSecrets(secretList);
         setAgents(agentList);
         setWorkflows(workflowList);
       } finally {
-        setLoadingExtra(false);
+        if (!cancelled) setLoadingExtra(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [open, project, workspaceId, agentsProp, workflowsProp]);
+
+  useEffect(() => {
+    if (!open || !project) return;
+    let cancelled = false;
+    setDeploymentPage(null);
+    setDeploymentError(null);
+    setDeploymentLoading(true);
+    void delivery
+      .listDeployments(project.id, workspaceId)
+      .then((page) => {
+        if (!cancelled) setDeploymentPage(page);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setDeploymentError(err instanceof Error ? err.message : "部署统计不可用");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDeploymentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, project, workspaceId]);
 
   const progress = project ? computeProjectProgress(project) : null;
   const configComplete = project ? isProjectConfigComplete(project) : false;
@@ -247,6 +281,13 @@ export function ProjectDetailModal({
   const gitSecret = secrets.find((s) => s.id === project?.secret_id);
   const registrySecret = secrets.find((s) => s.id === project?.resources?.registry_secret_id);
   const sonarSecret = secrets.find((s) => s.id === project?.resources?.sonarqube_secret_id);
+  const jenkinsSecret = secrets.find((s) => s.id === project?.jenkins_secret_id);
+  const kubernetesSecret = secrets.find((s) => s.id === project?.kubernetes_secret_id);
+  const deploymentSummary = deploymentSummaryState(
+    deploymentPage,
+    deploymentLoading,
+    deploymentError,
+  );
 
   function toggle(key: SectionKey) {
     setOpenKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
@@ -392,6 +433,22 @@ export function ProjectDetailModal({
                   : project.resources?.sonarqube_secret_id || "未配置",
               },
               {
+                label: "Jenkins 密钥",
+                value: jenkinsSecret
+                  ? jenkinsSecret.display_name || jenkinsSecret.name
+                  : project.jenkins_secret_id || "未配置",
+              },
+              {
+                label: "Kubernetes 密钥",
+                value: kubernetesSecret
+                  ? kubernetesSecret.display_name || kubernetesSecret.name
+                  : project.kubernetes_secret_id || "未配置",
+              },
+              {
+                label: "默认集群 ID",
+                value: project.default_cluster_id || "未配置",
+              },
+              {
                 label: "代码静态扫描",
                 value: project.resources?.enable_static_scan ? "已开启" : "关闭",
               },
@@ -421,9 +478,21 @@ export function ProjectDetailModal({
         >
           <InfoGrid
             items={[
-              { label: "部署次数", value: "0" },
-              { label: "构建次数", value: "0" },
-              { label: "最后部署", value: "N/A" },
+              {
+                label: "部署次数",
+                value: deploymentSummary.count,
+              },
+              { label: "构建次数", value: "暂无统计" },
+              {
+                label: "最后部署",
+                value: deploymentSummary.latest
+                  ? `${deploymentSummary.latest.status} · ${formatDateTime(deploymentSummary.latest.created_at)}`
+                  : deploymentLoading
+                    ? "加载中…"
+                    : deploymentSummary.unavailable
+                      ? "不可用"
+                      : "暂无",
+              },
               {
                 label: "配置进度",
                 value: progress?.steps.filter((s) => s.status === "done").length
@@ -463,9 +532,30 @@ export function ProjectDetailModal({
           icon={<IconClock />}
           open={isOpen("deploys")}
           onToggle={() => toggle("deploys")}
-          badge={<span className="project-detail-badge is-red">0</span>}
+          badge={
+            deploymentPage && deploymentPage.total > 0 ? (
+              <span className="project-detail-badge is-green">{deploymentPage.total}</span>
+            ) : null
+          }
         >
-          <p className="text-muted">暂无部署记录</p>
+          {deploymentLoading ? (
+            <p className="text-muted">加载中…</p>
+          ) : deploymentError ? (
+            <p className="text-muted" role="alert">
+              部署记录不可用：{deploymentError}
+            </p>
+          ) : !deploymentPage || deploymentPage.items.length === 0 ? (
+            <p className="text-muted">暂无部署记录</p>
+          ) : (
+            <ul className="stack-sm">
+              {deploymentPage.items.map((run) => (
+                <li key={run.id} className="flex items-center justify-between gap-2">
+                  <span>{run.status}</span>
+                  <time dateTime={run.created_at}>{formatDateTime(run.created_at)}</time>
+                </li>
+              ))}
+            </ul>
+          )}
         </DetailAccordion>
 
         <DetailAccordion

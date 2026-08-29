@@ -7,6 +7,7 @@ import type {
   SysConfigVM,
   ToolVM,
 } from "@sparkops/contracts/platform";
+import type { AuthorizedClusterVM } from "@sparkops/contracts/delivery";
 
 export async function getMonitorOverview(workspaceId: string) {
   return bffFetch<MonitorOverviewVM>(`/workspaces/${workspaceId}/monitor/overview`, {
@@ -136,6 +137,27 @@ export function createCluster(input: Record<string, unknown>) {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+export async function listWorkspaceClusters(workspaceId: string) {
+  const data = await bffFetch<{ items: AuthorizedClusterVM[] }>(
+    `/admin/workspaces/${workspaceId}/clusters`,
+  );
+  return data.items;
+}
+
+export function grantWorkspaceCluster(workspaceId: string, clusterId: string) {
+  return bffFetch<{ granted: true }>(`/admin/workspaces/${workspaceId}/clusters`, {
+    method: "POST",
+    body: JSON.stringify({ cluster_id: clusterId }),
+  });
+}
+
+export function revokeWorkspaceCluster(workspaceId: string, clusterId: string) {
+  return bffFetch<{ revoked: true }>(
+    `/admin/workspaces/${workspaceId}/clusters/${clusterId}`,
+    { method: "DELETE" },
+  );
 }
 
 export async function getSysConfig() {

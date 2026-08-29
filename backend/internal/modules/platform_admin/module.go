@@ -8,10 +8,10 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/infrastructure/persistence"
 	adminhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/applog"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
-	"github.com/sparkops/sparkops-agent/backend/internal/platform/applog"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/operationlog"
 )
 
@@ -45,6 +45,9 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewUpdateSysConfigHandler(repo),
 		query.NewListClustersHandler(repo),
 		command.NewCreateClusterHandler(repo),
+		query.NewListWorkspaceClustersHandler(repo),
+		command.NewGrantWorkspaceClusterHandler(repo),
+		command.NewRevokeWorkspaceClusterHandler(repo),
 		query.NewGetDashboardHandler(repo),
 		query.NewGetStatisticsHandler(repo),
 		query.NewGetMonitorOverviewHandler(repo),
@@ -71,6 +74,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.PATCH("/api/v1/admin/sysconfig", auth, superAdmin, handler.UpdateSysConfig)
 	c.Engine.GET("/api/v1/admin/clusters", auth, superAdmin, handler.ListClusters)
 	c.Engine.POST("/api/v1/admin/clusters", auth, superAdmin, handler.CreateCluster)
+	c.Engine.GET("/api/v1/admin/workspaces/:wsId/clusters", auth, superAdmin, handler.ListWorkspaceClusters)
+	c.Engine.POST("/api/v1/admin/workspaces/:wsId/clusters", auth, superAdmin, handler.GrantWorkspaceCluster)
+	c.Engine.DELETE("/api/v1/admin/workspaces/:wsId/clusters/:clusterId", auth, superAdmin, handler.RevokeWorkspaceCluster)
 	c.Engine.GET("/api/v1/admin/tools", auth, superAdmin, handler.ListTools)
 	c.Engine.GET("/api/v1/admin/proclaims", auth, superAdmin, handler.ListProclaims)
 	c.Engine.POST("/api/v1/admin/proclaims", auth, superAdmin, handler.CreateProclaim)

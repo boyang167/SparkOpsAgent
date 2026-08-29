@@ -32,29 +32,32 @@ type ProjectResourcesView struct {
 }
 
 type ProjectView struct {
-	ID              string               `json:"id"`
-	Name            string               `json:"name"`
-	DisplayName     string               `json:"display_name,omitempty"`
-	Description     string               `json:"description"`
-	Namespace       string               `json:"namespace,omitempty"`
-	Language        string               `json:"language,omitempty"`
-	GitURL          string               `json:"git_url,omitempty"`
-	SecretID        string               `json:"secret_id,omitempty"`
-	GitRefType      string               `json:"git_ref_type,omitempty"`
-	GitRefValue     string               `json:"git_ref_value,omitempty"`
-	DockerfilePath  string               `json:"dockerfile_path,omitempty"`
-	TemplateID      string               `json:"template_id,omitempty"`
-	Resources       ProjectResourcesView `json:"resources,omitempty"`
-	Status          string               `json:"status"`
-	ReviewStatus    string               `json:"review_status"`
-	SubmittedBy     string               `json:"submitted_by,omitempty"`
-	SubmittedAt     string               `json:"submitted_at,omitempty"`
-	ReviewedBy      string               `json:"reviewed_by,omitempty"`
-	ReviewedAt      string               `json:"reviewed_at,omitempty"`
-	ReviewComment   string               `json:"review_comment,omitempty"`
-	CanSubmitReview bool                 `json:"can_submit_review"`
-	CanReview       bool                 `json:"can_review"`
-	CreatedAt       string               `json:"created_at,omitempty"`
+	ID                 string               `json:"id"`
+	Name               string               `json:"name"`
+	DisplayName        string               `json:"display_name,omitempty"`
+	Description        string               `json:"description"`
+	Namespace          string               `json:"namespace,omitempty"`
+	Language           string               `json:"language,omitempty"`
+	GitURL             string               `json:"git_url,omitempty"`
+	SecretID           string               `json:"secret_id,omitempty"`
+	GitRefType         string               `json:"git_ref_type,omitempty"`
+	GitRefValue        string               `json:"git_ref_value,omitempty"`
+	DockerfilePath     string               `json:"dockerfile_path,omitempty"`
+	TemplateID         string               `json:"template_id,omitempty"`
+	DefaultClusterID   string               `json:"default_cluster_id,omitempty"`
+	JenkinsSecretID    string               `json:"jenkins_secret_id,omitempty"`
+	KubernetesSecretID string               `json:"kubernetes_secret_id,omitempty"`
+	Resources          ProjectResourcesView `json:"resources,omitempty"`
+	Status             string               `json:"status"`
+	ReviewStatus       string               `json:"review_status"`
+	SubmittedBy        string               `json:"submitted_by,omitempty"`
+	SubmittedAt        string               `json:"submitted_at,omitempty"`
+	ReviewedBy         string               `json:"reviewed_by,omitempty"`
+	ReviewedAt         string               `json:"reviewed_at,omitempty"`
+	ReviewComment      string               `json:"review_comment,omitempty"`
+	CanSubmitReview    bool                 `json:"can_submit_review"`
+	CanReview          bool                 `json:"can_review"`
+	CreatedAt          string               `json:"created_at,omitempty"`
 }
 
 type ListProjectsHandler struct {
@@ -244,18 +247,21 @@ func ToViews(projects []*model.Project) []ProjectView {
 
 func ToView(p *model.Project) ProjectView {
 	view := ProjectView{
-		ID:             p.ID.String(),
-		Name:           p.Name.String(),
-		DisplayName:    p.DisplayName,
-		Description:    p.Description,
-		Namespace:      p.Namespace,
-		Language:       p.Language,
-		GitURL:         p.GitURL,
-		SecretID:       p.SecretID,
-		GitRefType:     p.GitRefType,
-		GitRefValue:    p.GitRefValue,
-		DockerfilePath: p.DockerfilePath,
-		TemplateID:     p.TemplateID,
+		ID:                 p.ID.String(),
+		Name:               p.Name.String(),
+		DisplayName:        p.DisplayName,
+		Description:        p.Description,
+		Namespace:          p.Namespace,
+		Language:           p.Language,
+		GitURL:             p.GitURL,
+		SecretID:           p.SecretID,
+		GitRefType:         p.GitRefType,
+		GitRefValue:        p.GitRefValue,
+		DockerfilePath:     p.DockerfilePath,
+		TemplateID:         p.TemplateID,
+		DefaultClusterID:   p.DefaultClusterID,
+		JenkinsSecretID:    p.JenkinsSecretID,
+		KubernetesSecretID: p.KubernetesSecretID,
 		Resources: ProjectResourcesView{
 			CPURequest:            p.Resources.CPURequest,
 			CPULimit:              p.Resources.CPULimit,

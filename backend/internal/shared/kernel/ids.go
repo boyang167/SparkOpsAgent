@@ -19,6 +19,7 @@ type KnowledgeBaseID struct{ uuid.UUID }
 type DocumentID struct{ uuid.UUID }
 type NotificationID struct{ uuid.UUID }
 type BuildID struct{ uuid.UUID }
+type DeploymentRunID struct{ uuid.UUID }
 type CronJobID struct{ uuid.UUID }
 type PodID struct{ uuid.UUID }
 type TemplateID struct{ uuid.UUID }
@@ -51,6 +52,7 @@ func NewKnowledgeBaseID() KnowledgeBaseID { return KnowledgeBaseID{UUID: uuid.Ne
 func NewDocumentID() DocumentID           { return DocumentID{UUID: uuid.New()} }
 func NewNotificationID() NotificationID     { return NotificationID{UUID: uuid.New()} }
 func NewBuildID() BuildID                     { return BuildID{UUID: uuid.New()} }
+func NewDeploymentRunID() DeploymentRunID     { return DeploymentRunID{UUID: uuid.New()} }
 func NewCronJobID() CronJobID                 { return CronJobID{UUID: uuid.New()} }
 func NewPodID() PodID                         { return PodID{UUID: uuid.New()} }
 func NewTemplateID() TemplateID               { return TemplateID{UUID: uuid.New()} }
@@ -138,6 +140,11 @@ func ParseBuildID(s string) (BuildID, error) {
 	return BuildID{UUID: id}, err
 }
 
+func ParseDeploymentRunID(s string) (DeploymentRunID, error) {
+	id, err := uuid.Parse(s)
+	return DeploymentRunID{UUID: id}, err
+}
+
 func ParseCronJobID(s string) (CronJobID, error) {
 	id, err := uuid.Parse(s)
 	return CronJobID{UUID: id}, err
@@ -199,6 +206,7 @@ func (id KnowledgeBaseID) String() string  { return id.UUID.String() }
 func (id DocumentID) String() string       { return id.UUID.String() }
 func (id NotificationID) String() string    { return id.UUID.String() }
 func (id BuildID) String() string            { return id.UUID.String() }
+func (id DeploymentRunID) String() string    { return id.UUID.String() }
 func (id CronJobID) String() string          { return id.UUID.String() }
 func (id PodID) String() string               { return id.UUID.String() }
 func (id TemplateID) String() string          { return id.UUID.String() }

@@ -10,36 +10,43 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
-type MockExecutor struct{}
+type MockExecutor struct {
+	LastJobSpec      port.JenkinsJobSpec
+	LastBuildRequest port.BuildRequest
+}
 
 func NewMockExecutor() *MockExecutor { return &MockExecutor{} }
+
+func (e *MockExecutor) CreateOrUpdate(_ context.Context, spec port.JenkinsJobSpec) error {
+	e.LastJobSpec = spec
+	return nil
+}
 
 func (e *MockExecutor) RunStreaming(
 	ctx context.Context,
 	buildID kernel.BuildID,
-	projectName, branch string,
-	buildNumber int,
-	rollbackOf int,
+	req port.BuildRequest,
 	hub port.LogPublisher,
 ) (string, error) {
-	projectName = strings.TrimSpace(projectName)
-	if projectName == "" {
-		projectName = "app"
+	e.LastBuildRequest = req
+	req.Job = strings.TrimSpace(req.Job)
+	if req.Job == "" {
+		req.Job = "app-build"
 	}
-	if strings.TrimSpace(branch) == "" {
-		branch = "main"
+	if strings.TrimSpace(req.GitRefValue) == "" {
+		req.GitRefValue = "main"
 	}
 
 	lines := []string{
-		fmt.Sprintf("[mock-jenkins] job=%s-build build=%d branch=%s", projectName, buildNumber, branch),
+		fmt.Sprintf("[mock-jenkins] job=%s branch=%s", req.Job, req.GitRefValue),
 	}
-	if rollbackOf > 0 {
-		lines = append(lines, fmt.Sprintf("[rollback] redeploying artifact from build #%d", rollbackOf))
+	if req.RollbackOf > 0 {
+		lines = append(lines, fmt.Sprintf("[rollback] redeploying artifact from build #%d", req.RollbackOf))
 	}
 	lines = append(lines,
 		"Checking out source...",
 		"mvn clean package -DskipTests",
-		fmt.Sprintf("docker build -t %s:%d .", projectName, buildNumber),
+		fmt.Sprintf("docker build -t %s .", req.Job),
 		"BUILD SUCCESS",
 	)
 

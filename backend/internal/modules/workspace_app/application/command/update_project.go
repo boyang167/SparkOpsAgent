@@ -11,12 +11,13 @@ import (
 )
 
 type UpdateProjectHandler struct {
-	repo      repository.ProjectRepository
-	wsChecker port.WorkspaceChecker
+	repo           repository.ProjectRepository
+	wsChecker      port.WorkspaceChecker
+	clusterChecker port.WorkspaceClusterChecker
 }
 
-func NewUpdateProjectHandler(repo repository.ProjectRepository, wsChecker port.WorkspaceChecker) *UpdateProjectHandler {
-	return &UpdateProjectHandler{repo: repo, wsChecker: wsChecker}
+func NewUpdateProjectHandler(repo repository.ProjectRepository, wsChecker port.WorkspaceChecker, clusterChecker port.WorkspaceClusterChecker) *UpdateProjectHandler {
+	return &UpdateProjectHandler{repo: repo, wsChecker: wsChecker, clusterChecker: clusterChecker}
 }
 
 func (h *UpdateProjectHandler) Handle(
@@ -40,6 +41,19 @@ func (h *UpdateProjectHandler) Handle(
 	}
 	if project.WorkspaceID != wsID {
 		return nil, domain.ErrProjectNotFound
+	}
+	if input.DefaultClusterID != nil && *input.DefaultClusterID != "" {
+		clusterID, err := kernel.ParseClusterInfoID(*input.DefaultClusterID)
+		if err != nil {
+			return nil, domain.ErrClusterNotAuthorized
+		}
+		granted, err := h.clusterChecker.WorkspaceClusterGranted(ctx, wsID, clusterID)
+		if err != nil {
+			return nil, err
+		}
+		if !granted {
+			return nil, domain.ErrClusterNotAuthorized
+		}
 	}
 
 	if input.Name != nil {

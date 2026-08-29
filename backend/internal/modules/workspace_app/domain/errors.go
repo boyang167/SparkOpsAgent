@@ -17,6 +17,7 @@ var (
 	ErrProjectReviewSelf            = kernel.NewDomainError("PROJECT_REVIEW_SELF", "submitter cannot review own project")
 	ErrProjectReviewCommentRequired = kernel.NewDomainError("INVALID_REQUEST", "rejection comment is required")
 	ErrProjectReviewForbidden       = kernel.NewDomainError("AUTH_FORBIDDEN", "project review permission required")
+	ErrClusterNotAuthorized         = kernel.NewDomainError("WORKSPACE_APP_CLUSTER_NOT_AUTHORIZED", "cluster is not authorized for this workspace")
 	ErrInvalidTemplateName          = kernel.NewDomainError("WORKSPACE_APP_INVALID_TEMPLATE_NAME", "invalid template name")
 	ErrTemplateNotFound             = kernel.NewDomainError("WORKSPACE_APP_TEMPLATE_NOT_FOUND", "template not found")
 	ErrInvalidSecretName            = kernel.NewDomainError("WORKSPACE_APP_INVALID_SECRET_NAME", "invalid secret name")

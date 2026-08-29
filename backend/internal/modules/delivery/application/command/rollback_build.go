@@ -27,9 +27,10 @@ func NewRollbackBuildHandler(
 	bus eventbus.Bus,
 	hub *stream.Hub,
 	registry *runner.Registry,
+	workerCtx context.Context,
 ) *RollbackBuildHandler {
 	return &RollbackBuildHandler{
-		trigger: NewTriggerBuildHandler(builds, checker, jenkins, bus, hub, registry),
+		trigger: NewTriggerBuildHandler(builds, checker, jenkins, bus, hub, registry, workerCtx),
 		builds:  builds,
 		checker: checker,
 	}
@@ -81,6 +82,10 @@ func (h *RollbackBuildHandler) Handle(
 		return nil, err
 	}
 
-	go h.trigger.executeBuild(build, projectName, source.BuildNumber, memberID, wsID, source.ProjectID)
+	go h.trigger.executeBuild(build, projectName, port.BuildRequest{
+		Job:         projectName + "-build",
+		GitRefValue: source.Branch,
+		RollbackOf:  source.BuildNumber,
+	}, memberID, wsID, source.ProjectID)
 	return build, nil
 }

@@ -119,7 +119,9 @@ func main() {
 
 	projectRepo := wspersistence.NewProjectRepository(db)
 	projectMemberRepo := wspersistence.NewProjectMemberRepository(db)
-	createProject := wscommand.NewCreateProjectHandler(projectRepo, projectMemberRepo, wsacl.NewTenantACL(db), nil, bus)
+	createProject := wscommand.NewCreateProjectHandler(
+		projectRepo, projectMemberRepo, wsacl.NewTenantACL(db), wsacl.NewWorkspaceClusterACL(db), nil, bus,
+	)
 	project, err := ensureProject(ctx, projectRepo, createProject, ws.ID, memberID)
 	if err != nil {
 		log.Fatal(err)

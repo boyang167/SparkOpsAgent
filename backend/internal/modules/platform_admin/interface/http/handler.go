@@ -14,19 +14,22 @@ import (
 )
 
 type Handler struct {
-	getSysConfig    *query.GetSysConfigHandler
-	updateSysConfig *command.UpdateSysConfigHandler
-	listClusters    *query.ListClustersHandler
-	createCluster   *command.CreateClusterHandler
-	getDashboard       *query.GetDashboardHandler
-	getStatistics      *query.GetStatisticsHandler
-	getMonitorOverview *query.GetMonitorOverviewHandler
-	listDeploymentStats *query.ListDeploymentStatsHandler
-	listTools                 *query.ListToolsHandler
-	listProclaims             *query.ListProclaimsHandler
-	createProclaim            *command.CreateProclaimHandler
-	cloneTool                 *command.CloneToolHandler
-	getWorkspaceEntitlements  *query.GetWorkspaceEntitlementsHandler
+	getSysConfig             *query.GetSysConfigHandler
+	updateSysConfig          *command.UpdateSysConfigHandler
+	listClusters             *query.ListClustersHandler
+	createCluster            *command.CreateClusterHandler
+	listWorkspaceClusters    *query.ListWorkspaceClustersHandler
+	grantWorkspaceCluster    *command.GrantWorkspaceClusterHandler
+	revokeWorkspaceCluster   *command.RevokeWorkspaceClusterHandler
+	getDashboard             *query.GetDashboardHandler
+	getStatistics            *query.GetStatisticsHandler
+	getMonitorOverview       *query.GetMonitorOverviewHandler
+	listDeploymentStats      *query.ListDeploymentStatsHandler
+	listTools                *query.ListToolsHandler
+	listProclaims            *query.ListProclaimsHandler
+	createProclaim           *command.CreateProclaimHandler
+	cloneTool                *command.CloneToolHandler
+	getWorkspaceEntitlements *query.GetWorkspaceEntitlementsHandler
 }
 
 func NewHandler(
@@ -34,6 +37,9 @@ func NewHandler(
 	updateSysConfig *command.UpdateSysConfigHandler,
 	listClusters *query.ListClustersHandler,
 	createCluster *command.CreateClusterHandler,
+	listWorkspaceClusters *query.ListWorkspaceClustersHandler,
+	grantWorkspaceCluster *command.GrantWorkspaceClusterHandler,
+	revokeWorkspaceCluster *command.RevokeWorkspaceClusterHandler,
 	getDashboard *query.GetDashboardHandler,
 	getStatistics *query.GetStatisticsHandler,
 	getMonitorOverview *query.GetMonitorOverviewHandler,
@@ -47,11 +53,14 @@ func NewHandler(
 	return &Handler{
 		getSysConfig: getSysConfig, updateSysConfig: updateSysConfig,
 		listClusters: listClusters, createCluster: createCluster,
-		getDashboard: getDashboard, getStatistics: getStatistics,
+		listWorkspaceClusters:  listWorkspaceClusters,
+		grantWorkspaceCluster:  grantWorkspaceCluster,
+		revokeWorkspaceCluster: revokeWorkspaceCluster,
+		getDashboard:           getDashboard, getStatistics: getStatistics,
 		getMonitorOverview: getMonitorOverview, listDeploymentStats: listDeploymentStats,
-		listTools: listTools,
+		listTools:     listTools,
 		listProclaims: listProclaims, createProclaim: createProclaim,
-		cloneTool: cloneTool,
+		cloneTool:                cloneTool,
 		getWorkspaceEntitlements: getWorkspaceEntitlements,
 	}
 }
@@ -149,6 +158,68 @@ func (h *Handler) CreateCluster(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"id": cluster.ID.String(), "cluster_name": cluster.ClusterName})
+}
+
+func (h *Handler) ListWorkspaceClusters(c *gin.Context) {
+	wsID, err := kernel.ParseWorkspaceID(c.Param("wsId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid workspace id", http.StatusBadRequest)
+		return
+	}
+	items, err := h.listWorkspaceClusters.Handle(c.Request.Context(), wsID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) GrantWorkspaceCluster(c *gin.Context) {
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	wsID, err := kernel.ParseWorkspaceID(c.Param("wsId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid workspace id", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		ClusterID string `json:"cluster_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+	clusterID, err := kernel.ParseClusterInfoID(req.ClusterID)
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid cluster id", http.StatusBadRequest)
+		return
+	}
+	if err := h.grantWorkspaceCluster.Handle(c.Request.Context(), memberID, wsID, clusterID); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"granted": true, "workspace_id": wsID.String(), "cluster_id": clusterID.String()})
+}
+
+func (h *Handler) RevokeWorkspaceCluster(c *gin.Context) {
+	wsID, err := kernel.ParseWorkspaceID(c.Param("wsId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid workspace id", http.StatusBadRequest)
+		return
+	}
+	clusterID, err := kernel.ParseClusterInfoID(c.Param("clusterId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid cluster id", http.StatusBadRequest)
+		return
+	}
+	if err := h.revokeWorkspaceCluster.Handle(c.Request.Context(), wsID, clusterID); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"revoked": true, "workspace_id": wsID.String(), "cluster_id": clusterID.String()})
 }
 
 func (h *Handler) GetDashboard(c *gin.Context) {

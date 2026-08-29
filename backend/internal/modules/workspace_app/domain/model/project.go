@@ -84,61 +84,70 @@ type ProjectResources struct {
 }
 
 type Project struct {
-	ID             kernel.ProjectID
-	WorkspaceID    kernel.WorkspaceID
-	Name           ProjectName
-	DisplayName    string
-	Description    string
-	Namespace      string
-	Language       string
-	GitURL         string
-	SecretID       string
-	GitRefType     string
-	GitRefValue    string
-	DockerfilePath string
-	TemplateID     string
-	Resources      ProjectResources
-	Status         ProjectStatus
-	ReviewStatus   ProjectReviewStatus
-	SubmittedBy    *kernel.MemberID
-	SubmittedAt    *time.Time
-	ReviewedBy     *kernel.MemberID
-	ReviewedAt     *time.Time
-	ReviewComment  string
-	CreatedBy      kernel.MemberID
-	CreatedAt      time.Time
+	ID                 kernel.ProjectID
+	WorkspaceID        kernel.WorkspaceID
+	Name               ProjectName
+	DisplayName        string
+	Description        string
+	Namespace          string
+	Language           string
+	GitURL             string
+	SecretID           string
+	GitRefType         string
+	GitRefValue        string
+	DockerfilePath     string
+	TemplateID         string
+	DefaultClusterID   string
+	JenkinsSecretID    string
+	KubernetesSecretID string
+	Resources          ProjectResources
+	Status             ProjectStatus
+	ReviewStatus       ProjectReviewStatus
+	SubmittedBy        *kernel.MemberID
+	SubmittedAt        *time.Time
+	ReviewedBy         *kernel.MemberID
+	ReviewedAt         *time.Time
+	ReviewComment      string
+	CreatedBy          kernel.MemberID
+	CreatedAt          time.Time
 
 	events []events.Event
 }
 
 type CreateProjectInput struct {
-	Name           string
-	DisplayName    string
-	Description    string
-	Namespace      string
-	Language       string
-	GitURL         string
-	SecretID       string
-	GitRefType     string
-	GitRefValue    string
-	DockerfilePath string
-	TemplateID     string
-	Resources      ProjectResources
+	Name               string
+	DisplayName        string
+	Description        string
+	Namespace          string
+	Language           string
+	GitURL             string
+	SecretID           string
+	GitRefType         string
+	GitRefValue        string
+	DockerfilePath     string
+	TemplateID         string
+	DefaultClusterID   string
+	JenkinsSecretID    string
+	KubernetesSecretID string
+	Resources          ProjectResources
 }
 
 type UpdateProjectInput struct {
-	Name           *string
-	DisplayName    *string
-	Description    *string
-	Namespace      *string
-	Language       *string
-	GitURL         *string
-	SecretID       *string
-	GitRefType     *string
-	GitRefValue    *string
-	DockerfilePath *string
-	TemplateID     *string
-	Resources      *ProjectResources
+	Name               *string
+	DisplayName        *string
+	Description        *string
+	Namespace          *string
+	Language           *string
+	GitURL             *string
+	SecretID           *string
+	GitRefType         *string
+	GitRefValue        *string
+	DockerfilePath     *string
+	TemplateID         *string
+	DefaultClusterID   *string
+	JenkinsSecretID    *string
+	KubernetesSecretID *string
+	Resources          *ProjectResources
 }
 
 func NewProject(wsID kernel.WorkspaceID, name ProjectName, createdBy kernel.MemberID, input CreateProjectInput) *Project {
@@ -152,24 +161,27 @@ func NewProject(wsID kernel.WorkspaceID, name ProjectName, createdBy kernel.Memb
 	}
 
 	p := &Project{
-		ID:             kernel.NewProjectID(),
-		WorkspaceID:    wsID,
-		Name:           name,
-		DisplayName:    strings.TrimSpace(input.DisplayName),
-		Description:    strings.TrimSpace(input.Description),
-		Namespace:      strings.TrimSpace(input.Namespace),
-		Language:       strings.TrimSpace(input.Language),
-		GitURL:         strings.TrimSpace(input.GitURL),
-		SecretID:       strings.TrimSpace(input.SecretID),
-		GitRefType:     strings.TrimSpace(input.GitRefType),
-		GitRefValue:    strings.TrimSpace(input.GitRefValue),
-		DockerfilePath: dockerfile,
-		TemplateID:     strings.TrimSpace(input.TemplateID),
-		Resources:      resources,
-		Status:         ProjectStatusActive,
-		ReviewStatus:   ProjectReviewNone,
-		CreatedBy:      createdBy,
-		CreatedAt:      time.Now().UTC(),
+		ID:                 kernel.NewProjectID(),
+		WorkspaceID:        wsID,
+		Name:               name,
+		DisplayName:        strings.TrimSpace(input.DisplayName),
+		Description:        strings.TrimSpace(input.Description),
+		Namespace:          strings.TrimSpace(input.Namespace),
+		Language:           strings.TrimSpace(input.Language),
+		GitURL:             strings.TrimSpace(input.GitURL),
+		SecretID:           strings.TrimSpace(input.SecretID),
+		GitRefType:         strings.TrimSpace(input.GitRefType),
+		GitRefValue:        strings.TrimSpace(input.GitRefValue),
+		DockerfilePath:     dockerfile,
+		TemplateID:         strings.TrimSpace(input.TemplateID),
+		DefaultClusterID:   strings.TrimSpace(input.DefaultClusterID),
+		JenkinsSecretID:    strings.TrimSpace(input.JenkinsSecretID),
+		KubernetesSecretID: strings.TrimSpace(input.KubernetesSecretID),
+		Resources:          resources,
+		Status:             ProjectStatusActive,
+		ReviewStatus:       ProjectReviewNone,
+		CreatedBy:          createdBy,
+		CreatedAt:          time.Now().UTC(),
 	}
 	p.record(event.NewProjectCreated(p.ID, p.WorkspaceID, p.CreatedBy))
 	return p
@@ -197,6 +209,8 @@ func (p *Project) UpdateDetails(input CreateProjectInput) error {
 		Namespace: &input.Namespace, Language: &input.Language, GitURL: &input.GitURL,
 		SecretID: &input.SecretID, GitRefType: &input.GitRefType, GitRefValue: &input.GitRefValue,
 		DockerfilePath: &input.DockerfilePath, TemplateID: &input.TemplateID, Resources: &input.Resources,
+		DefaultClusterID: &input.DefaultClusterID, JenkinsSecretID: &input.JenkinsSecretID,
+		KubernetesSecretID: &input.KubernetesSecretID,
 	})
 }
 
@@ -248,6 +262,15 @@ func (p *Project) ApplyPatch(input UpdateProjectInput) error {
 	}
 	if input.TemplateID != nil {
 		p.TemplateID = strings.TrimSpace(*input.TemplateID)
+	}
+	if input.DefaultClusterID != nil {
+		p.DefaultClusterID = strings.TrimSpace(*input.DefaultClusterID)
+	}
+	if input.JenkinsSecretID != nil {
+		p.JenkinsSecretID = strings.TrimSpace(*input.JenkinsSecretID)
+	}
+	if input.KubernetesSecretID != nil {
+		p.KubernetesSecretID = strings.TrimSpace(*input.KubernetesSecretID)
 	}
 	if input.Resources != nil {
 		p.Resources = mergeProjectResources(p.Resources, *input.Resources)
@@ -368,6 +391,15 @@ func (p *Project) patchChangesConfiguration(input UpdateProjectInput) bool {
 		}
 	}
 	if input.TemplateID != nil && p.TemplateID != strings.TrimSpace(*input.TemplateID) {
+		return true
+	}
+	if input.DefaultClusterID != nil && p.DefaultClusterID != strings.TrimSpace(*input.DefaultClusterID) {
+		return true
+	}
+	if input.JenkinsSecretID != nil && p.JenkinsSecretID != strings.TrimSpace(*input.JenkinsSecretID) {
+		return true
+	}
+	if input.KubernetesSecretID != nil && p.KubernetesSecretID != strings.TrimSpace(*input.KubernetesSecretID) {
 		return true
 	}
 	if input.Resources != nil {

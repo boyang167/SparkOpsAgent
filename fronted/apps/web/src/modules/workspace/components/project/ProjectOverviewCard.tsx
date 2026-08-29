@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
+import type { DeploymentRunVM } from "@sparkops/contracts/delivery";
+import type { DeploymentEntryAction } from "./deployment-gate";
 import {
   formatDateTime,
   languageColor,
@@ -28,6 +30,13 @@ interface ProjectOverviewCardProps {
   onSubmitReview?: (project: ProjectVM) => void;
   onReview?: (project: ProjectVM) => void;
   onArchive?: (project: ProjectVM) => void;
+  deploymentAction?: DeploymentEntryAction;
+  deploymentSummary?: {
+    total: number | null;
+    latest: DeploymentRunVM | null;
+    loading: boolean;
+    error: string | null;
+  };
 }
 
 function statusLabelTagClass(label: string) {
@@ -113,6 +122,8 @@ export function ProjectOverviewCard({
   onSubmitReview,
   onReview,
   onArchive,
+  deploymentAction,
+  deploymentSummary,
 }: ProjectOverviewCardProps) {
   const router = useRouter();
   const { steps, statusLabel } = computeProjectProgress(project);
@@ -122,6 +133,22 @@ export function ProjectOverviewCard({
   const TitleTag = heading;
   const targetHref = detailsHref ?? `/projects/${project.id}`;
   const cardInteractive = Boolean(detailsHref);
+  const deploymentCount = deploymentSummary?.loading
+    ? "加载中…"
+    : deploymentSummary?.error
+      ? "不可用"
+      : deploymentSummary?.total != null
+        ? String(deploymentSummary.total)
+        : "暂无统计";
+  const latestDeployment = deploymentSummary?.loading
+    ? "加载中…"
+    : deploymentSummary?.error
+      ? "不可用"
+      : deploymentSummary?.latest
+        ? `${deploymentSummary.latest.status} · ${formatDateTime(deploymentSummary.latest.created_at)}`
+        : deploymentSummary
+          ? "暂无"
+          : "暂无统计";
 
   function handleCardClick(event: React.MouseEvent<HTMLElement>) {
     if (!cardInteractive) return;
@@ -175,15 +202,15 @@ export function ProjectOverviewCard({
       <div className="project-workbench-stats">
         <div>
           <span>部署次数</span>
-          <strong>0</strong>
+          <strong>{deploymentCount}</strong>
         </div>
         <div>
           <span>构建次数</span>
-          <strong>0</strong>
+          <strong>暂无统计</strong>
         </div>
         <div>
           <span>最后部署</span>
-          <strong>N/A</strong>
+          <strong>{latestDeployment}</strong>
         </div>
       </div>
 
@@ -221,8 +248,15 @@ export function ProjectOverviewCard({
             </button>
           ) : primaryAction === "deploy" ? (
             onDeploy ? (
-              <button type="button" className="project-action-btn is-deploy" onClick={onDeploy}>
-                部署
+              <button
+                type="button"
+                className="project-action-btn is-deploy"
+                onClick={onDeploy}
+                disabled={deploymentAction?.disabled}
+                title={deploymentAction?.reason ?? undefined}
+                aria-describedby={deploymentAction?.reason ? `deploy-reason-${project.id}` : undefined}
+              >
+                {deploymentAction?.label ?? "部署"}
               </button>
             ) : (
               <Link
@@ -243,6 +277,11 @@ export function ProjectOverviewCard({
           )}
         </div>
       </footer>
+      {deploymentAction?.reason ? (
+        <p id={`deploy-reason-${project.id}`} className="text-sm text-muted" role="status">
+          {deploymentAction.reason}
+        </p>
+      ) : null}
     </article>
   );
 }

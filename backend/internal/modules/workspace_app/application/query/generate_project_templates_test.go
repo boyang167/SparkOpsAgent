@@ -22,7 +22,7 @@ func TestGenerateArtifacts_DefaultService(t *testing.T) {
 		GitRefValue: "main",
 		Resources: model.ProjectResources{
 			ServiceTemplateID: "tmpl-svc",
-			Replicas:           1,
+			Replicas:          1,
 		},
 	})
 	byID := map[string]*model.Template{
@@ -74,6 +74,59 @@ func TestGenerateArtifacts_IncludesServiceWhenDeploymentConfigured(t *testing.T)
 	}
 	if !strings.Contains(items[0].Content, "kind: Service") {
 		t.Fatalf("service content missing: %s", items[0].Content)
+	}
+}
+
+func TestRenderDeploymentPipelineArtifactUsesDeploymentOverrides(t *testing.T) {
+	name, err := model.NewProjectName("orders")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{
+		Name:        "orders",
+		Namespace:   "team-a",
+		GitRefValue: "stored-branch",
+		Resources: model.ProjectResources{
+			JenkinsfileTemplateID: "jenkins-template",
+		},
+	})
+	template := &model.Template{
+		Kind: "jenkinsFile",
+		Name: mustTemplateName(t, "deploy-pipeline"),
+		Detail: `pipeline {
+  environment {
+    REF = '{{ .CodeVersion }}'
+    IMAGE = '{{ .image }}'
+    GIT_CREDENTIAL = '{{ .git_credential_id }}'
+    REGISTRY_CREDENTIAL = '{{ .registry_credential_id }}'
+  }
+}`,
+	}
+
+	content := RenderDeploymentPipelineArtifact(
+		project,
+		map[string]*model.Template{"jenkins-template": template},
+		testRenderContext(project),
+		DeploymentPipelineRenderInput{
+			GitRefValue:          "release/2026-08",
+			ImageTag:             "deploy-123",
+			ImageRepository:      "registry.example/team-a/orders",
+			GitCredentialID:      "sparkops-ws-git",
+			RegistryCredentialID: "sparkops-ws-harbor",
+		},
+	)
+
+	if !strings.Contains(content, "release/2026-08") {
+		t.Fatalf("rendered pipeline missing deployment git ref: %s", content)
+	}
+	if !strings.Contains(content, "registry.example/team-a/orders:deploy-123") {
+		t.Fatalf("rendered pipeline missing deployment image: %s", content)
+	}
+	if !strings.Contains(content, "sparkops-ws-git") || !strings.Contains(content, "sparkops-ws-harbor") {
+		t.Fatalf("rendered pipeline missing stable credential IDs: %s", content)
+	}
+	if strings.Contains(content, "stored-branch") {
+		t.Fatalf("rendered pipeline used stored branch instead of deployment input: %s", content)
 	}
 }
 

@@ -53,6 +53,20 @@ func (a *WorkspaceAppACL) ProjectName(ctx context.Context, projectID kernel.Proj
 	return row.Name, err
 }
 
+func (a *WorkspaceAppACL) ProjectNamespace(ctx context.Context, projectID kernel.ProjectID) (string, error) {
+	var row struct {
+		Namespace string
+	}
+	err := a.db.WithContext(ctx).Table("workspace_app.projects").
+		Select("namespace").
+		Where("id = ?", projectID.String()).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+	return row.Namespace, err
+}
+
 func (a *WorkspaceAppACL) ProjectAutomationContext(ctx context.Context, projectID kernel.ProjectID) (port.ProjectAutomationContext, error) {
 	var row struct {
 		WorkspaceID string

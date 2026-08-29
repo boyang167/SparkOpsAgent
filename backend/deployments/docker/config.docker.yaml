@@ -15,6 +15,10 @@ runtime:
   cluster: ""
 delivery:
   driver: "mock"
+deploy:
+  jenkins_timeout: 30m
+  rollout_timeout: 10m
+  reconcile_interval: 30s
 jenkins:
   url: ""
   user: ""

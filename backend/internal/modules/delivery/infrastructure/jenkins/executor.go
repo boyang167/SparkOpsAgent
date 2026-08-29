@@ -1,8 +1,14 @@
 package jenkins
 
 import (
+	"bytes"
 	"context"
+	"encoding/xml"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,32 +39,239 @@ func NewExecutor(cfg config.JenkinsConfig) (*Executor, error) {
 	return &Executor{client: client, jobSuffix: suffix}, nil
 }
 
+func (e *Executor) CreateOrUpdate(ctx context.Context, spec port.JenkinsJobSpec) error {
+	spec.Folder = strings.TrimSpace(spec.Folder)
+	spec.Job = strings.TrimSpace(spec.Job)
+	if spec.Folder == "" {
+		return errors.New("jenkins folder is required")
+	}
+	if spec.Job == "" {
+		return errors.New("jenkins job is required")
+	}
+
+	folderStatus, err := e.resourceStatus(ctx, "/job/"+url.PathEscape(spec.Folder))
+	if err != nil {
+		return fmt.Errorf("get jenkins folder: %w", err)
+	}
+	if folderStatus == http.StatusNotFound {
+		if _, err := e.client.CreateFolder(ctx, spec.Folder); err != nil {
+			if !isCreateConflict(err) {
+				return fmt.Errorf("create jenkins folder: %w", err)
+			}
+			reloadedStatus, reloadErr := e.resourceStatus(ctx, "/job/"+url.PathEscape(spec.Folder))
+			if reloadErr != nil {
+				return fmt.Errorf("reload jenkins folder after create conflict: %w", reloadErr)
+			}
+			if reloadedStatus != http.StatusOK {
+				return fmt.Errorf("reload jenkins folder after create conflict: unexpected status %d", reloadedStatus)
+			}
+		}
+	} else if folderStatus != http.StatusOK {
+		return fmt.Errorf("get jenkins folder: unexpected status %d", folderStatus)
+	}
+	if err := e.upsertCredentials(ctx, spec.Folder, spec.Credentials); err != nil {
+		return err
+	}
+
+	config := renderJobXML(spec)
+	jobBase := "/job/" + url.PathEscape(spec.Folder) + "/job/" + url.PathEscape(spec.Job)
+	jobStatus, err := e.resourceStatus(ctx, jobBase)
+	if err != nil {
+		return fmt.Errorf("get jenkins job: %w", err)
+	}
+	if jobStatus == http.StatusNotFound {
+		if _, err := e.client.CreateJobInFolder(ctx, config, spec.Job, spec.Folder); err != nil {
+			if !isCreateConflict(err) {
+				return fmt.Errorf("create jenkins job: %w", err)
+			}
+			reloadedStatus, reloadErr := e.resourceStatus(ctx, jobBase)
+			if reloadErr != nil {
+				return fmt.Errorf("reload jenkins job after create conflict: %w", reloadErr)
+			}
+			if reloadedStatus != http.StatusOK {
+				return fmt.Errorf("reload jenkins job after create conflict: unexpected status %d", reloadedStatus)
+			}
+			return e.updateJobConfig(ctx, spec.Folder, spec.Job, config)
+		}
+		return nil
+	}
+	if jobStatus != http.StatusOK {
+		return fmt.Errorf("get jenkins job: unexpected status %d", jobStatus)
+	}
+	return e.updateJobConfig(ctx, spec.Folder, spec.Job, config)
+}
+
+func (e *Executor) updateJobConfig(ctx context.Context, folder, jobName, config string) error {
+	job, err := e.client.GetJob(ctx, jobName, folder)
+	if err != nil {
+		return fmt.Errorf("get jenkins job: %w", err)
+	}
+	if err := job.UpdateConfig(ctx, config); err != nil {
+		return fmt.Errorf("update jenkins job: %w", err)
+	}
+	return nil
+}
+
+func isCreateConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return message == strconv.Itoa(http.StatusConflict) ||
+		strings.Contains(message, "already exists") ||
+		strings.Contains(message, "conflict status")
+}
+
+func (e *Executor) resourceStatus(ctx context.Context, base string) (int, error) {
+	var body string
+	response, err := e.client.Requester.Get(ctx, base+"/api/json", &body, nil)
+	if err != nil {
+		return 0, err
+	}
+	return response.StatusCode, nil
+}
+
+func (e *Executor) upsertCredentials(ctx context.Context, folder string, credentials []port.JenkinsCredential) error {
+	manager := gjenkins.CredentialsManager{J: e.client, Folder: folder}
+	existing, err := manager.List(ctx, "_")
+	if err != nil {
+		return fmt.Errorf("list jenkins credentials: %w", err)
+	}
+	exists := make(map[string]bool, len(existing))
+	for _, id := range existing {
+		exists[id] = true
+	}
+	for _, credential := range credentials {
+		value, err := jenkinsCredentialValue(credential)
+		if err != nil {
+			return fmt.Errorf("prepare jenkins credential %q: %w", credential.ID, err)
+		}
+		if exists[credential.ID] {
+			err = manager.Update(ctx, "_", credential.ID, value)
+		} else {
+			err = manager.Add(ctx, "_", value)
+			if isCreateConflict(err) {
+				reloaded, reloadErr := manager.List(ctx, "_")
+				if reloadErr != nil {
+					return fmt.Errorf("reload jenkins credential %q after create conflict: %w", credential.ID, reloadErr)
+				}
+				found := false
+				for _, id := range reloaded {
+					if id == credential.ID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return fmt.Errorf("reload jenkins credential %q after create conflict: credential not found", credential.ID)
+				}
+				err = manager.Update(ctx, "_", credential.ID, value)
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("upsert jenkins credential %q: %w", credential.ID, err)
+		}
+	}
+	return nil
+}
+
+func jenkinsCredentialValue(credential port.JenkinsCredential) (any, error) {
+	const scope = "GLOBAL"
+	switch credential.Kind {
+	case "username-password":
+		return gjenkins.UsernameCredentials{
+			ID: credential.ID, Scope: scope, Username: credential.Username, Password: credential.Secret,
+		}, nil
+	case "secret-text":
+		return gjenkins.StringCredentials{
+			ID: credential.ID, Scope: scope, Secret: credential.Secret,
+		}, nil
+	case "ssh-private-key":
+		return gjenkins.SSHCredentials{
+			ID: credential.ID, Scope: scope, Username: credential.Username,
+			PrivateKeySource: &gjenkins.PrivateKey{
+				Value: credential.Secret,
+				Class: gjenkins.KeySourceDirectEntryType,
+			},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported kind %q", credential.Kind)
+	}
+}
+
+func renderJobXML(spec port.JenkinsJobSpec) string {
+	var script bytes.Buffer
+	_ = xml.EscapeText(&script, []byte(spec.PipelineScript))
+	return `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<flow-definition plugin="workflow-job">` +
+		`<actions/><description/><keepDependencies>false</keepDependencies>` +
+		`<properties><hudson.model.ParametersDefinitionProperty><parameterDefinitions>` +
+		stringParameterXML("BRANCH") +
+		stringParameterXML("CodeVersion") +
+		stringParameterXML("IMAGE_TAG") +
+		stringParameterXML("IMAGE_REPOSITORY") +
+		`</parameterDefinitions></hudson.model.ParametersDefinitionProperty></properties>` +
+		`<definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">` +
+		`<script>` + script.String() + `</script><sandbox>true</sandbox></definition>` +
+		`<triggers/><disabled>false</disabled></flow-definition>`
+}
+
+func stringParameterXML(name string) string {
+	return `<hudson.model.StringParameterDefinition><name>` + name +
+		`</name><defaultValue></defaultValue><trim>true</trim></hudson.model.StringParameterDefinition>`
+}
+
+func buildParams(req port.BuildRequest) map[string]string {
+	branch := strings.TrimSpace(req.GitRefValue)
+	if branch == "" {
+		branch = "main"
+	}
+	params := map[string]string{"BRANCH": branch}
+	if req.Namespace != "" || req.ProjectName != "" {
+		params["CodeVersion"] = branch
+		params["IMAGE_TAG"] = req.ImageTag
+		params["IMAGE_REPOSITORY"] = req.ImageRepository
+	}
+	if req.RollbackOf > 0 {
+		params["ROLLBACK_OF"] = strconv.Itoa(req.RollbackOf)
+	}
+	return params
+}
+
 func (e *Executor) RunStreaming(
 	ctx context.Context,
 	buildID kernel.BuildID,
-	projectName, branch string,
-	buildNumber int,
-	rollbackOf int,
+	req port.BuildRequest,
 	hub port.LogPublisher,
 ) (string, error) {
-	projectName = strings.TrimSpace(projectName)
-	if projectName == "" {
-		projectName = "app"
+	if req.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
+		defer cancel()
 	}
-	if strings.TrimSpace(branch) == "" {
-		branch = "main"
+	req.Job = strings.TrimSpace(req.Job)
+	if req.Job == "" {
+		req.Job = "app" + e.jobSuffix
 	}
-	jobName := projectName + e.jobSuffix
-	header := fmt.Sprintf("[jenkins] job=%s branch=%s build=%d\n", jobName, branch, buildNumber)
+	if strings.TrimSpace(req.GitRefValue) == "" {
+		req.GitRefValue = "main"
+	}
+	header := fmt.Sprintf("[jenkins] job=%s branch=%s\n", req.Job, req.GitRefValue)
 	if hub != nil {
 		hub.Publish(buildID, header)
 	}
 	var buf strings.Builder
 	buf.WriteString(header)
 
-	job, err := e.client.GetJob(ctx, jobName)
+	var job *gjenkins.Job
+	var err error
+	if strings.TrimSpace(req.Folder) == "" {
+		job, err = e.client.GetJob(ctx, req.Job)
+	} else {
+		job, err = e.client.GetJob(ctx, req.Job, strings.TrimSpace(req.Folder))
+	}
 	if err != nil {
-		errLine := fmt.Sprintf("jenkins job not found: %s (%v)\n", jobName, err)
+		errLine := fmt.Sprintf("jenkins job not found: %s (%v)\n", req.Job, err)
 		buf.WriteString(errLine)
 		if hub != nil {
 			hub.Publish(buildID, errLine)
@@ -66,11 +279,7 @@ func (e *Executor) RunStreaming(
 		return buf.String(), err
 	}
 
-	params := map[string]string{"BRANCH": branch}
-	if rollbackOf > 0 {
-		params["ROLLBACK_OF"] = fmt.Sprintf("%d", rollbackOf)
-	}
-	queueID, err := job.InvokeSimple(ctx, params)
+	queueID, err := job.InvokeSimple(ctx, buildParams(req))
 	if err != nil {
 		return buf.String(), fmt.Errorf("invoke jenkins: %w", err)
 	}
@@ -79,7 +288,13 @@ func (e *Executor) RunStreaming(
 		return buf.String(), fmt.Errorf("wait build: %w", err)
 	}
 
-	for build.IsRunning(ctx) {
+	for {
+		if _, err := build.Poll(ctx); err != nil {
+			return buf.String(), fmt.Errorf("poll jenkins build: %w", err)
+		}
+		if !build.Raw.Building {
+			break
+		}
 		select {
 		case <-ctx.Done():
 			return buf.String(), ctx.Err()
@@ -90,8 +305,18 @@ func (e *Executor) RunStreaming(
 		if hub != nil {
 			hub.Publish(buildID, chunk)
 		}
-		time.Sleep(time.Second)
-		build, _ = job.GetBuild(ctx, build.GetBuildNumber())
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return buf.String(), ctx.Err()
+		case <-timer.C:
+		}
+		next, err := job.GetBuild(ctx, build.GetBuildNumber())
+		if err != nil {
+			return buf.String(), fmt.Errorf("refresh jenkins build: %w", err)
+		}
+		build = next
 	}
 
 	result := fmt.Sprintf("[jenkins] finished result=%s\n", build.GetResult())

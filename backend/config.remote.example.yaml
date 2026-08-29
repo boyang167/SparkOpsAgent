@@ -12,6 +12,10 @@ redis:
   addr: "192.168.5.24:16379"
 messaging:
   driver: inmemory
+deploy:
+  jenkins_timeout: 30m
+  rollout_timeout: 10m
+  reconcile_interval: 30s
 jwt:
   secret: "sparkops-agent-secret"
   expire_hour: 24

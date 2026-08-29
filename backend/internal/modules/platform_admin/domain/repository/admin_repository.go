@@ -43,6 +43,10 @@ type AdminRepository interface {
 	UpsertSysConfig(ctx context.Context, cfg *SysConfig) error
 	ListClusters(ctx context.Context) ([]*ClusterInfo, error)
 	SaveCluster(ctx context.Context, cluster *ClusterInfo) error
+	GrantWorkspaceCluster(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID, createdBy kernel.MemberID) error
+	RevokeWorkspaceCluster(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) error
+	ListWorkspaceClusters(ctx context.Context, wsID kernel.WorkspaceID) ([]*ClusterInfo, error)
+	WorkspaceClusterGranted(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) (bool, error)
 	GetStatisticsCache(ctx context.Context, wsID kernel.WorkspaceID, key string) (map[string]any, error)
 	UpsertStatisticsCache(ctx context.Context, wsID kernel.WorkspaceID, key string, payload map[string]any) error
 	ListProclaims(ctx context.Context) ([]*Proclaim, error)

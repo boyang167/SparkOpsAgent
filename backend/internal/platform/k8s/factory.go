@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"sync"
 
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/dynamic"
 )
 
 type ClusterConfig struct {
@@ -68,6 +68,18 @@ func newClient(kubeconfigPath, context string) (*rest.Config, kubernetes.Interfa
 		return nil, nil, err
 	}
 	return restCfg, client, nil
+}
+
+func NewClientsForConfig(restCfg *rest.Config) (kubernetes.Interface, dynamic.Interface, error) {
+	client, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	dynamicClient, err := dynamic.NewForConfig(restCfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return client, dynamicClient, nil
 }
 
 func (f *Factory) Get(clusterName string) (kubernetes.Interface, error) {

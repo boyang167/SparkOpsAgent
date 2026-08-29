@@ -30,6 +30,15 @@ func (c *Config) Validate() error {
 	if len(c.JWT.Secret) < 16 {
 		return fmt.Errorf("jwt.secret must be at least 16 characters")
 	}
+	if c.Deploy.JenkinsTimeout <= 0 {
+		return fmt.Errorf("deploy.jenkins_timeout must be greater than zero")
+	}
+	if c.Deploy.RolloutTimeout <= 0 {
+		return fmt.Errorf("deploy.rollout_timeout must be greater than zero")
+	}
+	if c.Deploy.ReconcileInterval <= 0 {
+		return fmt.Errorf("deploy.reconcile_interval must be greater than zero")
+	}
 	if IsProduction() {
 		if c.JWT.Secret == "dev-only-change-me" || c.JWT.Secret == "docker-dev-secret" {
 			return fmt.Errorf("jwt.secret must be changed in production")

@@ -1,0 +1,231 @@
+package query
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/port"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/stream"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
+)
+
+type DeploymentView struct {
+	ID           string  `json:"id"`
+	WorkspaceID  string  `json:"workspace_id"`
+	ProjectID    string  `json:"project_id"`
+	ClusterID    string  `json:"cluster_id"`
+	BuildID      *string `json:"build_id,omitempty"`
+	GitRefType   string  `json:"git_ref_type"`
+	GitRefValue  string  `json:"git_ref_value"`
+	ImageTag     string  `json:"image_tag"`
+	Status       string  `json:"status"`
+	CurrentStage string  `json:"current_stage,omitempty"`
+	ErrorMessage string  `json:"error_message,omitempty"`
+	CreatedBy    string  `json:"created_by"`
+	CreatedAt    string  `json:"created_at"`
+	StartedAt    *string `json:"started_at,omitempty"`
+	FinishedAt   *string `json:"finished_at,omitempty"`
+}
+
+type deploymentPageReader interface {
+	ListPageByProject(context.Context, kernel.WorkspaceID, kernel.ProjectID, int, int) (kernel.Page[*model.DeploymentRun], error)
+}
+
+type ListDeploymentsHandler struct {
+	repo deploymentPageReader
+}
+
+func NewListDeploymentsHandler(repo deploymentPageReader) *ListDeploymentsHandler {
+	return &ListDeploymentsHandler{repo: repo}
+}
+
+func (h *ListDeploymentsHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) (kernel.Page[DeploymentView], error) {
+	page, err := h.repo.ListPageByProject(ctx, wsID, projectID, 1, 20)
+	if err != nil {
+		return kernel.Page[DeploymentView]{}, err
+	}
+	items := make([]DeploymentView, 0, len(page.Items))
+	for _, run := range page.Items {
+		items = append(items, ToDeploymentView(run))
+	}
+	return kernel.NewPage(items, page.Total, page.Page, page.PageSize), nil
+}
+
+type GetDeploymentHandler struct {
+	repo repository.DeploymentRunRepository
+}
+
+func NewGetDeploymentHandler(repo repository.DeploymentRunRepository) *GetDeploymentHandler {
+	return &GetDeploymentHandler{repo: repo}
+}
+
+func (h *GetDeploymentHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, runID kernel.DeploymentRunID) (*DeploymentView, error) {
+	run, err := h.repo.FindByID(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run.WorkspaceID != wsID {
+		return nil, domain.ErrDeploymentRunNotFound
+	}
+	view := ToDeploymentView(run)
+	return &view, nil
+}
+
+type ClusterOption struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Server     string `json:"server"`
+	Available  bool   `json:"available"`
+	ReasonCode string `json:"reason_code,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+type DeploymentOptions struct {
+	Clusters []ClusterOption `json:"clusters"`
+}
+
+type DeploymentOptionsHandler struct {
+	reader port.ProjectDeploymentReader
+}
+
+func NewDeploymentOptionsHandler(reader port.ProjectDeploymentReader) *DeploymentOptionsHandler {
+	return &DeploymentOptionsHandler{reader: reader}
+}
+
+func (h *DeploymentOptionsHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) (DeploymentOptions, error) {
+	clusters, err := h.reader.ListAuthorizedClusters(ctx, wsID)
+	if err != nil {
+		return DeploymentOptions{}, err
+	}
+	options := DeploymentOptions{Clusters: make([]ClusterOption, 0, len(clusters))}
+	for _, cluster := range clusters {
+		option := ClusterOption{ID: cluster.ID.String(), Name: cluster.Name, Server: cluster.Server}
+		_, loadErr := h.reader.Load(ctx, wsID, projectID, cluster.ID)
+		if loadErr == nil {
+			option.Available = true
+		} else if domainErr, ok := kernel.IsDomainError(loadErr); ok {
+			option.ReasonCode = domainErr.Code()
+			option.Reason = domainErr.Error()
+		} else {
+			return DeploymentOptions{}, loadErr
+		}
+		options.Clusters = append(options.Clusters, option)
+	}
+	return options, nil
+}
+
+type StreamDeploymentHandler struct {
+	repo repository.DeploymentRunRepository
+	hub  *stream.Hub
+}
+
+func NewStreamDeploymentHandler(repo repository.DeploymentRunRepository, hub *stream.Hub) *StreamDeploymentHandler {
+	return &StreamDeploymentHandler{repo: repo, hub: hub}
+}
+
+func (h *StreamDeploymentHandler) Subscribe(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	runID kernel.DeploymentRunID,
+) (<-chan string, string, bool, func(), error) {
+	run, err := h.repo.FindByID(ctx, runID)
+	if err != nil {
+		return nil, "", false, nil, err
+	}
+	if run.WorkspaceID != wsID {
+		return nil, "", false, nil, domain.ErrDeploymentRunNotFound
+	}
+	live, _, _, unsubscribeLive := h.hub.Subscribe(runID)
+	events, err := h.repo.ListEvents(ctx, runID)
+	if err != nil {
+		unsubscribeLive()
+		return nil, "", false, nil, err
+	}
+	latest, err := h.repo.FindByID(ctx, runID)
+	if err != nil {
+		unsubscribeLive()
+		return nil, "", false, nil, err
+	}
+	if latest.WorkspaceID != wsID {
+		unsubscribeLive()
+		return nil, "", false, nil, domain.ErrDeploymentRunNotFound
+	}
+	if isTerminalDeployment(latest.Status) {
+		events, err = h.repo.ListEvents(ctx, runID)
+		if err != nil {
+			unsubscribeLive()
+			return nil, "", false, nil, err
+		}
+		unsubscribeLive()
+		ch := make(chan string)
+		close(ch)
+		return ch, stream.EncodeEvents(events), true, func() {}, nil
+	}
+	maxSnapshotID := uint64(0)
+	for _, event := range events {
+		if event.ID > maxSnapshotID {
+			maxSnapshotID = event.ID
+		}
+	}
+	output := make(chan string, 32)
+	liveCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		defer close(output)
+		for {
+			select {
+			case <-liveCtx.Done():
+				return
+			case delta, open := <-live:
+				if !open {
+					return
+				}
+				if eventID := stream.EventID(delta); eventID != 0 && eventID <= maxSnapshotID {
+					continue
+				}
+				select {
+				case output <- delta:
+				case <-liveCtx.Done():
+					return
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	unsubscribe := func() {
+		once.Do(func() {
+			cancel()
+			unsubscribeLive()
+		})
+	}
+	return output, stream.EncodeEvents(events), false, unsubscribe, nil
+}
+
+func isTerminalDeployment(status model.Status) bool {
+	return status == model.StatusSucceeded || status == model.StatusFailed || status == model.StatusAborted
+}
+
+func ToDeploymentView(run *model.DeploymentRun) DeploymentView {
+	view := DeploymentView{
+		ID: run.ID.String(), WorkspaceID: run.WorkspaceID.String(), ProjectID: run.ProjectID.String(),
+		ClusterID: run.ClusterID.String(), GitRefType: run.GitRefType, GitRefValue: run.GitRefValue,
+		ImageTag: run.ImageTag, Status: string(run.Status), CurrentStage: string(run.CurrentStage),
+		ErrorMessage: run.ErrorMessage, CreatedBy: run.CreatedBy.String(), CreatedAt: run.CreatedAt.Format(time.RFC3339),
+	}
+	if run.BuildID != nil {
+		value := run.BuildID.String()
+		view.BuildID = &value
+	}
+	if run.StartedAt != nil {
+		value := run.StartedAt.Format(time.RFC3339)
+		view.StartedAt = &value
+	}
+	if run.FinishedAt != nil {
+		value := run.FinishedAt.Format(time.RFC3339)
+		view.FinishedAt = &value
+	}
+	return view
+}

@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
@@ -13,6 +14,7 @@ type Adapters struct {
 	Logs      port.PodLogReader
 	Terminal  port.PodTerminal
 	Resources *ResourceService
+	Deployer  port.ManifestDeployer
 }
 
 func NewAdapters(
@@ -46,6 +48,7 @@ func NewAdapters(
 		}
 		return Adapters{
 			Lister: lister, Logs: logs, Terminal: terminal, Resources: resources,
+			Deployer: NewKubeconfigManifestDeployer(time.Second),
 		}, nil
 	}
 
@@ -54,5 +57,6 @@ func NewAdapters(
 		Logs:      NewMockPodLogs(),
 		Terminal:  NewMockPodTerminal(),
 		Resources: NewMockResourceService(checker),
+		Deployer:  NewMockManifestDeployer(),
 	}, nil
 }
