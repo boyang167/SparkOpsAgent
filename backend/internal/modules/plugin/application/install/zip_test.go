@@ -137,6 +137,34 @@ func TestInspectZipAcceptsDeclaredTarUnderBackend(t *testing.T) {
 	require.Equal(t, "tar content", string(inspected.BackendFiles["resource/arthas-bin.tar"]))
 }
 
+func TestInspectZipRejectsMultipleManifestsBeforeTarAssetAuthorization(t *testing.T) {
+	tests := map[string][]zipEntry{
+		"root manifest before backend manifest": {
+			{name: "example/plugin.yaml", content: validPluginYAMLWithTarAsset},
+			{name: "example/backend/plugin.yaml", content: validPluginYAML},
+			{name: "example/backend/plugin.go", content: validPluginGo},
+			{name: "example/backend/resource/arthas-bin.tar", content: "tar content"},
+			{name: "example/frontend/app/(platform)/plugins/example/page.tsx", content: "export default function Page(){return null}"},
+		},
+		"backend manifest before root manifest": {
+			{name: "example/backend/plugin.yaml", content: validPluginYAML},
+			{name: "example/plugin.yaml", content: validPluginYAMLWithTarAsset},
+			{name: "example/backend/plugin.go", content: validPluginGo},
+			{name: "example/backend/resource/arthas-bin.tar", content: "tar content"},
+			{name: "example/frontend/app/(platform)/plugins/example/page.tsx", content: "export default function Page(){return null}"},
+		},
+	}
+
+	for name, entries := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := InspectZip(makeZipEntries(t, entries))
+
+			requireZipInvalid(t, err)
+			require.ErrorContains(t, err, "multiple manifests")
+		})
+	}
+}
+
 func TestInspectZipRejectsUndeclaredTar(t *testing.T) {
 	tests := map[string]struct {
 		manifest string

@@ -101,6 +101,9 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 
 		switch {
 		case name == topLevelID+"/plugin.yaml" || name == topLevelID+"/backend/plugin.yaml":
+			if foundManifest != nil {
+				return nil, zipInvalid("plugin zip contains multiple manifests")
+			}
 			m, err := manifest.Parse(content)
 			if err != nil {
 				return nil, err
