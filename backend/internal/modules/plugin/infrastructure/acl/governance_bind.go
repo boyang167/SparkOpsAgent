@@ -73,6 +73,12 @@ type rolePermissionRow struct {
 	Permissions []byte `gorm:"column:permissions"`
 }
 
+type pluginAPIGrant struct {
+	Path     string
+	Method   string
+	ReadOnly bool
+}
+
 func (b *GovernanceBinder) Bind(ctx context.Context, workspaceID kernel.WorkspaceID, spec *manifest.Manifest) error {
 	db := b.db.WithContext(ctx)
 	now := time.Now().UTC()
@@ -84,33 +90,50 @@ func (b *GovernanceBinder) Bind(ctx context.Context, workspaceID kernel.Workspac
 	}
 	if err := db.Where("workspace_id = ? AND path = ?", workspaceID.String(), "/plugins").
 		Assign(map[string]any{
-			"name": "plugins", "title": "插件", "updated_at": now, "deleted_at": nil,
+			"name": "plugins", "title": "插件", "parent_id": nil, "updated_at": now, "deleted_at": nil,
 		}).FirstOrCreate(&parent).Error; err != nil {
 		return err
 	}
 	parentID := parent.ID
+	menuIDs := make(map[string]string, len(spec.Menus))
 	for index, menu := range spec.Menus {
 		row := menuRow{
 			ID: uuid.NewString(), WorkspaceID: workspaceID.String(),
-			ParentID: &parentID,
-			Name:     fmt.Sprintf("plugin-%s-%d", spec.ID, index+1),
-			Path:     menu.Path, Title: menu.Title, Component: menu.Component,
+			Name: fmt.Sprintf("plugin-%s-%d", spec.ID, index+1),
+			Path: menu.Path, Title: menu.Title, Component: menu.Component,
 			Sort: index + 1, TransitionAnimation: "global",
 			CreatedAt: now, UpdatedAt: now,
 		}
 		assign := map[string]any{
 			"name": row.Name, "title": row.Title, "component": row.Component,
-			"parent_id": parentID, "sort": row.Sort, "updated_at": now, "deleted_at": nil,
+			"sort": row.Sort, "updated_at": now, "deleted_at": nil,
 		}
 		if err := db.Where("workspace_id = ? AND path = ?", workspaceID.String(), menu.Path).
 			Assign(assign).FirstOrCreate(&row).Error; err != nil {
 			return err
 		}
+		menuIDs[menu.Path] = row.ID
+	}
+	for _, menu := range spec.Menus {
+		targetParentID := parentID
+		if menu.Parent != "" {
+			resolvedParentID, ok := menuIDs[menu.Parent]
+			if !ok {
+				return kernel.NewDomainError("PLUGIN_MANIFEST_INVALID", fmt.Sprintf("menu parent %q is not defined in this workspace binding", menu.Parent))
+			}
+			targetParentID = resolvedParentID
+		}
+		if err := db.Model(&menuRow{}).
+			Where("workspace_id = ? AND path = ?", workspaceID.String(), menu.Path).
+			Updates(map[string]any{"parent_id": targetParentID, "updated_at": now}).Error; err != nil {
+			return err
+		}
 	}
 
-	for _, api := range spec.APIs {
+	apiGrants := expandPluginAPIGrants(spec.APIs)
+	for _, api := range apiGrants {
 		row := apiRow{
-			ID: uuid.NewString(), Path: api.Path, Method: strings.ToUpper(api.Method),
+			ID: uuid.NewString(), Path: api.Path, Method: api.Method,
 			APIGroup: "plugin:" + spec.ID, Description: spec.DisplayName,
 			CreatedAt: now, UpdatedAt: now,
 		}
@@ -124,13 +147,24 @@ func (b *GovernanceBinder) Bind(ctx context.Context, workspaceID kernel.Workspac
 		}
 	}
 
-	roleIDs, err := governanceAdminRoleIDs(db, workspaceID.String())
+	roleIDs, adminRoleIDs, err := governanceRoleIDs(db, workspaceID.String())
 	if err != nil {
 		return err
 	}
 	for _, roleID := range roleIDs {
-		for _, api := range spec.APIs {
-			policy := rolePolicyRow{RoleID: roleID, Path: api.Path, Method: strings.ToUpper(api.Method)}
+		for _, api := range apiGrants {
+			if !api.ReadOnly {
+				continue
+			}
+			policy := rolePolicyRow{RoleID: roleID, Path: api.Path, Method: api.Method}
+			if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&policy).Error; err != nil {
+				return err
+			}
+		}
+	}
+	for _, roleID := range adminRoleIDs {
+		for _, api := range apiGrants {
+			policy := rolePolicyRow{RoleID: roleID, Path: api.Path, Method: api.Method}
 			if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&policy).Error; err != nil {
 				return err
 			}
@@ -139,28 +173,66 @@ func (b *GovernanceBinder) Bind(ctx context.Context, workspaceID kernel.Workspac
 	return nil
 }
 
-func governanceAdminRoleIDs(db *gorm.DB, workspaceID string) ([]string, error) {
+func expandPluginAPIGrants(apis []manifest.APISpec) []pluginAPIGrant {
+	methods := []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
+	grants := make([]pluginAPIGrant, 0, len(apis))
+	for _, api := range apis {
+		method := strings.ToUpper(api.Method)
+		if method == "ANY" {
+			path := normalizeWildcardAPIPath(api.Path)
+			for _, expandedMethod := range methods {
+				grants = append(grants, pluginAPIGrant{
+					Path:     path,
+					Method:   expandedMethod,
+					ReadOnly: expandedMethod == "GET" || expandedMethod == "HEAD",
+				})
+			}
+			continue
+		}
+		grants = append(grants, pluginAPIGrant{
+			Path:     api.Path,
+			Method:   method,
+			ReadOnly: method == "GET" || method == "HEAD" || (method == "POST" && strings.HasSuffix(api.Path, "/metrics")),
+		})
+	}
+	return grants
+}
+
+func normalizeWildcardAPIPath(path string) string {
+	prefix := strings.TrimSuffix(path, "*")
+	segments := strings.Split(prefix+"*", "/")
+	for index, segment := range segments {
+		if strings.HasPrefix(segment, ":") {
+			segments[index] = "*"
+		}
+	}
+	return strings.Join(segments, "/")
+}
+
+func governanceRoleIDs(db *gorm.DB, workspaceID string) ([]string, []string, error) {
 	var rows []rolePermissionRow
 	if err := db.Table("governance.roles").
 		Select("id, permissions").
 		Where("workspace_id = ?", workspaceID).
 		Find(&rows).Error; err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	ids := make([]string, 0, len(rows))
+	allIDs := make([]string, 0, len(rows))
+	adminIDs := make([]string, 0, len(rows))
 	for _, row := range rows {
+		allIDs = append(allIDs, row.ID)
 		var permissions []string
 		if err := json.Unmarshal(row.Permissions, &permissions); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, permission := range permissions {
 			if permission == authz.PermGovernanceAdmin {
-				ids = append(ids, row.ID)
+				adminIDs = append(adminIDs, row.ID)
 				break
 			}
 		}
 	}
-	return ids, nil
+	return allIDs, adminIDs, nil
 }
 
 func (b *GovernanceBinder) Unbind(ctx context.Context, workspaceID kernel.WorkspaceID, pluginID string) error {
