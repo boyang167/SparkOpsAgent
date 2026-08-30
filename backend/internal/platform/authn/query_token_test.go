@@ -28,6 +28,40 @@ func TestOptionalAuthAllowsMatchingAccessTokenQueryAndBearer(t *testing.T) {
 	require.JSONEq(t, `{"member_id":"`+memberID.String()+`"}`, rec.Body.String())
 }
 
+func TestOptionalAuthAllowsMatchingAccessTokenQueryAndLowercaseBearerScheme(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tokens := NewTokenProvider(config.JWTConfig{Secret: "query-token-test"})
+	memberID := kernel.NewMemberID()
+	token, err := tokens.Issue(memberID)
+	require.NoError(t, err)
+	engine := optionalAuthProbeEngine(tokens)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/probe?access_token="+token, nil)
+	req.Header.Set("Authorization", "bearer "+token)
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"member_id":"`+memberID.String()+`"}`, rec.Body.String())
+}
+
+func TestOptionalAuthRejectsAccessTokenQueryWithRawJWTAuthorization(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tokens := NewTokenProvider(config.JWTConfig{Secret: "query-token-test"})
+	token, err := tokens.Issue(kernel.NewMemberID())
+	require.NoError(t, err)
+	engine := optionalAuthProbeEngine(tokens)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/probe?access_token="+token, nil)
+	req.Header.Set("Authorization", token)
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Contains(t, rec.Body.String(), "AUTH_INVALID_TOKEN")
+	require.NotContains(t, rec.Body.String(), token)
+}
+
 func TestOptionalAuthRejectsMismatchedAccessTokenQueryAndBearer(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tokens := NewTokenProvider(config.JWTConfig{Secret: "query-token-test"})

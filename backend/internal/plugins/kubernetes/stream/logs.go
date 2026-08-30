@@ -1,7 +1,6 @@
 package stream
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,6 +24,7 @@ import (
 const (
 	maxLogTailLines    int64 = 10000
 	maxLogSinceSeconds int64 = 604800
+	logChunkBytes            = 32 << 10
 )
 
 type LogRequest struct {
@@ -102,16 +102,19 @@ func (h *Handler) Logs(c *gin.Context) {
 	if err := writer.Event("open", map[string]bool{"ok": true}); err != nil {
 		return
 	}
-	reader := bufio.NewReader(body)
+	buf := make([]byte, logChunkBytes)
 	for {
-		line, readErr := reader.ReadString('\n')
-		if line != "" {
-			if err := writer.Event("log", line); err != nil {
+		n, readErr := body.Read(buf)
+		if n > 0 {
+			if err := writer.Event("log", string(buf[:n])); err != nil {
 				return
 			}
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
+				return
+			}
+			if c.Request.Context().Err() != nil {
 				return
 			}
 			_ = writer.Event("error", "pod log stream failed")

@@ -2,6 +2,7 @@ package authn
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -21,9 +22,9 @@ func OptionalAuth(tokens *TokenProvider) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		raw := extractBearer(c.GetHeader("Authorization"))
 		queryToken := c.Query("access_token")
 		if queryToken != "" {
+			raw := extractStrictBearer(c.GetHeader("Authorization"))
 			memberID, ok := parseMatchingQueryAndBearer(c, tokens, raw, queryToken)
 			if !ok {
 				c.Abort()
@@ -33,6 +34,7 @@ func OptionalAuth(tokens *TokenProvider) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		raw := extractBearer(c.GetHeader("Authorization"))
 		if raw == "" {
 			c.Next()
 			return
@@ -52,7 +54,7 @@ func validateAccessTokenQuery(c *gin.Context, tokens *TokenProvider) bool {
 	if queryToken == "" {
 		return true
 	}
-	raw := extractBearer(c.GetHeader("Authorization"))
+	raw := extractStrictBearer(c.GetHeader("Authorization"))
 	_, ok := parseMatchingQueryAndBearer(c, tokens, raw, queryToken)
 	return ok
 }
@@ -73,6 +75,14 @@ func parseMatchingQueryAndBearer(c *gin.Context, tokens *TokenProvider, bearerTo
 		return kernel.MemberID{}, false
 	}
 	return bearerMemberID, true
+}
+
+func extractStrictBearer(header string) string {
+	fields := strings.Fields(header)
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
+		return ""
+	}
+	return fields[1]
 }
 
 // SetMemberIDForTest injects member id (used in tests).

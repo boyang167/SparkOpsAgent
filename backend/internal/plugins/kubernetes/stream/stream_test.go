@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -23,7 +24,7 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-func TestLogsStreamsEachLineAsJSONSSE(t *testing.T) {
+func TestLogsStreamsChunksAsJSONSSE(t *testing.T) {
 	wsID := kernel.NewWorkspaceID()
 	memberID := kernel.NewMemberID()
 	clusterID := kernel.NewClusterInfoID()
@@ -50,8 +51,31 @@ func TestLogsStreamsEachLineAsJSONSSE(t *testing.T) {
 	}, logs.request)
 	body := rec.Body.String()
 	require.Contains(t, body, "event: open\n")
-	require.Contains(t, body, "event: log\ndata: \"alpha\\n\"\n\n")
-	require.Contains(t, body, "event: log\ndata: \"beta\\n\"\n\n")
+	require.Contains(t, body, "event: log\ndata: \"alpha\\nbeta\\n\"\n\n")
+}
+
+func TestLogsStreamsLargeChunkWithoutAccumulatingUntilNewline(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	payload := strings.Repeat("x", 70*1024)
+	logs := &fakeLogStreamer{body: payload}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+	}, logs, nil)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/logs", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	chunks := logEventChunks(t, rec.Body.String())
+	require.Greater(t, len(chunks), 2)
+	for _, chunk := range chunks {
+		require.LessOrEqual(t, len(chunk), logChunkBytes)
+	}
+	require.Equal(t, payload, strings.Join(chunks, ""))
 }
 
 func TestExecRequiresWriterBeforeClusterConnection(t *testing.T) {
@@ -264,4 +288,20 @@ func (r ExecRequest) withoutWriters() ExecRequest {
 	r.Stdout = nil
 	r.Stderr = nil
 	return r
+}
+
+func logEventChunks(t *testing.T, body string) []string {
+	t.Helper()
+	frames := strings.Split(body, "\n\n")
+	var chunks []string
+	for _, frame := range frames {
+		if !strings.HasPrefix(frame, "event: log\n") {
+			continue
+		}
+		raw := strings.TrimPrefix(strings.TrimPrefix(frame, "event: log\n"), "data: ")
+		var chunk string
+		require.NoError(t, json.Unmarshal([]byte(raw), &chunk))
+		chunks = append(chunks, chunk)
+	}
+	return chunks
 }

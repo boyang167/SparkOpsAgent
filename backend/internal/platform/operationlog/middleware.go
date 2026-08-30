@@ -21,7 +21,7 @@ type responseCapture struct {
 }
 
 func (w *responseCapture) Write(b []byte) (int, error) {
-	if w.body.Len() < maxBodyBytes {
+	if !isEventStreamContentType(w.Header().Get("Content-Type")) && w.body.Len() < maxBodyBytes {
 		remain := maxBodyBytes - w.body.Len()
 		if len(b) > remain {
 			_, _ = w.body.Write(b[:remain])
@@ -46,9 +46,16 @@ func Middleware(store *Store) gin.HandlerFunc {
 		start := time.Now()
 		var reqBody string
 		if c.Request.Body != nil && c.Request.Method != "GET" && c.Request.Method != "HEAD" {
-			raw, _ := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes))
-			reqBody = string(raw)
-			c.Request.Body = io.NopCloser(bytes.NewBuffer(raw))
+			contentType := strings.ToLower(c.GetHeader("Content-Type"))
+			if strings.HasPrefix(contentType, "multipart/") {
+				// Never truncate multipart: replacing Body with a 4KiB prefix
+				// breaks plugin ZIP uploads (unexpected EOF / hung proxies).
+				reqBody = "[multipart omitted]"
+			} else {
+				raw, _ := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes))
+				reqBody = string(raw)
+				c.Request.Body = io.NopCloser(bytes.NewBuffer(raw))
+			}
 		}
 
 		capture := &responseCapture{ResponseWriter: c.Writer, body: bytes.NewBuffer(nil)}
@@ -64,6 +71,10 @@ func Middleware(store *Store) gin.HandlerFunc {
 		if len(c.Errors) > 0 {
 			errMsg = c.Errors.String()
 		}
+		respBody := capture.body.String()
+		if isEventStreamContentType(c.Writer.Header().Get("Content-Type")) {
+			respBody = "[stream omitted]"
+		}
 
 		rec := Record{
 			IP:           c.ClientIP(),
@@ -74,7 +85,7 @@ func Middleware(store *Store) gin.HandlerFunc {
 			Agent:        c.Request.UserAgent(),
 			ErrorMessage: errMsg,
 			Body:         reqBody,
-			Resp:         capture.body.String(),
+			Resp:         respBody,
 			MemberID:     memberID,
 			WorkspaceID:  wsID,
 			TraceID:      httpx.GetTraceID(c),
@@ -83,6 +94,10 @@ func Middleware(store *Store) gin.HandlerFunc {
 			_ = store.Create(context.Background(), rec)
 		}()
 	}
+}
+
+func isEventStreamContentType(contentType string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/event-stream")
 }
 
 func shouldSkip(path string) bool {
