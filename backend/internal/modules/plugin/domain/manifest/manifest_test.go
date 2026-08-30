@@ -104,3 +104,114 @@ func TestParse_InvalidAPIMethod_WithWhitespace(t *testing.T) {
 	_, err := manifest.Parse([]byte(yaml))
 	requireManifestInvalid(t, err)
 }
+
+func TestParse_ValidANYWildcard(t *testing.T) {
+	yaml := strings.Replace(validYAML,
+		"  - method: GET\n    path: /api/v1/plugins/example/ping",
+		"  - method: ANY\n    path: /api/v1/plugins/example/proxy/*", 1)
+	m, err := manifest.Parse([]byte(yaml))
+	require.NoError(t, err)
+	require.Equal(t, "ANY", m.APIs[0].Method)
+	require.Equal(t, "/api/v1/plugins/example/proxy/*", m.APIs[0].Path)
+}
+
+func TestParse_InvalidANYExactPath(t *testing.T) {
+	yaml := strings.Replace(validYAML, "method: GET", "method: ANY", 1)
+	_, err := manifest.Parse([]byte(yaml))
+	requireManifestInvalid(t, err)
+}
+
+func TestParse_InvalidParent(t *testing.T) {
+	yaml := strings.Replace(validYAML,
+		"  - title: Example\n    path: /plugins/example\n    component: plugins/example/page",
+		"  - title: Example\n    path: /plugins/example\n    component: plugins/example/page\n    parent: /plugins/example/missing", 1)
+	_, err := manifest.Parse([]byte(yaml))
+	requireManifestInvalid(t, err)
+}
+
+func TestParse_ValidTwoLevelParent(t *testing.T) {
+	yaml := strings.Replace(validYAML,
+		`menus:
+  - title: Example
+    path: /plugins/example
+    component: plugins/example/page`,
+		`menus:
+  - title: Root
+    path: /plugins/example
+    component: plugins/example/page
+  - title: Child
+    path: /plugins/example/child
+    component: plugins/example/child
+    parent: /plugins/example`, 1)
+	m, err := manifest.Parse([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, m.Menus, 2)
+	require.Equal(t, "/plugins/example", m.Menus[1].Parent)
+}
+
+func TestParse_InvalidAssetsFrontend(t *testing.T) {
+	yaml := validYAML + `assets:
+  - frontend/bundle.tar
+`
+	_, err := manifest.Parse([]byte(yaml))
+	requireManifestInvalid(t, err)
+}
+
+func TestParse_InvalidParentSelfLoop(t *testing.T) {
+	yaml := strings.Replace(validYAML,
+		"  - title: Example\n    path: /plugins/example\n    component: plugins/example/page",
+		"  - title: Example\n    path: /plugins/example\n    component: plugins/example/page\n    parent: /plugins/example", 1)
+	_, err := manifest.Parse([]byte(yaml))
+	requireManifestInvalid(t, err)
+}
+
+func TestParse_InvalidParentChainTooDeep(t *testing.T) {
+	yaml := strings.Replace(validYAML,
+		`menus:
+  - title: Example
+    path: /plugins/example
+    component: plugins/example/page`,
+		`menus:
+  - title: L1
+    path: /plugins/example
+    component: plugins/example/page
+  - title: L2
+    path: /plugins/example/l2
+    component: plugins/example/l2
+    parent: /plugins/example
+  - title: L3
+    path: /plugins/example/l2/l3
+    component: plugins/example/l2/l3
+    parent: /plugins/example/l2
+  - title: L4
+    path: /plugins/example/l2/l3/l4
+    component: plugins/example/l2/l3/l4
+    parent: /plugins/example/l2/l3`, 1)
+	_, err := manifest.Parse([]byte(yaml))
+	requireManifestInvalid(t, err)
+}
+
+func TestParse_ValidAssets(t *testing.T) {
+	yaml := validYAML + `assets:
+  - backend/plugin/kubernetes/arthas-bin.tar
+`
+	m, err := manifest.Parse([]byte(yaml))
+	require.NoError(t, err)
+	require.Equal(t, []string{"backend/plugin/kubernetes/arthas-bin.tar"}, m.Assets)
+}
+
+func TestParse_InvalidAssetsPathTraversal(t *testing.T) {
+	yaml := validYAML + `assets:
+  - backend/../secret.tar
+`
+	_, err := manifest.Parse([]byte(yaml))
+	requireManifestInvalid(t, err)
+}
+
+func TestParse_InvalidANYOutsideRoutePrefix(t *testing.T) {
+	yaml := strings.Replace(validYAML,
+		"  - method: GET\n    path: /api/v1/plugins/example/ping",
+		"  - method: ANY\n    path: /api/v1/other/*", 1)
+	_, err := manifest.Parse([]byte(yaml))
+	requireManifestInvalid(t, err)
+}
