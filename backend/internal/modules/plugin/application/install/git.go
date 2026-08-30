@@ -69,13 +69,6 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 	if err := validateBranchWithGit(ctx, runner, p.root, req.Branch); err != nil {
 		return "", err
 	}
-	branchExists, err := localBranchExists(ctx, runner, p.root, req.Branch)
-	if err != nil {
-		return "", err
-	}
-	if branchExists {
-		return "", fmt.Errorf("local branch already exists: %s", req.Branch)
-	}
 	if err := ensureCleanGitRoot(ctx, runner, p.root); err != nil {
 		return "", err
 	}
@@ -91,10 +84,13 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 	if err := os.Remove(worktree); err != nil && !os.IsNotExist(err) {
 		return "", err
 	}
-	deleteBranch := false
-	branchCreateAttempted := false
+
+	if _, err := runCommand(ctx, runner, p.root, "git", "branch", "--", req.Branch, "HEAD"); err != nil {
+		return "", err
+	}
+	branchOwned := true
 	defer func() {
-		cleanupErr := cleanupGitWorktreeAndBranch(runner, p.root, worktree, req.Branch, deleteBranch, branchCreateAttempted)
+		cleanupErr := cleanupGitWorktreeAndBranch(runner, p.root, worktree, req.Branch, branchOwned)
 		if cleanupErr == nil {
 			return
 		}
@@ -106,11 +102,9 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 		err = cleanupErr
 	}()
 
-	branchCreateAttempted = true
-	if _, err := runCommand(ctx, runner, p.root, "git", "worktree", "add", worktree, "-b", req.Branch); err != nil {
+	if _, err := runCommand(ctx, runner, p.root, "git", "worktree", "add", worktree, req.Branch); err != nil {
 		return "", err
 	}
-	deleteBranch = true
 
 	for name, content := range req.Files {
 		if err := writeWorktreeFile(worktree, name, content); err != nil {
@@ -139,7 +133,7 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 	return parsePRURL(out)
 }
 
-func cleanupGitWorktreeAndBranch(runner CommandRunner, root string, worktree string, branch string, deleteBranch bool, branchCreateAttempted bool) error {
+func cleanupGitWorktreeAndBranch(runner CommandRunner, root string, worktree string, branch string, branchOwned bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -147,14 +141,7 @@ func cleanupGitWorktreeAndBranch(runner CommandRunner, root string, worktree str
 	if _, err := runCommand(ctx, runner, root, "git", "worktree", "remove", "--force", worktree); err != nil {
 		cleanupErr = errors.Join(cleanupErr, err)
 	}
-	if !deleteBranch && branchCreateAttempted {
-		exists, err := localBranchExists(ctx, runner, root, branch)
-		if err != nil {
-			cleanupErr = errors.Join(cleanupErr, err)
-		}
-		deleteBranch = exists
-	}
-	if deleteBranch {
+	if branchOwned {
 		if _, err := runCommand(ctx, runner, root, "git", "branch", "-D", "--", branch); err != nil {
 			cleanupErr = errors.Join(cleanupErr, err)
 		}
@@ -353,17 +340,6 @@ func validateBranchWithGit(ctx context.Context, runner CommandRunner, root strin
 		return fmt.Errorf("git normalized branch ref %q does not match %q", strings.TrimSpace(string(out.Stdout)), ref)
 	}
 	return nil
-}
-
-func localBranchExists(ctx context.Context, runner CommandRunner, root string, branch string) (bool, error) {
-	out, err := runner.Run(ctx, root, "git", "show-ref", "--verify", "--quiet", branchRef(branch))
-	if err == nil {
-		return true, nil
-	}
-	if strings.TrimSpace(string(out.Stderr)) != "" {
-		return false, fmt.Errorf("check local branch existence: %w%s", err, commandOutputSuffix(out))
-	}
-	return false, nil
 }
 
 func branchRef(branch string) string {
