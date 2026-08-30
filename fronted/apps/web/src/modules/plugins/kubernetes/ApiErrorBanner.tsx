@@ -13,7 +13,13 @@ export function ApiErrorBanner({ error }: ApiErrorBannerProps) {
         {info.code ? `${info.code}: ` : ""}
         {info.message}
       </div>
-      {info.status ? <div className="text-sm mt-1">HTTP {info.status}</div> : null}
+      {info.status || info.traceId ? (
+        <div className="text-sm mt-1">
+          {info.status ? `HTTP ${info.status}` : ""}
+          {info.status && info.traceId ? " · " : ""}
+          {info.traceId ? `trace ${info.traceId}` : ""}
+        </div>
+      ) : null}
       {info.detail && info.detail !== info.message ? (
         <pre className="input-mono mt-2 whitespace-pre-wrap text-xs">{info.detail}</pre>
       ) : null}

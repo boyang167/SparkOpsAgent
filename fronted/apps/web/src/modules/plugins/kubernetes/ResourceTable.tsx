@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "./ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "./api";
 import { CATALOG, proxyPath, type ResourceDef } from "./catalog";
+import { resourceCollectionUrl } from "./resource-url";
 import { YamlEditor } from "./YamlEditor";
 
 type ResourceTableProps = {
@@ -15,6 +16,7 @@ type ResourceTableProps = {
 
 type K8sList = {
   items?: K8sObject[];
+  total?: number;
 };
 
 type K8sObject = {
@@ -37,6 +39,7 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
   const [items, setItems] = useState<K8sObject[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
@@ -52,7 +55,8 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
   const loadNamespaces = useCallback(async () => {
     if (!clusterId || !namespaceDef) return;
     try {
-      const data = await k8sFetch<K8sList>(proxyPath(clusterId, namespaceDef));
+      const url = resourceCollectionUrl(clusterId, namespaceDef, { page: 1, pageSize: 500 }) ?? proxyPath(clusterId, namespaceDef);
+      const data = await k8sFetch<K8sList>(url);
       setNamespaces((data.items ?? []).map((item) => item.metadata?.name).filter(Boolean) as string[]);
     } catch {
       setNamespaces([]);
@@ -61,20 +65,27 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
 
   const load = useCallback(async () => {
     if (!clusterId || !selected) return;
+    const url = resourceCollectionUrl(clusterId, selected, { namespace, page, pageSize: PAGE_SIZE, keyword });
+    if (!url) {
+      setItems([]);
+      setTotal(0);
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const data = await k8sFetch<K8sList | K8sObject>(proxyPath(clusterId, selected, namespace));
-      const nextItems = Array.isArray((data as K8sList).items) ? (data as K8sList).items ?? [] : [data as K8sObject];
-      setItems(nextItems);
-      setPage(1);
+      const data = await k8sFetch<K8sList>(url);
+      setItems(data.items ?? []);
+      setTotal(data.total ?? data.items?.length ?? 0);
     } catch (err) {
       setItems([]);
+      setTotal(0);
       setError(errorInfo(err, `加载 ${selected.kind} 失败`));
     } finally {
       setLoading(false);
     }
-  }, [clusterId, namespace, selected]);
+  }, [clusterId, keyword, namespace, page, selected]);
 
   useEffect(() => {
     void loadNamespaces();
@@ -84,14 +95,7 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
     void load();
   }, [load]);
 
-  const filtered = useMemo(() => {
-    const q = keyword.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((item) => JSON.stringify(item).toLowerCase().includes(q));
-  }, [items, keyword]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   async function openDetail(item: K8sObject) {
     if (!selected) return;
@@ -147,7 +151,15 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
       <div className="flex flex-wrap items-end gap-3">
         <label className="min-w-52">
           <span className="label">资源类型</span>
-          <select className="input" value={selected.id} onChange={(e) => setResourceId(e.target.value)}>
+          <select
+            className="input"
+            value={selected.id}
+            onChange={(e) => {
+              setResourceId(e.target.value);
+              setNamespace("");
+              setPage(1);
+            }}
+          >
             {resources.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.kind}
@@ -158,8 +170,15 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
         {selected.namespaced ? (
           <label className="min-w-52">
             <span className="label">命名空间</span>
-            <select className="input" value={namespace} onChange={(e) => setNamespace(e.target.value)}>
-              <option value="">全部命名空间</option>
+            <select
+              className="input"
+              value={namespace}
+              onChange={(e) => {
+                setNamespace(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">请选择命名空间</option>
               {namespaces.map((item) => (
                 <option key={item} value={item}>
                   {item}
@@ -170,7 +189,15 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
         ) : null}
         <label className="min-w-64 flex-1">
           <span className="label">关键词</span>
-          <input className="input" value={keyword} placeholder="名称、命名空间或 YAML/JSON 内容" onChange={(e) => setKeyword(e.target.value)} />
+          <input
+            className="input"
+            value={keyword}
+            placeholder="名称、命名空间或 YAML/JSON 内容"
+            onChange={(e) => {
+              setKeyword(e.target.value);
+              setPage(1);
+            }}
+          />
         </label>
         <button type="button" className="btn-secondary" disabled={loading || !clusterId} onClick={() => void load()}>
           {loading ? "加载中…" : "刷新"}
@@ -181,6 +208,8 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
 
       {!clusterId ? (
         <div className="empty-state">请先选择集群。</div>
+      ) : selected.namespaced && !namespace ? (
+        <div className="empty-state">请选择命名空间后加载 {selected.kind}。</div>
       ) : loading ? (
         <div className="empty-state">加载 {selected.kind} 中…</div>
       ) : (
@@ -196,7 +225,7 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
                 </tr>
               </thead>
               <tbody>
-                {pageItems.map((item, idx) => (
+                {items.map((item, idx) => (
                   <tr key={`${item.metadata?.namespace ?? "_"}-${item.metadata?.name ?? idx}`}>
                     {selected.columns.map((column) => (
                       <td key={column.key}>{formatCell(valueAtPath(item, column.key))}</td>
@@ -215,7 +244,7 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
                     </td>
                   </tr>
                 ))}
-                {pageItems.length === 0 ? (
+                {items.length === 0 ? (
                   <tr>
                     <td colSpan={selected.columns.length + 1}>
                       <div className="empty-state">暂无数据</div>
@@ -226,7 +255,7 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
             </table>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-            <span className="text-muted">共 {filtered.length} 条</span>
+            <span className="text-muted">共 {total} 条</span>
             <div className="flex items-center gap-2">
               <button type="button" className="btn-secondary text-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                 上一页

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ApiErrorBanner } from "./ApiErrorBanner";
+import { parseYamlEditorDocument, stringifyYamlEditorDocument } from "./yaml-document";
 
 type YamlEditorProps = {
   title: string;
@@ -13,16 +14,16 @@ type YamlEditorProps = {
 };
 
 export function YamlEditor({ title, value, canSave, saving = false, onSave, onClose }: YamlEditorProps) {
-  const initialText = useMemo(() => JSON.stringify(value, null, 2), [value]);
+  const initialText = useMemo(() => stringifyYamlEditorDocument(value), [value]);
   const [text, setText] = useState(initialText);
   const [error, setError] = useState<string | null>(null);
 
   async function save() {
     setError(null);
     try {
-      await onSave(JSON.parse(text));
+      await onSave(parseYamlEditorDocument(text));
     } catch (err) {
-      setError(err instanceof SyntaxError ? "YAML/JSON 内容不是合法 JSON" : err instanceof Error ? err.message : "保存失败");
+      setError(err instanceof Error ? err.message : "保存失败");
     }
   }
 
@@ -30,7 +31,7 @@ export function YamlEditor({ title, value, canSave, saving = false, onSave, onCl
     <div className="stack-md">
       <div>
         <h3 className="text-lg font-semibold">{title}</h3>
-        <p className="text-sm text-muted mt-1">YAML/JSON（当前仓库未引入 YAML 依赖，此处使用 JSON 文本编辑）。</p>
+        <p className="text-sm text-muted mt-1">YAML/JSON（支持 YAML 与 JSON，保存前会拒绝非对象根和危险原型键）。</p>
       </div>
       <textarea
         className="input input-mono min-h-96 text-xs"

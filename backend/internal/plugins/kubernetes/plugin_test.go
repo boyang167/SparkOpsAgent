@@ -134,6 +134,18 @@ func TestRegisterBundledDescriptor(t *testing.T) {
 		"fronted/apps/web/src/modules/plugins/kubernetes/api.ts",
 		"fronted/apps/web/src/modules/plugins/kubernetes/catalog.ts",
 		"fronted/apps/web/src/modules/plugins/kubernetes/page-server.tsx",
+		"fronted/apps/web/src/modules/plugins/kubernetes/resource-url.ts",
+		"fronted/apps/web/src/modules/plugins/kubernetes/sse.ts",
+		"fronted/apps/web/src/modules/plugins/kubernetes/yaml-document.ts",
+		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/ChatPage.tsx",
+		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/CloudTTYPage.tsx",
+		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/ClustersPanel.tsx",
+		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/CreateDeploymentPage.tsx",
+		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/DiagnosisPage.tsx",
+		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/FormParts.tsx",
+		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/OverviewPanel.tsx",
+		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/RecordsPage.tsx",
+		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/VelauxPage.tsx",
 	}, descriptor.InstalledFiles)
 }
 
