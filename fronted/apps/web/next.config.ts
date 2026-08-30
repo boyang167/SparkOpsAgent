@@ -32,6 +32,10 @@ const nextConfig: NextConfig = {
     "@sparkops/upstream",
     "@sparkops/web-sdk",
   ],
+  experimental: {
+    // Plugin ZIP upload limit mirrors backend MaxRequestBytes (51 MiB).
+    middlewareClientMaxBodySize: "55mb",
+  },
   async redirects() {
     return legacyRedirects;
   },

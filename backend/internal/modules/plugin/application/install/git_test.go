@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain"
 )
 
 func TestMemoryPublisherStoresLastRequest(t *testing.T) {
@@ -797,6 +799,17 @@ func TestNewGitCLIPublisherFromEnvRejectsMissingOrDirtyRoot(t *testing.T) {
 	runner := &recordingRunner{results: []commandResult{{stdout: "true\n"}, {stdout: " M dirty.go\n"}}}
 	if _, err := NewGitCLIPublisherFromEnv(ctx, runner); err == nil {
 		t.Fatalf("NewGitCLIPublisherFromEnv() dirty root error = nil")
+	}
+}
+
+func TestUnavailablePublisherRejectsPublish(t *testing.T) {
+	_, err := UnavailablePublisher{}.Publish(context.Background(), PublishRequest{
+		Branch:  "plugin/install-demo",
+		Message: "install",
+		Files:   map[string][]byte{"backend/internal/plugins/demo/plugin.go": []byte("package demo")},
+	})
+	if !errors.Is(err, domain.ErrPluginPublisherUnavailable) {
+		t.Fatalf("Publish() error = %v", err)
 	}
 }
 

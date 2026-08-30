@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain"
 )
 
 type GitPublisher interface {
@@ -53,6 +55,18 @@ type GitCLIPublisher struct {
 	root    string
 	runner  CommandRunner
 	tempDir func(dir, pattern string) (string, error)
+}
+
+// UnavailablePublisher lets non-production processes start without PLUGIN_GIT_ROOT.
+// Install and uninstall fail; catalog and workspace enable still work.
+type UnavailablePublisher struct{}
+
+func (UnavailablePublisher) Publish(context.Context, PublishRequest) (string, error) {
+	return "", domain.ErrPluginPublisherUnavailable
+}
+
+func (UnavailablePublisher) LookupPullRequest(context.Context, string) (PullRequestView, error) {
+	return PullRequestView{}, domain.ErrPluginPublisherUnavailable
 }
 
 func NewGitCLIPublisherFromEnv(ctx context.Context, runner CommandRunner) (*GitCLIPublisher, error) {

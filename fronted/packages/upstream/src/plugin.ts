@@ -24,7 +24,6 @@ export function createPluginUpstream(options: UpstreamRequestOptions = {}) {
         options,
       });
     },
-
     async markPluginMerged(pluginId: string) {
       return upstreamFetch<PluginRecordVM>(
         `/api/v1/admin/plugins/${encodeURIComponent(pluginId)}/merged`,

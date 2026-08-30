@@ -56,6 +56,7 @@ func (c permissionChecker) HasPermission(
 }
 
 func TestModuleRequiresConfiguredCleanGitPublisher(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
 	t.Setenv("PLUGIN_GIT_ROOT", "")
 	db := openModuleDB(t)
 	module := plugin.New(authn.NewTokenProvider(config.JWTConfig{Secret: "test-secret"}))
@@ -68,6 +69,22 @@ func TestModuleRequiresConfiguredCleanGitPublisher(t *testing.T) {
 	})
 
 	require.ErrorContains(t, err, "PLUGIN_GIT_ROOT is required")
+}
+
+func TestModuleStartsWithoutGitRootOutsideProduction(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("PLUGIN_GIT_ROOT", "")
+	db := openModuleDB(t)
+	module := plugin.New(authn.NewTokenProvider(config.JWTConfig{Secret: "test-secret"}))
+
+	err := module.Register(&appctx.Container{
+		Context:           context.Background(),
+		DB:                db,
+		Engine:            gin.New(),
+		SystemRoleChecker: systemRoleChecker{super: true},
+	})
+
+	require.NoError(t, err)
 }
 
 func TestAllPlatformPluginRoutesRequireSuperAdmin(t *testing.T) {

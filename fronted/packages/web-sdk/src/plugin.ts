@@ -3,6 +3,7 @@ import type {
   PluginBindingVM,
   PluginRecordVM,
 } from "@sparkops/contracts/plugin";
+import { BffError } from "@sparkops/contracts";
 import { bffFetch } from "./client";
 
 export async function listPlugins() {
@@ -11,6 +12,12 @@ export async function listPlugins() {
 }
 
 export function installPlugin(file: File) {
+  const maxBytes = 50 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    return Promise.reject(
+      new BffError("插件 zip 不能超过 50 MiB", "INVALID_REQUEST", 413),
+    );
+  }
   const formData = new FormData();
   formData.set("file", file);
   return bffFetch<PluginRecordVM>("/admin/plugins/install", {

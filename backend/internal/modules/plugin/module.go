@@ -13,6 +13,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 )
 
@@ -43,9 +44,15 @@ func (m *Module) Register(c *appctx.Container) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	publisher, err := plugininstall.NewGitCLIPublisherFromEnv(ctx, nil)
+	var publisher plugininstall.GitPublisher
+	cliPublisher, err := plugininstall.NewGitCLIPublisherFromEnv(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("plugin publisher: %w", err)
+		if config.IsProduction() {
+			return fmt.Errorf("plugin publisher: %w", err)
+		}
+		publisher = plugininstall.UnavailablePublisher{}
+	} else {
+		publisher = cliPublisher
 	}
 	if err := persistence.AutoMigrate(c.DB); err != nil {
 		return fmt.Errorf("plugin migrate: %w", err)

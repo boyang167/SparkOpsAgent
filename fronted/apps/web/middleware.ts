@@ -24,5 +24,7 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Exclude BFF API routes so large multipart uploads (plugin ZIP ≤50MiB)
+  // are not truncated by middleware's default ~10MiB body limit.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/bff).*)"],
 };
