@@ -46,7 +46,7 @@ func (h *Handler) ServeGIN(c *gin.Context) {
 		httpx.Fail(c, "PLUGIN_KUBERNETES_PROXY_PATH_INVALID", "invalid kubernetes api path", http.StatusBadRequest)
 		return
 	}
-	if !isReadMethod(c.Request.Method) {
+	if !isReadMethod(c.Request.Method) || isCoreSecretPath(apiPath) {
 		if h.ctx.Writer == nil {
 			httpx.Fail(c, "PLUGIN_KUBERNETES_UNAVAILABLE", "kubernetes plugin context unavailable", http.StatusServiceUnavailable)
 			return
@@ -114,6 +114,17 @@ func (h *Handler) reverseProxy(c *gin.Context, restCfg *rest.Config, apiPath str
 
 func isReadMethod(method string) bool {
 	return method == http.MethodGet || method == http.MethodHead
+}
+
+func isCoreSecretPath(apiPath string) bool {
+	parts := strings.Split(strings.Trim(apiPath, "/"), "/")
+	if len(parts) < 3 || parts[0] != "api" || parts[1] != "v1" {
+		return false
+	}
+	if parts[2] == "secrets" {
+		return true
+	}
+	return len(parts) >= 5 && parts[2] == "namespaces" && parts[3] != "" && parts[4] == "secrets"
 }
 
 func handleProxyClusterError(c *gin.Context, err error) {

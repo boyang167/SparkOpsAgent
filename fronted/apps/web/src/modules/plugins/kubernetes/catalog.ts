@@ -7,6 +7,7 @@ export type ResourceDef = {
   namespaced: boolean;
   columns: { key: string; title: string }[];
   menu: string;
+  adminOnly?: boolean;
 };
 
 export type ClusterOption = { id: string };
@@ -74,7 +75,7 @@ export const CATALOG: ResourceDef[] = [
   def("gateway-tlsroutes", "gateway", "gateway.networking.k8s.io", "v1alpha2", "TLSRoute", "tlsroutes", true, baseColumns),
   def("gateway-udproutes", "gateway", "gateway.networking.k8s.io", "v1alpha2", "UDPRoute", "udproutes", true, baseColumns),
   def("core-configmaps", "configs", "", "v1", "ConfigMap", "configmaps", true, baseColumns),
-  def("core-secrets", "configs", "", "v1", "Secret", "secrets", true, baseColumns),
+  def("core-secrets", "configs", "", "v1", "Secret", "secrets", true, baseColumns, true),
   def("core-persistentvolumes", "storages", "", "v1", "PersistentVolume", "persistentvolumes", false, clusterColumns),
   def("core-persistentvolumeclaims", "storages", "", "v1", "PersistentVolumeClaim", "persistentvolumeclaims", true, baseColumns),
   def("core-serviceaccounts", "access-controls", "", "v1", "ServiceAccount", "serviceaccounts", true, baseColumns),
@@ -98,8 +99,8 @@ export const CATALOG: ResourceDef[] = [
   def("velero-schedules", "backup", "velero.io", "v1", "Schedule", "schedules", true, baseColumns),
 ];
 
-export function resourcesForMenu(menu: string): ResourceDef[] {
-  return CATALOG.filter((item) => item.menu === menu);
+export function resourcesForMenu(menu: string, isAdmin = false): ResourceDef[] {
+  return CATALOG.filter((item) => item.menu === menu && (!item.adminOnly || isAdmin));
 }
 
 export function proxyPath(clusterId: string, def: ResourceDef, ns?: string, name?: string): string {
@@ -178,8 +179,9 @@ function def(
   plural: string,
   namespaced: boolean,
   columns: ResourceDef["columns"],
+  adminOnly = false,
 ): ResourceDef {
-  return { id, menu, group, version, kind, plural, namespaced, columns };
+  return { id, menu, group, version, kind, plural, namespaced, columns, adminOnly };
 }
 
 function encodeSegment(value: string): string {

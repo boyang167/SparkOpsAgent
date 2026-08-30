@@ -52,7 +52,7 @@ func (h clusterHandler) listClusters(c *gin.Context) {
 		handleClusterError(c, err)
 		return
 	}
-	settings, err := h.store.List(c.Request.Context(), clusterIDs(metas))
+	settings, err := h.store.List(c.Request.Context(), wsID, clusterIDs(metas))
 	if err != nil {
 		handleClusterError(c, err)
 		return
@@ -87,7 +87,7 @@ func (h clusterHandler) putClusterSettings(c *gin.Context) {
 		httpx.Fail(c, "PLUGIN_CLUSTER_SETTINGS_INVALID", "invalid settings payload", stdhttp.StatusBadRequest)
 		return
 	}
-	if err := validateSettingsURLs(req); err != nil {
+	if err := validateSettingsURLs(c.Request.Context(), h.ctx.Endpoints, req); err != nil {
 		httpx.Fail(c, "PLUGIN_CLUSTER_SETTINGS_INVALID_URL", err.Error(), stdhttp.StatusBadRequest)
 		return
 	}
@@ -96,7 +96,7 @@ func (h clusterHandler) putClusterSettings(c *gin.Context) {
 		handleClusterError(c, err)
 		return
 	}
-	settings, err := h.store.Upsert(c.Request.Context(), clusterID, req)
+	settings, err := h.store.Upsert(c.Request.Context(), wsID, clusterID, req)
 	if err != nil {
 		handleClusterError(c, err)
 		return

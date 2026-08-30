@@ -2,6 +2,7 @@
 
 import { ResourceTable } from "./ResourceTable";
 import { resourcesForMenu } from "./catalog";
+import { OperationsPanel } from "./OperationsPanel";
 
 type ResourceMenuPageProps = {
   title: string;
@@ -20,7 +21,12 @@ export function ResourceMenuPage({ title, description, menu, clusterId, canManag
           {description ? <p className="text-sm text-muted mt-1">{description}</p> : null}
         </div>
       </section>
-      <ResourceTable clusterId={clusterId} resources={resourcesForMenu(menu)} canManage={canManage} />
+      <ResourceTable clusterId={clusterId} resources={resourcesForMenu(menu, canManage)} canManage={canManage} />
+      {menu === "workloads" ? <OperationsPanel clusterId={clusterId} canManage={canManage} mode="pods" /> : null}
+      {menu === "nodes" ? <OperationsPanel clusterId={clusterId} canManage={canManage} mode="nodes" /> : null}
+      {menu === "nodes" || menu === "workloads" ? (
+        <OperationsPanel clusterId={clusterId} canManage={canManage} mode="metrics" />
+      ) : null}
     </div>
   );
 }

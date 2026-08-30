@@ -95,8 +95,12 @@ func (h *Handler) Query(c *gin.Context) {
 		httpx.Fail(c, "PLUGIN_CHAT_CLUSTER_SUMMARY_FAILED", "cluster summary unavailable", http.StatusBadGateway)
 		return
 	}
-	settings, err := h.settings(c.Request.Context(), clusterID)
+	settings, err := h.settings(c.Request.Context(), wsID, clusterID)
 	if err != nil || strings.TrimSpace(settings.LLMBaseURL) == "" || strings.TrimSpace(settings.LLMAPIKey) == "" || strings.TrimSpace(settings.LLMModel) == "" {
+		httpx.Fail(c, "PLUGIN_LLM_NOT_CONFIGURED", "LLM is not configured", http.StatusBadRequest)
+		return
+	}
+	if h.ctx.Endpoints == nil || h.ctx.Endpoints.Validate(c.Request.Context(), settings.LLMBaseURL) != nil {
 		httpx.Fail(c, "PLUGIN_LLM_NOT_CONFIGURED", "LLM is not configured", http.StatusBadRequest)
 		return
 	}
@@ -151,9 +155,9 @@ func (h *Handler) recordChatAudit(ctx context.Context, action string, wsID kerne
 	}
 }
 
-func (h *Handler) settings(ctx context.Context, clusterID kernel.ClusterInfoID) (k8sschema.ClusterSettings, error) {
+func (h *Handler) settings(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) (k8sschema.ClusterSettings, error) {
 	var settings k8sschema.ClusterSettings
-	err := h.ctx.DB.WithContext(ctx).First(&settings, "cluster_id = ?", clusterID.String()).Error
+	err := h.ctx.DB.WithContext(ctx).First(&settings, "workspace_id = ? AND cluster_id = ?", wsID.String(), clusterID.String()).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return k8sschema.ClusterSettings{}, err
 	}

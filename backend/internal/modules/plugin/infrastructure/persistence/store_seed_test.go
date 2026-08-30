@@ -64,6 +64,8 @@ func TestSeedBundledKubernetesPluginPersistsRegisteredDescriptor(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, descriptor.ManifestYAML, found.ManifestYAML)
 	require.Equal(t, descriptor.InstalledFiles, found.InstalledFiles)
+	require.Equal(t, "7.8.9", found.Version)
+	require.Equal(t, "Descriptor Kubernetes", found.DisplayName)
 }
 
 func TestSeedBundledKubernetesPluginSkipsWhenUninstallReceiptExists(t *testing.T) {
@@ -108,7 +110,7 @@ func registerKubernetesDescriptorForSeedTest(t *testing.T) sparkplugin.BundledDe
 	sparkplugin.ResetRegistryForTest()
 	t.Cleanup(sparkplugin.ResetRegistryForTest)
 	descriptor := sparkplugin.BundledDescriptor{
-		ManifestYAML: "id: kubernetes\n",
+		ManifestYAML: "id: kubernetes\nversion: \"7.8.9\"\ndisplay_name: Descriptor Kubernetes\nroute_prefix: /api/v1/plugins/kubernetes\nentitlement: plugin:kubernetes\napis:\n  - method: GET\n    path: /api/v1/plugins/kubernetes/ready\nfrontend:\n  pages:\n    - app/(platform)/plugins/kubernetes/page.tsx\n",
 		InstalledFiles: []string{
 			"backend/internal/plugins/kubernetes/plugin.go",
 			"backend/internal/plugins/kubernetes/plugin.yaml",

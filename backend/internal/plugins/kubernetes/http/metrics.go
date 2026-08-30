@@ -21,7 +21,7 @@ type metricsHandler struct {
 func newMetricsHandler(ctx sparkplugin.PluginContext) metricsHandler {
 	return metricsHandler{
 		clusterHandler: newClusterHandler(ctx),
-		client:         k8smetrics.NewClient(),
+		client:         k8smetrics.NewClient(ctx.Endpoints),
 	}
 }
 
@@ -55,7 +55,7 @@ func (h metricsHandler) postMetrics(c *gin.Context) {
 		handleMetricsError(c, err)
 		return
 	}
-	settingsByCluster, err := h.store.List(c.Request.Context(), []string{clusterID.String()})
+	settingsByCluster, err := h.store.List(c.Request.Context(), wsID, []string{clusterID.String()})
 	if err != nil {
 		handleClusterError(c, err)
 		return

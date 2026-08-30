@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/manifest"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/repository"
 	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
@@ -100,9 +101,24 @@ func seedBundledKubernetesPlugin(db *gorm.DB) error {
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
+	var existing pluginModel
+	err = db.Select("id").Where("id = ?", "kubernetes").First(&existing).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
 	descriptor, ok := sparkplugin.Bundled("kubernetes")
 	if !ok {
 		return nil
+	}
+	parsed, err := manifest.Parse([]byte(descriptor.ManifestYAML))
+	if err != nil || parsed.ID != "kubernetes" {
+		if err != nil {
+			return err
+		}
+		return domain.ErrPluginIDConflict
 	}
 	installedFiles, err := json.Marshal(descriptor.InstalledFiles)
 	if err != nil {
@@ -111,8 +127,8 @@ func seedBundledKubernetesPlugin(db *gorm.DB) error {
 	now := time.Now().UTC()
 	row := pluginModel{
 		ID:                 "kubernetes",
-		Version:            "0.1.0",
-		DisplayName:        "Kubernetes",
+		Version:            parsed.Version,
+		DisplayName:        parsed.DisplayName,
 		ManifestYAML:       descriptor.ManifestYAML,
 		InstalledFilesJSON: string(installedFiles),
 		Status:             string(model.PluginStatusDeployed),

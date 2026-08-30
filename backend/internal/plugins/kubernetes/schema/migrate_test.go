@@ -77,3 +77,13 @@ func TestRecordsMigrationCreatesWorkspaceStartedAtIndex(t *testing.T) {
 	}
 	require.Contains(t, names, "idx_records_workspace_started_at")
 }
+
+func TestClusterSettingsUsesWorkspaceAndClusterCompositeKey(t *testing.T) {
+	db := openSQLiteK8sSchema(t)
+	row := k8sschema.ClusterSettings{WorkspaceID: "workspace-a", ClusterID: "cluster-a"}
+	require.NoError(t, db.Create(&row).Error)
+	require.Error(t, db.Create(&row).Error)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
+		WorkspaceID: "workspace-b", ClusterID: "cluster-a",
+	}).Error)
+}

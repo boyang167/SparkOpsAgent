@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"net/url"
 	"strings"
@@ -45,7 +46,7 @@ func applyRequest(settings *k8sschema.ClusterSettings, req clusterSettingsReques
 	settings.LLMModel = req.LLMModel
 }
 
-func validateSettingsURLs(req clusterSettingsRequest) error {
+func validateSettingsURLs(ctx context.Context, policy sparkplugin.EndpointPolicy, req clusterSettingsRequest) error {
 	for _, raw := range []string{req.PrometheusURL, req.VelauxURL, req.LLMBaseURL} {
 		if raw == "" {
 			continue
@@ -54,10 +55,11 @@ func validateSettingsURLs(req clusterSettingsRequest) error {
 		if err != nil || parsed.Host == "" || parsed.User != nil {
 			return errInvalidSettingsURL
 		}
-		// These are trusted admin-configured internal service endpoints, so
-		// private and localhost hosts are allowed while scheme/host/userinfo are constrained.
 		scheme := strings.ToLower(parsed.Scheme)
 		if scheme != "http" && scheme != "https" {
+			return errInvalidSettingsURL
+		}
+		if policy == nil || policy.Validate(ctx, raw) != nil {
 			return errInvalidSettingsURL
 		}
 	}

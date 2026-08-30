@@ -86,6 +86,14 @@ func (p *plugin) RegisterWithContext(engine *gin.Engine, ctx sparkplugin.PluginC
 }
 ```
 
+## Kubernetes settings upgrade
+
+`plugin_kubernetes.cluster_settings` is keyed by `(workspace_id, cluster_id)`. PostgreSQL upgrades add
+`workspace_id` as nullable, remove the legacy cluster-only key/unique constraint, and create a partial
+unique index for non-null workspace IDs. Legacy rows remain unowned (`workspace_id IS NULL`) and are
+never returned to any workspace; operators must re-enter settings in the owning workspace instead of
+guessing ownership. The migration deliberately avoids using AutoMigrate on this existing table.
+
 The legacy `Plugin.Register(*gin.Engine)` entrypoint remains compatible, but platform installation prefers `ContextPlugin.RegisterWithContext` when implemented. `PluginContext` exposes neutral platform ports:
 
 - `Logger`: plugin-scoped logger.

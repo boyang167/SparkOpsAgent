@@ -96,6 +96,21 @@ describe("proxyUpstreamStreamRequest", () => {
     expect(headers.has("Host")).toBe(false);
   });
 
+  it("propagates the incoming abort signal to upstream fetch", async () => {
+    vi.stubEnv("UPSTREAM_URL", "http://upstream.test");
+    const fetchMock = vi.fn().mockResolvedValue(new Response("data: ok\n\n"));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const req = new Request("http://bff.test/api/bff/v1/plugins/kubernetes/logs", {
+      signal: controller.signal,
+    });
+
+    await proxyUpstreamStreamRequest(createContext(), "/api/v1/plugins/kubernetes/logs", req);
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.signal).toBe(req.signal);
+  });
+
   it("rejects request bodies larger than 50 MiB before calling upstream", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

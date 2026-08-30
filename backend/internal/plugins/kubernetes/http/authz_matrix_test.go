@@ -28,9 +28,12 @@ func TestAuthzMatrixForProxyRoutes(t *testing.T) {
 	var upstreamCalls int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&upstreamCalls, 1)
-		require.Equal(t, "/version", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
-		_, err := w.Write([]byte(`{"gitVersion":"v1.30.0"}`))
+		body := `{"kind":"Secret","metadata":{"name":"demo"}}`
+		if r.URL.Path == "/version" {
+			body = `{"gitVersion":"v1.30.0"}`
+		}
+		_, err := w.Write([]byte(body))
 		require.NoError(t, err)
 	}))
 	defer upstream.Close()
@@ -67,6 +70,39 @@ func TestAuthzMatrixForProxyRoutes(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, status, string(body))
 		requireEnvelopeError(t, body, "GOVERNANCE_API_ACCESS_DENIED")
 		require.Equal(t, int32(0), atomic.LoadInt32(&upstreamCalls))
+	})
+
+	t.Run("member Secret GET requires write permission before upstream", func(t *testing.T) {
+		atomic.StoreInt32(&upstreamCalls, 0)
+		engine := authzMatrixEngine(memberID, sparkplugin.PluginContext{
+			Clusters: authzClusterFactory{server: upstream.URL, clusterID: clusterID},
+			Members:  allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
+			Writer:   allowWriter{allow: false},
+		})
+		server := httptest.NewServer(engine)
+		defer server.Close()
+
+		status, body := requestAuthzProxyPath(t, server, http.MethodGet, wsID.String(), clusterID, "/api/v1/namespaces/default/secrets/demo/status")
+
+		require.Equal(t, http.StatusForbidden, status, string(body))
+		requireEnvelopeError(t, body, "GOVERNANCE_API_ACCESS_DENIED")
+		require.Equal(t, int32(0), atomic.LoadInt32(&upstreamCalls))
+	})
+
+	t.Run("admin Secret GET reaches upstream", func(t *testing.T) {
+		atomic.StoreInt32(&upstreamCalls, 0)
+		engine := authzMatrixEngine(memberID, sparkplugin.PluginContext{
+			Clusters: authzClusterFactory{server: upstream.URL, clusterID: clusterID},
+			Members:  allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
+			Writer:   allowWriter{allow: true},
+		})
+		server := httptest.NewServer(engine)
+		defer server.Close()
+
+		status, body := requestAuthzProxyPath(t, server, http.MethodGet, wsID.String(), clusterID, "/api/v1/namespaces/default/secrets/demo")
+
+		require.Equal(t, http.StatusOK, status, string(body))
+		require.Equal(t, int32(1), atomic.LoadInt32(&upstreamCalls))
 	})
 
 	t.Run("admin POST proxy reaches upstream", func(t *testing.T) {
@@ -131,9 +167,13 @@ func authzMatrixEngine(memberID kernel.MemberID, ctx sparkplugin.PluginContext) 
 }
 
 func requestAuthzProxy(t *testing.T, server *httptest.Server, method, workspaceID string, clusterID kernel.ClusterInfoID) (int, []byte) {
+	return requestAuthzProxyPath(t, server, method, workspaceID, clusterID, "/version")
+}
+
+func requestAuthzProxyPath(t *testing.T, server *httptest.Server, method, workspaceID string, clusterID kernel.ClusterInfoID, path string) (int, []byte) {
 	t.Helper()
 
-	req, err := http.NewRequest(method, server.URL+"/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/proxy/version", nil)
+	req, err := http.NewRequest(method, server.URL+"/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/proxy"+path, nil)
 	require.NoError(t, err)
 	if workspaceID != "" {
 		req.Header.Set("X-Workspace-Id", workspaceID)

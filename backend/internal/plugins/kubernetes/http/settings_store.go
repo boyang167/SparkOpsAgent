@@ -19,12 +19,12 @@ func newSettingsStore(db *gorm.DB) settingsStore {
 	return settingsStore{db: db}
 }
 
-func (s settingsStore) List(ctx context.Context, clusterIDs []string) (map[string]k8sschema.ClusterSettings, error) {
+func (s settingsStore) List(ctx context.Context, wsID kernel.WorkspaceID, clusterIDs []string) (map[string]k8sschema.ClusterSettings, error) {
 	if len(clusterIDs) == 0 {
 		return map[string]k8sschema.ClusterSettings{}, nil
 	}
 	var rows []k8sschema.ClusterSettings
-	if err := s.db.WithContext(ctx).Where("cluster_id IN ?", clusterIDs).Find(&rows).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("workspace_id = ? AND cluster_id IN ?", wsID.String(), clusterIDs).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make(map[string]k8sschema.ClusterSettings, len(rows))
@@ -34,14 +34,14 @@ func (s settingsStore) List(ctx context.Context, clusterIDs []string) (map[strin
 	return out, nil
 }
 
-func (s settingsStore) Upsert(ctx context.Context, clusterID kernel.ClusterInfoID, req clusterSettingsRequest) (k8sschema.ClusterSettings, error) {
+func (s settingsStore) Upsert(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID, req clusterSettingsRequest) (k8sschema.ClusterSettings, error) {
 	var saved k8sschema.ClusterSettings
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		settings := k8sschema.ClusterSettings{}
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			First(&settings, "cluster_id = ?", clusterID.String()).Error
+			First(&settings, "workspace_id = ? AND cluster_id = ?", wsID.String(), clusterID.String()).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			settings = k8sschema.ClusterSettings{ClusterID: clusterID.String()}
+			settings = k8sschema.ClusterSettings{WorkspaceID: wsID.String(), ClusterID: clusterID.String()}
 			applyRequest(&settings, req)
 			if err := tx.Create(&settings).Error; err != nil {
 				return mapSettingsConflict(err)

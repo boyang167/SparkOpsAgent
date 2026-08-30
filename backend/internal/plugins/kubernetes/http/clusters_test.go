@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -30,6 +31,7 @@ func TestListClustersReturnsAuthorizedMetadataWithMaskedSettings(t *testing.T) {
 	forbiddenID := kernel.NewClusterInfoID()
 	db := openK8sHTTPDB(t)
 	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
+		WorkspaceID:        wsID.String(),
 		ClusterID:          clusterID.String(),
 		PrometheusURL:      "https://prom.example",
 		PrometheusUser:     "prom-user",
@@ -42,6 +44,7 @@ func TestListClustersReturnsAuthorizedMetadataWithMaskedSettings(t *testing.T) {
 		LLMModel:           "qwen",
 	}).Error)
 	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
+		WorkspaceID:        kernel.NewWorkspaceID().String(),
 		ClusterID:          forbiddenID.String(),
 		PrometheusURL:      "https://forbidden.example",
 		PrometheusPassword: "do-not-leak",
@@ -139,6 +142,7 @@ func TestPutClusterSettingsPreservesMaskedSecretsAndAllowsClearing(t *testing.T)
 	clusterID := kernel.NewClusterInfoID()
 	db := openK8sHTTPDB(t)
 	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
+		WorkspaceID:        wsID.String(),
 		ClusterID:          clusterID.String(),
 		PrometheusPassword: "existing-prom",
 		VelauxPassword:     "existing-velaux",
@@ -165,7 +169,7 @@ func TestPutClusterSettingsPreservesMaskedSecretsAndAllowsClearing(t *testing.T)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var stored k8sschema.ClusterSettings
-	require.NoError(t, db.First(&stored, "cluster_id = ?", clusterID.String()).Error)
+	require.NoError(t, db.First(&stored, "workspace_id = ? AND cluster_id = ?", wsID.String(), clusterID.String()).Error)
 	require.Equal(t, "https://prometheus.example", stored.PrometheusURL)
 	require.Equal(t, "prom-user", stored.PrometheusUser)
 	require.Equal(t, "existing-prom", stored.PrometheusPassword)
@@ -179,6 +183,48 @@ func TestPutClusterSettingsPreservesMaskedSecretsAndAllowsClearing(t *testing.T)
 	require.NotContains(t, rec.Body.String(), "existing-key")
 	require.Contains(t, rec.Body.String(), `"prometheus_password":"***"`)
 	require.Contains(t, rec.Body.String(), `"llm_api_key":"***"`)
+}
+
+func TestClusterSettingsAreIsolatedByWorkspaceForSameCluster(t *testing.T) {
+	wsA := kernel.NewWorkspaceID()
+	wsB := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	db := openK8sHTTPDB(t)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
+		WorkspaceID: wsA.String(), ClusterID: clusterID.String(),
+		PrometheusURL: "https://a.example", PrometheusPassword: "secret-a",
+	}).Error)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
+		WorkspaceID: wsB.String(), ClusterID: clusterID.String(),
+		PrometheusURL: "https://b.example", PrometheusPassword: "secret-b",
+	}).Error)
+	engine := testEngine(memberID, sparkplugin.PluginContext{
+		DB:       db,
+		Clusters: fakeClusterFactory{items: []sparkplugin.ClusterMeta{{ID: clusterID.String(), Name: "shared"}}},
+		Members: allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{
+			wsA: {memberID: true}, wsB: {memberID: true},
+		}},
+		Writer: allowWriter{allow: true},
+	})
+
+	recA := performJSON(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters", wsA, nil)
+	recB := performJSON(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters", wsB, nil)
+	require.Contains(t, recA.Body.String(), "https://a.example")
+	require.NotContains(t, recA.Body.String(), "https://b.example")
+	require.Contains(t, recB.Body.String(), "https://b.example")
+	require.NotContains(t, recB.Body.String(), "https://a.example")
+
+	update := performJSON(engine, http.MethodPut, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/settings", wsA, map[string]string{
+		"prometheus_url": "https://a2.example", "prometheus_password": "***",
+	})
+	require.Equal(t, http.StatusOK, update.Code, update.Body.String())
+	var rowA, rowB k8sschema.ClusterSettings
+	require.NoError(t, db.First(&rowA, "workspace_id = ? AND cluster_id = ?", wsA.String(), clusterID.String()).Error)
+	require.NoError(t, db.First(&rowB, "workspace_id = ? AND cluster_id = ?", wsB.String(), clusterID.String()).Error)
+	require.Equal(t, "secret-a", rowA.PrometheusPassword)
+	require.Equal(t, "secret-b", rowB.PrometheusPassword)
+	require.Equal(t, "https://b.example", rowB.PrometheusURL)
 }
 
 func TestPutClusterSettingsValidatesURLFields(t *testing.T) {
@@ -205,6 +251,52 @@ func TestPutClusterSettingsValidatesURLFields(t *testing.T) {
 		require.NotContains(t, rec.Body.String(), "user:pass")
 		require.NotContains(t, rec.Body.String(), "prometheus.example")
 	}
+}
+
+func TestPutClusterSettingsRejectsUnsafeAndResolvedPrivateEndpoints(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	policy, err := sparkplugin.NewEndpointPolicy(nil, settingsResolver{
+		"private.example": {{IP: net.ParseIP("192.168.1.20")}},
+	})
+	require.NoError(t, err)
+	engine := testEngine(memberID, sparkplugin.PluginContext{
+		DB: openK8sHTTPDB(t), Endpoints: policy,
+		Clusters: fakeClusterFactory{items: []sparkplugin.ClusterMeta{{ID: clusterID.String()}}},
+		Members:  allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
+		Writer:   allowWriter{allow: true},
+	})
+	for _, endpoint := range []string{
+		"http://127.0.0.1:9090", "http://169.254.169.254", "http://10.0.0.1", "http://private.example",
+	} {
+		rec := performJSON(engine, http.MethodPut, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/settings", wsID, map[string]string{
+			"prometheus_url": endpoint,
+		})
+		require.Equal(t, http.StatusBadRequest, rec.Code, endpoint)
+		require.Contains(t, rec.Body.String(), "PLUGIN_CLUSTER_SETTINGS_INVALID_URL")
+		require.NotContains(t, rec.Body.String(), endpoint)
+	}
+}
+
+func TestPutClusterSettingsAllowsExplicitEndpointAllowlist(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer upstream.Close()
+	policy, err := sparkplugin.NewEndpointPolicy([]string{"127.0.0.1"}, nil)
+	require.NoError(t, err)
+	engine := testEngine(memberID, sparkplugin.PluginContext{
+		DB: openK8sHTTPDB(t), Endpoints: policy,
+		Clusters: fakeClusterFactory{items: []sparkplugin.ClusterMeta{{ID: clusterID.String()}}},
+		Members:  allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
+		Writer:   allowWriter{allow: true},
+	})
+	rec := performJSON(engine, http.MethodPut, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/settings", wsID, map[string]string{
+		"prometheus_url": upstream.URL,
+	})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 }
 
 func TestClusterRoutesReturnServiceUnavailableWithoutPluginContext(t *testing.T) {
@@ -276,6 +368,12 @@ func openK8sHTTPDB(t *testing.T) *gorm.DB {
 
 func testEngine(memberID kernel.MemberID, ctx sparkplugin.PluginContext) *gin.Engine {
 	gin.SetMode(gin.TestMode)
+	if ctx.Endpoints == nil {
+		policy, _ := sparkplugin.NewEndpointPolicy([]string{
+			"127.0.0.1", "prom.example", "prometheus.example", "a2.example", "velaux.example", "llm.example",
+		}, nil)
+		ctx.Endpoints = policy
+	}
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
 		authn.SetMemberIDForTest(c, memberID)
@@ -331,6 +429,12 @@ func (m allowMembers) IsWorkspaceMember(_ context.Context, wsID kernel.Workspace
 type recordingClusterFactory struct {
 	items          []sparkplugin.ClusterMeta
 	seenWorkspaces []kernel.WorkspaceID
+}
+
+type settingsResolver map[string][]net.IPAddr
+
+func (r settingsResolver) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
+	return r[host], nil
 }
 
 func (f *recordingClusterFactory) ForWorkspace(context.Context, kernel.WorkspaceID, kernel.ClusterInfoID) (

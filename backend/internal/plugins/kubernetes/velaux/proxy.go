@@ -96,8 +96,12 @@ func (h *Handler) ServeGIN(c *gin.Context) {
 		handleClusterError(c, err)
 		return
 	}
-	settings, err := h.settings(c.Request.Context(), clusterID)
+	settings, err := h.settings(c.Request.Context(), wsID, clusterID)
 	if err != nil {
+		httpx.Fail(c, "PLUGIN_VELAUX_NOT_CONFIGURED", "velaux url is not configured", http.StatusBadRequest)
+		return
+	}
+	if h.ctx.Endpoints == nil || h.ctx.Endpoints.Validate(c.Request.Context(), settings.VelauxURL) != nil {
 		httpx.Fail(c, "PLUGIN_VELAUX_NOT_CONFIGURED", "velaux url is not configured", http.StatusBadRequest)
 		return
 	}
@@ -181,9 +185,9 @@ func (h *Handler) authorizeCluster(ctx context.Context, wsID kernel.WorkspaceID,
 	return kernel.NewDomainError("PLUGIN_CLUSTER_FORBIDDEN", "cluster is not granted to workspace")
 }
 
-func (h *Handler) settings(ctx context.Context, clusterID kernel.ClusterInfoID) (k8sschema.ClusterSettings, error) {
+func (h *Handler) settings(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) (k8sschema.ClusterSettings, error) {
 	var settings k8sschema.ClusterSettings
-	err := h.ctx.DB.WithContext(ctx).First(&settings, "cluster_id = ?", clusterID.String()).Error
+	err := h.ctx.DB.WithContext(ctx).First(&settings, "workspace_id = ? AND cluster_id = ?", wsID.String(), clusterID.String()).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) || strings.TrimSpace(settings.VelauxURL) == "" {
 		return k8sschema.ClusterSettings{}, gorm.ErrRecordNotFound
 	}

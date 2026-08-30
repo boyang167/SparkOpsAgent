@@ -33,12 +33,13 @@ type WorkspaceMemberAuthorizer interface {
 }
 
 type PluginContext struct {
-	Logger   *zap.Logger
-	DB       *gorm.DB
-	Audit    AuditLogger
-	Clusters ClusterClientFactory
-	Writer   WriteAuthorizer
-	Members  WorkspaceMemberAuthorizer
+	Logger    *zap.Logger
+	DB        *gorm.DB
+	Audit     AuditLogger
+	Clusters  ClusterClientFactory
+	Writer    WriteAuthorizer
+	Members   WorkspaceMemberAuthorizer
+	Endpoints EndpointPolicy
 }
 
 type ContextPlugin interface {

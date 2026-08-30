@@ -36,9 +36,10 @@ func TestQueryRequiresAdminBeforeClusterAndLLM(t *testing.T) {
 	db := openChatDB(t)
 	factory := &recordingClusterFactory{}
 	engine := chatEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB:       db,
-		Clusters: factory,
-		Writer:   allowWriter{allow: false},
+		DB:        db,
+		Clusters:  factory,
+		Writer:    allowWriter{allow: false},
+		Endpoints: allowLocalEndpointPolicy(),
 	}))
 
 	rec := performJSON(engine, http.MethodPost, "/clusters/"+clusterID.String()+"/chat/query", wsID, map[string]string{"prompt": "hello"})
@@ -54,9 +55,10 @@ func TestQueryRejectsPromptOverrides(t *testing.T) {
 	db := openChatDB(t)
 	factory := &recordingClusterFactory{}
 	engine := chatEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB:       db,
-		Clusters: factory,
-		Writer:   allowWriter{allow: true},
+		DB:        db,
+		Clusters:  factory,
+		Writer:    allowWriter{allow: true},
+		Endpoints: allowLocalEndpointPolicy(),
 	}))
 
 	rec := performRaw(engine, "/clusters/"+clusterID.String()+"/chat/query", wsID, []byte(`{"prompt":"hello","model":"evil"}`))
@@ -85,18 +87,20 @@ func TestQueryStreamsOpenAICompatibleSSEWithSanitizedPrompt(t *testing.T) {
 
 	db := openChatDB(t)
 	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
-		ClusterID:  clusterID.String(),
-		LLMBaseURL: llm.URL + "/v1",
-		LLMAPIKey:  "llm-secret",
-		LLMModel:   "qwen-plus",
+		WorkspaceID: wsID.String(),
+		ClusterID:   clusterID.String(),
+		LLMBaseURL:  llm.URL + "/v1",
+		LLMAPIKey:   "llm-secret",
+		LLMModel:    "qwen-plus",
 	}).Error)
 	client := fake.NewSimpleClientset(
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "secret-ns"}},
 	)
 	engine := chatEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB:    db,
-		Audit: audit,
+		DB:        db,
+		Audit:     audit,
+		Endpoints: allowLocalEndpointPolicy(),
 		Clusters: &recordingClusterFactory{
 			client: client,
 			meta:   &sparkplugin.ClusterMeta{ID: clusterID.String(), Name: "prod", Server: "https://secret-server"},
@@ -156,16 +160,18 @@ func TestQueryRejectsNonEventStreamUpstreamBeforeLocalStream(t *testing.T) {
 			t.Cleanup(llm.Close)
 			db := openChatDB(t)
 			require.NoError(t, db.Create(&k8sschema.ClusterSettings{
-				ClusterID:  clusterID.String(),
-				LLMBaseURL: llm.URL,
-				LLMAPIKey:  "llm-secret",
-				LLMModel:   "qwen-plus",
+				WorkspaceID: wsID.String(),
+				ClusterID:   clusterID.String(),
+				LLMBaseURL:  llm.URL,
+				LLMAPIKey:   "llm-secret",
+				LLMModel:    "qwen-plus",
 			}).Error)
 			engine := chatEngine(memberID, NewHandler(sparkplugin.PluginContext{
-				DB:       db,
-				Audit:    audit,
-				Clusters: &recordingClusterFactory{client: fake.NewSimpleClientset(), meta: &sparkplugin.ClusterMeta{ID: clusterID.String(), Name: "prod"}},
-				Writer:   allowWriter{allow: true},
+				DB:        db,
+				Audit:     audit,
+				Clusters:  &recordingClusterFactory{client: fake.NewSimpleClientset(), meta: &sparkplugin.ClusterMeta{ID: clusterID.String(), Name: "prod"}},
+				Writer:    allowWriter{allow: true},
+				Endpoints: allowLocalEndpointPolicy(),
 			}))
 
 			rec := performJSON(engine, http.MethodPost, "/clusters/"+clusterID.String()+"/chat/query", wsID, map[string]string{"prompt": "prompt-secret"})
@@ -194,11 +200,12 @@ func TestQueryReturnsNotConfiguredWithoutCallingLLM(t *testing.T) {
 		called = true
 	}))
 	t.Cleanup(llm.Close)
-	require.NoError(t, db.Create(&k8sschema.ClusterSettings{ClusterID: clusterID.String(), LLMBaseURL: llm.URL, LLMModel: "qwen"}).Error)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{WorkspaceID: wsID.String(), ClusterID: clusterID.String(), LLMBaseURL: llm.URL, LLMModel: "qwen"}).Error)
 	engine := chatEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB:       db,
-		Clusters: &recordingClusterFactory{client: fake.NewSimpleClientset(), meta: &sparkplugin.ClusterMeta{ID: clusterID.String(), Name: "prod"}},
-		Writer:   allowWriter{allow: true},
+		DB:        db,
+		Clusters:  &recordingClusterFactory{client: fake.NewSimpleClientset(), meta: &sparkplugin.ClusterMeta{ID: clusterID.String(), Name: "prod"}},
+		Writer:    allowWriter{allow: true},
+		Endpoints: allowLocalEndpointPolicy(),
 	}))
 
 	rec := performJSON(engine, http.MethodPost, "/clusters/"+clusterID.String()+"/chat/query", wsID, map[string]string{"prompt": "hello"})
@@ -223,16 +230,18 @@ func TestQueryPropagatesClientCancelToUpstream(t *testing.T) {
 	})}
 	db := openChatDB(t)
 	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
-		ClusterID:  clusterID.String(),
-		LLMBaseURL: "https://llm.example/v1",
-		LLMAPIKey:  "llm-secret",
-		LLMModel:   "qwen-plus",
+		WorkspaceID: wsID.String(),
+		ClusterID:   clusterID.String(),
+		LLMBaseURL:  "https://llm.example/v1",
+		LLMAPIKey:   "llm-secret",
+		LLMModel:    "qwen-plus",
 	}).Error)
 	engine := chatEngine(memberID, NewHandlerWithClient(sparkplugin.PluginContext{
-		DB:       db,
-		Audit:    audit,
-		Clusters: &recordingClusterFactory{client: fake.NewSimpleClientset(), meta: &sparkplugin.ClusterMeta{ID: clusterID.String(), Name: "prod"}},
-		Writer:   allowWriter{allow: true},
+		DB:        db,
+		Audit:     audit,
+		Clusters:  &recordingClusterFactory{client: fake.NewSimpleClientset(), meta: &sparkplugin.ClusterMeta{ID: clusterID.String(), Name: "prod"}},
+		Writer:    allowWriter{allow: true},
+		Endpoints: allowLocalEndpointPolicy(),
 	}, httpClient))
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/clusters/"+clusterID.String()+"/chat/query", strings.NewReader(`{"prompt":"hello"}`))
@@ -284,6 +293,11 @@ func chatEngine(memberID kernel.MemberID, handler *Handler) *gin.Engine {
 	engine.Use(httpx.RequireWorkspace())
 	engine.POST("/clusters/:clusterId/chat/query", handler.Query)
 	return engine
+}
+
+func allowLocalEndpointPolicy() sparkplugin.EndpointPolicy {
+	policy, _ := sparkplugin.NewEndpointPolicy([]string{"127.0.0.1", "llm.example"}, nil)
+	return policy
 }
 
 func performJSON(engine *gin.Engine, method, path string, wsID kernel.WorkspaceID, payload any) *httptest.ResponseRecorder {

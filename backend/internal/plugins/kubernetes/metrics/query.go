@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
 )
 
 const (
@@ -45,6 +47,7 @@ type PrometheusQuery struct {
 
 type Client struct {
 	httpClient *http.Client
+	policy     sparkplugin.EndpointPolicy
 }
 
 type templateSpec struct {
@@ -120,8 +123,12 @@ func BuildRangeQuery(req QueryRequest, now time.Time) (PrometheusQuery, error) {
 	return PrometheusQuery{Path: queryRangePath, Values: values}, nil
 }
 
-func NewClient() *Client {
-	return &Client{httpClient: &http.Client{
+func NewClient(policies ...sparkplugin.EndpointPolicy) *Client {
+	var policy sparkplugin.EndpointPolicy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
+	return &Client{policy: policy, httpClient: &http.Client{
 		Timeout: 10 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -135,6 +142,9 @@ func (c *Client) Query(ctx context.Context, baseURL, user, password string, quer
 	}
 	if query.Path != queryPath && query.Path != queryRangePath {
 		return nil, fmt.Errorf("%w: invalid prometheus path", ErrInvalidRequest)
+	}
+	if c.policy == nil || c.policy.Validate(ctx, baseURL) != nil {
+		return nil, ErrUpstream
 	}
 	endpoint, err := buildEndpoint(baseURL, query.Path, query.Values)
 	if err != nil {

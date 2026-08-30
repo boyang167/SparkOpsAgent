@@ -45,15 +45,17 @@ func TestProxyForwardsSafePathAndAllowlistedHeaders(t *testing.T) {
 	t.Cleanup(upstream.Close)
 	db := openVelauxDB(t)
 	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
+		WorkspaceID:    wsID.String(),
 		ClusterID:      clusterID.String(),
 		VelauxURL:      upstream.URL + "/base",
 		VelauxUser:     "vela",
 		VelauxPassword: "secret",
 	}).Error)
 	engine := velauxEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB:       db,
-		Clusters: velauxClusterFactory{clusterID: clusterID},
-		Writer:   allowWriter{allow: true},
+		DB:        db,
+		Clusters:  velauxClusterFactory{clusterID: clusterID},
+		Writer:    allowWriter{allow: true},
+		Endpoints: allowLocalEndpointPolicy(),
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/velaux/ui/api/apps?limit=1", nil)
@@ -83,11 +85,12 @@ func TestProxyRejectsUnsafePathAndMissingURLWithoutCallingUpstream(t *testing.T)
 	}))
 	t.Cleanup(upstream.Close)
 	db := openVelauxDB(t)
-	require.NoError(t, db.Create(&k8sschema.ClusterSettings{ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{WorkspaceID: wsID.String(), ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
 	engine := velauxEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB:       db,
-		Clusters: velauxClusterFactory{clusterID: clusterID},
-		Writer:   allowWriter{allow: true},
+		DB:        db,
+		Clusters:  velauxClusterFactory{clusterID: clusterID},
+		Writer:    allowWriter{allow: true},
+		Endpoints: allowLocalEndpointPolicy(),
 	}))
 
 	for _, path := range []string{
@@ -107,9 +110,10 @@ func TestProxyRejectsUnsafePathAndMissingURLWithoutCallingUpstream(t *testing.T)
 
 	emptyDB := openVelauxDB(t)
 	emptyEngine := velauxEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB:       emptyDB,
-		Clusters: velauxClusterFactory{clusterID: clusterID},
-		Writer:   allowWriter{allow: true},
+		DB:        emptyDB,
+		Clusters:  velauxClusterFactory{clusterID: clusterID},
+		Writer:    allowWriter{allow: true},
+		Endpoints: allowLocalEndpointPolicy(),
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/velaux/ui", nil)
 	req.Header.Set("X-Workspace-Id", wsID.String())
@@ -130,11 +134,12 @@ func TestProxyRequiresWriterForMutatingMethodsBeforeUpstream(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 	db := openVelauxDB(t)
-	require.NoError(t, db.Create(&k8sschema.ClusterSettings{ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{WorkspaceID: wsID.String(), ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
 	engine := velauxEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB:       db,
-		Clusters: velauxClusterFactory{clusterID: clusterID},
-		Writer:   allowWriter{allow: false},
+		DB:        db,
+		Clusters:  velauxClusterFactory{clusterID: clusterID},
+		Writer:    allowWriter{allow: false},
+		Endpoints: allowLocalEndpointPolicy(),
 	}))
 
 	rec := performVelaux(engine, http.MethodPost, "/clusters/"+clusterID.String()+"/velaux/api/apps", wsID, []byte(`{}`))
@@ -154,11 +159,12 @@ func TestProxyCapsResponseBody(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 	db := openVelauxDB(t)
-	require.NoError(t, db.Create(&k8sschema.ClusterSettings{ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{WorkspaceID: wsID.String(), ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
 	engine := velauxEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB:       db,
-		Clusters: velauxClusterFactory{clusterID: clusterID},
-		Writer:   allowWriter{allow: true},
+		DB:        db,
+		Clusters:  velauxClusterFactory{clusterID: clusterID},
+		Writer:    allowWriter{allow: true},
+		Endpoints: allowLocalEndpointPolicy(),
 	}))
 
 	rec := performVelaux(engine, http.MethodGet, "/clusters/"+clusterID.String()+"/velaux/api/apps", wsID, nil)
@@ -181,11 +187,12 @@ func TestProxyCapsChunkedJSONResponseBody(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 	db := openVelauxDB(t)
-	require.NoError(t, db.Create(&k8sschema.ClusterSettings{ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{WorkspaceID: wsID.String(), ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
 	engine := velauxEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB:       db,
-		Clusters: velauxClusterFactory{clusterID: clusterID},
-		Writer:   allowWriter{allow: true},
+		DB:        db,
+		Clusters:  velauxClusterFactory{clusterID: clusterID},
+		Writer:    allowWriter{allow: true},
+		Endpoints: allowLocalEndpointPolicy(),
 	}))
 
 	rec := performVelaux(engine, http.MethodGet, "/clusters/"+clusterID.String()+"/velaux/api/apps", wsID, nil)
@@ -206,11 +213,12 @@ func TestProxyAllowsSmallChunkedJSONResponse(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 	db := openVelauxDB(t)
-	require.NoError(t, db.Create(&k8sschema.ClusterSettings{ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{WorkspaceID: wsID.String(), ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
 	engine := velauxEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB:       db,
-		Clusters: velauxClusterFactory{clusterID: clusterID},
-		Writer:   allowWriter{allow: true},
+		DB:        db,
+		Clusters:  velauxClusterFactory{clusterID: clusterID},
+		Writer:    allowWriter{allow: true},
+		Endpoints: allowLocalEndpointPolicy(),
 	}))
 
 	rec := performVelaux(engine, http.MethodGet, "/clusters/"+clusterID.String()+"/velaux/api/apps", wsID, nil)
@@ -242,11 +250,12 @@ func TestProxyStreamsEventStreamBeforeUpstreamEnds(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 	db := openVelauxDB(t)
-	require.NoError(t, db.Create(&k8sschema.ClusterSettings{ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{WorkspaceID: wsID.String(), ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
 	engine := velauxEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB:       db,
-		Clusters: velauxClusterFactory{clusterID: clusterID},
-		Writer:   allowWriter{allow: true},
+		DB:        db,
+		Clusters:  velauxClusterFactory{clusterID: clusterID},
+		Writer:    allowWriter{allow: true},
+		Endpoints: allowLocalEndpointPolicy(),
 	}))
 	server := httptest.NewServer(engine)
 	t.Cleanup(server.Close)
@@ -303,11 +312,12 @@ func TestProxyStreamStopsWhenClientCancels(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 	db := openVelauxDB(t)
-	require.NoError(t, db.Create(&k8sschema.ClusterSettings{ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{WorkspaceID: wsID.String(), ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
 	engine := velauxEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB:       db,
-		Clusters: velauxClusterFactory{clusterID: clusterID},
-		Writer:   allowWriter{allow: true},
+		DB:        db,
+		Clusters:  velauxClusterFactory{clusterID: clusterID},
+		Writer:    allowWriter{allow: true},
+		Endpoints: allowLocalEndpointPolicy(),
 	}))
 	server := httptest.NewServer(engine)
 	t.Cleanup(server.Close)
@@ -352,6 +362,11 @@ func velauxEngine(memberID kernel.MemberID, handler *Handler) *gin.Engine {
 	engine.Use(httpx.RequireWorkspace())
 	engine.Any("/clusters/:clusterId/velaux/*path", handler.ServeGIN)
 	return engine
+}
+
+func allowLocalEndpointPolicy() sparkplugin.EndpointPolicy {
+	policy, _ := sparkplugin.NewEndpointPolicy([]string{"127.0.0.1"}, nil)
+	return policy
 }
 
 func performVelaux(engine *gin.Engine, method, path string, wsID kernel.WorkspaceID, body []byte) *httptest.ResponseRecorder {

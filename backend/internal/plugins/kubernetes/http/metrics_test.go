@@ -34,6 +34,7 @@ func TestPostMetricsProxiesNamedTemplateToPrometheus(t *testing.T) {
 	t.Cleanup(prometheus.Close)
 	db := openK8sHTTPDB(t)
 	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
+		WorkspaceID:        wsID.String(),
 		ClusterID:          clusterID.String(),
 		PrometheusURL:      prometheus.URL,
 		PrometheusUser:     "prom-user",
@@ -89,6 +90,7 @@ func TestPostMetricsRequiresAuthorizedClusterBeforeSettingsLookup(t *testing.T) 
 	t.Cleanup(prometheus.Close)
 	db := openK8sHTTPDB(t)
 	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
+		WorkspaceID:        wsID.String(),
 		ClusterID:          clusterID.String(),
 		PrometheusURL:      prometheus.URL,
 		PrometheusPassword: "do-not-leak",
@@ -141,6 +143,7 @@ func TestPostMetricsHidesUpstreamFailures(t *testing.T) {
 	t.Cleanup(prometheus.Close)
 	db := openK8sHTTPDB(t)
 	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
+		WorkspaceID:        wsID.String(),
 		ClusterID:          clusterID.String(),
 		PrometheusURL:      prometheus.URL,
 		PrometheusUser:     "prom-user",
@@ -176,6 +179,7 @@ func TestPostMetricsAcceptsOnlyPrometheusJSON(t *testing.T) {
 	t.Cleanup(prometheus.Close)
 	db := openK8sHTTPDB(t)
 	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
+		WorkspaceID:   wsID.String(),
 		ClusterID:     clusterID.String(),
 		PrometheusURL: prometheus.URL,
 	}).Error)
@@ -212,6 +216,7 @@ func TestPostMetricsPassesPrometheusVectorJSON(t *testing.T) {
 	t.Cleanup(prometheus.Close)
 	db := openK8sHTTPDB(t)
 	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
+		WorkspaceID:   wsID.String(),
 		ClusterID:     clusterID.String(),
 		PrometheusURL: prometheus.URL,
 	}).Error)

@@ -28,6 +28,12 @@ describe("kubernetes catalog", () => {
     });
   });
 
+  it("hides Secret resources from non-admin catalogs", () => {
+    expect(resourcesForMenu("configs", false).map((item) => item.kind)).toEqual(["ConfigMap"]);
+    expect(resourcesForMenu("configs", true).map((item) => item.kind)).toEqual(["ConfigMap", "Secret"]);
+    expect(CATALOG.find((item) => item.kind === "Secret")).toMatchObject({ adminOnly: true });
+  });
+
   it("builds encoded proxy paths for core, group, CRD, and cluster scoped resources", () => {
     const pod = CATALOG.find((item) => item.kind === "Pod");
     const deployment = CATALOG.find((item) => item.kind === "Deployment");

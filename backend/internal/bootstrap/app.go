@@ -98,6 +98,7 @@ func Run(ctx context.Context) error {
 	httpx.RegisterReadiness(c.Engine, httpx.ReadinessDeps{DB: db, Redis: redisClient})
 
 	tokens := authn.NewTokenProvider(cfg.JWT)
+	var pluginAudit sparkplugin.AuditLogger
 
 	if db != nil {
 		appLogStore := applog.NewStore(db)
@@ -111,6 +112,7 @@ func Run(ctx context.Context) error {
 			return fmt.Errorf("operation log migrate: %w", err)
 		}
 		httpx.SetOperationLogMiddleware(operationlog.Middleware(opStore))
+		pluginAudit = sparkplugin.NewOperationAuditLogger(opStore)
 	}
 
 	c.Engine.Use(observability.RequestLogMiddleware(logger))
@@ -158,7 +160,13 @@ func Run(ctx context.Context) error {
 	}
 	c.Engine.Use(authn.RequireMemberForPluginAPIs())
 
-	pluginContext := sparkplugin.PluginContext{Logger: logger, DB: c.DB}
+	endpointPolicy, err := sparkplugin.NewEndpointPolicyFromCSV(os.Getenv("SPARKOPS_KUBERNETES_PLUGIN_ALLOWED_ENDPOINTS"))
+	if err != nil {
+		return fmt.Errorf("kubernetes plugin endpoint allowlist: %w", err)
+	}
+	pluginContext := sparkplugin.PluginContext{
+		Logger: logger, DB: c.DB, Audit: pluginAudit, Endpoints: endpointPolicy,
+	}
 	if c.DB != nil {
 		adminRepo := adminpersistence.NewAdminRepository(c.DB)
 		pluginContext.Clusters = sparkplugin.NewFactory(newClusterCredentialSource(adminRepo))

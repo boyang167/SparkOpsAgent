@@ -3,6 +3,7 @@ package schema
 import "time"
 
 type ClusterSettings struct {
+	WorkspaceID        string `gorm:"primaryKey;size:36"`
 	ClusterID          string `gorm:"primaryKey;size:36"`
 	PrometheusURL      string
 	PrometheusUser     string
