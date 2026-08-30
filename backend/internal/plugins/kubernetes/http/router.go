@@ -41,6 +41,7 @@ func RegisterRoutes(engine *gin.Engine, contexts ...sparkplugin.PluginContext) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 	group.GET("/clusters", handler.listClusters)
+	group.GET("/clusters/:clusterId/kubeconfig", handler.getKubeconfig)
 	group.PUT("/clusters/:clusterId/settings", handler.putClusterSettings)
 	group.POST("/clusters/:clusterId/metrics", metricsHandler.postMetrics)
 	group.Any("/clusters/:clusterId/proxy/*path", k8sproxy.NewHandler(pctx).ServeGIN)

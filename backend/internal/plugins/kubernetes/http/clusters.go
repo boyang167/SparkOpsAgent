@@ -180,6 +180,9 @@ func handleClusterError(c *gin.Context, err error) {
 		case "PLUGIN_CLUSTER_FORBIDDEN":
 			httpx.Fail(c, de.Code(), de.Error(), stdhttp.StatusForbidden)
 			return
+		case "PLUGIN_CLUSTER_CREDENTIALS_INCOMPLETE":
+			httpx.Fail(c, de.Code(), de.Error(), stdhttp.StatusBadRequest)
+			return
 		case "PLUGIN_CLUSTER_SETTINGS_CONFLICT":
 			httpx.Fail(c, de.Code(), de.Error(), stdhttp.StatusConflict)
 			return

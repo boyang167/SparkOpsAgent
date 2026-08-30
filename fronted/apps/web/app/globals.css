@@ -775,8 +775,134 @@ textarea {
 }
 
 .nav-sublink-active {
+  background: #409eff;
+  color: #fff;
+}
+
+.nav-sublink-active:hover {
+  background: #337ecc;
+  color: #fff;
+}
+
+.k8s-search-row,
+.k8s-ops-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.k8s-ops-row {
+  justify-content: flex-start;
+}
+
+.k8s-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.k8s-tab {
+  padding: 0.5rem 0.875rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.k8s-tab-active {
+  color: #409eff;
+  border-bottom-color: #409eff;
+  font-weight: 600;
+}
+
+.k8s-action-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #409eff;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.k8s-action-link:hover {
+  color: #337ecc;
+  text-decoration: underline;
+}
+
+.k8s-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.k8s-page-current {
+  display: inline-flex;
+  min-width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  background: #409eff;
+  color: #fff;
+  font-size: 0.8125rem;
+}
+
+.k8s-page-jumper {
+  width: 3.5rem;
+  padding: 0.25rem 0.4rem;
+  text-align: center;
+}
+
+.k8s-row-selected {
   background: var(--primary-soft);
-  color: #0369a1;
+}
+
+.k8s-form-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.25rem 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.k8s-form-divider::before,
+.k8s-form-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
+
+.k8s-fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.k8s-eye-btn {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.text-danger {
+  color: #f56c6c;
 }
 
 /* ---- Forms & buttons ---- */

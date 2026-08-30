@@ -25,6 +25,14 @@ func (r fakeAdminClusterRepo) UpsertSysConfig(context.Context, *repository.SysCo
 func (r fakeAdminClusterRepo) ListClusters(context.Context) ([]*repository.ClusterInfo, error) {
 	return nil, nil
 }
+func (r fakeAdminClusterRepo) FindClusterByName(_ context.Context, clusterName string) (*repository.ClusterInfo, error) {
+	for _, cluster := range r.clusters {
+		if cluster != nil && cluster.ClusterName == clusterName {
+			return cluster, nil
+		}
+	}
+	return nil, nil
+}
 func (r fakeAdminClusterRepo) SaveCluster(context.Context, *repository.ClusterInfo) error { return nil }
 func (r fakeAdminClusterRepo) GrantWorkspaceCluster(context.Context, kernel.WorkspaceID, kernel.ClusterInfoID, kernel.MemberID) error {
 	return nil

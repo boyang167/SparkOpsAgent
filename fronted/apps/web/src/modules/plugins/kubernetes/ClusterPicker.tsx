@@ -4,23 +4,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiErrorBanner } from "./ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "./api";
 import { selectStoredClusterId } from "./catalog";
+import {
+  ClusterSettingsForm,
+  EMPTY_CLUSTER_SETTINGS,
+  settingsFromCluster,
+} from "./cluster-settings-form";
+import type { KubernetesCluster } from "./cluster-types";
+import { ClustersPanel } from "./specialized/ClustersPanel";
+
+export type { KubernetesCluster } from "./cluster-types";
 
 export const CLUSTER_STORAGE_KEY = "sparkops.plugin.kubernetes.clusterId";
-
-export type KubernetesCluster = {
-  id: string;
-  name: string;
-  server: string;
-  prometheus_url?: string;
-  prometheus_user?: string;
-  prometheus_password?: string;
-  velaux_url?: string;
-  velaux_user?: string;
-  velaux_password?: string;
-  llm_base_url?: string;
-  llm_api_key?: string;
-  llm_model?: string;
-};
 
 type ClusterListResponse = {
   items?: KubernetesCluster[];
@@ -32,18 +26,7 @@ type ClusterPickerProps = {
   onClustersChange?: (clusters: KubernetesCluster[]) => void;
   canManage: boolean;
   showSettings?: boolean;
-};
-
-const EMPTY_SETTINGS = {
-  prometheus_url: "",
-  prometheus_user: "",
-  prometheus_password: "",
-  velaux_url: "",
-  velaux_user: "",
-  velaux_password: "",
-  llm_base_url: "",
-  llm_api_key: "",
-  llm_model: "",
+  layout?: "picker" | "table";
 };
 
 export function ClusterPicker({
@@ -52,12 +35,13 @@ export function ClusterPicker({
   onClustersChange,
   canManage,
   showSettings = false,
+  layout = "picker",
 }: ClusterPickerProps) {
   const [clusters, setClusters] = useState<KubernetesCluster[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
-  const [settings, setSettings] = useState(EMPTY_SETTINGS);
+  const [settings, setSettings] = useState(EMPTY_CLUSTER_SETTINGS);
 
   const selected = useMemo(() => clusters.find((item) => item.id === value), [clusters, value]);
 
@@ -99,21 +83,7 @@ export function ClusterPicker({
   }, [load]);
 
   useEffect(() => {
-    if (!selected) {
-      setSettings(EMPTY_SETTINGS);
-      return;
-    }
-    setSettings({
-      prometheus_url: selected.prometheus_url ?? "",
-      prometheus_user: selected.prometheus_user ?? "",
-      prometheus_password: selected.prometheus_password ?? "",
-      velaux_url: selected.velaux_url ?? "",
-      velaux_user: selected.velaux_user ?? "",
-      velaux_password: selected.velaux_password ?? "",
-      llm_base_url: selected.llm_base_url ?? "",
-      llm_api_key: selected.llm_api_key ?? "",
-      llm_model: selected.llm_model ?? "",
-    });
+    setSettings(settingsFromCluster(selected));
   }, [selected]);
 
   function choose(clusterId: string) {
@@ -140,6 +110,24 @@ export function ClusterPicker({
     } finally {
       setSaving(false);
     }
+  }
+
+  if (layout === "table") {
+    return (
+      <ClustersPanel
+        clusters={clusters}
+        loading={loading}
+        error={error}
+        canManage={canManage}
+        selectedId={value}
+        onRefresh={() => void load()}
+        onSelect={choose}
+        onClustersChange={(next) => {
+          setClusters(next);
+          onClustersChange?.(next);
+        }}
+      />
+    );
   }
 
   return (
@@ -172,17 +160,7 @@ export function ClusterPicker({
             <h2 className="text-lg font-semibold">集群设置</h2>
             <p className="text-sm text-muted mt-1">密钥字段返回为 *** 时可直接保存以保留原值。</p>
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {settingsField("Prometheus URL", "prometheus_url", settings, setSettings)}
-            {settingsField("Prometheus 用户", "prometheus_user", settings, setSettings)}
-            {settingsField("Prometheus 密码", "prometheus_password", settings, setSettings, true)}
-            {settingsField("Velaux URL", "velaux_url", settings, setSettings)}
-            {settingsField("Velaux 用户", "velaux_user", settings, setSettings)}
-            {settingsField("Velaux 密码", "velaux_password", settings, setSettings, true)}
-            {settingsField("LLM Base URL", "llm_base_url", settings, setSettings)}
-            {settingsField("LLM API Key", "llm_api_key", settings, setSettings, true)}
-            {settingsField("LLM Model", "llm_model", settings, setSettings)}
-          </div>
+          <ClusterSettingsForm settings={settings} onChange={setSettings} />
           {canManage ? (
             <div className="flex justify-end">
               <button type="button" className="btn" disabled={saving} onClick={() => void saveSettings()}>
@@ -195,26 +173,5 @@ export function ClusterPicker({
         </div>
       ) : null}
     </section>
-  );
-}
-
-function settingsField(
-  label: string,
-  key: keyof typeof EMPTY_SETTINGS,
-  settings: typeof EMPTY_SETTINGS,
-  setSettings: (next: typeof EMPTY_SETTINGS) => void,
-  secret = false,
-) {
-  return (
-    <label key={key}>
-      <span className="label">{label}</span>
-      <input
-        className="input"
-        type={secret ? "password" : "text"}
-        value={settings[key]}
-        placeholder={secret ? "***" : undefined}
-        onChange={(e) => setSettings({ ...settings, [key]: e.target.value })}
-      />
-    </label>
   );
 }

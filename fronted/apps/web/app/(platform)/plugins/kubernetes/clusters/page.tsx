@@ -4,6 +4,6 @@ export default function KubernetesClustersPage() {
   return renderKubernetesPage({
     mode: "clusters",
     title: "集群管理",
-    description: "查看当前工作区授权集群，并维护 Prometheus、Velaux、LLM 设置。",
+    description: "在当前工作区登记 Kubernetes 集群，并维护 Prometheus、Velaux、LLM 设置。",
   });
 }

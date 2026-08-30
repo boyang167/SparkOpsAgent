@@ -12,8 +12,8 @@ import (
 
 type apiModel struct {
 	ID          string `gorm:"column:id;primaryKey"`
-	Path        string
-	Method      string
+	Path        string `gorm:"uniqueIndex:ux_platform_apis_path_method"`
+	Method      string `gorm:"uniqueIndex:ux_platform_apis_path_method"`
 	APIGroup    string `gorm:"column:api_group"`
 	Description string
 	postgres.AuditColumns
@@ -56,7 +56,14 @@ func (s *APIRegistryStore) AutoMigrate() error {
 			return err
 		}
 	}
-	return s.db.AutoMigrate(&apiModel{}, &apiIgnoreModel{})
+	if err := s.db.AutoMigrate(&apiModel{}, &apiIgnoreModel{}); err != nil {
+		return err
+	}
+	// GORM may have created platform.apis before migration 000018; ensure binder ON CONFLICT works.
+	return s.db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS ux_platform_apis_path_method
+		ON platform.apis (path, method)
+	`).Error
 }
 
 func (s *APIRegistryStore) ListAll(ctx context.Context) ([]RegisteredAPI, error) {

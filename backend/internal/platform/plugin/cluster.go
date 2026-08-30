@@ -33,6 +33,7 @@ type ClusterCredential struct {
 	CertificateAuthorityData string
 	ClientCertificateData    string
 	ClientKeyData            string
+	BearerToken              string
 }
 
 type ClusterCredentialSource interface {
@@ -65,16 +66,22 @@ func (f *clusterClientFactory) ForWorkspace(ctx context.Context, wsID kernel.Wor
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	if cred == nil || strings.TrimSpace(cred.Server) == "" ||
-		cred.CertificateAuthorityData == "" || cred.ClientCertificateData == "" || cred.ClientKeyData == "" {
+	if cred == nil || strings.TrimSpace(cred.Server) == "" {
+		return nil, nil, nil, nil, kernel.NewDomainError("PLUGIN_CLUSTER_CREDENTIALS_INCOMPLETE", "cluster credentials are incomplete")
+	}
+	hasCert := cred.ClientCertificateData != "" && cred.ClientKeyData != ""
+	hasToken := strings.TrimSpace(cred.BearerToken) != ""
+	if !hasCert && !hasToken {
 		return nil, nil, nil, nil, kernel.NewDomainError("PLUGIN_CLUSTER_CREDENTIALS_INCOMPLETE", "cluster credentials are incomplete")
 	}
 	cfg := &rest.Config{
-		Host: strings.TrimSpace(cred.Server),
+		Host:        strings.TrimSpace(cred.Server),
+		BearerToken: strings.TrimSpace(cred.BearerToken),
 		TLSClientConfig: rest.TLSClientConfig{
 			CAData:   []byte(cred.CertificateAuthorityData),
 			CertData: []byte(cred.ClientCertificateData),
 			KeyData:  []byte(cred.ClientKeyData),
+			Insecure: cred.CertificateAuthorityData == "" && hasToken,
 		},
 	}
 	clientset, err := kubernetes.NewForConfig(cfg)

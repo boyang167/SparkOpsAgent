@@ -1,11 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ClusterPicker, type KubernetesCluster } from "./ClusterPicker";
+import { ClusterPicker } from "./ClusterPicker";
 import { ResourceMenuPage } from "./ResourceMenuPage";
 import { ChatPage } from "./specialized/ChatPage";
 import { CloudTTYPage } from "./specialized/CloudTTYPage";
-import { ClustersPanel } from "./specialized/ClustersPanel";
 import { CreateDeploymentPage } from "./specialized/CreateDeploymentPage";
 import { DiagnosisPage } from "./specialized/DiagnosisPage";
 import { OverviewPanel } from "./specialized/OverviewPanel";
@@ -33,11 +32,9 @@ type KubernetesConsoleProps = {
 
 export function KubernetesConsole({ mode, title, description, menu, canManage }: KubernetesConsoleProps) {
   const [clusterId, setClusterId] = useState("");
-  const [clusters, setClusters] = useState<KubernetesCluster[]>([]);
 
   const body = useMemo(() => {
     if (mode === "overview") return <OverviewPanel />;
-    if (mode === "clusters") return <ClustersPanel clusters={clusters} />;
     if (mode === "create") return <CreateDeploymentPage clusterId={clusterId} canManage={canManage} />;
     if (mode === "records") return <RecordsPage canManage={canManage} />;
     if (mode === "diagnosis") return <DiagnosisPage clusterId={clusterId} canManage={canManage} />;
@@ -53,18 +50,28 @@ export function KubernetesConsole({ mode, title, description, menu, canManage }:
         canManage={canManage}
       />
     );
-  }, [canManage, clusterId, clusters, description, menu, mode, title]);
+  }, [canManage, clusterId, description, menu, mode, title]);
+
+  if (mode === "clusters") {
+    return (
+      <div className="page stack-lg">
+        <section className="card stack-md p-4">
+          <div>
+            <h1 className="text-xl font-semibold">{title}</h1>
+            {description ? <p className="text-sm text-muted mt-1">{description}</p> : null}
+          </div>
+          <ClusterPicker value={clusterId} onChange={setClusterId} canManage={canManage} layout="table" />
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="page stack-lg">
-      <ClusterPicker
-        value={clusterId}
-        onChange={setClusterId}
-        onClustersChange={setClusters}
-        canManage={canManage}
-        showSettings={mode === "clusters"}
-      />
-      {mode === "resource" ? body : (
+      <ClusterPicker value={clusterId} onChange={setClusterId} canManage={canManage} layout="picker" />
+      {mode === "resource" ? (
+        body
+      ) : (
         <section className="card stack-md p-4">
           <div>
             <h1 className="text-xl font-semibold">{title}</h1>

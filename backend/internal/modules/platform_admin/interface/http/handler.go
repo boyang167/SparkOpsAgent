@@ -2,6 +2,7 @@ package http
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -82,6 +83,10 @@ type createClusterRequest struct {
 	CertificateAuthorityData string `json:"certificate_authority_data"`
 	ClientCertificateData    string `json:"client_certificate_data"`
 	ClientKeyData            string `json:"client_key_data"`
+	BearerToken              string `json:"bearer_token"`
+	KubeType                 int    `json:"kube_type"`
+	KubeConfig               string `json:"kube_config"`
+	APIAddress               string `json:"api_address"`
 	IsBuildEnv               bool   `json:"is_build_env"`
 	PriorityID               int    `json:"priority_id"`
 }
@@ -155,7 +160,7 @@ func (h *Handler) CreateCluster(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
-	cluster, err := h.createCluster.Handle(c.Request.Context(), memberID, req.ClusterName, req.Server, req.UserName, req.CertificateAuthorityData, req.ClientCertificateData, req.ClientKeyData, req.IsBuildEnv, req.PriorityID)
+	cluster, err := h.createCluster.Handle(c.Request.Context(), memberID, req.ClusterName, req.Server, req.UserName, req.CertificateAuthorityData, req.ClientCertificateData, req.ClientKeyData, req.BearerToken, req.IsBuildEnv, req.PriorityID)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
@@ -179,7 +184,32 @@ func (h *Handler) RegisterWorkspaceCluster(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
-	cluster, err := h.registerWorkspaceCluster.Handle(c.Request.Context(), memberID, wsID, req.ClusterName, req.Server)
+	var creds *command.ParsedClusterCredentials
+	if strings.TrimSpace(req.KubeConfig) != "" || strings.TrimSpace(req.BearerToken) != "" {
+		parsed, err := command.ParseClusterCredentials(command.ClusterCredentialInput{
+			KubeType:   req.KubeType,
+			KubeConfig: firstNonEmpty(req.KubeConfig, req.BearerToken),
+			APIAddress: firstNonEmpty(req.APIAddress, req.Server),
+			UserName:   req.UserName,
+		})
+		if err != nil {
+			httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+			return
+		}
+		creds = parsed
+	} else if strings.TrimSpace(req.CertificateAuthorityData) != "" || strings.TrimSpace(req.ClientCertificateData) != "" || strings.TrimSpace(req.BearerToken) != "" {
+		creds = &command.ParsedClusterCredentials{
+			Server:                   firstNonEmpty(req.APIAddress, req.Server),
+			UserName:                 req.UserName,
+			CertificateAuthorityData: req.CertificateAuthorityData,
+			ClientCertificateData:    req.ClientCertificateData,
+			ClientKeyData:            req.ClientKeyData,
+			BearerToken:              req.BearerToken,
+		}
+	}
+	cluster, err := h.registerWorkspaceCluster.Handle(
+		c.Request.Context(), memberID, wsID, req.ClusterName, firstNonEmpty(req.APIAddress, req.Server), creds,
+	)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
@@ -354,4 +384,13 @@ func (h *Handler) CloneTool(c *gin.Context) {
 
 func (h *Handler) GetServerStatus(c *gin.Context) {
 	httpx.OK(c, observability.GetServerStatus())
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

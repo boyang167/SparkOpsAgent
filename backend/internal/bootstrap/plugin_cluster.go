@@ -77,5 +77,6 @@ func clusterCredentialFromAdmin(cluster *repository.ClusterInfo) sparkplugin.Clu
 		CertificateAuthorityData: cluster.CertificateAuthorityData,
 		ClientCertificateData:    cluster.ClientCertificateData,
 		ClientKeyData:            cluster.ClientKeyData,
+		BearerToken:              cluster.BearerToken,
 	}
 }

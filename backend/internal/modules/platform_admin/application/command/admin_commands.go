@@ -49,7 +49,7 @@ func NewCreateClusterHandler(repo repository.AdminRepository) *CreateClusterHand
 	return &CreateClusterHandler{repo: repo}
 }
 
-func (h *CreateClusterHandler) Handle(ctx context.Context, memberID kernel.MemberID, clusterName, server, userName, caData, certData, keyData string, isBuildEnv bool, priorityID int) (*repository.ClusterInfo, error) {
+func (h *CreateClusterHandler) Handle(ctx context.Context, memberID kernel.MemberID, clusterName, server, userName, caData, certData, keyData, bearerToken string, isBuildEnv bool, priorityID int) (*repository.ClusterInfo, error) {
 	clusterName = strings.TrimSpace(clusterName)
 	if clusterName == "" {
 		return nil, domain.ErrClusterNameRequired
@@ -57,7 +57,8 @@ func (h *CreateClusterHandler) Handle(ctx context.Context, memberID kernel.Membe
 	cluster := &repository.ClusterInfo{
 		ID: kernel.NewClusterInfoID(), ClusterName: clusterName, Server: strings.TrimSpace(server), UserName: userName,
 		CertificateAuthorityData: caData, ClientCertificateData: certData, ClientKeyData: keyData,
-		IsBuildEnv: isBuildEnv, PriorityID: priorityID, CreatedBy: memberID,
+		BearerToken: strings.TrimSpace(bearerToken),
+		IsBuildEnv:  isBuildEnv, PriorityID: priorityID, CreatedBy: memberID,
 	}
 	if err := h.repo.SaveCluster(ctx, cluster); err != nil {
 		return nil, err
@@ -79,12 +80,14 @@ func (h *GrantWorkspaceClusterHandler) Handle(ctx context.Context, memberID kern
 }
 
 type RegisterWorkspaceClusterHandler struct {
+	repo   repository.AdminRepository
 	create *CreateClusterHandler
 	grant  *GrantWorkspaceClusterHandler
 }
 
 func NewRegisterWorkspaceClusterHandler(repo repository.AdminRepository) *RegisterWorkspaceClusterHandler {
 	return &RegisterWorkspaceClusterHandler{
+		repo:   repo,
 		create: NewCreateClusterHandler(repo),
 		grant:  NewGrantWorkspaceClusterHandler(repo),
 	}
@@ -95,10 +98,53 @@ func (h *RegisterWorkspaceClusterHandler) Handle(
 	memberID kernel.MemberID,
 	wsID kernel.WorkspaceID,
 	clusterName, server string,
+	creds *ParsedClusterCredentials,
 ) (*repository.ClusterInfo, error) {
-	cluster, err := h.create.Handle(ctx, memberID, clusterName, server, "", "", "", "", false, 0)
+	clusterName = strings.TrimSpace(clusterName)
+	if clusterName == "" {
+		return nil, domain.ErrClusterNameRequired
+	}
+	userName, caData, certData, keyData, bearerToken := "", "", "", "", ""
+	if creds != nil {
+		if strings.TrimSpace(server) == "" {
+			server = creds.Server
+		}
+		userName = creds.UserName
+		caData = creds.CertificateAuthorityData
+		certData = creds.ClientCertificateData
+		keyData = creds.ClientKeyData
+		bearerToken = creds.BearerToken
+	}
+	server = strings.TrimSpace(server)
+
+	existing, err := h.repo.FindClusterByName(ctx, clusterName)
 	if err != nil {
 		return nil, err
+	}
+	var cluster *repository.ClusterInfo
+	if existing != nil {
+		cluster = existing
+		if server != "" {
+			cluster.Server = server
+		}
+		if userName != "" {
+			cluster.UserName = userName
+		}
+		if caData != "" || certData != "" || keyData != "" || bearerToken != "" {
+			cluster.CertificateAuthorityData = caData
+			cluster.ClientCertificateData = certData
+			cluster.ClientKeyData = keyData
+			cluster.BearerToken = bearerToken
+		}
+		if err := h.repo.SaveCluster(ctx, cluster); err != nil {
+			return nil, err
+		}
+		entitlements.InvalidateCache()
+	} else {
+		cluster, err = h.create.Handle(ctx, memberID, clusterName, server, userName, caData, certData, keyData, bearerToken, false, 0)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := h.grant.Handle(ctx, memberID, wsID, cluster.ID); err != nil {
 		return nil, err

@@ -38,7 +38,18 @@ export async function listAuthorizedWorkspaceClusters(ctx: BffContext, workspace
 export async function registerWorkspaceCluster(
   ctx: BffContext,
   workspaceId: string,
-  input: { cluster_name: string; server?: string },
+  input: {
+    cluster_name: string;
+    server?: string;
+    api_address?: string;
+    kube_type?: number;
+    kube_config?: string;
+    bearer_token?: string;
+    user_name?: string;
+    certificate_authority_data?: string;
+    client_certificate_data?: string;
+    client_key_data?: string;
+  },
 ) {
   const result = await ctx.upstream.platform.registerWorkspaceCluster(workspaceId, input);
   invalidateEntitlementsCache();

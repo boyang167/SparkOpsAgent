@@ -66,7 +66,18 @@ export function createPlatformUpstream(options: UpstreamRequestOptions = {}) {
 
     async registerWorkspaceCluster(
       workspaceId: string,
-      input: { cluster_name: string; server?: string },
+      input: {
+        cluster_name: string;
+        server?: string;
+        api_address?: string;
+        kube_type?: number;
+        kube_config?: string;
+        bearer_token?: string;
+        user_name?: string;
+        certificate_authority_data?: string;
+        client_certificate_data?: string;
+        client_key_data?: string;
+      },
     ) {
       return upstreamFetch<{ id: string; cluster_name: string; server?: string }>(
         `/api/v1/workspaces/${workspaceId}/clusters`,

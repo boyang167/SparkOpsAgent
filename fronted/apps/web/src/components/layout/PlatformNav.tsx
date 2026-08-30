@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { governance } from "@sparkops/web-sdk";
 import type { MenuTreeVM } from "@sparkops/contracts/governance";
 import { NavGroup } from "@/components/layout/NavGroup";
+import { menuTreeToNavGroups } from "@/components/layout/menu-tree-nav";
 import { DASHBOARD_NAV_GROUP, filterBusinessNavGroups } from "@/components/layout/nav-tree";
 import { useShellContext } from "@/components/layout/shell-context";
 
@@ -48,6 +49,11 @@ const icons = {
       <path d="M4 6h16M4 12h16M4 18h10" strokeLinecap="round" />
     </svg>
   ),
+  "plugin-kubernetes": (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M7 15a5 5 0 111.7-9.7A6 6 0 0120 10a4 4 0 01-1 7.9H8" strokeLinecap="round" />
+    </svg>
+  ),
   default: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="2" />
@@ -63,17 +69,11 @@ function resolveGroupIcon(key?: string) {
   return icons[key as keyof typeof icons] ?? icons.default;
 }
 
-function menuTreeToNavGroups(tree: MenuTreeVM[]) {
-  return tree
-    .map((group) => ({
-      id: group.icon || group.name,
-      label: group.title,
-      defaultCollapsed: collapsedByDefault.has(group.icon || group.name),
-      items: (group.children ?? [])
-        .filter((child) => !child.hidden && child.path.startsWith("/"))
-        .map((child) => ({ href: child.path, label: child.title })),
-    }))
-    .filter((group) => group.items.length > 0);
+function toSidebarGroups(tree: MenuTreeVM[]) {
+  return menuTreeToNavGroups(tree).map((group) => ({
+    ...group,
+    defaultCollapsed: collapsedByDefault.has(group.id) || group.defaultCollapsed,
+  }));
 }
 
 export function PlatformNav({ workspaceId }: PlatformNavProps) {
@@ -106,7 +106,7 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
   }, [loadNav]);
 
   const dynamicGroups = useMemo(
-    () => (menuTree ? menuTreeToNavGroups(menuTree) : null),
+    () => (menuTree ? toSidebarGroups(menuTree) : null),
     [menuTree],
   );
 

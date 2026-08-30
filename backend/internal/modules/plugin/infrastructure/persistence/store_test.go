@@ -172,6 +172,7 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 
 	requireAPI(t, spec.APIs, "GET", "/api/v1/plugins/kubernetes/ready", false)
 	requireAPI(t, spec.APIs, "GET", "/api/v1/plugins/kubernetes/clusters", false)
+	requireAPI(t, spec.APIs, "GET", "/api/v1/plugins/kubernetes/clusters/:clusterId/kubeconfig", false)
 	requireAPI(t, spec.APIs, "PUT", "/api/v1/plugins/kubernetes/clusters/:clusterId/settings", false)
 	requireAPI(t, spec.APIs, "ANY", "/api/v1/plugins/kubernetes/clusters/:clusterId/proxy/*", false)
 	requireAPI(t, spec.APIs, "POST", "/api/v1/plugins/kubernetes/clusters/:clusterId/metrics", true)

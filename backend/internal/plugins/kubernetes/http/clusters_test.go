@@ -113,6 +113,56 @@ func TestPutClusterSettingsRequiresGovernanceAdmin(t *testing.T) {
 	require.Zero(t, count)
 }
 
+func TestGetKubeconfigReturnsYAMLForGovernanceAdmin(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	engine := testEngine(memberID, sparkplugin.PluginContext{
+		DB: openK8sHTTPDB(t),
+		Clusters: fakeClusterFactory{
+			items: []sparkplugin.ClusterMeta{{ID: clusterID.String(), Name: "dev"}},
+			rest: &rest.Config{
+				Host:        "https://k8s.example:6443",
+				BearerToken: "live-token",
+				TLSClientConfig: rest.TLSClientConfig{
+					Insecure: true,
+				},
+			},
+		},
+		Members: allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
+		Writer:  allowWriter{allow: true},
+	})
+
+	rec := performJSON(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/kubeconfig", wsID, nil)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var env httpx.Envelope
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+	body, err := json.Marshal(env.Data)
+	require.NoError(t, err)
+	var view kubeconfigView
+	require.NoError(t, json.Unmarshal(body, &view))
+	require.Contains(t, view.Kubeconfig, "https://k8s.example:6443")
+	require.Contains(t, view.Kubeconfig, "live-token")
+}
+
+func TestGetKubeconfigRequiresGovernanceAdmin(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	engine := testEngine(memberID, sparkplugin.PluginContext{
+		DB:       openK8sHTTPDB(t),
+		Clusters: fakeClusterFactory{items: []sparkplugin.ClusterMeta{{ID: clusterID.String(), Name: "dev"}}},
+		Members:  allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
+		Writer:   allowWriter{allow: false},
+	})
+
+	rec := performJSON(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/kubeconfig", wsID, nil)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "GOVERNANCE_API_ACCESS_DENIED")
+}
+
 func TestPutClusterSettingsRejectsUngrantCluster(t *testing.T) {
 	wsID := kernel.NewWorkspaceID()
 	memberID := kernel.NewMemberID()
@@ -403,13 +453,23 @@ func performJSON(engine *gin.Engine, method, path string, wsID kernel.WorkspaceI
 }
 
 type fakeClusterFactory struct {
-	items []sparkplugin.ClusterMeta
+	items  []sparkplugin.ClusterMeta
+	rest   *rest.Config
+	forErr error
 }
 
 func (f fakeClusterFactory) ForWorkspace(context.Context, kernel.WorkspaceID, kernel.ClusterInfoID) (
 	kubernetes.Interface, dynamic.Interface, *rest.Config, *sparkplugin.ClusterMeta, error,
 ) {
-	return nil, nil, nil, nil, nil
+	if f.forErr != nil {
+		return nil, nil, nil, nil, f.forErr
+	}
+	var meta *sparkplugin.ClusterMeta
+	if len(f.items) > 0 {
+		item := f.items[0]
+		meta = &item
+	}
+	return nil, nil, f.rest, meta, nil
 }
 
 func (f fakeClusterFactory) ListMeta(context.Context, kernel.WorkspaceID) ([]sparkplugin.ClusterMeta, error) {

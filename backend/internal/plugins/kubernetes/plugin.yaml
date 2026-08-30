@@ -92,6 +92,8 @@ apis:
     path: /api/v1/plugins/kubernetes/ready
   - method: GET
     path: /api/v1/plugins/kubernetes/clusters
+  - method: GET
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/kubeconfig
   - method: PUT
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/settings
   - method: ANY

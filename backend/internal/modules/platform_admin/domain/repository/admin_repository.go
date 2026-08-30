@@ -23,6 +23,7 @@ type ClusterInfo struct {
 	CertificateAuthorityData string
 	ClientCertificateData    string
 	ClientKeyData            string
+	BearerToken              string
 	IsBuildEnv               bool
 	PriorityID               int
 	CreatedBy                kernel.MemberID
@@ -42,6 +43,7 @@ type AdminRepository interface {
 	GetSysConfig(ctx context.Context) (*SysConfig, error)
 	UpsertSysConfig(ctx context.Context, cfg *SysConfig) error
 	ListClusters(ctx context.Context) ([]*ClusterInfo, error)
+	FindClusterByName(ctx context.Context, clusterName string) (*ClusterInfo, error)
 	SaveCluster(ctx context.Context, cluster *ClusterInfo) error
 	GrantWorkspaceCluster(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID, createdBy kernel.MemberID) error
 	RevokeWorkspaceCluster(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) error

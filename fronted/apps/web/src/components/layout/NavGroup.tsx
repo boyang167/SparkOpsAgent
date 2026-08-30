@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { isNavHrefActive } from "@/components/layout/menu-tree-nav";
 
 export interface NavLeafItem {
   href: string;
@@ -17,9 +18,8 @@ interface NavGroupProps {
 }
 
 function isGroupActive(pathname: string, items: NavLeafItem[]) {
-  return items.some(
-    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
-  );
+  const hrefs = items.map((item) => item.href);
+  return items.some((item) => isNavHrefActive(pathname, item.href, hrefs));
 }
 
 export function NavGroup({ label, icon, items, pathname, defaultOpen }: NavGroupProps) {
@@ -55,8 +55,11 @@ export function NavGroup({ label, icon, items, pathname, defaultOpen }: NavGroup
       {open ? (
         <div className="nav-group-children">
           {items.map((item) => {
-            const itemActive =
-              pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const itemActive = isNavHrefActive(
+              pathname,
+              item.href,
+              items.map((candidate) => candidate.href),
+            );
             return (
               <Link
                 key={item.href}

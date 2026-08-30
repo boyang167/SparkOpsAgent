@@ -156,7 +156,18 @@ export async function listAuthorizedWorkspaceClusters(workspaceId: string) {
 
 export function registerWorkspaceCluster(
   workspaceId: string,
-  input: { cluster_name: string; server?: string },
+  input: {
+    cluster_name: string;
+    server?: string;
+    api_address?: string;
+    kube_type?: number;
+    kube_config?: string;
+    bearer_token?: string;
+    user_name?: string;
+    certificate_authority_data?: string;
+    client_certificate_data?: string;
+    client_key_data?: string;
+  },
 ) {
   return bffFetch<{ id: string; cluster_name: string; server?: string }>(
     `/workspaces/${workspaceId}/clusters`,

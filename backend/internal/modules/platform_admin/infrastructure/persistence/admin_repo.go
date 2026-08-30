@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -47,6 +48,7 @@ type clusterInfoModel struct {
 	CertificateAuthorityData string `gorm:"type:text"`
 	ClientCertificateData    string `gorm:"type:text"`
 	ClientKeyData            string `gorm:"type:text"`
+	BearerToken              string `gorm:"type:text"`
 	IsBuildEnv               bool
 	PriorityID               int
 	CreatedBy                string
@@ -137,12 +139,27 @@ func (r *AdminRepository) ListClusters(ctx context.Context) ([]*repository.Clust
 	return out, nil
 }
 
+func (r *AdminRepository) FindClusterByName(ctx context.Context, clusterName string) (*repository.ClusterInfo, error) {
+	var row clusterInfoModel
+	err := r.db.WithContext(ctx).
+		Where("cluster_name = ?", strings.TrimSpace(clusterName)).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return rowToCluster(row), nil
+}
+
 func (r *AdminRepository) SaveCluster(ctx context.Context, cluster *repository.ClusterInfo) error {
 	row := clusterInfoModel{
 		ID: cluster.ID.String(), ClusterName: cluster.ClusterName, Server: cluster.Server,
 		UserName: cluster.UserName, CertificateAuthorityData: cluster.CertificateAuthorityData,
 		ClientCertificateData: cluster.ClientCertificateData, ClientKeyData: cluster.ClientKeyData,
-		IsBuildEnv: cluster.IsBuildEnv, PriorityID: cluster.PriorityID, CreatedBy: cluster.CreatedBy.String(),
+		BearerToken: cluster.BearerToken,
+		IsBuildEnv:  cluster.IsBuildEnv, PriorityID: cluster.PriorityID, CreatedBy: cluster.CreatedBy.String(),
 		AuditColumns: postgres.AuditColumns{CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
 	}
 	return r.db.WithContext(ctx).Save(&row).Error
@@ -289,7 +306,8 @@ func rowToCluster(row clusterInfoModel) *repository.ClusterInfo {
 		ID: id, ClusterName: row.ClusterName, Server: row.Server, UserName: row.UserName,
 		CertificateAuthorityData: row.CertificateAuthorityData,
 		ClientCertificateData:    row.ClientCertificateData, ClientKeyData: row.ClientKeyData,
-		IsBuildEnv: row.IsBuildEnv, PriorityID: row.PriorityID, CreatedBy: createdBy,
+		BearerToken: row.BearerToken,
+		IsBuildEnv:  row.IsBuildEnv, PriorityID: row.PriorityID, CreatedBy: createdBy,
 	}
 }
 

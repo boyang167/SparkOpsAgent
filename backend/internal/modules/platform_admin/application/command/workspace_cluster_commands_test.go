@@ -29,6 +29,17 @@ func (r *workspaceClusterRepo) UpsertSysConfig(context.Context, *repository.SysC
 func (r *workspaceClusterRepo) ListClusters(context.Context) ([]*repository.ClusterInfo, error) {
 	return nil, nil
 }
+func (r *workspaceClusterRepo) FindClusterByName(_ context.Context, clusterName string) (*repository.ClusterInfo, error) {
+	if r.saved != nil && r.saved.ClusterName == clusterName {
+		return r.saved, nil
+	}
+	for _, cluster := range r.clusters {
+		if cluster != nil && cluster.ClusterName == clusterName {
+			return cluster, nil
+		}
+	}
+	return nil, nil
+}
 func (r *workspaceClusterRepo) SaveCluster(_ context.Context, cluster *repository.ClusterInfo) error {
 	r.saved = cluster
 	r.clusterExists = true
@@ -117,7 +128,7 @@ func TestRegisterWorkspaceClusterCreatesAndGrants(t *testing.T) {
 	h := command.NewRegisterWorkspaceClusterHandler(repo)
 	wsID := kernel.NewWorkspaceID()
 
-	cluster, err := h.Handle(context.Background(), kernel.NewMemberID(), wsID, "dev-cluster", "https://k8s.example")
+	cluster, err := h.Handle(context.Background(), kernel.NewMemberID(), wsID, "dev-cluster", "https://k8s.example", nil)
 
 	require.NoError(t, err)
 	require.Equal(t, "dev-cluster", cluster.ClusterName)
@@ -126,11 +137,34 @@ func TestRegisterWorkspaceClusterCreatesAndGrants(t *testing.T) {
 	require.True(t, repo.granted)
 }
 
+func TestRegisterWorkspaceClusterReusesExistingNameAndRegrants(t *testing.T) {
+	existingID := kernel.NewClusterInfoID()
+	repo := &workspaceClusterRepo{
+		clusterExists: true,
+		clusters: []*repository.ClusterInfo{{
+			ID: existingID, ClusterName: "dev", Server: "https://old.example",
+		}},
+	}
+	h := command.NewRegisterWorkspaceClusterHandler(repo)
+	creds := &command.ParsedClusterCredentials{
+		Server:      "https://new.example",
+		BearerToken: "token-1",
+	}
+
+	cluster, err := h.Handle(context.Background(), kernel.NewMemberID(), kernel.NewWorkspaceID(), "dev", "", creds)
+
+	require.NoError(t, err)
+	require.Equal(t, existingID, cluster.ID)
+	require.Equal(t, "https://new.example", cluster.Server)
+	require.Equal(t, "token-1", cluster.BearerToken)
+	require.True(t, repo.granted)
+}
+
 func TestRegisterWorkspaceClusterRejectsEmptyName(t *testing.T) {
 	repo := &workspaceClusterRepo{}
 	h := command.NewRegisterWorkspaceClusterHandler(repo)
 
-	_, err := h.Handle(context.Background(), kernel.NewMemberID(), kernel.NewWorkspaceID(), "  ", "https://k8s.example")
+	_, err := h.Handle(context.Background(), kernel.NewMemberID(), kernel.NewWorkspaceID(), "  ", "https://k8s.example", nil)
 
 	require.ErrorIs(t, err, domain.ErrClusterNameRequired)
 	require.Nil(t, repo.saved)
