@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/rest"
 )
 
@@ -110,8 +111,17 @@ func (h *Handler) listPlanForPath(clusterID kernel.ClusterInfoID, restCfg *rest.
 
 func parseAggregateOptions(q url.Values) (aggregateOptions, error) {
 	var opts aggregateOptions
+	for _, key := range []string{"limit", "continue", "resourceVersion", "resourceVersionMatch"} {
+		if _, ok := q[key]; ok {
+			return opts, errors.New("limit, continue, resourceVersion, and resourceVersionMatch are not supported with aggregation")
+		}
+	}
 	opts.keyword = q.Get("keyword")
-	opts.namespaces = splitNamespaces(q["ns"])
+	namespaces, err := splitNamespaces(q["ns"])
+	if err != nil {
+		return opts, err
+	}
+	opts.namespaces = namespaces
 	pageRaw, hasPage := q["page"]
 	pageSizeRaw, hasPageSize := q["pageSize"]
 	opts.hasPage = hasPage || hasPageSize
@@ -133,17 +143,29 @@ func parseAggregateOptions(q url.Values) (aggregateOptions, error) {
 	return opts, nil
 }
 
-func splitNamespaces(values []string) []string {
+func splitNamespaces(values []string) ([]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
 	var out []string
+	seen := map[string]struct{}{}
 	for _, value := range values {
 		for _, part := range strings.Split(value, ",") {
 			ns := strings.TrimSpace(part)
-			if ns != "" && !hasUnsafePathBytes(ns) && !strings.Contains(ns, "/") && ns != ".." {
-				out = append(out, ns)
+			if ns == "" {
+				return nil, errors.New("namespace must be a valid DNS1123 label")
 			}
+			if errs := validation.IsDNS1123Label(ns); len(errs) > 0 {
+				return nil, errors.New("namespace must be a valid DNS1123 label")
+			}
+			if _, ok := seen[ns]; ok {
+				continue
+			}
+			seen[ns] = struct{}{}
+			out = append(out, ns)
 		}
 	}
-	return out
+	return out, nil
 }
 
 func queryWithoutLocalParams(q url.Values) url.Values {

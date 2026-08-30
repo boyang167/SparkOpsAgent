@@ -26,9 +26,6 @@ func TestHandlerAggregatesNamespacedListWithLocalFilters(t *testing.T) {
 	memberID := kernel.NewMemberID()
 	clusterID := kernel.NewClusterInfoID()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "", r.Header.Get("Authorization"))
-		require.Equal(t, "", r.Header.Get("Cookie"))
-		require.Equal(t, "", r.Header.Get("X-Workspace-Id"))
 		if r.URL.Path == "/api/v1" {
 			writeJSON(t, w, http.StatusOK, map[string]any{
 				"groupVersion": "v1",
@@ -38,6 +35,15 @@ func TestHandlerAggregatesNamespacedListWithLocalFilters(t *testing.T) {
 			})
 			return
 		}
+		require.Equal(t, "", r.Header.Get("Authorization"))
+		require.Equal(t, "", r.Header.Get("Cookie"))
+		require.Equal(t, "", r.Header.Get("X-Workspace-Id"))
+		require.Equal(t, "", r.Header.Get("Impersonate-User"))
+		require.Equal(t, "", r.Header.Get("Impersonate-Group"))
+		require.Equal(t, "", r.Header.Get("Impersonate-Extra-Scopes"))
+		require.Equal(t, "", r.Header.Get("X-Unknown-Proxy-Header"))
+		require.Equal(t, "application/json", r.Header.Get("Accept"))
+		require.Equal(t, "application/json", r.Header.Get("Content-Type"))
 		require.Equal(t, "app=demo", r.URL.Query().Get("labelSelector"))
 		require.Empty(t, r.URL.Query()["page"])
 		require.Empty(t, r.URL.Query()["pageSize"])
@@ -239,6 +245,89 @@ func TestHandlerRejectsHugePageValues(t *testing.T) {
 	require.Zero(t, upstreamCalls)
 }
 
+func TestHandlerRejectsSnapshotQueriesInAggregationMode(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	for _, query := range []string{
+		"ns=dev&limit=100",
+		"ns=dev&continue=abc",
+		"ns=dev&resourceVersion=123",
+		"ns=dev&resourceVersionMatch=NotOlderThan",
+	} {
+		var upstreamCalls int
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstreamCalls++
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		engine := proxyTestEngine(memberID, sparkplugin.PluginContext{
+			Clusters: proxyClusterFactory{server: upstream.URL, clusterID: clusterID},
+			Members:  proxyMembers{allow: true},
+			Writer:   proxyWriter{allow: true},
+		})
+
+		rec := performProxy(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/proxy/api/v1/pods?"+query, wsID, nil)
+
+		require.Equal(t, http.StatusBadRequest, rec.Code, query)
+		require.Contains(t, rec.Body.String(), "PLUGIN_KUBERNETES_PROXY_QUERY_INVALID")
+		require.Zero(t, upstreamCalls)
+		upstream.Close()
+	}
+}
+
+func TestHandlerAllowsSnapshotQueriesInPassthroughMode(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	var seenRawQuery string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenRawQuery = r.URL.RawQuery
+		writeJSON(t, w, http.StatusOK, map[string]any{"kind": "PodList", "items": []any{}})
+	}))
+	defer upstream.Close()
+	engine := proxyTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: proxyClusterFactory{server: upstream.URL, clusterID: clusterID},
+		Members:  proxyMembers{allow: true},
+		Writer:   proxyWriter{allow: true},
+	})
+
+	rec := performProxy(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/proxy/api/v1/pods?limit=100&resourceVersion=123", wsID, nil)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, seenRawQuery, "limit=100")
+	require.Contains(t, seenRawQuery, "resourceVersion=123")
+}
+
+func TestHandlerRejectsInvalidNamespaces(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	for _, query := range []string{
+		"ns=dev,,prod",
+		"ns=",
+		"ns=Bad_Name",
+		"ns=-bad",
+	} {
+		var upstreamCalls int
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstreamCalls++
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		engine := proxyTestEngine(memberID, sparkplugin.PluginContext{
+			Clusters: proxyClusterFactory{server: upstream.URL, clusterID: clusterID},
+			Members:  proxyMembers{allow: true},
+			Writer:   proxyWriter{allow: true},
+		})
+
+		rec := performProxy(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/proxy/api/v1/pods?"+query, wsID, nil)
+
+		require.Equal(t, http.StatusBadRequest, rec.Code, query)
+		require.Contains(t, rec.Body.String(), "PLUGIN_KUBERNETES_PROXY_QUERY_INVALID")
+		require.Zero(t, upstreamCalls)
+		upstream.Close()
+	}
+}
+
 func TestHandlerRequiresWritePermissionForMutatingMethods(t *testing.T) {
 	wsID := kernel.NewWorkspaceID()
 	memberID := kernel.NewMemberID()
@@ -308,6 +397,10 @@ func TestHandlerPassesWatchThroughWithoutAggregation(t *testing.T) {
 		upstreamCalls++
 		seenRawQuery = r.URL.RawQuery
 		require.Equal(t, "/api/v1/pods", r.URL.Path)
+		require.Equal(t, "", r.Header.Get("Impersonate-User"))
+		require.Equal(t, "", r.Header.Get("X-Unknown-Proxy-Header"))
+		require.Equal(t, "application/json", r.Header.Get("Accept"))
+		require.Equal(t, "application/json", r.Header.Get("Content-Type"))
 		writeJSON(t, w, http.StatusOK, map[string]any{"type": "ADDED"})
 	}))
 	defer upstream.Close()
@@ -489,6 +582,13 @@ func performProxy(engine *gin.Engine, method, target string, wsID kernel.Workspa
 	req.Header.Set("Authorization", "Bearer inbound")
 	req.Header.Set("Cookie", "session=inbound")
 	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Impersonate-User", "mallory")
+	req.Header.Set("Impersonate-Group", "system:masters")
+	req.Header.Set("Impersonate-Extra-Scopes", "cluster-admin")
+	req.Header.Set("X-Unknown-Proxy-Header", "must-not-forward")
 	rec := newCloseNotifyRecorder()
 	engine.ServeHTTP(rec, req)
 	return rec.ResponseRecorder
