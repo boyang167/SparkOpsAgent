@@ -37,9 +37,11 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/observability"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/operationlog"
+	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/redis"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/routes"
+	_ "github.com/sparkops/sparkops-agent/backend/internal/plugins"
 )
 
 func Run(ctx context.Context) error {
@@ -150,6 +152,7 @@ func Run(ctx context.Context) error {
 		c.Engine.Use(entitlements.Middleware(c.DB))
 	}
 
+	sparkplugin.InstallAll(c.Engine, logger)
 	c.RouteRegistry = routes.Collect(c.Engine)
 
 	server := &http.Server{
