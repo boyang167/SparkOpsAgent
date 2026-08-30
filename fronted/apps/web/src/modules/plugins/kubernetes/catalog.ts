@@ -124,6 +124,28 @@ export function proxyPath(clusterId: string, def: ResourceDef, ns?: string, name
   return parts.join("/");
 }
 
+export function serviceProxyPath(clusterId: string, namespace: string, serviceSegment: string): string {
+  const match = /^(https?):([^:]+):([0-9]+)$/.exec(serviceSegment);
+  const name = match?.[2] ?? "";
+  const port = Number(match?.[3]);
+  if (
+    !match ||
+    serviceSegment.includes("%") ||
+    serviceSegment.includes("/") ||
+    serviceSegment.includes("\\") ||
+    serviceSegment.includes("@") ||
+    !isDNSSubdomain(name) ||
+    !Number.isInteger(port) ||
+    port < 1 ||
+    port > 65535
+  ) {
+    throw new Error("invalid kubernetes service proxy segment");
+  }
+  const normalized = `${match[1]}:${name}:${port}`;
+  return `/api/bff/v1/plugins/kubernetes/clusters/${encodeSegment(clusterId)}` +
+    `/proxy/api/v1/namespaces/${encodeSegment(namespace)}/services/${normalized}/proxy/`;
+}
+
 export function selectStoredClusterId(stored: string | null, clusters: ClusterOption[]): string {
   if (clusters.length === 0) return "";
   if (stored && clusters.some((item) => item.id === stored)) return stored;

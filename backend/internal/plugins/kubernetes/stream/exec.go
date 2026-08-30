@@ -28,7 +28,12 @@ const (
 	maxExecArgs       = 32
 	maxExecArgBytes   = 4096
 	maxExecTotalBytes = 16 << 10
+	nodeTTYNamespace  = "kube-system"
+	nodeTTYPodPrefix  = "sparkops-nodetty-"
+	nodeTTYContainer  = "node-shell"
 )
+
+var nodeTTYExecPrefix = []string{"nsenter", "-t", "1", "-m", "-u", "-i", "-n", "--"}
 
 type ExecRequest struct {
 	Namespace string
@@ -88,6 +93,10 @@ func (h *Handler) Exec(c *gin.Context) {
 	if !ok {
 		return
 	}
+	command, ok = nodeTTYCommand(c, target, command)
+	if !ok {
+		return
+	}
 	client, _, restCfg, _, err := h.ctx.Clusters.ForWorkspace(c.Request.Context(), target.WorkspaceID, target.ClusterID)
 	if err != nil {
 		handleStreamClusterError(c, err)
@@ -140,6 +149,24 @@ func (h *Handler) Exec(c *gin.Context) {
 	_ = writer.Event("error", "pod exec stream failed")
 	recordExit(recorder, 1)
 	_ = writer.Event("exit", map[string]int{"code": 1})
+}
+
+func nodeTTYCommand(c *gin.Context, target streamTarget, command []string) ([]string, bool) {
+	raw, present := c.GetQuery("node_tty")
+	if !present {
+		return command, true
+	}
+	if raw != "true" ||
+		target.Namespace != nodeTTYNamespace ||
+		!strings.HasPrefix(target.Pod, nodeTTYPodPrefix) ||
+		target.Container != nodeTTYContainer {
+		httpx.Fail(c, "PLUGIN_KUBERNETES_EXEC_COMMAND_INVALID", "invalid exec command", http.StatusBadRequest)
+		return nil, false
+	}
+	wrapped := make([]string, 0, len(nodeTTYExecPrefix)+len(command))
+	wrapped = append(wrapped, nodeTTYExecPrefix...)
+	wrapped = append(wrapped, command...)
+	return wrapped, true
 }
 
 func (h *Handler) startRecorder(ctx context.Context, target streamTarget, writer *sseWriter) *records.SessionRecorder {

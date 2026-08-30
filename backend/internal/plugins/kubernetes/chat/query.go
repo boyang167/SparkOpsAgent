@@ -100,18 +100,23 @@ func (h *Handler) Query(c *gin.Context) {
 		httpx.Fail(c, "PLUGIN_LLM_NOT_CONFIGURED", "LLM is not configured", http.StatusBadRequest)
 		return
 	}
-	if h.ctx.Endpoints == nil || h.ctx.Endpoints.Validate(c.Request.Context(), settings.LLMBaseURL) != nil {
+	upstreamReq, err := buildUpstreamRequest(c.Request.Context(), settings, clusterSummary(*meta, clusterID, namespaceCount), req.Prompt)
+	if err != nil {
 		httpx.Fail(c, "PLUGIN_LLM_NOT_CONFIGURED", "LLM is not configured", http.StatusBadRequest)
 		return
 	}
-	upstreamReq, err := buildUpstreamRequest(c.Request.Context(), settings, clusterSummary(*meta, clusterID, namespaceCount), req.Prompt)
+	if h.ctx.Endpoints == nil {
+		httpx.Fail(c, "PLUGIN_LLM_NOT_CONFIGURED", "LLM is not configured", http.StatusBadRequest)
+		return
+	}
+	client, err := h.ctx.Endpoints.PinnedClient(c.Request.Context(), upstreamReq.URL.String(), h.client)
 	if err != nil {
 		httpx.Fail(c, "PLUGIN_LLM_NOT_CONFIGURED", "LLM is not configured", http.StatusBadRequest)
 		return
 	}
 	h.recordChatAudit(c.Request.Context(), "plugin.kubernetes.chat.started", wsID, memberID, clusterID, settings.LLMModel)
 	defer h.recordChatAudit(context.Background(), "plugin.kubernetes.chat.completed", wsID, memberID, clusterID, settings.LLMModel)
-	resp, err := h.client.Do(upstreamReq)
+	resp, err := client.Do(upstreamReq)
 	if err != nil {
 		if errors.Is(c.Request.Context().Err(), context.Canceled) {
 			return

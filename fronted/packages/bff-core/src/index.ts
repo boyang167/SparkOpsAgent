@@ -162,6 +162,24 @@ function normalizeKubernetesSegment(segment: string): string {
   return current;
 }
 
+function normalizeKubernetesServiceProxySegment(segment: string): string {
+  if (segment.includes("%") || segment.includes("/") || segment.includes("\\") || segment.includes("@")) {
+    throw invalidKubernetesPath();
+  }
+  const match = /^(https?):([^:]+):([0-9]+)$/.exec(segment);
+  if (!match) throw invalidKubernetesPath();
+  const [, scheme, name, rawPort] = match;
+  const port = Number(rawPort);
+  if (!name || name.length > 253 || !name.split(".").every((label) =>
+    label.length > 0 &&
+    label.length <= 63 &&
+    /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/.test(label)
+  ) || !Number.isInteger(port) || port < 1 || port > 65535) {
+    throw invalidKubernetesPath();
+  }
+  return `${scheme}:${name}:${port}`;
+}
+
 export function buildKubernetesPluginApiPath(
   segments: readonly string[],
   search = "",
@@ -172,7 +190,14 @@ export function buildKubernetesPluginApiPath(
   if (search && !search.startsWith("?")) {
     throw invalidKubernetesPath("invalid kubernetes plugin query");
   }
-  const encoded = segments.map((segment) => encodeURIComponent(normalizeKubernetesSegment(segment)));
+  const encoded: string[] = [];
+  for (const segment of segments) {
+    if (encoded.at(-1) === "services") {
+      encoded.push(normalizeKubernetesServiceProxySegment(segment));
+    } else {
+      encoded.push(encodeURIComponent(normalizeKubernetesSegment(segment)));
+    }
+  }
   return `${KUBERNETES_PLUGIN_API_PREFIX}/${encoded.join("/")}${search}`;
 }
 

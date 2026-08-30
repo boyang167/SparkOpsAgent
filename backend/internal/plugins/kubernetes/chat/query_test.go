@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -220,19 +221,30 @@ func TestQueryPropagatesClientCancelToUpstream(t *testing.T) {
 	memberID := kernel.NewMemberID()
 	clusterID := kernel.NewClusterInfoID()
 	started := make(chan struct{}, 1)
-	seenCanceled := make(chan struct{}, 1)
 	audit := &recordingAudit{}
-	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		started <- struct{}{}
-		<-r.Context().Done()
-		seenCanceled <- struct{}{}
-		return nil, r.Context().Err()
-	})}
+	policy, err := sparkplugin.NewEndpointPolicyWithDialer(
+		[]string{"llm.example"},
+		chatResolver{"llm.example": {{IP: net.ParseIP("10.20.0.5")}}},
+		func(context.Context, string, string) (net.Conn, error) {
+			client, server := net.Pipe()
+			go func() {
+				defer server.Close()
+				started <- struct{}{}
+				buffer := make([]byte, 4096)
+				for {
+					if _, readErr := server.Read(buffer); readErr != nil {
+						return
+					}
+				}
+			}()
+			return client, nil
+		})
+	require.NoError(t, err)
 	db := openChatDB(t)
 	require.NoError(t, db.Create(&k8sschema.ClusterSettings{
 		WorkspaceID: wsID.String(),
 		ClusterID:   clusterID.String(),
-		LLMBaseURL:  "https://llm.example/v1",
+		LLMBaseURL:  "http://llm.example/v1",
 		LLMAPIKey:   "llm-secret",
 		LLMModel:    "qwen-plus",
 	}).Error)
@@ -241,8 +253,8 @@ func TestQueryPropagatesClientCancelToUpstream(t *testing.T) {
 		Audit:     audit,
 		Clusters:  &recordingClusterFactory{client: fake.NewSimpleClientset(), meta: &sparkplugin.ClusterMeta{ID: clusterID.String(), Name: "prod"}},
 		Writer:    allowWriter{allow: true},
-		Endpoints: allowLocalEndpointPolicy(),
-	}, httpClient))
+		Endpoints: policy,
+	}, &http.Client{}))
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/clusters/"+clusterID.String()+"/chat/query", strings.NewReader(`{"prompt":"hello"}`))
 	req.Header.Set("X-Workspace-Id", wsID.String())
@@ -256,11 +268,6 @@ func TestQueryPropagatesClientCancelToUpstream(t *testing.T) {
 	<-started
 	cancel()
 
-	select {
-	case <-seenCanceled:
-	case <-time.After(time.Second):
-		t.Fatal("upstream request did not observe client cancellation")
-	}
 	select {
 	case <-done:
 	case <-time.After(time.Second):
@@ -296,7 +303,9 @@ func chatEngine(memberID kernel.MemberID, handler *Handler) *gin.Engine {
 }
 
 func allowLocalEndpointPolicy() sparkplugin.EndpointPolicy {
-	policy, _ := sparkplugin.NewEndpointPolicy([]string{"127.0.0.1", "llm.example"}, nil)
+	policy, _ := sparkplugin.NewEndpointPolicy([]string{"127.0.0.1", "llm.example"}, chatResolver{
+		"llm.example": {{IP: net.ParseIP("203.0.113.20")}},
+	})
 	return policy
 }
 
@@ -367,10 +376,10 @@ func (w allowWriter) CanWrite(context.Context, kernel.WorkspaceID, kernel.Member
 	return w.allow, nil
 }
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
+type chatResolver map[string][]net.IPAddr
 
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
-	return f(r)
+func (r chatResolver) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
+	return r[host], nil
 }
 
 type recordingAudit struct {

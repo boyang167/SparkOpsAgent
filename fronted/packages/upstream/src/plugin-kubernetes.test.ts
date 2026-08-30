@@ -8,6 +8,14 @@ describe("buildKubernetesPluginApiPath", () => {
     );
   });
 
+  it("preserves validated service proxy segments", () => {
+    expect(buildKubernetesPluginApiPath(["services", "https:cloudtty-1:443", "proxy"])).toBe(
+      "/api/v1/plugins/kubernetes/services/https:cloudtty-1:443/proxy",
+    );
+    expect(() => buildKubernetesPluginApiPath(["services", "http:..:80"])).toThrow();
+    expect(() => buildKubernetesPluginApiPath(["pods", "http:name:80"])).toThrow();
+  });
+
   it.each([
     [[""]],
     [["."]],

@@ -371,7 +371,13 @@ func testEngine(memberID kernel.MemberID, ctx sparkplugin.PluginContext) *gin.En
 	if ctx.Endpoints == nil {
 		policy, _ := sparkplugin.NewEndpointPolicy([]string{
 			"127.0.0.1", "prom.example", "prometheus.example", "a2.example", "velaux.example", "llm.example",
-		}, nil)
+		}, settingsResolver{
+			"prom.example":       {{IP: net.ParseIP("203.0.113.10")}},
+			"prometheus.example": {{IP: net.ParseIP("203.0.113.11")}},
+			"a2.example":         {{IP: net.ParseIP("203.0.113.12")}},
+			"velaux.example":     {{IP: net.ParseIP("203.0.113.13")}},
+			"llm.example":        {{IP: net.ParseIP("203.0.113.14")}},
+		})
 		ctx.Endpoints = policy
 	}
 	engine := gin.New()

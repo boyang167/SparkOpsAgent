@@ -178,6 +178,50 @@ func TestExecStreamsOutputErrorExitAndAuditsEnd(t *testing.T) {
 	require.NotContains(t, rec.Body.String(), "echo hello")
 }
 
+func TestNodeTTYExecUsesServerFixedNsenterWrapper(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	exec := &fakeExecStreamer{}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+		Writer:   allowStreamWriter{allow: true},
+	}, nil, exec)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/clusters/"+clusterID.String()+"/namespaces/kube-system/pods/sparkops-nodetty-abcd/exec"+
+			"?node_tty=true&container=node-shell&command=uname&command=-a", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"nsenter", "-t", "1", "-m", "-u", "-i", "-n", "--", "uname", "-a"}, exec.request.Command)
+	require.Equal(t, "kube-system", exec.request.Namespace)
+	require.Equal(t, "node-shell", exec.request.Container)
+}
+
+func TestNodeTTYExecRejectsNonManagedPodBeforeClusterLookup(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	factory := &recordingStreamClusterFactory{}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: factory,
+		Writer:   allowStreamWriter{allow: true},
+	}, nil, &fakeExecStreamer{})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/clusters/"+clusterID.String()+"/namespaces/kube-system/pods/attacker/exec"+
+			"?node_tty=true&container=node-shell&command=id", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.False(t, factory.called)
+}
+
 func TestExecPersistsRecordingWithoutCommandOrCredentials(t *testing.T) {
 	db := openStreamRecordsDB(t)
 	wsID := kernel.NewWorkspaceID()

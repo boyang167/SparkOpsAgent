@@ -101,11 +101,16 @@ func (h *Handler) ServeGIN(c *gin.Context) {
 		httpx.Fail(c, "PLUGIN_VELAUX_NOT_CONFIGURED", "velaux url is not configured", http.StatusBadRequest)
 		return
 	}
-	if h.ctx.Endpoints == nil || h.ctx.Endpoints.Validate(c.Request.Context(), settings.VelauxURL) != nil {
+	endpoint, err := buildVelauxURL(settings.VelauxURL, targetPath, c.Request.URL.RawQuery)
+	if err != nil {
 		httpx.Fail(c, "PLUGIN_VELAUX_NOT_CONFIGURED", "velaux url is not configured", http.StatusBadRequest)
 		return
 	}
-	endpoint, err := buildVelauxURL(settings.VelauxURL, targetPath, c.Request.URL.RawQuery)
+	if h.ctx.Endpoints == nil {
+		httpx.Fail(c, "PLUGIN_VELAUX_NOT_CONFIGURED", "velaux url is not configured", http.StatusBadRequest)
+		return
+	}
+	client, err := h.ctx.Endpoints.PinnedClient(c.Request.Context(), endpoint, h.client)
 	if err != nil {
 		httpx.Fail(c, "PLUGIN_VELAUX_NOT_CONFIGURED", "velaux url is not configured", http.StatusBadRequest)
 		return
@@ -119,7 +124,7 @@ func (h *Handler) ServeGIN(c *gin.Context) {
 	if settings.VelauxUser != "" || settings.VelauxPassword != "" {
 		req.SetBasicAuth(settings.VelauxUser, settings.VelauxPassword)
 	}
-	resp, err := h.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		httpx.Fail(c, "PLUGIN_VELAUX_UPSTREAM_UNAVAILABLE", "velaux upstream unavailable", http.StatusBadGateway)
 		return

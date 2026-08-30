@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiErrorBanner } from "./ApiErrorBanner";
 import { errorInfo, k8sFetch, KubernetesApiError, parseApiError, type ApiErrorInfo } from "./api";
 import { appendBoundedLines, createSSEParser, formatSSEPayload } from "./sse";
-import { podOperationPath, toCommandQuery } from "./operations";
+import { podOperationPath, toCommandQuery, waitForNodeTTYReady } from "./operations";
 
 type Props = {
   clusterId: string;
@@ -151,16 +151,43 @@ function NodeOperations({ clusterId, canManage }: Omit<Props, "mode">) {
   const [command, setCommand] = useState("uname -a");
   const [output, setOutput] = useState<string[]>([]);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
+  const active = useRef<AbortController | null>(null);
+  useEffect(() => () => active.current?.abort(), []);
+
   async function run() {
+    active.current?.abort();
+    const controller = new AbortController();
+    active.current = controller;
+    let createdPod: Session["pod"];
     try {
+      setError(null);
+      setOutput([]);
       const session = await k8sFetch<Session>(`/api/bff/v1/plugins/kubernetes/clusters/${encodeURIComponent(clusterId)}/nodetty`, {
-        method: "POST", body: JSON.stringify({ node }),
+        method: "POST", body: JSON.stringify({ node }), signal: controller.signal,
       });
       if (!session.pod) throw new Error("NodeTTY 未返回 Pod");
+      createdPod = session.pod;
+      const podURL =
+        `/api/bff/v1/plugins/kubernetes/clusters/${encodeURIComponent(clusterId)}` +
+        `/proxy/api/v1/namespaces/${encodeURIComponent(session.pod.namespace)}` +
+        `/pods/${encodeURIComponent(session.pod.name)}`;
+      await waitForNodeTTYReady({
+        signal: controller.signal,
+        load: () => k8sFetch(podURL, { signal: controller.signal }),
+      });
       const url = podOperationPath(clusterId, session.pod.namespace, session.pod.name, "exec");
-      await readSSE(`${url}?container=node-shell&${toCommandQuery(splitCommand(command))}`, setOutput);
+      await readSSE(`${url}?node_tty=true&container=node-shell&${toCommandQuery(splitCommand(command))}`, setOutput, controller.signal);
     } catch (err) {
+      if (createdPod) {
+        const cleanupURL =
+          `/api/bff/v1/plugins/kubernetes/clusters/${encodeURIComponent(clusterId)}` +
+          `/proxy/api/v1/namespaces/${encodeURIComponent(createdPod.namespace)}` +
+          `/pods/${encodeURIComponent(createdPod.name)}`;
+        await k8sFetch(cleanupURL, { method: "DELETE" }).catch(() => undefined);
+      }
       setError(errorInfo(err, "NodeTTY 创建或命令执行失败"));
+    } finally {
+      if (active.current === controller) active.current = null;
     }
   }
   return (
@@ -176,8 +203,12 @@ function NodeOperations({ clusterId, canManage }: Omit<Props, "mode">) {
   );
 }
 
-async function readSSE(url: string, setOutput: (updater: (current: string[]) => string[]) => void) {
-  const res = await fetch(url, { cache: "no-store" });
+async function readSSE(
+  url: string,
+  setOutput: (updater: (current: string[]) => string[]) => void,
+  signal?: AbortSignal,
+) {
+  const res = await fetch(url, { cache: "no-store", signal });
   if (!res.ok) throw new KubernetesApiError(await parseApiError(res));
   if (!res.body) throw new Error("SSE 响应为空");
   const parser = createSSEParser((event) => {

@@ -36,6 +36,32 @@ describe("buildKubernetesPluginApiPath", () => {
     );
   });
 
+  it("allows a validated Kubernetes service proxy segment only after services", () => {
+    expect(
+      buildKubernetesPluginApiPath([
+        "clusters", "prod", "proxy", "api", "v1", "namespaces", "default",
+        "services", "http:sparkops-cloudtty-abcd:7681", "proxy",
+      ]),
+    ).toBe(
+      "/api/v1/plugins/kubernetes/clusters/prod/proxy/api/v1/namespaces/default/services/http:sparkops-cloudtty-abcd:7681/proxy",
+    );
+  });
+
+  it.each([
+    "http:..:80",
+    "http:name:0",
+    "http:name:65536",
+    "ftp:name:80",
+    "http:user@name:80",
+    "http:name%2Fevil:80",
+  ])("rejects malicious Kubernetes service proxy segment %s", (service) => {
+    expect(() => buildKubernetesPluginApiPath(["services", service])).toThrow(BffError);
+  });
+
+  it("rejects service-shaped scheme segments outside the services position", () => {
+    expect(() => buildKubernetesPluginApiPath(["pods", "http:name:7681"])).toThrow(BffError);
+  });
+
   it.each([
     [[]],
     [[""]],
@@ -94,6 +120,20 @@ describe("proxyUpstreamStreamRequest", () => {
     expect(headers.has("X-Token")).toBe(false);
     expect(headers.has("Impersonate")).toBe(false);
     expect(headers.has("Host")).toBe(false);
+  });
+
+  it("forwards a CloudTTY service proxy path through the catch-all unchanged", async () => {
+    vi.stubEnv("UPSTREAM_URL", "http://upstream.test");
+    const fetchMock = vi.fn().mockResolvedValue(new Response("<html />", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const path = buildKubernetesPluginApiPath([
+      "clusters", "prod", "proxy", "api", "v1", "namespaces", "ns",
+      "services", "http:name:7681", "proxy", "",
+    ].slice(0, -1));
+
+    await proxyUpstreamStreamRequest(createContext(), `${path}/`, new Request("http://bff.test/cloudtty"));
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`http://upstream.test${path}/`);
   });
 
   it("propagates the incoming abort signal to upstream fetch", async () => {

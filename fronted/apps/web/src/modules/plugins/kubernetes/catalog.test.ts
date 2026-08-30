@@ -4,6 +4,7 @@ import {
   buildDeploymentManifest,
   proxyPath,
   resourcesForMenu,
+  serviceProxyPath,
   selectStoredClusterId,
   validateDeploymentDraft,
 } from "./catalog";
@@ -52,6 +53,13 @@ describe("kubernetes catalog", () => {
     expect(clusterRole && proxyPath("prod", clusterRole, "ignored", "admin-view")).toBe(
       "/api/bff/v1/plugins/kubernetes/clusters/prod/proxy/apis/rbac.authorization.k8s.io/v1/clusterroles/admin-view",
     );
+  });
+
+  it("builds only validated Kubernetes service proxy paths", () => {
+    expect(serviceProxyPath("prod", "default", "http:cloudtty-1:7681")).toBe(
+      "/api/bff/v1/plugins/kubernetes/clusters/prod/proxy/api/v1/namespaces/default/services/http:cloudtty-1:7681/proxy/",
+    );
+    expect(() => serviceProxyPath("prod", "default", "http:..:80")).toThrow();
   });
 
   it("rejects slash inside cluster, namespace, and resource name segments", () => {

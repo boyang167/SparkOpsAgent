@@ -47,6 +47,21 @@ function normalizeSegment(segment: string): string {
   return current;
 }
 
+function normalizeServiceProxySegment(segment: string): string {
+  if (segment.includes("%") || segment.includes("/") || segment.includes("\\") || segment.includes("@")) throw invalidPath();
+  const match = /^(https?):([^:]+):([0-9]+)$/.exec(segment);
+  const port = Number(match?.[3]);
+  const name = match?.[2] ?? "";
+  if (!match || !isDNS1123Name(name) || !Number.isInteger(port) || port < 1 || port > 65535) throw invalidPath();
+  return `${match[1]}:${name}:${port}`;
+}
+
+function isDNS1123Name(value: string) {
+  return value.length > 0 && value.length <= 253 && value.split(".").every((label) =>
+    label.length > 0 && label.length <= 63 && /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/.test(label)
+  );
+}
+
 export function buildKubernetesPluginApiPath(
   segments: readonly string[],
   search = "",
@@ -54,9 +69,13 @@ export function buildKubernetesPluginApiPath(
   if (segments.length === 0 || (search && !search.startsWith("?"))) {
     throw invalidPath();
   }
-  return `${KUBERNETES_PLUGIN_API_PREFIX}/${segments
-    .map((segment) => encodeURIComponent(normalizeSegment(segment)))
-    .join("/")}${search}`;
+  const encoded: string[] = [];
+  for (const segment of segments) {
+    encoded.push(encoded.at(-1) === "services"
+      ? normalizeServiceProxySegment(segment)
+      : encodeURIComponent(normalizeSegment(segment)));
+  }
+  return `${KUBERNETES_PLUGIN_API_PREFIX}/${encoded.join("/")}${search}`;
 }
 
 export function createKubernetesPluginUpstream(options: UpstreamRequestOptions = {}) {

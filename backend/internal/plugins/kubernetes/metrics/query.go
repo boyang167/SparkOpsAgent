@@ -143,12 +143,16 @@ func (c *Client) Query(ctx context.Context, baseURL, user, password string, quer
 	if query.Path != queryPath && query.Path != queryRangePath {
 		return nil, fmt.Errorf("%w: invalid prometheus path", ErrInvalidRequest)
 	}
-	if c.policy == nil || c.policy.Validate(ctx, baseURL) != nil {
-		return nil, ErrUpstream
-	}
 	endpoint, err := buildEndpoint(baseURL, query.Path, query.Values)
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid base url", ErrInvalidRequest)
+	}
+	if c.policy == nil {
+		return nil, ErrUpstream
+	}
+	httpClient, err := c.policy.PinnedClient(ctx, endpoint, c.httpClient)
+	if err != nil {
+		return nil, ErrUpstream
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -157,7 +161,7 @@ func (c *Client) Query(ctx context.Context, baseURL, user, password string, quer
 	if user != "" || password != "" {
 		req.SetBasicAuth(user, password)
 	}
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, ErrUpstream
 	}
