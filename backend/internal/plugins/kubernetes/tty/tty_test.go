@@ -29,12 +29,13 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 func TestCloudTTYProvisionerCreatesSecretAndCloudShellCR(t *testing.T) {
 	fixedNow := time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)
 	typed := fake.NewSimpleClientset(&corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "app-0", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "app-0", Namespace: "team-a"},
 		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
 	})
 	dynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
@@ -81,7 +82,7 @@ func TestCloudTTYProvisionerCreatesSecretAndCloudShellCR(t *testing.T) {
 
 	session, err := NewProvisioner(ProvisionerOptions{Now: func() time.Time { return fixedNow }}).
 		ProvisionCloudTTY(context.Background(), typed, dynamicClient, restCfg, CloudTTYRequest{
-			Namespace: "default",
+			Namespace: "team-a",
 			Pod:       "app-0",
 			Container: "app",
 		})
@@ -89,7 +90,7 @@ func TestCloudTTYProvisionerCreatesSecretAndCloudShellCR(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, session.ID)
 	require.NotNil(t, session.CloudShell)
-	require.Equal(t, "default", session.CloudShell.Namespace)
+	require.Equal(t, "team-a", session.CloudShell.Namespace)
 	require.Equal(t, "sparkops-cloudtty-cr123", session.CloudShell.Name)
 	require.Equal(t, fixedNow.Add(30*time.Minute), session.ExpiresAt)
 	require.Nil(t, session.Pod)
@@ -101,21 +102,24 @@ func TestCloudTTYProvisionerCreatesSecretAndCloudShellCR(t *testing.T) {
 	require.NotNil(t, createdSecret)
 	require.Empty(t, createdSecret.Name)
 	require.Equal(t, "sparkops-cloudtty-", createdSecret.GenerateName)
-	require.Equal(t, "default", createdSecret.Namespace)
+	require.Equal(t, "team-a", createdSecret.Namespace)
 	require.Equal(t, corev1.SecretTypeOpaque, createdSecret.Type)
 	require.Equal(t, sessionLabels(session.ID), createdSecret.Labels)
 	require.Contains(t, string(createdSecret.Data["config"]), "https://kubernetes.example")
 	require.Contains(t, string(createdSecret.Data["config"]), "bearer-secret")
+	kubeconfig, loadErr := clientcmd.Load(createdSecret.Data["config"])
+	require.NoError(t, loadErr)
+	require.Equal(t, "team-a", kubeconfig.Contexts[kubeconfig.CurrentContext].Namespace)
 
 	require.NotNil(t, createdCR)
 	require.Empty(t, createdCR.GetName())
 	require.Equal(t, "sparkops-cloudtty-", createdCR.GetGenerateName())
-	require.Equal(t, "default", createdCR.GetNamespace())
+	require.Equal(t, "team-a", createdCR.GetNamespace())
 	require.Equal(t, CloudShellAPIVersion, createdCR.GetAPIVersion())
 	require.Equal(t, CloudShellKind, createdCR.GetKind())
 	require.Equal(t, sessionLabels(session.ID), createdCR.GetLabels())
 	require.Equal(t, "sparkops-cloudtty-secret123", nestedString(t, createdCR.Object, "spec", "secretRef", "name"))
-	require.Equal(t, "kubectl exec -it app-0 -c app -- sh", nestedString(t, createdCR.Object, "spec", "commandAction"))
+	require.Equal(t, "kubectl exec -it -n team-a app-0 -c app -- sh", nestedString(t, createdCR.Object, "spec", "commandAction"))
 	require.Equal(t, true, nestedBool(t, createdCR.Object, "spec", "cleanup"))
 	require.Equal(t, int64(1800), nestedInt64(t, createdCR.Object, "spec", "ttlSecondsAfterStarted"))
 

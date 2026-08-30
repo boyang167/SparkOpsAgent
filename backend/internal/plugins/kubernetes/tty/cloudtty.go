@@ -118,7 +118,7 @@ func (p *KubernetesProvisioner) ProvisionCloudTTY(ctx context.Context, client ku
 	if !podHasContainer(target, req.Container) {
 		return Session{}, ErrCloudTTYTargetInvalid
 	}
-	kubeconfig, err := kubeconfigFromRESTConfig(restConfig)
+	kubeconfig, err := kubeconfigFromRESTConfig(restConfig, req.Namespace)
 	if err != nil {
 		return Session{}, ErrCloudTTYCredentialConfigInvalid
 	}
@@ -197,7 +197,7 @@ func stringMapAny(values map[string]string) map[string]any {
 }
 
 func cloudTTYCommand(req CloudTTYRequest) string {
-	return cloudTTYCommandExecutable + " exec -it " + req.Pod + " -c " + req.Container + " -- " + cloudTTYCommandShell
+	return cloudTTYCommandExecutable + " exec -it -n " + req.Namespace + " " + req.Pod + " -c " + req.Container + " -- " + cloudTTYCommandShell
 }
 
 func patchSecretOwner(ctx context.Context, client kubernetes.Interface, namespace, name string, cr *unstructured.Unstructured) error {
@@ -221,7 +221,7 @@ func patchSecretOwner(ctx context.Context, client kubernetes.Interface, namespac
 	return err
 }
 
-func kubeconfigFromRESTConfig(restConfig *rest.Config) ([]byte, error) {
+func kubeconfigFromRESTConfig(restConfig *rest.Config, namespace string) ([]byte, error) {
 	if restConfig == nil || strings.TrimSpace(restConfig.Host) == "" {
 		return nil, errors.New("missing host")
 	}
@@ -239,7 +239,7 @@ func kubeconfigFromRESTConfig(restConfig *rest.Config) ([]byte, error) {
 		CertificateAuthorityData: restConfig.TLSClientConfig.CAData,
 	}
 	cfg.AuthInfos["sparkops"] = authInfo
-	cfg.Contexts["sparkops"] = &clientcmdapi.Context{Cluster: "sparkops", AuthInfo: "sparkops"}
+	cfg.Contexts["sparkops"] = &clientcmdapi.Context{Cluster: "sparkops", AuthInfo: "sparkops", Namespace: namespace}
 	cfg.CurrentContext = "sparkops"
 	return clientcmd.Write(*cfg)
 }
