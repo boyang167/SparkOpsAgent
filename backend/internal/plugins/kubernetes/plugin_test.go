@@ -48,6 +48,23 @@ func TestPluginImplementsContextPlugin(t *testing.T) {
 	var _ sparkplugin.ContextPlugin = (*plugin)(nil)
 }
 
+func TestRegisterBundledDescriptor(t *testing.T) {
+	sparkplugin.ResetRegistryForTest()
+	t.Cleanup(sparkplugin.ResetRegistryForTest)
+
+	registerBundledDescriptor()
+	descriptor, ok := sparkplugin.Bundled("kubernetes")
+	require.True(t, ok)
+	require.Equal(t, ManifestYAML, descriptor.ManifestYAML)
+	require.ElementsMatch(t, []string{
+		"backend/internal/plugins/kubernetes/plugin.go",
+		"backend/internal/plugins/kubernetes/plugin.yaml",
+		"backend/internal/plugins/kubernetes/http/router.go",
+		"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
+		"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
+	}, descriptor.InstalledFiles)
+}
+
 func TestArthasTarContainsPlaceholderMember(t *testing.T) {
 	f, err := os.Open(filepath.Join("resource", "arthas-bin.tar"))
 	require.NoError(t, err)

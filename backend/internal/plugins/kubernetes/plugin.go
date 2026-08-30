@@ -18,6 +18,20 @@ type plugin struct{}
 
 func init() {
 	sparkplugin.Register(&plugin{})
+	registerBundledDescriptor()
+}
+
+func registerBundledDescriptor() {
+	sparkplugin.RegisterBundled("kubernetes", sparkplugin.BundledDescriptor{
+		ManifestYAML: ManifestYAML,
+		InstalledFiles: []string{
+			"backend/internal/plugins/kubernetes/plugin.go",
+			"backend/internal/plugins/kubernetes/plugin.yaml",
+			"backend/internal/plugins/kubernetes/http/router.go",
+			"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
+			"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
+		},
+	})
 }
 
 func (p *plugin) Register(engine *gin.Engine) {

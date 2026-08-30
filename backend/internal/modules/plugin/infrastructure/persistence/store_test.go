@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/infrastructure/persistence"
+	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
@@ -90,6 +92,7 @@ func TestAutoMigrateSeedsBundledExamplePlugin(t *testing.T) {
 }
 
 func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
+	registerBundledKubernetesForTest(t)
 	repo := openSQLitePluginStore(t)
 	found, err := repo.FindPlugin(context.Background(), "kubernetes")
 	require.NoError(t, err)
@@ -361,4 +364,22 @@ func requireAPI(t *testing.T, apis []manifest.APISpec, method, path string, read
 		return api.Method == method && api.Path == path && api.ReadOnly == readOnly
 	})
 	require.Truef(t, found, "missing api %s %s read_only=%v", method, path, readOnly)
+}
+
+func registerBundledKubernetesForTest(t *testing.T) {
+	t.Helper()
+	sparkplugin.ResetRegistryForTest()
+	t.Cleanup(sparkplugin.ResetRegistryForTest)
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "plugins", "kubernetes", "plugin.yaml"))
+	require.NoError(t, err)
+	sparkplugin.RegisterBundled("kubernetes", sparkplugin.BundledDescriptor{
+		ManifestYAML: string(raw),
+		InstalledFiles: []string{
+			"backend/internal/plugins/kubernetes/plugin.go",
+			"backend/internal/plugins/kubernetes/plugin.yaml",
+			"backend/internal/plugins/kubernetes/http/router.go",
+			"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
+			"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
+		},
+	})
 }

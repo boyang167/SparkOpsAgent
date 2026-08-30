@@ -8,7 +8,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/model"
-	bundledkubernetes "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes"
+	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -16,6 +16,7 @@ import (
 )
 
 func TestSeedBundledKubernetesPluginDoesNotOverwriteExistingRecord(t *testing.T) {
+	registerKubernetesDescriptorForSeedTest(t)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
@@ -47,7 +48,8 @@ func TestSeedBundledKubernetesPluginDoesNotOverwriteExistingRecord(t *testing.T)
 	require.Equal(t, installed, found.InstalledFiles)
 }
 
-func TestSeedBundledKubernetesPluginPersistsEmbeddedManifest(t *testing.T) {
+func TestSeedBundledKubernetesPluginPersistsRegisteredDescriptor(t *testing.T) {
+	descriptor := registerKubernetesDescriptorForSeedTest(t)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
@@ -60,10 +62,12 @@ func TestSeedBundledKubernetesPluginPersistsEmbeddedManifest(t *testing.T) {
 	require.NoError(t, seedBundledKubernetesPlugin(db))
 	found, err := NewStore(db).FindPlugin(context.Background(), "kubernetes")
 	require.NoError(t, err)
-	require.Equal(t, bundledkubernetes.ManifestYAML, found.ManifestYAML)
+	require.Equal(t, descriptor.ManifestYAML, found.ManifestYAML)
+	require.Equal(t, descriptor.InstalledFiles, found.InstalledFiles)
 }
 
 func TestSeedBundledKubernetesPluginSkipsWhenUninstallReceiptExists(t *testing.T) {
+	registerKubernetesDescriptorForSeedTest(t)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
@@ -80,4 +84,39 @@ func TestSeedBundledKubernetesPluginSkipsWhenUninstallReceiptExists(t *testing.T
 	require.NoError(t, seedBundledKubernetesPlugin(db))
 	_, err = NewStore(db).FindPlugin(context.Background(), "kubernetes")
 	require.ErrorIs(t, err, domain.ErrPluginNotFound)
+}
+
+func TestSeedBundledKubernetesPluginSkipsWhenDescriptorIsMissing(t *testing.T) {
+	sparkplugin.ResetRegistryForTest()
+	t.Cleanup(sparkplugin.ResetRegistryForTest)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS plugin").Error)
+	require.NoError(t, db.AutoMigrate(&pluginModel{}, &workspaceBindingModel{}, &uninstallReceiptModel{}))
+
+	require.NoError(t, seedBundledKubernetesPlugin(db))
+	_, err = NewStore(db).FindPlugin(context.Background(), "kubernetes")
+	require.ErrorIs(t, err, domain.ErrPluginNotFound)
+}
+
+func registerKubernetesDescriptorForSeedTest(t *testing.T) sparkplugin.BundledDescriptor {
+	t.Helper()
+	sparkplugin.ResetRegistryForTest()
+	t.Cleanup(sparkplugin.ResetRegistryForTest)
+	descriptor := sparkplugin.BundledDescriptor{
+		ManifestYAML: "id: kubernetes\n",
+		InstalledFiles: []string{
+			"backend/internal/plugins/kubernetes/plugin.go",
+			"backend/internal/plugins/kubernetes/plugin.yaml",
+			"backend/internal/plugins/kubernetes/http/router.go",
+			"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
+			"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
+		},
+	}
+	sparkplugin.RegisterBundled("kubernetes", descriptor)
+	return descriptor
 }

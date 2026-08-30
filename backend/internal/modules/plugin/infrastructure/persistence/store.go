@@ -12,7 +12,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/repository"
-	bundledkubernetes "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes"
+	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -100,13 +100,11 @@ func seedBundledKubernetesPlugin(db *gorm.DB) error {
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	installedFiles, err := json.Marshal([]string{
-		"backend/internal/plugins/kubernetes/plugin.go",
-		"backend/internal/plugins/kubernetes/plugin.yaml",
-		"backend/internal/plugins/kubernetes/http/router.go",
-		"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
-		"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
-	})
+	descriptor, ok := sparkplugin.Bundled("kubernetes")
+	if !ok {
+		return nil
+	}
+	installedFiles, err := json.Marshal(descriptor.InstalledFiles)
 	if err != nil {
 		return err
 	}
@@ -115,7 +113,7 @@ func seedBundledKubernetesPlugin(db *gorm.DB) error {
 		ID:                 "kubernetes",
 		Version:            "0.1.0",
 		DisplayName:        "Kubernetes",
-		ManifestYAML:       bundledkubernetes.ManifestYAML,
+		ManifestYAML:       descriptor.ManifestYAML,
 		InstalledFilesJSON: string(installedFiles),
 		Status:             string(model.PluginStatusDeployed),
 		CreatedBy:          "00000000-0000-0000-0000-000000000000",
