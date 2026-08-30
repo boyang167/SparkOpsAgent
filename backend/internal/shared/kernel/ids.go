@@ -29,6 +29,7 @@ type ProductPlanID struct{ uuid.UUID }
 type ProductRequirementID struct{ uuid.UUID }
 type ClusterInfoID struct{ uuid.UUID }
 type ProclaimID struct{ uuid.UUID }
+type PluginInstallID struct{ uuid.UUID }
 
 func NewMemberID() MemberID     { return MemberID{UUID: uuid.New()} }
 func NewOrgID() OrgID             { return OrgID{UUID: uuid.New()} }
@@ -64,6 +65,7 @@ func NewProductRequirementID() ProductRequirementID {
 }
 func NewClusterInfoID() ClusterInfoID         { return ClusterInfoID{UUID: uuid.New()} }
 func NewProclaimID() ProclaimID               { return ProclaimID{UUID: uuid.New()} }
+func NewPluginInstallID() PluginInstallID { return PluginInstallID{UUID: uuid.New()} }
 
 func ParseRoleID(s string) (RoleID, error) {
 	id, err := uuid.Parse(s)
@@ -190,6 +192,11 @@ func ParseProclaimID(s string) (ProclaimID, error) {
 	return ProclaimID{UUID: id}, err
 }
 
+func ParsePluginInstallID(s string) (PluginInstallID, error) {
+	id, err := uuid.Parse(s)
+	return PluginInstallID{UUID: id}, err
+}
+
 func (id MemberID) String() string        { return id.UUID.String() }
 func (id WorkspaceID) String() string     { return id.UUID.String() }
 func (id ProjectID) String() string       { return id.UUID.String() }
@@ -216,3 +223,4 @@ func (id ProductPlanID) String() string       { return id.UUID.String() }
 func (id ProductRequirementID) String() string { return id.UUID.String() }
 func (id ClusterInfoID) String() string       { return id.UUID.String() }
 func (id ProclaimID) String() string          { return id.UUID.String() }
+func (id PluginInstallID) String() string      { return id.UUID.String() }

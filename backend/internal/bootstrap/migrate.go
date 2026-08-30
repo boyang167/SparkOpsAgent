@@ -11,6 +11,7 @@ import (
 	knowledgepersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge/infrastructure/persistence"
 	notificationpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/notification/infrastructure/persistence"
 	platformadminpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/infrastructure/persistence"
+	pluginpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/infrastructure/persistence"
 	productpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/persistence"
 	workflowpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/infrastructure/persistence"
 	govpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/persistence"
@@ -37,6 +38,7 @@ func AutoMigrate(db *gorm.DB) error {
 		{"notification", notificationpersistence.AutoMigrate},
 		{"delivery", deliverypersistence.AutoMigrate},
 		{"agent_runtime", runtimepersistence.AutoMigrate},
+		{"plugin", pluginpersistence.AutoMigrate},
 	}
 	for _, step := range steps {
 		if err := step.fn(db); err != nil {
