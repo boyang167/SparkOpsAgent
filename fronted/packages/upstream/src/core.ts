@@ -6,8 +6,49 @@ export interface UpstreamRequestOptions {
   traceId?: string;
 }
 
+export interface UpstreamRawFetchInit extends RequestInit {
+  options?: UpstreamRequestOptions;
+}
+
 export function getUpstreamBaseUrl(): string {
   return process.env.UPSTREAM_URL ?? "http://localhost:8080";
+}
+
+export function buildUpstreamRequestHeaders(
+  headersInit: HeadersInit = {},
+  options: UpstreamRequestOptions = {},
+): Headers {
+  const headers = new Headers(headersInit);
+  if (options.token) {
+    headers.set("Authorization", `Bearer ${options.token}`);
+  }
+  if (options.workspaceId) {
+    headers.set("X-Workspace-Id", options.workspaceId);
+  }
+  if (options.traceId) {
+    headers.set("X-Trace-Id", options.traceId);
+  }
+  return headers;
+}
+
+export async function upstreamRawFetch(
+  path: string,
+  init: UpstreamRawFetchInit = {},
+): Promise<Response> {
+  if (!path.startsWith("/") || path.startsWith("//")) {
+    throw new BffError("invalid upstream path", "INVALID_REQUEST", 400, init.options?.traceId);
+  }
+
+  const { options, ...rest } = init;
+  try {
+    return await fetch(`${getUpstreamBaseUrl()}${path}`, {
+      ...rest,
+      headers: buildUpstreamRequestHeaders(rest.headers, options),
+      cache: "no-store",
+    });
+  } catch {
+    throw new BffError("upstream unavailable", "UPSTREAM_UNAVAILABLE", 502, options?.traceId);
+  }
 }
 
 export async function upstreamFetch<T>(

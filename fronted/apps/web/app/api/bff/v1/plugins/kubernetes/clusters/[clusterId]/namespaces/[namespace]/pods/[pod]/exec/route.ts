@@ -1,4 +1,5 @@
-import { createBffContext, createTraceId, fail, proxyUpstreamStream } from "@sparkops/bff-core";
+import { createBffContext, createTraceId, fail } from "@sparkops/bff-core";
+import { proxyKubernetesPluginRequest } from "@sparkops/bff-modules/plugins";
 import { NextRequest } from "next/server";
 
 export async function GET(
@@ -9,11 +10,12 @@ export async function GET(
   try {
     const ctx = await createBffContext(req);
     const params = await context.params;
-    const path =
-      `/api/v1/plugins/kubernetes/clusters/${encodeURIComponent(params.clusterId)}` +
-      `/namespaces/${encodeURIComponent(params.namespace)}` +
-      `/pods/${encodeURIComponent(params.pod)}/exec${req.nextUrl.search}`;
-    return proxyUpstreamStream(ctx, path);
+    return proxyKubernetesPluginRequest(
+      ctx,
+      req,
+      ["clusters", params.clusterId, "namespaces", params.namespace, "pods", params.pod, "exec"],
+      req.nextUrl.search,
+    );
   } catch (err) {
     return fail(err, traceId);
   }

@@ -1,5 +1,10 @@
-export { getUpstreamBaseUrl, upstreamFetch } from "./core";
-export type { UpstreamRequestOptions } from "./core";
+export {
+  buildUpstreamRequestHeaders,
+  getUpstreamBaseUrl,
+  upstreamFetch,
+  upstreamRawFetch,
+} from "./core";
+export type { UpstreamRawFetchInit, UpstreamRequestOptions } from "./core";
 export { createIdentityUpstream } from "./identity";
 export type { IdentityUpstream } from "./identity";
 export { createTenantUpstream } from "./tenant";
@@ -32,3 +37,8 @@ export { createSecretUpstream } from "./secret";
 export type { SecretUpstream } from "./secret";
 export { createPluginUpstream } from "./plugin";
 export type { PluginUpstream } from "./plugin";
+export { createKubernetesPluginUpstream } from "./plugin-kubernetes";
+export type {
+  KubernetesPluginApiPath,
+  KubernetesPluginUpstream,
+} from "./plugin-kubernetes";

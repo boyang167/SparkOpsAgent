@@ -17,3 +17,4 @@ export * as product from "./product";
 export * as secret from "./secret";
 export * as infra from "./infra";
 export * as plugin from "./plugin";
+export * as pluginKubernetes from "./plugin-kubernetes";

@@ -44,6 +44,9 @@ import {
   type SecretUpstream,
   createPluginUpstream,
   type PluginUpstream,
+  createKubernetesPluginUpstream,
+  type KubernetesPluginUpstream,
+  upstreamRawFetch,
 } from "@sparkops/upstream";
 
 export const AUTH_COOKIE = "sparkops_token";
@@ -70,6 +73,7 @@ export interface BffContext {
     product: ProductUpstream;
     secret: SecretUpstream;
     plugin: PluginUpstream;
+    kubernetesPlugin: KubernetesPluginUpstream;
   };
 }
 
@@ -98,6 +102,128 @@ async function assertApiEntitlement(ctx: BffContext, apiPath: string, traceId: s
       traceId,
     );
   }
+}
+
+const KUBERNETES_PLUGIN_API_PREFIX = "/api/v1/plugins/kubernetes";
+const MAX_PROXY_BODY_BYTES = 50 * 1024 * 1024;
+const REQUEST_HEADER_ALLOWLIST = new Set(["accept", "content-type"]);
+const RESPONSE_HEADER_ALLOWLIST = new Set([
+  "content-type",
+  "content-disposition",
+  "cache-control",
+  "etag",
+  "last-modified",
+  "x-accel-buffering",
+]);
+
+function invalidKubernetesPath(message = "invalid kubernetes plugin path") {
+  return new BffError(message, "INVALID_REQUEST", 400);
+}
+
+function assertSafeKubernetesSegment(segment: string) {
+  const lower = segment.toLowerCase();
+  if (
+    !segment ||
+    segment === "." ||
+    segment === ".." ||
+    segment.includes("/") ||
+    segment.includes("\\") ||
+    segment.includes("\u0000") ||
+    segment.includes("://") ||
+    /^[a-z][a-z0-9+.-]*:$/i.test(segment) ||
+    /%(?:00|2e|2f|5c)/i.test(lower)
+  ) {
+    throw invalidKubernetesPath();
+  }
+
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    throw invalidKubernetesPath();
+  }
+  if (
+    !decoded ||
+    decoded === "." ||
+    decoded === ".." ||
+    decoded.includes("/") ||
+    decoded.includes("\\") ||
+    decoded.includes("\u0000") ||
+    decoded.includes("://") ||
+    /^[a-z][a-z0-9+.-]*:$/i.test(decoded)
+  ) {
+    throw invalidKubernetesPath();
+  }
+}
+
+export function buildKubernetesPluginApiPath(
+  segments: readonly string[],
+  search = "",
+): `/api/v1/plugins/kubernetes/${string}` {
+  if (segments.length === 0) {
+    throw invalidKubernetesPath();
+  }
+  if (search && !search.startsWith("?")) {
+    throw invalidKubernetesPath("invalid kubernetes plugin query");
+  }
+  const encoded = segments.map((segment) => {
+    assertSafeKubernetesSegment(segment);
+    return encodeURIComponent(segment);
+  });
+  return `${KUBERNETES_PLUGIN_API_PREFIX}/${encoded.join("/")}${search}`;
+}
+
+function buildProxyRequestHeaders(headers: Headers): Headers {
+  const forwarded = new Headers();
+  headers.forEach((value, key) => {
+    const lower = key.toLowerCase();
+    if (REQUEST_HEADER_ALLOWLIST.has(lower) || lower.startsWith("if-")) {
+      forwarded.set(key, value);
+    }
+  });
+  return forwarded;
+}
+
+function buildProxyResponseHeaders(headers: Headers): Headers {
+  const forwarded = new Headers();
+  headers.forEach((value, key) => {
+    if (RESPONSE_HEADER_ALLOWLIST.has(key.toLowerCase())) {
+      forwarded.set(key, value);
+    }
+  });
+  return forwarded;
+}
+
+async function readBoundedBody(req: Request, traceId: string): Promise<BodyInit | undefined> {
+  if (req.method === "GET" || req.method === "HEAD" || !req.body) {
+    return undefined;
+  }
+
+  const contentLength = req.headers.get("content-length");
+  if (contentLength && Number(contentLength) > MAX_PROXY_BODY_BYTES) {
+    throw new BffError("request body too large", "PAYLOAD_TOO_LARGE", 413, traceId);
+  }
+
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_PROXY_BODY_BYTES) {
+      throw new BffError("request body too large", "PAYLOAD_TOO_LARGE", 413, traceId);
+    }
+    chunks.push(value);
+  }
+
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
 }
 
 async function assertBffEntitlement(ctx: BffContext, req: NextRequest, traceId: string) {
@@ -173,6 +299,7 @@ function buildBffContext(input: {
       product: createProductUpstream(baseOptions),
       secret: createSecretUpstream(baseOptions),
       plugin: createPluginUpstream(baseOptions),
+      kubernetesPlugin: createKubernetesPluginUpstream(baseOptions),
     },
   };
 }
@@ -291,5 +418,38 @@ export async function proxyUpstreamStream(ctx: BffContext, path: string): Promis
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     },
+  });
+}
+
+export async function proxyUpstreamStreamRequest(
+  ctx: BffContext,
+  path: `/api/v1/plugins/kubernetes/${string}`,
+  req: Request,
+): Promise<Response> {
+  if (!ctx.token) {
+    throw new BffError("unauthorized", "AUTH_UNAUTHORIZED", 401, ctx.traceId);
+  }
+  if (!ctx.workspaceId) {
+    throw new BffError("workspace required", "WORKSPACE_REQUIRED", 400, ctx.traceId);
+  }
+
+  await assertApiEntitlement(ctx, path, ctx.traceId);
+  const body = await readBoundedBody(req, ctx.traceId);
+  const upstream = await upstreamRawFetch(path, {
+    method: req.method,
+    headers: buildProxyRequestHeaders(req.headers),
+    body,
+    signal: req.signal,
+    options: {
+      token: ctx.token,
+      workspaceId: ctx.workspaceId,
+      traceId: ctx.traceId,
+    },
+  });
+
+  return new Response(req.method === "HEAD" ? null : upstream.body, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers: buildProxyResponseHeaders(upstream.headers),
   });
 }

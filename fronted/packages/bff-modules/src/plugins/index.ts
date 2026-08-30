@@ -1,5 +1,9 @@
 import type { BffContext } from "@sparkops/bff-core";
-import { invalidateEntitlementsCache } from "@sparkops/bff-core";
+import {
+  buildKubernetesPluginApiPath,
+  invalidateEntitlementsCache,
+  proxyUpstreamStreamRequest,
+} from "@sparkops/bff-core";
 
 export async function listPlugins(ctx: BffContext) {
   const data = await ctx.upstream.plugin.listPlugins();
@@ -51,4 +55,13 @@ export async function disableWorkspacePlugin(
 
 export function getExamplePing(ctx: BffContext) {
   return ctx.upstream.plugin.getExamplePing();
+}
+
+export function proxyKubernetesPluginRequest(
+  ctx: BffContext,
+  req: Request,
+  segments: readonly string[],
+  search = "",
+) {
+  return proxyUpstreamStreamRequest(ctx, buildKubernetesPluginApiPath(segments, search), req);
 }
