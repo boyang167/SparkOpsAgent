@@ -108,6 +108,25 @@ func TestStoreCompletesUninstallWithDurableReceipt(t *testing.T) {
 	require.False(t, found)
 }
 
+func TestStoreSavePluginRejectsConflictingPackageDigest(t *testing.T) {
+	repo := openSQLitePluginStore(t)
+	ctx := context.Background()
+	pluginID := fmt.Sprintf("conflict-%s", uuid.NewString())
+	first := &model.PluginRecord{
+		ID:            pluginID,
+		Version:       "0.1.0",
+		DisplayName:   "Conflict",
+		ManifestYAML:  "id: conflict",
+		PackageDigest: strings.Repeat("a", 64),
+		Status:        model.PluginStatusUploaded,
+		CreatedBy:     kernel.NewMemberID(),
+	}
+	require.NoError(t, repo.SavePlugin(ctx, first))
+	second := *first
+	second.PackageDigest = strings.Repeat("b", 64)
+	require.ErrorIs(t, repo.SavePlugin(ctx, &second), domain.ErrPluginIDConflict)
+}
+
 func TestStorePersistsPluginsAndWorkspaceBindings(t *testing.T) {
 	db, repo := openPluginStore(t)
 	ctx := context.Background()

@@ -69,6 +69,11 @@ func (r *memoryRepository) SavePlugin(_ context.Context, plugin *model.PluginRec
 	if err := r.failSaveAt[r.saveCalls]; err != nil {
 		return err
 	}
+	if existing, ok := r.plugins[plugin.ID]; ok {
+		if existing.PackageDigest != "" && plugin.PackageDigest != "" && existing.PackageDigest != plugin.PackageDigest {
+			return domain.ErrPluginIDConflict
+		}
+	}
 	copy := *plugin
 	copy.InstalledFiles = append([]string(nil), plugin.InstalledFiles...)
 	r.plugins[plugin.ID] = &copy

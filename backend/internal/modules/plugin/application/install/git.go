@@ -85,6 +85,13 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 	if err := ensureCleanGitRoot(ctx, runner, p.root); err != nil {
 		return "", err
 	}
+	remoteExists, err := remoteBranchExists(ctx, runner, p.root, req.Branch)
+	if err != nil {
+		return "", err
+	}
+	if remoteExists {
+		return p.createPRForExistingRemoteBranch(ctx, req.Branch)
+	}
 	tempDir := p.tempDir
 	if tempDir == nil {
 		tempDir = os.MkdirTemp
@@ -141,9 +148,44 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 	}
 	out, err := runCommand(ctx, runner, worktree, "gh", "pr", "create", "--fill")
 	if err != nil {
+		if url, recErr := p.recoverOpenPRURL(ctx, req.Branch); recErr == nil {
+			return url, nil
+		}
 		return "", err
 	}
 	return parsePRURL(out)
+}
+
+func (p *GitCLIPublisher) createPRForExistingRemoteBranch(ctx context.Context, branch string) (string, error) {
+	if url, err := p.recoverOpenPRURL(ctx, branch); err == nil {
+		return url, nil
+	} else if !errors.Is(err, ErrPullRequestNotFound) {
+		return "", err
+	}
+	out, err := runCommand(ctx, p.commandRunner(), p.root, "gh", "pr", "create", "--head", branch, "--fill")
+	if err != nil {
+		if url, recErr := p.recoverOpenPRURL(ctx, branch); recErr == nil {
+			return url, nil
+		}
+		return "", err
+	}
+	return parsePRURL(out)
+}
+
+func (p *GitCLIPublisher) recoverOpenPRURL(ctx context.Context, branch string) (string, error) {
+	view, err := p.LookupPullRequest(ctx, branch)
+	if err != nil {
+		return "", err
+	}
+	return view.URL, nil
+}
+
+func remoteBranchExists(ctx context.Context, runner CommandRunner, root, branch string) (bool, error) {
+	out, err := runCommand(ctx, runner, root, "git", "ls-remote", "--heads", "origin", "refs/heads/"+branch)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out.Stdout)) != "", nil
 }
 
 func (p *GitCLIPublisher) LookupPullRequest(ctx context.Context, branch string) (PullRequestView, error) {

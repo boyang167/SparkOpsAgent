@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -114,7 +116,54 @@ func (s *Store) SavePlugin(ctx context.Context, plugin *model.PluginRecord) erro
 		CreatedAt:          plugin.CreatedAt,
 		UpdatedAt:          plugin.UpdatedAt,
 	}
-	return s.db.WithContext(ctx).Save(&row).Error
+	db := s.db.WithContext(ctx)
+	var existing pluginModel
+	err = db.Where("id = ?", plugin.ID).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		createErr := db.Create(&row).Error
+		if isUniqueViolation(createErr) {
+			return domain.ErrPluginIDConflict
+		}
+		return createErr
+	}
+	if err != nil {
+		return err
+	}
+	if existing.PackageDigest != "" && row.PackageDigest != "" && existing.PackageDigest != row.PackageDigest {
+		return domain.ErrPluginIDConflict
+	}
+	if conflictingInstalledFiles(existing.InstalledFilesJSON, row.InstalledFilesJSON) {
+		return domain.ErrPluginIDConflict
+	}
+	return db.Save(&row).Error
+}
+
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique") || strings.Contains(msg, "duplicate") || strings.Contains(msg, "23505")
+}
+
+func conflictingInstalledFiles(existingJSON, incomingJSON string) bool {
+	if existingJSON == "" || existingJSON == "[]" || incomingJSON == "" {
+		return false
+	}
+	var existing, incoming []string
+	if json.Unmarshal([]byte(existingJSON), &existing) != nil {
+		return false
+	}
+	if json.Unmarshal([]byte(incomingJSON), &incoming) != nil {
+		return false
+	}
+	if len(existing) == 0 {
+		return false
+	}
+	return !slices.Equal(existing, incoming)
 }
 
 func (s *Store) FindPlugin(ctx context.Context, id string) (*model.PluginRecord, error) {

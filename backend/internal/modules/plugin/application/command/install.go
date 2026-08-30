@@ -68,16 +68,36 @@ func (h *InstallHandler) Handle(ctx context.Context, rawZip []byte, actor kernel
 		return nil, findErr
 	}
 	if isRetry {
-		storedManifest, manifestErr := manifest.Parse([]byte(record.ManifestYAML))
-		if (record.Status != model.PluginStatusUploaded && record.Status != model.PluginStatusPRFailed) ||
-			manifestErr != nil ||
-			storedManifest.ID != inspected.Manifest.ID ||
-			storedManifest.Version != inspected.Manifest.Version ||
-			record.Version != inspected.Manifest.Version ||
-			record.PackageDigest != packageDigest ||
-			!slices.Equal(record.InstalledFiles, installedFiles) {
-			return nil, domain.ErrPluginIDConflict
+		if err := assertRetryIdentity(record, inspected.Manifest, packageDigest, installedFiles); err != nil {
+			return nil, err
 		}
+	} else {
+		record = &model.PluginRecord{
+			ID:             inspected.Manifest.ID,
+			Version:        inspected.Manifest.Version,
+			DisplayName:    inspected.Manifest.DisplayName,
+			ManifestYAML:   string(manifestBytes),
+			PackageDigest:  packageDigest,
+			InstalledFiles: installedFiles,
+			Status:         model.PluginStatusUploaded,
+			CreatedBy:      actor,
+		}
+		if err := h.repo.SavePlugin(ctx, record); err != nil {
+			if !errors.Is(err, domain.ErrPluginIDConflict) {
+				return nil, err
+			}
+			existing, findErr := h.repo.FindPlugin(ctx, inspected.Manifest.ID)
+			if findErr != nil {
+				return nil, err
+			}
+			record = existing
+			isRetry = true
+			if identErr := assertRetryIdentity(record, inspected.Manifest, packageDigest, installedFiles); identErr != nil {
+				return nil, identErr
+			}
+		}
+	}
+	if isRetry {
 		branch := "plugin/install-" + record.ID
 		view, err := h.publisher.LookupPullRequest(ctx, branch)
 		if err == nil {
@@ -92,20 +112,6 @@ func (h *InstallHandler) Handle(ctx context.Context, rawZip []byte, actor kernel
 		if !errors.Is(err, plugininstall.ErrPullRequestNotFound) {
 			return nil, err
 		}
-	} else {
-		record = &model.PluginRecord{
-			ID:             inspected.Manifest.ID,
-			Version:        inspected.Manifest.Version,
-			DisplayName:    inspected.Manifest.DisplayName,
-			ManifestYAML:   string(manifestBytes),
-			PackageDigest:  packageDigest,
-			InstalledFiles: installedFiles,
-			Status:         model.PluginStatusUploaded,
-			CreatedBy:      actor,
-		}
-	}
-	if err := h.repo.SavePlugin(ctx, record); err != nil {
-		return nil, err
 	}
 
 	root, err := resolveInstallRoot(h.root)
@@ -150,6 +156,20 @@ func (h *InstallHandler) Handle(ctx context.Context, rawZip []byte, actor kernel
 		return record, err
 	}
 	return record, nil
+}
+
+func assertRetryIdentity(record *model.PluginRecord, spec *manifest.Manifest, packageDigest string, installedFiles []string) error {
+	storedManifest, manifestErr := manifest.Parse([]byte(record.ManifestYAML))
+	if (record.Status != model.PluginStatusUploaded && record.Status != model.PluginStatusPRFailed) ||
+		manifestErr != nil ||
+		storedManifest.ID != spec.ID ||
+		storedManifest.Version != spec.Version ||
+		record.Version != spec.Version ||
+		record.PackageDigest != packageDigest ||
+		!slices.Equal(record.InstalledFiles, installedFiles) {
+		return domain.ErrPluginIDConflict
+	}
+	return nil
 }
 
 func installFiles(inspected *plugininstall.InspectedZip, manifestBytes []byte) (map[string][]byte, error) {
