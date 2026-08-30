@@ -3,10 +3,13 @@ package kubernetes
 import (
 	"archive/tar"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -127,6 +130,7 @@ func TestRegisterBundledDescriptor(t *testing.T) {
 		"fronted/apps/web/app/(platform)/plugins/kubernetes/cloudtty/page.tsx",
 		"fronted/apps/web/app/(platform)/plugins/kubernetes/velaux/page.tsx",
 		"fronted/apps/web/app/(platform)/plugins/kubernetes/create/page.tsx",
+		"fronted/apps/web/app/api/bff/v1/plugins/kubernetes/[...path]/route.ts",
 		"fronted/apps/web/src/modules/plugins/kubernetes/ApiErrorBanner.tsx",
 		"fronted/apps/web/src/modules/plugins/kubernetes/ClusterPicker.tsx",
 		"fronted/apps/web/src/modules/plugins/kubernetes/KubernetesConsole.tsx",
@@ -157,15 +161,44 @@ func TestArthasTarContainsBootJar(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, f.Close()) }()
 
-	tr := tar.NewReader(f)
+	requireArthasTarContainsBootJar(t, f)
+}
+
+func requireArthasTarContainsBootJar(t *testing.T, r io.Reader) {
+	t.Helper()
+
+	tr := tar.NewReader(r)
+	foundBootJar := false
 	for {
 		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
 		require.NoError(t, err)
+		requireSafeTarHeader(t, header)
 		if header.Name == "arthas-bin/arthas-boot.jar" {
 			require.Positive(t, header.Size)
-			return
+			foundBootJar = true
 		}
 	}
+	require.True(t, foundBootJar, "arthas-bin/arthas-boot.jar not found")
+}
+
+func requireSafeTarHeader(t *testing.T, header *tar.Header) {
+	t.Helper()
+
+	require.NotContains(t, header.Name, `\`)
+	require.False(t, strings.HasPrefix(header.Name, "/"), header.Name)
+	cleanName := strings.TrimSuffix(header.Name, "/")
+	require.NotEmpty(t, cleanName)
+	require.Equal(t, path.Clean(cleanName), cleanName)
+	for _, segment := range strings.Split(cleanName, "/") {
+		require.NotEmpty(t, segment, header.Name)
+		require.NotEqual(t, ".", segment, header.Name)
+		require.NotEqual(t, "..", segment, header.Name)
+	}
+	require.NotEqual(t, tar.TypeSymlink, header.Typeflag, header.Name)
+	require.NotEqual(t, tar.TypeLink, header.Typeflag, header.Name)
 }
 
 func readyEngine(memberID kernel.MemberID) *gin.Engine {

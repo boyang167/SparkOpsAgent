@@ -52,6 +52,8 @@ Plugin routes run behind the normal platform chain: JWT authentication, workspac
 
 Frontend pages are installed under `fronted/apps/web/app/(platform)/plugins/{id}/...`; shared plugin UI/runtime helpers live under `fronted/apps/web/src/modules/plugins/{id}/...`. BFF routes for plugins live under `fronted/apps/web/app/api/bff/v1/plugins/{id}/...` when needed and must forward the platform JWT/session context instead of bypassing it.
 
+Plugins that ship BFF routes require the Task17 platform baseline: `@sparkops/bff-core` plus the generic plugin proxy helper from `@sparkops/bff-modules/plugins`. Those platform helpers are not plugin descriptor files. The plugin descriptor should include the plugin-owned route file, such as `fronted/apps/web/app/api/bff/v1/plugins/kubernetes/[...path]/route.ts`, and rely on the platform baseline for shared BFF runtime code.
+
 Server-sent event endpoints should keep the normal JWT and workspace checks, then stream through the route handler. Frontend SSE clients should parse platform/plugin error envelopes before switching to stream handling.
 
 ## Scaffold

@@ -77,6 +77,7 @@ func registerBundledDescriptor() {
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/cloudtty/page.tsx",
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/velaux/page.tsx",
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/create/page.tsx",
+			"fronted/apps/web/app/api/bff/v1/plugins/kubernetes/[...path]/route.ts",
 			"fronted/apps/web/src/modules/plugins/kubernetes/ApiErrorBanner.tsx",
 			"fronted/apps/web/src/modules/plugins/kubernetes/ClusterPicker.tsx",
 			"fronted/apps/web/src/modules/plugins/kubernetes/KubernetesConsole.tsx",

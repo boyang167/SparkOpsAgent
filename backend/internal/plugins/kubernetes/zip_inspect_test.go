@@ -20,6 +20,7 @@ import (
 const (
 	inspectZipMaxEntries       = 2000
 	inspectZipMaxExpandedBytes = 80 << 20
+	kubernetesBFFCatchallRoute = "fronted/apps/web/app/api/bff/v1/plugins/kubernetes/[...path]/route.ts"
 )
 
 func TestKubernetesBundledFilesBuildRealInspectableZip(t *testing.T) {
@@ -44,15 +45,19 @@ func TestKubernetesBundledFilesBuildRealInspectableZip(t *testing.T) {
 	require.Equal(t, "kubernetes", inspected.Manifest.ID)
 	require.Contains(t, inspected.BackendFiles, "internal/plugins/kubernetes/plugin.go")
 	require.Contains(t, inspected.BackendFiles, "internal/plugins/kubernetes/resource/arthas-bin.tar")
-	tarInfo, err := os.Stat(filepath.Join(repo, "backend", "internal", "plugins", "kubernetes", "resource", "arthas-bin.tar"))
+	sourceTar, err := os.ReadFile(filepath.Join(repo, "backend", "internal", "plugins", "kubernetes", "resource", "arthas-bin.tar"))
 	require.NoError(t, err)
-	require.Equal(t, int(tarInfo.Size()), len(inspected.BackendFiles["internal/plugins/kubernetes/resource/arthas-bin.tar"]))
-	require.Greater(t, len(inspected.BackendFiles["internal/plugins/kubernetes/resource/arthas-bin.tar"]), 19<<20)
+	inspectedTar := inspected.BackendFiles["internal/plugins/kubernetes/resource/arthas-bin.tar"]
+	require.Equal(t, sourceTar, inspectedTar)
+	requireArthasTarContainsBootJar(t, bytes.NewReader(inspectedTar))
 
 	for _, page := range parsedManifest.Frontend.Pages {
 		require.Contains(t, inspected.FrontendFiles, page)
 		require.Contains(t, inspected.Files, page)
 	}
+	const mappedBFFCatchall = "app/api/bff/v1/plugins/kubernetes/[...path]/route.ts"
+	require.Contains(t, inspected.FrontendFiles, mappedBFFCatchall)
+	require.Contains(t, inspected.Files, mappedBFFCatchall)
 }
 
 func requireDescriptorCoversProductionSources(t *testing.T, repo string, installed []string, m *manifest.Manifest) {
@@ -71,6 +76,7 @@ func requireDescriptorCoversProductionSources(t *testing.T, repo string, install
 	for _, page := range m.Frontend.Pages {
 		require.Contains(t, installedSet, "fronted/apps/web/"+page, "descriptor is missing manifest page %s", page)
 	}
+	require.Contains(t, installedSet, kubernetesBFFCatchallRoute, "descriptor is missing kubernetes BFF catchall route")
 }
 
 func requireProductionDescriptorPath(t *testing.T, rel string) {
@@ -87,6 +93,7 @@ func requireProductionDescriptorPath(t *testing.T, rel string) {
 	require.True(t,
 		strings.HasPrefix(rel, "backend/internal/plugins/kubernetes/") ||
 			strings.HasPrefix(rel, "fronted/apps/web/app/(platform)/plugins/kubernetes/") ||
+			strings.HasPrefix(rel, "fronted/apps/web/app/api/bff/v1/plugins/kubernetes/") ||
 			strings.HasPrefix(rel, "fronted/apps/web/src/modules/plugins/kubernetes/"),
 		"descriptor path is outside kubernetes production plugin files: %s", rel)
 }
