@@ -7,10 +7,12 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
-	"path"
+	"regexp"
 	"sort"
 	"strconv"
 )
+
+var pluginIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,62}$`)
 
 func RewriteRegisterGo(existing []byte, modulePath string, pluginIDs []string) ([]byte, error) {
 	if modulePath == "" {
@@ -52,11 +54,8 @@ func RewriteRegisterGo(existing []byte, modulePath string, pluginIDs []string) (
 func sortedPluginIDs(pluginIDs []string) ([]string, error) {
 	seen := make(map[string]struct{}, len(pluginIDs))
 	for _, id := range pluginIDs {
-		if !isSafeRelativePath(id) {
+		if !pluginIDPattern.MatchString(id) {
 			return nil, fmt.Errorf("unsafe plugin id: %q", id)
-		}
-		if path.Base(id) != id {
-			return nil, fmt.Errorf("plugin id must not contain path separators: %q", id)
 		}
 		seen[id] = struct{}{}
 	}

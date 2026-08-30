@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -104,11 +105,40 @@ func TestGitCLIPublisherRejectsUnsafePaths(t *testing.T) {
 	}
 }
 
+func TestGitCLIPublisherRejectsInvalidBranchBeforeCommands(t *testing.T) {
+	tests := []string{"", " plugins/example", "plugins/example ", "plugins/\nexample", "plugins/\x1fexample"}
+	for _, branch := range tests {
+		t.Run(branch, func(t *testing.T) {
+			runner := &recordingRunner{}
+			publisher := &GitCLIPublisher{
+				root:    t.TempDir(),
+				runner:  runner,
+				tempDir: func(string, string) (string, error) { return t.TempDir(), nil },
+			}
+
+			if _, err := publisher.Publish(context.Background(), PublishRequest{
+				Branch:  branch,
+				Message: "msg",
+				Files:   map[string][]byte{"backend/internal/plugins/example/plugin.go": []byte("x")},
+			}); err == nil {
+				t.Fatalf("Publish() error = nil")
+			}
+			if len(runner.calls) != 0 {
+				t.Fatalf("Publish() ran commands for invalid branch: %#v", runner.calls)
+			}
+		})
+	}
+}
+
 func TestGitCLIPublisherUsesIsolatedWorktreeAndCreatesPullRequest(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	worktree := filepath.Join(t.TempDir(), "plugin-worktree")
-	runner := &recordingRunner{outputs: []string{"", "", "", "", "https://example.local/pr/42\n", ""}}
+	runner := &recordingRunner{results: []commandResult{
+		{}, {}, {}, {}, {}, {},
+		{stdout: "https://example.local/pr/42\n"},
+		{}, {},
+	}}
 	publisher := &GitCLIPublisher{
 		root:    root,
 		runner:  runner,
@@ -132,12 +162,15 @@ func TestGitCLIPublisherUsesIsolatedWorktreeAndCreatesPullRequest(t *testing.T) 
 	}
 
 	wantCalls := []commandCall{
+		{dir: root, name: "git", args: []string{"check-ref-format", "--branch", "plugins/example"}},
+		{dir: root, name: "git", args: []string{"status", "--porcelain"}},
 		{dir: root, name: "git", args: []string{"worktree", "add", worktree, "-b", "plugins/example"}},
 		{dir: worktree, name: "git", args: []string{"add", "--all"}},
 		{dir: worktree, name: "git", args: []string{"commit", "-m", "Install example plugin"}},
 		{dir: worktree, name: "git", args: []string{"push", "-u", "origin", "plugins/example"}},
 		{dir: worktree, name: "gh", args: []string{"pr", "create", "--fill"}},
 		{dir: root, name: "git", args: []string{"worktree", "remove", "--force", worktree}},
+		{dir: root, name: "git", args: []string{"branch", "-D", "plugins/example"}},
 	}
 	if !reflect.DeepEqual(runner.calls, wantCalls) {
 		t.Fatalf("commands = %#v\nwant %#v", runner.calls, wantCalls)
@@ -158,7 +191,11 @@ func TestGitCLIPublisherUsesIsolatedWorktreeAndCreatesPullRequest(t *testing.T) 
 func TestGitCLIPublisherPassesMissingWorktreePathToGit(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	runner := &worktreePathRunner{t: t, outputs: []string{"", "", "", "", "https://example.local/pr/42\n", ""}}
+	runner := &worktreePathRunner{t: t, results: []commandResult{
+		{}, {}, {}, {}, {}, {},
+		{stdout: "https://example.local/pr/42\n"},
+		{}, {},
+	}}
 	publisher := &GitCLIPublisher{
 		root:    root,
 		runner:  runner,
@@ -174,10 +211,265 @@ func TestGitCLIPublisherPassesMissingWorktreePathToGit(t *testing.T) {
 	}
 }
 
+func TestGitCLIPublisherRejectsDirtyRootAtPublishStart(t *testing.T) {
+	root := t.TempDir()
+	runner := &recordingRunner{results: []commandResult{
+		{},
+		{stdout: " M backend/internal/plugins/example/plugin.go\n"},
+	}}
+	publisher := &GitCLIPublisher{
+		root:    root,
+		runner:  runner,
+		tempDir: func(string, string) (string, error) { return t.TempDir(), nil },
+	}
+
+	if _, err := publisher.Publish(context.Background(), PublishRequest{
+		Branch:  "plugins/example",
+		Message: "Install example plugin",
+		Files:   map[string][]byte{"backend/internal/plugins/example/plugin.go": []byte("package example\n")},
+	}); err == nil {
+		t.Fatalf("Publish() error = nil")
+	}
+	wantCalls := []commandCall{
+		{dir: root, name: "git", args: []string{"check-ref-format", "--branch", "plugins/example"}},
+		{dir: root, name: "git", args: []string{"status", "--porcelain"}},
+	}
+	if !reflect.DeepEqual(runner.calls, wantCalls) {
+		t.Fatalf("commands = %#v\nwant %#v", runner.calls, wantCalls)
+	}
+}
+
+func TestGitCLIPublisherRejectsSymlinkDuringWrite(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(t.TempDir(), "plugin-worktree")
+	runner := &recordingRunner{
+		results: []commandResult{{}, {}, {}},
+		afterRun: func(call commandCall) {
+			if call.name != "git" || !reflect.DeepEqual(call.args[:2], []string{"worktree", "add"}) {
+				return
+			}
+			target := filepath.Join(t.TempDir(), "outside")
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				t.Fatalf("mkdir target: %v", err)
+			}
+			if err := os.MkdirAll(filepath.Join(worktree, "backend"), 0o755); err != nil {
+				t.Fatalf("mkdir worktree backend: %v", err)
+			}
+			link := filepath.Join(worktree, "backend", "internal")
+			if err := os.Symlink(target, link); err != nil {
+				t.Skipf("symlink unavailable: %v", err)
+			}
+		},
+	}
+	publisher := &GitCLIPublisher{
+		root:    root,
+		runner:  runner,
+		tempDir: func(string, string) (string, error) { return worktree, nil },
+	}
+
+	if _, err := publisher.Publish(context.Background(), PublishRequest{
+		Branch:  "plugins/example",
+		Message: "Install example plugin",
+		Files:   map[string][]byte{"backend/internal/plugins/example/plugin.go": []byte("package example\n")},
+	}); err == nil {
+		t.Fatalf("Publish() error = nil")
+	}
+}
+
+func TestGitCLIPublisherDeletesNonEmptyDirectorySafely(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(t.TempDir(), "plugin-worktree")
+	runner := &recordingRunner{
+		results: []commandResult{
+			{}, {}, {}, {}, {}, {},
+			{stdout: "https://example.local/pr/42\n"},
+			{}, {},
+		},
+		afterRun: func(call commandCall) {
+			if call.name != "git" || !reflect.DeepEqual(call.args[:2], []string{"worktree", "add"}) {
+				return
+			}
+			dir := filepath.Join(worktree, "backend", "internal", "plugins", "old")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir delete dir: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "nested.go"), []byte("package old\n"), 0o644); err != nil {
+				t.Fatalf("write nested file: %v", err)
+			}
+		},
+	}
+	publisher := &GitCLIPublisher{
+		root:    root,
+		runner:  runner,
+		tempDir: func(string, string) (string, error) { return worktree, nil },
+	}
+
+	if _, err := publisher.Publish(context.Background(), PublishRequest{
+		Branch:  "plugins/example",
+		Message: "Remove old plugin",
+		Delete:  []string{"backend/internal/plugins/old"},
+	}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(worktree, "backend", "internal", "plugins", "old")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted dir stat error = %v, want not exist", err)
+	}
+}
+
+func TestGitCLIPublisherRejectsSymlinkInsideDeletedDirectory(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(t.TempDir(), "plugin-worktree")
+	runner := &recordingRunner{
+		results: []commandResult{{}, {}, {}},
+		afterRun: func(call commandCall) {
+			if call.name != "git" || !reflect.DeepEqual(call.args[:2], []string{"worktree", "add"}) {
+				return
+			}
+			dir := filepath.Join(worktree, "backend", "internal", "plugins", "old")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir delete dir: %v", err)
+			}
+			target := filepath.Join(t.TempDir(), "outside.go")
+			if err := os.WriteFile(target, []byte("package outside\n"), 0o644); err != nil {
+				t.Fatalf("write symlink target: %v", err)
+			}
+			if err := os.Symlink(target, filepath.Join(dir, "link.go")); err != nil {
+				t.Skipf("symlink unavailable: %v", err)
+			}
+		},
+	}
+	publisher := &GitCLIPublisher{
+		root:    root,
+		runner:  runner,
+		tempDir: func(string, string) (string, error) { return worktree, nil },
+	}
+
+	if _, err := publisher.Publish(context.Background(), PublishRequest{
+		Branch:  "plugins/example",
+		Message: "Remove old plugin",
+		Delete:  []string{"backend/internal/plugins/old"},
+	}); err == nil {
+		t.Fatalf("Publish() error = nil")
+	}
+}
+
+func TestGitCLIPublisherRejectsInvalidPullRequestURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		result commandResult
+	}{
+		{name: "empty stdout", result: commandResult{}},
+		{name: "garbage stdout", result: commandResult{stdout: "not a url\n"}},
+		{name: "warning and url", result: commandResult{stdout: "warning: something\nhttps://example.local/pr/42\n"}},
+		{name: "stderr warning", result: commandResult{stdout: "https://example.local/pr/42\n", stderr: "warning: something\n"}},
+		{name: "missing host", result: commandResult{stdout: "https:///pr/42\n"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			worktree := filepath.Join(t.TempDir(), "plugin-worktree")
+			runner := &recordingRunner{results: []commandResult{{}, {}, {}, {}, {}, {}, tt.result, {}, {}}}
+			publisher := &GitCLIPublisher{
+				root:    root,
+				runner:  runner,
+				tempDir: func(string, string) (string, error) { return worktree, nil },
+			}
+
+			if _, err := publisher.Publish(context.Background(), PublishRequest{
+				Branch:  "plugins/example",
+				Message: "Install example plugin",
+				Files:   map[string][]byte{"backend/internal/plugins/example/plugin.go": []byte("package example\n")},
+			}); err == nil {
+				t.Fatalf("Publish() error = nil")
+			}
+			if got := runner.calls[len(runner.calls)-2:]; !reflect.DeepEqual(got, []commandCall{
+				{dir: root, name: "git", args: []string{"worktree", "remove", "--force", worktree}},
+				{dir: root, name: "git", args: []string{"branch", "-D", "plugins/example"}},
+			}) {
+				t.Fatalf("cleanup calls = %#v", got)
+			}
+		})
+	}
+}
+
+func TestGitCLIPublisherCleansUpWithBackgroundContextAndJoinsErrors(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(t.TempDir(), "plugin-worktree")
+	ctx, cancel := context.WithCancel(context.Background())
+	runner := &recordingRunner{
+		results: []commandResult{
+			{}, {}, {}, {},
+			{err: errors.New("commit failed")},
+			{err: errors.New("remove failed")},
+			{err: errors.New("branch delete failed")},
+		},
+		afterRun: func(call commandCall) {
+			if call.name == "git" && len(call.args) > 0 && call.args[0] == "commit" {
+				cancel()
+			}
+		},
+	}
+	publisher := &GitCLIPublisher{
+		root:    root,
+		runner:  runner,
+		tempDir: func(string, string) (string, error) { return worktree, nil },
+	}
+
+	_, err := publisher.Publish(ctx, PublishRequest{
+		Branch:  "plugins/example",
+		Message: "Install example plugin",
+		Files:   map[string][]byte{"backend/internal/plugins/example/plugin.go": []byte("package example\n")},
+	})
+	if err == nil {
+		t.Fatalf("Publish() error = nil")
+	}
+	for _, part := range []string{"commit failed", "remove failed", "branch delete failed"} {
+		if !strings.Contains(err.Error(), part) {
+			t.Fatalf("Publish() error %q does not contain %q", err, part)
+		}
+	}
+	if runner.cleanupCtxErr != nil {
+		t.Fatalf("cleanup used canceled request context: %v", runner.cleanupCtxErr)
+	}
+}
+
+func TestGitCLIPublisherCleansUpAfterWorktreeAddFailure(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(t.TempDir(), "plugin-worktree")
+	runner := &recordingRunner{results: []commandResult{
+		{}, {},
+		{err: errors.New("worktree add failed")},
+		{}, {},
+	}}
+	publisher := &GitCLIPublisher{
+		root:    root,
+		runner:  runner,
+		tempDir: func(string, string) (string, error) { return worktree, nil },
+	}
+
+	if _, err := publisher.Publish(context.Background(), PublishRequest{
+		Branch:  "plugins/example",
+		Message: "Install example plugin",
+		Files:   map[string][]byte{"backend/internal/plugins/example/plugin.go": []byte("package example\n")},
+	}); err == nil {
+		t.Fatalf("Publish() error = nil")
+	}
+	wantCalls := []commandCall{
+		{dir: root, name: "git", args: []string{"check-ref-format", "--branch", "plugins/example"}},
+		{dir: root, name: "git", args: []string{"status", "--porcelain"}},
+		{dir: root, name: "git", args: []string{"worktree", "add", worktree, "-b", "plugins/example"}},
+		{dir: root, name: "git", args: []string{"worktree", "remove", "--force", worktree}},
+		{dir: root, name: "git", args: []string{"branch", "-D", "plugins/example"}},
+	}
+	if !reflect.DeepEqual(runner.calls, wantCalls) {
+		t.Fatalf("commands = %#v\nwant %#v", runner.calls, wantCalls)
+	}
+}
+
 func TestNewGitCLIPublisherFromEnvRequiresCleanGitRoot(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	runner := &recordingRunner{outputs: []string{"true\n", ""}}
+	runner := &recordingRunner{results: []commandResult{{stdout: "true\n"}, {}}}
 	t.Setenv("PLUGIN_GIT_ROOT", root)
 
 	publisher, err := NewGitCLIPublisherFromEnv(ctx, runner)
@@ -203,7 +495,7 @@ func TestNewGitCLIPublisherFromEnvRejectsMissingOrDirtyRoot(t *testing.T) {
 	}
 
 	t.Setenv("PLUGIN_GIT_ROOT", t.TempDir())
-	runner := &recordingRunner{outputs: []string{"true\n", " M dirty.go\n"}}
+	runner := &recordingRunner{results: []commandResult{{stdout: "true\n"}, {stdout: " M dirty.go\n"}}}
 	if _, err := NewGitCLIPublisherFromEnv(ctx, runner); err == nil {
 		t.Fatalf("NewGitCLIPublisherFromEnv() dirty root error = nil")
 	}
@@ -215,44 +507,54 @@ type commandCall struct {
 	args []string
 }
 
-type recordingRunner struct {
-	calls   []commandCall
-	outputs []string
-	err     error
+type commandResult struct {
+	stdout string
+	stderr string
+	err    error
 }
 
-func (r *recordingRunner) Run(ctx context.Context, dir string, name string, args ...string) ([]byte, error) {
-	_ = ctx
+type recordingRunner struct {
+	calls         []commandCall
+	results       []commandResult
+	afterRun      func(commandCall)
+	cleanupCtxErr error
+}
+
+func (r *recordingRunner) Run(ctx context.Context, dir string, name string, args ...string) (CommandOutput, error) {
 	copiedArgs := append([]string(nil), args...)
-	r.calls = append(r.calls, commandCall{dir: dir, name: name, args: copiedArgs})
-	if r.err != nil {
-		return nil, r.err
+	call := commandCall{dir: dir, name: name, args: copiedArgs}
+	r.calls = append(r.calls, call)
+	if name == "git" && len(args) > 0 && (args[0] == "worktree" || args[0] == "branch") && len(r.calls) > 5 && ctx.Err() != nil {
+		r.cleanupCtxErr = ctx.Err()
 	}
-	if len(r.outputs) == 0 {
-		return nil, nil
+	if r.afterRun != nil {
+		r.afterRun(call)
 	}
-	out := r.outputs[0]
-	r.outputs = r.outputs[1:]
-	return []byte(out), nil
+	if len(r.results) == 0 {
+		return CommandOutput{}, nil
+	}
+	result := r.results[0]
+	r.results = r.results[1:]
+	return CommandOutput{Stdout: []byte(result.stdout), Stderr: []byte(result.stderr)}, result.err
 }
 
 type worktreePathRunner struct {
 	t       *testing.T
-	outputs []string
+	results []commandResult
 }
 
-func (r *worktreePathRunner) Run(ctx context.Context, dir string, name string, args ...string) ([]byte, error) {
+func (r *worktreePathRunner) Run(ctx context.Context, dir string, name string, args ...string) (CommandOutput, error) {
 	_ = ctx
 	_ = dir
-	if name == "git" && reflect.DeepEqual(args[:2], []string{"worktree", "add"}) {
+	if name == "git" && len(args) >= 2 && reflect.DeepEqual(args[:2], []string{"worktree", "add"}) {
 		if _, err := os.Stat(args[2]); !errors.Is(err, os.ErrNotExist) {
 			r.t.Fatalf("worktree path exists before git worktree add: %v", err)
 		}
 	}
-	if len(r.outputs) == 0 {
-		return nil, nil
+	if len(r.results) == 0 {
+		return CommandOutput{}, nil
 	}
-	out := r.outputs[0]
-	r.outputs = r.outputs[1:]
-	return []byte(out), nil
+	result := r.results[0]
+	r.results = r.results[1:]
+	return CommandOutput{Stdout: []byte(result.stdout), Stderr: []byte(result.stderr)}, result.err
 }

@@ -1,13 +1,19 @@
 package install
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
+	"unicode"
 )
 
 type GitPublisher interface {
@@ -21,8 +27,13 @@ type PublishRequest struct {
 	Delete  []string
 }
 
+type CommandOutput struct {
+	Stdout []byte
+	Stderr []byte
+}
+
 type CommandRunner interface {
-	Run(ctx context.Context, dir string, name string, args ...string) ([]byte, error)
+	Run(ctx context.Context, dir string, name string, args ...string) (CommandOutput, error)
 }
 
 type GitCLIPublisher struct {
@@ -55,6 +66,12 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 		return "", err
 	}
 	runner := p.commandRunner()
+	if err := validateBranchWithGit(ctx, runner, p.root, req.Branch); err != nil {
+		return "", err
+	}
+	if err := ensureCleanGitRoot(ctx, runner, p.root); err != nil {
+		return "", err
+	}
 	tempDir := p.tempDir
 	if tempDir == nil {
 		tempDir = os.MkdirTemp
@@ -67,52 +84,181 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 	if err := os.Remove(worktree); err != nil && !os.IsNotExist(err) {
 		return "", err
 	}
-	cleanupWorktree := false
 	defer func() {
-		if !cleanupWorktree {
+		cleanupErr := cleanupGitWorktreeAndBranch(runner, p.root, worktree, req.Branch)
+		if cleanupErr == nil {
 			return
 		}
-		cleanupErr := runCommand(ctx, runner, p.root, "git", "worktree", "remove", "--force", worktree)
-		if err == nil && cleanupErr != nil {
-			err = cleanupErr
+		if err != nil {
+			err = errors.Join(err, cleanupErr)
+			return
 		}
+		prURL = ""
+		err = cleanupErr
 	}()
 
-	if err := runCommand(ctx, runner, p.root, "git", "worktree", "add", worktree, "-b", req.Branch); err != nil {
+	if _, err := runCommand(ctx, runner, p.root, "git", "worktree", "add", worktree, "-b", req.Branch); err != nil {
 		return "", err
 	}
-	cleanupWorktree = true
 
 	for name, content := range req.Files {
-		target := filepath.Join(worktree, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(target, content, 0o644); err != nil {
+		if err := writeWorktreeFile(worktree, name, content); err != nil {
 			return "", err
 		}
 	}
 	for _, name := range req.Delete {
-		target := filepath.Join(worktree, filepath.FromSlash(name))
-		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+		if err := deleteWorktreePath(worktree, name); err != nil {
 			return "", err
 		}
 	}
 
-	if err := runCommand(ctx, runner, worktree, "git", "add", "--all"); err != nil {
+	if _, err := runCommand(ctx, runner, worktree, "git", "add", "--all"); err != nil {
 		return "", err
 	}
-	if err := runCommand(ctx, runner, worktree, "git", "commit", "-m", req.Message); err != nil {
+	if _, err := runCommand(ctx, runner, worktree, "git", "commit", "-m", req.Message); err != nil {
 		return "", err
 	}
-	if err := runCommand(ctx, runner, worktree, "git", "push", "-u", "origin", req.Branch); err != nil {
+	if _, err := runCommand(ctx, runner, worktree, "git", "push", "-u", "origin", req.Branch); err != nil {
 		return "", err
 	}
-	out, err := runner.Run(ctx, worktree, "gh", "pr", "create", "--fill")
+	out, err := runCommand(ctx, runner, worktree, "gh", "pr", "create", "--fill")
 	if err != nil {
-		return "", fmt.Errorf("gh pr create --fill: %w", err)
+		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return parsePRURL(out)
+}
+
+func cleanupGitWorktreeAndBranch(runner CommandRunner, root string, worktree string, branch string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var cleanupErr error
+	if _, err := runCommand(ctx, runner, root, "git", "worktree", "remove", "--force", worktree); err != nil {
+		cleanupErr = errors.Join(cleanupErr, err)
+	}
+	if _, err := runCommand(ctx, runner, root, "git", "branch", "-D", branch); err != nil {
+		cleanupErr = errors.Join(cleanupErr, err)
+	}
+	return cleanupErr
+}
+
+func writeWorktreeFile(worktree string, name string, content []byte) error {
+	target, err := safeWorktreePath(worktree, name)
+	if err != nil {
+		return err
+	}
+	if err := ensureSafeParents(worktree, target); err != nil {
+		return err
+	}
+	if info, err := os.Lstat(target); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write symlink path: %s", name)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("refusing to overwrite directory: %s", name)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(target, content, 0o644)
+}
+
+func deleteWorktreePath(worktree string, name string) error {
+	target, err := safeWorktreePath(worktree, name)
+	if err != nil {
+		return err
+	}
+	if err := ensureSafeParents(worktree, target); err != nil {
+		return err
+	}
+	info, err := os.Lstat(target)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to delete symlink path: %s", name)
+	}
+	if !info.IsDir() {
+		return os.Remove(target)
+	}
+	if err := rejectSymlinkTree(target); err != nil {
+		return err
+	}
+	return os.RemoveAll(target)
+}
+
+func safeWorktreePath(worktree string, name string) (string, error) {
+	if !isSafeRelativePath(name) {
+		return "", fmt.Errorf("unsafe publish path: %q", name)
+	}
+	root, err := filepath.Abs(worktree)
+	if err != nil {
+		return "", err
+	}
+	target, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(name)))
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return "", err
+	}
+	if rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("publish path escapes worktree root: %q", name)
+	}
+	return target, nil
+}
+
+func ensureSafeParents(worktree string, target string) error {
+	root, err := filepath.Abs(worktree)
+	if err != nil {
+		return err
+	}
+	parent := filepath.Dir(target)
+	rel, err := filepath.Rel(root, parent)
+	if err != nil {
+		return err
+	}
+	if rel == "." {
+		return nil
+	}
+
+	current := root
+	for _, part := range strings.Split(rel, string(os.PathSeparator)) {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing symlink traversal: %s", current)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("path parent is not a directory: %s", current)
+		}
+	}
+	return nil
+}
+
+func rejectSymlinkTree(root string) error {
+	return filepath.WalkDir(root, func(name string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing symlink in deleted directory: %s", name)
+		}
+		return nil
+	})
 }
 
 func (p *GitCLIPublisher) validateRoot(ctx context.Context) error {
@@ -121,17 +267,10 @@ func (p *GitCLIPublisher) validateRoot(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("validate PLUGIN_GIT_ROOT: %w", err)
 	}
-	if strings.TrimSpace(string(out)) != "true" {
+	if strings.TrimSpace(string(out.Stdout)) != "true" {
 		return fmt.Errorf("PLUGIN_GIT_ROOT is not a git work tree")
 	}
-	out, err = runner.Run(ctx, p.root, "git", "status", "--porcelain")
-	if err != nil {
-		return fmt.Errorf("validate PLUGIN_GIT_ROOT cleanliness: %w", err)
-	}
-	if strings.TrimSpace(string(out)) != "" {
-		return fmt.Errorf("PLUGIN_GIT_ROOT must be clean")
-	}
-	return nil
+	return ensureCleanGitRoot(ctx, runner, p.root)
 }
 
 func (p *GitCLIPublisher) commandRunner() CommandRunner {
@@ -142,8 +281,8 @@ func (p *GitCLIPublisher) commandRunner() CommandRunner {
 }
 
 func validatePublishRequest(req PublishRequest) error {
-	if strings.TrimSpace(req.Branch) == "" {
-		return fmt.Errorf("publish branch is required")
+	if err := validateBranchName(req.Branch); err != nil {
+		return err
 	}
 	if strings.TrimSpace(req.Message) == "" {
 		return fmt.Errorf("publish message is required")
@@ -166,8 +305,41 @@ func validatePublishRequest(req PublishRequest) error {
 	return nil
 }
 
+func validateBranchName(branch string) error {
+	if branch == "" {
+		return fmt.Errorf("publish branch is required")
+	}
+	if strings.TrimSpace(branch) != branch {
+		return fmt.Errorf("publish branch must not contain surrounding whitespace")
+	}
+	for _, r := range branch {
+		if unicode.IsSpace(r) || r < 0x20 || r == 0x7f {
+			return fmt.Errorf("publish branch contains whitespace or control character")
+		}
+	}
+	return nil
+}
+
+func validateBranchWithGit(ctx context.Context, runner CommandRunner, root string, branch string) error {
+	if _, err := runCommand(ctx, runner, root, "git", "check-ref-format", "--branch", branch); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureCleanGitRoot(ctx context.Context, runner CommandRunner, root string) error {
+	out, err := runner.Run(ctx, root, "git", "status", "--porcelain")
+	if err != nil {
+		return fmt.Errorf("validate git root cleanliness: %w", err)
+	}
+	if strings.TrimSpace(string(out.Stdout)) != "" {
+		return fmt.Errorf("git root must be clean")
+	}
+	return nil
+}
+
 func isSafeRelativePath(name string) bool {
-	if name == "" || strings.Contains(name, `\`) || strings.HasPrefix(name, "/") || hasWindowsDrive(name) {
+	if name == "" || strings.Contains(name, `\`) || strings.HasPrefix(name, "/") || hasWindowsDrivePath(name) {
 		return false
 	}
 	if path.Clean(name) != name {
@@ -181,21 +353,61 @@ func isSafeRelativePath(name string) bool {
 	return true
 }
 
-func runCommand(ctx context.Context, runner CommandRunner, dir string, name string, args ...string) error {
-	if _, err := runner.Run(ctx, dir, name, args...); err != nil {
-		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+func hasWindowsDrivePath(name string) bool {
+	return len(name) >= 2 && name[1] == ':' && ((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z'))
+}
+
+func parsePRURL(out CommandOutput) (string, error) {
+	if strings.TrimSpace(string(out.Stderr)) != "" {
+		return "", fmt.Errorf("gh pr create produced stderr: %s", strings.TrimSpace(string(out.Stderr)))
 	}
-	return nil
+	raw := strings.TrimSpace(string(out.Stdout))
+	if raw == "" {
+		return "", fmt.Errorf("gh pr create returned empty URL")
+	}
+	if len(strings.Fields(raw)) != 1 {
+		return "", fmt.Errorf("gh pr create returned invalid URL output: %q", raw)
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return "", fmt.Errorf("gh pr create returned invalid URL: %q", raw)
+	}
+	return raw, nil
+}
+
+func runCommand(ctx context.Context, runner CommandRunner, dir string, name string, args ...string) (CommandOutput, error) {
+	out, err := runner.Run(ctx, dir, name, args...)
+	if err != nil {
+		return out, fmt.Errorf("%s %s: %w%s", name, strings.Join(args, " "), err, commandOutputSuffix(out))
+	}
+	return out, nil
+}
+
+func commandOutputSuffix(out CommandOutput) string {
+	stderr := strings.TrimSpace(string(out.Stderr))
+	if stderr != "" {
+		return ": " + stderr
+	}
+	stdout := strings.TrimSpace(string(out.Stdout))
+	if stdout != "" {
+		return ": " + stdout
+	}
+	return ""
 }
 
 type execCommandRunner struct{}
 
-func (execCommandRunner) Run(ctx context.Context, dir string, name string, args ...string) ([]byte, error) {
+func (execCommandRunner) Run(ctx context.Context, dir string, name string, args ...string) (CommandOutput, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	out := CommandOutput{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
 	if err != nil {
-		return out, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		return out, err
 	}
 	return out, nil
 }

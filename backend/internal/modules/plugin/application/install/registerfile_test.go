@@ -100,3 +100,25 @@ func TestRewriteRegisterGoWithNoPluginsIsValidPackage(t *testing.T) {
 		t.Fatalf("RewriteRegisterGo() = %q, want %q", got, want)
 	}
 }
+
+func TestRewriteRegisterGoRejectsInvalidPluginIDs(t *testing.T) {
+	invalidIDs := []string{
+		"a",
+		"Example",
+		"example_plugin",
+		"example.plugin",
+		"example/",
+		"-example",
+		"example plugin",
+		"example\nplugin",
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}
+
+	for _, id := range invalidIDs {
+		t.Run(id, func(t *testing.T) {
+			if _, err := RewriteRegisterGo(nil, testModulePath, []string{id}); err == nil {
+				t.Fatalf("RewriteRegisterGo() error = nil")
+			}
+		})
+	}
+}
