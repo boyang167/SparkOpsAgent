@@ -42,6 +42,7 @@ func TestAutoMigrateCreatesPluginSchemaTables(t *testing.T) {
 	assertColumn(t, db, "plugins", "version", "text", false, "")
 	assertColumn(t, db, "plugins", "display_name", "text", false, "")
 	assertColumn(t, db, "plugins", "manifest_yaml", "text", false, "")
+	assertColumn(t, db, "plugins", "installed_files", "jsonb", false, "[]")
 	assertColumn(t, db, "plugins", "status", "text", false, "")
 	assertColumn(t, db, "plugins", "created_by", "uuid", false, "")
 	assertColumn(t, db, "workspace_bindings", "workspace_id", "uuid", false, "")
@@ -75,10 +76,14 @@ func TestStorePersistsPluginsAndWorkspaceBindings(t *testing.T) {
 		Version:      "0.1.0",
 		DisplayName:  "Example Plugin",
 		ManifestYAML: "id: example",
-		Status:       model.PluginStatusUploaded,
-		CreatedBy:    createdBy,
-		CreatedAt:    enabledAt.Add(-time.Hour),
-		UpdatedAt:    enabledAt.Add(-time.Hour),
+		InstalledFiles: []string{
+			"backend/internal/plugins/example/plugin.go",
+			"fronted/apps/web/app/(platform)/plugins/example/page.tsx",
+		},
+		Status:    model.PluginStatusUploaded,
+		CreatedBy: createdBy,
+		CreatedAt: enabledAt.Add(-time.Hour),
+		UpdatedAt: enabledAt.Add(-time.Hour),
 	}
 	t.Cleanup(func() {
 		_ = repo.DeleteBinding(ctx, wsID, pluginID)
@@ -91,6 +96,7 @@ func TestStorePersistsPluginsAndWorkspaceBindings(t *testing.T) {
 	require.Equal(t, pluginID, found.ID)
 	require.Equal(t, "0.1.0", found.Version)
 	require.Equal(t, "Example Plugin", found.DisplayName)
+	require.Equal(t, plugin.InstalledFiles, found.InstalledFiles)
 	require.Equal(t, model.PluginStatusUploaded, found.Status)
 	require.Equal(t, createdBy, found.CreatedBy)
 

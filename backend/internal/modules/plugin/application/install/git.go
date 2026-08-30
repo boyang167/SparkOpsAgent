@@ -18,6 +18,7 @@ import (
 
 type GitPublisher interface {
 	Publish(ctx context.Context, req PublishRequest) (prURL string, err error)
+	LookupPullRequest(ctx context.Context, branch string) (prURL string, found bool, err error)
 }
 
 type PublishRequest struct {
@@ -131,6 +132,29 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 		return "", err
 	}
 	return parsePRURL(out)
+}
+
+func (p *GitCLIPublisher) LookupPullRequest(ctx context.Context, branch string) (string, bool, error) {
+	if err := validateBranchName(branch); err != nil {
+		return "", false, err
+	}
+	runner := p.commandRunner()
+	if err := validateBranchWithGit(ctx, runner, p.root, branch); err != nil {
+		return "", false, err
+	}
+	out, err := runner.Run(ctx, p.root, "gh", "pr", "view", branch, "--json", "url", "--jq", ".url")
+	if err != nil {
+		message := strings.ToLower(strings.TrimSpace(string(out.Stderr) + " " + string(out.Stdout)))
+		if strings.Contains(message, "no pull requests found") || strings.Contains(message, "could not resolve to a pullrequest") {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("gh pr view %s: %w%s", branch, err, commandOutputSuffix(out))
+	}
+	url, err := parsePRURL(out)
+	if err != nil {
+		return "", false, err
+	}
+	return url, true, nil
 }
 
 func cleanupGitWorktreeAndBranch(runner CommandRunner, root string, worktree string, branch string, branchOwned bool) error {
@@ -308,6 +332,13 @@ func validatePublishRequest(req PublishRequest) error {
 		if _, ok := seenWrites[name]; ok {
 			return fmt.Errorf("publish path cannot be both written and deleted: %q", name)
 		}
+	}
+	return nil
+}
+
+func ValidateRepoRelativePath(name string) error {
+	if !isSafeRelativePath(name) {
+		return fmt.Errorf("unsafe repository path: %q", name)
 	}
 	return nil
 }

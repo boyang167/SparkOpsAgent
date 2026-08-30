@@ -5,6 +5,7 @@ CREATE TABLE plugin.plugins (
     version       TEXT NOT NULL,
     display_name  TEXT NOT NULL,
     manifest_yaml TEXT NOT NULL,
+    installed_files JSONB NOT NULL DEFAULT '[]'::jsonb,
     status        TEXT NOT NULL,
     pr_url        TEXT NOT NULL DEFAULT '',
     created_by    UUID NOT NULL,

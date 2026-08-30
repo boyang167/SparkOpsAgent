@@ -6,6 +6,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -91,8 +93,59 @@ func TestInstallRejectsMultipartFieldsOtherThanSingleFile(t *testing.T) {
 	require.Contains(t, response.Body.String(), "INVALID_REQUEST")
 }
 
-func TestInstallUploadLimitIsFiftyMiB(t *testing.T) {
+func TestInstallUploadLimitsReserveMultipartOverhead(t *testing.T) {
 	require.Equal(t, int64(50<<20), pluginhttp.MaxUploadBytes)
+	require.Equal(t, int64(51<<20), pluginhttp.MaxRequestBytes)
+}
+
+func TestInstallRejectsArchiveOverFiftyMiBAndCleansTemporaryFile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	install := &installStub{}
+	handler := pluginhttp.NewHandler(install, listStub{}, getStub{}, statusStub{}, statusStub{}, uninstallStub{})
+	tokens := authn.NewTokenProvider(config.JWTConfig{Secret: "test-secret"})
+	token, err := tokens.Issue(kernel.NewMemberID())
+	require.NoError(t, err)
+	engine := gin.New()
+	engine.POST("/install", authn.RequireAuth(tokens), handler.Install)
+	tempDir := t.TempDir()
+	t.Setenv("TMP", tempDir)
+	t.Setenv("TEMP", tempDir)
+
+	body, contentType := multipartBody(t, map[string]string{
+		"file": strings.Repeat("x", int(pluginhttp.MaxUploadBytes)+1),
+	}, nil)
+	request := httptest.NewRequest(http.MethodPost, "/install", body)
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, response.Code)
+	require.Empty(t, install.raw)
+	entries, err := os.ReadDir(tempDir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
+
+func TestInstallRejectsMultipartRequestOverFiftyOneMiB(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := pluginhttp.NewHandler(&installStub{}, listStub{}, getStub{}, statusStub{}, statusStub{}, uninstallStub{})
+	tokens := authn.NewTokenProvider(config.JWTConfig{Secret: "test-secret"})
+	token, err := tokens.Issue(kernel.NewMemberID())
+	require.NoError(t, err)
+	engine := gin.New()
+	engine.POST("/install", authn.RequireAuth(tokens), handler.Install)
+
+	body, contentType := multipartBody(t, map[string]string{
+		"file": strings.Repeat("x", int(pluginhttp.MaxRequestBytes)+1),
+	}, nil)
+	request := httptest.NewRequest(http.MethodPost, "/install", body)
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, response.Code)
 }
 
 func multipartBody(t *testing.T, files map[string]string, fields map[string]string) (*bytes.Buffer, string) {

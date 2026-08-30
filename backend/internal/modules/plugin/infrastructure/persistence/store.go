@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -49,15 +50,16 @@ func AutoMigrate(db *gorm.DB) error {
 }
 
 type pluginModel struct {
-	ID           string    `gorm:"column:id;primaryKey;type:text"`
-	Version      string    `gorm:"type:text;not null"`
-	DisplayName  string    `gorm:"type:text;not null"`
-	ManifestYAML string    `gorm:"type:text;not null"`
-	Status       string    `gorm:"type:text;not null"`
-	PRURL        string    `gorm:"column:pr_url;type:text;not null;default:''"`
-	CreatedBy    string    `gorm:"type:uuid;not null"`
-	CreatedAt    time.Time `gorm:"not null"`
-	UpdatedAt    time.Time `gorm:"not null"`
+	ID                 string    `gorm:"column:id;primaryKey;type:text"`
+	Version            string    `gorm:"type:text;not null"`
+	DisplayName        string    `gorm:"type:text;not null"`
+	ManifestYAML       string    `gorm:"type:text;not null"`
+	InstalledFilesJSON string    `gorm:"column:installed_files;type:jsonb;not null;default:'[]'"`
+	Status             string    `gorm:"type:text;not null"`
+	PRURL              string    `gorm:"column:pr_url;type:text;not null;default:''"`
+	CreatedBy          string    `gorm:"type:uuid;not null"`
+	CreatedAt          time.Time `gorm:"not null"`
+	UpdatedAt          time.Time `gorm:"not null"`
 }
 
 func (pluginModel) TableName() string { return "plugin.plugins" }
@@ -81,21 +83,26 @@ func NewStore(db *gorm.DB) *Store {
 }
 
 func (s *Store) SavePlugin(ctx context.Context, plugin *model.PluginRecord) error {
+	installedFiles, err := json.Marshal(plugin.InstalledFiles)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	if plugin.CreatedAt.IsZero() {
 		plugin.CreatedAt = now
 	}
 	plugin.UpdatedAt = now
 	row := pluginModel{
-		ID:           plugin.ID,
-		Version:      plugin.Version,
-		DisplayName:  plugin.DisplayName,
-		ManifestYAML: plugin.ManifestYAML,
-		Status:       string(plugin.Status),
-		PRURL:        plugin.PRURL,
-		CreatedBy:    plugin.CreatedBy.String(),
-		CreatedAt:    plugin.CreatedAt,
-		UpdatedAt:    plugin.UpdatedAt,
+		ID:                 plugin.ID,
+		Version:            plugin.Version,
+		DisplayName:        plugin.DisplayName,
+		ManifestYAML:       plugin.ManifestYAML,
+		InstalledFilesJSON: string(installedFiles),
+		Status:             string(plugin.Status),
+		PRURL:              plugin.PRURL,
+		CreatedBy:          plugin.CreatedBy.String(),
+		CreatedAt:          plugin.CreatedAt,
+		UpdatedAt:          plugin.UpdatedAt,
 	}
 	return s.db.WithContext(ctx).Save(&row).Error
 }
@@ -211,16 +218,24 @@ func rowToPlugin(row pluginModel) (*model.PluginRecord, error) {
 	if err != nil {
 		return nil, err
 	}
+	var installedFiles []string
+	if err := json.Unmarshal([]byte(row.InstalledFilesJSON), &installedFiles); err != nil {
+		return nil, err
+	}
+	if installedFiles == nil {
+		installedFiles = []string{}
+	}
 	return &model.PluginRecord{
-		ID:           row.ID,
-		Version:      row.Version,
-		DisplayName:  row.DisplayName,
-		ManifestYAML: row.ManifestYAML,
-		Status:       model.PluginStatus(row.Status),
-		PRURL:        row.PRURL,
-		CreatedBy:    createdBy,
-		CreatedAt:    row.CreatedAt,
-		UpdatedAt:    row.UpdatedAt,
+		ID:             row.ID,
+		Version:        row.Version,
+		DisplayName:    row.DisplayName,
+		ManifestYAML:   row.ManifestYAML,
+		InstalledFiles: installedFiles,
+		Status:         model.PluginStatus(row.Status),
+		PRURL:          row.PRURL,
+		CreatedBy:      createdBy,
+		CreatedAt:      row.CreatedAt,
+		UpdatedAt:      row.UpdatedAt,
 	}, nil
 }
 

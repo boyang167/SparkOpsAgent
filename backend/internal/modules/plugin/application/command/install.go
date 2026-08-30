@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -40,9 +41,58 @@ func (h *InstallHandler) Handle(ctx context.Context, rawZip []byte, actor kernel
 	if err != nil {
 		return nil, err
 	}
-	if _, err := h.repo.FindPlugin(ctx, inspected.Manifest.ID); err == nil {
-		return nil, domain.ErrPluginIDConflict
-	} else if !errors.Is(err, domain.ErrPluginNotFound) {
+
+	manifestBytes, err := yaml.Marshal(inspected.Manifest)
+	if err != nil {
+		return nil, err
+	}
+	files, err := installFiles(inspected, manifestBytes)
+	if err != nil {
+		return nil, err
+	}
+	installedFiles := make([]string, 0, len(files))
+	for name := range files {
+		installedFiles = append(installedFiles, name)
+	}
+	sort.Strings(installedFiles)
+
+	record, findErr := h.repo.FindPlugin(ctx, inspected.Manifest.ID)
+	isRetry := findErr == nil
+	if findErr != nil && !errors.Is(findErr, domain.ErrPluginNotFound) {
+		return nil, findErr
+	}
+	if isRetry {
+		if (record.Status != model.PluginStatusUploaded && record.Status != model.PluginStatusPRFailed) ||
+			record.Version != inspected.Manifest.Version || record.ManifestYAML != string(manifestBytes) {
+			return nil, domain.ErrPluginIDConflict
+		}
+		record.InstalledFiles = installedFiles
+		branch := "plugin/install-" + record.ID
+		prURL, found, err := h.publisher.LookupPullRequest(ctx, branch)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			if err := record.MarkPROpen(prURL); err != nil {
+				return nil, err
+			}
+			if err := h.repo.SavePlugin(ctx, record); err != nil {
+				return record, err
+			}
+			return record, nil
+		}
+	} else {
+		record = &model.PluginRecord{
+			ID:             inspected.Manifest.ID,
+			Version:        inspected.Manifest.Version,
+			DisplayName:    inspected.Manifest.DisplayName,
+			ManifestYAML:   string(manifestBytes),
+			InstalledFiles: installedFiles,
+			Status:         model.PluginStatusUploaded,
+			CreatedBy:      actor,
+		}
+	}
+	if err := h.repo.SavePlugin(ctx, record); err != nil {
 		return nil, err
 	}
 
@@ -64,24 +114,6 @@ func (h *InstallHandler) Handle(ctx context.Context, rawZip []byte, actor kernel
 	if err != nil {
 		return nil, err
 	}
-
-	manifestBytes, err := yaml.Marshal(inspected.Manifest)
-	if err != nil {
-		return nil, err
-	}
-	record := &model.PluginRecord{
-		ID:           inspected.Manifest.ID,
-		Version:      inspected.Manifest.Version,
-		DisplayName:  inspected.Manifest.DisplayName,
-		ManifestYAML: string(manifestBytes),
-		Status:       model.PluginStatusUploaded,
-		CreatedBy:    actor,
-	}
-	if err := h.repo.SavePlugin(ctx, record); err != nil {
-		return nil, err
-	}
-
-	files := installFiles(inspected, manifestBytes)
 	files[registerGoPath] = nextRegister
 	prURL, publishErr := h.publisher.Publish(ctx, plugininstall.PublishRequest{
 		Branch:  "plugin/install-" + record.ID,
@@ -89,8 +121,10 @@ func (h *InstallHandler) Handle(ctx context.Context, rawZip []byte, actor kernel
 		Files:   files,
 	})
 	if publishErr != nil {
-		if err := record.MarkPRFailed(); err != nil {
-			return record, errors.Join(publishErr, err)
+		if record.Status != model.PluginStatusPRFailed {
+			if err := record.MarkPRFailed(); err != nil {
+				return record, errors.Join(publishErr, err)
+			}
 		}
 		if err := h.repo.SavePlugin(ctx, record); err != nil {
 			return record, errors.Join(publishErr, err)
@@ -106,17 +140,37 @@ func (h *InstallHandler) Handle(ctx context.Context, rawZip []byte, actor kernel
 	return record, nil
 }
 
-func installFiles(inspected *plugininstall.InspectedZip, manifestBytes []byte) map[string][]byte {
+func installFiles(inspected *plugininstall.InspectedZip, manifestBytes []byte) (map[string][]byte, error) {
 	files := make(map[string][]byte, len(inspected.BackendFiles)+len(inspected.FrontendFiles)+1)
 	backendRoot := path.Join("backend/internal/plugins", inspected.Manifest.ID)
 	for name, content := range inspected.BackendFiles {
-		files[path.Join(backendRoot, name)] = append([]byte(nil), content...)
+		if err := plugininstall.ValidateRepoRelativePath(name); err != nil {
+			return nil, err
+		}
+		target := path.Join(backendRoot, name)
+		if err := plugininstall.ValidateRepoRelativePath(target); err != nil {
+			return nil, err
+		}
+		if !strings.HasPrefix(target, backendRoot+"/") {
+			return nil, fmt.Errorf("unsafe backend plugin path: %q", name)
+		}
+		files[target] = append([]byte(nil), content...)
 	}
 	for name, content := range inspected.FrontendFiles {
-		files[path.Join("fronted/apps/web", name)] = append([]byte(nil), content...)
+		if err := plugininstall.ValidateRepoRelativePath(name); err != nil {
+			return nil, err
+		}
+		target := path.Join("fronted/apps/web", name)
+		if err := plugininstall.ValidateRepoRelativePath(target); err != nil {
+			return nil, err
+		}
+		if !strings.HasPrefix(target, "fronted/apps/web/") {
+			return nil, fmt.Errorf("unsafe frontend plugin path: %q", name)
+		}
+		files[target] = append([]byte(nil), content...)
 	}
 	files[path.Join(backendRoot, "plugin.yaml")] = append([]byte(nil), manifestBytes...)
-	return files
+	return files, nil
 }
 
 func registeredPluginIDs(src []byte) ([]string, error) {

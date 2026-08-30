@@ -3,6 +3,8 @@ package install
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -86,6 +88,26 @@ func TestInspectZipAcceptsValidPluginAndMapsFiles(t *testing.T) {
 	require.NotContains(t, inspected.Files, "plugin.yaml")
 }
 
+func TestInspectZipRejectsMoreThanOneThousandEntries(t *testing.T) {
+	_, err := InspectZip(makeSizedZip(t, nil, 998))
+
+	requireZipInvalid(t, err)
+}
+
+func TestInspectZipRejectsFileLargerThanTenMiB(t *testing.T) {
+	_, err := InspectZip(makeSizedZip(t, []int64{10<<20 + 1}, 0))
+
+	requireZipInvalid(t, err)
+}
+
+func TestInspectZipRejectsMoreThanFiftyMiBUncompressed(t *testing.T) {
+	_, err := InspectZip(makeSizedZip(t, []int64{
+		9 << 20, 9 << 20, 9 << 20, 9 << 20, 9 << 20, 6 << 20,
+	}, 0))
+
+	requireZipInvalid(t, err)
+}
+
 func TestInspectZipRejectsDuplicateRawEntryNames(t *testing.T) {
 	_, err := InspectZip(makeZipEntries(t, []zipEntry{
 		{name: "example/plugin.yaml", content: validPluginYAML},
@@ -139,6 +161,44 @@ func requireZipInvalid(t *testing.T, err error) {
 	de, ok := kernel.IsDomainError(err)
 	require.True(t, ok)
 	require.Equal(t, "PLUGIN_ZIP_INVALID", de.Code())
+}
+
+type repeatedByteReader struct{}
+
+func (repeatedByteReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'a'
+	}
+	return len(p), nil
+}
+
+func makeSizedZip(t *testing.T, sizes []int64, extraEntries int) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := zip.NewWriter(&buf)
+	base := []zipEntry{
+		{name: "example/plugin.yaml", content: validPluginYAML},
+		{name: "example/backend/plugin.go", content: validPluginGo},
+		{name: "example/frontend/app/(platform)/plugins/example/page.tsx", content: "export default function Page(){return null}"},
+	}
+	for _, entry := range base {
+		part, err := writer.Create(entry.name)
+		require.NoError(t, err)
+		_, err = part.Write([]byte(entry.content))
+		require.NoError(t, err)
+	}
+	for i := 0; i < extraEntries; i++ {
+		_, err := writer.Create(fmt.Sprintf("example/backend/dir-%04d/", i))
+		require.NoError(t, err)
+	}
+	for i, size := range sizes {
+		part, err := writer.Create(fmt.Sprintf("example/backend/data-%02d.txt", i))
+		require.NoError(t, err)
+		_, err = io.CopyN(part, repeatedByteReader{}, size)
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+	return buf.Bytes()
 }
 
 func TestInspectZipRejectsScriptAndBinaryExtensions(t *testing.T) {

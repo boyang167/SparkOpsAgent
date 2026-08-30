@@ -23,6 +23,12 @@ var rejectedExts = map[string]struct{}{
 	".so":  {},
 }
 
+const (
+	maxZipEntries       = 1000
+	maxZipFileBytes     = 10 << 20
+	maxZipExpandedBytes = 50 << 20
+)
+
 type InspectedZip struct {
 	Manifest      *manifest.Manifest
 	Files         map[string][]byte
@@ -35,6 +41,9 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 	if err != nil {
 		return nil, zipInvalid("plugin zip is invalid")
 	}
+	if len(zr.File) > maxZipEntries {
+		return nil, zipInvalid("plugin zip contains too many entries")
+	}
 
 	files := make(map[string][]byte)
 	backendFiles := make(map[string][]byte)
@@ -43,6 +52,8 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 	var foundManifest *manifest.Manifest
 	var topLevelID string
 	registerFound := false
+	var declaredExpanded uint64
+	var actualExpanded int64
 
 	for _, f := range zr.File {
 		if _, ok := seenRawNames[f.Name]; ok {
@@ -56,6 +67,13 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 		}
 		if isDir {
 			continue
+		}
+		if f.UncompressedSize64 > maxZipFileBytes {
+			return nil, zipInvalid("plugin zip entry exceeds 10 MiB: " + name)
+		}
+		declaredExpanded += f.UncompressedSize64
+		if declaredExpanded > maxZipExpandedBytes {
+			return nil, zipInvalid("plugin zip exceeds 50 MiB uncompressed")
 		}
 		if _, ok := rejectedExts[strings.ToLower(path.Ext(name))]; ok {
 			return nil, zipInvalid("plugin zip contains rejected extension: " + name)
@@ -71,9 +89,13 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 			return nil, zipInvalid("plugin zip contains multiple top-level directories")
 		}
 
-		content, err := readZipFile(f)
+		content, err := readZipFile(f, maxZipFileBytes)
 		if err != nil {
 			return nil, zipInvalid("plugin zip entry cannot be read: " + name)
+		}
+		actualExpanded += int64(len(content))
+		if actualExpanded > maxZipExpandedBytes {
+			return nil, zipInvalid("plugin zip exceeds 50 MiB uncompressed")
 		}
 
 		switch {
@@ -154,14 +176,21 @@ func hasWindowsDrive(name string) bool {
 	return len(name) >= 2 && name[1] == ':' && ((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z'))
 }
 
-func readZipFile(f *zip.File) ([]byte, error) {
+func readZipFile(f *zip.File, maxBytes int64) ([]byte, error) {
 	r, err := f.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer r.Close()
 
-	return io.ReadAll(r)
+	content, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(content)) > maxBytes {
+		return nil, fmt.Errorf("uncompressed size exceeds limit")
+	}
+	return content, nil
 }
 
 func zipInvalid(message string) error {

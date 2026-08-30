@@ -2,18 +2,22 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	plugininstall "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/application/install"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain"
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/manifest"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
+
+var uninstallPluginIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,62}$`)
 
 type UninstallHandler struct {
 	repo      repository.PluginRepository
@@ -43,6 +47,24 @@ func (h *UninstallHandler) Handle(ctx context.Context, id string, actor kernel.M
 			return nil, domain.ErrPluginInUse
 		}
 	}
+	deletePaths, err := uninstallDeletePaths(record)
+	if err != nil {
+		return nil, err
+	}
+	branch := "plugin/uninstall-" + id
+	prURL, found, err := h.publisher.LookupPullRequest(ctx, branch)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		if err := record.MarkUninstalling(prURL); err != nil {
+			return nil, err
+		}
+		if err := h.repo.SavePlugin(ctx, record); err != nil {
+			return record, err
+		}
+		return record, nil
+	}
 
 	root, err := resolveInstallRoot(h.root)
 	if err != nil {
@@ -67,16 +89,8 @@ func (h *UninstallHandler) Handle(ctx context.Context, id string, actor kernel.M
 		return nil, err
 	}
 
-	storedManifest, err := manifest.Parse([]byte(record.ManifestYAML))
-	if err != nil {
-		return nil, err
-	}
-	deletePaths := []string{path.Join("backend/internal/plugins", id)}
-	for _, page := range storedManifest.Frontend.Pages {
-		deletePaths = append(deletePaths, path.Join("fronted/apps/web", page))
-	}
-	prURL, err := h.publisher.Publish(ctx, plugininstall.PublishRequest{
-		Branch:  "plugin/uninstall-" + id,
+	prURL, err = h.publisher.Publish(ctx, plugininstall.PublishRequest{
+		Branch:  branch,
 		Message: "Uninstall plugin " + id,
 		Files:   map[string][]byte{registerGoPath: nextRegister},
 		Delete:  deletePaths,
@@ -93,6 +107,31 @@ func (h *UninstallHandler) Handle(ctx context.Context, id string, actor kernel.M
 	return record, nil
 }
 
+func uninstallDeletePaths(record *model.PluginRecord) ([]string, error) {
+	if !uninstallPluginIDPattern.MatchString(record.ID) {
+		return nil, fmt.Errorf("unsafe plugin id: %q", record.ID)
+	}
+	backendRoot := path.Join("backend/internal/plugins", record.ID)
+	deletePaths := make([]string, 0, len(record.InstalledFiles)+1)
+	seen := make(map[string]struct{}, len(record.InstalledFiles)+1)
+	for _, name := range record.InstalledFiles {
+		if err := plugininstall.ValidateRepoRelativePath(name); err != nil {
+			return nil, err
+		}
+		if !strings.HasPrefix(name, backendRoot+"/") && !strings.HasPrefix(name, "fronted/apps/web/") {
+			return nil, fmt.Errorf("installed file is outside plugin roots: %q", name)
+		}
+		if _, ok := seen[name]; !ok {
+			deletePaths = append(deletePaths, name)
+			seen[name] = struct{}{}
+		}
+	}
+	if _, ok := seen[backendRoot]; !ok {
+		deletePaths = append(deletePaths, backendRoot)
+	}
+	return deletePaths, nil
+}
+
 type MarkMergedHandler struct {
 	repo repository.PluginRepository
 }
@@ -106,10 +145,15 @@ func (h *MarkMergedHandler) Handle(ctx context.Context, id string) (*model.Plugi
 	if err != nil {
 		return nil, err
 	}
-	if record.Status == model.PluginStatusUninstalling {
+	switch record.Status {
+	case model.PluginStatusMerged, model.PluginStatusUninstallMerged:
+		return record, nil
+	case model.PluginStatusUninstalling:
 		err = record.MarkUninstallMerged()
-	} else {
+	case model.PluginStatusPROpen:
 		err = record.MarkMerged()
+	default:
+		return nil, model.ErrInvalidPluginStatusTransition
 	}
 	if err != nil {
 		return nil, err
@@ -131,16 +175,28 @@ func NewMarkDeployedHandler(repo repository.PluginRepository) *MarkDeployedHandl
 func (h *MarkDeployedHandler) Handle(ctx context.Context, id string) (*model.PluginRecord, error) {
 	record, err := h.repo.FindPlugin(ctx, id)
 	if err != nil {
+		if errors.Is(err, domain.ErrPluginNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
-	if record.Status == model.PluginStatusUninstallMerged {
+	switch record.Status {
+	case model.PluginStatusDeployed:
+		return record, nil
+	case model.PluginStatusUninstallMerged:
 		if err := h.repo.DeletePlugin(ctx, id); err != nil {
+			if errors.Is(err, domain.ErrPluginNotFound) {
+				return nil, nil
+			}
 			return nil, err
 		}
 		return nil, nil
-	}
-	if err := record.MarkDeployed(); err != nil {
-		return nil, err
+	case model.PluginStatusMerged:
+		if err := record.MarkDeployed(); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, model.ErrInvalidPluginStatusTransition
 	}
 	if err := h.repo.SavePlugin(ctx, record); err != nil {
 		return nil, err

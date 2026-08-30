@@ -1,6 +1,8 @@
 package persistence
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +23,10 @@ func TestGormModelsDeclareRequiredSchemaConstraints(t *testing.T) {
 	require.NotNil(t, createdBy)
 	require.Equal(t, "uuid", strings.ToLower(createdBy.TagSettings["TYPE"]))
 	require.Contains(t, createdBy.TagSettings, "NOT NULL")
+	installedFiles := pluginSchema.LookUpField("InstalledFilesJSON")
+	require.NotNil(t, installedFiles)
+	require.Equal(t, "jsonb", strings.ToLower(installedFiles.TagSettings["TYPE"]))
+	require.Contains(t, installedFiles.TagSettings, "NOT NULL")
 
 	bindingSchema := parseGormSchema(t, &workspaceBindingModel{})
 	for _, fieldName := range []string{"WorkspaceID", "PluginID", "Enabled"} {
@@ -30,6 +36,17 @@ func TestGormModelsDeclareRequiredSchemaConstraints(t *testing.T) {
 	}
 	enabled := bindingSchema.LookUpField("Enabled")
 	require.Equal(t, "false", strings.ToLower(enabled.TagSettings["DEFAULT"]))
+}
+
+func TestPluginMigrationDeclaresInstalledFilesJSONB(t *testing.T) {
+	migrations := filepath.Join("..", "..", "..", "..", "..", "migrations")
+	source, err := os.ReadFile(filepath.Join(migrations, "000033_plugin_framework.up.sql"))
+	require.NoError(t, err)
+	require.Contains(t, string(source), "installed_files JSONB NOT NULL DEFAULT '[]'::jsonb")
+
+	source, err = os.ReadFile(filepath.Join(migrations, "000033_plugin_framework.down.sql"))
+	require.NoError(t, err)
+	require.Contains(t, string(source), "DROP COLUMN IF EXISTS installed_files")
 }
 
 func parseGormSchema(t *testing.T, value any) *schema.Schema {

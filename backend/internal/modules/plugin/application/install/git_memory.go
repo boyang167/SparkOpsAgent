@@ -3,13 +3,41 @@ package install
 import "context"
 
 type MemoryPublisher struct {
-	Last PublishRequest
+	Last         PublishRequest
+	PullRequests map[string]string
+	PublishURL   string
+	PublishErr   error
+	LookupErr    error
+	PublishCount int
+	LookupCount  int
 }
 
 func (p *MemoryPublisher) Publish(ctx context.Context, req PublishRequest) (string, error) {
 	_ = ctx
 	p.Last = clonePublishRequest(req)
-	return "https://example.local/pr/1", nil
+	p.PublishCount++
+	if p.PublishErr != nil {
+		return "", p.PublishErr
+	}
+	url := p.PublishURL
+	if url == "" {
+		url = "https://example.local/pr/1"
+	}
+	if p.PullRequests == nil {
+		p.PullRequests = make(map[string]string)
+	}
+	p.PullRequests[req.Branch] = url
+	return url, nil
+}
+
+func (p *MemoryPublisher) LookupPullRequest(ctx context.Context, branch string) (string, bool, error) {
+	_ = ctx
+	p.LookupCount++
+	if p.LookupErr != nil {
+		return "", false, p.LookupErr
+	}
+	url, found := p.PullRequests[branch]
+	return url, found, nil
 }
 
 func clonePublishRequest(req PublishRequest) PublishRequest {

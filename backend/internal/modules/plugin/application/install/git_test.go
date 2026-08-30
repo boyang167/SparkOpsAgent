@@ -38,6 +38,79 @@ func TestMemoryPublisherStoresLastRequest(t *testing.T) {
 	}
 }
 
+func TestMemoryPublisherLooksUpPublishedPullRequestByBranch(t *testing.T) {
+	publisher := &MemoryPublisher{}
+	_, err := publisher.Publish(context.Background(), PublishRequest{
+		Branch:  "plugin/install-example",
+		Message: "Install example",
+	})
+	if err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	url, found, err := publisher.LookupPullRequest(context.Background(), "plugin/install-example")
+
+	if err != nil {
+		t.Fatalf("LookupPullRequest() error = %v", err)
+	}
+	if !found || url != "https://example.local/pr/1" {
+		t.Fatalf("LookupPullRequest() = %q, %v", url, found)
+	}
+}
+
+func TestGitCLIPublisherLooksUpPullRequestWithStrictURLParsing(t *testing.T) {
+	root := t.TempDir()
+	runner := &recordingRunner{results: []commandResult{
+		{stdout: "refs/heads/plugin/install-example\n"},
+		{stdout: "https://example.test/pr/42\n"},
+	}}
+	publisher := &GitCLIPublisher{root: root, runner: runner}
+
+	url, found, err := publisher.LookupPullRequest(context.Background(), "plugin/install-example")
+
+	if err != nil {
+		t.Fatalf("LookupPullRequest() error = %v", err)
+	}
+	if !found || url != "https://example.test/pr/42" {
+		t.Fatalf("LookupPullRequest() = %q, %v", url, found)
+	}
+	wantCalls := []commandCall{
+		{dir: root, name: "git", args: []string{"check-ref-format", "--normalize", "refs/heads/plugin/install-example"}},
+		{dir: root, name: "gh", args: []string{"pr", "view", "plugin/install-example", "--json", "url", "--jq", ".url"}},
+	}
+	if !reflect.DeepEqual(runner.calls, wantCalls) {
+		t.Fatalf("calls = %#v, want %#v", runner.calls, wantCalls)
+	}
+}
+
+func TestGitCLIPublisherLookupReportsMissingPullRequest(t *testing.T) {
+	runner := &recordingRunner{results: []commandResult{
+		{stdout: "refs/heads/plugin/install-example\n"},
+		{stderr: "no pull requests found for branch \"plugin/install-example\"", err: errors.New("exit 1")},
+	}}
+	publisher := &GitCLIPublisher{root: t.TempDir(), runner: runner}
+
+	url, found, err := publisher.LookupPullRequest(context.Background(), "plugin/install-example")
+
+	if err != nil || found || url != "" {
+		t.Fatalf("LookupPullRequest() = %q, %v, %v; want missing", url, found, err)
+	}
+}
+
+func TestGitCLIPublisherLookupRejectsMalformedURL(t *testing.T) {
+	runner := &recordingRunner{results: []commandResult{
+		{stdout: "refs/heads/plugin/install-example\n"},
+		{stdout: "not-a-url\n"},
+	}}
+	publisher := &GitCLIPublisher{root: t.TempDir(), runner: runner}
+
+	_, found, err := publisher.LookupPullRequest(context.Background(), "plugin/install-example")
+
+	if err == nil || found {
+		t.Fatalf("LookupPullRequest() error = %v, found = %v", err, found)
+	}
+}
+
 func TestGitCLIPublisherRejectsUnsafePaths(t *testing.T) {
 	tests := []struct {
 		name string

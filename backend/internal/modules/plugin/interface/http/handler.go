@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -14,7 +15,11 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
-const MaxUploadBytes int64 = 50 << 20
+const (
+	MaxUploadBytes  int64 = 50 << 20
+	MaxRequestBytes int64 = 51 << 20
+	multipartMemory int64 = 32 << 20
+)
 
 type installCommand interface {
 	Handle(context.Context, []byte, kernel.MemberID) (*model.PluginRecord, error)
@@ -74,32 +79,43 @@ func (h *Handler) Install(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", "multipart/form-data is required", http.StatusBadRequest)
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxUploadBytes)
-	if err := c.Request.ParseMultipartForm(MaxUploadBytes); err != nil {
-		status := http.StatusBadRequest
-		if err.Error() == "http: request body too large" {
-			status = http.StatusRequestEntityTooLarge
-		}
-		httpx.Fail(c, "INVALID_REQUEST", err.Error(), status)
-		return
-	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxRequestBytes)
+	parseErr := c.Request.ParseMultipartForm(multipartMemory)
 	if c.Request.MultipartForm != nil {
 		defer c.Request.MultipartForm.RemoveAll()
+	}
+	if parseErr != nil {
+		status := http.StatusBadRequest
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(parseErr, &maxBytesErr) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		httpx.Fail(c, "INVALID_REQUEST", parseErr.Error(), status)
+		return
 	}
 	form := c.Request.MultipartForm
 	if form == nil || len(form.Value) != 0 || len(form.File) != 1 || len(form.File["file"]) != 1 {
 		httpx.Fail(c, "INVALID_REQUEST", "multipart body must contain only one file field named file", http.StatusBadRequest)
 		return
 	}
-	file, err := form.File["file"][0].Open()
+	fileHeader := form.File["file"][0]
+	if fileHeader.Size > MaxUploadBytes {
+		httpx.Fail(c, "INVALID_REQUEST", "plugin archive exceeds 50 MiB", http.StatusRequestEntityTooLarge)
+		return
+	}
+	file, err := fileHeader.Open()
 	if err != nil {
 		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
 	defer file.Close()
-	raw, err := io.ReadAll(file)
+	raw, err := io.ReadAll(io.LimitReader(file, MaxUploadBytes+1))
 	if err != nil {
 		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+	if int64(len(raw)) > MaxUploadBytes {
+		httpx.Fail(c, "INVALID_REQUEST", "plugin archive exceeds 50 MiB", http.StatusRequestEntityTooLarge)
 		return
 	}
 	record, err := h.install.Handle(c.Request.Context(), raw, actor)
