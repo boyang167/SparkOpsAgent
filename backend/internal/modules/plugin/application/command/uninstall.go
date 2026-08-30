@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	plugininstall "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/application/install"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain"
@@ -52,18 +53,18 @@ func (h *UninstallHandler) Handle(ctx context.Context, id string, actor kernel.M
 		return nil, err
 	}
 	branch := "plugin/uninstall-" + id
-	prURL, found, err := h.publisher.LookupPullRequest(ctx, branch)
-	if err != nil {
-		return nil, err
-	}
-	if found {
-		if err := record.MarkUninstalling(prURL); err != nil {
+	view, err := h.publisher.LookupPullRequest(ctx, branch)
+	if err == nil {
+		if err := record.MarkUninstalling(view.URL); err != nil {
 			return nil, err
 		}
 		if err := h.repo.SavePlugin(ctx, record); err != nil {
 			return record, err
 		}
 		return record, nil
+	}
+	if !errors.Is(err, plugininstall.ErrPullRequestNotFound) {
+		return nil, err
 	}
 
 	root, err := resolveInstallRoot(h.root)
@@ -89,7 +90,7 @@ func (h *UninstallHandler) Handle(ctx context.Context, id string, actor kernel.M
 		return nil, err
 	}
 
-	prURL, err = h.publisher.Publish(ctx, plugininstall.PublishRequest{
+	prURL, err := h.publisher.Publish(ctx, plugininstall.PublishRequest{
 		Branch:  branch,
 		Message: "Uninstall plugin " + id,
 		Files:   map[string][]byte{registerGoPath: nextRegister},
@@ -176,7 +177,13 @@ func (h *MarkDeployedHandler) Handle(ctx context.Context, id string) (*model.Plu
 	record, err := h.repo.FindPlugin(ctx, id)
 	if err != nil {
 		if errors.Is(err, domain.ErrPluginNotFound) {
-			return nil, nil
+			hasReceipt, receiptErr := h.repo.HasUninstallReceipt(ctx, id)
+			if receiptErr != nil {
+				return nil, receiptErr
+			}
+			if hasReceipt {
+				return nil, nil
+			}
 		}
 		return nil, err
 	}
@@ -184,9 +191,15 @@ func (h *MarkDeployedHandler) Handle(ctx context.Context, id string) (*model.Plu
 	case model.PluginStatusDeployed:
 		return record, nil
 	case model.PluginStatusUninstallMerged:
-		if err := h.repo.DeletePlugin(ctx, id); err != nil {
+		if err := h.repo.CompleteUninstall(ctx, id, time.Now().UTC()); err != nil {
 			if errors.Is(err, domain.ErrPluginNotFound) {
-				return nil, nil
+				hasReceipt, receiptErr := h.repo.HasUninstallReceipt(ctx, id)
+				if receiptErr != nil {
+					return nil, receiptErr
+				}
+				if hasReceipt {
+					return nil, nil
+				}
 			}
 			return nil, err
 		}

@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/glebarez/sqlite"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/repository"
@@ -31,10 +33,23 @@ func openPluginStore(t *testing.T) (*gorm.DB, repository.PluginRepository) {
 	return db, persistence.NewStore(db)
 }
 
+func openSQLitePluginStore(t *testing.T) repository.PluginRepository {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS plugin").Error)
+	require.NoError(t, persistence.AutoMigrate(db))
+	return persistence.NewStore(db)
+}
+
 func TestAutoMigrateCreatesPluginSchemaTables(t *testing.T) {
 	db, _ := openPluginStore(t)
 
-	for _, table := range []string{"plugin.plugins", "plugin.workspace_bindings"} {
+	for _, table := range []string{"plugin.plugins", "plugin.workspace_bindings", "plugin.uninstall_receipts"} {
 		var exists bool
 		require.NoError(t, db.Raw("SELECT to_regclass(?) IS NOT NULL", table).Scan(&exists).Error)
 		require.Truef(t, exists, "missing table %s", table)
@@ -42,6 +57,7 @@ func TestAutoMigrateCreatesPluginSchemaTables(t *testing.T) {
 	assertColumn(t, db, "plugins", "version", "text", false, "")
 	assertColumn(t, db, "plugins", "display_name", "text", false, "")
 	assertColumn(t, db, "plugins", "manifest_yaml", "text", false, "")
+	assertColumn(t, db, "plugins", "package_digest", "text", false, "")
 	assertColumn(t, db, "plugins", "installed_files", "jsonb", false, "[]")
 	assertColumn(t, db, "plugins", "status", "text", false, "")
 	assertColumn(t, db, "plugins", "created_by", "uuid", false, "")
@@ -63,6 +79,35 @@ func TestAutoMigrateCreatesPluginSchemaTables(t *testing.T) {
 	require.Equal(t, int64(1), fkCount)
 }
 
+func TestStoreCompletesUninstallWithDurableReceipt(t *testing.T) {
+	repo := openSQLitePluginStore(t)
+	ctx := context.Background()
+	pluginID := fmt.Sprintf("receipt-%s", uuid.NewString())
+	require.NoError(t, repo.SavePlugin(ctx, &model.PluginRecord{
+		ID:            pluginID,
+		Version:       "0.1.0",
+		DisplayName:   "Receipt Plugin",
+		ManifestYAML:  "id: receipt",
+		PackageDigest: strings.Repeat("a", 64),
+		Status:        model.PluginStatusUninstallMerged,
+		CreatedBy:     kernel.NewMemberID(),
+	}))
+	deployedAt := time.Now().UTC().Truncate(time.Microsecond)
+
+	require.NoError(t, repo.CompleteUninstall(ctx, pluginID, deployedAt))
+	_, err := repo.FindPlugin(ctx, pluginID)
+	require.ErrorIs(t, err, domain.ErrPluginNotFound)
+	found, err := repo.HasUninstallReceipt(ctx, pluginID)
+	require.NoError(t, err)
+	require.True(t, found)
+
+	unknownID := fmt.Sprintf("unknown-%s", uuid.NewString())
+	require.ErrorIs(t, repo.CompleteUninstall(ctx, unknownID, deployedAt), domain.ErrPluginNotFound)
+	found, err = repo.HasUninstallReceipt(ctx, unknownID)
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
 func TestStorePersistsPluginsAndWorkspaceBindings(t *testing.T) {
 	db, repo := openPluginStore(t)
 	ctx := context.Background()
@@ -72,10 +117,11 @@ func TestStorePersistsPluginsAndWorkspaceBindings(t *testing.T) {
 	enabledBy := kernel.NewMemberID()
 	enabledAt := time.Now().UTC().Truncate(time.Microsecond)
 	plugin := &model.PluginRecord{
-		ID:           pluginID,
-		Version:      "0.1.0",
-		DisplayName:  "Example Plugin",
-		ManifestYAML: "id: example",
+		ID:            pluginID,
+		Version:       "0.1.0",
+		DisplayName:   "Example Plugin",
+		ManifestYAML:  "id: example",
+		PackageDigest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		InstalledFiles: []string{
 			"backend/internal/plugins/example/plugin.go",
 			"fronted/apps/web/app/(platform)/plugins/example/page.tsx",
@@ -96,6 +142,7 @@ func TestStorePersistsPluginsAndWorkspaceBindings(t *testing.T) {
 	require.Equal(t, pluginID, found.ID)
 	require.Equal(t, "0.1.0", found.Version)
 	require.Equal(t, "Example Plugin", found.DisplayName)
+	require.Equal(t, plugin.PackageDigest, found.PackageDigest)
 	require.Equal(t, plugin.InstalledFiles, found.InstalledFiles)
 	require.Equal(t, model.PluginStatusUploaded, found.Status)
 	require.Equal(t, createdBy, found.CreatedBy)

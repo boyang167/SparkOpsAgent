@@ -3,6 +3,7 @@ package install
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -18,7 +19,18 @@ import (
 
 type GitPublisher interface {
 	Publish(ctx context.Context, req PublishRequest) (prURL string, err error)
-	LookupPullRequest(ctx context.Context, branch string) (prURL string, found bool, err error)
+	LookupPullRequest(ctx context.Context, branch string) (PullRequestView, error)
+}
+
+var (
+	ErrPullRequestNotFound       = errors.New("pull request not found")
+	ErrPullRequestNotRecoverable = errors.New("pull request is not recoverable")
+)
+
+type PullRequestView struct {
+	URL         string `json:"url"`
+	State       string `json:"state"`
+	HeadRefName string `json:"headRefName"`
 }
 
 type PublishRequest struct {
@@ -134,27 +146,39 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 	return parsePRURL(out)
 }
 
-func (p *GitCLIPublisher) LookupPullRequest(ctx context.Context, branch string) (string, bool, error) {
+func (p *GitCLIPublisher) LookupPullRequest(ctx context.Context, branch string) (PullRequestView, error) {
 	if err := validateBranchName(branch); err != nil {
-		return "", false, err
+		return PullRequestView{}, err
 	}
 	runner := p.commandRunner()
 	if err := validateBranchWithGit(ctx, runner, p.root, branch); err != nil {
-		return "", false, err
+		return PullRequestView{}, err
 	}
-	out, err := runner.Run(ctx, p.root, "gh", "pr", "view", branch, "--json", "url", "--jq", ".url")
+	out, err := runner.Run(ctx, p.root, "gh", "pr", "view", branch, "--json", "url,state,headRefName")
 	if err != nil {
 		message := strings.ToLower(strings.TrimSpace(string(out.Stderr) + " " + string(out.Stdout)))
 		if strings.Contains(message, "no pull requests found") || strings.Contains(message, "could not resolve to a pullrequest") {
-			return "", false, nil
+			return PullRequestView{}, ErrPullRequestNotFound
 		}
-		return "", false, fmt.Errorf("gh pr view %s: %w%s", branch, err, commandOutputSuffix(out))
+		return PullRequestView{}, fmt.Errorf("gh pr view %s: %w%s", branch, err, commandOutputSuffix(out))
 	}
-	url, err := parsePRURL(out)
+	var view PullRequestView
+	if err := json.Unmarshal(out.Stdout, &view); err != nil {
+		return PullRequestView{}, fmt.Errorf("parse gh pr view: %w", err)
+	}
+	return validateRecoverablePRView(view, branch)
+}
+
+func validateRecoverablePRView(view PullRequestView, branch string) (PullRequestView, error) {
+	url, err := parsePRURL(CommandOutput{Stdout: []byte(view.URL)})
 	if err != nil {
-		return "", false, err
+		return PullRequestView{}, err
 	}
-	return url, true, nil
+	view.URL = url
+	if view.State != "OPEN" || view.HeadRefName != branch {
+		return PullRequestView{}, fmt.Errorf("%w: state=%q head=%q", ErrPullRequestNotRecoverable, view.State, view.HeadRefName)
+	}
+	return view, nil
 }
 
 func cleanupGitWorktreeAndBranch(runner CommandRunner, root string, worktree string, branch string, branchOwned bool) error {

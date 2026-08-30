@@ -4,11 +4,14 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/application/command"
 	plugininstall "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/application/install"
@@ -50,12 +53,14 @@ type memoryRepository struct {
 	bindings   map[string][]*model.WorkspaceBinding
 	saveCalls  int
 	failSaveAt map[int]error
+	receipts   map[string]time.Time
 }
 
 func newMemoryRepository() *memoryRepository {
 	return &memoryRepository{
 		plugins:  make(map[string]*model.PluginRecord),
 		bindings: make(map[string][]*model.WorkspaceBinding),
+		receipts: make(map[string]time.Time),
 	}
 }
 
@@ -97,6 +102,21 @@ func (r *memoryRepository) DeletePlugin(_ context.Context, id string) error {
 	return nil
 }
 
+func (r *memoryRepository) CompleteUninstall(_ context.Context, id string, deployedAt time.Time) error {
+	if _, ok := r.plugins[id]; !ok {
+		return domain.ErrPluginNotFound
+	}
+	r.receipts[id] = deployedAt
+	delete(r.bindings, id)
+	delete(r.plugins, id)
+	return nil
+}
+
+func (r *memoryRepository) HasUninstallReceipt(_ context.Context, id string) (bool, error) {
+	_, ok := r.receipts[id]
+	return ok, nil
+}
+
 func (r *memoryRepository) SaveBinding(_ context.Context, binding *model.WorkspaceBinding) error {
 	r.bindings[binding.PluginID] = append(r.bindings[binding.PluginID], binding)
 	return nil
@@ -124,8 +144,8 @@ func (p failingPublisher) Publish(context.Context, plugininstall.PublishRequest)
 	return "", p.err
 }
 
-func (p failingPublisher) LookupPullRequest(context.Context, string) (string, bool, error) {
-	return "", false, nil
+func (p failingPublisher) LookupPullRequest(context.Context, string) (plugininstall.PullRequestView, error) {
+	return plugininstall.PullRequestView{}, plugininstall.ErrPullRequestNotFound
 }
 
 func TestInstallPublishesFilesWithoutWritingCurrentTree(t *testing.T) {
@@ -133,11 +153,13 @@ func TestInstallPublishesFilesWithoutWritingCurrentTree(t *testing.T) {
 	repo := newMemoryRepository()
 	publisher := &plugininstall.MemoryPublisher{}
 	handler := command.NewInstallHandler(repo, publisher, root)
+	raw := validZip(t)
 
-	record, err := handler.Handle(context.Background(), validZip(t), kernel.NewMemberID())
+	record, err := handler.Handle(context.Background(), raw, kernel.NewMemberID())
 
 	require.NoError(t, err)
 	require.Equal(t, model.PluginStatusPROpen, record.Status)
+	require.Equal(t, packageDigest(raw), record.PackageDigest)
 	require.Equal(t, "plugin/install-example", publisher.Last.Branch)
 	require.Equal(t, pluginGo, string(publisher.Last.Files["backend/internal/plugins/example/plugin.go"]))
 	require.Equal(t, "export default function Page(){return null}", string(publisher.Last.Files["fronted/apps/web/app/(platform)/plugins/example/page.tsx"]))
@@ -193,8 +215,9 @@ func TestInstallRecoversPublishedPRWhenStatusSaveFailed(t *testing.T) {
 	repo.failSaveAt = map[int]error{2: saveErr}
 	publisher := &plugininstall.MemoryPublisher{}
 	handler := command.NewInstallHandler(repo, publisher, root)
+	raw := validZip(t)
 
-	record, err := handler.Handle(context.Background(), validZip(t), kernel.NewMemberID())
+	record, err := handler.Handle(context.Background(), raw, kernel.NewMemberID())
 	require.ErrorIs(t, err, saveErr)
 	require.Equal(t, model.PluginStatusPROpen, record.Status)
 	require.Equal(t, 1, publisher.PublishCount)
@@ -203,7 +226,7 @@ func TestInstallRecoversPublishedPRWhenStatusSaveFailed(t *testing.T) {
 	require.Equal(t, model.PluginStatusUploaded, saved.Status)
 
 	repo.failSaveAt = nil
-	record, err = handler.Handle(context.Background(), validZip(t), kernel.NewMemberID())
+	record, err = handler.Handle(context.Background(), raw, kernel.NewMemberID())
 
 	require.NoError(t, err)
 	require.Equal(t, model.PluginStatusPROpen, record.Status)
@@ -214,47 +237,108 @@ func TestInstallRecoversPublishedPRWhenStatusSaveFailed(t *testing.T) {
 func TestInstallRetriesPRFailedWhenNoPullRequestExists(t *testing.T) {
 	root := makeInstallRoot(t)
 	repo := newMemoryRepository()
-	repo.plugins["example"] = &model.PluginRecord{
-		ID:           "example",
-		Version:      "0.1.0",
-		ManifestYAML: normalizedManifest(t),
-		Status:       model.PluginStatusPRFailed,
-	}
+	raw := validZip(t)
+	repo.plugins["example"] = retryRecord(t, raw, model.PluginStatusPRFailed)
 	publisher := &plugininstall.MemoryPublisher{}
 
-	record, err := command.NewInstallHandler(repo, publisher, root).Handle(context.Background(), validZip(t), kernel.NewMemberID())
+	record, err := command.NewInstallHandler(repo, publisher, root).Handle(context.Background(), raw, kernel.NewMemberID())
 
 	require.NoError(t, err)
 	require.Equal(t, model.PluginStatusPROpen, record.Status)
 	require.Equal(t, 1, publisher.PublishCount)
 }
 
-func TestInstallRejectsRetryWithDifferentManifestOrVersion(t *testing.T) {
+func TestInstallRejectsRetryWithDifferentManifestIDOrVersion(t *testing.T) {
+	raw := validZip(t)
 	tests := []struct {
 		name     string
 		version  string
 		manifest string
 	}{
-		{name: "different version", version: "9.9.9", manifest: normalizedManifest(t)},
-		{name: "different manifest", version: "0.1.0", manifest: strings.Replace(normalizedManifest(t), "Example Plugin", "Changed Plugin", 1)},
+		{name: "different version", version: "9.9.9", manifest: normalizedManifestFrom(t, raw)},
+		{name: "different manifest id", version: "0.1.0", manifest: strings.Replace(normalizedManifestFrom(t, raw), "id: example", "id: other", 1)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := makeInstallRoot(t)
 			repo := newMemoryRepository()
 			repo.plugins["example"] = &model.PluginRecord{
-				ID:           "example",
-				Version:      tt.version,
-				ManifestYAML: tt.manifest,
-				Status:       model.PluginStatusUploaded,
+				ID:             "example",
+				Version:        tt.version,
+				ManifestYAML:   tt.manifest,
+				PackageDigest:  packageDigest(raw),
+				InstalledFiles: installedFiles(),
+				Status:         model.PluginStatusUploaded,
 			}
 
 			_, err := command.NewInstallHandler(repo, &plugininstall.MemoryPublisher{}, root).
-				Handle(context.Background(), validZip(t), kernel.NewMemberID())
+				Handle(context.Background(), raw, kernel.NewMemberID())
 
 			requireDomainCode(t, err, "PLUGIN_ID_CONFLICT")
 		})
 	}
+}
+
+func TestInstallRejectsSameManifestVersionWithDifferentPackageBytes(t *testing.T) {
+	root := makeInstallRoot(t)
+	original := validZipWithHelper(t, "export const helper = true")
+	retry := validZipWithHelper(t, "export const helper = false")
+	repo := newMemoryRepository()
+	repo.plugins["example"] = retryRecord(t, original, model.PluginStatusUploaded)
+	originalFiles := append([]string(nil), repo.plugins["example"].InstalledFiles...)
+
+	_, err := command.NewInstallHandler(repo, &plugininstall.MemoryPublisher{}, root).
+		Handle(context.Background(), retry, kernel.NewMemberID())
+
+	requireDomainCode(t, err, "PLUGIN_ID_CONFLICT")
+	require.Equal(t, originalFiles, repo.plugins["example"].InstalledFiles)
+}
+
+func TestInstallRejectsRetryWhenPersistedInstalledFilesDiffer(t *testing.T) {
+	root := makeInstallRoot(t)
+	raw := validZip(t)
+	repo := newMemoryRepository()
+	record := retryRecord(t, raw, model.PluginStatusUploaded)
+	record.InstalledFiles = []string{"backend/internal/plugins/example/original.go"}
+	repo.plugins["example"] = record
+
+	_, err := command.NewInstallHandler(repo, &plugininstall.MemoryPublisher{}, root).
+		Handle(context.Background(), raw, kernel.NewMemberID())
+
+	requireDomainCode(t, err, "PLUGIN_ID_CONFLICT")
+	require.Equal(t, []string{"backend/internal/plugins/example/original.go"}, repo.plugins["example"].InstalledFiles)
+}
+
+func TestInstallDoesNotPublishWhenPullRequestLookupFails(t *testing.T) {
+	root := makeInstallRoot(t)
+	raw := validZip(t)
+	repo := newMemoryRepository()
+	repo.plugins["example"] = retryRecord(t, raw, model.PluginStatusUploaded)
+	lookupErr := errors.New("github unavailable")
+	publisher := &plugininstall.MemoryPublisher{LookupErr: lookupErr}
+
+	_, err := command.NewInstallHandler(repo, publisher, root).
+		Handle(context.Background(), raw, kernel.NewMemberID())
+
+	require.ErrorIs(t, err, lookupErr)
+	require.Zero(t, publisher.PublishCount)
+}
+
+func TestInstallDoesNotReuseOrReplaceClosedPullRequest(t *testing.T) {
+	root := makeInstallRoot(t)
+	raw := validZip(t)
+	repo := newMemoryRepository()
+	repo.plugins["example"] = retryRecord(t, raw, model.PluginStatusUploaded)
+	branch := "plugin/install-example"
+	publisher := &plugininstall.MemoryPublisher{PullRequests: map[string]plugininstall.PullRequestView{
+		branch: {URL: "https://example.test/pr/1", State: "CLOSED", HeadRefName: branch},
+	}}
+
+	_, err := command.NewInstallHandler(repo, publisher, root).
+		Handle(context.Background(), raw, kernel.NewMemberID())
+
+	require.ErrorIs(t, err, plugininstall.ErrPullRequestNotRecoverable)
+	require.Zero(t, publisher.PublishCount)
 }
 
 func TestUninstallRejectsEnabledBinding(t *testing.T) {
@@ -423,6 +507,14 @@ func TestStatusCallbacksStillRejectReverseTransitions(t *testing.T) {
 	require.ErrorIs(t, err, model.ErrInvalidPluginStatusTransition)
 }
 
+func TestDeployedCallbackRejectsUnknownPluginWithoutReceipt(t *testing.T) {
+	repo := newMemoryRepository()
+
+	_, err := command.NewMarkDeployedHandler(repo).Handle(context.Background(), "unknown")
+
+	require.ErrorIs(t, err, domain.ErrPluginNotFound)
+}
+
 func makeInstallRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -433,6 +525,10 @@ func makeInstallRoot(t *testing.T) string {
 }
 
 func validZip(t *testing.T) []byte {
+	return validZipWithHelper(t, "export const helper = true")
+}
+
+func validZipWithHelper(t *testing.T, helper string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	writer := zip.NewWriter(&buf)
@@ -440,7 +536,7 @@ func validZip(t *testing.T) []byte {
 		"example/plugin.yaml":                                      manifestYAML,
 		"example/backend/plugin.go":                                pluginGo,
 		"example/frontend/app/(platform)/plugins/example/page.tsx": "export default function Page(){return null}",
-		"example/frontend/src/plugins/example/helper.ts":           "export const helper = true",
+		"example/frontend/src/plugins/example/helper.ts":           helper,
 	}
 	for name, content := range files {
 		entry, err := writer.Create(name)
@@ -461,13 +557,30 @@ func installedFiles() []string {
 	}
 }
 
-func normalizedManifest(t *testing.T) string {
+func normalizedManifestFrom(t *testing.T, rawZip []byte) string {
 	t.Helper()
-	inspected, err := plugininstall.InspectZip(validZip(t))
+	inspected, err := plugininstall.InspectZip(rawZip)
 	require.NoError(t, err)
 	raw, err := yaml.Marshal(inspected.Manifest)
 	require.NoError(t, err)
 	return string(raw)
+}
+
+func packageDigest(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func retryRecord(t *testing.T, raw []byte, status model.PluginStatus) *model.PluginRecord {
+	t.Helper()
+	return &model.PluginRecord{
+		ID:             "example",
+		Version:        "0.1.0",
+		ManifestYAML:   normalizedManifestFrom(t, raw),
+		PackageDigest:  packageDigest(raw),
+		InstalledFiles: installedFiles(),
+		Status:         status,
+	}
 }
 
 func requireDomainCode(t *testing.T, err error, code string) {

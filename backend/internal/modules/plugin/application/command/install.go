@@ -2,6 +2,8 @@ package command
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"go/parser"
@@ -9,12 +11,14 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	plugininstall "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/application/install"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/manifest"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -55,6 +59,8 @@ func (h *InstallHandler) Handle(ctx context.Context, rawZip []byte, actor kernel
 		installedFiles = append(installedFiles, name)
 	}
 	sort.Strings(installedFiles)
+	digestSum := sha256.Sum256(rawZip)
+	packageDigest := hex.EncodeToString(digestSum[:])
 
 	record, findErr := h.repo.FindPlugin(ctx, inspected.Manifest.ID)
 	isRetry := findErr == nil
@@ -62,18 +68,20 @@ func (h *InstallHandler) Handle(ctx context.Context, rawZip []byte, actor kernel
 		return nil, findErr
 	}
 	if isRetry {
+		storedManifest, manifestErr := manifest.Parse([]byte(record.ManifestYAML))
 		if (record.Status != model.PluginStatusUploaded && record.Status != model.PluginStatusPRFailed) ||
-			record.Version != inspected.Manifest.Version || record.ManifestYAML != string(manifestBytes) {
+			manifestErr != nil ||
+			storedManifest.ID != inspected.Manifest.ID ||
+			storedManifest.Version != inspected.Manifest.Version ||
+			record.Version != inspected.Manifest.Version ||
+			record.PackageDigest != packageDigest ||
+			!slices.Equal(record.InstalledFiles, installedFiles) {
 			return nil, domain.ErrPluginIDConflict
 		}
-		record.InstalledFiles = installedFiles
 		branch := "plugin/install-" + record.ID
-		prURL, found, err := h.publisher.LookupPullRequest(ctx, branch)
-		if err != nil {
-			return nil, err
-		}
-		if found {
-			if err := record.MarkPROpen(prURL); err != nil {
+		view, err := h.publisher.LookupPullRequest(ctx, branch)
+		if err == nil {
+			if err := record.MarkPROpen(view.URL); err != nil {
 				return nil, err
 			}
 			if err := h.repo.SavePlugin(ctx, record); err != nil {
@@ -81,12 +89,16 @@ func (h *InstallHandler) Handle(ctx context.Context, rawZip []byte, actor kernel
 			}
 			return record, nil
 		}
+		if !errors.Is(err, plugininstall.ErrPullRequestNotFound) {
+			return nil, err
+		}
 	} else {
 		record = &model.PluginRecord{
 			ID:             inspected.Manifest.ID,
 			Version:        inspected.Manifest.Version,
 			DisplayName:    inspected.Manifest.DisplayName,
 			ManifestYAML:   string(manifestBytes),
+			PackageDigest:  packageDigest,
 			InstalledFiles: installedFiles,
 			Status:         model.PluginStatusUploaded,
 			CreatedBy:      actor,

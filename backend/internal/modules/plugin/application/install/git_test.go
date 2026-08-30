@@ -48,13 +48,18 @@ func TestMemoryPublisherLooksUpPublishedPullRequestByBranch(t *testing.T) {
 		t.Fatalf("Publish() error = %v", err)
 	}
 
-	url, found, err := publisher.LookupPullRequest(context.Background(), "plugin/install-example")
+	view, err := publisher.LookupPullRequest(context.Background(), "plugin/install-example")
 
 	if err != nil {
 		t.Fatalf("LookupPullRequest() error = %v", err)
 	}
-	if !found || url != "https://example.local/pr/1" {
-		t.Fatalf("LookupPullRequest() = %q, %v", url, found)
+	want := PullRequestView{
+		URL:         "https://example.local/pr/1",
+		State:       "OPEN",
+		HeadRefName: "plugin/install-example",
+	}
+	if view != want {
+		t.Fatalf("LookupPullRequest() = %#v, want %#v", view, want)
 	}
 }
 
@@ -62,21 +67,21 @@ func TestGitCLIPublisherLooksUpPullRequestWithStrictURLParsing(t *testing.T) {
 	root := t.TempDir()
 	runner := &recordingRunner{results: []commandResult{
 		{stdout: "refs/heads/plugin/install-example\n"},
-		{stdout: "https://example.test/pr/42\n"},
+		{stdout: `{"url":"https://example.test/pr/42","state":"OPEN","headRefName":"plugin/install-example"}`},
 	}}
 	publisher := &GitCLIPublisher{root: root, runner: runner}
 
-	url, found, err := publisher.LookupPullRequest(context.Background(), "plugin/install-example")
+	view, err := publisher.LookupPullRequest(context.Background(), "plugin/install-example")
 
 	if err != nil {
 		t.Fatalf("LookupPullRequest() error = %v", err)
 	}
-	if !found || url != "https://example.test/pr/42" {
-		t.Fatalf("LookupPullRequest() = %q, %v", url, found)
+	if view.URL != "https://example.test/pr/42" || view.State != "OPEN" || view.HeadRefName != "plugin/install-example" {
+		t.Fatalf("LookupPullRequest() = %#v", view)
 	}
 	wantCalls := []commandCall{
 		{dir: root, name: "git", args: []string{"check-ref-format", "--normalize", "refs/heads/plugin/install-example"}},
-		{dir: root, name: "gh", args: []string{"pr", "view", "plugin/install-example", "--json", "url", "--jq", ".url"}},
+		{dir: root, name: "gh", args: []string{"pr", "view", "plugin/install-example", "--json", "url,state,headRefName"}},
 	}
 	if !reflect.DeepEqual(runner.calls, wantCalls) {
 		t.Fatalf("calls = %#v, want %#v", runner.calls, wantCalls)
@@ -90,24 +95,50 @@ func TestGitCLIPublisherLookupReportsMissingPullRequest(t *testing.T) {
 	}}
 	publisher := &GitCLIPublisher{root: t.TempDir(), runner: runner}
 
-	url, found, err := publisher.LookupPullRequest(context.Background(), "plugin/install-example")
+	_, err := publisher.LookupPullRequest(context.Background(), "plugin/install-example")
 
-	if err != nil || found || url != "" {
-		t.Fatalf("LookupPullRequest() = %q, %v, %v; want missing", url, found, err)
+	if !errors.Is(err, ErrPullRequestNotFound) {
+		t.Fatalf("LookupPullRequest() error = %v, want ErrPullRequestNotFound", err)
 	}
 }
 
-func TestGitCLIPublisherLookupRejectsMalformedURL(t *testing.T) {
+func TestGitCLIPublisherLookupRejectsMalformedJSON(t *testing.T) {
 	runner := &recordingRunner{results: []commandResult{
 		{stdout: "refs/heads/plugin/install-example\n"},
 		{stdout: "not-a-url\n"},
 	}}
 	publisher := &GitCLIPublisher{root: t.TempDir(), runner: runner}
 
-	_, found, err := publisher.LookupPullRequest(context.Background(), "plugin/install-example")
+	_, err := publisher.LookupPullRequest(context.Background(), "plugin/install-example")
 
-	if err == nil || found {
-		t.Fatalf("LookupPullRequest() error = %v, found = %v", err, found)
+	if err == nil || errors.Is(err, ErrPullRequestNotFound) {
+		t.Fatalf("LookupPullRequest() error = %v", err)
+	}
+}
+
+func TestGitCLIPublisherLookupRejectsNonOpenOrWrongHeadPullRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+	}{
+		{name: "closed", json: `{"url":"https://example.test/pr/1","state":"CLOSED","headRefName":"plugin/install-example"}`},
+		{name: "merged", json: `{"url":"https://example.test/pr/1","state":"MERGED","headRefName":"plugin/install-example"}`},
+		{name: "wrong head", json: `{"url":"https://example.test/pr/1","state":"OPEN","headRefName":"plugin/install-other"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &recordingRunner{results: []commandResult{
+				{stdout: "refs/heads/plugin/install-example\n"},
+				{stdout: tt.json},
+			}}
+			publisher := &GitCLIPublisher{root: t.TempDir(), runner: runner}
+
+			_, err := publisher.LookupPullRequest(context.Background(), "plugin/install-example")
+
+			if !errors.Is(err, ErrPullRequestNotRecoverable) {
+				t.Fatalf("LookupPullRequest() error = %v, want ErrPullRequestNotRecoverable", err)
+			}
+		})
 	}
 }
 

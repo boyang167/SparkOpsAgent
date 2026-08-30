@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -12,6 +13,8 @@ type PluginRepository interface {
 	FindPlugin(ctx context.Context, id string) (*model.PluginRecord, error)
 	ListPlugins(ctx context.Context) ([]*model.PluginRecord, error)
 	DeletePlugin(ctx context.Context, id string) error
+	CompleteUninstall(ctx context.Context, id string, deployedAt time.Time) error
+	HasUninstallReceipt(ctx context.Context, id string) (bool, error)
 	SaveBinding(ctx context.Context, binding *model.WorkspaceBinding) error
 	FindBinding(ctx context.Context, workspaceID kernel.WorkspaceID, pluginID string) (*model.WorkspaceBinding, error)
 	ListBindingsByPlugin(ctx context.Context, pluginID string) ([]*model.WorkspaceBinding, error)

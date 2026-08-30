@@ -12,6 +12,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func AutoMigrate(db *gorm.DB) error {
@@ -20,7 +21,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	if err := db.AutoMigrate(&pluginModel{}, &workspaceBindingModel{}); err != nil {
+	if err := db.AutoMigrate(&pluginModel{}, &workspaceBindingModel{}, &uninstallReceiptModel{}); err != nil {
 		return err
 	}
 	if db.Dialector.Name() == "postgres" {
@@ -54,6 +55,7 @@ type pluginModel struct {
 	Version            string    `gorm:"type:text;not null"`
 	DisplayName        string    `gorm:"type:text;not null"`
 	ManifestYAML       string    `gorm:"type:text;not null"`
+	PackageDigest      string    `gorm:"column:package_digest;type:text;not null;default:''"`
 	InstalledFilesJSON string    `gorm:"column:installed_files;type:jsonb;not null;default:'[]'"`
 	Status             string    `gorm:"type:text;not null"`
 	PRURL              string    `gorm:"column:pr_url;type:text;not null;default:''"`
@@ -73,6 +75,13 @@ type workspaceBindingModel struct {
 }
 
 func (workspaceBindingModel) TableName() string { return "plugin.workspace_bindings" }
+
+type uninstallReceiptModel struct {
+	PluginID   string    `gorm:"column:plugin_id;primaryKey;type:text"`
+	DeployedAt time.Time `gorm:"column:deployed_at;not null"`
+}
+
+func (uninstallReceiptModel) TableName() string { return "plugin.uninstall_receipts" }
 
 type Store struct {
 	db *gorm.DB
@@ -97,6 +106,7 @@ func (s *Store) SavePlugin(ctx context.Context, plugin *model.PluginRecord) erro
 		Version:            plugin.Version,
 		DisplayName:        plugin.DisplayName,
 		ManifestYAML:       plugin.ManifestYAML,
+		PackageDigest:      plugin.PackageDigest,
 		InstalledFilesJSON: string(installedFiles),
 		Status:             string(plugin.Status),
 		PRURL:              plugin.PRURL,
@@ -149,6 +159,43 @@ func (s *Store) DeletePlugin(ctx context.Context, id string) error {
 		}
 		return nil
 	})
+}
+
+func (s *Store) CompleteUninstall(ctx context.Context, id string, deployedAt time.Time) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing pluginModel
+		err := tx.Where("id = ?", id).First(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.ErrPluginNotFound
+		}
+		if err != nil {
+			return err
+		}
+		receipt := uninstallReceiptModel{PluginID: id, DeployedAt: deployedAt.UTC()}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&receipt).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("plugin_id = ?", id).Delete(&workspaceBindingModel{}).Error; err != nil {
+			return err
+		}
+		result := tx.Where("id = ?", id).Delete(&pluginModel{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return domain.ErrPluginNotFound
+		}
+		return nil
+	})
+}
+
+func (s *Store) HasUninstallReceipt(ctx context.Context, id string) (bool, error) {
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&uninstallReceiptModel{}).
+		Where("plugin_id = ?", id).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (s *Store) SaveBinding(ctx context.Context, binding *model.WorkspaceBinding) error {
@@ -230,6 +277,7 @@ func rowToPlugin(row pluginModel) (*model.PluginRecord, error) {
 		Version:        row.Version,
 		DisplayName:    row.DisplayName,
 		ManifestYAML:   row.ManifestYAML,
+		PackageDigest:  row.PackageDigest,
 		InstalledFiles: installedFiles,
 		Status:         model.PluginStatus(row.Status),
 		PRURL:          row.PRURL,

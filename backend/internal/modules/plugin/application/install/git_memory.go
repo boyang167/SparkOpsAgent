@@ -4,7 +4,7 @@ import "context"
 
 type MemoryPublisher struct {
 	Last         PublishRequest
-	PullRequests map[string]string
+	PullRequests map[string]PullRequestView
 	PublishURL   string
 	PublishErr   error
 	LookupErr    error
@@ -24,20 +24,23 @@ func (p *MemoryPublisher) Publish(ctx context.Context, req PublishRequest) (stri
 		url = "https://example.local/pr/1"
 	}
 	if p.PullRequests == nil {
-		p.PullRequests = make(map[string]string)
+		p.PullRequests = make(map[string]PullRequestView)
 	}
-	p.PullRequests[req.Branch] = url
+	p.PullRequests[req.Branch] = PullRequestView{URL: url, State: "OPEN", HeadRefName: req.Branch}
 	return url, nil
 }
 
-func (p *MemoryPublisher) LookupPullRequest(ctx context.Context, branch string) (string, bool, error) {
+func (p *MemoryPublisher) LookupPullRequest(ctx context.Context, branch string) (PullRequestView, error) {
 	_ = ctx
 	p.LookupCount++
 	if p.LookupErr != nil {
-		return "", false, p.LookupErr
+		return PullRequestView{}, p.LookupErr
 	}
-	url, found := p.PullRequests[branch]
-	return url, found, nil
+	view, found := p.PullRequests[branch]
+	if !found {
+		return PullRequestView{}, ErrPullRequestNotFound
+	}
+	return validateRecoverablePRView(view, branch)
 }
 
 func clonePublishRequest(req PublishRequest) PublishRequest {

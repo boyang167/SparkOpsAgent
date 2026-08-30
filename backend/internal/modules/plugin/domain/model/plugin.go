@@ -27,6 +27,7 @@ type PluginRecord struct {
 	Version        string          `json:"version"`
 	DisplayName    string          `json:"display_name"`
 	ManifestYAML   string          `json:"manifest_yaml"`
+	PackageDigest  string          `json:"package_digest"`
 	InstalledFiles []string        `json:"installed_files"`
 	Status         PluginStatus    `json:"status"`
 	PRURL          string          `json:"pr_url"`
