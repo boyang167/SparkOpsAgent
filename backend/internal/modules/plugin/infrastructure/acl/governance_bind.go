@@ -123,10 +123,14 @@ func (b *GovernanceBinder) Bind(ctx context.Context, workspaceID kernel.Workspac
 			}
 			targetParentID = resolvedParentID
 		}
-		if err := db.Model(&menuRow{}).
+		result := db.Model(&menuRow{}).
 			Where("workspace_id = ? AND path = ?", workspaceID.String(), menu.Path).
-			Updates(map[string]any{"parent_id": targetParentID, "updated_at": now}).Error; err != nil {
-			return err
+			Updates(map[string]any{"parent_id": targetParentID, "updated_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return kernel.NewDomainError("PLUGIN_MANIFEST_INVALID", fmt.Sprintf("menu %q was not upserted before parent binding", menu.Path))
 		}
 	}
 
@@ -179,10 +183,9 @@ func expandPluginAPIGrants(apis []manifest.APISpec) []pluginAPIGrant {
 	for _, api := range apis {
 		method := strings.ToUpper(api.Method)
 		if method == "ANY" {
-			path := normalizeWildcardAPIPath(api.Path)
 			for _, expandedMethod := range methods {
 				grants = append(grants, pluginAPIGrant{
-					Path:     path,
+					Path:     api.Path,
 					Method:   expandedMethod,
 					ReadOnly: expandedMethod == "GET" || expandedMethod == "HEAD",
 				})
@@ -192,21 +195,10 @@ func expandPluginAPIGrants(apis []manifest.APISpec) []pluginAPIGrant {
 		grants = append(grants, pluginAPIGrant{
 			Path:     api.Path,
 			Method:   method,
-			ReadOnly: method == "GET" || method == "HEAD" || (method == "POST" && strings.HasSuffix(api.Path, "/metrics")),
+			ReadOnly: method == "GET" || method == "HEAD" || api.ReadOnly,
 		})
 	}
 	return grants
-}
-
-func normalizeWildcardAPIPath(path string) string {
-	prefix := strings.TrimSuffix(path, "*")
-	segments := strings.Split(prefix+"*", "/")
-	for index, segment := range segments {
-		if strings.HasPrefix(segment, ":") {
-			segments[index] = "*"
-		}
-	}
-	return strings.Join(segments, "/")
 }
 
 func governanceRoleIDs(db *gorm.DB, workspaceID string) ([]string, []string, error) {

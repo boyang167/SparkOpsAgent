@@ -36,8 +36,9 @@ type MenuSpec struct {
 }
 
 type APISpec struct {
-	Method string `yaml:"method"`
-	Path   string `yaml:"path"`
+	Method   string `yaml:"method"`
+	Path     string `yaml:"path"`
+	ReadOnly bool   `yaml:"read_only"`
 }
 
 type FrontendSpec struct {
@@ -114,6 +115,12 @@ func (m *Manifest) Validate() error {
 }
 
 func validateAPIMethod(api APISpec, routePrefix string) error {
+	if api.ReadOnly && api.Method != "POST" {
+		return invalid("api read_only is only allowed on exact POST APIs")
+	}
+	if api.ReadOnly && strings.HasSuffix(api.Path, "/*") {
+		return invalid("api read_only is only allowed on exact POST APIs")
+	}
 	if api.Method == "ANY" {
 		if !strings.HasSuffix(api.Path, "/*") {
 			return invalid(fmt.Sprintf("api method ANY requires path %q to end with /*", api.Path))

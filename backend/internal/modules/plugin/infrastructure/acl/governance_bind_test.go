@@ -49,6 +49,9 @@ apis:
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/proxy/*
   - method: POST
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/metrics
+    read_only: true
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/custom/metrics
   - method: POST
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/exec
 frontend:
@@ -116,8 +119,9 @@ func TestGovernanceBinderBindsNestedMenusAndMemberReadOnlyPluginAPIs(t *testing.
 	require.NotEmpty(t, rootID)
 	require.Equal(t, rootID, podsParentID)
 
-	proxyPolicyPath := "/api/v1/plugins/kubernetes/clusters/*/proxy/*"
+	proxyPolicyPath := "/api/v1/plugins/kubernetes/clusters/:clusterId/proxy/*"
 	metricsPolicyPath := "/api/v1/plugins/kubernetes/clusters/:clusterId/metrics"
+	customMetricsPolicyPath := "/api/v1/plugins/kubernetes/clusters/:clusterId/custom/metrics"
 	execPolicyPath := "/api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/exec"
 	for _, method := range []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"} {
 		require.Equal(t, int64(1), countRows(t, db, "platform.apis", "path = ? AND method = ?", proxyPolicyPath, method))
@@ -128,10 +132,17 @@ func TestGovernanceBinderBindsNestedMenusAndMemberReadOnlyPluginAPIs(t *testing.
 	require.Equal(t, int64(1), countRows(t, db, "governance.role_api_policies", "role_id = ? AND path = ? AND method = ?", viewerRoleID, proxyPolicyPath, "HEAD"))
 	require.Zero(t, countRows(t, db, "governance.role_api_policies", "role_id = ? AND path = ? AND method = ?", viewerRoleID, proxyPolicyPath, "POST"))
 	require.Equal(t, int64(1), countRows(t, db, "governance.role_api_policies", "role_id = ? AND path = ? AND method = ?", viewerRoleID, metricsPolicyPath, "POST"))
+	require.Zero(t, countRows(t, db, "governance.role_api_policies", "role_id = ? AND path = ? AND method = ?", viewerRoleID, customMetricsPolicyPath, "POST"))
 	require.Zero(t, countRows(t, db, "governance.role_api_policies", "role_id = ? AND path = ? AND method = ?", viewerRoleID, execPolicyPath, "POST"))
 
 	require.Equal(t, int64(1), countRows(t, db, "governance.role_api_policies", "role_id = ? AND path = ? AND method = ?", adminRoleID, proxyPolicyPath, "POST"))
+	require.Equal(t, int64(1), countRows(t, db, "governance.role_api_policies", "role_id = ? AND path = ? AND method = ?", adminRoleID, customMetricsPolicyPath, "POST"))
 	require.Equal(t, int64(1), countRows(t, db, "governance.role_api_policies", "role_id = ? AND path = ? AND method = ?", adminRoleID, execPolicyPath, "POST"))
+
+	require.NoError(t, binder.Unbind(context.Background(), wsID, "kubernetes"))
+
+	require.Zero(t, countRows(t, db, "governance.role_api_policies", "path = ?", proxyPolicyPath))
+	require.Zero(t, countRows(t, db, "governance.role_api_policies", "path = ?", metricsPolicyPath))
 }
 
 func TestUnitOfWorkRollsBackGovernanceWrites(t *testing.T) {

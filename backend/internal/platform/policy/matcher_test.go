@@ -14,7 +14,7 @@ func TestMatcherAllowsPluginProxyPrefixForRolePolicies(t *testing.T) {
 	enforcer, err := casbin.NewEnforcer(m)
 	require.NoError(t, err)
 
-	require.True(t, mustAddPolicy(t, enforcer, "viewer", "ws-1", "/api/v1/plugins/kubernetes/clusters/*/proxy/*", "GET"))
+	require.True(t, mustAddPolicy(t, enforcer, "viewer", "ws-1", "/api/v1/plugins/kubernetes/clusters/:clusterId/proxy/*", "GET"))
 	require.True(t, mustAddGroupingPolicy(t, enforcer, "member-1", "viewer", "ws-1"))
 
 	allowed, err := enforcer.Enforce(
@@ -25,6 +25,15 @@ func TestMatcherAllowsPluginProxyPrefixForRolePolicies(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.True(t, allowed)
+
+	allowed, err = enforcer.Enforce(
+		"member-1",
+		"ws-1",
+		"/api/v1/plugins/kubernetes/clusters/a/extra/proxy/api/v1/pods",
+		"GET",
+	)
+	require.NoError(t, err)
+	require.False(t, allowed)
 
 	allowed, err = enforcer.Enforce(
 		"member-1",

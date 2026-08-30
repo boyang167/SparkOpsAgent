@@ -115,6 +115,39 @@ func TestParse_ValidANYWildcard(t *testing.T) {
 	require.Equal(t, "/api/v1/plugins/example/proxy/*", m.APIs[0].Path)
 }
 
+func TestParse_ValidExactPOSTReadOnly(t *testing.T) {
+	yaml := strings.Replace(validYAML,
+		"  - method: GET\n    path: /api/v1/plugins/example/ping",
+		"  - method: POST\n    path: /api/v1/plugins/example/metrics\n    read_only: true", 1)
+	m, err := manifest.Parse([]byte(yaml))
+	require.NoError(t, err)
+	require.True(t, m.APIs[0].ReadOnly)
+}
+
+func TestParse_InvalidANYReadOnly(t *testing.T) {
+	yaml := strings.Replace(validYAML,
+		"  - method: GET\n    path: /api/v1/plugins/example/ping",
+		"  - method: ANY\n    path: /api/v1/plugins/example/proxy/*\n    read_only: true", 1)
+	_, err := manifest.Parse([]byte(yaml))
+	requireManifestInvalid(t, err)
+}
+
+func TestParse_InvalidPUTReadOnly(t *testing.T) {
+	yaml := strings.Replace(validYAML,
+		"  - method: GET\n    path: /api/v1/plugins/example/ping",
+		"  - method: PUT\n    path: /api/v1/plugins/example/ping\n    read_only: true", 1)
+	_, err := manifest.Parse([]byte(yaml))
+	requireManifestInvalid(t, err)
+}
+
+func TestParse_InvalidPOSTWildcardReadOnly(t *testing.T) {
+	yaml := strings.Replace(validYAML,
+		"  - method: GET\n    path: /api/v1/plugins/example/ping",
+		"  - method: POST\n    path: /api/v1/plugins/example/proxy/*\n    read_only: true", 1)
+	_, err := manifest.Parse([]byte(yaml))
+	requireManifestInvalid(t, err)
+}
+
 func TestParse_InvalidANYExactPath(t *testing.T) {
 	yaml := strings.Replace(validYAML, "method: GET", "method: ANY", 1)
 	_, err := manifest.Parse([]byte(yaml))
