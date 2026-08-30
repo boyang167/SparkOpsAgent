@@ -39,6 +39,27 @@ func TestAutoMigrateCreatesPluginSchemaTables(t *testing.T) {
 		require.NoError(t, db.Raw("SELECT to_regclass(?) IS NOT NULL", table).Scan(&exists).Error)
 		require.Truef(t, exists, "missing table %s", table)
 	}
+	assertColumn(t, db, "plugins", "version", "text", false, "")
+	assertColumn(t, db, "plugins", "display_name", "text", false, "")
+	assertColumn(t, db, "plugins", "manifest_yaml", "text", false, "")
+	assertColumn(t, db, "plugins", "status", "text", false, "")
+	assertColumn(t, db, "plugins", "created_by", "uuid", false, "")
+	assertColumn(t, db, "workspace_bindings", "workspace_id", "uuid", false, "")
+	assertColumn(t, db, "workspace_bindings", "plugin_id", "text", false, "")
+	assertColumn(t, db, "workspace_bindings", "enabled", "boolean", false, "false")
+
+	var fkCount int64
+	require.NoError(t, db.Raw(`
+		SELECT count(*)
+		FROM pg_constraint c
+		JOIN pg_class rel ON rel.oid = c.conrelid
+		JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+		WHERE ns.nspname = 'plugin'
+		  AND rel.relname = 'workspace_bindings'
+		  AND c.conname = 'fk_plugin_workspace_bindings_plugin'
+		  AND c.contype = 'f'
+	`).Scan(&fkCount).Error)
+	require.Equal(t, int64(1), fkCount)
 }
 
 func TestStorePersistsPluginsAndWorkspaceBindings(t *testing.T) {
@@ -80,6 +101,13 @@ func TestStorePersistsPluginsAndWorkspaceBindings(t *testing.T) {
 	require.Equal(t, model.PluginStatusPROpen, reopened.Status)
 	require.Equal(t, "https://example.test/pr/1", reopened.PRURL)
 
+	require.NoError(t, reopened.MarkMerged())
+	require.NoError(t, reopened.MarkDeployed())
+	require.NoError(t, repo.SavePlugin(ctx, reopened))
+	deployed, err := repo.FindPlugin(ctx, pluginID)
+	require.NoError(t, err)
+	require.True(t, deployed.CanEnable())
+
 	binding := &model.WorkspaceBinding{
 		WorkspaceID: wsID,
 		PluginID:    pluginID,
@@ -106,17 +134,42 @@ func TestStorePersistsPluginsAndWorkspaceBindings(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, pluginIDs(enabledByWorkspace), pluginID)
 
-	require.NoError(t, repo.DeleteBinding(ctx, wsID, pluginID))
+	require.NoError(t, repo.DeletePlugin(ctx, pluginID))
 	_, err = repo.FindBinding(ctx, wsID, pluginID)
 	require.ErrorIs(t, err, domain.ErrPluginBindingNotFound)
 
-	require.NoError(t, repo.DeletePlugin(ctx, pluginID))
 	_, err = repo.FindPlugin(ctx, pluginID)
 	require.ErrorIs(t, err, domain.ErrPluginNotFound)
 
 	var remaining int64
 	require.NoError(t, db.Table("plugin.plugins").Where("id = ?", pluginID).Count(&remaining).Error)
 	require.Zero(t, remaining)
+}
+
+func assertColumn(t *testing.T, db *gorm.DB, table, column, dataType string, nullable bool, defaultValue string) {
+	t.Helper()
+	var row struct {
+		DataType      string
+		IsNullable    string
+		ColumnDefault *string
+	}
+	require.NoError(t, db.Raw(`
+		SELECT data_type, is_nullable, column_default
+		FROM information_schema.columns
+		WHERE table_schema = 'plugin'
+		  AND table_name = ?
+		  AND column_name = ?
+	`, table, column).Scan(&row).Error)
+	require.Equal(t, dataType, row.DataType)
+	if nullable {
+		require.Equal(t, "YES", row.IsNullable)
+	} else {
+		require.Equal(t, "NO", row.IsNullable)
+	}
+	if defaultValue != "" {
+		require.NotNil(t, row.ColumnDefault)
+		require.Contains(t, *row.ColumnDefault, defaultValue)
+	}
 }
 
 func pluginIDs(bindings []*model.WorkspaceBinding) []string {

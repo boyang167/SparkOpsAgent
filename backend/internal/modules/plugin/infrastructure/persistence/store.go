@@ -19,27 +19,53 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return db.AutoMigrate(&pluginModel{}, &workspaceBindingModel{})
+	if err := db.AutoMigrate(&pluginModel{}, &workspaceBindingModel{}); err != nil {
+		return err
+	}
+	if db.Dialector.Name() == "postgres" {
+		return db.Exec(`
+			DO $$
+			BEGIN
+				IF NOT EXISTS (
+					SELECT 1
+					FROM pg_constraint c
+					JOIN pg_class rel ON rel.oid = c.conrelid
+					JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+					WHERE ns.nspname = 'plugin'
+					  AND rel.relname = 'workspace_bindings'
+					  AND c.conname = 'fk_plugin_workspace_bindings_plugin'
+					  AND c.contype = 'f'
+				) THEN
+					ALTER TABLE plugin.workspace_bindings
+						ADD CONSTRAINT fk_plugin_workspace_bindings_plugin
+						FOREIGN KEY (plugin_id)
+						REFERENCES plugin.plugins(id);
+				END IF;
+			END
+			$$;
+		`).Error
+	}
+	return nil
 }
 
 type pluginModel struct {
-	ID           string `gorm:"column:id;primaryKey"`
-	Version      string
-	DisplayName  string
-	ManifestYAML string `gorm:"type:text"`
-	Status       string
-	PRURL        string `gorm:"column:pr_url;default:'';not null"`
-	CreatedBy    string `gorm:"type:uuid;not null"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID           string    `gorm:"column:id;primaryKey;type:text"`
+	Version      string    `gorm:"type:text;not null"`
+	DisplayName  string    `gorm:"type:text;not null"`
+	ManifestYAML string    `gorm:"type:text;not null"`
+	Status       string    `gorm:"type:text;not null"`
+	PRURL        string    `gorm:"column:pr_url;type:text;not null;default:''"`
+	CreatedBy    string    `gorm:"type:uuid;not null"`
+	CreatedAt    time.Time `gorm:"not null"`
+	UpdatedAt    time.Time `gorm:"not null"`
 }
 
 func (pluginModel) TableName() string { return "plugin.plugins" }
 
 type workspaceBindingModel struct {
-	WorkspaceID string `gorm:"column:workspace_id;primaryKey;type:uuid"`
-	PluginID    string `gorm:"column:plugin_id;primaryKey"`
-	Enabled     bool
+	WorkspaceID string  `gorm:"column:workspace_id;primaryKey;type:uuid;not null"`
+	PluginID    string  `gorm:"column:plugin_id;primaryKey;type:text;not null"`
+	Enabled     bool    `gorm:"not null;default:false"`
 	EnabledBy   *string `gorm:"column:enabled_by;type:uuid"`
 	EnabledAt   *time.Time
 }
@@ -103,14 +129,19 @@ func (s *Store) ListPlugins(ctx context.Context) ([]*model.PluginRecord, error) 
 }
 
 func (s *Store) DeletePlugin(ctx context.Context, id string) error {
-	result := s.db.WithContext(ctx).Where("id = ?", id).Delete(&pluginModel{})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return domain.ErrPluginNotFound
-	}
-	return nil
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("plugin_id = ?", id).Delete(&workspaceBindingModel{}).Error; err != nil {
+			return err
+		}
+		result := tx.Where("id = ?", id).Delete(&pluginModel{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return domain.ErrPluginNotFound
+		}
+		return nil
+	})
 }
 
 func (s *Store) SaveBinding(ctx context.Context, binding *model.WorkspaceBinding) error {
