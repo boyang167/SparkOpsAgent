@@ -10,6 +10,7 @@ import (
 	k8sproxy "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/proxy"
 	k8srecords "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/records"
 	k8sstream "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/stream"
+	k8stty "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/tty"
 )
 
 const routePrefix = "/api/v1/plugins/kubernetes"
@@ -27,6 +28,7 @@ func RegisterRoutes(engine *gin.Engine, contexts ...sparkplugin.PluginContext) {
 	filesHandler := k8sfiles.NewHandler(pctx)
 	recordsHandler := k8srecords.NewHandler(pctx)
 	streamHandler := k8sstream.NewHandler(pctx)
+	ttyHandler := k8stty.NewHandler(pctx)
 	group := engine.Group(routePrefix)
 	group.Use(httpx.RequireWorkspace(), requireWorkspaceMember(pctx.Members))
 	group.GET("/ready", func(c *gin.Context) {
@@ -45,4 +47,6 @@ func RegisterRoutes(engine *gin.Engine, contexts ...sparkplugin.PluginContext) {
 	group.GET("/records", recordsHandler.List)
 	group.GET("/records/:recordId", recordsHandler.Get)
 	group.DELETE("/records/:recordId", recordsHandler.Delete)
+	group.POST("/clusters/:clusterId/cloudtty", ttyHandler.CloudTTY)
+	group.POST("/clusters/:clusterId/nodetty", ttyHandler.NodeTTY)
 }
