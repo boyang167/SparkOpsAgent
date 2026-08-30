@@ -1,9 +1,14 @@
 package http
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
+	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,4 +20,25 @@ func TestRegisterRoutesPanicsWhenMountedTwiceOnSameEngine(t *testing.T) {
 	require.Panics(t, func() {
 		RegisterRoutes(engine)
 	})
+}
+
+func TestRegisterRoutesMountsProxyForHeadRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	memberID := kernel.NewMemberID()
+	wsID := kernel.NewWorkspaceID()
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		authn.SetMemberIDForTest(c, memberID)
+		c.Next()
+	})
+	RegisterRoutes(engine, sparkplugin.PluginContext{
+		Members: allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
+	})
+
+	req := httptest.NewRequest(http.MethodHead, "/api/v1/plugins/kubernetes/clusters/"+kernel.NewClusterInfoID().String()+"/proxy/version", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
