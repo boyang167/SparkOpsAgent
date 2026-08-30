@@ -15,5 +15,5 @@ func TestRunRegistersPluginModule(t *testing.T) {
 
 	require.Contains(t, app, `pluginmod "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin"`)
 	require.Contains(t, app, "pluginmod.New(tokens)")
-	require.Less(t, strings.Index(app, "pluginmod.New(tokens)"), strings.Index(app, "sparkplugin.InstallAll(c.Engine, logger)"))
+	require.Less(t, strings.Index(app, "pluginmod.New(tokens)"), strings.Index(app, "sparkplugin.InstallAllWithContext(c.Engine, pluginContext)"))
 }

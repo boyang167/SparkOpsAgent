@@ -63,7 +63,7 @@ func TestRunInstallsPluginsAfterAuthMiddlewareBeforeRouteCollect(t *testing.T) {
 
 	entitlementsMiddleware := strings.Index(app, "c.Engine.Use(entitlements.Middleware(c.DB))")
 	pluginAuth := strings.Index(app, "c.Engine.Use(authn.RequireMemberForPluginAPIs())")
-	installAll := strings.Index(app, "sparkplugin.InstallAll(c.Engine, logger)")
+	installAll := strings.Index(app, "sparkplugin.InstallAllWithContext(c.Engine, pluginContext)")
 	routeCollect := strings.Index(app, "c.RouteRegistry = routes.Collect(c.Engine)")
 
 	require.NotEqual(t, -1, entitlementsMiddleware)
@@ -73,4 +73,5 @@ func TestRunInstallsPluginsAfterAuthMiddlewareBeforeRouteCollect(t *testing.T) {
 	require.Less(t, entitlementsMiddleware, pluginAuth)
 	require.Less(t, pluginAuth, installAll)
 	require.Less(t, installAll, routeCollect)
+	require.Contains(t, app, "sparkplugin.NewFactory(newClusterCredentialSource(adminRepo))")
 }

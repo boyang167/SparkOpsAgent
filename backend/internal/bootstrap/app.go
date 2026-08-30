@@ -21,6 +21,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/mcp"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/notification"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin"
+	adminpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/infrastructure/persistence"
 	pluginmod "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime"
@@ -157,7 +158,12 @@ func Run(ctx context.Context) error {
 	}
 	c.Engine.Use(authn.RequireMemberForPluginAPIs())
 
-	sparkplugin.InstallAll(c.Engine, logger)
+	pluginContext := sparkplugin.PluginContext{Logger: logger, DB: c.DB}
+	if c.DB != nil {
+		adminRepo := adminpersistence.NewAdminRepository(c.DB)
+		pluginContext.Clusters = sparkplugin.NewFactory(newClusterCredentialSource(adminRepo))
+	}
+	sparkplugin.InstallAllWithContext(c.Engine, pluginContext)
 	c.RouteRegistry = routes.Collect(c.Engine)
 
 	server := &http.Server{

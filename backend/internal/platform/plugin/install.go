@@ -6,23 +6,32 @@ import (
 )
 
 func InstallAll(engine *gin.Engine, logger *zap.Logger) {
+	InstallAllWithContext(engine, PluginContext{Logger: logger})
+}
+
+func InstallAllWithContext(engine *gin.Engine, pctx PluginContext) {
 	if engine == nil {
 		return
 	}
 	for _, p := range Registered() {
-		installOne(engine, logger, p)
+		installOne(engine, pctx, p)
 	}
 }
 
-func installOne(engine *gin.Engine, logger *zap.Logger, p Plugin) {
+func installOne(engine *gin.Engine, pctx PluginContext, p Plugin) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			if logger != nil {
-				logger.Error("plugin register panicked", zap.Any("panic", rec))
+			if pctx.Logger != nil {
+				pctx.Logger.Error("plugin register panicked", zap.Any("panic", rec))
 			}
 		}
 	}()
-	if p != nil {
-		p.Register(engine)
+	if p == nil {
+		return
 	}
+	if cp, ok := p.(ContextPlugin); ok {
+		cp.RegisterWithContext(engine, pctx)
+		return
+	}
+	p.Register(engine)
 }
