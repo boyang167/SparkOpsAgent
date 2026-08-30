@@ -59,6 +59,20 @@ func (r fakeAdminClusterRepo) CountProductsByWorkspace(context.Context, kernel.W
 	return 0, nil
 }
 
+type fakePermissionChecker struct {
+	allowed bool
+	perm    string
+}
+
+func (c *fakePermissionChecker) RequirePermission(context.Context, kernel.WorkspaceID, kernel.MemberID, string) error {
+	return nil
+}
+
+func (c *fakePermissionChecker) HasPermission(_ context.Context, _ kernel.WorkspaceID, _ kernel.MemberID, perm string) (bool, error) {
+	c.perm = perm
+	return c.allowed, nil
+}
+
 func TestClusterCredentialSourceListsOnlyAuthorizedClusters(t *testing.T) {
 	wsID := kernel.NewWorkspaceID()
 	clusterID := kernel.NewClusterInfoID()
@@ -102,6 +116,17 @@ func TestClusterCredentialSourceRejectsUngrantWithoutLeakingCredentials(t *testi
 	require.NotContains(t, err.Error(), "CA_prod")
 	require.NotContains(t, err.Error(), "CERT_prod")
 	require.NotContains(t, err.Error(), "KEY_prod")
+}
+
+func TestGovernanceWriteAuthorizerChecksGovernanceAdminPermission(t *testing.T) {
+	checker := &fakePermissionChecker{allowed: true}
+	writer := newGovernanceWriteAuthorizer(checker)
+
+	allowed, err := writer.CanWrite(context.Background(), kernel.NewWorkspaceID(), kernel.NewMemberID())
+
+	require.NoError(t, err)
+	require.True(t, allowed)
+	require.Equal(t, "governance:admin", checker.perm)
 }
 
 func testCluster(id kernel.ClusterInfoID, name string) *repository.ClusterInfo {

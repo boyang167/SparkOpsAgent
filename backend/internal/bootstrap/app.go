@@ -163,6 +163,9 @@ func Run(ctx context.Context) error {
 		adminRepo := adminpersistence.NewAdminRepository(c.DB)
 		pluginContext.Clusters = sparkplugin.NewFactory(newClusterCredentialSource(adminRepo))
 	}
+	if c.PermissionChecker != nil {
+		pluginContext.Writer = newGovernanceWriteAuthorizer(c.PermissionChecker)
+	}
 	sparkplugin.InstallAllWithContext(c.Engine, pluginContext)
 	c.RouteRegistry = routes.Collect(c.Engine)
 

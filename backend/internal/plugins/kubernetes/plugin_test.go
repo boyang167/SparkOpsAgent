@@ -59,7 +59,9 @@ func TestRegisterBundledDescriptor(t *testing.T) {
 	require.ElementsMatch(t, []string{
 		"backend/internal/plugins/kubernetes/plugin.go",
 		"backend/internal/plugins/kubernetes/plugin.yaml",
+		"backend/internal/plugins/kubernetes/http/clusters.go",
 		"backend/internal/plugins/kubernetes/http/router.go",
+		"backend/internal/plugins/kubernetes/http/write_guard.go",
 		"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
 		"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
 	}, descriptor.InstalledFiles)

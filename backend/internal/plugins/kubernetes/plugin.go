@@ -27,7 +27,9 @@ func registerBundledDescriptor() {
 		InstalledFiles: []string{
 			"backend/internal/plugins/kubernetes/plugin.go",
 			"backend/internal/plugins/kubernetes/plugin.yaml",
+			"backend/internal/plugins/kubernetes/http/clusters.go",
 			"backend/internal/plugins/kubernetes/http/router.go",
+			"backend/internal/plugins/kubernetes/http/write_guard.go",
 			"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
 		},
@@ -38,6 +40,6 @@ func (p *plugin) Register(engine *gin.Engine) {
 	kuberneteshttp.RegisterRoutes(engine)
 }
 
-func (p *plugin) RegisterWithContext(engine *gin.Engine, _ sparkplugin.PluginContext) {
-	kuberneteshttp.RegisterRoutes(engine)
+func (p *plugin) RegisterWithContext(engine *gin.Engine, ctx sparkplugin.PluginContext) {
+	kuberneteshttp.RegisterRoutes(engine, ctx)
 }
