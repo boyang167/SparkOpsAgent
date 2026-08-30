@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
 )
 
@@ -19,6 +20,7 @@ func RegisterRoutes(engine *gin.Engine, contexts ...sparkplugin.PluginContext) {
 	}
 	handler := newClusterHandler(pctx)
 	group := engine.Group(routePrefix)
+	group.Use(httpx.RequireWorkspace(), requireWorkspaceMember(pctx.Members))
 	group.GET("/ready", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})

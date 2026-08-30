@@ -166,6 +166,9 @@ func Run(ctx context.Context) error {
 	if c.PermissionChecker != nil {
 		pluginContext.Writer = newGovernanceWriteAuthorizer(c.PermissionChecker)
 	}
+	if c.WorkspaceMemberChecker != nil {
+		pluginContext.Members = c.WorkspaceMemberChecker
+	}
 	sparkplugin.InstallAllWithContext(c.Engine, pluginContext)
 	c.RouteRegistry = routes.Collect(c.Engine)
 

@@ -24,12 +24,17 @@ type WriteAuthorizer interface {
 	CanWrite(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID) (bool, error)
 }
 
+type WorkspaceMemberAuthorizer interface {
+	IsWorkspaceMember(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID) (bool, error)
+}
+
 type PluginContext struct {
 	Logger   *zap.Logger
 	DB       *gorm.DB
 	Audit    AuditLogger
 	Clusters ClusterClientFactory
 	Writer   WriteAuthorizer
+	Members  WorkspaceMemberAuthorizer
 }
 
 type ContextPlugin interface {

@@ -1,27 +1,22 @@
 package http
 
 import (
-	"errors"
 	stdhttp "net/http"
-	"net/url"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
 	k8sschema "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/schema"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
-	"gorm.io/gorm"
 )
 
-const maskedSecret = "***"
-
 type clusterHandler struct {
-	ctx sparkplugin.PluginContext
+	ctx   sparkplugin.PluginContext
+	store settingsStore
 }
 
 func newClusterHandler(ctx sparkplugin.PluginContext) clusterHandler {
-	return clusterHandler{ctx: ctx}
+	return clusterHandler{ctx: ctx, store: newSettingsStore(ctx.DB)}
 }
 
 type clusterListResponse struct {
@@ -32,18 +27,6 @@ type clusterView struct {
 	ID                 string `json:"id"`
 	Name               string `json:"name"`
 	Server             string `json:"server"`
-	PrometheusURL      string `json:"prometheus_url"`
-	PrometheusUser     string `json:"prometheus_user"`
-	PrometheusPassword string `json:"prometheus_password"`
-	VelauxURL          string `json:"velaux_url"`
-	VelauxUser         string `json:"velaux_user"`
-	VelauxPassword     string `json:"velaux_password"`
-	LLMBaseURL         string `json:"llm_base_url"`
-	LLMAPIKey          string `json:"llm_api_key"`
-	LLMModel           string `json:"llm_model"`
-}
-
-type clusterSettingsRequest struct {
 	PrometheusURL      string `json:"prometheus_url"`
 	PrometheusUser     string `json:"prometheus_user"`
 	PrometheusPassword string `json:"prometheus_password"`
@@ -69,7 +52,7 @@ func (h clusterHandler) listClusters(c *gin.Context) {
 		handleClusterError(c, err)
 		return
 	}
-	settings, err := h.loadSettings(c, metas)
+	settings, err := h.store.List(c.Request.Context(), clusterIDs(metas))
 	if err != nil {
 		handleClusterError(c, err)
 		return
@@ -113,7 +96,7 @@ func (h clusterHandler) putClusterSettings(c *gin.Context) {
 		handleClusterError(c, err)
 		return
 	}
-	settings, err := h.upsertSettings(c, clusterID, req)
+	settings, err := h.store.Upsert(c.Request.Context(), clusterID, req)
 	if err != nil {
 		handleClusterError(c, err)
 		return
@@ -143,25 +126,6 @@ func (h clusterHandler) writeReady(c *gin.Context) bool {
 	return true
 }
 
-func (h clusterHandler) loadSettings(c *gin.Context, metas []sparkplugin.ClusterMeta) (map[string]k8sschema.ClusterSettings, error) {
-	ids := make([]string, 0, len(metas))
-	for _, meta := range metas {
-		ids = append(ids, meta.ID)
-	}
-	if len(ids) == 0 {
-		return map[string]k8sschema.ClusterSettings{}, nil
-	}
-	var rows []k8sschema.ClusterSettings
-	if err := h.ctx.DB.WithContext(c.Request.Context()).Where("cluster_id IN ?", ids).Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make(map[string]k8sschema.ClusterSettings, len(rows))
-	for _, row := range rows {
-		out[row.ClusterID] = row
-	}
-	return out, nil
-}
-
 func (h clusterHandler) authorizedMeta(c *gin.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) (sparkplugin.ClusterMeta, error) {
 	metas, err := h.ctx.Clusters.ListMeta(c.Request.Context(), wsID)
 	if err != nil {
@@ -173,49 +137,6 @@ func (h clusterHandler) authorizedMeta(c *gin.Context, wsID kernel.WorkspaceID, 
 		}
 	}
 	return sparkplugin.ClusterMeta{}, kernel.NewDomainError("PLUGIN_CLUSTER_FORBIDDEN", "cluster is not granted to workspace")
-}
-
-func (h clusterHandler) upsertSettings(c *gin.Context, clusterID kernel.ClusterInfoID, req clusterSettingsRequest) (k8sschema.ClusterSettings, error) {
-	settings := k8sschema.ClusterSettings{ClusterID: clusterID.String()}
-	err := h.ctx.DB.WithContext(c.Request.Context()).First(&settings, "cluster_id = ?", clusterID.String()).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return k8sschema.ClusterSettings{}, err
-	}
-	settings.ClusterID = clusterID.String()
-	settings.PrometheusURL = req.PrometheusURL
-	settings.PrometheusUser = req.PrometheusUser
-	settings.PrometheusPassword = updateSecret(settings.PrometheusPassword, req.PrometheusPassword)
-	settings.VelauxURL = req.VelauxURL
-	settings.VelauxUser = req.VelauxUser
-	settings.VelauxPassword = updateSecret(settings.VelauxPassword, req.VelauxPassword)
-	settings.LLMBaseURL = req.LLMBaseURL
-	settings.LLMAPIKey = updateSecret(settings.LLMAPIKey, req.LLMAPIKey)
-	settings.LLMModel = req.LLMModel
-	if err := h.ctx.DB.WithContext(c.Request.Context()).Save(&settings).Error; err != nil {
-		return k8sschema.ClusterSettings{}, err
-	}
-	return settings, nil
-}
-
-func validateSettingsURLs(req clusterSettingsRequest) error {
-	for field, raw := range map[string]string{
-		"prometheus_url": req.PrometheusURL,
-		"velaux_url":     req.VelauxURL,
-		"llm_base_url":   req.LLMBaseURL,
-	} {
-		if raw == "" {
-			continue
-		}
-		parsed, err := url.ParseRequestURI(raw)
-		if err != nil || parsed.Host == "" {
-			return errors.New(field + " must be an absolute http or https URL")
-		}
-		scheme := strings.ToLower(parsed.Scheme)
-		if scheme != "http" && scheme != "https" {
-			return errors.New(field + " must be an absolute http or https URL")
-		}
-	}
-	return nil
 }
 
 func viewFromMeta(meta sparkplugin.ClusterMeta) clusterView {
@@ -253,24 +174,16 @@ func maskViewSecrets(view *clusterView) {
 	view.LLMAPIKey = maskSecret(view.LLMAPIKey)
 }
 
-func maskSecret(value string) string {
-	if value == "" {
-		return ""
-	}
-	return maskedSecret
-}
-
-func updateSecret(existing, incoming string) string {
-	if incoming == maskedSecret {
-		return existing
-	}
-	return incoming
-}
-
 func handleClusterError(c *gin.Context, err error) {
-	if de, ok := kernel.IsDomainError(err); ok && de.Code() == "PLUGIN_CLUSTER_FORBIDDEN" {
-		httpx.Fail(c, de.Code(), de.Error(), stdhttp.StatusForbidden)
-		return
+	if de, ok := kernel.IsDomainError(err); ok {
+		switch de.Code() {
+		case "PLUGIN_CLUSTER_FORBIDDEN":
+			httpx.Fail(c, de.Code(), de.Error(), stdhttp.StatusForbidden)
+			return
+		case "PLUGIN_CLUSTER_SETTINGS_CONFLICT":
+			httpx.Fail(c, de.Code(), de.Error(), stdhttp.StatusConflict)
+			return
+		}
 	}
 	httpx.HandleError(c, err)
 }

@@ -54,7 +54,8 @@ func TestListClustersReturnsAuthorizedMetadataWithMaskedSettings(t *testing.T) {
 			Name:   "prod",
 			Server: "https://kubernetes.example",
 		}}},
-		Writer: allowWriter{allow: true},
+		Members: allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
+		Writer:  allowWriter{allow: true},
 	})
 
 	rec := performJSON(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters", wsID, nil)
@@ -94,6 +95,7 @@ func TestPutClusterSettingsRequiresGovernanceAdmin(t *testing.T) {
 	engine := testEngine(memberID, sparkplugin.PluginContext{
 		DB:       db,
 		Clusters: fakeClusterFactory{items: []sparkplugin.ClusterMeta{{ID: clusterID.String(), Name: "prod"}}},
+		Members:  allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
 		Writer:   allowWriter{allow: false},
 	})
 
@@ -116,6 +118,7 @@ func TestPutClusterSettingsRejectsUngrantCluster(t *testing.T) {
 	engine := testEngine(memberID, sparkplugin.PluginContext{
 		DB:       db,
 		Clusters: fakeClusterFactory{items: nil},
+		Members:  allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
 		Writer:   allowWriter{allow: true},
 	})
 
@@ -144,6 +147,7 @@ func TestPutClusterSettingsPreservesMaskedSecretsAndAllowsClearing(t *testing.T)
 	engine := testEngine(memberID, sparkplugin.PluginContext{
 		DB:       db,
 		Clusters: fakeClusterFactory{items: []sparkplugin.ClusterMeta{{ID: clusterID.String(), Name: "prod"}}},
+		Members:  allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
 		Writer:   allowWriter{allow: true},
 	})
 
@@ -171,6 +175,10 @@ func TestPutClusterSettingsPreservesMaskedSecretsAndAllowsClearing(t *testing.T)
 	require.Equal(t, "https://llm.example/v1", stored.LLMBaseURL)
 	require.Equal(t, "existing-key", stored.LLMAPIKey)
 	require.Equal(t, "qwen-plus", stored.LLMModel)
+	require.NotContains(t, rec.Body.String(), "existing-prom")
+	require.NotContains(t, rec.Body.String(), "existing-key")
+	require.Contains(t, rec.Body.String(), `"prometheus_password":"***"`)
+	require.Contains(t, rec.Body.String(), `"llm_api_key":"***"`)
 }
 
 func TestPutClusterSettingsValidatesURLFields(t *testing.T) {
@@ -181,6 +189,7 @@ func TestPutClusterSettingsValidatesURLFields(t *testing.T) {
 	engine := testEngine(memberID, sparkplugin.PluginContext{
 		DB:       db,
 		Clusters: fakeClusterFactory{items: []sparkplugin.ClusterMeta{{ID: clusterID.String(), Name: "prod"}}},
+		Members:  allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
 		Writer:   allowWriter{allow: true},
 	})
 
@@ -188,10 +197,13 @@ func TestPutClusterSettingsValidatesURLFields(t *testing.T) {
 		{"prometheus_url": "ftp://prometheus.example"},
 		{"velaux_url": "http://[::1"},
 		{"llm_base_url": "//llm.example"},
+		{"prometheus_url": "https://user:pass@prometheus.example"},
 	} {
 		rec := performJSON(engine, http.MethodPut, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/settings", wsID, payload)
 		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 		require.Contains(t, rec.Body.String(), "PLUGIN_CLUSTER_SETTINGS_INVALID_URL")
+		require.NotContains(t, rec.Body.String(), "user:pass")
+		require.NotContains(t, rec.Body.String(), "prometheus.example")
 	}
 }
 
@@ -208,6 +220,45 @@ func TestClusterRoutesReturnServiceUnavailableWithoutPluginContext(t *testing.T)
 		"prometheus_url": "https://prom.example",
 	})
 	require.Equal(t, http.StatusServiceUnavailable, putRec.Code)
+}
+
+func TestClusterRoutesRequireWorkspaceMembershipFromProductionChain(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	otherWSID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	db := openK8sHTTPDB(t)
+	factory := &recordingClusterFactory{items: []sparkplugin.ClusterMeta{{ID: clusterID.String(), Name: "prod"}}}
+	engine := testEngine(memberID, sparkplugin.PluginContext{
+		DB:       db,
+		Clusters: factory,
+		Members:  allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
+		Writer:   allowWriter{allow: true},
+	})
+
+	okRec := performJSON(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters", wsID, nil)
+	require.Equal(t, http.StatusOK, okRec.Code)
+	require.Equal(t, []kernel.WorkspaceID{wsID}, factory.seenWorkspaces)
+
+	forbiddenRec := performJSON(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters", otherWSID, nil)
+	require.Equal(t, http.StatusForbidden, forbiddenRec.Code)
+	require.Contains(t, forbiddenRec.Body.String(), "TENANT_NOT_WORKSPACE_MEMBER")
+	require.Equal(t, []kernel.WorkspaceID{wsID}, factory.seenWorkspaces)
+}
+
+func TestClusterRoutesReturnServiceUnavailableWithoutMemberAuthorizer(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	db := openK8sHTTPDB(t)
+	engine := testEngine(memberID, sparkplugin.PluginContext{
+		DB:       db,
+		Clusters: fakeClusterFactory{items: []sparkplugin.ClusterMeta{{ID: clusterID.String(), Name: "prod"}}},
+		Writer:   allowWriter{allow: true},
+	})
+
+	rec := performJSON(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters", wsID, nil)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
 
 func openK8sHTTPDB(t *testing.T) *gorm.DB {
@@ -230,7 +281,6 @@ func testEngine(memberID kernel.MemberID, ctx sparkplugin.PluginContext) *gin.En
 		authn.SetMemberIDForTest(c, memberID)
 		c.Next()
 	})
-	engine.Use(httpx.RequireWorkspace())
 	RegisterRoutes(engine, ctx)
 	return engine
 }
@@ -268,4 +318,28 @@ type allowWriter struct {
 
 func (w allowWriter) CanWrite(context.Context, kernel.WorkspaceID, kernel.MemberID) (bool, error) {
 	return w.allow, nil
+}
+
+type allowMembers struct {
+	grants map[kernel.WorkspaceID]map[kernel.MemberID]bool
+}
+
+func (m allowMembers) IsWorkspaceMember(_ context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID) (bool, error) {
+	return m.grants[wsID][memberID], nil
+}
+
+type recordingClusterFactory struct {
+	items          []sparkplugin.ClusterMeta
+	seenWorkspaces []kernel.WorkspaceID
+}
+
+func (f *recordingClusterFactory) ForWorkspace(context.Context, kernel.WorkspaceID, kernel.ClusterInfoID) (
+	kubernetes.Interface, dynamic.Interface, *rest.Config, *sparkplugin.ClusterMeta, error,
+) {
+	return nil, nil, nil, nil, nil
+}
+
+func (f *recordingClusterFactory) ListMeta(_ context.Context, wsID kernel.WorkspaceID) ([]sparkplugin.ClusterMeta, error) {
+	f.seenWorkspaces = append(f.seenWorkspaces, wsID)
+	return f.items, nil
 }

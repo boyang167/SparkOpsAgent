@@ -29,6 +29,8 @@ func registerBundledDescriptor() {
 			"backend/internal/plugins/kubernetes/plugin.yaml",
 			"backend/internal/plugins/kubernetes/http/clusters.go",
 			"backend/internal/plugins/kubernetes/http/router.go",
+			"backend/internal/plugins/kubernetes/http/settings.go",
+			"backend/internal/plugins/kubernetes/http/settings_store.go",
 			"backend/internal/plugins/kubernetes/http/write_guard.go",
 			"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
