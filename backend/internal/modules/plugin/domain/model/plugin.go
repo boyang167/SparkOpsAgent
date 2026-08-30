@@ -23,23 +23,23 @@ const (
 var ErrInvalidPluginStatusTransition = errors.New("invalid plugin status transition")
 
 type PluginRecord struct {
-	ID           string
-	Version      string
-	DisplayName  string
-	ManifestYAML string
-	Status       PluginStatus
-	PRURL        string
-	CreatedBy    kernel.MemberID
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID           string          `json:"id"`
+	Version      string          `json:"version"`
+	DisplayName  string          `json:"display_name"`
+	ManifestYAML string          `json:"manifest_yaml"`
+	Status       PluginStatus    `json:"status"`
+	PRURL        string          `json:"pr_url"`
+	CreatedBy    kernel.MemberID `json:"created_by"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
 }
 
 type WorkspaceBinding struct {
-	WorkspaceID kernel.WorkspaceID
-	PluginID    string
-	Enabled     bool
-	EnabledBy   kernel.MemberID
-	EnabledAt   time.Time
+	WorkspaceID kernel.WorkspaceID `json:"workspace_id"`
+	PluginID    string             `json:"plugin_id"`
+	Enabled     bool               `json:"enabled"`
+	EnabledBy   kernel.MemberID    `json:"enabled_by"`
+	EnabledAt   time.Time          `json:"enabled_at"`
 }
 
 func (p *PluginRecord) MarkPROpen(url string) error {

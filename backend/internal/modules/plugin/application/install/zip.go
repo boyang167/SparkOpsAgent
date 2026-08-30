@@ -24,8 +24,10 @@ var rejectedExts = map[string]struct{}{
 }
 
 type InspectedZip struct {
-	Manifest *manifest.Manifest
-	Files    map[string][]byte
+	Manifest      *manifest.Manifest
+	Files         map[string][]byte
+	BackendFiles  map[string][]byte
+	FrontendFiles map[string][]byte
 }
 
 func InspectZip(raw []byte) (*InspectedZip, error) {
@@ -35,6 +37,8 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 	}
 
 	files := make(map[string][]byte)
+	backendFiles := make(map[string][]byte)
+	frontendFiles := make(map[string][]byte)
 	seenRawNames := make(map[string]struct{})
 	var foundManifest *manifest.Manifest
 	var topLevelID string
@@ -88,6 +92,7 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 				return nil, zipInvalid("plugin zip maps multiple files to: " + rel)
 			}
 			files[rel] = content
+			backendFiles[rel] = content
 			if path.Base(rel) == "plugin.go" && FileDeclaresRegisterEngine(content) {
 				registerFound = true
 			}
@@ -97,6 +102,7 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 				return nil, zipInvalid("plugin zip maps multiple files to: " + rel)
 			}
 			files[rel] = content
+			frontendFiles[rel] = content
 		}
 	}
 
@@ -108,8 +114,10 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 	}
 
 	return &InspectedZip{
-		Manifest: foundManifest,
-		Files:    files,
+		Manifest:      foundManifest,
+		Files:         files,
+		BackendFiles:  backendFiles,
+		FrontendFiles: frontendFiles,
 	}, nil
 }
 

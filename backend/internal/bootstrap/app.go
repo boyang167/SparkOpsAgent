@@ -21,6 +21,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/mcp"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/notification"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin"
+	pluginmod "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/tenant"
@@ -131,6 +132,7 @@ func Run(ctx context.Context) error {
 			integration.New(tokens),
 			agent_runtime.New(tokens),
 			mcp.New(tokens),
+			pluginmod.New(tokens),
 		)
 	} else {
 		logger.Warn("database unavailable, skipping business modules")

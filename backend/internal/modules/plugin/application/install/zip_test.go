@@ -81,6 +81,8 @@ func TestInspectZipAcceptsValidPluginAndMapsFiles(t *testing.T) {
 	require.Equal(t, "example", inspected.Manifest.ID)
 	require.Equal(t, validPluginGo, string(inspected.Files["plugin.go"]))
 	require.Equal(t, "export default function Page(){return null}", string(inspected.Files["app/(platform)/plugins/example/page.tsx"]))
+	require.Equal(t, validPluginGo, string(inspected.BackendFiles["plugin.go"]))
+	require.Equal(t, "export default function Page(){return null}", string(inspected.FrontendFiles["app/(platform)/plugins/example/page.tsx"]))
 	require.NotContains(t, inspected.Files, "plugin.yaml")
 }
 
