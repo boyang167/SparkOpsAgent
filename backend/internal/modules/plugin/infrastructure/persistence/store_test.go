@@ -125,6 +125,18 @@ func TestStoreSavePluginRejectsConflictingPackageDigest(t *testing.T) {
 	second := *first
 	second.PackageDigest = strings.Repeat("b", 64)
 	require.ErrorIs(t, repo.SavePlugin(ctx, &second), domain.ErrPluginIDConflict)
+	found, err := repo.FindPlugin(ctx, pluginID)
+	require.NoError(t, err)
+	require.Equal(t, strings.Repeat("a", 64), found.PackageDigest)
+
+	stale := *first
+	stale.Status = model.PluginStatusPROpen
+	stale.PRURL = "https://example.local/pr/1"
+	require.NoError(t, repo.SavePlugin(ctx, &stale))
+	found, err = repo.FindPlugin(ctx, pluginID)
+	require.NoError(t, err)
+	require.Equal(t, model.PluginStatusPROpen, found.Status)
+	require.Equal(t, strings.Repeat("a", 64), found.PackageDigest)
 }
 
 func TestStorePersistsPluginsAndWorkspaceBindings(t *testing.T) {

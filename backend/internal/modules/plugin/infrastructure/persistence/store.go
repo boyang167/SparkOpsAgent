@@ -135,7 +135,25 @@ func (s *Store) SavePlugin(ctx context.Context, plugin *model.PluginRecord) erro
 	if conflictingInstalledFiles(existing.InstalledFilesJSON, row.InstalledFilesJSON) {
 		return domain.ErrPluginIDConflict
 	}
-	return db.Save(&row).Error
+	result := db.Model(&pluginModel{}).
+		Where("id = ? AND package_digest = ?", existing.ID, existing.PackageDigest).
+		Updates(map[string]any{
+			"version":         row.Version,
+			"display_name":    row.DisplayName,
+			"manifest_yaml":   row.ManifestYAML,
+			"package_digest":  row.PackageDigest,
+			"installed_files": row.InstalledFilesJSON,
+			"status":          row.Status,
+			"pr_url":          row.PRURL,
+			"updated_at":      row.UpdatedAt,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return domain.ErrPluginIDConflict
+	}
+	return nil
 }
 
 func isUniqueViolation(err error) bool {
