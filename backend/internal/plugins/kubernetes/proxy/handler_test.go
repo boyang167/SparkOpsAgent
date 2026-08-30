@@ -29,6 +29,15 @@ func TestHandlerAggregatesNamespacedListWithLocalFilters(t *testing.T) {
 		require.Equal(t, "", r.Header.Get("Authorization"))
 		require.Equal(t, "", r.Header.Get("Cookie"))
 		require.Equal(t, "", r.Header.Get("X-Workspace-Id"))
+		if r.URL.Path == "/api/v1" {
+			writeJSON(t, w, http.StatusOK, map[string]any{
+				"groupVersion": "v1",
+				"resources": []any{
+					map[string]any{"name": "pods", "namespaced": true},
+				},
+			})
+			return
+		}
 		require.Equal(t, "app=demo", r.URL.Query().Get("labelSelector"))
 		require.Empty(t, r.URL.Query()["page"])
 		require.Empty(t, r.URL.Query()["pageSize"])
@@ -40,7 +49,7 @@ func TestHandlerAggregatesNamespacedListWithLocalFilters(t *testing.T) {
 			writeJSON(t, w, http.StatusOK, map[string]any{
 				"kind":       "PodList",
 				"apiVersion": "v1",
-				"metadata":   map[string]any{"resourceVersion": "10"},
+				"metadata":   map[string]any{"resourceVersion": "10", "continue": "do-not-reuse"},
 				"items": []any{
 					map[string]any{"metadata": map[string]any{"name": "web-a", "namespace": "dev"}},
 					map[string]any{"metadata": map[string]any{"name": "api-a", "namespace": "dev"}},
@@ -72,6 +81,9 @@ func TestHandlerAggregatesNamespacedListWithLocalFilters(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.JSONEq(t, `{
+		"kind": "PodList",
+		"apiVersion": "v1",
+		"metadata": {},
 		"total": 3,
 		"items": [
 			{"metadata":{"name":"web-a","namespace":"dev"}},
@@ -80,6 +92,8 @@ func TestHandlerAggregatesNamespacedListWithLocalFilters(t *testing.T) {
 		"page": 1,
 		"pageSize": 2
 	}`, rec.Body.String())
+	require.NotContains(t, rec.Body.String(), "resourceVersion")
+	require.NotContains(t, rec.Body.String(), "do-not-reuse")
 }
 
 func TestHandlerDoesNotInsertNamespaceForClusterScopedList(t *testing.T) {
@@ -88,10 +102,20 @@ func TestHandlerDoesNotInsertNamespaceForClusterScopedList(t *testing.T) {
 	clusterID := kernel.NewClusterInfoID()
 	var seenPath string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1" {
+			writeJSON(t, w, http.StatusOK, map[string]any{
+				"groupVersion": "v1",
+				"resources": []any{
+					map[string]any{"name": "namespaces", "namespaced": false},
+				},
+			})
+			return
+		}
 		seenPath = r.URL.Path
 		writeJSON(t, w, http.StatusOK, map[string]any{
-			"kind":     "NamespaceList",
-			"metadata": map[string]any{"resourceVersion": "12"},
+			"kind":       "NamespaceList",
+			"apiVersion": "v1",
+			"metadata":   map[string]any{"resourceVersion": "12", "continue": "stale"},
 			"items": []any{
 				map[string]any{"metadata": map[string]any{"name": "dev"}},
 				map[string]any{"metadata": map[string]any{"name": "prod"}},
@@ -110,6 +134,109 @@ func TestHandlerDoesNotInsertNamespaceForClusterScopedList(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, "/api/v1/namespaces", seenPath)
 	require.NotContains(t, rec.Body.String(), "/namespaces/dev")
+	require.JSONEq(t, `{
+		"kind": "NamespaceList",
+		"apiVersion": "v1",
+		"metadata": {},
+		"total": 2,
+		"items": [
+			{"metadata":{"name":"dev"}},
+			{"metadata":{"name":"prod"}}
+		],
+		"page": 1,
+		"pageSize": 10
+	}`, rec.Body.String())
+	require.NotContains(t, rec.Body.String(), "resourceVersion")
+	require.NotContains(t, rec.Body.String(), "stale")
+}
+
+func TestHandlerUsesDiscoveryScopeForCustomResources(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	var seenPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/apis/example.com/v1" {
+			writeJSON(t, w, http.StatusOK, map[string]any{
+				"groupVersion": "example.com/v1",
+				"resources": []any{
+					map[string]any{"name": "widgets", "namespaced": false},
+				},
+			})
+			return
+		}
+		seenPath = r.URL.Path
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"kind":       "WidgetList",
+			"apiVersion": "example.com/v1",
+			"metadata":   map[string]any{},
+			"items":      []any{map[string]any{"metadata": map[string]any{"name": "global-widget"}}},
+		})
+	}))
+	defer upstream.Close()
+	engine := proxyTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: proxyClusterFactory{server: upstream.URL, clusterID: clusterID},
+		Members:  proxyMembers{allow: true},
+		Writer:   proxyWriter{allow: true},
+	})
+
+	rec := performProxy(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/proxy/apis/example.com/v1/widgets?ns=dev,prod", wsID, nil)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "/apis/example.com/v1/widgets", seenPath)
+	require.NotContains(t, rec.Body.String(), "/namespaces/dev")
+}
+
+func TestHandlerReturnsBadGatewayWhenNamespacedScopeDiscoveryFails(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	var upstreamCalls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/apis/example.com/v1" {
+			http.Error(w, "tls: certificate token secret", http.StatusInternalServerError)
+			return
+		}
+		upstreamCalls++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+	engine := proxyTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: proxyClusterFactory{server: upstream.URL, clusterID: clusterID},
+		Members:  proxyMembers{allow: true},
+		Writer:   proxyWriter{allow: true},
+	})
+
+	rec := performProxy(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/proxy/apis/example.com/v1/widgets?ns=dev", wsID, nil)
+
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Contains(t, rec.Body.String(), "PLUGIN_KUBERNETES_PROXY_DISCOVERY_FAILED")
+	require.NotContains(t, rec.Body.String(), "certificate")
+	require.NotContains(t, rec.Body.String(), "token")
+	require.Zero(t, upstreamCalls)
+}
+
+func TestHandlerRejectsHugePageValues(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	var upstreamCalls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+	engine := proxyTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: proxyClusterFactory{server: upstream.URL, clusterID: clusterID},
+		Members:  proxyMembers{allow: true},
+		Writer:   proxyWriter{allow: true},
+	})
+
+	rec := performProxy(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/proxy/api/v1/pods?page=1000001&pageSize=1", wsID, nil)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "PLUGIN_KUBERNETES_PROXY_QUERY_INVALID")
+	require.Zero(t, upstreamCalls)
 }
 
 func TestHandlerRequiresWritePermissionForMutatingMethods(t *testing.T) {
@@ -153,6 +280,24 @@ func TestHandlerRejectsPathInjectionBeforeClusterLookup(t *testing.T) {
 	require.Zero(t, factory.calls)
 }
 
+func TestHandlerRejectsVersionPrefixConfusion(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	factory := &recordingProxyClusterFactory{}
+	engine := proxyTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: factory,
+		Members:  proxyMembers{allow: true},
+		Writer:   proxyWriter{allow: true},
+	})
+
+	rec := performProxy(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/proxy/versionanything", wsID, nil)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "PLUGIN_KUBERNETES_PROXY_PATH_INVALID")
+	require.Zero(t, factory.calls)
+}
+
 func TestHandlerPassesWatchThroughWithoutAggregation(t *testing.T) {
 	wsID := kernel.NewWorkspaceID()
 	memberID := kernel.NewMemberID()
@@ -179,6 +324,109 @@ func TestHandlerPassesWatchThroughWithoutAggregation(t *testing.T) {
 	require.Contains(t, seenRawQuery, "watch=true")
 	require.Contains(t, seenRawQuery, "page=1")
 	require.Contains(t, seenRawQuery, "ns=dev")
+}
+
+func TestHandlerDoesNotDiscoverVersionForOrdinaryWatchRequests(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NotEqual(t, "/version", r.URL.Path)
+		writeJSON(t, w, http.StatusOK, map[string]any{"type": "ADDED"})
+	}))
+	defer upstream.Close()
+	engine := proxyTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: proxyClusterFactory{server: upstream.URL, clusterID: clusterID},
+		Members:  proxyMembers{allow: true},
+		Writer:   proxyWriter{allow: true},
+	})
+
+	rec := performProxy(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/proxy/api/v1/pods?watch=true", wsID, nil)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+}
+
+func TestHandlerDoesNotDiscoverVersionForCompatibilityWatchRequests(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	var seenPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NotEqual(t, "/version", r.URL.Path)
+		seenPath = r.URL.Path
+		writeJSON(t, w, http.StatusOK, map[string]any{"type": "ADDED"})
+	}))
+	defer upstream.Close()
+	engine := proxyTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: proxyClusterFactory{server: upstream.URL, clusterID: clusterID},
+		Members:  proxyMembers{allow: true},
+		Writer:   proxyWriter{allow: true},
+	})
+
+	rec := performProxy(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/proxy/apis/networking.k8s.io/v1/ingresses?watch=true", wsID, nil)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "/apis/networking.k8s.io/v1/ingresses", seenPath)
+}
+
+func TestHandlerDiscoversVersionOnlyForCompatibilityCandidatesAndCaches(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	var versionCalls int
+	var ingressCalls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/version":
+			versionCalls++
+			writeJSON(t, w, http.StatusOK, map[string]any{"minor": "18+"})
+		case "/apis/networking.k8s.io/v1beta1/ingresses":
+			ingressCalls++
+			writeJSON(t, w, http.StatusOK, map[string]any{"kind": "IngressList", "items": []any{}})
+		default:
+			t.Fatalf("unexpected upstream path %q", r.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+	engine := proxyTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: proxyClusterFactory{server: upstream.URL, clusterID: clusterID},
+		Members:  proxyMembers{allow: true},
+		Writer:   proxyWriter{allow: true},
+	})
+
+	for i := 0; i < 2; i++ {
+		rec := performProxy(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/proxy/apis/networking.k8s.io/v1/ingresses", wsID, nil)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	}
+	require.Equal(t, 1, versionCalls)
+	require.Equal(t, 2, ingressCalls)
+}
+
+func TestHandlerKeepsOriginalCompatibilityPathWhenVersionDiscoveryFails(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	var seenPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/version" {
+			http.Error(w, "token secret from apiserver", http.StatusInternalServerError)
+			return
+		}
+		seenPath = r.URL.Path
+		writeJSON(t, w, http.StatusOK, map[string]any{"kind": "IngressList", "items": []any{}})
+	}))
+	defer upstream.Close()
+	engine := proxyTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: proxyClusterFactory{server: upstream.URL, clusterID: clusterID},
+		Members:  proxyMembers{allow: true},
+		Writer:   proxyWriter{allow: true},
+	})
+
+	rec := performProxy(engine, http.MethodGet, "/api/v1/plugins/kubernetes/clusters/"+clusterID.String()+"/proxy/apis/networking.k8s.io/v1/ingresses", wsID, nil)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "/apis/networking.k8s.io/v1/ingresses", seenPath)
+	require.NotContains(t, rec.Body.String(), "token secret")
 }
 
 func TestHandlerRedactsSensitiveUpstreamErrors(t *testing.T) {

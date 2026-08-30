@@ -1,14 +1,28 @@
 package proxy
 
-import "strings"
-
 // CompatibleAPIPath mirrors the legacy GVA compatibility rewrites for older/newer clusters.
 func CompatibleAPIPath(minor int, apiPath string) string {
-	if minor <= 18 && strings.Contains(apiPath, "networking.k8s.io/v1") && strings.Contains(apiPath, "ingresses") {
-		return strings.ReplaceAll(apiPath, "networking.k8s.io/v1", "networking.k8s.io/v1beta1")
+	info, ok := parseListPath(apiPath)
+	if !ok {
+		return apiPath
 	}
-	if minor > 18 && strings.Contains(apiPath, "/apis/batch/v1beta1") && strings.Contains(apiPath, "cronjobs") {
-		return strings.ReplaceAll(apiPath, "/apis/batch/v1beta1", "/apis/batch/v1")
+	segments := append([]string{}, info.segments...)
+	if minor <= 18 && info.groupVersion == "networking.k8s.io/v1" && info.resource == "ingresses" {
+		segments[2] = "v1beta1"
+		return "/" + joinPathSegments(segments)
+	}
+	if minor > 18 && info.groupVersion == "batch/v1beta1" && info.resource == "cronjobs" {
+		segments[2] = "v1"
+		return "/" + joinPathSegments(segments)
 	}
 	return apiPath
+}
+
+func isCompatibilityCandidate(apiPath string) bool {
+	info, ok := parseListPath(apiPath)
+	if !ok {
+		return false
+	}
+	return (info.groupVersion == "networking.k8s.io/v1" && info.resource == "ingresses") ||
+		(info.groupVersion == "batch/v1beta1" && info.resource == "cronjobs")
 }

@@ -29,6 +29,30 @@ func TestCompatibleAPIPath(t *testing.T) {
 			path:  "/api/v1/pods",
 			want:  "/api/v1/pods",
 		},
+		{
+			name:  "does not rewrite api version substrings",
+			minor: 18,
+			path:  "/apis/networking.k8s.io/v1alpha1/ingresses",
+			want:  "/apis/networking.k8s.io/v1alpha1/ingresses",
+		},
+		{
+			name:  "does not rewrite resource name substrings",
+			minor: 18,
+			path:  "/apis/networking.k8s.io/v1/not-ingresses",
+			want:  "/apis/networking.k8s.io/v1/not-ingresses",
+		},
+		{
+			name:  "rewrites nested namespaced ingress list",
+			minor: 18,
+			path:  "/apis/networking.k8s.io/v1/namespaces/default/ingresses",
+			want:  "/apis/networking.k8s.io/v1beta1/namespaces/default/ingresses",
+		},
+		{
+			name:  "does not rewrite cronjob resource name substrings",
+			minor: 19,
+			path:  "/apis/batch/v1beta1/cronjobs-old",
+			want:  "/apis/batch/v1beta1/cronjobs-old",
+		},
 	}
 
 	for _, tt := range tests {
