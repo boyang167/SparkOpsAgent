@@ -69,6 +69,13 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 	if err := validateBranchWithGit(ctx, runner, p.root, req.Branch); err != nil {
 		return "", err
 	}
+	branchExists, err := localBranchExists(ctx, runner, p.root, req.Branch)
+	if err != nil {
+		return "", err
+	}
+	if branchExists {
+		return "", fmt.Errorf("local branch already exists: %s", req.Branch)
+	}
 	if err := ensureCleanGitRoot(ctx, runner, p.root); err != nil {
 		return "", err
 	}
@@ -84,8 +91,10 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 	if err := os.Remove(worktree); err != nil && !os.IsNotExist(err) {
 		return "", err
 	}
+	deleteBranch := false
+	branchCreateAttempted := false
 	defer func() {
-		cleanupErr := cleanupGitWorktreeAndBranch(runner, p.root, worktree, req.Branch)
+		cleanupErr := cleanupGitWorktreeAndBranch(runner, p.root, worktree, req.Branch, deleteBranch, branchCreateAttempted)
 		if cleanupErr == nil {
 			return
 		}
@@ -97,9 +106,11 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 		err = cleanupErr
 	}()
 
+	branchCreateAttempted = true
 	if _, err := runCommand(ctx, runner, p.root, "git", "worktree", "add", worktree, "-b", req.Branch); err != nil {
 		return "", err
 	}
+	deleteBranch = true
 
 	for name, content := range req.Files {
 		if err := writeWorktreeFile(worktree, name, content); err != nil {
@@ -128,7 +139,7 @@ func (p *GitCLIPublisher) Publish(ctx context.Context, req PublishRequest) (prUR
 	return parsePRURL(out)
 }
 
-func cleanupGitWorktreeAndBranch(runner CommandRunner, root string, worktree string, branch string) error {
+func cleanupGitWorktreeAndBranch(runner CommandRunner, root string, worktree string, branch string, deleteBranch bool, branchCreateAttempted bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -136,8 +147,17 @@ func cleanupGitWorktreeAndBranch(runner CommandRunner, root string, worktree str
 	if _, err := runCommand(ctx, runner, root, "git", "worktree", "remove", "--force", worktree); err != nil {
 		cleanupErr = errors.Join(cleanupErr, err)
 	}
-	if _, err := runCommand(ctx, runner, root, "git", "branch", "-D", branch); err != nil {
-		cleanupErr = errors.Join(cleanupErr, err)
+	if !deleteBranch && branchCreateAttempted {
+		exists, err := localBranchExists(ctx, runner, root, branch)
+		if err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
+		deleteBranch = exists
+	}
+	if deleteBranch {
+		if _, err := runCommand(ctx, runner, root, "git", "branch", "-D", "--", branch); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
 	}
 	return cleanupErr
 }
@@ -309,6 +329,9 @@ func validateBranchName(branch string) error {
 	if branch == "" {
 		return fmt.Errorf("publish branch is required")
 	}
+	if strings.Contains(branch, "@{") {
+		return fmt.Errorf("publish branch contains unsupported ref expression")
+	}
 	if strings.TrimSpace(branch) != branch {
 		return fmt.Errorf("publish branch must not contain surrounding whitespace")
 	}
@@ -321,10 +344,30 @@ func validateBranchName(branch string) error {
 }
 
 func validateBranchWithGit(ctx context.Context, runner CommandRunner, root string, branch string) error {
-	if _, err := runCommand(ctx, runner, root, "git", "check-ref-format", "--branch", branch); err != nil {
+	ref := branchRef(branch)
+	out, err := runCommand(ctx, runner, root, "git", "check-ref-format", "--normalize", ref)
+	if err != nil {
 		return err
 	}
+	if strings.TrimSpace(string(out.Stdout)) != ref {
+		return fmt.Errorf("git normalized branch ref %q does not match %q", strings.TrimSpace(string(out.Stdout)), ref)
+	}
 	return nil
+}
+
+func localBranchExists(ctx context.Context, runner CommandRunner, root string, branch string) (bool, error) {
+	out, err := runner.Run(ctx, root, "git", "show-ref", "--verify", "--quiet", branchRef(branch))
+	if err == nil {
+		return true, nil
+	}
+	if strings.TrimSpace(string(out.Stderr)) != "" {
+		return false, fmt.Errorf("check local branch existence: %w%s", err, commandOutputSuffix(out))
+	}
+	return false, nil
+}
+
+func branchRef(branch string) string {
+	return "refs/heads/" + branch
 }
 
 func ensureCleanGitRoot(ctx context.Context, runner CommandRunner, root string) error {
@@ -358,9 +401,6 @@ func hasWindowsDrivePath(name string) bool {
 }
 
 func parsePRURL(out CommandOutput) (string, error) {
-	if strings.TrimSpace(string(out.Stderr)) != "" {
-		return "", fmt.Errorf("gh pr create produced stderr: %s", strings.TrimSpace(string(out.Stderr)))
-	}
 	raw := strings.TrimSpace(string(out.Stdout))
 	if raw == "" {
 		return "", fmt.Errorf("gh pr create returned empty URL")

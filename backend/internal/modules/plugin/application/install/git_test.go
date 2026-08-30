@@ -106,7 +106,7 @@ func TestGitCLIPublisherRejectsUnsafePaths(t *testing.T) {
 }
 
 func TestGitCLIPublisherRejectsInvalidBranchBeforeCommands(t *testing.T) {
-	tests := []string{"", " plugins/example", "plugins/example ", "plugins/\nexample", "plugins/\x1fexample"}
+	tests := []string{"", " plugins/example", "plugins/example ", "plugins/\nexample", "plugins/\x1fexample", "@{-1}", "plugins/@{bad}"}
 	for _, branch := range tests {
 		t.Run(branch, func(t *testing.T) {
 			runner := &recordingRunner{}
@@ -135,7 +135,9 @@ func TestGitCLIPublisherUsesIsolatedWorktreeAndCreatesPullRequest(t *testing.T) 
 	root := t.TempDir()
 	worktree := filepath.Join(t.TempDir(), "plugin-worktree")
 	runner := &recordingRunner{results: []commandResult{
-		{}, {}, {}, {}, {}, {},
+		{stdout: "refs/heads/plugins/example\n"},
+		{err: errors.New("missing ref")},
+		{}, {}, {}, {}, {},
 		{stdout: "https://example.local/pr/42\n"},
 		{}, {},
 	}}
@@ -162,7 +164,8 @@ func TestGitCLIPublisherUsesIsolatedWorktreeAndCreatesPullRequest(t *testing.T) 
 	}
 
 	wantCalls := []commandCall{
-		{dir: root, name: "git", args: []string{"check-ref-format", "--branch", "plugins/example"}},
+		{dir: root, name: "git", args: []string{"check-ref-format", "--normalize", "refs/heads/plugins/example"}},
+		{dir: root, name: "git", args: []string{"show-ref", "--verify", "--quiet", "refs/heads/plugins/example"}},
 		{dir: root, name: "git", args: []string{"status", "--porcelain"}},
 		{dir: root, name: "git", args: []string{"worktree", "add", worktree, "-b", "plugins/example"}},
 		{dir: worktree, name: "git", args: []string{"add", "--all"}},
@@ -170,7 +173,7 @@ func TestGitCLIPublisherUsesIsolatedWorktreeAndCreatesPullRequest(t *testing.T) 
 		{dir: worktree, name: "git", args: []string{"push", "-u", "origin", "plugins/example"}},
 		{dir: worktree, name: "gh", args: []string{"pr", "create", "--fill"}},
 		{dir: root, name: "git", args: []string{"worktree", "remove", "--force", worktree}},
-		{dir: root, name: "git", args: []string{"branch", "-D", "plugins/example"}},
+		{dir: root, name: "git", args: []string{"branch", "-D", "--", "plugins/example"}},
 	}
 	if !reflect.DeepEqual(runner.calls, wantCalls) {
 		t.Fatalf("commands = %#v\nwant %#v", runner.calls, wantCalls)
@@ -192,7 +195,9 @@ func TestGitCLIPublisherPassesMissingWorktreePathToGit(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	runner := &worktreePathRunner{t: t, results: []commandResult{
-		{}, {}, {}, {}, {}, {},
+		{stdout: "refs/heads/plugins/example\n"},
+		{err: errors.New("missing ref")},
+		{}, {}, {}, {}, {},
 		{stdout: "https://example.local/pr/42\n"},
 		{}, {},
 	}}
@@ -214,7 +219,8 @@ func TestGitCLIPublisherPassesMissingWorktreePathToGit(t *testing.T) {
 func TestGitCLIPublisherRejectsDirtyRootAtPublishStart(t *testing.T) {
 	root := t.TempDir()
 	runner := &recordingRunner{results: []commandResult{
-		{},
+		{stdout: "refs/heads/plugins/example\n"},
+		{err: errors.New("missing ref")},
 		{stdout: " M backend/internal/plugins/example/plugin.go\n"},
 	}}
 	publisher := &GitCLIPublisher{
@@ -231,8 +237,63 @@ func TestGitCLIPublisherRejectsDirtyRootAtPublishStart(t *testing.T) {
 		t.Fatalf("Publish() error = nil")
 	}
 	wantCalls := []commandCall{
-		{dir: root, name: "git", args: []string{"check-ref-format", "--branch", "plugins/example"}},
+		{dir: root, name: "git", args: []string{"check-ref-format", "--normalize", "refs/heads/plugins/example"}},
+		{dir: root, name: "git", args: []string{"show-ref", "--verify", "--quiet", "refs/heads/plugins/example"}},
 		{dir: root, name: "git", args: []string{"status", "--porcelain"}},
+	}
+	if !reflect.DeepEqual(runner.calls, wantCalls) {
+		t.Fatalf("commands = %#v\nwant %#v", runner.calls, wantCalls)
+	}
+}
+
+func TestGitCLIPublisherRejectsExistingBranchWithoutDeletingIt(t *testing.T) {
+	root := t.TempDir()
+	runner := &recordingRunner{results: []commandResult{
+		{stdout: "refs/heads/plugins/example\n"},
+		{},
+	}}
+	publisher := &GitCLIPublisher{
+		root:    root,
+		runner:  runner,
+		tempDir: func(string, string) (string, error) { return t.TempDir(), nil },
+	}
+
+	if _, err := publisher.Publish(context.Background(), PublishRequest{
+		Branch:  "plugins/example",
+		Message: "Install example plugin",
+		Files:   map[string][]byte{"backend/internal/plugins/example/plugin.go": []byte("package example\n")},
+	}); err == nil {
+		t.Fatalf("Publish() error = nil")
+	}
+	wantCalls := []commandCall{
+		{dir: root, name: "git", args: []string{"check-ref-format", "--normalize", "refs/heads/plugins/example"}},
+		{dir: root, name: "git", args: []string{"show-ref", "--verify", "--quiet", "refs/heads/plugins/example"}},
+	}
+	if !reflect.DeepEqual(runner.calls, wantCalls) {
+		t.Fatalf("commands = %#v\nwant %#v", runner.calls, wantCalls)
+	}
+}
+
+func TestGitCLIPublisherRejectsUnexpectedNormalizedBranchRef(t *testing.T) {
+	root := t.TempDir()
+	runner := &recordingRunner{results: []commandResult{
+		{stdout: "refs/heads/other\n"},
+	}}
+	publisher := &GitCLIPublisher{
+		root:    root,
+		runner:  runner,
+		tempDir: func(string, string) (string, error) { return t.TempDir(), nil },
+	}
+
+	if _, err := publisher.Publish(context.Background(), PublishRequest{
+		Branch:  "plugins/example",
+		Message: "Install example plugin",
+		Files:   map[string][]byte{"backend/internal/plugins/example/plugin.go": []byte("package example\n")},
+	}); err == nil {
+		t.Fatalf("Publish() error = nil")
+	}
+	wantCalls := []commandCall{
+		{dir: root, name: "git", args: []string{"check-ref-format", "--normalize", "refs/heads/plugins/example"}},
 	}
 	if !reflect.DeepEqual(runner.calls, wantCalls) {
 		t.Fatalf("commands = %#v\nwant %#v", runner.calls, wantCalls)
@@ -243,7 +304,7 @@ func TestGitCLIPublisherRejectsSymlinkDuringWrite(t *testing.T) {
 	root := t.TempDir()
 	worktree := filepath.Join(t.TempDir(), "plugin-worktree")
 	runner := &recordingRunner{
-		results: []commandResult{{}, {}, {}},
+		results: []commandResult{{stdout: "refs/heads/plugins/example\n"}, {err: errors.New("missing ref")}, {}, {}, {}, {}},
 		afterRun: func(call commandCall) {
 			if call.name != "git" || !reflect.DeepEqual(call.args[:2], []string{"worktree", "add"}) {
 				return
@@ -281,7 +342,9 @@ func TestGitCLIPublisherDeletesNonEmptyDirectorySafely(t *testing.T) {
 	worktree := filepath.Join(t.TempDir(), "plugin-worktree")
 	runner := &recordingRunner{
 		results: []commandResult{
-			{}, {}, {}, {}, {}, {},
+			{stdout: "refs/heads/plugins/example\n"},
+			{err: errors.New("missing ref")},
+			{}, {}, {}, {}, {},
 			{stdout: "https://example.local/pr/42\n"},
 			{}, {},
 		},
@@ -320,7 +383,7 @@ func TestGitCLIPublisherRejectsSymlinkInsideDeletedDirectory(t *testing.T) {
 	root := t.TempDir()
 	worktree := filepath.Join(t.TempDir(), "plugin-worktree")
 	runner := &recordingRunner{
-		results: []commandResult{{}, {}, {}},
+		results: []commandResult{{stdout: "refs/heads/plugins/example\n"}, {err: errors.New("missing ref")}, {}, {}, {}, {}},
 		afterRun: func(call commandCall) {
 			if call.name != "git" || !reflect.DeepEqual(call.args[:2], []string{"worktree", "add"}) {
 				return
@@ -361,14 +424,13 @@ func TestGitCLIPublisherRejectsInvalidPullRequestURL(t *testing.T) {
 		{name: "empty stdout", result: commandResult{}},
 		{name: "garbage stdout", result: commandResult{stdout: "not a url\n"}},
 		{name: "warning and url", result: commandResult{stdout: "warning: something\nhttps://example.local/pr/42\n"}},
-		{name: "stderr warning", result: commandResult{stdout: "https://example.local/pr/42\n", stderr: "warning: something\n"}},
 		{name: "missing host", result: commandResult{stdout: "https:///pr/42\n"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			worktree := filepath.Join(t.TempDir(), "plugin-worktree")
-			runner := &recordingRunner{results: []commandResult{{}, {}, {}, {}, {}, {}, tt.result, {}, {}}}
+			runner := &recordingRunner{results: []commandResult{{stdout: "refs/heads/plugins/example\n"}, {err: errors.New("missing ref")}, {}, {}, {}, {}, {}, tt.result, {}, {}}}
 			publisher := &GitCLIPublisher{
 				root:    root,
 				runner:  runner,
@@ -384,11 +446,40 @@ func TestGitCLIPublisherRejectsInvalidPullRequestURL(t *testing.T) {
 			}
 			if got := runner.calls[len(runner.calls)-2:]; !reflect.DeepEqual(got, []commandCall{
 				{dir: root, name: "git", args: []string{"worktree", "remove", "--force", worktree}},
-				{dir: root, name: "git", args: []string{"branch", "-D", "plugins/example"}},
+				{dir: root, name: "git", args: []string{"branch", "-D", "--", "plugins/example"}},
 			}) {
 				t.Fatalf("cleanup calls = %#v", got)
 			}
 		})
+	}
+}
+
+func TestGitCLIPublisherAcceptsPullRequestURLWithStderrWarning(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(t.TempDir(), "plugin-worktree")
+	runner := &recordingRunner{results: []commandResult{
+		{stdout: "refs/heads/plugins/example\n"},
+		{err: errors.New("missing ref")},
+		{}, {}, {}, {}, {},
+		{stdout: "https://example.local/pr/42\n", stderr: "warning: something\n"},
+		{}, {},
+	}}
+	publisher := &GitCLIPublisher{
+		root:    root,
+		runner:  runner,
+		tempDir: func(string, string) (string, error) { return worktree, nil },
+	}
+
+	url, err := publisher.Publish(context.Background(), PublishRequest{
+		Branch:  "plugins/example",
+		Message: "Install example plugin",
+		Files:   map[string][]byte{"backend/internal/plugins/example/plugin.go": []byte("package example\n")},
+	})
+	if err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if url != "https://example.local/pr/42" {
+		t.Fatalf("Publish() url = %q", url)
 	}
 }
 
@@ -398,7 +489,9 @@ func TestGitCLIPublisherCleansUpWithBackgroundContextAndJoinsErrors(t *testing.T
 	ctx, cancel := context.WithCancel(context.Background())
 	runner := &recordingRunner{
 		results: []commandResult{
-			{}, {}, {}, {},
+			{stdout: "refs/heads/plugins/example\n"},
+			{err: errors.New("missing ref")},
+			{}, {}, {},
 			{err: errors.New("commit failed")},
 			{err: errors.New("remove failed")},
 			{err: errors.New("branch delete failed")},
@@ -433,13 +526,81 @@ func TestGitCLIPublisherCleansUpWithBackgroundContextAndJoinsErrors(t *testing.T
 	}
 }
 
+func TestGitCLIPublisherCleansUpAfterCommandFailures(t *testing.T) {
+	tests := []struct {
+		name    string
+		results []commandResult
+	}{
+		{
+			name: "git add failure",
+			results: []commandResult{
+				{stdout: "refs/heads/plugins/example\n"},
+				{err: errors.New("missing ref")},
+				{}, {},
+				{err: errors.New("add failed")},
+				{}, {},
+			},
+		},
+		{
+			name: "git push failure",
+			results: []commandResult{
+				{stdout: "refs/heads/plugins/example\n"},
+				{err: errors.New("missing ref")},
+				{}, {}, {}, {},
+				{err: errors.New("push failed")},
+				{}, {},
+			},
+		},
+		{
+			name: "gh failure",
+			results: []commandResult{
+				{stdout: "refs/heads/plugins/example\n"},
+				{err: errors.New("missing ref")},
+				{}, {}, {}, {}, {},
+				{stderr: "failed to create pr\n", err: errors.New("gh failed")},
+				{}, {},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			worktree := filepath.Join(t.TempDir(), "plugin-worktree")
+			runner := &recordingRunner{results: tt.results}
+			publisher := &GitCLIPublisher{
+				root:    root,
+				runner:  runner,
+				tempDir: func(string, string) (string, error) { return worktree, nil },
+			}
+
+			if _, err := publisher.Publish(context.Background(), PublishRequest{
+				Branch:  "plugins/example",
+				Message: "Install example plugin",
+				Files:   map[string][]byte{"backend/internal/plugins/example/plugin.go": []byte("package example\n")},
+			}); err == nil {
+				t.Fatalf("Publish() error = nil")
+			}
+			if got := runner.calls[len(runner.calls)-2:]; !reflect.DeepEqual(got, []commandCall{
+				{dir: root, name: "git", args: []string{"worktree", "remove", "--force", worktree}},
+				{dir: root, name: "git", args: []string{"branch", "-D", "--", "plugins/example"}},
+			}) {
+				t.Fatalf("cleanup calls = %#v", got)
+			}
+		})
+	}
+}
+
 func TestGitCLIPublisherCleansUpAfterWorktreeAddFailure(t *testing.T) {
 	root := t.TempDir()
 	worktree := filepath.Join(t.TempDir(), "plugin-worktree")
 	runner := &recordingRunner{results: []commandResult{
-		{}, {},
+		{stdout: "refs/heads/plugins/example\n"},
+		{err: errors.New("missing ref")},
+		{},
 		{err: errors.New("worktree add failed")},
 		{}, {},
+		{},
 	}}
 	publisher := &GitCLIPublisher{
 		root:    root,
@@ -455,11 +616,13 @@ func TestGitCLIPublisherCleansUpAfterWorktreeAddFailure(t *testing.T) {
 		t.Fatalf("Publish() error = nil")
 	}
 	wantCalls := []commandCall{
-		{dir: root, name: "git", args: []string{"check-ref-format", "--branch", "plugins/example"}},
+		{dir: root, name: "git", args: []string{"check-ref-format", "--normalize", "refs/heads/plugins/example"}},
+		{dir: root, name: "git", args: []string{"show-ref", "--verify", "--quiet", "refs/heads/plugins/example"}},
 		{dir: root, name: "git", args: []string{"status", "--porcelain"}},
 		{dir: root, name: "git", args: []string{"worktree", "add", worktree, "-b", "plugins/example"}},
 		{dir: root, name: "git", args: []string{"worktree", "remove", "--force", worktree}},
-		{dir: root, name: "git", args: []string{"branch", "-D", "plugins/example"}},
+		{dir: root, name: "git", args: []string{"show-ref", "--verify", "--quiet", "refs/heads/plugins/example"}},
+		{dir: root, name: "git", args: []string{"branch", "-D", "--", "plugins/example"}},
 	}
 	if !reflect.DeepEqual(runner.calls, wantCalls) {
 		t.Fatalf("commands = %#v\nwant %#v", runner.calls, wantCalls)
