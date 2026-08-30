@@ -104,6 +104,8 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 	require.Contains(t, found.InstalledFiles, "backend/internal/plugins/kubernetes/http/router.go")
 	require.Contains(t, found.InstalledFiles, "backend/internal/plugins/kubernetes/resource/arthas-bin.tar")
 	require.Contains(t, found.InstalledFiles, "fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx")
+	require.Contains(t, found.InstalledFiles, "fronted/apps/web/app/(platform)/plugins/kubernetes/access-controls/page.tsx")
+	require.Contains(t, found.InstalledFiles, "fronted/apps/web/src/modules/plugins/kubernetes/catalog.ts")
 
 	spec, err := manifest.Parse([]byte(found.ManifestYAML))
 	require.NoError(t, err)
@@ -111,13 +113,35 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 	require.Equal(t, "/api/v1/plugins/kubernetes", spec.RoutePrefix)
 	require.Equal(t, "plugin:kubernetes", spec.Entitlement)
 	require.Equal(t, []string{"backend/internal/plugins/kubernetes/resource/arthas-bin.tar"}, spec.Assets)
-	require.Equal(t, []string{"app/(platform)/plugins/kubernetes/page.tsx"}, spec.Frontend.Pages)
+	require.Equal(t, []string{
+		"app/(platform)/plugins/kubernetes/page.tsx",
+		"app/(platform)/plugins/kubernetes/layout.tsx",
+		"app/(platform)/plugins/kubernetes/clusters/page.tsx",
+		"app/(platform)/plugins/kubernetes/nodes/page.tsx",
+		"app/(platform)/plugins/kubernetes/workloads/page.tsx",
+		"app/(platform)/plugins/kubernetes/openkruise/page.tsx",
+		"app/(platform)/plugins/kubernetes/kruise-rollouts/page.tsx",
+		"app/(platform)/plugins/kubernetes/kubeblocks/page.tsx",
+		"app/(platform)/plugins/kubernetes/kubevela/page.tsx",
+		"app/(platform)/plugins/kubernetes/namespaces/page.tsx",
+		"app/(platform)/plugins/kubernetes/networks/page.tsx",
+		"app/(platform)/plugins/kubernetes/gateway/page.tsx",
+		"app/(platform)/plugins/kubernetes/configs/page.tsx",
+		"app/(platform)/plugins/kubernetes/storages/page.tsx",
+		"app/(platform)/plugins/kubernetes/access-controls/page.tsx",
+		"app/(platform)/plugins/kubernetes/backup/page.tsx",
+		"app/(platform)/plugins/kubernetes/records/page.tsx",
+		"app/(platform)/plugins/kubernetes/diagnosis/page.tsx",
+		"app/(platform)/plugins/kubernetes/chat/page.tsx",
+		"app/(platform)/plugins/kubernetes/cloudtty/page.tsx",
+		"app/(platform)/plugins/kubernetes/velaux/page.tsx",
+		"app/(platform)/plugins/kubernetes/create/page.tsx",
+	}, spec.Frontend.Pages)
 
 	for _, path := range []string{
 		"/plugins/kubernetes",
 		"/plugins/kubernetes/clusters",
 		"/plugins/kubernetes/nodes",
-		"/plugins/kubernetes/nodelabelstaints",
 		"/plugins/kubernetes/workloads",
 		"/plugins/kubernetes/openkruise",
 		"/plugins/kubernetes/kruise-rollouts",
@@ -128,7 +152,8 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 		"/plugins/kubernetes/gateway",
 		"/plugins/kubernetes/configs",
 		"/plugins/kubernetes/storages",
-		"/plugins/kubernetes/accessControls",
+		"/plugins/kubernetes/access-controls",
+		"/plugins/kubernetes/create",
 		"/plugins/kubernetes/records",
 		"/plugins/kubernetes/diagnosis",
 		"/plugins/kubernetes/backup",
@@ -385,6 +410,8 @@ func registerBundledKubernetesForTest(t *testing.T) {
 			"backend/internal/plugins/kubernetes/http/router.go",
 			"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
+			"fronted/apps/web/app/(platform)/plugins/kubernetes/access-controls/page.tsx",
+			"fronted/apps/web/src/modules/plugins/kubernetes/catalog.ts",
 		},
 	})
 }

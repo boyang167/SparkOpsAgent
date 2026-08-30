@@ -115,6 +115,8 @@ func registerKubernetesDescriptorForSeedTest(t *testing.T) sparkplugin.BundledDe
 			"backend/internal/plugins/kubernetes/http/router.go",
 			"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
+			"fronted/apps/web/app/(platform)/plugins/kubernetes/access-controls/page.tsx",
+			"fronted/apps/web/src/modules/plugins/kubernetes/catalog.ts",
 		},
 	}
 	sparkplugin.RegisterBundled("kubernetes", descriptor)

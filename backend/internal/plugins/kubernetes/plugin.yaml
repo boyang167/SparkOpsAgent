@@ -15,10 +15,6 @@ menus:
     path: /plugins/kubernetes/nodes
     component: plugins/kubernetes/nodes/page
     parent: /plugins/kubernetes
-  - title: 标签与污点
-    path: /plugins/kubernetes/nodelabelstaints
-    component: plugins/kubernetes/nodelabelstaints/page
-    parent: /plugins/kubernetes
   - title: 工作负载
     path: /plugins/kubernetes/workloads
     component: plugins/kubernetes/workloads/page
@@ -60,8 +56,12 @@ menus:
     component: plugins/kubernetes/storages/page
     parent: /plugins/kubernetes
   - title: 访问控制
-    path: /plugins/kubernetes/accessControls
-    component: plugins/kubernetes/accessControls/page
+    path: /plugins/kubernetes/access-controls
+    component: plugins/kubernetes/access-controls/page
+    parent: /plugins/kubernetes
+  - title: 创建资源
+    path: /plugins/kubernetes/create
+    component: plugins/kubernetes/create/page
     parent: /plugins/kubernetes
   - title: 终端审计
     path: /plugins/kubernetes/records
@@ -134,5 +134,26 @@ apis:
 frontend:
   pages:
     - app/(platform)/plugins/kubernetes/page.tsx
+    - app/(platform)/plugins/kubernetes/layout.tsx
+    - app/(platform)/plugins/kubernetes/clusters/page.tsx
+    - app/(platform)/plugins/kubernetes/nodes/page.tsx
+    - app/(platform)/plugins/kubernetes/workloads/page.tsx
+    - app/(platform)/plugins/kubernetes/openkruise/page.tsx
+    - app/(platform)/plugins/kubernetes/kruise-rollouts/page.tsx
+    - app/(platform)/plugins/kubernetes/kubeblocks/page.tsx
+    - app/(platform)/plugins/kubernetes/kubevela/page.tsx
+    - app/(platform)/plugins/kubernetes/namespaces/page.tsx
+    - app/(platform)/plugins/kubernetes/networks/page.tsx
+    - app/(platform)/plugins/kubernetes/gateway/page.tsx
+    - app/(platform)/plugins/kubernetes/configs/page.tsx
+    - app/(platform)/plugins/kubernetes/storages/page.tsx
+    - app/(platform)/plugins/kubernetes/access-controls/page.tsx
+    - app/(platform)/plugins/kubernetes/backup/page.tsx
+    - app/(platform)/plugins/kubernetes/records/page.tsx
+    - app/(platform)/plugins/kubernetes/diagnosis/page.tsx
+    - app/(platform)/plugins/kubernetes/chat/page.tsx
+    - app/(platform)/plugins/kubernetes/cloudtty/page.tsx
+    - app/(platform)/plugins/kubernetes/velaux/page.tsx
+    - app/(platform)/plugins/kubernetes/create/page.tsx
 assets:
   - backend/internal/plugins/kubernetes/resource/arthas-bin.tar

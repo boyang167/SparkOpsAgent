@@ -1,14 +1,9 @@
+import { renderKubernetesPage } from "@/modules/plugins/kubernetes/page-server";
+
 export default function KubernetesPluginPage() {
-  return (
-    <div className="page stack-lg">
-      <section className="card stack-md">
-        <div>
-          <h1 className="text-xl font-semibold">Kubernetes 插件</h1>
-          <p className="text-sm text-muted mt-1">
-            Kubernetes 控制台骨架已内置，后续任务会逐步接入集群、资源、诊断和终端能力。
-          </p>
-        </div>
-      </section>
-    </div>
-  );
+  return renderKubernetesPage({
+    mode: "overview",
+    title: "Kubernetes 插件",
+    description: "统一入口覆盖资源目录、集群设置、诊断、终端审计和生态入口。",
+  });
 }
