@@ -101,7 +101,6 @@ apis:
     read_only: true
   - method: GET
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/logs
-    read_only: true
   - method: GET
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/exec
   - method: GET
@@ -116,10 +115,8 @@ apis:
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/files
   - method: GET
     path: /api/v1/plugins/kubernetes/records
-    read_only: true
   - method: GET
     path: /api/v1/plugins/kubernetes/records/:recordId
-    read_only: true
   - method: DELETE
     path: /api/v1/plugins/kubernetes/records/:recordId
   - method: POST

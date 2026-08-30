@@ -31,6 +31,12 @@ const (
 	maxSafeInteger      = int64(1<<53 - 1)
 )
 
+var truncatedMarkerLine = mustJSONLine(recordFrame{
+	Time:   0,
+	Stream: "truncated",
+	Data:   "recording truncated at 5MiB",
+})
+
 type Store struct {
 	db *gorm.DB
 }
@@ -43,13 +49,14 @@ type Session struct {
 }
 
 type SessionRecorder struct {
-	id        string
-	store     *Store
-	startedAt time.Time
-	mu        sync.Mutex
-	blob      bytes.Buffer
-	truncated bool
-	closed    bool
+	id          string
+	workspaceID string
+	store       *Store
+	startedAt   time.Time
+	mu          sync.Mutex
+	blob        bytes.Buffer
+	truncated   bool
+	closed      bool
 }
 
 func NewStore(db *gorm.DB) *Store {
@@ -74,7 +81,7 @@ func (s *Store) Start(ctx context.Context, session Session) (*SessionRecorder, e
 	if err := s.db.WithContext(ctx).Create(&record).Error; err != nil {
 		return nil, err
 	}
-	return &SessionRecorder{id: record.ID, store: s, startedAt: startedAt}, nil
+	return &SessionRecorder{id: record.ID, workspaceID: record.WorkspaceID, store: s, startedAt: startedAt}, nil
 }
 
 func (r *SessionRecorder) ID() string {
@@ -115,9 +122,16 @@ func (r *SessionRecorder) Close(ctx context.Context, endedAt time.Time) error {
 	blob := append([]byte(nil), r.blob.Bytes()...)
 	r.mu.Unlock()
 
-	return r.store.db.WithContext(ctx).Model(&k8sschema.Record{}).
-		Where("id = ?", r.id).
-		Updates(map[string]any{"ended_at": endedAt, "blob": blob}).Error
+	result := r.store.db.WithContext(ctx).Model(&k8sschema.Record{}).
+		Where("id = ? AND workspace_id = ?", r.id, r.workspaceID).
+		Updates(map[string]any{"ended_at": endedAt, "blob": blob})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("kubernetes record finalize affected unexpected rows")
+	}
+	return nil
 }
 
 type recordStreamWriter struct {
@@ -164,19 +178,47 @@ func (r *SessionRecorder) append(stream string, data []byte) {
 		return
 	}
 	line = append(line, '\n')
-	if r.blob.Len()+len(line) <= MaxRecordingBytes {
+	if r.blob.Len()+len(line) <= maxFrameBytesBeforeMarker() {
 		_, _ = r.blob.Write(line)
 		return
 	}
 	r.truncated = true
-	marker, err := json.Marshal(recordFrame{
-		Time:   math.Round(time.Since(r.startedAt).Seconds()*1000) / 1000,
-		Stream: "truncated",
-		Data:   "recording truncated at 5MiB",
-	})
-	if err == nil {
-		_, _ = r.blob.Write(append(marker, '\n'))
+	r.appendTruncatedMarkerLocked()
+}
+
+func (r *SessionRecorder) appendTruncatedMarkerLocked() {
+	limit := maxFrameBytesBeforeMarker()
+	if r.blob.Len() > limit {
+		data := r.blob.Bytes()
+		cut := bytes.LastIndexByte(data[:limit], '\n')
+		if cut >= 0 {
+			r.blob.Truncate(cut + 1)
+		} else {
+			r.blob.Reset()
+		}
 	}
+	if r.blob.Len() > 0 {
+		data := r.blob.Bytes()
+		if data[len(data)-1] != '\n' {
+			if r.blob.Len()+1 > limit {
+				r.blob.Truncate(limit - 1)
+			}
+			_ = r.blob.WriteByte('\n')
+		}
+	}
+	_, _ = r.blob.Write(truncatedMarkerLine)
+}
+
+func maxFrameBytesBeforeMarker() int {
+	return MaxRecordingBytes - len(truncatedMarkerLine)
+}
+
+func mustJSONLine(frame recordFrame) []byte {
+	line, err := json.Marshal(frame)
+	if err != nil {
+		panic(err)
+	}
+	return append(line, '\n')
 }
 
 type Handler struct {

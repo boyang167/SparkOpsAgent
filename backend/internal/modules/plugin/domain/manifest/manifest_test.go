@@ -35,6 +35,17 @@ func requireManifestInvalid(t *testing.T, err error) {
 	require.Equal(t, "PLUGIN_MANIFEST_INVALID", de.Code())
 }
 
+func requireAPIReadOnly(t *testing.T, apis []manifest.APISpec, method, path string, readOnly bool) {
+	t.Helper()
+	for _, api := range apis {
+		if api.Method == method && api.Path == path {
+			require.Equal(t, readOnly, api.ReadOnly)
+			return
+		}
+	}
+	require.Failf(t, "missing api", "%s %s", method, path)
+}
+
 func TestParse_ValidExampleYAML(t *testing.T) {
 	raw, err := os.ReadFile("../../../../../internal/plugins/example/plugin.yaml")
 	require.NoError(t, err)
@@ -55,6 +66,16 @@ func TestParse_ValidExampleYAML(t *testing.T) {
 	require.Equal(t, "/api/v1/plugins/example/ping", m.APIs[0].Path)
 	require.Len(t, m.Frontend.Pages, 1)
 	require.Equal(t, "app/(platform)/plugins/example/page.tsx", m.Frontend.Pages[0])
+}
+
+func TestParse_KubernetesRecordsGETReliesOnBinderReadOnlyDefault(t *testing.T) {
+	raw, err := os.ReadFile("../../../../../internal/plugins/kubernetes/plugin.yaml")
+	require.NoError(t, err)
+
+	m, err := manifest.Parse(raw)
+	require.NoError(t, err)
+	requireAPIReadOnly(t, m.APIs, "GET", "/api/v1/plugins/kubernetes/records", false)
+	requireAPIReadOnly(t, m.APIs, "GET", "/api/v1/plugins/kubernetes/records/:recordId", false)
 }
 
 func TestParse_ValidInlineYAML(t *testing.T) {

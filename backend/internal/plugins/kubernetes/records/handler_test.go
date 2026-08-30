@@ -213,7 +213,7 @@ func TestSessionRecorderPersistsBoundedJSONLinesAndTruncates(t *testing.T) {
 	var saved k8sschema.Record
 	require.NoError(t, db.First(&saved, "id = ?", recorder.ID()).Error)
 	require.NotNil(t, saved.EndedAt)
-	require.LessOrEqual(t, len(saved.Blob), MaxRecordingBytes+256)
+	require.LessOrEqual(t, len(saved.Blob), MaxRecordingBytes)
 	require.Contains(t, string(saved.Blob), `"stream":"stdout"`)
 	require.Contains(t, string(saved.Blob), `"stream":"truncated"`)
 	require.NotContains(t, string(saved.Blob), "secret stderr after limit")
@@ -221,6 +221,65 @@ func TestSessionRecorderPersistsBoundedJSONLinesAndTruncates(t *testing.T) {
 		var frame map[string]any
 		require.NoError(t, json.Unmarshal([]byte(line), &frame), line)
 	}
+}
+
+func TestSessionRecorderKeepsTruncatedMarkerWithinStrictLimit(t *testing.T) {
+	db := openRecordsDB(t)
+	store := NewStore(db)
+	wsID := kernel.NewWorkspaceID()
+	recorder, err := store.Start(context.Background(), Session{
+		WorkspaceID: wsID.String(),
+		ClusterID:   kernel.NewClusterInfoID().String(),
+		Kind:        "exec",
+		StartedAt:   time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	recorder.blob.Write(bytes.Repeat([]byte("x"), MaxRecordingBytes-10))
+	recorder.blob.WriteByte('\n')
+
+	_, err = recorder.Stdout().Write([]byte("would exceed reserved marker space"))
+	require.NoError(t, err)
+	require.NoError(t, recorder.Close(context.Background(), time.Now().UTC()))
+
+	var saved k8sschema.Record
+	require.NoError(t, db.First(&saved, "id = ?", recorder.ID()).Error)
+	require.LessOrEqual(t, len(saved.Blob), MaxRecordingBytes)
+	require.Equal(t, 1, strings.Count(string(saved.Blob), `"stream":"truncated"`))
+	lines := strings.Split(strings.TrimSpace(string(saved.Blob)), "\n")
+	require.NotEmpty(t, lines)
+	var last map[string]any
+	require.NoError(t, json.Unmarshal([]byte(lines[len(lines)-1]), &last))
+	require.Equal(t, "truncated", last["stream"])
+}
+
+func TestSessionRecorderCloseRequiresMatchingWorkspace(t *testing.T) {
+	db := openRecordsDB(t)
+	store := NewStore(db)
+	recordID := "same-id"
+	actualWS := kernel.NewWorkspaceID()
+	recorderWS := kernel.NewWorkspaceID()
+	insertRecord(t, db, k8sschema.Record{
+		ID:          recordID,
+		WorkspaceID: actualWS.String(),
+		ClusterID:   kernel.NewClusterInfoID().String(),
+		Kind:        "exec",
+		StartedAt:   time.Now().UTC(),
+	})
+	recorder := &SessionRecorder{
+		id:          recordID,
+		workspaceID: recorderWS.String(),
+		store:       store,
+		startedAt:   time.Now().UTC(),
+	}
+	recorder.Event("stdout", "must not persist")
+
+	err := recorder.Close(context.Background(), time.Now().UTC())
+
+	require.Error(t, err)
+	var saved k8sschema.Record
+	require.NoError(t, db.First(&saved, "id = ?", recordID).Error)
+	require.Nil(t, saved.EndedAt)
+	require.Empty(t, saved.Blob)
 }
 
 func openRecordsDB(t *testing.T) *gorm.DB {
