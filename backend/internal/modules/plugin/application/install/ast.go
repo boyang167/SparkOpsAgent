@@ -5,7 +5,10 @@ import (
 	"go/parser"
 	"go/token"
 	"strconv"
+	"strings"
 )
+
+const sparkopsModulePrefix = "github.com/sparkops/sparkops-agent/backend/internal/"
 
 const ginImportPath = "github.com/gin-gonic/gin"
 
@@ -61,6 +64,35 @@ func countParams(fields *ast.FieldList) int {
 		total += len(field.Names)
 	}
 	return total
+}
+
+func FileImportsForbiddenModule(src []byte) bool {
+	file, err := parser.ParseFile(token.NewFileSet(), "plugin.go", src, parser.ImportsOnly)
+	if err != nil {
+		return true
+	}
+	for _, spec := range file.Imports {
+		importPath, err := strconv.Unquote(spec.Path.Value)
+		if err != nil {
+			return true
+		}
+		if isForbiddenPluginImport(importPath) {
+			return true
+		}
+	}
+	return false
+}
+
+func isForbiddenPluginImport(importPath string) bool {
+	rest, ok := strings.CutPrefix(importPath, sparkopsModulePrefix+"modules/")
+	if !ok {
+		return false
+	}
+	_, kind, cut := strings.Cut(rest, "/")
+	if !cut {
+		return false
+	}
+	return strings.HasPrefix(kind, "domain") || strings.HasPrefix(kind, "infrastructure")
 }
 
 func isGinEnginePointer(expr ast.Expr) bool {

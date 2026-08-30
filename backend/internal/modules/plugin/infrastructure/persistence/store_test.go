@@ -79,6 +79,14 @@ func TestAutoMigrateCreatesPluginSchemaTables(t *testing.T) {
 	require.Equal(t, int64(1), fkCount)
 }
 
+func TestAutoMigrateSeedsBundledExamplePlugin(t *testing.T) {
+	repo := openSQLitePluginStore(t)
+	found, err := repo.FindPlugin(context.Background(), "example")
+	require.NoError(t, err)
+	require.Equal(t, model.PluginStatusDeployed, found.Status)
+	require.Equal(t, "example", found.ID)
+}
+
 func TestStoreCompletesUninstallWithDurableReceipt(t *testing.T) {
 	repo := openSQLitePluginStore(t)
 	ctx := context.Background()

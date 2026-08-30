@@ -123,6 +123,9 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 			if _, ok := files[rel]; ok {
 				return nil, zipInvalid("plugin zip maps multiple files to: " + rel)
 			}
+			if !AllowedFrontendRel(topLevelID, rel) {
+				return nil, zipInvalid("frontend path is outside plugin directories: " + rel)
+			}
 			files[rel] = content
 			frontendFiles[rel] = content
 		}
@@ -133,6 +136,19 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 	}
 	if !registerFound {
 		return nil, zipInvalid("backend plugin.go with Register(*gin.Engine) not found")
+	}
+	for _, page := range foundManifest.Frontend.Pages {
+		if _, ok := frontendFiles[page]; !ok {
+			return nil, zipInvalid("frontend page listed in manifest is missing: " + page)
+		}
+	}
+	for rel, content := range backendFiles {
+		if !strings.HasSuffix(strings.ToLower(rel), ".go") {
+			continue
+		}
+		if FileImportsForbiddenModule(content) {
+			return nil, zipInvalid("backend file imports another BC domain or infrastructure: " + rel)
+		}
 	}
 
 	return &InspectedZip{

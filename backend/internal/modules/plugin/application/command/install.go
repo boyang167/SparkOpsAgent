@@ -199,6 +199,9 @@ func installFiles(inspected *plugininstall.InspectedZip, manifestBytes []byte) (
 		if !strings.HasPrefix(target, "fronted/apps/web/") {
 			return nil, fmt.Errorf("unsafe frontend plugin path: %q", name)
 		}
+		if !plugininstall.AllowedFrontendRel(inspected.Manifest.ID, name) {
+			return nil, fmt.Errorf("frontend path is outside plugin directories: %q", name)
+		}
 		files[target] = append([]byte(nil), content...)
 	}
 	files[path.Join(backendRoot, "plugin.yaml")] = append([]byte(nil), manifestBytes...)

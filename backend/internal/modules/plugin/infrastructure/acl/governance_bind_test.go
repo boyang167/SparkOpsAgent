@@ -47,6 +47,12 @@ func TestGovernanceBinderBindsAndUnbindsPluginResources(t *testing.T) {
 	require.NoError(t, binder.Bind(context.Background(), wsID, spec))
 
 	require.Equal(t, int64(1), countRows(t, db, "governance.menus", "workspace_id = ? AND path = ?", wsID.String(), "/plugins/example"))
+	require.Equal(t, int64(1), countRows(t, db, "governance.menus", "workspace_id = ? AND path = ? AND parent_id IS NULL", wsID.String(), "/plugins"))
+	var childParent string
+	require.NoError(t, db.Table("governance.menus").Select("parent_id").
+		Where("workspace_id = ? AND path = ?", wsID.String(), "/plugins/example").
+		Scan(&childParent).Error)
+	require.NotEmpty(t, childParent)
 	require.Equal(t, int64(1), countRows(t, db, "platform.apis", "path = ? AND method = ?", "/api/v1/plugins/example/ping", "GET"))
 	require.Equal(t, int64(1), countRows(t, db, "governance.role_api_policies", "role_id = ? AND path = ?", adminRoleID, "/api/v1/plugins/example/ping"))
 	require.Zero(t, countRows(t, db, "governance.role_api_policies", "role_id = ?", viewerRoleID))
@@ -54,6 +60,7 @@ func TestGovernanceBinderBindsAndUnbindsPluginResources(t *testing.T) {
 	require.NoError(t, binder.Unbind(context.Background(), wsID, "example"))
 
 	require.Zero(t, countRows(t, db, "governance.menus", "workspace_id = ? AND path LIKE ?", wsID.String(), "/plugins/example%"))
+	require.Equal(t, int64(1), countRows(t, db, "governance.menus", "workspace_id = ? AND path = ?", wsID.String(), "/plugins"))
 	require.Zero(t, countRows(t, db, "governance.role_api_policies", "role_id = ?", adminRoleID))
 	require.Equal(t, int64(1), countRows(t, db, "platform.apis", "path = ? AND method = ?", "/api/v1/plugins/example/ping", "GET"))
 }

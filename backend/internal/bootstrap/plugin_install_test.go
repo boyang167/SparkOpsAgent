@@ -62,12 +62,15 @@ func TestRunInstallsPluginsAfterAuthMiddlewareBeforeRouteCollect(t *testing.T) {
 	require.Contains(t, app, `sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"`)
 
 	entitlementsMiddleware := strings.Index(app, "c.Engine.Use(entitlements.Middleware(c.DB))")
+	pluginAuth := strings.Index(app, "c.Engine.Use(authn.RequireMemberForPluginAPIs())")
 	installAll := strings.Index(app, "sparkplugin.InstallAll(c.Engine, logger)")
 	routeCollect := strings.Index(app, "c.RouteRegistry = routes.Collect(c.Engine)")
 
 	require.NotEqual(t, -1, entitlementsMiddleware)
+	require.NotEqual(t, -1, pluginAuth)
 	require.NotEqual(t, -1, installAll)
 	require.NotEqual(t, -1, routeCollect)
-	require.Less(t, entitlementsMiddleware, installAll)
+	require.Less(t, entitlementsMiddleware, pluginAuth)
+	require.Less(t, pluginAuth, installAll)
 	require.Less(t, installAll, routeCollect)
 }

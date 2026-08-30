@@ -103,3 +103,23 @@ func (p *plugin) Register(engine *gin.Engine) {}
 		})
 	}
 }
+
+func TestFileImportsForbiddenModule(t *testing.T) {
+	if FileImportsForbiddenModule([]byte(`package example
+
+import (
+	"github.com/gin-gonic/gin"
+	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
+)
+
+type plugin struct{}
+`)) {
+		t.Fatal("platform/plugin import must be allowed")
+	}
+	if !FileImportsForbiddenModule([]byte(`package example
+
+import _ "github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/infrastructure/persistence"
+`)) {
+		t.Fatal("other BC infrastructure import must be rejected")
+	}
+}

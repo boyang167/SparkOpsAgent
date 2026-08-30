@@ -114,6 +114,7 @@ export const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
     items: [
       { href: "/admin/tenant", label: "组织与工作区" },
       { href: "/admin/announcements", label: "公告管理" },
+      { href: "/admin/plugins", label: "工作区插件" },
     ],
   },
   {
@@ -196,6 +197,7 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   "/admin/data-policies": "数据策略",
   "/admin/tenant": "组织与工作区",
   "/admin/announcements": "公告管理",
+  "/admin/plugins": "工作区插件",
   "/admin/operation-logs": "操作日志",
   "/admin/org-audit": "组织审计",
   "/admin/server-status": "服务器状态",
@@ -209,6 +211,7 @@ export const ADMIN_PAGE_DESCRIPTIONS: Record<string, string> = {
   "/admin/apis": "配置接口访问策略与 RBAC 映射。",
   "/admin/data-policies": "定义数据资源隔离与访问范围。",
   "/admin/tenant": "管理组织与工作区结构，创建租户边界并切换协作上下文。",
+  "/admin/plugins": "启用已部署到平台的插件，绑定当前工作区菜单与接口权限。",
   "/admin/operation-logs": "查看工作区内的操作审计记录。",
   "/admin/org-audit": "查看组织级合规与变更审计。",
   "/admin/server-status": "查看平台服务健康与运行状态。",

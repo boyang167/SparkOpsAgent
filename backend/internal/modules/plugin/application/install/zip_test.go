@@ -239,6 +239,42 @@ func TestInspectZipRequiresManifestAndTopLevelIDMatch(t *testing.T) {
 	})
 }
 
+func TestInspectZipRejectsMissingFrontendPageAndUnsafeFrontendPath(t *testing.T) {
+	t.Run("manifest page missing from zip", func(t *testing.T) {
+		files := validZipFiles()
+		delete(files, "example/frontend/app/(platform)/plugins/example/page.tsx")
+
+		_, err := InspectZip(makeZip(t, files))
+		requireZipInvalid(t, err)
+	})
+
+	t.Run("frontend file outside plugin directories", func(t *testing.T) {
+		files := validZipFiles()
+		files["example/frontend/app/layout.tsx"] = "export default function Root(){return null}"
+
+		_, err := InspectZip(makeZip(t, files))
+		requireZipInvalid(t, err)
+	})
+}
+
+func TestInspectZipRejectsForbiddenBCImports(t *testing.T) {
+	files := validZipFiles()
+	files["example/backend/plugin.go"] = `package example
+
+import (
+	"github.com/gin-gonic/gin"
+	_ "github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/domain"
+)
+
+type plugin struct{}
+
+func (p *plugin) Register(engine *gin.Engine) {}
+`
+
+	_, err := InspectZip(makeZip(t, files))
+	requireZipInvalid(t, err)
+}
+
 func TestInspectZipRequiresBackendPluginGoWithRegisterEngine(t *testing.T) {
 	t.Run("missing backend plugin go", func(t *testing.T) {
 		files := validZipFiles()

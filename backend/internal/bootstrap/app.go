@@ -146,13 +146,16 @@ func Run(ctx context.Context) error {
 
 	entitlements.ConfigureFromEnv()
 
-	if c.PolicyEngine != nil && c.PermissionChecker != nil && c.APIPolicyChecker != nil {
+	if tokens != nil {
 		c.Engine.Use(authn.OptionalAuth(tokens))
+	}
+	if c.PolicyEngine != nil && c.PermissionChecker != nil && c.APIPolicyChecker != nil {
 		c.Engine.Use(authz.APIAccessMiddleware(c.PolicyEngine, c.PermissionChecker, c.APIPolicyChecker))
 	}
 	if c.DB != nil {
 		c.Engine.Use(entitlements.Middleware(c.DB))
 	}
+	c.Engine.Use(authn.RequireMemberForPluginAPIs())
 
 	sparkplugin.InstallAll(c.Engine, logger)
 	c.RouteRegistry = routes.Collect(c.Engine)

@@ -27,7 +27,7 @@ func AutoMigrate(db *gorm.DB) error {
 		return err
 	}
 	if db.Dialector.Name() == "postgres" {
-		return db.Exec(`
+		if err := db.Exec(`
 			DO $$
 			BEGIN
 				IF NOT EXISTS (
@@ -47,9 +47,44 @@ func AutoMigrate(db *gorm.DB) error {
 				END IF;
 			END
 			$$;
-		`).Error
+		`).Error; err != nil {
+			return err
+		}
 	}
-	return nil
+	return seedBundledExamplePlugin(db)
+}
+
+const bundledExampleManifest = `id: example
+version: "0.1.0"
+display_name: Example Plugin
+route_prefix: /api/v1/plugins/example
+entitlement: plugin:example
+menus:
+  - title: Example
+    path: /plugins/example
+    component: plugins/example/page
+apis:
+  - method: GET
+    path: /api/v1/plugins/example/ping
+frontend:
+  pages:
+    - app/(platform)/plugins/example/page.tsx
+`
+
+func seedBundledExamplePlugin(db *gorm.DB) error {
+	now := time.Now().UTC()
+	row := pluginModel{
+		ID:           "example",
+		Version:      "0.1.0",
+		DisplayName:  "Example Plugin",
+		ManifestYAML:       bundledExampleManifest,
+		InstalledFilesJSON: "[]",
+		Status:             string(model.PluginStatusDeployed),
+		CreatedBy:    "00000000-0000-0000-0000-000000000000",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	return db.Where("id = ?", "example").FirstOrCreate(&row).Error
 }
 
 type pluginModel struct {

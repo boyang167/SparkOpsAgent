@@ -76,17 +76,31 @@ type rolePermissionRow struct {
 func (b *GovernanceBinder) Bind(ctx context.Context, workspaceID kernel.WorkspaceID, spec *manifest.Manifest) error {
 	db := b.db.WithContext(ctx)
 	now := time.Now().UTC()
+	parent := menuRow{
+		ID: uuid.NewString(), WorkspaceID: workspaceID.String(),
+		Name: "plugins", Path: "/plugins", Title: "插件",
+		Sort: 90, TransitionAnimation: "global",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Where("workspace_id = ? AND path = ?", workspaceID.String(), "/plugins").
+		Assign(map[string]any{
+			"name": "plugins", "title": "插件", "updated_at": now, "deleted_at": nil,
+		}).FirstOrCreate(&parent).Error; err != nil {
+		return err
+	}
+	parentID := parent.ID
 	for index, menu := range spec.Menus {
 		row := menuRow{
 			ID: uuid.NewString(), WorkspaceID: workspaceID.String(),
-			Name: fmt.Sprintf("plugin-%s-%d", spec.ID, index+1),
-			Path: menu.Path, Title: menu.Title, Component: menu.Component,
+			ParentID: &parentID,
+			Name:     fmt.Sprintf("plugin-%s-%d", spec.ID, index+1),
+			Path:     menu.Path, Title: menu.Title, Component: menu.Component,
 			Sort: index + 1, TransitionAnimation: "global",
 			CreatedAt: now, UpdatedAt: now,
 		}
 		assign := map[string]any{
 			"name": row.Name, "title": row.Title, "component": row.Component,
-			"sort": row.Sort, "updated_at": now, "deleted_at": nil,
+			"parent_id": parentID, "sort": row.Sort, "updated_at": now, "deleted_at": nil,
 		}
 		if err := db.Where("workspace_id = ? AND path = ?", workspaceID.String(), menu.Path).
 			Assign(assign).FirstOrCreate(&row).Error; err != nil {

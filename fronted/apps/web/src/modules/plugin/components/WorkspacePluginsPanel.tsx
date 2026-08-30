@@ -46,6 +46,7 @@ export function WorkspacePluginsPanel({ workspaceId }: { workspaceId: string }) 
         ),
       );
       notifyEntitlementsUpdated();
+      window.dispatchEvent(new Event("sparkops:menus-updated"));
     } catch (err) {
       setError(err instanceof BffError ? err.message : "更新插件开关失败");
     } finally {
