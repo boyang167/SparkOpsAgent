@@ -77,6 +77,7 @@ func TestRegisterBundledDescriptor(t *testing.T) {
 	require.ElementsMatch(t, []string{
 		"backend/internal/plugins/kubernetes/plugin.go",
 		"backend/internal/plugins/kubernetes/plugin.yaml",
+		"backend/internal/plugins/kubernetes/files/handler.go",
 		"backend/internal/plugins/kubernetes/http/clusters.go",
 		"backend/internal/plugins/kubernetes/http/metrics.go",
 		"backend/internal/plugins/kubernetes/http/router.go",

@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
+	k8sfiles "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/files"
 	k8sproxy "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/proxy"
 )
 
@@ -21,6 +22,7 @@ func RegisterRoutes(engine *gin.Engine, contexts ...sparkplugin.PluginContext) {
 	}
 	handler := newClusterHandler(pctx)
 	metricsHandler := newMetricsHandler(pctx)
+	filesHandler := k8sfiles.NewHandler(pctx)
 	group := engine.Group(routePrefix)
 	group.Use(httpx.RequireWorkspace(), requireWorkspaceMember(pctx.Members))
 	group.GET("/ready", func(c *gin.Context) {
@@ -30,4 +32,8 @@ func RegisterRoutes(engine *gin.Engine, contexts ...sparkplugin.PluginContext) {
 	group.PUT("/clusters/:clusterId/settings", handler.putClusterSettings)
 	group.POST("/clusters/:clusterId/metrics", metricsHandler.postMetrics)
 	group.Any("/clusters/:clusterId/proxy/*path", k8sproxy.NewHandler(pctx).ServeGIN)
+	group.GET("/clusters/:clusterId/namespaces/:namespace/pods/:pod/files", filesHandler.List)
+	group.GET("/clusters/:clusterId/namespaces/:namespace/pods/:pod/files/download", filesHandler.Download)
+	group.POST("/clusters/:clusterId/namespaces/:namespace/pods/:pod/files", filesHandler.Upload)
+	group.DELETE("/clusters/:clusterId/namespaces/:namespace/pods/:pod/files", filesHandler.Delete)
 }

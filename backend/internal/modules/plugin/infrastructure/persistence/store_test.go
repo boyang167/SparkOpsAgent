@@ -100,6 +100,7 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 	require.Equal(t, "kubernetes", found.ID)
 	require.Contains(t, found.InstalledFiles, "backend/internal/plugins/kubernetes/plugin.go")
 	require.Contains(t, found.InstalledFiles, "backend/internal/plugins/kubernetes/plugin.yaml")
+	require.Contains(t, found.InstalledFiles, "backend/internal/plugins/kubernetes/files/handler.go")
 	require.Contains(t, found.InstalledFiles, "backend/internal/plugins/kubernetes/http/router.go")
 	require.Contains(t, found.InstalledFiles, "backend/internal/plugins/kubernetes/resource/arthas-bin.tar")
 	require.Contains(t, found.InstalledFiles, "fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx")
@@ -152,9 +153,10 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 	requireAPI(t, spec.APIs, "GET", "/api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/logs", false)
 	requireAPI(t, spec.APIs, "GET", "/api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/exec", false)
 	requireAPI(t, spec.APIs, "POST", "/api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/exec", false)
-	requireAPI(t, spec.APIs, "GET", "/api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/files", false)
-	requireAPI(t, spec.APIs, "POST", "/api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/files", false)
-	requireAPI(t, spec.APIs, "DELETE", "/api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/files", false)
+	requireAPI(t, spec.APIs, "GET", "/api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/files", false)
+	requireAPI(t, spec.APIs, "GET", "/api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/files/download", false)
+	requireAPI(t, spec.APIs, "POST", "/api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/files", false)
+	requireAPI(t, spec.APIs, "DELETE", "/api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/files", false)
 	requireAPI(t, spec.APIs, "GET", "/api/v1/plugins/kubernetes/records", false)
 	requireAPI(t, spec.APIs, "DELETE", "/api/v1/plugins/kubernetes/records/:recordId", false)
 	requireAPI(t, spec.APIs, "POST", "/api/v1/plugins/kubernetes/clusters/:clusterId/cloudtty", false)
@@ -377,6 +379,7 @@ func registerBundledKubernetesForTest(t *testing.T) {
 		InstalledFiles: []string{
 			"backend/internal/plugins/kubernetes/plugin.go",
 			"backend/internal/plugins/kubernetes/plugin.yaml",
+			"backend/internal/plugins/kubernetes/files/handler.go",
 			"backend/internal/plugins/kubernetes/http/router.go",
 			"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
