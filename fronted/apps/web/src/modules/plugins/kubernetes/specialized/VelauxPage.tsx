@@ -1,23 +1,21 @@
 "use client";
 
+import { buildVelauxFrameProps } from "../velaux-frame";
+
 export function VelauxPage({ clusterId }: { clusterId: string }) {
   if (!clusterId) return <div className="empty-state">请先选择集群。</div>;
-  const src = `/api/bff/v1/plugins/kubernetes/clusters/${encodeURIComponent(clusterId)}/velaux/`;
+  const frame = buildVelauxFrameProps(clusterId);
   return (
     <div className="stack-sm">
       <div className="alert alert-info">
-        Velaux 通过同源 BFF proxy 打开。iframe 已隔离，不直接暴露后端配置 URL 或密钥；
-        <a className="link-primary ml-1" href={src} target="_blank" rel="noreferrer">
-          新标签打开同源入口
-        </a>
-        。
+        Velaux 仅在隔离 iframe 内通过同源 BFF proxy 打开，不提供未沙箱化的新标签入口，也不暴露后端配置 URL 或密钥。
       </div>
       <iframe
         title="Velaux"
-        src={src}
+        src={frame.src}
         className="w-full min-h-[640px] rounded-md border"
-        sandbox="allow-scripts allow-forms allow-popups allow-downloads"
-        referrerPolicy="no-referrer"
+        sandbox={frame.sandbox}
+        referrerPolicy={frame.referrerPolicy}
       />
     </div>
   );

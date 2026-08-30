@@ -136,6 +136,7 @@ func TestRegisterBundledDescriptor(t *testing.T) {
 		"fronted/apps/web/src/modules/plugins/kubernetes/page-server.tsx",
 		"fronted/apps/web/src/modules/plugins/kubernetes/resource-url.ts",
 		"fronted/apps/web/src/modules/plugins/kubernetes/sse.ts",
+		"fronted/apps/web/src/modules/plugins/kubernetes/velaux-frame.ts",
 		"fronted/apps/web/src/modules/plugins/kubernetes/yaml-document.ts",
 		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/ChatPage.tsx",
 		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/CloudTTYPage.tsx",
