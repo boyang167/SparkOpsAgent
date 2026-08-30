@@ -100,11 +100,10 @@ apis:
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/metrics
     read_only: true
   - method: GET
-    path: /api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/logs
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/logs
+    read_only: true
   - method: GET
-    path: /api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/exec
-  - method: POST
-    path: /api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/exec
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/exec
   - method: GET
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/arthas-ws
   - method: GET

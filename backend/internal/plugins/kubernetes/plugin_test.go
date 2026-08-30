@@ -94,6 +94,8 @@ func TestRegisterBundledDescriptor(t *testing.T) {
 		"backend/internal/plugins/kubernetes/proxy/rewrite.go",
 		"backend/internal/plugins/kubernetes/proxy/transport.go",
 		"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
+		"backend/internal/plugins/kubernetes/stream/exec.go",
+		"backend/internal/plugins/kubernetes/stream/logs.go",
 		"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
 	}, descriptor.InstalledFiles)
 }
