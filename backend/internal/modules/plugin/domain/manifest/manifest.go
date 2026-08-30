@@ -75,8 +75,7 @@ func (m *Manifest) Validate() error {
 		return invalid("at least one api is required")
 	}
 	for _, api := range m.APIs {
-		method := strings.ToUpper(strings.TrimSpace(api.Method))
-		if _, ok := allowedMethods[method]; !ok {
+		if _, ok := allowedMethods[api.Method]; !ok {
 			return invalid(fmt.Sprintf("api method %q is invalid", api.Method))
 		}
 		if !strings.HasPrefix(api.Path, m.RoutePrefix) {

@@ -92,3 +92,15 @@ func TestParse_InvalidAPIMethod(t *testing.T) {
 	_, err := manifest.Parse([]byte(yaml))
 	requireManifestInvalid(t, err)
 }
+
+func TestParse_InvalidAPIMethod_Lowercase(t *testing.T) {
+	yaml := strings.Replace(validYAML, "method: GET", "method: get", 1)
+	_, err := manifest.Parse([]byte(yaml))
+	requireManifestInvalid(t, err)
+}
+
+func TestParse_InvalidAPIMethod_WithWhitespace(t *testing.T) {
+	yaml := strings.Replace(validYAML, "method: GET", `method: " post "`, 1)
+	_, err := manifest.Parse([]byte(yaml))
+	requireManifestInvalid(t, err)
+}
