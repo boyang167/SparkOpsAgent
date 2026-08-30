@@ -24,9 +24,9 @@ var rejectedExts = map[string]struct{}{
 }
 
 const (
-	maxZipEntries       = 1000
-	maxZipFileBytes     = 10 << 20
-	maxZipExpandedBytes = 50 << 20
+	maxZipEntries       = 2000
+	maxZipFileBytes     = 50 << 20
+	maxZipExpandedBytes = 80 << 20
 )
 
 type InspectedZip struct {
@@ -54,6 +54,7 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 	registerFound := false
 	var declaredExpanded uint64
 	var actualExpanded int64
+	var pendingTarAssets []string
 
 	for _, f := range zr.File {
 		if _, ok := seenRawNames[f.Name]; ok {
@@ -69,11 +70,11 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 			continue
 		}
 		if f.UncompressedSize64 > maxZipFileBytes {
-			return nil, zipInvalid("plugin zip entry exceeds 10 MiB: " + name)
+			return nil, zipInvalid("plugin zip entry exceeds 50 MiB: " + name)
 		}
 		declaredExpanded += f.UncompressedSize64
 		if declaredExpanded > maxZipExpandedBytes {
-			return nil, zipInvalid("plugin zip exceeds 50 MiB uncompressed")
+			return nil, zipInvalid("plugin zip exceeds 80 MiB uncompressed")
 		}
 		if _, ok := rejectedExts[strings.ToLower(path.Ext(name))]; ok {
 			return nil, zipInvalid("plugin zip contains rejected extension: " + name)
@@ -95,7 +96,7 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 		}
 		actualExpanded += int64(len(content))
 		if actualExpanded > maxZipExpandedBytes {
-			return nil, zipInvalid("plugin zip exceeds 50 MiB uncompressed")
+			return nil, zipInvalid("plugin zip exceeds 80 MiB uncompressed")
 		}
 
 		switch {
@@ -110,6 +111,9 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 			foundManifest = m
 		case strings.HasPrefix(name, topLevelID+"/backend/"):
 			rel := strings.TrimPrefix(name, topLevelID+"/backend/")
+			if strings.EqualFold(path.Ext(rel), ".tar") {
+				pendingTarAssets = append(pendingTarAssets, "backend/"+rel)
+			}
 			if _, ok := files[rel]; ok {
 				return nil, zipInvalid("plugin zip maps multiple files to: " + rel)
 			}
@@ -120,6 +124,9 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 			}
 		case strings.HasPrefix(name, topLevelID+"/frontend/"):
 			rel := strings.TrimPrefix(name, topLevelID+"/frontend/")
+			if strings.EqualFold(path.Ext(rel), ".tar") {
+				pendingTarAssets = append(pendingTarAssets, "frontend/"+rel)
+			}
 			if _, ok := files[rel]; ok {
 				return nil, zipInvalid("plugin zip maps multiple files to: " + rel)
 			}
@@ -136,6 +143,15 @@ func InspectZip(raw []byte) (*InspectedZip, error) {
 	}
 	if !registerFound {
 		return nil, zipInvalid("backend plugin.go with Register(*gin.Engine) not found")
+	}
+	declaredAssets := make(map[string]struct{}, len(foundManifest.Assets))
+	for _, asset := range foundManifest.Assets {
+		declaredAssets[asset] = struct{}{}
+	}
+	for _, asset := range pendingTarAssets {
+		if _, ok := declaredAssets[asset]; !ok {
+			return nil, zipInvalid("plugin zip contains undeclared tar asset: " + asset)
+		}
 	}
 	for _, page := range foundManifest.Frontend.Pages {
 		if _, ok := frontendFiles[page]; !ok {

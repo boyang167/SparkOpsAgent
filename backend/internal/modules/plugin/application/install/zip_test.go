@@ -29,6 +29,10 @@ frontend:
     - app/(platform)/plugins/example/page.tsx
 `
 
+const validPluginYAMLWithTarAsset = validPluginYAML + `assets:
+  - backend/resource/arthas-bin.tar
+`
+
 const validPluginGo = `package example
 
 import "github.com/gin-gonic/gin"
@@ -88,24 +92,81 @@ func TestInspectZipAcceptsValidPluginAndMapsFiles(t *testing.T) {
 	require.NotContains(t, inspected.Files, "plugin.yaml")
 }
 
-func TestInspectZipRejectsMoreThanOneThousandEntries(t *testing.T) {
-	_, err := InspectZip(makeSizedZip(t, nil, 998))
+func TestInspectZipRejectsMoreThanTwoThousandEntries(t *testing.T) {
+	_, err := InspectZip(makeSizedZip(t, nil, 1998))
 
 	requireZipInvalid(t, err)
 }
 
-func TestInspectZipRejectsFileLargerThanTenMiB(t *testing.T) {
-	_, err := InspectZip(makeSizedZip(t, []int64{10<<20 + 1}, 0))
+func TestInspectZipAcceptsTwoThousandEntries(t *testing.T) {
+	_, err := InspectZip(makeSizedZip(t, nil, 1997))
+
+	require.NoError(t, err)
+}
+
+func TestInspectZipRejectsFileLargerThanFiftyMiB(t *testing.T) {
+	_, err := InspectZip(makeSizedZip(t, []int64{50<<20 + 1}, 0))
 
 	requireZipInvalid(t, err)
 }
 
-func TestInspectZipRejectsMoreThanFiftyMiBUncompressed(t *testing.T) {
+func TestInspectZipRejectsMoreThanEightyMiBUncompressed(t *testing.T) {
 	_, err := InspectZip(makeSizedZip(t, []int64{
-		9 << 20, 9 << 20, 9 << 20, 9 << 20, 9 << 20, 6 << 20,
+		9 << 20, 9 << 20, 9 << 20, 9 << 20, 9 << 20, 9 << 20, 9 << 20, 9 << 20, 9 << 20,
 	}, 0))
 
 	requireZipInvalid(t, err)
+}
+
+func TestInspectZipAcceptsMoreThanFiftyMiBUncompressed(t *testing.T) {
+	_, err := InspectZip(makeSizedZip(t, []int64{
+		9 << 20, 9 << 20, 9 << 20, 9 << 20, 9 << 20, 9 << 20,
+	}, 0))
+
+	require.NoError(t, err)
+}
+
+func TestInspectZipAcceptsDeclaredTarUnderBackend(t *testing.T) {
+	files := validZipFiles()
+	files["example/plugin.yaml"] = validPluginYAMLWithTarAsset
+	files["example/backend/resource/arthas-bin.tar"] = "tar content"
+
+	inspected, err := InspectZip(makeZip(t, files))
+
+	require.NoError(t, err)
+	require.Equal(t, "tar content", string(inspected.BackendFiles["resource/arthas-bin.tar"]))
+}
+
+func TestInspectZipRejectsUndeclaredTar(t *testing.T) {
+	tests := map[string]struct {
+		manifest string
+		entry    string
+	}{
+		"backend tar absent from assets": {
+			manifest: validPluginYAML,
+			entry:    "example/backend/resource/arthas-bin.tar",
+		},
+		"backend tar path differs from asset": {
+			manifest: validPluginYAMLWithTarAsset,
+			entry:    "example/backend/other/arthas-bin.tar",
+		},
+		"frontend tar is not a backend asset": {
+			manifest: validPluginYAMLWithTarAsset,
+			entry:    "example/frontend/app/(platform)/plugins/example/arthas-bin.tar",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			files := validZipFiles()
+			files["example/plugin.yaml"] = tc.manifest
+			files[tc.entry] = "tar content"
+
+			_, err := InspectZip(makeZip(t, files))
+
+			requireZipInvalid(t, err)
+		})
+	}
 }
 
 func TestInspectZipRejectsDuplicateRawEntryNames(t *testing.T) {
