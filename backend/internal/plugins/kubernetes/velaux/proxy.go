@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"path"
@@ -124,12 +125,14 @@ func (h *Handler) ServeGIN(c *gin.Context) {
 		httpx.Fail(c, "PLUGIN_VELAUX_UPSTREAM_UNAVAILABLE", "velaux upstream unavailable", http.StatusBadGateway)
 		return
 	}
-	copyResponseHeaders(c.Writer.Header(), resp.Header)
-	c.Status(resp.StatusCode)
 	if c.Request.Method == http.MethodHead {
+		copyResponseHeaders(c.Writer.Header(), resp.Header)
+		c.Status(resp.StatusCode)
 		return
 	}
 	if isStreamResponse(resp) {
+		copyResponseHeaders(c.Writer.Header(), resp.Header)
+		c.Status(resp.StatusCode)
 		h.copyStream(c, resp.Body)
 		return
 	}
@@ -138,6 +141,8 @@ func (h *Handler) ServeGIN(c *gin.Context) {
 		httpx.Fail(c, "PLUGIN_VELAUX_UPSTREAM_UNAVAILABLE", "velaux upstream unavailable", http.StatusBadGateway)
 		return
 	}
+	copyResponseHeaders(c.Writer.Header(), resp.Header)
+	c.Status(resp.StatusCode)
 	_, _ = c.Writer.Write(body)
 }
 
@@ -275,19 +280,8 @@ func isStreamResponse(resp *http.Response) bool {
 	if resp == nil {
 		return false
 	}
-	contentType := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
-	if strings.HasPrefix(contentType, "text/event-stream") {
-		return true
-	}
-	if resp.ContentLength < 0 {
-		return true
-	}
-	for _, encoding := range resp.TransferEncoding {
-		if strings.EqualFold(encoding, "chunked") {
-			return true
-		}
-	}
-	return false
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	return err == nil && strings.EqualFold(mediaType, "text/event-stream")
 }
 
 func requireWrite(ctx context.Context, c *gin.Context, writer sparkplugin.WriteAuthorizer) (kernel.WorkspaceID, kernel.MemberID, bool) {

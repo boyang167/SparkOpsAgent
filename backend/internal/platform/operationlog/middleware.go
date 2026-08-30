@@ -52,9 +52,7 @@ func Middleware(store *Store) gin.HandlerFunc {
 				// breaks plugin ZIP uploads (unexpected EOF / hung proxies).
 				reqBody = "[multipart omitted]"
 			} else if shouldOmitPluginRequestBody(path) {
-				raw, _ := io.ReadAll(c.Request.Body)
 				reqBody = "[plugin body omitted]"
-				c.Request.Body = io.NopCloser(bytes.NewBuffer(raw))
 			} else {
 				raw, _ := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes))
 				reqBody = string(raw)

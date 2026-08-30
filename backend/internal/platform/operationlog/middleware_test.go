@@ -88,7 +88,9 @@ func TestMiddlewareOmitsKubernetesPluginRequestBodyAndPreservesHandlerBody(t *te
 	engine := gin.New()
 	engine.Use(Middleware(store))
 	received := map[string]string{}
+	chatBody := &countingReadCloser{Reader: bytes.NewBufferString(`{"prompt":"chat-secret"}`)}
 	engine.POST("/api/v1/plugins/kubernetes/clusters/c1/chat/query", func(c *gin.Context) {
+		require.Zero(t, chatBody.reads, "middleware must not pre-read kubernetes plugin body")
 		raw, readErr := io.ReadAll(c.Request.Body)
 		require.NoError(t, readErr)
 		received["chat"] = string(raw)
@@ -105,19 +107,22 @@ func TestMiddlewareOmitsKubernetesPluginRequestBodyAndPreservesHandlerBody(t *te
 		method string
 		path   string
 		key    string
-		body   string
+		body   io.ReadCloser
+		want   string
 	}{
-		{http.MethodPost, "/api/v1/plugins/kubernetes/clusters/c1/chat/query", "chat", `{"prompt":"chat-secret"}`},
-		{http.MethodPut, "/api/v1/plugins/kubernetes/clusters/c1/settings", "settings", `{"llm_api_key":"settings-secret","velaux_password":"velaux-secret"}`},
+		{http.MethodPost, "/api/v1/plugins/kubernetes/clusters/c1/chat/query", "chat", chatBody, `{"prompt":"chat-secret"}`},
+		{http.MethodPut, "/api/v1/plugins/kubernetes/clusters/c1/settings", "settings", io.NopCloser(bytes.NewBufferString(`{"llm_api_key":"settings-secret","velaux_password":"velaux-secret"}`)), `{"llm_api_key":"settings-secret","velaux_password":"velaux-secret"}`},
 	}
 	for _, payload := range payloads {
-		req := httptest.NewRequest(payload.method, payload.path, bytes.NewBufferString(payload.body))
+		req := httptest.NewRequest(payload.method, payload.path, nil)
+		req.Body = payload.body
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		engine.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
-		require.Equal(t, payload.body, received[payload.key])
+		require.Equal(t, payload.want, received[payload.key])
 	}
+	require.Positive(t, chatBody.reads)
 
 	records := waitForOperationLogRecords(t, store, 2)
 	encoded, err := json.Marshal(records)
@@ -127,6 +132,18 @@ func TestMiddlewareOmitsKubernetesPluginRequestBodyAndPreservesHandlerBody(t *te
 		require.NotContains(t, string(encoded), secret)
 	}
 }
+
+type countingReadCloser struct {
+	io.Reader
+	reads int
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	r.reads++
+	return r.Reader.Read(p)
+}
+
+func (r *countingReadCloser) Close() error { return nil }
 
 func openOperationLogStore(t *testing.T, name string) *Store {
 	t.Helper()

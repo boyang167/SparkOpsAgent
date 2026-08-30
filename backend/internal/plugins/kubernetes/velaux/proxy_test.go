@@ -167,6 +167,58 @@ func TestProxyCapsResponseBody(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "PLUGIN_VELAUX_UPSTREAM_UNAVAILABLE")
 }
 
+func TestProxyCapsChunkedJSONResponseBody(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		chunk := bytes.Repeat([]byte("x"), 32<<10)
+		for written := int64(0); written <= MaxResponseBodyBytes; written += int64(len(chunk)) {
+			_, _ = w.Write(chunk)
+			w.(http.Flusher).Flush()
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	db := openVelauxDB(t)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
+	engine := velauxEngine(memberID, NewHandler(sparkplugin.PluginContext{
+		DB:       db,
+		Clusters: velauxClusterFactory{clusterID: clusterID},
+		Writer:   allowWriter{allow: true},
+	}))
+
+	rec := performVelaux(engine, http.MethodGet, "/clusters/"+clusterID.String()+"/velaux/api/apps", wsID, nil)
+
+	require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "PLUGIN_VELAUX_UPSTREAM_UNAVAILABLE")
+}
+
+func TestProxyAllowsSmallChunkedJSONResponse(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":`))
+		w.(http.Flusher).Flush()
+		_, _ = w.Write([]byte(`true}`))
+	}))
+	t.Cleanup(upstream.Close)
+	db := openVelauxDB(t)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
+	engine := velauxEngine(memberID, NewHandler(sparkplugin.PluginContext{
+		DB:       db,
+		Clusters: velauxClusterFactory{clusterID: clusterID},
+		Writer:   allowWriter{allow: true},
+	}))
+
+	rec := performVelaux(engine, http.MethodGet, "/clusters/"+clusterID.String()+"/velaux/api/apps", wsID, nil)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.JSONEq(t, `{"ok":true}`, rec.Body.String())
+}
+
 func TestProxyStreamsEventStreamBeforeUpstreamEnds(t *testing.T) {
 	wsID := kernel.NewWorkspaceID()
 	memberID := kernel.NewMemberID()
