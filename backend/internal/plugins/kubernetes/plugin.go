@@ -1,11 +1,18 @@
 package kubernetes
 
 import (
+	_ "embed"
+
 	"github.com/gin-gonic/gin"
 
 	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
 	kuberneteshttp "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/http"
 )
+
+// ManifestYAML is the bundled manifest persisted for the built-in plugin seed.
+//
+//go:embed plugin.yaml
+var ManifestYAML string
 
 type plugin struct{}
 

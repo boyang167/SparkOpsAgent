@@ -2,24 +2,18 @@ package persistence
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/model"
+	bundledkubernetes "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
-
-func TestBundledKubernetesManifestMatchesPluginYAML(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "plugins", "kubernetes", "plugin.yaml"))
-	require.NoError(t, err)
-	require.Equal(t, strings.ReplaceAll(string(raw), "\r\n", "\n"), bundledKubernetesManifest)
-}
 
 func TestSeedBundledKubernetesPluginDoesNotOverwriteExistingRecord(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
@@ -51,4 +45,39 @@ func TestSeedBundledKubernetesPluginDoesNotOverwriteExistingRecord(t *testing.T)
 	require.Equal(t, "Custom Kubernetes", found.DisplayName)
 	require.Equal(t, model.PluginStatusUploaded, found.Status)
 	require.Equal(t, installed, found.InstalledFiles)
+}
+
+func TestSeedBundledKubernetesPluginPersistsEmbeddedManifest(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS plugin").Error)
+	require.NoError(t, db.AutoMigrate(&pluginModel{}, &workspaceBindingModel{}, &uninstallReceiptModel{}))
+
+	require.NoError(t, seedBundledKubernetesPlugin(db))
+	found, err := NewStore(db).FindPlugin(context.Background(), "kubernetes")
+	require.NoError(t, err)
+	require.Equal(t, bundledkubernetes.ManifestYAML, found.ManifestYAML)
+}
+
+func TestSeedBundledKubernetesPluginSkipsWhenUninstallReceiptExists(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS plugin").Error)
+	require.NoError(t, db.AutoMigrate(&pluginModel{}, &workspaceBindingModel{}, &uninstallReceiptModel{}))
+	require.NoError(t, db.Create(&uninstallReceiptModel{
+		PluginID:   "kubernetes",
+		DeployedAt: time.Now().UTC(),
+	}).Error)
+
+	require.NoError(t, seedBundledKubernetesPlugin(db))
+	_, err = NewStore(db).FindPlugin(context.Background(), "kubernetes")
+	require.ErrorIs(t, err, domain.ErrPluginNotFound)
 }
