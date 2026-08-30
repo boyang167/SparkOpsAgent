@@ -48,6 +48,8 @@ func registerBundledDescriptor() {
 			"backend/internal/plugins/kubernetes/records/handler.go",
 			"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
 			"backend/internal/plugins/kubernetes/resource/assets.go",
+			"backend/internal/plugins/kubernetes/schema/migrate.go",
+			"backend/internal/plugins/kubernetes/schema/models.go",
 			"backend/internal/plugins/kubernetes/stream/exec.go",
 			"backend/internal/plugins/kubernetes/stream/logs.go",
 			"backend/internal/plugins/kubernetes/tty/cloudtty.go",
