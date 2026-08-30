@@ -13,3 +13,4 @@ export * from "./k8s/index";
 export * from "./platform/index";
 export * from "./product/index";
 export * from "./secret/index";
+export * from "./plugin/index";

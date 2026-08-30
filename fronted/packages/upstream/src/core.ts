@@ -16,7 +16,11 @@ export async function upstreamFetch<T>(
 ): Promise<T> {
   const { options, ...rest } = init;
   const headers = new Headers(rest.headers);
-  headers.set("Content-Type", "application/json");
+  const hasMultipartBody =
+    typeof FormData !== "undefined" && rest.body instanceof FormData;
+  if (!headers.has("Content-Type") && rest.body && !hasMultipartBody) {
+    headers.set("Content-Type", "application/json");
+  }
   if (options?.token) {
     headers.set("Authorization", `Bearer ${options.token}`);
   }

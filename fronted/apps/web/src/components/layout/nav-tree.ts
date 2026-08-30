@@ -132,6 +132,7 @@ export const PLATFORM_OPS_NAV_ITEMS: NavLeafConfig[] = [
   { href: "/platform/accounts", label: "平台账号" },
   { href: "/platform/organizations", label: "平台组织" },
   { href: "/platform/clusters", label: "集群管理" },
+  { href: "/platform/plugins", label: "插件管理" },
   { href: "/platform/audit", label: "平台审计" },
   { href: "/platform/settings", label: "平台配置" },
 ];

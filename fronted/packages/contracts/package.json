@@ -21,7 +21,8 @@
     "./k8s": "./src/k8s/index.ts",
     "./platform": "./src/platform/index.ts",
     "./product": "./src/product/index.ts",
-    "./secret": "./src/secret/index.ts"
+    "./secret": "./src/secret/index.ts",
+    "./plugin": "./src/plugin/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit"

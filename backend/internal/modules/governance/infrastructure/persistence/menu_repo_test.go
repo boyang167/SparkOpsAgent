@@ -52,3 +52,7 @@ func TestBuildMenuTree_orphanBecomesRoot(t *testing.T) {
 	require.Len(t, tree, 1)
 	require.Equal(t, "孤儿菜单", tree[0].Title)
 }
+
+func TestIsSuperAdminOnlyPath_Plugins(t *testing.T) {
+	require.True(t, persistence.IsSuperAdminOnlyPath("/platform/plugins"))
+}

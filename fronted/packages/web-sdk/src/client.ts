@@ -8,7 +8,9 @@ export interface BffFetchOptions extends RequestInit {
 
 export async function bffFetch<T>(path: string, options: BffFetchOptions = {}): Promise<T> {
   const headers = new Headers(options.headers);
-  if (!headers.has("Content-Type") && options.body) {
+  const hasMultipartBody =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
+  if (!headers.has("Content-Type") && options.body && !hasMultipartBody) {
     headers.set("Content-Type", "application/json");
   }
   if (options.workspaceId) {

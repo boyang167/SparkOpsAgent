@@ -42,6 +42,8 @@ import {
   type ProductUpstream,
   createSecretUpstream,
   type SecretUpstream,
+  createPluginUpstream,
+  type PluginUpstream,
 } from "@sparkops/upstream";
 
 export const AUTH_COOKIE = "sparkops_token";
@@ -67,6 +69,7 @@ export interface BffContext {
     platform: PlatformUpstream;
     product: ProductUpstream;
     secret: SecretUpstream;
+    plugin: PluginUpstream;
   };
 }
 
@@ -169,6 +172,7 @@ function buildBffContext(input: {
       platform: createPlatformUpstream(baseOptions),
       product: createProductUpstream(baseOptions),
       secret: createSecretUpstream(baseOptions),
+      plugin: createPluginUpstream(baseOptions),
     },
   };
 }
