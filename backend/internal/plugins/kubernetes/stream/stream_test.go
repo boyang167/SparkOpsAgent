@@ -80,25 +80,36 @@ func TestLogsStreamsLargeChunkWithoutAccumulatingUntilNewline(t *testing.T) {
 }
 
 func TestLogsPreservesUTF8RuneAcrossChunkBoundary(t *testing.T) {
-	wsID := kernel.NewWorkspaceID()
-	memberID := kernel.NewMemberID()
-	clusterID := kernel.NewClusterInfoID()
-	payload := strings.Repeat("a", logChunkBytes-1) + "中🙂tail"
-	logs := &fakeLogStreamer{body: payload}
-	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
-		Clusters: fakeStreamClusterFactory{clusterID: clusterID},
-	}, logs, nil)
+	for _, tc := range []struct {
+		name        string
+		prefixBytes int
+		suffix      string
+	}{
+		{name: "chinese rune split 1 plus 2", prefixBytes: logChunkBytes - 1, suffix: "中tail"},
+		{name: "emoji rune split 2 plus 2", prefixBytes: logChunkBytes - 2, suffix: "🙂tail"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wsID := kernel.NewWorkspaceID()
+			memberID := kernel.NewMemberID()
+			clusterID := kernel.NewClusterInfoID()
+			payload := strings.Repeat("a", tc.prefixBytes) + tc.suffix
+			logs := &fakeLogStreamer{body: payload}
+			engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+				Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+			}, logs, nil)
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/logs", nil)
-	req.Header.Set("X-Workspace-Id", wsID.String())
-	engine.ServeHTTP(rec, req)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/logs", nil)
+			req.Header.Set("X-Workspace-Id", wsID.String())
+			engine.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	joined := strings.Join(logEventChunks(t, rec.Body.String()), "")
-	require.Equal(t, payload, joined)
-	require.True(t, bytes.Equal([]byte(payload), []byte(joined)))
-	require.NotContains(t, joined, "\uFFFD")
+			require.Equal(t, http.StatusOK, rec.Code)
+			joined := strings.Join(logEventChunks(t, rec.Body.String()), "")
+			require.Equal(t, payload, joined)
+			require.True(t, bytes.Equal([]byte(payload), []byte(joined)))
+			require.NotContains(t, joined, "\uFFFD")
+		})
+	}
 }
 
 func TestExecRequiresWriterBeforeClusterConnection(t *testing.T) {
