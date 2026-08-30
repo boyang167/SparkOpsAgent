@@ -72,6 +72,7 @@ func TestQueryStreamsOpenAICompatibleSSEWithSanitizedPrompt(t *testing.T) {
 	clusterID := kernel.NewClusterInfoID()
 	var upstreamPath, upstreamAuth string
 	var upstreamBody []byte
+	audit := &recordingAudit{}
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamPath = r.URL.Path
 		upstreamAuth = r.Header.Get("Authorization")
@@ -94,7 +95,8 @@ func TestQueryStreamsOpenAICompatibleSSEWithSanitizedPrompt(t *testing.T) {
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "secret-ns"}},
 	)
 	engine := chatEngine(memberID, NewHandler(sparkplugin.PluginContext{
-		DB: db,
+		DB:    db,
+		Audit: audit,
 		Clusters: &recordingClusterFactory{
 			client: client,
 			meta:   &sparkplugin.ClusterMeta{ID: clusterID.String(), Name: "prod", Server: "https://secret-server"},
@@ -128,6 +130,58 @@ func TestQueryStreamsOpenAICompatibleSSEWithSanitizedPrompt(t *testing.T) {
 	}
 	require.Contains(t, rec.Body.String(), "event: chunk")
 	require.Contains(t, rec.Body.String(), "event: done")
+	require.Len(t, audit.events, 2)
+	require.Equal(t, "plugin.kubernetes.chat.started", audit.events[0].Action)
+	require.Equal(t, "plugin.kubernetes.chat.completed", audit.events[1].Action)
+	auditBody, err := json.Marshal(audit.events)
+	require.NoError(t, err)
+	require.Contains(t, string(auditBody), `"model":"qwen-plus"`)
+	require.Contains(t, string(auditBody), clusterID.String())
+	for _, secret := range []string{"summarize", "llm-secret", llm.URL, "secret-server", "cluster-token", "ok"} {
+		require.NotContains(t, string(auditBody), secret)
+	}
+}
+
+func TestQueryRejectsNonEventStreamUpstreamBeforeLocalStream(t *testing.T) {
+	for _, contentType := range []string{"application/json", "text/html; charset=utf-8"} {
+		t.Run(contentType, func(t *testing.T) {
+			wsID := kernel.NewWorkspaceID()
+			memberID := kernel.NewMemberID()
+			clusterID := kernel.NewClusterInfoID()
+			audit := &recordingAudit{}
+			llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", contentType)
+				_, _ = w.Write([]byte(`{"secret":"response-secret"}`))
+			}))
+			t.Cleanup(llm.Close)
+			db := openChatDB(t)
+			require.NoError(t, db.Create(&k8sschema.ClusterSettings{
+				ClusterID:  clusterID.String(),
+				LLMBaseURL: llm.URL,
+				LLMAPIKey:  "llm-secret",
+				LLMModel:   "qwen-plus",
+			}).Error)
+			engine := chatEngine(memberID, NewHandler(sparkplugin.PluginContext{
+				DB:       db,
+				Audit:    audit,
+				Clusters: &recordingClusterFactory{client: fake.NewSimpleClientset(), meta: &sparkplugin.ClusterMeta{ID: clusterID.String(), Name: "prod"}},
+				Writer:   allowWriter{allow: true},
+			}))
+
+			rec := performJSON(engine, http.MethodPost, "/clusters/"+clusterID.String()+"/chat/query", wsID, map[string]string{"prompt": "prompt-secret"})
+
+			require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
+			require.NotContains(t, rec.Header().Get("Content-Type"), "text/event-stream")
+			require.NotContains(t, rec.Body.String(), "response-secret")
+			require.Len(t, audit.events, 2)
+			require.Equal(t, "plugin.kubernetes.chat.completed", audit.events[1].Action)
+			auditBody, err := json.Marshal(audit.events)
+			require.NoError(t, err)
+			for _, secret := range []string{"prompt-secret", "llm-secret", llm.URL, "response-secret"} {
+				require.NotContains(t, string(auditBody), secret)
+			}
+		})
+	}
 }
 
 func TestQueryReturnsNotConfiguredWithoutCallingLLM(t *testing.T) {
@@ -160,6 +214,7 @@ func TestQueryPropagatesClientCancelToUpstream(t *testing.T) {
 	clusterID := kernel.NewClusterInfoID()
 	started := make(chan struct{}, 1)
 	seenCanceled := make(chan struct{}, 1)
+	audit := &recordingAudit{}
 	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		started <- struct{}{}
 		<-r.Context().Done()
@@ -175,6 +230,7 @@ func TestQueryPropagatesClientCancelToUpstream(t *testing.T) {
 	}).Error)
 	engine := chatEngine(memberID, NewHandlerWithClient(sparkplugin.PluginContext{
 		DB:       db,
+		Audit:    audit,
 		Clusters: &recordingClusterFactory{client: fake.NewSimpleClientset(), meta: &sparkplugin.ClusterMeta{ID: clusterID.String(), Name: "prod"}},
 		Writer:   allowWriter{allow: true},
 	}, httpClient))
@@ -201,6 +257,8 @@ func TestQueryPropagatesClientCancelToUpstream(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("handler did not return after client cancellation")
 	}
+	require.Len(t, audit.events, 2)
+	require.Equal(t, "plugin.kubernetes.chat.completed", audit.events[1].Action)
 }
 
 func openChatDB(t *testing.T) *gorm.DB {
@@ -299,4 +357,14 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
+}
+
+type recordingAudit struct {
+	events []sparkplugin.AuditEvent
+	err    error
+}
+
+func (a *recordingAudit) Record(_ context.Context, event sparkplugin.AuditEvent) error {
+	a.events = append(a.events, event)
+	return a.err
 }

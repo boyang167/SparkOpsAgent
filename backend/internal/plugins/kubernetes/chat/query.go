@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -65,7 +66,7 @@ func (h *Handler) Query(c *gin.Context) {
 		httpx.Fail(c, "PLUGIN_KUBERNETES_UNAVAILABLE", "kubernetes plugin context unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	wsID, _, ok := requireWrite(c.Request.Context(), c, h.ctx.Writer)
+	wsID, memberID, ok := requireWrite(c.Request.Context(), c, h.ctx.Writer)
 	if !ok {
 		return
 	}
@@ -104,6 +105,8 @@ func (h *Handler) Query(c *gin.Context) {
 		httpx.Fail(c, "PLUGIN_LLM_NOT_CONFIGURED", "LLM is not configured", http.StatusBadRequest)
 		return
 	}
+	h.recordChatAudit(c.Request.Context(), "plugin.kubernetes.chat.started", wsID, memberID, clusterID, settings.LLMModel)
+	defer h.recordChatAudit(context.Background(), "plugin.kubernetes.chat.completed", wsID, memberID, clusterID, settings.LLMModel)
 	resp, err := h.client.Do(upstreamReq)
 	if err != nil {
 		if errors.Is(c.Request.Context().Err(), context.Canceled) {
@@ -117,9 +120,34 @@ func (h *Handler) Query(c *gin.Context) {
 		httpx.Fail(c, "PLUGIN_CHAT_UPSTREAM_UNAVAILABLE", "chat upstream unavailable", http.StatusBadGateway)
 		return
 	}
+	if !isEventStreamContentType(resp.Header.Get("Content-Type")) {
+		httpx.Fail(c, "PLUGIN_CHAT_UPSTREAM_UNAVAILABLE", "chat upstream unavailable", http.StatusBadGateway)
+		return
+	}
 	writer := prepareSSE(c)
 	if err := streamOpenAISSE(c.Request.Context(), writer, resp.Body); err != nil && !errors.Is(c.Request.Context().Err(), context.Canceled) {
 		_ = writer.Event("error", "chat stream failed")
+	}
+}
+
+func (h *Handler) recordChatAudit(ctx context.Context, action string, wsID kernel.WorkspaceID, memberID kernel.MemberID, clusterID kernel.ClusterInfoID, model string) {
+	if h == nil || h.ctx.Audit == nil {
+		return
+	}
+	detail := map[string]any{
+		"workspace_id": wsID.String(),
+		"member_id":    memberID.String(),
+		"cluster_id":   clusterID.String(),
+		"model":        strings.TrimSpace(model),
+	}
+	err := h.ctx.Audit.Record(ctx, sparkplugin.AuditEvent{
+		WorkspaceID: wsID.String(),
+		MemberID:    memberID.String(),
+		Action:      action,
+		Detail:      detail,
+	})
+	if err != nil && h.ctx.Logger != nil {
+		h.ctx.Logger.Warn("kubernetes chat audit failed")
 	}
 }
 
@@ -243,6 +271,14 @@ func streamOpenAISSE(ctx context.Context, writer *sseWriter, body io.Reader) err
 		return err
 	}
 	return writer.Event("done", map[string]bool{"ok": true})
+}
+
+func isEventStreamContentType(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(mediaType, "text/event-stream")
 }
 
 func requireWrite(ctx context.Context, c *gin.Context, writer sparkplugin.WriteAuthorizer) (kernel.WorkspaceID, kernel.MemberID, bool) {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,6 +21,10 @@ import (
 )
 
 const MaxResponseBodyBytes int64 = 16 << 20
+
+const streamBufferBytes = 32 << 10
+
+var percentEscape = regexp.MustCompile(`%[0-9a-fA-F]{2}`)
 
 var allowedRequestHeaders = map[string]bool{
 	"Accept":              true,
@@ -115,14 +120,47 @@ func (h *Handler) ServeGIN(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodyBytes+1))
-	if err != nil || int64(len(body)) > MaxResponseBodyBytes {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		httpx.Fail(c, "PLUGIN_VELAUX_UPSTREAM_UNAVAILABLE", "velaux upstream unavailable", http.StatusBadGateway)
 		return
 	}
 	copyResponseHeaders(c.Writer.Header(), resp.Header)
 	c.Status(resp.StatusCode)
+	if c.Request.Method == http.MethodHead {
+		return
+	}
+	if isStreamResponse(resp) {
+		h.copyStream(c, resp.Body)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodyBytes+1))
+	if err != nil || int64(len(body)) > MaxResponseBodyBytes {
+		httpx.Fail(c, "PLUGIN_VELAUX_UPSTREAM_UNAVAILABLE", "velaux upstream unavailable", http.StatusBadGateway)
+		return
+	}
 	_, _ = c.Writer.Write(body)
+}
+
+func (h *Handler) copyStream(c *gin.Context, body io.Reader) {
+	buf := make([]byte, streamBufferBytes)
+	flusher, _ := c.Writer.(http.Flusher)
+	for {
+		if err := c.Request.Context().Err(); err != nil {
+			return
+		}
+		n, readErr := body.Read(buf)
+		if n > 0 {
+			if _, err := c.Writer.Write(buf[:n]); err != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if readErr != nil {
+			return
+		}
+	}
 }
 
 func (h *Handler) authorizeCluster(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) error {
@@ -156,7 +194,7 @@ func buildVelauxURL(baseURL, targetPath, rawQuery string) (string, error) {
 	if scheme != "http" && scheme != "https" {
 		return "", errors.New("invalid velaux url")
 	}
-	parsed.Path = path.Join(parsed.EscapedPath(), targetPath)
+	parsed.Path = path.Join(parsed.Path, targetPath)
 	if strings.HasSuffix(targetPath, "/") && !strings.HasSuffix(parsed.Path, "/") {
 		parsed.Path += "/"
 	}
@@ -171,25 +209,40 @@ func cleanVelauxPath(raw string) (string, error) {
 	if raw == "" || raw == "/" {
 		return "/", nil
 	}
-	unescaped, err := url.PathUnescape(raw)
-	if err != nil {
+	current := raw
+	for i := 0; i < 3; i++ {
+		if err := validatePathLayer(current); err != nil {
+			return "", err
+		}
+		decoded, err := url.PathUnescape(current)
+		if err != nil {
+			return "", err
+		}
+		if decoded == current {
+			break
+		}
+		current = decoded
+	}
+	if percentEscape.MatchString(current) {
+		return "", errors.New("unsafe velaux path")
+	}
+	if err := validatePathLayer(current); err != nil {
 		return "", err
 	}
-	unescaped = strings.ReplaceAll(unescaped, "\\", "/")
-	if strings.HasPrefix(unescaped, "//") || strings.Contains(unescaped, "://") {
-		return "", errors.New("unsafe velaux path")
+	return path.Clean("/" + strings.TrimPrefix(current, "/")), nil
+}
+
+func validatePathLayer(value string) error {
+	if strings.Contains(value, "\x00") || strings.Contains(value, "\\") ||
+		strings.HasPrefix(value, "//") || strings.Contains(value, "://") {
+		return errors.New("unsafe velaux path")
 	}
-	cleaned := path.Clean("/" + strings.TrimPrefix(unescaped, "/"))
-	segments := strings.Split(strings.Trim(cleaned, "/"), "/")
-	for _, segment := range segments {
-		if segment == ".." || segment == "." {
-			return "", errors.New("unsafe velaux path")
+	for _, segment := range strings.Split(strings.Trim(value, "/"), "/") {
+		if segment == "." || segment == ".." {
+			return errors.New("unsafe velaux path")
 		}
 	}
-	if strings.Contains(unescaped, "/../") || strings.HasSuffix(unescaped, "/..") || strings.HasPrefix(unescaped, "../") {
-		return "", errors.New("unsafe velaux path")
-	}
-	return cleaned, nil
+	return nil
 }
 
 func allowHeaders(in http.Header) http.Header {
@@ -216,6 +269,25 @@ func copyResponseHeaders(out, in http.Header) {
 
 func isReadMethod(method string) bool {
 	return method == http.MethodGet || method == http.MethodHead
+}
+
+func isStreamResponse(resp *http.Response) bool {
+	if resp == nil {
+		return false
+	}
+	contentType := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
+	if strings.HasPrefix(contentType, "text/event-stream") {
+		return true
+	}
+	if resp.ContentLength < 0 {
+		return true
+	}
+	for _, encoding := range resp.TransferEncoding {
+		if strings.EqualFold(encoding, "chunked") {
+			return true
+		}
+	}
+	return false
 }
 
 func requireWrite(ctx context.Context, c *gin.Context, writer sparkplugin.WriteAuthorizer) (kernel.WorkspaceID, kernel.MemberID, bool) {

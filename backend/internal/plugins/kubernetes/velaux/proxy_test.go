@@ -1,13 +1,16 @@
 package velaux
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -91,6 +94,8 @@ func TestProxyRejectsUnsafePathAndMissingURLWithoutCallingUpstream(t *testing.T)
 		"/clusters/" + clusterID.String() + "/velaux/../secret",
 		"/clusters/" + clusterID.String() + "/velaux/http://evil.test/path",
 		"/clusters/" + clusterID.String() + "/velaux//evil.test/path",
+		"/clusters/" + clusterID.String() + "/velaux/%252e%252e/secret",
+		"/clusters/" + clusterID.String() + "/velaux/%255cwindows",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.Header.Set("X-Workspace-Id", wsID.String())
@@ -143,6 +148,8 @@ func TestProxyCapsResponseBody(t *testing.T) {
 	memberID := kernel.NewMemberID()
 	clusterID := kernel.NewClusterInfoID()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "16777217")
 		_, _ = io.Copy(w, io.LimitReader(bytes.NewReader(bytes.Repeat([]byte("x"), int(MaxResponseBodyBytes+1))), MaxResponseBodyBytes+1))
 	}))
 	t.Cleanup(upstream.Close)
@@ -158,6 +165,116 @@ func TestProxyCapsResponseBody(t *testing.T) {
 
 	require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
 	require.Contains(t, rec.Body.String(), "PLUGIN_VELAUX_UPSTREAM_UNAVAILABLE")
+}
+
+func TestProxyStreamsEventStreamBeforeUpstreamEnds(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	firstChunkWritten := make(chan struct{}, 1)
+	releaseUpstream := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(releaseUpstream)
+		}
+	}()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		_, _ = w.Write([]byte("data: first\n\n"))
+		w.(http.Flusher).Flush()
+		firstChunkWritten <- struct{}{}
+		<-releaseUpstream
+		_, _ = w.Write([]byte("data: second\n\n"))
+		w.(http.Flusher).Flush()
+	}))
+	t.Cleanup(upstream.Close)
+	db := openVelauxDB(t)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
+	engine := velauxEngine(memberID, NewHandler(sparkplugin.PluginContext{
+		DB:       db,
+		Clusters: velauxClusterFactory{clusterID: clusterID},
+		Writer:   allowWriter{allow: true},
+	}))
+	server := httptest.NewServer(engine)
+	t.Cleanup(server.Close)
+
+	respCh := make(chan *http.Response, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		req, err := http.NewRequest(http.MethodGet, server.URL+"/clusters/"+clusterID.String()+"/velaux/events", nil)
+		require.NoError(t, err)
+		req.Header.Set("X-Workspace-Id", wsID.String())
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		respCh <- resp
+	}()
+
+	<-firstChunkWritten
+	var resp *http.Response
+	select {
+	case resp = <-respCh:
+	case err := <-errCh:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("first stream chunk was not visible before upstream completed")
+	}
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	reader := bufio.NewReader(resp.Body)
+	line, err := reader.ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "data: first\n", line)
+	close(releaseUpstream)
+	released = true
+	rest, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(rest), "data: second")
+}
+
+func TestProxyStreamStopsWhenClientCancels(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	upstreamStarted := make(chan struct{}, 1)
+	upstreamCanceled := make(chan struct{}, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: first\n\n"))
+		w.(http.Flusher).Flush()
+		upstreamStarted <- struct{}{}
+		<-r.Context().Done()
+		upstreamCanceled <- struct{}{}
+	}))
+	t.Cleanup(upstream.Close)
+	db := openVelauxDB(t)
+	require.NoError(t, db.Create(&k8sschema.ClusterSettings{ClusterID: clusterID.String(), VelauxURL: upstream.URL}).Error)
+	engine := velauxEngine(memberID, NewHandler(sparkplugin.PluginContext{
+		DB:       db,
+		Clusters: velauxClusterFactory{clusterID: clusterID},
+		Writer:   allowWriter{allow: true},
+	}))
+	server := httptest.NewServer(engine)
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/clusters/"+clusterID.String()+"/velaux/events", strings.NewReader(""))
+	require.NoError(t, err)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	<-upstreamStarted
+	cancel()
+
+	select {
+	case <-upstreamCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("upstream did not observe downstream cancellation")
+	}
 }
 
 func openVelauxDB(t *testing.T) *gorm.DB {

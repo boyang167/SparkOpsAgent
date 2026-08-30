@@ -3,6 +3,7 @@ package operationlog
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -79,6 +80,52 @@ func TestMiddlewareOmitsEventStreamResponseBody(t *testing.T) {
 	require.NotContains(t, records[0].Path, "access_token")
 	require.NotContains(t, records[0].Path, "command")
 	require.NotContains(t, records[0].Resp, "sse-secret")
+}
+
+func TestMiddlewareOmitsKubernetesPluginRequestBodyAndPreservesHandlerBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := openOperationLogStore(t, "oplog_plugin_body")
+	engine := gin.New()
+	engine.Use(Middleware(store))
+	received := map[string]string{}
+	engine.POST("/api/v1/plugins/kubernetes/clusters/c1/chat/query", func(c *gin.Context) {
+		raw, readErr := io.ReadAll(c.Request.Body)
+		require.NoError(t, readErr)
+		received["chat"] = string(raw)
+		c.Status(http.StatusOK)
+	})
+	engine.PUT("/api/v1/plugins/kubernetes/clusters/c1/settings", func(c *gin.Context) {
+		raw, readErr := io.ReadAll(c.Request.Body)
+		require.NoError(t, readErr)
+		received["settings"] = string(raw)
+		c.Status(http.StatusOK)
+	})
+
+	payloads := []struct {
+		method string
+		path   string
+		key    string
+		body   string
+	}{
+		{http.MethodPost, "/api/v1/plugins/kubernetes/clusters/c1/chat/query", "chat", `{"prompt":"chat-secret"}`},
+		{http.MethodPut, "/api/v1/plugins/kubernetes/clusters/c1/settings", "settings", `{"llm_api_key":"settings-secret","velaux_password":"velaux-secret"}`},
+	}
+	for _, payload := range payloads {
+		req := httptest.NewRequest(payload.method, payload.path, bytes.NewBufferString(payload.body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, payload.body, received[payload.key])
+	}
+
+	records := waitForOperationLogRecords(t, store, 2)
+	encoded, err := json.Marshal(records)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), "[plugin body omitted]")
+	for _, secret := range []string{"chat-secret", "settings-secret", "velaux-secret"} {
+		require.NotContains(t, string(encoded), secret)
+	}
 }
 
 func openOperationLogStore(t *testing.T, name string) *Store {
