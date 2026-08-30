@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/manifest"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/infrastructure/persistence"
@@ -85,6 +87,67 @@ func TestAutoMigrateSeedsBundledExamplePlugin(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, model.PluginStatusDeployed, found.Status)
 	require.Equal(t, "example", found.ID)
+}
+
+func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
+	repo := openSQLitePluginStore(t)
+	found, err := repo.FindPlugin(context.Background(), "kubernetes")
+	require.NoError(t, err)
+	require.Equal(t, model.PluginStatusDeployed, found.Status)
+	require.Equal(t, "kubernetes", found.ID)
+	require.Contains(t, found.InstalledFiles, "backend/internal/plugins/kubernetes/plugin.go")
+	require.Contains(t, found.InstalledFiles, "backend/internal/plugins/kubernetes/plugin.yaml")
+	require.Contains(t, found.InstalledFiles, "backend/internal/plugins/kubernetes/http/router.go")
+	require.Contains(t, found.InstalledFiles, "backend/internal/plugins/kubernetes/resource/arthas-bin.tar")
+	require.Contains(t, found.InstalledFiles, "fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx")
+
+	spec, err := manifest.Parse([]byte(found.ManifestYAML))
+	require.NoError(t, err)
+	require.Equal(t, "kubernetes", spec.ID)
+	require.Equal(t, "/api/v1/plugins/kubernetes", spec.RoutePrefix)
+	require.Equal(t, "plugin:kubernetes", spec.Entitlement)
+	require.Equal(t, []string{"backend/resource/arthas-bin.tar"}, spec.Assets)
+	require.Equal(t, []string{"app/(platform)/plugins/kubernetes/page.tsx"}, spec.Frontend.Pages)
+
+	for _, path := range []string{
+		"/plugins/kubernetes",
+		"/plugins/kubernetes/clusters",
+		"/plugins/kubernetes/nodes",
+		"/plugins/kubernetes/nodelabelstaints",
+		"/plugins/kubernetes/workloads",
+		"/plugins/kubernetes/openkruise",
+		"/plugins/kubernetes/kruise-rollouts",
+		"/plugins/kubernetes/kubeblocks",
+		"/plugins/kubernetes/kubevela",
+		"/plugins/kubernetes/namespaces",
+		"/plugins/kubernetes/networks",
+		"/plugins/kubernetes/gateway",
+		"/plugins/kubernetes/configs",
+		"/plugins/kubernetes/storages",
+		"/plugins/kubernetes/accessControls",
+		"/plugins/kubernetes/records",
+		"/plugins/kubernetes/diagnosis",
+		"/plugins/kubernetes/backup",
+		"/plugins/kubernetes/chat",
+		"/plugins/kubernetes/cloudtty",
+		"/plugins/kubernetes/velaux",
+	} {
+		menu, ok := findMenu(spec.Menus, path)
+		require.Truef(t, ok, "missing menu %s", path)
+		if path == "/plugins/kubernetes" {
+			require.Empty(t, menu.Parent)
+		} else {
+			require.Equal(t, "/plugins/kubernetes", menu.Parent)
+		}
+	}
+
+	requireAPI(t, spec.APIs, "GET", "/api/v1/plugins/kubernetes/ready", false)
+	requireAPI(t, spec.APIs, "GET", "/api/v1/plugins/kubernetes/clusters", false)
+	requireAPI(t, spec.APIs, "PUT", "/api/v1/plugins/kubernetes/clusters/:clusterId/settings", false)
+	requireAPI(t, spec.APIs, "ANY", "/api/v1/plugins/kubernetes/clusters/:clusterId/proxy/*", false)
+	requireAPI(t, spec.APIs, "POST", "/api/v1/plugins/kubernetes/clusters/:clusterId/metrics", true)
+	requireAPI(t, spec.APIs, "ANY", "/api/v1/plugins/kubernetes/clusters/:clusterId/velaux/*", false)
+	requireAPI(t, spec.APIs, "POST", "/api/v1/plugins/kubernetes/clusters/:clusterId/chat/query", false)
 }
 
 func TestStoreCompletesUninstallWithDurableReceipt(t *testing.T) {
@@ -270,4 +333,21 @@ func pluginIDs(bindings []*model.WorkspaceBinding) []string {
 		out = append(out, binding.PluginID)
 	}
 	return out
+}
+
+func findMenu(menus []manifest.MenuSpec, path string) (manifest.MenuSpec, bool) {
+	for _, menu := range menus {
+		if menu.Path == path {
+			return menu, true
+		}
+	}
+	return manifest.MenuSpec{}, false
+}
+
+func requireAPI(t *testing.T, apis []manifest.APISpec, method, path string, readOnly bool) {
+	t.Helper()
+	found := slices.ContainsFunc(apis, func(api manifest.APISpec) bool {
+		return api.Method == method && api.Path == path && api.ReadOnly == readOnly
+	})
+	require.Truef(t, found, "missing api %s %s read_only=%v", method, path, readOnly)
 }

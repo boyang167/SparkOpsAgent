@@ -51,7 +51,10 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return seedBundledExamplePlugin(db)
+	if err := seedBundledExamplePlugin(db); err != nil {
+		return err
+	}
+	return seedBundledKubernetesPlugin(db)
 }
 
 const bundledExampleManifest = `id: example
@@ -74,17 +77,179 @@ frontend:
 func seedBundledExamplePlugin(db *gorm.DB) error {
 	now := time.Now().UTC()
 	row := pluginModel{
-		ID:           "example",
-		Version:      "0.1.0",
-		DisplayName:  "Example Plugin",
+		ID:                 "example",
+		Version:            "0.1.0",
+		DisplayName:        "Example Plugin",
 		ManifestYAML:       bundledExampleManifest,
 		InstalledFilesJSON: "[]",
 		Status:             string(model.PluginStatusDeployed),
-		CreatedBy:    "00000000-0000-0000-0000-000000000000",
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		CreatedBy:          "00000000-0000-0000-0000-000000000000",
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	return db.Where("id = ?", "example").FirstOrCreate(&row).Error
+}
+
+const bundledKubernetesManifest = `id: kubernetes
+version: "0.1.0"
+display_name: Kubernetes
+route_prefix: /api/v1/plugins/kubernetes
+entitlement: plugin:kubernetes
+menus:
+  - title: Kubernetes管理
+    path: /plugins/kubernetes
+    component: plugins/kubernetes/page
+  - title: 集群管理
+    path: /plugins/kubernetes/clusters
+    component: plugins/kubernetes/clusters/page
+    parent: /plugins/kubernetes
+  - title: 节点管理
+    path: /plugins/kubernetes/nodes
+    component: plugins/kubernetes/nodes/page
+    parent: /plugins/kubernetes
+  - title: 标签与污点
+    path: /plugins/kubernetes/nodelabelstaints
+    component: plugins/kubernetes/nodelabelstaints/page
+    parent: /plugins/kubernetes
+  - title: 工作负载
+    path: /plugins/kubernetes/workloads
+    component: plugins/kubernetes/workloads/page
+    parent: /plugins/kubernetes
+  - title: OpenKruise
+    path: /plugins/kubernetes/openkruise
+    component: plugins/kubernetes/openkruise/page
+    parent: /plugins/kubernetes
+  - title: Kruise Rollouts
+    path: /plugins/kubernetes/kruise-rollouts
+    component: plugins/kubernetes/kruise-rollouts/page
+    parent: /plugins/kubernetes
+  - title: KubeBlocks
+    path: /plugins/kubernetes/kubeblocks
+    component: plugins/kubernetes/kubeblocks/page
+    parent: /plugins/kubernetes
+  - title: KubeVela
+    path: /plugins/kubernetes/kubevela
+    component: plugins/kubernetes/kubevela/page
+    parent: /plugins/kubernetes
+  - title: 命名空间
+    path: /plugins/kubernetes/namespaces
+    component: plugins/kubernetes/namespaces/page
+    parent: /plugins/kubernetes
+  - title: 网络管理
+    path: /plugins/kubernetes/networks
+    component: plugins/kubernetes/networks/page
+    parent: /plugins/kubernetes
+  - title: Gateway
+    path: /plugins/kubernetes/gateway
+    component: plugins/kubernetes/gateway/page
+    parent: /plugins/kubernetes
+  - title: 配置管理
+    path: /plugins/kubernetes/configs
+    component: plugins/kubernetes/configs/page
+    parent: /plugins/kubernetes
+  - title: 存储管理
+    path: /plugins/kubernetes/storages
+    component: plugins/kubernetes/storages/page
+    parent: /plugins/kubernetes
+  - title: 访问控制
+    path: /plugins/kubernetes/accessControls
+    component: plugins/kubernetes/accessControls/page
+    parent: /plugins/kubernetes
+  - title: 终端审计
+    path: /plugins/kubernetes/records
+    component: plugins/kubernetes/records/page
+    parent: /plugins/kubernetes
+  - title: 应用诊断
+    path: /plugins/kubernetes/diagnosis
+    component: plugins/kubernetes/diagnosis/page
+    parent: /plugins/kubernetes
+  - title: Velero备份
+    path: /plugins/kubernetes/backup
+    component: plugins/kubernetes/backup/page
+    parent: /plugins/kubernetes
+  - title: AI Chat
+    path: /plugins/kubernetes/chat
+    component: plugins/kubernetes/chat/page
+    parent: /plugins/kubernetes
+  - title: CloudTTY
+    path: /plugins/kubernetes/cloudtty
+    component: plugins/kubernetes/cloudtty/page
+    parent: /plugins/kubernetes
+  - title: Velaux
+    path: /plugins/kubernetes/velaux
+    component: plugins/kubernetes/velaux/page
+    parent: /plugins/kubernetes
+apis:
+  - method: GET
+    path: /api/v1/plugins/kubernetes/ready
+  - method: GET
+    path: /api/v1/plugins/kubernetes/clusters
+  - method: PUT
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/settings
+  - method: ANY
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/proxy/*
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/metrics
+    read_only: true
+  - method: GET
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/logs
+  - method: GET
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/exec
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/exec
+  - method: GET
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/arthas-ws
+  - method: GET
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/files
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/files
+  - method: DELETE
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/files
+  - method: GET
+    path: /api/v1/plugins/kubernetes/records
+  - method: DELETE
+    path: /api/v1/plugins/kubernetes/records/:recordId
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/cloudtty
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/nodetty
+  - method: ANY
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/diagnosis/*
+  - method: ANY
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/velaux/*
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/chat/query
+frontend:
+  pages:
+    - app/(platform)/plugins/kubernetes/page.tsx
+assets:
+  - backend/resource/arthas-bin.tar
+`
+
+func seedBundledKubernetesPlugin(db *gorm.DB) error {
+	installedFiles, err := json.Marshal([]string{
+		"backend/internal/plugins/kubernetes/plugin.go",
+		"backend/internal/plugins/kubernetes/plugin.yaml",
+		"backend/internal/plugins/kubernetes/http/router.go",
+		"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
+		"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
+	})
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	row := pluginModel{
+		ID:                 "kubernetes",
+		Version:            "0.1.0",
+		DisplayName:        "Kubernetes",
+		ManifestYAML:       bundledKubernetesManifest,
+		InstalledFilesJSON: string(installedFiles),
+		Status:             string(model.PluginStatusDeployed),
+		CreatedBy:          "00000000-0000-0000-0000-000000000000",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	return db.Where("id = ?", "kubernetes").FirstOrCreate(&row).Error
 }
 
 type pluginModel struct {
