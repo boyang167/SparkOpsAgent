@@ -34,8 +34,8 @@ describe("kubernetes catalog", () => {
     const application = CATALOG.find((item) => item.kind === "Application");
     const clusterRole = CATALOG.find((item) => item.kind === "ClusterRole");
 
-    expect(pod && proxyPath("local/one", pod, "dev ns", "api/pod")).toBe(
-      "/api/bff/v1/plugins/kubernetes/clusters/local%2Fone/proxy/api/v1/namespaces/dev%20ns/pods/api%2Fpod",
+    expect(pod && proxyPath("local-名字", pod, "dev", "api-名字")).toBe(
+      "/api/bff/v1/plugins/kubernetes/clusters/local-%E5%90%8D%E5%AD%97/proxy/api/v1/namespaces/dev/pods/api-%E5%90%8D%E5%AD%97",
     );
     expect(deployment && proxyPath("prod", deployment, "apps", "web")).toBe(
       "/api/bff/v1/plugins/kubernetes/clusters/prod/proxy/apis/apps/v1/namespaces/apps/deployments/web",
@@ -43,9 +43,17 @@ describe("kubernetes catalog", () => {
     expect(application && proxyPath("prod", application, "vela-system")).toBe(
       "/api/bff/v1/plugins/kubernetes/clusters/prod/proxy/apis/core.oam.dev/v1beta1/namespaces/vela-system/applications",
     );
-    expect(clusterRole && proxyPath("prod", clusterRole, "ignored", "admin/view")).toBe(
-      "/api/bff/v1/plugins/kubernetes/clusters/prod/proxy/apis/rbac.authorization.k8s.io/v1/clusterroles/admin%2Fview",
+    expect(clusterRole && proxyPath("prod", clusterRole, "ignored", "admin-view")).toBe(
+      "/api/bff/v1/plugins/kubernetes/clusters/prod/proxy/apis/rbac.authorization.k8s.io/v1/clusterroles/admin-view",
     );
+  });
+
+  it("rejects slash inside cluster, namespace, and resource name segments", () => {
+    const pod = CATALOG.find((item) => item.kind === "Pod");
+
+    expect(() => pod && proxyPath("local/one", pod, "dev", "api")).toThrow("invalid kubernetes path segment");
+    expect(() => pod && proxyPath("local", pod, "dev/ns", "api")).toThrow("invalid kubernetes path segment");
+    expect(() => pod && proxyPath("local", pod, "dev", "api/pod")).toThrow("invalid kubernetes path segment");
   });
 
   it("selects only cluster ids returned by the backend", () => {

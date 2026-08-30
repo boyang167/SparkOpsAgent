@@ -6,17 +6,25 @@ import {
 
 describe("buildKubernetesPluginBffPath", () => {
   it("encodes kubernetes plugin route segments for the BFF", () => {
-    expect(buildKubernetesPluginBffPath(["clusters", "dev cluster"], "?watch=1")).toBe(
-      "/api/bff/v1/plugins/kubernetes/clusters/dev%20cluster?watch=1",
+    expect(buildKubernetesPluginBffPath(["clusters", "名字"], "?watch=1")).toBe(
+      "/api/bff/v1/plugins/kubernetes/clusters/%E5%90%8D%E5%AD%97?watch=1",
     );
   });
 
-  it.each([[[".."]], [["%2e%2e"]], [["pods/admin"]], [["pods\\admin"]], [["http:"]]])(
-    "rejects unsafe route segments %#",
-    (segments) => {
-      expect(() => buildKubernetesPluginBffPath(segments)).toThrow("invalid kubernetes plugin path");
-    },
-  );
+  it.each([
+    [[".."]],
+    [["%2e%2e"]],
+    [["%25252e"]],
+    [["pods/admin"]],
+    [["pods%2Fadmin"]],
+    [["pods%252fadmin"]],
+    [["pods\\admin"]],
+    [["http:"]],
+    [["name%25252541"]],
+    [["bad%zz"]],
+  ])("rejects unsafe route segments %#", (segments) => {
+    expect(() => buildKubernetesPluginBffPath(segments)).toThrow("invalid kubernetes plugin path");
+  });
 });
 
 describe("kubernetesPluginFetch", () => {

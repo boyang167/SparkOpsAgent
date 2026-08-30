@@ -45,6 +45,7 @@ export async function upstreamRawFetch(
       ...rest,
       headers: buildUpstreamRequestHeaders(rest.headers, options),
       cache: "no-store",
+      redirect: "manual",
     });
   } catch {
     throw new BffError("upstream unavailable", "UPSTREAM_UNAVAILABLE", 502, options?.traceId);

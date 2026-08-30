@@ -37,7 +37,10 @@ export { createSecretUpstream } from "./secret";
 export type { SecretUpstream } from "./secret";
 export { createPluginUpstream } from "./plugin";
 export type { PluginUpstream } from "./plugin";
-export { createKubernetesPluginUpstream } from "./plugin-kubernetes";
+export {
+  buildKubernetesPluginApiPath,
+  createKubernetesPluginUpstream,
+} from "./plugin-kubernetes";
 export type {
   KubernetesPluginApiPath,
   KubernetesPluginUpstream,

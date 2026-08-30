@@ -46,6 +46,7 @@ import {
   type PluginUpstream,
   createKubernetesPluginUpstream,
   type KubernetesPluginUpstream,
+  getUpstreamBaseUrl,
   upstreamRawFetch,
 } from "@sparkops/upstream";
 
@@ -105,6 +106,7 @@ async function assertApiEntitlement(ctx: BffContext, apiPath: string, traceId: s
 }
 
 const KUBERNETES_PLUGIN_API_PREFIX = "/api/v1/plugins/kubernetes";
+const KUBERNETES_PLUGIN_BFF_PREFIX = "/api/bff/v1/plugins/kubernetes";
 const MAX_PROXY_BODY_BYTES = 50 * 1024 * 1024;
 const REQUEST_HEADER_ALLOWLIST = new Set(["accept", "content-type"]);
 const RESPONSE_HEADER_ALLOWLIST = new Set([
@@ -115,13 +117,13 @@ const RESPONSE_HEADER_ALLOWLIST = new Set([
   "last-modified",
   "x-accel-buffering",
 ]);
+const HTML_SANDBOX_CSP = "sandbox allow-scripts allow-forms allow-popups allow-downloads";
 
 function invalidKubernetesPath(message = "invalid kubernetes plugin path") {
   return new BffError(message, "INVALID_REQUEST", 400);
 }
 
-function assertSafeKubernetesSegment(segment: string) {
-  const lower = segment.toLowerCase();
+function assertSafeKubernetesSegmentLayer(segment: string) {
   if (
     !segment ||
     segment === "." ||
@@ -130,30 +132,34 @@ function assertSafeKubernetesSegment(segment: string) {
     segment.includes("\\") ||
     segment.includes("\u0000") ||
     segment.includes("://") ||
-    /^[a-z][a-z0-9+.-]*:$/i.test(segment) ||
-    /%(?:00|2e|2f|5c)/i.test(lower)
+    /^[a-z][a-z0-9+.-]*:/i.test(segment)
   ) {
     throw invalidKubernetesPath();
+  }
+}
+
+function normalizeKubernetesSegment(segment: string): string {
+  let current = segment;
+  for (let depth = 0; depth < 3; depth += 1) {
+    assertSafeKubernetesSegmentLayer(current);
+
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(current);
+    } catch {
+      throw invalidKubernetesPath();
+    }
+    if (decoded === current) {
+      return current;
+    }
+    current = decoded;
   }
 
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(segment);
-  } catch {
+  assertSafeKubernetesSegmentLayer(current);
+  if (/%[0-9a-fA-F]{2}/.test(current)) {
     throw invalidKubernetesPath();
   }
-  if (
-    !decoded ||
-    decoded === "." ||
-    decoded === ".." ||
-    decoded.includes("/") ||
-    decoded.includes("\\") ||
-    decoded.includes("\u0000") ||
-    decoded.includes("://") ||
-    /^[a-z][a-z0-9+.-]*:$/i.test(decoded)
-  ) {
-    throw invalidKubernetesPath();
-  }
+  return current;
 }
 
 export function buildKubernetesPluginApiPath(
@@ -166,10 +172,7 @@ export function buildKubernetesPluginApiPath(
   if (search && !search.startsWith("?")) {
     throw invalidKubernetesPath("invalid kubernetes plugin query");
   }
-  const encoded = segments.map((segment) => {
-    assertSafeKubernetesSegment(segment);
-    return encodeURIComponent(segment);
-  });
+  const encoded = segments.map((segment) => encodeURIComponent(normalizeKubernetesSegment(segment)));
   return `${KUBERNETES_PLUGIN_API_PREFIX}/${encoded.join("/")}${search}`;
 }
 
@@ -184,13 +187,60 @@ function buildProxyRequestHeaders(headers: Headers): Headers {
   return forwarded;
 }
 
-function buildProxyResponseHeaders(headers: Headers): Headers {
+function rewriteRedirectLocation(
+  headers: Headers,
+  upstreamPath: string,
+  status: number,
+  traceId: string,
+): string | undefined {
+  if (status < 300 || status >= 400) {
+    return undefined;
+  }
+  const location = headers.get("location");
+  if (!location) {
+    return undefined;
+  }
+
+  let parsed: URL;
+  let upstreamUrl: URL;
+  try {
+    upstreamUrl = new URL(upstreamPath, getUpstreamBaseUrl());
+    parsed = new URL(location, upstreamUrl);
+  } catch {
+    throw new BffError("invalid upstream redirect", "UPSTREAM_REDIRECT_INVALID", 502, traceId);
+  }
+  if (
+    parsed.origin !== upstreamUrl.origin ||
+    !parsed.pathname.startsWith(`${KUBERNETES_PLUGIN_API_PREFIX}/`)
+  ) {
+    throw new BffError("invalid upstream redirect", "UPSTREAM_REDIRECT_INVALID", 502, traceId);
+  }
+
+  const suffix = parsed.pathname.slice(KUBERNETES_PLUGIN_API_PREFIX.length);
+  return `${KUBERNETES_PLUGIN_BFF_PREFIX}${suffix}${parsed.search}`;
+}
+
+function buildProxyResponseHeaders(
+  headers: Headers,
+  upstreamPath: string,
+  status: number,
+  traceId: string,
+): Headers {
   const forwarded = new Headers();
   headers.forEach((value, key) => {
     if (RESPONSE_HEADER_ALLOWLIST.has(key.toLowerCase())) {
       forwarded.set(key, value);
     }
   });
+  const rewrittenLocation = rewriteRedirectLocation(headers, upstreamPath, status, traceId);
+  if (rewrittenLocation) {
+    forwarded.set("Location", rewrittenLocation);
+  }
+  if (headers.get("content-type")?.toLowerCase().includes("text/html")) {
+    forwarded.set("Content-Security-Policy", HTML_SANDBOX_CSP);
+    forwarded.set("X-Content-Type-Options", "nosniff");
+    forwarded.set("Referrer-Policy", "no-referrer");
+  }
   return forwarded;
 }
 
@@ -450,6 +500,6 @@ export async function proxyUpstreamStreamRequest(
   return new Response(req.method === "HEAD" ? null : upstream.body, {
     status: upstream.status,
     statusText: upstream.statusText,
-    headers: buildProxyResponseHeaders(upstream.headers),
+    headers: buildProxyResponseHeaders(upstream.headers, path, upstream.status, ctx.traceId),
   });
 }

@@ -5,8 +5,11 @@ export interface KubernetesPluginFetchOptions extends RequestInit {
 const KUBERNETES_PLUGIN_BFF_PREFIX = "/api/bff/v1/plugins/kubernetes";
 const REQUEST_HEADER_ALLOWLIST = new Set(["accept", "content-type"]);
 
-function assertSafeSegment(segment: string) {
-  const lower = segment.toLowerCase();
+function invalidPath() {
+  return new Error("invalid kubernetes plugin path");
+}
+
+function assertSafeSegmentLayer(segment: string) {
   if (
     !segment ||
     segment === "." ||
@@ -15,11 +18,33 @@ function assertSafeSegment(segment: string) {
     segment.includes("\\") ||
     segment.includes("\u0000") ||
     segment.includes("://") ||
-    /^[a-z][a-z0-9+.-]*:$/i.test(segment) ||
-    /%(?:00|2e|2f|5c)/i.test(lower)
+    /^[a-z][a-z0-9+.-]*:/i.test(segment)
   ) {
-    throw new Error("invalid kubernetes plugin path");
+    throw invalidPath();
   }
+}
+
+function normalizeSegment(segment: string): string {
+  let current = segment;
+  for (let depth = 0; depth < 3; depth += 1) {
+    assertSafeSegmentLayer(current);
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(current);
+    } catch {
+      throw invalidPath();
+    }
+    if (decoded === current) {
+      return current;
+    }
+    current = decoded;
+  }
+
+  assertSafeSegmentLayer(current);
+  if (/%[0-9a-fA-F]{2}/.test(current)) {
+    throw invalidPath();
+  }
+  return current;
 }
 
 function buildRequestHeaders(headersInit: HeadersInit = {}, workspaceId?: string) {
@@ -38,13 +63,10 @@ function buildRequestHeaders(headersInit: HeadersInit = {}, workspaceId?: string
 
 export function buildKubernetesPluginBffPath(segments: readonly string[], search = "") {
   if (segments.length === 0 || (search && !search.startsWith("?"))) {
-    throw new Error("invalid kubernetes plugin path");
+    throw invalidPath();
   }
   return `${KUBERNETES_PLUGIN_BFF_PREFIX}/${segments
-    .map((segment) => {
-      assertSafeSegment(segment);
-      return encodeURIComponent(segment);
-    })
+    .map((segment) => encodeURIComponent(normalizeSegment(segment)))
     .join("/")}${search}`;
 }
 

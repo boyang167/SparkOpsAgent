@@ -183,7 +183,45 @@ function def(
 }
 
 function encodeSegment(value: string): string {
-  return encodeURIComponent(value);
+  return encodeURIComponent(normalizePathSegment(value));
+}
+
+function normalizePathSegment(value: string): string {
+  let current = value;
+  for (let depth = 0; depth < 3; depth += 1) {
+    assertPathSegment(current);
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(current);
+    } catch {
+      throw new Error("invalid kubernetes path segment");
+    }
+    if (decoded === current) {
+      return current;
+    }
+    current = decoded;
+  }
+
+  assertPathSegment(current);
+  if (/%[0-9a-fA-F]{2}/.test(current)) {
+    throw new Error("invalid kubernetes path segment");
+  }
+  return current;
+}
+
+function assertPathSegment(value: string) {
+  if (
+    !value ||
+    value === "." ||
+    value === ".." ||
+    value.includes("/") ||
+    value.includes("\\") ||
+    value.includes("\u0000") ||
+    value.includes("://") ||
+    /^[a-z][a-z0-9+.-]*:/i.test(value)
+  ) {
+    throw new Error("invalid kubernetes path segment");
+  }
 }
 
 function isDNSLabel(value: string): boolean {

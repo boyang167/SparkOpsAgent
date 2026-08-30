@@ -15,13 +15,13 @@ describe("kubernetes resource collection URL", () => {
     expect(resourceCollectionUrl("prod", deployment, { page: 1, pageSize: 20 })).toBeNull();
     expect(
       resourceCollectionUrl("prod", deployment, {
-        namespace: "apps ns",
+        namespace: "apps",
         page: 1,
         pageSize: 20,
         keyword: "api/web",
       }),
     ).toBe(
-      "/api/bff/v1/plugins/kubernetes/clusters/prod/proxy/apis/apps/v1/namespaces/apps%20ns/deployments?page=1&pageSize=20&keyword=api%2Fweb",
+      "/api/bff/v1/plugins/kubernetes/clusters/prod/proxy/apis/apps/v1/namespaces/apps/deployments?page=1&pageSize=20&keyword=api%2Fweb",
     );
   });
 });

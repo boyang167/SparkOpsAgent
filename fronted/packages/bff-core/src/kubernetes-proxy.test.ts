@@ -31,8 +31,8 @@ function createContext(): BffContext {
 
 describe("buildKubernetesPluginApiPath", () => {
   it("encodes every segment under the kubernetes plugin API", () => {
-    expect(buildKubernetesPluginApiPath(["clusters", "dev cluster"], "?watch=1")).toBe(
-      "/api/v1/plugins/kubernetes/clusters/dev%20cluster?watch=1",
+    expect(buildKubernetesPluginApiPath(["clusters", "名字"], "?watch=1")).toBe(
+      "/api/v1/plugins/kubernetes/clusters/%E5%90%8D%E5%AD%97?watch=1",
     );
   });
 
@@ -42,7 +42,11 @@ describe("buildKubernetesPluginApiPath", () => {
     [["."]],
     [[".."]],
     [["%2e%2e"]],
+    [["%25252e"]],
     [["pods%2Fadmin"]],
+    [["pods%252fadmin"]],
+    [["name%25252541"]],
+    [["bad%zz"]],
     [["pods\\admin"]],
     [["pods\u0000admin"]],
     [["http:"]],
@@ -140,6 +144,85 @@ describe("proxyUpstreamStreamRequest", () => {
     expect(res.headers.get("X-Accel-Buffering")).toBe("no");
     expect(res.headers.has("X-Internal-Secret")).toBe(false);
     expect(await res.text()).toBe("data: hello\n\n");
+  });
+
+  it("adds sandbox security headers for HTML responses without trusting upstream overrides", async () => {
+    vi.stubEnv("UPSTREAM_URL", "http://upstream.test");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("<html></html>", {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Content-Security-Policy": "default-src *",
+            "Set-Cookie": "leak=1",
+          },
+        }),
+      ),
+    );
+
+    const res = await proxyUpstreamStreamRequest(
+      createContext(),
+      "/api/v1/plugins/kubernetes/clusters/prod/velaux/",
+      new Request("http://bff.test/api/bff/v1/plugins/kubernetes/clusters/prod/velaux/"),
+    );
+
+    expect(res.headers.get("Content-Security-Policy")).toBe(
+      "sandbox allow-scripts allow-forms allow-popups allow-downloads",
+    );
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(res.headers.has("Set-Cookie")).toBe(false);
+  });
+
+  it("rewrites same-origin upstream redirects to the BFF catch-all prefix", async () => {
+    vi.stubEnv("UPSTREAM_URL", "http://upstream.test");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 302,
+          headers: {
+            Location: "/api/v1/plugins/kubernetes/clusters/prod/velaux/?next=1",
+          },
+        }),
+      ),
+    );
+
+    const res = await proxyUpstreamStreamRequest(
+      createContext(),
+      "/api/v1/plugins/kubernetes/clusters/prod/velaux",
+      new Request("http://bff.test/api/bff/v1/plugins/kubernetes/clusters/prod/velaux"),
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe(
+      "/api/bff/v1/plugins/kubernetes/clusters/prod/velaux/?next=1",
+    );
+  });
+
+  it("rejects upstream redirects to an external origin", async () => {
+    vi.stubEnv("UPSTREAM_URL", "http://upstream.test");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 302,
+          headers: {
+            Location: "https://evil.test/steal",
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      proxyUpstreamStreamRequest(
+        createContext(),
+        "/api/v1/plugins/kubernetes/clusters/prod/velaux",
+        new Request("http://bff.test/api/bff/v1/plugins/kubernetes/clusters/prod/velaux"),
+      ),
+    ).rejects.toMatchObject({ status: 502, code: "UPSTREAM_REDIRECT_INVALID" });
   });
 
   it("maps upstream transport failures to a fixed 502 error", async () => {

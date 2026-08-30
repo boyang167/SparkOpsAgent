@@ -3,10 +3,10 @@ import { buildVelauxFrameProps, VELAUX_IFRAME_SANDBOX } from "../velaux-frame";
 
 describe("Velaux page frame security", () => {
   it("keeps Velaux inside a sandboxed iframe only", () => {
-    const props = buildVelauxFrameProps("prod/cluster");
+    const props = buildVelauxFrameProps("prod-名字");
 
     expect(props).toEqual({
-      src: "/api/bff/v1/plugins/kubernetes/clusters/prod%2Fcluster/velaux/",
+      src: "/api/bff/v1/plugins/kubernetes/clusters/prod-%E5%90%8D%E5%AD%97/velaux/",
       sandbox: VELAUX_IFRAME_SANDBOX,
       referrerPolicy: "no-referrer",
     });
