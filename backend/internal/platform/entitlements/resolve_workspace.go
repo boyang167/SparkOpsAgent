@@ -76,9 +76,24 @@ func ResolveForWorkspace(ctx context.Context, db *gorm.DB, workspaceID string) (
 		if overrides, ok := cfg.workspaceOverrides[workspaceID]; ok {
 			applyWorkspaceOverrides(&ents, overrides)
 		}
+		plugins, err := loadEnabledPlugins(ctx, db, workspaceID)
+		if err != nil {
+			return ents, err
+		}
+		ents.Plugins = plugins
 	}
 
 	return ents, nil
+}
+
+func loadEnabledPlugins(ctx context.Context, db *gorm.DB, workspaceID string) ([]string, error) {
+	plugins := make([]string, 0)
+	err := db.WithContext(ctx).
+		Table("plugin.workspace_bindings").
+		Where("workspace_id = ? AND enabled = ?", workspaceID, true).
+		Order("plugin_id ASC").
+		Pluck("plugin_id", &plugins).Error
+	return plugins, err
 }
 
 func loadFeatureFlags(ctx context.Context, db *gorm.DB) (map[string]bool, error) {

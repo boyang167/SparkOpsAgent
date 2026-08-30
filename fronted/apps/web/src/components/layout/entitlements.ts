@@ -7,12 +7,17 @@ export const DEFAULT_ENTITLEMENTS: WorkspaceEntitlementsVM = {
   observability: true,
   k8s: false,
   mcp: false,
+  plugins: [],
 };
 
-export type EntitlementKey = keyof WorkspaceEntitlementsVM;
+export type EntitlementKey = string;
 
-export function pathEntitlement(path: string): EntitlementKey | "" {
+export function pathEntitlement(path: string): string {
   if (!path.startsWith("/")) return "";
+  if (path.startsWith("/plugins/")) {
+    const pluginId = path.slice("/plugins/".length).split("/")[0];
+    return pluginId ? `plugin:${pluginId}` : "";
+  }
   if (path.startsWith("/knowledge")) return "knowledge";
   if (path.startsWith("/delivery") || path.startsWith("/publish") || path.startsWith("/config/secrets")) {
     return "delivery";
@@ -35,7 +40,14 @@ export function pathEntitlement(path: string): EntitlementKey | "" {
 export function isPathEntitled(path: string, entitlements: WorkspaceEntitlementsVM): boolean {
   const key = pathEntitlement(path);
   if (!key) return true;
-  return entitlements[key];
+  if (key.startsWith("plugin:")) {
+    return entitlements.plugins.includes(key.slice("plugin:".length));
+  }
+  if (key in entitlements) {
+    const value = entitlements[key as keyof WorkspaceEntitlementsVM];
+    return typeof value === "boolean" ? value : true;
+  }
+  return true;
 }
 
 export function filterNavItemsByEntitlements<T extends { href: string }>(

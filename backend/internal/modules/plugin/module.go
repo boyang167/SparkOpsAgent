@@ -7,11 +7,13 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/application/command"
 	plugininstall "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/application/install"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/application/query"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/infrastructure/persistence"
 	pluginhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 )
 
 type Module struct {
@@ -50,6 +52,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 
 	repo := persistence.NewStore(c.DB)
+	unitOfWork := acl.NewUnitOfWork(c.DB)
 	handler := pluginhttp.NewHandler(
 		command.NewInstallHandler(repo, publisher),
 		query.NewListHandler(repo),
@@ -58,7 +61,15 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewMarkDeployedHandler(repo),
 		command.NewUninstallHandler(repo, publisher),
 	)
+	workspaceHandler := pluginhttp.NewWorkspaceHandler(
+		query.NewListWorkspacePluginsHandler(repo),
+		command.NewEnableHandler(unitOfWork),
+		command.NewDisableHandler(unitOfWork),
+	)
 	auth := authn.RequireAuth(m.tokens)
+	ws := httpx.RequireWorkspace()
+	wsMember := authz.RequireWorkspaceMember(c.WorkspaceMemberChecker)
+	govAdmin := authz.RequirePermission(c.PermissionChecker, authz.PermGovernanceAdmin)
 	superAdmin := authz.RequireSuperAdmin(c.SystemRoleChecker)
 	c.Engine.POST("/api/v1/admin/plugins/install", auth, superAdmin, handler.Install)
 	c.Engine.GET("/api/v1/admin/plugins", auth, superAdmin, handler.List)
@@ -66,5 +77,11 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.POST("/api/v1/admin/plugins/:id/merged", auth, superAdmin, handler.MarkMerged)
 	c.Engine.POST("/api/v1/admin/plugins/:id/deployed", auth, superAdmin, handler.MarkDeployed)
 	c.Engine.POST("/api/v1/admin/plugins/:id/uninstall", auth, superAdmin, handler.Uninstall)
+	c.Engine.GET("/api/v1/workspaces/:wsId/plugins",
+		auth, ws, wsMember, govAdmin, workspaceHandler.ListWorkspace)
+	c.Engine.POST("/api/v1/workspaces/:wsId/plugins/:id/enable",
+		auth, ws, wsMember, govAdmin, workspaceHandler.Enable)
+	c.Engine.POST("/api/v1/workspaces/:wsId/plugins/:id/disable",
+		auth, ws, wsMember, govAdmin, workspaceHandler.Disable)
 	return nil
 }

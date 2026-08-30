@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FEATURE_MODULE_LABELS,
-  type WorkspaceEntitlementsVM,
+  type FeatureModuleKey,
 } from "@sparkops/contracts/platform";
 import type { AuthProvidersVM } from "@sparkops/contracts/identity";
 import { identity, platform, tenant } from "@sparkops/web-sdk";
@@ -12,7 +12,11 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
 import { notifyEntitlementsUpdated } from "@/components/layout/shell-context";
 
-type FeatureKey = keyof WorkspaceEntitlementsVM;
+type FeatureKey = FeatureModuleKey;
+type FeatureValues = Pick<
+  import("@sparkops/contracts/platform").WorkspaceEntitlementsVM,
+  FeatureKey
+>;
 type SettingsTab = "features" | "sso" | "license" | "workspace";
 
 const FEATURE_KEYS = Object.keys(FEATURE_MODULE_LABELS) as FeatureKey[];
@@ -37,7 +41,7 @@ const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: "workspace", label: "工作区覆盖" },
 ];
 
-type WorkspaceFeatureOverrides = Record<string, Partial<WorkspaceEntitlementsVM>>;
+type WorkspaceFeatureOverrides = Record<string, Partial<Record<FeatureKey, boolean>>>;
 
 function FeatureSwitch({
   label,
@@ -74,8 +78,8 @@ function FeatureSwitch({
   );
 }
 
-function readFeatures(config: Record<string, unknown> | undefined): WorkspaceEntitlementsVM {
-  const defaults: WorkspaceEntitlementsVM = {
+function readFeatures(config: Record<string, unknown> | undefined): FeatureValues {
+  const defaults: FeatureValues = {
     agent: true,
     knowledge: true,
     delivery: true,
@@ -100,7 +104,7 @@ function readWorkspaceFeatures(config: Record<string, unknown> | undefined): Wor
   const out: WorkspaceFeatureOverrides = {};
   for (const [wsId, value] of Object.entries(raw as Record<string, unknown>)) {
     if (!value || typeof value !== "object") continue;
-    const parsed: Partial<WorkspaceEntitlementsVM> = {};
+    const parsed: Partial<Record<FeatureKey, boolean>> = {};
     for (const key of FEATURE_KEYS) {
       const item = (value as Record<string, unknown>)[key];
       if (typeof item === "boolean") {
@@ -128,7 +132,7 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [config, setConfig] = useState<Record<string, unknown>>({});
-  const [features, setFeatures] = useState<WorkspaceEntitlementsVM>(() => readFeatures(undefined));
+  const [features, setFeatures] = useState<FeatureValues>(() => readFeatures(undefined));
   const [providers, setProviders] = useState<AuthProvidersVM | null>(null);
   const [workspaces, setWorkspaces] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
@@ -156,7 +160,7 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
         observability: true,
         k8s: true,
         mcp: true,
-      } satisfies WorkspaceEntitlementsVM;
+      } satisfies FeatureValues;
     }
     const base = readFeatures(config);
     const overrides = workspaceFeatures[selectedWorkspaceId] ?? {};
@@ -315,7 +319,7 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
     return "保存工作区覆盖";
   }
 
-  const featureGrid = (values: WorkspaceEntitlementsVM, onChange: (key: FeatureKey, next: boolean) => void) => (
+  const featureGrid = (values: FeatureValues, onChange: (key: FeatureKey, next: boolean) => void) => (
     <div className={isPlatform ? "platform-settings-feature-grid" : "stack-sm"}>
       {FEATURE_KEYS.map((key) => (
         <FeatureSwitch

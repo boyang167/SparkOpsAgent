@@ -225,11 +225,18 @@ export const WorkspaceEntitlementsVMSchema = z.object({
   k8s: z.boolean(),
   observability: z.boolean(),
   mcp: z.boolean(),
+  plugins: z.array(z.string()).optional().default([]),
 });
 
 export type WorkspaceEntitlementsVM = z.infer<typeof WorkspaceEntitlementsVMSchema>;
 
-export const FEATURE_MODULE_LABELS: Record<keyof WorkspaceEntitlementsVM, string> = {
+export type FeatureModuleKey = keyof Pick<
+  WorkspaceEntitlementsVM,
+  "agent" | "knowledge" | "delivery" | "k8s" | "observability" | "mcp"
+>;
+
+export const FEATURE_MODULE_LABELS: Record<FeatureModuleKey, string> &
+  Partial<Record<string, string>> = {
   agent: "智能体 / 项目",
   knowledge: "知识库",
   delivery: "持续交付",

@@ -1,6 +1,6 @@
 import type { WorkspaceEntitlementsVM } from "@sparkops/contracts/platform";
 
-export type EntitlementModuleKey = keyof WorkspaceEntitlementsVM;
+export type EntitlementModuleKey = string;
 
 /** Convert BFF route path to upstream API path for entitlement lookup. */
 export function bffPathToApiPath(bffPath: string): string {
@@ -34,6 +34,27 @@ function shouldSkipApiEntitlement(path: string): boolean {
   if (path === "/api/v1/workspaces" || path.endsWith("/workspaces/select")) {
     return true;
   }
+  if (isWorkspacePluginManagementApi(path)) {
+    return true;
+  }
+  return false;
+}
+
+function isWorkspacePluginManagementApi(path: string): boolean {
+  const prefix = "/api/v1/workspaces/";
+  if (!path.startsWith(prefix)) return false;
+  const parts = path.slice(prefix.length).split("/");
+  if (parts.length === 2) {
+    return parts[0].length > 0 && parts[1] === "plugins";
+  }
+  if (parts.length === 4) {
+    return (
+      parts[0].length > 0 &&
+      parts[1] === "plugins" &&
+      parts[2].length > 0 &&
+      (parts[3] === "enable" || parts[3] === "disable")
+    );
+  }
   return false;
 }
 
@@ -53,10 +74,16 @@ function isGovernanceWorkspaceApi(path: string): boolean {
 }
 
 /** Mirrors backend entitlements.APIPathEntitlement. */
-export function apiPathEntitlement(path: string): EntitlementModuleKey | "" {
+export function apiPathEntitlement(path: string): string {
   if (!path.startsWith("/api/v1/")) return "";
   if (shouldSkipApiEntitlement(path)) return "";
   if (isGovernanceWorkspaceApi(path)) return "";
+  if (path.startsWith("/api/v1/plugins/")) {
+    const parts = path.slice("/api/v1/plugins/".length).split("/");
+    if (parts.length >= 2 && parts[0] && parts[1]) {
+      return `plugin:${parts[0]}`;
+    }
+  }
 
   if (path.includes("/knowledge-bases") || path.startsWith("/api/v1/documents/")) {
     return "knowledge";
@@ -100,7 +127,7 @@ export function apiPathEntitlement(path: string): EntitlementModuleKey | "" {
   return "";
 }
 
-export function bffPathEntitlement(bffPath: string): EntitlementModuleKey | "" {
+export function bffPathEntitlement(bffPath: string): string {
   return apiPathEntitlement(bffPathToApiPath(bffPath));
 }
 
@@ -109,7 +136,15 @@ export function isModuleEnabled(
   moduleKey: EntitlementModuleKey | "",
 ): boolean {
   if (!moduleKey) return true;
-  return entitlements[moduleKey];
+  if (moduleKey.startsWith("plugin:")) {
+    const pluginId = moduleKey.slice("plugin:".length);
+    return pluginId.length > 0 && entitlements.plugins.includes(pluginId);
+  }
+  if (moduleKey in entitlements) {
+    const value = entitlements[moduleKey as keyof WorkspaceEntitlementsVM];
+    return typeof value === "boolean" ? value : true;
+  }
+  return true;
 }
 
 export const DEFAULT_ENTITLEMENTS: WorkspaceEntitlementsVM = {
@@ -119,4 +154,5 @@ export const DEFAULT_ENTITLEMENTS: WorkspaceEntitlementsVM = {
   observability: true,
   k8s: false,
   mcp: false,
+  plugins: [],
 };

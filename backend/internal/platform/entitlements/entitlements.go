@@ -9,12 +9,13 @@ import (
 
 // WorkspaceEntitlements describes licensed / enabled product modules for a workspace.
 type WorkspaceEntitlements struct {
-	Agent         bool `json:"agent"`
-	Knowledge     bool `json:"knowledge"`
-	Delivery      bool `json:"delivery"`
-	K8s           bool `json:"k8s"`
-	Observability bool `json:"observability"`
-	Mcp           bool `json:"mcp"`
+	Agent         bool     `json:"agent"`
+	Knowledge     bool     `json:"knowledge"`
+	Delivery      bool     `json:"delivery"`
+	K8s           bool     `json:"k8s"`
+	Observability bool     `json:"observability"`
+	Mcp           bool     `json:"mcp"`
+	Plugins       []string `json:"plugins"`
 }
 
 func Default() WorkspaceEntitlements {
@@ -25,6 +26,7 @@ func Default() WorkspaceEntitlements {
 		Observability: true,
 		K8s:           false,
 		Mcp:           false,
+		Plugins:       []string{},
 	}
 }
 
@@ -81,6 +83,14 @@ func asBool(value any) bool {
 func PathEntitlement(path string) string {
 	if path == "" || !strings.HasPrefix(path, "/") {
 		return ""
+	}
+	if strings.HasPrefix(path, "/plugins/") {
+		rest := strings.TrimPrefix(path, "/plugins/")
+		if id, _, ok := strings.Cut(rest, "/"); ok && id != "" {
+			return "plugin:" + id
+		} else if !ok && rest != "" {
+			return "plugin:" + rest
+		}
 	}
 	switch {
 	case strings.HasPrefix(path, "/knowledge"):

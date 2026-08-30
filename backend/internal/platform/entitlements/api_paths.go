@@ -13,6 +13,12 @@ func APIPathEntitlement(path string) string {
 	if isGovernanceWorkspaceAPI(path) {
 		return ""
 	}
+	if strings.HasPrefix(path, "/api/v1/plugins/") {
+		rest := strings.TrimPrefix(path, "/api/v1/plugins/")
+		if id, suffix, ok := strings.Cut(rest, "/"); ok && id != "" && suffix != "" {
+			return "plugin:" + id
+		}
+	}
 
 	switch {
 	case strings.Contains(path, "/knowledge-bases"), strings.HasPrefix(path, "/api/v1/documents/"):
@@ -65,6 +71,25 @@ func shouldSkipAPIEntitlement(path string) bool {
 	if path == "/api/v1/workspaces" || strings.HasSuffix(path, "/workspaces/select") {
 		return true
 	}
+	if isWorkspacePluginManagementAPI(path) {
+		return true
+	}
+	return false
+}
+
+func isWorkspacePluginManagementAPI(path string) bool {
+	const prefix = "/api/v1/workspaces/"
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(path, prefix), "/")
+	if len(parts) == 2 {
+		return parts[0] != "" && parts[1] == "plugins"
+	}
+	if len(parts) == 4 {
+		return parts[0] != "" && parts[1] == "plugins" && parts[2] != "" &&
+			(parts[3] == "enable" || parts[3] == "disable")
+	}
 	return false
 }
 
@@ -87,6 +112,15 @@ func isGovernanceWorkspaceAPI(path string) bool {
 func (e WorkspaceEntitlements) AllowsModule(key string) bool {
 	if key == "" {
 		return true
+	}
+	if strings.HasPrefix(key, "plugin:") {
+		id := strings.TrimPrefix(key, "plugin:")
+		for _, enabledID := range e.Plugins {
+			if id != "" && enabledID == id {
+				return true
+			}
+		}
+		return false
 	}
 	switch key {
 	case "agent":

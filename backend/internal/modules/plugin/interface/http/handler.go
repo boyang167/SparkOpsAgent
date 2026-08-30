@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
@@ -41,13 +42,24 @@ type uninstallCommand interface {
 	Handle(context.Context, string, kernel.MemberID) (*model.PluginRecord, error)
 }
 
+type workspaceListQuery interface {
+	Handle(context.Context, kernel.WorkspaceID) ([]query.WorkspacePlugin, error)
+}
+
+type workspaceCommand interface {
+	Handle(context.Context, kernel.WorkspaceID, string, kernel.MemberID) (*model.WorkspaceBinding, error)
+}
+
 type Handler struct {
-	install      installCommand
-	list         listQuery
-	get          getQuery
-	markMerged   statusCommand
-	markDeployed statusCommand
-	uninstall    uninstallCommand
+	install       installCommand
+	list          listQuery
+	get           getQuery
+	markMerged    statusCommand
+	markDeployed  statusCommand
+	uninstall     uninstallCommand
+	workspaceList workspaceListQuery
+	enable        workspaceCommand
+	disable       workspaceCommand
 }
 
 func NewHandler(
@@ -66,6 +78,10 @@ func NewHandler(
 		markDeployed: markDeployed,
 		uninstall:    uninstall,
 	}
+}
+
+func NewWorkspaceHandler(list workspaceListQuery, enable, disable workspaceCommand) *Handler {
+	return &Handler{workspaceList: list, enable: enable, disable: disable}
 }
 
 func (h *Handler) Install(c *gin.Context) {
@@ -178,6 +194,47 @@ func (h *Handler) Uninstall(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, record)
+}
+
+func (h *Handler) ListWorkspace(c *gin.Context) {
+	workspaceID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	items, err := h.workspaceList.Handle(c.Request.Context(), workspaceID)
+	if err != nil {
+		handlePluginError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) Enable(c *gin.Context) {
+	h.changeWorkspaceBinding(c, h.enable)
+}
+
+func (h *Handler) Disable(c *gin.Context) {
+	h.changeWorkspaceBinding(c, h.disable)
+}
+
+func (h *Handler) changeWorkspaceBinding(c *gin.Context, handler workspaceCommand) {
+	workspaceID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	actor, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	binding, err := handler.Handle(c.Request.Context(), workspaceID, c.Param("id"), actor)
+	if err != nil {
+		handlePluginError(c, err)
+		return
+	}
+	httpx.OK(c, binding)
 }
 
 func handlePluginError(c *gin.Context, err error) {

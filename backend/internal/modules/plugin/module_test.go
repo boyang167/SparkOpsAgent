@@ -26,6 +26,35 @@ func (c systemRoleChecker) IsSuperAdmin(context.Context, kernel.MemberID) (bool,
 	return c.super, nil
 }
 
+type workspaceMemberChecker struct{ member bool }
+
+func (c workspaceMemberChecker) IsWorkspaceMember(context.Context, kernel.WorkspaceID, kernel.MemberID) (bool, error) {
+	return c.member, nil
+}
+
+type permissionChecker struct{ allowed bool }
+
+func (c permissionChecker) RequirePermission(
+	context.Context,
+	kernel.WorkspaceID,
+	kernel.MemberID,
+	string,
+) error {
+	if c.allowed {
+		return nil
+	}
+	return kernel.NewDomainError("AUTH_FORBIDDEN", "forbidden")
+}
+
+func (c permissionChecker) HasPermission(
+	context.Context,
+	kernel.WorkspaceID,
+	kernel.MemberID,
+	string,
+) (bool, error) {
+	return c.allowed, nil
+}
+
 func TestModuleRequiresConfiguredCleanGitPublisher(t *testing.T) {
 	t.Setenv("PLUGIN_GIT_ROOT", "")
 	db := openModuleDB(t)
@@ -85,6 +114,42 @@ func TestAllPlatformPluginRoutesRequireSuperAdmin(t *testing.T) {
 
 func TestModuleName(t *testing.T) {
 	require.Equal(t, "plugin", plugin.New(nil).Name())
+}
+
+func TestWorkspacePluginRoutesRequireMembershipAndGovernanceAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	root := t.TempDir()
+	cmd := exec.Command("git", "init", root)
+	require.NoError(t, cmd.Run())
+	t.Setenv("PLUGIN_GIT_ROOT", root)
+	tokens := authn.NewTokenProvider(config.JWTConfig{Secret: "test-secret"})
+	engine := gin.New()
+	require.NoError(t, plugin.New(tokens).Register(&appctx.Container{
+		Context:                context.Background(),
+		DB:                     openModuleDB(t),
+		Engine:                 engine,
+		SystemRoleChecker:      systemRoleChecker{super: true},
+		WorkspaceMemberChecker: workspaceMemberChecker{member: true},
+		PermissionChecker:      permissionChecker{allowed: false},
+	}))
+	token, err := tokens.Issue(kernel.NewMemberID())
+	require.NoError(t, err)
+	wsID := kernel.NewWorkspaceID().String()
+
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/workspaces/" + wsID + "/plugins"},
+		{http.MethodPost, "/api/v1/workspaces/" + wsID + "/plugins/example/enable"},
+		{http.MethodPost, "/api/v1/workspaces/" + wsID + "/plugins/example/disable"},
+	} {
+		request := httptest.NewRequest(route.method, route.path, nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, request)
+		require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	}
 }
 
 func openModuleDB(t *testing.T) *gorm.DB {

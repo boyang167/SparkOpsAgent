@@ -11,10 +11,12 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/domain/model"
 	pluginhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 )
@@ -46,6 +48,34 @@ type uninstallStub struct{}
 
 func (uninstallStub) Handle(context.Context, string, kernel.MemberID) (*model.PluginRecord, error) {
 	return nil, nil
+}
+
+type workspaceListStub struct{}
+
+func (workspaceListStub) Handle(context.Context, kernel.WorkspaceID) ([]query.WorkspacePlugin, error) {
+	return []query.WorkspacePlugin{{
+		PluginRecord: model.PluginRecord{ID: "example", Status: model.PluginStatusDeployed},
+		Enabled:      true,
+	}}, nil
+}
+
+type workspaceCommandStub struct {
+	workspaceID kernel.WorkspaceID
+	pluginID    string
+	actor       kernel.MemberID
+	enabled     bool
+}
+
+func (s *workspaceCommandStub) Handle(
+	_ context.Context,
+	workspaceID kernel.WorkspaceID,
+	pluginID string,
+	actor kernel.MemberID,
+) (*model.WorkspaceBinding, error) {
+	s.workspaceID, s.pluginID, s.actor = workspaceID, pluginID, actor
+	return &model.WorkspaceBinding{
+		WorkspaceID: workspaceID, PluginID: pluginID, Enabled: s.enabled, EnabledBy: actor,
+	}, nil
 }
 
 func TestInstallAcceptsOnlyMultipartFile(t *testing.T) {
@@ -146,6 +176,42 @@ func TestInstallRejectsMultipartRequestOverFiftyOneMiB(t *testing.T) {
 	engine.ServeHTTP(response, request)
 
 	require.Equal(t, http.StatusRequestEntityTooLarge, response.Code)
+}
+
+func TestWorkspacePluginHandlersUseWorkspaceAndAuthenticatedActor(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	wsID, actor := kernel.NewWorkspaceID(), kernel.NewMemberID()
+	enable := &workspaceCommandStub{enabled: true}
+	disable := &workspaceCommandStub{}
+	handler := pluginhttp.NewWorkspaceHandler(workspaceListStub{}, enable, disable)
+	tokens := authn.NewTokenProvider(config.JWTConfig{Secret: "test-secret"})
+	token, err := tokens.Issue(actor)
+	require.NoError(t, err)
+	engine := gin.New()
+	engine.GET("/workspaces/:wsId/plugins", authn.RequireAuth(tokens), httpx.RequireWorkspace(), handler.ListWorkspace)
+	engine.POST("/workspaces/:wsId/plugins/:id/enable", authn.RequireAuth(tokens), httpx.RequireWorkspace(), handler.Enable)
+	engine.POST("/workspaces/:wsId/plugins/:id/disable", authn.RequireAuth(tokens), httpx.RequireWorkspace(), handler.Disable)
+
+	for _, requestCase := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/workspaces/" + wsID.String() + "/plugins"},
+		{http.MethodPost, "/workspaces/" + wsID.String() + "/plugins/example/enable"},
+		{http.MethodPost, "/workspaces/" + wsID.String() + "/plugins/example/disable"},
+	} {
+		request := httptest.NewRequest(requestCase.method, requestCase.path, nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, request)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	}
+
+	require.Equal(t, wsID, enable.workspaceID)
+	require.Equal(t, "example", enable.pluginID)
+	require.Equal(t, actor, enable.actor)
+	require.Equal(t, wsID, disable.workspaceID)
+	require.Equal(t, actor, disable.actor)
 }
 
 func multipartBody(t *testing.T, files map[string]string, fields map[string]string) (*bytes.Buffer, string) {
