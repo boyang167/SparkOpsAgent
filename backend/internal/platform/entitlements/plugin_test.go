@@ -10,7 +10,15 @@ import (
 )
 
 func TestAPIPathEntitlementMapsPluginBusinessRoute(t *testing.T) {
-	require.Equal(t, "plugin:example", APIPathEntitlement("/api/v1/plugins/example/ping"))
+	for _, path := range []string{
+		"/api/v1/plugins/example/ping",
+		"/api/v1/plugins/example/dashboard",
+		"/api/v1/plugins/example/workspaces/x/menus",
+	} {
+		t.Run(path, func(t *testing.T) {
+			require.Equal(t, "plugin:example", APIPathEntitlement(path))
+		})
+	}
 }
 
 func TestAPIPathEntitlementSkipsOnlyWorkspacePluginManagementRoutes(t *testing.T) {

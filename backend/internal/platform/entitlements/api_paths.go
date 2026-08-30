@@ -7,17 +7,17 @@ func APIPathEntitlement(path string) string {
 	if !strings.HasPrefix(path, "/api/v1/") {
 		return ""
 	}
-	if shouldSkipAPIEntitlement(path) {
-		return ""
-	}
-	if isGovernanceWorkspaceAPI(path) {
-		return ""
-	}
 	if strings.HasPrefix(path, "/api/v1/plugins/") {
 		rest := strings.TrimPrefix(path, "/api/v1/plugins/")
 		if id, suffix, ok := strings.Cut(rest, "/"); ok && id != "" && suffix != "" {
 			return "plugin:" + id
 		}
+	}
+	if shouldSkipAPIEntitlement(path) {
+		return ""
+	}
+	if isGovernanceWorkspaceAPI(path) {
+		return ""
 	}
 
 	switch {

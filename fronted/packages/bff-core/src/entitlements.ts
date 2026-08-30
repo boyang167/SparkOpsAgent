@@ -76,14 +76,14 @@ function isGovernanceWorkspaceApi(path: string): boolean {
 /** Mirrors backend entitlements.APIPathEntitlement. */
 export function apiPathEntitlement(path: string): string {
   if (!path.startsWith("/api/v1/")) return "";
-  if (shouldSkipApiEntitlement(path)) return "";
-  if (isGovernanceWorkspaceApi(path)) return "";
   if (path.startsWith("/api/v1/plugins/")) {
     const parts = path.slice("/api/v1/plugins/".length).split("/");
     if (parts.length >= 2 && parts[0] && parts[1]) {
       return `plugin:${parts[0]}`;
     }
   }
+  if (shouldSkipApiEntitlement(path)) return "";
+  if (isGovernanceWorkspaceApi(path)) return "";
 
   if (path.includes("/knowledge-bases") || path.startsWith("/api/v1/documents/")) {
     return "knowledge";
