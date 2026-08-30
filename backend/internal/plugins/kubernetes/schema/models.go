@@ -36,7 +36,13 @@ type Diagnosis struct {
 	ClusterID   string `gorm:"size:36"`
 	Namespace   string
 	Pod         string
+	Container   string
+	PID         int
 	Port        int
+	SessionDir  string
+	JarPath     string
+	Status      string
+	CreatedAt   time.Time
 	ExpiresAt   time.Time
 }
 

@@ -27,6 +27,8 @@ func registerBundledDescriptor() {
 		InstalledFiles: []string{
 			"backend/internal/plugins/kubernetes/plugin.go",
 			"backend/internal/plugins/kubernetes/plugin.yaml",
+			"backend/internal/plugins/kubernetes/chat/query.go",
+			"backend/internal/plugins/kubernetes/diagnosis/arthas.go",
 			"backend/internal/plugins/kubernetes/files/handler.go",
 			"backend/internal/plugins/kubernetes/http/clusters.go",
 			"backend/internal/plugins/kubernetes/http/metrics.go",
@@ -45,10 +47,12 @@ func registerBundledDescriptor() {
 			"backend/internal/plugins/kubernetes/proxy/transport.go",
 			"backend/internal/plugins/kubernetes/records/handler.go",
 			"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
+			"backend/internal/plugins/kubernetes/resource/assets.go",
 			"backend/internal/plugins/kubernetes/stream/exec.go",
 			"backend/internal/plugins/kubernetes/stream/logs.go",
 			"backend/internal/plugins/kubernetes/tty/cloudtty.go",
 			"backend/internal/plugins/kubernetes/tty/nodetty.go",
+			"backend/internal/plugins/kubernetes/velaux/proxy.go",
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
 		},
 	})

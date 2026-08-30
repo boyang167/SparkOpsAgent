@@ -104,8 +104,6 @@ apis:
   - method: GET
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/exec
   - method: GET
-    path: /api/v1/plugins/kubernetes/clusters/:clusterId/pods/:namespace/:pod/arthas-ws
-  - method: GET
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/files
   - method: GET
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/files/download
@@ -123,8 +121,12 @@ apis:
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/cloudtty
   - method: POST
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/nodetty
-  - method: ANY
-    path: /api/v1/plugins/kubernetes/clusters/:clusterId/diagnosis/*
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/diagnosis
+  - method: GET
+    path: /api/v1/plugins/kubernetes/diagnosis/:id/ws
+  - method: DELETE
+    path: /api/v1/plugins/kubernetes/diagnosis/:id
   - method: ANY
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/velaux/*
   - method: POST
@@ -133,4 +135,4 @@ frontend:
   pages:
     - app/(platform)/plugins/kubernetes/page.tsx
 assets:
-  - backend/resource/arthas-bin.tar
+  - backend/internal/plugins/kubernetes/resource/arthas-bin.tar

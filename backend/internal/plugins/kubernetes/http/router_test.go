@@ -148,3 +148,38 @@ func TestRegisterRoutesMountsTTYRoutes(t *testing.T) {
 		require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	}
 }
+
+func TestRegisterRoutesMountsTask15Routes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	memberID := kernel.NewMemberID()
+	wsID := kernel.NewWorkspaceID()
+	clusterID := kernel.NewClusterInfoID()
+	diagnosisID := kernel.NewPluginInstallID()
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		authn.SetMemberIDForTest(c, memberID)
+		c.Next()
+	})
+	RegisterRoutes(engine, sparkplugin.PluginContext{
+		Members: allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
+	})
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/v1/plugins/kubernetes/clusters/" + clusterID.String() + "/diagnosis"},
+		{http.MethodGet, "/api/v1/plugins/kubernetes/diagnosis/" + diagnosisID.String() + "/ws"},
+		{http.MethodDelete, "/api/v1/plugins/kubernetes/diagnosis/" + diagnosisID.String()},
+		{http.MethodGet, "/api/v1/plugins/kubernetes/clusters/" + clusterID.String() + "/velaux/ui"},
+		{http.MethodPost, "/api/v1/plugins/kubernetes/clusters/" + clusterID.String() + "/chat/query"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		req.Header.Set("X-Workspace-Id", wsID.String())
+		rec := httptest.NewRecorder()
+		engine.ServeHTTP(rec, req)
+
+		require.NotEqual(t, http.StatusNotFound, rec.Code, tc.path)
+		require.Equal(t, http.StatusServiceUnavailable, rec.Code, tc.path)
+	}
+}

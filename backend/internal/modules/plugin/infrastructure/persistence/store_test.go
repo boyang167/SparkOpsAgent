@@ -110,7 +110,7 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 	require.Equal(t, "kubernetes", spec.ID)
 	require.Equal(t, "/api/v1/plugins/kubernetes", spec.RoutePrefix)
 	require.Equal(t, "plugin:kubernetes", spec.Entitlement)
-	require.Equal(t, []string{"backend/resource/arthas-bin.tar"}, spec.Assets)
+	require.Equal(t, []string{"backend/internal/plugins/kubernetes/resource/arthas-bin.tar"}, spec.Assets)
 	require.Equal(t, []string{"app/(platform)/plugins/kubernetes/page.tsx"}, spec.Frontend.Pages)
 
 	for _, path := range []string{
@@ -161,7 +161,9 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 	requireAPI(t, spec.APIs, "DELETE", "/api/v1/plugins/kubernetes/records/:recordId", false)
 	requireAPI(t, spec.APIs, "POST", "/api/v1/plugins/kubernetes/clusters/:clusterId/cloudtty", false)
 	requireAPI(t, spec.APIs, "POST", "/api/v1/plugins/kubernetes/clusters/:clusterId/nodetty", false)
-	requireAPI(t, spec.APIs, "ANY", "/api/v1/plugins/kubernetes/clusters/:clusterId/diagnosis/*", false)
+	requireAPI(t, spec.APIs, "POST", "/api/v1/plugins/kubernetes/clusters/:clusterId/diagnosis", false)
+	requireAPI(t, spec.APIs, "GET", "/api/v1/plugins/kubernetes/diagnosis/:id/ws", false)
+	requireAPI(t, spec.APIs, "DELETE", "/api/v1/plugins/kubernetes/diagnosis/:id", false)
 	requireAPI(t, spec.APIs, "ANY", "/api/v1/plugins/kubernetes/clusters/:clusterId/velaux/*", false)
 	requireAPI(t, spec.APIs, "POST", "/api/v1/plugins/kubernetes/clusters/:clusterId/chat/query", false)
 }

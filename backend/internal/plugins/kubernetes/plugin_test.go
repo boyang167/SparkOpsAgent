@@ -77,6 +77,8 @@ func TestRegisterBundledDescriptor(t *testing.T) {
 	require.ElementsMatch(t, []string{
 		"backend/internal/plugins/kubernetes/plugin.go",
 		"backend/internal/plugins/kubernetes/plugin.yaml",
+		"backend/internal/plugins/kubernetes/chat/query.go",
+		"backend/internal/plugins/kubernetes/diagnosis/arthas.go",
 		"backend/internal/plugins/kubernetes/files/handler.go",
 		"backend/internal/plugins/kubernetes/http/clusters.go",
 		"backend/internal/plugins/kubernetes/http/metrics.go",
@@ -95,23 +97,30 @@ func TestRegisterBundledDescriptor(t *testing.T) {
 		"backend/internal/plugins/kubernetes/proxy/transport.go",
 		"backend/internal/plugins/kubernetes/records/handler.go",
 		"backend/internal/plugins/kubernetes/resource/arthas-bin.tar",
+		"backend/internal/plugins/kubernetes/resource/assets.go",
 		"backend/internal/plugins/kubernetes/stream/exec.go",
 		"backend/internal/plugins/kubernetes/stream/logs.go",
 		"backend/internal/plugins/kubernetes/tty/cloudtty.go",
 		"backend/internal/plugins/kubernetes/tty/nodetty.go",
+		"backend/internal/plugins/kubernetes/velaux/proxy.go",
 		"fronted/apps/web/app/(platform)/plugins/kubernetes/page.tsx",
 	}, descriptor.InstalledFiles)
 }
 
-func TestArthasTarContainsPlaceholderMember(t *testing.T) {
+func TestArthasTarContainsBootJar(t *testing.T) {
 	f, err := os.Open(filepath.Join("resource", "arthas-bin.tar"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, f.Close()) }()
 
-	header, err := tar.NewReader(f).Next()
-	require.NoError(t, err)
-	require.Equal(t, "README.placeholder", header.Name)
-	require.Zero(t, header.Size)
+	tr := tar.NewReader(f)
+	for {
+		header, err := tr.Next()
+		require.NoError(t, err)
+		if header.Name == "arthas-bin/arthas-boot.jar" {
+			require.Positive(t, header.Size)
+			return
+		}
+	}
 }
 
 func readyEngine(memberID kernel.MemberID) *gin.Engine {
