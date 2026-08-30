@@ -1,0 +1,15 @@
+id: {{.ID}}
+version: "0.1.0"
+display_name: {{.Name}}
+route_prefix: /api/v1/plugins/{{.ID}}
+entitlement: plugin:{{.ID}}
+menus:
+  - title: {{.Name}}
+    path: /plugins/{{.ID}}
+    component: plugins/{{.ID}}/page
+apis:
+  - method: GET
+    path: /api/v1/plugins/{{.ID}}/ping
+frontend:
+  pages:
+    - app/(platform)/plugins/{{.ID}}/page.tsx
