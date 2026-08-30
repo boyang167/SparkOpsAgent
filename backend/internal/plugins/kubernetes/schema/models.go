@@ -19,10 +19,10 @@ func (ClusterSettings) TableName() string { return "plugin_kubernetes.cluster_se
 
 type Record struct {
 	ID          string `gorm:"primaryKey;size:36"`
-	WorkspaceID string `gorm:"index;size:36"`
+	WorkspaceID string `gorm:"index:idx_records_workspace_started_at,priority:1;size:36"`
 	ClusterID   string `gorm:"size:36"`
 	Kind        string
-	StartedAt   time.Time
+	StartedAt   time.Time `gorm:"index:idx_records_workspace_started_at,priority:2,sort:desc"`
 	EndedAt     *time.Time
 	Blob        []byte
 	ObjectPath  string

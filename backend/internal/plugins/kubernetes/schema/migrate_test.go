@@ -63,3 +63,17 @@ func TestClusterSettingsHasNoKubeconfigFields(t *testing.T) {
 	require.Contains(t, names, "velaux_url")
 	require.Contains(t, names, "llm_base_url")
 }
+
+func TestRecordsMigrationCreatesWorkspaceStartedAtIndex(t *testing.T) {
+	db := openSQLiteK8sSchema(t)
+
+	var indexes []struct {
+		Name string
+	}
+	require.NoError(t, db.Raw("PRAGMA plugin_kubernetes.index_list('records')").Scan(&indexes).Error)
+	names := make([]string, 0, len(indexes))
+	for _, idx := range indexes {
+		names = append(names, strings.ToLower(idx.Name))
+	}
+	require.Contains(t, names, "idx_records_workspace_started_at")
+}

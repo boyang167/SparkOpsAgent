@@ -5,13 +5,17 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
+	"github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/records"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
+	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -98,6 +102,8 @@ func (h *Handler) Exec(c *gin.Context) {
 	if err := writer.Event("open", map[string]bool{"ok": true}); err != nil {
 		return
 	}
+	recorder := h.startRecorder(c.Request.Context(), target, writer)
+	defer h.closeRecorder(recorder)
 	recordExecAudit(c.Request.Context(), h.ctx.Audit, target, "kubernetes.exec.started", "")
 	var status string
 	defer func() {
@@ -109,18 +115,21 @@ func (h *Handler) Exec(c *gin.Context) {
 		Pod:       target.Pod,
 		Container: target.Container,
 		Command:   command,
-		Stdout:    sseEventWriter{writer: writer, event: "output"},
-		Stderr:    sseEventWriter{writer: writer, event: "error"},
+		Stdout:    execOutputWriter(writer, recorder, "output", "stdout"),
+		Stderr:    execOutputWriter(writer, recorder, "error", "stderr"),
 	}
 	err = h.exec.StreamExec(c.Request.Context(), client, restCfg, req)
 	if err == nil {
 		status = "completed"
+		recordExit(recorder, 0)
 		_ = writer.Event("exit", map[string]int{"code": 0})
 		return
 	}
 	if exitErr, ok := err.(clientgoexec.CodeExitError); ok {
 		status = "failed"
-		_ = writer.Event("exit", map[string]int{"code": exitErr.ExitStatus()})
+		code := exitErr.ExitStatus()
+		recordExit(recorder, code)
+		_ = writer.Event("exit", map[string]int{"code": code})
 		return
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -129,7 +138,59 @@ func (h *Handler) Exec(c *gin.Context) {
 	}
 	status = "failed"
 	_ = writer.Event("error", "pod exec stream failed")
+	recordExit(recorder, 1)
 	_ = writer.Event("exit", map[string]int{"code": 1})
+}
+
+func (h *Handler) startRecorder(ctx context.Context, target streamTarget, writer *sseWriter) *records.SessionRecorder {
+	if h == nil || h.ctx.DB == nil {
+		return nil
+	}
+	recorder, err := records.NewStore(h.ctx.DB).Start(ctx, records.Session{
+		WorkspaceID: target.WorkspaceID.String(),
+		ClusterID:   target.ClusterID.String(),
+		Kind:        "exec",
+		StartedAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		_ = writer.Event("warning", "terminal recording unavailable")
+		if h.ctx.Logger != nil {
+			h.ctx.Logger.Warn("kubernetes exec recording start failed", zap.Error(err))
+		}
+		return nil
+	}
+	return recorder
+}
+
+func (h *Handler) closeRecorder(recorder *records.SessionRecorder) {
+	if recorder == nil {
+		return
+	}
+	if err := recorder.Close(context.Background(), time.Now().UTC()); err != nil && h != nil && h.ctx.Logger != nil {
+		h.ctx.Logger.Warn("kubernetes exec recording close failed", zap.Error(err))
+	}
+}
+
+func execOutputWriter(writer *sseWriter, recorder *records.SessionRecorder, event string, stream string) io.Writer {
+	out := sseEventWriter{writer: writer, event: event}
+	if recorder == nil {
+		return out
+	}
+	switch stream {
+	case "stdout":
+		return io.MultiWriter(out, recorder.Stdout())
+	case "stderr":
+		return io.MultiWriter(out, recorder.Stderr())
+	default:
+		return out
+	}
+}
+
+func recordExit(recorder *records.SessionRecorder, code int) {
+	if recorder == nil {
+		return
+	}
+	recorder.Event("exit", strconv.Itoa(code))
 }
 
 type sseEventWriter struct {

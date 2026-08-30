@@ -94,3 +94,30 @@ func TestRegisterRoutesMountsPodStreamRoutes(t *testing.T) {
 		require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	}
 }
+
+func TestRegisterRoutesMountsRecordRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	memberID := kernel.NewMemberID()
+	wsID := kernel.NewWorkspaceID()
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		authn.SetMemberIDForTest(c, memberID)
+		c.Next()
+	})
+	RegisterRoutes(engine, sparkplugin.PluginContext{
+		Members: allowMembers{grants: map[kernel.WorkspaceID]map[kernel.MemberID]bool{wsID: {memberID: true}}},
+	})
+
+	for _, path := range []string{
+		"/api/v1/plugins/kubernetes/records",
+		"/api/v1/plugins/kubernetes/records/" + kernel.NewPluginInstallID().String(),
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("X-Workspace-Id", wsID.String())
+		rec := httptest.NewRecorder()
+		engine.ServeHTTP(rec, req)
+
+		require.NotEqual(t, http.StatusNotFound, rec.Code)
+		require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	}
+}

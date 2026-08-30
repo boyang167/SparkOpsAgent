@@ -20,6 +20,10 @@ type AuditLogger interface {
 	Record(ctx context.Context, event AuditEvent) error
 }
 
+type NopAudit struct{}
+
+func (NopAudit) Record(context.Context, AuditEvent) error { return nil }
+
 type WriteAuthorizer interface {
 	CanWrite(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID) (bool, error)
 }

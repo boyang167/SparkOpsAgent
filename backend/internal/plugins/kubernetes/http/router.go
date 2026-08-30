@@ -8,6 +8,7 @@ import (
 	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
 	k8sfiles "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/files"
 	k8sproxy "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/proxy"
+	k8srecords "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/records"
 	k8sstream "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/stream"
 )
 
@@ -24,6 +25,7 @@ func RegisterRoutes(engine *gin.Engine, contexts ...sparkplugin.PluginContext) {
 	handler := newClusterHandler(pctx)
 	metricsHandler := newMetricsHandler(pctx)
 	filesHandler := k8sfiles.NewHandler(pctx)
+	recordsHandler := k8srecords.NewHandler(pctx)
 	streamHandler := k8sstream.NewHandler(pctx)
 	group := engine.Group(routePrefix)
 	group.Use(httpx.RequireWorkspace(), requireWorkspaceMember(pctx.Members))
@@ -40,4 +42,7 @@ func RegisterRoutes(engine *gin.Engine, contexts ...sparkplugin.PluginContext) {
 	group.DELETE("/clusters/:clusterId/namespaces/:namespace/pods/:pod/files", filesHandler.Delete)
 	group.GET("/clusters/:clusterId/namespaces/:namespace/pods/:pod/logs", streamHandler.Logs)
 	group.GET("/clusters/:clusterId/namespaces/:namespace/pods/:pod/exec", streamHandler.Exec)
+	group.GET("/records", recordsHandler.List)
+	group.GET("/records/:recordId", recordsHandler.Get)
+	group.DELETE("/records/:recordId", recordsHandler.Delete)
 }

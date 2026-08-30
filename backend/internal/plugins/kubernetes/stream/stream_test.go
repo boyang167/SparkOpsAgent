@@ -14,11 +14,15 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
+	k8sschema "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/schema"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
@@ -174,6 +178,100 @@ func TestExecStreamsOutputErrorExitAndAuditsEnd(t *testing.T) {
 	require.NotContains(t, rec.Body.String(), "echo hello")
 }
 
+func TestExecPersistsRecordingWithoutCommandOrCredentials(t *testing.T) {
+	db := openStreamRecordsDB(t)
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	exec := &fakeExecStreamer{
+		run: func(ctx context.Context, req ExecRequest) error {
+			_, _ = req.Stdout.Write([]byte("stdout token is allowed as terminal content\n"))
+			_, _ = req.Stderr.Write([]byte("stderr line\n"))
+			return nil
+		},
+	}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		DB:       db,
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID, host: "https://token-secret.example"},
+		Writer:   allowStreamWriter{allow: true},
+	}, nil, exec)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/exec?container=app&command=sh&command=-c&command=cat%20%2Fvar%2Frun%2Fsecrets%2Ftoken", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var saved k8sschema.Record
+	require.NoError(t, db.First(&saved, "workspace_id = ? AND cluster_id = ?", wsID.String(), clusterID.String()).Error)
+	require.Equal(t, "exec", saved.Kind)
+	require.NotNil(t, saved.EndedAt)
+	recording := string(saved.Blob)
+	require.Contains(t, recording, `"stream":"stdout"`)
+	require.Contains(t, recording, `"data":"stdout token is allowed as terminal content\n"`)
+	require.Contains(t, recording, `"stream":"stderr"`)
+	require.NotContains(t, recording, "cat /var/run/secrets/token")
+	require.NotContains(t, recording, "token-secret.example")
+}
+
+func TestExecPersistsRecordingWhenRequestIsCanceled(t *testing.T) {
+	db := openStreamRecordsDB(t)
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	exec := &fakeExecStreamer{
+		run: func(ctx context.Context, req ExecRequest) error {
+			_, _ = req.Stdout.Write([]byte("before cancel\n"))
+			return context.Canceled
+		},
+	}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		DB:       db,
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+		Writer:   allowStreamWriter{allow: true},
+	}, nil, exec)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/exec?command=date", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var saved k8sschema.Record
+	require.NoError(t, db.First(&saved, "workspace_id = ? AND cluster_id = ?", wsID.String(), clusterID.String()).Error)
+	require.NotNil(t, saved.EndedAt)
+	require.Contains(t, string(saved.Blob), "before cancel")
+}
+
+func TestExecContinuesWithFixedWarningWhenRecordingStartFails(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	exec := &fakeExecStreamer{
+		run: func(ctx context.Context, req ExecRequest) error {
+			_, _ = req.Stdout.Write([]byte("still streaming\n"))
+			return nil
+		},
+	}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		DB:       db,
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+		Writer:   allowStreamWriter{allow: true},
+	}, nil, exec)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/exec?command=date", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "event: warning\ndata: \"terminal recording unavailable\"")
+	require.Contains(t, rec.Body.String(), "event: output\ndata: \"still streaming\\n\"")
+	require.NotContains(t, rec.Body.String(), "no such table")
+}
+
 func TestExecCancelsStreamerWhenClientContextIsDone(t *testing.T) {
 	wsID := kernel.NewWorkspaceID()
 	memberID := kernel.NewMemberID()
@@ -270,12 +368,17 @@ func (f *fakeExecStreamer) StreamExec(ctx context.Context, _ kubernetes.Interfac
 
 type fakeStreamClusterFactory struct {
 	clusterID kernel.ClusterInfoID
+	host      string
 }
 
 func (f fakeStreamClusterFactory) ForWorkspace(context.Context, kernel.WorkspaceID, kernel.ClusterInfoID) (
 	kubernetes.Interface, dynamic.Interface, *rest.Config, *sparkplugin.ClusterMeta, error,
 ) {
-	return fake.NewSimpleClientset(), nil, &rest.Config{Host: "https://kubernetes.example"}, nil, nil
+	host := f.host
+	if host == "" {
+		host = "https://kubernetes.example"
+	}
+	return fake.NewSimpleClientset(), nil, &rest.Config{Host: host}, nil, nil
 }
 
 func (f fakeStreamClusterFactory) ListMeta(context.Context, kernel.WorkspaceID) ([]sparkplugin.ClusterMeta, error) {
@@ -322,6 +425,19 @@ func (r ExecRequest) withoutWriters() ExecRequest {
 	r.Stdout = nil
 	r.Stderr = nil
 	return r
+}
+
+func openStreamRecordsDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS plugin_kubernetes").Error)
+	require.NoError(t, k8sschema.AutoMigrate(db))
+	return db
 }
 
 func logEventChunks(t *testing.T, body string) []string {

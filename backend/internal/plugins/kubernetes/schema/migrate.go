@@ -16,7 +16,7 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(&ClusterSettings{}, &Diagnosis{}, &sqliteRecord{}); err != nil {
 		return err
 	}
-	return db.Exec("CREATE INDEX IF NOT EXISTS plugin_kubernetes.idx_records_workspace_id ON records(workspace_id)").Error
+	return db.Exec("CREATE INDEX IF NOT EXISTS plugin_kubernetes.idx_records_workspace_started_at ON records(workspace_id, started_at DESC)").Error
 }
 
 // sqliteRecord mirrors Record without gorm index tags; SQLite mishandles dotted
