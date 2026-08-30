@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -76,6 +77,28 @@ func TestLogsStreamsLargeChunkWithoutAccumulatingUntilNewline(t *testing.T) {
 		require.LessOrEqual(t, len(chunk), logChunkBytes)
 	}
 	require.Equal(t, payload, strings.Join(chunks, ""))
+}
+
+func TestLogsPreservesUTF8RuneAcrossChunkBoundary(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	payload := strings.Repeat("a", logChunkBytes-1) + "中🙂tail"
+	logs := &fakeLogStreamer{body: payload}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+	}, logs, nil)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/logs", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	joined := strings.Join(logEventChunks(t, rec.Body.String()), "")
+	require.Equal(t, payload, joined)
+	require.True(t, bytes.Equal([]byte(payload), []byte(joined)))
+	require.NotContains(t, joined, "\uFFFD")
 }
 
 func TestExecRequiresWriterBeforeClusterConnection(t *testing.T) {

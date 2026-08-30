@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -103,15 +104,25 @@ func (h *Handler) Logs(c *gin.Context) {
 		return
 	}
 	buf := make([]byte, logChunkBytes)
+	pending := make([]byte, 0, 3)
 	for {
 		n, readErr := body.Read(buf)
 		if n > 0 {
-			if err := writer.Event("log", string(buf[:n])); err != nil {
-				return
+			chunk := append(append(make([]byte, 0, len(pending)+n), pending...), buf[:n]...)
+			tailLen := incompleteUTF8TailLen(chunk)
+			emit := chunk[:len(chunk)-tailLen]
+			pending = append(pending[:0], chunk[len(chunk)-tailLen:]...)
+			if len(emit) > 0 {
+				if err := writer.Event("log", string(bytes.ToValidUTF8(emit, []byte("\uFFFD")))); err != nil {
+					return
+				}
 			}
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
+				if len(pending) > 0 {
+					_ = writer.Event("log", string(bytes.ToValidUTF8(pending, []byte("\uFFFD"))))
+				}
 				return
 			}
 			if c.Request.Context().Err() != nil {
@@ -120,6 +131,54 @@ func (h *Handler) Logs(c *gin.Context) {
 			_ = writer.Event("error", "pod log stream failed")
 			return
 		}
+	}
+}
+
+func incompleteUTF8TailLen(b []byte) int {
+	if len(b) == 0 {
+		return 0
+	}
+	last := b[len(b)-1]
+	if last < 0x80 {
+		return 0
+	}
+	if utf8ExpectedLen(last) > 1 {
+		return 1
+	}
+	continuations := 0
+	for i := len(b) - 1; i >= 0 && continuations < 3; i-- {
+		if b[i]&0xC0 != 0x80 {
+			break
+		}
+		continuations++
+	}
+	leadIndex := len(b) - continuations - 1
+	if leadIndex < 0 {
+		return 0
+	}
+	expected := utf8ExpectedLen(b[leadIndex])
+	if expected == 0 {
+		return 0
+	}
+	have := continuations + 1
+	if have < expected {
+		return have
+	}
+	return 0
+}
+
+func utf8ExpectedLen(lead byte) int {
+	switch {
+	case lead < 0x80:
+		return 1
+	case lead >= 0xC2 && lead <= 0xDF:
+		return 2
+	case lead >= 0xE0 && lead <= 0xEF:
+		return 3
+	case lead >= 0xF0 && lead <= 0xF4:
+		return 4
+	default:
+		return 0
 	}
 }
 
