@@ -20,6 +20,7 @@ func RegisterRoutes(engine *gin.Engine, contexts ...sparkplugin.PluginContext) {
 		pctx = contexts[0]
 	}
 	handler := newClusterHandler(pctx)
+	metricsHandler := newMetricsHandler(pctx)
 	group := engine.Group(routePrefix)
 	group.Use(httpx.RequireWorkspace(), requireWorkspaceMember(pctx.Members))
 	group.GET("/ready", func(c *gin.Context) {
@@ -27,5 +28,6 @@ func RegisterRoutes(engine *gin.Engine, contexts ...sparkplugin.PluginContext) {
 	})
 	group.GET("/clusters", handler.listClusters)
 	group.PUT("/clusters/:clusterId/settings", handler.putClusterSettings)
+	group.POST("/clusters/:clusterId/metrics", metricsHandler.postMetrics)
 	group.Any("/clusters/:clusterId/proxy/*path", k8sproxy.NewHandler(pctx).ServeGIN)
 }
