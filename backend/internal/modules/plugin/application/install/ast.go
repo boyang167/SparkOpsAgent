@@ -4,11 +4,17 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strconv"
 )
+
+const ginImportPath = "github.com/gin-gonic/gin"
 
 func FileDeclaresRegisterEngine(src []byte) bool {
 	file, err := parser.ParseFile(token.NewFileSet(), "plugin.go", src, 0)
 	if err != nil {
+		return false
+	}
+	if !importsDefaultGin(file) {
 		return false
 	}
 
@@ -17,7 +23,7 @@ func FileDeclaresRegisterEngine(src []byte) bool {
 		if !ok || fn.Recv == nil || fn.Name == nil || fn.Name.Name != "Register" {
 			continue
 		}
-		if fn.Type == nil || fn.Type.Params == nil || len(fn.Type.Params.List) != 1 {
+		if fn.Type == nil || countParams(fn.Type.Params) != 1 {
 			continue
 		}
 		if isGinEnginePointer(fn.Type.Params.List[0].Type) {
@@ -25,6 +31,36 @@ func FileDeclaresRegisterEngine(src []byte) bool {
 		}
 	}
 	return false
+}
+
+func importsDefaultGin(file *ast.File) bool {
+	for _, spec := range file.Imports {
+		importPath, err := strconv.Unquote(spec.Path.Value)
+		if err != nil || importPath != ginImportPath {
+			continue
+		}
+		if spec.Name == nil {
+			return true
+		}
+		return spec.Name.Name == "gin"
+	}
+	return false
+}
+
+func countParams(fields *ast.FieldList) int {
+	if fields == nil {
+		return 0
+	}
+
+	total := 0
+	for _, field := range fields.List {
+		if len(field.Names) == 0 {
+			total++
+			continue
+		}
+		total += len(field.Names)
+	}
+	return total
 }
 
 func isGinEnginePointer(expr ast.Expr) bool {

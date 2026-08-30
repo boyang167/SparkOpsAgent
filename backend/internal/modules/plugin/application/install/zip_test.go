@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,12 +39,27 @@ func (p *plugin) Register(engine *gin.Engine) {}
 func makeZip(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 
+	entries := make([]zipEntry, 0, len(files))
+	for name, content := range files {
+		entries = append(entries, zipEntry{name: name, content: content})
+	}
+	return makeZipEntries(t, entries)
+}
+
+type zipEntry struct {
+	name    string
+	content string
+}
+
+func makeZipEntries(t *testing.T, entries []zipEntry) []byte {
+	t.Helper()
+
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	for name, content := range files {
-		w, err := zw.Create(name)
+	for _, entry := range entries {
+		w, err := zw.Create(entry.name)
 		require.NoError(t, err)
-		_, err = w.Write([]byte(content))
+		_, err = w.Write([]byte(entry.content))
 		require.NoError(t, err)
 	}
 	require.NoError(t, zw.Close())
@@ -68,6 +84,29 @@ func TestInspectZipAcceptsValidPluginAndMapsFiles(t *testing.T) {
 	require.NotContains(t, inspected.Files, "plugin.yaml")
 }
 
+func TestInspectZipRejectsDuplicateRawEntryNames(t *testing.T) {
+	_, err := InspectZip(makeZipEntries(t, []zipEntry{
+		{name: "example/plugin.yaml", content: validPluginYAML},
+		{name: "example/backend/plugin.go", content: validPluginGo},
+		{name: "example/backend/plugin.go", content: `package example
+
+type plugin struct{}
+`},
+		{name: "example/frontend/app/(platform)/plugins/example/page.tsx", content: "export default function Page(){return null}"},
+	}))
+
+	requireZipInvalid(t, err)
+}
+
+func TestInspectZipRejectsBackendFrontendMappedKeyCollision(t *testing.T) {
+	files := validZipFiles()
+	files["example/backend/app/(platform)/plugins/example/page.tsx"] = "backend page"
+
+	_, err := InspectZip(makeZip(t, files))
+
+	requireZipInvalid(t, err)
+}
+
 func TestInspectZipRejectsUnsafeEntryNames(t *testing.T) {
 	tests := []string{
 		"",
@@ -89,6 +128,15 @@ func TestInspectZipRejectsUnsafeEntryNames(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func requireZipInvalid(t *testing.T, err error) {
+	t.Helper()
+
+	require.Error(t, err)
+	de, ok := kernel.IsDomainError(err)
+	require.True(t, ok)
+	require.Equal(t, "PLUGIN_ZIP_INVALID", de.Code())
 }
 
 func TestInspectZipRejectsScriptAndBinaryExtensions(t *testing.T) {
