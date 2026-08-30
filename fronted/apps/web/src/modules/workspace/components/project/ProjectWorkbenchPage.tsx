@@ -180,7 +180,12 @@ export function ProjectWorkbenchPage({
         project={currentProject}
         onContinueConfig={() => setConfigureOpen(true)}
         onDeploy={() => {
-          if (!deployAction.disabled) setDeployOpen(true);
+          if (deployAction.disabled) {
+            setError(deployAction.reason ?? "当前不可部署，请先补齐部署条件");
+            return;
+          }
+          setError(null);
+          setDeployOpen(true);
         }}
         onViewDetails={() => setDetailOpen(true)}
         onSubmitReview={() => void submitReview()}

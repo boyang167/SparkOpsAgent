@@ -57,6 +57,34 @@ export function createPlatformUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async listAuthorizedWorkspaceClusters(workspaceId: string) {
+      return upstreamFetch<{ items: AuthorizedClusterVM[] }>(
+        `/api/v1/workspaces/${workspaceId}/clusters`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async registerWorkspaceCluster(
+      workspaceId: string,
+      input: { cluster_name: string; server?: string },
+    ) {
+      return upstreamFetch<{ id: string; cluster_name: string; server?: string }>(
+        `/api/v1/workspaces/${workspaceId}/clusters`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
+    async revokeAuthorizedWorkspaceCluster(workspaceId: string, clusterId: string) {
+      return upstreamFetch<{ revoked: true }>(
+        `/api/v1/workspaces/${workspaceId}/clusters/${clusterId}`,
+        { method: "DELETE", options: { ...options, workspaceId } },
+      );
+    },
+
     async grantWorkspaceCluster(workspaceId: string, clusterId: string) {
       return upstreamFetch<{ granted: true }>(
         `/api/v1/admin/workspaces/${workspaceId}/clusters`,

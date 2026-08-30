@@ -273,6 +273,7 @@ var defaultMenuGroups = []defaultMenuGroup{
 			{"/publish/plans", "版本计划"},
 			{"/publish/releases", "发布管理"},
 			{"/config/secrets", "密钥配置"},
+			{"/cluster/list", "集群管理"},
 		},
 	},
 	{
@@ -317,6 +318,7 @@ var enterpriseMenuTitleByPath = map[string]string{
 	"/publish/plans":            "版本计划",
 	"/publish/releases":         "发布管理",
 	"/config/secrets":           "密钥配置",
+	"/cluster/list":             "集群管理",
 	"/runtime/pods":             "运行实例",
 	"/cronjobs":                 "定时任务",
 	"/monitor/overview":         "监控概览",

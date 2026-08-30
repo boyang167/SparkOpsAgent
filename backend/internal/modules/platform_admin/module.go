@@ -45,6 +45,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewUpdateSysConfigHandler(repo),
 		query.NewListClustersHandler(repo),
 		command.NewCreateClusterHandler(repo),
+		command.NewRegisterWorkspaceClusterHandler(repo),
 		query.NewListWorkspaceClustersHandler(repo),
 		command.NewGrantWorkspaceClusterHandler(repo),
 		command.NewRevokeWorkspaceClusterHandler(repo),
@@ -77,6 +78,13 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.GET("/api/v1/admin/workspaces/:wsId/clusters", auth, superAdmin, handler.ListWorkspaceClusters)
 	c.Engine.POST("/api/v1/admin/workspaces/:wsId/clusters", auth, superAdmin, handler.GrantWorkspaceCluster)
 	c.Engine.DELETE("/api/v1/admin/workspaces/:wsId/clusters/:clusterId", auth, superAdmin, handler.RevokeWorkspaceCluster)
+	secretWrite := authz.RequirePermission(c.PermissionChecker, authz.PermSecretWrite)
+	c.Engine.GET("/api/v1/workspaces/:wsId/clusters",
+		auth, ws, wsMember, projectRead, handler.ListWorkspaceClusters)
+	c.Engine.POST("/api/v1/workspaces/:wsId/clusters",
+		auth, ws, wsMember, secretWrite, handler.RegisterWorkspaceCluster)
+	c.Engine.DELETE("/api/v1/workspaces/:wsId/clusters/:clusterId",
+		auth, ws, wsMember, secretWrite, handler.RevokeWorkspaceCluster)
 	c.Engine.GET("/api/v1/admin/tools", auth, superAdmin, handler.ListTools)
 	c.Engine.GET("/api/v1/admin/proclaims", auth, superAdmin, handler.ListProclaims)
 	c.Engine.POST("/api/v1/admin/proclaims", auth, superAdmin, handler.CreateProclaim)

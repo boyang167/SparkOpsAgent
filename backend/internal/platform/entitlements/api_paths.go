@@ -71,6 +71,9 @@ func shouldSkipAPIEntitlement(path string) bool {
 	if path == "/api/v1/workspaces" || strings.HasSuffix(path, "/workspaces/select") {
 		return true
 	}
+	if strings.Contains(path, "/workspaces/") && strings.Contains(path, "/clusters") {
+		return true
+	}
 	if isWorkspacePluginManagementAPI(path) {
 		return true
 	}

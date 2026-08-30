@@ -252,7 +252,7 @@ export function ProjectOverviewCard({
                 type="button"
                 className="project-action-btn is-deploy"
                 onClick={onDeploy}
-                disabled={deploymentAction?.disabled}
+                aria-disabled={deploymentAction?.disabled || undefined}
                 title={deploymentAction?.reason ?? undefined}
                 aria-describedby={deploymentAction?.reason ? `deploy-reason-${project.id}` : undefined}
               >

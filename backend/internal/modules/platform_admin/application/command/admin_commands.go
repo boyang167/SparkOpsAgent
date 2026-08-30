@@ -2,7 +2,9 @@ package command
 
 import (
 	"context"
+	"strings"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/entitlements"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -48,8 +50,12 @@ func NewCreateClusterHandler(repo repository.AdminRepository) *CreateClusterHand
 }
 
 func (h *CreateClusterHandler) Handle(ctx context.Context, memberID kernel.MemberID, clusterName, server, userName, caData, certData, keyData string, isBuildEnv bool, priorityID int) (*repository.ClusterInfo, error) {
+	clusterName = strings.TrimSpace(clusterName)
+	if clusterName == "" {
+		return nil, domain.ErrClusterNameRequired
+	}
 	cluster := &repository.ClusterInfo{
-		ID: kernel.NewClusterInfoID(), ClusterName: clusterName, Server: server, UserName: userName,
+		ID: kernel.NewClusterInfoID(), ClusterName: clusterName, Server: strings.TrimSpace(server), UserName: userName,
 		CertificateAuthorityData: caData, ClientCertificateData: certData, ClientKeyData: keyData,
 		IsBuildEnv: isBuildEnv, PriorityID: priorityID, CreatedBy: memberID,
 	}
@@ -70,6 +76,34 @@ func NewGrantWorkspaceClusterHandler(repo repository.AdminRepository) *GrantWork
 
 func (h *GrantWorkspaceClusterHandler) Handle(ctx context.Context, memberID kernel.MemberID, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) error {
 	return h.repo.GrantWorkspaceCluster(ctx, wsID, clusterID, memberID)
+}
+
+type RegisterWorkspaceClusterHandler struct {
+	create *CreateClusterHandler
+	grant  *GrantWorkspaceClusterHandler
+}
+
+func NewRegisterWorkspaceClusterHandler(repo repository.AdminRepository) *RegisterWorkspaceClusterHandler {
+	return &RegisterWorkspaceClusterHandler{
+		create: NewCreateClusterHandler(repo),
+		grant:  NewGrantWorkspaceClusterHandler(repo),
+	}
+}
+
+func (h *RegisterWorkspaceClusterHandler) Handle(
+	ctx context.Context,
+	memberID kernel.MemberID,
+	wsID kernel.WorkspaceID,
+	clusterName, server string,
+) (*repository.ClusterInfo, error) {
+	cluster, err := h.create.Handle(ctx, memberID, clusterName, server, "", "", "", "", false, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.grant.Handle(ctx, memberID, wsID, cluster.ID); err != nil {
+		return nil, err
+	}
+	return cluster, nil
 }
 
 type RevokeWorkspaceClusterHandler struct {

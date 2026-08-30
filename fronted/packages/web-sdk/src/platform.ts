@@ -146,6 +146,35 @@ export async function listWorkspaceClusters(workspaceId: string) {
   return data.items;
 }
 
+export async function listAuthorizedWorkspaceClusters(workspaceId: string) {
+  const data = await bffFetch<{ items: AuthorizedClusterVM[] }>(
+    `/workspaces/${workspaceId}/clusters`,
+    { workspaceId },
+  );
+  return data.items;
+}
+
+export function registerWorkspaceCluster(
+  workspaceId: string,
+  input: { cluster_name: string; server?: string },
+) {
+  return bffFetch<{ id: string; cluster_name: string; server?: string }>(
+    `/workspaces/${workspaceId}/clusters`,
+    {
+      method: "POST",
+      workspaceId,
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function revokeAuthorizedWorkspaceCluster(workspaceId: string, clusterId: string) {
+  return bffFetch<{ revoked: true }>(`/workspaces/${workspaceId}/clusters/${clusterId}`, {
+    method: "DELETE",
+    workspaceId,
+  });
+}
+
 export function grantWorkspaceCluster(workspaceId: string, clusterId: string) {
   return bffFetch<{ granted: true }>(`/admin/workspaces/${workspaceId}/clusters`, {
     method: "POST",

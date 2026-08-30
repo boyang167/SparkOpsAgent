@@ -754,7 +754,6 @@ func (s *MenuStore) SetButtonIDsForRole(ctx context.Context, roleID string, butt
 func IsSuperAdminOnlyPath(path string) bool {
 	return strings.HasPrefix(path, "/settings/platform") ||
 		strings.HasPrefix(path, "/platform/") ||
-		strings.HasPrefix(path, "/cluster/") ||
 		path == "/monitor/platform-audit"
 }
 

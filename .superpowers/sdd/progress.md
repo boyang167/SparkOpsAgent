@@ -1,3 +1,20 @@
+# Plugin Framework SDD Progress
+
+Baseline: `go test ./...` PASS; `pnpm --filter web typecheck` PASS.
+Plan: `docs/superpowers/plans/2026-08-30-plugin-framework.md`
+Execution: current `master` working tree by explicit user choice; task-scoped commits authorized.
+Task 1: complete (commits 39cef7d..e1ddd73, review clean; Minor: empty install_test.go and test-only reset API exposure).
+Task 2: complete (commits e1ddd73..f264646, review clean; Minor: task report contains unrelated legacy content after the current report).
+Task 3: complete (commits f264646..004814b, review clean after strict API method fix).
+Task 4: complete (commits 004814b..80c8fd4, review clean; Minor: timestamp defaults differ from SQL and FK existence check may duplicate a migration-created FK).
+Task 5: complete (commits 80c8fd4..d0583e7, review clean after duplicate-entry and AST fixes; Minor: no decompressed-size limit).
+Task 6: complete (commits d0583e7..6b3fb2c, review clean after Git worktree/branch/path/URL safety fixes; Minor: command runner inherits process environment).
+Task 7: complete (commits 6b3fb2c..5376610, review iterated through ZIP limits, package digest, OPEN PR recovery, remote-branch reuse, and digest CAS).
+Task 8: complete (commits 5376610..6a2aefb, review clean after plugin path matching was moved before generic entitlement skips).
+Task 9: complete (commits 6a2aefb..fa39755, review clean; Minor: no browser E2E; /platform/plugins already covered by existing /platform/ prefix).
+Task 10: complete (commits fa39755..3af8d5c, review approved; Minor: tests don't lock full plugin.go text; YAML display_name unquoted; dual {{id}}/{{.ID}} placeholders).
+Whole-branch review: Important gaps fixed in d52cb41 (plugin JWT, sidebar parent menu, /admin/plugins nav, example deployed seed, frontend path + BC import checks, PR template). Remaining Minors: git env inheritance; AutoMigrate timestamps vs SQL; no browser E2E; scaffold test lock; YAML quoting; dual placeholders. Uninstall of non-deployed leftovers not addressed.
+
 # Project Deploy Pipeline SDD Progress
 
 Baseline: `6f439fb4eca37148d35faf15ffed36fac435733b`

@@ -56,7 +56,7 @@ deploy:
 
 真实环境可分别设置 `MESSAGING_DRIVER=amqp`、`DELIVERY_DRIVER=jenkins`、`RUNTIME_DRIVER=k8s`。开始部署前：
 
-1. Super Admin 调用 `POST /api/v1/admin/workspaces/:wsId/clusters`，body 为 `{"cluster_id":"<cluster-id>"}`，授权目标 Workspace 使用该集群。
+1. 在业务控制台「持续交付 → 集群管理」注册集群（`POST /api/v1/workspaces/:wsId/clusters`），会自动授权给当前工作空间。Super Admin 仍可在平台运营中跨工作空间授权已有集群。
 2. Kubernetes 类型工作空间密钥的 `credentials.extra_config` 必须保存完整 kubeconfig；本期不支持把 token/CA 分字段拼成 kubeconfig。
 3. 通过 `PATCH /api/v1/projects/:projectId` 绑定 `default_cluster_id`、Git、Harbor、Jenkins、Kubernetes 密钥；启用静态扫描时还需绑定 SonarQube 密钥。
 4. 项目审核状态必须为 `approved`。部署弹窗和 options API 只返回当前 Workspace 已授权的集群。

@@ -1,17 +1,24 @@
 import Link from "next/link";
-import { FEATURE_MODULE_LABELS } from "@sparkops/contracts/platform";
+import {
+  FEATURE_MODULE_LABELS,
+  type FeatureModuleKey,
+} from "@sparkops/contracts/platform";
 import { PageHeader } from "@/components/ui/PageHeader";
 import type { EntitlementKey } from "@/components/layout/entitlements";
 import { loadConsoleAccess } from "@/server/loaders/console-access";
 
 const MODULE_HINTS: Partial<Record<EntitlementKey, string>> = {
-  k8s: "请先在「平台运营 → 集群管理」接入 Kubernetes 集群，或在「平台配置」中启用 K8s 模块。",
+  k8s: "请先在「持续交付 → 集群管理」接入 Kubernetes 集群，或在「平台配置」中启用 K8s 模块。",
   delivery: "当前工作区未开通持续交付能力，请联系管理员在平台配置中启用。",
   observability: "可观测性模块未启用，请联系平台管理员。",
   knowledge: "知识库模块未启用，请联系平台管理员。",
   agent: "智能体 / 项目模块未启用，请联系平台管理员。",
   mcp: "MCP 集成未启用，请联系平台管理员。",
 };
+
+function isFeatureModuleKey(value: string): value is FeatureModuleKey {
+  return value in FEATURE_MODULE_LABELS;
+}
 
 export default async function ModuleUnavailablePage({
   searchParams,
@@ -22,7 +29,7 @@ export default async function ModuleUnavailablePage({
   const moduleKey = params.module as EntitlementKey | undefined;
   const from = params.from ?? "";
   const label =
-    moduleKey && moduleKey in FEATURE_MODULE_LABELS
+    moduleKey && isFeatureModuleKey(moduleKey)
       ? FEATURE_MODULE_LABELS[moduleKey]
       : "该功能模块";
   const hint = moduleKey ? MODULE_HINTS[moduleKey] : undefined;
@@ -53,8 +60,8 @@ export default async function ModuleUnavailablePage({
               打开平台配置
             </Link>
           ) : null}
-          {moduleKey === "k8s" && isSuperAdmin ? (
-            <Link href="/platform/clusters" className="btn-secondary">
+          {moduleKey === "k8s" ? (
+            <Link href="/cluster/list" className="btn-secondary">
               管理集群
             </Link>
           ) : null}

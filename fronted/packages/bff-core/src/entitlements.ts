@@ -34,6 +34,9 @@ function shouldSkipApiEntitlement(path: string): boolean {
   if (path === "/api/v1/workspaces" || path.endsWith("/workspaces/select")) {
     return true;
   }
+  if (path.includes("/workspaces/") && path.includes("/clusters")) {
+    return true;
+  }
   if (isWorkspacePluginManagementApi(path)) {
     return true;
   }

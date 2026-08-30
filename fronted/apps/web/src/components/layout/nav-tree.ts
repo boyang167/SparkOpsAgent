@@ -46,6 +46,7 @@ export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
       { href: "/publish/plans", label: "版本计划", entitlement: "delivery" },
       { href: "/publish/releases", label: "发布管理", entitlement: "delivery" },
       { href: "/config/secrets", label: "密钥配置", entitlement: "delivery" },
+      { href: "/cluster/list", label: "集群管理" },
     ],
   },
   {

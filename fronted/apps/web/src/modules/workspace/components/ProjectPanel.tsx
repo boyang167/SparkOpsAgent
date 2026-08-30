@@ -12,6 +12,7 @@ import { ProjectCard } from "./project/ProjectCard";
 import { ProjectCreateModal } from "./project/ProjectCreateModal";
 import { ProjectConfigurePanel } from "./project/ProjectConfigurePanel";
 import { ProjectDetailModal } from "./project/ProjectDetailModal";
+import { ProjectDeployModal } from "./project/ProjectDeployModal";
 import { ProjectReviewModal } from "./project/ProjectReviewModal";
 import {
   formatDateTime,
@@ -61,6 +62,7 @@ export function ProjectPanel({
   const [createOpen, setCreateOpen] = useState(initialCreateOpen);
   const [detailProject, setDetailProject] = useState<ProjectVM | null>(null);
   const [configureProject, setConfigureProject] = useState<ProjectVM | null>(null);
+  const [deployProject, setDeployProject] = useState<ProjectVM | null>(null);
   const [reviewProject, setReviewProject] = useState<ProjectVM | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("card");
@@ -294,6 +296,7 @@ export function ProjectPanel({
                       onContinueConfig={(p) => setConfigureProject(p)}
                       onSubmitReview={(p) => void onSubmitReview(p)}
                       onReview={(p) => setReviewProject(p)}
+                      onDeploy={(p) => setDeployProject(p)}
                     />
                   ))}
                 </div>
@@ -348,7 +351,11 @@ export function ProjectPanel({
                               {(() => {
                                 const action = projectPrimaryAction(project);
                                 if (action === "deploy") {
-                                  return <Link href={`/projects/${project.id}`}>部署</Link>;
+                                  return (
+                                    <button type="button" onClick={() => setDeployProject(project)}>
+                                      部署
+                                    </button>
+                                  );
                                 }
                                 return (
                                   <button type="button" onClick={() => setConfigureProject(project)}>
@@ -436,6 +443,15 @@ export function ProjectPanel({
         project={detailProject}
         onClose={() => setDetailProject(null)}
       />
+
+      {deployProject ? (
+        <ProjectDeployModal
+          open={Boolean(deployProject)}
+          workspaceId={workspaceId}
+          project={deployProject}
+          onClose={() => setDeployProject(null)}
+        />
+      ) : null}
 
       <ProjectReviewModal
         open={Boolean(reviewProject)}

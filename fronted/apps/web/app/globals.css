@@ -7546,6 +7546,15 @@ textarea {
   color: #fff;
 }
 
+.project-action-btn.is-deploy[aria-disabled="true"],
+.project-action-btn.is-deploy:disabled {
+  background: color-mix(in srgb, #67c23a 45%, #e5e7eb);
+  border-color: color-mix(in srgb, #67c23a 35%, #d1d5db);
+  color: #f8fafc;
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
 .project-action-btn.is-edit {
   background: #409eff;
   color: #fff;

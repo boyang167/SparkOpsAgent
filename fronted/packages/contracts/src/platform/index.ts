@@ -41,6 +41,13 @@ export const GrantWorkspaceClusterCommandSchema = z.object({
 
 export type GrantWorkspaceClusterCommand = z.infer<typeof GrantWorkspaceClusterCommandSchema>;
 
+export const RegisterWorkspaceClusterCommandSchema = z.object({
+  cluster_name: z.string().trim().min(1).max(128),
+  server: z.string().trim().max(512).optional(),
+});
+
+export type RegisterWorkspaceClusterCommand = z.infer<typeof RegisterWorkspaceClusterCommandSchema>;
+
 export const ProclaimVMSchema = z.object({
   id: z.string(),
   title: z.string(),

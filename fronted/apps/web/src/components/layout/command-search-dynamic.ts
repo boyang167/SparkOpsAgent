@@ -14,7 +14,7 @@ export async function buildDynamicCommandItems(options: {
   isSuperAdmin: boolean;
   entitlements: import("@sparkops/contracts/platform").WorkspaceEntitlementsVM;
 }): Promise<CommandSearchItem[]> {
-  const { workspaceId, isSuperAdmin, entitlements } = options;
+  const { workspaceId, entitlements } = options;
   const allow = (href: string) => isPathEntitled(href, entitlements);
 
   const projects = await workspace.listProjects(workspaceId).catch(() => []);
@@ -25,9 +25,9 @@ export async function buildDynamicCommandItems(options: {
     entitlements.delivery
       ? product.listProducts(workspaceId).catch(() => [] as ProductVM[])
       : Promise.resolve([] as ProductVM[]),
-    isSuperAdmin && entitlements.k8s
-      ? platform.listClusters().catch(() => [] as Array<Record<string, unknown>>)
-      : Promise.resolve([] as Array<Record<string, unknown>>),
+    platform
+      .listAuthorizedWorkspaceClusters(workspaceId)
+      .catch(() => [] as Array<{ id: string; cluster_name: string }>),
   ]);
 
   const projectItems: CommandSearchItem[] = projects.flatMap((project) =>
@@ -73,11 +73,11 @@ export async function buildDynamicCommandItems(options: {
   }));
 
   const clusterItems: CommandSearchItem[] = clusters.slice(0, MAX_CLUSTERS).map((cluster) => {
-    const name = String(cluster.cluster_name ?? cluster.name ?? "集群");
+    const name = cluster.cluster_name || "集群";
     return {
-      href: "/platform/clusters",
+      href: "/cluster/list",
       label: name,
-      group: "平台运营",
+      group: "基础设施",
       kind: "cluster" as const,
       keywords: `${name} 集群 cluster`,
     };

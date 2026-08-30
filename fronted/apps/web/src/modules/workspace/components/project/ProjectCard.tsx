@@ -10,6 +10,7 @@ interface ProjectCardProps {
   onContinueConfig?: (project: ProjectVM) => void;
   onSubmitReview?: (project: ProjectVM) => void;
   onReview?: (project: ProjectVM) => void;
+  onDeploy?: (project: ProjectVM) => void;
 }
 
 export function ProjectCard({
@@ -19,6 +20,7 @@ export function ProjectCard({
   onContinueConfig,
   onSubmitReview,
   onReview,
+  onDeploy,
 }: ProjectCardProps) {
   return (
     <ProjectOverviewCard
@@ -29,6 +31,7 @@ export function ProjectCard({
       onSubmitReview={onSubmitReview}
       onReview={onReview}
       onArchive={onArchive}
+      onDeploy={onDeploy ? () => onDeploy(project) : undefined}
     />
   );
 }

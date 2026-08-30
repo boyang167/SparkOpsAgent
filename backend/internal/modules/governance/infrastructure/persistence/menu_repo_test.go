@@ -9,6 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsSuperAdminOnlyPath(t *testing.T) {
+	require.True(t, persistence.IsSuperAdminOnlyPath("/platform/clusters"))
+	require.True(t, persistence.IsSuperAdminOnlyPath("/settings/platform/members"))
+	require.True(t, persistence.IsSuperAdminOnlyPath("/monitor/platform-audit"))
+	require.False(t, persistence.IsSuperAdminOnlyPath("/cluster/list"))
+	require.False(t, persistence.IsSuperAdminOnlyPath("/config/secrets"))
+	require.False(t, persistence.IsSuperAdminOnlyPath("/projects"))
+}
+
 func TestBuildMenuTree_nestedChildren(t *testing.T) {
 	wsID := kernel.NewWorkspaceID()
 	parentID := "group-delivery"

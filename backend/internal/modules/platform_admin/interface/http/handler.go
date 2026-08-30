@@ -18,6 +18,7 @@ type Handler struct {
 	updateSysConfig          *command.UpdateSysConfigHandler
 	listClusters             *query.ListClustersHandler
 	createCluster            *command.CreateClusterHandler
+	registerWorkspaceCluster *command.RegisterWorkspaceClusterHandler
 	listWorkspaceClusters    *query.ListWorkspaceClustersHandler
 	grantWorkspaceCluster    *command.GrantWorkspaceClusterHandler
 	revokeWorkspaceCluster   *command.RevokeWorkspaceClusterHandler
@@ -37,6 +38,7 @@ func NewHandler(
 	updateSysConfig *command.UpdateSysConfigHandler,
 	listClusters *query.ListClustersHandler,
 	createCluster *command.CreateClusterHandler,
+	registerWorkspaceCluster *command.RegisterWorkspaceClusterHandler,
 	listWorkspaceClusters *query.ListWorkspaceClustersHandler,
 	grantWorkspaceCluster *command.GrantWorkspaceClusterHandler,
 	revokeWorkspaceCluster *command.RevokeWorkspaceClusterHandler,
@@ -53,7 +55,8 @@ func NewHandler(
 	return &Handler{
 		getSysConfig: getSysConfig, updateSysConfig: updateSysConfig,
 		listClusters: listClusters, createCluster: createCluster,
-		listWorkspaceClusters:  listWorkspaceClusters,
+		registerWorkspaceCluster: registerWorkspaceCluster,
+		listWorkspaceClusters:    listWorkspaceClusters,
 		grantWorkspaceCluster:  grantWorkspaceCluster,
 		revokeWorkspaceCluster: revokeWorkspaceCluster,
 		getDashboard:           getDashboard, getStatistics: getStatistics,
@@ -158,6 +161,35 @@ func (h *Handler) CreateCluster(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"id": cluster.ID.String(), "cluster_name": cluster.ClusterName})
+}
+
+func (h *Handler) RegisterWorkspaceCluster(c *gin.Context) {
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	wsID, err := kernel.ParseWorkspaceID(c.Param("wsId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid workspace id", http.StatusBadRequest)
+		return
+	}
+	var req createClusterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+	cluster, err := h.registerWorkspaceCluster.Handle(c.Request.Context(), memberID, wsID, req.ClusterName, req.Server)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{
+		"id":           cluster.ID.String(),
+		"cluster_name": cluster.ClusterName,
+		"server":       cluster.Server,
+		"workspace_id": wsID.String(),
+	})
 }
 
 func (h *Handler) ListWorkspaceClusters(c *gin.Context) {

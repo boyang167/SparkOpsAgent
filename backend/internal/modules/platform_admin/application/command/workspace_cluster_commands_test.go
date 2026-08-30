@@ -16,6 +16,7 @@ type workspaceClusterRepo struct {
 	clusterExists bool
 	granted       bool
 	revoked       bool
+	saved         *repository.ClusterInfo
 	clusters      []*repository.ClusterInfo
 }
 
@@ -28,7 +29,9 @@ func (r *workspaceClusterRepo) UpsertSysConfig(context.Context, *repository.SysC
 func (r *workspaceClusterRepo) ListClusters(context.Context) ([]*repository.ClusterInfo, error) {
 	return nil, nil
 }
-func (r *workspaceClusterRepo) SaveCluster(context.Context, *repository.ClusterInfo) error {
+func (r *workspaceClusterRepo) SaveCluster(_ context.Context, cluster *repository.ClusterInfo) error {
+	r.saved = cluster
+	r.clusterExists = true
 	return nil
 }
 func (r *workspaceClusterRepo) GetStatisticsCache(context.Context, kernel.WorkspaceID, string) (map[string]any, error) {
@@ -107,4 +110,29 @@ func TestListWorkspaceClustersReturnsOnlyRepositoryGrants(t *testing.T) {
 		"id": granted.ID.String(), "cluster_name": "production", "server": "https://k8s.example",
 		"is_build_env": true, "priority_id": 3,
 	}}, items)
+}
+
+func TestRegisterWorkspaceClusterCreatesAndGrants(t *testing.T) {
+	repo := &workspaceClusterRepo{}
+	h := command.NewRegisterWorkspaceClusterHandler(repo)
+	wsID := kernel.NewWorkspaceID()
+
+	cluster, err := h.Handle(context.Background(), kernel.NewMemberID(), wsID, "dev-cluster", "https://k8s.example")
+
+	require.NoError(t, err)
+	require.Equal(t, "dev-cluster", cluster.ClusterName)
+	require.Equal(t, "https://k8s.example", cluster.Server)
+	require.NotNil(t, repo.saved)
+	require.True(t, repo.granted)
+}
+
+func TestRegisterWorkspaceClusterRejectsEmptyName(t *testing.T) {
+	repo := &workspaceClusterRepo{}
+	h := command.NewRegisterWorkspaceClusterHandler(repo)
+
+	_, err := h.Handle(context.Background(), kernel.NewMemberID(), kernel.NewWorkspaceID(), "  ", "https://k8s.example")
+
+	require.ErrorIs(t, err, domain.ErrClusterNameRequired)
+	require.Nil(t, repo.saved)
+	require.False(t, repo.granted)
 }
