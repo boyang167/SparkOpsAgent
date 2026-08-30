@@ -118,7 +118,7 @@ func validateAPIMethod(api APISpec, routePrefix string) error {
 	if api.ReadOnly && api.Method != "POST" {
 		return invalid("api read_only is only allowed on exact POST APIs")
 	}
-	if api.ReadOnly && strings.HasSuffix(api.Path, "/*") {
+	if api.ReadOnly && strings.Contains(api.Path, "*") {
 		return invalid("api read_only is only allowed on exact POST APIs")
 	}
 	if api.Method == "ANY" {

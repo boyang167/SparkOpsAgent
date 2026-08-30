@@ -148,6 +148,14 @@ func TestParse_InvalidPOSTWildcardReadOnly(t *testing.T) {
 	requireManifestInvalid(t, err)
 }
 
+func TestParse_InvalidPOSTInternalWildcardReadOnly(t *testing.T) {
+	yaml := strings.Replace(validYAML,
+		"  - method: GET\n    path: /api/v1/plugins/example/ping",
+		"  - method: POST\n    path: /api/v1/plugins/example/foo/*/metrics\n    read_only: true", 1)
+	_, err := manifest.Parse([]byte(yaml))
+	requireManifestInvalid(t, err)
+}
+
 func TestParse_InvalidANYExactPath(t *testing.T) {
 	yaml := strings.Replace(validYAML, "method: GET", "method: ANY", 1)
 	_, err := manifest.Parse([]byte(yaml))
