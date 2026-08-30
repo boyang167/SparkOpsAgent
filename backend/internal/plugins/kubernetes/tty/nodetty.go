@@ -12,7 +12,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 const (
@@ -36,7 +38,7 @@ type NodeTTYRequest struct {
 // ProvisionNodeTTY creates a short-lived privileged nsenter pod on one node.
 // HostPID plus Privileged access exposes host namespaces, so callers must
 // enforce admin authorization before reaching this method.
-func (p *KubernetesProvisioner) ProvisionNodeTTY(ctx context.Context, client kubernetes.Interface, req NodeTTYRequest) (Session, error) {
+func (p *KubernetesProvisioner) ProvisionNodeTTY(ctx context.Context, client kubernetes.Interface, _ dynamic.Interface, _ *rest.Config, req NodeTTYRequest) (Session, error) {
 	if client == nil || !validDNSSubdomain(req.Node) {
 		return Session{}, ErrNodeTTYTargetInvalid
 	}
@@ -91,7 +93,7 @@ func (p *KubernetesProvisioner) ProvisionNodeTTY(ctx context.Context, client kub
 
 	return Session{
 		ID:        sessionID,
-		Pod:       ResourceRef{Name: pod.Name, Namespace: pod.Namespace},
+		Pod:       &ResourceRef{Name: pod.Name, Namespace: pod.Namespace},
 		ExpiresAt: p.now().UTC().Add(NodeTTYTTL),
 	}, nil
 }
@@ -117,12 +119,12 @@ func (h *Handler) NodeTTY(c *gin.Context) {
 		httpx.Fail(c, "PLUGIN_KUBERNETES_TTY_TARGET_INVALID", "invalid tty target", http.StatusBadRequest)
 		return
 	}
-	client, _, _, _, err := h.ctx.Clusters.ForWorkspace(c.Request.Context(), wsID, clusterID)
+	client, dynamicClient, restCfg, _, err := h.ctx.Clusters.ForWorkspace(c.Request.Context(), wsID, clusterID)
 	if err != nil {
 		handleClusterError(c, err)
 		return
 	}
-	session, err := h.provisioner.ProvisionNodeTTY(c.Request.Context(), client, req)
+	session, err := h.provisioner.ProvisionNodeTTY(c.Request.Context(), client, dynamicClient, restCfg, req)
 	if err != nil {
 		handleTTYError(c, err)
 		return

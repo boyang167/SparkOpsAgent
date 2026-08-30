@@ -2,6 +2,7 @@ package tty
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -16,9 +17,15 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
 const (
@@ -26,18 +33,29 @@ const (
 	ManagedByValue = "sparkops-kubernetes-plugin"
 	SessionIDLabel = "session-id"
 
-	CloudTTYGenerateName = "sparkops-cloudtty-"
-	DefaultCloudTTYImage = "ghcr.io/cloudtty/cloudtty:latest"
-	CloudTTYPort         = int32(7681)
-	CloudTTYTTL          = time.Hour
+	CloudTTYGenerateName      = "sparkops-cloudtty-"
+	CloudShellGroup           = "cloudshell.cloudtty.io"
+	CloudShellVersion         = "v1alpha1"
+	CloudShellResource        = "cloudshells"
+	CloudShellKind            = "CloudShell"
+	CloudShellAPIVersion      = CloudShellGroup + "/" + CloudShellVersion
+	CloudShellTTLSeconds      = int64(1800)
+	CloudTTYTTL               = 30 * time.Minute
+	cleanupTimeout            = 10 * time.Second
+	kubeconfigSecretKey       = "config"
+	cloudTTYCommandShell      = "sh"
+	cloudTTYCommandExecutable = "kubectl"
 )
 
 var (
-	ErrCloudTTYTargetInvalid       = errors.New("cloudtty target invalid")
-	ErrCloudTTYTargetNotFound      = errors.New("cloudtty target not found")
-	ErrCloudTTYPodCreateFailed     = errors.New("cloudtty pod create failed")
-	ErrCloudTTYServiceCreateFailed = errors.New("cloudtty service create failed")
-	ErrTTYClusterUnavailable       = errors.New("kubernetes cluster unavailable")
+	ErrCloudTTYTargetInvalid           = errors.New("cloudtty target invalid")
+	ErrCloudTTYTargetNotFound          = errors.New("cloudtty target not found")
+	ErrCloudTTYSecretCreateFailed      = errors.New("cloudtty secret create failed")
+	ErrCloudTTYCloudShellCreateFailed  = errors.New("cloudtty cloudshell create failed")
+	ErrCloudTTYCRDUnavailable          = errors.New("cloudtty crd unavailable")
+	ErrCloudTTYOwnerPatchFailed        = errors.New("cloudtty owner patch failed")
+	ErrCloudTTYCredentialConfigInvalid = errors.New("cloudtty credential config invalid")
+	ErrTTYClusterUnavailable           = errors.New("kubernetes cluster unavailable")
 )
 
 type CloudTTYRequest struct {
@@ -52,27 +70,26 @@ type ResourceRef struct {
 }
 
 type Session struct {
-	ID        string       `json:"id"`
-	Pod       ResourceRef  `json:"pod"`
-	Service   *ResourceRef `json:"service,omitempty"`
-	ExpiresAt time.Time    `json:"expires_at"`
+	ID         string       `json:"id"`
+	CloudShell *ResourceRef `json:"cloudshell,omitempty"`
+	Pod        *ResourceRef `json:"pod,omitempty"`
+	Service    *ResourceRef `json:"service,omitempty"`
+	ExpiresAt  time.Time    `json:"expires_at"`
 }
 
 type Provisioner interface {
-	ProvisionCloudTTY(ctx context.Context, client kubernetes.Interface, req CloudTTYRequest) (Session, error)
-	ProvisionNodeTTY(ctx context.Context, client kubernetes.Interface, req NodeTTYRequest) (Session, error)
+	ProvisionCloudTTY(ctx context.Context, client kubernetes.Interface, dynamicClient dynamic.Interface, restConfig *rest.Config, req CloudTTYRequest) (Session, error)
+	ProvisionNodeTTY(ctx context.Context, client kubernetes.Interface, dynamicClient dynamic.Interface, restConfig *rest.Config, req NodeTTYRequest) (Session, error)
 }
 
 type ProvisionerOptions struct {
-	Now           func() time.Time
-	CloudTTYImage string
-	NodeTTYImage  string
+	Now          func() time.Time
+	NodeTTYImage string
 }
 
 type KubernetesProvisioner struct {
-	now           func() time.Time
-	cloudTTYImage string
-	nodeTTYImage  string
+	now          func() time.Time
+	nodeTTYImage string
 }
 
 func NewProvisioner(opts ProvisionerOptions) *KubernetesProvisioner {
@@ -80,19 +97,15 @@ func NewProvisioner(opts ProvisionerOptions) *KubernetesProvisioner {
 	if now == nil {
 		now = time.Now
 	}
-	cloudTTYImage := strings.TrimSpace(opts.CloudTTYImage)
-	if cloudTTYImage == "" {
-		cloudTTYImage = DefaultCloudTTYImage
-	}
 	nodeTTYImage := strings.TrimSpace(opts.NodeTTYImage)
 	if nodeTTYImage == "" {
 		nodeTTYImage = DefaultNodeTTYImage
 	}
-	return &KubernetesProvisioner{now: now, cloudTTYImage: cloudTTYImage, nodeTTYImage: nodeTTYImage}
+	return &KubernetesProvisioner{now: now, nodeTTYImage: nodeTTYImage}
 }
 
-func (p *KubernetesProvisioner) ProvisionCloudTTY(ctx context.Context, client kubernetes.Interface, req CloudTTYRequest) (Session, error) {
-	if client == nil || !validDNSLabel(req.Namespace) || !validDNSSubdomain(req.Pod) || !validDNSLabel(req.Container) {
+func (p *KubernetesProvisioner) ProvisionCloudTTY(ctx context.Context, client kubernetes.Interface, dynamicClient dynamic.Interface, restConfig *rest.Config, req CloudTTYRequest) (Session, error) {
+	if client == nil || dynamicClient == nil || restConfig == nil || !validDNSLabel(req.Namespace) || !validDNSSubdomain(req.Pod) || !validDNSLabel(req.Container) {
 		return Session{}, ErrCloudTTYTargetInvalid
 	}
 	target, err := client.CoreV1().Pods(req.Namespace).Get(ctx, req.Pod, metav1.GetOptions{})
@@ -105,77 +118,130 @@ func (p *KubernetesProvisioner) ProvisionCloudTTY(ctx context.Context, client ku
 	if !podHasContainer(target, req.Container) {
 		return Session{}, ErrCloudTTYTargetInvalid
 	}
+	kubeconfig, err := kubeconfigFromRESTConfig(restConfig)
+	if err != nil {
+		return Session{}, ErrCloudTTYCredentialConfigInvalid
+	}
 
 	sessionID := uuid.NewString()
 	labels := sessionLabels(sessionID)
-	deadline := int64(CloudTTYTTL / time.Second)
-	falseValue := false
-	pod, err := client.CoreV1().Pods(req.Namespace).Create(ctx, &corev1.Pod{
+	secret, err := client.CoreV1().Secrets(req.Namespace).Create(ctx, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: CloudTTYGenerateName,
 			Namespace:    req.Namespace,
 			Labels:       labels,
 		},
-		Spec: corev1.PodSpec{
-			ActiveDeadlineSeconds: &deadline,
-			RestartPolicy:         corev1.RestartPolicyNever,
-			Containers: []corev1.Container{{
-				Name:            "web-tty",
-				Image:           p.cloudTTYImage,
-				ImagePullPolicy: corev1.PullIfNotPresent,
-				Args: []string{
-					"--command",
-					"kubectl", "exec", "-it", "-n", req.Namespace, req.Pod, "-c", req.Container, "--", "sh",
-				},
-				Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: CloudTTYPort}},
-				SecurityContext: &corev1.SecurityContext{
-					Privileged:               &falseValue,
-					AllowPrivilegeEscalation: &falseValue,
-					Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
-					SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
-				},
-			}},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			kubeconfigSecretKey: kubeconfig,
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		return Session{}, ErrCloudTTYPodCreateFailed
+		return Session{}, ErrCloudTTYSecretCreateFailed
 	}
 
-	service, err := client.CoreV1().Services(req.Namespace).Create(ctx, &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: CloudTTYGenerateName,
-			Namespace:    req.Namespace,
-			Labels:       labels,
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         "v1",
-				Kind:               "Pod",
-				Name:               pod.Name,
-				UID:                pod.UID,
-				Controller:         &falseValue,
-				BlockOwnerDeletion: &falseValue,
-			}},
-		},
-		Spec: corev1.ServiceSpec{
-			Type:     corev1.ServiceTypeClusterIP,
-			Selector: labels,
-			Ports: []corev1.ServicePort{{
-				Name:       "http",
-				Port:       80,
-				TargetPort: intstr.FromInt32(CloudTTYPort),
-			}},
-		},
-	}, metav1.CreateOptions{})
+	cr, err := dynamicClient.Resource(cloudShellGVR()).Namespace(req.Namespace).Create(ctx, cloudShellObject(req, secret.Name, labels), metav1.CreateOptions{})
 	if err != nil {
-		_ = deletePodNow(ctx, client, req.Namespace, pod.Name)
-		return Session{}, ErrCloudTTYServiceCreateFailed
+		deleteSecretWithCleanupContext(client, req.Namespace, secret.Name)
+		if apierrors.IsNotFound(err) {
+			return Session{}, ErrCloudTTYCRDUnavailable
+		}
+		return Session{}, ErrCloudTTYCloudShellCreateFailed
+	}
+
+	if err := patchSecretOwner(ctx, client, req.Namespace, secret.Name, cr); err != nil {
+		deleteCloudShellWithCleanupContext(dynamicClient, req.Namespace, cr.GetName())
+		deleteSecretWithCleanupContext(client, req.Namespace, secret.Name)
+		return Session{}, ErrCloudTTYOwnerPatchFailed
 	}
 
 	return Session{
-		ID:        sessionID,
-		Pod:       ResourceRef{Name: pod.Name, Namespace: pod.Namespace},
-		Service:   &ResourceRef{Name: service.Name, Namespace: service.Namespace},
-		ExpiresAt: p.now().UTC().Add(CloudTTYTTL),
+		ID:         sessionID,
+		CloudShell: &ResourceRef{Name: cr.GetName(), Namespace: cr.GetNamespace()},
+		ExpiresAt:  p.now().UTC().Add(CloudTTYTTL),
 	}, nil
+}
+
+func cloudShellGVR() schema.GroupVersionResource {
+	return schema.GroupVersionResource{Group: CloudShellGroup, Version: CloudShellVersion, Resource: CloudShellResource}
+}
+
+func cloudShellObject(req CloudTTYRequest, secretName string, labels map[string]string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": CloudShellAPIVersion,
+			"kind":       CloudShellKind,
+			"metadata": map[string]any{
+				"generateName": CloudTTYGenerateName,
+				"namespace":    req.Namespace,
+				"labels":       stringMapAny(labels),
+			},
+			"spec": map[string]any{
+				"secretRef": map[string]any{
+					"name": secretName,
+				},
+				"commandAction":          cloudTTYCommand(req),
+				"cleanup":                true,
+				"ttlSecondsAfterStarted": CloudShellTTLSeconds,
+			},
+		},
+	}
+}
+
+func stringMapAny(values map[string]string) map[string]any {
+	out := make(map[string]any, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
+}
+
+func cloudTTYCommand(req CloudTTYRequest) string {
+	return cloudTTYCommandExecutable + " exec -it " + req.Pod + " -c " + req.Container + " -- " + cloudTTYCommandShell
+}
+
+func patchSecretOwner(ctx context.Context, client kubernetes.Interface, namespace, name string, cr *unstructured.Unstructured) error {
+	falseValue := false
+	patch, err := json.Marshal(map[string]any{
+		"metadata": map[string]any{
+			"ownerReferences": []map[string]any{{
+				"apiVersion":         CloudShellAPIVersion,
+				"kind":               CloudShellKind,
+				"name":               cr.GetName(),
+				"uid":                cr.GetUID(),
+				"controller":         falseValue,
+				"blockOwnerDeletion": falseValue,
+			}},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	_, err = client.CoreV1().Secrets(namespace).Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
+	return err
+}
+
+func kubeconfigFromRESTConfig(restConfig *rest.Config) ([]byte, error) {
+	if restConfig == nil || strings.TrimSpace(restConfig.Host) == "" {
+		return nil, errors.New("missing host")
+	}
+	authInfo := &clientcmdapi.AuthInfo{
+		Token:                 restConfig.BearerToken,
+		ClientCertificateData: restConfig.TLSClientConfig.CertData,
+		ClientKeyData:         restConfig.TLSClientConfig.KeyData,
+	}
+	if authInfo.Token == "" && (len(authInfo.ClientCertificateData) == 0 || len(authInfo.ClientKeyData) == 0) {
+		return nil, errors.New("missing credentials")
+	}
+	cfg := clientcmdapi.NewConfig()
+	cfg.Clusters["sparkops"] = &clientcmdapi.Cluster{
+		Server:                   strings.TrimSpace(restConfig.Host),
+		CertificateAuthorityData: restConfig.TLSClientConfig.CAData,
+	}
+	cfg.AuthInfos["sparkops"] = authInfo
+	cfg.Contexts["sparkops"] = &clientcmdapi.Context{Cluster: "sparkops", AuthInfo: "sparkops"}
+	cfg.CurrentContext = "sparkops"
+	return clientcmd.Write(*cfg)
 }
 
 type Handler struct {
@@ -212,12 +278,12 @@ func (h *Handler) CloudTTY(c *gin.Context) {
 		httpx.Fail(c, "PLUGIN_KUBERNETES_TTY_TARGET_INVALID", "invalid tty target", http.StatusBadRequest)
 		return
 	}
-	client, _, _, _, err := h.ctx.Clusters.ForWorkspace(c.Request.Context(), wsID, clusterID)
+	client, dynamicClient, restCfg, _, err := h.ctx.Clusters.ForWorkspace(c.Request.Context(), wsID, clusterID)
 	if err != nil {
 		handleClusterError(c, err)
 		return
 	}
-	session, err := h.provisioner.ProvisionCloudTTY(c.Request.Context(), client, req)
+	session, err := h.provisioner.ProvisionCloudTTY(c.Request.Context(), client, dynamicClient, restCfg, req)
 	if err != nil {
 		handleTTYError(c, err)
 		return
@@ -285,13 +351,15 @@ func handleClusterError(c *gin.Context, err error) {
 
 func handleTTYError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, ErrCloudTTYTargetInvalid), errors.Is(err, ErrNodeTTYTargetInvalid):
+	case errors.Is(err, ErrCloudTTYTargetInvalid), errors.Is(err, ErrNodeTTYTargetInvalid), errors.Is(err, ErrCloudTTYCredentialConfigInvalid):
 		httpx.Fail(c, "PLUGIN_KUBERNETES_TTY_TARGET_INVALID", "invalid tty target", http.StatusBadRequest)
 	case errors.Is(err, ErrCloudTTYTargetNotFound), errors.Is(err, ErrNodeTTYTargetNotFound):
 		httpx.Fail(c, "PLUGIN_KUBERNETES_TTY_TARGET_NOT_FOUND", "tty target not found", http.StatusNotFound)
+	case errors.Is(err, ErrCloudTTYCRDUnavailable):
+		httpx.Fail(c, "PLUGIN_CLOUDTTY_CRD_UNAVAILABLE", "CloudTTY CRD is unavailable", http.StatusBadGateway)
 	case errors.Is(err, ErrNodeTTYNamespaceUnavailable):
 		httpx.Fail(c, "PLUGIN_KUBERNETES_TTY_NAMESPACE_FORBIDDEN", "tty namespace is not writable", http.StatusForbidden)
-	case errors.Is(err, ErrCloudTTYPodCreateFailed), errors.Is(err, ErrCloudTTYServiceCreateFailed), errors.Is(err, ErrNodeTTYPodCreateFailed):
+	case errors.Is(err, ErrCloudTTYSecretCreateFailed), errors.Is(err, ErrCloudTTYCloudShellCreateFailed), errors.Is(err, ErrCloudTTYOwnerPatchFailed), errors.Is(err, ErrNodeTTYPodCreateFailed):
 		httpx.Fail(c, "PLUGIN_KUBERNETES_TTY_CREATE_FAILED", "tty resource create failed", http.StatusBadGateway)
 	default:
 		httpx.Fail(c, "PLUGIN_KUBERNETES_TTY_UPSTREAM_UNAVAILABLE", "kubernetes tty upstream unavailable", http.StatusBadGateway)
@@ -317,10 +385,35 @@ func podHasContainer(pod *corev1.Pod, container string) bool {
 	return false
 }
 
-func deletePodNow(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+func cleanupContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), cleanupTimeout)
+}
+
+func deleteSecretWithCleanupContext(client kubernetes.Interface, namespace, name string) {
+	ctx, cancel := cleanupContext()
+	defer cancel()
+	_ = deleteSecretNow(ctx, client, namespace, name)
+}
+
+func deleteCloudShellWithCleanupContext(dynamicClient dynamic.Interface, namespace, name string) {
+	ctx, cancel := cleanupContext()
+	defer cancel()
+	_ = deleteCloudShellNow(ctx, dynamicClient, namespace, name)
+}
+
+func deleteSecretNow(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
 	grace := int64(0)
 	propagation := metav1.DeletePropagationBackground
-	return client.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{
+	return client.CoreV1().Secrets(namespace).Delete(ctx, name, metav1.DeleteOptions{
+		GracePeriodSeconds: &grace,
+		PropagationPolicy:  &propagation,
+	})
+}
+
+func deleteCloudShellNow(ctx context.Context, dynamicClient dynamic.Interface, namespace, name string) error {
+	grace := int64(0)
+	propagation := metav1.DeletePropagationBackground
+	return dynamicClient.Resource(cloudShellGVR()).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{
 		GracePeriodSeconds: &grace,
 		PropagationPolicy:  &propagation,
 	})
