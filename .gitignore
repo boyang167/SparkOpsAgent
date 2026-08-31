@@ -56,4 +56,4 @@ backend/deployments/docker/.env
 tmp/
 temp/
 *.tmp
-plugins/
+/plugins/

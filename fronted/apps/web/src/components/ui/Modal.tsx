@@ -11,6 +11,7 @@ interface ModalProps {
   /** Higher stacking + capture Escape so nested dialogs do not close the parent. */
   nested?: boolean;
   panelClassName?: string;
+  headerExtra?: React.ReactNode;
   children: React.ReactNode;
   footer?: React.ReactNode;
 }
@@ -23,6 +24,7 @@ export function Modal({
   size = "md",
   nested = false,
   panelClassName,
+  headerExtra,
   children,
   footer,
 }: ModalProps) {
@@ -78,6 +80,7 @@ export function Modal({
               </p>
             ) : null}
           </div>
+          {headerExtra}
           <button
             type="button"
             className="modal-close"

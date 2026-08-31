@@ -77,6 +77,7 @@ func TestRegisterBundledDescriptor(t *testing.T) {
 	descriptor, ok := sparkplugin.Bundled("kubernetes")
 	require.True(t, ok)
 	require.Equal(t, ManifestYAML, descriptor.ManifestYAML)
+	require.Contains(t, ManifestYAML, "/pods/:pod/terminal-ticket")
 	require.ElementsMatch(t, []string{
 		"backend/internal/plugins/kubernetes/plugin.go",
 		"backend/internal/plugins/kubernetes/plugin.yaml",
@@ -109,6 +110,10 @@ func TestRegisterBundledDescriptor(t *testing.T) {
 		"backend/internal/plugins/kubernetes/schema/models.go",
 		"backend/internal/plugins/kubernetes/stream/exec.go",
 		"backend/internal/plugins/kubernetes/stream/logs.go",
+		"backend/internal/plugins/kubernetes/terminal/handler.go",
+		"backend/internal/plugins/kubernetes/terminal/protocol.go",
+		"backend/internal/plugins/kubernetes/terminal/session.go",
+		"backend/internal/plugins/kubernetes/terminal/ticket.go",
 		"backend/internal/plugins/kubernetes/tty/cloudtty.go",
 		"backend/internal/plugins/kubernetes/tty/nodetty.go",
 		"backend/internal/plugins/kubernetes/velaux/proxy.go",
@@ -141,6 +146,8 @@ func TestRegisterBundledDescriptor(t *testing.T) {
 		"fronted/apps/web/src/modules/plugins/kubernetes/cluster-settings-form.tsx",
 		"fronted/apps/web/src/modules/plugins/kubernetes/cluster-status.ts",
 		"fronted/apps/web/src/modules/plugins/kubernetes/cluster-types.ts",
+		"fronted/apps/web/src/modules/plugins/kubernetes/node-view.ts",
+		"fronted/apps/web/src/modules/plugins/kubernetes/pod-terminal.ts",
 		"fronted/apps/web/src/modules/plugins/kubernetes/KubernetesConsole.tsx",
 		"fronted/apps/web/src/modules/plugins/kubernetes/OperationsPanel.tsx",
 		"fronted/apps/web/src/modules/plugins/kubernetes/ResourceMenuPage.tsx",
@@ -165,7 +172,10 @@ func TestRegisterBundledDescriptor(t *testing.T) {
 		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/CreateDeploymentPage.tsx",
 		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/DiagnosisPage.tsx",
 		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/FormParts.tsx",
+		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/NodeDetailView.tsx",
+		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/NodesPanel.tsx",
 		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/OverviewPanel.tsx",
+		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/PodTerminal.tsx",
 		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/RecordsPage.tsx",
 		"fronted/apps/web/src/modules/plugins/kubernetes/specialized/VelauxPage.tsx",
 	}, descriptor.InstalledFiles)

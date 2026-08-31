@@ -115,6 +115,8 @@ apis:
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/logs
   - method: GET
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/exec
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/terminal-ticket
   - method: GET
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/namespaces/:namespace/pods/:pod/files
   - method: GET

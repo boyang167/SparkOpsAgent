@@ -4,7 +4,7 @@ export default function KubernetesNodesPage() {
   return renderKubernetesPage({
     mode: "resource",
     title: "节点管理",
-    description: "通过 Kubernetes API 查看 Node 资源。",
+    description: "查看节点状态、资源用量，并执行调度、排空与终端操作。",
     menu: "nodes",
   });
 }

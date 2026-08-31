@@ -12,6 +12,7 @@ import (
 	k8sproxy "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/proxy"
 	k8srecords "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/records"
 	k8sstream "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/stream"
+	k8sterminal "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/terminal"
 	k8stty "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/tty"
 	k8svelaux "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/velaux"
 )
@@ -31,6 +32,7 @@ func RegisterRoutes(engine *gin.Engine, contexts ...sparkplugin.PluginContext) {
 	filesHandler := k8sfiles.NewHandler(pctx)
 	recordsHandler := k8srecords.NewHandler(pctx)
 	streamHandler := k8sstream.NewHandler(pctx)
+	terminalHandler := k8sterminal.NewHandler(pctx, k8sterminal.NewTicketStore(nil))
 	ttyHandler := k8stty.NewHandler(pctx)
 	diagnosisHandler := k8sdiagnosis.NewHandler(pctx)
 	velauxHandler := k8svelaux.NewHandler(pctx)
@@ -59,6 +61,7 @@ func RegisterRoutes(engine *gin.Engine, contexts ...sparkplugin.PluginContext) {
 	group.DELETE("/clusters/:clusterId/namespaces/:namespace/pods/:pod/files", filesHandler.Delete)
 	group.GET("/clusters/:clusterId/namespaces/:namespace/pods/:pod/logs", streamHandler.Logs)
 	group.GET("/clusters/:clusterId/namespaces/:namespace/pods/:pod/exec", streamHandler.Exec)
+	group.POST("/clusters/:clusterId/namespaces/:namespace/pods/:pod/terminal-ticket", terminalHandler.CreateTicket)
 	group.GET("/records", recordsHandler.List)
 	group.GET("/records/:recordId", recordsHandler.Get)
 	group.DELETE("/records/:recordId", recordsHandler.Delete)
@@ -66,4 +69,5 @@ func RegisterRoutes(engine *gin.Engine, contexts ...sparkplugin.PluginContext) {
 	group.DELETE("/diagnosis/:id", diagnosisHandler.Delete)
 	group.POST("/clusters/:clusterId/cloudtty", ttyHandler.CloudTTY)
 	group.POST("/clusters/:clusterId/nodetty", ttyHandler.NodeTTY)
+	engine.GET(k8sterminal.WebsocketPath, terminalHandler.ServeWS)
 }
