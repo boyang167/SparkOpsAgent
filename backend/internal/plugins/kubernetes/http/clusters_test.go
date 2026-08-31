@@ -455,6 +455,7 @@ func performJSON(engine *gin.Engine, method, path string, wsID kernel.WorkspaceI
 type fakeClusterFactory struct {
 	items  []sparkplugin.ClusterMeta
 	rest   *rest.Config
+	client kubernetes.Interface
 	forErr error
 }
 
@@ -469,7 +470,7 @@ func (f fakeClusterFactory) ForWorkspace(context.Context, kernel.WorkspaceID, ke
 		item := f.items[0]
 		meta = &item
 	}
-	return nil, nil, f.rest, meta, nil
+	return f.client, nil, f.rest, meta, nil
 }
 
 func (f fakeClusterFactory) ListMeta(context.Context, kernel.WorkspaceID) ([]sparkplugin.ClusterMeta, error) {

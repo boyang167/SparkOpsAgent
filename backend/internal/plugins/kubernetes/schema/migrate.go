@@ -18,9 +18,12 @@ func AutoMigrate(db *gorm.DB) error {
 		} else if err := migratePostgresClusterSettings(db); err != nil {
 			return err
 		}
-		return db.AutoMigrate(&Record{}, &Diagnosis{})
+		return db.AutoMigrate(&Record{}, &Diagnosis{}, &ClusterUserGrant{})
 	}
-	if err := db.AutoMigrate(&ClusterSettings{}, &Diagnosis{}, &sqliteRecord{}); err != nil {
+	if err := db.AutoMigrate(&ClusterSettings{}, &Diagnosis{}, &sqliteClusterUserGrant{}, &sqliteRecord{}); err != nil {
+		return err
+	}
+	if err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS plugin_kubernetes.ux_cluster_user_grant ON cluster_user_grants(workspace_id, cluster_id, member_id)").Error; err != nil {
 		return err
 	}
 	return db.Exec("CREATE INDEX IF NOT EXISTS plugin_kubernetes.idx_records_workspace_started_at ON records(workspace_id, started_at DESC)").Error
@@ -78,3 +81,18 @@ type sqliteRecord struct {
 }
 
 func (sqliteRecord) TableName() string { return "plugin_kubernetes.records" }
+
+type sqliteClusterUserGrant struct {
+	ID                      string `gorm:"primaryKey;size:36"`
+	WorkspaceID             string `gorm:"size:36"`
+	ClusterID               string `gorm:"size:36"`
+	MemberID                string `gorm:"size:36"`
+	ServiceAccountName      string
+	ServiceAccountNamespace string
+	ClusterRoles            string `gorm:"column:cluster_roles"`
+	NamespaceRoles          string `gorm:"column:namespace_roles"`
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+}
+
+func (sqliteClusterUserGrant) TableName() string { return "plugin_kubernetes.cluster_user_grants" }

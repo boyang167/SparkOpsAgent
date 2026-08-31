@@ -836,6 +836,50 @@ textarea {
   text-decoration: underline;
 }
 
+.k8s-role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.k8s-role-chip:hover {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.k8s-role-chip-active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.k8s-role-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.k8s-role-list {
+  max-height: 10rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 0.5rem);
+  padding: 0.5rem;
+}
+
+.k8s-role-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
 .k8s-pagination {
   display: flex;
   flex-wrap: wrap;
@@ -1040,6 +1084,11 @@ textarea {
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+}
+
+.data-table .badge {
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .badge-neutral {
@@ -2073,6 +2122,10 @@ textarea {
   display: grid;
   place-items: center;
   padding: 1rem;
+}
+
+.modal-root.modal-nested {
+  z-index: 60;
 }
 
 .modal-backdrop {

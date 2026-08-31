@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { platform } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import { Modal } from "@/components/ui/Modal";
@@ -13,6 +13,13 @@ import {
   formFromCluster,
   type ClusterCreateFormValue,
 } from "../ClusterCreateForm";
+import {
+  clusterStatusBadgeClass,
+  clusterStatusFromProbe,
+  clusterStatusView,
+  clusterVersionProxyPath,
+  type ClusterStatusView,
+} from "../cluster-status";
 import type { KubernetesCluster } from "../cluster-types";
 import { ClusterAssociateDialog } from "./ClusterAssociateDialog";
 import { ClusterAuthorizeDialog } from "./ClusterAuthorizeDialog";
@@ -67,6 +74,7 @@ export function ClustersPanel({
   const [authorizing, setAuthorizing] = useState<KubernetesCluster | null>(null);
   const [associating, setAssociating] = useState<KubernetesCluster | null>(null);
   const [actionError, setActionError] = useState<ApiErrorInfo | null>(null);
+  const [statuses, setStatuses] = useState<Record<string, ClusterStatusView>>({});
 
   const filtered = useMemo(() => {
     const q = keyword.trim().toLowerCase();
@@ -78,7 +86,41 @@ export function ClustersPanel({
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(page, totalPages);
   const rows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const rowIds = rows.map((item) => item.id).join(",");
   const allChecked = rows.length > 0 && rows.every((item) => selected.includes(item.id));
+
+  useEffect(() => {
+    if (!rowIds) {
+      return;
+    }
+    const ids = rowIds.split(",");
+    let cancelled = false;
+    setStatuses((prev) => {
+      const next = { ...prev };
+      for (const id of ids) {
+        next[id] = clusterStatusView("checking");
+      }
+      return next;
+    });
+    void Promise.all(
+      ids.map(async (id) => {
+        try {
+          await k8sFetch(clusterVersionProxyPath(id));
+          if (!cancelled) {
+            setStatuses((prev) => ({ ...prev, [id]: clusterStatusFromProbe(true) }));
+          }
+        } catch (err) {
+          const info = errorInfo(err, "无法连接 Kubernetes API");
+          if (!cancelled) {
+            setStatuses((prev) => ({ ...prev, [id]: clusterStatusFromProbe(false, info.message) }));
+          }
+        }
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [rowIds, loading]);
 
   function toggleAll(checked: boolean) {
     const ids = rows.map((item) => item.id);
@@ -267,12 +309,15 @@ export function ClustersPanel({
               </th>
               <th>ID</th>
               <th>名称</th>
+              <th>状态</th>
               <th>Prometheus</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((item) => (
+            {rows.map((item) => {
+              const status = statuses[item.id] ?? clusterStatusView("checking");
+              return (
               <tr key={item.id} className={item.id === selectedId ? "k8s-row-selected" : undefined}>
                 <td>
                   <input
@@ -287,6 +332,11 @@ export function ClustersPanel({
                   <button type="button" className="k8s-action-link" onClick={() => onSelect(item.id)}>
                     {item.name || item.id}
                   </button>
+                </td>
+                <td>
+                  <span className={clusterStatusBadgeClass(status.kind)} title={status.detail}>
+                    {status.label}
+                  </span>
                 </td>
                 <td>{item.prometheus_url || "-"}</td>
                 <td>
@@ -310,10 +360,11 @@ export function ClustersPanel({
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={6}>
                   <div className="empty-state">{loading ? "加载集群中…" : "暂无集群，点击「新增」接入"}</div>
                 </td>
               </tr>

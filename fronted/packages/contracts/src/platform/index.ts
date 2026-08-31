@@ -44,6 +44,14 @@ export type GrantWorkspaceClusterCommand = z.infer<typeof GrantWorkspaceClusterC
 export const RegisterWorkspaceClusterCommandSchema = z.object({
   cluster_name: z.string().trim().min(1).max(128),
   server: z.string().trim().max(512).optional(),
+  api_address: z.string().trim().max(512).optional(),
+  kube_type: z.number().int().min(1).max(2).optional(),
+  kube_config: z.string().max(1024 * 1024).optional(),
+  bearer_token: z.string().max(1024 * 1024).optional(),
+  user_name: z.string().trim().max(128).optional(),
+  certificate_authority_data: z.string().max(1024 * 1024).optional(),
+  client_certificate_data: z.string().max(1024 * 1024).optional(),
+  client_key_data: z.string().max(1024 * 1024).optional(),
 });
 
 export type RegisterWorkspaceClusterCommand = z.infer<typeof RegisterWorkspaceClusterCommandSchema>;

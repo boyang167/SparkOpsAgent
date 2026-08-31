@@ -54,9 +54,16 @@ func Middleware(store *Store) gin.HandlerFunc {
 			} else if shouldOmitPluginRequestBody(path) {
 				reqBody = "[plugin body omitted]"
 			} else {
-				raw, _ := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes))
-				reqBody = string(raw)
+				raw, err := io.ReadAll(c.Request.Body)
+				if err != nil {
+					raw = nil
+				}
 				c.Request.Body = io.NopCloser(bytes.NewBuffer(raw))
+				if len(raw) > maxBodyBytes {
+					reqBody = string(raw[:maxBodyBytes]) + "...[truncated]"
+				} else {
+					reqBody = string(raw)
+				}
 			}
 		}
 

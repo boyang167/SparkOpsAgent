@@ -94,6 +94,16 @@ apis:
     path: /api/v1/plugins/kubernetes/clusters
   - method: GET
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/kubeconfig
+  - method: GET
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/users
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/users
+  - method: PUT
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/users/:memberId
+  - method: DELETE
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/users/:memberId
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/users/:memberId/kubeconfig
   - method: PUT
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/settings
   - method: ANY

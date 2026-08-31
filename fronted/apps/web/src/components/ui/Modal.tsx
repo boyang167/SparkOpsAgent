@@ -8,6 +8,8 @@ interface ModalProps {
   title: string;
   description?: string;
   size?: "md" | "lg" | "xl";
+  /** Higher stacking + capture Escape so nested dialogs do not close the parent. */
+  nested?: boolean;
   panelClassName?: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
@@ -19,6 +21,7 @@ export function Modal({
   title,
   description,
   size = "md",
+  nested = false,
   panelClassName,
   children,
   footer,
@@ -32,23 +35,25 @@ export function Modal({
     if (!open) return;
 
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onCloseRef.current();
+      if (e.key !== "Escape") return;
+      if (nested) e.stopPropagation();
+      onCloseRef.current();
     }
 
-    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, nested);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
     return () => {
-      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown, nested);
       document.body.style.overflow = prevOverflow;
     };
-  }, [open]);
+  }, [open, nested]);
 
   if (!open) return null;
 
   return (
-    <div className="modal-root" role="presentation">
+    <div className={nested ? "modal-root modal-nested" : "modal-root"} role="presentation">
       <button
         type="button"
         className="modal-backdrop"

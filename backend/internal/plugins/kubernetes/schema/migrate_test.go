@@ -27,7 +27,7 @@ func openSQLiteK8sSchema(t *testing.T) *gorm.DB {
 func TestAutoMigrateCreatesPluginKubernetesTables(t *testing.T) {
 	db := openSQLiteK8sSchema(t)
 
-	for _, table := range []string{"cluster_settings", "records", "diagnosis"} {
+	for _, table := range []string{"cluster_settings", "records", "diagnosis", "cluster_user_grants"} {
 		var count int64
 		require.NoError(t, db.Raw(
 			"SELECT count(*) FROM plugin_kubernetes.sqlite_master WHERE type = 'table' AND name = ?",

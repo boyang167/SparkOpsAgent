@@ -48,3 +48,18 @@ type Diagnosis struct {
 }
 
 func (Diagnosis) TableName() string { return "plugin_kubernetes.diagnosis" }
+
+type ClusterUserGrant struct {
+	ID                      string `gorm:"primaryKey;size:36"`
+	WorkspaceID             string `gorm:"uniqueIndex:ux_cluster_user_grant;size:36"`
+	ClusterID               string `gorm:"uniqueIndex:ux_cluster_user_grant;size:36"`
+	MemberID                string `gorm:"uniqueIndex:ux_cluster_user_grant;size:36"`
+	ServiceAccountName      string
+	ServiceAccountNamespace string
+	ClusterRoles            string `gorm:"column:cluster_roles"`
+	NamespaceRoles          string `gorm:"column:namespace_roles"`
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+}
+
+func (ClusterUserGrant) TableName() string { return "plugin_kubernetes.cluster_user_grants" }

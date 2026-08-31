@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -131,6 +132,35 @@ func TestMiddlewareOmitsKubernetesPluginRequestBodyAndPreservesHandlerBody(t *te
 	for _, secret := range []string{"chat-secret", "settings-secret", "velaux-secret"} {
 		require.NotContains(t, string(encoded), secret)
 	}
+}
+
+func TestMiddlewarePreservesLargeJSONBodyForHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := openOperationLogStore(t, "oplog_large_json")
+
+	var received []byte
+	engine := gin.New()
+	engine.Use(Middleware(store))
+	engine.POST("/api/v1/workspaces/ws-1/clusters", func(c *gin.Context) {
+		raw, readErr := io.ReadAll(c.Request.Body)
+		require.NoError(t, readErr)
+		received = raw
+		c.Status(http.StatusOK)
+	})
+
+	payload := `{"cluster_name":"dev","kube_config":"` + strings.Repeat("A", maxBodyBytes+2048) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-1/clusters", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, payload, string(received))
+
+	records := waitForOperationLogRecords(t, store, 1)
+	require.LessOrEqual(t, len(records[0].Body), maxBodyBytes+len("...[truncated]"))
+	require.True(t, strings.HasPrefix(records[0].Body, `{"cluster_name":"dev"`))
+	require.Contains(t, records[0].Body, "...[truncated]")
 }
 
 type countingReadCloser struct {
