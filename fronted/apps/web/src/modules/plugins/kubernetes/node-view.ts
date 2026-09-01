@@ -59,6 +59,7 @@ export type PodObject = {
     name?: string;
     namespace?: string;
     creationTimestamp?: string;
+    labels?: Record<string, string>;
     ownerReferences?: { kind?: string }[];
   };
   spec?: {
