@@ -15,6 +15,13 @@ describe("buildKubernetesPluginBffPath", () => {
     expect(buildKubernetesPluginBffPath(["services", "http:cloudtty-1:7681", "proxy"])).toBe(
       "/api/bff/v1/plugins/kubernetes/services/http:cloudtty-1:7681/proxy",
     );
+    expect(
+      buildKubernetesPluginBffPath([
+        "clusters", "prod", "proxy", "api", "v1", "namespaces", "default", "services", "consul",
+      ]),
+    ).toBe(
+      "/api/bff/v1/plugins/kubernetes/clusters/prod/proxy/api/v1/namespaces/default/services/consul",
+    );
     expect(() => buildKubernetesPluginBffPath(["services", "http:name:70000"])).toThrow();
     expect(() => buildKubernetesPluginBffPath(["pods", "http:name:80"])).toThrow();
   });

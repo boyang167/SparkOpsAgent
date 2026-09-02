@@ -36,7 +36,7 @@ describe("buildKubernetesPluginApiPath", () => {
     );
   });
 
-  it("allows a validated Kubernetes service proxy segment only after services", () => {
+  it("allows validated service proxy segments only after services", () => {
     expect(
       buildKubernetesPluginApiPath([
         "clusters", "prod", "proxy", "api", "v1", "namespaces", "default",
@@ -44,6 +44,17 @@ describe("buildKubernetesPluginApiPath", () => {
       ]),
     ).toBe(
       "/api/v1/plugins/kubernetes/clusters/prod/proxy/api/v1/namespaces/default/services/http:sparkops-cloudtty-abcd:7681/proxy",
+    );
+  });
+
+  it("allows regular service resource names after services", () => {
+    expect(
+      buildKubernetesPluginApiPath([
+        "clusters", "prod", "proxy", "api", "v1", "namespaces", "argocd",
+        "services", "devops-argocd-dex-server",
+      ]),
+    ).toBe(
+      "/api/v1/plugins/kubernetes/clusters/prod/proxy/api/v1/namespaces/argocd/services/devops-argocd-dex-server",
     );
   });
 

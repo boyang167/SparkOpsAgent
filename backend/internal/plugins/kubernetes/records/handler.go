@@ -24,11 +24,13 @@ import (
 )
 
 const (
-	MaxRecordingBytes   = 5 << 20
-	recordingChunkBytes = 32 << 10
-	defaultPageSize     = 20
-	maxPageSize         = 100
-	maxSafeInteger      = int64(1<<53 - 1)
+	MaxRecordingBytes      = 5 << 20
+	recordingChunkBytes    = 32 << 10
+	recordingCoalesceGap   = 100 * time.Millisecond
+	recordingCoalesceBytes = 64 << 10
+	defaultPageSize        = 20
+	maxPageSize            = 100
+	maxSafeInteger         = int64(1 << 53 - 1)
 )
 
 var truncatedMarkerLine = mustJSONLine(recordFrame{
@@ -45,6 +47,7 @@ type Session struct {
 	WorkspaceID string
 	ClusterID   string
 	Kind        string
+	ObjectPath  string
 	StartedAt   time.Time
 }
 
@@ -57,6 +60,8 @@ type SessionRecorder struct {
 	blob        bytes.Buffer
 	truncated   bool
 	closed      bool
+	pendingTime float64
+	pending     bytes.Buffer
 }
 
 func NewStore(db *gorm.DB) *Store {
@@ -76,6 +81,7 @@ func (s *Store) Start(ctx context.Context, session Session) (*SessionRecorder, e
 		WorkspaceID: session.WorkspaceID,
 		ClusterID:   session.ClusterID,
 		Kind:        session.Kind,
+		ObjectPath:  session.ObjectPath,
 		StartedAt:   startedAt,
 	}
 	if err := s.db.WithContext(ctx).Create(&record).Error; err != nil {
@@ -119,6 +125,7 @@ func (r *SessionRecorder) Close(ctx context.Context, endedAt time.Time) error {
 		return nil
 	}
 	r.closed = true
+	r.flushPendingLocked("stdout")
 	blob := append([]byte(nil), r.blob.Bytes()...)
 	r.mu.Unlock()
 
@@ -168,8 +175,34 @@ func (r *SessionRecorder) append(stream string, data []byte) {
 	if r.truncated || r.closed {
 		return
 	}
+	now := math.Round(time.Since(r.startedAt).Seconds()*1000) / 1000
+	if stream == "stdout" || stream == "stderr" {
+		if r.pending.Len() > 0 &&
+			now-r.pendingTime <= recordingCoalesceGap.Seconds() &&
+			r.pending.Len()+len(data) <= recordingCoalesceBytes {
+			_, _ = r.pending.Write(data)
+			return
+		}
+		r.flushPendingLocked("stdout")
+		_, _ = r.pending.Write(data)
+		r.pendingTime = now
+		return
+	}
+	r.flushPendingLocked("stdout")
+	r.writeFrameLocked(stream, now, data)
+}
+
+func (r *SessionRecorder) flushPendingLocked(stream string) {
+	if r.pending.Len() == 0 {
+		return
+	}
+	r.writeFrameLocked(stream, r.pendingTime, r.pending.Bytes())
+	r.pending.Reset()
+}
+
+func (r *SessionRecorder) writeFrameLocked(stream string, frameTime float64, data []byte) {
 	frame := recordFrame{
-		Time:   math.Round(time.Since(r.startedAt).Seconds()*1000) / 1000,
+		Time:   frameTime,
 		Stream: stream,
 		Data:   string(bytes.ToValidUTF8(data, []byte("\uFFFD"))),
 	}
@@ -245,6 +278,10 @@ func (h *Handler) List(c *gin.Context) {
 	}
 	offset := (page - 1) * pageSize
 	db := h.store.db.WithContext(c.Request.Context()).Model(&k8sschema.Record{}).Where("workspace_id = ?", wsID.String())
+	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+		pattern := "%" + strings.ToLower(keyword) + "%"
+		db = db.Where("LOWER(object_path) LIKE ?", pattern)
+	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
 		httpx.Fail(c, "PLUGIN_KUBERNETES_RECORDS_UNAVAILABLE", "terminal records unavailable", http.StatusServiceUnavailable)

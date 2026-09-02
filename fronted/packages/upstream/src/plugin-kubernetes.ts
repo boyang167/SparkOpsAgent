@@ -56,6 +56,10 @@ function normalizeServiceProxySegment(segment: string): string {
   return `${match[1]}:${name}:${port}`;
 }
 
+function looksLikeServiceProxySegment(segment: string): boolean {
+  return /^(https?):([^:]+):([0-9]+)$/.test(segment);
+}
+
 function isDNS1123Name(value: string) {
   return value.length > 0 && value.length <= 253 && value.split(".").every((label) =>
     label.length > 0 && label.length <= 63 && /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/.test(label)
@@ -71,9 +75,11 @@ export function buildKubernetesPluginApiPath(
   }
   const encoded: string[] = [];
   for (const segment of segments) {
-    encoded.push(encoded.at(-1) === "services"
-      ? normalizeServiceProxySegment(segment)
-      : encodeURIComponent(normalizeSegment(segment)));
+    encoded.push(
+      encoded.at(-1) === "services" && looksLikeServiceProxySegment(segment)
+        ? normalizeServiceProxySegment(segment)
+        : encodeURIComponent(normalizeSegment(segment)),
+    );
   }
   return `${KUBERNETES_PLUGIN_API_PREFIX}/${encoded.join("/")}${search}`;
 }

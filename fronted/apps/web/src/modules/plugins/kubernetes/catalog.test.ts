@@ -15,6 +15,16 @@ describe("kubernetes catalog", () => {
     expect(resourcesForMenu("workloads").map((item) => item.kind)).toEqual(
       expect.arrayContaining(["Pod", "Deployment", "DaemonSet", "StatefulSet", "ReplicaSet", "Job", "CronJob"]),
     );
+    expect(resourcesForMenu("configs", true).map((item) => item.kind)).toEqual(
+      expect.arrayContaining([
+        "ConfigMap",
+        "Secret",
+        "ResourceQuota",
+        "LimitRange",
+        "HorizontalPodAutoscaler",
+        "PodDisruptionBudget",
+      ]),
+    );
     expect(resourcesForMenu("gateway").map((item) => item.kind)).toEqual(
       expect.arrayContaining(["GatewayClass", "Gateway", "HTTPRoute", "GRPCRoute", "TCPRoute", "TLSRoute", "UDPRoute"]),
     );
@@ -30,8 +40,21 @@ describe("kubernetes catalog", () => {
   });
 
   it("hides Secret resources from non-admin catalogs", () => {
-    expect(resourcesForMenu("configs", false).map((item) => item.kind)).toEqual(["ConfigMap"]);
-    expect(resourcesForMenu("configs", true).map((item) => item.kind)).toEqual(["ConfigMap", "Secret"]);
+    expect(resourcesForMenu("configs", false).map((item) => item.kind)).toEqual([
+      "ConfigMap",
+      "ResourceQuota",
+      "LimitRange",
+      "HorizontalPodAutoscaler",
+      "PodDisruptionBudget",
+    ]);
+    expect(resourcesForMenu("configs", true).map((item) => item.kind)).toEqual([
+      "ConfigMap",
+      "Secret",
+      "ResourceQuota",
+      "LimitRange",
+      "HorizontalPodAutoscaler",
+      "PodDisruptionBudget",
+    ]);
     expect(CATALOG.find((item) => item.kind === "Secret")).toMatchObject({ adminOnly: true });
   });
 

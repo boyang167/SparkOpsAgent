@@ -180,6 +180,10 @@ function normalizeKubernetesServiceProxySegment(segment: string): string {
   return `${scheme}:${name}:${port}`;
 }
 
+function looksLikeKubernetesServiceProxySegment(segment: string): boolean {
+  return /^(https?):([^:]+):([0-9]+)$/.test(segment);
+}
+
 export function buildKubernetesPluginApiPath(
   segments: readonly string[],
   search = "",
@@ -192,7 +196,7 @@ export function buildKubernetesPluginApiPath(
   }
   const encoded: string[] = [];
   for (const segment of segments) {
-    if (encoded.at(-1) === "services") {
+    if (encoded.at(-1) === "services" && looksLikeKubernetesServiceProxySegment(segment)) {
       encoded.push(normalizeKubernetesServiceProxySegment(segment));
     } else {
       encoded.push(encodeURIComponent(normalizeKubernetesSegment(segment)));

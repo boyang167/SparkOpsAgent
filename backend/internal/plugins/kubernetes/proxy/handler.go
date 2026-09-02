@@ -66,13 +66,30 @@ func (h *Handler) ServeGIN(c *gin.Context) {
 		return
 	}
 	if !isWatch(c.Request.URL.Query()) {
-		apiPath = h.compatiblePath(clusterID, restCfg, apiPath)
+		apiPath = h.resolveAPIPath(clusterID, restCfg, apiPath)
 	}
 	if shouldAggregate(c.Request.Method, c.Request.URL.Query()) {
 		h.aggregateList(c, clusterID, restCfg, apiPath)
 		return
 	}
 	h.reverseProxy(c, restCfg, apiPath)
+}
+
+func (h *Handler) resolveAPIPath(clusterID kernel.ClusterInfoID, restCfg *rest.Config, apiPath string) string {
+	apiPath = h.resolveGatewayAPIPath(clusterID, restCfg, apiPath)
+	return h.compatiblePath(clusterID, restCfg, apiPath)
+}
+
+func (h *Handler) resolveGatewayAPIPath(clusterID kernel.ClusterInfoID, restCfg *rest.Config, apiPath string) string {
+	group, version, resource, ok := parseGatewayAPIPath(apiPath)
+	if !ok {
+		return apiPath
+	}
+	resolved, ok := h.discover.resolveGroupVersion(clusterID, restCfg, group, version, resource)
+	if !ok || resolved == version {
+		return apiPath
+	}
+	return rewriteGatewayAPIVersion(apiPath, resolved)
 }
 
 func (h *Handler) compatiblePath(clusterID kernel.ClusterInfoID, restCfg *rest.Config, apiPath string) string {

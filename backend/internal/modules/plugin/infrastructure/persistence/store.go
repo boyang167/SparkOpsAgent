@@ -56,7 +56,10 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := seedBundledExamplePlugin(db); err != nil {
 		return err
 	}
-	return seedBundledKubernetesPlugin(db)
+	if err := seedBundledKubernetesPlugin(db); err != nil {
+		return err
+	}
+	return pruneRemovedPluginMenuPaths(db, "/plugins/kubernetes/create")
 }
 
 const bundledExampleManifest = `id: example
@@ -474,6 +477,24 @@ func rowsToBindings(rows []workspaceBindingModel) ([]*model.WorkspaceBinding, er
 		out = append(out, binding)
 	}
 	return out, nil
+}
+
+func pruneRemovedPluginMenuPaths(db *gorm.DB, paths ...string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	if !db.Migrator().HasTable("governance.menus") && !db.Migrator().HasTable("menus") {
+		return nil
+	}
+	now := time.Now().UTC()
+	result := db.Exec(
+		"UPDATE governance.menus SET deleted_at = ?, updated_at = ? WHERE path IN ? AND deleted_at IS NULL",
+		now, now, paths,
+	)
+	if result.Error != nil && strings.Contains(result.Error.Error(), "no such table") {
+		return nil
+	}
+	return result.Error
 }
 
 var _ repository.PluginRepository = (*Store)(nil)

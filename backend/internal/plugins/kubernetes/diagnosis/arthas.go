@@ -88,18 +88,20 @@ func (KubernetesExecutor) Exec(ctx context.Context, client kubernetes.Interface,
 }
 
 type Options struct {
-	Executor Executor
-	Archive  []byte
-	Now      func() time.Time
-	RunAsync func(func())
+	Executor     Executor
+	Archive      []byte
+	Now          func() time.Time
+	RunAsync     func(func())
+	PortForward  PortForwardStarter
 }
 
 type Handler struct {
-	ctx      sparkplugin.PluginContext
-	executor Executor
-	archive  []byte
-	now      func() time.Time
-	runAsync func(func())
+	ctx         sparkplugin.PluginContext
+	executor    Executor
+	archive     []byte
+	now         func() time.Time
+	runAsync    func(func())
+	portForward PortForwardStarter
 }
 
 type startRequest struct {
@@ -130,7 +132,7 @@ func NewHandlerWithOptions(ctx sparkplugin.PluginContext, opts Options) *Handler
 	if runAsync == nil {
 		runAsync = func(fn func()) { go fn() }
 	}
-	return &Handler{ctx: ctx, executor: executor, archive: archive, now: now, runAsync: runAsync}
+	return &Handler{ctx: ctx, executor: executor, archive: archive, now: now, runAsync: runAsync, portForward: opts.PortForward}
 }
 
 func (h *Handler) Start(c *gin.Context) {

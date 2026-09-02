@@ -135,7 +135,6 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 		"app/(platform)/plugins/kubernetes/chat/page.tsx",
 		"app/(platform)/plugins/kubernetes/cloudtty/page.tsx",
 		"app/(platform)/plugins/kubernetes/velaux/page.tsx",
-		"app/(platform)/plugins/kubernetes/create/page.tsx",
 	}, spec.Frontend.Pages)
 
 	for _, path := range []string{
@@ -153,7 +152,6 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 		"/plugins/kubernetes/configs",
 		"/plugins/kubernetes/storages",
 		"/plugins/kubernetes/access-controls",
-		"/plugins/kubernetes/create",
 		"/plugins/kubernetes/records",
 		"/plugins/kubernetes/diagnosis",
 		"/plugins/kubernetes/backup",

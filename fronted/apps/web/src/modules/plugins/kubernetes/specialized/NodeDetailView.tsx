@@ -9,6 +9,7 @@ import { appendBoundedLines, createSSEParser, formatSSEPayload } from "../sse";
 import { podOperationPath } from "../operations";
 import { YamlEditor } from "../YamlEditor";
 import { PodTerminal } from "./PodTerminal";
+import { PodFilesBrowser } from "./PodFilesBrowser";
 import {
   formatDateTime,
   formatNodeAge,
@@ -85,6 +86,7 @@ export function NodeDetailView({
   const [podDetail, setPodDetail] = useState<PodObject | null>(null);
   const [morePod, setMorePod] = useState<PodObject | null>(null);
   const [stream, setStream] = useState<StreamTarget | null>(null);
+  const [filesTarget, setFilesTarget] = useState<{ pod: PodObject; container: string } | null>(null);
   const [terminalFullscreen, setTerminalFullscreen] = useState(false);
   const [saving, setSaving] = useState(false);
   const info = node.status?.nodeInfo;
@@ -402,6 +404,20 @@ export function NodeDetailView({
           <div className="k8s-action-sheet">
             {podContainerNames(morePod).map((container) => (
               <button
+                key={`files-${container}`}
+                type="button"
+                className="k8s-action-sheet-item"
+                onClick={() => {
+                  setMorePod(null);
+                  setFilesTarget({ pod: morePod, container });
+                }}
+              >
+                <span className="k8s-action-sheet-label">{container} 文件浏览</span>
+                <span className="k8s-action-sheet-hint">列出、上传、下载或删除容器内文件</span>
+              </button>
+            ))}
+            {podContainerNames(morePod).map((container) => (
+              <button
                 key={`exec-${container}`}
                 type="button"
                 className="k8s-action-sheet-item"
@@ -450,6 +466,27 @@ export function NodeDetailView({
         <pre className="k8s-yaml-panel font-mono text-xs min-h-80 overflow-auto whitespace-pre-wrap">
           {podDetail ? JSON.stringify(podDetail, null, 2) : ""}
         </pre>
+      </Modal>
+
+      <Modal
+        nested
+        open={Boolean(filesTarget)}
+        title={
+          filesTarget
+            ? `Pod: ${filesTarget.pod.metadata?.name ?? ""} Container: ${filesTarget.container} 文件浏览`
+            : "文件浏览"
+        }
+        size="xl"
+        onClose={() => setFilesTarget(null)}
+      >
+        {filesTarget ? (
+          <PodFilesBrowser
+            clusterId={clusterId}
+            pod={filesTarget.pod}
+            container={filesTarget.container}
+            canManage={canManage}
+          />
+        ) : null}
       </Modal>
 
       <Modal

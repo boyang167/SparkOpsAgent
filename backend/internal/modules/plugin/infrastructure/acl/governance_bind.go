@@ -134,6 +134,29 @@ func (b *GovernanceBinder) Bind(ctx context.Context, workspaceID kernel.Workspac
 		}
 	}
 
+	desiredPaths := make(map[string]struct{}, len(spec.Menus))
+	for _, menu := range spec.Menus {
+		desiredPaths[menu.Path] = struct{}{}
+	}
+	pluginRoot := "/plugins/" + spec.ID
+	var staleMenus []menuRow
+	if err := db.Where(
+		"workspace_id = ? AND deleted_at IS NULL AND (path = ? OR path LIKE ?)",
+		workspaceID.String(), pluginRoot, pluginRoot+"/%",
+	).Find(&staleMenus).Error; err != nil {
+		return err
+	}
+	for _, row := range staleMenus {
+		if _, ok := desiredPaths[row.Path]; ok {
+			continue
+		}
+		deletedAt := now
+		if err := db.Model(&menuRow{}).Where("id = ?", row.ID).
+			Updates(map[string]any{"deleted_at": deletedAt, "updated_at": now}).Error; err != nil {
+			return err
+		}
+	}
+
 	apiGrants := expandPluginAPIGrants(spec.APIs)
 	for _, api := range apiGrants {
 		row := apiRow{

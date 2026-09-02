@@ -62,6 +62,6 @@ func ShellCommand() []string {
 	return []string{
 		"/bin/sh",
 		"-c",
-		"clear 2>/dev/null || true; exec bash 2>/dev/null || exec sh",
+		"clear 2>/dev/null || true; if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi",
 	}
 }

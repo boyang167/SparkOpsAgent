@@ -328,6 +328,7 @@ func (h *Handler) startRecorder(ctx context.Context, claims TicketClaims) *recor
 		WorkspaceID: claims.WorkspaceID.String(),
 		ClusterID:   claims.ClusterID.String(),
 		Kind:        "exec",
+		ObjectPath:  records.ObjectPathFromPod(claims.Namespace, claims.Pod, claims.Container),
 		StartedAt:   time.Now().UTC(),
 	})
 	if err != nil {

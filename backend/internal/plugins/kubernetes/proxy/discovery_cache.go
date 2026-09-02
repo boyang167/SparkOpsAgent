@@ -108,6 +108,20 @@ func (c *discoveryCache) resourceNamespaced(clusterID kernel.ClusterInfoID, rest
 	return false, errDiscoveryFailed
 }
 
+func (c *discoveryCache) resolveGroupVersion(
+	clusterID kernel.ClusterInfoID,
+	restCfg *rest.Config,
+	group, preferredVersion, resource string,
+) (string, bool) {
+	for _, version := range gatewayVersionCandidates(preferredVersion) {
+		groupVersion := group + "/" + version
+		if _, err := c.resourceNamespaced(clusterID, restCfg, groupVersion, resource); err == nil {
+			return version, true
+		}
+	}
+	return preferredVersion, false
+}
+
 func discoveryConfig(restCfg *rest.Config) *rest.Config {
 	cfg := rest.CopyConfig(restCfg)
 	cfg.Timeout = discoveryTimeout

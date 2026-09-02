@@ -9,6 +9,7 @@ import { podContainerNames, type PodObject } from "../node-view";
 import { podOperationPath } from "../operations";
 import { appendBoundedLines, createSSEParser, formatSSEPayload } from "../sse";
 import { PodTerminal } from "./PodTerminal";
+import { PodFilesBrowser } from "./PodFilesBrowser";
 import { METRIC_TEMPLATES } from "./WorkloadPodActions.helpers";
 
 const podDef = CATALOG.find((item) => item.kind === "Pod");
@@ -102,11 +103,17 @@ export function WorkloadPodActions({
       <Modal
         nested
         open={view?.type === "files"}
-        title={view?.type === "files" ? `文件浏览 · ${pod.metadata?.name}/${view.container}` : "文件浏览"}
-        size="lg"
+        title={
+          view?.type === "files"
+            ? `Pod: ${pod.metadata?.name ?? ""} Container: ${view.container} 文件浏览`
+            : "文件浏览"
+        }
+        size="xl"
         onClose={() => setView(null)}
       >
-        {view?.type === "files" ? <PodFilesPanel clusterId={clusterId} pod={pod} container={view.container} canManage={canManage} /> : null}
+        {view?.type === "files" ? (
+          <PodFilesBrowser clusterId={clusterId} pod={pod} container={view.container} canManage={canManage} />
+        ) : null}
       </Modal>
 
       <Modal nested open={view?.type === "monitor"} title={`Pod 监控 ${pod.metadata?.name ?? ""}`} size="lg" onClose={() => setView(null)}>
@@ -239,140 +246,6 @@ function PodLogPanel({ clusterId, pod, container }: { clusterId: string; pod: Po
       </button>
       <ApiErrorBanner error={error} />
       <pre className="k8s-yaml-panel font-mono text-xs min-h-64 whitespace-pre-wrap">{output.join("\n") || "暂无输出"}</pre>
-    </div>
-  );
-}
-
-function PodFilesPanel({
-  clusterId,
-  pod,
-  container,
-  canManage,
-}: {
-  clusterId: string;
-  pod: PodObject;
-  container: string;
-  canManage: boolean;
-}) {
-  const [path, setPath] = useState("/tmp");
-  const [output, setOutput] = useState<string[]>([]);
-  const [error, setError] = useState<ApiErrorInfo | null>(null);
-  const [loading, setLoading] = useState(false);
-  const active = useRef<AbortController | null>(null);
-  const namespace = pod.metadata?.namespace ?? "";
-  const podName = pod.metadata?.name ?? "";
-  const base = namespace && podName ? podOperationPath(clusterId, namespace, podName, "") : "";
-
-  useEffect(() => () => active.current?.abort(), []);
-
-  function query(extra: Record<string, string> = {}) {
-    return new URLSearchParams({ container, ...extra }).toString();
-  }
-
-  function nextController() {
-    active.current?.abort();
-    const controller = new AbortController();
-    active.current = controller;
-    return controller;
-  }
-
-  async function listFiles() {
-    if (!base) return;
-    const controller = nextController();
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await k8sFetch<{ output: string }>(`${base}files?${query({ path })}`, { signal: controller.signal });
-      setOutput((data.output || "").split("\n").filter(Boolean));
-    } catch (err) {
-      if (!controller.signal.aborted) setError(errorInfo(err, "读取文件列表失败"));
-    } finally {
-      if (active.current === controller) {
-        active.current = null;
-        setLoading(false);
-      }
-    }
-  }
-
-  async function upload(file?: File) {
-    if (!file || !base || !canManage) return;
-    const controller = nextController();
-    const form = new FormData();
-    form.append("file", file);
-    setError(null);
-    try {
-      const res = await fetch(`${base}files?${query({ path })}`, { method: "POST", body: form, signal: controller.signal });
-      if (!res.ok) throw new KubernetesApiError(await parseApiError(res));
-      await listFiles();
-    } catch (err) {
-      if (!controller.signal.aborted) setError(errorInfo(err, "上传文件失败"));
-    } finally {
-      if (active.current === controller) active.current = null;
-    }
-  }
-
-  async function download() {
-    if (!base) return;
-    const controller = nextController();
-    setError(null);
-    try {
-      const res = await fetch(`${base}files/download?${query({ path })}`, { cache: "no-store", signal: controller.signal });
-      if (!res.ok) throw new KubernetesApiError(await parseApiError(res));
-      const blob = await res.blob();
-      const href = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = href;
-      anchor.download = path.split("/").pop() || "download";
-      anchor.click();
-      URL.revokeObjectURL(href);
-    } catch (err) {
-      if (!controller.signal.aborted) setError(errorInfo(err, "下载文件失败"));
-    } finally {
-      if (active.current === controller) active.current = null;
-    }
-  }
-
-  async function remove() {
-    if (!base || !canManage) return;
-    const controller = nextController();
-    setError(null);
-    try {
-      await k8sFetch(`${base}files?${query({ path })}`, { method: "DELETE", signal: controller.signal });
-      await listFiles();
-    } catch (err) {
-      if (!controller.signal.aborted) setError(errorInfo(err, "删除文件失败"));
-    } finally {
-      if (active.current === controller) active.current = null;
-    }
-  }
-
-  return (
-    <div className="stack-md">
-      <label>
-        <span className="label">路径</span>
-        <input className="input font-mono" value={path} onChange={(event) => setPath(event.target.value)} />
-      </label>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn-secondary" disabled={!base || loading} onClick={() => void listFiles()}>
-          {loading ? "读取中…" : "列出文件"}
-        </button>
-        <button type="button" className="btn-secondary" disabled={!base || !path} onClick={() => void download()}>
-          下载
-        </button>
-        {canManage ? (
-          <label className="btn-secondary">
-            上传
-            <input className="hidden" type="file" onChange={(event) => void upload(event.target.files?.[0])} />
-          </label>
-        ) : null}
-        {canManage ? (
-          <button type="button" className="btn-secondary" disabled={!base || !path} onClick={() => void remove()}>
-            删除
-          </button>
-        ) : null}
-      </div>
-      <ApiErrorBanner error={error} />
-      <pre className="k8s-yaml-panel font-mono text-xs min-h-48 whitespace-pre-wrap">{output.join("\n") || "暂无输出"}</pre>
     </div>
   );
 }

@@ -81,7 +81,11 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
     } catch (err) {
       setItems([]);
       setTotal(0);
-      setError(errorInfo(err, `加载 ${selected.kind} 失败`));
+      const info = errorInfo(err, `加载 ${selected.kind} 失败`);
+      if (info.status === 404 && selected.group === "gateway.networking.k8s.io") {
+        info.message = `Gateway API 资源 ${selected.kind} 不可用：请确认集群已安装 Gateway API CRD，且控制器正常运行。`;
+      }
+      setError(info);
     } finally {
       setLoading(false);
     }

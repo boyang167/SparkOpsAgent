@@ -200,6 +200,11 @@ func TestRegisterRoutesMountsTask15Routes(t *testing.T) {
 		path   string
 	}{
 		{http.MethodPost, "/api/v1/plugins/kubernetes/clusters/" + clusterID.String() + "/diagnosis"},
+		{http.MethodPost, "/api/v1/plugins/kubernetes/clusters/" + clusterID.String() + "/diagnosis/install"},
+		{http.MethodDelete, "/api/v1/plugins/kubernetes/clusters/" + clusterID.String() + "/diagnosis/uninstall"},
+		{http.MethodPost, "/api/v1/plugins/kubernetes/clusters/" + clusterID.String() + "/diagnosis/by-pod"},
+		{http.MethodPost, "/api/v1/plugins/kubernetes/clusters/" + clusterID.String() + "/diagnosis/jps"},
+		{http.MethodPost, "/api/v1/plugins/kubernetes/clusters/" + clusterID.String() + "/diagnosis/proxy"},
 		{http.MethodGet, "/api/v1/plugins/kubernetes/diagnosis/" + diagnosisID.String() + "/ws"},
 		{http.MethodDelete, "/api/v1/plugins/kubernetes/diagnosis/" + diagnosisID.String()},
 		{http.MethodGet, "/api/v1/plugins/kubernetes/clusters/" + clusterID.String() + "/velaux/ui"},

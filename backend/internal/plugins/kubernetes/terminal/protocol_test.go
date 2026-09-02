@@ -27,9 +27,15 @@ func TestParseClientMessageAcceptsReadAndResize(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint16(120), resize.Cols)
 	require.Equal(t, uint16(36), resize.Rows)
-	require.Equal(t, []string{
-		"/bin/sh",
-		"-c",
-		"clear 2>/dev/null || true; exec bash 2>/dev/null || exec sh",
-	}, ShellCommand())
+}
+
+func TestShellCommandFallsBackWithoutExecBashOr(t *testing.T) {
+	command := ShellCommand()
+	require.Equal(t, "/bin/sh", command[0])
+	require.Equal(t, "-c", command[1])
+	script := command[2]
+	require.NotContains(t, script, "exec bash 2>/dev/null || exec sh")
+	require.Contains(t, script, "command -v bash")
+	require.Contains(t, script, "exec bash")
+	require.Contains(t, script, "exec sh")
 }

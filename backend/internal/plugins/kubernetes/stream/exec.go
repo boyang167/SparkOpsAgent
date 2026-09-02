@@ -177,6 +177,7 @@ func (h *Handler) startRecorder(ctx context.Context, target streamTarget, writer
 		WorkspaceID: target.WorkspaceID.String(),
 		ClusterID:   target.ClusterID.String(),
 		Kind:        "exec",
+		ObjectPath:  records.ObjectPathFromPod(target.Namespace, target.Pod, target.Container),
 		StartedAt:   time.Now().UTC(),
 	})
 	if err != nil {

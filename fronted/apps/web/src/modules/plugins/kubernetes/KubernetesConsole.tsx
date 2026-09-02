@@ -5,8 +5,7 @@ import { ClusterPicker } from "./ClusterPicker";
 import { ResourceMenuPage } from "./ResourceMenuPage";
 import { ChatPage } from "./specialized/ChatPage";
 import { CloudTTYPage } from "./specialized/CloudTTYPage";
-import { CreateDeploymentPage } from "./specialized/CreateDeploymentPage";
-import { DiagnosisPage } from "./specialized/DiagnosisPage";
+import { DiagnosisPanel } from "./specialized/DiagnosisPanel";
 import { OverviewPanel } from "./specialized/OverviewPanel";
 import { RecordsPage } from "./specialized/RecordsPage";
 import { VelauxPage } from "./specialized/VelauxPage";
@@ -15,7 +14,6 @@ export type KubernetesConsoleMode =
   | "overview"
   | "clusters"
   | "resource"
-  | "create"
   | "records"
   | "diagnosis"
   | "chat"
@@ -35,9 +33,7 @@ export function KubernetesConsole({ mode, title, description, menu, canManage }:
 
   const body = useMemo(() => {
     if (mode === "overview") return <OverviewPanel />;
-    if (mode === "create") return <CreateDeploymentPage clusterId={clusterId} canManage={canManage} />;
-    if (mode === "records") return <RecordsPage canManage={canManage} />;
-    if (mode === "diagnosis") return <DiagnosisPage clusterId={clusterId} canManage={canManage} />;
+    if (mode === "diagnosis") return null;
     if (mode === "chat") return <ChatPage clusterId={clusterId} canManage={canManage} />;
     if (mode === "cloudtty") return <CloudTTYPage clusterId={clusterId} canManage={canManage} />;
     if (mode === "velaux") return <VelauxPage clusterId={clusterId} />;
@@ -62,6 +58,22 @@ export function KubernetesConsole({ mode, title, description, menu, canManage }:
           </div>
           <ClusterPicker value={clusterId} onChange={setClusterId} canManage={canManage} layout="table" />
         </section>
+      </div>
+    );
+  }
+
+  if (mode === "records") {
+    return (
+      <div className="page stack-lg">
+        <RecordsPage canManage={canManage} />
+      </div>
+    );
+  }
+
+  if (mode === "diagnosis") {
+    return (
+      <div className="page stack-lg">
+        <DiagnosisPanel canManage={canManage} />
       </div>
     );
   }

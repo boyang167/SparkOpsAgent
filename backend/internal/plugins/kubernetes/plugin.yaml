@@ -59,10 +59,6 @@ menus:
     path: /plugins/kubernetes/access-controls
     component: plugins/kubernetes/access-controls/page
     parent: /plugins/kubernetes
-  - title: 创建资源
-    path: /plugins/kubernetes/create
-    component: plugins/kubernetes/create/page
-    parent: /plugins/kubernetes
   - title: 终端审计
     path: /plugins/kubernetes/records
     component: plugins/kubernetes/records/page
@@ -137,6 +133,16 @@ apis:
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/nodetty
   - method: POST
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/diagnosis
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/diagnosis/install
+  - method: DELETE
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/diagnosis/uninstall
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/diagnosis/by-pod
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/diagnosis/jps
+  - method: POST
+    path: /api/v1/plugins/kubernetes/clusters/:clusterId/diagnosis/proxy
   - method: GET
     path: /api/v1/plugins/kubernetes/diagnosis/:id/ws
   - method: DELETE
@@ -168,6 +174,5 @@ frontend:
     - app/(platform)/plugins/kubernetes/chat/page.tsx
     - app/(platform)/plugins/kubernetes/cloudtty/page.tsx
     - app/(platform)/plugins/kubernetes/velaux/page.tsx
-    - app/(platform)/plugins/kubernetes/create/page.tsx
 assets:
   - backend/internal/plugins/kubernetes/resource/arthas-bin.tar

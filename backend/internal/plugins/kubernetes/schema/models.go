@@ -40,6 +40,7 @@ type Diagnosis struct {
 	Container   string
 	PID         int
 	Port        int
+	LocalPort   int
 	SessionDir  string
 	JarPath     string
 	Status      string
