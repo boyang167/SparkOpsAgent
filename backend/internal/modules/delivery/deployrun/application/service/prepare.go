@@ -6,15 +6,19 @@ import (
 	"strings"
 
 	deployport "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/port"
+	harborinfra "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/harbor"
 	jenkinsinfra "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/jenkins"
 	deliveryport "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
 )
 
+type HarborProjectEnsurer func(ctx context.Context, secret deployport.DeploymentSecret, projectName string) error
+
 type PrepareService struct {
 	jobSuffix      string
 	renderer       deployport.PipelineRenderer
 	jenkinsFactory func(deployport.DeploymentSecret) (deliveryport.JenkinsExecutor, error)
+	harborEnsurer  HarborProjectEnsurer
 }
 
 type PrepareInput struct {
@@ -35,7 +39,16 @@ func (s *PrepareService) UseJenkinsFactory(
 	return s
 }
 
+// UseHarborEnsurer overrides Harbor project provisioning; intended for tests.
+func (s *PrepareService) UseHarborEnsurer(fn HarborProjectEnsurer) *PrepareService {
+	s.harborEnsurer = fn
+	return s
+}
+
 func (s *PrepareService) Run(ctx context.Context, project deployport.ProjectDeploymentContext, input PrepareInput) error {
+	if err := s.ensureHarborProject(ctx, project); err != nil {
+		return err
+	}
 	if s.renderer == nil {
 		return domain.ErrDeploymentPipelineEmpty
 	}
@@ -45,8 +58,9 @@ func (s *PrepareService) Run(ctx context.Context, project deployport.ProjectDepl
 		GitRefValue:          input.GitRefValue,
 		ImageTag:             input.ImageTag,
 		ImageRepository:      input.ImageRepository,
-		GitCredentialID:      StableCredentialID(project.WorkspaceID, project.Git.ID),
-		RegistryCredentialID: StableCredentialID(project.WorkspaceID, project.Harbor.ID),
+		GitCredentialID:        JenkinsCredentialID(project.Git, project.Namespace),
+		RegistryCredentialID: JenkinsCredentialID(project.Harbor, project.Namespace),
+		GitURLOverride:       ResolveCheckoutGitURL(project),
 	})
 	if err != nil {
 		return fmt.Errorf("render deployment pipeline: %w", err)
@@ -68,6 +82,41 @@ func (s *PrepareService) Run(ctx context.Context, project deployport.ProjectDepl
 		return fmt.Errorf("upsert jenkins job: %w", err)
 	}
 	return nil
+}
+
+func (s *PrepareService) ensureHarborProject(ctx context.Context, project deployport.ProjectDeploymentContext) error {
+	if !strings.EqualFold(strings.TrimSpace(project.Harbor.ServiceType), "Harbor") {
+		return nil
+	}
+	projectName := strings.TrimSpace(project.Namespace)
+	if projectName == "" {
+		return fmt.Errorf("ensure harbor project: project namespace is empty")
+	}
+	ensurer := s.harborEnsurer
+	if ensurer == nil {
+		ensurer = defaultHarborProjectEnsurer
+	}
+	if err := ensurer(ctx, project.Harbor, projectName); err != nil {
+		return fmt.Errorf("ensure harbor project: %w", err)
+	}
+	return nil
+}
+
+func defaultHarborProjectEnsurer(
+	ctx context.Context,
+	secret deployport.DeploymentSecret,
+	projectName string,
+) error {
+	if strings.TrimSpace(secret.ServiceURL) == "" {
+		return fmt.Errorf("harbor service url is empty")
+	}
+	return harborinfra.EnsureProject(
+		ctx,
+		secret.ServiceURL,
+		secret.Username,
+		secret.Credentials.Password,
+		projectName,
+	)
 }
 
 func (s *PrepareService) resolveJenkins(secret deployport.DeploymentSecret) (deliveryport.JenkinsExecutor, error) {

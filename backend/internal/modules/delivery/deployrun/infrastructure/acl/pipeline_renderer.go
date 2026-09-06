@@ -45,6 +45,7 @@ func (r *PipelineRenderer) Render(ctx context.Context, request deployport.Pipeli
 		ImageRepository:      request.ImageRepository,
 		GitCredentialID:      request.GitCredentialID,
 		RegistryCredentialID: request.RegistryCredentialID,
+		GitURLOverride:       request.GitURLOverride,
 	})
 }
 

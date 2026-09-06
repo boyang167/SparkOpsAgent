@@ -37,6 +37,7 @@ type ProjectDeploymentContext struct {
 	ProjectID        kernel.ProjectID
 	Name             string
 	Namespace        string
+	GitURL           string
 	Jenkinsfile      string
 	ServiceYAML      string
 	DeploymentYAML   string
@@ -58,6 +59,7 @@ type PipelineRenderRequest struct {
 	ImageRepository      string
 	GitCredentialID      string
 	RegistryCredentialID string
+	GitURLOverride       string
 }
 
 type PipelineRenderer interface {

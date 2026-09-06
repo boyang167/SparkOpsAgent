@@ -59,25 +59,27 @@ func TestPrepareUpsertsNamespaceJobPipelineAndStableCredentials(t *testing.T) {
 	prepare.jenkinsFactory = func(deployport.DeploymentSecret) (deliveryport.JenkinsExecutor, error) {
 		return recorder, nil
 	}
+	prepare.UseHarborEnsurer(func(context.Context, deployport.DeploymentSecret, string) error { return nil })
 	project := deployport.ProjectDeploymentContext{
 		WorkspaceID: workspaceID,
 		ProjectID:   kernel.NewProjectID(),
 		Name:        "orders",
 		Namespace:   " team-a ",
 		Git: deployport.DeploymentSecret{
-			ID: gitID, Username: "git-user",
+			ID: gitID, Username: "git-user", ServiceType: "GitLab",
 			Credentials: deployport.DeploymentCredentials{Token: "git-token"},
 		},
 		Harbor: deployport.DeploymentSecret{
-			ID: harborID, Username: "registry-user",
+			ID: harborID, Username: "registry-user", ServiceType: "Harbor",
 			Credentials: deployport.DeploymentCredentials{Password: "registry-password"},
 		},
 		Jenkins: deployport.DeploymentSecret{
-			ID: jenkinsID, ServiceURL: "http://jenkins.example", Username: "jenkins-user",
+			ID: jenkinsID, ServiceURL: "http://jenkins.example", Username: "jenkins-user", ServiceType: "Jenkins",
 			Credentials: deployport.DeploymentCredentials{APIKey: "jenkins-api-key"},
 		},
 		Sonar: &deployport.DeploymentSecret{
 			ID:          sonarID,
+			ServiceType: "SonarQube",
 			Credentials: deployport.DeploymentCredentials{Token: "sonar-token"},
 		},
 	}
@@ -97,14 +99,30 @@ func TestPrepareUpsertsNamespaceJobPipelineAndStableCredentials(t *testing.T) {
 		GitRefValue:          input.GitRefValue,
 		ImageTag:             input.ImageTag,
 		ImageRepository:      input.ImageRepository,
-		GitCredentialID:      "sparkops-" + workspaceID.String() + "-" + gitID.String(),
-		RegistryCredentialID: "sparkops-" + workspaceID.String() + "-" + harborID.String(),
+		GitCredentialID:        JenkinsCredentialID(project.Git, project.Namespace),
+		RegistryCredentialID: JenkinsCredentialID(project.Harbor, project.Namespace),
 	}, renderer.input)
 	require.Equal(t, []deliveryport.JenkinsCredential{
-		{ID: "sparkops-" + workspaceID.String() + "-" + gitID.String(), Username: "git-user", Secret: "git-token", Kind: "username-password"},
-		{ID: "sparkops-" + workspaceID.String() + "-" + harborID.String(), Username: "registry-user", Secret: "registry-password", Kind: "username-password"},
-		{ID: "sparkops-" + workspaceID.String() + "-" + jenkinsID.String(), Username: "jenkins-user", Secret: "jenkins-api-key", Kind: "username-password"},
-		{ID: "sparkops-" + workspaceID.String() + "-" + sonarID.String(), Secret: "sonar-token", Kind: "secret-text"},
+		{
+			ID:          JenkinsCredentialID(project.Git, project.Namespace),
+			Description: JenkinsCredentialDescription(project.Git, project.Namespace),
+			Username:    "git-user", Secret: "git-token", Kind: "username-password",
+		},
+		{
+			ID:          JenkinsCredentialID(project.Harbor, project.Namespace),
+			Description: JenkinsCredentialDescription(project.Harbor, project.Namespace),
+			Username:    "registry-user", Secret: "registry-password", Kind: "username-password",
+		},
+		{
+			ID:          JenkinsCredentialID(project.Jenkins, project.Namespace),
+			Description: JenkinsCredentialDescription(project.Jenkins, project.Namespace),
+			Username:    "jenkins-user", Secret: "jenkins-api-key", Kind: "username-password",
+		},
+		{
+			ID:          JenkinsCredentialID(*project.Sonar, project.Namespace),
+			Description: JenkinsCredentialDescription(*project.Sonar, project.Namespace),
+			Secret: "sonar-token", Kind: "secret-text",
+		},
 	}, recorder.spec.Credentials)
 }
 
@@ -143,6 +161,7 @@ func TestPrepareRejectsEmptyRenderedPipelineWithoutUpsert(t *testing.T) {
 	prepare.jenkinsFactory = func(deployport.DeploymentSecret) (deliveryport.JenkinsExecutor, error) {
 		return recorder, nil
 	}
+	prepare.UseHarborEnsurer(func(context.Context, deployport.DeploymentSecret, string) error { return nil })
 
 	err := prepare.Run(context.Background(), deployport.ProjectDeploymentContext{
 		WorkspaceID: kernel.NewWorkspaceID(),
@@ -157,4 +176,41 @@ func TestPrepareRejectsEmptyRenderedPipelineWithoutUpsert(t *testing.T) {
 
 	require.ErrorIs(t, err, deploydomain.ErrDeploymentPipelineEmpty)
 	require.Zero(t, recorder.calls)
+}
+
+func TestPrepareEnsuresHarborProjectBeforeUpsert(t *testing.T) {
+	recorder := &recordingJenkins{}
+	renderer := &pipelineRenderer{content: "pipeline {}"}
+	prepare := NewPrepareService("-build", renderer)
+	prepare.jenkinsFactory = func(deployport.DeploymentSecret) (deliveryport.JenkinsExecutor, error) {
+		return recorder, nil
+	}
+	var ensured string
+	prepare.UseHarborEnsurer(func(_ context.Context, secret deployport.DeploymentSecret, projectName string) error {
+		ensured = projectName + "|" + secret.Username
+		return nil
+	})
+
+	project := deployport.ProjectDeploymentContext{
+		WorkspaceID: kernel.NewWorkspaceID(),
+		ProjectID:   kernel.NewProjectID(),
+		Name:        "orders",
+		Namespace:   "team-a",
+		Harbor: deployport.DeploymentSecret{
+			ID: kernel.NewSecretID(), ServiceType: "Harbor", ServiceURL: "https://harbor.example",
+			Username: "admin", Credentials: deployport.DeploymentCredentials{Password: "secret"},
+		},
+		Jenkins: deployport.DeploymentSecret{
+			ID: kernel.NewSecretID(), ServiceURL: "http://jenkins.example",
+			Credentials: deployport.DeploymentCredentials{Token: "token"},
+		},
+		Git: deployport.DeploymentSecret{
+			ID: kernel.NewSecretID(), Credentials: deployport.DeploymentCredentials{Token: "git"},
+		},
+	}
+	require.NoError(t, prepare.Run(context.Background(), project, PrepareInput{
+		GitRefValue: "main", ImageTag: "tag", ImageRepository: "harbor.example/team-a/orders",
+	}))
+	require.Equal(t, "team-a|admin", ensured)
+	require.Equal(t, 1, recorder.calls)
 }

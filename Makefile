@@ -23,6 +23,12 @@ server:
 dev-web:
 	cd fronted && pnpm dev
 
+dev-restart:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-restart.ps1
+
+dev-stop:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-restart.ps1 -Stop
+
 docker-up:
 	cd backend/deployments/docker && docker compose up --build -d
 

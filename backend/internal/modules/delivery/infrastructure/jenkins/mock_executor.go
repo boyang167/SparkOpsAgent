@@ -36,6 +36,11 @@ func (e *MockExecutor) RunStreaming(
 	req port.BuildRequest,
 	hub port.LogPublisher,
 ) (string, error) {
+	if len(req.Credentials) > 0 && strings.TrimSpace(req.Folder) != "" {
+		if err := e.SyncCredentials(ctx, req.Folder, req.Credentials); err != nil {
+			return "", err
+		}
+	}
 	e.LastBuildRequest = req
 	req.Job = strings.TrimSpace(req.Job)
 	if req.Job == "" {

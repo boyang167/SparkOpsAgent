@@ -166,10 +166,61 @@ func TestDefaultJenkinsfileIncludesSparkOpsRuntimeParams(t *testing.T) {
 		"git@gitlab.example.com:group/orders.git",
 		"stage('Sonar Scan')",
 		"docker push",
+		"certs.d",
 	} {
 		if !strings.Contains(content, needle) {
 			t.Fatalf("jenkinsfile missing %q: %s", needle, content)
 		}
+	}
+	for _, forbidden := range []string{
+		"Prepare Registry",
+		"/api/v2.0/projects/",
+		"Kaniko",
+		"kaniko",
+	} {
+		if strings.Contains(content, forbidden) {
+			t.Fatalf("jenkinsfile should not contain %q", forbidden)
+		}
+	}
+}
+
+func TestDefaultJenkinsfilePreservesGroovyEnvReferences(t *testing.T) {
+	vars := map[string]string{
+		"name":               "test-go",
+		"namespace":          "test-workspace",
+		"language":           "go",
+		"git_url":            "http://192.168.5.24:8929/cicd/test-repo.git",
+		"git_ref_type":       "branch",
+		"git_ref_value":      "main",
+		"workspace_slug":     "test-workspace",
+		"registry_host":      "harbor.local",
+		"git_credential_id":  "sparkops-git-test-workspace-abc",
+		"registry_credential_id": "sparkops-harbor-test-workspace-abc",
+	}
+	content := defaultJenkinsfile(vars, false)
+
+	for _, needle := range []string{
+		`APP_NAME               = 'test-go'`,
+		`DEFAULT_GIT_REF        = 'main'`,
+		`${env.APP_NAME}`,
+		`${env.BRANCH}`,
+		`${env.FULL_IMAGE}`,
+		`?: 'main'`,
+		`def branch = (env.BRANCH ?: 'main').trim()`,
+	} {
+		if !strings.Contains(content, needle) {
+			t.Fatalf("jenkinsfile missing %q:\n%s", needle, content)
+		}
+	}
+}
+
+func TestRenderPlaceholdersPreservesUnknownDollarTokens(t *testing.T) {
+	out := renderPlaceholders("keep ${env.BRANCH} replace ${namespace}", map[string]string{
+		"namespace": "ns1",
+	})
+	want := "keep ${env.BRANCH} replace ns1"
+	if out != want {
+		t.Fatalf("got %q want %q", out, want)
 	}
 }
 

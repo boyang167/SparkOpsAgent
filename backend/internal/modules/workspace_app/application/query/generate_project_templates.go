@@ -34,6 +34,7 @@ type DeploymentPipelineRenderInput struct {
 	ImageRepository      string
 	GitCredentialID      string
 	RegistryCredentialID string
+	GitURLOverride       string
 }
 
 type GenerateProjectTemplatesHandler struct {
@@ -126,6 +127,9 @@ func RenderDeploymentPipelineArtifact(
 ) string {
 	deploymentProject := *project
 	deploymentProject.GitRefValue = strings.TrimSpace(input.GitRefValue)
+	if override := strings.TrimSpace(input.GitURLOverride); override != "" {
+		deploymentProject.GitURL = override
+	}
 	renderCtx.ContainerImage = strings.TrimSuffix(strings.TrimSpace(input.ImageRepository), "/") + ":" + strings.TrimSpace(input.ImageTag)
 	renderCtx.GitCredentialID = strings.TrimSpace(input.GitCredentialID)
 	renderCtx.RegistryCredentialID = strings.TrimSpace(input.RegistryCredentialID)
@@ -490,35 +494,44 @@ func renderPlaceholders(source string, vars map[string]string) string {
 	out := mustacheRe.ReplaceAllStringFunc(source, func(m string) string {
 		sub := mustacheRe.FindStringSubmatch(m)
 		if len(sub) < 2 {
-			return ""
+			return m
 		}
-		return lookupVar(vars, sub[1])
+		if v, ok := lookupVar(vars, sub[1]); ok {
+			return v
+		}
+		return m
 	})
 	out = dollarRe.ReplaceAllStringFunc(out, func(m string) string {
 		sub := dollarRe.FindStringSubmatch(m)
 		if len(sub) < 2 {
-			return ""
+			return m
 		}
-		return lookupVar(vars, sub[1])
+		if v, ok := lookupVar(vars, sub[1]); ok {
+			return v
+		}
+		return m
 	})
 	out = percentRe.ReplaceAllStringFunc(out, func(m string) string {
 		sub := percentRe.FindStringSubmatch(m)
 		if len(sub) < 2 {
-			return ""
+			return m
 		}
-		return lookupVar(vars, strings.ToLower(sub[1]))
+		if v, ok := lookupVar(vars, strings.ToLower(sub[1])); ok {
+			return v
+		}
+		return m
 	})
 	return out
 }
 
-func lookupVar(vars map[string]string, key string) string {
+func lookupVar(vars map[string]string, key string) (string, bool) {
 	if v, ok := vars[key]; ok {
-		return v
+		return v, true
 	}
 	if v, ok := vars[strings.ToLower(key)]; ok {
-		return v
+		return v, true
 	}
-	return ""
+	return "", false
 }
 
 func buildTemplateVars(project *model.Project, renderCtx TemplateRenderContext) map[string]string {

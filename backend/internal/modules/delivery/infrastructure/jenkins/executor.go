@@ -115,6 +115,9 @@ func (e *Executor) SyncCredentials(ctx context.Context, folder string, credentia
 	if folder == "" {
 		return errors.New("jenkins folder is required")
 	}
+	if len(credentials) == 0 {
+		return nil
+	}
 	if err := e.ensureFolder(ctx, folder); err != nil {
 		return err
 	}
@@ -178,10 +181,26 @@ func (e *Executor) resourceStatus(ctx context.Context, base string) (int, error)
 }
 
 func (e *Executor) upsertCredentials(ctx context.Context, folder string, credentials []port.JenkinsCredential) error {
+	if len(credentials) == 0 {
+		return nil
+	}
+	if err := e.upsertCredentialsInStore(ctx, folder, credentials); err != nil {
+		return err
+	}
+	if strings.TrimSpace(folder) != "" {
+		if err := e.upsertCredentialsInStore(ctx, "", credentials); err != nil {
+			return fmt.Errorf("sync global jenkins credentials: %w", err)
+		}
+	}
+	return e.verifyCredentialsExist(ctx, folder, credentials)
+}
+
+func (e *Executor) upsertCredentialsInStore(ctx context.Context, folder string, credentials []port.JenkinsCredential) error {
 	manager := gjenkins.CredentialsManager{J: e.client, Folder: folder}
 	existing, err := manager.List(ctx, "_")
 	if err != nil {
-		return fmt.Errorf("list jenkins credentials: %w", err)
+		store := credentialStoreLabel(folder)
+		return fmt.Errorf("list jenkins credentials (%s): %w", store, err)
 	}
 	exists := make(map[string]bool, len(existing))
 	for _, id := range existing {
@@ -215,10 +234,68 @@ func (e *Executor) upsertCredentials(ctx context.Context, folder string, credent
 			}
 		}
 		if err != nil {
-			return fmt.Errorf("upsert jenkins credential %q: %w", credential.ID, err)
+			store := credentialStoreLabel(folder)
+			return fmt.Errorf("upsert jenkins credential %q (%s): %w", credential.ID, store, err)
 		}
+		exists[credential.ID] = true
 	}
 	return nil
+}
+
+func credentialStoreLabel(folder string) string {
+	if strings.TrimSpace(folder) == "" {
+		return "global"
+	}
+	return "folder:" + folder
+}
+
+func (e *Executor) verifyCredentialsExist(ctx context.Context, folder string, credentials []port.JenkinsCredential) error {
+	if err := e.verifyCredentialsInStore(ctx, folder, credentials); err == nil {
+		return nil
+	}
+	if strings.TrimSpace(folder) != "" {
+		if err := e.verifyCredentialsInStore(ctx, "", credentials); err == nil {
+			return nil
+		}
+	}
+	ids := make([]string, 0, len(credentials))
+	for _, credential := range credentials {
+		ids = append(ids, credential.ID)
+	}
+	return fmt.Errorf("jenkins credentials missing after sync: %s", strings.Join(ids, ", "))
+}
+
+func (e *Executor) verifyCredentialsInStore(ctx context.Context, folder string, credentials []port.JenkinsCredential) error {
+	manager := gjenkins.CredentialsManager{J: e.client, Folder: folder}
+	existing, err := manager.List(ctx, "_")
+	if err != nil {
+		return fmt.Errorf("verify jenkins credentials (%s): %w", credentialStoreLabel(folder), err)
+	}
+	present := make(map[string]bool, len(existing))
+	for _, id := range existing {
+		present[id] = true
+	}
+	var missing []string
+	for _, credential := range credentials {
+		if !present[credential.ID] {
+			missing = append(missing, credential.ID)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing in %s: %s", credentialStoreLabel(folder), strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func (e *Executor) ensureBuildCredentials(ctx context.Context, req port.BuildRequest) error {
+	if len(req.Credentials) == 0 {
+		return nil
+	}
+	folder := strings.TrimSpace(req.Folder)
+	if folder == "" {
+		return errors.New("jenkins folder is required to sync build credentials")
+	}
+	return e.SyncCredentials(ctx, folder, req.Credentials)
 }
 
 func jenkinsCredentialValue(credential port.JenkinsCredential) (any, error) {
@@ -226,15 +303,16 @@ func jenkinsCredentialValue(credential port.JenkinsCredential) (any, error) {
 	switch credential.Kind {
 	case "username-password":
 		return gjenkins.UsernameCredentials{
-			ID: credential.ID, Scope: scope, Username: credential.Username, Password: credential.Secret,
+			ID: credential.ID, Scope: scope, Description: credential.Description,
+			Username: credential.Username, Password: credential.Secret,
 		}, nil
 	case "secret-text":
 		return gjenkins.StringCredentials{
-			ID: credential.ID, Scope: scope, Secret: credential.Secret,
+			ID: credential.ID, Scope: scope, Description: credential.Description, Secret: credential.Secret,
 		}, nil
 	case "ssh-private-key":
 		return gjenkins.SSHCredentials{
-			ID: credential.ID, Scope: scope, Username: credential.Username,
+			ID: credential.ID, Scope: scope, Username: credential.Username, Description: credential.Description,
 			PrivateKeySource: &gjenkins.PrivateKey{
 				Value: credential.Secret,
 				Class: gjenkins.KeySourceDirectEntryType,
@@ -252,19 +330,20 @@ func renderJobXML(spec port.JenkinsJobSpec) string {
 		`<flow-definition plugin="workflow-job">` +
 		`<actions/><description/><keepDependencies>false</keepDependencies>` +
 		`<properties><hudson.model.ParametersDefinitionProperty><parameterDefinitions>` +
-		stringParameterXML("BRANCH") +
-		stringParameterXML("CodeVersion") +
-		stringParameterXML("IMAGE_TAG") +
-		stringParameterXML("IMAGE_REPOSITORY") +
+		stringParameterXML("BRANCH", "main") +
+		stringParameterXML("CodeVersion", "") +
+		stringParameterXML("IMAGE_TAG", "") +
+		stringParameterXML("IMAGE_REPOSITORY", "") +
 		`</parameterDefinitions></hudson.model.ParametersDefinitionProperty></properties>` +
 		`<definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">` +
 		`<script>` + script.String() + `</script><sandbox>true</sandbox></definition>` +
 		`<triggers/><disabled>false</disabled></flow-definition>`
 }
 
-func stringParameterXML(name string) string {
+func stringParameterXML(name, defaultValue string) string {
 	return `<hudson.model.StringParameterDefinition><name>` + name +
-		`</name><defaultValue></defaultValue><trim>true</trim></hudson.model.StringParameterDefinition>`
+		`</name><defaultValue>` + defaultValue +
+		`</defaultValue><trim>true</trim></hudson.model.StringParameterDefinition>`
 }
 
 func buildParams(req port.BuildRequest) map[string]string {
@@ -301,6 +380,9 @@ func (e *Executor) RunStreaming(
 	}
 	if strings.TrimSpace(req.GitRefValue) == "" {
 		req.GitRefValue = "main"
+	}
+	if err := e.ensureBuildCredentials(ctx, req); err != nil {
+		return "", fmt.Errorf("ensure jenkins credentials: %w", err)
 	}
 	header := fmt.Sprintf("[jenkins] job=%s branch=%s\n", req.Job, req.GitRefValue)
 	if hub != nil {

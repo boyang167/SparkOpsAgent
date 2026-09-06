@@ -92,16 +92,12 @@ func TestCreateOrUpdateCreatesFolderThenCreatesAndUpdatesJobAndCredential(t *tes
 			_, _ = io.WriteString(w, `{"name":"team-a"}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/createItem":
 			folderExists = true
-		case r.Method == http.MethodGet && r.URL.Path == "/job/team-a/credentials/store/folder/domain/_/api/json/":
-			if credentialExists {
-				_, _ = io.WriteString(w, `{"credentials":[{"id":"`+credentialID+`"}]}`)
-			} else {
-				_, _ = io.WriteString(w, `{"credentials":[]}`)
-			}
-		case r.Method == http.MethodPost && r.URL.Path == "/job/team-a/credentials/store/folder/domain/_/createCredentials":
+		case r.Method == http.MethodGet && matchCredentialStoreList(r.URL.Path):
+			writeCredentialList(w, credentialID, credentialExists)
+		case r.Method == http.MethodPost && matchCredentialStoreCreate(r.URL.Path):
 			createdCredentialXML = readRequestBody(t, r)
 			credentialExists = true
-		case r.Method == http.MethodPost && r.URL.Path == "/job/team-a/credentials/store/folder/domain/_/credential/"+credentialID+"/config.xml":
+		case r.Method == http.MethodPost && matchCredentialStoreUpdate(r.URL.Path, credentialID):
 			updatedCredentialXML = readRequestBody(t, r)
 		case r.Method == http.MethodGet && strings.TrimSuffix(r.URL.Path, "/") == "/job/team-a/job/orders/api/json":
 			if !jobExists {
@@ -154,16 +150,12 @@ func TestSyncCredentialsCreatesAndUpdatesCredential(t *testing.T) {
 			}
 		case r.Method == http.MethodPost && r.URL.Path == "/createItem":
 			folderExists = true
-		case r.Method == http.MethodGet && r.URL.Path == "/job/team-a/credentials/store/folder/domain/_/api/json/":
-			if credentialExists {
-				_, _ = io.WriteString(w, `{"credentials":[{"id":"`+credentialID+`"}]}`)
-			} else {
-				_, _ = io.WriteString(w, `{"credentials":[]}`)
-			}
-		case r.Method == http.MethodPost && r.URL.Path == "/job/team-a/credentials/store/folder/domain/_/createCredentials":
+		case r.Method == http.MethodGet && matchCredentialStoreList(r.URL.Path):
+			writeCredentialList(w, credentialID, credentialExists)
+		case r.Method == http.MethodPost && matchCredentialStoreCreate(r.URL.Path):
 			createdCredentialXML = readRequestBody(t, r)
 			credentialExists = true
-		case r.Method == http.MethodPost && r.URL.Path == "/job/team-a/credentials/store/folder/domain/_/credential/"+credentialID+"/config.xml":
+		case r.Method == http.MethodPost && matchCredentialStoreUpdate(r.URL.Path, credentialID):
 			updatedCredentialXML = readRequestBody(t, r)
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -199,16 +191,12 @@ func TestCreateOrUpdateRecoversFromConcurrentFolderJobAndCredentialCreates(t *te
 		case r.Method == http.MethodPost && r.URL.Path == "/createItem":
 			folderExists = true
 			w.WriteHeader(http.StatusConflict)
-		case r.Method == http.MethodGet && r.URL.Path == "/job/team-a/credentials/store/folder/domain/_/api/json/":
-			if credentialExists {
-				_, _ = io.WriteString(w, `{"credentials":[{"id":"`+credentialID+`"}]}`)
-			} else {
-				_, _ = io.WriteString(w, `{"credentials":[]}`)
-			}
-		case r.Method == http.MethodPost && r.URL.Path == "/job/team-a/credentials/store/folder/domain/_/createCredentials":
+		case r.Method == http.MethodGet && matchCredentialStoreList(r.URL.Path):
+			writeCredentialList(w, credentialID, credentialExists)
+		case r.Method == http.MethodPost && matchCredentialStoreCreate(r.URL.Path):
 			credentialExists = true
 			w.WriteHeader(http.StatusConflict)
-		case r.Method == http.MethodPost && r.URL.Path == "/job/team-a/credentials/store/folder/domain/_/credential/"+credentialID+"/config.xml":
+		case r.Method == http.MethodPost && matchCredentialStoreUpdate(r.URL.Path, credentialID):
 			updatedCredentialXML = readRequestBody(t, r)
 		case r.Method == http.MethodGet && strings.TrimSuffix(r.URL.Path, "/") == "/job/team-a/job/orders/api/json":
 			if !jobExists {
@@ -288,6 +276,71 @@ func TestMockExecutorRecordsSpecsAndKeepsPredictableBuildOutput(t *testing.T) {
 	require.Contains(t, output, "BUILD SUCCESS")
 }
 
+func TestRunStreamingEnsuresMissingCredentialsBeforeBuild(t *testing.T) {
+	const credentialID = "sparkops-workspace-git"
+	var folderExists, jobExists, credentialExists bool
+	var credentialCreatedBeforeBuild bool
+	buildInvoked := false
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/crumbIssuer/api/json"):
+			http.NotFound(w, r)
+		case r.Method == http.MethodGet && strings.TrimSuffix(r.URL.Path, "/") == "/job/team-a/api/json":
+			if !folderExists {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = io.WriteString(w, `{"name":"team-a"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/createItem":
+			folderExists = true
+		case r.Method == http.MethodGet && matchCredentialStoreList(r.URL.Path):
+			writeCredentialList(w, credentialID, credentialExists)
+		case r.Method == http.MethodPost && matchCredentialStoreCreate(r.URL.Path):
+			credentialExists = true
+			if !buildInvoked {
+				credentialCreatedBeforeBuild = true
+			}
+		case r.Method == http.MethodPost && matchCredentialStoreUpdate(r.URL.Path, credentialID):
+		case r.Method == http.MethodGet && strings.TrimSuffix(r.URL.Path, "/") == "/job/team-a/job/orders/api/json":
+			if !jobExists {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = io.WriteString(w, `{"name":"orders","url":"`+server.URL+`/job/team-a/job/orders"}`)
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/job/team-a/job/orders/build"):
+			buildInvoked = true
+			w.Header().Set("Location", server.URL+"/queue/item/1/")
+			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodGet && r.URL.Path == "/queue/item/1/api/json":
+			_, _ = io.WriteString(w, `{"id":1,"executable":{"number":1,"url":"`+server.URL+`/job/team-a/job/orders/1/"}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/job/team-a/job/orders/1/api/json":
+			_, _ = io.WriteString(w, `{"number":1,"building":false,"result":"SUCCESS"}`)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/logText/progressiveText"):
+			w.Header().Set("X-Text-Size", "0")
+			_, _ = io.WriteString(w, "")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	folderExists = true
+	jobExists = true
+	executor := &Executor{client: gjenkins.CreateJenkins(server.Client(), server.URL)}
+
+	_, err := executor.RunStreaming(context.Background(), kernel.NewBuildID(), port.BuildRequest{
+		Folder: "team-a", Job: "orders", GitRefValue: "main",
+		Namespace: "team-a", ProjectName: "orders", ImageTag: "tag-1", ImageRepository: "registry/orders",
+		Credentials: []port.JenkinsCredential{{
+			ID: credentialID, Username: "git", Secret: "token", Kind: "username-password",
+		}},
+	}, nil)
+
+	require.NoError(t, err)
+	require.True(t, credentialCreatedBeforeBuild)
+	require.True(t, buildInvoked)
+}
+
 func TestRunStreamingEnforcesConfiguredTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
@@ -345,4 +398,25 @@ func readRequestBody(t *testing.T, r *http.Request) string {
 	body, err := io.ReadAll(r.Body)
 	require.NoError(t, err)
 	return strings.TrimSpace(string(body))
+}
+
+func matchCredentialStoreList(path string) bool {
+	return strings.Contains(path, "/credentials/store/") && strings.Contains(path, "/api/json")
+}
+
+func matchCredentialStoreCreate(path string) bool {
+	return strings.Contains(path, "/credentials/store/") && strings.Contains(path, "/createCredentials")
+}
+
+func matchCredentialStoreUpdate(path, credentialID string) bool {
+	return strings.Contains(path, "/credentials/store/") &&
+		strings.Contains(path, "/credential/"+credentialID+"/config.xml")
+}
+
+func writeCredentialList(w http.ResponseWriter, credentialID string, credentialExists bool) {
+	if credentialExists {
+		_, _ = io.WriteString(w, `{"credentials":[{"id":"`+credentialID+`"}]}`)
+		return
+	}
+	_, _ = io.WriteString(w, `{"credentials":[]}`)
 }

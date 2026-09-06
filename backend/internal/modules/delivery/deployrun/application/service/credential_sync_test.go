@@ -62,15 +62,15 @@ func TestCredentialSyncServiceSyncsAffectedProjects(t *testing.T) {
 			ProjectID:   projectID,
 			Namespace:   "team-a",
 			Git: deployport.DeploymentSecret{
-				ID: gitID, Username: "git-user",
+				ID: gitID, Username: "git-user", ServiceType: "GitLab",
 				Credentials: deployport.DeploymentCredentials{Token: "git-token"},
 			},
 			Harbor: deployport.DeploymentSecret{
-				ID: harborID, Username: "registry-user",
+				ID: harborID, Username: "registry-user", ServiceType: "Harbor",
 				Credentials: deployport.DeploymentCredentials{Password: "registry-password"},
 			},
 			Jenkins: deployport.DeploymentSecret{
-				ID: jenkinsID, Username: "jenkins-user",
+				ID: jenkinsID, Username: "jenkins-user", ServiceType: "Jenkins",
 				Credentials: deployport.DeploymentCredentials{APIKey: "jenkins-api-key"},
 			},
 		},
@@ -81,7 +81,8 @@ func TestCredentialSyncServiceSyncsAffectedProjects(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "team-a", recorder.folder)
 	require.Len(t, recorder.credentials, 3)
-	require.Equal(t, deployservice.StableCredentialID(workspaceID, gitID), recorder.credentials[0].ID)
+	require.Equal(t, deployservice.JenkinsCredentialID(lister.project.Git, lister.project.Namespace), recorder.credentials[0].ID)
+	require.Contains(t, recorder.credentials[0].Description, "GitLab 代码仓库")
 }
 
 func TestCredentialSyncServiceSkipsNonJenkinsSecretTypes(t *testing.T) {

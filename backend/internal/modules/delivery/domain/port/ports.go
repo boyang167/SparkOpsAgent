@@ -21,10 +21,11 @@ type ProjectAutomationContext struct {
 }
 
 type JenkinsCredential struct {
-	ID       string
-	Username string
-	Secret   string
-	Kind     string
+	ID          string
+	Description string
+	Username    string
+	Secret      string
+	Kind        string
 }
 
 type JenkinsJobSpec struct {
@@ -44,6 +45,7 @@ type BuildRequest struct {
 	ImageRepository string
 	RollbackOf      int
 	Timeout         time.Duration
+	Credentials     []JenkinsCredential
 }
 
 type GitBranchLister interface {

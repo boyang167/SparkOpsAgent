@@ -145,6 +145,7 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			Namespace: project.Namespace, ProjectName: project.Name,
 			Folder: project.Namespace, Job: project.Name, GitRefValue: run.GitRefValue,
 			ImageTag: run.ImageTag, ImageRepository: project.ImageRepository, Timeout: o.jenkinsTimeout,
+			Credentials: BuildJenkinsCredentials(workspaceID, project),
 		}, func(callbackCtx context.Context, build *buildmodel.Build) error {
 			run.BuildID = &build.ID
 			if err := run.Transition(model.StatusBuilding, o.clock()); err != nil {

@@ -174,3 +174,5 @@ https://192.168.5.21:6443
 rabbit mq :
 admin 
 BdsDevopsAdmin!2024
+
+jenkins mcp  tokne: 11523e6d669dc0fd29f9420036120a753e

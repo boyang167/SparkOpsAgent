@@ -278,7 +278,8 @@ func newPipelineFixture(t *testing.T, mode pipelineMode) *pipelineFixture {
 	prepare := service.NewPrepareService("-build", acceptancePipelineRenderer{}).
 		UseJenkinsFactory(func(deployport.DeploymentSecret) (deliveryport.JenkinsExecutor, error) {
 			return jenkinsMock, nil
-		})
+		}).
+		UseHarborEnsurer(func(context.Context, deployport.DeploymentSecret, string) error { return nil })
 	orchestrator := service.NewOrchestrator(
 		repo, builds, reader,
 		prepare,

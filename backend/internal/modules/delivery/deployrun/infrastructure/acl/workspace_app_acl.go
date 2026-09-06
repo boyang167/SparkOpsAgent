@@ -297,6 +297,7 @@ func (a *WorkspaceAppACL) Load(ctx context.Context, wsID kernel.WorkspaceID, pro
 	}
 	return port.ProjectDeploymentContext{
 		WorkspaceID: wsID, ProjectID: projectID, Name: project.Name, Namespace: project.Namespace,
+		GitURL: project.GitURL,
 		Jenkinsfile: jenkinsfile, ServiceYAML: serviceYAML, DeploymentYAML: deploymentYAML,
 		ImageRepository:  imageRepository,
 		EnableStaticScan: resources.EnableStaticScan, Cluster: cluster,

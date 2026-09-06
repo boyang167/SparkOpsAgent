@@ -102,4 +102,9 @@ func TestGenerateArtifactsForDemoGitRepo(t *testing.T) {
 			t.Fatalf("rendered pipeline missing %q", needle)
 		}
 	}
+	for _, forbidden := range []string{"Prepare Registry", "/api/v2.0/projects/"} {
+		if strings.Contains(pipeline, forbidden) {
+			t.Fatalf("rendered pipeline should not contain %q", forbidden)
+		}
+	}
 }
