@@ -256,14 +256,14 @@ export function ProjectOverviewCard({
                 title={deploymentAction?.reason ?? undefined}
                 aria-describedby={deploymentAction?.reason ? `deploy-reason-${project.id}` : undefined}
               >
-                {deploymentAction?.label ?? "部署"}
+                {deploymentAction?.label ?? "发布"}
               </button>
             ) : (
               <Link
                 href={deployHref ?? detailsHref ?? `/projects/${project.id}`}
                 className="project-action-btn is-deploy"
               >
-                部署
+                发布
               </Link>
             )
           ) : onContinueConfig ? (

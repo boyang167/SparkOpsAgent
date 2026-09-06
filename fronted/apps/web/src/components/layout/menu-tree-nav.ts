@@ -8,7 +8,7 @@ export type NavGroupFromMenu = {
 };
 
 function visibleChildren(node: MenuTreeVM): MenuTreeVM[] {
-  return (node.children ?? []).filter((child) => !child.hidden && child.path.startsWith("/"));
+  return (node.children ?? []).filter((child) => !child.hidden && child.path.trim().startsWith("/"));
 }
 
 function groupId(node: MenuTreeVM): string {
@@ -19,7 +19,7 @@ function groupId(node: MenuTreeVM): string {
 }
 
 function toLeaves(nodes: MenuTreeVM[]): Array<{ href: string; label: string }> {
-  return nodes.map((node) => ({ href: node.path, label: node.title }));
+  return nodes.map((node) => ({ href: node.path.trim(), label: node.title }));
 }
 
 /** 将治理菜单树转为侧栏分组。带子菜单的插件根提升为独立分组，避免只显示「Kubernetes管理」一层。 */

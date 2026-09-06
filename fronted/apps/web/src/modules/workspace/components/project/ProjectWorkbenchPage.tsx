@@ -19,8 +19,9 @@ import { ProjectConfigurePanel } from "./ProjectConfigurePanel";
 import { ProjectDetailModal } from "./ProjectDetailModal";
 import { ProjectReviewModal } from "./ProjectReviewModal";
 import { ProjectDeployModal } from "./ProjectDeployModal";
+import { ReleaseWizardModal } from "@/modules/delivery/cd/components/ReleaseWizard/ReleaseWizardModal";
 import { projectDisplayName } from "./project-utils";
-import { deploymentEntryAction } from "./deployment-gate";
+import { releaseEntryAction } from "./deployment-gate";
 
 interface ProjectWorkbenchPageProps {
   workspaceId: string;
@@ -41,6 +42,7 @@ export function ProjectWorkbenchPage({
   const [configureOpen, setConfigureOpen] = useState(initialConfigure);
   const [detailOpen, setDetailOpen] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
+  const [releaseOpen, setReleaseOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState(project);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -112,9 +114,8 @@ export function ProjectWorkbenchPage({
       const preflightError = [deploymentOptionsError, deploymentListError]
         .filter(Boolean)
         .join("；");
-      return deploymentEntryAction(
+      return releaseEntryAction(
         currentProject,
-        deploymentOptions,
         activeRun,
         deploymentLoading,
         preflightError || null,
@@ -122,7 +123,6 @@ export function ProjectWorkbenchPage({
     },
     [
       currentProject,
-      deploymentOptions,
       activeRun,
       deploymentLoading,
       deploymentOptionsError,
@@ -180,12 +180,17 @@ export function ProjectWorkbenchPage({
         project={currentProject}
         onContinueConfig={() => setConfigureOpen(true)}
         onDeploy={() => {
+          if (activeRun) {
+            setError(null);
+            setDeployOpen(true);
+            return;
+          }
           if (deployAction.disabled) {
-            setError(deployAction.reason ?? "当前不可部署，请先补齐部署条件");
+            setError(deployAction.reason ?? "当前不可发布，请先通过项目审核");
             return;
           }
           setError(null);
-          setDeployOpen(true);
+          setReleaseOpen(true);
         }}
         onViewDetails={() => setDetailOpen(true)}
         onSubmitReview={() => void submitReview()}
@@ -200,6 +205,9 @@ export function ProjectWorkbenchPage({
       />
 
       <div className="flex flex-wrap items-center justify-end gap-2">
+        <button type="button" className="btn-ghost text-sm" onClick={() => setDeployOpen(true)}>
+          经典单集群部署
+        </button>
         <EditProjectForm workspaceId={workspaceId} project={currentProject} />
         <DeleteProjectButton
           workspaceId={workspaceId}
@@ -227,6 +235,15 @@ export function ProjectWorkbenchPage({
         agents={agents}
         workflows={workflows}
         onClose={() => setDetailOpen(false)}
+      />
+      <ReleaseWizardModal
+        open={releaseOpen}
+        workspaceId={workspaceId}
+        project={currentProject}
+        deployments={deploymentPage}
+        options={deploymentOptions}
+        onClose={() => setReleaseOpen(false)}
+        onBuildStarted={handleRunChanged}
       />
       <ProjectDeployModal
         open={deployOpen}

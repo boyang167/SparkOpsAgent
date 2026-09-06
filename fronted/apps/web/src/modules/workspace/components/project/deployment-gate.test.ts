@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DeploymentOptionsVM, DeploymentRunVM } from "@sparkops/contracts/delivery";
 import type { SecretVM } from "@sparkops/contracts/secret";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
-import { deploymentEntryAction, deploymentGate } from "./deployment-gate";
+import { deploymentEntryAction, deploymentGate, releaseEntryAction } from "./deployment-gate";
 
 function approvedProject(patch: Partial<ProjectVM> = {}): ProjectVM {
   return {
@@ -90,8 +90,8 @@ describe("deploymentEntryAction", () => {
       deploymentEntryAction(approvedProject(), null, null, true, null),
     ).toEqual({
       disabled: true,
-      label: "部署检查中…",
-      reason: "正在检查部署条件",
+      label: "发布检查中…",
+      reason: "正在检查发布条件",
     });
   });
 
@@ -115,8 +115,18 @@ describe("deploymentEntryAction", () => {
       ),
     ).toMatchObject({
       disabled: true,
-      label: "部署",
+      label: "发布",
       reason: "项目审核通过；缺少 Jenkins 密钥；未授权集群",
+    });
+  });
+});
+
+describe("releaseEntryAction", () => {
+  it("opens the wizard without Jenkins or cluster secrets", () => {
+    expect(releaseEntryAction(approvedProject(), null, false, null)).toEqual({
+      disabled: false,
+      label: "发布",
+      reason: null,
     });
   });
 });

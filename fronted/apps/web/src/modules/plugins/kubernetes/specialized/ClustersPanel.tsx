@@ -183,18 +183,28 @@ export function ClustersPanel({
 
   async function saveChange() {
     if (!changing || !canManage || !workspaceId) return;
+    const nextAddress = changeForm.api_address.trim();
+    const addressChanged = nextAddress !== (changing.server ?? "").trim();
+    const hasCredential = changeForm.kube_config.trim() !== "";
+    if (addressChanged && !nextAddress) {
+      setCreateError({ code: "INVALID_REQUEST", message: "请填写接口地址" });
+      return;
+    }
     setCreateSaving(true);
     setCreateError(null);
     try {
       let clusterId = changing.id;
-      if (changeForm.kube_config.trim()) {
-        const updated = await platform.registerWorkspaceCluster(workspaceId, {
+      if (hasCredential || addressChanged) {
+        const registerPayload: Parameters<typeof platform.registerWorkspaceCluster>[1] = {
           cluster_name: changeForm.name.trim() || changing.name,
-          api_address: changeForm.api_address.trim() || changing.server,
-          server: changeForm.api_address.trim() || changing.server,
-          kube_type: changeForm.kube_type,
-          kube_config: changeForm.kube_config,
-        });
+          api_address: nextAddress || changing.server,
+          server: nextAddress || changing.server,
+        };
+        if (hasCredential) {
+          registerPayload.kube_type = changeForm.kube_type;
+          registerPayload.kube_config = changeForm.kube_config;
+        }
+        const updated = await platform.registerWorkspaceCluster(workspaceId, registerPayload);
         clusterId = updated.id;
       }
       const updated = await k8sFetch<KubernetesCluster>(
@@ -454,7 +464,7 @@ export function ClustersPanel({
           </>
         }
       >
-        <p className="text-sm text-muted mb-3">密钥字段为 *** 时可直接保存以保留原值。修改接口地址需同时粘贴凭证。</p>
+        <p className="text-sm text-muted mb-3">密钥字段为 *** 时可直接保存以保留原值。修改接口地址可直接保存；如需更新凭证请重新粘贴。</p>
         <ApiErrorBanner error={createError} />
         <ClusterCreateForm value={changeForm} onChange={setChangeForm} nameReadOnly credentialOptional />
       </Modal>

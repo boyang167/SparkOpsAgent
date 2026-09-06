@@ -162,3 +162,6 @@ http://192.168.5.24:8929/cicd/test-repo.git
 jenkins : root 123456
 
 https://192.168.5.21:6443
+rabbit mq :
+admin 
+BdsDevopsAdmin!2024

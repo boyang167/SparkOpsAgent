@@ -31,6 +31,7 @@ const nextConfig: NextConfig = {
     "@sparkops/bff-modules",
     "@sparkops/upstream",
     "@sparkops/web-sdk",
+    "@xyflow/react",
   ],
   experimental: {
     // Plugin ZIP upload limit mirrors backend MaxRequestBytes (51 MiB).

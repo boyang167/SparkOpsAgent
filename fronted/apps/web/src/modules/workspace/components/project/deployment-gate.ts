@@ -9,7 +9,7 @@ export interface DeploymentGateResult {
 
 export interface DeploymentEntryAction {
   disabled: boolean;
-  label: "部署" | "部署检查中…" | "查看部署进度";
+  label: "发布" | "发布检查中…" | "查看部署进度" | "部署" | "部署检查中…";
   reason: string | null;
 }
 
@@ -60,7 +60,7 @@ export function deploymentEntryAction(
   loadError: string | null,
 ): DeploymentEntryAction {
   if (loading) {
-    return { disabled: true, label: "部署检查中…", reason: "正在检查部署条件" };
+    return { disabled: true, label: "发布检查中…", reason: "正在检查发布条件" };
   }
   if (activeRun) {
     return { disabled: false, label: "查看部署进度", reason: null };
@@ -76,5 +76,27 @@ export function deploymentEntryAction(
     missing.push("部署条件不可用");
   }
   const reason = [...new Set(missing)].join("；");
-  return { disabled: Boolean(reason), label: "部署", reason: reason || null };
+  return { disabled: Boolean(reason), label: "发布", reason: reason || null };
+}
+
+/** 打开发布向导：只需审核通过。Jenkins / 集群门禁在向导「先构建」里再拦。 */
+export function releaseEntryAction(
+  project: ProjectVM,
+  activeRun: DeploymentRunVM | null,
+  loading: boolean,
+  loadError: string | null,
+): DeploymentEntryAction {
+  if (loading) {
+    return { disabled: true, label: "发布检查中…", reason: "正在检查发布条件" };
+  }
+  if (activeRun) {
+    return { disabled: false, label: "查看部署进度", reason: null };
+  }
+  if (project.review_status !== "approved") {
+    return { disabled: true, label: "发布", reason: "项目审核通过" };
+  }
+  if (loadError) {
+    return { disabled: true, label: "发布", reason: loadError };
+  }
+  return { disabled: false, label: "发布", reason: null };
 }

@@ -12,7 +12,7 @@ import { ProjectCard } from "./project/ProjectCard";
 import { ProjectCreateModal } from "./project/ProjectCreateModal";
 import { ProjectConfigurePanel } from "./project/ProjectConfigurePanel";
 import { ProjectDetailModal } from "./project/ProjectDetailModal";
-import { ProjectDeployModal } from "./project/ProjectDeployModal";
+import { ReleaseWizardModal } from "@/modules/delivery/cd/components/ReleaseWizard/ReleaseWizardModal";
 import { ProjectReviewModal } from "./project/ProjectReviewModal";
 import {
   formatDateTime,
@@ -353,7 +353,7 @@ export function ProjectPanel({
                                 if (action === "deploy") {
                                   return (
                                     <button type="button" onClick={() => setDeployProject(project)}>
-                                      部署
+                                      发布
                                     </button>
                                   );
                                 }
@@ -445,7 +445,7 @@ export function ProjectPanel({
       />
 
       {deployProject ? (
-        <ProjectDeployModal
+        <ReleaseWizardModal
           open={Boolean(deployProject)}
           workspaceId={workspaceId}
           project={deployProject}

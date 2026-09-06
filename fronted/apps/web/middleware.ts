@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { cleanedPathname } from "@/lib/normalize-pathname";
 
 const publicPaths = ["/login", "/register", "/callback"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const normalized = cleanedPathname(pathname);
+  if (normalized) {
+    const url = req.nextUrl.clone();
+    url.pathname = normalized;
+    return NextResponse.redirect(url);
+  }
 
   if (publicPaths.some((path) => pathname.startsWith(path))) {
     return NextResponse.next();
