@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { product, secret } from "@sparkops/web-sdk";
-import type { DeploymentRunListVM } from "@sparkops/contracts/delivery";
+import type { DeploymentRunListVM, DeploymentRunVM } from "@sparkops/contracts/delivery";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import type { SecretVM } from "@sparkops/contracts/secret";
 import type { TemplateVM } from "@sparkops/contracts/product";
@@ -20,11 +20,12 @@ import {
   shouldShowEditConfigAction,
 } from "./project-progress";
 import type { DeploymentEntryAction } from "./deployment-gate";
-import { ProjectBuildLogsTab } from "./ProjectBuildLogsTab";
+import { ProjectDeploymentConsolePanel } from "./ProjectDeploymentConsolePanel";
 import { ProjectYamlTab } from "./ProjectYamlTab";
 import { ProjectJenkinsPreview } from "./ProjectJenkinsPreview";
 import { ProjectPublishedOverview } from "./ProjectPublishedOverview";
 import { ProjectUnpublishedOverview } from "./ProjectUnpublishedOverview";
+import { ProjectTemplateArtifactsCollapsible } from "./ProjectTemplateArtifactsCollapsible";
 import { hasSuccessfulDeployment, isPublishedProjectView } from "./project-deployment-state";
 import { ProjectDockerfileViewer } from "./ProjectDockerfileViewer";
 import { countGeneratedTemplates } from "./project-template-render";
@@ -48,6 +49,7 @@ interface ProjectServiceDetailPageProps {
   onProjectUpdated?: (project: ProjectVM) => void;
   deploymentPage?: DeploymentRunListVM | null;
   deploymentLoading?: boolean;
+  onRunChanged?: (run: DeploymentRunVM) => void;
 }
 
 function ProjectIcon({ language }: { language?: string }) {
@@ -221,6 +223,7 @@ export function ProjectServiceDetailPage({
   onProjectUpdated,
   deploymentPage = null,
   deploymentLoading = false,
+  onRunChanged,
 }: ProjectServiceDetailPageProps) {
   const [secrets, setSecrets] = useState<SecretVM[]>([]);
   const [templates, setTemplates] = useState<TemplateVM[]>([]);
@@ -468,12 +471,21 @@ export function ProjectServiceDetailPage({
             />
           ) : null}
           {published && tab === "build-logs" ? (
-            <ProjectBuildLogsTab workspaceId={workspaceId} project={project} active={tab === "build-logs"} />
+            <ProjectDeploymentConsolePanel
+              workspaceId={workspaceId}
+              project={project}
+              deploymentPage={deploymentPage}
+              active={tab === "build-logs"}
+              onRunChanged={onRunChanged}
+            />
           ) : null}
           {published && tab === "storage" ? <PlaceholderTab title="持久化存储" /> : null}
           {published && tab === "webhooks" ? <PlaceholderTab title="Webhooks" /> : null}
           {published && tab === "monitor" ? <PlaceholderTab title="监控" /> : null}
         </div>
+        {published ? (
+          <ProjectTemplateArtifactsCollapsible workspaceId={workspaceId} project={project} />
+        ) : null}
       </div>
 
       <div className="project-service-footer-links">

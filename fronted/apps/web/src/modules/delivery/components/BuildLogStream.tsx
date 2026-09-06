@@ -7,10 +7,11 @@ interface BuildLogStreamProps {
   buildId: string;
   initialLog?: string;
   active: boolean;
+  terminal?: boolean;
   onDone?: () => void;
 }
 
-export function BuildLogStream({ buildId, initialLog, active, onDone }: BuildLogStreamProps) {
+export function BuildLogStream({ buildId, initialLog, active, terminal = false, onDone }: BuildLogStreamProps) {
   const logRef = useRef<HTMLPreElement>(null);
   const logTextRef = useRef(initialLog ?? "");
 
@@ -45,7 +46,11 @@ export function BuildLogStream({ buildId, initialLog, active, onDone }: BuildLog
   return (
     <pre
       ref={logRef}
-      className="text-xs bg-[var(--surface)] p-3 rounded-lg overflow-x-auto whitespace-pre-wrap max-h-96 overflow-y-auto font-mono"
+      className={
+        terminal
+          ? "project-build-logs-terminal"
+          : "text-xs bg-[var(--surface)] p-3 rounded-lg overflow-x-auto whitespace-pre-wrap max-h-96 overflow-y-auto font-mono"
+      }
     >
       {logTextRef.current || "等待日志…"}
     </pre>

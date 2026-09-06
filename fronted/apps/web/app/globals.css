@@ -8652,6 +8652,88 @@ textarea {
   max-height: 32rem;
 }
 
+.project-build-logs-terminal {
+  margin: 0;
+  min-height: 24rem;
+  max-height: 32rem;
+  padding: 1rem;
+  overflow: auto;
+  border-radius: 6px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.project-service-tab-nav-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.project-service-tab-nav-row .project-service-tab-nav {
+  border-bottom: 0;
+  flex: 1 1 auto;
+}
+
+.project-service-tab-nav-action {
+  margin: 0.35rem 0.75rem 0.35rem 0;
+  white-space: nowrap;
+}
+
+.project-template-artifacts-collapsible {
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0 0 10px 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.project-template-artifacts-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border: 0;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  color: var(--foreground);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.project-template-artifacts-toggle:hover {
+  background: #eef2f7;
+}
+
+.project-template-artifacts-toggle-label {
+  font-weight: 600;
+}
+
+.project-template-artifacts-toggle-action {
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.project-template-artifacts-body {
+  border-top: 1px solid var(--border);
+  padding: 0.75rem 1rem 1rem;
+}
+
+.project-template-artifacts-inner-nav {
+  margin-bottom: 0.75rem;
+}
+
+.project-template-artifacts-inner-body {
+  min-height: 12rem;
+}
+
 @media (max-width: 960px) {
   .project-build-logs-layout {
     grid-template-columns: 1fr;

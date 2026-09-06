@@ -48,10 +48,8 @@ export function ProjectWorkbenchPage({
   const deploymentGenerationRef = useRef(0);
   const releaseHandledRef = useRef(false);
 
-  const tab = parseProjectDetailTab(
-    searchParams.get("tab"),
-    isPublishedProjectView(deploymentPage, searchParams.get("tab")),
-  );
+  const published = isPublishedProjectView(deploymentPage, searchParams.get("tab"));
+  const tab = parseProjectDetailTab(searchParams.get("tab"), published);
 
   useEffect(() => {
     setCurrentProject(project);
@@ -237,6 +235,7 @@ export function ProjectWorkbenchPage({
         onProjectUpdated={(updated) => setCurrentProject(updated)}
         deploymentPage={deploymentPage}
         deploymentLoading={deploymentLoading}
+        onRunChanged={handleRunChanged}
       />
 
       <ProjectConfigurePanel
@@ -256,7 +255,13 @@ export function ProjectWorkbenchPage({
         workspaceId={workspaceId}
         project={currentProject}
         initialRun={selectedRun ?? activeRun}
+        deploymentPage={deploymentPage}
         onRunChanged={handleRunChanged}
+        onDeployStarted={() => {
+          setDeployOpen(false);
+          setSelectedRun(null);
+          setTab("build-logs");
+        }}
         onClose={() => {
           setDeployOpen(false);
           setSelectedRun(null);

@@ -4,32 +4,36 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CreateDeploymentCommand,
   DeploymentOptionsVM,
+  DeploymentRunListVM,
   DeploymentRunVM,
 } from "@sparkops/contracts/delivery";
 import type { SecretVM } from "@sparkops/contracts/secret";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { BffError } from "@sparkops/contracts";
 import { delivery, secret } from "@sparkops/web-sdk";
-import { BuildLogStream } from "@/modules/delivery/components/BuildLogStream";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { GitRefValueField } from "./GitRefValueField";
+import { ProjectDeploymentConsolePanel } from "./ProjectDeploymentConsolePanel";
 import { deploymentGate } from "./deployment-gate";
 import {
   createSerialPoller,
   shouldContinueDeploymentPoll,
 } from "./deployment-poll";
+import { isActiveDeploymentRun } from "./deployment-console-utils";
 
 interface ProjectDeployModalProps {
   open: boolean;
   workspaceId: string;
   project: ProjectVM;
   initialRun?: DeploymentRunVM | null;
+  deploymentPage?: DeploymentRunListVM | null;
+  initialConsoleView?: boolean;
   onRunChanged?: (run: DeploymentRunVM) => void;
+  onDeployStarted?: (run: DeploymentRunVM) => void;
   onClose: () => void;
 }
 
-const ACTIVE_STATUSES = new Set(["queued", "preparing", "building", "deploying"]);
 const STAGES = ["preparing", "building", "deploying"] as const;
 
 export function ProjectDeployModal({
@@ -37,7 +41,10 @@ export function ProjectDeployModal({
   workspaceId,
   project,
   initialRun = null,
+  deploymentPage = null,
+  initialConsoleView = false,
   onRunChanged,
+  onDeployStarted,
   onClose,
 }: ProjectDeployModalProps) {
   const [options, setOptions] = useState<DeploymentOptionsVM>({ clusters: [], missing: [] });
@@ -54,6 +61,7 @@ export function ProjectDeployModal({
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"form" | "console">("form");
   const mountedRef = useRef(true);
   const pollGenerationRef = useRef(0);
   const initialRunRef = useRef(initialRun);
@@ -73,6 +81,7 @@ export function ProjectDeployModal({
     setStreamOutput("");
     setError(null);
     setLoading(true);
+    setViewMode(initialRunRef.current || initialConsoleView ? "console" : "form");
     setGitRefType(project.git_ref_type === "tag" ? "tag" : "branch");
     setGitRefValue(project.git_ref_value ?? "");
     setImageTag("");
@@ -82,15 +91,16 @@ export function ProjectDeployModal({
       secret.listSecrets(workspaceId),
       delivery.listDeployments(project.id, workspaceId),
     ])
-      .then(([nextOptions, nextSecrets, deploymentPage]) => {
+      .then(([nextOptions, nextSecrets, deploymentList]) => {
         if (cancelled) return;
         const nextActive =
-          deploymentPage.items.find((item) => ACTIVE_STATUSES.has(item.status)) ?? null;
+          deploymentList.items.find((item) => isActiveDeploymentRun(item)) ?? null;
         const selectedRun = initialRunRef.current ?? nextActive;
         setOptions(nextOptions);
         setSecrets(nextSecrets);
         setActiveRun(selectedRun);
         setRun(selectedRun);
+        if (selectedRun) setViewMode("console");
         const preferred = nextOptions.clusters.some(
           (cluster) => cluster.id === project.default_cluster_id,
         )
@@ -110,17 +120,17 @@ export function ProjectDeployModal({
     return () => {
       cancelled = true;
     };
-  }, [open, project, workspaceId]);
+  }, [open, project, workspaceId, initialConsoleView]);
 
   useEffect(() => {
-    if (!open || !run || !ACTIVE_STATUSES.has(run.status)) return;
+    if (!open || !run || !isActiveDeploymentRun(run) || viewMode !== "form") return;
     const generation = ++pollGenerationRef.current;
     let stopStream: (() => void) | null = null;
     const poller = createSerialPoller({
       refresh: () => delivery.getDeployment(run.id, workspaceId),
       onValue: (next) => {
         setRun(next);
-        setActiveRun(ACTIVE_STATUSES.has(next.status) ? next : null);
+        setActiveRun(isActiveDeploymentRun(next) ? next : null);
         onRunChanged?.(next);
         if (!shouldContinueDeploymentPoll(next.status, generation, pollGenerationRef.current)) {
           stopStream?.();
@@ -158,7 +168,7 @@ export function ProjectDeployModal({
       poller.stop();
       stopStream?.();
     };
-  }, [open, run?.id, run?.status, workspaceId, onRunChanged]);
+  }, [open, run?.id, run?.status, viewMode, workspaceId, onRunChanged]);
 
   const gate = useMemo(
     () => deploymentGate(project, secrets, options, activeRun),
@@ -168,6 +178,12 @@ export function ProjectDeployModal({
     () => secrets.find((item) => item.id === project.secret_id)?.service_type,
     [project.secret_id, secrets],
   );
+
+  const consoleDeploymentPage = useMemo((): DeploymentRunListVM | null => {
+    if (deploymentPage?.items.length) return deploymentPage;
+    if (!run) return null;
+    return { items: [run], total: 1, page: 1, page_size: 20 };
+  }, [deploymentPage, run]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -189,7 +205,9 @@ export function ProjectDeployModal({
       if (!mountedRef.current) return;
       setRun(created);
       setActiveRun(created);
+      setViewMode("console");
       onRunChanged?.(created);
+      onDeployStarted?.(created);
     } catch (err) {
       if (mountedRef.current) {
         setError(err instanceof BffError ? err.message : "创建部署失败");
@@ -217,103 +235,138 @@ export function ProjectDeployModal({
   }
 
   const stage = run?.current_stage;
+  const showConsole = viewMode === "console" && run && consoleDeploymentPage;
 
   return (
     <Modal open={open} onClose={onClose} title="部署项目" size="xl">
       <form className="stack-md" onSubmit={submit}>
         {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-        {loading ? <p className="text-muted">正在加载部署选项…</p> : null}
-        {!loading && gate.missing.length > 0 ? (
-          <InlineAlert tone="error">
-            <span>当前不可部署：</span>
-            <ul>
-              {gate.missing.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </InlineAlert>
-        ) : null}
 
-        <label className="stack-sm">
-          <span>目标集群</span>
-          <select
-            className="input"
-            value={clusterId}
-            onChange={(event) => setClusterId(event.target.value)}
-            disabled={loading || Boolean(run)}
-            required
-          >
-            <option value="">请选择授权集群</option>
-            {options.clusters.map((cluster) => (
-              <option key={cluster.id} value={cluster.id}>
-                {cluster.cluster_name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="stack-sm">
-          <span>Git 引用类型</span>
-          <select
-            className="input"
-            value={gitRefType}
-            onChange={(event) => {
-              setGitRefType(event.target.value as "branch" | "tag");
-              setGitRefValue("");
-            }}
-            disabled={Boolean(run)}
-          >
-            <option value="branch">分支</option>
-            <option value="tag">标签</option>
-          </select>
-        </label>
-
-        <GitRefValueField
-          key={`${open ? "open" : "closed"}-${gitRefType}`}
-          workspaceId={workspaceId}
-          gitUrl={project.git_url}
-          secretId={project.secret_id}
-          gitServiceType={gitServiceType}
-          refType={gitRefType}
-          value={gitRefValue}
-          onChange={setGitRefValue}
-          disabled={Boolean(run)}
-        />
-
-        <label className="stack-sm">
-          <span>镜像版本（可选）</span>
-          <input
-            className="input"
-            value={imageTag}
-            onChange={(event) => setImageTag(event.target.value)}
-            disabled={Boolean(run)}
-            maxLength={255}
-            placeholder="留空则使用本次部署 ID 去连字符后的前 12 位"
+        {showConsole ? (
+          <ProjectDeploymentConsolePanel
+            workspaceId={workspaceId}
+            project={project}
+            deploymentPage={consoleDeploymentPage}
+            active={open}
+            selectedRunId={run.id}
+            onRunChanged={onRunChanged}
+            headerExtra={
+              <button
+                type="button"
+                className="btn btn-secondary text-sm"
+                onClick={() => setViewMode("form")}
+              >
+                切换部署表单
+              </button>
+            }
           />
-        </label>
-
-        {run ? (
-          <section className="stack-md" aria-live="polite">
-            <h3>部署进度：{run.status}</h3>
-            <ol className="flex flex-wrap gap-2">
-              {STAGES.map((item) => (
-                <li key={item} className={stage === item ? "project-tag project-tag-blue" : "project-tag"}>
-                  {item}
-                </li>
-              ))}
-            </ol>
-            {streamOutput ? <pre className="text-xs whitespace-pre-wrap">{streamOutput}</pre> : null}
-            {run.status === "building" && run.build_id ? (
-              <BuildLogStream buildId={run.build_id} active initialLog="" />
+        ) : (
+          <>
+            {loading ? <p className="text-muted">正在加载部署选项…</p> : null}
+            {!loading && gate.missing.length > 0 ? (
+              <InlineAlert tone="error">
+                <span>当前不可部署：</span>
+                <ul>
+                  {gate.missing.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </InlineAlert>
             ) : null}
-          </section>
-        ) : null}
+
+            <label className="stack-sm">
+              <span>目标集群</span>
+              <select
+                className="input"
+                value={clusterId}
+                onChange={(event) => setClusterId(event.target.value)}
+                disabled={loading || Boolean(run)}
+                required
+              >
+                <option value="">请选择授权集群</option>
+                {options.clusters.map((cluster) => (
+                  <option key={cluster.id} value={cluster.id}>
+                    {cluster.cluster_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="stack-sm">
+              <span>Git 引用类型</span>
+              <select
+                className="input"
+                value={gitRefType}
+                onChange={(event) => {
+                  setGitRefType(event.target.value as "branch" | "tag");
+                  setGitRefValue("");
+                }}
+                disabled={Boolean(run)}
+              >
+                <option value="branch">分支</option>
+                <option value="tag">标签</option>
+              </select>
+            </label>
+
+            <GitRefValueField
+              key={`${open ? "open" : "closed"}-${gitRefType}`}
+              workspaceId={workspaceId}
+              gitUrl={project.git_url}
+              secretId={project.secret_id}
+              gitServiceType={gitServiceType}
+              refType={gitRefType}
+              value={gitRefValue}
+              onChange={setGitRefValue}
+              disabled={Boolean(run)}
+            />
+
+            <label className="stack-sm">
+              <span>镜像版本（可选）</span>
+              <input
+                className="input"
+                value={imageTag}
+                onChange={(event) => setImageTag(event.target.value)}
+                disabled={Boolean(run)}
+                maxLength={255}
+                placeholder="留空则使用本次部署 ID 去连字符后的前 12 位"
+              />
+            </label>
+
+            {run ? (
+              <section className="stack-md" aria-live="polite">
+                <div className="flex items-center justify-between gap-2">
+                  <h3>部署进度：{run.status}</h3>
+                  <button
+                    type="button"
+                    className="btn btn-secondary text-sm"
+                    onClick={() => setViewMode("console")}
+                  >
+                    查看控制台
+                  </button>
+                </div>
+                <ol className="flex flex-wrap gap-2">
+                  {STAGES.map((item) => (
+                    <li
+                      key={item}
+                      className={stage === item ? "project-tag project-tag-blue" : "project-tag"}
+                    >
+                      {item}
+                    </li>
+                  ))}
+                </ol>
+                {streamOutput ? (
+                  <pre className="text-xs whitespace-pre-wrap">{streamOutput}</pre>
+                ) : null}
+              </section>
+            ) : null}
+          </>
+        )}
 
         <div className="flex justify-end gap-2">
           <button type="button" className="btn-secondary" onClick={onClose}>
             {run ? "关闭" : "取消"}
           </button>
-          {!run ? (
+          {!showConsole && !run ? (
             <button
               type="submit"
               className="btn"
@@ -321,7 +374,8 @@ export function ProjectDeployModal({
             >
               {submitting ? "提交中…" : "开始部署"}
             </button>
-          ) : ACTIVE_STATUSES.has(run.status) ? (
+          ) : null}
+          {!showConsole && run && isActiveDeploymentRun(run) ? (
             <button
               type="button"
               className="btn-secondary"
