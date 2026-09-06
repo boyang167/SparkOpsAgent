@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { product, secret, workspace } from "@sparkops/web-sdk";
+import { useEffect, useMemo, useState } from "react";
+import { product, platform, secret, workspace } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { CreateProjectCommand, ProjectVM } from "@sparkops/contracts/workspace";
 import type { SecretVM } from "@sparkops/contracts/secret";
 import type { TemplateVM } from "@sparkops/contracts/product";
+import type { AuthorizedClusterVM } from "@sparkops/contracts/delivery";
 import { Modal } from "@/components/ui/Modal";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { ProjectCreateStep2 } from "./ProjectCreateStep2";
@@ -82,12 +83,13 @@ export function ProjectConfigurePanel({
 }: ProjectConfigurePanelProps) {
   const [step, setStep] = useState(2);
   const [form, setForm] = useState<CreateProjectCommand>(() => projectToForm(project));
-  const openedRef = useRef(false);
   const [gitServiceType, setGitServiceType] = useState<"GitLab" | "GitHub">("GitLab");
   const [secrets, setSecrets] = useState<SecretVM[]>([]);
   const [templates, setTemplates] = useState<TemplateVM[]>([]);
+  const [clusters, setClusters] = useState<AuthorizedClusterVM[]>([]);
   const [loadingSecrets, setLoadingSecrets] = useState(false);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [loadingClusters, setLoadingClusters] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,43 +99,46 @@ export function ProjectConfigurePanel({
   );
 
   useEffect(() => {
-    if (!open) {
-      openedRef.current = false;
-      return;
-    }
-    if (project.review_status === "pending") return;
-    if (openedRef.current) return;
-    openedRef.current = true;
+    if (!open || project.review_status === "pending") return;
     setStep(2);
     setForm(projectToForm(project));
     setError(null);
+  }, [open, project.id, project.review_status]);
+
+  useEffect(() => {
+    if (!open || project.review_status === "pending") return;
+
     let cancelled = false;
     void (async () => {
       setLoadingTemplates(true);
       setLoadingSecrets(true);
+      setLoadingClusters(true);
       try {
-        const [templateList, secretList] = await Promise.all([
+        const [templateList, secretList, clusterList] = await Promise.all([
           product.listTemplates(workspaceId),
           secret.listSecrets(workspaceId),
+          platform.listAuthorizedWorkspaceClusters(workspaceId),
         ]);
         if (cancelled) return;
         setTemplates(templateList);
         setSecrets(secretList);
+        setClusters(clusterList);
       } catch {
         if (cancelled) return;
         setTemplates([]);
         setSecrets([]);
+        setClusters([]);
       } finally {
-        if (!cancelled) {
-          setLoadingTemplates(false);
-          setLoadingSecrets(false);
-        }
+        setLoadingTemplates(false);
+        setLoadingSecrets(false);
+        setLoadingClusters(false);
       }
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [open, project, workspaceId]);
+  }, [open, workspaceId, project.review_status]);
 
   function updateForm(patch: Partial<CreateProjectCommand>) {
     setForm((prev) => ({ ...prev, ...patch }));
@@ -222,6 +227,11 @@ export function ProjectConfigurePanel({
     }
   }
 
+  const configComplete = isProjectConfigComplete(project);
+  const editingExistingConfig = configComplete;
+  const reviewWillReset =
+    project.review_status === "approved" || project.review_status === "rejected";
+
   if (project.review_status === "pending") {
     return (
       <Modal open={open} onClose={onClose} title="项目审核中">
@@ -234,12 +244,17 @@ export function ProjectConfigurePanel({
     <Modal
       open={open}
       onClose={onClose}
-      title="继续配置项目"
+      title={editingExistingConfig ? "编辑项目配置" : "继续配置项目"}
       description="请仔细核对每一项内容和参数。"
       size="xl"
       panelClassName="project-create-modal"
     >
       <div className="project-configure-panel">
+        {reviewWillReset ? (
+          <InlineAlert tone="warning">
+            修改 Git、模板、密钥或默认集群等配置后，审核状态将重置，需重新提交审核后方可发布。
+          </InlineAlert>
+        ) : null}
         <div className="project-wizard-steps is-modal is-ref">
           {CONFIG_STEPS.map((title, index) => {
             const n = index + 1;
@@ -281,8 +296,10 @@ export function ProjectConfigurePanel({
               updateForm={updateForm}
               templates={templates}
               secrets={secrets}
+              clusters={clusters}
               loadingTemplates={loadingTemplates}
               loadingSecrets={loadingSecrets}
+              loadingClusters={loadingClusters}
             />
           )}
         </div>

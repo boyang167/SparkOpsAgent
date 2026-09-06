@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -14,6 +15,8 @@ import (
 	workspace "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/clientcmd/api"
 	"gorm.io/gorm"
 )
 
@@ -140,6 +143,18 @@ func (a *WorkspaceAppACL) loadAuthorizedCluster(ctx context.Context, wsID kernel
 	return port.DeploymentCluster{ID: id, Name: row.ClusterName, Server: row.Server}, nil
 }
 
+func (a *WorkspaceAppACL) loadKubernetesCredentials(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	clusterID kernel.ClusterInfoID,
+	secretID string,
+) (port.DeploymentSecret, error) {
+	if strings.TrimSpace(secretID) != "" {
+		return a.loadKubernetesSecret(ctx, wsID, secretID)
+	}
+	return a.loadKubernetesFromCluster(ctx, wsID, clusterID)
+}
+
 func (a *WorkspaceAppACL) loadKubernetesSecret(ctx context.Context, wsID kernel.WorkspaceID, secretID string) (port.DeploymentSecret, error) {
 	secret, err := a.loadSecret(ctx, wsID, secretID, "Kubernetes")
 	if err != nil {
@@ -149,6 +164,71 @@ func (a *WorkspaceAppACL) loadKubernetesSecret(ctx context.Context, wsID kernel.
 		return port.DeploymentSecret{}, deploydomain.ErrKubernetesKubeconfigMissing
 	}
 	return secret, nil
+}
+
+type clusterCredentialRow struct {
+	ID                       string
+	ClusterName              string
+	Server                   string
+	UserName                 string
+	CertificateAuthorityData string
+	ClientCertificateData    string
+	ClientKeyData            string
+	BearerToken              string
+}
+
+func (a *WorkspaceAppACL) loadKubernetesFromCluster(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	clusterID kernel.ClusterInfoID,
+) (port.DeploymentSecret, error) {
+	var row clusterCredentialRow
+	err := a.db.WithContext(ctx).Raw(`
+		SELECT c.id, c.cluster_name, c.server, c.user_name,
+			c.certificate_authority_data, c.client_certificate_data,
+			c.client_key_data, c.bearer_token
+		FROM platform_admin.cluster_info AS c
+		INNER JOIN platform_admin.workspace_clusters AS g
+			ON g.cluster_id = c.id AND g.workspace_id = ?
+		WHERE c.id = ?`, wsID.String(), clusterID.String()).Scan(&row).Error
+	if err != nil {
+		return port.DeploymentSecret{}, err
+	}
+	if row.ID == "" {
+		return port.DeploymentSecret{}, deploydomain.ErrDeploymentClusterNotAuthorized
+	}
+	kubeconfig, err := kubeconfigFromClusterCredentials(row)
+	if err != nil {
+		return port.DeploymentSecret{}, deploydomain.ErrKubernetesKubeconfigMissing
+	}
+	return port.DeploymentSecret{
+		ServiceType: "Kubernetes",
+		Credentials: port.DeploymentCredentials{ExtraConfig: string(kubeconfig)},
+	}, nil
+}
+
+func kubeconfigFromClusterCredentials(row clusterCredentialRow) ([]byte, error) {
+	server := strings.TrimSpace(row.Server)
+	if server == "" {
+		return nil, fmt.Errorf("missing server")
+	}
+	authInfo := &api.AuthInfo{
+		Token:                 strings.TrimSpace(row.BearerToken),
+		ClientCertificateData: []byte(row.ClientCertificateData),
+		ClientKeyData:         []byte(row.ClientKeyData),
+	}
+	if authInfo.Token == "" && (len(authInfo.ClientCertificateData) == 0 || len(authInfo.ClientKeyData) == 0) {
+		return nil, fmt.Errorf("missing credentials")
+	}
+	cfg := api.NewConfig()
+	cfg.Clusters["sparkops"] = &api.Cluster{
+		Server:                   server,
+		CertificateAuthorityData: []byte(row.CertificateAuthorityData),
+	}
+	cfg.AuthInfos["sparkops"] = authInfo
+	cfg.Contexts["sparkops"] = &api.Context{Cluster: "sparkops", AuthInfo: "sparkops"}
+	cfg.CurrentContext = "sparkops"
+	return clientcmd.Write(*cfg)
 }
 
 func (a *WorkspaceAppACL) Load(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID, selected kernel.ClusterInfoID) (port.ProjectDeploymentContext, error) {
@@ -167,12 +247,17 @@ func (a *WorkspaceAppACL) Load(ctx context.Context, wsID kernel.WorkspaceID, pro
 	}
 	clusterID := selected
 	if clusterID.UUID == uuid.Nil {
-		if project.DefaultClusterID == nil {
-			return port.ProjectDeploymentContext{}, deploydomain.ErrDeploymentBindingMissing
-		}
-		clusterID, err = kernel.ParseClusterInfoID(*project.DefaultClusterID)
-		if err != nil {
-			return port.ProjectDeploymentContext{}, deploydomain.ErrDeploymentBindingMissing
+		buildCluster, loadErr := a.loadBuildCluster(ctx, wsID)
+		if loadErr != nil {
+			if project.DefaultClusterID == nil {
+				return port.ProjectDeploymentContext{}, deploydomain.ErrDeploymentBindingMissing
+			}
+			clusterID, err = kernel.ParseClusterInfoID(*project.DefaultClusterID)
+			if err != nil {
+				return port.ProjectDeploymentContext{}, deploydomain.ErrDeploymentBindingMissing
+			}
+		} else {
+			clusterID = buildCluster.ID
 		}
 	}
 	cluster, err := a.loadAuthorizedCluster(ctx, wsID, clusterID)
@@ -191,7 +276,7 @@ func (a *WorkspaceAppACL) Load(ctx context.Context, wsID kernel.WorkspaceID, pro
 	if err != nil {
 		return port.ProjectDeploymentContext{}, err
 	}
-	kubernetes, err := a.loadKubernetesSecret(ctx, wsID, value(project.KubernetesSecretID))
+	kubernetes, err := a.loadKubernetesCredentials(ctx, wsID, clusterID, value(project.KubernetesSecretID))
 	if err != nil {
 		return port.ProjectDeploymentContext{}, err
 	}
@@ -328,24 +413,39 @@ func (a *WorkspaceAppACL) ListAuthorizedClusters(ctx context.Context, wsID kerne
 		ID          string
 		ClusterName string
 		Server      string
+		PriorityID  int
 	}
 	if err := a.db.WithContext(ctx).Raw(`
-		SELECT c.id, c.cluster_name, c.server
+		SELECT c.id, c.cluster_name, c.server, g.priority_id
 		FROM platform_admin.cluster_info AS c
 		INNER JOIN platform_admin.workspace_clusters AS g ON g.cluster_id = c.id
 		WHERE g.workspace_id = ?
-		ORDER BY c.priority_id ASC`, wsID.String()).Scan(&rows).Error; err != nil {
+		ORDER BY g.priority_id ASC`, wsID.String()).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]port.DeploymentCluster, 0, len(rows))
-	for _, row := range rows {
+	for i, row := range rows {
 		id, err := kernel.ParseClusterInfoID(row.ID)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, port.DeploymentCluster{ID: id, Name: row.ClusterName, Server: row.Server})
+		out = append(out, port.DeploymentCluster{
+			ID: id, Name: row.ClusterName, Server: row.Server,
+			IsBuildEnv: i == 0, PriorityID: row.PriorityID,
+		})
 	}
 	return out, nil
+}
+
+func (a *WorkspaceAppACL) loadBuildCluster(ctx context.Context, wsID kernel.WorkspaceID) (port.DeploymentCluster, error) {
+	clusters, err := a.ListAuthorizedClusters(ctx, wsID)
+	if err != nil {
+		return port.DeploymentCluster{}, err
+	}
+	if len(clusters) == 0 {
+		return port.DeploymentCluster{}, deploydomain.ErrDeploymentClusterNotAuthorized
+	}
+	return clusters[0], nil
 }
 
 func value(input *string) string {

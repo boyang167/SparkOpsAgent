@@ -96,6 +96,17 @@ export function createPlatformUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async reorderAuthorizedWorkspaceClusters(workspaceId: string, clusterIds: string[]) {
+      return upstreamFetch<{ reordered: true }>(
+        `/api/v1/workspaces/${workspaceId}/clusters/order`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ cluster_ids: clusterIds }),
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
     async grantWorkspaceCluster(workspaceId: string, clusterId: string) {
       return upstreamFetch<{ granted: true }>(
         `/api/v1/admin/workspaces/${workspaceId}/clusters`,

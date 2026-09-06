@@ -30,38 +30,3 @@ export function deleteCronJob(workspaceId: string, projectId: string, cronJobId:
     },
   );
 }
-
-export async function listK8sResources(
-  workspaceId: string,
-  projectId: string,
-  kind: "configmaps" | "ingresses" | "services" | "pvcs" | "virtualservices",
-) {
-  return bffFetch<{ items: Record<string, unknown>[] }>(
-    `/workspaces/${workspaceId}/projects/${projectId}/k8s/${kind}`,
-    { workspaceId },
-  );
-}
-
-export async function listConsulKV(workspaceId: string, prefix?: string) {
-  const qs = prefix ? `?prefix=${encodeURIComponent(prefix)}` : "";
-  const data = await bffFetch<{ items: { key: string; value: string; updated_at?: string }[] }>(
-    `/workspaces/${workspaceId}/consul/kv${qs}`,
-    { workspaceId },
-  );
-  return data.items;
-}
-
-export function putConsulKV(workspaceId: string, input: { key: string; value: string }) {
-  return bffFetch<{ saved: boolean }>(`/workspaces/${workspaceId}/consul/kv`, {
-    method: "PUT",
-    body: JSON.stringify(input),
-    workspaceId,
-  });
-}
-
-export function deleteConsulKV(workspaceId: string, key: string) {
-  return bffFetch<{ deleted: boolean }>(
-    `/workspaces/${workspaceId}/consul/kv?key=${encodeURIComponent(key)}`,
-    { method: "DELETE", workspaceId },
-  );
-}

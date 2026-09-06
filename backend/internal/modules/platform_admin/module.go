@@ -49,6 +49,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewListWorkspaceClustersHandler(repo),
 		command.NewGrantWorkspaceClusterHandler(repo),
 		command.NewRevokeWorkspaceClusterHandler(repo),
+		command.NewReorderWorkspaceClustersHandler(repo),
 		query.NewGetDashboardHandler(repo),
 		query.NewGetStatisticsHandler(repo),
 		query.NewGetMonitorOverviewHandler(repo),
@@ -85,6 +86,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, secretWrite, handler.RegisterWorkspaceCluster)
 	c.Engine.DELETE("/api/v1/workspaces/:wsId/clusters/:clusterId",
 		auth, ws, wsMember, secretWrite, handler.RevokeWorkspaceCluster)
+	c.Engine.PUT("/api/v1/workspaces/:wsId/clusters/order",
+		auth, ws, wsMember, secretWrite, handler.ReorderWorkspaceClusters)
 	c.Engine.GET("/api/v1/admin/tools", auth, superAdmin, handler.ListTools)
 	c.Engine.GET("/api/v1/admin/proclaims", auth, superAdmin, handler.ListProclaims)
 	c.Engine.POST("/api/v1/admin/proclaims", auth, superAdmin, handler.CreateProclaim)

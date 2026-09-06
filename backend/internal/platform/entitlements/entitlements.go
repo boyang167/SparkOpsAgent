@@ -100,11 +100,9 @@ func PathEntitlement(path string) string {
 		return "delivery"
 	case strings.HasPrefix(path, "/monitor"):
 		return "observability"
-	case strings.HasPrefix(path, "/config/webhooks"):
+	case strings.HasPrefix(path, "/config/webhooks"), strings.HasPrefix(path, "/config/mcp"):
 		return "mcp"
-	case strings.HasPrefix(path, "/runtime") || strings.HasPrefix(path, "/cronjobs") ||
-		strings.HasPrefix(path, "/config") || strings.HasPrefix(path, "/discovery") ||
-		strings.HasPrefix(path, "/security"):
+	case strings.HasPrefix(path, "/runtime") || strings.HasPrefix(path, "/cronjobs"):
 		return "k8s"
 	case strings.HasPrefix(path, "/projects"), strings.HasPrefix(path, "/templates"):
 		return "agent"

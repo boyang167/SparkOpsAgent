@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BffError } from "@sparkops/contracts";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { delivery, workspace } from "@sparkops/web-sdk";
@@ -13,15 +13,13 @@ import type {
 import type { AgentVM } from "@sparkops/contracts/agent";
 import type { WorkflowVM } from "@sparkops/contracts/workflow";
 import { InlineAlert } from "@/components/ui/InlineAlert";
-import { EditProjectForm, DeleteProjectButton } from "../ProjectSettings";
-import { ProjectWorkbenchCard } from "./ProjectWorkbenchCard";
 import { ProjectConfigurePanel } from "./ProjectConfigurePanel";
-import { ProjectDetailModal } from "./ProjectDetailModal";
 import { ProjectReviewModal } from "./ProjectReviewModal";
 import { ProjectDeployModal } from "./ProjectDeployModal";
-import { ReleaseWizardModal } from "@/modules/delivery/cd/components/ReleaseWizard/ReleaseWizardModal";
+import { ProjectServiceDetailPage } from "./ProjectServiceDetailPage";
 import { projectDisplayName } from "./project-utils";
-import { releaseEntryAction } from "./deployment-gate";
+import { deploymentEntryAction } from "./deployment-gate";
+import { parseProjectDetailTab, type ProjectDetailTab } from "./project-detail-tabs";
 
 interface ProjectWorkbenchPageProps {
   workspaceId: string;
@@ -34,15 +32,13 @@ interface ProjectWorkbenchPageProps {
 export function ProjectWorkbenchPage({
   workspaceId,
   project,
-  agents,
-  workflows,
   initialConfigure = false,
 }: ProjectWorkbenchPageProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [configureOpen, setConfigureOpen] = useState(initialConfigure);
-  const [detailOpen, setDetailOpen] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
-  const [releaseOpen, setReleaseOpen] = useState(false);
+  const [selectedRun, setSelectedRun] = useState<DeploymentRunVM | null>(null);
   const [currentProject, setCurrentProject] = useState(project);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -53,6 +49,9 @@ export function ProjectWorkbenchPage({
   const [deploymentOptionsError, setDeploymentOptionsError] = useState<string | null>(null);
   const [deploymentListError, setDeploymentListError] = useState<string | null>(null);
   const deploymentGenerationRef = useRef(0);
+  const releaseHandledRef = useRef(false);
+
+  const tab = parseProjectDetailTab(searchParams.get("tab"));
 
   useEffect(() => {
     setCurrentProject(project);
@@ -114,8 +113,9 @@ export function ProjectWorkbenchPage({
       const preflightError = [deploymentOptionsError, deploymentListError]
         .filter(Boolean)
         .join("；");
-      return releaseEntryAction(
+      return deploymentEntryAction(
         currentProject,
+        deploymentOptions,
         activeRun,
         deploymentLoading,
         preflightError || null,
@@ -123,12 +123,14 @@ export function ProjectWorkbenchPage({
     },
     [
       currentProject,
+      deploymentOptions,
       activeRun,
       deploymentLoading,
       deploymentOptionsError,
       deploymentListError,
     ],
   );
+
   const handleRunChanged = useCallback((run: DeploymentRunVM) => {
     setDeploymentPage((current) => {
       if (!current) {
@@ -144,6 +146,47 @@ export function ProjectWorkbenchPage({
       };
     });
   }, []);
+
+  const setTab = useCallback(
+    (next: ProjectDetailTab) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === "overview") {
+        params.delete("tab");
+      } else {
+        params.set("tab", next);
+      }
+      params.delete("release");
+      const query = params.toString();
+      router.replace(query ? `/projects/${currentProject.id}?${query}` : `/projects/${currentProject.id}`);
+    },
+    [currentProject.id, router, searchParams],
+  );
+
+  const openDeploy = useCallback(() => {
+    if (activeRun) {
+      setError(null);
+      setSelectedRun(activeRun);
+      setDeployOpen(true);
+      return;
+    }
+    if (deployAction.disabled) {
+      setError(deployAction.reason ?? "当前不可发布，请先完成部署前置条件");
+      return;
+    }
+    setError(null);
+    setSelectedRun(null);
+    setDeployOpen(true);
+  }, [activeRun, deployAction.disabled, deployAction.reason]);
+
+  useEffect(() => {
+    if (searchParams.get("release") !== "1" || releaseHandledRef.current) return;
+    releaseHandledRef.current = true;
+    openDeploy();
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("release");
+    const query = params.toString();
+    router.replace(query ? `/projects/${currentProject.id}?${query}` : `/projects/${currentProject.id}`);
+  }, [currentProject.id, openDeploy, router, searchParams]);
 
   async function submitReview() {
     if (!window.confirm(`确定提交项目「${projectDisplayName(currentProject)}」审核？提交后配置将暂时锁定。`)) {
@@ -176,45 +219,30 @@ export function ProjectWorkbenchPage({
     <div className="stack-lg">
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
 
-      <ProjectWorkbenchCard
+      <ProjectServiceDetailPage
+        workspaceId={workspaceId}
         project={currentProject}
-        onContinueConfig={() => setConfigureOpen(true)}
-        onDeploy={() => {
-          if (activeRun) {
-            setError(null);
-            setDeployOpen(true);
-            return;
-          }
-          if (deployAction.disabled) {
-            setError(deployAction.reason ?? "当前不可发布，请先通过项目审核");
-            return;
-          }
+        tab={tab}
+        onTabChange={setTab}
+        deploymentPage={deploymentPage}
+        deploymentLoading={deploymentLoading}
+        deploymentListError={deploymentListError}
+        deployAction={deployAction}
+        onRelease={openDeploy}
+        onViewDeployProgress={() => {
           setError(null);
-          setReleaseOpen(true);
+          setSelectedRun(activeRun);
+          setDeployOpen(true);
         }}
-        onViewDetails={() => setDetailOpen(true)}
+        onConfigure={() => setConfigureOpen(true)}
         onSubmitReview={() => void submitReview()}
         onReview={() => setReviewOpen(true)}
-        deploymentAction={deployAction}
-        deploymentSummary={{
-          total: deploymentPage?.total ?? null,
-          latest: deploymentPage?.items[0] ?? null,
-          loading: deploymentLoading,
-          error: deploymentListError,
+        onViewRun={(run) => {
+          setSelectedRun(run);
+          setDeployOpen(true);
         }}
+        onProjectUpdated={(updated) => setCurrentProject(updated)}
       />
-
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <button type="button" className="btn-ghost text-sm" onClick={() => setDeployOpen(true)}>
-          经典单集群部署
-        </button>
-        <EditProjectForm workspaceId={workspaceId} project={currentProject} />
-        <DeleteProjectButton
-          workspaceId={workspaceId}
-          projectId={currentProject.id}
-          projectName={currentProject.name}
-        />
-      </div>
 
       <ProjectConfigurePanel
         open={configureOpen}
@@ -228,30 +256,16 @@ export function ProjectWorkbenchPage({
         }}
       />
 
-      <ProjectDetailModal
-        open={detailOpen}
-        workspaceId={workspaceId}
-        project={currentProject}
-        agents={agents}
-        workflows={workflows}
-        onClose={() => setDetailOpen(false)}
-      />
-      <ReleaseWizardModal
-        open={releaseOpen}
-        workspaceId={workspaceId}
-        project={currentProject}
-        deployments={deploymentPage}
-        options={deploymentOptions}
-        onClose={() => setReleaseOpen(false)}
-        onBuildStarted={handleRunChanged}
-      />
       <ProjectDeployModal
         open={deployOpen}
         workspaceId={workspaceId}
         project={currentProject}
-        initialRun={activeRun}
+        initialRun={selectedRun ?? activeRun}
         onRunChanged={handleRunChanged}
-        onClose={() => setDeployOpen(false)}
+        onClose={() => {
+          setDeployOpen(false);
+          setSelectedRun(null);
+        }}
       />
       <ProjectReviewModal
         open={reviewOpen}
@@ -266,3 +280,4 @@ export function ProjectWorkbenchPage({
     </div>
   );
 }
+

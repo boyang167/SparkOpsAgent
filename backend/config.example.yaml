@@ -25,13 +25,6 @@ k8s:
 runtime:
   driver: "mock"
   cluster: ""
-  istio_enabled: false
-consul:
-  driver: "mock"
-  address: ""
-  token: ""
-  datacenter: ""
-  key_prefix: "sparkops"
 delivery:
   driver: "mock"
   url: ""

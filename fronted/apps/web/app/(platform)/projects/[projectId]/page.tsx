@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { WORKSPACE_COOKIE } from "@sparkops/bff-core";
@@ -11,7 +12,7 @@ import { loadWorkflows } from "@/server/loaders/workflows";
 
 interface ProjectPageProps {
   params: Promise<{ projectId: string }>;
-  searchParams: Promise<{ configure?: string }>;
+  searchParams: Promise<{ configure?: string; release?: string; tab?: string }>;
 }
 
 export default async function ProjectPage({ params, searchParams }: ProjectPageProps) {
@@ -44,12 +45,14 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
   const workflows = await loadWorkflows(workspaceId, projectId);
 
   return (
-    <ProjectWorkbenchPage
-      workspaceId={workspaceId}
-      project={project}
-      agents={agents}
-      workflows={workflows}
-      initialConfigure={query.configure === "1"}
-    />
+    <Suspense fallback={<div className="text-muted p-4">加载项目详情…</div>}>
+      <ProjectWorkbenchPage
+        workspaceId={workspaceId}
+        project={project}
+        agents={agents}
+        workflows={workflows}
+        initialConfigure={query.configure === "1"}
+      />
+    </Suspense>
   );
 }

@@ -83,3 +83,16 @@ export function projectPrimaryAction(project: ProjectVM): ProjectPrimaryAction {
   if (project.review_status === "pending") return "pending";
   return "configure";
 }
+
+/** 审核中锁定配置；其余状态可打开配置向导修改。 */
+export function canEditProjectConfig(project: Pick<ProjectVM, "review_status">) {
+  return (project.review_status ?? "none") !== "pending";
+}
+
+export function shouldShowEditConfigAction(project: ProjectVM) {
+  return canEditProjectConfig(project) && isProjectConfigComplete(project);
+}
+
+export function projectConfigActionLabel(project: ProjectVM) {
+  return isProjectConfigComplete(project) ? "修改配置" : "继续配置";
+}

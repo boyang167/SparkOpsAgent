@@ -80,6 +80,9 @@ func (r *workspaceClusterRepo) ListWorkspaceClusters(context.Context, kernel.Wor
 func (r *workspaceClusterRepo) WorkspaceClusterGranted(context.Context, kernel.WorkspaceID, kernel.ClusterInfoID) (bool, error) {
 	return r.granted, nil
 }
+func (r *workspaceClusterRepo) ReorderWorkspaceClusters(context.Context, kernel.WorkspaceID, []kernel.ClusterInfoID) error {
+	return nil
+}
 
 func TestGrantWorkspaceClusterRejectsUnknownCluster(t *testing.T) {
 	repo := &workspaceClusterRepo{}

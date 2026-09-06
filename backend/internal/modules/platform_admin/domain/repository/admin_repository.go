@@ -55,4 +55,5 @@ type AdminRepository interface {
 	SaveProclaim(ctx context.Context, proclaim *Proclaim) error
 	CountProjectsByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) (int, error)
 	CountProductsByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) (int, error)
+	ReorderWorkspaceClusters(ctx context.Context, wsID kernel.WorkspaceID, clusterIDs []kernel.ClusterInfoID) error
 }

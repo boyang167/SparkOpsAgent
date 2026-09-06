@@ -11,8 +11,6 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 import { ProjectCard } from "./project/ProjectCard";
 import { ProjectCreateModal } from "./project/ProjectCreateModal";
 import { ProjectConfigurePanel } from "./project/ProjectConfigurePanel";
-import { ProjectDetailModal } from "./project/ProjectDetailModal";
-import { ReleaseWizardModal } from "@/modules/delivery/cd/components/ReleaseWizard/ReleaseWizardModal";
 import { ProjectReviewModal } from "./project/ProjectReviewModal";
 import {
   formatDateTime,
@@ -24,7 +22,7 @@ import {
   projectDisplayName,
   statusBadgeClass,
 } from "./project/project-utils";
-import { projectPrimaryAction } from "./project/project-progress";
+import { projectConfigActionLabel, projectPrimaryAction, shouldShowEditConfigAction } from "./project/project-progress";
 
 interface ProjectPanelProps {
   workspaceId: string;
@@ -60,9 +58,7 @@ export function ProjectPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(initialCreateOpen);
-  const [detailProject, setDetailProject] = useState<ProjectVM | null>(null);
   const [configureProject, setConfigureProject] = useState<ProjectVM | null>(null);
-  const [deployProject, setDeployProject] = useState<ProjectVM | null>(null);
   const [reviewProject, setReviewProject] = useState<ProjectVM | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("card");
@@ -292,11 +288,11 @@ export function ProjectPanel({
                       key={project.id}
                       project={project}
                       onArchive={(p) => void onArchive(p)}
-                      onViewDetails={(p) => setDetailProject(p)}
+                      onViewDetails={(p) => router.push(`/projects/${p.id}`)}
                       onContinueConfig={(p) => setConfigureProject(p)}
                       onSubmitReview={(p) => void onSubmitReview(p)}
                       onReview={(p) => setReviewProject(p)}
-                      onDeploy={(p) => setDeployProject(p)}
+                      onDeploy={(p) => router.push(`/projects/${p.id}?release=1`)}
                     />
                   ))}
                 </div>
@@ -344,7 +340,7 @@ export function ProjectPanel({
                           <td>{formatDateTime(project.created_at)}</td>
                           <td>
                             <div className="project-row-actions">
-                              <button type="button" onClick={() => setDetailProject(project)}>
+                              <button type="button" onClick={() => router.push(`/projects/${project.id}`)}>
                                 查看详情
                               </button>
                               <Link href={`/projects/${project.id}`}>进入项目</Link>
@@ -352,8 +348,49 @@ export function ProjectPanel({
                                 const action = projectPrimaryAction(project);
                                 if (action === "deploy") {
                                   return (
-                                    <button type="button" onClick={() => setDeployProject(project)}>
-                                      发布
+                                    <>
+                                      {shouldShowEditConfigAction(project) ? (
+                                        <button type="button" onClick={() => setConfigureProject(project)}>
+                                          修改配置
+                                        </button>
+                                      ) : null}
+                                      <button type="button" onClick={() => router.push(`/projects/${project.id}?release=1`)}>
+                                        发布
+                                      </button>
+                                    </>
+                                  );
+                                }
+                                if (action === "submit" || action === "review") {
+                                  return (
+                                    <>
+                                      {shouldShowEditConfigAction(project) ? (
+                                        <button type="button" onClick={() => setConfigureProject(project)}>
+                                          修改配置
+                                        </button>
+                                      ) : null}
+                                      {action === "submit" ? (
+                                        <button type="button" onClick={() => void onSubmitReview(project)}>
+                                          提交审核
+                                        </button>
+                                      ) : (
+                                        <button type="button" onClick={() => setReviewProject(project)}>
+                                          审核
+                                        </button>
+                                      )}
+                                    </>
+                                  );
+                                }
+                                if (action === "pending") {
+                                  return (
+                                    <button type="button" disabled>
+                                      审核中
+                                    </button>
+                                  );
+                                }
+                                if (shouldShowEditConfigAction(project)) {
+                                  return (
+                                    <button type="button" onClick={() => setConfigureProject(project)}>
+                                      {projectConfigActionLabel(project)}
                                     </button>
                                   );
                                 }
@@ -434,22 +471,6 @@ export function ProjectPanel({
             setConfigureProject(null);
             void load();
           }}
-        />
-      ) : null}
-
-      <ProjectDetailModal
-        open={Boolean(detailProject)}
-        workspaceId={workspaceId}
-        project={detailProject}
-        onClose={() => setDetailProject(null)}
-      />
-
-      {deployProject ? (
-        <ReleaseWizardModal
-          open={Boolean(deployProject)}
-          workspaceId={workspaceId}
-          project={deployProject}
-          onClose={() => setDeployProject(null)}
         />
       ) : null}
 

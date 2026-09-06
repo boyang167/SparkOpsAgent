@@ -59,13 +59,13 @@ export const ROUTE_LABEL_RULES: RouteLabelRule[] = [
 const SEGMENT_LABELS: Record<string, string> = {
   agents: "智能体",
   workflows: "工作流",
+  runtime: "运行环境",
   builds: "构建",
   products: "产品",
   plans: "版本计划",
   releases: "发布",
   pods: "运行实例",
   cronjobs: "定时任务",
-  configmaps: "配置管理",
   secrets: "密钥配置",
   clusters: "集群管理",
 };

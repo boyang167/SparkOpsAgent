@@ -14,7 +14,9 @@ import {
 } from "./project-utils";
 import {
   computeProjectProgress,
+  projectConfigActionLabel,
   projectPrimaryAction,
+  shouldShowEditConfigAction,
   type ProjectProgressStep,
 } from "./project-progress";
 
@@ -126,8 +128,10 @@ export function ProjectOverviewCard({
   deploymentSummary,
 }: ProjectOverviewCardProps) {
   const router = useRouter();
-  const { steps, statusLabel } = computeProjectProgress(project);
+  const { steps, statusLabel, configComplete } = computeProjectProgress(project);
   const primaryAction = projectPrimaryAction(project);
+  const showEditConfig = shouldShowEditConfigAction(project);
+  const configActionLabel = projectConfigActionLabel(project);
   const langColor = languageColor(project.language);
   const initial = languageLabel(project.language).charAt(0).toUpperCase() || "P";
   const TitleTag = heading;
@@ -226,55 +230,75 @@ export function ProjectOverviewCard({
               查看详情
             </Link>
           )}
-          {primaryAction === "submit" ? (
-            <button
-              type="button"
-              className="project-action-btn is-submit"
-              onClick={() => onSubmitReview?.(project)}
-            >
-              提交审核
-            </button>
-          ) : primaryAction === "review" ? (
-            <button
-              type="button"
-              className="project-action-btn is-submit"
-              onClick={() => onReview?.(project)}
-            >
-              审核
-            </button>
-          ) : primaryAction === "pending" ? (
+          {primaryAction === "pending" ? (
             <button type="button" className="project-action-btn is-submit" disabled>
               审核中
             </button>
           ) : primaryAction === "deploy" ? (
-            onDeploy ? (
-              <button
-                type="button"
-                className="project-action-btn is-deploy"
-                onClick={onDeploy}
-                aria-disabled={deploymentAction?.disabled || undefined}
-                title={deploymentAction?.reason ?? undefined}
-                aria-describedby={deploymentAction?.reason ? `deploy-reason-${project.id}` : undefined}
-              >
-                {deploymentAction?.label ?? "发布"}
-              </button>
-            ) : (
-              <Link
-                href={deployHref ?? detailsHref ?? `/projects/${project.id}`}
-                className="project-action-btn is-deploy"
-              >
-                发布
-              </Link>
-            )
-          ) : onContinueConfig ? (
+            <>
+              {showEditConfig && onContinueConfig ? (
+                <button type="button" className="project-action-btn is-config" onClick={onContinueConfig}>
+                  修改配置
+                </button>
+              ) : null}
+              {onDeploy ? (
+                <button
+                  type="button"
+                  className="project-action-btn is-deploy"
+                  onClick={onDeploy}
+                  aria-disabled={deploymentAction?.disabled || undefined}
+                  title={deploymentAction?.reason ?? undefined}
+                  aria-describedby={deploymentAction?.reason ? `deploy-reason-${project.id}` : undefined}
+                >
+                  {deploymentAction?.label ?? "发布"}
+                </button>
+              ) : (
+                <Link
+                  href={deployHref ?? detailsHref ?? `/projects/${project.id}`}
+                  className="project-action-btn is-deploy"
+                >
+                  发布
+                </Link>
+              )}
+            </>
+          ) : primaryAction === "submit" || primaryAction === "review" ? (
+            <>
+              {showEditConfig && onContinueConfig ? (
+                <button type="button" className="project-action-btn is-config" onClick={onContinueConfig}>
+                  修改配置
+                </button>
+              ) : null}
+              {primaryAction === "submit" ? (
+                <button
+                  type="button"
+                  className="project-action-btn is-submit"
+                  onClick={() => onSubmitReview?.(project)}
+                >
+                  提交审核
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="project-action-btn is-submit"
+                  onClick={() => onReview?.(project)}
+                >
+                  审核
+                </button>
+              )}
+            </>
+          ) : showEditConfig && onContinueConfig ? (
+            <button type="button" className="project-action-btn is-config" onClick={onContinueConfig}>
+              {configActionLabel}
+            </button>
+          ) : !configComplete && onContinueConfig ? (
             <button type="button" className="project-action-btn is-config" onClick={onContinueConfig}>
               继续配置
             </button>
-          ) : (
+          ) : !configComplete ? (
             <Link href={continueHref ?? detailsHref ?? `/projects/${project.id}`} className="project-action-btn is-config">
               继续配置
             </Link>
-          )}
+          ) : null}
         </div>
       </footer>
       {deploymentAction?.reason ? (

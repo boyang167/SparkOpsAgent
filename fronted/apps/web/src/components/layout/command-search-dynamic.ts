@@ -53,6 +53,13 @@ export async function buildDynamicCommandItems(options: {
         kind: "project" as const,
         keywords: `${project.name} workflow 工作流`,
       },
+      {
+        href: `/projects/${project.id}/runtime`,
+        label: `${project.name} · 运行环境`,
+        group: "项目",
+        kind: "project" as const,
+        keywords: `${project.name} runtime 运行环境 集群 cluster`,
+      },
     ].filter((item) => allow(item.href)),
   );
 
@@ -72,15 +79,19 @@ export async function buildDynamicCommandItems(options: {
     keywords: `${item.name} 产品 product`,
   }));
 
-  const clusterItems: CommandSearchItem[] = clusters.slice(0, MAX_CLUSTERS).map((cluster) => {
+  const clusterItems: CommandSearchItem[] = clusters.slice(0, MAX_CLUSTERS).flatMap((cluster) => {
     const name = cluster.cluster_name || "集群";
-    return {
-      href: "/cluster/list",
-      label: name,
-      group: "基础设施",
-      kind: "cluster" as const,
-      keywords: `${name} 集群 cluster`,
-    };
+    if (limitedProjects.length === 0) return [];
+    const project = limitedProjects[0]!;
+    return [
+      {
+        href: `/projects/${project.id}/runtime`,
+        label: `${name} · 运行环境`,
+        group: "项目",
+        kind: "cluster" as const,
+        keywords: `${name} 集群 cluster 运行环境 runtime`,
+      },
+    ];
   });
 
   const nested = await Promise.all(

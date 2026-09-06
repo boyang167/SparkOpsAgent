@@ -30,6 +30,7 @@ interface ProjectDetailModalProps {
   workspaceId: string;
   project: ProjectVM | null;
   onClose: () => void;
+  onEditConfig?: () => void;
   agents?: AgentVM[];
   workflows?: WorkflowVM[];
 }
@@ -199,6 +200,7 @@ export function ProjectDetailModal({
   workspaceId,
   project,
   onClose,
+  onEditConfig,
   agents: agentsProp,
   workflows: workflowsProp,
 }: ProjectDetailModalProps) {
@@ -316,6 +318,13 @@ export function ProjectDetailModal({
   return (
     <Modal open={open} onClose={onClose} title="项目详情" size="xl" panelClassName="project-detail-modal">
       <div className="project-detail-panel">
+        {onEditConfig ? (
+          <div className="flex justify-end" style={{ marginBottom: "0.75rem" }}>
+            <button type="button" className="project-action-btn is-config" onClick={onEditConfig}>
+              修改配置
+            </button>
+          </div>
+        ) : null}
         <DetailAccordion
           title="基本信息"
           icon={<IconDoc />}

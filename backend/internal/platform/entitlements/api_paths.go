@@ -30,10 +30,8 @@ func APIPathEntitlement(path string) string {
 		return "mcp"
 	case strings.Contains(path, "/cronjobs"), strings.Contains(path, "/pods"),
 		strings.Contains(path, "/k8s/"),
-		strings.Contains(path, "/consul/"), strings.Contains(path, "/deployments"),
-		strings.Contains(path, "/ingresses"), strings.Contains(path, "/configmaps"),
-		strings.Contains(path, "/services"), strings.Contains(path, "/pvcs"),
-		strings.Contains(path, "/virtualservices"), strings.Contains(path, "/storageclasses"):
+		strings.Contains(path, "/deployments"),
+		strings.Contains(path, "/storageclasses"):
 		return "k8s"
 	case strings.Contains(path, "/monitor/"), strings.Contains(path, "/observability/"),
 		strings.Contains(path, "/statistics"):

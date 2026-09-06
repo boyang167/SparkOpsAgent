@@ -97,7 +97,15 @@ func (m *Module) Register(c *appctx.Container) error {
 		return fmt.Errorf("ensure default workspace roles: %w", err)
 	}
 
-	c.EventBus.Subscribe(integration.EventWorkspaceCreated, subscriber.NewOnWorkspaceCreated(bootstrap).Handle)
+	seedMenus := command.NewSeedWorkspaceMenusHandler(menuStore)
+	if err := seedMenus.RepairRemovedMenusAllWorkspaces(context.Background()); err != nil {
+		return fmt.Errorf("repair removed menus: %w", err)
+	}
+	menuPolicies := command.NewApplyMenuRolePoliciesHandler(menuStore, roleRepo, seedMenus)
+	if err := menuPolicies.HandleAllWorkspaces(context.Background(), command.ApplyMenuRolePoliciesOptions{SkipIfConfigured: true}); err != nil {
+		return fmt.Errorf("apply menu role policies: %w", err)
+	}
+	c.EventBus.Subscribe(integration.EventWorkspaceCreated, subscriber.NewOnWorkspaceCreated(bootstrap, menuPolicies).Handle)
 
 	handler := govhttp.NewHandler(
 		createRole, updateRole, deleteRole, copyRole, assignRole, inviteMember, removeBinding,
@@ -118,10 +126,6 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewUpdateRoleDataPoliciesHandler(roleRepo, dataPolicyStore),
 	)
 
-	seedMenus := command.NewSeedWorkspaceMenusHandler(menuStore)
-	if err := seedMenus.RepairRemovedMenusAllWorkspaces(context.Background()); err != nil {
-		return fmt.Errorf("repair removed menus: %w", err)
-	}
 	menuHandler := govhttp.NewMenuHandler(
 		query.NewListMenuTreeHandler(menuStore, seedMenus),
 		query.NewListNavMenusHandler(menuStore, seedMenus, checker, c.SystemRoleChecker, c.DB),

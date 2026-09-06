@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import type { CreateProjectCommand } from "@sparkops/contracts/workspace";
 import type { TemplateVM } from "@sparkops/contracts/product";
 import type { SecretVM } from "@sparkops/contracts/secret";
+import type { AuthorizedClusterVM } from "@sparkops/contracts/delivery";
 import { FormRow } from "./project-form-shared";
 import { hasSelectedProjectTemplate } from "./project-utils";
 
@@ -12,8 +13,10 @@ interface ProjectCreateStep3Props {
   updateForm: (patch: Partial<CreateProjectCommand>) => void;
   templates: TemplateVM[];
   secrets: SecretVM[];
+  clusters?: AuthorizedClusterVM[];
   loadingTemplates: boolean;
   loadingSecrets: boolean;
+  loadingClusters?: boolean;
 }
 
 function kindMatch(kind: string | undefined, expected: string) {
@@ -25,9 +28,12 @@ export function ProjectCreateStep3({
   updateForm,
   templates,
   secrets,
+  clusters = [],
   loadingTemplates,
   loadingSecrets,
+  loadingClusters = false,
 }: ProjectCreateStep3Props) {
+  const authorizedClusters = clusters ?? [];
   const resources = form.resources ?? {};
 
   const serviceTemplates = useMemo(
@@ -60,10 +66,6 @@ export function ProjectCreateStep3({
   );
   const jenkinsSecrets = useMemo(
     () => secrets.filter((s) => s.service_type === "Jenkins"),
-    [secrets],
-  );
-  const kubernetesSecrets = useMemo(
-    () => secrets.filter((s) => s.service_type === "Kubernetes"),
     [secrets],
   );
 
@@ -170,14 +172,34 @@ export function ProjectCreateStep3({
         </select>
       </FormRow>
 
-      <FormRow label="默认集群 ID:" hint="部署时将优先选择此集群；最终可选范围以工作空间授权为准">
-        <input
+      <FormRow label="默认集群:" hint="未指定时发布将使用工作空间排序第一的构建集群；也可在此显式选择默认集群">
+        <select
           className="input"
-          aria-label="默认集群 ID"
+          aria-label="默认集群"
           value={form.default_cluster_id ?? ""}
           onChange={(e) => updateForm({ default_cluster_id: e.target.value })}
-          placeholder="请输入已授权的 cluster_id（可选）"
-        />
+        >
+          <option value="">
+            {loadingClusters
+              ? "加载中…"
+              : authorizedClusters.length === 0
+                ? "暂无授权集群（请先在项目「运行环境」中配置）"
+                : "使用构建集群（排序第一）"}
+          </option>
+          {authorizedClusters.map((cluster) => (
+            <option key={cluster.id} value={cluster.id}>
+              {cluster.cluster_name}
+              {cluster.is_build_env ? " [构建集群]" : " [同步集群]"}
+              {cluster.server ? ` (${cluster.server})` : ""}
+            </option>
+          ))}
+          {form.default_cluster_id &&
+          !authorizedClusters.some((cluster) => cluster.id === form.default_cluster_id) ? (
+            <option value={form.default_cluster_id}>
+              {form.default_cluster_id}（未授权或已撤销）
+            </option>
+          ) : null}
+        </select>
       </FormRow>
 
       <FormRow label="Jenkins 密钥:" hint="选择用于执行构建流水线的 Jenkins 密钥">
@@ -189,22 +211,6 @@ export function ProjectCreateStep3({
         >
           <option value="">{loadingSecrets ? "加载中…" : "请选择 Jenkins 密钥"}</option>
           {jenkinsSecrets.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.display_name?.trim() || item.name}
-            </option>
-          ))}
-        </select>
-      </FormRow>
-
-      <FormRow label="Kubernetes 密钥:" hint="选择用于部署到集群的 Kubernetes 密钥">
-        <select
-          className="input"
-          aria-label="Kubernetes 密钥"
-          value={form.kubernetes_secret_id ?? ""}
-          onChange={(e) => updateForm({ kubernetes_secret_id: e.target.value })}
-        >
-          <option value="">{loadingSecrets ? "加载中…" : "请选择 Kubernetes 密钥"}</option>
-          {kubernetesSecrets.map((item) => (
             <option key={item.id} value={item.id}>
               {item.display_name?.trim() || item.name}
             </option>

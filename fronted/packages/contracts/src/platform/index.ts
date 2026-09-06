@@ -35,6 +35,12 @@ export const ClusterVMSchema = z.object({
 
 export type ClusterVM = z.infer<typeof ClusterVMSchema>;
 
+export const ReorderWorkspaceClustersCommandSchema = z.object({
+  cluster_ids: z.array(z.string().uuid()).min(1),
+});
+
+export type ReorderWorkspaceClustersCommand = z.infer<typeof ReorderWorkspaceClustersCommandSchema>;
+
 export const GrantWorkspaceClusterCommandSchema = z.object({
   cluster_id: z.string().uuid(),
 });

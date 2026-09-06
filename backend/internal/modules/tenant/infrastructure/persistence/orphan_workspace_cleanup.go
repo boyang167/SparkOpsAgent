@@ -215,9 +215,6 @@ func (s *TenantStore) PurgeOrphanWorkspaces(ctx context.Context) (int, error) {
 			{"platform_admin.sys_cfg", `
 				DELETE FROM platform_admin.sys_cfg
 				WHERE workspace_id IN (SELECT id FROM tmp_orphan_ws)`},
-			{"platform.consul_kv", `
-				DELETE FROM platform.consul_kv
-				WHERE workspace_id IN (SELECT id FROM tmp_orphan_ws)`},
 			{"identity.api_tokens", `
 				DELETE FROM identity.api_tokens
 				WHERE workspace_id IN (SELECT id FROM tmp_orphan_ws)`},

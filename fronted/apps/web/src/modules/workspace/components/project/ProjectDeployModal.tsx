@@ -13,6 +13,7 @@ import { delivery, secret } from "@sparkops/web-sdk";
 import { BuildLogStream } from "@/modules/delivery/components/BuildLogStream";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
+import { GitRefValueField } from "./GitRefValueField";
 import { deploymentGate } from "./deployment-gate";
 import {
   createSerialPoller,
@@ -163,6 +164,10 @@ export function ProjectDeployModal({
     () => deploymentGate(project, secrets, options, activeRun),
     [project, secrets, options, activeRun],
   );
+  const gitServiceType = useMemo(
+    () => secrets.find((item) => item.id === project.secret_id)?.service_type,
+    [project.secret_id, secrets],
+  );
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -252,7 +257,10 @@ export function ProjectDeployModal({
           <select
             className="input"
             value={gitRefType}
-            onChange={(event) => setGitRefType(event.target.value as "branch" | "tag")}
+            onChange={(event) => {
+              setGitRefType(event.target.value as "branch" | "tag");
+              setGitRefValue("");
+            }}
             disabled={Boolean(run)}
           >
             <option value="branch">分支</option>
@@ -260,16 +268,17 @@ export function ProjectDeployModal({
           </select>
         </label>
 
-        <label className="stack-sm">
-          <span>Git 引用值</span>
-          <input
-            className="input"
-            value={gitRefValue}
-            onChange={(event) => setGitRefValue(event.target.value)}
-            disabled={Boolean(run)}
-            required
-          />
-        </label>
+        <GitRefValueField
+          key={`${open ? "open" : "closed"}-${gitRefType}`}
+          workspaceId={workspaceId}
+          gitUrl={project.git_url}
+          secretId={project.secret_id}
+          gitServiceType={gitServiceType}
+          refType={gitRefType}
+          value={gitRefValue}
+          onChange={setGitRefValue}
+          disabled={Boolean(run)}
+        />
 
         <label className="stack-sm">
           <span>镜像版本（可选）</span>

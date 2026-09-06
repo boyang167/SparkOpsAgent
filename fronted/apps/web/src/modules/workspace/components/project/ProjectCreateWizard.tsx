@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { product, secret, tenant, workspace } from "@sparkops/web-sdk";
+import { product, platform, secret, tenant, workspace } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { CreateProjectCommand, ProjectVM } from "@sparkops/contracts/workspace";
 import type { SecretVM } from "@sparkops/contracts/secret";
 import type { TemplateVM } from "@sparkops/contracts/product";
+import type { AuthorizedClusterVM } from "@sparkops/contracts/delivery";
 import type { WorkspaceVM } from "@sparkops/contracts/tenant";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { CharCounter, FormRow } from "./project-form-shared";
@@ -42,8 +43,10 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
   const [gitServiceType, setGitServiceType] = useState<"GitLab" | "GitHub">("GitLab");
   const [secrets, setSecrets] = useState<SecretVM[]>([]);
   const [templates, setTemplates] = useState<TemplateVM[]>([]);
+  const [clusters, setClusters] = useState<AuthorizedClusterVM[]>([]);
   const [loadingSecrets, setLoadingSecrets] = useState(false);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [loadingClusters, setLoadingClusters] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [displayNameManual, setDisplayNameManual] = useState(false);
@@ -84,6 +87,24 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
   }, [targetWorkspaceId, workspaceId, workspaceMode]);
 
   const activeWorkspaceId = workspaceMode === "select" ? targetWorkspaceId : workspaceId;
+
+  useEffect(() => {
+    if (open === false || step !== 3) return;
+    void loadSecrets();
+    void loadClusters();
+  }, [open, step, activeWorkspaceId]);
+
+  async function loadClusters() {
+    if (!activeWorkspaceId) return;
+    setLoadingClusters(true);
+    try {
+      setClusters(await platform.listAuthorizedWorkspaceClusters(activeWorkspaceId));
+    } catch {
+      setClusters([]);
+    } finally {
+      setLoadingClusters(false);
+    }
+  }
 
   async function loadWorkspaces() {
     setLoadingWorkspaces(true);
@@ -439,8 +460,10 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
             updateForm={updateForm}
             templates={templates}
             secrets={secrets}
+            clusters={clusters}
             loadingTemplates={loadingTemplates}
             loadingSecrets={loadingSecrets}
+            loadingClusters={loadingClusters}
           />
         ) : null}
         </div>

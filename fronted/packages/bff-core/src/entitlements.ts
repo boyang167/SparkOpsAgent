@@ -98,13 +98,7 @@ export function apiPathEntitlement(path: string): string {
     path.includes("/cronjobs") ||
     path.includes("/pods") ||
     path.includes("/k8s/") ||
-    path.includes("/consul/") ||
     path.includes("/deployments") ||
-    path.includes("/ingresses") ||
-    path.includes("/configmaps") ||
-    path.includes("/services") ||
-    path.includes("/pvcs") ||
-    path.includes("/virtualservices") ||
     path.includes("/storageclasses")
   ) {
     return "k8s";

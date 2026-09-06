@@ -133,6 +133,9 @@ func main() {
 	if err := govcommand.NewEnsureDefaultWorkspaceRolesHandler(roleRepo).Handle(ctx); err != nil {
 		log.Fatal(err)
 	}
+	if err := govcommand.EnsureMenuRolePolicies(ctx, db, govcommand.ApplyMenuRolePoliciesOptions{SkipIfConfigured: true}); err != nil {
+		log.Fatal(err)
+	}
 	workspaces, err := listAllWorkspaces(ctx, db)
 	if err != nil {
 		log.Fatal(err)
@@ -177,12 +180,16 @@ func main() {
 
 func wireGovernanceBootstrap(bus eventbus.Bus, db *gorm.DB) {
 	store := govpersistence.NewStore(db)
+	menuStore := govpersistence.NewMenuStore(db)
+	roleRepo := govpersistence.NewRoleRepository(store)
 	bootstrapHandler := govcommand.NewBootstrapWorkspaceHandler(
-		govpersistence.NewRoleRepository(store),
+		roleRepo,
 		govpersistence.NewBindingRepository(store),
 		nil,
 	)
-	bus.Subscribe(integration.EventWorkspaceCreated, subscriber.NewOnWorkspaceCreated(bootstrapHandler).Handle)
+	seedMenus := govcommand.NewSeedWorkspaceMenusHandler(menuStore)
+	menuPolicies := govcommand.NewApplyMenuRolePoliciesHandler(menuStore, roleRepo, seedMenus)
+	bus.Subscribe(integration.EventWorkspaceCreated, subscriber.NewOnWorkspaceCreated(bootstrapHandler, menuPolicies).Handle)
 }
 
 func ensureMember(

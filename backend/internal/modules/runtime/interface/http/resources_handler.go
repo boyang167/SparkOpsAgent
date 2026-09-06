@@ -50,58 +50,6 @@ func (h *ResourcesHandler) ScaleDeployment(c *gin.Context) {
 	httpx.OK(c, gin.H{"scaled": true})
 }
 
-func (h *ResourcesHandler) ListIngresses(c *gin.Context) {
-	h.listProject(c, func(wsID kernel.WorkspaceID, projectID kernel.ProjectID) (any, error) {
-		items, err := h.k8s.ListIngresses(c.Request.Context(), wsID, projectID)
-		return gin.H{"items": items}, err
-	})
-}
-
-func (h *ResourcesHandler) GetIngress(c *gin.Context) {
-	h.getProject(c, func(wsID kernel.WorkspaceID, projectID kernel.ProjectID) (any, error) {
-		return h.k8s.GetIngress(c.Request.Context(), wsID, projectID, c.Param("name"))
-	})
-}
-
-func (h *ResourcesHandler) ListConfigMaps(c *gin.Context) {
-	h.listProject(c, func(wsID kernel.WorkspaceID, projectID kernel.ProjectID) (any, error) {
-		items, err := h.k8s.ListConfigMaps(c.Request.Context(), wsID, projectID)
-		return gin.H{"items": items}, err
-	})
-}
-
-func (h *ResourcesHandler) GetConfigMap(c *gin.Context) {
-	h.getProject(c, func(wsID kernel.WorkspaceID, projectID kernel.ProjectID) (any, error) {
-		return h.k8s.GetConfigMap(c.Request.Context(), wsID, projectID, c.Param("name"))
-	})
-}
-
-func (h *ResourcesHandler) ListServices(c *gin.Context) {
-	h.listProject(c, func(wsID kernel.WorkspaceID, projectID kernel.ProjectID) (any, error) {
-		items, err := h.k8s.ListServices(c.Request.Context(), wsID, projectID)
-		return gin.H{"items": items}, err
-	})
-}
-
-func (h *ResourcesHandler) GetService(c *gin.Context) {
-	h.getProject(c, func(wsID kernel.WorkspaceID, projectID kernel.ProjectID) (any, error) {
-		return h.k8s.GetService(c.Request.Context(), wsID, projectID, c.Param("name"))
-	})
-}
-
-func (h *ResourcesHandler) ListPVCs(c *gin.Context) {
-	h.listProject(c, func(wsID kernel.WorkspaceID, projectID kernel.ProjectID) (any, error) {
-		items, err := h.k8s.ListPVCs(c.Request.Context(), wsID, projectID)
-		return gin.H{"items": items}, err
-	})
-}
-
-func (h *ResourcesHandler) GetPVC(c *gin.Context) {
-	h.getProject(c, func(wsID kernel.WorkspaceID, projectID kernel.ProjectID) (any, error) {
-		return h.k8s.GetPVC(c.Request.Context(), wsID, projectID, c.Param("name"))
-	})
-}
-
 func (h *ResourcesHandler) ListStorageClasses(c *gin.Context) {
 	items, err := h.k8s.ListStorageClasses(c.Request.Context())
 	if err != nil {
@@ -118,19 +66,6 @@ func (h *ResourcesHandler) GetStorageClass(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, item)
-}
-
-func (h *ResourcesHandler) ListVirtualServices(c *gin.Context) {
-	h.listProject(c, func(wsID kernel.WorkspaceID, projectID kernel.ProjectID) (any, error) {
-		items, err := h.k8s.ListVirtualServices(c.Request.Context(), wsID, projectID)
-		return gin.H{"items": items}, err
-	})
-}
-
-func (h *ResourcesHandler) GetVirtualService(c *gin.Context) {
-	h.getProject(c, func(wsID kernel.WorkspaceID, projectID kernel.ProjectID) (any, error) {
-		return h.k8s.GetVirtualService(c.Request.Context(), wsID, projectID, c.Param("name"))
-	})
 }
 
 type projectFn func(kernel.WorkspaceID, kernel.ProjectID) (any, error)

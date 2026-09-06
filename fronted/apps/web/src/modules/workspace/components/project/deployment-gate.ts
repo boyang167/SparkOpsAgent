@@ -31,9 +31,6 @@ export function deploymentGate(
   if (!project.jenkins_secret_id || !secretIds.has(project.jenkins_secret_id)) {
     missing.push("Jenkins 密钥");
   }
-  if (!project.kubernetes_secret_id || !secretIds.has(project.kubernetes_secret_id)) {
-    missing.push("Kubernetes 密钥");
-  }
   if (
     !project.resources?.registry_secret_id ||
     !secretIds.has(project.resources.registry_secret_id)

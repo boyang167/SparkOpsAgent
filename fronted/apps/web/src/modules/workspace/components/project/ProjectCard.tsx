@@ -26,6 +26,7 @@ export function ProjectCard({
     <ProjectOverviewCard
       project={project}
       detailsHref={`/projects/${project.id}`}
+      deployHref={`/projects/${project.id}?release=1`}
       onViewDetails={onViewDetails ? () => onViewDetails(project) : undefined}
       onContinueConfig={onContinueConfig ? () => onContinueConfig(project) : undefined}
       onSubmitReview={onSubmitReview}

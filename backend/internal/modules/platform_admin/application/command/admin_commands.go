@@ -76,7 +76,31 @@ func NewGrantWorkspaceClusterHandler(repo repository.AdminRepository) *GrantWork
 }
 
 func (h *GrantWorkspaceClusterHandler) Handle(ctx context.Context, memberID kernel.MemberID, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) error {
-	return h.repo.GrantWorkspaceCluster(ctx, wsID, clusterID, memberID)
+	if err := h.repo.GrantWorkspaceCluster(ctx, wsID, clusterID, memberID); err != nil {
+		return err
+	}
+	entitlements.InvalidateCache()
+	return nil
+}
+
+type ReorderWorkspaceClustersHandler struct {
+	repo repository.AdminRepository
+}
+
+func NewReorderWorkspaceClustersHandler(repo repository.AdminRepository) *ReorderWorkspaceClustersHandler {
+	return &ReorderWorkspaceClustersHandler{repo: repo}
+}
+
+func (h *ReorderWorkspaceClustersHandler) Handle(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	clusterIDs []kernel.ClusterInfoID,
+) error {
+	if err := h.repo.ReorderWorkspaceClusters(ctx, wsID, clusterIDs); err != nil {
+		return err
+	}
+	entitlements.InvalidateCache()
+	return nil
 }
 
 type RegisterWorkspaceClusterHandler struct {

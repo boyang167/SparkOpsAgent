@@ -80,6 +80,8 @@ type ClusterOption struct {
 	Name       string `json:"name"`
 	Server     string `json:"server"`
 	Available  bool   `json:"available"`
+	IsBuildEnv bool   `json:"is_build_env"`
+	PriorityID int    `json:"priority_id"`
 	ReasonCode string `json:"reason_code,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 }
@@ -103,7 +105,10 @@ func (h *DeploymentOptionsHandler) Handle(ctx context.Context, wsID kernel.Works
 	}
 	options := DeploymentOptions{Clusters: make([]ClusterOption, 0, len(clusters))}
 	for _, cluster := range clusters {
-		option := ClusterOption{ID: cluster.ID.String(), Name: cluster.Name, Server: cluster.Server}
+		option := ClusterOption{
+			ID: cluster.ID.String(), Name: cluster.Name, Server: cluster.Server,
+			IsBuildEnv: cluster.IsBuildEnv, PriorityID: cluster.PriorityID,
+		}
 		_, loadErr := h.reader.Load(ctx, wsID, projectID, cluster.ID)
 		if loadErr == nil {
 			option.Available = true

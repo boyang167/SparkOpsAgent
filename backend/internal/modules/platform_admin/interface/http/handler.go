@@ -23,6 +23,7 @@ type Handler struct {
 	listWorkspaceClusters    *query.ListWorkspaceClustersHandler
 	grantWorkspaceCluster    *command.GrantWorkspaceClusterHandler
 	revokeWorkspaceCluster   *command.RevokeWorkspaceClusterHandler
+	reorderWorkspaceClusters *command.ReorderWorkspaceClustersHandler
 	getDashboard             *query.GetDashboardHandler
 	getStatistics            *query.GetStatisticsHandler
 	getMonitorOverview       *query.GetMonitorOverviewHandler
@@ -43,6 +44,7 @@ func NewHandler(
 	listWorkspaceClusters *query.ListWorkspaceClustersHandler,
 	grantWorkspaceCluster *command.GrantWorkspaceClusterHandler,
 	revokeWorkspaceCluster *command.RevokeWorkspaceClusterHandler,
+	reorderWorkspaceClusters *command.ReorderWorkspaceClustersHandler,
 	getDashboard *query.GetDashboardHandler,
 	getStatistics *query.GetStatisticsHandler,
 	getMonitorOverview *query.GetMonitorOverviewHandler,
@@ -60,6 +62,7 @@ func NewHandler(
 		listWorkspaceClusters:    listWorkspaceClusters,
 		grantWorkspaceCluster:  grantWorkspaceCluster,
 		revokeWorkspaceCluster: revokeWorkspaceCluster,
+		reorderWorkspaceClusters: reorderWorkspaceClusters,
 		getDashboard:           getDashboard, getStatistics: getStatistics,
 		getMonitorOverview: getMonitorOverview, listDeploymentStats: listDeploymentStats,
 		listTools:     listTools,
@@ -282,6 +285,35 @@ func (h *Handler) RevokeWorkspaceCluster(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"revoked": true, "workspace_id": wsID.String(), "cluster_id": clusterID.String()})
+}
+
+func (h *Handler) ReorderWorkspaceClusters(c *gin.Context) {
+	wsID, err := kernel.ParseWorkspaceID(c.Param("wsId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid workspace id", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		ClusterIDs []string `json:"cluster_ids" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+	clusterIDs := make([]kernel.ClusterInfoID, 0, len(req.ClusterIDs))
+	for _, raw := range req.ClusterIDs {
+		clusterID, parseErr := kernel.ParseClusterInfoID(raw)
+		if parseErr != nil {
+			httpx.Fail(c, "INVALID_REQUEST", "invalid cluster id", http.StatusBadRequest)
+			return
+		}
+		clusterIDs = append(clusterIDs, clusterID)
+	}
+	if err := h.reorderWorkspaceClusters.Handle(c.Request.Context(), wsID, clusterIDs); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"reordered": true, "workspace_id": wsID.String()})
 }
 
 func (h *Handler) GetDashboard(c *gin.Context) {

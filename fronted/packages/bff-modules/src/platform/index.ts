@@ -64,6 +64,19 @@ export async function revokeAuthorizedWorkspaceCluster(
   return ctx.upstream.platform.revokeAuthorizedWorkspaceCluster(workspaceId, clusterId);
 }
 
+export async function reorderAuthorizedWorkspaceClusters(
+  ctx: BffContext,
+  workspaceId: string,
+  clusterIds: string[],
+) {
+  const result = await ctx.upstream.platform.reorderAuthorizedWorkspaceClusters(
+    workspaceId,
+    clusterIds,
+  );
+  invalidateEntitlementsCache();
+  return result;
+}
+
 export async function grantWorkspaceCluster(
   ctx: BffContext,
   workspaceId: string,

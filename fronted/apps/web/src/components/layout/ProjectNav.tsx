@@ -12,7 +12,10 @@ const PROJECT_NAV_ITEMS = [
   { segment: "", label: "项目概览", suffix: "" },
   { segment: "agents", label: "智能体", suffix: "/agents" },
   { segment: "workflows", label: "工作流", suffix: "/workflows" },
+  { segment: "runtime", label: "运行环境", suffix: "/runtime" },
 ] as const;
+
+const PROJECT_NAV_SUFFIXES = PROJECT_NAV_ITEMS.map((item) => item.suffix).filter(Boolean);
 
 function isNavActive(pathname: string, projectId: string, suffix: string) {
   const base = `/projects/${projectId}`;
@@ -20,8 +23,7 @@ function isNavActive(pathname: string, projectId: string, suffix: string) {
     return (
       pathname === base ||
       (pathname.startsWith(`${base}/`) &&
-        !pathname.startsWith(`${base}/agents`) &&
-        !pathname.startsWith(`${base}/workflows`))
+        !PROJECT_NAV_SUFFIXES.some((navSuffix) => pathname.startsWith(`${base}${navSuffix}`)))
     );
   }
   return pathname.startsWith(`${base}${suffix}`);

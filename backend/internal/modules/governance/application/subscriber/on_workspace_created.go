@@ -10,11 +10,15 @@ import (
 )
 
 type OnWorkspaceCreated struct {
-	bootstrap *command.BootstrapWorkspaceHandler
+	bootstrap    *command.BootstrapWorkspaceHandler
+	menuPolicies *command.ApplyMenuRolePoliciesHandler
 }
 
-func NewOnWorkspaceCreated(bootstrap *command.BootstrapWorkspaceHandler) *OnWorkspaceCreated {
-	return &OnWorkspaceCreated{bootstrap: bootstrap}
+func NewOnWorkspaceCreated(
+	bootstrap *command.BootstrapWorkspaceHandler,
+	menuPolicies *command.ApplyMenuRolePoliciesHandler,
+) *OnWorkspaceCreated {
+	return &OnWorkspaceCreated{bootstrap: bootstrap, menuPolicies: menuPolicies}
 }
 
 func (s *OnWorkspaceCreated) Handle(ctx context.Context, e events.Event) error {
@@ -22,5 +26,11 @@ func (s *OnWorkspaceCreated) Handle(ctx context.Context, e events.Event) error {
 	if !ok {
 		return nil
 	}
-	return s.bootstrap.Handle(ctx, ev.WorkspaceID, ev.OwnerID, authz.DefaultAdminPermissions)
+	if err := s.bootstrap.Handle(ctx, ev.WorkspaceID, ev.OwnerID, authz.DefaultAdminPermissions); err != nil {
+		return err
+	}
+	if s.menuPolicies == nil {
+		return nil
+	}
+	return s.menuPolicies.Handle(ctx, ev.WorkspaceID, command.ApplyMenuRolePoliciesOptions{SkipIfConfigured: true})
 }

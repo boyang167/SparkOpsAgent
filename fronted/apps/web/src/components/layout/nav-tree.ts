@@ -49,7 +49,6 @@ export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
       { href: "/publish/plans", label: "版本计划", entitlement: "delivery" },
       { href: "/publish/releases", label: "发布管理", entitlement: "delivery" },
       { href: "/config/secrets", label: "密钥配置", entitlement: "delivery" },
-      { href: "/cluster/list", label: "集群管理" },
     ],
   },
   {
@@ -74,14 +73,8 @@ export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
     label: "基础设施",
     defaultCollapsed: true,
     items: [
-      { href: "/config/configmaps", label: "配置管理", entitlement: "k8s" },
-      { href: "/config/storage", label: "存储管理", entitlement: "k8s" },
-      { href: "/discovery/services", label: "服务发现", entitlement: "k8s" },
-      { href: "/security/ingress", label: "网络入口", entitlement: "k8s" },
-      { href: "/security/virtualservices", label: "流量策略", entitlement: "k8s" },
       { href: "/config/webhooks", label: "Webhook", entitlement: "mcp" },
       { href: "/config/mcp", label: "MCP 集成", entitlement: "mcp" },
-      { href: "/config/consul", label: "配置中心", entitlement: "k8s" },
     ],
   },
 ];

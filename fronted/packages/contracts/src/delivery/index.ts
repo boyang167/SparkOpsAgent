@@ -76,6 +76,8 @@ export const AuthorizedClusterVMSchema = z.object({
   id: z.string(),
   cluster_name: z.string(),
   server: z.string().optional(),
+  priority_id: z.number().int().nonnegative().optional().default(0),
+  is_build_env: z.boolean().optional().default(false),
 });
 
 export type AuthorizedClusterVM = z.infer<typeof AuthorizedClusterVMSchema>;

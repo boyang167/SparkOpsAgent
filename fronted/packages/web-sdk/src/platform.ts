@@ -186,6 +186,14 @@ export function revokeAuthorizedWorkspaceCluster(workspaceId: string, clusterId:
   });
 }
 
+export function reorderAuthorizedWorkspaceClusters(workspaceId: string, clusterIds: string[]) {
+  return bffFetch<{ reordered: true }>(`/workspaces/${workspaceId}/clusters/order`, {
+    method: "PUT",
+    workspaceId,
+    body: JSON.stringify({ cluster_ids: clusterIds }),
+  });
+}
+
 export function grantWorkspaceCluster(workspaceId: string, clusterId: string) {
   return bffFetch<{ granted: true }>(`/admin/workspaces/${workspaceId}/clusters`, {
     method: "POST",

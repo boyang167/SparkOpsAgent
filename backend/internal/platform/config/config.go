@@ -15,7 +15,6 @@ type Config struct {
 	Messaging     MessagingConfig     `yaml:"messaging"`
 	K8s           K8sConfig           `yaml:"k8s"`
 	Runtime       RuntimeConfig       `yaml:"runtime"`
-	Consul        ConsulConfig        `yaml:"consul"`
 	Delivery      DeliveryConfig      `yaml:"delivery"`
 	Deploy        DeployConfig        `yaml:"deploy"`
 	Jenkins       JenkinsConfig       `yaml:"jenkins"`
@@ -118,17 +117,8 @@ type K8sClusterConfig struct {
 }
 
 type RuntimeConfig struct {
-	Driver       string `yaml:"driver"`
-	Cluster      string `yaml:"cluster"`
-	IstioEnabled bool   `yaml:"istio_enabled"`
-}
-
-type ConsulConfig struct {
-	Driver     string `yaml:"driver"`
-	Address    string `yaml:"address"`
-	Token      string `yaml:"token"`
-	Datacenter string `yaml:"datacenter"`
-	KeyPrefix  string `yaml:"key_prefix"`
+	Driver  string `yaml:"driver"`
+	Cluster string `yaml:"cluster"`
 }
 
 type DeliveryConfig struct {
@@ -215,18 +205,6 @@ func (c *Config) applyEnvOverrides() error {
 	}
 	if v := os.Getenv("RUNTIME_DRIVER"); v != "" {
 		c.Runtime.Driver = v
-	}
-	if v := os.Getenv("RUNTIME_ISTIO_ENABLED"); v == "true" || v == "1" {
-		c.Runtime.IstioEnabled = true
-	}
-	if v := os.Getenv("CONSUL_DRIVER"); v != "" {
-		c.Consul.Driver = v
-	}
-	if v := os.Getenv("CONSUL_ADDR"); v != "" {
-		c.Consul.Address = v
-	}
-	if v := os.Getenv("CONSUL_TOKEN"); v != "" {
-		c.Consul.Token = v
 	}
 	if v := os.Getenv("DELIVERY_DRIVER"); v != "" {
 		c.Delivery.Driver = v
@@ -317,12 +295,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Runtime.Driver == "" {
 		c.Runtime.Driver = "mock"
-	}
-	if c.Consul.Driver == "" {
-		c.Consul.Driver = "mock"
-	}
-	if c.Consul.KeyPrefix == "" {
-		c.Consul.KeyPrefix = "sparkops"
 	}
 	if c.Delivery.Driver == "" {
 		c.Delivery.Driver = "mock"

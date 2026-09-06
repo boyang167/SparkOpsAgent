@@ -7,9 +7,11 @@ import (
 )
 
 type DeploymentCluster struct {
-	ID     kernel.ClusterInfoID
-	Name   string
-	Server string
+	ID         kernel.ClusterInfoID
+	Name       string
+	Server     string
+	IsBuildEnv bool
+	PriorityID int
 }
 
 type DeploymentSecret struct {

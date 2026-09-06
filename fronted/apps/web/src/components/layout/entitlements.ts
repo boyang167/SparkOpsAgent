@@ -26,10 +26,7 @@ export function pathEntitlement(path: string): string {
   if (path.startsWith("/config/webhooks") || path.startsWith("/config/mcp")) return "mcp";
   if (
     path.startsWith("/runtime") ||
-    path.startsWith("/cronjobs") ||
-    path.startsWith("/config") ||
-    path.startsWith("/discovery") ||
-    path.startsWith("/security")
+    path.startsWith("/cronjobs")
   ) {
     return "k8s";
   }

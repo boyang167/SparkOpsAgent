@@ -162,6 +162,12 @@ func (h *SeedWorkspaceMenusHandler) repairLegacyMonitorMenus(ctx context.Context
 var removedMenuPaths = []string{
 	"/cluster/config",
 	"/market/dockerfiles",
+	"/config/configmaps",
+	"/config/storage",
+	"/discovery/services",
+	"/security/ingress",
+	"/security/virtualservices",
+	"/config/consul",
 }
 
 var removedMenuTitles = []string{
@@ -297,13 +303,7 @@ var defaultMenuGroups = []defaultMenuGroup{
 	{
 		ID: "ops-infra", Label: "基础设施",
 		Items: []struct{ Href, Label string }{
-			{"/config/configmaps", "配置管理"},
-			{"/config/storage", "存储管理"},
-			{"/discovery/services", "服务发现"},
-			{"/security/ingress", "网络入口"},
-			{"/security/virtualservices", "流量策略"},
 			{"/config/webhooks", "外部集成"},
-			{"/config/consul", "配置中心"},
 		},
 	},
 }
@@ -330,13 +330,7 @@ var enterpriseMenuTitleByPath = map[string]string{
 	"/monitor/overview":         "监控概览",
 	"/monitor/log-viewer":       "日志查询",
 	"/monitor/statistics":       "部署统计",
-	"/config/configmaps":        "配置管理",
-	"/config/storage":           "存储管理",
-	"/discovery/services":       "服务发现",
-	"/security/ingress":         "网络入口",
-	"/security/virtualservices": "流量策略",
-	"/config/webhooks":          "外部集成",
-	"/config/consul":            "配置中心",
+	"/config/webhooks": "外部集成",
 }
 
 func (h *SeedWorkspaceMenusHandler) repairSecretConfigMenu(ctx context.Context, workspaceID kernel.WorkspaceID) error {

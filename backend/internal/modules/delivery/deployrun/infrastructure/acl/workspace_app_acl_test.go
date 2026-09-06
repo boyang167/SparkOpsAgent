@@ -42,9 +42,12 @@ func newACLFixture(t *testing.T) *aclFixture {
 			id TEXT PRIMARY KEY, workspace_id TEXT, service_type TEXT, service_url TEXT,
 			username TEXT, credential_blob TEXT, status TEXT)`,
 		`CREATE TABLE platform_admin.cluster_info (
-			id TEXT PRIMARY KEY, cluster_name TEXT, server TEXT, is_build_env BOOLEAN, priority_id INTEGER)`,
+			id TEXT PRIMARY KEY, cluster_name TEXT, server TEXT, user_name TEXT,
+			certificate_authority_data TEXT, client_certificate_data TEXT, client_key_data TEXT,
+			bearer_token TEXT, is_build_env BOOLEAN, priority_id INTEGER)`,
 		`CREATE TABLE platform_admin.workspace_clusters (
 			workspace_id TEXT, cluster_id TEXT, created_by TEXT, created_at DATETIME,
+			priority_id INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (workspace_id, cluster_id))`,
 	} {
 		require.NoError(t, db.Exec(ddl).Error)
@@ -64,12 +67,12 @@ func (f *aclFixture) seed(t *testing.T) {
 	t.Helper()
 	actor := kernel.NewMemberID()
 	require.NoError(t, f.db.Exec(
-		`INSERT INTO platform_admin.cluster_info(id, cluster_name, server, is_build_env, priority_id)
-		 VALUES (?, 'authorized', 'https://k8s.example', 0, 1), (?, 'other', 'https://other.example', 1, 2)`,
+		`INSERT INTO platform_admin.cluster_info(id, cluster_name, server, bearer_token, is_build_env, priority_id)
+		 VALUES (?, 'authorized', 'https://k8s.example', 'cluster-token', 0, 1), (?, 'other', 'https://other.example', 'other-token', 1, 2)`,
 		f.cluster.String(), f.other.String()).Error)
 	require.NoError(t, f.db.Exec(
-		`INSERT INTO platform_admin.workspace_clusters(workspace_id, cluster_id, created_by, created_at)
-		 VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
+		`INSERT INTO platform_admin.workspace_clusters(workspace_id, cluster_id, created_by, created_at, priority_id)
+		 VALUES (?, ?, ?, CURRENT_TIMESTAMP, 0)`,
 		f.workspace.String(), f.cluster.String(), actor.String()).Error)
 
 	serviceTypes := []string{"GitLab", "Harbor", "Jenkins", "Kubernetes", "SonarQube"}
@@ -180,6 +183,20 @@ func TestLoadMapsInvalidCredentialCipherAndJSONToSafeDomainError(t *testing.T) {
 	})
 }
 
+func TestLoadUsesClusterCredentialsWhenKubernetesSecretMissing(t *testing.T) {
+	f := newACLFixture(t)
+	require.NoError(t, f.db.Exec(
+		`UPDATE workspace_app.projects SET kubernetes_secret_id = NULL WHERE id = ?`,
+		f.project.String()).Error)
+
+	context, err := NewWorkspaceAppACL(f.db, f.box).Load(
+		context.Background(), f.workspace, f.project, kernel.ClusterInfoID{})
+
+	require.NoError(t, err)
+	require.Contains(t, context.Kubernetes.Credentials.ExtraConfig, "https://k8s.example")
+	require.Contains(t, context.Kubernetes.Credentials.ExtraConfig, "cluster-token")
+}
+
 func TestLoadRejectsIncompleteBindings(t *testing.T) {
 	cases := []struct {
 		name, update string
@@ -189,8 +206,6 @@ func TestLoadRejectsIncompleteBindings(t *testing.T) {
 		{"missing git", `secret_id = NULL`, deploydomain.ErrDeploymentBindingMissing},
 		{"missing harbor", `resources = '{}'`, deploydomain.ErrDeploymentBindingMissing},
 		{"missing jenkins", `jenkins_secret_id = NULL`, deploydomain.ErrDeploymentBindingMissing},
-		{"missing kubernetes", `kubernetes_secret_id = NULL`, deploydomain.ErrDeploymentBindingMissing},
-		{"missing cluster", `default_cluster_id = NULL`, deploydomain.ErrDeploymentBindingMissing},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -201,6 +216,13 @@ func TestLoadRejectsIncompleteBindings(t *testing.T) {
 			require.ErrorIs(t, f.load(), tc.want)
 		})
 	}
+	t.Run("missing authorized cluster", func(t *testing.T) {
+		f := newACLFixture(t)
+		require.NoError(t, f.db.Exec(
+			`DELETE FROM platform_admin.workspace_clusters WHERE workspace_id = ?`,
+			f.workspace.String()).Error)
+		require.ErrorIs(t, f.load(), deploydomain.ErrDeploymentClusterNotAuthorized)
+	})
 }
 
 func TestLoadRequiresSonarOnlyWhenStaticScanEnabled(t *testing.T) {

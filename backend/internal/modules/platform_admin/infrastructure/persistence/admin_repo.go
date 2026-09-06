@@ -60,6 +60,7 @@ func (clusterInfoModel) TableName() string { return "platform_admin.cluster_info
 type workspaceClusterModel struct {
 	WorkspaceID string `gorm:"column:workspace_id;primaryKey"`
 	ClusterID   string `gorm:"column:cluster_id;primaryKey"`
+	PriorityID  int    `gorm:"column:priority_id;not null;default:0"`
 	CreatedBy   string
 	CreatedAt   time.Time
 }
@@ -178,6 +179,14 @@ func (r *AdminRepository) GrantWorkspaceCluster(ctx context.Context, wsID kernel
 		WorkspaceID: wsID.String(), ClusterID: clusterID.String(),
 		CreatedBy: createdBy.String(), CreatedAt: time.Now().UTC(),
 	}
+	var maxPriority int
+	if err := r.db.WithContext(ctx).Model(&workspaceClusterModel{}).
+		Where("workspace_id = ?", wsID.String()).
+		Select("COALESCE(MAX(priority_id), -1)").
+		Scan(&maxPriority).Error; err != nil {
+		return err
+	}
+	row.PriorityID = maxPriority + 1
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
 }
 
@@ -188,20 +197,65 @@ func (r *AdminRepository) RevokeWorkspaceCluster(ctx context.Context, wsID kerne
 }
 
 func (r *AdminRepository) ListWorkspaceClusters(ctx context.Context, wsID kernel.WorkspaceID) ([]*repository.ClusterInfo, error) {
-	var rows []clusterInfoModel
-	if err := r.db.WithContext(ctx).
-		Table("platform_admin.cluster_info AS c").
-		Joins("INNER JOIN platform_admin.workspace_clusters AS g ON g.cluster_id = c.id").
-		Where("g.workspace_id = ?", wsID.String()).
-		Order("c.priority_id ASC").
-		Find(&rows).Error; err != nil {
+	var rows []struct {
+		ID          string
+		ClusterName string
+		Server      string
+		PriorityID  int
+	}
+	if err := r.db.WithContext(ctx).Raw(`
+		SELECT c.id, c.cluster_name, c.server, g.priority_id
+		FROM platform_admin.cluster_info AS c
+		INNER JOIN platform_admin.workspace_clusters AS g ON g.cluster_id = c.id
+		WHERE g.workspace_id = ?
+		ORDER BY g.priority_id ASC`, wsID.String()).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*repository.ClusterInfo, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, rowToCluster(row))
+	for i, row := range rows {
+		id, err := kernel.ParseClusterInfoID(row.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, &repository.ClusterInfo{
+			ID: id, ClusterName: row.ClusterName, Server: row.Server,
+			PriorityID: row.PriorityID, IsBuildEnv: i == 0,
+		})
 	}
 	return out, nil
+}
+
+func (r *AdminRepository) ReorderWorkspaceClusters(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	clusterIDs []kernel.ClusterInfoID,
+) error {
+	if len(clusterIDs) == 0 {
+		return nil
+	}
+	var granted int64
+	if err := r.db.WithContext(ctx).Model(&workspaceClusterModel{}).
+		Where("workspace_id = ?", wsID.String()).
+		Count(&granted).Error; err != nil {
+		return err
+	}
+	if int(granted) != len(clusterIDs) {
+		return domain.ErrWorkspaceClusterOrderInvalid
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for priority, clusterID := range clusterIDs {
+			result := tx.Model(&workspaceClusterModel{}).
+				Where("workspace_id = ? AND cluster_id = ?", wsID.String(), clusterID.String()).
+				Update("priority_id", priority)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return domain.ErrWorkspaceClusterOrderInvalid
+			}
+		}
+		return nil
+	})
 }
 
 func (r *AdminRepository) WorkspaceClusterGranted(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) (bool, error) {

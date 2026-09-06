@@ -57,90 +57,10 @@ func (h *K8sResources) ScaleDeployment(ctx context.Context, wsID kernel.Workspac
 	return h.svc.ScaleDeployment(ctx, projectID, projectName, name, replicas)
 }
 
-func (h *K8sResources) ListIngresses(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) ([]map[string]any, error) {
-	projectName, err := h.projectAccess(ctx, wsID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	return h.svc.ListIngresses(ctx, projectID, projectName)
-}
-
-func (h *K8sResources) GetIngress(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID, name string) (map[string]any, error) {
-	projectName, err := h.projectAccess(ctx, wsID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	return h.svc.GetIngress(ctx, projectID, projectName, name)
-}
-
-func (h *K8sResources) ListConfigMaps(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) ([]map[string]any, error) {
-	projectName, err := h.projectAccess(ctx, wsID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	return h.svc.ListConfigMaps(ctx, projectID, projectName)
-}
-
-func (h *K8sResources) GetConfigMap(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID, name string) (map[string]any, error) {
-	projectName, err := h.projectAccess(ctx, wsID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	return h.svc.GetConfigMap(ctx, projectID, projectName, name)
-}
-
-func (h *K8sResources) ListServices(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) ([]map[string]any, error) {
-	projectName, err := h.projectAccess(ctx, wsID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	return h.svc.ListServices(ctx, projectID, projectName)
-}
-
-func (h *K8sResources) GetService(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID, name string) (map[string]any, error) {
-	projectName, err := h.projectAccess(ctx, wsID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	return h.svc.GetService(ctx, projectID, projectName, name)
-}
-
-func (h *K8sResources) ListPVCs(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) ([]map[string]any, error) {
-	projectName, err := h.projectAccess(ctx, wsID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	return h.svc.ListPVCs(ctx, projectID, projectName)
-}
-
-func (h *K8sResources) GetPVC(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID, name string) (map[string]any, error) {
-	projectName, err := h.projectAccess(ctx, wsID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	return h.svc.GetPVC(ctx, projectID, projectName, name)
-}
-
 func (h *K8sResources) ListStorageClasses(ctx context.Context) ([]map[string]any, error) {
 	return h.svc.ListStorageClasses(ctx)
 }
 
 func (h *K8sResources) GetStorageClass(ctx context.Context, name string) (map[string]any, error) {
 	return h.svc.GetStorageClass(ctx, name)
-}
-
-func (h *K8sResources) ListVirtualServices(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) ([]map[string]any, error) {
-	projectName, err := h.projectAccess(ctx, wsID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	return h.svc.ListVirtualServices(ctx, projectID, projectName)
-}
-
-func (h *K8sResources) GetVirtualService(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID, name string) (map[string]any, error) {
-	projectName, err := h.projectAccess(ctx, wsID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	return h.svc.GetVirtualService(ctx, projectID, projectName, name)
 }

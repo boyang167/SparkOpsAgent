@@ -5,27 +5,41 @@ import { platform } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { AuthorizedClusterVM } from "@sparkops/contracts/delivery";
 import { InlineAlert } from "@/components/ui/InlineAlert";
-import { Modal } from "@/components/ui/Modal";
 import { notifyEntitlementsUpdated } from "@/components/layout/shell-context";
 
 interface WorkspaceClusterPanelProps {
   workspaceId: string;
 }
 
+function moveItem<T>(items: T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || to < 0 || from >= items.length || to >= items.length) {
+    return items;
+  }
+  const next = [...items];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}
+
+function withRank(items: AuthorizedClusterVM[]): AuthorizedClusterVM[] {
+  return items.map((item, index) => ({
+    ...item,
+    priority_id: index,
+    is_build_env: index === 0,
+  }));
+}
+
 export function WorkspaceClusterPanel({ workspaceId }: WorkspaceClusterPanelProps) {
   const [items, setItems] = useState<AuthorizedClusterVM[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
-  const [clusterName, setClusterName] = useState("");
-  const [server, setServer] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setItems(await platform.listAuthorizedWorkspaceClusters(workspaceId));
+      setItems(withRank(await platform.listAuthorizedWorkspaceClusters(workspaceId)));
     } catch (err) {
       setError(err instanceof BffError ? err.message : "加载集群失败");
     } finally {
@@ -37,25 +51,28 @@ export function WorkspaceClusterPanel({ workspaceId }: WorkspaceClusterPanelProp
     void load();
   }, [load]);
 
-  async function onCreate(event: React.FormEvent) {
-    event.preventDefault();
-    setSubmitting(true);
+  async function persistOrder(nextItems: AuthorizedClusterVM[]) {
+    setSaving(true);
     setError(null);
     try {
-      await platform.registerWorkspaceCluster(workspaceId, {
-        cluster_name: clusterName.trim(),
-        server: server.trim() || undefined,
-      });
-      setOpen(false);
-      setClusterName("");
-      setServer("");
+      await platform.reorderAuthorizedWorkspaceClusters(
+        workspaceId,
+        nextItems.map((item) => item.id),
+      );
+      setItems(withRank(nextItems));
       notifyEntitlementsUpdated();
-      await load();
     } catch (err) {
-      setError(err instanceof BffError ? err.message : "注册集群失败");
+      setError(err instanceof BffError ? err.message : "更新集群排序失败");
+      await load();
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
+  }
+
+  async function onMove(index: number, direction: "up" | "down") {
+    const target = direction === "up" ? index - 1 : index + 1;
+    const nextItems = moveItem(items, index, target);
+    await persistOrder(nextItems);
   }
 
   async function onRevoke(clusterId: string) {
@@ -72,33 +89,68 @@ export function WorkspaceClusterPanel({ workspaceId }: WorkspaceClusterPanelProp
 
   return (
     <div className="stack-md">
-      <div className="flex justify-end">
-        <button type="button" className="btn platform-add-btn" onClick={() => setOpen(true)}>
-          注册集群
-        </button>
-      </div>
+      <p className="text-sm text-muted">
+        拖拽排序暂未开放，请使用上移/下移调整顺序。排在最前的集群为<strong>构建集群</strong>
+        ，发布时在此构建镜像并部署；其余集群用于后续跨集群同步配置。
+      </p>
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       {loading ? (
         <div className="empty-state">加载中…</div>
       ) : items.length === 0 ? (
-        <div className="empty-state">当前工作空间暂无授权集群，点击「注册集群」接入 Kubernetes。</div>
+        <div className="empty-state">当前工作空间暂无授权集群。</div>
       ) : (
         <div className="table-wrap">
-          <table className="data-table text-sm">
+          <table className="data-table text-sm workspace-cluster-table">
             <thead>
               <tr>
+                <th>排序</th>
                 <th>名称</th>
+                <th>角色</th>
                 <th>API Server</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((row) => (
+              {items.map((row, index) => (
                 <tr key={row.id}>
+                  <td>
+                    <div className="workspace-cluster-sort-actions">
+                      <button
+                        type="button"
+                        className="btn-ghost text-xs"
+                        disabled={saving || index === 0}
+                        onClick={() => void onMove(index, "up")}
+                        aria-label={`上移 ${row.cluster_name}`}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ghost text-xs"
+                        disabled={saving || index === items.length - 1}
+                        onClick={() => void onMove(index, "down")}
+                        aria-label={`下移 ${row.cluster_name}`}
+                      >
+                        ↓
+                      </button>
+                    </div>
+                  </td>
                   <td>{row.cluster_name}</td>
+                  <td>
+                    {row.is_build_env ? (
+                      <span className="project-tag project-tag-green">构建集群</span>
+                    ) : (
+                      <span className="project-tag project-tag-blue">同步集群</span>
+                    )}
+                  </td>
                   <td className="font-mono text-xs">{row.server || "-"}</td>
                   <td>
-                    <button type="button" className="btn-secondary" onClick={() => void onRevoke(row.id)}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      disabled={saving}
+                      onClick={() => void onRevoke(row.id)}
+                    >
                       撤销授权
                     </button>
                   </td>
@@ -108,34 +160,6 @@ export function WorkspaceClusterPanel({ workspaceId }: WorkspaceClusterPanelProp
           </table>
         </div>
       )}
-      <Modal open={open} onClose={() => setOpen(false)} title="注册 K8s 集群">
-        <form onSubmit={(event) => void onCreate(event)} className="stack-md">
-          <input
-            className="input"
-            placeholder="集群名称"
-            value={clusterName}
-            onChange={(event) => setClusterName(event.target.value)}
-            required
-          />
-          <input
-            className="input"
-            placeholder="API Server URL，例如 https://192.168.1.10:6443"
-            value={server}
-            onChange={(event) => setServer(event.target.value)}
-          />
-          <p className="text-sm text-muted">
-            注册后会自动授权给当前工作空间。kubeconfig 请在「密钥配置」中以 Kubernetes 密钥保存。
-          </p>
-          <div className="flex justify-end gap-2">
-            <button type="button" className="btn-secondary" onClick={() => setOpen(false)}>
-              取消
-            </button>
-            <button type="submit" className="btn" disabled={submitting}>
-              {submitting ? "保存中…" : "保存"}
-            </button>
-          </div>
-        </form>
-      </Modal>
     </div>
   );
 }
