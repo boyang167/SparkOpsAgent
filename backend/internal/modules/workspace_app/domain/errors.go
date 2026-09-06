@@ -22,4 +22,6 @@ var (
 	ErrTemplateNotFound             = kernel.NewDomainError("WORKSPACE_APP_TEMPLATE_NOT_FOUND", "template not found")
 	ErrInvalidSecretName            = kernel.NewDomainError("WORKSPACE_APP_INVALID_SECRET_NAME", "invalid secret name")
 	ErrSecretNotFound               = kernel.NewDomainError("WORKSPACE_APP_SECRET_NOT_FOUND", "secret not found")
+	ErrInvalidManifestKind          = kernel.NewDomainError("INVALID_REQUEST", "invalid manifest kind")
+	ErrInvalidManifestContent       = kernel.NewDomainError("INVALID_REQUEST", "manifest content is required")
 )

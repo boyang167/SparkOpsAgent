@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { product, secret } from "@sparkops/web-sdk";
+import type { DeploymentRunListVM } from "@sparkops/contracts/delivery";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
-import type { DeploymentRunListVM, DeploymentRunVM } from "@sparkops/contracts/delivery";
 import type { SecretVM } from "@sparkops/contracts/secret";
 import type { TemplateVM } from "@sparkops/contracts/product";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
@@ -14,21 +14,23 @@ import {
   projectDisplayName,
 } from "./project-utils";
 import {
-  computeProjectProgress,
   isProjectConfigComplete,
   projectConfigActionLabel,
   projectPrimaryAction,
   shouldShowEditConfigAction,
-  type ProjectProgressStep,
 } from "./project-progress";
 import type { DeploymentEntryAction } from "./deployment-gate";
-import { deploymentSummaryState } from "./deployment-summary";
-import { ProjectGeneratedTemplates } from "./ProjectGeneratedTemplates";
+import { ProjectBuildLogsTab } from "./ProjectBuildLogsTab";
+import { ProjectYamlTab } from "./ProjectYamlTab";
+import { ProjectJenkinsPreview } from "./ProjectJenkinsPreview";
+import { ProjectPublishedOverview } from "./ProjectPublishedOverview";
+import { ProjectUnpublishedOverview } from "./ProjectUnpublishedOverview";
+import { hasSuccessfulDeployment, isPublishedProjectView } from "./project-deployment-state";
 import { ProjectDockerfileViewer } from "./ProjectDockerfileViewer";
 import { countGeneratedTemplates } from "./project-template-render";
 import { ProjectDisplayNameField, ProjectDescriptionField } from "./ProjectDisplayNameEditModal";
 import {
-  PROJECT_DETAIL_TABS,
+  projectDetailTabs,
   type ProjectDetailTab,
 } from "./project-detail-tabs";
 
@@ -37,17 +39,15 @@ interface ProjectServiceDetailPageProps {
   project: ProjectVM;
   tab: ProjectDetailTab;
   onTabChange: (tab: ProjectDetailTab) => void;
-  deploymentPage: DeploymentRunListVM | null;
-  deploymentLoading: boolean;
-  deploymentListError: string | null;
   deployAction: DeploymentEntryAction;
   onRelease: () => void;
   onViewDeployProgress: () => void;
   onConfigure: () => void;
   onSubmitReview: () => void;
   onReview: () => void;
-  onViewRun?: (run: DeploymentRunVM) => void;
   onProjectUpdated?: (project: ProjectVM) => void;
+  deploymentPage?: DeploymentRunListVM | null;
+  deploymentLoading?: boolean;
 }
 
 function ProjectIcon({ language }: { language?: string }) {
@@ -85,42 +85,6 @@ function InfoGrid({
   );
 }
 
-function ProgressTrack({ steps }: { steps: ProjectProgressStep[] }) {
-  return (
-    <section className="project-workbench-progress">
-      <div className="project-workbench-progress-title">项目进度</div>
-      <ol className="project-workbench-steps">
-        {steps.map((step, index) => (
-          <li key={step.key} className={`project-workbench-step is-${step.status}`}>
-            <div className="project-workbench-step-node">
-              <span className="project-workbench-step-circle">
-                {step.status === "done" ? "✓" : index + 1}
-              </span>
-            </div>
-            <div className="project-workbench-step-copy">
-              <strong>{step.title}</strong>
-              <span>{step.subtitle}</span>
-            </div>
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
-
-function deploymentStatusLabel(status: DeploymentRunVM["status"]) {
-  const map: Record<DeploymentRunVM["status"], string> = {
-    queued: "排队中",
-    preparing: "准备中",
-    building: "构建中",
-    deploying: "部署中",
-    succeeded: "成功",
-    failed: "失败",
-    aborted: "已中止",
-  };
-  return map[status] ?? status;
-}
-
 function reviewStatusLabel(project: ProjectVM) {
   const configComplete = isProjectConfigComplete(project);
   return {
@@ -144,50 +108,28 @@ function OverviewTab({
   project,
   deploymentPage,
   deploymentLoading,
-  deploymentListError,
 }: {
   workspaceId: string;
   project: ProjectVM;
   deploymentPage: DeploymentRunListVM | null;
   deploymentLoading: boolean;
-  deploymentListError: string | null;
 }) {
-  const progress = computeProjectProgress(project);
-  const deploymentSummary = deploymentSummaryState(
-    deploymentPage,
-    deploymentLoading,
-    deploymentListError,
-  );
+  const published = hasSuccessfulDeployment(deploymentPage);
+
+  if (deploymentLoading && !deploymentPage) {
+    return <p className="text-muted">概览加载中…</p>;
+  }
+
+  if (!published) {
+    return <ProjectUnpublishedOverview project={project} workspaceId={workspaceId} />;
+  }
 
   return (
-    <div className="stack-md">
-      <ProgressTrack steps={progress.steps} />
-      <div className="project-workbench-stats">
-        <span>
-          部署次数 <strong>{deploymentSummary.count}</strong>
-        </span>
-        <span>
-          最后部署{" "}
-          <strong>
-            {deploymentSummary.latest
-              ? `${deploymentStatusLabel(deploymentSummary.latest.status)} · ${formatDateTime(deploymentSummary.latest.created_at)}`
-              : deploymentSummary.unavailable
-                ? "不可用"
-                : "暂无"}
-          </strong>
-        </span>
-        <span>
-          配置进度{" "}
-          <strong>
-            {progress.steps.filter((step) => step.status === "done").length} / 4
-          </strong>
-        </span>
-      </div>
-      <section className="stack-sm">
-        <h4 className="project-service-section-title">生成的模板</h4>
-        <ProjectGeneratedTemplates workspaceId={workspaceId} project={project} />
-      </section>
-    </div>
+    <ProjectPublishedOverview
+      workspaceId={workspaceId}
+      project={project}
+      deploymentPage={deploymentPage}
+    />
   );
 }
 
@@ -265,87 +207,20 @@ function ConfigTab({
   );
 }
 
-function BuildLogsTab({
-  deploymentPage,
-  deploymentLoading,
-  deploymentListError,
-  onViewRun,
-}: {
-  deploymentPage: DeploymentRunListVM | null;
-  deploymentLoading: boolean;
-  deploymentListError: string | null;
-  onViewRun?: (run: DeploymentRunVM) => void;
-}) {
-  if (deploymentLoading) {
-    return <p className="text-muted">Build 日志加载中…</p>;
-  }
-  if (deploymentListError) {
-    return <p className="text-muted">{deploymentListError}</p>;
-  }
-  if (!deploymentPage?.items.length) {
-    return <p className="text-muted">暂无构建 / 部署记录</p>;
-  }
-
-  return (
-    <div className="project-build-log-table-wrap">
-      <table className="data-table project-build-log-table">
-        <thead>
-          <tr>
-            <th>记录 ID</th>
-            <th>镜像标签</th>
-            <th>Git 引用</th>
-            <th>集群</th>
-            <th>状态</th>
-            <th>创建时间</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {deploymentPage.items.map((run) => (
-            <tr key={run.id}>
-              <td className="font-mono text-xs">{run.id.slice(0, 8)}</td>
-              <td>{run.image_tag || "-"}</td>
-              <td>
-                {run.git_ref_type}/{run.git_ref_value}
-              </td>
-              <td className="font-mono text-xs">{run.cluster_id.slice(0, 8)}</td>
-              <td>
-                <span className="project-tag project-tag-blue">{deploymentStatusLabel(run.status)}</span>
-              </td>
-              <td>{formatDateTime(run.created_at)}</td>
-              <td>
-                {onViewRun ? (
-                  <button type="button" className="btn-ghost text-sm" onClick={() => onViewRun(run)}>
-                    查看日志
-                  </button>
-                ) : (
-                  "-"
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 export function ProjectServiceDetailPage({
   workspaceId,
   project,
   tab,
   onTabChange,
-  deploymentPage,
-  deploymentLoading,
-  deploymentListError,
   deployAction,
   onRelease,
   onViewDeployProgress,
   onConfigure,
   onSubmitReview,
   onReview,
-  onViewRun,
   onProjectUpdated,
+  deploymentPage = null,
+  deploymentLoading = false,
 }: ProjectServiceDetailPageProps) {
   const [secrets, setSecrets] = useState<SecretVM[]>([]);
   const [templates, setTemplates] = useState<TemplateVM[]>([]);
@@ -354,6 +229,8 @@ export function ProjectServiceDetailPage({
   const primaryAction = projectPrimaryAction(project);
   const statusText = reviewStatusLabel(project);
   const businessSpace = project.namespace || workspaceId;
+  const published = isPublishedProjectView(deploymentPage, tab);
+  const detailTabs = projectDetailTabs(published);
 
   useEffect(() => {
     if (tab !== "config") return;
@@ -535,11 +412,15 @@ export function ProjectServiceDetailPage({
       </header>
 
       <div className="template-tabs project-service-tabs">
-        <div className="template-tabs-nav">
-          {PROJECT_DETAIL_TABS.map((item) => (
+        <div className="template-tabs-nav project-service-tab-nav" role="tablist" aria-label="项目详情">
+          {detailTabs.map((item) => (
             <button
               key={item.id}
               type="button"
+              role="tab"
+              id={`project-tab-${item.id}`}
+              aria-selected={tab === item.id}
+              aria-controls={`project-tabpanel-${item.id}`}
               className={tab === item.id ? "is-active" : ""}
               onClick={() => onTabChange(item.id)}
             >
@@ -547,17 +428,35 @@ export function ProjectServiceDetailPage({
             </button>
           ))}
         </div>
-        <div className="template-tabs-body">
+        <div className="template-tabs-body project-service-tab-body">
           {tab === "overview" ? (
-            <OverviewTab
-              workspaceId={workspaceId}
-              project={project}
-              deploymentPage={deploymentPage}
-              deploymentLoading={deploymentLoading}
-              deploymentListError={deploymentListError}
-            />
+            <div role="tabpanel" id="project-tabpanel-overview" aria-labelledby="project-tab-overview">
+              <OverviewTab
+                workspaceId={workspaceId}
+                project={project}
+                deploymentPage={deploymentPage}
+                deploymentLoading={deploymentLoading}
+              />
+            </div>
           ) : null}
-          {tab === "config" ? (
+          {!published && tab === "yaml" ? (
+            <div role="tabpanel" id="project-tabpanel-yaml" aria-labelledby="project-tab-yaml">
+              <ProjectYamlTab workspaceId={workspaceId} project={project} active={tab === "yaml"} />
+            </div>
+          ) : null}
+          {!published && tab === "jenkins" ? (
+            <div role="tabpanel" id="project-tabpanel-jenkins" aria-labelledby="project-tab-jenkins">
+              <ProjectJenkinsPreview workspaceId={workspaceId} project={project} active={tab === "jenkins"} />
+            </div>
+          ) : null}
+          {!published && tab === "dockerfile" ? (
+            <div role="tabpanel" id="project-tabpanel-dockerfile" aria-labelledby="project-tab-dockerfile">
+              <section className="stack-sm">
+                <ProjectDockerfileViewer workspaceId={workspaceId} project={project} />
+              </section>
+            </div>
+          ) : null}
+          {published && tab === "config" ? (
             <ConfigTab
               workspaceId={workspaceId}
               project={project}
@@ -568,17 +467,12 @@ export function ProjectServiceDetailPage({
               canEdit={shouldShowEditConfigAction(project)}
             />
           ) : null}
-          {tab === "build-logs" ? (
-            <BuildLogsTab
-              deploymentPage={deploymentPage}
-              deploymentLoading={deploymentLoading}
-              deploymentListError={deploymentListError}
-              onViewRun={onViewRun}
-            />
+          {published && tab === "build-logs" ? (
+            <ProjectBuildLogsTab workspaceId={workspaceId} project={project} active={tab === "build-logs"} />
           ) : null}
-          {tab === "storage" ? <PlaceholderTab title="持久化存储" /> : null}
-          {tab === "webhooks" ? <PlaceholderTab title="Webhooks" /> : null}
-          {tab === "monitor" ? <PlaceholderTab title="监控" /> : null}
+          {published && tab === "storage" ? <PlaceholderTab title="持久化存储" /> : null}
+          {published && tab === "webhooks" ? <PlaceholderTab title="Webhooks" /> : null}
+          {published && tab === "monitor" ? <PlaceholderTab title="监控" /> : null}
         </div>
       </div>
 

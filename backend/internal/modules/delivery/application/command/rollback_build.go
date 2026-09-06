@@ -23,7 +23,7 @@ type RollbackBuildHandler struct {
 func NewRollbackBuildHandler(
 	builds repository.BuildRepository,
 	checker port.ProjectChecker,
-	jenkins port.JenkinsExecutor,
+	jenkins port.JenkinsExecutorProvider,
 	bus eventbus.Bus,
 	hub *stream.Hub,
 	registry *runner.Registry,

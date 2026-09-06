@@ -39,12 +39,31 @@ func (c *Config) Validate() error {
 	if c.Deploy.ReconcileInterval <= 0 {
 		return fmt.Errorf("deploy.reconcile_interval must be greater than zero")
 	}
+	switch c.Delivery.Driver {
+	case "mock":
+		// Explicit mock driver for local demos only.
+	case "jenkins":
+		// Jenkins URL/credentials come from each project's jenkins_secret_id.
+	default:
+		return fmt.Errorf("unsupported delivery.driver: %s", c.Delivery.Driver)
+	}
+	switch c.Runtime.Driver {
+	case "mock", "k8s":
+	default:
+		return fmt.Errorf("unsupported runtime.driver: %s", c.Runtime.Driver)
+	}
 	if IsProduction() {
 		if c.JWT.Secret == "dev-only-change-me" || c.JWT.Secret == "docker-dev-secret" {
 			return fmt.Errorf("jwt.secret must be changed in production")
 		}
 		if c.Messaging.Driver == "inmemory" {
 			return fmt.Errorf("messaging.driver must not be inmemory in production")
+		}
+		if c.Delivery.Driver == "mock" {
+			return fmt.Errorf("delivery.driver must not be mock in production")
+		}
+		if c.Runtime.Driver == "mock" {
+			return fmt.Errorf("runtime.driver must not be mock in production")
 		}
 		if c.Messaging.Driver == "amqp" && c.Messaging.AMQP.URL == "" {
 			return fmt.Errorf("messaging.amqp.url is required when driver=amqp")

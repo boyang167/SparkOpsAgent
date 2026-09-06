@@ -140,6 +140,48 @@ func TestCreateOrUpdateCreatesFolderThenCreatesAndUpdatesJobAndCredential(t *tes
 	require.Contains(t, updatedCredentialXML, "<password>updated-secret</password>")
 }
 
+func TestSyncCredentialsCreatesAndUpdatesCredential(t *testing.T) {
+	const credentialID = "sparkops-workspace-secret"
+	var folderExists, credentialExists bool
+	var createdCredentialXML, updatedCredentialXML string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/job/team-a/api/json/":
+			if folderExists {
+				_, _ = io.WriteString(w, `{"name":"team-a"}`)
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
+		case r.Method == http.MethodPost && r.URL.Path == "/createItem":
+			folderExists = true
+		case r.Method == http.MethodGet && r.URL.Path == "/job/team-a/credentials/store/folder/domain/_/api/json/":
+			if credentialExists {
+				_, _ = io.WriteString(w, `{"credentials":[{"id":"`+credentialID+`"}]}`)
+			} else {
+				_, _ = io.WriteString(w, `{"credentials":[]}`)
+			}
+		case r.Method == http.MethodPost && r.URL.Path == "/job/team-a/credentials/store/folder/domain/_/createCredentials":
+			createdCredentialXML = readRequestBody(t, r)
+			credentialExists = true
+		case r.Method == http.MethodPost && r.URL.Path == "/job/team-a/credentials/store/folder/domain/_/credential/"+credentialID+"/config.xml":
+			updatedCredentialXML = readRequestBody(t, r)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	executor := &Executor{client: gjenkins.CreateJenkins(server.Client(), server.URL)}
+	credentials := []port.JenkinsCredential{{
+		ID: credentialID, Username: "robot", Secret: "first-secret", Kind: "username-password",
+	}}
+	require.NoError(t, executor.SyncCredentials(context.Background(), "team-a", credentials))
+	credentials[0].Secret = "updated-secret"
+	require.NoError(t, executor.SyncCredentials(context.Background(), "team-a", credentials))
+	require.Contains(t, createdCredentialXML, "<password>first-secret</password>")
+	require.Contains(t, updatedCredentialXML, "<password>updated-secret</password>")
+}
+
 func TestCreateOrUpdateRecoversFromConcurrentFolderJobAndCredentialCreates(t *testing.T) {
 	const credentialID = "sparkops-workspace-secret"
 	var folderExists, jobExists, credentialExists bool
@@ -276,11 +318,14 @@ func TestRunStreamingReturnsBuildRefreshError(t *testing.T) {
 			_, _ = io.WriteString(w, `{"id":1,"executable":{"number":1,"url":"`+server.URL+`/job/orders/1/"}}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/job/orders/1/api/json":
 			buildReads++
-			if buildReads > 2 {
+			if buildReads > 4 {
 				http.Error(w, "refresh failed", http.StatusInternalServerError)
 				return
 			}
 			_, _ = io.WriteString(w, `{"number":1,"building":true,"result":""}`)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/logText/progressiveText"):
+			w.Header().Set("X-Text-Size", "0")
+			_, _ = io.WriteString(w, "")
 		default:
 			http.NotFound(w, r)
 		}

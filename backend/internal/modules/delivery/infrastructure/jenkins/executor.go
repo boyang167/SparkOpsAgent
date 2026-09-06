@@ -25,18 +25,44 @@ type Executor struct {
 }
 
 func NewExecutor(cfg config.JenkinsConfig) (*Executor, error) {
-	if cfg.URL == "" {
+	return NewExecutorFromConnection(ConnectionConfig{
+		URL: cfg.URL, User: cfg.User, Token: resolveToken(cfg.Token, ""),
+	}, cfg.JobSuffix)
+}
+
+type ConnectionConfig struct {
+	URL      string
+	User     string
+	Password string
+	Token    string
+}
+
+func NewExecutorFromConnection(conn ConnectionConfig, jobSuffix string) (*Executor, error) {
+	url := strings.TrimSpace(conn.URL)
+	if url == "" {
 		return nil, fmt.Errorf("jenkins url is required")
 	}
-	client := gjenkins.CreateJenkins(nil, cfg.URL, cfg.User, cfg.Token)
+	token := resolveToken(conn.Token, conn.Password)
+	if strings.TrimSpace(token) == "" {
+		return nil, fmt.Errorf("jenkins token is required")
+	}
+	client := gjenkins.CreateJenkins(nil, url, strings.TrimSpace(conn.User), token)
 	if _, err := client.Init(context.Background()); err != nil {
 		return nil, fmt.Errorf("jenkins init: %w", err)
 	}
-	suffix := cfg.JobSuffix
-	if suffix == "" {
-		suffix = "-build"
+	if jobSuffix == "" {
+		jobSuffix = "-build"
 	}
-	return &Executor{client: client, jobSuffix: suffix}, nil
+	return &Executor{client: client, jobSuffix: jobSuffix}, nil
+}
+
+func resolveToken(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (e *Executor) CreateOrUpdate(ctx context.Context, spec port.JenkinsJobSpec) error {
@@ -49,25 +75,8 @@ func (e *Executor) CreateOrUpdate(ctx context.Context, spec port.JenkinsJobSpec)
 		return errors.New("jenkins job is required")
 	}
 
-	folderStatus, err := e.resourceStatus(ctx, "/job/"+url.PathEscape(spec.Folder))
-	if err != nil {
-		return fmt.Errorf("get jenkins folder: %w", err)
-	}
-	if folderStatus == http.StatusNotFound {
-		if _, err := e.client.CreateFolder(ctx, spec.Folder); err != nil {
-			if !isCreateConflict(err) {
-				return fmt.Errorf("create jenkins folder: %w", err)
-			}
-			reloadedStatus, reloadErr := e.resourceStatus(ctx, "/job/"+url.PathEscape(spec.Folder))
-			if reloadErr != nil {
-				return fmt.Errorf("reload jenkins folder after create conflict: %w", reloadErr)
-			}
-			if reloadedStatus != http.StatusOK {
-				return fmt.Errorf("reload jenkins folder after create conflict: unexpected status %d", reloadedStatus)
-			}
-		}
-	} else if folderStatus != http.StatusOK {
-		return fmt.Errorf("get jenkins folder: unexpected status %d", folderStatus)
+	if err := e.ensureFolder(ctx, spec.Folder); err != nil {
+		return err
 	}
 	if err := e.upsertCredentials(ctx, spec.Folder, spec.Credentials); err != nil {
 		return err
@@ -99,6 +108,43 @@ func (e *Executor) CreateOrUpdate(ctx context.Context, spec port.JenkinsJobSpec)
 		return fmt.Errorf("get jenkins job: unexpected status %d", jobStatus)
 	}
 	return e.updateJobConfig(ctx, spec.Folder, spec.Job, config)
+}
+
+func (e *Executor) SyncCredentials(ctx context.Context, folder string, credentials []port.JenkinsCredential) error {
+	folder = strings.TrimSpace(folder)
+	if folder == "" {
+		return errors.New("jenkins folder is required")
+	}
+	if err := e.ensureFolder(ctx, folder); err != nil {
+		return err
+	}
+	return e.upsertCredentials(ctx, folder, credentials)
+}
+
+func (e *Executor) ensureFolder(ctx context.Context, folder string) error {
+	folderStatus, err := e.resourceStatus(ctx, "/job/"+url.PathEscape(folder))
+	if err != nil {
+		return fmt.Errorf("get jenkins folder: %w", err)
+	}
+	if folderStatus == http.StatusNotFound {
+		if _, err := e.client.CreateFolder(ctx, folder); err != nil {
+			if !isCreateConflict(err) {
+				return fmt.Errorf("create jenkins folder: %w", err)
+			}
+			reloadedStatus, reloadErr := e.resourceStatus(ctx, "/job/"+url.PathEscape(folder))
+			if reloadErr != nil {
+				return fmt.Errorf("reload jenkins folder after create conflict: %w", reloadErr)
+			}
+			if reloadedStatus != http.StatusOK {
+				return fmt.Errorf("reload jenkins folder after create conflict: unexpected status %d", reloadedStatus)
+			}
+		}
+		return nil
+	}
+	if folderStatus != http.StatusOK {
+		return fmt.Errorf("get jenkins folder: unexpected status %d", folderStatus)
+	}
+	return nil
 }
 
 func (e *Executor) updateJobConfig(ctx context.Context, folder, jobName, config string) error {
@@ -288,23 +334,33 @@ func (e *Executor) RunStreaming(
 		return buf.String(), fmt.Errorf("wait build: %w", err)
 	}
 
+	var offset int64
 	for {
-		if _, err := build.Poll(ctx); err != nil {
-			return buf.String(), fmt.Errorf("poll jenkins build: %w", err)
-		}
-		if !build.Raw.Building {
-			break
-		}
 		select {
 		case <-ctx.Done():
 			return buf.String(), ctx.Err()
 		default:
 		}
-		chunk := fmt.Sprintf("[jenkins] running #%d...\n", build.GetBuildNumber())
-		buf.WriteString(chunk)
-		if hub != nil {
-			hub.Publish(buildID, chunk)
+
+		if _, err := build.Poll(ctx); err != nil {
+			return buf.String(), fmt.Errorf("poll jenkins build: %w", err)
 		}
+
+		offset, hasMore, err := e.publishConsoleChunk(ctx, build, buildID, hub, &buf, offset)
+		if err != nil {
+			return buf.String(), err
+		}
+
+		if !build.Raw.Building {
+			for hasMore {
+				offset, hasMore, err = e.publishConsoleChunk(ctx, build, buildID, hub, &buf, offset)
+				if err != nil {
+					return buf.String(), err
+				}
+			}
+			break
+		}
+
 		timer := time.NewTimer(time.Second)
 		select {
 		case <-ctx.Done():
@@ -319,7 +375,7 @@ func (e *Executor) RunStreaming(
 		build = next
 	}
 
-	result := fmt.Sprintf("[jenkins] finished result=%s\n", build.GetResult())
+	result := fmt.Sprintf("\n[jenkins] finished result=%s\n", build.GetResult())
 	buf.WriteString(result)
 	if hub != nil {
 		hub.Publish(buildID, result)
@@ -328,6 +384,27 @@ func (e *Executor) RunStreaming(
 		return buf.String(), fmt.Errorf("jenkins result: %s", build.GetResult())
 	}
 	return buf.String(), nil
+}
+
+func (e *Executor) publishConsoleChunk(
+	ctx context.Context,
+	build *gjenkins.Build,
+	buildID kernel.BuildID,
+	hub port.LogPublisher,
+	buf *strings.Builder,
+	offset int64,
+) (int64, bool, error) {
+	resp, err := build.GetConsoleOutputFromIndex(ctx, offset)
+	if err != nil {
+		return offset, false, fmt.Errorf("read jenkins console: %w", err)
+	}
+	if resp.Content != "" {
+		buf.WriteString(resp.Content)
+		if hub != nil {
+			hub.Publish(buildID, resp.Content)
+		}
+	}
+	return resp.Offset, resp.HasMoreText, nil
 }
 
 var _ port.JenkinsExecutor = (*Executor)(nil)

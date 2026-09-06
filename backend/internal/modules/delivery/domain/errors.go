@@ -11,4 +11,5 @@ var (
 	ErrBuildNotRollbackable          = kernel.NewDomainError("DELIVERY_BUILD_NOT_ROLLBACKABLE", "only successful builds can be rolled back")
 	ErrInvalidCronJob                = kernel.NewDomainError("DELIVERY_INVALID_CRONJOB", "invalid cronjob request")
 	ErrInvalidDeploymentBuildRequest = kernel.NewDomainError("DELIVERY_INVALID_DEPLOYMENT_BUILD_REQUEST", "invalid deployment build request")
+	ErrProjectJenkinsNotConfigured   = kernel.NewDomainError("DELIVERY_PROJECT_JENKINS_NOT_CONFIGURED", "project jenkins secret is not configured")
 )

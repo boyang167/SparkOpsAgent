@@ -7,8 +7,6 @@ import { loadSession } from "@/server/loaders/session";
 import { loadWorkspaceId } from "@/server/loaders/context";
 import { loadWorkspaces } from "@/server/loaders/workspaces";
 import { loadProject } from "@/server/loaders/projects";
-import { loadAgents } from "@/server/loaders/agents";
-import { loadWorkflows } from "@/server/loaders/workflows";
 
 interface ProjectPageProps {
   params: Promise<{ projectId: string }>;
@@ -41,16 +39,11 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
     notFound();
   }
 
-  const agents = await loadAgents(workspaceId, projectId);
-  const workflows = await loadWorkflows(workspaceId, projectId);
-
   return (
     <Suspense fallback={<div className="text-muted p-4">加载项目详情…</div>}>
       <ProjectWorkbenchPage
         workspaceId={workspaceId}
         project={project}
-        agents={agents}
-        workflows={workflows}
         initialConfigure={query.configure === "1"}
       />
     </Suspense>

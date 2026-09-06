@@ -12,6 +12,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/policy"
 )
 
 type Module struct {
@@ -30,6 +31,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 	if c.PermissionChecker == nil {
 		return fmt.Errorf("agent module requires permission checker")
+	}
+	if c.ProjectAccessChecker == nil {
+		return fmt.Errorf("agent module requires project access checker")
 	}
 	if err := persistence.AutoMigrate(c.DB); err != nil {
 		return fmt.Errorf("agent migrate: %w", err)
@@ -52,11 +56,12 @@ func (m *Module) Register(c *appctx.Container) error {
 	auth := authn.RequireAuth(m.tokens)
 	ws := httpx.RequireWorkspace()
 	wsMember := authz.RequireWorkspaceMember(c.WorkspaceMemberChecker)
+	projectRead := authz.RequireProjectAccess(c.ProjectAccessChecker, policy.ActionRead)
 
 	c.Engine.POST("/api/v1/projects/:projectId/agents",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermAgentWrite), handler.CreateAgent)
 	c.Engine.GET("/api/v1/projects/:projectId/agents",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermAgentRead), handler.ListAgents)
+		auth, ws, wsMember, projectRead, handler.ListAgents)
 	c.Engine.GET("/api/v1/agents/:agentId",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermAgentRead), handler.GetAgent)
 	c.Engine.PATCH("/api/v1/agents/:agentId",

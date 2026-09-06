@@ -23,21 +23,15 @@ k8s:
   kubeconfig_path: ""
   clusters: []
 runtime:
-  driver: "mock"
+  driver: "k8s"
   cluster: ""
 delivery:
-  driver: "mock"
-  url: ""
-  user: ""
-  token: ""
+  driver: "jenkins"
 deploy:
   jenkins_timeout: 30m
   rollout_timeout: 10m
   reconcile_interval: 30s
 jenkins:
-  url: ""
-  user: ""
-  token: ""
   job_suffix: "-build"
 gitlab:
   base_url: ""

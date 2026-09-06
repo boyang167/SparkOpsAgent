@@ -1,7 +1,6 @@
 package k8s
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/domain/port"
@@ -22,10 +21,14 @@ func NewAdapters(
 	factory *platformk8s.Factory,
 	checker port.ProjectChecker,
 ) (Adapters, error) {
-	if cfg.Runtime.Driver == "k8s" {
-		if factory == nil || len(factory.Names()) == 0 {
-			return Adapters{}, fmt.Errorf("runtime driver k8s requires configured kubernetes clusters")
-		}
+	adapters := Adapters{}
+	if cfg.Runtime.Driver == "mock" {
+		adapters.Deployer = NewMockManifestDeployer()
+	} else {
+		adapters.Deployer = NewKubeconfigManifestDeployer(time.Second)
+	}
+
+	if cfg.Runtime.Driver == "k8s" && factory != nil && len(factory.Names()) > 0 {
 		cluster := cfg.Runtime.Cluster
 		if cluster == "" {
 			cluster = factory.Names()[0]
@@ -46,10 +49,16 @@ func NewAdapters(
 		if err != nil {
 			return Adapters{}, err
 		}
-		return Adapters{
-			Lister: lister, Logs: logs, Terminal: terminal, Resources: resources,
-			Deployer: NewKubeconfigManifestDeployer(time.Second),
-		}, nil
+		adapters.Lister = lister
+		adapters.Logs = logs
+		adapters.Terminal = terminal
+		adapters.Resources = resources
+		return adapters, nil
+	}
+
+	if cfg.Runtime.Driver == "k8s" && (factory == nil || len(factory.Names()) == 0) {
+		// Deployment still uses per-project kubeconfig via ManifestDeployer above.
+		// Pod/resource APIs stay on mock adapters until platform k8s is configured.
 	}
 
 	return Adapters{
@@ -57,6 +66,6 @@ func NewAdapters(
 		Logs:      NewMockPodLogs(),
 		Terminal:  NewMockPodTerminal(),
 		Resources: NewMockResourceService(checker),
-		Deployer:  NewMockManifestDeployer(),
+		Deployer:  adapters.Deployer,
 	}, nil
 }

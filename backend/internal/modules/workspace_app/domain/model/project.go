@@ -79,8 +79,9 @@ type ProjectResources struct {
 	JenkinsfileTemplateID string        `json:"jenkinsfile_template_id,omitempty"`
 	RegistryType          string        `json:"registry_type,omitempty"`
 	RegistrySecretID      string        `json:"registry_secret_id,omitempty"`
-	SonarqubeSecretID     string        `json:"sonarqube_secret_id,omitempty"`
-	EnableStaticScan      bool          `json:"enable_static_scan,omitempty"`
+	SonarqubeSecretID     string            `json:"sonarqube_secret_id,omitempty"`
+	EnableStaticScan      bool              `json:"enable_static_scan,omitempty"`
+	ManifestOverrides     map[string]string `json:"manifest_overrides,omitempty"`
 }
 
 type Project struct {
@@ -299,7 +300,60 @@ func mergeProjectResources(existing, incoming ProjectResources) ProjectResources
 	if strings.TrimSpace(out.JenkinsfileTemplateID) == "" {
 		out.JenkinsfileTemplateID = existing.JenkinsfileTemplateID
 	}
+	if incoming.ManifestOverrides == nil {
+		out.ManifestOverrides = existing.ManifestOverrides
+	} else {
+		merged := make(map[string]string, len(existing.ManifestOverrides)+len(incoming.ManifestOverrides))
+		for k, v := range existing.ManifestOverrides {
+			merged[k] = v
+		}
+		for k, v := range incoming.ManifestOverrides {
+			merged[k] = v
+		}
+		out.ManifestOverrides = merged
+	}
 	return out
+}
+
+func NormalizeManifestKind(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "service":
+		return "Service"
+	case "deployment":
+		return "Deployment"
+	case "jenkinsfile":
+		return "jenkinsFile"
+	default:
+		return ""
+	}
+}
+
+func (p *Project) SetManifestOverride(kind, content string) error {
+	if p.Status != ProjectStatusActive {
+		return domain.ErrProjectNotActive
+	}
+	if p.ReviewStatus == ProjectReviewPending {
+		return domain.ErrProjectReviewLocked
+	}
+	normalized := NormalizeManifestKind(kind)
+	if normalized == "" {
+		return domain.ErrInvalidManifestKind
+	}
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return domain.ErrInvalidManifestContent
+	}
+	if p.Resources.ManifestOverrides == nil {
+		p.Resources.ManifestOverrides = map[string]string{}
+	}
+	p.Resources.ManifestOverrides[normalized] = content
+	if !strings.HasSuffix(p.Resources.ManifestOverrides[normalized], "\n") {
+		p.Resources.ManifestOverrides[normalized] += "\n"
+	}
+	if p.ReviewStatus == ProjectReviewApproved {
+		p.resetReview()
+	}
+	return nil
 }
 
 func (p *Project) IsConfigComplete() bool {

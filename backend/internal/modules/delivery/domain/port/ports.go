@@ -58,12 +58,18 @@ type GitBranch struct {
 
 type JenkinsExecutor interface {
 	CreateOrUpdate(ctx context.Context, spec JenkinsJobSpec) error
+	SyncCredentials(ctx context.Context, folder string, credentials []JenkinsCredential) error
 	RunStreaming(
 		ctx context.Context,
 		buildID kernel.BuildID,
 		req BuildRequest,
 		hub LogPublisher,
 	) (consoleLog string, err error)
+}
+
+// JenkinsExecutorProvider resolves a Jenkins client from project-bound secrets.
+type JenkinsExecutorProvider interface {
+	ForProject(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) (JenkinsExecutor, error)
 }
 
 type LogPublisher interface {

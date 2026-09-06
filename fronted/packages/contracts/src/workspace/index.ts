@@ -177,6 +177,12 @@ export const GeneratedTemplateListVMSchema = z.object({
 
 export type GeneratedTemplateListVM = z.infer<typeof GeneratedTemplateListVMSchema>;
 
+export const UpdateGeneratedTemplateCommandSchema = z.object({
+  content: z.string().min(1),
+});
+
+export type UpdateGeneratedTemplateCommand = z.infer<typeof UpdateGeneratedTemplateCommandSchema>;
+
 export const GitRefVMSchema = z.object({
   name: z.string(),
   title: z.string().optional(),

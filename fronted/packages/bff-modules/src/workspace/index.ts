@@ -8,7 +8,7 @@ export {
   updateProjectMemberRole,
   removeProjectMember,
 } from "./projectMembers";
-export { listGeneratedTemplates } from "./generatedTemplates";
+export { listGeneratedTemplates, updateGeneratedTemplate } from "./generatedTemplates";
 export { listGitRefs } from "./gitRefs";
 export { listGitTree } from "./gitTree";
 export { getGitFileContent } from "./gitFile";

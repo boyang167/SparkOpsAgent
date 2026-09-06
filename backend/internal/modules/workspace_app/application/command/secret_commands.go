@@ -8,6 +8,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -64,17 +66,19 @@ type UpdateSecretInput struct {
 }
 
 type UpdateSecretHandler struct {
-	repo         repository.SecretRepository
-	wsChecker    port.WorkspaceChecker
-	crypto       *application.SecretCrypto
+	repo      repository.SecretRepository
+	wsChecker port.WorkspaceChecker
+	crypto    *application.SecretCrypto
+	bus       eventbus.Bus
 }
 
 func NewUpdateSecretHandler(
 	repo repository.SecretRepository,
 	wsChecker port.WorkspaceChecker,
 	crypto *application.SecretCrypto,
+	bus eventbus.Bus,
 ) *UpdateSecretHandler {
-	return &UpdateSecretHandler{repo: repo, wsChecker: wsChecker, crypto: crypto}
+	return &UpdateSecretHandler{repo: repo, wsChecker: wsChecker, crypto: crypto, bus: bus}
 }
 
 func (h *UpdateSecretHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID, secretID kernel.SecretID, in UpdateSecretInput) (*model.Secret, error) {
@@ -110,7 +114,19 @@ func (h *UpdateSecretHandler) Handle(ctx context.Context, wsID kernel.WorkspaceI
 	if err := h.repo.Update(ctx, s); err != nil {
 		return nil, err
 	}
+	if credentialsPatchProvided(in) && h.bus != nil {
+		_ = h.bus.Publish(ctx, integration.NewSecretUpdated(wsID, secretID, s.ServiceType))
+	}
 	return s, nil
+}
+
+func credentialsPatchProvided(in UpdateSecretInput) bool {
+	if in.ReplaceCredentials {
+		return true
+	}
+	c := in.Credentials
+	return c.Password != "" || c.Token != "" || c.APIKey != "" ||
+		c.PrivateKey != "" || c.PublicKey != "" || c.Certificate != "" || c.ExtraConfig != ""
 }
 
 func mergeCredentials(base, patch model.SecretCredentials) model.SecretCredentials {

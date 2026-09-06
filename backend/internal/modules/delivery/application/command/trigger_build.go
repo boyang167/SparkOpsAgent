@@ -21,7 +21,7 @@ import (
 type TriggerBuildHandler struct {
 	builds       repository.BuildRepository
 	checker      port.ProjectChecker
-	jenkins      port.JenkinsExecutor
+	jenkins      port.JenkinsExecutorProvider
 	bus          eventbus.Bus
 	hub          *stream.Hub
 	registry     *runner.Registry
@@ -32,7 +32,7 @@ type TriggerBuildHandler struct {
 func NewTriggerBuildHandler(
 	builds repository.BuildRepository,
 	checker port.ProjectChecker,
-	jenkins port.JenkinsExecutor,
+	jenkins port.JenkinsExecutorProvider,
 	bus eventbus.Bus,
 	hub *stream.Hub,
 	registry *runner.Registry,
@@ -218,7 +218,17 @@ func (h *TriggerBuildHandler) executeBuild(
 	h.registry.Register(build.ID.String(), cancel)
 	defer h.registry.Done(build.ID.String())
 
-	consoleLog, execErr := h.jenkins.RunStreaming(
+	jenkins, err := h.jenkins.ForProject(execCtx, wsID, projectID)
+	if err != nil {
+		build.Fail(err.Error(), "")
+		if updateErr := h.updateBuildWithRetry(h.workerCtx, build); updateErr != nil {
+			h.reportAsyncError(fmt.Errorf("persist jenkins config failure: %w", updateErr))
+		}
+		h.hub.Complete(build.ID, build.ConsoleLog)
+		return
+	}
+
+	consoleLog, execErr := jenkins.RunStreaming(
 		execCtx, build.ID, req, h.hub,
 	)
 

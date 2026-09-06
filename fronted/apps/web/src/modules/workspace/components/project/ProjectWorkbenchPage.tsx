@@ -10,8 +10,6 @@ import type {
   DeploymentRunListVM,
   DeploymentRunVM,
 } from "@sparkops/contracts/delivery";
-import type { AgentVM } from "@sparkops/contracts/agent";
-import type { WorkflowVM } from "@sparkops/contracts/workflow";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { ProjectConfigurePanel } from "./ProjectConfigurePanel";
 import { ProjectReviewModal } from "./ProjectReviewModal";
@@ -19,13 +17,12 @@ import { ProjectDeployModal } from "./ProjectDeployModal";
 import { ProjectServiceDetailPage } from "./ProjectServiceDetailPage";
 import { projectDisplayName } from "./project-utils";
 import { deploymentEntryAction } from "./deployment-gate";
+import { isPublishedProjectView } from "./project-deployment-state";
 import { parseProjectDetailTab, type ProjectDetailTab } from "./project-detail-tabs";
 
 interface ProjectWorkbenchPageProps {
   workspaceId: string;
   project: ProjectVM;
-  agents: AgentVM[];
-  workflows: WorkflowVM[];
   initialConfigure?: boolean;
 }
 
@@ -51,7 +48,10 @@ export function ProjectWorkbenchPage({
   const deploymentGenerationRef = useRef(0);
   const releaseHandledRef = useRef(false);
 
-  const tab = parseProjectDetailTab(searchParams.get("tab"));
+  const tab = parseProjectDetailTab(
+    searchParams.get("tab"),
+    isPublishedProjectView(deploymentPage, searchParams.get("tab")),
+  );
 
   useEffect(() => {
     setCurrentProject(project);
@@ -224,9 +224,6 @@ export function ProjectWorkbenchPage({
         project={currentProject}
         tab={tab}
         onTabChange={setTab}
-        deploymentPage={deploymentPage}
-        deploymentLoading={deploymentLoading}
-        deploymentListError={deploymentListError}
         deployAction={deployAction}
         onRelease={openDeploy}
         onViewDeployProgress={() => {
@@ -237,11 +234,9 @@ export function ProjectWorkbenchPage({
         onConfigure={() => setConfigureOpen(true)}
         onSubmitReview={() => void submitReview()}
         onReview={() => setReviewOpen(true)}
-        onViewRun={(run) => {
-          setSelectedRun(run);
-          setDeployOpen(true);
-        }}
         onProjectUpdated={(updated) => setCurrentProject(updated)}
+        deploymentPage={deploymentPage}
+        deploymentLoading={deploymentLoading}
       />
 
       <ProjectConfigurePanel

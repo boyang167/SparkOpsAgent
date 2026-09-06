@@ -39,22 +39,29 @@ pnpm dev                              # :3000
 
 ### 配置与授权
 
-后端默认配置位于 `backend/config.example.yaml`：
+后端默认配置位于 `backend/config.example.yaml`（**默认使用真实 Jenkins + K8s 驱动**，不再走 mock）：
 
 ```yaml
 messaging:
   driver: inmemory
 runtime:
-  driver: mock
+  driver: k8s
 delivery:
-  driver: mock
+  driver: jenkins
 deploy:
   jenkins_timeout: 30m
   rollout_timeout: 10m
   reconcile_interval: 30s
 ```
 
-真实环境可分别设置 `MESSAGING_DRIVER=amqp`、`DELIVERY_DRIVER=jenkins`、`RUNTIME_DRIVER=k8s`。开始部署前：
+本地纯演示仍可通过环境变量显式启用 mock：
+
+```powershell
+$env:DELIVERY_DRIVER="mock"
+$env:RUNTIME_DRIVER="mock"
+```
+
+生产环境请设置 `APP_ENV=production`，并配置 `MESSAGING_DRIVER=amqp`、项目级 Jenkins 密钥与 Kubernetes 密钥。
 
 1. 在业务控制台「持续交付 → 集群管理」注册集群（`POST /api/v1/workspaces/:wsId/clusters`），会自动授权给当前工作空间。Super Admin 仍可在平台运营中跨工作空间授权已有集群。
 2. Kubernetes 类型工作空间密钥的 `credentials.extra_config` 必须保存完整 kubeconfig；本期不支持把 token/CA 分字段拼成 kubeconfig。
@@ -156,8 +163,10 @@ Harbor12345
 
 test-gitlab  glpat-LOYje5HyX9RQd1Kjs-4Vx286MQp1OjMH.01.0w16qu9hd
 ssh://git@192.168.5.24:2224/cicd/test-repo.git
-http://192.168.5.24:8929/cicd/test-repo.git
 
+
+http://192.168.5.24:8929/cicd/test-repo.git
+user: root pwd: asdf!123456
 
 jenkins : root 123456
 

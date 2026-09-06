@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -181,6 +182,7 @@ func Load(path string) (*Config, error) {
 	if err := cfg.applyEnvOverrides(); err != nil {
 		return nil, fmt.Errorf("environment override: %w", err)
 	}
+	cfg.resolveDrivers()
 	if err := cfg.resolveDatabaseDSN(); err != nil {
 		return nil, fmt.Errorf("database dsn: %w", err)
 	}
@@ -294,10 +296,10 @@ func (c *Config) applyDefaults() {
 		c.Messaging.AMQP.ExchangeType = "direct"
 	}
 	if c.Runtime.Driver == "" {
-		c.Runtime.Driver = "mock"
+		c.Runtime.Driver = "k8s"
 	}
 	if c.Delivery.Driver == "" {
-		c.Delivery.Driver = "mock"
+		c.Delivery.Driver = "jenkins"
 	}
 	if c.Deploy.JenkinsTimeout == 0 {
 		c.Deploy.JenkinsTimeout = 30 * time.Minute
@@ -328,6 +330,22 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Auth.LDAP.NameAttribute == "" {
 		c.Auth.LDAP.NameAttribute = "cn"
+	}
+}
+
+// resolveDrivers normalizes driver names after defaults and env overrides.
+func (c *Config) resolveDrivers() {
+	switch strings.ToLower(strings.TrimSpace(c.Runtime.Driver)) {
+	case "", "auto", "k8s":
+		c.Runtime.Driver = "k8s"
+	case "mock":
+		c.Runtime.Driver = "mock"
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Delivery.Driver)) {
+	case "", "auto", "jenkins":
+		c.Delivery.Driver = "jenkins"
+	case "mock":
+		c.Delivery.Driver = "mock"
 	}
 }
 

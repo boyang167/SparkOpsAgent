@@ -270,14 +270,18 @@ func newPipelineFixture(t *testing.T, mode pipelineMode) *pipelineFixture {
 	buildRegistry := runner.NewRegistry()
 	buildHub := buildstream.NewHub()
 	trigger := buildcommand.NewTriggerBuildHandler(
-		builds, project, jenkinsMock, bus, buildHub, buildRegistry, ctx,
+		builds, project, jenkins.NewStaticProvider(jenkinsMock), bus, buildHub, buildRegistry, ctx,
 	)
 	runtime := &acceptanceRuntime{mock: runtimek8s.NewMockManifestDeployer()}
 	publisher := consumer.NewPublisher(queue)
 	operations := runner.NewRegistry()
+	prepare := service.NewPrepareService("-build", acceptancePipelineRenderer{}).
+		UseJenkinsFactory(func(deployport.DeploymentSecret) (deliveryport.JenkinsExecutor, error) {
+			return jenkinsMock, nil
+		})
 	orchestrator := service.NewOrchestrator(
 		repo, builds, reader,
-		service.NewPrepareService(jenkinsMock, acceptancePipelineRenderer{}),
+		prepare,
 		trigger, service.NewManifestRenderer(), runtime, publisher,
 		time.Minute, time.Minute, operations,
 	)

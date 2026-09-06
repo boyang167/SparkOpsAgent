@@ -131,6 +131,22 @@ export async function listGeneratedTemplates(workspaceId: string, projectId: str
   return data.items;
 }
 
+export function updateGeneratedTemplate(
+  workspaceId: string,
+  projectId: string,
+  kind: string,
+  input: import("@sparkops/contracts/workspace").UpdateGeneratedTemplateCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/workspace").GeneratedTemplateArtifact>(
+    `/workspaces/${workspaceId}/projects/${projectId}/generated-templates/${encodeURIComponent(kind)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+      ...withWorkspace(workspaceId),
+    },
+  );
+}
+
 export async function listGitRefs(
   workspaceId: string,
   input: import("@sparkops/contracts/workspace").ListGitRefsCommand,

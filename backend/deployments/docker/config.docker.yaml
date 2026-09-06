@@ -11,10 +11,10 @@ messaging:
     exchange: "sparkops"
     exchange_type: "direct"
 runtime:
-  driver: "mock"
+  driver: "k8s"
   cluster: ""
 delivery:
-  driver: "mock"
+  driver: "jenkins"
 deploy:
   jenkins_timeout: 30m
   rollout_timeout: 10m

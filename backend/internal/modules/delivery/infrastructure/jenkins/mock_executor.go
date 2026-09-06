@@ -22,6 +22,14 @@ func (e *MockExecutor) CreateOrUpdate(_ context.Context, spec port.JenkinsJobSpe
 	return nil
 }
 
+func (e *MockExecutor) SyncCredentials(_ context.Context, folder string, credentials []port.JenkinsCredential) error {
+	if e.LastJobSpec.Folder == "" {
+		e.LastJobSpec.Folder = folder
+	}
+	e.LastJobSpec.Credentials = credentials
+	return nil
+}
+
 func (e *MockExecutor) RunStreaming(
 	ctx context.Context,
 	buildID kernel.BuildID,

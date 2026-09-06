@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
 	deployport "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/port"
+	jenkinsinfra "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/jenkins"
 	deliveryport "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/port"
-	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
 )
 
 type PrepareService struct {
-	jenkins  deliveryport.JenkinsExecutor
-	renderer deployport.PipelineRenderer
+	jobSuffix      string
+	renderer       deployport.PipelineRenderer
+	jenkinsFactory func(deployport.DeploymentSecret) (deliveryport.JenkinsExecutor, error)
 }
 
 type PrepareInput struct {
@@ -23,8 +23,16 @@ type PrepareInput struct {
 	ImageRepository string
 }
 
-func NewPrepareService(jenkins deliveryport.JenkinsExecutor, renderer deployport.PipelineRenderer) *PrepareService {
-	return &PrepareService{jenkins: jenkins, renderer: renderer}
+func NewPrepareService(jobSuffix string, renderer deployport.PipelineRenderer) *PrepareService {
+	return &PrepareService{jobSuffix: jobSuffix, renderer: renderer}
+}
+
+// UseJenkinsFactory overrides Jenkins resolution; intended for tests.
+func (s *PrepareService) UseJenkinsFactory(
+	fn func(deployport.DeploymentSecret) (deliveryport.JenkinsExecutor, error),
+) *PrepareService {
+	s.jenkinsFactory = fn
+	return s
 }
 
 func (s *PrepareService) Run(ctx context.Context, project deployport.ProjectDeploymentContext, input PrepareInput) error {
@@ -37,8 +45,8 @@ func (s *PrepareService) Run(ctx context.Context, project deployport.ProjectDepl
 		GitRefValue:          input.GitRefValue,
 		ImageTag:             input.ImageTag,
 		ImageRepository:      input.ImageRepository,
-		GitCredentialID:      stableCredentialID(project.WorkspaceID, project.Git.ID),
-		RegistryCredentialID: stableCredentialID(project.WorkspaceID, project.Harbor.ID),
+		GitCredentialID:      StableCredentialID(project.WorkspaceID, project.Git.ID),
+		RegistryCredentialID: StableCredentialID(project.WorkspaceID, project.Harbor.ID),
 	})
 	if err != nil {
 		return fmt.Errorf("render deployment pipeline: %w", err)
@@ -50,58 +58,46 @@ func (s *PrepareService) Run(ctx context.Context, project deployport.ProjectDepl
 		Folder:         strings.TrimSpace(project.Namespace),
 		Job:            strings.TrimSpace(project.Name),
 		PipelineScript: pipeline,
-		Credentials:    stableCredentials(project.WorkspaceID, project),
+		Credentials:    BuildJenkinsCredentials(project.WorkspaceID, project),
 	}
-	if err := s.jenkins.CreateOrUpdate(ctx, spec); err != nil {
+	executor, err := s.resolveJenkins(project.Jenkins)
+	if err != nil {
+		return fmt.Errorf("resolve project jenkins: %w", err)
+	}
+	if err := executor.CreateOrUpdate(ctx, spec); err != nil {
 		return fmt.Errorf("upsert jenkins job: %w", err)
 	}
 	return nil
 }
 
-func stableCredentialID(workspaceID kernel.WorkspaceID, secretID kernel.SecretID) string {
-	if secretID.UUID == uuid.Nil {
-		return ""
+func (s *PrepareService) resolveJenkins(secret deployport.DeploymentSecret) (deliveryport.JenkinsExecutor, error) {
+	if s.jenkinsFactory != nil {
+		return s.jenkinsFactory(secret)
 	}
-	return "sparkops-" + workspaceID.String() + "-" + secretID.String()
+	return jenkinsExecutorFromDeploymentSecret(secret, s.jobSuffix)
 }
 
-func stableCredentials(workspaceID kernel.WorkspaceID, project deployport.ProjectDeploymentContext) []deliveryport.JenkinsCredential {
-	secrets := []deployport.DeploymentSecret{project.Git, project.Harbor, project.Jenkins}
-	if project.Sonar != nil {
-		secrets = append(secrets, *project.Sonar)
-	}
-	credentials := make([]deliveryport.JenkinsCredential, 0, len(secrets))
-	for _, secret := range secrets {
-		if secret.ID.UUID == uuid.Nil {
-			continue
-		}
-		value, kind := credentialValue(secret)
-		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		credentials = append(credentials, deliveryport.JenkinsCredential{
-			ID:       stableCredentialID(workspaceID, secret.ID),
-			Username: secret.Username,
-			Secret:   value,
-			Kind:     kind,
-		})
-	}
-	return credentials
+func jenkinsExecutorFromDeploymentSecret(
+	secret deployport.DeploymentSecret,
+	jobSuffix string,
+) (deliveryport.JenkinsExecutor, error) {
+	return jenkinsinfra.NewExecutorFromConnection(jenkinsinfra.ConnectionConfig{
+		URL:      secret.ServiceURL,
+		User:     secret.Username,
+		Password: secret.Credentials.Password,
+		Token: jenkinsToken(
+			secret.Credentials.Token,
+			secret.Credentials.APIKey,
+			secret.Credentials.Password,
+		),
+	}, jobSuffix)
 }
 
-func credentialValue(secret deployport.DeploymentSecret) (string, string) {
-	credentials := secret.Credentials
-	if strings.TrimSpace(credentials.PrivateKey) != "" {
-		return credentials.PrivateKey, "ssh-private-key"
-	}
-	values := []string{credentials.Password, credentials.Token, credentials.APIKey}
+func jenkinsToken(values ...string) string {
 	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			if strings.TrimSpace(secret.Username) != "" {
-				return value, "username-password"
-			}
-			return value, "secret-text"
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
 		}
 	}
-	return "", ""
+	return ""
 }

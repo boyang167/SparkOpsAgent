@@ -323,6 +323,13 @@ func TestNewAdaptersInjectsMockManifestDeployer(t *testing.T) {
 	require.NoError(t, adapters.Deployer.Deploy(context.Background(), target(time.Second), manifests()))
 }
 
+func TestNewAdaptersUsesKubeconfigDeployerForK8sDriver(t *testing.T) {
+	adapters, err := NewAdapters(&config.Config{Runtime: config.RuntimeConfig{Driver: "k8s"}}, nil, nil)
+	require.NoError(t, err)
+	_, ok := adapters.Deployer.(*ManifestDeployer)
+	require.True(t, ok, "k8s driver should use kubeconfig manifest deployer")
+}
+
 func applyDynamicClient(t *testing.T) *fake.FakeDynamicClient {
 	t.Helper()
 	client := fake.NewSimpleDynamicClient(runtime.NewScheme())

@@ -173,6 +173,9 @@ func GenerateArtifacts(project *model.Project, byID map[string]*model.Template, 
 		if usedCustomTemplate && pick.kind == "Deployment" {
 			content = injectProjectConfigEnv(content, project.Resources.ProjectConfig)
 		}
+		if override, ok := project.Resources.ManifestOverrides[pick.kind]; ok && strings.TrimSpace(override) != "" {
+			content = override
+		}
 		if !strings.HasSuffix(content, "\n") {
 			content += "\n"
 		}
@@ -792,50 +795,15 @@ spec:
 }
 
 func defaultJenkinsfile(vars map[string]string, enableScan bool) string {
-	scanStage := ""
-	if enableScan {
-		scanStage = fmt.Sprintf(`    stage('Sonar Scan') {
-      steps {
-        echo 'Static code scan for %s'
-      }
-    }
-`, vars["name"])
-	}
-	return fmt.Sprintf(`pipeline {
-  agent any
-  environment {
-    APP_NAME = '%s'
-    GIT_URL = '%s'
-    GIT_REF = '%s'
-    DOCKERFILE = '%s'
-    REGISTRY_TYPE = '%s'
-    NAMESPACE = '%s'
-  }
-  stages {
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
-    }
-    stage('Build') {
-      steps {
-        echo "Building $%%{APP_NAME} from $%%{GIT_URL}#$%%{GIT_REF}"
-        sh "docker build -f $%%{DOCKERFILE} -t $%%{APP_NAME}:latest ."
-      }
-    }
-%s    stage('Push') {
-      steps {
-        echo "Push image to $%%{REGISTRY_TYPE}"
-      }
-    }
-    stage('Deploy') {
-      steps {
-        echo "Deploy $%%{APP_NAME} to namespace $%%{NAMESPACE}"
-      }
-    }
-  }
+	return renderBuiltinJenkinsfile(copyStringMap(vars), enableScan)
 }
-`, vars["name"], vars["git_url"], vars["git_ref_value"], vars["dockerfile_path"], vars["registry_type"], vars["namespace"], scanStage)
+
+func copyStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func filenameFor(kind, name string) string {

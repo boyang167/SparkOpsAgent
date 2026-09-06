@@ -1,7 +1,9 @@
 package workspace_app
 
 import (
+	"context"
 	"fmt"
+	"log"
 
 	"gorm.io/gorm"
 
@@ -39,6 +41,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	if err := persistence.AutoMigrate(c.DB); err != nil {
 		return fmt.Errorf("workspace_app migrate: %w", err)
 	}
+	if err := command.SyncBuiltinTemplates(context.Background(), c.DB); err != nil {
+		log.Printf("workspace_app: sync builtin templates: %v", err)
+	}
 
 	repo := persistence.NewProjectRepository(c.DB)
 	memberRepo := persistence.NewProjectMemberRepository(c.DB)
@@ -60,6 +65,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		return fmt.Errorf("sync project policies: %w", err)
 	}
 
+	generateTemplates := query.NewGenerateProjectTemplatesHandler(repo, templateRepo, secretRepo, wsChecker, c.DB)
 	handler := wshttp.NewHandler(
 		command.NewCreateProjectHandler(repo, memberRepo, wsChecker, clusterChecker, c.PolicyEngine, c.EventBus),
 		command.NewUpdateProjectHandler(repo, wsChecker, clusterChecker),
@@ -72,7 +78,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewListTemplatesHandler(templateRepo, wsChecker, memberLookup),
 		query.NewGetTemplateHandler(templateRepo, wsChecker, memberLookup),
 		command.NewCreateSecretHandler(secretRepo, wsChecker, secretCrypto),
-		command.NewUpdateSecretHandler(secretRepo, wsChecker, secretCrypto),
+		command.NewUpdateSecretHandler(secretRepo, wsChecker, secretCrypto, c.EventBus),
 		command.NewDeleteSecretHandler(secretRepo, wsChecker),
 		query.NewListSecretsHandler(secretRepo, wsChecker, memberLookup, secretCrypto),
 		query.NewGetSecretHandler(secretRepo, wsChecker, memberLookup, secretCrypto),
@@ -85,7 +91,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewUpdateProjectMemberRoleHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
 		command.NewRemoveProjectMemberHandler(repo, memberRepo, wsChecker, c.PermissionChecker, c.PolicyEngine),
 		query.NewListProjectMembersHandler(repo, memberRepo),
-		query.NewGenerateProjectTemplatesHandler(repo, templateRepo, secretRepo, wsChecker, c.DB),
+		generateTemplates,
+		command.NewUpdateGeneratedTemplateHandler(repo, wsChecker, generateTemplates),
 		command.NewSubmitProjectReviewHandler(repo, c.ProjectAccessChecker, c.PermissionChecker),
 		command.NewReviewProjectHandler(repo, c.ProjectAccessChecker, c.PermissionChecker),
 		memberLookup,
@@ -106,6 +113,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, projectRead, handler.GetProject)
 	c.Engine.GET("/api/v1/projects/:projectId/generated-templates",
 		auth, ws, wsMember, projectRead, handler.GenerateProjectTemplates)
+	c.Engine.PUT("/api/v1/projects/:projectId/generated-templates/:kind",
+		auth, ws, wsMember, projectWrite, handler.UpdateGeneratedTemplate)
 	c.Engine.PATCH("/api/v1/projects/:projectId",
 		auth, ws, wsMember, projectWrite, handler.UpdateProject)
 	c.Engine.POST("/api/v1/projects/:projectId/submit-review",

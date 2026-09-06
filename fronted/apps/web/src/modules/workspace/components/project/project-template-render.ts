@@ -97,6 +97,9 @@ export interface TemplateRenderHints {
   workspaceName?: string;
   registrySecretName?: string;
   registryURL?: string;
+  gitSecretName?: string;
+  gitCredentialId?: string;
+  registryCredentialId?: string;
 }
 
 export function buildTemplateVars(
@@ -176,6 +179,9 @@ export function buildTemplateVars(
     HubNameSpace: workspaceSlug,
     ProjectName: name,
     CodeVersion: gitRefValue,
+    git_credential_id: hints.gitCredentialId?.trim() || `git-${workspaceSlug}-${hints.gitSecretName?.trim() || "gitlab"}`,
+    CodeCrendentialId: hints.gitCredentialId?.trim() || `git-${workspaceSlug}-${hints.gitSecretName?.trim() || "gitlab"}`,
+    registry_credential_id: hints.registryCredentialId?.trim() || registrySecretName,
   };
 
   for (const entry of configEntries) {
@@ -408,46 +414,117 @@ ${containerPorts}
 `;
 }
 
+function groovyQuote(value: string) {
+  return value.replace(/'/g, "\\'");
+}
+
 function defaultJenkinsfile(vars: Record<string, string>, enableScan: boolean) {
   const scanStage = enableScan
-    ? `    stage('Sonar Scan') {
+    ? `
+    stage('Sonar Scan') {
       steps {
-        echo 'Static code scan for ${vars.name}'
+        echo "SonarQube static scan enabled for ${groovyQuote(vars.name ?? "app")}"
       }
-    }
-`
+    }`
     : "";
+  const defaultRepo = `${vars.registry_host}/${vars.workspace_slug}/${vars.name}`;
   return `pipeline {
   agent any
-  environment {
-    APP_NAME = '${vars.name}'
-    GIT_URL = '${vars.git_url}'
-    GIT_REF = '${vars.git_ref_value}'
-    DOCKERFILE = '${vars.dockerfile_path}'
-    REGISTRY_TYPE = '${vars.registry_type}'
-    NAMESPACE = '${vars.namespace}'
+
+  options {
+    disableConcurrentBuilds()
+    timeout(time: 90, unit: 'MINUTES')
   }
+
+  environment {
+    APP_NAME               = '${groovyQuote(vars.name ?? "app")}'
+    PROJECT_NAME           = '${groovyQuote(vars.name ?? "app")}'
+    NAMESPACE              = '${groovyQuote(vars.namespace ?? "default")}'
+    WORKSPACE_SLUG         = '${groovyQuote(vars.workspace_slug ?? "default")}'
+    ORG_SLUG               = '${groovyQuote(vars.org_slug ?? "org")}'
+    LANGUAGE               = '${groovyQuote(vars.language ?? "go")}'
+    GIT_URL                = '${groovyQuote(vars.git_url ?? "")}'
+    GIT_REF_TYPE           = '${groovyQuote(vars.git_ref_type ?? "branch")}'
+    DEFAULT_GIT_REF        = '${groovyQuote(vars.git_ref_value ?? "main")}'
+    DOCKERFILE_PATH        = '${groovyQuote(vars.dockerfile_path ?? "./Dockerfile")}'
+    REGISTRY_HOST          = '${groovyQuote(vars.registry_host ?? "harbor.local")}'
+    REGISTRY_TYPE          = '${groovyQuote(vars.registry_type ?? "Harbor")}'
+    REGISTRY_URL           = '${groovyQuote(vars.registry_url ?? "")}'
+    DEFAULT_IMAGE          = '${groovyQuote(vars.image ?? "")}'
+    GIT_CREDENTIAL_ID      = '${groovyQuote(vars.git_credential_id ?? "gitlab")}'
+    REGISTRY_CREDENTIAL_ID = '${groovyQuote(vars.registry_credential_id ?? "registry")}'
+    IMAGE_PULL_SECRET      = '${groovyQuote(vars.image_pull_secret_name ?? "")}'
+  }
+
   stages {
+    stage('Prepare') {
+      steps {
+        script {
+          env.BRANCH = (params.BRANCH ?: env.DEFAULT_GIT_REF)?.trim()
+          env.CODE_VERSION = (params.CodeVersion ?: env.BRANCH)?.trim()
+          env.IMAGE_TAG = (params.IMAGE_TAG ?: 'latest')?.trim()
+          env.IMAGE_REPOSITORY = (params.IMAGE_REPOSITORY ?: '${groovyQuote(defaultRepo)}')?.trim()
+          env.FULL_IMAGE = "\${env.IMAGE_REPOSITORY}:\${env.IMAGE_TAG}"
+          if (params.ROLLBACK_OF?.trim()) {
+            echo "Rollback build of #\${params.ROLLBACK_OF}"
+          }
+        }
+        echo "SparkOps CI: \${env.APP_NAME} (\${env.LANGUAGE}) in \${env.NAMESPACE}"
+        echo "Git \${env.GIT_URL} @ \${env.BRANCH} (\${env.GIT_REF_TYPE})"
+        echo "Target image \${env.FULL_IMAGE}"
+      }
+    }
+
     stage('Checkout') {
       steps {
-        checkout scm
+        script {
+          def branchSpec = env.GIT_REF_TYPE == 'tag' ? "refs/tags/\${env.BRANCH}" : "*/\${env.BRANCH}"
+          checkout([
+            $class: 'GitSCM',
+            branches: [[name: branchSpec]],
+            extensions: [[$class: 'CloneOption', shallow: true, depth: 1]],
+            userRemoteConfigs: [[url: env.GIT_URL, credentialsId: env.GIT_CREDENTIAL_ID]]
+          ])
+        }
       }
     }
+
     stage('Build') {
       steps {
-        echo "Building \${APP_NAME} from \${GIT_URL}#\${GIT_REF}"
-        sh "docker build -f \${DOCKERFILE} -t \${APP_NAME}:latest ."
+        sh """
+          set -e
+          docker build -f "\${env.DOCKERFILE_PATH}" -t "\${env.FULL_IMAGE}" .
+        """
       }
     }
-${scanStage}    stage('Push') {
+${scanStage}
+    stage('Push') {
       steps {
-        echo "Push image to \${REGISTRY_TYPE}"
+        script {
+          withCredentials([usernamePassword(credentialsId: env.REGISTRY_CREDENTIAL_ID, usernameVariable: 'REGISTRY_USER', passwordVariable: 'REGISTRY_PASS')]) {
+            sh """
+              set -e
+              echo "\${REGISTRY_PASS}" | docker login \${env.REGISTRY_HOST} -u "\${REGISTRY_USER}" --password-stdin
+              docker push "\${env.FULL_IMAGE}"
+            """
+          }
+        }
       }
     }
-    stage('Deploy') {
+
+    stage('Complete') {
       steps {
-        echo "Deploy \${APP_NAME} to namespace \${NAMESPACE}"
+        echo "Image \${env.FULL_IMAGE} is ready; SparkOps will deploy to namespace \${env.NAMESPACE}"
       }
+    }
+  }
+
+  post {
+    success {
+      echo "Build succeeded: \${env.FULL_IMAGE}"
+    }
+    failure {
+      echo 'Build failed'
     }
   }
 }

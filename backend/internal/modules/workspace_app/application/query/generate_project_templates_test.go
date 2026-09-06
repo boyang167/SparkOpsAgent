@@ -130,6 +130,49 @@ func TestRenderDeploymentPipelineArtifactUsesDeploymentOverrides(t *testing.T) {
 	}
 }
 
+func TestDefaultJenkinsfileIncludesSparkOpsRuntimeParams(t *testing.T) {
+	name, err := model.NewProjectName("orders")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{
+		Name:           "orders",
+		Namespace:      "team-a",
+		Language:       "go",
+		GitURL:         "git@gitlab.example.com:group/orders.git",
+		GitRefType:     "branch",
+		GitRefValue:    "main",
+		DockerfilePath: "./Dockerfile",
+		Resources: model.ProjectResources{
+			JenkinsfileTemplateID: "jenkins-template",
+			RegistryType:          "Harbor",
+			EnableStaticScan:      true,
+		},
+	})
+	renderCtx := testRenderContext(project)
+	renderCtx.GitCredentialID = "sparkops-ws-git"
+	renderCtx.RegistryCredentialID = "sparkops-ws-harbor"
+	vars := buildTemplateVars(project, renderCtx)
+	content := defaultJenkinsfile(vars, project.Resources.EnableStaticScan)
+
+	for _, needle := range []string{
+		"params.BRANCH",
+		"params.IMAGE_TAG",
+		"params.IMAGE_REPOSITORY",
+		"params.CodeVersion",
+		"params.ROLLBACK_OF",
+		"sparkops-ws-git",
+		"sparkops-ws-harbor",
+		"git@gitlab.example.com:group/orders.git",
+		"stage('Sonar Scan')",
+		"docker push",
+	} {
+		if !strings.Contains(content, needle) {
+			t.Fatalf("jenkinsfile missing %q: %s", needle, content)
+		}
+	}
+}
+
 func TestRenderPlaceholders(t *testing.T) {
 	out := renderPlaceholders("hello {{name}} / ${namespace} / %GIT_URL%", map[string]string{
 		"name":      "demo",

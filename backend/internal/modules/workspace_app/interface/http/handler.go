@@ -41,6 +41,7 @@ type Handler struct {
 	removeMember      *command.RemoveProjectMemberHandler
 	listMembers       *query.ListProjectMembersHandler
 	generateTemplates *query.GenerateProjectTemplatesHandler
+	updateGeneratedTemplate *command.UpdateGeneratedTemplateHandler
 	submitReview      *command.SubmitProjectReviewHandler
 	reviewProject     *command.ReviewProjectHandler
 	memberLookup      port.MemberLookup
@@ -72,6 +73,7 @@ func NewHandler(
 	removeMember *command.RemoveProjectMemberHandler,
 	listMembers *query.ListProjectMembersHandler,
 	generateTemplates *query.GenerateProjectTemplatesHandler,
+	updateGeneratedTemplate *command.UpdateGeneratedTemplateHandler,
 	submitReview *command.SubmitProjectReviewHandler,
 	reviewProject *command.ReviewProjectHandler,
 	memberLookup port.MemberLookup,
@@ -88,6 +90,7 @@ func NewHandler(
 		secretCrypto:      secretCrypto,
 		addMember:         addMember, updateMemberRole: updateMemberRole, removeMember: removeMember,
 		listMembers: listMembers, generateTemplates: generateTemplates,
+		updateGeneratedTemplate: updateGeneratedTemplate,
 		submitReview: submitReview, reviewProject: reviewProject, memberLookup: memberLookup,
 	}
 }
@@ -332,6 +335,37 @@ func (h *Handler) GenerateProjectTemplates(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) UpdateGeneratedTemplate(c *gin.Context) {
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Content string `json:"content" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid body", http.StatusBadRequest)
+		return
+	}
+	item, err := h.updateGeneratedTemplate.Handle(c.Request.Context(), wsID, memberID, projectID, c.Param("kind"), body.Content)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, item)
 }
 
 func (h *Handler) UpdateProject(c *gin.Context) {

@@ -107,6 +107,22 @@ export function createWorkspaceUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async updateGeneratedTemplate(
+      workspaceId: string,
+      projectId: string,
+      kind: string,
+      input: import("@sparkops/contracts/workspace").UpdateGeneratedTemplateCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/workspace").GeneratedTemplateArtifact>(
+        `/api/v1/projects/${projectId}/generated-templates/${encodeURIComponent(kind)}`,
+        {
+          method: "PUT",
+          body: JSON.stringify(input),
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
     async listGitRefs(
       workspaceId: string,
       input: import("@sparkops/contracts/workspace").ListGitRefsCommand,

@@ -30,6 +30,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"go.uber.org/zap"
 )
@@ -64,14 +65,18 @@ func (m *Module) Register(c *appctx.Container) error {
 	repo := persistence.NewBuildRepository(c.DB)
 	cronRepo := persistence.NewCronJobRepository(c.DB)
 	checker := acl.NewWorkspaceAppACL(c.DB)
-	executor, err := deliveryinfra.NewJenkinsExecutor(c.Config)
+	secretBox, err := crypto.NewSecretBoxFromConfig(c.Config)
+	if err != nil {
+		return fmt.Errorf("delivery secrets: %w", err)
+	}
+	jenkinsProvider, err := deliveryinfra.NewJenkinsExecutorProvider(c.Config, c.DB, secretBox)
 	if err != nil {
 		return fmt.Errorf("delivery jenkins: %w", err)
 	}
 	hub := stream.NewHub()
 	registry := runner.NewRegistry()
 	abortBuild := command.NewAbortBuildHandler(repo, checker, registry, hub)
-	trigger := command.NewTriggerBuildHandler(repo, checker, executor, c.EventBus, hub, registry, c.Context, func(err error) {
+	trigger := command.NewTriggerBuildHandler(repo, checker, jenkinsProvider, c.EventBus, hub, registry, c.Context, func(err error) {
 		if c.Logger != nil {
 			c.Logger.Error("asynchronous build failed", zap.Error(err))
 		}
@@ -86,7 +91,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	handler := deliveryhttp.NewHandler(
 		trigger,
 		abortBuild,
-		command.NewRollbackBuildHandler(repo, checker, executor, c.EventBus, hub, registry, c.Context),
+		command.NewRollbackBuildHandler(repo, checker, jenkinsProvider, c.EventBus, hub, registry, c.Context),
 		query.NewListBuildsHandler(repo, checker),
 		query.NewGetBuildHandler(repo, checker),
 		query.NewStreamBuildLogsHandler(repo, checker, hub),
@@ -96,10 +101,6 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewDeleteCronJobHandler(cronRepo, checker),
 	)
 	public := deliveryhttp.NewPublicHandler(c.MessageQueue, c.Config.Webhook.Secret)
-	secretBox, err := crypto.NewSecretBoxFromConfig(c.Config)
-	if err != nil {
-		return fmt.Errorf("delivery deployment secrets: %w", err)
-	}
 	deployHub := deploystream.NewHub()
 	deployRepo := deploypersistence.NewDeploymentRunRepositoryWithObserver(c.DB, deployHub, func(err error) {
 		if c.Logger != nil {
@@ -116,7 +117,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		deployRepo,
 		repo,
 		deployReader,
-		deployservice.NewPrepareService(executor, deployacl.NewWorkspacePipelineRenderer(c.DB)),
+		deployservice.NewPrepareService(c.Config.Jenkins.JobSuffix, deployacl.NewWorkspacePipelineRenderer(c.DB)),
 		trigger,
 		deployservice.NewManifestRenderer(),
 		c.ManifestDeployer,
@@ -134,6 +135,13 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 	onBuildCompleted := deploysubscriber.NewOnBuildCompleted(deployRepo, deployPublisher)
 	c.EventBus.Subscribe(deliveryevent.BuildCompletedName, onBuildCompleted.Handle)
+	credentialSync := deployservice.NewCredentialSyncService(
+		deployReader,
+		jenkinsProvider,
+		c.Config.Deploy.JenkinsTimeout,
+		c.Logger,
+	)
+	c.EventBus.Subscribe(integration.EventSecretUpdated, deploysubscriber.NewOnSecretUpdated(credentialSync, c.Logger, c.Config.Deploy.JenkinsTimeout).Handle)
 	deployservice.NewReconciler(deployRepo, deployPublisher, func(err error) {
 		if c.Logger != nil {
 			c.Logger.Error("deployment reconciliation failed", zap.Error(err))

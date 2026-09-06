@@ -12,6 +12,7 @@ import (
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/port"
+	jenkinsinfra "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/jenkins"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/runner"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/stream"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
@@ -104,20 +105,23 @@ type requestCapturingJenkins struct {
 func (j *requestCapturingJenkins) CreateOrUpdate(context.Context, port.JenkinsJobSpec) error {
 	return nil
 }
+func (j *requestCapturingJenkins) SyncCredentials(context.Context, string, []port.JenkinsCredential) error {
+	return nil
+}
 func (j *requestCapturingJenkins) RunStreaming(_ context.Context, _ kernel.BuildID, req port.BuildRequest, _ port.LogPublisher) (string, error) {
 	j.requests <- req
 	return "ok", nil
 }
 
-func newTriggerHandler(jenkins port.JenkinsExecutor) *TriggerBuildHandler {
-	return newTriggerHandlerWithRepo(&triggerBuildRepo{}, jenkins)
+func newTriggerHandler(executor port.JenkinsExecutor) *TriggerBuildHandler {
+	return newTriggerHandlerWithRepo(&triggerBuildRepo{}, executor)
 }
 
-func newTriggerHandlerWithRepo(repo *triggerBuildRepo, jenkins port.JenkinsExecutor) *TriggerBuildHandler {
+func newTriggerHandlerWithRepo(repo *triggerBuildRepo, executor port.JenkinsExecutor) *TriggerBuildHandler {
 	return NewTriggerBuildHandler(
 		repo,
 		triggerProjectChecker{namespace: "team-a"},
-		jenkins,
+		jenkinsinfra.NewStaticProvider(executor),
 		eventbus.NewInMemory(),
 		stream.NewHub(),
 		runner.NewRegistry(),
@@ -341,11 +345,11 @@ func (*countingEventBus) Subscribe(string, eventbus.Handler) {}
 func TestExecuteBuildRetriesTerminalUpdateAndSuppressesEventOnFailure(t *testing.T) {
 	updateErr := errors.New("build update unavailable")
 	repo := &triggerBuildRepo{updateErr: updateErr, failAfter: 1}
-	jenkins := &requestCapturingJenkins{requests: make(chan port.BuildRequest, 1)}
+	capturing := &requestCapturingJenkins{requests: make(chan port.BuildRequest, 1)}
 	bus := &countingEventBus{}
 	asyncErr := make(chan error, 1)
 	handler := NewTriggerBuildHandler(
-		repo, triggerProjectChecker{namespace: "team-a"}, jenkins, bus,
+		repo, triggerProjectChecker{namespace: "team-a"}, jenkinsinfra.NewStaticProvider(capturing), bus,
 		stream.NewHub(), runner.NewRegistry(), context.Background(), func(err error) { asyncErr <- err },
 	)
 
@@ -359,7 +363,7 @@ func TestExecuteBuildRetriesTerminalUpdateAndSuppressesEventOnFailure(t *testing
 	)
 	require.NoError(t, err)
 	require.NotNil(t, build.ExecutionStartedAt)
-	<-jenkins.requests
+	<-capturing.requests
 
 	select {
 	case got := <-asyncErr:
@@ -380,10 +384,10 @@ func TestWorkerCancellationStopsTerminalUpdateRetry(t *testing.T) {
 			cancel()
 		}
 	}
-	jenkins := &requestCapturingJenkins{requests: make(chan port.BuildRequest, 1)}
+	capturing := &requestCapturingJenkins{requests: make(chan port.BuildRequest, 1)}
 	asyncErr := make(chan error, 1)
 	handler := NewTriggerBuildHandler(
-		repo, triggerProjectChecker{namespace: "team-a"}, jenkins, &countingEventBus{},
+		repo, triggerProjectChecker{namespace: "team-a"}, jenkinsinfra.NewStaticProvider(capturing), &countingEventBus{},
 		stream.NewHub(), runner.NewRegistry(), workerCtx, func(err error) { asyncErr <- err },
 	)
 	_, err := handler.TriggerDeploymentAssociated(
@@ -395,7 +399,7 @@ func TestWorkerCancellationStopsTerminalUpdateRetry(t *testing.T) {
 		func(context.Context, *model.Build) error { return nil },
 	)
 	require.NoError(t, err)
-	<-jenkins.requests
+	<-capturing.requests
 	require.ErrorIs(t, <-asyncErr, context.Canceled)
 	require.Equal(t, 2, repo.updates)
 }
@@ -403,15 +407,15 @@ func TestWorkerCancellationStopsTerminalUpdateRetry(t *testing.T) {
 func TestBuildCompletedFinalPublishFailureIsReported(t *testing.T) {
 	publishErr := errors.New("event bus unavailable")
 	repo := &triggerBuildRepo{}
-	jenkins := &requestCapturingJenkins{requests: make(chan port.BuildRequest, 1)}
+	capturing := &requestCapturingJenkins{requests: make(chan port.BuildRequest, 1)}
 	asyncErr := make(chan error, 1)
 	handler := NewTriggerBuildHandler(
-		repo, triggerProjectChecker{namespace: "team-a"}, jenkins, &countingEventBus{err: publishErr},
+		repo, triggerProjectChecker{namespace: "team-a"}, jenkinsinfra.NewStaticProvider(capturing), &countingEventBus{err: publishErr},
 		stream.NewHub(), runner.NewRegistry(), context.Background(), func(err error) { asyncErr <- err },
 	)
 	_, err := handler.Handle(context.Background(), kernel.NewWorkspaceID(), kernel.NewMemberID(), kernel.NewProjectID(), "main")
 	require.NoError(t, err)
-	<-jenkins.requests
+	<-capturing.requests
 	select {
 	case got := <-asyncErr:
 		require.ErrorIs(t, got, publishErr)

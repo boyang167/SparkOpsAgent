@@ -25,6 +25,13 @@ func (j *recordingJenkins) CreateOrUpdate(_ context.Context, spec deliveryport.J
 	return j.err
 }
 
+func (j *recordingJenkins) SyncCredentials(_ context.Context, folder string, credentials []deliveryport.JenkinsCredential) error {
+	j.calls++
+	j.spec.Folder = folder
+	j.spec.Credentials = credentials
+	return j.err
+}
+
 func (j *recordingJenkins) RunStreaming(context.Context, kernel.BuildID, deliveryport.BuildRequest, deliveryport.LogPublisher) (string, error) {
 	return "", nil
 }
@@ -48,7 +55,10 @@ func TestPrepareUpsertsNamespaceJobPipelineAndStableCredentials(t *testing.T) {
 	sonarID := kernel.NewSecretID()
 	recorder := &recordingJenkins{}
 	renderer := &pipelineRenderer{content: "pipeline { stages { stage('rendered') {} } }"}
-	prepare := NewPrepareService(recorder, renderer)
+	prepare := NewPrepareService("-build", renderer)
+	prepare.jenkinsFactory = func(deployport.DeploymentSecret) (deliveryport.JenkinsExecutor, error) {
+		return recorder, nil
+	}
 	project := deployport.ProjectDeploymentContext{
 		WorkspaceID: workspaceID,
 		ProjectID:   kernel.NewProjectID(),
@@ -63,7 +73,7 @@ func TestPrepareUpsertsNamespaceJobPipelineAndStableCredentials(t *testing.T) {
 			Credentials: deployport.DeploymentCredentials{Password: "registry-password"},
 		},
 		Jenkins: deployport.DeploymentSecret{
-			ID: jenkinsID, Username: "jenkins-user",
+			ID: jenkinsID, ServiceURL: "http://jenkins.example", Username: "jenkins-user",
 			Credentials: deployport.DeploymentCredentials{APIKey: "jenkins-api-key"},
 		},
 		Sonar: &deployport.DeploymentSecret{
@@ -100,12 +110,19 @@ func TestPrepareUpsertsNamespaceJobPipelineAndStableCredentials(t *testing.T) {
 
 func TestPrepareWrapsUpsertErrorWithoutCredentialValues(t *testing.T) {
 	recorder := &recordingJenkins{err: errors.New("jenkins unavailable")}
-	prepare := NewPrepareService(recorder, &pipelineRenderer{content: "pipeline {}"})
+	prepare := NewPrepareService("-build", &pipelineRenderer{content: "pipeline {}"})
+	prepare.jenkinsFactory = func(deployport.DeploymentSecret) (deliveryport.JenkinsExecutor, error) {
+		return recorder, nil
+	}
 	project := deployport.ProjectDeploymentContext{
 		WorkspaceID: kernel.NewWorkspaceID(),
 		Name:        "orders",
 		Namespace:   "team-a",
 		Jenkinsfile: "pipeline {}",
+		Jenkins: deployport.DeploymentSecret{
+			ID: kernel.NewSecretID(), ServiceURL: "http://jenkins.example",
+			Credentials: deployport.DeploymentCredentials{Token: "must-not-leak"},
+		},
 		Git: deployport.DeploymentSecret{
 			ID:          kernel.NewSecretID(),
 			Credentials: deployport.DeploymentCredentials{Token: "must-not-leak"},
@@ -122,13 +139,20 @@ func TestPrepareWrapsUpsertErrorWithoutCredentialValues(t *testing.T) {
 
 func TestPrepareRejectsEmptyRenderedPipelineWithoutUpsert(t *testing.T) {
 	recorder := &recordingJenkins{}
-	prepare := NewPrepareService(recorder, &pipelineRenderer{content: " \n\t "})
+	prepare := NewPrepareService("-build", &pipelineRenderer{content: " \n\t "})
+	prepare.jenkinsFactory = func(deployport.DeploymentSecret) (deliveryport.JenkinsExecutor, error) {
+		return recorder, nil
+	}
 
 	err := prepare.Run(context.Background(), deployport.ProjectDeploymentContext{
 		WorkspaceID: kernel.NewWorkspaceID(),
 		ProjectID:   kernel.NewProjectID(),
 		Name:        "orders",
 		Namespace:   "team-a",
+		Jenkins: deployport.DeploymentSecret{
+			ID: kernel.NewSecretID(), ServiceURL: "http://jenkins.example",
+			Credentials: deployport.DeploymentCredentials{Token: "token"},
+		},
 	}, PrepareInput{GitRefValue: "main", ImageTag: "tag", ImageRepository: "registry/orders"})
 
 	require.ErrorIs(t, err, deploydomain.ErrDeploymentPipelineEmpty)
