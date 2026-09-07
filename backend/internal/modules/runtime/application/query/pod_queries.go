@@ -20,6 +20,7 @@ type PodView struct {
 	Container string `json:"container"`
 	Image     string `json:"image"`
 	StartedAt string `json:"started_at"`
+	Message   string `json:"message,omitempty"`
 }
 
 type ListPodsHandler struct {
@@ -88,6 +89,6 @@ func toPodView(pod *model.Pod) PodView {
 		ID: pod.ID.String(), ProjectID: pod.ProjectID.String(),
 		Name: pod.Name, Namespace: pod.Namespace, Phase: string(pod.Phase),
 		Node: pod.Node, Restarts: pod.Restarts, Container: pod.Container,
-		Image: pod.Image, StartedAt: pod.StartedAt,
+		Image: pod.Image, StartedAt: pod.StartedAt, Message: pod.Message,
 	}
 }

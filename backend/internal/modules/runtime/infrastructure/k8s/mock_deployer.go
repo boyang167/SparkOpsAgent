@@ -29,4 +29,14 @@ func (d *MockManifestDeployer) Deploy(
 	return err
 }
 
+func (d *MockManifestDeployer) RolloutRestart(ctx context.Context, target port.DeploymentTarget) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(target.Kubeconfig) == "" {
+		return domain.ErrKubeconfigMissing
+	}
+	return nil
+}
+
 var _ port.ManifestDeployer = (*MockManifestDeployer)(nil)

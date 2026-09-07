@@ -20,4 +20,5 @@ type Pod struct {
 	Container   string
 	Image       string
 	StartedAt   string
+	Message     string
 }

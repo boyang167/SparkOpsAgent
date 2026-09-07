@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import Link from "next/link";
 import { product, secret } from "@sparkops/web-sdk";
 import type { DeploymentRunListVM, DeploymentRunVM } from "@sparkops/contracts/delivery";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
@@ -25,7 +24,7 @@ import { ProjectYamlTab } from "./ProjectYamlTab";
 import { ProjectJenkinsPreview } from "./ProjectJenkinsPreview";
 import { ProjectPublishedOverview } from "./ProjectPublishedOverview";
 import { ProjectUnpublishedOverview } from "./ProjectUnpublishedOverview";
-import { ProjectTemplateArtifactsCollapsible } from "./ProjectTemplateArtifactsCollapsible";
+import { ProjectTemplateArtifactsModal } from "./ProjectTemplateArtifactsModal";
 import { hasSuccessfulDeployment, isPublishedProjectView } from "./project-deployment-state";
 import { ProjectDockerfileViewer } from "./ProjectDockerfileViewer";
 import { countGeneratedTemplates } from "./project-template-render";
@@ -123,7 +122,13 @@ function OverviewTab({
   }
 
   if (!published) {
-    return <ProjectUnpublishedOverview project={project} workspaceId={workspaceId} />;
+    return (
+      <ProjectUnpublishedOverview
+        project={project}
+        workspaceId={workspaceId}
+        deploymentPage={deploymentPage}
+      />
+    );
   }
 
   return (
@@ -228,6 +233,7 @@ export function ProjectServiceDetailPage({
   const [secrets, setSecrets] = useState<SecretVM[]>([]);
   const [templates, setTemplates] = useState<TemplateVM[]>([]);
   const [configLoading, setConfigLoading] = useState(false);
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
 
   const primaryAction = projectPrimaryAction(project);
   const statusText = reviewStatusLabel(project);
@@ -407,7 +413,18 @@ export function ProjectServiceDetailPage({
         </div>
 
         <div className="project-service-header-side">
-          <div className="project-service-actions">{headerActions}</div>
+          <div className="project-service-actions">
+            {published ? (
+              <button
+                type="button"
+                className="btn btn-secondary text-sm"
+                onClick={() => setTemplateModalOpen(true)}
+              >
+                模板实例
+              </button>
+            ) : null}
+            {headerActions}
+          </div>
           <p className="project-service-status">
             状态: <strong>{statusText}</strong>
           </p>
@@ -483,16 +500,14 @@ export function ProjectServiceDetailPage({
           {published && tab === "webhooks" ? <PlaceholderTab title="Webhooks" /> : null}
           {published && tab === "monitor" ? <PlaceholderTab title="监控" /> : null}
         </div>
-        {published ? (
-          <ProjectTemplateArtifactsCollapsible workspaceId={workspaceId} project={project} />
-        ) : null}
       </div>
 
-      <div className="project-service-footer-links">
-        <Link href="/projects" className="btn-ghost text-sm">
-          返回项目列表
-        </Link>
-      </div>
+      <ProjectTemplateArtifactsModal
+        open={templateModalOpen}
+        onClose={() => setTemplateModalOpen(false)}
+        workspaceId={workspaceId}
+        project={project}
+      />
     </div>
   );
 }

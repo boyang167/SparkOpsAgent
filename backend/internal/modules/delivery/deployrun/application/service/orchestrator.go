@@ -141,6 +141,12 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			}
 			return o.handleDependencyError(ctx, run, err)
 		}
+
+		k8sErrCh := make(chan error, 1)
+		go func() {
+			k8sErrCh <- o.bootstrapKubernetes(operationCtx, run, project)
+		}()
+
 		_, err = o.trigger.TriggerDeploymentAssociated(operationCtx, workspaceID, run.CreatedBy, run.ProjectID, deliveryport.BuildRequest{
 			Namespace: project.Namespace, ProjectName: project.Name,
 			Folder: project.Namespace, Job: project.Name, GitRefValue: run.GitRefValue,
@@ -167,6 +173,13 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			}
 			return nil
 		})
+		k8sErr := <-k8sErrCh
+		if k8sErr != nil {
+			if operationCtx.Err() != nil {
+				return operationCtx.Err()
+			}
+			return o.handleDependencyError(ctx, run, k8sErr)
+		}
 		if err != nil {
 			if errors.Is(err, errAssociationObsolete) {
 				return nil
@@ -225,29 +238,7 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			}
 			return o.handleProjectError(ctx, run, err)
 		}
-		manifests, err := o.renderer.Render(operationCtx, project, run.ImageTag)
-		if err != nil {
-			if operationCtx.Err() != nil {
-				return operationCtx.Err()
-			}
-			return o.failBusiness(ctx, run, err)
-		}
-		deploymentName, serviceName, err := extractManifestResourceNames(manifests)
-		if err != nil {
-			if operationCtx.Err() != nil {
-				return operationCtx.Err()
-			}
-			return o.failBusiness(ctx, run, err)
-		}
-		target := runtimeport.DeploymentTarget{
-			ClusterID: project.Cluster.ID.String(), Server: project.Cluster.Server,
-			Kubeconfig: project.Kubernetes.Credentials.ExtraConfig,
-			Namespace:  project.Namespace, DeploymentName: deploymentName,
-			ServiceName: serviceName, ImageTag: run.ImageTag,
-			RolloutTimeout: o.rolloutTimeout,
-			RegistryPull:   registryPullCredentialFromHarbor(project.Harbor),
-		}
-		if err := o.deployer.Deploy(operationCtx, target, manifests); err != nil {
+		if err := o.finalizeKubernetes(operationCtx, run, project); err != nil {
 			if operationCtx.Err() != nil {
 				return operationCtx.Err()
 			}
@@ -357,6 +348,68 @@ func (o *Orchestrator) publishRun(ctx context.Context, run *model.DeploymentRun)
 		return o.recordInfrastructureFailure(ctx, run, err)
 	}
 	return nil
+}
+
+func (o *Orchestrator) bootstrapKubernetes(
+	ctx context.Context,
+	run *model.DeploymentRun,
+	project deployport.ProjectDeploymentContext,
+) error {
+	manifests, deploymentName, serviceName, err := o.renderManifests(ctx, project, run.ImageTag)
+	if err != nil {
+		return err
+	}
+	target := o.buildDeploymentTarget(project, run, deploymentName, serviceName)
+	target.SkipRolloutWait = true
+	return o.deployer.Deploy(ctx, target, manifests)
+}
+
+func (o *Orchestrator) finalizeKubernetes(
+	ctx context.Context,
+	run *model.DeploymentRun,
+	project deployport.ProjectDeploymentContext,
+) error {
+	manifests, deploymentName, serviceName, err := o.renderManifests(ctx, project, run.ImageTag)
+	if err != nil {
+		return err
+	}
+	target := o.buildDeploymentTarget(project, run, deploymentName, serviceName)
+	target.SkipRolloutWait = true
+	if err := o.deployer.Deploy(ctx, target, manifests); err != nil {
+		return err
+	}
+	return o.deployer.RolloutRestart(ctx, target)
+}
+
+func (o *Orchestrator) renderManifests(
+	ctx context.Context,
+	project deployport.ProjectDeploymentContext,
+	imageTag string,
+) ([]runtimeport.Manifest, string, string, error) {
+	manifests, err := o.renderer.Render(ctx, project, imageTag)
+	if err != nil {
+		return nil, "", "", err
+	}
+	deploymentName, serviceName, err := extractManifestResourceNames(manifests)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return manifests, deploymentName, serviceName, nil
+}
+
+func (o *Orchestrator) buildDeploymentTarget(
+	project deployport.ProjectDeploymentContext,
+	run *model.DeploymentRun,
+	deploymentName, serviceName string,
+) runtimeport.DeploymentTarget {
+	return runtimeport.DeploymentTarget{
+		ClusterID: project.Cluster.ID.String(), Server: project.Cluster.Server,
+		Kubeconfig: project.Kubernetes.Credentials.ExtraConfig,
+		Namespace:  project.Namespace, DeploymentName: deploymentName,
+		ServiceName: serviceName, ImageTag: run.ImageTag,
+		RolloutTimeout: o.rolloutTimeout,
+		RegistryPull:   registryPullCredentialFromHarbor(project.Harbor),
+	}
 }
 
 func (o *Orchestrator) resolveConcurrent(ctx context.Context, runID kernel.DeploymentRunID, updateErr error) error {

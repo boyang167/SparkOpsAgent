@@ -6,20 +6,25 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
 	platformk8s "github.com/sparkops/sparkops-agent/backend/internal/platform/k8s"
+	"gorm.io/gorm"
 )
 
 type Adapters struct {
 	Lister    port.PodLister
+	Restarter port.PodRestarter
 	Logs      port.PodLogReader
 	Terminal  port.PodTerminal
 	Resources *ResourceService
 	Deployer  port.ManifestDeployer
+	Inspector *ProjectRuntimeInspector
 }
 
 func NewAdapters(
 	cfg *config.Config,
 	factory *platformk8s.Factory,
 	checker port.ProjectChecker,
+	db *gorm.DB,
+	projectAccess *ProjectClusterAccess,
 ) (Adapters, error) {
 	adapters := Adapters{}
 	if cfg.Runtime.Driver == "mock" {
@@ -37,6 +42,10 @@ func NewAdapters(
 		if err != nil {
 			return Adapters{}, err
 		}
+		client, err := factory.Get(cluster)
+		if err != nil {
+			return Adapters{}, err
+		}
 		logs, err := NewPodLogReader(factory, cluster)
 		if err != nil {
 			return Adapters{}, err
@@ -50,22 +59,27 @@ func NewAdapters(
 			return Adapters{}, err
 		}
 		adapters.Lister = lister
+		adapters.Restarter = NewPlatformPodRestarter(client)
 		adapters.Logs = logs
 		adapters.Terminal = terminal
 		adapters.Resources = resources
-		return adapters, nil
+	} else if projectAccess != nil && db != nil {
+		adapters.Lister = NewProjectPodLister(projectAccess, db)
+		adapters.Restarter = NewProjectPodRestarter(projectAccess, db)
+		adapters.Logs = NewProjectPodLogReader(projectAccess, db)
+		adapters.Terminal = NewProjectPodTerminal(projectAccess, db)
+		adapters.Resources = NewMockResourceService(checker)
+		adapters.Inspector = NewProjectRuntimeInspector(projectAccess)
+	} else {
+		adapters.Lister = NewMockPodLister()
+		adapters.Restarter = NewMockPodRestarter()
+		adapters.Logs = NewMockPodLogs()
+		adapters.Terminal = NewMockPodTerminal()
+		adapters.Resources = NewMockResourceService(checker)
 	}
 
-	if cfg.Runtime.Driver == "k8s" && (factory == nil || len(factory.Names()) == 0) {
-		// Deployment still uses per-project kubeconfig via ManifestDeployer above.
-		// Pod/resource APIs stay on mock adapters until platform k8s is configured.
+	if adapters.Deployer == nil {
+		adapters.Deployer = NewMockManifestDeployer()
 	}
-
-	return Adapters{
-		Lister:    NewMockPodLister(),
-		Logs:      NewMockPodLogs(),
-		Terminal:  NewMockPodTerminal(),
-		Resources: NewMockResourceService(checker),
-		Deployer:  adapters.Deployer,
-	}, nil
+	return adapters, nil
 }

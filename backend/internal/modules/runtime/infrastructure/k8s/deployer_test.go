@@ -375,14 +375,14 @@ func TestMockManifestDeployerValidatesExactTargetImageTag(t *testing.T) {
 }
 
 func TestNewAdaptersInjectsMockManifestDeployer(t *testing.T) {
-	adapters, err := NewAdapters(&config.Config{Runtime: config.RuntimeConfig{Driver: "mock"}}, nil, nil)
+	adapters, err := NewAdapters(&config.Config{Runtime: config.RuntimeConfig{Driver: "mock"}}, nil, nil, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, adapters.Deployer)
 	require.NoError(t, adapters.Deployer.Deploy(context.Background(), target(time.Second), manifests()))
 }
 
 func TestNewAdaptersUsesKubeconfigDeployerForK8sDriver(t *testing.T) {
-	adapters, err := NewAdapters(&config.Config{Runtime: config.RuntimeConfig{Driver: "k8s"}}, nil, nil)
+	adapters, err := NewAdapters(&config.Config{Runtime: config.RuntimeConfig{Driver: "k8s"}}, nil, nil, nil, nil)
 	require.NoError(t, err)
 	_, ok := adapters.Deployer.(*ManifestDeployer)
 	require.True(t, ok, "k8s driver should use kubeconfig manifest deployer")

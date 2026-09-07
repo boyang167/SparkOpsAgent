@@ -3,6 +3,7 @@ package acl
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -43,12 +44,13 @@ func (a *WorkspaceAppACL) ProjectNamespace(
 	projectName string,
 ) (string, error) {
 	var row struct {
+		Namespace       string
 		LegacyNamespace string
 	}
 	err := a.db.WithContext(ctx).
 		Table("workspace_app.projects p").
 		Joins("JOIN tenant.workspaces w ON w.id = p.workspace_id").
-		Select("w.legacy_namespace").
+		Select("p.namespace, w.legacy_namespace").
 		Where("p.id = ?", projectID.String()).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -57,8 +59,11 @@ func (a *WorkspaceAppACL) ProjectNamespace(
 	if err != nil {
 		return "", err
 	}
-	if row.LegacyNamespace != "" {
-		return row.LegacyNamespace, nil
+	if ns := strings.TrimSpace(row.Namespace); ns != "" {
+		return ns, nil
+	}
+	if ns := strings.TrimSpace(row.LegacyNamespace); ns != "" {
+		return ns, nil
 	}
 	return k8s.DefaultNamespace(projectName), nil
 }

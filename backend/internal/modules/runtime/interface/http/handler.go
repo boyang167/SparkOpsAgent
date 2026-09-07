@@ -6,16 +6,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type Handler struct {
-	listPods  *query.ListPodsHandler
-	getPod    *query.GetPodHandler
-	podLogs   *query.GetPodLogsHandler
-	terminal  *query.StreamPodTerminalHandler
+	listPods    *query.ListPodsHandler
+	getPod      *query.GetPodHandler
+	podLogs     *query.GetPodLogsHandler
+	terminal    *query.StreamPodTerminalHandler
+	overview    *query.GetProjectRuntimeOverviewHandler
+	restartPod  *command.RestartPodHandler
 }
 
 func NewHandler(
@@ -23,8 +26,32 @@ func NewHandler(
 	getPod *query.GetPodHandler,
 	podLogs *query.GetPodLogsHandler,
 	terminal *query.StreamPodTerminalHandler,
+	overview *query.GetProjectRuntimeOverviewHandler,
+	restartPod *command.RestartPodHandler,
 ) *Handler {
-	return &Handler{listPods: listPods, getPod: getPod, podLogs: podLogs, terminal: terminal}
+	return &Handler{
+		listPods: listPods, getPod: getPod, podLogs: podLogs, terminal: terminal,
+		overview: overview, restartPod: restartPod,
+	}
+}
+
+func (h *Handler) GetProjectRuntimeOverview(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	item, err := h.overview.Handle(c.Request.Context(), wsID, projectID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, item)
 }
 
 func (h *Handler) ListPods(c *gin.Context) {
@@ -129,4 +156,28 @@ func (h *Handler) StreamPodTerminal(c *gin.Context) {
 		}
 	}()
 	httpx.StreamSSE(c, ch, "", false)
+}
+
+func (h *Handler) RestartPod(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	podID, err := kernel.ParsePodID(c.Param("podId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid pod id", http.StatusBadRequest)
+		return
+	}
+	err = h.restartPod.Handle(c.Request.Context(), wsID, projectID, podID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"restarted": true})
 }

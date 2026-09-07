@@ -19,6 +19,10 @@ type PodLister interface {
 	FindByID(ctx context.Context, projectID kernel.ProjectID, projectName string, podID kernel.PodID) (*model.Pod, error)
 }
 
+type PodRestarter interface {
+	Restart(ctx context.Context, projectID kernel.ProjectID, projectName string, pod *model.Pod) error
+}
+
 type PodLogReader interface {
 	ReadLogs(ctx context.Context, pod *model.Pod) (string, error)
 }
@@ -47,11 +51,13 @@ type DeploymentTarget struct {
 	Namespace      string
 	DeploymentName string
 	ServiceName    string
-	ImageTag       string
-	RolloutTimeout time.Duration
-	RegistryPull   *RegistryPullCredential
+	ImageTag         string
+	RolloutTimeout   time.Duration
+	SkipRolloutWait  bool
+	RegistryPull     *RegistryPullCredential
 }
 
 type ManifestDeployer interface {
 	Deploy(ctx context.Context, target DeploymentTarget, manifests []Manifest) error
+	RolloutRestart(ctx context.Context, target DeploymentTarget) error
 }

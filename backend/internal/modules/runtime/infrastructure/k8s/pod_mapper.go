@@ -37,6 +37,7 @@ func MapPod(projectID kernel.ProjectID, item corev1.Pod) *model.Pod {
 		Container: containerName,
 		Image:     image,
 		StartedAt: startedAt,
+		Message:   podStatusMessage(item),
 	}
 }
 
@@ -63,6 +64,26 @@ func primaryContainerStatus(pod corev1.Pod) (name, image string, restarts int, s
 		startedAt = pod.CreationTimestamp.UTC().Format(time.RFC3339)
 	}
 	return name, image, restarts, startedAt
+}
+
+func podStatusMessage(pod corev1.Pod) string {
+	for _, st := range pod.Status.ContainerStatuses {
+		if st.State.Waiting != nil && st.State.Waiting.Message != "" {
+			return st.State.Waiting.Message
+		}
+		if st.State.Waiting != nil && st.State.Waiting.Reason != "" {
+			return st.State.Waiting.Reason
+		}
+		if st.State.Terminated != nil && st.State.Terminated.Message != "" {
+			return st.State.Terminated.Message
+		}
+	}
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionFalse && cond.Message != "" {
+			return cond.Message
+		}
+	}
+	return ""
 }
 
 func ValidatePod(pod *model.Pod) error {

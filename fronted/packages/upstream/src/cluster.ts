@@ -1,4 +1,4 @@
-import type { PodVM } from "@sparkops/contracts/cluster";
+import type { PodVM, ProjectRuntimeOverviewVM } from "@sparkops/contracts/cluster";
 import type { UpstreamRequestOptions } from "./core";
 import { getUpstreamBaseUrl, upstreamFetch } from "./core";
 
@@ -9,6 +9,16 @@ export function createClusterUpstream(options: UpstreamRequestOptions = {}) {
         method: "GET",
         options: { ...options, workspaceId },
       });
+    },
+
+    async getProjectRuntimeOverview(workspaceId: string, projectId: string) {
+      return upstreamFetch<ProjectRuntimeOverviewVM>(
+        `/api/v1/projects/${projectId}/runtime/overview`,
+        {
+          method: "GET",
+          options: { ...options, workspaceId },
+        },
+      );
     },
 
     async getPod(workspaceId: string, projectId: string, podId: string) {
@@ -23,6 +33,16 @@ export function createClusterUpstream(options: UpstreamRequestOptions = {}) {
         `/api/v1/projects/${projectId}/pods/${podId}/logs`,
         {
           method: "GET",
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
+    async restartPod(workspaceId: string, projectId: string, podId: string) {
+      return upstreamFetch<{ restarted: boolean }>(
+        `/api/v1/projects/${projectId}/pods/${podId}/restart`,
+        {
+          method: "POST",
           options: { ...options, workspaceId },
         },
       );

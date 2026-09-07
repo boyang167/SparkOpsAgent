@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/infrastructure/k8s"
@@ -10,6 +11,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 )
 
@@ -32,7 +34,12 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 
 	checker := acl.NewWorkspaceAppACL(c.DB)
-	adapters, err := k8s.NewAdapters(c.Config, c.K8sFactory, checker)
+	secretBox, err := crypto.NewSecretBoxFromConfig(c.Config)
+	if err != nil {
+		return fmt.Errorf("runtime secrets: %w", err)
+	}
+	projectAccess := k8s.NewProjectClusterAccess(c.DB, secretBox)
+	adapters, err := k8s.NewAdapters(c.Config, c.K8sFactory, checker, c.DB, projectAccess)
 	if err != nil {
 		return fmt.Errorf("runtime adapters: %w", err)
 	}
@@ -41,11 +48,14 @@ func (m *Module) Register(c *appctx.Container) error {
 	k8sQuery := query.NewK8sResources(checker, adapters.Resources)
 	resHandler := runtimehttp.NewResourcesHandler(k8sQuery)
 
+	overview := query.NewGetProjectRuntimeOverviewHandler(checker, adapters.Lister, adapters.Inspector)
 	handler := runtimehttp.NewHandler(
 		query.NewListPodsHandler(checker, adapters.Lister),
 		query.NewGetPodHandler(checker, adapters.Lister),
 		query.NewGetPodLogsHandler(checker, adapters.Lister, adapters.Logs),
 		query.NewStreamPodTerminalHandler(checker, adapters.Lister, adapters.Terminal),
+		overview,
+		command.NewRestartPodHandler(checker, adapters.Lister, adapters.Restarter),
 	)
 
 	auth := authn.RequireAuth(m.tokens)
@@ -54,12 +64,16 @@ func (m *Module) Register(c *appctx.Container) error {
 
 	c.Engine.GET("/api/v1/projects/:projectId/pods",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListPods)
+	c.Engine.GET("/api/v1/projects/:projectId/runtime/overview",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetProjectRuntimeOverview)
 	c.Engine.GET("/api/v1/projects/:projectId/pods/:podId",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetPod)
 	c.Engine.GET("/api/v1/projects/:projectId/pods/:podId/logs",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetPodLogs)
 	c.Engine.GET("/api/v1/projects/:projectId/pods/:podId/terminal/stream",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.StreamPodTerminal)
+	c.Engine.POST("/api/v1/projects/:projectId/pods/:podId/restart",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.RestartPod)
 
 	base := "/api/v1/workspaces/:wsId/k8s/projects/:projectId"
 	c.Engine.GET(base+"/deployments",

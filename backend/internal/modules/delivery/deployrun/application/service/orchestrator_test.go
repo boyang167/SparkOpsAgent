@@ -194,10 +194,12 @@ spec:
 }
 
 type orchestratorDeployer struct {
-	calls     int
-	target    runtimeport.DeploymentTarget
-	manifests []runtimeport.Manifest
-	err       error
+	calls          int
+	restartCalls   int
+	target         runtimeport.DeploymentTarget
+	manifests      []runtimeport.Manifest
+	err            error
+	restartErr     error
 }
 
 func (d *orchestratorDeployer) Deploy(_ context.Context, target runtimeport.DeploymentTarget, manifests []runtimeport.Manifest) error {
@@ -205,6 +207,12 @@ func (d *orchestratorDeployer) Deploy(_ context.Context, target runtimeport.Depl
 	d.target = target
 	d.manifests = manifests
 	return d.err
+}
+
+func (d *orchestratorDeployer) RolloutRestart(_ context.Context, target runtimeport.DeploymentTarget) error {
+	d.restartCalls++
+	d.target = target
+	return d.restartErr
 }
 
 type orchestratorPublisher struct {
@@ -283,6 +291,8 @@ func TestPreparingUpsertsAndTriggersExactlyOnce(t *testing.T) {
 	require.Zero(t, f.run.AttemptCount)
 	require.Equal(t, 1, f.prepare.calls)
 	require.Equal(t, 1, f.trigger.calls)
+	require.Equal(t, 1, f.deployer.calls)
+	require.True(t, f.deployer.target.SkipRolloutWait)
 	require.Equal(t, f.run.ImageTag, f.trigger.req.ImageTag)
 	require.Equal(t, f.projects.project.ImageRepository, f.trigger.req.ImageRepository)
 	require.Equal(t, 30*time.Minute, f.trigger.req.Timeout)
@@ -371,6 +381,8 @@ func TestDeployingUsesSingleAuthorizedContextAndRunTag(t *testing.T) {
 	require.NoError(t, f.o.Step(context.Background(), f.run.ID, f.wsID))
 	require.Equal(t, model.StatusSucceeded, f.run.Status)
 	require.Equal(t, 1, f.deployer.calls)
+	require.Equal(t, 1, f.deployer.restartCalls)
+	require.True(t, f.deployer.target.SkipRolloutWait)
 	require.Equal(t, f.projects.project.Cluster.ID.String(), f.deployer.target.ClusterID)
 	require.Equal(t, f.projects.project.Cluster.Server, f.deployer.target.Server)
 	require.Equal(t, f.projects.project.Kubernetes.Credentials.ExtraConfig, f.deployer.target.Kubeconfig)
@@ -433,6 +445,10 @@ func (d *blockingDeployer) Deploy(context.Context, runtimeport.DeploymentTarget,
 		close(d.entered)
 		<-d.release
 	}
+	return nil
+}
+
+func (d *blockingDeployer) RolloutRestart(context.Context, runtimeport.DeploymentTarget) error {
 	return nil
 }
 
@@ -501,6 +517,10 @@ func (d *contextBlockingDeployer) Deploy(ctx context.Context, _ runtimeport.Depl
 	}
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+func (d *contextBlockingDeployer) RolloutRestart(context.Context, runtimeport.DeploymentTarget) error {
+	return nil
 }
 
 func TestDeployingOperationContextCoversApplyAndBlocksSecondOwner(t *testing.T) {
@@ -572,15 +592,16 @@ func TestOrchestratorMockClosureAdvancesOneStagePerDelivery(t *testing.T) {
 	require.NoError(t, f.o.Step(ctx, f.run.ID, f.wsID))
 	require.Equal(t, model.StatusBuilding, f.run.Status)
 	require.Equal(t, 1, f.trigger.calls)
-	require.Zero(t, f.deployer.calls)
+	require.Equal(t, 1, f.deployer.calls)
 
 	require.NoError(t, f.run.Transition(model.StatusDeploying, time.Now()))
 	require.NoError(t, f.o.Step(ctx, f.run.ID, f.wsID))
 	require.Equal(t, model.StatusSucceeded, f.run.Status)
 	require.Equal(t, 1, f.trigger.calls)
-	require.Equal(t, 1, f.deployer.calls)
+	require.Equal(t, 2, f.deployer.calls)
+	require.Equal(t, 1, f.deployer.restartCalls)
 
 	require.NoError(t, f.o.Step(ctx, f.run.ID, f.wsID))
 	require.Equal(t, 1, f.trigger.calls)
-	require.Equal(t, 1, f.deployer.calls)
+	require.Equal(t, 2, f.deployer.calls)
 }

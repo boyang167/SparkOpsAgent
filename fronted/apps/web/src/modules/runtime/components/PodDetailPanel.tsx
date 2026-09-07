@@ -1,110 +1,433 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { cluster } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { PodVM } from "@sparkops/contracts/cluster";
+import { Modal } from "@/components/ui/Modal";
+
+export type PodDetailTab = "overview" | "logs" | "console";
 
 interface PodDetailPanelProps {
   workspaceId: string;
   projectId: string;
   pod: PodVM;
+  initialTab?: PodDetailTab;
   onClose: () => void;
 }
 
-export function PodDetailPanel({ workspaceId, projectId, pod, onClose }: PodDetailPanelProps) {
-  const [logs, setLogs] = useState<string>("");
-  const [terminal, setTerminal] = useState<string>("");
-  const [logsLoading, setLogsLoading] = useState(true);
+const DETAIL_TABS: { id: PodDetailTab; label: string }[] = [
+  { id: "overview", label: "概览" },
+  { id: "logs", label: "日志" },
+  { id: "console", label: "控制台" },
+];
+
+function formatDateTime(value: string) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN");
+}
+
+function downloadText(content: string, filename: string) {
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function ToolbarIconButton({
+  label,
+  title,
+  active,
+  onClick,
+  children,
+}: {
+  label: string;
+  title: string;
+  active?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={active ? "pod-detail-toolbar-btn is-active" : "pod-detail-toolbar-btn"}
+      aria-label={label}
+      title={title}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function PodOverviewTab({ pod }: { pod: PodVM }) {
+  return (
+    <dl className="pod-detail-overview-grid">
+      <div className="pod-detail-overview-item">
+        <dt>名称</dt>
+        <dd>{pod.name}</dd>
+      </div>
+      <div className="pod-detail-overview-item">
+        <dt>命名空间</dt>
+        <dd>{pod.namespace}</dd>
+      </div>
+      <div className="pod-detail-overview-item">
+        <dt>状态</dt>
+        <dd>{pod.phase}</dd>
+      </div>
+      <div className="pod-detail-overview-item">
+        <dt>节点</dt>
+        <dd>{pod.node || "-"}</dd>
+      </div>
+      <div className="pod-detail-overview-item">
+        <dt>容器</dt>
+        <dd>{pod.container || "-"}</dd>
+      </div>
+      <div className="pod-detail-overview-item">
+        <dt>镜像</dt>
+        <dd className="pod-detail-mono">{pod.image || "-"}</dd>
+      </div>
+      <div className="pod-detail-overview-item">
+        <dt>重启次数</dt>
+        <dd>{pod.restarts}</dd>
+      </div>
+      <div className="pod-detail-overview-item">
+        <dt>启动时间</dt>
+        <dd>{formatDateTime(pod.started_at)}</dd>
+      </div>
+      {pod.message ? (
+        <div className="pod-detail-overview-item pod-detail-overview-item-wide">
+          <dt>状态信息</dt>
+          <dd className="pod-detail-error-text">{pod.message}</dd>
+        </div>
+      ) : null}
+    </dl>
+  );
+}
+
+function PodLogsTab({
+  workspaceId,
+  projectId,
+  pod,
+  active,
+}: {
+  workspaceId: string;
+  projectId: string;
+  pod: PodVM;
+  active: boolean;
+}) {
+  const [logs, setLogs] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [paused, setPaused] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const terminalRef = useRef<HTMLPreElement>(null);
+  const viewportRef = useRef<HTMLPreElement>(null);
+  const stickToBottomRef = useRef(true);
 
-  useEffect(() => {
-    setLogsLoading(true);
+  const loadLogs = useCallback(async () => {
+    setLoading(true);
     setError(null);
-    void cluster
-      .getPodLogs(projectId, pod.id, workspaceId)
-      .then((data) => setLogs(data.logs))
-      .catch((err) => setError(err instanceof BffError ? err.message : "加载日志失败"))
-      .finally(() => setLogsLoading(false));
+    try {
+      const data = await cluster.getPodLogs(projectId, pod.id, workspaceId);
+      setLogs(data.logs);
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "加载日志失败");
+    } finally {
+      setLoading(false);
+    }
   }, [projectId, pod.id, workspaceId]);
 
   useEffect(() => {
-    setTerminal("");
-    const stop = cluster.streamPodTerminal(projectId, pod.id, workspaceId, {
-      onDelta: (delta) => {
-        setTerminal((prev) => {
-          const next = prev + delta;
-          if (terminalRef.current) {
-            terminalRef.current.textContent = next;
-            terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-          }
-          return next;
-        });
-      },
-      onDone: () => {},
-    });
-    return stop;
-  }, [projectId, pod.id, workspaceId]);
+    if (!active || paused) return;
+    void loadLogs();
+  }, [active, paused, loadLogs]);
+
+  useEffect(() => {
+    if (!active || paused) return;
+    const timer = window.setInterval(() => {
+      void loadLogs();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [active, paused, loadLogs]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !stickToBottomRef.current) return;
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [logs]);
+
+  function handleScroll() {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    stickToBottomRef.current = distance < 48;
+  }
 
   return (
-    <section className="card stack-md border-[var(--border-strong)]">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="font-medium">{pod.name}</h3>
-          <p className="text-xs text-muted mt-1">
-            {pod.namespace} · {pod.phase} · {pod.node}
-          </p>
+    <div className="pod-detail-stream-panel">
+      <div className="pod-detail-toolbar">
+        <div className="pod-detail-toolbar-filters">
+          <label className="pod-detail-toolbar-field">
+            <span>容器</span>
+            <select value={pod.container || pod.name} disabled aria-label="容器">
+              <option value={pod.container || pod.name}>{pod.container || pod.name}</option>
+            </select>
+          </label>
+          <label className="pod-detail-toolbar-field">
+            <span>位于</span>
+            <select value={pod.name} disabled aria-label="Pod">
+              <option value={pod.name}>{pod.name}</option>
+            </select>
+          </label>
         </div>
-        <button className="btn-secondary text-sm" type="button" onClick={onClose}>
-          关闭
+        <div className="pod-detail-toolbar-actions">
+          <ToolbarIconButton
+            label={paused ? "继续刷新" : "暂停刷新"}
+            title={paused ? "继续刷新" : "暂停刷新"}
+            active={paused}
+            onClick={() => setPaused((value) => !value)}
+          >
+            {paused ? (
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M6 5h4v14H6V5zm8 0h4v14h-4V5z" />
+              </svg>
+            )}
+          </ToolbarIconButton>
+          <ToolbarIconButton
+            label="清空"
+            title="清空当前显示"
+            onClick={() => {
+              setLogs("");
+              setError(null);
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </ToolbarIconButton>
+          <ToolbarIconButton
+            label="下载"
+            title="下载日志"
+            onClick={() => downloadText(logs || "", `${pod.name}.log`)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </ToolbarIconButton>
+        </div>
+      </div>
+
+      {error ? <p className="pod-detail-inline-error">{error}</p> : null}
+
+      <pre
+        ref={viewportRef}
+        className="pod-detail-viewport"
+        onScroll={handleScroll}
+      >
+        {loading && !logs ? "加载中…" : logs || "暂无日志"}
+      </pre>
+    </div>
+  );
+}
+
+function PodConsoleTab({
+  workspaceId,
+  projectId,
+  pod,
+  active,
+}: {
+  workspaceId: string;
+  projectId: string;
+  pod: PodVM;
+  active: boolean;
+}) {
+  const [output, setOutput] = useState("");
+  const [paused, setPaused] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const viewportRef = useRef<HTMLPreElement>(null);
+  const pausedRef = useRef(false);
+
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
+
+  useEffect(() => {
+    if (!active) return;
+    setOutput("");
+    setError(null);
+    setPaused(false);
+    pausedRef.current = false;
+
+    const stop = cluster.streamPodTerminal(projectId, pod.id, workspaceId, {
+      onDelta: (delta) => {
+        if (pausedRef.current) return;
+        setOutput((prev) => prev + delta);
+      },
+      onDone: () => {},
+      onError: (err) => setError(err.message),
+    });
+
+    return stop;
+  }, [active, projectId, pod.id, workspaceId]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [output]);
+
+  return (
+    <div className="pod-detail-stream-panel">
+      <div className="pod-detail-toolbar">
+        <div className="pod-detail-toolbar-filters">
+          <label className="pod-detail-toolbar-field">
+            <span>容器</span>
+            <select value={pod.container || pod.name} disabled aria-label="容器">
+              <option value={pod.container || pod.name}>{pod.container || pod.name}</option>
+            </select>
+          </label>
+          <label className="pod-detail-toolbar-field">
+            <span>位于</span>
+            <select value={pod.name} disabled aria-label="Pod">
+              <option value={pod.name}>{pod.name}</option>
+            </select>
+          </label>
+        </div>
+        <div className="pod-detail-toolbar-actions">
+          <ToolbarIconButton
+            label={paused ? "继续输出" : "暂停输出"}
+            title={paused ? "继续输出" : "暂停输出"}
+            active={paused}
+            onClick={() => setPaused((value) => !value)}
+          >
+            {paused ? (
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M6 5h4v14H6V5zm8 0h4v14h-4V5z" />
+              </svg>
+            )}
+          </ToolbarIconButton>
+          <ToolbarIconButton
+            label="清空"
+            title="清空当前显示"
+            onClick={() => {
+              setOutput("");
+              setError(null);
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </ToolbarIconButton>
+          <ToolbarIconButton
+            label="下载"
+            title="下载控制台输出"
+            onClick={() => downloadText(output || "", `${pod.name}-console.log`)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </ToolbarIconButton>
+        </div>
+      </div>
+
+      {error ? <p className="pod-detail-inline-error">{error}</p> : null}
+
+      <pre ref={viewportRef} className="pod-detail-viewport">
+        {output || "$ connecting…\n"}
+      </pre>
+    </div>
+  );
+}
+
+export function PodDetailPanel({
+  workspaceId,
+  projectId,
+  pod,
+  initialTab = "overview",
+  onClose,
+}: PodDetailPanelProps) {
+  const [tab, setTab] = useState<PodDetailTab>(initialTab);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [pod.id, initialTab]);
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Pods详情 - ${pod.name}`}
+      size="xl"
+      panelClassName={
+        fullscreen ? "pod-detail-modal pod-detail-modal-fullscreen" : "pod-detail-modal"
+      }
+      headerExtra={
+        tab !== "overview" ? (
+          <button
+            type="button"
+            className="modal-close"
+            aria-label={fullscreen ? "退出全屏" : "全屏"}
+            title={fullscreen ? "退出全屏" : "全屏"}
+            onClick={() => setFullscreen((value) => !value)}
+          >
+            <span aria-hidden>{fullscreen ? "⊙" : "⛶"}</span>
+          </button>
+        ) : undefined
+      }
+    >
+      <div className="pod-detail-root">
+        <button type="button" className="pod-detail-back" onClick={onClose}>
+          ← 返回服务详情
         </button>
+
+        <div className="pod-detail-tabs" role="tablist" aria-label="Pod 详情">
+          {DETAIL_TABS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              className={tab === item.id ? "pod-detail-tab is-active" : "pod-detail-tab"}
+              onClick={() => setTab(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="pod-detail-body">
+          {tab === "overview" ? <PodOverviewTab pod={pod} /> : null}
+          {tab === "logs" ? (
+            <PodLogsTab
+              workspaceId={workspaceId}
+              projectId={projectId}
+              pod={pod}
+              active={tab === "logs"}
+            />
+          ) : null}
+          {tab === "console" ? (
+            <PodConsoleTab
+              workspaceId={workspaceId}
+              projectId={projectId}
+              pod={pod}
+              active={tab === "console"}
+            />
+          ) : null}
+        </div>
       </div>
-
-      <dl className="grid gap-2 sm:grid-cols-2 text-sm">
-        <div>
-          <dt className="text-muted">容器</dt>
-          <dd>{pod.container}</dd>
-        </div>
-        <div>
-          <dt className="text-muted">镜像</dt>
-          <dd className="font-mono text-xs break-all">{pod.image}</dd>
-        </div>
-        <div>
-          <dt className="text-muted">重启次数</dt>
-          <dd>{pod.restarts}</dd>
-        </div>
-        <div>
-          <dt className="text-muted">启动时间</dt>
-          <dd>{new Date(pod.started_at).toLocaleString("zh-CN")}</dd>
-        </div>
-      </dl>
-
-      {error ? <p className="error text-sm">{error}</p> : null}
-
-      <div className="stack-sm">
-        <h4 className="text-sm font-medium">Pod 日志</h4>
-        {logsLoading ? (
-          <p className="text-sm text-muted">加载中…</p>
-        ) : (
-          <pre className="text-xs bg-[var(--surface)] p-3 rounded-lg overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto font-mono">
-            {logs || "暂无日志"}
-          </pre>
-        )}
-      </div>
-
-      <div className="stack-sm">
-        <div className="flex items-center gap-2">
-          <h4 className="text-sm font-medium">Web 终端（Mock）</h4>
-          <span className="text-xs text-muted">SSE 模拟 shell 输出</span>
-        </div>
-        <pre
-          ref={terminalRef}
-          className="text-xs bg-[#1e1e1e] text-[#d4d4d4] p-3 rounded-lg overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto font-mono"
-        >
-          {terminal || "$ connecting…\n"}
-        </pre>
-      </div>
-    </section>
+    </Modal>
   );
 }

@@ -97,13 +97,15 @@ func TestRealNoopQueueAdvancesQueuedAndPreparingWithoutLosingNestedMessage(t *te
 func TestRealQueueAndEventBusCompleteSuccessfulDeployment(t *testing.T) {
 	f := runRealQueueClosure(t, buildmodel.BuildStatusSuccess)
 	require.Equal(t, model.StatusSucceeded, f.run.Status)
-	require.Equal(t, 1, f.deployer.calls)
+	require.Equal(t, 2, f.deployer.calls)
+	require.Equal(t, 1, f.deployer.restartCalls)
 }
 
 func TestRealQueueAndEventBusCIShutdownHasZeroApply(t *testing.T) {
 	f := runRealQueueClosure(t, buildmodel.BuildStatusFailed)
 	require.Equal(t, model.StatusFailed, f.run.Status)
-	require.Zero(t, f.deployer.calls)
+	require.Equal(t, 1, f.deployer.calls)
+	require.Zero(t, f.deployer.restartCalls)
 }
 
 func TestReconcilerRecoversMissedBuildEventAndDeployingMessage(t *testing.T) {

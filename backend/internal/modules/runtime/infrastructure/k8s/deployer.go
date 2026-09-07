@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/utils/ptr"
 
@@ -94,6 +95,25 @@ func buildClients(
 	return typedClient, dynamicClient, nil
 }
 
+func NewTypedClientFromKubeconfig(kubeconfig []byte, expectedServer string) (kubernetes.Interface, error) {
+	client, _, err := buildClients(kubeconfig, expectedServer)
+	return client, err
+}
+
+func RESTConfigFromKubeconfig(kubeconfig []byte, expectedServer string) (*rest.Config, error) {
+	if len(bytes.TrimSpace(kubeconfig)) == 0 {
+		return nil, domain.ErrKubeconfigMissing
+	}
+	cfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfig)
+	if err != nil {
+		return nil, domain.ErrKubeconfigInvalid
+	}
+	if !sameServerEndpoint(cfg.Host, expectedServer) {
+		return nil, domain.ErrClusterServerMismatch
+	}
+	return cfg, nil
+}
+
 func sameServerEndpoint(actual, expected string) bool {
 	actualScheme, actualHost, actualOK := normalizedServerEndpoint(actual)
 	expectedScheme, expectedHost, expectedOK := normalizedServerEndpoint(expected)
@@ -145,6 +165,19 @@ func (d *ManifestDeployer) Deploy(
 		return err
 	}
 
+	service, err := typedClient.CoreV1().Services(target.Namespace).Get(
+		ctx, target.ServiceName, metav1.GetOptions{},
+	)
+	if err != nil {
+		return fmt.Errorf("validate service %q: %w", target.ServiceName, err)
+	}
+	if service.DeletionTimestamp != nil {
+		return domain.ErrServiceDeleting
+	}
+	if target.SkipRolloutWait {
+		return nil
+	}
+
 	timeout := target.RolloutTimeout
 	if timeout <= 0 {
 		timeout = defaultRolloutTimeout
@@ -154,14 +187,36 @@ func (d *ManifestDeployer) Deploy(
 	if err := d.waitForDeployment(rolloutCtx, typedClient, target); err != nil {
 		return err
 	}
-	service, err := typedClient.CoreV1().Services(target.Namespace).Get(
-		rolloutCtx, target.ServiceName, metav1.GetOptions{},
+	return nil
+}
+
+func (d *ManifestDeployer) RolloutRestart(
+	ctx context.Context,
+	target port.DeploymentTarget,
+) error {
+	if len(strings.TrimSpace(target.Kubeconfig)) == 0 {
+		return domain.ErrKubeconfigMissing
+	}
+	typedClient, _, err := d.clients(target)
+	if err != nil {
+		return err
+	}
+	if typedClient == nil {
+		return errors.New("kubernetes clients are not configured")
+	}
+	patch := fmt.Sprintf(
+		`{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":%q}}}}}`,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	_, err = typedClient.AppsV1().Deployments(target.Namespace).Patch(
+		ctx,
+		target.DeploymentName,
+		types.StrategicMergePatchType,
+		[]byte(patch),
+		metav1.PatchOptions{FieldManager: fieldManager},
 	)
 	if err != nil {
-		return fmt.Errorf("validate service %q: %w", target.ServiceName, err)
-	}
-	if service.DeletionTimestamp != nil {
-		return domain.ErrServiceDeleting
+		return fmt.Errorf("restart deployment %q: %w", target.DeploymentName, err)
 	}
 	return nil
 }

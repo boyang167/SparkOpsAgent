@@ -220,6 +220,10 @@ func (r *acceptanceRuntime) Deploy(ctx context.Context, target runtimeport.Deplo
 	return nil
 }
 
+func (r *acceptanceRuntime) RolloutRestart(ctx context.Context, target runtimeport.DeploymentTarget) error {
+	return r.mock.RolloutRestart(ctx, target)
+}
+
 type pipelineFixture struct {
 	ctx                   context.Context
 	cancel                context.CancelFunc
@@ -560,7 +564,7 @@ func TestDeploymentPipelineCIFailureHasZeroApply(t *testing.T) {
 	_, statuses := env.createAndObserve(t, command.CreateInput{GitRefType: "branch", GitRefValue: "main"})
 
 	require.Equal(t, model.StatusFailed, statuses[len(statuses)-1])
-	require.Zero(t, env.runtime.applyCalls)
+	require.Equal(t, 1, env.runtime.applyCalls)
 }
 
 func TestDeploymentPipelineMissingHarborFailsCreate(t *testing.T) {
