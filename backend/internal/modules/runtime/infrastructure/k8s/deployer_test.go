@@ -83,6 +83,64 @@ func TestBuildClientsCreatesTypedAndDynamicClientsFromCompleteKubeconfig(t *test
 	require.NotNil(t, dynamicClient)
 }
 
+func TestDeployCreatesMissingNamespaceBeforeApply(t *testing.T) {
+	dyn := applyDynamicClient(t)
+	typed := kubernetesfake.NewSimpleClientset(readyDeployment(2, 2, 1, nil), expectedService())
+	deployer := NewManifestDeployer(dyn, typed, time.Millisecond)
+
+	tgt := target(100 * time.Millisecond)
+	err := deployer.Deploy(context.Background(), tgt, manifests())
+	require.NoError(t, err)
+
+	ns, err := typed.CoreV1().Namespaces().Get(context.Background(), tgt.Namespace, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.Equal(t, tgt.Namespace, ns.Name)
+}
+
+func TestDeployCreatesMissingImagePullSecretBeforeApply(t *testing.T) {
+	dyn := applyDynamicClient(t)
+	typed := kubernetesfake.NewSimpleClientset(readyDeployment(2, 2, 1, nil), expectedService())
+	deployer := NewManifestDeployer(dyn, typed, time.Millisecond)
+
+	tgt := target(100 * time.Millisecond)
+	tgt.RegistryPull = &runtimeport.RegistryPullCredential{
+		Server: "registry.example", Username: "user", Password: "pass",
+	}
+	manifest := deploymentYAMLWithPullSecret("registry.example/orders:deploy-123", "harbor-pull") +
+		"\n---\n" + serviceYAML("")
+
+	err := deployer.Deploy(context.Background(), tgt, []runtimeport.Manifest{{YAML: manifest}})
+	require.NoError(t, err)
+
+	secret, err := typed.CoreV1().Secrets(tgt.Namespace).Get(
+		context.Background(), "harbor-pull", metav1.GetOptions{},
+	)
+	require.NoError(t, err)
+	require.Equal(t, corev1.SecretTypeDockerConfigJson, secret.Type)
+}
+
+func deploymentYAMLWithPullSecret(image, secretName string) string {
+	return fmt.Sprintf(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-deployment
+spec:
+  selector:
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders
+    spec:
+      imagePullSecrets:
+        - name: %s
+      containers:
+        - name: orders
+          image: %s
+`, secretName, image)
+}
+
 func TestDeployAppliesMultiDocumentManifestAndWaitsForReadyResources(t *testing.T) {
 	dyn := applyDynamicClient(t)
 	typed := kubernetesfake.NewSimpleClientset(readyDeployment(2, 2, 1, nil), expectedService())

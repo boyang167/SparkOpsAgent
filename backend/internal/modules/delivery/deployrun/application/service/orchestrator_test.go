@@ -170,10 +170,27 @@ type orchestratorRenderer struct {
 	tag   string
 }
 
-func (r *orchestratorRenderer) Render(_ context.Context, _ deployport.ProjectDeploymentContext, tag string) ([]runtimeport.Manifest, error) {
+func (r *orchestratorRenderer) Render(_ context.Context, project deployport.ProjectDeploymentContext, tag string) ([]runtimeport.Manifest, error) {
 	r.calls++
 	r.tag = tag
-	return []runtimeport.Manifest{{YAML: "kind: Service"}, {YAML: "kind: Deployment"}}, nil
+	return []runtimeport.Manifest{
+		{YAML: `apiVersion: v1
+kind: Service
+metadata:
+  name: ` + project.Name + `
+  namespace: ` + project.Namespace},
+		{YAML: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ` + project.Name + `
+  namespace: ` + project.Namespace + `
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: ` + project.ImageRepository + `:` + tag},
+	}, nil
 }
 
 type orchestratorDeployer struct {

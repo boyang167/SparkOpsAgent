@@ -10,17 +10,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDefaultImageTagStripsHyphensAndTakesFirst12(t *testing.T) {
-	id, err := kernel.ParseDeploymentRunID("550e8400-e29b-41d4-a716-446655440000")
-	require.NoError(t, err)
-	require.Equal(t, "550e8400e29b", model.DefaultImageTag(id))
+func TestDefaultImageTagUsesGitRefValue(t *testing.T) {
+	require.Equal(t, "main", model.DefaultImageTag("main"))
+	require.Equal(t, "v1.2.3", model.DefaultImageTag("v1.2.3"))
 }
 
-func TestNewDeploymentRunUsesDefaultImageTagWhenEmpty(t *testing.T) {
+func TestDefaultImageTagSanitizesGitRefForDockerTag(t *testing.T) {
+	require.Equal(t, "feature-login", model.DefaultImageTag("feature/login"))
+	require.Equal(t, "release-1", model.DefaultImageTag("refs/heads/release-1"))
+	require.Equal(t, "v1.0.0", model.DefaultImageTag("refs/tags/v1.0.0"))
+}
+
+func TestDefaultImageTagFallsBackToLatestWhenEmpty(t *testing.T) {
+	require.Equal(t, "latest", model.DefaultImageTag(""))
+	require.Equal(t, "latest", model.DefaultImageTag("   "))
+}
+
+func TestNewDeploymentRunUsesGitRefAsDefaultImageTag(t *testing.T) {
 	run := model.NewDeploymentRun(kernel.NewWorkspaceID(), kernel.NewProjectID(),
 		kernel.NewClusterInfoID(), kernel.NewMemberID(), "branch", "main", "")
-	require.Equal(t, model.DefaultImageTag(run.ID), run.ImageTag)
-	require.Len(t, run.ImageTag, 12)
+	require.Equal(t, "main", run.ImageTag)
 }
 
 func TestNewDeploymentRunKeepsExplicitImageTag(t *testing.T) {

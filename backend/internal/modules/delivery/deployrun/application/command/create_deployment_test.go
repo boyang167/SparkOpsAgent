@@ -163,7 +163,7 @@ func TestCreateDeploymentDefaultsImageTagAndPublishes(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, model.DefaultImageTag(run.ID), run.ImageTag)
+	require.Equal(t, "main", run.ImageTag)
 	require.Equal(t, now, run.CreatedAt)
 	require.Len(t, repo.created, 1)
 	require.Len(t, queue.payloads, 1)

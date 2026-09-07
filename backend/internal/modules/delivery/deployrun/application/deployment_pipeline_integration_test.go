@@ -544,7 +544,7 @@ func TestDeploymentPipelineAcceptance(t *testing.T) {
 		GitRefType: "branch", GitRefValue: "main",
 	})
 
-	require.Equal(t, model.DefaultImageTag(run.ID), run.ImageTag)
+	require.Equal(t, "main", run.ImageTag)
 	require.Equal(t, []model.Status{
 		model.StatusQueued, model.StatusPreparing, model.StatusBuilding,
 		model.StatusDeploying, model.StatusSucceeded,

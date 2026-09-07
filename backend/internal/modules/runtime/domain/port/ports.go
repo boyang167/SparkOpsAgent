@@ -31,6 +31,12 @@ type Manifest struct {
 	YAML string
 }
 
+type RegistryPullCredential struct {
+	Server   string
+	Username string
+	Password string
+}
+
 type DeploymentTarget struct {
 	// ClusterID and Server must come from the same workspace-authorized
 	// ProjectDeploymentContext. Runtime validates the kubeconfig endpoint but
@@ -43,6 +49,7 @@ type DeploymentTarget struct {
 	ServiceName    string
 	ImageTag       string
 	RolloutTimeout time.Duration
+	RegistryPull   *RegistryPullCredential
 }
 
 type ManifestDeployer interface {

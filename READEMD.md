@@ -176,3 +176,4 @@ admin
 BdsDevopsAdmin!2024
 
 jenkins mcp  tokne: 11523e6d669dc0fd29f9420036120a753e
+docker pull dockerhub.kubekey.local/test-workspace/test-repo@sha256:1232afbd8c8d9bef89fdad05781da70e5ce92c482661cc8b571f3936696f54e3

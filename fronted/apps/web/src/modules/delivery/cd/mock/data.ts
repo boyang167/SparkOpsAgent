@@ -28,7 +28,7 @@ const STANDARD_JAVA_PROD: PipelineDefinition = {
   spec: {
     parameters: [
       { name: "git_ref_value", type: "string", required: true, description: "Git 分支或 Tag" },
-      { name: "image_tag", type: "string", required: false, description: "镜像 Tag，留空则自动生成" },
+      { name: "image_tag", type: "string", required: false, description: "镜像 Tag，留空则使用 Git 引用值" },
       { name: "target_env", type: "string", required: true, default: "prod", description: "目标环境" },
     ],
     stages: [

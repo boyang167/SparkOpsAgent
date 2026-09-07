@@ -232,12 +232,20 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			}
 			return o.failBusiness(ctx, run, err)
 		}
+		deploymentName, serviceName, err := extractManifestResourceNames(manifests)
+		if err != nil {
+			if operationCtx.Err() != nil {
+				return operationCtx.Err()
+			}
+			return o.failBusiness(ctx, run, err)
+		}
 		target := runtimeport.DeploymentTarget{
 			ClusterID: project.Cluster.ID.String(), Server: project.Cluster.Server,
 			Kubeconfig: project.Kubernetes.Credentials.ExtraConfig,
-			Namespace:  project.Namespace, DeploymentName: project.Name + "-deployment",
-			ServiceName: project.Name + "-service", ImageTag: run.ImageTag,
+			Namespace:  project.Namespace, DeploymentName: deploymentName,
+			ServiceName: serviceName, ImageTag: run.ImageTag,
 			RolloutTimeout: o.rolloutTimeout,
+			RegistryPull:   registryPullCredentialFromHarbor(project.Harbor),
 		}
 		if err := o.deployer.Deploy(operationCtx, target, manifests); err != nil {
 			if operationCtx.Err() != nil {

@@ -50,6 +50,39 @@ func TestInjectProjectConfigEnv_CreatesEnvBlockWhenMissing(t *testing.T) {
 	}
 }
 
+func TestInjectProjectConfigEnv_AppendsWhenEnvFromPrecedesEnv(t *testing.T) {
+	source := `      containers:
+      - image: demo:latest
+        name: demo
+        resources:
+          requests:
+            memory: 512Mi
+          limits:
+            memory: 1Gi
+        envFrom:
+        - configMapRef:
+            name: bionet-env-config
+        env:
+        - name: MY_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        volumeMounts:
+        - name: tz-config
+          mountPath: /etc/localtime`
+
+	out := injectProjectConfigEnv(source, `{"env":"dev"}`)
+	if strings.Contains(out, "limits:\n            memory: 1Gi\n        - name: env") {
+		t.Fatalf("env item injected at wrong level: %s", out)
+	}
+	if !strings.Contains(out, "- name: env\n          value: dev") {
+		t.Fatalf("missing env var: %s", out)
+	}
+	if !strings.Contains(out, "MY_POD_NAME") {
+		t.Fatalf("removed existing env: %s", out)
+	}
+}
+
 func TestGenerateArtifacts_InjectsProjectConfigEnv(t *testing.T) {
 	name, err := model.NewProjectName("demo")
 	if err != nil {

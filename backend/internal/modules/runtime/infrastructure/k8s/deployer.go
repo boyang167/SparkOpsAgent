@@ -134,6 +134,13 @@ func (d *ManifestDeployer) Deploy(
 	if typedClient == nil || dynamicClient == nil {
 		return errors.New("kubernetes clients are not configured")
 	}
+	if err := ensureNamespace(ctx, typedClient, target.Namespace); err != nil {
+		return err
+	}
+	secretNames := extractImagePullSecretNames(objects)
+	if err := ensureImagePullSecrets(ctx, typedClient, target.Namespace, secretNames, target.RegistryPull); err != nil {
+		return err
+	}
 	if err := applyObjects(ctx, dynamicClient, objects); err != nil {
 		return err
 	}

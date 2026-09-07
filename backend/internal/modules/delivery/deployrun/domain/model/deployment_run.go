@@ -59,10 +59,31 @@ type DeploymentRunEvent struct {
 	Message string
 }
 
-func DefaultImageTag(id kernel.DeploymentRunID) string {
-	tag := strings.ReplaceAll(id.String(), "-", "")
-	if len(tag) > 12 {
-		return tag[:12]
+func DefaultImageTag(gitRefValue string) string {
+	ref := strings.TrimSpace(gitRefValue)
+	ref = strings.TrimPrefix(ref, "refs/heads/")
+	ref = strings.TrimPrefix(ref, "refs/tags/")
+	if ref == "" {
+		return "latest"
+	}
+
+	var b strings.Builder
+	for _, r := range ref {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		case r == '/':
+			b.WriteByte('-')
+		default:
+			b.WriteByte('-')
+		}
+	}
+	tag := strings.Trim(b.String(), ".-_")
+	if tag == "" {
+		return "latest"
+	}
+	if len(tag) > 255 {
+		return tag[:255]
 	}
 	return tag
 }
@@ -79,7 +100,7 @@ func NewDeploymentRun(
 	id := kernel.NewDeploymentRunID()
 	tag := strings.TrimSpace(imageTag)
 	if tag == "" {
-		tag = DefaultImageTag(id)
+		tag = DefaultImageTag(gitRefValue)
 	}
 	return &DeploymentRun{
 		ID:          id,

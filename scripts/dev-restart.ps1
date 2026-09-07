@@ -61,23 +61,48 @@ function Stop-PortListener {
     }
 }
 
-function Stop-SavedPids {
-    if (-not (Test-Path $PidFile)) { return }
+function Load-Pids {
+    if (-not (Test-Path $PidFile)) { return @{} }
     try {
         $saved = Get-Content $PidFile -Raw | ConvertFrom-Json
+        $obj = @{}
         foreach ($name in @("backend", "frontend")) {
             $entry = $saved.$name
             if ($null -eq $entry) { continue }
-            $processId = [int]$entry.processId
-            if ($processId -gt 0 -and (Get-Process -Id $processId -ErrorAction SilentlyContinue)) {
-                Write-Host "  停止 $name (PID=$processId)" -ForegroundColor Yellow
-                Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+            $obj[$name] = @{
+                processId = [int]$entry.processId
+                port      = [int]$entry.port
+                url       = [string]$entry.url
+                startedAt = [string]$entry.startedAt
             }
         }
+        return $obj
     } catch {
         Write-Host "  忽略无效 PID 文件: $PidFile" -ForegroundColor DarkGray
+        return @{}
     }
-    Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+}
+
+function Stop-SavedPids {
+    param(
+        [bool]$IncludeBackend,
+        [bool]$IncludeFrontend
+    )
+
+    $saved = Load-Pids
+    if ($saved.Count -eq 0) { return }
+
+    foreach ($name in @("backend", "frontend")) {
+        if ($name -eq "backend" -and -not $IncludeBackend) { continue }
+        if ($name -eq "frontend" -and -not $IncludeFrontend) { continue }
+        $entry = $saved[$name]
+        if ($null -eq $entry) { continue }
+        $processId = [int]$entry.processId
+        if ($processId -gt 0 -and (Get-Process -Id $processId -ErrorAction SilentlyContinue)) {
+            Write-Host "  停止 $name (PID=$processId)" -ForegroundColor Yellow
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Stop-DevServices {
@@ -87,7 +112,7 @@ function Stop-DevServices {
     )
 
     Write-Host ">> 停止开发服务..." -ForegroundColor Cyan
-    Stop-SavedPids
+    Stop-SavedPids -IncludeBackend $IncludeBackend -IncludeFrontend $IncludeFrontend
     if ($IncludeBackend) { Stop-PortListener -Port $BackendPort }
     if ($IncludeFrontend) { Stop-PortListener -Port $FrontendPort }
     Start-Sleep -Milliseconds 500
@@ -152,10 +177,18 @@ function Start-FrontendService {
 }
 
 function Save-Pids {
-    param([array]$Entries)
+    param(
+        [array]$Entries,
+        [hashtable]$Existing = $null
+    )
 
     Ensure-DevDir
     $obj = @{}
+    if ($null -ne $Existing) {
+        foreach ($key in $Existing.Keys) {
+            $obj[$key] = $Existing[$key]
+        }
+    }
     foreach ($entry in $Entries) {
         $obj[$entry.name] = @{
             processId = $entry.processId
@@ -169,10 +202,14 @@ function Save-Pids {
 
 $runBackend = (-not $Backend -and -not $Frontend) -or $Backend
 $runFrontend = (-not $Backend -and -not $Frontend) -or $Frontend
+$stopBackend = $Stop -or $runBackend
+$stopFrontend = $Stop -or $runFrontend
+$existingPids = Load-Pids
 
-Stop-DevServices -IncludeBackend $runBackend -IncludeFrontend $runFrontend
+Stop-DevServices -IncludeBackend $stopBackend -IncludeFrontend $stopFrontend
 
 if ($Stop) {
+    Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
     Write-Host ">> 已停止。" -ForegroundColor Cyan
     exit 0
 }
@@ -180,7 +217,16 @@ if ($Stop) {
 $started = @()
 if ($runBackend) { $started += ,(Start-BackendService) }
 if ($runFrontend) { $started += ,(Start-FrontendService) }
-if ($started.Count -gt 0) { Save-Pids -Entries $started }
+if ($started.Count -gt 0) {
+    $retained = @{}
+    if (-not $runBackend -and $existingPids.ContainsKey("backend")) {
+        $retained["backend"] = $existingPids["backend"]
+    }
+    if (-not $runFrontend -and $existingPids.ContainsKey("frontend")) {
+        $retained["frontend"] = $existingPids["frontend"]
+    }
+    Save-Pids -Entries $started -Existing $retained
+}
 
 Write-Host ""
 Write-Host "SparkOps 开发服务已启动：" -ForegroundColor Cyan

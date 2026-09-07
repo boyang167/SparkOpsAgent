@@ -16,14 +16,14 @@ describe("deployment contracts", () => {
       cluster_id: "c",
       git_ref_type: "branch",
       git_ref_value: "main",
-      image_tag: "550e8400e29b",
+      image_tag: "main",
       status: "queued",
       current_stage: "",
       created_by: "m",
       created_at: new Date().toISOString(),
     });
 
-    expect(run.image_tag).toBe("550e8400e29b");
+    expect(run.image_tag).toBe("main");
     expect(run.error_message).toBe("");
   });
 

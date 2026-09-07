@@ -328,7 +328,7 @@ export function ProjectDeployModal({
                 onChange={(event) => setImageTag(event.target.value)}
                 disabled={Boolean(run)}
                 maxLength={255}
-                placeholder="留空则使用本次部署 ID 去连字符后的前 12 位"
+                placeholder="留空则使用 Git 引用值（如 main、v1.0.0）"
               />
             </label>
 

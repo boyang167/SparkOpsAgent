@@ -88,12 +88,11 @@ func injectProjectConfigEnv(yamlContent, projectConfig string) string {
 	}
 
 	itemBlock := strings.TrimRight(formatProjectEnvYAML(toAdd), "\n")
-	hasEnv := strings.Contains(yamlContent, "\n        env:")
-	block := itemBlock
-	if !hasEnv {
-		block = "        env:\n" + itemBlock
+	if strings.Contains(yamlContent, "\n        env:") {
+		return appendToDeploymentEnvBlock(yamlContent, itemBlock)
 	}
 
+	block := "        env:\n" + itemBlock
 	anchors := []string{"\n        envFrom:", "\n        volumeMounts:", "\n        resources:"}
 	for _, anchor := range anchors {
 		if idx := strings.Index(yamlContent, anchor); idx >= 0 {
@@ -101,11 +100,38 @@ func injectProjectConfigEnv(yamlContent, projectConfig string) string {
 		}
 	}
 
-	if hasEnv {
-		return yamlContent + "\n" + itemBlock
-	}
 	if strings.HasSuffix(yamlContent, "\n") {
 		return yamlContent + block + "\n"
 	}
 	return yamlContent + "\n" + block + "\n"
+}
+
+func appendToDeploymentEnvBlock(yamlContent, itemBlock string) string {
+	envIdx := strings.Index(yamlContent, "\n        env:")
+	if envIdx < 0 {
+		return yamlContent
+	}
+	searchStart := envIdx + len("\n        env:")
+	insertAt := len(yamlContent)
+	for _, anchor := range []string{
+		"\n        volumeMounts:",
+		"\n        resources:",
+		"\n        ports:",
+		"\n        livenessProbe:",
+		"\n        readinessProbe:",
+		"\n      volumes:",
+	} {
+		if idx := strings.Index(yamlContent[searchStart:], anchor); idx >= 0 {
+			pos := searchStart + idx
+			if pos < insertAt {
+				insertAt = pos
+			}
+		}
+	}
+	prefix := yamlContent[:insertAt]
+	suffix := yamlContent[insertAt:]
+	if !strings.HasSuffix(prefix, "\n") {
+		prefix += "\n"
+	}
+	return prefix + itemBlock + suffix
 }
