@@ -36,6 +36,57 @@ export function restartPod(projectId: string, podId: string, workspaceId: string
   );
 }
 
+export function putLogCollection(
+  projectId: string,
+  workspaceId: string,
+  body: import("@sparkops/contracts/cluster").LogCollectionInput,
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/log-collection`,
+    { workspaceId, method: "PUT", body },
+  );
+}
+
+export function putHealthProbe(
+  projectId: string,
+  workspaceId: string,
+  body: import("@sparkops/contracts/cluster").HealthProbeInput,
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/health-probe`,
+    { workspaceId, method: "PUT", body },
+  );
+}
+
+export function putServicePorts(
+  projectId: string,
+  workspaceId: string,
+  body: { ports: import("@sparkops/contracts/cluster").RuntimeServicePortInput[] },
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/service/ports`,
+    { workspaceId, method: "PUT", body },
+  );
+}
+
+export function createRuntimeService(projectId: string, workspaceId: string) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/service`,
+    { workspaceId, method: "POST" },
+  );
+}
+
+export function createRuntimeIngress(
+  projectId: string,
+  workspaceId: string,
+  body: import("@sparkops/contracts/cluster").RuntimeIngressInput = {},
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/ingress`,
+    { workspaceId, method: "POST", body },
+  );
+}
+
 export interface StreamPodTerminalHandlers {
   onDelta: (delta: string) => void;
   onDone: () => void;

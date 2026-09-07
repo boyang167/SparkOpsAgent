@@ -10,13 +10,15 @@ import (
 )
 
 type Adapters struct {
-	Lister    port.PodLister
-	Restarter port.PodRestarter
-	Logs      port.PodLogReader
-	Terminal  port.PodTerminal
-	Resources *ResourceService
-	Deployer  port.ManifestDeployer
-	Inspector *ProjectRuntimeInspector
+	Lister        port.PodLister
+	Restarter     port.PodRestarter
+	Logs          port.PodLogReader
+	Terminal      port.PodTerminal
+	PodMetrics    port.PodMetricsReader
+	Resources     *ResourceService
+	Deployer      port.ManifestDeployer
+	Inspector     *ProjectRuntimeInspector
+	Configurator  *ProjectRuntimeConfigurator
 }
 
 func NewAdapters(
@@ -58,26 +60,37 @@ func NewAdapters(
 		if err != nil {
 			return Adapters{}, err
 		}
+		podMetrics, err := NewPlatformPodMetricsReader(factory, cluster)
+		if err != nil {
+			return Adapters{}, err
+		}
 		adapters.Lister = lister
 		adapters.Restarter = NewPlatformPodRestarter(client)
 		adapters.Logs = logs
 		adapters.Terminal = terminal
+		adapters.PodMetrics = podMetrics
 		adapters.Resources = resources
 	} else if projectAccess != nil && db != nil {
 		adapters.Lister = NewProjectPodLister(projectAccess, db)
 		adapters.Restarter = NewProjectPodRestarter(projectAccess, db)
 		adapters.Logs = NewProjectPodLogReader(projectAccess, db)
 		adapters.Terminal = NewProjectPodTerminal(projectAccess, db)
+		adapters.PodMetrics = NewProjectPodMetricsReader(projectAccess, db)
 		adapters.Resources = NewMockResourceService(checker)
 		adapters.Inspector = NewProjectRuntimeInspector(projectAccess)
+		adapters.Configurator = NewProjectRuntimeConfigurator(projectAccess)
 	} else {
 		adapters.Lister = NewMockPodLister()
 		adapters.Restarter = NewMockPodRestarter()
 		adapters.Logs = NewMockPodLogs()
 		adapters.Terminal = NewMockPodTerminal()
+		adapters.PodMetrics = NewMockPodMetricsReader()
 		adapters.Resources = NewMockResourceService(checker)
 	}
 
+	if adapters.PodMetrics == nil {
+		adapters.PodMetrics = NewMockPodMetricsReader()
+	}
 	if adapters.Deployer == nil {
 		adapters.Deployer = NewMockManifestDeployer()
 	}

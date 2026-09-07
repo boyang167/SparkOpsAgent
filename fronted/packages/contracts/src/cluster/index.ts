@@ -12,6 +12,8 @@ export const PodVMSchema = z.object({
   image: z.string(),
   started_at: z.string(),
   message: z.string().optional(),
+  cpu_millicores: z.number().optional(),
+  memory_bytes: z.number().optional(),
 });
 
 export type PodVM = z.infer<typeof PodVMSchema>;
@@ -49,13 +51,82 @@ export const DeploymentOverviewVMSchema = z.object({
   created_at: z.string().optional(),
 });
 
+export const LogCollectionOverviewVMSchema = z.object({
+  configured: z.boolean(),
+  path: z.string().optional(),
+  pattern: z.string().optional(),
+  file_suffix: z.string().optional(),
+});
+
+export const HealthProbeOverviewVMSchema = z.object({
+  configured: z.boolean(),
+  port: z.number().optional(),
+  protocol: z.string().optional(),
+  path: z.string().optional(),
+  readiness: z.boolean(),
+  liveness: z.boolean(),
+  initial_delay_seconds: z.number().optional(),
+  period_seconds: z.number().optional(),
+  timeout_seconds: z.number().optional(),
+  success_threshold: z.number().optional(),
+  failure_threshold: z.number().optional(),
+});
+
+export const IngressPathOverviewVMSchema = z.object({
+  path: z.string(),
+  service_name: z.string(),
+  service_port: z.number(),
+});
+
+export const IngressOverviewVMSchema = z.object({
+  name: z.string(),
+  host: z.string(),
+  paths: z.array(IngressPathOverviewVMSchema).optional(),
+  created_at: z.string().optional(),
+});
+
 export const ProjectRuntimeOverviewVMSchema = z.object({
   deployment: DeploymentOverviewVMSchema.optional(),
   service: ServiceOverviewVMSchema.optional(),
+  log_collection: LogCollectionOverviewVMSchema.optional(),
+  health_probe: HealthProbeOverviewVMSchema.optional(),
+  ingress: IngressOverviewVMSchema.optional(),
   pods: z.array(PodVMSchema),
 });
 
 export type ServicePortOverviewVM = z.infer<typeof ServicePortOverviewVMSchema>;
 export type ServiceOverviewVM = z.infer<typeof ServiceOverviewVMSchema>;
 export type DeploymentOverviewVM = z.infer<typeof DeploymentOverviewVMSchema>;
+export type LogCollectionOverviewVM = z.infer<typeof LogCollectionOverviewVMSchema>;
+export type HealthProbeOverviewVM = z.infer<typeof HealthProbeOverviewVMSchema>;
+export type IngressPathOverviewVM = z.infer<typeof IngressPathOverviewVMSchema>;
+export type IngressOverviewVM = z.infer<typeof IngressOverviewVMSchema>;
 export type ProjectRuntimeOverviewVM = z.infer<typeof ProjectRuntimeOverviewVMSchema>;
+
+export interface LogCollectionInput {
+  path: string;
+  pattern: string;
+}
+
+export interface HealthProbeInput {
+  port: number;
+  probe: Array<"Readiness" | "Liveness">;
+  path?: string;
+  initial_delay_seconds: number;
+  period_seconds: number;
+  timeout_seconds: number;
+  success_threshold: number;
+  failure_threshold: number;
+}
+
+export interface RuntimeServicePortInput {
+  port: number;
+  target_port?: number;
+  name: string;
+  protocol: string;
+}
+
+export interface RuntimeIngressInput {
+  host?: string;
+  path?: string;
+}

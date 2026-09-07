@@ -10,23 +10,30 @@ import (
 )
 
 type ProjectRuntimeOverviewView struct {
-	Deployment *runtimek8s.DeploymentOverview `json:"deployment,omitempty"`
-	Service    *runtimek8s.ServiceOverview    `json:"service,omitempty"`
-	Pods       []PodView                      `json:"pods"`
+	Deployment    *runtimek8s.DeploymentOverview    `json:"deployment,omitempty"`
+	Service       *runtimek8s.ServiceOverview       `json:"service,omitempty"`
+	LogCollection *runtimek8s.LogCollectionOverview `json:"log_collection,omitempty"`
+	HealthProbe   *runtimek8s.HealthProbeOverview   `json:"health_probe,omitempty"`
+	Ingress       *runtimek8s.IngressOverview       `json:"ingress,omitempty"`
+	Pods          []PodView                         `json:"pods"`
 }
 
 type GetProjectRuntimeOverviewHandler struct {
 	checker   port.ProjectChecker
 	lister    port.PodLister
 	inspector *runtimek8s.ProjectRuntimeInspector
+	metrics   port.PodMetricsReader
 }
 
 func NewGetProjectRuntimeOverviewHandler(
 	checker port.ProjectChecker,
 	lister port.PodLister,
 	inspector *runtimek8s.ProjectRuntimeInspector,
+	metrics port.PodMetricsReader,
 ) *GetProjectRuntimeOverviewHandler {
-	return &GetProjectRuntimeOverviewHandler{checker: checker, lister: lister, inspector: inspector}
+	return &GetProjectRuntimeOverviewHandler{
+		checker: checker, lister: lister, inspector: inspector, metrics: metrics,
+	}
 }
 
 func (h *GetProjectRuntimeOverviewHandler) Handle(
@@ -52,15 +59,24 @@ func (h *GetProjectRuntimeOverviewHandler) Handle(
 		if inspectErr == nil && overview != nil {
 			out.Deployment = overview.Deployment
 			out.Service = overview.Service
+			out.LogCollection = overview.LogCollection
+			out.HealthProbe = overview.HealthProbe
+			out.Ingress = overview.Ingress
 		}
 	}
 	pods, err := h.lister.ListByProject(ctx, projectID, projectName)
 	if err != nil {
 		return out, nil
 	}
+	metricsByPod := map[kernel.PodID]port.PodMetrics{}
+	if h.metrics != nil {
+		if fetched, metricsErr := h.metrics.MetricsForPods(ctx, projectID, pods); metricsErr == nil {
+			metricsByPod = fetched
+		}
+	}
 	out.Pods = make([]PodView, 0, len(pods))
 	for _, pod := range pods {
-		out.Pods = append(out.Pods, toPodView(pod))
+		out.Pods = append(out.Pods, toPodViewWithMetrics(pod, metricsByPod[pod.ID]))
 	}
 	return out, nil
 }

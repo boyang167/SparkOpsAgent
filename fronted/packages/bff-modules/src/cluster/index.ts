@@ -44,3 +44,43 @@ export async function restartPod(
 ): Promise<{ restarted: boolean }> {
   return ctx.upstream.cluster.restartPod(workspaceId, projectId, podId);
 }
+
+export async function putLogCollection(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  body: Record<string, unknown>,
+) {
+  return ctx.upstream.cluster.putLogCollection(workspaceId, projectId, body);
+}
+
+export async function putHealthProbe(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  body: Record<string, unknown>,
+) {
+  return ctx.upstream.cluster.putHealthProbe(workspaceId, projectId, body);
+}
+
+export async function putServicePorts(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  body: Record<string, unknown>,
+) {
+  return ctx.upstream.cluster.putServicePorts(workspaceId, projectId, body);
+}
+
+export async function createRuntimeService(ctx: BffContext, workspaceId: string, projectId: string) {
+  return ctx.upstream.cluster.createRuntimeService(workspaceId, projectId);
+}
+
+export async function createRuntimeIngress(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  body: Record<string, unknown> = {},
+) {
+  return ctx.upstream.cluster.createRuntimeIngress(workspaceId, projectId, body);
+}

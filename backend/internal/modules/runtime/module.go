@@ -48,7 +48,8 @@ func (m *Module) Register(c *appctx.Container) error {
 	k8sQuery := query.NewK8sResources(checker, adapters.Resources)
 	resHandler := runtimehttp.NewResourcesHandler(k8sQuery)
 
-	overview := query.NewGetProjectRuntimeOverviewHandler(checker, adapters.Lister, adapters.Inspector)
+	overview := query.NewGetProjectRuntimeOverviewHandler(checker, adapters.Lister, adapters.Inspector, adapters.PodMetrics)
+	runtimeConfig := command.NewRuntimeConfigHandler(checker, adapters.Configurator)
 	handler := runtimehttp.NewHandler(
 		query.NewListPodsHandler(checker, adapters.Lister),
 		query.NewGetPodHandler(checker, adapters.Lister),
@@ -56,6 +57,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewStreamPodTerminalHandler(checker, adapters.Lister, adapters.Terminal),
 		overview,
 		command.NewRestartPodHandler(checker, adapters.Lister, adapters.Restarter),
+		runtimeConfig,
 	)
 
 	auth := authn.RequireAuth(m.tokens)
@@ -74,6 +76,16 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.StreamPodTerminal)
 	c.Engine.POST("/api/v1/projects/:projectId/pods/:podId/restart",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.RestartPod)
+	c.Engine.PUT("/api/v1/projects/:projectId/runtime/log-collection",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.PutLogCollection)
+	c.Engine.PUT("/api/v1/projects/:projectId/runtime/health-probe",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.PutHealthProbe)
+	c.Engine.PUT("/api/v1/projects/:projectId/runtime/service/ports",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.PutServicePorts)
+	c.Engine.POST("/api/v1/projects/:projectId/runtime/service",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.CreateRuntimeService)
+	c.Engine.POST("/api/v1/projects/:projectId/runtime/ingress",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.CreateRuntimeIngress)
 
 	base := "/api/v1/workspaces/:wsId/k8s/projects/:projectId"
 	c.Engine.GET(base+"/deployments",

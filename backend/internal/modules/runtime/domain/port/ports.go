@@ -31,6 +31,15 @@ type PodTerminal interface {
 	StreamLines(ctx context.Context, pod *model.Pod) []string
 }
 
+type PodMetrics struct {
+	CPUMillicores int64
+	MemoryBytes   int64
+}
+
+type PodMetricsReader interface {
+	MetricsForPods(ctx context.Context, projectID kernel.ProjectID, pods []*model.Pod) (map[kernel.PodID]PodMetrics, error)
+}
+
 type Manifest struct {
 	YAML string
 }

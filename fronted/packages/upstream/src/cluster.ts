@@ -48,6 +48,45 @@ export function createClusterUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async putLogCollection(workspaceId: string, projectId: string, body: Record<string, unknown>) {
+      return upstreamFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/runtime/log-collection`, {
+        method: "PUT",
+        body,
+        options: { ...options, workspaceId },
+      });
+    },
+
+    async putHealthProbe(workspaceId: string, projectId: string, body: Record<string, unknown>) {
+      return upstreamFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/runtime/health-probe`, {
+        method: "PUT",
+        body,
+        options: { ...options, workspaceId },
+      });
+    },
+
+    async putServicePorts(workspaceId: string, projectId: string, body: Record<string, unknown>) {
+      return upstreamFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/runtime/service/ports`, {
+        method: "PUT",
+        body,
+        options: { ...options, workspaceId },
+      });
+    },
+
+    async createRuntimeService(workspaceId: string, projectId: string) {
+      return upstreamFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/runtime/service`, {
+        method: "POST",
+        options: { ...options, workspaceId },
+      });
+    },
+
+    async createRuntimeIngress(workspaceId: string, projectId: string, body: Record<string, unknown> = {}) {
+      return upstreamFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/runtime/ingress`, {
+        method: "POST",
+        body,
+        options: { ...options, workspaceId },
+      });
+    },
+
     podTerminalStreamUrl(projectId: string, podId: string) {
       return `${getUpstreamBaseUrl()}/api/v1/projects/${projectId}/pods/${podId}/terminal/stream`;
     },

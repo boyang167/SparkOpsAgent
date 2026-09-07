@@ -10,17 +10,19 @@ import (
 )
 
 type PodView struct {
-	ID        string `json:"id"`
-	ProjectID string `json:"project_id"`
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-	Phase     string `json:"phase"`
-	Node      string `json:"node"`
-	Restarts  int    `json:"restarts"`
-	Container string `json:"container"`
-	Image     string `json:"image"`
-	StartedAt string `json:"started_at"`
-	Message   string `json:"message,omitempty"`
+	ID            string `json:"id"`
+	ProjectID     string `json:"project_id"`
+	Name          string `json:"name"`
+	Namespace     string `json:"namespace"`
+	Phase         string `json:"phase"`
+	Node          string `json:"node"`
+	Restarts      int    `json:"restarts"`
+	Container     string `json:"container"`
+	Image         string `json:"image"`
+	StartedAt     string `json:"started_at"`
+	Message       string `json:"message,omitempty"`
+	CPUMillicores int64  `json:"cpu_millicores"`
+	MemoryBytes   int64  `json:"memory_bytes"`
 }
 
 type ListPodsHandler struct {
@@ -85,10 +87,16 @@ func (h *GetPodHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, pro
 }
 
 func toPodView(pod *model.Pod) PodView {
+	return toPodViewWithMetrics(pod, port.PodMetrics{})
+}
+
+func toPodViewWithMetrics(pod *model.Pod, metrics port.PodMetrics) PodView {
 	return PodView{
 		ID: pod.ID.String(), ProjectID: pod.ProjectID.String(),
 		Name: pod.Name, Namespace: pod.Namespace, Phase: string(pod.Phase),
 		Node: pod.Node, Restarts: pod.Restarts, Container: pod.Container,
 		Image: pod.Image, StartedAt: pod.StartedAt, Message: pod.Message,
+		CPUMillicores: metrics.CPUMillicores,
+		MemoryBytes:   metrics.MemoryBytes,
 	}
 }

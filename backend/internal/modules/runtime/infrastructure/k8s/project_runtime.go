@@ -49,8 +49,11 @@ type ServiceOverview struct {
 }
 
 type ProjectRuntimeOverview struct {
-	Deployment *DeploymentOverview `json:"deployment,omitempty"`
-	Service    *ServiceOverview    `json:"service,omitempty"`
+	Deployment    *DeploymentOverview    `json:"deployment,omitempty"`
+	Service       *ServiceOverview       `json:"service,omitempty"`
+	LogCollection *LogCollectionOverview `json:"log_collection,omitempty"`
+	HealthProbe   *HealthProbeOverview   `json:"health_probe,omitempty"`
+	Ingress       *IngressOverview       `json:"ingress,omitempty"`
 }
 
 type ProjectRuntimeInspector struct {
@@ -71,7 +74,7 @@ func (i *ProjectRuntimeInspector) Inspect(
 		return nil, err
 	}
 	out := &ProjectRuntimeOverview{}
-	deployment, err := loadDeploymentOverview(ctx, session.Client, session.Namespace, session.ProjectName)
+	deployment, depObj, err := loadDeploymentOverview(ctx, session.Client, session.Namespace, session.ProjectName)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return nil, err
 	}
@@ -85,6 +88,21 @@ func (i *ProjectRuntimeInspector) Inspect(
 	if service != nil {
 		out.Service = service
 	}
+	logCollection, err := loadLogCollectionOverview(ctx, session.Client, session.Namespace, session.ProjectName)
+	if err != nil {
+		return nil, err
+	}
+	out.LogCollection = logCollection
+	if depObj != nil {
+		out.HealthProbe = loadHealthProbeOverview(depObj, session.ProjectName)
+	} else {
+		out.HealthProbe = &HealthProbeOverview{}
+	}
+	ingress, err := loadIngressOverview(ctx, session.Client, session.Namespace, session.ProjectName)
+	if err != nil {
+		return nil, err
+	}
+	out.Ingress = ingress
 	return out, nil
 }
 
@@ -92,7 +110,7 @@ func loadDeploymentOverview(
 	ctx context.Context,
 	client kubernetes.Interface,
 	namespace, projectName string,
-) (*DeploymentOverview, error) {
+) (*DeploymentOverview, *appsv1.Deployment, error) {
 	names := []string{projectName, projectName + "-deployment"}
 	var dep *appsv1.Deployment
 	var err error
@@ -102,11 +120,11 @@ func loadDeploymentOverview(
 			break
 		}
 		if !apierrors.IsNotFound(err) {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if dep == nil {
-		return nil, apierrors.NewNotFound(appsv1.Resource("deployments"), projectName)
+		return nil, nil, apierrors.NewNotFound(appsv1.Resource("deployments"), projectName)
 	}
 	replicas := int32(1)
 	if dep.Spec.Replicas != nil {
@@ -126,7 +144,7 @@ func loadDeploymentOverview(
 		MemoryLimit:         memoryLimit,
 		UID:                 string(dep.UID),
 		CreatedAt:           dep.CreationTimestamp.UTC().Format(time.RFC3339),
-	}, nil
+	}, dep, nil
 }
 
 func primaryContainerResources(dep *appsv1.Deployment, projectName string) (image, tag, memoryLimit string) {

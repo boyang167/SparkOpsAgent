@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { cluster } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type {
@@ -12,6 +12,11 @@ import type {
 import type { DeploymentRunListVM } from "@sparkops/contracts/delivery";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { PodDetailPanel, type PodDetailTab } from "@/modules/runtime/components/PodDetailPanel";
+import {
+  RuntimeHealthProbeModal,
+  RuntimeLogCollectionModal,
+  RuntimeServicePortModal,
+} from "@/modules/runtime/components/RuntimeConfigModals";
 import { formatDateTime } from "./project-utils";
 import { latestSuccessfulDeployment } from "./project-deployment-state";
 
@@ -90,17 +95,13 @@ function RuntimeSectionCard({
   );
 }
 
-function PlaceholderRuntimeCard({ title }: { title: string }) {
-  return (
-    <RuntimeSectionCard
-      title={title}
-      action={
-        <button type="button" className="project-runtime-card-add" disabled title="待开发">
-          添加
-        </button>
-      }
-    />
-  );
+
+function probeTypeLabel(probe: ProjectRuntimeOverviewVM["health_probe"]) {
+  if (!probe?.configured) return "-";
+  const types: string[] = [];
+  if (probe.readiness) types.push(probe.protocol || "TCP");
+  if (probe.liveness && !probe.readiness) types.push(probe.protocol || "TCP");
+  return types[0] || probe.protocol || "TCP";
 }
 
 function replicaStatus(deployment: DeploymentOverviewVM | undefined) {
@@ -127,11 +128,49 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function MetricSparkline({ tone }: { tone: "cpu" | "memory" }) {
+function formatCpuCores(millicores: number | undefined) {
+  if (millicores === undefined || millicores < 0) return "-";
+  if (millicores === 0) return "0";
+  const cores = millicores / 1000;
+  if (cores >= 1) return cores.toFixed(2).replace(/\.?0+$/, "");
+  if (cores >= 0.01) return cores.toFixed(3).replace(/\.?0+$/, "");
+  return `${millicores}m`;
+}
+
+function formatMemoryMiB(bytes: number | undefined) {
+  if (bytes === undefined || bytes < 0) return "-";
+  if (bytes === 0) return "0 MiB";
+  const mib = bytes / (1024 * 1024);
+  if (mib < 0.01) return "<0.01 MiB";
+  if (mib < 10) return `${mib.toFixed(2)} MiB`;
+  return `${mib.toFixed(1)} MiB`;
+}
+
+function metricLevel(value: number | undefined, max: number) {
+  if (value === undefined || value <= 0 || max <= 0) return 12;
+  return Math.max(12, Math.min(100, Math.round((value / max) * 100)));
+}
+
+function MetricSparkline({
+  tone,
+  value,
+  max,
+  label,
+}: {
+  tone: "cpu" | "memory";
+  value: number | undefined;
+  max: number;
+  label: string;
+}) {
+  const level = metricLevel(value, max);
   return (
     <span className="project-runtime-metric">
-      <span className={`project-runtime-sparkline project-runtime-sparkline-${tone}`} aria-hidden />
-      <span className="project-runtime-metric-value">{tone === "memory" ? "0 MB" : "0"}</span>
+      <span
+        className={`project-runtime-sparkline project-runtime-sparkline-${tone}`}
+        style={{ ["--metric-level" as string]: `${level}%` }}
+        aria-hidden
+      />
+      <span className="project-runtime-metric-value">{label}</span>
     </span>
   );
 }
@@ -146,14 +185,29 @@ export function ProjectPublishedOverview({
   const [error, setError] = useState<string | null>(null);
   const [podPanel, setPodPanel] = useState<{ pod: PodVM; tab: PodDetailTab } | null>(null);
   const [restartingPodId, setRestartingPodId] = useState<string | null>(null);
+  const [logModalOpen, setLogModalOpen] = useState(false);
+  const [probeModalOpen, setProbeModalOpen] = useState(false);
+  const [portModalOpen, setPortModalOpen] = useState(false);
+  const [savingRuntime, setSavingRuntime] = useState(false);
 
   const latestDeploy = latestSuccessfulDeployment(deploymentPage);
   const pods = overview?.pods ?? [];
   const deployment = overview?.deployment;
   const service = overview?.service;
+  const logCollection = overview?.log_collection;
+  const healthProbe = overview?.health_probe;
+  const ingress = overview?.ingress;
   const namespace = deployment?.namespace || project.namespace || workspaceId;
   const imageTag = deployment?.image_tag || latestDeploy?.image_tag;
   const memoryLimit = deployment?.memory_limit || project.resources?.memory_limit;
+  const maxCpuMillicores = useMemo(
+    () => Math.max(1000, ...pods.map((pod) => pod.cpu_millicores ?? 0)),
+    [pods],
+  );
+  const maxMemoryBytes = useMemo(
+    () => Math.max(1024 * 1024, ...pods.map((pod) => pod.memory_bytes ?? 0)),
+    [pods],
+  );
 
   const loadOverview = useCallback(async () => {
     setLoading(true);
@@ -191,6 +245,34 @@ export function ProjectPublishedOverview({
     },
     [loadOverview, project.id, workspaceId],
   );
+
+  const handleCreateService = useCallback(async () => {
+    if (!window.confirm("确定创建 Service 吗？")) return;
+    setSavingRuntime(true);
+    setError(null);
+    try {
+      await cluster.createRuntimeService(project.id, workspaceId);
+      await loadOverview();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "创建 Service 失败");
+    } finally {
+      setSavingRuntime(false);
+    }
+  }, [loadOverview, project.id, workspaceId]);
+
+  const handleCreateIngress = useCallback(async () => {
+    if (!window.confirm("确定添加外部访问地址吗？将自动创建 Ingress。")) return;
+    setSavingRuntime(true);
+    setError(null);
+    try {
+      await cluster.createRuntimeIngress(project.id, workspaceId);
+      await loadOverview();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "创建 Ingress 失败");
+    } finally {
+      setSavingRuntime(false);
+    }
+  }, [loadOverview, project.id, workspaceId]);
 
   return (
     <div className="project-runtime-overview">
@@ -288,7 +370,7 @@ export function ProjectPublishedOverview({
                   <th>状态</th>
                   <th>已重启</th>
                   <th>CPU（核）</th>
-                  <th>内存（字节）</th>
+                  <th>内存（MiB）</th>
                   <th>创建时间</th>
                   <th>操作</th>
                 </tr>
@@ -314,10 +396,20 @@ export function ProjectPublishedOverview({
                     </td>
                     <td>{pod.restarts}</td>
                     <td>
-                      <MetricSparkline tone="cpu" />
+                      <MetricSparkline
+                        tone="cpu"
+                        value={pod.cpu_millicores}
+                        max={maxCpuMillicores}
+                        label={formatCpuCores(pod.cpu_millicores)}
+                      />
                     </td>
                     <td>
-                      <MetricSparkline tone="memory" />
+                      <MetricSparkline
+                        tone="memory"
+                        value={pod.memory_bytes}
+                        max={maxMemoryBytes}
+                        label={formatMemoryMiB(pod.memory_bytes)}
+                      />
                     </td>
                     <td>{pod.started_at ? formatDateTime(pod.started_at) : "-"}</td>
                     <td>
@@ -356,15 +448,69 @@ export function ProjectPublishedOverview({
         )}
       </section>
 
-      <PlaceholderRuntimeCard title="日志采集" />
-      <PlaceholderRuntimeCard title="健康检测" />
+      <RuntimeSectionCard
+        title="日志采集"
+        action={
+          <button
+            type="button"
+            className="project-runtime-card-add"
+            onClick={() => setLogModalOpen(true)}
+            disabled={loading || savingRuntime}
+          >
+            {logCollection?.configured ? "编辑" : "添加"}
+          </button>
+        }
+      >
+        {logCollection?.configured ? (
+          <dl className="project-runtime-detail-grid">
+            <DetailItem label="日志路径" value={logCollection.path || "-"} />
+            <DetailItem label="收集规则" value={logCollection.pattern || "-"} />
+            <DetailItem label="文件后缀" value={logCollection.file_suffix || "*.log"} />
+          </dl>
+        ) : !loading ? (
+          <p className="project-runtime-empty">尚未配置日志采集。</p>
+        ) : null}
+      </RuntimeSectionCard>
+
+      <RuntimeSectionCard
+        title="健康检测"
+        action={
+          <button
+            type="button"
+            className="project-runtime-card-add"
+            onClick={() => setProbeModalOpen(true)}
+            disabled={loading || savingRuntime}
+          >
+            {healthProbe?.configured ? "编辑" : "添加"}
+          </button>
+        }
+      >
+        {healthProbe?.configured ? (
+          <dl className="project-runtime-detail-grid">
+            <DetailItem label="就绪" value={probeTypeLabel(healthProbe)} />
+            <DetailItem label="端口" value={healthProbe.port ?? "-"} />
+            <DetailItem label="初始化等候时间" value={`${healthProbe.initial_delay_seconds ?? "-"}s`} />
+            <DetailItem label="检测时间间隔" value={`${healthProbe.period_seconds ?? "-"}s`} />
+            <DetailItem label="检测超时时间" value={`${healthProbe.timeout_seconds ?? "-"}s`} />
+            <DetailItem label="连续成功次数" value={healthProbe.success_threshold ?? "-"} />
+            <DetailItem label="连续失败次数" value={healthProbe.failure_threshold ?? "-"} />
+          </dl>
+        ) : !loading ? (
+          <p className="project-runtime-empty">尚未配置健康检测。</p>
+        ) : null}
+      </RuntimeSectionCard>
 
       {!loading && service ? (
         <RuntimeSectionCard
           title="Service"
           action={
             <div className="project-runtime-card-actions">
-              <button type="button" className="project-runtime-card-add" disabled title="待开发">
+              <button
+                type="button"
+                className="project-runtime-card-add"
+                onClick={() => setPortModalOpen(true)}
+                disabled={loading || savingRuntime}
+              >
                 调整端口
               </button>
             </div>
@@ -387,7 +533,12 @@ export function ProjectPublishedOverview({
         <RuntimeSectionCard
           title="Service"
           action={
-            <button type="button" className="project-runtime-card-add" disabled title="待开发">
+            <button
+              type="button"
+              className="project-runtime-card-add"
+              onClick={() => void handleCreateService()}
+              disabled={loading || savingRuntime}
+            >
               创建服务
             </button>
           }
@@ -399,10 +550,69 @@ export function ProjectPublishedOverview({
       <RuntimeSectionCard
         title="外部地址"
         action={
-          <button type="button" className="project-runtime-card-add" disabled title="待开发">
-            添加
-          </button>
+          !ingress ? (
+            <button
+              type="button"
+              className="project-runtime-card-add"
+              onClick={() => void handleCreateIngress()}
+              disabled={loading || savingRuntime || !service}
+              title={!service ? "请先创建 Service" : undefined}
+            >
+              添加
+            </button>
+          ) : null
         }
+      >
+        {ingress ? (
+          <dl className="project-runtime-detail-grid">
+            <DetailItem
+              label="域名"
+              value={
+                <a href={`http://${ingress.host}`} target="_blank" rel="noreferrer">
+                  {ingress.host}
+                </a>
+              }
+            />
+            {(ingress.paths ?? []).map((item, index) => (
+              <DetailItem
+                key={`${item.path}-${index}`}
+                label={`路径 ${index + 1}`}
+                value={`${item.path} → ${item.service_name}:${item.service_port}`}
+              />
+            ))}
+            <DetailItem
+              label="创建时间"
+              value={ingress.created_at ? formatDateTime(ingress.created_at) : "-"}
+            />
+          </dl>
+        ) : !loading ? (
+          <p className="project-runtime-empty">暂无外部访问地址。</p>
+        ) : null}
+      </RuntimeSectionCard>
+
+      <RuntimeLogCollectionModal
+        open={logModalOpen}
+        projectId={project.id}
+        workspaceId={workspaceId}
+        initial={logCollection}
+        onClose={() => setLogModalOpen(false)}
+        onSaved={() => void loadOverview()}
+      />
+      <RuntimeHealthProbeModal
+        open={probeModalOpen}
+        projectId={project.id}
+        workspaceId={workspaceId}
+        initial={healthProbe}
+        onClose={() => setProbeModalOpen(false)}
+        onSaved={() => void loadOverview()}
+      />
+      <RuntimeServicePortModal
+        open={portModalOpen}
+        projectId={project.id}
+        workspaceId={workspaceId}
+        service={service}
+        onClose={() => setPortModalOpen(false)}
+        onSaved={() => void loadOverview()}
       />
 
       {podPanel ? (
