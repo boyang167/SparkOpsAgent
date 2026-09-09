@@ -8,6 +8,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/infrastructure/k8s"
 	runtimehttp "github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/interface/http"
+	runtimeterminal "github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/terminal"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
@@ -86,6 +87,13 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.CreateRuntimeService)
 	c.Engine.POST("/api/v1/projects/:projectId/runtime/ingress",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.CreateRuntimeIngress)
+
+	terminalHandler := runtimehttp.NewProjectTerminalHandler(
+		checker, adapters.Lister, projectAccess, runtimeterminal.NewTicketStore(nil),
+	)
+	c.Engine.POST("/api/v1/projects/:projectId/pods/:podId/terminal-ticket",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), terminalHandler.CreateTicket)
+	c.Engine.GET(runtimeterminal.WebsocketPath, terminalHandler.ServeWS)
 
 	base := "/api/v1/workspaces/:wsId/k8s/projects/:projectId"
 	c.Engine.GET(base+"/deployments",

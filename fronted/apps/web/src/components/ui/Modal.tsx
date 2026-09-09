@@ -80,17 +80,19 @@ export function Modal({
               </p>
             ) : null}
           </div>
-          {headerExtra}
-          <button
-            type="button"
-            className="modal-close"
-            onClick={() => onCloseRef.current()}
-            aria-label="关闭"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
-            </svg>
-          </button>
+          <div className="modal-header-actions">
+            {headerExtra}
+            <button
+              type="button"
+              className="modal-close"
+              onClick={() => onCloseRef.current()}
+              aria-label="关闭"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
         </header>
         <div className="modal-body">{children}</div>
         {footer ? <footer className="modal-footer">{footer}</footer> : null}

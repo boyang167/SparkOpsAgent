@@ -84,3 +84,13 @@ export async function createRuntimeIngress(
 ) {
   return ctx.upstream.cluster.createRuntimeIngress(workspaceId, projectId, body);
 }
+
+export async function createPodTerminalTicket(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  podId: string,
+  body: Record<string, unknown>,
+) {
+  return ctx.upstream.cluster.createPodTerminalTicket(workspaceId, projectId, podId, body);
+}

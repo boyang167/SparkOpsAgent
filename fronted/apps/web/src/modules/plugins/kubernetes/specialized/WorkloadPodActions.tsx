@@ -125,12 +125,18 @@ export function WorkloadPodActions({
         open={view?.type === "terminal"}
         title={view?.type === "terminal" ? `容器组名: ${pod.metadata?.name} 容器名: ${view.container} 终端` : "容器终端"}
         size="xl"
-        panelClassName={view?.type === "terminal" && terminalFullscreen ? "k8s-pod-terminal-modal-fullscreen" : undefined}
+        panelClassName={
+          view?.type === "terminal"
+            ? terminalFullscreen
+              ? "k8s-pod-terminal-modal-fullscreen"
+              : "k8s-pod-terminal-modal"
+            : undefined
+        }
         headerExtra={
           view?.type === "terminal" ? (
             <button
               type="button"
-              className="modal-close"
+              className="modal-header-action"
               aria-label={terminalFullscreen ? "退出全屏" : "全屏"}
               title={terminalFullscreen ? "退出全屏" : "全屏"}
               onClick={() => setTerminalFullscreen((value) => !value)}

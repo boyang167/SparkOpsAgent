@@ -8,6 +8,7 @@ import {
   buildTerminalWebSocketURL,
   clampTerminalSize,
   encodeClientMessage,
+  focusTerminalWithoutScroll,
   parseServerMessage,
   podTerminalTicketPath,
   splitTerminalInput,
@@ -137,7 +138,7 @@ export function PodTerminal({
               ...clampTerminalSize(terminal.cols, terminal.rows),
             }),
           );
-          terminal.focus();
+          focusTerminalWithoutScroll(terminal);
           setStatus("connected");
         };
         socket.onmessage = (event) => {

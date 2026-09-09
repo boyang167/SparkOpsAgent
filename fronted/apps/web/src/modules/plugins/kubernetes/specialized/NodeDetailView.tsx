@@ -500,12 +500,18 @@ export function NodeDetailView({
             : "容器输出"
         }
         size={stream?.mode === "exec" ? "xl" : "lg"}
-        panelClassName={stream?.mode === "exec" && terminalFullscreen ? "k8s-pod-terminal-modal-fullscreen" : undefined}
+        panelClassName={
+          stream?.mode === "exec"
+            ? terminalFullscreen
+              ? "k8s-pod-terminal-modal-fullscreen"
+              : "k8s-pod-terminal-modal"
+            : undefined
+        }
         headerExtra={
           stream?.mode === "exec" ? (
             <button
               type="button"
-              className="modal-close"
+              className="modal-header-action"
               aria-label={terminalFullscreen ? "退出全屏" : "全屏"}
               title={terminalFullscreen ? "退出全屏" : "全屏"}
               onClick={() => setTerminalFullscreen((value) => !value)}

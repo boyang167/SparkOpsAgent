@@ -42,7 +42,14 @@ func (s *clusterCredentialSource) ListAuthorized(ctx context.Context, wsID kerne
 		if cluster == nil {
 			continue
 		}
-		out = append(out, clusterCredentialFromAdmin(cluster))
+		full, err := s.repo.FindClusterByID(ctx, cluster.ID)
+		if err != nil {
+			return nil, err
+		}
+		if full == nil {
+			continue
+		}
+		out = append(out, clusterCredentialFromAdmin(full))
 	}
 	return out, nil
 }
@@ -55,18 +62,15 @@ func (s *clusterCredentialSource) GetAuthorized(ctx context.Context, wsID kernel
 	if !granted {
 		return nil, kernel.NewDomainError("PLUGIN_CLUSTER_FORBIDDEN", "cluster is not granted to workspace")
 	}
-	clusters, err := s.repo.ListWorkspaceClusters(ctx, wsID)
+	cluster, err := s.repo.FindClusterByID(ctx, clusterID)
 	if err != nil {
 		return nil, err
 	}
-	for _, cluster := range clusters {
-		if cluster == nil || cluster.ID != clusterID {
-			continue
-		}
-		cred := clusterCredentialFromAdmin(cluster)
-		return &cred, nil
+	if cluster == nil {
+		return nil, kernel.NewDomainError("PLUGIN_CLUSTER_FORBIDDEN", "cluster is not granted to workspace")
 	}
-	return nil, kernel.NewDomainError("PLUGIN_CLUSTER_FORBIDDEN", "cluster is not granted to workspace")
+	cred := clusterCredentialFromAdmin(cluster)
+	return &cred, nil
 }
 
 func clusterCredentialFromAdmin(cluster *repository.ClusterInfo) sparkplugin.ClusterCredential {

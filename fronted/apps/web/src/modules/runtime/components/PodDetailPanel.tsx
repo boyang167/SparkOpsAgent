@@ -5,6 +5,7 @@ import { cluster } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { PodVM } from "@sparkops/contracts/cluster";
 import { Modal } from "@/components/ui/Modal";
+import { ProjectPodTerminal } from "./ProjectPodTerminal";
 
 export type PodDetailTab = "overview" | "logs" | "console";
 
@@ -249,40 +250,7 @@ function PodConsoleTab({
   pod: PodVM;
   active: boolean;
 }) {
-  const [output, setOutput] = useState("");
-  const [paused, setPaused] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const viewportRef = useRef<HTMLPreElement>(null);
-  const pausedRef = useRef(false);
-
-  useEffect(() => {
-    pausedRef.current = paused;
-  }, [paused]);
-
-  useEffect(() => {
-    if (!active) return;
-    setOutput("");
-    setError(null);
-    setPaused(false);
-    pausedRef.current = false;
-
-    const stop = cluster.streamPodTerminal(projectId, pod.id, workspaceId, {
-      onDelta: (delta) => {
-        if (pausedRef.current) return;
-        setOutput((prev) => prev + delta);
-      },
-      onDone: () => {},
-      onError: (err) => setError(err.message),
-    });
-
-    return stop;
-  }, [active, projectId, pod.id, workspaceId]);
-
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    viewport.scrollTop = viewport.scrollHeight;
-  }, [output]);
+  const container = pod.container || pod.name;
 
   return (
     <div className="pod-detail-stream-panel">
@@ -290,8 +258,8 @@ function PodConsoleTab({
         <div className="pod-detail-toolbar-filters">
           <label className="pod-detail-toolbar-field">
             <span>容器</span>
-            <select value={pod.container || pod.name} disabled aria-label="容器">
-              <option value={pod.container || pod.name}>{pod.container || pod.name}</option>
+            <select value={container} disabled aria-label="容器">
+              <option value={container}>{container}</option>
             </select>
           </label>
           <label className="pod-detail-toolbar-field">
@@ -301,52 +269,15 @@ function PodConsoleTab({
             </select>
           </label>
         </div>
-        <div className="pod-detail-toolbar-actions">
-          <ToolbarIconButton
-            label={paused ? "继续输出" : "暂停输出"}
-            title={paused ? "继续输出" : "暂停输出"}
-            active={paused}
-            onClick={() => setPaused((value) => !value)}
-          >
-            {paused ? (
-              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            ) : (
-              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                <path d="M6 5h4v14H6V5zm8 0h4v14h-4V5z" />
-              </svg>
-            )}
-          </ToolbarIconButton>
-          <ToolbarIconButton
-            label="清空"
-            title="清空当前显示"
-            onClick={() => {
-              setOutput("");
-              setError(null);
-            }}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-              <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </ToolbarIconButton>
-          <ToolbarIconButton
-            label="下载"
-            title="下载控制台输出"
-            onClick={() => downloadText(output || "", `${pod.name}-console.log`)}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-              <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </ToolbarIconButton>
-        </div>
       </div>
 
-      {error ? <p className="pod-detail-inline-error">{error}</p> : null}
-
-      <pre ref={viewportRef} className="pod-detail-viewport">
-        {output || "$ connecting…\n"}
-      </pre>
+      <ProjectPodTerminal
+        workspaceId={workspaceId}
+        projectId={projectId}
+        podId={pod.id}
+        container={container}
+        active={active}
+      />
     </div>
   );
 }
@@ -378,7 +309,7 @@ export function PodDetailPanel({
         tab !== "overview" ? (
           <button
             type="button"
-            className="modal-close"
+            className="modal-header-action"
             aria-label={fullscreen ? "退出全屏" : "全屏"}
             title={fullscreen ? "退出全屏" : "全屏"}
             onClick={() => setFullscreen((value) => !value)}

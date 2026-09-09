@@ -1385,6 +1385,29 @@ textarea {
   background: var(--surface);
 }
 
+.modal-panel.k8s-pod-terminal-modal {
+  max-height: min(90vh, 44rem);
+}
+
+.modal-panel.k8s-pod-terminal-modal .modal-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-panel.k8s-pod-terminal-modal .k8s-pod-terminal {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  max-height: min(58vh, 30rem);
+}
+
+.modal-panel.k8s-pod-terminal-modal .k8s-pod-terminal-host {
+  min-height: 0;
+  flex: 1;
+}
+
 .modal-panel.k8s-pod-terminal-modal-fullscreen {
   width: 100vw;
   max-width: 100vw;
@@ -2794,8 +2817,23 @@ textarea {
   padding: 1.25rem 1.375rem 0;
 }
 
+.modal-header-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.modal-header-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .modal-title {
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 1.125rem;
   font-weight: 650;
   letter-spacing: -0.02em;
@@ -2809,7 +2847,8 @@ textarea {
   color: var(--muted);
 }
 
-.modal-close {
+.modal-close,
+.modal-header-action {
   flex-shrink: 0;
   width: 2rem;
   height: 2rem;
@@ -2828,7 +2867,8 @@ textarea {
   height: 1.125rem;
 }
 
-.modal-close:hover {
+.modal-close:hover,
+.modal-header-action:hover {
   background: var(--surface-muted);
   color: var(--text);
 }
@@ -8994,7 +9034,48 @@ textarea {
 }
 
 .pod-detail-modal .modal-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
   padding-top: 0.25rem;
+}
+
+.pod-detail-modal .pod-detail-root {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  max-height: min(72vh, 40rem);
+}
+
+.pod-detail-modal .pod-detail-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.pod-detail-modal .pod-detail-stream-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.pod-detail-modal .pod-detail-toolbar {
+  flex-shrink: 0;
+}
+
+.pod-detail-modal .pod-detail-terminal {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  max-height: none;
+}
+
+.pod-detail-modal .pod-detail-terminal.k8s-pod-terminal {
+  min-height: 0;
 }
 
 .pod-detail-modal-fullscreen {
@@ -9024,6 +9105,19 @@ textarea {
   min-height: 0;
   flex: 1;
   max-height: none;
+}
+
+.pod-detail-modal-fullscreen .pod-detail-terminal {
+  min-height: 0;
+  flex: 1;
+}
+
+.pod-detail-terminal {
+  min-height: 16rem;
+}
+
+.pod-detail-modal .pod-detail-terminal .k8s-pod-terminal-host {
+  min-height: 0;
 }
 
 .pod-detail-root {

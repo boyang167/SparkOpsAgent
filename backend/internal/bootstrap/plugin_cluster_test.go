@@ -33,6 +33,12 @@ func (r fakeAdminClusterRepo) FindClusterByName(_ context.Context, clusterName s
 	}
 	return nil, nil
 }
+func (r fakeAdminClusterRepo) FindClusterByID(_ context.Context, clusterID kernel.ClusterInfoID) (*repository.ClusterInfo, error) {
+	if cluster, ok := r.clusters[clusterID]; ok {
+		return cluster, nil
+	}
+	return nil, nil
+}
 func (r fakeAdminClusterRepo) SaveCluster(context.Context, *repository.ClusterInfo) error { return nil }
 func (r fakeAdminClusterRepo) GrantWorkspaceCluster(context.Context, kernel.WorkspaceID, kernel.ClusterInfoID, kernel.MemberID) error {
 	return nil
@@ -65,6 +71,9 @@ func (r fakeAdminClusterRepo) CountProjectsByWorkspace(context.Context, kernel.W
 }
 func (r fakeAdminClusterRepo) CountProductsByWorkspace(context.Context, kernel.WorkspaceID) (int, error) {
 	return 0, nil
+}
+func (r fakeAdminClusterRepo) ReorderWorkspaceClusters(context.Context, kernel.WorkspaceID, []kernel.ClusterInfoID) error {
+	return nil
 }
 
 type fakePermissionChecker struct {
@@ -105,6 +114,22 @@ func TestClusterCredentialSourceListsOnlyAuthorizedClusters(t *testing.T) {
 		ClientCertificateData:    "CERT_prod",
 		ClientKeyData:            "KEY_prod",
 	}}, items)
+}
+
+func TestClusterCredentialSourceGetAuthorizedLoadsFullCredentials(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	clusterID := kernel.NewClusterInfoID()
+	full := testCluster(clusterID, "dev")
+	src := newClusterCredentialSource(fakeAdminClusterRepo{
+		clusters: map[kernel.ClusterInfoID]*repository.ClusterInfo{clusterID: full},
+		grants:   map[kernel.WorkspaceID]map[kernel.ClusterInfoID]bool{wsID: {clusterID: true}},
+	})
+
+	cred, err := src.GetAuthorized(context.Background(), wsID, clusterID)
+	require.NoError(t, err)
+	require.NotNil(t, cred)
+	require.Equal(t, "CERT_dev", cred.ClientCertificateData)
+	require.Equal(t, "KEY_dev", cred.ClientKeyData)
 }
 
 func TestClusterCredentialSourceRejectsUngrantWithoutLeakingCredentials(t *testing.T) {

@@ -44,6 +44,7 @@ type AdminRepository interface {
 	UpsertSysConfig(ctx context.Context, cfg *SysConfig) error
 	ListClusters(ctx context.Context) ([]*ClusterInfo, error)
 	FindClusterByName(ctx context.Context, clusterName string) (*ClusterInfo, error)
+	FindClusterByID(ctx context.Context, clusterID kernel.ClusterInfoID) (*ClusterInfo, error)
 	SaveCluster(ctx context.Context, cluster *ClusterInfo) error
 	GrantWorkspaceCluster(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID, createdBy kernel.MemberID) error
 	RevokeWorkspaceCluster(ctx context.Context, wsID kernel.WorkspaceID, clusterID kernel.ClusterInfoID) error

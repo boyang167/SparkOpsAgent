@@ -78,6 +78,15 @@ export function splitTerminalInput(data: string, maxBytes = 32 * 1024) {
   return chunks;
 }
 
+export function focusTerminalWithoutScroll(terminal: import("@xterm/xterm").Terminal) {
+  const textarea = terminal.textarea;
+  if (textarea) {
+    textarea.focus({ preventScroll: true });
+    return;
+  }
+  terminal.focus();
+}
+
 export function parseServerMessage(raw: string): TerminalServerMessage | null {
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;

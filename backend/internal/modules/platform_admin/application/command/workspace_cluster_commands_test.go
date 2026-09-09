@@ -40,6 +40,17 @@ func (r *workspaceClusterRepo) FindClusterByName(_ context.Context, clusterName 
 	}
 	return nil, nil
 }
+func (r *workspaceClusterRepo) FindClusterByID(_ context.Context, clusterID kernel.ClusterInfoID) (*repository.ClusterInfo, error) {
+	if r.saved != nil && r.saved.ID == clusterID {
+		return r.saved, nil
+	}
+	for _, cluster := range r.clusters {
+		if cluster != nil && cluster.ID == clusterID {
+			return cluster, nil
+		}
+	}
+	return nil, nil
+}
 func (r *workspaceClusterRepo) SaveCluster(_ context.Context, cluster *repository.ClusterInfo) error {
 	r.saved = cluster
 	r.clusterExists = true

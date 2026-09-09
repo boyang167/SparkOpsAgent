@@ -154,6 +154,20 @@ func (r *AdminRepository) FindClusterByName(ctx context.Context, clusterName str
 	return rowToCluster(row), nil
 }
 
+func (r *AdminRepository) FindClusterByID(ctx context.Context, clusterID kernel.ClusterInfoID) (*repository.ClusterInfo, error) {
+	var row clusterInfoModel
+	err := r.db.WithContext(ctx).
+		Where("id = ?", clusterID.String()).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return rowToCluster(row), nil
+}
+
 func (r *AdminRepository) SaveCluster(ctx context.Context, cluster *repository.ClusterInfo) error {
 	row := clusterInfoModel{
 		ID: cluster.ID.String(), ClusterName: cluster.ClusterName, Server: cluster.Server,

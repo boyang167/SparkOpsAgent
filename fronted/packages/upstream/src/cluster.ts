@@ -51,7 +51,7 @@ export function createClusterUpstream(options: UpstreamRequestOptions = {}) {
     async putLogCollection(workspaceId: string, projectId: string, body: Record<string, unknown>) {
       return upstreamFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/runtime/log-collection`, {
         method: "PUT",
-        body,
+        body: JSON.stringify(body),
         options: { ...options, workspaceId },
       });
     },
@@ -59,7 +59,7 @@ export function createClusterUpstream(options: UpstreamRequestOptions = {}) {
     async putHealthProbe(workspaceId: string, projectId: string, body: Record<string, unknown>) {
       return upstreamFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/runtime/health-probe`, {
         method: "PUT",
-        body,
+        body: JSON.stringify(body),
         options: { ...options, workspaceId },
       });
     },
@@ -67,7 +67,7 @@ export function createClusterUpstream(options: UpstreamRequestOptions = {}) {
     async putServicePorts(workspaceId: string, projectId: string, body: Record<string, unknown>) {
       return upstreamFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/runtime/service/ports`, {
         method: "PUT",
-        body,
+        body: JSON.stringify(body),
         options: { ...options, workspaceId },
       });
     },
@@ -82,13 +82,30 @@ export function createClusterUpstream(options: UpstreamRequestOptions = {}) {
     async createRuntimeIngress(workspaceId: string, projectId: string, body: Record<string, unknown> = {}) {
       return upstreamFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/runtime/ingress`, {
         method: "POST",
-        body,
+        body: JSON.stringify(body),
         options: { ...options, workspaceId },
       });
     },
 
     podTerminalStreamUrl(projectId: string, podId: string) {
       return `${getUpstreamBaseUrl()}/api/v1/projects/${projectId}/pods/${podId}/terminal/stream`;
+    },
+
+    async createPodTerminalTicket(
+      workspaceId: string,
+      projectId: string,
+      podId: string,
+      body: Record<string, unknown>,
+    ) {
+      return upstreamFetch<{
+        ticket: string;
+        expires_at: string;
+        websocket_path: string;
+      }>(`/api/v1/projects/${projectId}/pods/${podId}/terminal-ticket`, {
+        method: "POST",
+        body: JSON.stringify(body),
+        options: { ...options, workspaceId },
+      });
     },
   };
 }
