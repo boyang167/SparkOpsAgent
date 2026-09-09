@@ -15,4 +15,5 @@ var (
 	ErrDeploymentRunConcurrentUpdate  = kernel.NewDomainError("DELIVERY_DEPLOYMENT_CONCURRENT_UPDATE", "deployment run was updated concurrently")
 	ErrDeploymentBindingInvalid       = kernel.NewDomainError("DELIVERY_DEPLOYMENT_BINDING_INVALID", "deployment binding is invalid")
 	ErrDeploymentBuildStalled         = kernel.NewDomainError("DELIVERY_DEPLOYMENT_BUILD_STALLED", "deployment build did not start or timed out")
+	ErrDeploymentNotRollbackable      = kernel.NewDomainError("DELIVERY_DEPLOYMENT_NOT_ROLLBACKABLE", "no rollback target is available")
 )

@@ -46,6 +46,9 @@ export const DeploymentOverviewVMSchema = z.object({
   replicas: z.number(),
   available_replicas: z.number(),
   unavailable_replicas: z.number(),
+  cpu_request: z.string().optional(),
+  cpu_limit: z.string().optional(),
+  memory_request: z.string().optional(),
   memory_limit: z.string().optional(),
   uid: z.string().optional(),
   created_at: z.string().optional(),
@@ -129,4 +132,15 @@ export interface RuntimeServicePortInput {
 export interface RuntimeIngressInput {
   host?: string;
   path?: string;
+}
+
+export interface ScaleDeploymentInput {
+  replicas: number;
+}
+
+export interface DeploymentResourcesInput {
+  cpu_request: string;
+  cpu_limit: string;
+  memory_request: string;
+  memory_limit: string;
 }

@@ -40,6 +40,7 @@ type BuildRequest struct {
 	ProjectName     string
 	Folder          string
 	Job             string
+	GitRefType      string
 	GitRefValue     string
 	ImageTag        string
 	ImageRepository string

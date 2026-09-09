@@ -87,6 +87,22 @@ export function createClusterUpstream(options: UpstreamRequestOptions = {}) {
       });
     },
 
+    async scaleDeployment(workspaceId: string, projectId: string, body: Record<string, unknown>) {
+      return upstreamFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/runtime/deployment/scale`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+        options: { ...options, workspaceId },
+      });
+    },
+
+    async putDeploymentResources(workspaceId: string, projectId: string, body: Record<string, unknown>) {
+      return upstreamFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/runtime/deployment/resources`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+        options: { ...options, workspaceId },
+      });
+    },
+
     podTerminalStreamUrl(projectId: string, podId: string) {
       return `${getUpstreamBaseUrl()}/api/v1/projects/${projectId}/pods/${podId}/terminal/stream`;
     },

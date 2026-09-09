@@ -461,6 +461,7 @@ function defaultJenkinsfile(vars: Record<string, string>, enableScan: boolean) {
       steps {
         script {
           env.BRANCH = (params.BRANCH ?: env.DEFAULT_GIT_REF ?: 'main')?.trim() ?: 'main'
+          env.GIT_REF_TYPE = (params.GIT_REF_TYPE ?: env.GIT_REF_TYPE ?: 'branch')?.trim() ?: 'branch'
           env.CODE_VERSION = (params.CodeVersion ?: env.BRANCH)?.trim() ?: env.BRANCH
           env.IMAGE_TAG = (params.IMAGE_TAG ?: 'latest')?.trim()
           env.IMAGE_REPOSITORY = (params.IMAGE_REPOSITORY ?: '${groovyQuote(defaultRepo)}')?.trim()
@@ -488,12 +489,19 @@ function defaultJenkinsfile(vars: Record<string, string>, enableScan: boolean) {
       steps {
         script {
           def branch = (env.BRANCH ?: 'main').trim()
-          def branchSpec = env.GIT_REF_TYPE == 'tag' ? "refs/tags/\${branch}" : "*/\${branch}"
+          def refType = (params.GIT_REF_TYPE ?: env.GIT_REF_TYPE ?: 'branch').trim()
+          def branchSpec = refType == 'tag' ? "refs/tags/\${branch}" : "*/\${branch}"
+          def cloneExtensions = refType == 'tag'
+            ? [[$class: 'CloneOption', shallow: false]]
+            : [[$class: 'CloneOption', shallow: true, depth: 1]]
+          def remoteConfigs = refType == 'tag'
+            ? [[url: env.GIT_URL, credentialsId: env.GIT_CREDENTIAL_ID, refspec: '+refs/tags/*:refs/remotes/origin/tags/*']]
+            : [[url: env.GIT_URL, credentialsId: env.GIT_CREDENTIAL_ID]]
           checkout([
             $class: 'GitSCM',
             branches: [[name: branchSpec]],
-            extensions: [[$class: 'CloneOption', shallow: true, depth: 1]],
-            userRemoteConfigs: [[url: env.GIT_URL, credentialsId: env.GIT_CREDENTIAL_ID]]
+            extensions: cloneExtensions,
+            userRemoteConfigs: remoteConfigs
           ])
         }
       }

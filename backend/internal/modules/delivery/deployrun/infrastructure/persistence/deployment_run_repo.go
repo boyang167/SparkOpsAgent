@@ -30,11 +30,13 @@ type deploymentRunRow struct {
 	CreatedAt      time.Time `gorm:"not null"`
 	StartedAt      *time.Time
 	FinishedAt     *time.Time
-	CurrentStage   string `gorm:"size:16;not null;default:''"`
-	Version        int64  `gorm:"not null;default:0"`
-	AttemptCount   int    `gorm:"not null;default:0"`
-	LeaseOwner     *string
-	LeaseExpiresAt *time.Time
+	CurrentStage      string  `gorm:"size:16;not null;default:''"`
+	RunType           string  `gorm:"size:16;not null;default:normal"`
+	RollbackOfRunID   *string `gorm:"size:36"`
+	Version           int64   `gorm:"not null;default:0"`
+	AttemptCount      int     `gorm:"not null;default:0"`
+	LeaseOwner        *string
+	LeaseExpiresAt    *time.Time
 }
 
 func (deploymentRunRow) TableName() string { return "delivery.deployment_runs" }
@@ -101,9 +103,13 @@ func NewDeploymentRunRepositoryWithObserver(
 }
 
 func (r *DeploymentRunRepository) Create(ctx context.Context, run *model.DeploymentRun) error {
+	message := "deployment queued"
+	if run.IsRollback() {
+		message = "rollback queued"
+	}
 	eventRow := deploymentRunEventRow{
 		RunID: run.ID.String(), At: run.CreatedAt, Status: string(run.Status),
-		Stage: string(run.CurrentStage), Message: "deployment queued",
+		Stage: string(run.CurrentStage), Message: message,
 	}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(toRunRow(run)).Error; err != nil {
@@ -129,6 +135,9 @@ func (r *DeploymentRunRepository) Update(ctx context.Context, run *model.Deploym
 		at = *run.StartedAt
 	}
 	message := "deployment " + string(run.Status)
+	if run.IsRollback() {
+		message = "rollback " + string(run.Status)
+	}
 	if run.ErrorMessage != "" {
 		message = run.ErrorMessage
 	}
@@ -416,13 +425,18 @@ func (r *DeploymentRunRepository) HasActiveByProject(ctx context.Context, projec
 }
 
 func toRunRow(run *model.DeploymentRun) *deploymentRunRow {
+	runType := string(run.RunType)
+	if runType == "" {
+		runType = string(model.RunTypeNormal)
+	}
 	return &deploymentRunRow{
 		ID: run.ID.String(), WorkspaceID: run.WorkspaceID.String(), ProjectID: run.ProjectID.String(),
 		ClusterID: run.ClusterID.String(), GitRefType: run.GitRefType, GitRefValue: run.GitRefValue,
 		ImageTag: run.ImageTag, Status: string(run.Status), BuildID: buildIDValue(run.BuildID),
 		ErrorMessage: run.ErrorMessage, CreatedBy: run.CreatedBy.String(), CreatedAt: run.CreatedAt,
 		StartedAt: run.StartedAt, FinishedAt: run.FinishedAt, CurrentStage: string(run.CurrentStage),
-		Version:      run.Version,
+		RunType: runType, RollbackOfRunID: deploymentRunIDValue(run.RollbackOfRunID),
+		Version: run.Version,
 		AttemptCount: run.AttemptCount, LeaseOwner: nullableString(run.LeaseOwner),
 		LeaseExpiresAt: run.LeaseExpiresAt,
 	}
@@ -449,15 +463,27 @@ func fromRunRow(row deploymentRunRow) (*model.DeploymentRun, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse member id: %w", err)
 	}
+	runType := model.RunType(row.RunType)
+	if runType == "" {
+		runType = model.RunTypeNormal
+	}
 	run := &model.DeploymentRun{
 		ID: id, WorkspaceID: wsID, ProjectID: projectID, ClusterID: clusterID,
 		GitRefType: row.GitRefType, GitRefValue: row.GitRefValue, ImageTag: row.ImageTag,
 		Status: model.Status(row.Status), ErrorMessage: row.ErrorMessage, CreatedBy: createdBy,
 		CreatedAt: row.CreatedAt, StartedAt: row.StartedAt, FinishedAt: row.FinishedAt,
-		CurrentStage:   model.Stage(row.CurrentStage),
-		Version:        row.Version,
-		AttemptCount:   row.AttemptCount,
+		CurrentStage: model.Stage(row.CurrentStage),
+		RunType:      runType,
+		Version:      row.Version,
+		AttemptCount: row.AttemptCount,
 		LeaseExpiresAt: row.LeaseExpiresAt,
+	}
+	if row.RollbackOfRunID != nil && *row.RollbackOfRunID != "" {
+		rollbackOf, parseErr := kernel.ParseDeploymentRunID(*row.RollbackOfRunID)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse rollback_of_run_id: %w", parseErr)
+		}
+		run.RollbackOfRunID = &rollbackOf
 	}
 	if row.LeaseOwner != nil {
 		run.LeaseOwner = *row.LeaseOwner
@@ -480,6 +506,14 @@ func nullableString(value string) *string {
 }
 
 func buildIDValue(id *kernel.BuildID) *string {
+	if id == nil {
+		return nil
+	}
+	value := id.String()
+	return &value
+}
+
+func deploymentRunIDValue(id *kernel.DeploymentRunID) *string {
 	if id == nil {
 		return nil
 	}

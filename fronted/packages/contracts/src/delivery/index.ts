@@ -34,6 +34,10 @@ export const DeploymentStatusSchema = z.enum([
 
 export type DeploymentStatus = z.infer<typeof DeploymentStatusSchema>;
 
+export const DeploymentRunTypeSchema = z.enum(["normal", "rollback"]);
+
+export type DeploymentRunType = z.infer<typeof DeploymentRunTypeSchema>;
+
 export const DeploymentRunVMSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -43,6 +47,8 @@ export const DeploymentRunVMSchema = z.object({
   git_ref_value: z.string(),
   image_tag: z.string(),
   status: DeploymentStatusSchema,
+  run_type: DeploymentRunTypeSchema.optional().default("normal"),
+  rollback_of_run_id: z.string().optional(),
   build_id: z.string().optional(),
   error_message: z.string().default(""),
   current_stage: z.enum(["", "preparing", "building", "deploying"]),
@@ -71,6 +77,31 @@ export const CreateDeploymentCommandSchema = z.object({
 });
 
 export type CreateDeploymentCommand = z.infer<typeof CreateDeploymentCommandSchema>;
+
+export const RollbackDeploymentCommandSchema = z.object({
+  target_run_id: z.string().optional(),
+});
+
+export type RollbackDeploymentCommand = z.infer<typeof RollbackDeploymentCommandSchema>;
+
+export const RollbackDiffFieldSchema = z.object({
+  label: z.string(),
+  current: z.string(),
+  target: z.string(),
+  changed: z.boolean(),
+});
+
+export type RollbackDiffFieldVM = z.infer<typeof RollbackDiffFieldSchema>;
+
+export const RollbackPreviewVMSchema = z.object({
+  can_rollback: z.boolean(),
+  reason: z.string().optional(),
+  current_run: DeploymentRunVMSchema.optional(),
+  target_run: DeploymentRunVMSchema.optional(),
+  diff: z.array(RollbackDiffFieldSchema).optional(),
+});
+
+export type RollbackPreviewVM = z.infer<typeof RollbackPreviewVMSchema>;
 
 export const AuthorizedClusterVMSchema = z.object({
   id: z.string(),

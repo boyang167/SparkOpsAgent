@@ -12,6 +12,8 @@ import {
   shouldContinueDeploymentPoll,
 } from "./deployment-poll";
 import {
+  deploymentRollbackSourceTitle,
+  deploymentRunKindLabel,
   deploymentRunStatusLabel,
   deploymentRunTitle,
   deploymentStatusTone,
@@ -205,7 +207,15 @@ export function ProjectDeploymentConsolePanel({
                     <StatusIcon tone={deploymentStatusTone(item.status)} />
                     <span className="project-build-logs-item-copy">
                       <strong>{deploymentRunTitle(item)}</strong>
-                      <span>{formatDateTime(item.created_at)}</span>
+                      <span>
+                        {item.run_type === "rollback" ? (
+                          <>
+                            <span className="project-tag project-tag-orange">回滚</span>
+                            {" · "}
+                          </>
+                        ) : null}
+                        {formatDateTime(item.created_at)}
+                      </span>
                     </span>
                   </button>
                 </li>
@@ -241,9 +251,16 @@ export function ProjectDeploymentConsolePanel({
               <span
                 className={`project-tag project-tag-${run.status === "succeeded" ? "green" : run.status === "failed" ? "orange" : "blue"}`}
               >
+                {deploymentRunKindLabel(run)}
+                {" · "}
                 {deploymentRunStatusLabel(run.status)}
                 {run.current_stage ? ` · ${run.current_stage}` : ""}
               </span>
+              {run.run_type === "rollback" && run.rollback_of_run_id ? (
+                <span className="text-xs text-muted">
+                  回滚来源：{deploymentRollbackSourceTitle(run, runs)}
+                </span>
+              ) : null}
               {run.error_message ? (
                 <span className="text-xs text-[var(--danger)]">{run.error_message}</span>
               ) : null}

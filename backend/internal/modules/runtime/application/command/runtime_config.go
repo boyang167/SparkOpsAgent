@@ -97,3 +97,27 @@ func (h *RuntimeConfigHandler) CreateIngress(
 	}
 	return h.configurator.CreateIngress(ctx, wsID, projectID, input)
 }
+
+func (h *RuntimeConfigHandler) UpdateDeploymentResources(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	projectID kernel.ProjectID,
+	input runtimek8s.DeploymentResourcesInput,
+) error {
+	if err := h.authorize(ctx, wsID, projectID); err != nil {
+		return err
+	}
+	return h.configurator.UpdateDeploymentResources(ctx, wsID, projectID, input)
+}
+
+func (h *RuntimeConfigHandler) ScaleDeployment(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	projectID kernel.ProjectID,
+	replicas int32,
+) error {
+	if err := h.authorize(ctx, wsID, projectID); err != nil {
+		return err
+	}
+	return h.configurator.ScaleDeployment(ctx, wsID, projectID, replicas)
+}

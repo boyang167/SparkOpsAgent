@@ -8749,6 +8749,290 @@ textarea {
   gap: 0.5rem;
 }
 
+.project-runtime-card-yaml-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid #409eff;
+  border-radius: 4px;
+  background: #fff;
+  color: #409eff;
+  cursor: pointer;
+}
+
+.project-runtime-card-yaml-icon:hover:not(:disabled) {
+  background: #ecf5ff;
+}
+
+.project-runtime-card-yaml-icon:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.project-runtime-row-yaml-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  vertical-align: middle;
+}
+
+.runtime-service-yaml-modal .modal-body {
+  padding-top: 0.5rem;
+}
+
+.runtime-scale-modal {
+  max-width: 28rem;
+}
+
+.runtime-scale-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.runtime-scale-label {
+  font-size: 0.875rem;
+  color: #606266;
+}
+
+.runtime-scale-help {
+  font-size: 0.8125rem;
+  color: #909399;
+}
+
+.project-service-scale-error {
+  margin: 0.35rem 0 0;
+  font-size: 0.8125rem;
+  text-align: right;
+}
+
+.runtime-expand-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding-top: 0.5rem;
+}
+
+.runtime-expand-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 4px;
+  background: #ecf5ff;
+  color: #409eff;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.runtime-expand-alert-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.runtime-expand-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.runtime-expand-section-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #303133;
+}
+
+.runtime-expand-summary {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #606266;
+}
+
+.runtime-rollback-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-top: 0.35rem;
+  max-height: min(72vh, 640px);
+  overflow-y: auto;
+}
+
+.runtime-rollback-hint {
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 4px;
+  background: #ecf5ff;
+  color: #409eff;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.runtime-rollback-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.runtime-rollback-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #303133;
+}
+
+.runtime-rollback-select {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  background: #fff;
+}
+
+.runtime-rollback-loading {
+  margin: 0;
+}
+
+.runtime-rollback-section-title {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #909399;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.runtime-rollback-compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: stretch;
+}
+
+.runtime-rollback-compare-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #909399;
+  font-size: 1.125rem;
+  padding-top: 1.25rem;
+}
+
+.runtime-rollback-version-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fafafa;
+  min-width: 0;
+}
+
+.runtime-rollback-version-card.is-target {
+  border-color: #f5dab1;
+  background: #fdf6ec;
+}
+
+.runtime-rollback-version-label {
+  font-size: 0.75rem;
+  color: #909399;
+}
+
+.runtime-rollback-version-tag {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #303133;
+  word-break: break-all;
+}
+
+.runtime-rollback-version-meta,
+.runtime-rollback-version-time {
+  font-size: 0.75rem;
+  color: #606266;
+  word-break: break-all;
+}
+
+.runtime-rollback-version-empty {
+  margin: 0;
+  color: #909399;
+}
+
+.runtime-rollback-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.runtime-rollback-change-row {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.runtime-rollback-change-row.is-changed {
+  border-color: #f5dab1;
+  background: #fdf6ec;
+}
+
+.runtime-rollback-change-label {
+  font-size: 0.8125rem;
+  color: #606266;
+  font-weight: 500;
+}
+
+.runtime-rollback-change-values {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  font-size: 0.8125rem;
+}
+
+.runtime-rollback-change-from,
+.runtime-rollback-change-to {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-rollback-change-from {
+  color: #606266;
+}
+
+.runtime-rollback-change-to {
+  color: #e6a23c;
+  font-weight: 600;
+}
+
+.runtime-rollback-change-arrow {
+  flex: 0 0 auto;
+  color: #909399;
+}
+
+.runtime-rollback-unchanged {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 .project-runtime-card-add {
   min-width: 7.5rem;
   padding: 0.35rem 0.85rem;
@@ -8922,6 +9206,194 @@ textarea {
 .project-runtime-action-sep {
   color: #dcdfe6;
   font-size: 0.75rem;
+}
+
+.runtime-config-modal-error {
+  margin: 0 0 0.75rem;
+  color: #e74c3c;
+  font-size: 0.875rem;
+}
+
+.runtime-log-collection-modal {
+  width: min(92vw, 40rem);
+  max-width: min(92vw, 40rem);
+}
+
+.runtime-log-collection-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.runtime-log-collection-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.runtime-log-collection-label {
+  flex: 0 0 7.5rem;
+  padding-top: 0.45rem;
+  color: #606266;
+  font-size: 0.875rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.runtime-log-collection-control {
+  min-width: 0;
+  flex: 1;
+}
+
+.runtime-log-collection-path {
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: #fff;
+}
+
+.runtime-log-collection-path .input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.runtime-log-collection-path .input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.runtime-log-collection-suffix {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  padding: 0 0.75rem;
+  border-left: 1px solid var(--border);
+  background: #f5f7fa;
+  color: #606266;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.875rem;
+}
+
+.runtime-log-collection-pattern {
+  width: 100%;
+  min-height: 5.5rem;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.runtime-log-collection-help {
+  margin: 0.35rem 0 0;
+  color: #909399;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.runtime-health-probe-modal {
+  width: min(92vw, 42rem);
+  max-width: min(92vw, 42rem);
+}
+
+.runtime-health-probe-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.runtime-health-probe-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.runtime-health-probe-label {
+  flex: 0 0 7.5rem;
+  padding-top: 0.45rem;
+  color: #606266;
+  font-size: 0.875rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.runtime-health-probe-control {
+  min-width: 0;
+  flex: 1;
+}
+
+.runtime-health-probe-control > .input:not(.runtime-health-probe-number) {
+  width: 100%;
+}
+
+.runtime-health-probe-number {
+  width: 100%;
+  max-width: 8rem;
+}
+
+.runtime-health-probe-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.runtime-health-probe-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #303133;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.runtime-health-probe-help {
+  margin: 0.35rem 0 0;
+  color: #909399;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.runtime-health-probe-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 1.5rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.runtime-health-probe-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.runtime-health-probe-pair-label {
+  color: #606266;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 640px) {
+  .runtime-health-probe-row {
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .runtime-health-probe-label {
+    flex: none;
+    padding-top: 0;
+    text-align: left;
+  }
+
+  .runtime-health-probe-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .runtime-service-port-modal {

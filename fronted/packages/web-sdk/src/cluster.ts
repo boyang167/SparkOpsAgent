@@ -43,7 +43,7 @@ export function putLogCollection(
 ) {
   return bffFetch<{ ok: boolean }>(
     `/workspaces/${workspaceId}/projects/${projectId}/runtime/log-collection`,
-    { workspaceId, method: "PUT", body },
+    { workspaceId, method: "PUT", body: JSON.stringify(body) },
   );
 }
 
@@ -54,7 +54,7 @@ export function putHealthProbe(
 ) {
   return bffFetch<{ ok: boolean }>(
     `/workspaces/${workspaceId}/projects/${projectId}/runtime/health-probe`,
-    { workspaceId, method: "PUT", body },
+    { workspaceId, method: "PUT", body: JSON.stringify(body) },
   );
 }
 
@@ -65,7 +65,7 @@ export function putServicePorts(
 ) {
   return bffFetch<{ ok: boolean }>(
     `/workspaces/${workspaceId}/projects/${projectId}/runtime/service/ports`,
-    { workspaceId, method: "PUT", body },
+    { workspaceId, method: "PUT", body: JSON.stringify(body) },
   );
 }
 
@@ -83,7 +83,29 @@ export function createRuntimeIngress(
 ) {
   return bffFetch<{ ok: boolean }>(
     `/workspaces/${workspaceId}/projects/${projectId}/runtime/ingress`,
-    { workspaceId, method: "POST", body },
+    { workspaceId, method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export function scaleDeployment(
+  projectId: string,
+  workspaceId: string,
+  body: import("@sparkops/contracts/cluster").ScaleDeploymentInput,
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/deployment/scale`,
+    { workspaceId, method: "PUT", body: JSON.stringify(body) },
+  );
+}
+
+export function putDeploymentResources(
+  projectId: string,
+  workspaceId: string,
+  body: import("@sparkops/contracts/cluster").DeploymentResourcesInput,
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/deployment/resources`,
+    { workspaceId, method: "PUT", body: JSON.stringify(body) },
   );
 }
 

@@ -14,21 +14,23 @@ import (
 )
 
 type DeploymentView struct {
-	ID           string  `json:"id"`
-	WorkspaceID  string  `json:"workspace_id"`
-	ProjectID    string  `json:"project_id"`
-	ClusterID    string  `json:"cluster_id"`
-	BuildID      *string `json:"build_id,omitempty"`
-	GitRefType   string  `json:"git_ref_type"`
-	GitRefValue  string  `json:"git_ref_value"`
-	ImageTag     string  `json:"image_tag"`
-	Status       string  `json:"status"`
-	CurrentStage string  `json:"current_stage,omitempty"`
-	ErrorMessage string  `json:"error_message,omitempty"`
-	CreatedBy    string  `json:"created_by"`
-	CreatedAt    string  `json:"created_at"`
-	StartedAt    *string `json:"started_at,omitempty"`
-	FinishedAt   *string `json:"finished_at,omitempty"`
+	ID              string  `json:"id"`
+	WorkspaceID     string  `json:"workspace_id"`
+	ProjectID       string  `json:"project_id"`
+	ClusterID       string  `json:"cluster_id"`
+	BuildID         *string `json:"build_id,omitempty"`
+	GitRefType      string  `json:"git_ref_type"`
+	GitRefValue     string  `json:"git_ref_value"`
+	ImageTag        string  `json:"image_tag"`
+	Status          string  `json:"status"`
+	RunType         string  `json:"run_type,omitempty"`
+	RollbackOfRunID *string `json:"rollback_of_run_id,omitempty"`
+	CurrentStage    string  `json:"current_stage,omitempty"`
+	ErrorMessage    string  `json:"error_message,omitempty"`
+	CreatedBy       string  `json:"created_by"`
+	CreatedAt       string  `json:"created_at"`
+	StartedAt       *string `json:"started_at,omitempty"`
+	FinishedAt      *string `json:"finished_at,omitempty"`
 }
 
 type deploymentPageReader interface {
@@ -214,11 +216,20 @@ func isTerminalDeployment(status model.Status) bool {
 }
 
 func ToDeploymentView(run *model.DeploymentRun) DeploymentView {
+	runType := string(run.RunType)
+	if runType == "" {
+		runType = string(model.RunTypeNormal)
+	}
 	view := DeploymentView{
 		ID: run.ID.String(), WorkspaceID: run.WorkspaceID.String(), ProjectID: run.ProjectID.String(),
 		ClusterID: run.ClusterID.String(), GitRefType: run.GitRefType, GitRefValue: run.GitRefValue,
-		ImageTag: run.ImageTag, Status: string(run.Status), CurrentStage: string(run.CurrentStage),
+		ImageTag: run.ImageTag, Status: string(run.Status), RunType: runType,
+		CurrentStage: string(run.CurrentStage),
 		ErrorMessage: run.ErrorMessage, CreatedBy: run.CreatedBy.String(), CreatedAt: run.CreatedAt.Format(time.RFC3339),
+	}
+	if run.RollbackOfRunID != nil {
+		value := run.RollbackOfRunID.String()
+		view.RollbackOfRunID = &value
 	}
 	if run.BuildID != nil {
 		value := run.BuildID.String()

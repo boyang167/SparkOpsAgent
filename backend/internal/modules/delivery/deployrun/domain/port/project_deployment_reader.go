@@ -54,6 +54,7 @@ type ProjectDeploymentContext struct {
 type PipelineRenderRequest struct {
 	WorkspaceID          kernel.WorkspaceID
 	ProjectID            kernel.ProjectID
+	GitRefType           string
 	GitRefValue          string
 	ImageTag             string
 	ImageRepository      string

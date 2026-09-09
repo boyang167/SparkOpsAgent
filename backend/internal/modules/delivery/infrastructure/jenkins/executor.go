@@ -331,6 +331,7 @@ func renderJobXML(spec port.JenkinsJobSpec) string {
 		`<actions/><description/><keepDependencies>false</keepDependencies>` +
 		`<properties><hudson.model.ParametersDefinitionProperty><parameterDefinitions>` +
 		stringParameterXML("BRANCH", "main") +
+		stringParameterXML("GIT_REF_TYPE", "branch") +
 		stringParameterXML("CodeVersion", "") +
 		stringParameterXML("IMAGE_TAG", "") +
 		stringParameterXML("IMAGE_REPOSITORY", "") +
@@ -351,7 +352,14 @@ func buildParams(req port.BuildRequest) map[string]string {
 	if branch == "" {
 		branch = "main"
 	}
-	params := map[string]string{"BRANCH": branch}
+	refType := strings.TrimSpace(req.GitRefType)
+	if refType != "tag" {
+		refType = "branch"
+	}
+	params := map[string]string{
+		"BRANCH":       branch,
+		"GIT_REF_TYPE": refType,
+	}
 	if req.Namespace != "" || req.ProjectName != "" {
 		params["CodeVersion"] = branch
 		params["IMAGE_TAG"] = req.ImageTag

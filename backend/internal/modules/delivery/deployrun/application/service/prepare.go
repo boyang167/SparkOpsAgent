@@ -22,6 +22,7 @@ type PrepareService struct {
 }
 
 type PrepareInput struct {
+	GitRefType      string
 	GitRefValue     string
 	ImageTag        string
 	ImageRepository string
@@ -55,6 +56,7 @@ func (s *PrepareService) Run(ctx context.Context, project deployport.ProjectDepl
 	pipeline, err := s.renderer.Render(ctx, deployport.PipelineRenderRequest{
 		WorkspaceID:          project.WorkspaceID,
 		ProjectID:            project.ProjectID,
+		GitRefType:           input.GitRefType,
 		GitRefValue:          input.GitRefValue,
 		ImageTag:             input.ImageTag,
 		ImageRepository:      input.ImageRepository,

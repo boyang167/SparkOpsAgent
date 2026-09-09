@@ -5,7 +5,10 @@ import type {
   DeploymentOptionsVM,
   DeploymentRunListVM,
   DeploymentRunVM,
+  RollbackDeploymentCommand,
+  RollbackPreviewVM,
 } from "@sparkops/contracts/delivery";
+import { RollbackPreviewVMSchema } from "@sparkops/contracts/delivery";
 import { DeploymentRunVMSchema } from "@sparkops/contracts/delivery";
 import type { UpstreamRequestOptions } from "./core";
 import { getUpstreamBaseUrl, upstreamFetch } from "./core";
@@ -44,6 +47,7 @@ export function normalizeDeploymentRun(input: unknown): DeploymentRunVM {
   const wire = input as Record<string, unknown>;
   return DeploymentRunVMSchema.parse({
     ...wire,
+    run_type: wire.run_type ?? "normal",
     current_stage: wire.current_stage ?? "",
     error_message: wire.error_message ?? "",
   });
@@ -135,6 +139,42 @@ export function createDeliveryUpstream(options: UpstreamRequestOptions = {}) {
         options: { ...options, workspaceId },
       });
       return normalizeDeploymentRun(data);
+    },
+
+    async rollbackDeployment(
+      workspaceId: string,
+      projectId: string,
+      input: RollbackDeploymentCommand = {},
+    ) {
+      const data = await upstreamFetch<unknown>(
+        `/api/v1/projects/${projectId}/deployments/rollback`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          options: { ...options, workspaceId },
+        },
+      );
+      return normalizeDeploymentRun(data);
+    },
+
+    async getRollbackPreview(
+      workspaceId: string,
+      projectId: string,
+      targetRunId?: string,
+    ) {
+      const query = targetRunId ? `?target_run_id=${encodeURIComponent(targetRunId)}` : "";
+      const data = await upstreamFetch<unknown>(
+        `/api/v1/projects/${projectId}/deployments/rollback-preview${query}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+      const wire = data as Record<string, unknown>;
+      return RollbackPreviewVMSchema.parse({
+        ...wire,
+        current_run: wire.current_run
+          ? normalizeDeploymentRun(wire.current_run)
+          : undefined,
+        target_run: wire.target_run ? normalizeDeploymentRun(wire.target_run) : undefined,
+      });
     },
 
     async getDeployment(workspaceId: string, runId: string) {

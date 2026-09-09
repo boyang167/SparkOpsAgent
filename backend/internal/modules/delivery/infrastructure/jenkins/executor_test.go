@@ -27,7 +27,7 @@ func TestJobXMLContainsPipelineAndParameters(t *testing.T) {
 	})
 
 	require.Contains(t, config, `<definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition"`)
-	for _, name := range []string{"BRANCH", "CodeVersion", "IMAGE_TAG", "IMAGE_REPOSITORY"} {
+	for _, name := range []string{"BRANCH", "GIT_REF_TYPE", "CodeVersion", "IMAGE_TAG", "IMAGE_REPOSITORY"} {
 		require.Contains(t, config, "<name>"+name+"</name>")
 	}
 	require.NotContains(t, config, "build < push & publish")
@@ -53,10 +53,22 @@ func TestBuildParamsCarryImageCoordinates(t *testing.T) {
 	})
 
 	require.Equal(t, "main", params["BRANCH"])
+	require.Equal(t, "branch", params["GIT_REF_TYPE"])
 	require.Equal(t, "main", params["CodeVersion"])
 	require.Equal(t, "550e8400e29b", params["IMAGE_TAG"])
 	require.Equal(t, "registry.example/team/orders", params["IMAGE_REPOSITORY"])
 	require.Equal(t, "42", params["ROLLBACK_OF"])
+}
+
+func TestBuildParamsCarryGitRefTypeTag(t *testing.T) {
+	params := buildParams(port.BuildRequest{
+		Namespace: "team-a", ProjectName: "orders",
+		GitRefType: "tag", GitRefValue: "v1.0.1",
+		ImageTag: "v1.0.1", ImageRepository: "registry.example/team/orders",
+	})
+
+	require.Equal(t, "v1.0.1", params["BRANCH"])
+	require.Equal(t, "tag", params["GIT_REF_TYPE"])
 }
 
 func TestBuildParamsDeploymentAlwaysCarriesFourRequiredParameters(t *testing.T) {
@@ -73,7 +85,7 @@ func TestBuildParamsDeploymentAlwaysCarriesFourRequiredParameters(t *testing.T) 
 func TestBuildParamsOrdinaryBuildOnlyCarriesLegacyBranch(t *testing.T) {
 	params := buildParams(port.BuildRequest{Job: "orders-build", GitRefValue: "main"})
 
-	require.Equal(t, map[string]string{"BRANCH": "main"}, params)
+	require.Equal(t, map[string]string{"BRANCH": "main", "GIT_REF_TYPE": "branch"}, params)
 }
 
 func TestCreateOrUpdateCreatesFolderThenCreatesAndUpdatesJobAndCredential(t *testing.T) {

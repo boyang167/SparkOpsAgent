@@ -28,26 +28,35 @@ const (
 	StageDeploying Stage = "deploying"
 )
 
+type RunType string
+
+const (
+	RunTypeNormal   RunType = "normal"
+	RunTypeRollback RunType = "rollback"
+)
+
 type DeploymentRun struct {
-	ID             kernel.DeploymentRunID
-	WorkspaceID    kernel.WorkspaceID
-	ProjectID      kernel.ProjectID
-	ClusterID      kernel.ClusterInfoID
-	BuildID        *kernel.BuildID
-	GitRefType     string
-	GitRefValue    string
-	ImageTag       string
-	Status         Status
-	CurrentStage   Stage
-	ErrorMessage   string
-	CreatedBy      kernel.MemberID
-	CreatedAt      time.Time
-	StartedAt      *time.Time
-	FinishedAt     *time.Time
-	Version        int64
-	AttemptCount   int
-	LeaseOwner     string
-	LeaseExpiresAt *time.Time
+	ID               kernel.DeploymentRunID
+	WorkspaceID      kernel.WorkspaceID
+	ProjectID        kernel.ProjectID
+	ClusterID        kernel.ClusterInfoID
+	BuildID          *kernel.BuildID
+	GitRefType       string
+	GitRefValue      string
+	ImageTag         string
+	Status           Status
+	CurrentStage     Stage
+	RunType          RunType
+	RollbackOfRunID  *kernel.DeploymentRunID
+	ErrorMessage     string
+	CreatedBy        kernel.MemberID
+	CreatedAt        time.Time
+	StartedAt        *time.Time
+	FinishedAt       *time.Time
+	Version          int64
+	AttemptCount     int
+	LeaseOwner       string
+	LeaseExpiresAt   *time.Time
 }
 
 type DeploymentRunEvent struct {
@@ -88,6 +97,13 @@ func DefaultImageTag(gitRefValue string) string {
 	return tag
 }
 
+func NormalizeGitRefType(gitRefType string) string {
+	if strings.TrimSpace(gitRefType) == "tag" {
+		return "tag"
+	}
+	return "branch"
+}
+
 func NewDeploymentRun(
 	wsID kernel.WorkspaceID,
 	projectID kernel.ProjectID,
@@ -108,12 +124,40 @@ func NewDeploymentRun(
 		ProjectID:   projectID,
 		ClusterID:   clusterID,
 		CreatedBy:   createdBy,
-		GitRefType:  gitRefType,
+		GitRefType:  NormalizeGitRefType(gitRefType),
 		GitRefValue: gitRefValue,
 		ImageTag:    tag,
 		Status:      StatusQueued,
+		RunType:     RunTypeNormal,
 		CreatedAt:   time.Now().UTC(),
 	}
+}
+
+func NewRollbackDeploymentRun(
+	wsID kernel.WorkspaceID,
+	projectID kernel.ProjectID,
+	createdBy kernel.MemberID,
+	target *DeploymentRun,
+) *DeploymentRun {
+	targetID := target.ID
+	return &DeploymentRun{
+		ID:              kernel.NewDeploymentRunID(),
+		WorkspaceID:     wsID,
+		ProjectID:       projectID,
+		ClusterID:       target.ClusterID,
+		CreatedBy:       createdBy,
+		GitRefType:      target.GitRefType,
+		GitRefValue:     target.GitRefValue,
+		ImageTag:        target.ImageTag,
+		Status:          StatusQueued,
+		RunType:         RunTypeRollback,
+		RollbackOfRunID: &targetID,
+		CreatedAt:       time.Now().UTC(),
+	}
+}
+
+func (r *DeploymentRun) IsRollback() bool {
+	return r.RunType == RunTypeRollback
 }
 
 func (r *DeploymentRun) Transition(to Status, at time.Time) error {
@@ -155,8 +199,9 @@ func isTerminalStatus(status Status) bool {
 var validTransitions = map[Status]map[Status]bool{
 	StatusQueued: {
 		StatusPreparing: true,
-		StatusFailed:    true,
-		StatusAborted:   true,
+		StatusDeploying: true,
+		StatusFailed:      true,
+		StatusAborted:     true,
 	},
 	StatusPreparing: {
 		StatusBuilding: true,

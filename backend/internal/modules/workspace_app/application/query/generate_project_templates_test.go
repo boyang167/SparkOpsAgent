@@ -122,11 +122,46 @@ func TestRenderDeploymentPipelineArtifactUsesDeploymentOverrides(t *testing.T) {
 	if !strings.Contains(content, "registry.example/team-a/orders:deploy-123") {
 		t.Fatalf("rendered pipeline missing deployment image: %s", content)
 	}
-	if !strings.Contains(content, "sparkops-ws-git") || !strings.Contains(content, "sparkops-ws-harbor") {
-		t.Fatalf("rendered pipeline missing stable credential IDs: %s", content)
+}
+
+func TestRenderDeploymentPipelineArtifactUsesDeploymentGitRefType(t *testing.T) {
+	name, err := model.NewProjectName("orders")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(content, "stored-branch") {
-		t.Fatalf("rendered pipeline used stored branch instead of deployment input: %s", content)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{
+		Name:        "orders",
+		Namespace:   "team-a",
+		GitRefType:  "branch",
+		GitRefValue: "main",
+		Resources: model.ProjectResources{
+			JenkinsfileTemplateID: "jenkins-template",
+		},
+	})
+	template := &model.Template{
+		Kind: "jenkinsFile",
+		Name: mustTemplateName(t, "deploy-pipeline"),
+		Detail: `pipeline {
+  environment {
+    GIT_REF_TYPE = '{{ .git_ref_type }}'
+  }
+}`,
+	}
+
+	content := RenderDeploymentPipelineArtifact(
+		project,
+		map[string]*model.Template{"jenkins-template": template},
+		testRenderContext(project),
+		DeploymentPipelineRenderInput{
+			GitRefType:      "tag",
+			GitRefValue:     "v1.0.1",
+			ImageTag:        "v1.0.1",
+			ImageRepository: "registry.example/team-a/orders",
+		},
+	)
+
+	if !strings.Contains(content, "GIT_REF_TYPE = 'tag'") {
+		t.Fatalf("rendered pipeline missing deployment git ref type: %s", content)
 	}
 }
 

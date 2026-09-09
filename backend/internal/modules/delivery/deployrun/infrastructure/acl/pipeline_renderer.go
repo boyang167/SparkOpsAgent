@@ -40,6 +40,7 @@ func NewWorkspacePipelineRenderer(db *gorm.DB) *PipelineRenderer {
 
 func (r *PipelineRenderer) Render(ctx context.Context, request deployport.PipelineRenderRequest) (string, error) {
 	return r.generator.RenderDeploymentPipeline(ctx, request.WorkspaceID, request.ProjectID, workspacequery.DeploymentPipelineRenderInput{
+		GitRefType:           request.GitRefType,
 		GitRefValue:          request.GitRefValue,
 		ImageTag:             request.ImageTag,
 		ImageRepository:      request.ImageRepository,

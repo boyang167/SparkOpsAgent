@@ -10,6 +10,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -41,6 +42,13 @@ type ServicePortInput struct {
 type IngressInput struct {
 	Host string `json:"host,omitempty"`
 	Path string `json:"path,omitempty"`
+}
+
+type DeploymentResourcesInput struct {
+	CPURequest    string `json:"cpu_request"`
+	CPULimit      string `json:"cpu_limit"`
+	MemoryRequest string `json:"memory_request"`
+	MemoryLimit   string `json:"memory_limit"`
 }
 
 type ProjectRuntimeConfigurator struct {
@@ -346,6 +354,90 @@ func hasVolumeMount(container *corev1.Container, mountPath string) bool {
 		}
 	}
 	return false
+}
+
+func (c *ProjectRuntimeConfigurator) UpdateDeploymentResources(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	projectID kernel.ProjectID,
+	input DeploymentResourcesInput,
+) error {
+	cpuRequest := strings.TrimSpace(input.CPURequest)
+	cpuLimit := strings.TrimSpace(input.CPULimit)
+	memoryRequest := strings.TrimSpace(input.MemoryRequest)
+	memoryLimit := strings.TrimSpace(input.MemoryLimit)
+	if cpuRequest == "" || cpuLimit == "" || memoryRequest == "" || memoryLimit == "" {
+		return fmt.Errorf("cpu and memory request/limit are required")
+	}
+	session, err := c.access.Open(ctx, wsID, projectID)
+	if err != nil {
+		return err
+	}
+	dep, err := getDeployment(ctx, session.Client, session.Namespace, session.ProjectName)
+	if err != nil {
+		return err
+	}
+	container := primaryContainer(dep, session.ProjectName)
+	if container == nil {
+		return fmt.Errorf("deployment container not found")
+	}
+	for i := range dep.Spec.Template.Spec.Containers {
+		if dep.Spec.Template.Spec.Containers[i].Name != container.Name {
+			continue
+		}
+		item := &dep.Spec.Template.Spec.Containers[i]
+		if item.Resources.Requests == nil {
+			item.Resources.Requests = corev1.ResourceList{}
+		}
+		if item.Resources.Limits == nil {
+			item.Resources.Limits = corev1.ResourceList{}
+		}
+		reqCPU, err := resource.ParseQuantity(cpuRequest)
+		if err != nil {
+			return fmt.Errorf("invalid cpu request")
+		}
+		limCPU, err := resource.ParseQuantity(cpuLimit)
+		if err != nil {
+			return fmt.Errorf("invalid cpu limit")
+		}
+		reqMem, err := resource.ParseQuantity(memoryRequest)
+		if err != nil {
+			return fmt.Errorf("invalid memory request")
+		}
+		limMem, err := resource.ParseQuantity(memoryLimit)
+		if err != nil {
+			return fmt.Errorf("invalid memory limit")
+		}
+		item.Resources.Requests[corev1.ResourceCPU] = reqCPU
+		item.Resources.Limits[corev1.ResourceCPU] = limCPU
+		item.Resources.Requests[corev1.ResourceMemory] = reqMem
+		item.Resources.Limits[corev1.ResourceMemory] = limMem
+		break
+	}
+	_, err = session.Client.AppsV1().Deployments(session.Namespace).Update(ctx, dep, metav1.UpdateOptions{})
+	return err
+}
+
+func (c *ProjectRuntimeConfigurator) ScaleDeployment(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	projectID kernel.ProjectID,
+	replicas int32,
+) error {
+	if replicas < 0 || replicas > 1000 {
+		return fmt.Errorf("replicas must be between 0 and 1000")
+	}
+	session, err := c.access.Open(ctx, wsID, projectID)
+	if err != nil {
+		return err
+	}
+	dep, err := getDeployment(ctx, session.Client, session.Namespace, session.ProjectName)
+	if err != nil {
+		return err
+	}
+	dep.Spec.Replicas = &replicas
+	_, err = session.Client.AppsV1().Deployments(session.Namespace).Update(ctx, dep, metav1.UpdateOptions{})
+	return err
 }
 
 func hasVolume(dep *appsv1.Deployment, name string) bool {

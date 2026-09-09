@@ -5,6 +5,8 @@ import type {
   DeploymentOptionsVM,
   DeploymentRunListVM,
   DeploymentRunVM,
+  RollbackDeploymentCommand,
+  RollbackPreviewVM,
   TriggerBuildCommand,
 } from "@sparkops/contracts/delivery";
 
@@ -72,6 +74,24 @@ export async function createDeployment(
   input: CreateDeploymentCommand,
 ): Promise<DeploymentRunVM> {
   return ctx.upstream.delivery.createDeployment(workspaceId, projectId, input);
+}
+
+export async function rollbackDeployment(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  input: RollbackDeploymentCommand = {},
+): Promise<DeploymentRunVM> {
+  return ctx.upstream.delivery.rollbackDeployment(workspaceId, projectId, input);
+}
+
+export async function getRollbackPreview(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  targetRunId?: string,
+): Promise<RollbackPreviewVM> {
+  return ctx.upstream.delivery.getRollbackPreview(workspaceId, projectId, targetRunId);
 }
 
 export async function getDeployment(

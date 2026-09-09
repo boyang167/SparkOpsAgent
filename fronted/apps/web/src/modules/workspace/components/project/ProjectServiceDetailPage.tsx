@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { product, secret } from "@sparkops/web-sdk";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { cluster, product, secret } from "@sparkops/web-sdk";
+import type { ProjectRuntimeOverviewVM } from "@sparkops/contracts/cluster";
 import type { DeploymentRunListVM, DeploymentRunVM } from "@sparkops/contracts/delivery";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import type { SecretVM } from "@sparkops/contracts/secret";
@@ -25,7 +26,14 @@ import { ProjectJenkinsPreview } from "./ProjectJenkinsPreview";
 import { ProjectPublishedOverview } from "./ProjectPublishedOverview";
 import { ProjectUnpublishedOverview } from "./ProjectUnpublishedOverview";
 import { ProjectTemplateArtifactsModal } from "./ProjectTemplateArtifactsModal";
-import { hasSuccessfulDeployment, isPublishedProjectView } from "./project-deployment-state";
+import { RuntimeExpandModal } from "@/modules/runtime/components/RuntimeExpandModal";
+import { RuntimeRollbackModal } from "@/modules/runtime/components/RuntimeRollbackModal";
+import { RuntimeScaleModal } from "@/modules/runtime/components/RuntimeConfigModals";
+import {
+  canRollbackDeployment,
+  hasSuccessfulDeployment,
+  isPublishedProjectView,
+} from "./project-deployment-state";
 import { ProjectDockerfileViewer } from "./ProjectDockerfileViewer";
 import { countGeneratedTemplates } from "./project-template-render";
 import { ProjectDisplayNameField, ProjectDescriptionField } from "./ProjectDisplayNameEditModal";
@@ -109,11 +117,13 @@ function OverviewTab({
   project,
   deploymentPage,
   deploymentLoading,
+  runtimeRefreshKey,
 }: {
   workspaceId: string;
   project: ProjectVM;
   deploymentPage: DeploymentRunListVM | null;
   deploymentLoading: boolean;
+  runtimeRefreshKey: number;
 }) {
   const published = hasSuccessfulDeployment(deploymentPage);
 
@@ -136,6 +146,7 @@ function OverviewTab({
       workspaceId={workspaceId}
       project={project}
       deploymentPage={deploymentPage}
+      refreshKey={runtimeRefreshKey}
     />
   );
 }
@@ -234,12 +245,43 @@ export function ProjectServiceDetailPage({
   const [templates, setTemplates] = useState<TemplateVM[]>([]);
   const [configLoading, setConfigLoading] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
-
+  const [expandModalOpen, setExpandModalOpen] = useState(false);
+  const [scaleModalOpen, setScaleModalOpen] = useState(false);
+  const [rollbackModalOpen, setRollbackModalOpen] = useState(false);
+  const [runtimeOverview, setRuntimeOverview] = useState<ProjectRuntimeOverviewVM | null>(null);
+  const [runtimeRefreshKey, setRuntimeRefreshKey] = useState(0);
   const primaryAction = projectPrimaryAction(project);
   const statusText = reviewStatusLabel(project);
   const businessSpace = project.namespace || workspaceId;
   const published = isPublishedProjectView(deploymentPage, tab);
   const detailTabs = projectDetailTabs(published);
+  const canScale = hasSuccessfulDeployment(deploymentPage);
+  const hasActiveRun = deployAction.label === "查看部署进度";
+  const rollbackGate = canRollbackDeployment(deploymentPage, hasActiveRun);
+  const currentReplicas =
+    runtimeOverview?.deployment?.replicas ?? project.resources?.replicas ?? 1;
+
+  const loadRuntimeOverview = useCallback(async () => {
+    if (!canScale) {
+      setRuntimeOverview(null);
+      return;
+    }
+    try {
+      const data = await cluster.getProjectRuntimeOverview(project.id, workspaceId);
+      setRuntimeOverview(data);
+    } catch {
+      setRuntimeOverview(null);
+    }
+  }, [canScale, project.id, workspaceId]);
+
+  useEffect(() => {
+    void loadRuntimeOverview();
+  }, [loadRuntimeOverview, runtimeRefreshKey]);
+
+  const handleRuntimeScaled = useCallback(() => {
+    setRuntimeRefreshKey((value) => value + 1);
+    void loadRuntimeOverview();
+  }, [loadRuntimeOverview]);
 
   useEffect(() => {
     if (tab !== "config") return;
@@ -284,17 +326,35 @@ export function ProjectServiceDetailPage({
           >
             {deployAction.label === "查看部署进度" ? "查看部署进度" : "发布"}
           </button>
-          <button type="button" className="btn btn-secondary text-sm project-service-danger" disabled title="待开发">
+          <button
+            type="button"
+            className="btn btn-secondary text-sm project-service-danger"
+            disabled={!rollbackGate.allowed}
+            title={rollbackGate.reason ?? undefined}
+            onClick={() => setRollbackModalOpen(true)}
+          >
             回滚
           </button>
           <div className="project-service-btn-group">
             <button type="button" className="btn btn-secondary text-sm" disabled title="待开发">
               模式
             </button>
-            <button type="button" className="btn btn-secondary text-sm" disabled title="待开发">
+            <button
+              type="button"
+              className="btn btn-secondary text-sm"
+              disabled={!canScale}
+              title={!canScale ? "请先完成首次发布" : undefined}
+              onClick={() => setExpandModalOpen(true)}
+            >
               扩容
             </button>
-            <button type="button" className="btn btn-secondary text-sm" disabled title="待开发">
+            <button
+              type="button"
+              className="btn btn-secondary text-sm"
+              disabled={!canScale}
+              title={!canScale ? "请先完成首次发布" : undefined}
+              onClick={() => setScaleModalOpen(true)}
+            >
               伸缩
             </button>
           </div>
@@ -331,6 +391,7 @@ export function ProjectServiceDetailPage({
       </>
     );
   }, [
+    canScale,
     deployAction,
     onConfigure,
     onRelease,
@@ -339,6 +400,8 @@ export function ProjectServiceDetailPage({
     onViewDeployProgress,
     primaryAction,
     project,
+    rollbackGate.allowed,
+    rollbackGate.reason,
   ]);
 
   return (
@@ -456,6 +519,7 @@ export function ProjectServiceDetailPage({
                 project={project}
                 deploymentPage={deploymentPage}
                 deploymentLoading={deploymentLoading}
+                runtimeRefreshKey={runtimeRefreshKey}
               />
             </div>
           ) : null}
@@ -507,6 +571,40 @@ export function ProjectServiceDetailPage({
         onClose={() => setTemplateModalOpen(false)}
         workspaceId={workspaceId}
         project={project}
+      />
+      <RuntimeExpandModal
+        open={expandModalOpen}
+        projectId={project.id}
+        workspaceId={workspaceId}
+        deployment={runtimeOverview?.deployment}
+        fallback={{
+          cpu_request: project.resources?.cpu_request,
+          cpu_limit: project.resources?.cpu_limit,
+          memory_request: project.resources?.memory_request,
+          memory_limit: project.resources?.memory_limit,
+        }}
+        onClose={() => setExpandModalOpen(false)}
+        onSaved={handleRuntimeScaled}
+      />
+      <RuntimeScaleModal
+        open={scaleModalOpen}
+        projectId={project.id}
+        workspaceId={workspaceId}
+        currentReplicas={currentReplicas}
+        onClose={() => setScaleModalOpen(false)}
+        onSaved={handleRuntimeScaled}
+      />
+      <RuntimeRollbackModal
+        open={rollbackModalOpen}
+        projectId={project.id}
+        workspaceId={workspaceId}
+        deploymentPage={deploymentPage}
+        deployment={runtimeOverview?.deployment}
+        onClose={() => setRollbackModalOpen(false)}
+        onRollbackStarted={(run) => {
+          onRunChanged?.(run);
+          onViewDeployProgress();
+        }}
       />
     </div>
   );

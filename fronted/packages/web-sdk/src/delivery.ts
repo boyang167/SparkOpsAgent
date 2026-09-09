@@ -5,6 +5,8 @@ import type {
   DeploymentOptionsVM,
   DeploymentRunListVM,
   DeploymentRunVM,
+  RollbackDeploymentCommand,
+  RollbackPreviewVM,
 } from "@sparkops/contracts/delivery";
 import { DeploymentEventVMSchema } from "@sparkops/contracts/delivery";
 import { bffFetch } from "./client";
@@ -65,6 +67,29 @@ export function createDeployment(
   return bffFetch<DeploymentRunVM>(
     `/workspaces/${workspaceId}/projects/${projectId}/deployments`,
     { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function rollbackDeployment(
+  projectId: string,
+  workspaceId: string,
+  input: RollbackDeploymentCommand = {},
+) {
+  return bffFetch<DeploymentRunVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/deployments/rollback`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function getRollbackPreview(
+  projectId: string,
+  workspaceId: string,
+  targetRunId?: string,
+) {
+  const query = targetRunId ? `?target_run_id=${encodeURIComponent(targetRunId)}` : "";
+  return bffFetch<RollbackPreviewVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/deployments/rollback-preview${query}`,
+    { workspaceId },
   );
 }
 

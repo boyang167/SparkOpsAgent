@@ -25,6 +25,9 @@ type DeploymentOverview struct {
 	Replicas            int32             `json:"replicas"`
 	AvailableReplicas   int32             `json:"available_replicas"`
 	UnavailableReplicas int32             `json:"unavailable_replicas"`
+	CPURequest          string            `json:"cpu_request,omitempty"`
+	CPULimit            string            `json:"cpu_limit,omitempty"`
+	MemoryRequest       string            `json:"memory_request,omitempty"`
 	MemoryLimit         string            `json:"memory_limit,omitempty"`
 	UID                 string            `json:"uid,omitempty"`
 	CreatedAt           string            `json:"created_at,omitempty"`
@@ -130,7 +133,7 @@ func loadDeploymentOverview(
 	if dep.Spec.Replicas != nil {
 		replicas = *dep.Spec.Replicas
 	}
-	image, imageTag, memoryLimit := primaryContainerResources(dep, projectName)
+	image, imageTag, cpuRequest, cpuLimit, memoryRequest, memoryLimit := primaryContainerResources(dep, projectName)
 	return &DeploymentOverview{
 		Name:                dep.Name,
 		Namespace:           dep.Namespace,
@@ -141,34 +144,44 @@ func loadDeploymentOverview(
 		Replicas:            replicas,
 		AvailableReplicas:   dep.Status.AvailableReplicas,
 		UnavailableReplicas: dep.Status.UnavailableReplicas,
+		CPURequest:          cpuRequest,
+		CPULimit:            cpuLimit,
+		MemoryRequest:       memoryRequest,
 		MemoryLimit:         memoryLimit,
 		UID:                 string(dep.UID),
 		CreatedAt:           dep.CreationTimestamp.UTC().Format(time.RFC3339),
 	}, dep, nil
 }
 
-func primaryContainerResources(dep *appsv1.Deployment, projectName string) (image, tag, memoryLimit string) {
-	var container *corev1.Container
-	for i := range dep.Spec.Template.Spec.Containers {
-		item := &dep.Spec.Template.Spec.Containers[i]
-		if item.Name == projectName || container == nil {
-			container = item
-		}
-		if item.Name == projectName {
-			break
-		}
-	}
+func primaryContainerResources(
+	dep *appsv1.Deployment,
+	projectName string,
+) (image, tag, cpuRequest, cpuLimit, memoryRequest, memoryLimit string) {
+	container := primaryContainer(dep, projectName)
 	if container == nil {
-		return "", "", ""
+		return "", "", "", "", "", ""
 	}
 	image = container.Image
 	if idx := strings.LastIndex(image, ":"); idx > strings.LastIndex(image, "/") {
 		tag = image[idx+1:]
 	}
-	if container.Resources.Limits != nil {
-		memoryLimit = container.Resources.Limits.Memory().String()
+	if container.Resources.Requests != nil {
+		if q, ok := container.Resources.Requests[corev1.ResourceCPU]; ok {
+			cpuRequest = q.String()
+		}
+		if q, ok := container.Resources.Requests[corev1.ResourceMemory]; ok {
+			memoryRequest = q.String()
+		}
 	}
-	return image, tag, memoryLimit
+	if container.Resources.Limits != nil {
+		if q, ok := container.Resources.Limits[corev1.ResourceCPU]; ok {
+			cpuLimit = q.String()
+		}
+		if q, ok := container.Resources.Limits[corev1.ResourceMemory]; ok {
+			memoryLimit = q.String()
+		}
+	}
+	return image, tag, cpuRequest, cpuLimit, memoryRequest, memoryLimit
 }
 
 func loadServiceOverview(

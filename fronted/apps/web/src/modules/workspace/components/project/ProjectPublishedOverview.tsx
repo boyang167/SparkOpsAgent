@@ -13,17 +13,23 @@ import type { DeploymentRunListVM } from "@sparkops/contracts/delivery";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { PodDetailPanel, type PodDetailTab } from "@/modules/runtime/components/PodDetailPanel";
 import {
+  RuntimeDeploymentYamlModal,
   RuntimeHealthProbeModal,
   RuntimeLogCollectionModal,
+  RuntimePodYamlModal,
   RuntimeServicePortModal,
+  RuntimeServiceYamlModal,
+  ServiceYamlIcon,
 } from "@/modules/runtime/components/RuntimeConfigModals";
 import { formatDateTime } from "./project-utils";
+import { deploymentRollbackSourceTitle } from "./deployment-console-utils";
 import { latestSuccessfulDeployment } from "./project-deployment-state";
 
 interface ProjectPublishedOverviewProps {
   workspaceId: string;
   project: ProjectVM;
   deploymentPage: DeploymentRunListVM | null;
+  refreshKey?: number;
 }
 
 function phaseBadgeClass(phase: string) {
@@ -179,6 +185,7 @@ export function ProjectPublishedOverview({
   workspaceId,
   project,
   deploymentPage,
+  refreshKey = 0,
 }: ProjectPublishedOverviewProps) {
   const [overview, setOverview] = useState<ProjectRuntimeOverviewVM | null>(null);
   const [loading, setLoading] = useState(true);
@@ -188,6 +195,9 @@ export function ProjectPublishedOverview({
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [probeModalOpen, setProbeModalOpen] = useState(false);
   const [portModalOpen, setPortModalOpen] = useState(false);
+  const [serviceYamlModalOpen, setServiceYamlModalOpen] = useState(false);
+  const [deploymentYamlModalOpen, setDeploymentYamlModalOpen] = useState(false);
+  const [podYamlModalPod, setPodYamlModalPod] = useState<PodVM | null>(null);
   const [savingRuntime, setSavingRuntime] = useState(false);
 
   const latestDeploy = latestSuccessfulDeployment(deploymentPage);
@@ -225,7 +235,7 @@ export function ProjectPublishedOverview({
 
   useEffect(() => {
     void loadOverview();
-  }, [loadOverview]);
+  }, [loadOverview, refreshKey]);
 
   const handleRestartPod = useCallback(
     async (pod: PodVM) => {
@@ -303,6 +313,16 @@ export function ProjectPublishedOverview({
               imageTag ? <span className="project-tag project-tag-blue">{imageTag}</span> : "-"
             }
           />
+          {latestDeploy?.run_type === "rollback" && latestDeploy.rollback_of_run_id ? (
+            <DetailItem
+              label="回滚来源"
+              value={
+                <span className="project-tag project-tag-orange">
+                  {deploymentRollbackSourceTitle(latestDeploy, deploymentPage?.items ?? [])}
+                </span>
+              }
+            />
+          ) : null}
           <DetailItem label="升级策略" value={deployment?.strategy || "RollingUpdate"} />
           <DetailItem
             label="TOKEN"
@@ -356,6 +376,18 @@ export function ProjectPublishedOverview({
       <section className="project-runtime-card">
         <header className="project-runtime-card-header">
           <h4 className="project-runtime-card-title">容器组</h4>
+          <div className="project-runtime-card-actions">
+            <button
+              type="button"
+              className="project-runtime-card-yaml-icon"
+              onClick={() => setDeploymentYamlModalOpen(true)}
+              disabled={loading || !deployment}
+              title="查看Deployment YAML信息"
+              aria-label="查看Deployment YAML信息"
+            >
+              <ServiceYamlIcon />
+            </button>
+          </div>
         </header>
 
         {!loading && pods.length === 0 ? (
@@ -438,6 +470,16 @@ export function ProjectPublishedOverview({
                         >
                           控制台
                         </button>
+                        <span className="project-runtime-action-sep">|</span>
+                        <button
+                          type="button"
+                          className="project-runtime-card-yaml-icon project-runtime-row-yaml-icon"
+                          onClick={() => setPodYamlModalPod(pod)}
+                          title="查看Pod YAML信息"
+                          aria-label="查看Pod YAML信息"
+                        >
+                          <ServiceYamlIcon />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -447,58 +489,6 @@ export function ProjectPublishedOverview({
           </div>
         )}
       </section>
-
-      <RuntimeSectionCard
-        title="日志采集"
-        action={
-          <button
-            type="button"
-            className="project-runtime-card-add"
-            onClick={() => setLogModalOpen(true)}
-            disabled={loading || savingRuntime}
-          >
-            {logCollection?.configured ? "编辑" : "添加"}
-          </button>
-        }
-      >
-        {logCollection?.configured ? (
-          <dl className="project-runtime-detail-grid">
-            <DetailItem label="日志路径" value={logCollection.path || "-"} />
-            <DetailItem label="收集规则" value={logCollection.pattern || "-"} />
-            <DetailItem label="文件后缀" value={logCollection.file_suffix || "*.log"} />
-          </dl>
-        ) : !loading ? (
-          <p className="project-runtime-empty">尚未配置日志采集。</p>
-        ) : null}
-      </RuntimeSectionCard>
-
-      <RuntimeSectionCard
-        title="健康检测"
-        action={
-          <button
-            type="button"
-            className="project-runtime-card-add"
-            onClick={() => setProbeModalOpen(true)}
-            disabled={loading || savingRuntime}
-          >
-            {healthProbe?.configured ? "编辑" : "添加"}
-          </button>
-        }
-      >
-        {healthProbe?.configured ? (
-          <dl className="project-runtime-detail-grid">
-            <DetailItem label="就绪" value={probeTypeLabel(healthProbe)} />
-            <DetailItem label="端口" value={healthProbe.port ?? "-"} />
-            <DetailItem label="初始化等候时间" value={`${healthProbe.initial_delay_seconds ?? "-"}s`} />
-            <DetailItem label="检测时间间隔" value={`${healthProbe.period_seconds ?? "-"}s`} />
-            <DetailItem label="检测超时时间" value={`${healthProbe.timeout_seconds ?? "-"}s`} />
-            <DetailItem label="连续成功次数" value={healthProbe.success_threshold ?? "-"} />
-            <DetailItem label="连续失败次数" value={healthProbe.failure_threshold ?? "-"} />
-          </dl>
-        ) : !loading ? (
-          <p className="project-runtime-empty">尚未配置健康检测。</p>
-        ) : null}
-      </RuntimeSectionCard>
 
       {!loading && service ? (
         <RuntimeSectionCard
@@ -512,6 +502,16 @@ export function ProjectPublishedOverview({
                 disabled={loading || savingRuntime}
               >
                 调整端口
+              </button>
+              <button
+                type="button"
+                className="project-runtime-card-yaml-icon"
+                onClick={() => setServiceYamlModalOpen(true)}
+                disabled={loading || savingRuntime}
+                title="查看Service YAML信息"
+                aria-label="查看Service YAML信息"
+              >
+                <ServiceYamlIcon />
               </button>
             </div>
           }
@@ -590,6 +590,58 @@ export function ProjectPublishedOverview({
         ) : null}
       </RuntimeSectionCard>
 
+      <RuntimeSectionCard
+        title="日志采集"
+        action={
+          <button
+            type="button"
+            className="project-runtime-card-add"
+            onClick={() => setLogModalOpen(true)}
+            disabled={loading || savingRuntime}
+          >
+            {logCollection?.configured ? "编辑" : "添加"}
+          </button>
+        }
+      >
+        {logCollection?.configured ? (
+          <dl className="project-runtime-detail-grid">
+            <DetailItem label="日志路径" value={logCollection.path || "-"} />
+            <DetailItem label="收集规则" value={logCollection.pattern || "-"} />
+            <DetailItem label="文件后缀" value={logCollection.file_suffix || "*.log"} />
+          </dl>
+        ) : !loading ? (
+          <p className="project-runtime-empty">尚未配置日志采集。</p>
+        ) : null}
+      </RuntimeSectionCard>
+
+      <RuntimeSectionCard
+        title="健康检测"
+        action={
+          <button
+            type="button"
+            className="project-runtime-card-add"
+            onClick={() => setProbeModalOpen(true)}
+            disabled={loading || savingRuntime}
+          >
+            {healthProbe?.configured ? "编辑" : "添加"}
+          </button>
+        }
+      >
+        {healthProbe?.configured ? (
+          <dl className="project-runtime-detail-grid">
+            <DetailItem label="就绪" value={probeTypeLabel(healthProbe)} />
+            <DetailItem label="端口" value={healthProbe.port ?? "-"} />
+            <DetailItem label="初始化等候时间" value={`${healthProbe.initial_delay_seconds ?? "-"}s`} />
+            <DetailItem label="检测时间间隔" value={`${healthProbe.period_seconds ?? "-"}s`} />
+            <DetailItem label="检测超时时间" value={`${healthProbe.timeout_seconds ?? "-"}s`} />
+            <DetailItem label="连续成功次数" value={healthProbe.success_threshold ?? "-"} />
+            <DetailItem label="连续失败次数" value={healthProbe.failure_threshold ?? "-"} />
+          </dl>
+        ) : !loading ? (
+          <p className="project-runtime-empty">尚未配置健康检测。</p>
+        ) : null}
+      </RuntimeSectionCard>
+
       <RuntimeLogCollectionModal
         open={logModalOpen}
         projectId={project.id}
@@ -613,6 +665,22 @@ export function ProjectPublishedOverview({
         service={service}
         onClose={() => setPortModalOpen(false)}
         onSaved={() => void loadOverview()}
+      />
+      <RuntimeServiceYamlModal
+        open={serviceYamlModalOpen}
+        service={service}
+        onClose={() => setServiceYamlModalOpen(false)}
+      />
+      <RuntimeDeploymentYamlModal
+        open={deploymentYamlModalOpen}
+        deployment={deployment}
+        pod={pods[0]}
+        onClose={() => setDeploymentYamlModalOpen(false)}
+      />
+      <RuntimePodYamlModal
+        open={Boolean(podYamlModalPod)}
+        pod={podYamlModalPod}
+        onClose={() => setPodYamlModalPod(null)}
       />
 
       {podPanel ? (

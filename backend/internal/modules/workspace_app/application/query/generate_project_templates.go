@@ -29,6 +29,7 @@ type GeneratedTemplateArtifact struct {
 }
 
 type DeploymentPipelineRenderInput struct {
+	GitRefType           string
 	GitRefValue          string
 	ImageTag             string
 	ImageRepository      string
@@ -126,6 +127,13 @@ func RenderDeploymentPipelineArtifact(
 	input DeploymentPipelineRenderInput,
 ) string {
 	deploymentProject := *project
+	if refType := strings.TrimSpace(input.GitRefType); refType != "" {
+		if refType == "tag" {
+			deploymentProject.GitRefType = "tag"
+		} else {
+			deploymentProject.GitRefType = "branch"
+		}
+	}
 	deploymentProject.GitRefValue = strings.TrimSpace(input.GitRefValue)
 	if override := strings.TrimSpace(input.GitURLOverride); override != "" {
 		deploymentProject.GitURL = override

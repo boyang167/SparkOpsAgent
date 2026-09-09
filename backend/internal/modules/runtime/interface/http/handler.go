@@ -232,6 +232,28 @@ func (h *Handler) CreateRuntimeIngress(c *gin.Context) {
 	})
 }
 
+func (h *Handler) PutDeploymentResources(c *gin.Context) {
+	h.handleRuntimeConfig(c, func(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) error {
+		var body runtimek8s.DeploymentResourcesInput
+		if err := c.ShouldBindJSON(&body); err != nil {
+			return err
+		}
+		return h.runtimeConfig.UpdateDeploymentResources(ctx, wsID, projectID, body)
+	})
+}
+
+func (h *Handler) PutDeploymentScale(c *gin.Context) {
+	h.handleRuntimeConfig(c, func(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) error {
+		var body struct {
+			Replicas int32 `json:"replicas"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			return err
+		}
+		return h.runtimeConfig.ScaleDeployment(ctx, wsID, projectID, body.Replicas)
+	})
+}
+
 func (h *Handler) handleRuntimeConfig(
 	c *gin.Context,
 	run func(context.Context, kernel.WorkspaceID, kernel.ProjectID) error,

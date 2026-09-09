@@ -7,6 +7,29 @@ export const CPU_MARKS = [
   { label: "32核", millicores: 32000 },
 ] as const;
 
+export const EXPAND_CPU_MARKS = [
+  { label: "200m", millicores: 200 },
+  { label: "500m", millicores: 500 },
+  { label: "1", millicores: 1000 },
+  { label: "2", millicores: 2000 },
+  { label: "4", millicores: 4000 },
+  { label: "8", millicores: 8000 },
+] as const;
+
+export const EXPAND_MEMORY_MARKS = [
+  { label: "64Mi", mebibytes: 64 },
+  { label: "128Mi", mebibytes: 128 },
+  { label: "256Mi", mebibytes: 256 },
+  { label: "512Mi", mebibytes: 512 },
+  { label: "1Gi", mebibytes: 1024 },
+  { label: "2Gi", mebibytes: 2048 },
+  { label: "4Gi", mebibytes: 4096 },
+  { label: "6Gi", mebibytes: 6144 },
+  { label: "8Gi", mebibytes: 8192 },
+  { label: "12Gi", mebibytes: 12288 },
+  { label: "16Gi", mebibytes: 16384 },
+] as const;
+
 export const MEMORY_MARKS = [
   { label: "128Mi", mebibytes: 128 },
   { label: "512Mi", mebibytes: 512 },
@@ -35,24 +58,24 @@ export function formatCpuMillicores(millicores: number): string {
   return `${clamped}m`;
 }
 
-export function parseMemoryToMi(raw: string): number {
+export function parseMemoryToMi(raw: string, fallback = 512): number {
   const value = raw.trim();
-  if (!value) return 512;
+  if (!value) return fallback;
   const lower = value.toLowerCase();
   if (lower.endsWith("gi")) {
     const n = Number.parseFloat(lower.slice(0, -2));
-    return Number.isFinite(n) ? Math.max(128, Math.round(n * 1024)) : 512;
+    return Number.isFinite(n) ? Math.max(64, Math.round(n * 1024)) : fallback;
   }
   if (lower.endsWith("mi")) {
     const n = Number.parseFloat(lower.slice(0, -2));
-    return Number.isFinite(n) ? Math.max(128, Math.round(n)) : 512;
+    return Number.isFinite(n) ? Math.max(64, Math.round(n)) : fallback;
   }
   const n = Number.parseFloat(lower);
-  return Number.isFinite(n) ? Math.max(128, Math.round(n)) : 512;
+  return Number.isFinite(n) ? Math.max(64, Math.round(n)) : fallback;
 }
 
-export function formatMemoryMi(mebibytes: number): string {
-  const clamped = Math.max(128, Math.min(32768, mebibytes));
+export function formatMemoryMi(mebibytes: number, minMi = 128): string {
+  const clamped = Math.max(minMi, Math.min(32768, mebibytes));
   if (clamped >= 1024 && clamped % 1024 === 0) return `${clamped / 1024}Gi`;
   return `${clamped}Mi`;
 }

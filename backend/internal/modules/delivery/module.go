@@ -149,6 +149,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	}).Start(c.Context, c.Config.Deploy.ReconcileInterval)
 	deployHandler := deployhttp.NewHandler(
 		deploycommand.NewCreateDeploymentHandler(deployRepo, deployReader, c.MessageQueue, nil),
+		deploycommand.NewRollbackDeploymentHandler(deployRepo, c.MessageQueue, nil),
 		deploycommand.NewAbortDeploymentHandler(deployRepo, nil, deploycommand.AbortDependencies{
 			Builds: abortBuild,
 			Runs:   deployOperations,
@@ -156,6 +157,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		deployquery.NewListDeploymentsHandler(deployRepo),
 		deployquery.NewGetDeploymentHandler(deployRepo),
 		deployquery.NewDeploymentOptionsHandler(deployReader),
+		deployquery.NewRollbackPreviewHandler(deployRepo),
 		deployquery.NewStreamDeploymentHandler(deployRepo, deployHub),
 	)
 
@@ -187,6 +189,10 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.POST("/api/v1/public/builds/webhook", public.BuildWebhook)
 	c.Engine.POST("/api/v1/projects/:projectId/deployments",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), deployHandler.Create)
+	c.Engine.POST("/api/v1/projects/:projectId/deployments/rollback",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), deployHandler.Rollback)
+	c.Engine.GET("/api/v1/projects/:projectId/deployments/rollback-preview",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), deployHandler.RollbackPreview)
 	c.Engine.GET("/api/v1/projects/:projectId/deployments",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), deployHandler.List)
 	c.Engine.GET("/api/v1/projects/:projectId/deployments/options",

@@ -87,6 +87,10 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.CreateRuntimeService)
 	c.Engine.POST("/api/v1/projects/:projectId/runtime/ingress",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.CreateRuntimeIngress)
+	c.Engine.PUT("/api/v1/projects/:projectId/runtime/deployment/scale",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.PutDeploymentScale)
+	c.Engine.PUT("/api/v1/projects/:projectId/runtime/deployment/resources",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.PutDeploymentResources)
 
 	terminalHandler := runtimehttp.NewProjectTerminalHandler(
 		checker, adapters.Lister, projectAccess, runtimeterminal.NewTicketStore(nil),

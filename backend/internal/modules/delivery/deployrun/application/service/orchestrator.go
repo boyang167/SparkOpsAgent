@@ -109,7 +109,11 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 		if _, err := o.projects.Load(ctx, workspaceID, run.ProjectID, run.ClusterID); err != nil {
 			return o.handleProjectError(ctx, run, err)
 		}
-		if err := run.Transition(model.StatusPreparing, o.clock()); err != nil {
+		nextStatus := model.StatusPreparing
+		if run.IsRollback() {
+			nextStatus = model.StatusDeploying
+		}
+		if err := run.Transition(nextStatus, o.clock()); err != nil {
 			return err
 		}
 		if err := o.repo.Update(ctx, run); err != nil {
@@ -134,7 +138,8 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			return o.handleProjectError(ctx, run, err)
 		}
 		if err := o.prepare.Run(operationCtx, project, PrepareInput{
-			GitRefValue: run.GitRefValue, ImageTag: run.ImageTag, ImageRepository: project.ImageRepository,
+			GitRefType: run.GitRefType, GitRefValue: run.GitRefValue,
+			ImageTag: run.ImageTag, ImageRepository: project.ImageRepository,
 		}); err != nil {
 			if operationCtx.Err() != nil {
 				return operationCtx.Err()
@@ -149,7 +154,8 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 
 		_, err = o.trigger.TriggerDeploymentAssociated(operationCtx, workspaceID, run.CreatedBy, run.ProjectID, deliveryport.BuildRequest{
 			Namespace: project.Namespace, ProjectName: project.Name,
-			Folder: project.Namespace, Job: project.Name, GitRefValue: run.GitRefValue,
+			Folder: project.Namespace, Job: project.Name,
+			GitRefType: run.GitRefType, GitRefValue: run.GitRefValue,
 			ImageTag: run.ImageTag, ImageRepository: project.ImageRepository, Timeout: o.jenkinsTimeout,
 			Credentials: BuildJenkinsCredentials(workspaceID, project),
 		}, func(callbackCtx context.Context, build *buildmodel.Build) error {

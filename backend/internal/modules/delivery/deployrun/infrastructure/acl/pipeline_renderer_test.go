@@ -38,6 +38,7 @@ func TestPipelineRendererUsesWorkspaceTemplateBoundary(t *testing.T) {
 	request := deployport.PipelineRenderRequest{
 		WorkspaceID:          workspaceID,
 		ProjectID:            projectID,
+		GitRefType:           "tag",
 		GitRefValue:          "release/2026-08",
 		ImageTag:             "deploy-123",
 		ImageRepository:      "registry.example/team-a/orders",
@@ -52,6 +53,7 @@ func TestPipelineRendererUsesWorkspaceTemplateBoundary(t *testing.T) {
 	require.Equal(t, workspaceID, generator.workspaceID)
 	require.Equal(t, projectID, generator.projectID)
 	require.Equal(t, workspacequery.DeploymentPipelineRenderInput{
+		GitRefType:           request.GitRefType,
 		GitRefValue:          request.GitRefValue,
 		ImageTag:             request.ImageTag,
 		ImageRepository:      request.ImageRepository,

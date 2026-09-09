@@ -96,6 +96,7 @@ func TestPrepareUpsertsNamespaceJobPipelineAndStableCredentials(t *testing.T) {
 	require.Equal(t, deployport.PipelineRenderRequest{
 		WorkspaceID:          workspaceID,
 		ProjectID:            project.ProjectID,
+		GitRefType:           input.GitRefType,
 		GitRefValue:          input.GitRefValue,
 		ImageTag:             input.ImageTag,
 		ImageRepository:      input.ImageRepository,
