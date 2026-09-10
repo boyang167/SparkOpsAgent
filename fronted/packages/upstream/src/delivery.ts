@@ -236,6 +236,54 @@ export function createDeliveryUpstream(options: UpstreamRequestOptions = {}) {
         },
       );
     },
+
+    async listWebhooks(workspaceId: string, projectId: string) {
+      return upstreamFetch<{
+        items: import("@sparkops/contracts/delivery").ProjectWebhookVM[];
+        catalog: import("@sparkops/contracts/delivery").WebhookEventCatalogItem[];
+      }>(`/api/v1/projects/${projectId}/webhooks`, {
+        method: "GET",
+        options: { ...options, workspaceId },
+      });
+    },
+
+    async createWebhook(
+      workspaceId: string,
+      projectId: string,
+      input: import("@sparkops/contracts/delivery").UpsertProjectWebhookInput,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/delivery").ProjectWebhookVM>(
+        `/api/v1/projects/${projectId}/webhooks`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
+    async updateWebhook(
+      workspaceId: string,
+      projectId: string,
+      webhookId: string,
+      input: import("@sparkops/contracts/delivery").UpsertProjectWebhookInput,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/delivery").ProjectWebhookVM>(
+        `/api/v1/projects/${projectId}/webhooks/${webhookId}`,
+        {
+          method: "PUT",
+          body: JSON.stringify(input),
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
+    async deleteWebhook(workspaceId: string, projectId: string, webhookId: string) {
+      return upstreamFetch<{ deleted: true }>(`/api/v1/projects/${projectId}/webhooks/${webhookId}`, {
+        method: "DELETE",
+        options: { ...options, workspaceId },
+      });
+    },
   };
 }
 

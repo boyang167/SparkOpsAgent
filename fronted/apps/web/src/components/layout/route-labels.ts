@@ -60,6 +60,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   agents: "智能体",
   workflows: "工作流",
   runtime: "运行环境",
+  config: "配置",
   builds: "构建",
   products: "产品",
   plans: "版本计划",

@@ -10,6 +10,8 @@ var (
 	ErrBuildNotRunning               = kernel.NewDomainError("DELIVERY_BUILD_NOT_RUNNING", "build is not running")
 	ErrBuildNotRollbackable          = kernel.NewDomainError("DELIVERY_BUILD_NOT_ROLLBACKABLE", "only successful builds can be rolled back")
 	ErrInvalidCronJob                = kernel.NewDomainError("DELIVERY_INVALID_CRONJOB", "invalid cronjob request")
+	ErrInvalidWebhook                = kernel.NewDomainError("DELIVERY_INVALID_WEBHOOK", "invalid webhook request")
+	ErrWebhookNotFound               = kernel.NewDomainError("DELIVERY_WEBHOOK_NOT_FOUND", "webhook not found")
 	ErrInvalidDeploymentBuildRequest = kernel.NewDomainError("DELIVERY_INVALID_DEPLOYMENT_BUILD_REQUEST", "invalid deployment build request")
 	ErrProjectJenkinsNotConfigured   = kernel.NewDomainError("DELIVERY_PROJECT_JENKINS_NOT_CONFIGURED", "project jenkins secret is not configured")
 )

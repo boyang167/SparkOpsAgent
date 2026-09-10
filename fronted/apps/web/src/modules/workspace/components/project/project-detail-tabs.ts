@@ -3,16 +3,16 @@ export type ProjectDetailTab =
   | "yaml"
   | "jenkins"
   | "dockerfile"
-  | "config"
   | "build-logs"
+  | "configmap"
   | "storage"
   | "webhooks"
   | "monitor";
 
 export const PROJECT_DETAIL_TABS_PUBLISHED: { id: ProjectDetailTab; label: string }[] = [
   { id: "overview", label: "概览" },
-  { id: "config", label: "配置" },
   { id: "build-logs", label: "Build日志" },
+  { id: "configmap", label: "ConfigMap" },
   { id: "storage", label: "持久化存储" },
   { id: "webhooks", label: "Webhooks" },
   { id: "monitor", label: "监控" },

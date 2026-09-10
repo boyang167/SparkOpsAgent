@@ -5,8 +5,11 @@ import type {
   DeploymentOptionsVM,
   DeploymentRunListVM,
   DeploymentRunVM,
+  ProjectWebhookVM,
   RollbackDeploymentCommand,
   RollbackPreviewVM,
+  UpsertProjectWebhookInput,
+  WebhookEventCatalogItem,
 } from "@sparkops/contracts/delivery";
 import { DeploymentEventVMSchema } from "@sparkops/contracts/delivery";
 import { bffFetch } from "./client";
@@ -209,6 +212,47 @@ export function createCronJob(
 export function deleteCronJob(workspaceId: string, projectId: string, cronJobId: string) {
   return bffFetch<{ deleted: true }>(
     `/workspaces/${workspaceId}/projects/${projectId}/cronjobs/${cronJobId}`,
+    {
+      method: "DELETE",
+      workspaceId,
+    },
+  );
+}
+
+export async function listWebhooks(workspaceId: string, projectId: string) {
+  return bffFetch<{ items: ProjectWebhookVM[]; catalog: WebhookEventCatalogItem[] }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/webhooks`,
+    { workspaceId },
+  );
+}
+
+export function createWebhook(workspaceId: string, projectId: string, input: UpsertProjectWebhookInput) {
+  return bffFetch<ProjectWebhookVM>(`/workspaces/${workspaceId}/projects/${projectId}/webhooks`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    workspaceId,
+  });
+}
+
+export function updateWebhook(
+  workspaceId: string,
+  projectId: string,
+  webhookId: string,
+  input: UpsertProjectWebhookInput,
+) {
+  return bffFetch<ProjectWebhookVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/webhooks/${webhookId}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+      workspaceId,
+    },
+  );
+}
+
+export function deleteWebhook(workspaceId: string, projectId: string, webhookId: string) {
+  return bffFetch<{ deleted: true }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/webhooks/${webhookId}`,
     {
       method: "DELETE",
       workspaceId,

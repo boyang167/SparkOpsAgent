@@ -103,6 +103,84 @@ export async function putDeploymentResources(
   return ctx.upstream.cluster.putDeploymentResources(workspaceId, projectId, body);
 }
 
+export async function listConfigMaps(ctx: BffContext, workspaceId: string, projectId: string) {
+  return ctx.upstream.cluster.listConfigMaps(workspaceId, projectId);
+}
+
+export async function createConfigMap(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  body: Record<string, unknown> = {},
+) {
+  return ctx.upstream.cluster.createConfigMap(workspaceId, projectId, body);
+}
+
+export async function upsertConfigMapEntry(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  name: string,
+  body: Record<string, unknown>,
+) {
+  return ctx.upstream.cluster.upsertConfigMapEntry(workspaceId, projectId, name, body);
+}
+
+export async function replaceConfigMapData(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  name: string,
+  body: Record<string, unknown>,
+) {
+  return ctx.upstream.cluster.replaceConfigMapData(workspaceId, projectId, name, body);
+}
+
+export async function deleteConfigMapEntry(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  name: string,
+  key: string,
+) {
+  return ctx.upstream.cluster.deleteConfigMapEntry(workspaceId, projectId, name, key);
+}
+
+export async function listPVCs(ctx: BffContext, workspaceId: string, projectId: string) {
+  return ctx.upstream.cluster.listPVCs(workspaceId, projectId);
+}
+
+export async function createPVC(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  body: Record<string, unknown> = {},
+) {
+  return ctx.upstream.cluster.createPVC(workspaceId, projectId, body);
+}
+
+export async function deletePVC(ctx: BffContext, workspaceId: string, projectId: string, name: string) {
+  return ctx.upstream.cluster.deletePVC(workspaceId, projectId, name);
+}
+
+export async function bindPVC(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  name: string,
+  body: Record<string, unknown>,
+) {
+  return ctx.upstream.cluster.bindPVC(workspaceId, projectId, name, body);
+}
+
+export async function unbindPVC(ctx: BffContext, workspaceId: string, projectId: string, name: string) {
+  return ctx.upstream.cluster.unbindPVC(workspaceId, projectId, name);
+}
+
+export async function listStorageClasses(ctx: BffContext, workspaceId: string, projectId: string) {
+  return ctx.upstream.cluster.listStorageClasses(workspaceId, projectId);
+}
+
 export async function createPodTerminalTicket(
   ctx: BffContext,
   workspaceId: string,

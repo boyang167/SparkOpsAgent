@@ -12,8 +12,8 @@ describe("projectDetailTabs", () => {
     const tabs = projectDetailTabs(true);
     expect(tabs.map((tab) => tab.id)).toEqual([
       "overview",
-      "config",
       "build-logs",
+      "configmap",
       "storage",
       "webhooks",
       "monitor",
@@ -22,7 +22,9 @@ describe("projectDetailTabs", () => {
 
   it("falls back to overview for unpublished-only tabs when published", () => {
     expect(parseProjectDetailTab("yaml", true)).toBe("overview");
+    expect(parseProjectDetailTab("config", true)).toBe("overview");
     expect(parseProjectDetailTab("build-logs", true)).toBe("build-logs");
+    expect(parseProjectDetailTab("configmap", true)).toBe("configmap");
   });
 });
 

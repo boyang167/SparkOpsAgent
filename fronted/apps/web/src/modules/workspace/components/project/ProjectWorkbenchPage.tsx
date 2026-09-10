@@ -17,8 +17,14 @@ import { ProjectDeployModal } from "./ProjectDeployModal";
 import { ProjectServiceDetailPage } from "./ProjectServiceDetailPage";
 import { projectDisplayName } from "./project-utils";
 import { deploymentEntryAction } from "./deployment-gate";
-import { isPublishedProjectView } from "./project-deployment-state";
+import {
+  createSerialPoller,
+  shouldContinueDeploymentPoll,
+} from "./deployment-poll";
+import { resolvePublishedProjectView, useStickyPublishedProject } from "./project-deployment-state";
 import { parseProjectDetailTab, type ProjectDetailTab } from "./project-detail-tabs";
+
+const TERMINAL_DEPLOYMENT_STATUSES = new Set(["succeeded", "failed", "aborted"]);
 
 interface ProjectWorkbenchPageProps {
   workspaceId: string;
@@ -45,11 +51,23 @@ export function ProjectWorkbenchPage({
   const [deploymentLoading, setDeploymentLoading] = useState(true);
   const [deploymentOptionsError, setDeploymentOptionsError] = useState<string | null>(null);
   const [deploymentListError, setDeploymentListError] = useState<string | null>(null);
+  const [runtimeRefreshKey, setRuntimeRefreshKey] = useState(0);
   const deploymentGenerationRef = useRef(0);
+  const deploymentPollGenerationRef = useRef(0);
   const releaseHandledRef = useRef(false);
 
-  const published = isPublishedProjectView(deploymentPage, searchParams.get("tab"));
-  const tab = parseProjectDetailTab(searchParams.get("tab"), published);
+  const stickyPublished = useStickyPublishedProject(currentProject.id);
+  const urlTabParam = searchParams.get("tab");
+  const publishedForUrl = resolvePublishedProjectView(deploymentPage, urlTabParam, {
+    loading: deploymentLoading,
+    stickyPublished,
+  });
+  const urlTab = parseProjectDetailTab(urlTabParam, publishedForUrl);
+  const [activeTab, setActiveTab] = useState<ProjectDetailTab>(urlTab);
+
+  useEffect(() => {
+    setActiveTab(urlTab);
+  }, [urlTab]);
 
   useEffect(() => {
     setCurrentProject(project);
@@ -60,8 +78,6 @@ export function ProjectWorkbenchPage({
     setDeploymentLoading(true);
     setDeploymentOptionsError(null);
     setDeploymentListError(null);
-    setDeploymentOptions(null);
-    setDeploymentPage(null);
     void Promise.allSettled([
       delivery.getDeploymentOptions(currentProject.id, workspaceId),
       delivery.listDeployments(currentProject.id, workspaceId),
@@ -129,24 +145,69 @@ export function ProjectWorkbenchPage({
     ],
   );
 
-  const handleRunChanged = useCallback((run: DeploymentRunVM) => {
-    setDeploymentPage((current) => {
-      if (!current) {
-        return { items: [run], total: 1, page: 1, page_size: 20 };
+  const refreshDeploymentList = useCallback(async () => {
+    try {
+      const page = await delivery.listDeployments(currentProject.id, workspaceId);
+      setDeploymentPage(page);
+    } catch (err) {
+      setDeploymentListError(
+        err instanceof BffError ? err.message : "部署记录加载失败",
+      );
+    }
+  }, [currentProject.id, workspaceId]);
+
+  const handleRunChanged = useCallback(
+    (run: DeploymentRunVM) => {
+      setDeploymentPage((current) => {
+        if (!current) {
+          return { items: [run], total: 1, page: 1, page_size: 20 };
+        }
+        const exists = current.items.some((item) => item.id === run.id);
+        return {
+          ...current,
+          total: exists ? current.total : current.total + 1,
+          items: exists
+            ? current.items.map((item) => (item.id === run.id ? run : item))
+            : [run, ...current.items].slice(0, current.page_size),
+        };
+      });
+      if (TERMINAL_DEPLOYMENT_STATUSES.has(run.status)) {
+        void refreshDeploymentList();
+        if (run.status === "succeeded") {
+          setRuntimeRefreshKey((value) => value + 1);
+        }
       }
-      const exists = current.items.some((item) => item.id === run.id);
-      return {
-        ...current,
-        total: exists ? current.total : current.total + 1,
-        items: exists
-          ? current.items.map((item) => (item.id === run.id ? run : item))
-          : [run, ...current.items].slice(0, current.page_size),
-      };
+    },
+    [refreshDeploymentList],
+  );
+
+  useEffect(() => {
+    if (!activeRun) return;
+    const generation = ++deploymentPollGenerationRef.current;
+    const poller = createSerialPoller({
+      refresh: () => delivery.getDeployment(activeRun.id, workspaceId),
+      onValue: handleRunChanged,
+      onError: () => {
+        /* 轮询失败时静默，下一次继续 */
+      },
+      shouldContinue: (next) =>
+        shouldContinueDeploymentPoll(next.status, generation, deploymentPollGenerationRef.current),
+      schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+      cancel: (timer) => window.clearTimeout(timer),
+      delayMs: 2000,
     });
-  }, []);
+    poller.start();
+    return () => {
+      if (deploymentPollGenerationRef.current === generation) {
+        deploymentPollGenerationRef.current += 1;
+      }
+      poller.stop();
+    };
+  }, [activeRun?.id, workspaceId, handleRunChanged]);
 
   const setTab = useCallback(
     (next: ProjectDetailTab) => {
+      setActiveTab(next);
       const params = new URLSearchParams(searchParams.toString());
       if (next === "overview") {
         params.delete("tab");
@@ -220,7 +281,7 @@ export function ProjectWorkbenchPage({
       <ProjectServiceDetailPage
         workspaceId={workspaceId}
         project={currentProject}
-        tab={tab}
+        tab={activeTab}
         onTabChange={setTab}
         deployAction={deployAction}
         onRelease={openDeploy}
@@ -235,6 +296,7 @@ export function ProjectWorkbenchPage({
         onProjectUpdated={(updated) => setCurrentProject(updated)}
         deploymentPage={deploymentPage}
         deploymentLoading={deploymentLoading}
+        runtimeRefreshKey={runtimeRefreshKey}
         onRunChanged={handleRunChanged}
       />
 

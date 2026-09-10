@@ -1,28 +1,34 @@
 package http
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/application/query"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type Handler struct {
-	trigger  *command.TriggerBuildHandler
-	abort    *command.AbortBuildHandler
-	rollback *command.RollbackBuildHandler
-	list     *query.ListBuildsHandler
-	get      *query.GetBuildHandler
-	stream   *query.StreamBuildLogsHandler
-	branches    *query.ListGitBranchesHandler
-	listCron    *query.ListCronJobsHandler
-	createCron  *command.CreateCronJobHandler
-	deleteCron  *command.DeleteCronJobHandler
+	trigger    *command.TriggerBuildHandler
+	abort      *command.AbortBuildHandler
+	rollback   *command.RollbackBuildHandler
+	list       *query.ListBuildsHandler
+	get        *query.GetBuildHandler
+	stream     *query.StreamBuildLogsHandler
+	branches   *query.ListGitBranchesHandler
+	listCron   *query.ListCronJobsHandler
+	createCron *command.CreateCronJobHandler
+	deleteCron *command.DeleteCronJobHandler
+	listHooks  *query.ListWebhooksHandler
+	createHook *command.CreateWebhookHandler
+	updateHook *command.UpdateWebhookHandler
+	deleteHook *command.DeleteWebhookHandler
 }
 
 func NewHandler(
@@ -36,11 +42,16 @@ func NewHandler(
 	listCron *query.ListCronJobsHandler,
 	createCron *command.CreateCronJobHandler,
 	deleteCron *command.DeleteCronJobHandler,
+	listHooks *query.ListWebhooksHandler,
+	createHook *command.CreateWebhookHandler,
+	updateHook *command.UpdateWebhookHandler,
+	deleteHook *command.DeleteWebhookHandler,
 ) *Handler {
 	return &Handler{
 		trigger: trigger, abort: abort, rollback: rollback,
 		list: list, get: get, stream: stream, branches: branches,
 		listCron: listCron, createCron: createCron, deleteCron: deleteCron,
+		listHooks: listHooks, createHook: createHook, updateHook: updateHook, deleteHook: deleteHook,
 	}
 }
 
@@ -272,4 +283,95 @@ func (h *Handler) DeleteCronJob(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"deleted": true})
+}
+
+func (h *Handler) ListWebhooks(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	items, err := h.listHooks.Handle(c.Request.Context(), wsID, projectID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"items": items, "catalog": query.WebhookEventCatalog()})
+}
+
+func (h *Handler) CreateWebhook(c *gin.Context) {
+	h.handleWebhookWrite(c, func(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) (*persistenceWebhook, error) {
+		var req command.WebhookInput
+		if err := c.ShouldBindJSON(&req); err != nil {
+			return nil, err
+		}
+		return h.createHook.Handle(ctx, wsID, projectID, req)
+	})
+}
+
+func (h *Handler) UpdateWebhook(c *gin.Context) {
+	webhookID, err := kernel.ParseWebhookID(c.Param("webhookId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid webhook id", http.StatusBadRequest)
+		return
+	}
+	h.handleWebhookWrite(c, func(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) (*persistenceWebhook, error) {
+		var req command.WebhookInput
+		if err := c.ShouldBindJSON(&req); err != nil {
+			return nil, err
+		}
+		return h.updateHook.Handle(ctx, wsID, projectID, webhookID, req)
+	})
+}
+
+func (h *Handler) DeleteWebhook(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	webhookID, err := kernel.ParseWebhookID(c.Param("webhookId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid webhook id", http.StatusBadRequest)
+		return
+	}
+	if err := h.deleteHook.Handle(c.Request.Context(), wsID, projectID, webhookID); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"deleted": true})
+}
+
+type persistenceWebhook = persistence.WebhookRecord
+
+func (h *Handler) handleWebhookWrite(
+	c *gin.Context,
+	run func(context.Context, kernel.WorkspaceID, kernel.ProjectID) (*persistence.WebhookRecord, error),
+) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	item, err := run(c.Request.Context(), wsID, projectID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, query.WebhookJSON(*item))
 }

@@ -10,6 +10,7 @@ import (
 	deployquery "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/application/query"
 	deployservice "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/application/service"
 	deploysubscriber "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/application/subscriber"
+	deployrunmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	deployacl "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/acl"
 	deployconsumer "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/consumer"
 	deploypersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/persistence"
@@ -20,6 +21,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/cronjob"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/gitlab"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/runner"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/stream"
@@ -64,6 +66,7 @@ func (m *Module) Register(c *appctx.Container) error {
 
 	repo := persistence.NewBuildRepository(c.DB)
 	cronRepo := persistence.NewCronJobRepository(c.DB)
+	hookRepo := persistence.NewWebhookRepository(c.DB)
 	checker := acl.NewWorkspaceAppACL(c.DB)
 	secretBox, err := crypto.NewSecretBoxFromConfig(c.Config)
 	if err != nil {
@@ -99,6 +102,10 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewListCronJobsHandler(cronRepo, checker),
 		command.NewCreateCronJobHandler(cronRepo, checker),
 		command.NewDeleteCronJobHandler(cronRepo, checker),
+		query.NewListWebhooksHandler(hookRepo, checker),
+		command.NewCreateWebhookHandler(hookRepo, checker),
+		command.NewUpdateWebhookHandler(hookRepo, checker),
+		command.NewDeleteWebhookHandler(hookRepo, checker),
 	)
 	public := deliveryhttp.NewPublicHandler(c.MessageQueue, c.Config.Webhook.Secret)
 	deployHub := deploystream.NewHub()
@@ -126,6 +133,16 @@ func (m *Module) Register(c *appctx.Container) error {
 		c.Config.Deploy.JenkinsTimeout,
 		deployOperations,
 	)
+	deployOrchestrator.SetTerminalHook(func(ctx context.Context, run *deployrunmodel.DeploymentRun) {
+		if run == nil {
+			return
+		}
+		if err := c.EventBus.Publish(ctx, deliveryevent.NewDeployCompleted(
+			run.ID, run.ProjectID, run.WorkspaceID, "", string(run.Status), string(run.RunType), run.ImageTag,
+		)); err != nil && c.Logger != nil {
+			c.Logger.Warn("publish deploy completed failed", zap.Error(err))
+		}
+	})
 	deployConsumer, err := deployconsumer.New(deployRepo, deployOrchestrator)
 	if err != nil {
 		return fmt.Errorf("delivery deployment consumer: %w", err)
@@ -135,6 +152,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 	onBuildCompleted := deploysubscriber.NewOnBuildCompleted(deployRepo, deployPublisher)
 	c.EventBus.Subscribe(deliveryevent.BuildCompletedName, onBuildCompleted.Handle)
+	hookDispatcher := outbound.NewDispatcher(hookRepo, c.Logger)
+	c.EventBus.Subscribe(deliveryevent.BuildCompletedName, hookDispatcher.Handle)
+	c.EventBus.Subscribe(deliveryevent.DeployCompletedName, hookDispatcher.Handle)
 	credentialSync := deployservice.NewCredentialSyncService(
 		deployReader,
 		jenkinsProvider,
@@ -185,6 +205,14 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CreateCronJob)
 	c.Engine.DELETE("/api/v1/projects/:projectId/cronjobs/:cronJobId",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.DeleteCronJob)
+	c.Engine.GET("/api/v1/projects/:projectId/webhooks",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListWebhooks)
+	c.Engine.POST("/api/v1/projects/:projectId/webhooks",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CreateWebhook)
+	c.Engine.PUT("/api/v1/projects/:projectId/webhooks/:webhookId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.UpdateWebhook)
+	c.Engine.DELETE("/api/v1/projects/:projectId/webhooks/:webhookId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.DeleteWebhook)
 
 	c.Engine.POST("/api/v1/public/builds/webhook", public.BuildWebhook)
 	c.Engine.POST("/api/v1/projects/:projectId/deployments",

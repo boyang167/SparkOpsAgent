@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CreateProjectCommand, GitRefVM } from "@sparkops/contracts/workspace";
 import { PROJECT_LANGUAGE_OPTIONS } from "@sparkops/contracts/workspace";
 import type { SecretVM } from "@sparkops/contracts/secret";

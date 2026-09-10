@@ -142,3 +142,34 @@ export const CronJobVMSchema = z.object({
 });
 
 export type CronJobVM = z.infer<typeof CronJobVMSchema>;
+
+export const WEBHOOK_EVENTS = ["Build", "Deploy", "Rollback"] as const;
+export type WebhookEventKey = (typeof WEBHOOK_EVENTS)[number];
+
+export const ProjectWebhookVMSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  name: z.string(),
+  url: z.string(),
+  token: z.string().optional(),
+  events: z.array(z.string()),
+  enabled: z.boolean(),
+  created_at: z.string().optional(),
+});
+
+export type ProjectWebhookVM = z.infer<typeof ProjectWebhookVMSchema>;
+
+export const WebhookEventCatalogItemSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+});
+
+export type WebhookEventCatalogItem = z.infer<typeof WebhookEventCatalogItemSchema>;
+
+export interface UpsertProjectWebhookInput {
+  name: string;
+  url: string;
+  token?: string;
+  events: string[];
+  enabled: boolean;
+}

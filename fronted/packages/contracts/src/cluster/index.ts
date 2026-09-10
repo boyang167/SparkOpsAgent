@@ -144,3 +144,65 @@ export interface DeploymentResourcesInput {
   memory_request: string;
   memory_limit: string;
 }
+
+export const ProjectConfigMapVMSchema = z.object({
+  name: z.string(),
+  namespace: z.string(),
+  labels: z.record(z.string()).optional(),
+  data: z.record(z.string()).optional(),
+  created_at: z.string().optional(),
+});
+
+export type ProjectConfigMapVM = z.infer<typeof ProjectConfigMapVMSchema>;
+
+export interface CreateProjectConfigMapInput {
+  name?: string;
+  data?: Record<string, string>;
+}
+
+export interface UpsertConfigMapEntryInput {
+  key: string;
+  value: string;
+}
+
+export interface ReplaceConfigMapDataInput {
+  data: Record<string, string>;
+}
+
+export const ProjectPVCVMSchema = z.object({
+  name: z.string(),
+  namespace: z.string(),
+  status: z.string().optional(),
+  storage: z.string().optional(),
+  access_modes: z.array(z.string()).optional(),
+  storage_class: z.string().optional(),
+  volume_name: z.string().optional(),
+  mount_name: z.string().optional(),
+  mount_path: z.string().optional(),
+  mounted: z.boolean().optional(),
+  created_at: z.string().optional(),
+});
+
+export type ProjectPVCVM = z.infer<typeof ProjectPVCVMSchema>;
+
+export const StorageClassVMSchema = z.object({
+  name: z.string(),
+  provisioner: z.string().optional(),
+  reclaim_policy: z.string().optional(),
+});
+
+export type StorageClassVM = z.infer<typeof StorageClassVMSchema>;
+
+export interface CreateProjectPVCInput {
+  name?: string;
+  storage?: string;
+  access_mode?: string;
+  storage_class?: string;
+  mount_path?: string;
+  volume_name?: string;
+}
+
+export interface BindProjectPVCInput {
+  mount_path: string;
+  volume_name?: string;
+}

@@ -91,6 +91,28 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.PutDeploymentScale)
 	c.Engine.PUT("/api/v1/projects/:projectId/runtime/deployment/resources",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.PutDeploymentResources)
+	c.Engine.GET("/api/v1/projects/:projectId/runtime/configmaps",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListConfigMaps)
+	c.Engine.POST("/api/v1/projects/:projectId/runtime/configmaps",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.CreateConfigMap)
+	c.Engine.PUT("/api/v1/projects/:projectId/runtime/configmaps/:name",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.ReplaceConfigMapData)
+	c.Engine.PUT("/api/v1/projects/:projectId/runtime/configmaps/:name/data",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.UpsertConfigMapEntry)
+	c.Engine.DELETE("/api/v1/projects/:projectId/runtime/configmaps/:name/data",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.DeleteConfigMapEntry)
+	c.Engine.GET("/api/v1/projects/:projectId/runtime/pvcs",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListPVCs)
+	c.Engine.POST("/api/v1/projects/:projectId/runtime/pvcs",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.CreatePVC)
+	c.Engine.DELETE("/api/v1/projects/:projectId/runtime/pvcs/:name",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.DeletePVC)
+	c.Engine.PUT("/api/v1/projects/:projectId/runtime/pvcs/:name/bind",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.BindPVC)
+	c.Engine.DELETE("/api/v1/projects/:projectId/runtime/pvcs/:name/bind",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.UnbindPVC)
+	c.Engine.GET("/api/v1/projects/:projectId/runtime/storageclasses",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListStorageClasses)
 
 	terminalHandler := runtimehttp.NewProjectTerminalHandler(
 		checker, adapters.Lister, projectAccess, runtimeterminal.NewTicketStore(nil),

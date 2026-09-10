@@ -140,3 +140,35 @@ export async function deleteCronJob(
 ) {
   return ctx.upstream.delivery.deleteCronJob(workspaceId, projectId, cronJobId);
 }
+
+export async function listWebhooks(ctx: BffContext, workspaceId: string, projectId: string) {
+  return ctx.upstream.delivery.listWebhooks(workspaceId, projectId);
+}
+
+export async function createWebhook(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  input: import("@sparkops/contracts/delivery").UpsertProjectWebhookInput,
+) {
+  return ctx.upstream.delivery.createWebhook(workspaceId, projectId, input);
+}
+
+export async function updateWebhook(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  webhookId: string,
+  input: import("@sparkops/contracts/delivery").UpsertProjectWebhookInput,
+) {
+  return ctx.upstream.delivery.updateWebhook(workspaceId, projectId, webhookId, input);
+}
+
+export async function deleteWebhook(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  webhookId: string,
+) {
+  return ctx.upstream.delivery.deleteWebhook(workspaceId, projectId, webhookId);
+}

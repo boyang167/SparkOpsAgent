@@ -21,6 +21,7 @@ type NotificationID struct{ uuid.UUID }
 type BuildID struct{ uuid.UUID }
 type DeploymentRunID struct{ uuid.UUID }
 type CronJobID struct{ uuid.UUID }
+type WebhookID struct{ uuid.UUID }
 type PodID struct{ uuid.UUID }
 type TemplateID struct{ uuid.UUID }
 type SecretID struct{ uuid.UUID }
@@ -31,40 +32,41 @@ type ClusterInfoID struct{ uuid.UUID }
 type ProclaimID struct{ uuid.UUID }
 type PluginInstallID struct{ uuid.UUID }
 
-func NewMemberID() MemberID     { return MemberID{UUID: uuid.New()} }
-func NewOrgID() OrgID             { return OrgID{UUID: uuid.New()} }
+func NewMemberID() MemberID { return MemberID{UUID: uuid.New()} }
+func NewOrgID() OrgID       { return OrgID{UUID: uuid.New()} }
 func ParseOrgID(s string) (OrgID, error) {
 	id, err := uuid.Parse(s)
 	return OrgID{UUID: id}, err
 }
-func (id OrgID) String() string { return id.UUID.String() }
-func NewWorkspaceID() WorkspaceID { return WorkspaceID{UUID: uuid.New()} }
-func NewProjectID() ProjectID   { return ProjectID{UUID: uuid.New()} }
+func (id OrgID) String() string           { return id.UUID.String() }
+func NewWorkspaceID() WorkspaceID         { return WorkspaceID{UUID: uuid.New()} }
+func NewProjectID() ProjectID             { return ProjectID{UUID: uuid.New()} }
 func NewAgentID() AgentID                 { return AgentID{UUID: uuid.New()} }
 func NewAgentVersionID() AgentVersionID   { return AgentVersionID{UUID: uuid.New()} }
-func NewRoleID() RoleID         { return RoleID{UUID: uuid.New()} }
-func NewRoleBindingID() RoleBindingID { return RoleBindingID{UUID: uuid.New()} }
-func NewConversationID() ConversationID { return ConversationID{UUID: uuid.New()} }
-func NewRunID() RunID                   { return RunID{UUID: uuid.New()} }
-func NewMessageID() MessageID           { return MessageID{UUID: uuid.New()} }
+func NewRoleID() RoleID                   { return RoleID{UUID: uuid.New()} }
+func NewRoleBindingID() RoleBindingID     { return RoleBindingID{UUID: uuid.New()} }
+func NewConversationID() ConversationID   { return ConversationID{UUID: uuid.New()} }
+func NewRunID() RunID                     { return RunID{UUID: uuid.New()} }
+func NewMessageID() MessageID             { return MessageID{UUID: uuid.New()} }
 func NewWorkflowID() WorkflowID           { return WorkflowID{UUID: uuid.New()} }
 func NewWorkflowRunID() WorkflowRunID     { return WorkflowRunID{UUID: uuid.New()} }
 func NewKnowledgeBaseID() KnowledgeBaseID { return KnowledgeBaseID{UUID: uuid.New()} }
 func NewDocumentID() DocumentID           { return DocumentID{UUID: uuid.New()} }
-func NewNotificationID() NotificationID     { return NotificationID{UUID: uuid.New()} }
-func NewBuildID() BuildID                     { return BuildID{UUID: uuid.New()} }
-func NewDeploymentRunID() DeploymentRunID     { return DeploymentRunID{UUID: uuid.New()} }
-func NewCronJobID() CronJobID                 { return CronJobID{UUID: uuid.New()} }
-func NewPodID() PodID                         { return PodID{UUID: uuid.New()} }
-func NewTemplateID() TemplateID               { return TemplateID{UUID: uuid.New()} }
-func NewSecretID() SecretID                   { return SecretID{UUID: uuid.New()} }
-func NewProductID() ProductID                 { return ProductID{UUID: uuid.New()} }
-func NewProductPlanID() ProductPlanID         { return ProductPlanID{UUID: uuid.New()} }
+func NewNotificationID() NotificationID   { return NotificationID{UUID: uuid.New()} }
+func NewBuildID() BuildID                 { return BuildID{UUID: uuid.New()} }
+func NewDeploymentRunID() DeploymentRunID { return DeploymentRunID{UUID: uuid.New()} }
+func NewCronJobID() CronJobID             { return CronJobID{UUID: uuid.New()} }
+func NewWebhookID() WebhookID             { return WebhookID{UUID: uuid.New()} }
+func NewPodID() PodID                     { return PodID{UUID: uuid.New()} }
+func NewTemplateID() TemplateID           { return TemplateID{UUID: uuid.New()} }
+func NewSecretID() SecretID               { return SecretID{UUID: uuid.New()} }
+func NewProductID() ProductID             { return ProductID{UUID: uuid.New()} }
+func NewProductPlanID() ProductPlanID     { return ProductPlanID{UUID: uuid.New()} }
 func NewProductRequirementID() ProductRequirementID {
 	return ProductRequirementID{UUID: uuid.New()}
 }
-func NewClusterInfoID() ClusterInfoID         { return ClusterInfoID{UUID: uuid.New()} }
-func NewProclaimID() ProclaimID               { return ProclaimID{UUID: uuid.New()} }
+func NewClusterInfoID() ClusterInfoID     { return ClusterInfoID{UUID: uuid.New()} }
+func NewProclaimID() ProclaimID           { return ProclaimID{UUID: uuid.New()} }
 func NewPluginInstallID() PluginInstallID { return PluginInstallID{UUID: uuid.New()} }
 
 func ParseRoleID(s string) (RoleID, error) {
@@ -152,6 +154,11 @@ func ParseCronJobID(s string) (CronJobID, error) {
 	return CronJobID{UUID: id}, err
 }
 
+func ParseWebhookID(s string) (WebhookID, error) {
+	id, err := uuid.Parse(s)
+	return WebhookID{UUID: id}, err
+}
+
 func ParsePodID(s string) (PodID, error) {
 	id, err := uuid.Parse(s)
 	return PodID{UUID: id}, err
@@ -197,30 +204,31 @@ func ParsePluginInstallID(s string) (PluginInstallID, error) {
 	return PluginInstallID{UUID: id}, err
 }
 
-func (id MemberID) String() string        { return id.UUID.String() }
-func (id WorkspaceID) String() string     { return id.UUID.String() }
-func (id ProjectID) String() string       { return id.UUID.String() }
+func (id MemberID) String() string             { return id.UUID.String() }
+func (id WorkspaceID) String() string          { return id.UUID.String() }
+func (id ProjectID) String() string            { return id.UUID.String() }
 func (id AgentID) String() string              { return id.UUID.String() }
 func (id AgentVersionID) String() string       { return id.UUID.String() }
 func (id ConversationID) String() string       { return id.UUID.String() }
-func (id RunID) String() string                 { return id.UUID.String() }
-func (id MessageID) String() string             { return id.UUID.String() }
-func (id RoleID) String() string          { return id.UUID.String() }
-func (id RoleBindingID) String() string   { return id.UUID.String() }
-func (id WorkflowID) String() string       { return id.UUID.String() }
-func (id WorkflowRunID) String() string    { return id.UUID.String() }
-func (id KnowledgeBaseID) String() string  { return id.UUID.String() }
-func (id DocumentID) String() string       { return id.UUID.String() }
-func (id NotificationID) String() string    { return id.UUID.String() }
-func (id BuildID) String() string            { return id.UUID.String() }
-func (id DeploymentRunID) String() string    { return id.UUID.String() }
-func (id CronJobID) String() string          { return id.UUID.String() }
-func (id PodID) String() string               { return id.UUID.String() }
-func (id TemplateID) String() string          { return id.UUID.String() }
-func (id SecretID) String() string            { return id.UUID.String() }
-func (id ProductID) String() string           { return id.UUID.String() }
-func (id ProductPlanID) String() string       { return id.UUID.String() }
+func (id RunID) String() string                { return id.UUID.String() }
+func (id MessageID) String() string            { return id.UUID.String() }
+func (id RoleID) String() string               { return id.UUID.String() }
+func (id RoleBindingID) String() string        { return id.UUID.String() }
+func (id WorkflowID) String() string           { return id.UUID.String() }
+func (id WorkflowRunID) String() string        { return id.UUID.String() }
+func (id KnowledgeBaseID) String() string      { return id.UUID.String() }
+func (id DocumentID) String() string           { return id.UUID.String() }
+func (id NotificationID) String() string       { return id.UUID.String() }
+func (id BuildID) String() string              { return id.UUID.String() }
+func (id DeploymentRunID) String() string      { return id.UUID.String() }
+func (id CronJobID) String() string            { return id.UUID.String() }
+func (id WebhookID) String() string            { return id.UUID.String() }
+func (id PodID) String() string                { return id.UUID.String() }
+func (id TemplateID) String() string           { return id.UUID.String() }
+func (id SecretID) String() string             { return id.UUID.String() }
+func (id ProductID) String() string            { return id.UUID.String() }
+func (id ProductPlanID) String() string        { return id.UUID.String() }
 func (id ProductRequirementID) String() string { return id.UUID.String() }
-func (id ClusterInfoID) String() string       { return id.UUID.String() }
-func (id ProclaimID) String() string          { return id.UUID.String() }
+func (id ClusterInfoID) String() string        { return id.UUID.String() }
+func (id ProclaimID) String() string           { return id.UUID.String() }
 func (id PluginInstallID) String() string      { return id.UUID.String() }

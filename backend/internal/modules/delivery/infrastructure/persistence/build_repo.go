@@ -20,7 +20,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return db.AutoMigrate(&buildModel{}, &cronjobModel{})
+	return db.AutoMigrate(&buildModel{}, &cronjobModel{}, &webhookModel{})
 }
 
 type buildModel struct {

@@ -103,6 +103,125 @@ export function createClusterUpstream(options: UpstreamRequestOptions = {}) {
       });
     },
 
+    async listConfigMaps(workspaceId: string, projectId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/cluster").ProjectConfigMapVM[] }>(
+        `/api/v1/projects/${projectId}/runtime/configmaps`,
+        {
+          method: "GET",
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
+    async createConfigMap(workspaceId: string, projectId: string, body: Record<string, unknown> = {}) {
+      return upstreamFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/runtime/configmaps`, {
+        method: "POST",
+        body: JSON.stringify(body),
+        options: { ...options, workspaceId },
+      });
+    },
+
+    async upsertConfigMapEntry(
+      workspaceId: string,
+      projectId: string,
+      name: string,
+      body: Record<string, unknown>,
+    ) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/projects/${projectId}/runtime/configmaps/${encodeURIComponent(name)}/data`,
+        {
+          method: "PUT",
+          body: JSON.stringify(body),
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
+    async replaceConfigMapData(
+      workspaceId: string,
+      projectId: string,
+      name: string,
+      body: Record<string, unknown>,
+    ) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/projects/${projectId}/runtime/configmaps/${encodeURIComponent(name)}`,
+        {
+          method: "PUT",
+          body: JSON.stringify(body),
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
+    async deleteConfigMapEntry(workspaceId: string, projectId: string, name: string, key: string) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/projects/${projectId}/runtime/configmaps/${encodeURIComponent(name)}/data?key=${encodeURIComponent(key)}`,
+        {
+          method: "DELETE",
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
+    async listPVCs(workspaceId: string, projectId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/cluster").ProjectPVCVM[] }>(
+        `/api/v1/projects/${projectId}/runtime/pvcs`,
+        {
+          method: "GET",
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
+    async createPVC(workspaceId: string, projectId: string, body: Record<string, unknown> = {}) {
+      return upstreamFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/runtime/pvcs`, {
+        method: "POST",
+        body: JSON.stringify(body),
+        options: { ...options, workspaceId },
+      });
+    },
+
+    async deletePVC(workspaceId: string, projectId: string, name: string) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/projects/${projectId}/runtime/pvcs/${encodeURIComponent(name)}`,
+        {
+          method: "DELETE",
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
+    async bindPVC(workspaceId: string, projectId: string, name: string, body: Record<string, unknown>) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/projects/${projectId}/runtime/pvcs/${encodeURIComponent(name)}/bind`,
+        {
+          method: "PUT",
+          body: JSON.stringify(body),
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
+    async unbindPVC(workspaceId: string, projectId: string, name: string) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/projects/${projectId}/runtime/pvcs/${encodeURIComponent(name)}/bind`,
+        {
+          method: "DELETE",
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
+    async listStorageClasses(workspaceId: string, projectId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/cluster").StorageClassVM[] }>(
+        `/api/v1/projects/${projectId}/runtime/storageclasses`,
+        {
+          method: "GET",
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
     podTerminalStreamUrl(projectId: string, podId: string) {
       return `${getUpstreamBaseUrl()}/api/v1/projects/${projectId}/pods/${podId}/terminal/stream`;
     },

@@ -109,6 +109,114 @@ export function putDeploymentResources(
   );
 }
 
+export async function listConfigMaps(projectId: string, workspaceId: string) {
+  const data = await bffFetch<{ items: import("@sparkops/contracts/cluster").ProjectConfigMapVM[] }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/configmaps`,
+    { workspaceId },
+  );
+  return data.items ?? [];
+}
+
+export function createConfigMap(
+  projectId: string,
+  workspaceId: string,
+  body: import("@sparkops/contracts/cluster").CreateProjectConfigMapInput = {},
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/configmaps`,
+    { workspaceId, method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export function upsertConfigMapEntry(
+  projectId: string,
+  workspaceId: string,
+  name: string,
+  body: import("@sparkops/contracts/cluster").UpsertConfigMapEntryInput,
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/configmaps/${encodeURIComponent(name)}/data`,
+    { workspaceId, method: "PUT", body: JSON.stringify(body) },
+  );
+}
+
+export function replaceConfigMapData(
+  projectId: string,
+  workspaceId: string,
+  name: string,
+  body: import("@sparkops/contracts/cluster").ReplaceConfigMapDataInput,
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/configmaps/${encodeURIComponent(name)}`,
+    { workspaceId, method: "PUT", body: JSON.stringify(body) },
+  );
+}
+
+export function deleteConfigMapEntry(
+  projectId: string,
+  workspaceId: string,
+  name: string,
+  key: string,
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/configmaps/${encodeURIComponent(name)}/data?key=${encodeURIComponent(key)}`,
+    { workspaceId, method: "DELETE" },
+  );
+}
+
+export async function listPVCs(projectId: string, workspaceId: string) {
+  const data = await bffFetch<{ items: import("@sparkops/contracts/cluster").ProjectPVCVM[] }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/pvcs`,
+    { workspaceId },
+  );
+  return data.items ?? [];
+}
+
+export function createPVC(
+  projectId: string,
+  workspaceId: string,
+  body: import("@sparkops/contracts/cluster").CreateProjectPVCInput = {},
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/pvcs`,
+    { workspaceId, method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export function deletePVC(projectId: string, workspaceId: string, name: string) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/pvcs/${encodeURIComponent(name)}`,
+    { workspaceId, method: "DELETE" },
+  );
+}
+
+export function bindPVC(
+  projectId: string,
+  workspaceId: string,
+  name: string,
+  body: import("@sparkops/contracts/cluster").BindProjectPVCInput,
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/pvcs/${encodeURIComponent(name)}/bind`,
+    { workspaceId, method: "PUT", body: JSON.stringify(body) },
+  );
+}
+
+export function unbindPVC(projectId: string, workspaceId: string, name: string) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/pvcs/${encodeURIComponent(name)}/bind`,
+    { workspaceId, method: "DELETE" },
+  );
+}
+
+export async function listStorageClasses(projectId: string, workspaceId: string) {
+  const data = await bffFetch<{ items: import("@sparkops/contracts/cluster").StorageClassVM[] }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/storageclasses`,
+    { workspaceId },
+  );
+  return data.items ?? [];
+}
+
 export interface StreamPodTerminalHandlers {
   onDelta: (delta: string) => void;
   onDone: () => void;

@@ -91,9 +91,9 @@ export function apiPathEntitlement(path: string): string {
   if (path.includes("/knowledge-bases") || path.startsWith("/api/v1/documents/")) {
     return "knowledge";
   }
-  if (path.includes("/builds") || path.includes("/products")) return "delivery";
+  if (path.includes("/builds") || path.includes("/products") || path.includes("/webhooks")) return "delivery";
   if (path.includes("/workspaces/") && path.includes("/secrets")) return "delivery";
-  if (path.includes("/webhooks") || path.includes("/mcp/")) return "mcp";
+  if (path.includes("/mcp/")) return "mcp";
   if (
     path.includes("/cronjobs") ||
     path.includes("/pods") ||

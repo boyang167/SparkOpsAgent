@@ -1,12 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { cluster, product, secret } from "@sparkops/web-sdk";
+import { cluster } from "@sparkops/web-sdk";
 import type { ProjectRuntimeOverviewVM } from "@sparkops/contracts/cluster";
 import type { DeploymentRunListVM, DeploymentRunVM } from "@sparkops/contracts/delivery";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
-import type { SecretVM } from "@sparkops/contracts/secret";
-import type { TemplateVM } from "@sparkops/contracts/product";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import {
   formatDateTime,
@@ -21,6 +19,9 @@ import {
 } from "./project-progress";
 import type { DeploymentEntryAction } from "./deployment-gate";
 import { ProjectDeploymentConsolePanel } from "./ProjectDeploymentConsolePanel";
+import { ProjectConfigMapTab } from "./ProjectConfigMapTab";
+import { ProjectStorageTab } from "./ProjectStorageTab";
+import { ProjectWebhookTab } from "./ProjectWebhookTab";
 import { ProjectYamlTab } from "./ProjectYamlTab";
 import { ProjectJenkinsPreview } from "./ProjectJenkinsPreview";
 import { ProjectPublishedOverview } from "./ProjectPublishedOverview";
@@ -33,9 +34,11 @@ import {
   canRollbackDeployment,
   hasSuccessfulDeployment,
   isPublishedProjectView,
+  markStickyPublishedProject,
+  resolvePublishedProjectView,
+  useStickyPublishedProject,
 } from "./project-deployment-state";
 import { ProjectDockerfileViewer } from "./ProjectDockerfileViewer";
-import { countGeneratedTemplates } from "./project-template-render";
 import { ProjectDisplayNameField, ProjectDescriptionField } from "./ProjectDisplayNameEditModal";
 import {
   projectDetailTabs,
@@ -56,6 +59,7 @@ interface ProjectServiceDetailPageProps {
   onProjectUpdated?: (project: ProjectVM) => void;
   deploymentPage?: DeploymentRunListVM | null;
   deploymentLoading?: boolean;
+  runtimeRefreshKey?: number;
   onRunChanged?: (run: DeploymentRunVM) => void;
 }
 
@@ -75,23 +79,6 @@ function MetaTag({
   tone?: "gray" | "orange" | "green" | "blue";
 }) {
   return <span className={`project-tag project-tag-${tone}`}>{children}</span>;
-}
-
-function InfoGrid({
-  items,
-}: {
-  items: Array<{ label: string; value: ReactNode; full?: boolean }>;
-}) {
-  return (
-    <dl className="project-detail-grid">
-      {items.map((item) => (
-        <div key={item.label} className={`project-detail-cell${item.full ? " is-full" : ""}`}>
-          <dt>{item.label}</dt>
-          <dd>{item.value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
 }
 
 function reviewStatusLabel(project: ProjectVM) {
@@ -117,21 +104,35 @@ function OverviewTab({
   project,
   deploymentPage,
   deploymentLoading,
+  publishedView,
   runtimeRefreshKey,
 }: {
   workspaceId: string;
   project: ProjectVM;
   deploymentPage: DeploymentRunListVM | null;
   deploymentLoading: boolean;
+  publishedView: boolean;
   runtimeRefreshKey: number;
 }) {
   const published = hasSuccessfulDeployment(deploymentPage);
 
   if (deploymentLoading && !deploymentPage) {
-    return <p className="text-muted">概览加载中…</p>;
+    if (publishedView) {
+      return (
+        <ProjectPublishedOverview
+          workspaceId={workspaceId}
+          project={project}
+          deploymentPage={null}
+          refreshKey={runtimeRefreshKey}
+        />
+      );
+    }
+    return (
+      <p className="text-muted project-overview-loading">概览加载中…</p>
+    );
   }
 
-  if (!published) {
+  if (!published && !publishedView) {
     return (
       <ProjectUnpublishedOverview
         project={project}
@@ -151,80 +152,6 @@ function OverviewTab({
   );
 }
 
-function ConfigTab({
-  workspaceId,
-  project,
-  secrets,
-  templates,
-  loading,
-  onConfigure,
-  canEdit,
-}: {
-  workspaceId: string;
-  project: ProjectVM;
-  secrets: SecretVM[];
-  templates: TemplateVM[];
-  loading: boolean;
-  onConfigure: () => void;
-  canEdit: boolean;
-}) {
-  const gitSecret = secrets.find((item) => item.id === project.secret_id);
-  const registrySecret = secrets.find((item) => item.id === project.resources?.registry_secret_id);
-  const jenkinsSecret = secrets.find((item) => item.id === project.jenkins_secret_id);
-  const generatedTemplateCount = countGeneratedTemplates(project, templates);
-
-  return (
-    <div className="stack-md">
-      {canEdit ? (
-        <div className="flex justify-end">
-          <button type="button" className="btn btn-secondary text-sm" onClick={onConfigure}>
-            {projectConfigActionLabel(project)}
-          </button>
-        </div>
-      ) : null}
-      {loading ? <p className="text-muted">配置详情加载中…</p> : null}
-      <InfoGrid
-        items={[
-          { label: "Git 仓库", value: project.git_url || "-", full: true },
-          { label: "引用类型", value: project.git_ref_type || "branch" },
-          { label: "引用值", value: project.git_ref_value || "-" },
-          { label: "Dockerfile", value: project.dockerfile_path || "./Dockerfile" },
-          {
-            label: "Git 密钥",
-            value: gitSecret ? gitSecret.display_name || gitSecret.name : project.secret_id || "未配置",
-          },
-          {
-            label: "镜像仓库密钥",
-            value: registrySecret
-              ? registrySecret.display_name || registrySecret.name
-              : project.resources?.registry_secret_id || "未配置",
-          },
-          {
-            label: "Jenkins 密钥",
-            value: jenkinsSecret
-              ? jenkinsSecret.display_name || jenkinsSecret.name
-              : project.jenkins_secret_id || "未配置",
-          },
-          { label: "默认集群", value: project.default_cluster_id || "未配置" },
-          {
-            label: "副本 / CPU / 内存",
-            value: `${project.resources?.replicas ?? "-"} · ${project.resources?.cpu_request || "-"} ~ ${project.resources?.cpu_limit || "-"} · ${project.resources?.memory_request || "-"} ~ ${project.resources?.memory_limit || "-"}`,
-            full: true,
-          },
-          {
-            label: "生成模板数",
-            value: generatedTemplateCount > 0 ? `${generatedTemplateCount} 个` : "暂无",
-          },
-        ]}
-      />
-      <section className="stack-sm">
-        <h4 className="project-service-section-title">Dockerfile 预览</h4>
-        <ProjectDockerfileViewer workspaceId={workspaceId} project={project} />
-      </section>
-    </div>
-  );
-}
-
 export function ProjectServiceDetailPage({
   workspaceId,
   project,
@@ -239,22 +166,30 @@ export function ProjectServiceDetailPage({
   onProjectUpdated,
   deploymentPage = null,
   deploymentLoading = false,
+  runtimeRefreshKey: externalRuntimeRefreshKey = 0,
   onRunChanged,
 }: ProjectServiceDetailPageProps) {
-  const [secrets, setSecrets] = useState<SecretVM[]>([]);
-  const [templates, setTemplates] = useState<TemplateVM[]>([]);
-  const [configLoading, setConfigLoading] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [expandModalOpen, setExpandModalOpen] = useState(false);
   const [scaleModalOpen, setScaleModalOpen] = useState(false);
   const [rollbackModalOpen, setRollbackModalOpen] = useState(false);
   const [runtimeOverview, setRuntimeOverview] = useState<ProjectRuntimeOverviewVM | null>(null);
-  const [runtimeRefreshKey, setRuntimeRefreshKey] = useState(0);
+  const [localRuntimeRefreshKey, setLocalRuntimeRefreshKey] = useState(0);
+  const stickyPublished = useStickyPublishedProject(project.id);
+  const runtimeRefreshKey = externalRuntimeRefreshKey + localRuntimeRefreshKey;
   const primaryAction = projectPrimaryAction(project);
   const statusText = reviewStatusLabel(project);
   const businessSpace = project.namespace || workspaceId;
-  const published = isPublishedProjectView(deploymentPage, tab);
+  const published = resolvePublishedProjectView(deploymentPage, tab, {
+    loading: deploymentLoading,
+    stickyPublished,
+  });
   const detailTabs = projectDetailTabs(published);
+
+  useEffect(() => {
+    if (!isPublishedProjectView(deploymentPage, tab)) return;
+    markStickyPublishedProject(project.id);
+  }, [deploymentPage, project.id, tab]);
   const canScale = hasSuccessfulDeployment(deploymentPage);
   const hasActiveRun = deployAction.label === "查看部署进度";
   const rollbackGate = canRollbackDeployment(deploymentPage, hasActiveRun);
@@ -279,30 +214,9 @@ export function ProjectServiceDetailPage({
   }, [loadRuntimeOverview, runtimeRefreshKey]);
 
   const handleRuntimeScaled = useCallback(() => {
-    setRuntimeRefreshKey((value) => value + 1);
+    setLocalRuntimeRefreshKey((value) => value + 1);
     void loadRuntimeOverview();
   }, [loadRuntimeOverview]);
-
-  useEffect(() => {
-    if (tab !== "config") return;
-    let cancelled = false;
-    setConfigLoading(true);
-    void Promise.all([
-      secret.listSecrets(workspaceId).catch(() => [] as SecretVM[]),
-      product.listTemplates(workspaceId).catch(() => [] as TemplateVM[]),
-    ])
-      .then(([secretList, templateList]) => {
-        if (cancelled) return;
-        setSecrets(secretList);
-        setTemplates(templateList);
-      })
-      .finally(() => {
-        if (!cancelled) setConfigLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tab, workspaceId]);
 
   const headerActions = useMemo(() => {
     if (primaryAction === "deploy") {
@@ -519,6 +433,7 @@ export function ProjectServiceDetailPage({
                 project={project}
                 deploymentPage={deploymentPage}
                 deploymentLoading={deploymentLoading}
+                publishedView={published}
                 runtimeRefreshKey={runtimeRefreshKey}
               />
             </div>
@@ -540,18 +455,7 @@ export function ProjectServiceDetailPage({
               </section>
             </div>
           ) : null}
-          {published && tab === "config" ? (
-            <ConfigTab
-              workspaceId={workspaceId}
-              project={project}
-              secrets={secrets}
-              templates={templates}
-              loading={configLoading}
-              onConfigure={onConfigure}
-              canEdit={shouldShowEditConfigAction(project)}
-            />
-          ) : null}
-          {published && tab === "build-logs" ? (
+          {tab === "build-logs" ? (
             <ProjectDeploymentConsolePanel
               workspaceId={workspaceId}
               project={project}
@@ -560,9 +464,20 @@ export function ProjectServiceDetailPage({
               onRunChanged={onRunChanged}
             />
           ) : null}
-          {published && tab === "storage" ? <PlaceholderTab title="持久化存储" /> : null}
-          {published && tab === "webhooks" ? <PlaceholderTab title="Webhooks" /> : null}
-          {published && tab === "monitor" ? <PlaceholderTab title="监控" /> : null}
+          {tab === "configmap" ? (
+            <ProjectConfigMapTab
+              workspaceId={workspaceId}
+              project={project}
+              active={tab === "configmap"}
+            />
+          ) : null}
+          {tab === "storage" ? (
+            <ProjectStorageTab workspaceId={workspaceId} project={project} active={tab === "storage"} />
+          ) : null}
+          {tab === "webhooks" ? (
+            <ProjectWebhookTab workspaceId={workspaceId} project={project} active={tab === "webhooks"} />
+          ) : null}
+          {tab === "monitor" ? <PlaceholderTab title="监控" /> : null}
         </div>
       </div>
 

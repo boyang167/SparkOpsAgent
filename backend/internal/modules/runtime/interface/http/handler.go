@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -15,13 +16,13 @@ import (
 )
 
 type Handler struct {
-	listPods       *query.ListPodsHandler
-	getPod         *query.GetPodHandler
-	podLogs        *query.GetPodLogsHandler
-	terminal       *query.StreamPodTerminalHandler
-	overview       *query.GetProjectRuntimeOverviewHandler
-	restartPod     *command.RestartPodHandler
-	runtimeConfig  *command.RuntimeConfigHandler
+	listPods      *query.ListPodsHandler
+	getPod        *query.GetPodHandler
+	podLogs       *query.GetPodLogsHandler
+	terminal      *query.StreamPodTerminalHandler
+	overview      *query.GetProjectRuntimeOverviewHandler
+	restartPod    *command.RestartPodHandler
+	runtimeConfig *command.RuntimeConfigHandler
 }
 
 func NewHandler(
@@ -239,6 +240,143 @@ func (h *Handler) PutDeploymentResources(c *gin.Context) {
 			return err
 		}
 		return h.runtimeConfig.UpdateDeploymentResources(ctx, wsID, projectID, body)
+	})
+}
+
+func (h *Handler) ListConfigMaps(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	if h.runtimeConfig == nil {
+		httpx.Fail(c, "RUNTIME_NOT_CONFIGURED", "runtime configurator unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	items, err := h.runtimeConfig.ListConfigMaps(c.Request.Context(), wsID, projectID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) CreateConfigMap(c *gin.Context) {
+	h.handleRuntimeConfig(c, func(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) error {
+		var body runtimek8s.CreateConfigMapInput
+		_ = c.ShouldBindJSON(&body)
+		return h.runtimeConfig.CreateConfigMap(ctx, wsID, projectID, body)
+	})
+}
+
+func (h *Handler) UpsertConfigMapEntry(c *gin.Context) {
+	h.handleRuntimeConfig(c, func(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) error {
+		var body runtimek8s.UpsertConfigMapEntryInput
+		if err := c.ShouldBindJSON(&body); err != nil {
+			return err
+		}
+		return h.runtimeConfig.UpsertConfigMapEntry(ctx, wsID, projectID, c.Param("name"), body)
+	})
+}
+
+func (h *Handler) ReplaceConfigMapData(c *gin.Context) {
+	h.handleRuntimeConfig(c, func(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) error {
+		var body runtimek8s.ReplaceConfigMapDataInput
+		if err := c.ShouldBindJSON(&body); err != nil {
+			return err
+		}
+		return h.runtimeConfig.ReplaceConfigMapData(ctx, wsID, projectID, c.Param("name"), body)
+	})
+}
+
+func (h *Handler) DeleteConfigMapEntry(c *gin.Context) {
+	h.handleRuntimeConfig(c, func(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) error {
+		key := c.Query("key")
+		if key == "" {
+			return fmt.Errorf("key is required")
+		}
+		return h.runtimeConfig.DeleteConfigMapEntry(ctx, wsID, projectID, c.Param("name"), key)
+	})
+}
+
+func (h *Handler) ListPVCs(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	if h.runtimeConfig == nil {
+		httpx.Fail(c, "RUNTIME_NOT_CONFIGURED", "runtime configurator unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	items, err := h.runtimeConfig.ListPVCs(c.Request.Context(), wsID, projectID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) ListStorageClasses(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	if h.runtimeConfig == nil {
+		httpx.Fail(c, "RUNTIME_NOT_CONFIGURED", "runtime configurator unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	items, err := h.runtimeConfig.ListStorageClasses(c.Request.Context(), wsID, projectID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) CreatePVC(c *gin.Context) {
+	h.handleRuntimeConfig(c, func(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) error {
+		var body runtimek8s.CreatePVCInput
+		_ = c.ShouldBindJSON(&body)
+		return h.runtimeConfig.CreatePVC(ctx, wsID, projectID, body)
+	})
+}
+
+func (h *Handler) BindPVC(c *gin.Context) {
+	h.handleRuntimeConfig(c, func(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) error {
+		var body runtimek8s.BindPVCInput
+		if err := c.ShouldBindJSON(&body); err != nil {
+			return err
+		}
+		return h.runtimeConfig.BindPVC(ctx, wsID, projectID, c.Param("name"), body)
+	})
+}
+
+func (h *Handler) UnbindPVC(c *gin.Context) {
+	h.handleRuntimeConfig(c, func(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) error {
+		return h.runtimeConfig.UnbindPVC(ctx, wsID, projectID, c.Param("name"))
+	})
+}
+
+func (h *Handler) DeletePVC(c *gin.Context) {
+	h.handleRuntimeConfig(c, func(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) error {
+		return h.runtimeConfig.DeletePVC(ctx, wsID, projectID, c.Param("name"))
 	})
 }
 

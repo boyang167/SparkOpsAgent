@@ -13,6 +13,7 @@ const PROJECT_NAV_ITEMS = [
   { segment: "agents", label: "智能体", suffix: "/agents" },
   { segment: "workflows", label: "工作流", suffix: "/workflows" },
   { segment: "runtime", label: "运行环境", suffix: "/runtime" },
+  { segment: "config", label: "配置", suffix: "/config" },
 ] as const;
 
 const PROJECT_NAV_SUFFIXES = PROJECT_NAV_ITEMS.map((item) => item.suffix).filter(Boolean);
@@ -26,7 +27,7 @@ function isNavActive(pathname: string, projectId: string, suffix: string) {
         !PROJECT_NAV_SUFFIXES.some((navSuffix) => pathname.startsWith(`${base}${navSuffix}`)))
     );
   }
-  return pathname.startsWith(`${base}${suffix}`);
+  return pathname === `${base}${suffix}` || pathname.startsWith(`${base}${suffix}/`);
 }
 
 export function ProjectNav({ projectId, projectName }: ProjectNavProps) {
@@ -50,7 +51,11 @@ export function ProjectNav({ projectId, projectName }: ProjectNavProps) {
         const href = `${base}${item.suffix}`;
         const active = isNavActive(pathname, projectId, item.suffix);
         return (
-          <Link key={item.label} href={href} className={`nav-link ${active ? "nav-link-active" : ""}`}>
+          <Link
+            key={item.label}
+            href={href}
+            className={`nav-link${active ? " nav-link-active" : ""}`}
+          >
             <span className="nav-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="2" />

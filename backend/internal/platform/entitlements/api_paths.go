@@ -24,9 +24,10 @@ func APIPathEntitlement(path string) string {
 	case strings.Contains(path, "/knowledge-bases"), strings.HasPrefix(path, "/api/v1/documents/"):
 		return "knowledge"
 	case strings.Contains(path, "/builds"), strings.Contains(path, "/products"),
-		strings.Contains(path, "/workspaces/") && strings.Contains(path, "/secrets"):
+		strings.Contains(path, "/workspaces/") && strings.Contains(path, "/secrets"),
+		strings.Contains(path, "/projects/") && strings.Contains(path, "/webhooks"):
 		return "delivery"
-	case strings.Contains(path, "/webhooks"), strings.Contains(path, "/mcp/"):
+	case strings.Contains(path, "/mcp/"):
 		return "mcp"
 	case strings.Contains(path, "/cronjobs"), strings.Contains(path, "/pods"),
 		strings.Contains(path, "/k8s/"),

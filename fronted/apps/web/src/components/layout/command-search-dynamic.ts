@@ -60,6 +60,13 @@ export async function buildDynamicCommandItems(options: {
         kind: "project" as const,
         keywords: `${project.name} runtime 运行环境 集群 cluster`,
       },
+      {
+        href: `/projects/${project.id}/config`,
+        label: `${project.name} · 配置`,
+        group: "项目",
+        kind: "project" as const,
+        keywords: `${project.name} config 配置 configmap`,
+      },
     ].filter((item) => allow(item.href)),
   );
 
