@@ -23,6 +23,7 @@ type deploymentRunRow struct {
 	GitRefType     string `gorm:"size:16;not null"`
 	GitRefValue    string `gorm:"size:255;not null"`
 	ImageTag       string `gorm:"size:255;not null"`
+	CrossCluster   bool   `gorm:"not null;default:false"`
 	Status         string `gorm:"size:16;not null"`
 	BuildID        *string
 	ErrorMessage   string    `gorm:"not null;default:''"`
@@ -386,6 +387,19 @@ func (r *DeploymentRunRepository) ListEvents(ctx context.Context, runID kernel.D
 	return events, nil
 }
 
+func (r *DeploymentRunRepository) AppendEvent(ctx context.Context, run *model.DeploymentRun, message string) error {
+	at := time.Now().UTC()
+	eventRow := deploymentRunEventRow{
+		RunID: run.ID.String(), At: at, Status: string(run.Status),
+		Stage: string(run.CurrentStage), Message: message,
+	}
+	if err := insertDeploymentEvent(r.db.WithContext(ctx), &eventRow).Error; err != nil {
+		return err
+	}
+	r.publishEvent(run, eventRow)
+	return nil
+}
+
 func (r *DeploymentRunRepository) publishEvent(run *model.DeploymentRun, row deploymentRunEventRow) {
 	if r.sink == nil {
 		return
@@ -432,7 +446,7 @@ func toRunRow(run *model.DeploymentRun) *deploymentRunRow {
 	return &deploymentRunRow{
 		ID: run.ID.String(), WorkspaceID: run.WorkspaceID.String(), ProjectID: run.ProjectID.String(),
 		ClusterID: run.ClusterID.String(), GitRefType: run.GitRefType, GitRefValue: run.GitRefValue,
-		ImageTag: run.ImageTag, Status: string(run.Status), BuildID: buildIDValue(run.BuildID),
+		ImageTag: run.ImageTag, CrossCluster: run.CrossCluster, Status: string(run.Status), BuildID: buildIDValue(run.BuildID),
 		ErrorMessage: run.ErrorMessage, CreatedBy: run.CreatedBy.String(), CreatedAt: run.CreatedAt,
 		StartedAt: run.StartedAt, FinishedAt: run.FinishedAt, CurrentStage: string(run.CurrentStage),
 		RunType: runType, RollbackOfRunID: deploymentRunIDValue(run.RollbackOfRunID),
@@ -470,6 +484,7 @@ func fromRunRow(row deploymentRunRow) (*model.DeploymentRun, error) {
 	run := &model.DeploymentRun{
 		ID: id, WorkspaceID: wsID, ProjectID: projectID, ClusterID: clusterID,
 		GitRefType: row.GitRefType, GitRefValue: row.GitRefValue, ImageTag: row.ImageTag,
+		CrossCluster: row.CrossCluster,
 		Status: model.Status(row.Status), ErrorMessage: row.ErrorMessage, CreatedBy: createdBy,
 		CreatedAt: row.CreatedAt, StartedAt: row.StartedAt, FinishedAt: row.FinishedAt,
 		CurrentStage: model.Stage(row.CurrentStage),

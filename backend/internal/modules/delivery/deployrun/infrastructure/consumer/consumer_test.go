@@ -41,6 +41,9 @@ func (*consumerRepo) RecordInfrastructureFailure(context.Context, kernel.Deploym
 func (*consumerRepo) ListEvents(context.Context, kernel.DeploymentRunID) ([]model.DeploymentRunEvent, error) {
 	return nil, nil
 }
+func (*consumerRepo) AppendEvent(context.Context, *model.DeploymentRun, string) error {
+	return nil
+}
 func (*consumerRepo) HasActiveByProject(context.Context, kernel.ProjectID) (bool, error) {
 	return false, nil
 }

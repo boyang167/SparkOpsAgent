@@ -22,6 +22,7 @@ type DeploymentView struct {
 	GitRefType      string  `json:"git_ref_type"`
 	GitRefValue     string  `json:"git_ref_value"`
 	ImageTag        string  `json:"image_tag"`
+	CrossCluster    bool    `json:"cross_cluster"`
 	Status          string  `json:"status"`
 	RunType         string  `json:"run_type,omitempty"`
 	RollbackOfRunID *string `json:"rollback_of_run_id,omitempty"`
@@ -79,7 +80,7 @@ func (h *GetDeploymentHandler) Handle(ctx context.Context, wsID kernel.Workspace
 
 type ClusterOption struct {
 	ID         string `json:"id"`
-	Name       string `json:"name"`
+	Name       string `json:"cluster_name"`
 	Server     string `json:"server"`
 	Available  bool   `json:"available"`
 	IsBuildEnv bool   `json:"is_build_env"`
@@ -223,7 +224,7 @@ func ToDeploymentView(run *model.DeploymentRun) DeploymentView {
 	view := DeploymentView{
 		ID: run.ID.String(), WorkspaceID: run.WorkspaceID.String(), ProjectID: run.ProjectID.String(),
 		ClusterID: run.ClusterID.String(), GitRefType: run.GitRefType, GitRefValue: run.GitRefValue,
-		ImageTag: run.ImageTag, Status: string(run.Status), RunType: runType,
+		ImageTag: run.ImageTag, CrossCluster: run.CrossCluster, Status: string(run.Status), RunType: runType,
 		CurrentStage: string(run.CurrentStage),
 		ErrorMessage: run.ErrorMessage, CreatedBy: run.CreatedBy.String(), CreatedAt: run.CreatedAt.Format(time.RFC3339),
 	}

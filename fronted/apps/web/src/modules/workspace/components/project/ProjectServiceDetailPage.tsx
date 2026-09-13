@@ -52,6 +52,7 @@ interface ProjectServiceDetailPageProps {
   onTabChange: (tab: ProjectDetailTab) => void;
   deployAction: DeploymentEntryAction;
   onRelease: () => void;
+  onCrossClusterRelease?: () => void;
   onViewDeployProgress: () => void;
   onConfigure: () => void;
   onSubmitReview: () => void;
@@ -159,6 +160,7 @@ export function ProjectServiceDetailPage({
   onTabChange,
   deployAction,
   onRelease,
+  onCrossClusterRelease,
   onViewDeployProgress,
   onConfigure,
   onSubmitReview,
@@ -222,7 +224,13 @@ export function ProjectServiceDetailPage({
     if (primaryAction === "deploy") {
       return (
         <>
-          <button type="button" className="btn btn-secondary text-sm" disabled title="待开发">
+          <button
+            type="button"
+            className="btn btn-secondary text-sm"
+            disabled={deployAction.disabled && deployAction.label === "发布"}
+            title={deployAction.reason ?? undefined}
+            onClick={() => onCrossClusterRelease?.()}
+          >
             跨集群发布
           </button>
           <button
@@ -309,6 +317,7 @@ export function ProjectServiceDetailPage({
     deployAction,
     onConfigure,
     onRelease,
+    onCrossClusterRelease,
     onReview,
     onSubmitReview,
     onViewDeployProgress,

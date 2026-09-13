@@ -62,6 +62,9 @@ func (r *queryRepo) ListEvents(context.Context, kernel.DeploymentRunID) ([]model
 	}
 	return r.events, nil
 }
+func (*queryRepo) AppendEvent(context.Context, *model.DeploymentRun, string) error {
+	return nil
+}
 func (*queryRepo) HasActiveByProject(context.Context, kernel.ProjectID) (bool, error) {
 	return false, nil
 }

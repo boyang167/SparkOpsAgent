@@ -41,6 +41,7 @@ export function ProjectWorkbenchPage({
   const searchParams = useSearchParams();
   const [configureOpen, setConfigureOpen] = useState(initialConfigure);
   const [deployOpen, setDeployOpen] = useState(false);
+  const [crossClusterDeploy, setCrossClusterDeploy] = useState(false);
   const [selectedRun, setSelectedRun] = useState<DeploymentRunVM | null>(null);
   const [currentProject, setCurrentProject] = useState(project);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -221,10 +222,11 @@ export function ProjectWorkbenchPage({
     [currentProject.id, router, searchParams],
   );
 
-  const openDeploy = useCallback(() => {
+  const openDeploy = useCallback((crossCluster = false) => {
     if (activeRun) {
       setError(null);
       setSelectedRun(activeRun);
+      setCrossClusterDeploy(false);
       setDeployOpen(true);
       return;
     }
@@ -232,10 +234,27 @@ export function ProjectWorkbenchPage({
       setError(deployAction.reason ?? "当前不可发布，请先完成部署前置条件");
       return;
     }
+    if (crossCluster) {
+      const clusters = deploymentOptions?.clusters ?? [];
+      if (clusters.length < 2) {
+        setError("跨集群发布需要至少 2 个已授权集群：请先在运行环境中配置构建集群与同步目标");
+        return;
+      }
+      const build = clusters.find((c) => c.is_build_env) ?? clusters[0];
+      const syncNames = clusters.filter((c) => c.id !== build?.id).map((c) => c.cluster_name);
+      if (
+        !window.confirm(
+          `将在构建集群「${build?.cluster_name ?? "-"}」构建并部署，随后同步到：${syncNames.join("、")}。\n确定开始跨集群发布？`,
+        )
+      ) {
+        return;
+      }
+    }
     setError(null);
     setSelectedRun(null);
+    setCrossClusterDeploy(crossCluster);
     setDeployOpen(true);
-  }, [activeRun, deployAction.disabled, deployAction.reason]);
+  }, [activeRun, deployAction.disabled, deployAction.reason, deploymentOptions]);
 
   useEffect(() => {
     if (searchParams.get("release") !== "1" || releaseHandledRef.current) return;
@@ -284,7 +303,8 @@ export function ProjectWorkbenchPage({
         tab={activeTab}
         onTabChange={setTab}
         deployAction={deployAction}
-        onRelease={openDeploy}
+        onRelease={() => openDeploy(false)}
+        onCrossClusterRelease={() => openDeploy(true)}
         onViewDeployProgress={() => {
           setError(null);
           setSelectedRun(activeRun);
@@ -318,14 +338,17 @@ export function ProjectWorkbenchPage({
         project={currentProject}
         initialRun={selectedRun ?? activeRun}
         deploymentPage={deploymentPage}
+        crossCluster={crossClusterDeploy}
         onRunChanged={handleRunChanged}
         onDeployStarted={() => {
           setDeployOpen(false);
+          setCrossClusterDeploy(false);
           setSelectedRun(null);
           setTab("build-logs");
         }}
         onClose={() => {
           setDeployOpen(false);
+          setCrossClusterDeploy(false);
           setSelectedRun(null);
         }}
       />

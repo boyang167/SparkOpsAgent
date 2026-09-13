@@ -29,6 +29,7 @@ interface ProjectDeployModalProps {
   initialRun?: DeploymentRunVM | null;
   deploymentPage?: DeploymentRunListVM | null;
   initialConsoleView?: boolean;
+  crossCluster?: boolean;
   onRunChanged?: (run: DeploymentRunVM) => void;
   onDeployStarted?: (run: DeploymentRunVM) => void;
   onClose: () => void;
@@ -43,6 +44,7 @@ export function ProjectDeployModal({
   initialRun = null,
   deploymentPage = null,
   initialConsoleView = false,
+  crossCluster = false,
   onRunChanged,
   onDeployStarted,
   onClose,
@@ -101,11 +103,14 @@ export function ProjectDeployModal({
         setActiveRun(selectedRun);
         setRun(selectedRun);
         if (selectedRun) setViewMode("console");
-        const preferred = nextOptions.clusters.some(
-          (cluster) => cluster.id === project.default_cluster_id,
-        )
-          ? project.default_cluster_id
-          : nextOptions.clusters[0]?.id;
+        const buildCluster =
+          nextOptions.clusters.find((cluster) => cluster.is_build_env) ??
+          nextOptions.clusters[0];
+        const preferred = crossCluster
+          ? buildCluster?.id
+          : nextOptions.clusters.some((cluster) => cluster.id === project.default_cluster_id)
+            ? project.default_cluster_id
+            : nextOptions.clusters[0]?.id;
         setClusterId(preferred ?? "");
       })
       .catch((err) => {
@@ -120,7 +125,7 @@ export function ProjectDeployModal({
     return () => {
       cancelled = true;
     };
-  }, [open, project, workspaceId, initialConsoleView]);
+  }, [open, project, workspaceId, initialConsoleView, crossCluster]);
 
   useEffect(() => {
     if (!open || !run || !isActiveDeploymentRun(run) || viewMode !== "form") return;
@@ -195,10 +200,11 @@ export function ProjectDeployModal({
     setSubmitting(true);
     setError(null);
     const input: CreateDeploymentCommand = {
-      cluster_id: clusterId || undefined,
+      cluster_id: crossCluster ? undefined : clusterId || undefined,
       git_ref_type: gitRefType,
       git_ref_value: trimmedRef,
       ...(imageTag.trim() ? { image_tag: imageTag.trim() } : {}),
+      ...(crossCluster ? { cross_cluster: true } : {}),
     };
     try {
       const created = await delivery.createDeployment(project.id, workspaceId, input);
@@ -238,7 +244,7 @@ export function ProjectDeployModal({
   const showConsole = viewMode === "console" && run && consoleDeploymentPage;
 
   return (
-    <Modal open={open} onClose={onClose} title="部署项目" size="xl">
+    <Modal open={open} onClose={onClose} title={crossCluster ? "跨集群发布" : "部署项目"} size="xl">
       <form className="stack-md" onSubmit={submit}>
         {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
 
@@ -280,16 +286,23 @@ export function ProjectDeployModal({
                 className="input"
                 value={clusterId}
                 onChange={(event) => setClusterId(event.target.value)}
-                disabled={loading || Boolean(run)}
+                disabled={loading || Boolean(run) || crossCluster}
                 required
               >
                 <option value="">请选择授权集群</option>
                 {options.clusters.map((cluster) => (
                   <option key={cluster.id} value={cluster.id}>
                     {cluster.cluster_name}
+                    {cluster.is_build_env ? "（构建集群）" : ""}
                   </option>
                 ))}
               </select>
+              {crossCluster ? (
+                <p className="text-muted text-sm">
+                  跨集群发布将在构建集群构建并部署，随后把同一镜像同步到其余授权集群。
+                </p>
+              ) : null}
+
             </label>
 
             <label className="stack-sm">

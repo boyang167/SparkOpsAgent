@@ -18,10 +18,11 @@ import (
 )
 
 type CreateInput struct {
-	ClusterID   string `json:"cluster_id"`
-	GitRefType  string `json:"git_ref_type"`
-	GitRefValue string `json:"git_ref_value"`
-	ImageTag    string `json:"image_tag"`
+	ClusterID    string `json:"cluster_id"`
+	GitRefType   string `json:"git_ref_type"`
+	GitRefValue  string `json:"git_ref_value"`
+	ImageTag     string `json:"image_tag"`
+	CrossCluster bool   `json:"cross_cluster"`
 }
 
 type CreateDeploymentHandler struct {
@@ -52,7 +53,17 @@ func (h *CreateDeploymentHandler) Handle(
 ) (*model.DeploymentRun, error) {
 	var selected kernel.ClusterInfoID
 	var err error
-	if strings.TrimSpace(input.ClusterID) != "" {
+	if input.CrossCluster {
+		clusters, listErr := h.reader.ListAuthorizedClusters(ctx, wsID)
+		if listErr != nil {
+			return nil, listErr
+		}
+		if len(clusters) < 2 {
+			return nil, domain.ErrCrossClusterSyncTargetsMissing
+		}
+		// Force build cluster (priority first); ignore client-selected cluster.
+		selected = kernel.ClusterInfoID{}
+	} else if strings.TrimSpace(input.ClusterID) != "" {
 		selected, err = kernel.ParseClusterInfoID(input.ClusterID)
 		if err != nil {
 			return nil, domain.ErrDeploymentClusterNotFound
@@ -72,6 +83,7 @@ func (h *CreateDeploymentHandler) Handle(
 
 	run := model.NewDeploymentRun(wsID, projectID, deploymentContext.Cluster.ID, memberID,
 		input.GitRefType, input.GitRefValue, input.ImageTag)
+	run.CrossCluster = input.CrossCluster
 	run.CreatedAt = h.clock().UTC()
 	if err := h.repo.Create(ctx, run); err != nil {
 		return nil, err

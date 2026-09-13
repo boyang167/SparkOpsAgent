@@ -59,19 +59,30 @@ func (*fakeRunRepo) RecordInfrastructureFailure(context.Context, kernel.Deployme
 func (*fakeRunRepo) ListEvents(context.Context, kernel.DeploymentRunID) ([]model.DeploymentRunEvent, error) {
 	return nil, nil
 }
+func (*fakeRunRepo) AppendEvent(context.Context, *model.DeploymentRun, string) error {
+	return nil
+}
 func (r *fakeRunRepo) HasActiveByProject(context.Context, kernel.ProjectID) (bool, error) {
 	return r.active, nil
 }
 
 type fakeDeploymentReader struct {
-	result  port.ProjectDeploymentContext
-	loadErr error
+	result   port.ProjectDeploymentContext
+	clusters []port.DeploymentCluster
+	loadErr  error
+	listErr  error
 }
 
 func (r fakeDeploymentReader) Load(context.Context, kernel.WorkspaceID, kernel.ProjectID, kernel.ClusterInfoID) (port.ProjectDeploymentContext, error) {
 	return r.result, r.loadErr
 }
 func (r fakeDeploymentReader) ListAuthorizedClusters(context.Context, kernel.WorkspaceID) ([]port.DeploymentCluster, error) {
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	if len(r.clusters) > 0 {
+		return r.clusters, nil
+	}
 	return []port.DeploymentCluster{r.result.Cluster}, nil
 }
 
@@ -131,12 +142,54 @@ func TestCreateDeploymentRejectsActiveRunWithoutPublishing(t *testing.T) {
 func TestCreateInputAcceptsSnakeCaseHTTPFields(t *testing.T) {
 	var input CreateInput
 	require.NoError(t, json.Unmarshal([]byte(`{
-		"cluster_id":"cluster","git_ref_type":"branch","git_ref_value":"main","image_tag":"release"
+		"cluster_id":"cluster","git_ref_type":"branch","git_ref_value":"main","image_tag":"release","cross_cluster":true
 	}`), &input))
 	require.Equal(t, "cluster", input.ClusterID)
 	require.Equal(t, "branch", input.GitRefType)
 	require.Equal(t, "main", input.GitRefValue)
 	require.Equal(t, "release", input.ImageTag)
+	require.True(t, input.CrossCluster)
+}
+
+func TestCreateCrossClusterRequiresSyncTargets(t *testing.T) {
+	wsID, projectID, clusterID := kernel.NewWorkspaceID(), kernel.NewProjectID(), kernel.NewClusterInfoID()
+	repo, queue := &fakeRunRepo{}, &recordingQueue{}
+	reader := approvedReader(wsID, projectID, clusterID)
+	handler := NewCreateDeploymentHandler(repo, reader, queue, time.Now)
+
+	_, err := handler.Handle(context.Background(), wsID, kernel.NewMemberID(), projectID, CreateInput{
+		GitRefType: "branch", GitRefValue: "main", CrossCluster: true,
+	})
+
+	require.ErrorIs(t, err, domain.ErrCrossClusterSyncTargetsMissing)
+	require.Empty(t, repo.created)
+	require.Empty(t, queue.payloads)
+}
+
+func TestCreateCrossClusterForcesBuildCluster(t *testing.T) {
+	wsID, projectID := kernel.NewWorkspaceID(), kernel.NewProjectID()
+	buildID, syncID := kernel.NewClusterInfoID(), kernel.NewClusterInfoID()
+	repo, queue := &fakeRunRepo{}, &recordingQueue{}
+	reader := fakeDeploymentReader{
+		result: port.ProjectDeploymentContext{
+			WorkspaceID: wsID, ProjectID: projectID,
+			Cluster: port.DeploymentCluster{ID: buildID, Name: "build"},
+		},
+		clusters: []port.DeploymentCluster{
+			{ID: buildID, Name: "build", IsBuildEnv: true},
+			{ID: syncID, Name: "sync"},
+		},
+	}
+	handler := NewCreateDeploymentHandler(repo, reader, queue, time.Now)
+
+	run, err := handler.Handle(context.Background(), wsID, kernel.NewMemberID(), projectID, CreateInput{
+		ClusterID: syncID.String(), GitRefType: "branch", GitRefValue: "main", CrossCluster: true,
+	})
+
+	require.NoError(t, err)
+	require.True(t, run.CrossCluster)
+	require.Equal(t, buildID, run.ClusterID)
+	require.Len(t, queue.payloads, 1)
 }
 
 func TestCreateDeploymentGateErrorDoesNotCreateRun(t *testing.T) {

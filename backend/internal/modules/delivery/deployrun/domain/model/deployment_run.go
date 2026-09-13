@@ -44,6 +44,7 @@ type DeploymentRun struct {
 	GitRefType       string
 	GitRefValue      string
 	ImageTag         string
+	CrossCluster     bool
 	Status           Status
 	CurrentStage     Stage
 	RunType          RunType

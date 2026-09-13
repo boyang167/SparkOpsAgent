@@ -90,6 +90,9 @@ func (r *subscriberRepo) RecordInfrastructureFailure(_ context.Context, _ kernel
 func (r *subscriberRepo) ListEvents(context.Context, kernel.DeploymentRunID) ([]model.DeploymentRunEvent, error) {
 	return nil, nil
 }
+func (*subscriberRepo) AppendEvent(context.Context, *model.DeploymentRun, string) error {
+	return nil
+}
 func (r *subscriberRepo) HasActiveByProject(context.Context, kernel.ProjectID) (bool, error) {
 	return false, nil
 }

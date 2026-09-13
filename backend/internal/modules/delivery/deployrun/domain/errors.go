@@ -16,4 +16,5 @@ var (
 	ErrDeploymentBindingInvalid       = kernel.NewDomainError("DELIVERY_DEPLOYMENT_BINDING_INVALID", "deployment binding is invalid")
 	ErrDeploymentBuildStalled         = kernel.NewDomainError("DELIVERY_DEPLOYMENT_BUILD_STALLED", "deployment build did not start or timed out")
 	ErrDeploymentNotRollbackable      = kernel.NewDomainError("DELIVERY_DEPLOYMENT_NOT_ROLLBACKABLE", "no rollback target is available")
+	ErrCrossClusterSyncTargetsMissing = kernel.NewDomainError("DELIVERY_CROSS_CLUSTER_TARGETS_MISSING", "no sync clusters configured for cross-cluster publish")
 )

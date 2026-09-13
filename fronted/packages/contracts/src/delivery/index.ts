@@ -46,6 +46,7 @@ export const DeploymentRunVMSchema = z.object({
   git_ref_type: z.enum(["branch", "tag"]),
   git_ref_value: z.string(),
   image_tag: z.string(),
+  cross_cluster: z.boolean().optional().default(false),
   status: DeploymentStatusSchema,
   run_type: DeploymentRunTypeSchema.optional().default("normal"),
   rollback_of_run_id: z.string().optional(),
@@ -74,6 +75,7 @@ export const CreateDeploymentCommandSchema = z.object({
   git_ref_type: z.enum(["branch", "tag"]),
   git_ref_value: z.string().min(1),
   image_tag: z.string().max(255).optional(),
+  cross_cluster: z.boolean().optional(),
 });
 
 export type CreateDeploymentCommand = z.infer<typeof CreateDeploymentCommandSchema>;

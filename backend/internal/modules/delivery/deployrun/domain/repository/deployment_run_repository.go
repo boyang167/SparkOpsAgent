@@ -19,5 +19,6 @@ type DeploymentRunRepository interface {
 	ReleaseLease(ctx context.Context, runID kernel.DeploymentRunID, expectedVersion int64, owner string) error
 	RecordInfrastructureFailure(ctx context.Context, runID kernel.DeploymentRunID, expectedVersion int64, message string) (*model.DeploymentRun, error)
 	ListEvents(ctx context.Context, runID kernel.DeploymentRunID) ([]model.DeploymentRunEvent, error)
+	AppendEvent(ctx context.Context, run *model.DeploymentRun, message string) error
 	HasActiveByProject(ctx context.Context, projectID kernel.ProjectID) (bool, error)
 }

@@ -268,6 +268,12 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 		if operationCtx.Err() != nil {
 			return operationCtx.Err()
 		}
+		if err := o.syncCrossClusterTargets(operationCtx, ctx, workspaceID, run); err != nil {
+			if operationCtx.Err() != nil {
+				return operationCtx.Err()
+			}
+			return o.failBusiness(ctx, run, err)
+		}
 		if err := run.Transition(model.StatusSucceeded, o.clock()); err != nil {
 			return err
 		}
@@ -403,6 +409,38 @@ func (o *Orchestrator) finalizeKubernetes(
 		return err
 	}
 	return o.deployer.RolloutRestart(ctx, target)
+}
+
+func (o *Orchestrator) syncCrossClusterTargets(
+	operationCtx context.Context,
+	parentCtx context.Context,
+	workspaceID kernel.WorkspaceID,
+	run *model.DeploymentRun,
+) error {
+	if !run.CrossCluster {
+		return nil
+	}
+	clusters, err := o.projects.ListAuthorizedClusters(operationCtx, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, cluster := range clusters {
+		if cluster.ID == run.ClusterID {
+			continue
+		}
+		_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("cross-cluster sync started: %s", cluster.Name))
+		project, err := o.projects.Load(operationCtx, workspaceID, run.ProjectID, cluster.ID)
+		if err != nil {
+			_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("cross-cluster sync failed: %s (%v)", cluster.Name, err))
+			return fmt.Errorf("sync cluster %s: %w", cluster.Name, err)
+		}
+		if err := o.finalizeKubernetes(operationCtx, run, project); err != nil {
+			_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("cross-cluster sync failed: %s (%v)", cluster.Name, err))
+			return fmt.Errorf("sync cluster %s: %w", cluster.Name, err)
+		}
+		_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("cross-cluster sync succeeded: %s", cluster.Name))
+	}
+	return nil
 }
 
 func (o *Orchestrator) renderManifests(

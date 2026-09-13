@@ -30,6 +30,7 @@ type orchestratorRepo struct {
 	leased      bool
 	listEntered chan struct{}
 	listRelease chan struct{}
+	events      []string
 }
 
 func (r *orchestratorRepo) Create(context.Context, *model.DeploymentRun) error { return nil }
@@ -72,6 +73,10 @@ func (r *orchestratorRepo) ListActive(context.Context) ([]*model.DeploymentRun, 
 }
 func (r *orchestratorRepo) ListEvents(context.Context, kernel.DeploymentRunID) ([]model.DeploymentRunEvent, error) {
 	return nil, nil
+}
+func (r *orchestratorRepo) AppendEvent(_ context.Context, _ *model.DeploymentRun, message string) error {
+	r.events = append(r.events, message)
+	return nil
 }
 func (r *orchestratorRepo) HasActiveByProject(context.Context, kernel.ProjectID) (bool, error) {
 	return false, nil
@@ -122,17 +127,33 @@ func (r *orchestratorRepo) RecordInfrastructureFailure(_ context.Context, runID 
 }
 
 type orchestratorProjects struct {
-	project deployport.ProjectDeploymentContext
-	err     error
-	loads   int
+	project  deployport.ProjectDeploymentContext
+	clusters []deployport.DeploymentCluster
+	err      error
+	loads    int
+	loadIDs  []kernel.ClusterInfoID
 }
 
-func (p *orchestratorProjects) Load(context.Context, kernel.WorkspaceID, kernel.ProjectID, kernel.ClusterInfoID) (deployport.ProjectDeploymentContext, error) {
+func (p *orchestratorProjects) Load(_ context.Context, _ kernel.WorkspaceID, _ kernel.ProjectID, clusterID kernel.ClusterInfoID) (deployport.ProjectDeploymentContext, error) {
 	p.loads++
-	return p.project, p.err
+	p.loadIDs = append(p.loadIDs, clusterID)
+	if p.err != nil {
+		return deployport.ProjectDeploymentContext{}, p.err
+	}
+	out := p.project
+	for _, cluster := range p.clusters {
+		if cluster.ID == clusterID {
+			out.Cluster = cluster
+			return out, nil
+		}
+	}
+	return out, nil
 }
-func (*orchestratorProjects) ListAuthorizedClusters(context.Context, kernel.WorkspaceID) ([]deployport.DeploymentCluster, error) {
-	return nil, nil
+func (p *orchestratorProjects) ListAuthorizedClusters(context.Context, kernel.WorkspaceID) ([]deployport.DeploymentCluster, error) {
+	if len(p.clusters) > 0 {
+		return p.clusters, nil
+	}
+	return []deployport.DeploymentCluster{p.project.Cluster}, nil
 }
 
 type orchestratorPrepare struct {
@@ -194,19 +215,23 @@ spec:
 }
 
 type orchestratorDeployer struct {
-	calls          int
-	restartCalls   int
-	target         runtimeport.DeploymentTarget
-	manifests      []runtimeport.Manifest
-	err            error
-	restartErr     error
+	calls        int
+	restartCalls int
+	target       runtimeport.DeploymentTarget
+	manifests    []runtimeport.Manifest
+	err          error
+	errAfter     int
+	restartErr   error
 }
 
 func (d *orchestratorDeployer) Deploy(_ context.Context, target runtimeport.DeploymentTarget, manifests []runtimeport.Manifest) error {
 	d.calls++
 	d.target = target
 	d.manifests = manifests
-	return d.err
+	if d.err != nil && (d.errAfter == 0 || d.calls > d.errAfter) {
+		return d.err
+	}
+	return nil
 }
 
 func (d *orchestratorDeployer) RolloutRestart(_ context.Context, target runtimeport.DeploymentTarget) error {
@@ -604,4 +629,46 @@ func TestOrchestratorMockClosureAdvancesOneStagePerDelivery(t *testing.T) {
 	require.NoError(t, f.o.Step(ctx, f.run.ID, f.wsID))
 	require.Equal(t, 1, f.trigger.calls)
 	require.Equal(t, 2, f.deployer.calls)
+}
+
+func TestDeployingCrossClusterSyncsOtherClusters(t *testing.T) {
+	f := newOrchestratorFixture(model.StatusDeploying)
+	f.run.CrossCluster = true
+	f.run.ImageTag = "sync-tag"
+	syncCluster := deployport.DeploymentCluster{
+		ID: kernel.NewClusterInfoID(), Name: "sync-env", Server: "https://sync.example",
+	}
+	f.projects.clusters = []deployport.DeploymentCluster{
+		{ID: f.run.ClusterID, Name: "build-env", Server: "https://cluster.example", IsBuildEnv: true},
+		syncCluster,
+	}
+
+	require.NoError(t, f.o.Step(context.Background(), f.run.ID, f.wsID))
+
+	require.Equal(t, model.StatusSucceeded, f.run.Status)
+	require.Equal(t, 2, f.deployer.calls)
+	require.Equal(t, 2, f.deployer.restartCalls)
+	require.Contains(t, f.repo.events, "cross-cluster sync started: sync-env")
+	require.Contains(t, f.repo.events, "cross-cluster sync succeeded: sync-env")
+	require.Equal(t, syncCluster.ID.String(), f.deployer.target.ClusterID)
+}
+
+func TestDeployingCrossClusterFailsWhenSyncFails(t *testing.T) {
+	f := newOrchestratorFixture(model.StatusDeploying)
+	f.run.CrossCluster = true
+	syncCluster := deployport.DeploymentCluster{
+		ID: kernel.NewClusterInfoID(), Name: "sync-env", Server: "https://sync.example",
+	}
+	f.projects.clusters = []deployport.DeploymentCluster{
+		{ID: f.run.ClusterID, Name: "build-env", Server: "https://cluster.example", IsBuildEnv: true},
+		syncCluster,
+	}
+	f.deployer.errAfter = 1
+	f.deployer.err = errors.New("apply failed")
+
+	require.NoError(t, f.o.Step(context.Background(), f.run.ID, f.wsID))
+
+	require.Equal(t, model.StatusFailed, f.run.Status)
+	require.Contains(t, f.run.ErrorMessage, "sync-env")
+	require.Contains(t, f.repo.events[len(f.repo.events)-1], "cross-cluster sync failed: sync-env")
 }
