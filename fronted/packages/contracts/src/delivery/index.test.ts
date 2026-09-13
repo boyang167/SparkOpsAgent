@@ -5,6 +5,7 @@ import {
   DeploymentOptionsVMSchema,
   DeploymentRunListVMSchema,
   DeploymentRunVMSchema,
+  SyncPreviewVMSchema,
 } from "./index";
 
 describe("deployment contracts", () => {
@@ -25,6 +26,46 @@ describe("deployment contracts", () => {
 
     expect(run.image_tag).toBe("main");
     expect(run.error_message).toBe("");
+  });
+
+  it("requires manifests for sync_only", () => {
+    expect(() =>
+      CreateDeploymentCommandSchema.parse({
+        sync_only: true,
+      }),
+    ).toThrow();
+    expect(
+      CreateDeploymentCommandSchema.parse({
+        sync_only: true,
+        manifests: [
+          {
+            kind: "ConfigMap",
+            name: "cfg",
+            yaml: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cfg\n",
+          },
+        ],
+      }),
+    ).toMatchObject({ sync_only: true });
+  });
+
+  it("parses sync preview payload", () => {
+    expect(
+      SyncPreviewVMSchema.parse({
+        build_cluster_id: "c1",
+        build_cluster_name: "build",
+        namespace: "demo",
+        items: [
+          {
+            id: "Deployment/demo",
+            kind: "Deployment",
+            name: "demo",
+            related_reason: "core workload",
+            default_selected: true,
+            yaml: "kind: Deployment",
+          },
+        ],
+      }).items,
+    ).toHaveLength(1);
   });
 
   it("rejects unsupported deployment values", () => {

@@ -178,6 +178,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		deployquery.NewGetDeploymentHandler(deployRepo),
 		deployquery.NewDeploymentOptionsHandler(deployReader),
 		deployquery.NewRollbackPreviewHandler(deployRepo),
+		deployquery.NewSyncPreviewHandler(deployReader),
 		deployquery.NewStreamDeploymentHandler(deployRepo, deployHub),
 	)
 
@@ -221,6 +222,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), deployHandler.Rollback)
 	c.Engine.GET("/api/v1/projects/:projectId/deployments/rollback-preview",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), deployHandler.RollbackPreview)
+	c.Engine.GET("/api/v1/projects/:projectId/deployments/sync-preview",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), deployHandler.SyncPreview)
 	c.Engine.GET("/api/v1/projects/:projectId/deployments",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), deployHandler.List)
 	c.Engine.GET("/api/v1/projects/:projectId/deployments/options",

@@ -278,7 +278,8 @@ func TestDeployRejectsMalformedUnknownAndCrossNamespaceDocuments(t *testing.T) {
 		expected error
 	}{
 		{name: "malformed", yaml: "apiVersion: apps/v1\nkind: Deployment\nmetadata: [", expected: runtimedomain.ErrManifestInvalid},
-		{name: "unknown", yaml: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: forbidden", expected: runtimedomain.ErrManifestUnsupported},
+		{name: "unknown", yaml: "apiVersion: batch/v1\nkind: CronJob\nmetadata:\n  name: forbidden", expected: runtimedomain.ErrManifestUnsupported},
+		{name: "configmap-without-workloads", yaml: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-config", expected: runtimedomain.ErrManifestInvalid},
 		{name: "cross namespace", yaml: deploymentYAML("repo/app:tag", "another-namespace"), expected: runtimedomain.ErrManifestNamespaceMismatch},
 	}
 	for _, tt := range tests {
@@ -292,6 +293,41 @@ func TestDeployRejectsMalformedUnknownAndCrossNamespaceDocuments(t *testing.T) {
 			require.Empty(t, dyn.Actions())
 		})
 	}
+}
+
+func TestDeployAllowsPartialWorkloadsWithConfigMapOnly(t *testing.T) {
+	dyn := applyDynamicClient(t)
+	typed := kubernetesfake.NewSimpleClientset()
+	deploymentTarget := target(20 * time.Millisecond)
+	deploymentTarget.AllowPartialWorkloads = true
+	deploymentTarget.ImageTag = ""
+	deploymentTarget.DeploymentName = ""
+	deploymentTarget.ServiceName = ""
+
+	err := NewManifestDeployer(dyn, typed, time.Millisecond).Deploy(
+		context.Background(),
+		deploymentTarget,
+		[]runtimeport.Manifest{{YAML: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-config\ndata:\n  key: value\n"}},
+	)
+
+	require.NoError(t, err)
+	require.NotEmpty(t, dyn.Actions())
+}
+
+func TestPrepareApplyOperationsOrdersByKind(t *testing.T) {
+	objects := []*unstructured.Unstructured{
+		{Object: map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": map[string]any{"name": "d", "namespace": "ns"}}},
+		{Object: map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "c", "namespace": "ns"}}},
+		{Object: map[string]any{"apiVersion": "networking.k8s.io/v1", "kind": "Ingress", "metadata": map[string]any{"name": "i", "namespace": "ns"}}},
+		{Object: map[string]any{"apiVersion": "v1", "kind": "Service", "metadata": map[string]any{"name": "s", "namespace": "ns"}}},
+		{Object: map[string]any{"apiVersion": "v1", "kind": "Secret", "metadata": map[string]any{"name": "sec", "namespace": "ns"}}},
+	}
+
+	ops, err := prepareApplyOperations(objects)
+	require.NoError(t, err)
+	require.Equal(t, []string{"ConfigMap", "Secret", "Service", "Ingress", "Deployment"}, []string{
+		ops[0].kind, ops[1].kind, ops[2].kind, ops[3].kind, ops[4].kind,
+	})
 }
 
 func TestApplyObjectsDoesNotPatchWhenLaterObjectCannotBeMarshaled(t *testing.T) {

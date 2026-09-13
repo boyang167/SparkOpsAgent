@@ -61,6 +61,27 @@ func TestDeploymentRunHappyPathSetsStagesAndTimestamps(t *testing.T) {
 	require.NotNil(t, run.FinishedAt)
 }
 
+func TestNewRollbackDeploymentRunCopiesCrossCluster(t *testing.T) {
+	wsID, projectID := kernel.NewWorkspaceID(), kernel.NewProjectID()
+	target := model.NewDeploymentRun(wsID, projectID, kernel.NewClusterInfoID(),
+		kernel.NewMemberID(), "branch", "main", "v1")
+	target.CrossCluster = true
+	rollback := model.NewRollbackDeploymentRun(wsID, projectID, kernel.NewMemberID(), target)
+	require.True(t, rollback.CrossCluster)
+	require.True(t, rollback.IsRollback())
+	require.True(t, rollback.SkipsBuild())
+}
+
+func TestNewSyncDeploymentRunSkipsBuildAndForcesCrossCluster(t *testing.T) {
+	run := model.NewSyncDeploymentRun(kernel.NewWorkspaceID(), kernel.NewProjectID(),
+		kernel.NewClusterInfoID(), kernel.NewMemberID(), "branch", "main", "v9")
+	require.True(t, run.CrossCluster)
+	require.True(t, run.IsSyncOnly())
+	require.True(t, run.SkipsBuild())
+	require.Equal(t, model.RunTypeSync, run.RunType)
+	require.Equal(t, "v9", run.ImageTag)
+}
+
 func TestDeploymentRunFailDoesNotMutateTerminalRun(t *testing.T) {
 	now := time.Date(2026, 8, 29, 2, 3, 4, 0, time.UTC)
 	run := model.NewDeploymentRun(kernel.NewWorkspaceID(), kernel.NewProjectID(),

@@ -219,6 +219,9 @@ export function RuntimeRollbackModal({
 
       <p className="runtime-rollback-hint">
         跳过 CI，使用历史镜像重新部署；副本与资源配置不变，失败不会自动再次回滚。
+        {selectedTarget?.cross_cluster
+          ? " 该版本为跨集群发布，回滚会同步到其余授权集群。"
+          : null}
       </p>
 
       <section className="runtime-rollback-section">

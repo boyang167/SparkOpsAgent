@@ -19,6 +19,10 @@ import {
   deploymentStatusTone,
   isActiveDeploymentRun,
 } from "./deployment-console-utils";
+import {
+  crossClusterSyncStatusLabel,
+  parseCrossClusterSyncProgress,
+} from "./cross-cluster-sync-progress";
 
 interface ProjectDeploymentConsolePanelProps {
   workspaceId: string;
@@ -119,28 +123,32 @@ export function ProjectDeploymentConsolePanel({
   }, [selectedId, workspaceId, runs]);
 
   useEffect(() => {
-    if (!active || !run || !isActiveDeploymentRun(run)) return;
+    if (!active || !run) return;
+    const shouldStream = isActiveDeploymentRun(run) || Boolean(run.cross_cluster);
+    if (!shouldStream) return;
     const generation = ++pollGenerationRef.current;
     let stopStream: (() => void) | null = null;
-    const poller = createSerialPoller({
-      refresh: () => delivery.getDeployment(run.id, workspaceId),
-      onValue: (next) => {
-        setRun(next);
-        onRunChanged?.(next);
-        if (!shouldContinueDeploymentPoll(next.status, generation, pollGenerationRef.current)) {
-          stopStream?.();
-          stopStream = null;
-        }
-      },
-      onError: (err) => {
-        setError(err instanceof BffError ? err.message : "刷新部署状态失败");
-      },
-      shouldContinue: (next) =>
-        shouldContinueDeploymentPoll(next.status, generation, pollGenerationRef.current),
-      schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
-      cancel: (timer) => window.clearTimeout(timer),
-      delayMs: 2000,
-    });
+    const poller = isActiveDeploymentRun(run)
+      ? createSerialPoller({
+          refresh: () => delivery.getDeployment(run.id, workspaceId),
+          onValue: (next) => {
+            setRun(next);
+            onRunChanged?.(next);
+            if (!shouldContinueDeploymentPoll(next.status, generation, pollGenerationRef.current)) {
+              stopStream?.();
+              stopStream = null;
+            }
+          },
+          onError: (err) => {
+            setError(err instanceof BffError ? err.message : "刷新部署状态失败");
+          },
+          shouldContinue: (next) =>
+            shouldContinueDeploymentPoll(next.status, generation, pollGenerationRef.current),
+          schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+          cancel: (timer) => window.clearTimeout(timer),
+          delayMs: 2000,
+        })
+      : null;
     stopStream = delivery.streamDeployment(run.id, {
       onDelta: (delta) => {
         if (pollGenerationRef.current !== generation) return;
@@ -155,13 +163,13 @@ export function ProjectDeploymentConsolePanel({
         stopStream = null;
       },
     });
-    poller.start();
+    poller?.start();
     return () => {
       if (pollGenerationRef.current === generation) pollGenerationRef.current += 1;
-      poller.stop();
+      poller?.stop();
       stopStream?.();
     };
-  }, [active, run?.id, run?.status, workspaceId, onRunChanged]);
+  }, [active, run?.id, run?.status, run?.cross_cluster, workspaceId, onRunChanged]);
 
   const selectedBuild = useMemo(() => {
     if (!run?.build_id) return null;
@@ -186,6 +194,10 @@ export function ProjectDeploymentConsolePanel({
 
   const showBuildStream = Boolean(run?.build_id);
   const running = run ? isActiveDeploymentRun(run) : false;
+  const syncProgress = useMemo(
+    () => (run?.cross_cluster ? parseCrossClusterSyncProgress(streamOutput) : []),
+    [run?.cross_cluster, streamOutput],
+  );
 
   return (
     <div className="project-build-logs-layout">
@@ -211,6 +223,18 @@ export function ProjectDeploymentConsolePanel({
                         {item.run_type === "rollback" ? (
                           <>
                             <span className="project-tag project-tag-orange">回滚</span>
+                            {" · "}
+                          </>
+                        ) : null}
+                        {item.run_type === "sync" ? (
+                          <>
+                            <span className="project-tag project-tag-blue">同步</span>
+                            {" · "}
+                          </>
+                        ) : null}
+                        {item.cross_cluster && item.run_type !== "sync" ? (
+                          <>
+                            <span className="project-tag project-tag-blue">跨集群</span>
                             {" · "}
                           </>
                         ) : null}
@@ -261,10 +285,42 @@ export function ProjectDeploymentConsolePanel({
                   回滚来源：{deploymentRollbackSourceTitle(run, runs)}
                 </span>
               ) : null}
+              {run.cross_cluster ? (
+                <span className="project-tag project-tag-blue">跨集群</span>
+              ) : null}
               {run.error_message ? (
                 <span className="text-xs text-[var(--danger)]">{run.error_message}</span>
               ) : null}
             </div>
+            {syncProgress.length > 0 ? (
+              <div className="project-cross-cluster-sync stack-xs">
+                <div className="text-xs text-muted">跨集群同步进度</div>
+                <ul className="project-cross-cluster-sync-list">
+                  {syncProgress.map((item) => (
+                    <li key={item.name} className="project-cross-cluster-sync-item">
+                      <StatusIcon
+                        tone={
+                          item.status === "succeeded"
+                            ? "success"
+                            : item.status === "failed"
+                              ? "failed"
+                              : item.status === "running"
+                                ? "running"
+                                : "neutral"
+                        }
+                      />
+                      <span className="project-cross-cluster-sync-copy">
+                        <strong>{item.name}</strong>
+                        <span>
+                          {crossClusterSyncStatusLabel(item.status)}
+                          {item.detail ? ` · ${item.detail}` : ""}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {showBuildStream && run.build_id ? (
               <BuildLogStream
                 buildId={run.build_id}

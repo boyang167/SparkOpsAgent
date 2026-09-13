@@ -17,4 +17,7 @@ var (
 	ErrDeploymentBuildStalled         = kernel.NewDomainError("DELIVERY_DEPLOYMENT_BUILD_STALLED", "deployment build did not start or timed out")
 	ErrDeploymentNotRollbackable      = kernel.NewDomainError("DELIVERY_DEPLOYMENT_NOT_ROLLBACKABLE", "no rollback target is available")
 	ErrCrossClusterSyncTargetsMissing = kernel.NewDomainError("DELIVERY_CROSS_CLUSTER_TARGETS_MISSING", "no sync clusters configured for cross-cluster publish")
+	ErrDeploymentNotSyncable            = kernel.NewDomainError("DELIVERY_DEPLOYMENT_NOT_SYNCABLE", "no succeeded deployment with image tag is available for sync")
+	ErrDeploymentSyncManifestsEmpty     = kernel.NewDomainError("DELIVERY_DEPLOYMENT_SYNC_MANIFESTS_EMPTY", "at least one sync manifest is required")
+	ErrDeploymentSyncManifestInvalid    = kernel.NewDomainError("DELIVERY_DEPLOYMENT_SYNC_MANIFEST_INVALID", "sync manifest is invalid")
 )

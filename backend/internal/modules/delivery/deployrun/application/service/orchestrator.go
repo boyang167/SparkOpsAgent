@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
@@ -125,7 +126,7 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			return o.handleProjectError(ctx, run, err)
 		}
 		nextStatus := model.StatusPreparing
-		if run.IsRollback() {
+		if run.SkipsBuild() {
 			nextStatus = model.StatusDeploying
 		}
 		if err := run.Transition(nextStatus, o.clock()); err != nil {
@@ -259,11 +260,13 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			}
 			return o.handleProjectError(ctx, run, err)
 		}
-		if err := o.finalizeKubernetes(operationCtx, run, project); err != nil {
-			if operationCtx.Err() != nil {
-				return operationCtx.Err()
+		if !(run.IsSyncOnly() && len(run.SyncManifests) > 0) {
+			if err := o.finalizeKubernetes(operationCtx, run, project); err != nil {
+				if operationCtx.Err() != nil {
+					return operationCtx.Err()
+				}
+				return o.handleDependencyError(ctx, run, err)
 			}
-			return o.handleDependencyError(ctx, run, err)
 		}
 		if operationCtx.Err() != nil {
 			return operationCtx.Err()
@@ -424,6 +427,7 @@ func (o *Orchestrator) syncCrossClusterTargets(
 	if err != nil {
 		return err
 	}
+	useSyncManifests := run.IsSyncOnly() && len(run.SyncManifests) > 0
 	for _, cluster := range clusters {
 		if cluster.ID == run.ClusterID {
 			continue
@@ -434,13 +438,70 @@ func (o *Orchestrator) syncCrossClusterTargets(
 			_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("cross-cluster sync failed: %s (%v)", cluster.Name, err))
 			return fmt.Errorf("sync cluster %s: %w", cluster.Name, err)
 		}
-		if err := o.finalizeKubernetes(operationCtx, run, project); err != nil {
+		if useSyncManifests {
+			applied, err := o.applySyncManifests(operationCtx, run, project)
+			if err != nil {
+				_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("cross-cluster sync failed: %s (%v)", cluster.Name, err))
+				return fmt.Errorf("sync cluster %s: %w", cluster.Name, err)
+			}
+			if applied != "" {
+				_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("applied: %s", applied))
+			}
+		} else if err := o.finalizeKubernetes(operationCtx, run, project); err != nil {
 			_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("cross-cluster sync failed: %s (%v)", cluster.Name, err))
 			return fmt.Errorf("sync cluster %s: %w", cluster.Name, err)
 		}
 		_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("cross-cluster sync succeeded: %s", cluster.Name))
 	}
 	return nil
+}
+
+func (o *Orchestrator) applySyncManifests(
+	ctx context.Context,
+	run *model.DeploymentRun,
+	project deployport.ProjectDeploymentContext,
+) (string, error) {
+	ordered := model.SyncApplyOrder(run.SyncManifests)
+	manifests := make([]runtimeport.Manifest, 0, len(ordered))
+	pullSecrets := make([]string, 0)
+	applied := make([]string, 0, len(ordered))
+	deploymentName := ""
+	serviceName := ""
+	hasDeployment := false
+	for _, item := range ordered {
+		applied = append(applied, item.Kind+"/"+item.Name)
+		if item.ManagedPullSecret {
+			pullSecrets = append(pullSecrets, item.Name)
+			continue
+		}
+		manifests = append(manifests, runtimeport.Manifest{YAML: item.YAML})
+		switch item.Kind {
+		case model.SyncManifestKindDeployment:
+			deploymentName = item.Name
+			hasDeployment = true
+		case model.SyncManifestKindService:
+			serviceName = item.Name
+		}
+	}
+	if len(manifests) == 0 && len(pullSecrets) == 0 {
+		return "", domain.ErrDeploymentSyncManifestsEmpty
+	}
+	target := o.buildDeploymentTarget(project, run, deploymentName, serviceName)
+	target.AllowPartialWorkloads = true
+	target.SkipRolloutWait = true
+	target.ExtraImagePullSecrets = pullSecrets
+	if !hasDeployment {
+		target.ImageTag = ""
+	}
+	if err := o.deployer.Deploy(ctx, target, manifests); err != nil {
+		return "", err
+	}
+	if hasDeployment {
+		if err := o.deployer.RolloutRestart(ctx, target); err != nil {
+			return "", err
+		}
+	}
+	return strings.Join(applied, ", "), nil
 }
 
 func (o *Orchestrator) renderManifests(

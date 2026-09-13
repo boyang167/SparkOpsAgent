@@ -1,0 +1,60 @@
+﻿"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { BffError } from "@sparkops/contracts";
+import type { ProjectVM } from "@sparkops/contracts/workspace";
+import { delivery, workspace } from "@sparkops/web-sdk";
+import type {
+  DeploymentOptionsVM,
+  DeploymentRunListVM,
+  DeploymentRunVM,
+} from "@sparkops/contracts/delivery";
+import { InlineAlert } from "@/components/ui/InlineAlert";
+import { ProjectConfigurePanel } from "./ProjectConfigurePanel";
+import { ProjectReviewModal } from "./ProjectReviewModal";
+import { ProjectDeployModal } from "./ProjectDeployModal";
+import { ProjectServiceDetailPage } from "./ProjectServiceDetailPage";
+import {
+  CrossClusterConfirmModal,
+  type CrossClusterConfirmMode,
+} from "./CrossClusterConfirmModal";
+import { projectDisplayName } from "./project-utils";
+import { deploymentEntryAction } from "./deployment-gate";
+import {
+  createSerialPoller,
+  shouldContinueDeploymentPoll,
+} from "./deployment-poll";
+import { resolvePublishedProjectView, useStickyPublishedProject } from "./project-deployment-state";
+import { parseProjectDetailTab, type ProjectDetailTab } from "./project-detail-tabs";
+
+---
+19:  CrossClusterConfirmModal,
+20:  type CrossClusterConfirmMode,
+21:} from "./CrossClusterConfirmModal";
+48:  const [crossClusterDeploy, setCrossClusterDeploy] = useState(false);
+49:  const [crossClusterConfirmOpen, setCrossClusterConfirmOpen] = useState(false);
+50:  const [crossClusterConfirmMode, setCrossClusterConfirmMode] =
+51:    useState<CrossClusterConfirmMode>("publish");
+52:  const [crossClusterSyncSubmitting, setCrossClusterSyncSubmitting] = useState(false);
+259:      setCrossClusterDeploy(false);
+273:      setCrossClusterConfirmMode("publish");
+274:      setCrossClusterConfirmOpen(true);
+279:    setCrossClusterDeploy(false);
+283:  const openCrossClusterSync = useCallback(() => {
+287:      setCrossClusterDeploy(false);
+300:    setCrossClusterConfirmMode("sync");
+301:    setCrossClusterConfirmOpen(true);
+304:  const confirmCrossClusterAction = useCallback(async () => {
+306:      setCrossClusterConfirmOpen(false);
+308:      setCrossClusterDeploy(true);
+312:    setCrossClusterSyncSubmitting(true);
+321:      setCrossClusterConfirmOpen(false);
+328:      setCrossClusterSyncSubmitting(false);
+389:        onCrossClusterRelease={() => openDeploy(true)}
+390:        onCrossClusterSync={openCrossClusterSync}
+428:          setCrossClusterDeploy(false);
+434:          setCrossClusterDeploy(false);
+438:      <CrossClusterConfirmModal
+452:          setCrossClusterConfirmOpen(false);
+454:        onConfirm={() => void confirmCrossClusterAction()}

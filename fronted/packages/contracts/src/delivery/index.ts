@@ -34,7 +34,7 @@ export const DeploymentStatusSchema = z.enum([
 
 export type DeploymentStatus = z.infer<typeof DeploymentStatusSchema>;
 
-export const DeploymentRunTypeSchema = z.enum(["normal", "rollback"]);
+export const DeploymentRunTypeSchema = z.enum(["normal", "rollback", "sync"]);
 
 export type DeploymentRunType = z.infer<typeof DeploymentRunTypeSchema>;
 
@@ -70,13 +70,83 @@ export const DeploymentRunListVMSchema = z.object({
 
 export type DeploymentRunListVM = z.infer<typeof DeploymentRunListVMSchema>;
 
-export const CreateDeploymentCommandSchema = z.object({
-  cluster_id: z.string().optional(),
-  git_ref_type: z.enum(["branch", "tag"]),
-  git_ref_value: z.string().min(1),
-  image_tag: z.string().max(255).optional(),
-  cross_cluster: z.boolean().optional(),
+export const SyncManifestKindSchema = z.enum([
+  "Deployment",
+  "Service",
+  "ConfigMap",
+  "Secret",
+  "Ingress",
+]);
+
+export type SyncManifestKind = z.infer<typeof SyncManifestKindSchema>;
+
+export const SyncManifestInputSchema = z.object({
+  kind: SyncManifestKindSchema,
+  name: z.string().min(1),
+  yaml: z.string().optional(),
+  managed_pull_secret: z.boolean().optional(),
 });
+
+export type SyncManifestInput = z.infer<typeof SyncManifestInputSchema>;
+
+export const SyncPreviewItemVMSchema = z.object({
+  id: z.string(),
+  kind: SyncManifestKindSchema,
+  name: z.string(),
+  related_reason: z.string().optional().default(""),
+  default_selected: z.boolean(),
+  managed: z.boolean().optional().default(false),
+  yaml: z.string().optional().default(""),
+  note: z.string().optional().default(""),
+});
+
+export type SyncPreviewItemVM = z.infer<typeof SyncPreviewItemVMSchema>;
+
+export const SyncPreviewVMSchema = z.object({
+  build_cluster_id: z.string(),
+  build_cluster_name: z.string(),
+  namespace: z.string(),
+  items: z.array(SyncPreviewItemVMSchema),
+});
+
+export type SyncPreviewVM = z.infer<typeof SyncPreviewVMSchema>;
+
+export const CreateDeploymentCommandSchema = z
+  .object({
+    cluster_id: z.string().optional(),
+    git_ref_type: z.enum(["branch", "tag"]).optional(),
+    git_ref_value: z.string().optional(),
+    image_tag: z.string().max(255).optional(),
+    cross_cluster: z.boolean().optional(),
+    sync_only: z.boolean().optional(),
+    manifests: z.array(SyncManifestInputSchema).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.sync_only) {
+      if (!value.manifests || value.manifests.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "manifests are required for sync_only",
+          path: ["manifests"],
+        });
+      }
+      return;
+    }
+    if (!value.git_ref_type) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "git_ref_type is required",
+        path: ["git_ref_type"],
+      });
+    }
+    if (!value.git_ref_value?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "git_ref_value is required",
+        path: ["git_ref_value"],
+      });
+    }
+  });
 
 export type CreateDeploymentCommand = z.infer<typeof CreateDeploymentCommandSchema>;
 

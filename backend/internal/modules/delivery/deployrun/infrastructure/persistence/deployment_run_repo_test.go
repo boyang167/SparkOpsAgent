@@ -25,6 +25,7 @@ func newRunRepo(t *testing.T) (*DeploymentRunRepository, *gorm.DB) {
 	require.NoError(t, db.Exec(`CREATE TABLE delivery.deployment_runs (
 		id TEXT PRIMARY KEY, workspace_id TEXT, project_id TEXT, cluster_id TEXT,
 		git_ref_type TEXT, git_ref_value TEXT, image_tag TEXT, cross_cluster INTEGER NOT NULL DEFAULT 0,
+		sync_manifests TEXT NOT NULL DEFAULT '[]',
 		status TEXT, build_id TEXT,
 		error_message TEXT, created_by TEXT, created_at DATETIME, started_at DATETIME,
 		finished_at DATETIME, current_stage TEXT, run_type TEXT NOT NULL DEFAULT 'normal',

@@ -9,12 +9,17 @@ import type {
   DeploymentOptionsVM,
   DeploymentRunListVM,
   DeploymentRunVM,
+  SyncManifestInput,
 } from "@sparkops/contracts/delivery";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { ProjectConfigurePanel } from "./ProjectConfigurePanel";
 import { ProjectReviewModal } from "./ProjectReviewModal";
 import { ProjectDeployModal } from "./ProjectDeployModal";
 import { ProjectServiceDetailPage } from "./ProjectServiceDetailPage";
+import {
+  CrossClusterConfirmModal,
+  type CrossClusterConfirmMode,
+} from "./CrossClusterConfirmModal";
 import { projectDisplayName } from "./project-utils";
 import { deploymentEntryAction } from "./deployment-gate";
 import {
@@ -42,6 +47,10 @@ export function ProjectWorkbenchPage({
   const [configureOpen, setConfigureOpen] = useState(initialConfigure);
   const [deployOpen, setDeployOpen] = useState(false);
   const [crossClusterDeploy, setCrossClusterDeploy] = useState(false);
+  const [crossClusterConfirmOpen, setCrossClusterConfirmOpen] = useState(false);
+  const [crossClusterConfirmMode, setCrossClusterConfirmMode] =
+    useState<CrossClusterConfirmMode>("publish");
+  const [crossClusterSyncSubmitting, setCrossClusterSyncSubmitting] = useState(false);
   const [selectedRun, setSelectedRun] = useState<DeploymentRunVM | null>(null);
   const [currentProject, setCurrentProject] = useState(project);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -222,6 +231,28 @@ export function ProjectWorkbenchPage({
     [currentProject.id, router, searchParams],
   );
 
+  const crossClusterPlan = useMemo(() => {
+    const clusters = deploymentOptions?.clusters ?? [];
+    const build = clusters.find((c) => c.is_build_env) ?? clusters[0] ?? null;
+    const syncClusterNames = clusters
+      .filter((c) => c.id !== build?.id)
+      .map((c) => c.cluster_name)
+      .filter(Boolean);
+    return {
+      clusters,
+      buildClusterName: build?.cluster_name ?? "",
+      syncClusterNames,
+    };
+  }, [deploymentOptions]);
+
+  const lastSucceededRun = useMemo(
+    () =>
+      deploymentPage?.items.find(
+        (item) => item.status === "succeeded" && Boolean(item.image_tag?.trim()),
+      ) ?? null,
+    [deploymentPage],
+  );
+
   const openDeploy = useCallback((crossCluster = false) => {
     if (activeRun) {
       setError(null);
@@ -235,26 +266,86 @@ export function ProjectWorkbenchPage({
       return;
     }
     if (crossCluster) {
-      const clusters = deploymentOptions?.clusters ?? [];
-      if (clusters.length < 2) {
+      if (crossClusterPlan.clusters.length < 2) {
         setError("跨集群发布需要至少 2 个已授权集群：请先在运行环境中配置构建集群与同步目标");
         return;
       }
-      const build = clusters.find((c) => c.is_build_env) ?? clusters[0];
-      const syncNames = clusters.filter((c) => c.id !== build?.id).map((c) => c.cluster_name);
-      if (
-        !window.confirm(
-          `将在构建集群「${build?.cluster_name ?? "-"}」构建并部署，随后同步到：${syncNames.join("、")}。\n确定开始跨集群发布？`,
-        )
-      ) {
-        return;
-      }
+      setError(null);
+      setCrossClusterConfirmMode("publish");
+      setCrossClusterConfirmOpen(true);
+      return;
     }
     setError(null);
     setSelectedRun(null);
-    setCrossClusterDeploy(crossCluster);
+    setCrossClusterDeploy(false);
     setDeployOpen(true);
-  }, [activeRun, deployAction.disabled, deployAction.reason, deploymentOptions]);
+  }, [activeRun, crossClusterPlan.clusters.length, deployAction.disabled, deployAction.reason]);
+
+  const openCrossClusterSync = useCallback(() => {
+    if (activeRun) {
+      setError(null);
+      setSelectedRun(activeRun);
+      setCrossClusterDeploy(false);
+      setDeployOpen(true);
+      return;
+    }
+    if (crossClusterPlan.clusters.length < 2) {
+      setError("跨集群同步需要至少 2 个已授权集群：请先在运行环境中配置构建集群与同步目标");
+      return;
+    }
+    if (!lastSucceededRun) {
+      setError("跨集群同步需要至少一次成功发布（含镜像标签）");
+      return;
+    }
+    setError(null);
+    setCrossClusterConfirmMode("sync");
+    setCrossClusterConfirmOpen(true);
+  }, [activeRun, crossClusterPlan.clusters.length, lastSucceededRun]);
+
+  const confirmCrossClusterAction = useCallback(
+    async (manifests?: SyncManifestInput[]) => {
+      if (crossClusterConfirmMode === "publish") {
+        setCrossClusterConfirmOpen(false);
+        setSelectedRun(null);
+        setCrossClusterDeploy(true);
+        setDeployOpen(true);
+        return;
+      }
+      if (!manifests || manifests.length === 0) {
+        setError("请至少勾选一项同步资源");
+        return;
+      }
+      setCrossClusterSyncSubmitting(true);
+      setError(null);
+      try {
+        const created = await delivery.createDeployment(currentProject.id, workspaceId, {
+          sync_only: true,
+          git_ref_type: lastSucceededRun?.git_ref_type,
+          git_ref_value: lastSucceededRun?.git_ref_value,
+          image_tag: lastSucceededRun?.image_tag,
+          manifests,
+        });
+        setCrossClusterConfirmOpen(false);
+        setSelectedRun(created);
+        handleRunChanged(created);
+        setTab("build-logs");
+      } catch (err) {
+        setError(err instanceof BffError ? err.message : "跨集群同步失败");
+      } finally {
+        setCrossClusterSyncSubmitting(false);
+      }
+    },
+    [
+      crossClusterConfirmMode,
+      currentProject.id,
+      handleRunChanged,
+      lastSucceededRun?.git_ref_type,
+      lastSucceededRun?.git_ref_value,
+      lastSucceededRun?.image_tag,
+      setTab,
+      workspaceId,
+    ],
+  );
 
   useEffect(() => {
     if (searchParams.get("release") !== "1" || releaseHandledRef.current) return;
@@ -305,6 +396,7 @@ export function ProjectWorkbenchPage({
         deployAction={deployAction}
         onRelease={() => openDeploy(false)}
         onCrossClusterRelease={() => openDeploy(true)}
+        onCrossClusterSync={openCrossClusterSync}
         onViewDeployProgress={() => {
           setError(null);
           setSelectedRun(activeRun);
@@ -351,6 +443,26 @@ export function ProjectWorkbenchPage({
           setCrossClusterDeploy(false);
           setSelectedRun(null);
         }}
+      />
+      <CrossClusterConfirmModal
+        open={crossClusterConfirmOpen}
+        mode={crossClusterConfirmMode}
+        workspaceId={workspaceId}
+        projectId={currentProject.id}
+        buildClusterName={crossClusterPlan.buildClusterName}
+        syncClusterNames={crossClusterPlan.syncClusterNames}
+        imageTag={lastSucceededRun?.image_tag}
+        gitRefLabel={
+          lastSucceededRun
+            ? `${lastSucceededRun.git_ref_value}（${lastSucceededRun.git_ref_type === "tag" ? "标签" : "分支"}）`
+            : undefined
+        }
+        submitting={crossClusterSyncSubmitting}
+        onClose={() => {
+          if (crossClusterSyncSubmitting) return;
+          setCrossClusterConfirmOpen(false);
+        }}
+        onConfirm={(manifests) => void confirmCrossClusterAction(manifests)}
       />
       <ProjectReviewModal
         open={reviewOpen}

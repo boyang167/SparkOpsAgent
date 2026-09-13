@@ -18,11 +18,13 @@ import (
 )
 
 type CreateInput struct {
-	ClusterID    string `json:"cluster_id"`
-	GitRefType   string `json:"git_ref_type"`
-	GitRefValue  string `json:"git_ref_value"`
-	ImageTag     string `json:"image_tag"`
-	CrossCluster bool   `json:"cross_cluster"`
+	ClusterID    string               `json:"cluster_id"`
+	GitRefType   string               `json:"git_ref_type"`
+	GitRefValue  string               `json:"git_ref_value"`
+	ImageTag     string               `json:"image_tag"`
+	CrossCluster bool                 `json:"cross_cluster"`
+	SyncOnly     bool                 `json:"sync_only"`
+	Manifests    []model.SyncManifest `json:"manifests"`
 }
 
 type CreateDeploymentHandler struct {
@@ -53,7 +55,8 @@ func (h *CreateDeploymentHandler) Handle(
 ) (*model.DeploymentRun, error) {
 	var selected kernel.ClusterInfoID
 	var err error
-	if input.CrossCluster {
+	needsAuthorizedClusters := input.CrossCluster || input.SyncOnly
+	if needsAuthorizedClusters {
 		clusters, listErr := h.reader.ListAuthorizedClusters(ctx, wsID)
 		if listErr != nil {
 			return nil, listErr
@@ -81,9 +84,50 @@ func (h *CreateDeploymentHandler) Handle(
 		return nil, domain.ErrDeploymentAlreadyRunning
 	}
 
-	run := model.NewDeploymentRun(wsID, projectID, deploymentContext.Cluster.ID, memberID,
-		input.GitRefType, input.GitRefValue, input.ImageTag)
-	run.CrossCluster = input.CrossCluster
+	gitRefType := input.GitRefType
+	gitRefValue := input.GitRefValue
+	imageTag := input.ImageTag
+	if input.SyncOnly {
+		if strings.TrimSpace(imageTag) == "" || strings.TrimSpace(gitRefValue) == "" {
+			latest, listErr := h.repo.ListByProject(ctx, projectID, 20)
+			if listErr != nil {
+				return nil, listErr
+			}
+			var source *model.DeploymentRun
+			for _, item := range latest {
+				if item.Status == model.StatusSucceeded && strings.TrimSpace(item.ImageTag) != "" {
+					source = item
+					break
+				}
+			}
+			if source == nil {
+				return nil, domain.ErrDeploymentNotSyncable
+			}
+			if strings.TrimSpace(gitRefType) == "" {
+				gitRefType = source.GitRefType
+			}
+			if strings.TrimSpace(gitRefValue) == "" {
+				gitRefValue = source.GitRefValue
+			}
+			if strings.TrimSpace(imageTag) == "" {
+				imageTag = source.ImageTag
+			}
+		}
+	}
+
+	var run *model.DeploymentRun
+	if input.SyncOnly {
+		if err := model.ValidateSyncManifests(input.Manifests, deploymentContext.Namespace); err != nil {
+			return nil, err
+		}
+		run = model.NewSyncDeploymentRun(wsID, projectID, deploymentContext.Cluster.ID, memberID,
+			gitRefType, gitRefValue, imageTag)
+		run.SyncManifests = append([]model.SyncManifest(nil), input.Manifests...)
+	} else {
+		run = model.NewDeploymentRun(wsID, projectID, deploymentContext.Cluster.ID, memberID,
+			gitRefType, gitRefValue, imageTag)
+		run.CrossCluster = input.CrossCluster
+	}
 	run.CreatedAt = h.clock().UTC()
 	if err := h.repo.Create(ctx, run); err != nil {
 		return nil, err

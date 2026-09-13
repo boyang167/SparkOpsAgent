@@ -7,8 +7,9 @@ import type {
   DeploymentRunVM,
   RollbackDeploymentCommand,
   RollbackPreviewVM,
+  SyncPreviewVM,
 } from "@sparkops/contracts/delivery";
-import { RollbackPreviewVMSchema } from "@sparkops/contracts/delivery";
+import { RollbackPreviewVMSchema, SyncPreviewVMSchema } from "@sparkops/contracts/delivery";
 import { DeploymentRunVMSchema } from "@sparkops/contracts/delivery";
 import type { UpstreamRequestOptions } from "./core";
 import { getUpstreamBaseUrl, upstreamFetch } from "./core";
@@ -187,6 +188,15 @@ export function createDeliveryUpstream(options: UpstreamRequestOptions = {}) {
           : undefined,
         target_run: wire.target_run ? normalizeDeploymentRun(wire.target_run) : undefined,
       });
+    },
+
+    async getSyncPreview(workspaceId: string, projectId: string, imageTag?: string) {
+      const query = imageTag ? `?image_tag=${encodeURIComponent(imageTag)}` : "";
+      const data = await upstreamFetch<unknown>(
+        `/api/v1/projects/${projectId}/deployments/sync-preview${query}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+      return SyncPreviewVMSchema.parse(data);
     },
 
     async getDeployment(workspaceId: string, runId: string) {

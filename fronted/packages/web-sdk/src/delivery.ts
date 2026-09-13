@@ -8,6 +8,7 @@ import type {
   ProjectWebhookVM,
   RollbackDeploymentCommand,
   RollbackPreviewVM,
+  SyncPreviewVM,
   UpsertProjectWebhookInput,
   WebhookEventCatalogItem,
 } from "@sparkops/contracts/delivery";
@@ -92,6 +93,18 @@ export function getRollbackPreview(
   const query = targetRunId ? `?target_run_id=${encodeURIComponent(targetRunId)}` : "";
   return bffFetch<RollbackPreviewVM>(
     `/workspaces/${workspaceId}/projects/${projectId}/deployments/rollback-preview${query}`,
+    { workspaceId },
+  );
+}
+
+export function getSyncPreview(
+  projectId: string,
+  workspaceId: string,
+  imageTag?: string,
+) {
+  const query = imageTag ? `?image_tag=${encodeURIComponent(imageTag)}` : "";
+  return bffFetch<SyncPreviewVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/deployments/sync-preview${query}`,
     { workspaceId },
   );
 }

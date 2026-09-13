@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -24,6 +25,7 @@ type deploymentRunRow struct {
 	GitRefValue    string `gorm:"size:255;not null"`
 	ImageTag       string `gorm:"size:255;not null"`
 	CrossCluster   bool   `gorm:"not null;default:false"`
+	SyncManifests  []byte `gorm:"column:sync_manifests;type:jsonb;not null;default:'[]'"`
 	Status         string `gorm:"size:16;not null"`
 	BuildID        *string
 	ErrorMessage   string    `gorm:"not null;default:''"`
@@ -443,10 +445,15 @@ func toRunRow(run *model.DeploymentRun) *deploymentRunRow {
 	if runType == "" {
 		runType = string(model.RunTypeNormal)
 	}
+	syncManifests, _ := json.Marshal(run.SyncManifests)
+	if len(run.SyncManifests) == 0 {
+		syncManifests = []byte("[]")
+	}
 	return &deploymentRunRow{
 		ID: run.ID.String(), WorkspaceID: run.WorkspaceID.String(), ProjectID: run.ProjectID.String(),
 		ClusterID: run.ClusterID.String(), GitRefType: run.GitRefType, GitRefValue: run.GitRefValue,
-		ImageTag: run.ImageTag, CrossCluster: run.CrossCluster, Status: string(run.Status), BuildID: buildIDValue(run.BuildID),
+		ImageTag: run.ImageTag, CrossCluster: run.CrossCluster, SyncManifests: syncManifests,
+		Status: string(run.Status), BuildID: buildIDValue(run.BuildID),
 		ErrorMessage: run.ErrorMessage, CreatedBy: run.CreatedBy.String(), CreatedAt: run.CreatedAt,
 		StartedAt: run.StartedAt, FinishedAt: run.FinishedAt, CurrentStage: string(run.CurrentStage),
 		RunType: runType, RollbackOfRunID: deploymentRunIDValue(run.RollbackOfRunID),
@@ -492,6 +499,9 @@ func fromRunRow(row deploymentRunRow) (*model.DeploymentRun, error) {
 		Version:      row.Version,
 		AttemptCount: row.AttemptCount,
 		LeaseExpiresAt: row.LeaseExpiresAt,
+	}
+	if len(row.SyncManifests) > 0 && string(row.SyncManifests) != "null" {
+		_ = json.Unmarshal(row.SyncManifests, &run.SyncManifests)
 	}
 	if row.RollbackOfRunID != nil && *row.RollbackOfRunID != "" {
 		rollbackOf, parseErr := kernel.ParseDeploymentRunID(*row.RollbackOfRunID)

@@ -57,9 +57,22 @@ func marshalK8sYAML(obj any, apiVersion, kind string) (string, error) {
 	}
 	doc["apiVersion"] = apiVersion
 	doc["kind"] = kind
+	delete(doc, "managedFields")
+	if metadata, ok := doc["metadata"].(map[string]any); ok {
+		delete(metadata, "managedFields")
+		delete(metadata, "resourceVersion")
+		delete(metadata, "uid")
+		delete(metadata, "generation")
+		delete(metadata, "creationTimestamp")
+	}
 	yamlBytes, err := yaml.Marshal(doc)
 	if err != nil {
 		return "", err
 	}
 	return string(yamlBytes), nil
+}
+
+// MarshalK8sYAML exports a Kubernetes object as apply-friendly YAML.
+func MarshalK8sYAML(obj any, apiVersion, kind string) (string, error) {
+	return marshalK8sYAML(obj, apiVersion, kind)
 }

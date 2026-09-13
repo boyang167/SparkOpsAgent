@@ -52,6 +52,7 @@ interface ProjectServiceDetailPageProps {
   deployAction: DeploymentEntryAction;
   onRelease: () => void;
   onCrossClusterRelease?: () => void;
+  onCrossClusterSync?: () => void;
   onViewDeployProgress: () => void;
   onConfigure: () => void;
   onSubmitReview: () => void;
@@ -250,6 +251,7 @@ export function ProjectServiceDetailPage({
   deployAction,
   onRelease,
   onCrossClusterRelease,
+  onCrossClusterSync,
   onViewDeployProgress,
   onConfigure,
   onSubmitReview,
@@ -326,6 +328,13 @@ export function ProjectServiceDetailPage({
         onClick: () => onCrossClusterRelease?.(),
       },
       {
+        key: "cross-cluster-sync",
+        label: "跨集群同步",
+        disabled: !canScale,
+        title: !canScale ? "请先完成首次发布" : undefined,
+        onClick: () => onCrossClusterSync?.(),
+      },
+      {
         key: "expand",
         label: "扩容",
         disabled: !canScale,
@@ -354,6 +363,7 @@ export function ProjectServiceDetailPage({
     deployAction.label,
     deployAction.reason,
     onCrossClusterRelease,
+    onCrossClusterSync,
     primaryAction,
     published,
   ]);

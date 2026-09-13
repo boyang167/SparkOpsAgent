@@ -60,6 +60,23 @@ func extractImagePullSecretNames(objects []*unstructured.Unstructured) []string 
 	return names
 }
 
+func appendUniqueStrings(base []string, extra ...string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(base)+len(extra))
+	for _, name := range append(base, extra...) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
 func ensureImagePullSecrets(
 	ctx context.Context,
 	client kubernetes.Interface,

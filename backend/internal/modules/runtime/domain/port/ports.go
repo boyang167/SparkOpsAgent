@@ -60,10 +60,12 @@ type DeploymentTarget struct {
 	Namespace      string
 	DeploymentName string
 	ServiceName    string
-	ImageTag         string
-	RolloutTimeout   time.Duration
-	SkipRolloutWait  bool
-	RegistryPull     *RegistryPullCredential
+	ImageTag              string
+	RolloutTimeout        time.Duration
+	SkipRolloutWait       bool
+	AllowPartialWorkloads bool
+	ExtraImagePullSecrets []string
+	RegistryPull          *RegistryPullCredential
 }
 
 type ManifestDeployer interface {

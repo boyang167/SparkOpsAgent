@@ -33,6 +33,7 @@ type RunType string
 const (
 	RunTypeNormal   RunType = "normal"
 	RunTypeRollback RunType = "rollback"
+	RunTypeSync     RunType = "sync"
 )
 
 type DeploymentRun struct {
@@ -45,6 +46,7 @@ type DeploymentRun struct {
 	GitRefValue      string
 	ImageTag         string
 	CrossCluster     bool
+	SyncManifests    []SyncManifest
 	Status           Status
 	CurrentStage     Stage
 	RunType          RunType
@@ -150,6 +152,7 @@ func NewRollbackDeploymentRun(
 		GitRefType:      target.GitRefType,
 		GitRefValue:     target.GitRefValue,
 		ImageTag:        target.ImageTag,
+		CrossCluster:    target.CrossCluster,
 		Status:          StatusQueued,
 		RunType:         RunTypeRollback,
 		RollbackOfRunID: &targetID,
@@ -157,8 +160,45 @@ func NewRollbackDeploymentRun(
 	}
 }
 
+func NewSyncDeploymentRun(
+	wsID kernel.WorkspaceID,
+	projectID kernel.ProjectID,
+	clusterID kernel.ClusterInfoID,
+	createdBy kernel.MemberID,
+	gitRefType string,
+	gitRefValue string,
+	imageTag string,
+) *DeploymentRun {
+	tag := strings.TrimSpace(imageTag)
+	if tag == "" {
+		tag = DefaultImageTag(gitRefValue)
+	}
+	return &DeploymentRun{
+		ID:           kernel.NewDeploymentRunID(),
+		WorkspaceID:  wsID,
+		ProjectID:    projectID,
+		ClusterID:    clusterID,
+		CreatedBy:    createdBy,
+		GitRefType:   NormalizeGitRefType(gitRefType),
+		GitRefValue:  gitRefValue,
+		ImageTag:     tag,
+		CrossCluster: true,
+		Status:       StatusQueued,
+		RunType:      RunTypeSync,
+		CreatedAt:    time.Now().UTC(),
+	}
+}
+
 func (r *DeploymentRun) IsRollback() bool {
 	return r.RunType == RunTypeRollback
+}
+
+func (r *DeploymentRun) IsSyncOnly() bool {
+	return r.RunType == RunTypeSync
+}
+
+func (r *DeploymentRun) SkipsBuild() bool {
+	return r.IsRollback() || r.IsSyncOnly()
 }
 
 func (r *DeploymentRun) Transition(to Status, at time.Time) error {

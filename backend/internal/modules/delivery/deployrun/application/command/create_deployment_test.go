@@ -21,6 +21,7 @@ type fakeRunRepo struct {
 	updateErr   error
 	found       *model.DeploymentRun
 	afterUpdate *model.DeploymentRun
+	byProject   []*model.DeploymentRun
 }
 
 func (r *fakeRunRepo) Create(_ context.Context, run *model.DeploymentRun) error {
@@ -43,8 +44,8 @@ func (r *fakeRunRepo) FindByID(context.Context, kernel.DeploymentRunID) (*model.
 func (*fakeRunRepo) FindByBuildID(context.Context, kernel.BuildID) (*model.DeploymentRun, error) {
 	return nil, domain.ErrDeploymentRunNotFound
 }
-func (*fakeRunRepo) ListByProject(context.Context, kernel.ProjectID, int) ([]*model.DeploymentRun, error) {
-	return nil, nil
+func (r *fakeRunRepo) ListByProject(context.Context, kernel.ProjectID, int) ([]*model.DeploymentRun, error) {
+	return r.byProject, nil
 }
 func (*fakeRunRepo) ListActive(context.Context) ([]*model.DeploymentRun, error) { return nil, nil }
 func (*fakeRunRepo) TryAcquireLease(context.Context, kernel.DeploymentRunID, int64, string, time.Duration) (bool, error) {
@@ -190,6 +191,101 @@ func TestCreateCrossClusterForcesBuildCluster(t *testing.T) {
 	require.True(t, run.CrossCluster)
 	require.Equal(t, buildID, run.ClusterID)
 	require.Len(t, queue.payloads, 1)
+}
+
+func TestCreateSyncOnlyReusesSucceededImage(t *testing.T) {
+	wsID, projectID := kernel.NewWorkspaceID(), kernel.NewProjectID()
+	buildID, syncID := kernel.NewClusterInfoID(), kernel.NewClusterInfoID()
+	source := model.NewDeploymentRun(wsID, projectID, buildID, kernel.NewMemberID(), "branch", "main", "v1.2.3")
+	source.Status = model.StatusSucceeded
+	repo, queue := &fakeRunRepo{byProject: []*model.DeploymentRun{source}}, &recordingQueue{}
+	reader := fakeDeploymentReader{
+		result: port.ProjectDeploymentContext{
+			WorkspaceID: wsID, ProjectID: projectID, Namespace: "demo",
+			Cluster: port.DeploymentCluster{ID: buildID, Name: "build"},
+		},
+		clusters: []port.DeploymentCluster{
+			{ID: buildID, Name: "build", IsBuildEnv: true},
+			{ID: syncID, Name: "sync"},
+		},
+	}
+	handler := NewCreateDeploymentHandler(repo, reader, queue, time.Now)
+
+	run, err := handler.Handle(context.Background(), wsID, kernel.NewMemberID(), projectID, CreateInput{
+		SyncOnly: true,
+		Manifests: []model.SyncManifest{{
+			Kind: model.SyncManifestKindDeployment,
+			Name: "demo",
+			YAML: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n  namespace: demo\n",
+		}},
+	})
+
+	require.NoError(t, err)
+	require.True(t, run.IsSyncOnly())
+	require.True(t, run.CrossCluster)
+	require.True(t, run.SkipsBuild())
+	require.Equal(t, "v1.2.3", run.ImageTag)
+	require.Equal(t, "main", run.GitRefValue)
+	require.Equal(t, buildID, run.ClusterID)
+	require.Len(t, run.SyncManifests, 1)
+	require.Len(t, queue.payloads, 1)
+}
+
+func TestCreateSyncOnlyRequiresSucceededSource(t *testing.T) {
+	wsID, projectID := kernel.NewWorkspaceID(), kernel.NewProjectID()
+	buildID, syncID := kernel.NewClusterInfoID(), kernel.NewClusterInfoID()
+	repo, queue := &fakeRunRepo{}, &recordingQueue{}
+	reader := fakeDeploymentReader{
+		result: port.ProjectDeploymentContext{
+			WorkspaceID: wsID, ProjectID: projectID,
+			Cluster: port.DeploymentCluster{ID: buildID, Name: "build"},
+		},
+		clusters: []port.DeploymentCluster{
+			{ID: buildID, Name: "build", IsBuildEnv: true},
+			{ID: syncID, Name: "sync"},
+		},
+	}
+	handler := NewCreateDeploymentHandler(repo, reader, queue, time.Now)
+
+	_, err := handler.Handle(context.Background(), wsID, kernel.NewMemberID(), projectID, CreateInput{
+		SyncOnly: true,
+		Manifests: []model.SyncManifest{{
+			Kind: model.SyncManifestKindConfigMap,
+			Name: "cfg",
+			YAML: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cfg\n",
+		}},
+	})
+
+	require.ErrorIs(t, err, domain.ErrDeploymentNotSyncable)
+	require.Empty(t, repo.created)
+	require.Empty(t, queue.payloads)
+}
+
+func TestCreateSyncOnlyRequiresManifests(t *testing.T) {
+	wsID, projectID := kernel.NewWorkspaceID(), kernel.NewProjectID()
+	buildID, syncID := kernel.NewClusterInfoID(), kernel.NewClusterInfoID()
+	source := model.NewDeploymentRun(wsID, projectID, buildID, kernel.NewMemberID(), "branch", "main", "v1")
+	source.Status = model.StatusSucceeded
+	repo, queue := &fakeRunRepo{byProject: []*model.DeploymentRun{source}}, &recordingQueue{}
+	reader := fakeDeploymentReader{
+		result: port.ProjectDeploymentContext{
+			WorkspaceID: wsID, ProjectID: projectID, Namespace: "demo",
+			Cluster: port.DeploymentCluster{ID: buildID, Name: "build"},
+		},
+		clusters: []port.DeploymentCluster{
+			{ID: buildID, Name: "build", IsBuildEnv: true},
+			{ID: syncID, Name: "sync"},
+		},
+	}
+	handler := NewCreateDeploymentHandler(repo, reader, queue, time.Now)
+
+	_, err := handler.Handle(context.Background(), wsID, kernel.NewMemberID(), projectID, CreateInput{
+		SyncOnly: true,
+	})
+
+	require.ErrorIs(t, err, domain.ErrDeploymentSyncManifestsEmpty)
+	require.Empty(t, repo.created)
+	require.Empty(t, queue.payloads)
 }
 
 func TestCreateDeploymentGateErrorDoesNotCreateRun(t *testing.T) {

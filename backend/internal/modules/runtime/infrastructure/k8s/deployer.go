@@ -42,6 +42,15 @@ var (
 	servicesResource = schema.GroupVersionResource{
 		Group: "", Version: "v1", Resource: "services",
 	}
+	configMapsResource = schema.GroupVersionResource{
+		Group: "", Version: "v1", Resource: "configmaps",
+	}
+	secretsResource = schema.GroupVersionResource{
+		Group: "", Version: "v1", Resource: "secrets",
+	}
+	ingressesResource = schema.GroupVersionResource{
+		Group: "networking.k8s.io", Version: "v1", Resource: "ingresses",
+	}
 )
 
 type clientProvider func(port.DeploymentTarget) (kubernetes.Interface, dynamic.Interface, error)
@@ -158,6 +167,7 @@ func (d *ManifestDeployer) Deploy(
 		return err
 	}
 	secretNames := extractImagePullSecretNames(objects)
+	secretNames = appendUniqueStrings(secretNames, target.ExtraImagePullSecrets...)
 	if err := ensureImagePullSecrets(ctx, typedClient, target.Namespace, secretNames, target.RegistryPull); err != nil {
 		return err
 	}
@@ -165,16 +175,34 @@ func (d *ManifestDeployer) Deploy(
 		return err
 	}
 
-	service, err := typedClient.CoreV1().Services(target.Namespace).Get(
-		ctx, target.ServiceName, metav1.GetOptions{},
-	)
-	if err != nil {
-		return fmt.Errorf("validate service %q: %w", target.ServiceName, err)
+	hasService := false
+	hasDeployment := false
+	for _, object := range objects {
+		switch object.GetKind() {
+		case "Service":
+			hasService = true
+			if strings.TrimSpace(target.ServiceName) == "" {
+				target.ServiceName = object.GetName()
+			}
+		case "Deployment":
+			hasDeployment = true
+			if strings.TrimSpace(target.DeploymentName) == "" {
+				target.DeploymentName = object.GetName()
+			}
+		}
 	}
-	if service.DeletionTimestamp != nil {
-		return domain.ErrServiceDeleting
+	if hasService {
+		service, err := typedClient.CoreV1().Services(target.Namespace).Get(
+			ctx, target.ServiceName, metav1.GetOptions{},
+		)
+		if err != nil {
+			return fmt.Errorf("validate service %q: %w", target.ServiceName, err)
+		}
+		if service.DeletionTimestamp != nil {
+			return domain.ErrServiceDeleting
+		}
 	}
-	if target.SkipRolloutWait {
+	if target.SkipRolloutWait || !hasDeployment {
 		return nil
 	}
 
@@ -255,15 +283,17 @@ func parseManifests(target port.DeploymentTarget, manifests []port.Manifest) ([]
 			object.SetNamespace(target.Namespace)
 			switch resource {
 			case deploymentsResource:
-				if object.GetName() != target.DeploymentName {
+				if strings.TrimSpace(target.DeploymentName) != "" && object.GetName() != target.DeploymentName {
 					return nil, domain.ErrManifestInvalid
 				}
-				if err := validateDeploymentImageTag(object, target.ImageTag); err != nil {
-					return nil, err
+				if strings.TrimSpace(target.ImageTag) != "" || !target.AllowPartialWorkloads {
+					if err := validateDeploymentImageTag(object, target.ImageTag); err != nil {
+						return nil, err
+					}
 				}
 				foundDeploymentName = true
 			case servicesResource:
-				if object.GetName() != target.ServiceName {
+				if strings.TrimSpace(target.ServiceName) != "" && object.GetName() != target.ServiceName {
 					return nil, domain.ErrManifestInvalid
 				}
 				foundServiceName = true
@@ -271,7 +301,7 @@ func parseManifests(target port.DeploymentTarget, manifests []port.Manifest) ([]
 			objects = append(objects, object)
 		}
 	}
-	if !foundDeploymentName || !foundServiceName {
+	if !target.AllowPartialWorkloads && (!foundDeploymentName || !foundServiceName) {
 		return nil, domain.ErrManifestInvalid
 	}
 	return objects, nil
@@ -323,6 +353,12 @@ func resourceFor(gvk schema.GroupVersionKind) (schema.GroupVersionResource, bool
 		return deploymentsResource, true
 	case gvk.Group == "" && gvk.Version == "v1" && gvk.Kind == "Service":
 		return servicesResource, true
+	case gvk.Group == "" && gvk.Version == "v1" && gvk.Kind == "ConfigMap":
+		return configMapsResource, true
+	case gvk.Group == "" && gvk.Version == "v1" && gvk.Kind == "Secret":
+		return secretsResource, true
+	case gvk.Group == "networking.k8s.io" && gvk.Version == "v1" && gvk.Kind == "Ingress":
+		return ingressesResource, true
 	default:
 		return schema.GroupVersionResource{}, false
 	}
@@ -337,8 +373,19 @@ type applyOperation struct {
 }
 
 func prepareApplyOperations(objects []*unstructured.Unstructured) ([]applyOperation, error) {
-	operations := make([]applyOperation, 0, len(objects))
-	for _, object := range objects {
+	rank := map[string]int{
+		"ConfigMap": 0, "Secret": 1, "Service": 2, "Ingress": 3, "Deployment": 4,
+	}
+	sorted := append([]*unstructured.Unstructured(nil), objects...)
+	for i := 0; i < len(sorted); i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			if rank[sorted[j].GetKind()] < rank[sorted[i].GetKind()] {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
+		}
+	}
+	operations := make([]applyOperation, 0, len(sorted))
+	for _, object := range sorted {
 		resource, supported := resourceFor(object.GroupVersionKind())
 		if !supported {
 			return nil, domain.ErrManifestUnsupported

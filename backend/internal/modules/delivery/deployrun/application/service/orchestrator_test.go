@@ -672,3 +672,64 @@ func TestDeployingCrossClusterFailsWhenSyncFails(t *testing.T) {
 	require.Contains(t, f.run.ErrorMessage, "sync-env")
 	require.Contains(t, f.repo.events[len(f.repo.events)-1], "cross-cluster sync failed: sync-env")
 }
+
+func TestDeployingSyncOnlyAppliesUserManifestsToTargetsOnly(t *testing.T) {
+	f := newOrchestratorFixture(model.StatusDeploying)
+	f.run.CrossCluster = true
+	f.run.RunType = model.RunTypeSync
+	f.run.ImageTag = "sync-tag"
+	f.run.SyncManifests = []model.SyncManifest{
+		{
+			Kind: model.SyncManifestKindConfigMap,
+			Name: "app-config",
+			YAML: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-config\ndata:\n  k: v\n",
+		},
+		{Kind: model.SyncManifestKindSecret, Name: "registry-pull", ManagedPullSecret: true},
+	}
+	syncCluster := deployport.DeploymentCluster{
+		ID: kernel.NewClusterInfoID(), Name: "sync-env", Server: "https://sync.example",
+	}
+	f.projects.clusters = []deployport.DeploymentCluster{
+		{ID: f.run.ClusterID, Name: "build-env", Server: "https://cluster.example", IsBuildEnv: true},
+		syncCluster,
+	}
+
+	require.NoError(t, f.o.Step(context.Background(), f.run.ID, f.wsID))
+
+	require.Equal(t, model.StatusSucceeded, f.run.Status)
+	require.Equal(t, 1, f.deployer.calls)
+	require.Equal(t, 0, f.deployer.restartCalls)
+	require.True(t, f.deployer.target.AllowPartialWorkloads)
+	require.Equal(t, []string{"registry-pull"}, f.deployer.target.ExtraImagePullSecrets)
+	require.Len(t, f.deployer.manifests, 1)
+	require.Contains(t, f.deployer.manifests[0].YAML, "ConfigMap")
+	require.Equal(t, syncCluster.ID.String(), f.deployer.target.ClusterID)
+	require.Contains(t, f.repo.events, "applied: ConfigMap/app-config, Secret/registry-pull")
+	require.Contains(t, f.repo.events, "cross-cluster sync succeeded: sync-env")
+}
+
+func TestDeployingSyncOnlyWithDeploymentRestarts(t *testing.T) {
+	f := newOrchestratorFixture(model.StatusDeploying)
+	f.run.CrossCluster = true
+	f.run.RunType = model.RunTypeSync
+	f.run.ImageTag = "sync-tag"
+	f.run.SyncManifests = []model.SyncManifest{{
+		Kind: model.SyncManifestKindDeployment,
+		Name: "demo",
+		YAML: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          image: repo/app:sync-tag\n",
+	}}
+	syncCluster := deployport.DeploymentCluster{
+		ID: kernel.NewClusterInfoID(), Name: "sync-env", Server: "https://sync.example",
+	}
+	f.projects.clusters = []deployport.DeploymentCluster{
+		{ID: f.run.ClusterID, Name: "build-env", Server: "https://cluster.example", IsBuildEnv: true},
+		syncCluster,
+	}
+
+	require.NoError(t, f.o.Step(context.Background(), f.run.ID, f.wsID))
+
+	require.Equal(t, model.StatusSucceeded, f.run.Status)
+	require.Equal(t, 1, f.deployer.calls)
+	require.Equal(t, 1, f.deployer.restartCalls)
+	require.Equal(t, "demo", f.deployer.target.DeploymentName)
+}
