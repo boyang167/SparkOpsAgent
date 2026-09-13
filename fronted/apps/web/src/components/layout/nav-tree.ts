@@ -41,13 +41,10 @@ export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
     id: "ops-delivery",
     label: "持续交付",
     items: [
-      { href: "/delivery/builds", label: "构建管理", entitlement: "delivery" },
       { href: "/delivery/pipelines", label: "Pipeline Studio", entitlement: "delivery" },
       { href: "/delivery/fleets", label: "Fleet 编辑器", entitlement: "delivery" },
       { href: "/delivery/profiles", label: "Profile 配置", entitlement: "delivery" },
       { href: "/publish/products", label: "产品管理", entitlement: "delivery" },
-      { href: "/publish/plans", label: "版本计划", entitlement: "delivery" },
-      { href: "/publish/releases", label: "发布管理", entitlement: "delivery" },
       { href: "/config/secrets", label: "密钥配置", entitlement: "delivery" },
     ],
   },
@@ -65,7 +62,6 @@ export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
     items: [
       { href: "/monitor/overview", label: "监控概览", entitlement: "observability" },
       { href: "/monitor/log-viewer", label: "日志查询", entitlement: "observability" },
-      { href: "/monitor/statistics", label: "部署统计", entitlement: "observability" },
     ],
   },
   {

@@ -161,6 +161,11 @@ func (h *SeedWorkspaceMenusHandler) repairLegacyMonitorMenus(ctx context.Context
 
 var removedMenuPaths = []string{
 	"/cluster/config",
+	"/cluster/list",
+	"/delivery/builds",
+	"/publish/plans",
+	"/publish/releases",
+	"/monitor/statistics",
 	"/market/dockerfiles",
 	"/config/configmaps",
 	"/config/storage",
@@ -174,6 +179,11 @@ var removedMenuTitles = []string{
 	"秘钥管理",
 	"服务连接配置",
 	"能力目录",
+	"部署统计",
+	"构建管理",
+	"版本计划",
+	"发布管理",
+	"集群管理",
 }
 
 func normalizeMenuPathLocal(path string) string {
@@ -274,15 +284,11 @@ var defaultMenuGroups = []defaultMenuGroup{
 	{
 		ID: "ops-delivery", Label: "持续交付",
 		Items: []struct{ Href, Label string }{
-			{"/delivery/builds", "构建管理"},
 			{"/delivery/pipelines", "Pipeline Studio"},
 			{"/delivery/fleets", "Fleet 编辑器"},
 			{"/delivery/profiles", "Profile 配置"},
 			{"/publish/products", "产品管理"},
-			{"/publish/plans", "版本计划"},
-			{"/publish/releases", "发布管理"},
 			{"/config/secrets", "密钥配置"},
-			{"/cluster/list", "集群管理"},
 		},
 	},
 	{
@@ -297,7 +303,6 @@ var defaultMenuGroups = []defaultMenuGroup{
 		Items: []struct{ Href, Label string }{
 			{"/monitor/overview", "监控概览"},
 			{"/monitor/log-viewer", "日志查询"},
-			{"/monitor/statistics", "部署统计"},
 		},
 	},
 	{
@@ -316,20 +321,15 @@ var enterpriseMenuTitleByPath = map[string]string{
 	"/projects":                 "项目管理",
 	"/templates":                "模板管理",
 	"/knowledge":                "知识库",
-	"/delivery/builds":          "构建管理",
-	"/delivery/pipelines":       "Pipeline Studio",
-	"/delivery/fleets":          "Fleet 编辑器",
-	"/delivery/profiles":        "Profile 配置",
-	"/publish/products":         "产品管理",
-	"/publish/plans":            "版本计划",
-	"/publish/releases":         "发布管理",
-	"/config/secrets":           "密钥配置",
-	"/cluster/list":             "集群管理",
+	"/delivery/pipelines": "Pipeline Studio",
+	"/delivery/fleets":    "Fleet 编辑器",
+	"/delivery/profiles":  "Profile 配置",
+	"/publish/products":   "产品管理",
+	"/config/secrets":     "密钥配置",
 	"/runtime/pods":             "运行实例",
 	"/cronjobs":                 "定时任务",
-	"/monitor/overview":         "监控概览",
-	"/monitor/log-viewer":       "日志查询",
-	"/monitor/statistics":       "部署统计",
+	"/monitor/overview":   "监控概览",
+	"/monitor/log-viewer": "日志查询",
 	"/config/webhooks": "外部集成",
 }
 
