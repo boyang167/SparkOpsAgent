@@ -1,6 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  K8sEmptyState,
+  K8sLoadingState,
+  K8sPagination,
+  K8sPanelCard,
+  K8sResourceTabs,
+  useK8sConfirm,
+} from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "../api";
@@ -76,7 +84,6 @@ type PodDetailState = {
 
 const namespaceDef = CATALOG.find((item) => item.kind === "Namespace");
 const podDef = CATALOG.find((item) => item.kind === "Pod");
-const PAGE_SIZES = [10, 30, 50, 100];
 const POD_METRIC_CONCURRENCY = 6;
 
 const initialQuery = (): QueryState => ({
@@ -115,6 +122,7 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
   const [createTarget, setCreateTarget] = useState<{ title: string; def: ResourceDef; value: K8sObject } | null>(null);
   const [cloudOpen, setCloudOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
 
   const defByKind = useMemo(
     () => new Map(CATALOG.filter((item) => WORKLOAD_TABS.includes(item.kind as WorkloadTab)).map((item) => [item.kind, item])),
@@ -271,8 +279,6 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
-
-  const totalPages = Math.max(1, Math.ceil(total / query.pageSize));
 
   function rowKey(item: K8sObject, index: number): string {
     return `${item.metadata?.namespace ?? "_"}-${item.metadata?.name ?? index}`;
@@ -442,7 +448,13 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
     const requestDef = defForObject(item);
     if (!canManage || !requestDef || !item.metadata?.name) return;
     const label = item.metadata.namespace ? `${item.metadata.namespace}/${item.metadata.name}` : item.metadata.name;
-    if (!window.confirm(`确定要删除 ${requestDef.kind} ${label} 吗？`)) return;
+    const ok = await ask({
+      title: "删除工作负载",
+      description: `确定要删除 ${requestDef.kind} ${label} 吗？此操作不可恢复。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await k8sFetch(proxyPath(clusterId, requestDef, item.metadata.namespace, item.metadata.name), { method: "DELETE" });
@@ -463,25 +475,25 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
 
   if (!clusterId) {
     return (
-      <section className="card p-4">
-        <div className="empty-state">请先选择集群。</div>
-      </section>
+      <K8sPanelCard>
+        <K8sEmptyState variant="no-cluster" />
+      </K8sPanelCard>
     );
   }
 
   if (!selectedDef) {
     return (
-      <section className="card p-4">
-        <div className="empty-state">缺少 {tab} 资源定义。</div>
-      </section>
+      <K8sPanelCard>
+        <K8sEmptyState variant="missing-def" kind={tab} />
+      </K8sPanelCard>
     );
   }
 
   return (
     <div className="stack-md">
-      <section className="card stack-md p-4">
+      <K8sPanelCard>
         <ApiErrorBanner error={error} />
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="k8s-toolbar-row">
           <label className="min-w-52">
             <span className="label">命名空间</span>
             <select
@@ -508,25 +520,18 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
           </button>
         </div>
 
-        <div className="k8s-tabs" role="tablist" aria-label="工作负载类型">
-          {WORKLOAD_TABS.map((item) => (
-            <button
-              key={item}
-              type="button"
-              role="tab"
-              aria-selected={tab === item}
-              className={tab === item ? "k8s-tab k8s-tab-active" : "k8s-tab"}
-              onClick={() => {
-                setTab(item);
-                setQueries((current) => ({ ...current, [item]: { ...current[item], page: 1 } }));
-              }}
-            >
-              {tabLabel(item)}
-            </button>
-          ))}
-        </div>
+        <K8sResourceTabs
+          tabs={WORKLOAD_TABS}
+          active={tab}
+          ariaLabel="工作负载类型"
+          label={tabLabel}
+          onChange={(item) => {
+            setTab(item);
+            setQueries((current) => ({ ...current, [item]: { ...current[item], page: 1 } }));
+          }}
+        />
 
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="k8s-toolbar-row">
           <label>
             <span className="label">名称</span>
             <input
@@ -574,7 +579,7 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
               {loading ? (
                 <tr>
                   <td colSpan={tab === "Pod" ? podColSpan() : controllerColSpan(tab)}>
-                    <div className="empty-state">加载中…</div>
+                    <K8sLoadingState compact />
                   </td>
                 </tr>
               ) : null}
@@ -612,7 +617,7 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
               {!loading && items.length === 0 ? (
                 <tr>
                   <td colSpan={tab === "Pod" ? podColSpan() : controllerColSpan(tab)}>
-                    <div className="empty-state">暂无数据</div>
+                    <K8sEmptyState variant="empty" compact />
                   </td>
                 </tr>
               ) : null}
@@ -620,49 +625,22 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
           </table>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-          <span className="text-muted">共 {total} 条</span>
-          <div className="flex items-center gap-2">
-            <select
-              className="input w-auto"
-              value={query.pageSize}
-              onChange={(e) => updateCurrentQuery({ pageSize: Number(e.target.value), page: 1 })}
-            >
-              {PAGE_SIZES.map((size) => (
-                <option key={size} value={size}>
-                  {size}条/页
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="btn-secondary text-sm"
-              disabled={query.page <= 1 || loading}
-              onClick={() => updateCurrentQuery((current) => ({ ...current, page: Math.max(1, current.page - 1) }))}
-            >
-              上一页
-            </button>
-            <span>
-              {query.page} / {totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn-secondary text-sm"
-              disabled={query.page >= totalPages || loading}
-              onClick={() => updateCurrentQuery((current) => ({ ...current, page: current.page + 1 }))}
-            >
-              下一页
-            </button>
-          </div>
-        </div>
-      </section>
+        <K8sPagination
+          page={query.page}
+          pageSize={query.pageSize}
+          total={total}
+          loading={loading}
+          onPageChange={(page) => updateCurrentQuery({ page })}
+          onPageSizeChange={(pageSize) => updateCurrentQuery({ pageSize, page: 1 })}
+        />
+      </K8sPanelCard>
 
       <Modal open={Boolean(detail)} title={`详情 ${detail?.metadata?.name ?? ""}`} size="xl" onClose={() => setDetail(null)}>
         {detail ? <pre className="k8s-yaml-panel font-mono text-xs whitespace-pre-wrap">{JSON.stringify(detail, null, 2)}</pre> : null}
       </Modal>
       <Modal open={Boolean(podDetail)} title="详情" size="xl" onClose={closePodDetail}>
         {podDetail?.loading || !podDetail?.pod ? (
-          <div className="empty-state">Pod 详情加载中…</div>
+          <K8sLoadingState label="Pod 详情加载中…" />
         ) : (
           <PodDetailView
             pod={podDetail.pod}
@@ -715,6 +693,7 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
       <Modal nested open={chatOpen} title="AI 助手" size="xl" onClose={() => setChatOpen(false)}>
         <ChatPage clusterId={clusterId} canManage={canManage} />
       </Modal>
+      {confirmDialog}
     </div>
   );
 }

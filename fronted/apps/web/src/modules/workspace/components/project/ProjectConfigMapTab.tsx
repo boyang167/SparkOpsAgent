@@ -5,6 +5,7 @@ import { BffError } from "@sparkops/contracts";
 import type { ProjectConfigMapVM } from "@sparkops/contracts/cluster";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { cluster } from "@sparkops/web-sdk";
+import { K8sEmptyState, K8sLoadingState, useK8sConfirm } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import {
   dataToRows,
@@ -149,6 +150,7 @@ export function ProjectConfigMapTab({ workspaceId, project, active }: ProjectCon
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const entryFileRef = useRef<HTMLInputElement>(null);
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
 
   const selected = useMemo(
     () => items.find((item) => item.name === selectedName) ?? items[0] ?? null,
@@ -194,7 +196,7 @@ export function ProjectConfigMapTab({ workspaceId, project, active }: ProjectCon
     setDetailError(null);
   }, [selected, selected?.name, selected?.namespace, selected?.data, namespace, detailMode, detailYamlDirty]);
 
-  function switchDetailMode(next: EditorMode) {
+  async function switchDetailMode(next: EditorMode) {
     if (!selected || next === detailMode) return;
     setDetailError(null);
     if (next === "yaml") {
@@ -210,9 +212,13 @@ export function ProjectConfigMapTab({ workspaceId, project, active }: ProjectCon
         setDetailError(err instanceof Error ? err.message : "YAML 无法解析，请修正后再切换");
         return;
       }
-      if (!window.confirm("YAML 有未保存修改，切换回可视化将丢弃这些修改，是否继续？")) {
-        return;
-      }
+      const ok = await ask({
+        title: "丢弃未保存修改",
+        description: "YAML 有未保存修改，切换回可视化将丢弃这些修改，是否继续？",
+        confirmLabel: "继续",
+        danger: true,
+      });
+      if (!ok) return;
     }
     setDetailYamlDirty(false);
     setDetailMode("visual");
@@ -362,7 +368,13 @@ export function ProjectConfigMapTab({ workspaceId, project, active }: ProjectCon
 
   async function handleDeleteEntry(key: string) {
     if (!selected) return;
-    if (!window.confirm(`确定删除配置项「${key}」？`)) return;
+    const ok = await ask({
+      title: "删除配置项",
+      description: `确定删除配置项「${key}」？`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await cluster.deleteConfigMapEntry(project.id, workspaceId, selected.name, key);
@@ -398,7 +410,7 @@ export function ProjectConfigMapTab({ workspaceId, project, active }: ProjectCon
         </div>
       </header>
 
-      {loading ? <p className="project-configmap-loading">ConfigMap 加载中…</p> : null}
+      {loading ? <K8sLoadingState label="ConfigMap 加载中…" /> : null}
 
       {error ? (
         <div className="project-configmap-alert">
@@ -410,10 +422,11 @@ export function ProjectConfigMapTab({ workspaceId, project, active }: ProjectCon
       ) : null}
 
       {showEmpty ? (
-        <div className="project-configmap-empty">
-          <strong>还没有 ConfigMap</strong>
-          <p>点击右上角「创建」，用表格或 YAML 一次性写入 Key / Value。</p>
-        </div>
+        <K8sEmptyState
+          variant="empty"
+          title="还没有 ConfigMap"
+          description="点击右上角「创建」，用表格或 YAML 一次性写入 Key / Value。"
+        />
       ) : null}
 
       {!error && items.length > 1 ? (
@@ -469,14 +482,14 @@ export function ProjectConfigMapTab({ workspaceId, project, active }: ProjectCon
                 <button
                   type="button"
                   className={detailMode === "visual" ? "is-active" : ""}
-                  onClick={() => switchDetailMode("visual")}
+                  onClick={() => void switchDetailMode("visual")}
                 >
                   可视化
                 </button>
                 <button
                   type="button"
                   className={detailMode === "yaml" ? "is-active" : ""}
-                  onClick={() => switchDetailMode("yaml")}
+                  onClick={() => void switchDetailMode("yaml")}
                 >
                   YAML
                 </button>
@@ -698,6 +711,7 @@ export function ProjectConfigMapTab({ workspaceId, project, active }: ProjectCon
           </label>
         </div>
       </Modal>
+      {confirmDialog}
     </div>
   );
 }

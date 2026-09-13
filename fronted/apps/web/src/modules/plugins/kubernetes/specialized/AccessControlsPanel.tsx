@@ -1,6 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  K8sEmptyState,
+  K8sLoadingState,
+  K8sPagination,
+  K8sPanelCard,
+  K8sResourceTabs,
+  useK8sConfirm,
+} from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import {
   ACCESS_TABS,
@@ -52,8 +60,6 @@ type AccessTarget = {
 };
 
 const namespaceDef = CATALOG.find((item) => item.kind === "Namespace");
-const PAGE_SIZES = [10, 30, 50, 100];
-
 const initialQuery = (): QueryState => ({
   draftKeyword: "",
   keyword: "",
@@ -89,6 +95,7 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
   const [detail, setDetail] = useState<K8sObject | null>(null);
   const [editTarget, setEditTarget] = useState<AccessTarget | null>(null);
   const [createTarget, setCreateTarget] = useState<{ title: string; def: ResourceDef; value: K8sObject } | null>(null);
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
   const [cloudOpen, setCloudOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
 
@@ -221,8 +228,6 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
     return () => controller.abort();
   }, [load]);
 
-  const totalPages = Math.max(1, Math.ceil(total / query.pageSize));
-
   function rowKey(item: K8sObject, index: number): string {
     return `${item.metadata?.namespace ?? "_"}-${item.metadata?.name ?? index}`;
   }
@@ -323,7 +328,13 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
     const requestDef = defByKind.get(typeof item.kind === "string" ? item.kind : tab) ?? selectedDef;
     if (!canManage || !requestDef || !item.metadata?.name) return;
     const label = item.metadata.namespace ? `${item.metadata.namespace}/${item.metadata.name}` : item.metadata.name;
-    if (!window.confirm(`确定要删除 ${requestDef.kind} ${label} 吗？`)) return;
+    const ok = await ask({
+      title: "删除资源",
+      description: `确定要删除 ${requestDef.kind} ${label} 吗？此操作不可恢复。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await k8sFetch(proxyPath(clusterId, requestDef, item.metadata.namespace, item.metadata.name), { method: "DELETE" });
@@ -344,26 +355,26 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
 
   if (!clusterId) {
     return (
-      <section className="card p-4">
-        <div className="empty-state">请先选择集群。</div>
-      </section>
+      <K8sPanelCard>
+        <K8sEmptyState variant="no-cluster" />
+      </K8sPanelCard>
     );
   }
 
   if (!selectedDef) {
     return (
-      <section className="card p-4">
-        <div className="empty-state">缺少 {tab} 资源定义。</div>
-      </section>
+      <K8sPanelCard>
+        <K8sEmptyState variant="missing-def" kind={tab} />
+      </K8sPanelCard>
     );
   }
 
   return (
     <div className="stack-md">
-      <section className="card stack-md p-4">
+      <K8sPanelCard>
         <ApiErrorBanner error={error} />
 
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="k8s-toolbar-row">
           <label className="min-w-52">
             <span className="label">命名空间</span>
             <select
@@ -390,25 +401,18 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
           </button>
         </div>
 
-        <div className="k8s-tabs" role="tablist" aria-label="访问控制资源类型">
-          {ACCESS_TABS.map((item) => (
-            <button
-              key={item}
-              type="button"
-              role="tab"
-              aria-selected={tab === item}
-              className={tab === item ? "k8s-tab k8s-tab-active" : "k8s-tab"}
-              onClick={() => {
-                setTab(item);
-                setQueries((current) => ({ ...current, [item]: { ...current[item], page: 1 } }));
-              }}
-            >
-              {accessTabLabel(item)}
-            </button>
-          ))}
-        </div>
+        <K8sResourceTabs
+          tabs={ACCESS_TABS}
+          active={tab}
+          ariaLabel="访问控制资源类型"
+          label={accessTabLabel}
+          onChange={(item) => {
+            setTab(item);
+            setQueries((current) => ({ ...current, [item]: { ...current[item], page: 1 } }));
+          }}
+        />
 
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="k8s-toolbar-row">
           <label>
             <span className="label">名称</span>
             <input
@@ -453,7 +457,7 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
               {loading ? (
                 <tr>
                   <td colSpan={colSpan}>
-                    <div className="empty-state">加载中…</div>
+                    <K8sLoadingState compact />
                   </td>
                 </tr>
               ) : null}
@@ -474,7 +478,7 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
               {!loading && items.length === 0 ? (
                 <tr>
                   <td colSpan={colSpan}>
-                    <div className="empty-state">暂无数据</div>
+                    <K8sEmptyState variant="empty" compact />
                   </td>
                 </tr>
               ) : null}
@@ -482,42 +486,15 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
           </table>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-          <span className="text-muted">共 {total} 条</span>
-          <div className="flex items-center gap-2">
-            <select
-              className="input w-auto"
-              value={query.pageSize}
-              onChange={(e) => updateCurrentQuery({ pageSize: Number(e.target.value), page: 1 })}
-            >
-              {PAGE_SIZES.map((size) => (
-                <option key={size} value={size}>
-                  {size}条/页
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="btn-secondary text-sm"
-              disabled={query.page <= 1 || loading}
-              onClick={() => updateCurrentQuery((current) => ({ ...current, page: Math.max(1, current.page - 1) }))}
-            >
-              上一页
-            </button>
-            <span>
-              {query.page} / {totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn-secondary text-sm"
-              disabled={query.page >= totalPages || loading}
-              onClick={() => updateCurrentQuery((current) => ({ ...current, page: current.page + 1 }))}
-            >
-              下一页
-            </button>
-          </div>
-        </div>
-      </section>
+        <K8sPagination
+          page={query.page}
+          pageSize={query.pageSize}
+          total={total}
+          loading={loading}
+          onPageChange={(page) => updateCurrentQuery({ page })}
+          onPageSizeChange={(pageSize) => updateCurrentQuery({ pageSize, page: 1 })}
+        />
+      </K8sPanelCard>
 
       <Modal open={Boolean(detail)} title={`详情 ${detail?.metadata?.name ?? ""}`} size="xl" onClose={() => setDetail(null)}>
         {detail ? <pre className="k8s-yaml-panel font-mono text-xs whitespace-pre-wrap">{JSON.stringify(detail, null, 2)}</pre> : null}
@@ -553,6 +530,7 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
       <Modal nested open={chatOpen} title="AI 助手" size="xl" onClose={() => setChatOpen(false)}>
         <ChatPage clusterId={clusterId} canManage={canManage} />
       </Modal>
+      {confirmDialog}
     </div>
   );
 }

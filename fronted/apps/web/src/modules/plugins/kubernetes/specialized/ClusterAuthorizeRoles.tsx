@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { K8sEmptyState, K8sLoadingState, K8sResourceTabs, useK8sConfirm } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "../api";
@@ -100,6 +101,7 @@ export function ClusterAuthorizeRoles({
   const [namespace, setNamespace] = useState("default");
   const [roles, setRoles] = useState<RoleObject[]>([]);
   const [editor, setEditor] = useState<{ mode: EditorMode; yaml: string; name: string } | null>(null);
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
 
   const loadNamespaces = useCallback(async () => {
     const data = await k8sFetch<K8sList<{ metadata?: { name?: string } }>>(proxyURL(cluster.id, "api/v1/namespaces"));
@@ -223,7 +225,13 @@ export function ClusterAuthorizeRoles({
     const name = item.metadata?.name;
     if (!canManage || !name || isBuiltinRole(item, scope)) return;
     const kindLabel = scope === "cluster" ? "ClusterRole" : "Role";
-    if (!window.confirm(`确定删除 ${kindLabel}「${name}」？`)) return;
+    const ok = await ask({
+      title: `删除${kindLabel}`,
+      description: `确定删除 ${kindLabel}「${name}」？此操作不可恢复。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       const url =
@@ -239,26 +247,16 @@ export function ClusterAuthorizeRoles({
 
   return (
     <div className="stack-md">
-      <div className="k8s-tabs">
-        {(
-          [
-            ["cluster", "集群"],
-            ["namespace", "命名空间"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            className={scope === id ? "k8s-tab k8s-tab-active" : "k8s-tab"}
-            onClick={() => {
-              setQuery("");
-              setScope(id);
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <K8sResourceTabs
+        tabs={["cluster", "namespace"] as const}
+        active={scope}
+        ariaLabel="角色范围"
+        label={(id) => (id === "cluster" ? "集群" : "命名空间")}
+        onChange={(id) => {
+          setQuery("");
+          setScope(id);
+        }}
+      />
       <p className="text-sm text-muted">
         {scope === "cluster"
           ? "ClusterRole 在整个集群生效，授权用户时可绑定为集群角色或命名空间角色。"
@@ -309,7 +307,7 @@ export function ClusterAuthorizeRoles({
             {loading ? (
               <tr>
                 <td colSpan={4}>
-                  <div className="empty-state">加载中…</div>
+                  <K8sLoadingState compact />
                 </td>
               </tr>
             ) : null}
@@ -356,7 +354,7 @@ export function ClusterAuthorizeRoles({
             {!loading && filtered.length === 0 ? (
               <tr>
                 <td colSpan={4}>
-                  <div className="empty-state">暂无{kindLabel}</div>
+                  <K8sEmptyState variant="empty" title={`暂无${kindLabel}`} compact />
                 </td>
               </tr>
             ) : null}
@@ -403,6 +401,7 @@ export function ClusterAuthorizeRoles({
           />
         </div>
       </Modal>
+      {confirmDialog}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { BffError } from "@sparkops/contracts";
 import type { ProjectPVCVM, StorageClassVM } from "@sparkops/contracts/cluster";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { cluster } from "@sparkops/web-sdk";
+import { K8sEmptyState, K8sLoadingState, useK8sConfirm } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import {
   ACCESS_MODES,
@@ -57,6 +58,7 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
   const [bindPath, setBindPath] = useState("/data");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
 
   const selected = useMemo(
     () => items.find((item) => item.name === selectedName) ?? items[0] ?? null,
@@ -160,7 +162,13 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
 
   async function handleUnbind() {
     if (!selected) return;
-    if (!window.confirm(`确定从工作负载卸载「${selected.name}」？PVC 本身会保留。`)) return;
+    const ok = await ask({
+      title: "卸载 PVC",
+      description: `确定从工作负载卸载「${selected.name}」？PVC 本身会保留。`,
+      confirmLabel: "卸载",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await cluster.unbindPVC(project.id, workspaceId, selected.name);
@@ -172,7 +180,13 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
 
   async function handleDelete() {
     if (!selected) return;
-    if (!window.confirm(`确定删除 PVC「${selected.name}」？若已挂载会先卸载并滚动重启工作负载。`)) return;
+    const ok = await ask({
+      title: "删除 PVC",
+      description: `确定删除 PVC「${selected.name}」？若已挂载会先卸载并滚动重启工作负载。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await cluster.deletePVC(project.id, workspaceId, selected.name);
@@ -209,7 +223,7 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
         </div>
       </header>
 
-      {loading ? <p className="project-configmap-loading">持久化存储加载中…</p> : null}
+      {loading ? <K8sLoadingState label="持久化存储加载中…" /> : null}
 
       {error ? (
         <div className="project-configmap-alert">
@@ -221,10 +235,11 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
       ) : null}
 
       {showEmpty ? (
-        <div className="project-configmap-empty">
-          <strong>还没有持久化存储</strong>
-          <p>点击右上角「添加」，声明一块 PVC。填写挂载路径后会绑定到当前工作负载并滚动重启。</p>
-        </div>
+        <K8sEmptyState
+          variant="empty"
+          title="还没有持久化存储"
+          description="点击右上角「添加」，声明一块 PVC。填写挂载路径后会绑定到当前工作负载并滚动重启。"
+        />
       ) : null}
 
       {!error && items.length > 1 ? (
@@ -422,6 +437,7 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
           <p className="text-sm text-[var(--muted)]">挂载会写入 Deployment volumes/volumeMounts，并滚动重启 Pod。</p>
         </div>
       </Modal>
+      {confirmDialog}
     </div>
   );
 }

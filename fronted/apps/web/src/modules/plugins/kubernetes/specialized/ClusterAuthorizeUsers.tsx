@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { governance } from "@sparkops/web-sdk";
+import { K8sEmptyState, K8sLoadingState, useK8sConfirm } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { useShellContext } from "@/components/layout/shell-context";
 import { ApiErrorBanner } from "../ApiErrorBanner";
@@ -176,6 +177,7 @@ export function ClusterAuthorizeUsers({
   const [namespaceRoles, setNamespaceRoles] = useState<NamespaceRole[]>([]);
   const [credential, setCredential] = useState<{ email: string; kubeconfig: string; expires_at: string } | null>(null);
   const [issuing, setIssuing] = useState(false);
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
 
   const load = useCallback(async () => {
     const [grantList, memberList, roleList, nsList] = await Promise.all([
@@ -283,7 +285,13 @@ export function ClusterAuthorizeUsers({
 
   async function remove(ids: string[]) {
     if (!canManage || ids.length === 0) return;
-    if (!window.confirm(`确定删除选中的 ${ids.length} 个用户授权？删除后将吊销其集群访问。`)) return;
+    const ok = await ask({
+      title: "删除用户授权",
+      description: `确定删除选中的 ${ids.length} 个用户授权？删除后将吊销其集群访问。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       for (const id of ids) {
@@ -373,7 +381,7 @@ export function ClusterAuthorizeUsers({
             {loading ? (
               <tr>
                 <td colSpan={6}>
-                  <div className="empty-state">加载中…</div>
+                  <K8sLoadingState compact />
                 </td>
               </tr>
             ) : null}
@@ -429,7 +437,7 @@ export function ClusterAuthorizeUsers({
             {!loading && grants.length === 0 ? (
               <tr>
                 <td colSpan={6}>
-                  <div className="empty-state">暂无已授权的工作区成员</div>
+                  <K8sEmptyState variant="empty" title="暂无已授权成员" description="点击「添加」为工作区成员授予集群访问。" compact />
                 </td>
               </tr>
             ) : null}
@@ -608,6 +616,7 @@ export function ClusterAuthorizeUsers({
       >
         <textarea className="input font-mono text-xs" rows={14} readOnly value={credential?.kubeconfig ?? ""} />
       </Modal>
+      {confirmDialog}
     </div>
   );
 }

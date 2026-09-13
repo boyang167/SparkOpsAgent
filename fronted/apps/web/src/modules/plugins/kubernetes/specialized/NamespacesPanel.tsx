@@ -1,6 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  K8sEmptyState,
+  K8sLoadingState,
+  K8sPagination,
+  K8sPanelCard,
+  useK8sConfirm,
+} from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "../api";
@@ -13,8 +20,6 @@ import { YamlEditor } from "../YamlEditor";
 import { CloudTTYPage } from "./CloudTTYPage";
 
 const namespaceDef = CATALOG.find((item) => item.kind === "Namespace");
-const PAGE_SIZES = [10, 30, 50, 100];
-
 export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; canManage: boolean }) {
   const mountedRef = useRef(false);
   const listRequestSeq = useRef(0);
@@ -34,6 +39,7 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
   const [editTarget, setEditTarget] = useState<NamespaceObject | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [cloudOpen, setCloudOpen] = useState(false);
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
 
   useEffect(() => {
     mountedRef.current = true;
@@ -85,8 +91,6 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
-
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   async function openEdit(item: NamespaceObject) {
     if (!namespaceDef || !item.metadata?.name) return;
@@ -164,7 +168,13 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
 
   async function deleteItem(item: NamespaceObject) {
     if (!namespaceDef || !canManage || !item.metadata?.name) return;
-    if (!window.confirm(`确定要删除命名空间「${item.metadata.name}」吗？`)) return;
+    const ok = await ask({
+      title: "删除命名空间",
+      description: `确定要删除命名空间「${item.metadata.name}」吗？此操作不可恢复。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await k8sFetch(proxyPath(clusterId, namespaceDef, undefined, item.metadata.name), { method: "DELETE" });
@@ -180,18 +190,18 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
 
   if (!clusterId) {
     return (
-      <section className="card p-4">
-        <div className="empty-state">请先选择集群。</div>
-      </section>
+      <K8sPanelCard>
+        <K8sEmptyState variant="no-cluster" />
+      </K8sPanelCard>
     );
   }
 
   return (
     <div className="stack-md">
-      <section className="card stack-md p-4">
+      <K8sPanelCard>
         <ApiErrorBanner error={error} />
 
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="k8s-toolbar-row">
           <label>
             <span className="label">名称</span>
             <input
@@ -256,7 +266,7 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
               {loading ? (
                 <tr>
                   <td colSpan={6}>
-                    <div className="empty-state">加载中…</div>
+                    <K8sLoadingState compact />
                   </td>
                 </tr>
               ) : null}
@@ -298,7 +308,7 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
               {!loading && items.length === 0 ? (
                 <tr>
                   <td colSpan={6}>
-                    <div className="empty-state">暂无数据</div>
+                    <K8sEmptyState variant="empty" compact />
                   </td>
                 </tr>
               ) : null}
@@ -306,33 +316,18 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
           </table>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-          <span className="text-muted">共 {total} 条</span>
-          <div className="flex items-center gap-2">
-            <select className="input w-auto" value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
-              {PAGE_SIZES.map((size) => (
-                <option key={size} value={size}>
-                  {size}条/页
-                </option>
-              ))}
-            </select>
-            <button type="button" className="btn-secondary text-sm" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
-              上一页
-            </button>
-            <span>
-              {page} / {totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn-secondary text-sm"
-              disabled={page >= totalPages || loading}
-              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-            >
-              下一页
-            </button>
-          </div>
-        </div>
-      </section>
+        <K8sPagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          loading={loading}
+          onPageChange={setPage}
+          onPageSizeChange={(next) => {
+            setPageSize(next);
+            setPage(1);
+          }}
+        />
+      </K8sPanelCard>
 
       <Modal open={cloudOpen} title="CloudShell" size="xl" onClose={() => setCloudOpen(false)}>
         <CloudTTYPage clusterId={clusterId} canManage={canManage} />
@@ -363,6 +358,7 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
           onClose={() => setCreateOpen(false)}
         />
       </Modal>
+      {confirmDialog}
     </div>
   );
 }

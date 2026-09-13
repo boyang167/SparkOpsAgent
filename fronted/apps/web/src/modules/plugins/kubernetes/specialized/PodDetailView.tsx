@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { JSX, ReactNode } from "react";
+import { K8sEmptyState, K8sLoadingState } from "@/components/k8s";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import type { ApiErrorInfo } from "../api";
 import {
@@ -438,10 +439,11 @@ function DetailLine({ label, children }: { label: string; children: ReactNode })
 }
 
 function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {
+  const loading = text.includes("加载");
   return (
     <tr>
       <td colSpan={colSpan}>
-        <div className="empty-state">{text}</div>
+        {loading ? <K8sLoadingState label={text} compact /> : <K8sEmptyState variant="empty" title={text} compact />}
       </td>
     </tr>
   );

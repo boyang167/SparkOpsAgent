@@ -11,6 +11,7 @@ import type {
 } from "@sparkops/contracts/cluster";
 import type { DeploymentRunListVM } from "@sparkops/contracts/delivery";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
+import { K8sEmptyState, useK8sConfirm } from "@/components/k8s";
 import { PodDetailPanel, type PodDetailTab } from "@/modules/runtime/components/PodDetailPanel";
 import {
   RuntimeDeploymentYamlModal,
@@ -199,6 +200,7 @@ export function ProjectPublishedOverview({
   const [deploymentYamlModalOpen, setDeploymentYamlModalOpen] = useState(false);
   const [podYamlModalPod, setPodYamlModalPod] = useState<PodVM | null>(null);
   const [savingRuntime, setSavingRuntime] = useState(false);
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
 
   const latestDeploy = latestSuccessfulDeployment(deploymentPage);
   const pods = overview?.pods ?? [];
@@ -239,9 +241,13 @@ export function ProjectPublishedOverview({
 
   const handleRestartPod = useCallback(
     async (pod: PodVM) => {
-      if (!window.confirm(`确定重启 Pod「${pod.name}」吗？`)) {
-        return;
-      }
+      const ok = await ask({
+        title: "重启 Pod",
+        description: `确定重启 Pod「${pod.name}」吗？`,
+        confirmLabel: "重启",
+        danger: true,
+      });
+      if (!ok) return;
       setRestartingPodId(pod.id);
       setError(null);
       try {
@@ -253,11 +259,17 @@ export function ProjectPublishedOverview({
         setRestartingPodId(null);
       }
     },
-    [loadOverview, project.id, workspaceId],
+    [ask, loadOverview, project.id, workspaceId],
   );
 
   const handleCreateService = useCallback(async () => {
-    if (!window.confirm("确定创建 Service 吗？")) return;
+    const ok = await ask({
+      title: "创建 Service",
+      description: "确定创建 Service 吗？",
+      confirmLabel: "创建",
+      danger: false,
+    });
+    if (!ok) return;
     setSavingRuntime(true);
     setError(null);
     try {
@@ -268,10 +280,16 @@ export function ProjectPublishedOverview({
     } finally {
       setSavingRuntime(false);
     }
-  }, [loadOverview, project.id, workspaceId]);
+  }, [ask, loadOverview, project.id, workspaceId]);
 
   const handleCreateIngress = useCallback(async () => {
-    if (!window.confirm("确定添加外部访问地址吗？将自动创建 Ingress。")) return;
+    const ok = await ask({
+      title: "添加外部访问",
+      description: "确定添加外部访问地址吗？将自动创建 Ingress。",
+      confirmLabel: "创建",
+      danger: false,
+    });
+    if (!ok) return;
     setSavingRuntime(true);
     setError(null);
     try {
@@ -282,7 +300,7 @@ export function ProjectPublishedOverview({
     } finally {
       setSavingRuntime(false);
     }
-  }, [loadOverview, project.id, workspaceId]);
+  }, [ask, loadOverview, project.id, workspaceId]);
 
   return (
     <div className="project-runtime-overview">
@@ -391,7 +409,12 @@ export function ProjectPublishedOverview({
         </header>
 
         {!loading && pods.length === 0 ? (
-          <p className="project-runtime-empty">暂无 Pod，请确认 Deployment 已成功调度。</p>
+          <K8sEmptyState
+            variant="empty"
+            title="暂无 Pod"
+            description="请确认 Deployment 已成功调度。"
+            compact
+          />
         ) : (
           <div className="project-runtime-table-wrap">
             <table className="project-runtime-table">
@@ -543,7 +566,7 @@ export function ProjectPublishedOverview({
             </button>
           }
         >
-          {!loading ? <p className="project-runtime-empty">暂无 Service。</p> : null}
+          {!loading ? <K8sEmptyState variant="empty" title="暂无 Service" compact /> : null}
         </RuntimeSectionCard>
       )}
 
@@ -586,7 +609,7 @@ export function ProjectPublishedOverview({
             />
           </dl>
         ) : !loading ? (
-          <p className="project-runtime-empty">暂无外部访问地址。</p>
+          <K8sEmptyState variant="empty" title="暂无外部访问地址" compact />
         ) : null}
       </RuntimeSectionCard>
 
@@ -610,7 +633,7 @@ export function ProjectPublishedOverview({
             <DetailItem label="文件后缀" value={logCollection.file_suffix || "*.log"} />
           </dl>
         ) : !loading ? (
-          <p className="project-runtime-empty">尚未配置日志采集。</p>
+          <K8sEmptyState variant="empty" title="尚未配置日志采集" compact />
         ) : null}
       </RuntimeSectionCard>
 
@@ -638,7 +661,7 @@ export function ProjectPublishedOverview({
             <DetailItem label="连续失败次数" value={healthProbe.failure_threshold ?? "-"} />
           </dl>
         ) : !loading ? (
-          <p className="project-runtime-empty">尚未配置健康检测。</p>
+          <K8sEmptyState variant="empty" title="尚未配置健康检测" compact />
         ) : null}
       </RuntimeSectionCard>
 
@@ -696,6 +719,7 @@ export function ProjectPublishedOverview({
           onClose={() => setPodPanel(null)}
         />
       ) : null}
+      {confirmDialog}
     </div>
   );
 }

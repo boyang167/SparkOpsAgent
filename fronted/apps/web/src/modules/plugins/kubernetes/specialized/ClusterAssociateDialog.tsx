@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { K8sEmptyState, useK8sConfirm } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "../api";
@@ -37,6 +38,7 @@ export function ClusterAssociateDialog({ cluster }: { cluster: KubernetesCluster
   const [page, setPage] = useState(1);
   const [joining, setJoining] = useState(false);
   const [form, setForm] = useState({ name: "", alias: "", description: "", kubeConfig: "" });
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
 
   const configured = Boolean(cluster.velaux_url?.trim());
 
@@ -82,7 +84,13 @@ export function ClusterAssociateDialog({ cluster }: { cluster: KubernetesCluster
   }
 
   async function remove(name: string) {
-    if (!window.confirm(`确定从 Velaux 删除集群「${name}」？`)) return;
+    const ok = await ask({
+      title: "删除 Velaux 关联",
+      description: `确定从 Velaux 删除集群「${name}」？`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await k8sFetch(`${velauxPath(cluster.id)}/${encodeURIComponent(name)}`, { method: "DELETE" });
       await load();
@@ -139,7 +147,7 @@ export function ClusterAssociateDialog({ cluster }: { cluster: KubernetesCluster
             {items.length === 0 ? (
               <tr>
                 <td colSpan={5}>
-                  <div className="empty-state">暂无 Velaux 关联集群</div>
+                  <K8sEmptyState variant="empty" title="暂无 Velaux 关联集群" compact />
                 </td>
               </tr>
             ) : null}
@@ -188,6 +196,7 @@ export function ClusterAssociateDialog({ cluster }: { cluster: KubernetesCluster
           </label>
         </div>
       </Modal>
+      {confirmDialog}
     </div>
   );
 }

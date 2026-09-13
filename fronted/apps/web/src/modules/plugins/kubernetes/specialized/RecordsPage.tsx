@@ -1,6 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  K8sEmptyState,
+  K8sLoadingState,
+  K8sPagination,
+  K8sPanelCard,
+  useK8sConfirm,
+} from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "../api";
@@ -26,8 +33,6 @@ type QueryState = {
   pageSize: number;
 };
 
-const PAGE_SIZES = [10, 30, 50, 100];
-
 const initialQuery = (): QueryState => ({
   draftKeyword: "",
   keyword: "",
@@ -47,6 +52,7 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [playOpen, setPlayOpen] = useState(false);
   const [playData, setPlayData] = useState("");
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const requestSeq = listRequestSeq.current + 1;
@@ -99,8 +105,6 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
     return () => controller.abort();
   }, [load]);
 
-  const totalPages = Math.max(1, Math.ceil(total / query.pageSize));
-
   async function playRecord(item: RecordItem) {
     setError(null);
     try {
@@ -114,7 +118,13 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
 
   async function deleteRecord(item: RecordItem) {
     if (!canManage) return;
-    if (!window.confirm("确定要删除该条记录吗？此操作不可恢复。")) return;
+    const ok = await ask({
+      title: "删除录制",
+      description: "确定要删除该条记录吗？此操作不可恢复。",
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await k8sFetch<void>(`/api/bff/v1/plugins/kubernetes/records/${encodeURIComponent(item.id)}`, { method: "DELETE" });
@@ -126,7 +136,13 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
 
   async function deleteSelected() {
     if (!canManage || selected.length === 0) return;
-    if (!window.confirm(`确定要删除选中的 ${selected.length} 条记录吗？此操作不可恢复。`)) return;
+    const ok = await ask({
+      title: "批量删除录制",
+      description: `确定要删除选中的 ${selected.length} 条记录吗？此操作不可恢复。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       for (const id of selected) {
@@ -141,10 +157,10 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
 
   return (
     <div className="stack-md">
-      <section className="card stack-md p-4">
+      <K8sPanelCard>
         <ApiErrorBanner error={error} />
 
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="k8s-toolbar-row">
           <label>
             <span className="label">Pod 名称</span>
             <input
@@ -201,7 +217,7 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
               {loading ? (
                 <tr>
                   <td colSpan={RECORDS_TABLE_COL_SPAN}>
-                    <div className="empty-state">加载中…</div>
+                    <K8sLoadingState compact />
                   </td>
                 </tr>
               ) : null}
@@ -220,7 +236,7 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
               {!loading && items.length === 0 ? (
                 <tr>
                   <td colSpan={RECORDS_TABLE_COL_SPAN}>
-                    <div className="empty-state">暂无数据</div>
+                    <K8sEmptyState variant="empty" compact />
                   </td>
                 </tr>
               ) : null}
@@ -228,46 +244,20 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
           </table>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-          <span className="text-muted">共 {total} 条</span>
-          <div className="flex items-center gap-2">
-            <select
-              className="input w-auto"
-              value={query.pageSize}
-              onChange={(e) => setQuery((current) => ({ ...current, pageSize: Number(e.target.value), page: 1 }))}
-            >
-              {PAGE_SIZES.map((size) => (
-                <option key={size} value={size}>
-                  {size}条/页
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="btn-secondary text-sm"
-              disabled={query.page <= 1 || loading}
-              onClick={() => setQuery((current) => ({ ...current, page: Math.max(1, current.page - 1) }))}
-            >
-              上一页
-            </button>
-            <span>
-              {query.page} / {totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn-secondary text-sm"
-              disabled={query.page >= totalPages || loading}
-              onClick={() => setQuery((current) => ({ ...current, page: current.page + 1 }))}
-            >
-              下一页
-            </button>
-          </div>
-        </div>
-      </section>
+        <K8sPagination
+          page={query.page}
+          pageSize={query.pageSize}
+          total={total}
+          loading={loading}
+          onPageChange={(page) => setQuery((current) => ({ ...current, page }))}
+          onPageSizeChange={(pageSize) => setQuery((current) => ({ ...current, pageSize, page: 1 }))}
+        />
+      </K8sPanelCard>
 
       <Modal open={playOpen} title="终端录制播放" size="xl" onClose={() => setPlayOpen(false)}>
         {playData ? <RecordPlayer ndjson={playData} /> : null}
       </Modal>
+      {confirmDialog}
     </div>
   );
 }

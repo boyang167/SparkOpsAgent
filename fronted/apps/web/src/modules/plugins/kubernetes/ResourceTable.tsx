@@ -1,6 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import {
+  K8sEmptyState,
+  K8sLoadingState,
+  K8sPagination,
+  K8sPanelCard,
+  useK8sConfirm,
+} from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "./ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "./api";
@@ -44,6 +51,7 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
   const [detail, setDetail] = useState<K8sObject | null>(null);
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
 
   useEffect(() => {
     setResourceId(resources[0]?.id ?? "");
@@ -99,8 +107,6 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
     void load();
   }, [load]);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
   async function openDetail(item: K8sObject) {
     if (!selected) return;
     const name = item.metadata?.name;
@@ -135,7 +141,12 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
 
   async function deleteItem(item: K8sObject) {
     if (!selected || !item.metadata?.name) return;
-    const ok = window.confirm(`确认删除 ${selected.kind} ${item.metadata.namespace ? `${item.metadata.namespace}/` : ""}${item.metadata.name}？`);
+    const ok = await ask({
+      title: "删除资源",
+      description: `确认删除 ${selected.kind} ${item.metadata.namespace ? `${item.metadata.namespace}/` : ""}${item.metadata.name}？此操作不可恢复。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
     if (!ok) return;
     setError(null);
     try {
@@ -147,12 +158,16 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
   }
 
   if (!selected) {
-    return <div className="empty-state">此页面暂无资源定义。</div>;
+    return (
+      <K8sPanelCard>
+        <K8sEmptyState variant="missing-def" title="此页面暂无资源定义" />
+      </K8sPanelCard>
+    );
   }
 
   return (
-    <section className="card stack-md p-4">
-      <div className="flex flex-wrap items-end gap-3">
+    <K8sPanelCard>
+      <div className="k8s-toolbar-row">
         <label className="min-w-52">
           <span className="label">资源类型</span>
           <select
@@ -211,11 +226,15 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
       <ApiErrorBanner error={error} />
 
       {!clusterId ? (
-        <div className="empty-state">请先选择集群。</div>
+        <K8sEmptyState variant="no-cluster" />
       ) : selected.namespaced && !namespace ? (
-        <div className="empty-state">请选择命名空间后加载 {selected.kind}。</div>
+        <K8sEmptyState
+          variant="custom"
+          title="请选择命名空间"
+          description={`选择命名空间后即可加载 ${selected.kind} 列表。`}
+        />
       ) : loading ? (
-        <div className="empty-state">加载 {selected.kind} 中…</div>
+        <K8sLoadingState label={`加载 ${selected.kind} 中…`} />
       ) : (
         <>
           <div className="table-wrap">
@@ -251,27 +270,22 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
                 {items.length === 0 ? (
                   <tr>
                     <td colSpan={selected.columns.length + 1}>
-                      <div className="empty-state">暂无数据</div>
+                      <K8sEmptyState variant="empty" compact />
                     </td>
                   </tr>
                 ) : null}
               </tbody>
             </table>
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-            <span className="text-muted">共 {total} 条</span>
-            <div className="flex items-center gap-2">
-              <button type="button" className="btn-secondary text-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                上一页
-              </button>
-              <span>
-                {page} / {totalPages}
-              </span>
-              <button type="button" className="btn-secondary text-sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
-                下一页
-              </button>
-            </div>
-          </div>
+          <K8sPagination
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+            pageSizes={[PAGE_SIZE]}
+            loading={loading}
+            onPageChange={setPage}
+            onPageSizeChange={() => undefined}
+          />
         </>
       )}
 
@@ -287,7 +301,8 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
           />
         ) : null}
       </Modal>
-    </section>
+      {confirmDialog}
+    </K8sPanelCard>
   );
 }
 

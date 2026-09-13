@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { K8sResourceTabs } from "@/components/k8s";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "../api";
 import type { KubernetesCluster } from "../cluster-types";
@@ -61,24 +62,13 @@ export function ClusterAuthorizeDialog({
 
   return (
     <div className="stack-md">
-      <div className="k8s-tabs">
-        {(
-          [
-            ["kubeconfig", "连接信息"],
-            ["users", "用户"],
-            ["roles", "角色"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            className={tab === id ? "k8s-tab k8s-tab-active" : "k8s-tab"}
-            onClick={() => setTab(id)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <K8sResourceTabs
+        tabs={["kubeconfig", "users", "roles"] as const}
+        active={tab}
+        ariaLabel="集群授权"
+        label={(id) => (id === "kubeconfig" ? "连接信息" : id === "users" ? "用户" : "角色")}
+        onChange={setTab}
+      />
       {tab === "kubeconfig" ? <ApiErrorBanner error={error} /> : null}
       {tab === "kubeconfig" ? (
         <div className="stack-md">

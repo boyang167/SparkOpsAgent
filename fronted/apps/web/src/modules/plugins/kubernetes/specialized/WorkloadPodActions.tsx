@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useK8sConfirm } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, KubernetesApiError, parseApiError, type ApiErrorInfo } from "../api";
@@ -38,6 +39,7 @@ export function WorkloadPodActions({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [view, setView] = useState<PodActionView | null>(null);
   const [terminalFullscreen, setTerminalFullscreen] = useState(false);
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
   const title = `${pod.metadata?.namespace ?? "-"}/${pod.metadata?.name ?? "-"}`;
 
   useEffect(() => {
@@ -50,7 +52,13 @@ export function WorkloadPodActions({
     const namespace = pod.metadata?.namespace;
     const name = pod.metadata?.name;
     if (!canManage || !podDef || !namespace || !name) return;
-    if (!window.confirm(`确定删除 Pod「${namespace}/${name}」？`)) return;
+    const ok = await ask({
+      title: "删除 Pod",
+      description: `确定删除 Pod「${namespace}/${name}」？`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await k8sFetch(proxyPath(clusterId, podDef, namespace, name), { method: "DELETE" });
       await onDeleted();
@@ -170,6 +178,7 @@ export function WorkloadPodActions({
       >
         {view?.type === "logs" ? <PodLogPanel clusterId={clusterId} pod={pod} container={view.container} /> : null}
       </Modal>
+      {confirmDialog}
     </>
   );
 

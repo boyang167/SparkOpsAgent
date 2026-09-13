@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useK8sConfirm } from "@/components/k8s";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, KubernetesApiError, parseApiError, type ApiErrorInfo } from "../api";
 import { podOperationPath } from "../operations";
@@ -21,6 +22,7 @@ type PodFilesBrowserProps = {
 };
 
 export function PodFilesBrowser({ clusterId, pod, container, canManage }: PodFilesBrowserProps) {
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
   const [currentPath, setCurrentPath] = useState("/");
   const [files, setFiles] = useState<PodFileEntry[]>([]);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
@@ -103,7 +105,13 @@ export function PodFilesBrowser({ clusterId, pod, container, canManage }: PodFil
     if (!base || !canManage) return;
     const targetPath = joinPodFilePath(currentPath, entry.name);
     const kind = entry.isDir ? "文件夹" : "文件";
-    if (!window.confirm(`您确定要删除 ${entry.name} ${kind}？该操作不可逆，是否继续？`)) return;
+    const ok = await ask({
+      title: "删除文件",
+      description: `您确定要删除 ${entry.name} ${kind}？该操作不可逆，是否继续？`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await k8sFetch(`${base}files?${query(targetPath)}`, { method: "DELETE" });
@@ -223,6 +231,7 @@ export function PodFilesBrowser({ clusterId, pod, container, canManage }: PodFil
           </tbody>
         </table>
       </div>
+      {confirmDialog}
     </div>
   );
 }

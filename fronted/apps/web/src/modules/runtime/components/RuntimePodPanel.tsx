@@ -5,6 +5,7 @@ import { cluster } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { PodVM } from "@sparkops/contracts/cluster";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
+import { K8sEmptyState } from "@/components/k8s";
 import { PodDetailPanel } from "./PodDetailPanel";
 
 interface RuntimePodPanelProps {
@@ -82,7 +83,7 @@ export function RuntimePodPanel({
       {error ? <p className="error">{error}</p> : null}
 
       {pods.length === 0 ? (
-        <div className="empty-state">暂无 Pod</div>
+        <K8sEmptyState variant="empty" title="暂无 Pod" compact />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

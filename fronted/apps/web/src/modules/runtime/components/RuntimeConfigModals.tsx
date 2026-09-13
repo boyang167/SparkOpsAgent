@@ -13,6 +13,7 @@ import type {
 } from "@sparkops/contracts/cluster";
 import { BffError } from "@sparkops/contracts";
 import { cluster } from "@sparkops/web-sdk";
+import { K8sEmptyState, K8sLoadingState } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import {
   buildDeploymentYaml,
@@ -441,11 +442,11 @@ export function RuntimeYamlViewModal({
       }
     >
       {loading ? (
-        <p className="project-runtime-empty">正在加载集群中的 YAML…</p>
+        <K8sLoadingState label="正在加载集群中的 YAML…" />
       ) : error ? (
-        <p className="project-runtime-empty text-danger">{error}</p>
+        <K8sEmptyState variant="custom" title="加载失败" description={error} />
       ) : !yaml ? (
-        <p className="project-runtime-empty">{emptyMessage}</p>
+        <K8sEmptyState variant="empty" title={emptyMessage} compact />
       ) : (
         <div className="k8s-yaml-editor" data-theme="light">
           <div className="k8s-yaml-gutter" aria-hidden>

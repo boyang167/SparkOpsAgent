@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { K8sEmptyState, K8sLoadingState, useK8sConfirm } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, KubernetesApiError, parseApiError, type ApiErrorInfo } from "../api";
@@ -89,6 +90,7 @@ export function NodeDetailView({
   const [filesTarget, setFilesTarget] = useState<{ pod: PodObject; container: string } | null>(null);
   const [terminalFullscreen, setTerminalFullscreen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
   const info = node.status?.nodeInfo;
   const name = node.metadata?.name ?? "";
 
@@ -154,7 +156,13 @@ export function NodeDetailView({
     const podName = pod.metadata?.name;
     const ns = pod.metadata?.namespace;
     if (!canManage || !podDef || !podName || !ns) return;
-    if (!window.confirm(`确定删除 Pod「${ns}/${podName}」？`)) return;
+    const ok = await ask({
+      title: "删除 Pod",
+      description: `确定删除 Pod「${ns}/${podName}」？`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await k8sFetch(proxyPath(clusterId, podDef, ns, podName), { method: "DELETE" });
       await reloadPods();
@@ -271,7 +279,7 @@ export function NodeDetailView({
               {(node.status?.conditions ?? []).length === 0 ? (
                 <tr>
                   <td colSpan={5}>
-                    <div className="empty-state">暂无状态</div>
+                    <K8sEmptyState variant="empty" title="暂无状态" compact />
                   </td>
                 </tr>
               ) : null}
@@ -302,7 +310,7 @@ export function NodeDetailView({
               {loadingPods ? (
                 <tr>
                   <td colSpan={10}>
-                    <div className="empty-state">加载中…</div>
+                    <K8sLoadingState compact />
                   </td>
                 </tr>
               ) : null}
@@ -369,7 +377,7 @@ export function NodeDetailView({
               {!loadingPods && pods.length === 0 ? (
                 <tr>
                   <td colSpan={10}>
-                    <div className="empty-state">该节点暂无 Pod</div>
+                    <K8sEmptyState variant="empty" title="该节点暂无 Pod" compact />
                   </td>
                 </tr>
               ) : null}
@@ -537,6 +545,7 @@ export function NodeDetailView({
           <PodLogPanel clusterId={clusterId} pod={stream.pod} container={stream.container} />
         ) : null}
       </Modal>
+      {confirmDialog}
     </div>
   );
 }

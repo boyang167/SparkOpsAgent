@@ -1,6 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  K8sEmptyState,
+  K8sLoadingState,
+  K8sPagination,
+  K8sPanelCard,
+  useK8sConfirm,
+} from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, KubernetesApiError, parseApiError, type ApiErrorInfo } from "../api";
@@ -26,8 +33,6 @@ import {
 } from "../node-view";
 
 const nodeDef = CATALOG.find((item) => item.kind === "Node");
-const PAGE_SIZES = [10, 30, 50, 100];
-
 type Row = {
   node: NodeObject;
   cpu: NodeMetricView;
@@ -54,6 +59,7 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
   const [shellNode, setShellNode] = useState<string | null>(null);
   const [taintNode, setTaintNode] = useState<NodeObject | null>(null);
   const [monitorNode, setMonitorNode] = useState<string | null>(null);
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
 
   const load = useCallback(async () => {
     if (!clusterId || !nodeDef) return;
@@ -93,8 +99,6 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
     setPage(1);
   }, [clusterId]);
 
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-
   async function refreshNode(name: string): Promise<NodeObject> {
     if (!nodeDef) throw new Error("missing node catalog");
     return k8sFetch<NodeObject>(proxyPath(clusterId, nodeDef, undefined, name));
@@ -122,7 +126,13 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
     const name = node.metadata?.name;
     if (!canManage || !name) return;
     const disable = !node.spec?.unschedulable;
-    if (!window.confirm(`确定将节点「${name}」设置为${disable ? "不可调度" : "可调度"}？`)) return;
+    const ok = await ask({
+      title: "调度设置",
+      description: `确定将节点「${name}」设置为${disable ? "不可调度" : "可调度"}？`,
+      confirmLabel: "确认",
+      danger: false,
+    });
+    if (!ok) return;
     try {
       const latest = await refreshNode(name);
       const body = { ...latest, spec: { ...(latest.spec ?? {}), unschedulable: disable } };
@@ -137,7 +147,13 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
   async function drain(node: NodeObject) {
     const name = node.metadata?.name;
     if (!canManage || !name) return;
-    if (!window.confirm(`此操作将排空节点「${name}」上的 Pod，是否继续？`)) return;
+    const ok = await ask({
+      title: "排空节点",
+      description: `此操作将排空节点「${name}」上的 Pod，是否继续？`,
+      confirmLabel: "继续排空",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       const latest = await refreshNode(name);
@@ -178,7 +194,13 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
   async function deleteNode(node: NodeObject) {
     const name = node.metadata?.name;
     if (!canManage || !name || !nodeDef) return;
-    if (!window.confirm(`确定删除节点「${name}」？`)) return;
+    const ok = await ask({
+      title: "删除节点",
+      description: `确定删除节点「${name}」？此操作不可恢复。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await k8sFetch(proxyPath(clusterId, nodeDef, undefined, name), { method: "DELETE" });
       await load();
@@ -207,21 +229,21 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
 
   if (!clusterId) {
     return (
-      <section className="card p-4">
-        <div className="empty-state">请先选择集群。</div>
-      </section>
+      <K8sPanelCard>
+        <K8sEmptyState variant="no-cluster" />
+      </K8sPanelCard>
     );
   }
 
   return (
     <div className="stack-md">
-      <section className="card stack-md p-4">
+      <K8sPanelCard>
         <div>
           <h1 className="text-xl font-semibold">节点管理</h1>
           <p className="text-sm text-muted mt-1">查看节点状态、资源用量，并执行调度、排空与终端操作。</p>
         </div>
         <ApiErrorBanner error={error} />
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="k8s-toolbar-row">
           <label>
             <span className="label">名称</span>
             <input
@@ -240,6 +262,7 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
           <button
             type="button"
             className="btn"
+            disabled={loading}
             onClick={() => {
               setKeyword(draftKeyword);
               setPage(1);
@@ -296,7 +319,7 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
               {loading ? (
                 <tr>
                   <td colSpan={10}>
-                    <div className="empty-state">加载中…</div>
+                    <K8sLoadingState compact />
                   </td>
                 </tr>
               ) : null}
@@ -378,47 +401,25 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
               {!loading && rows.length === 0 ? (
                 <tr>
                   <td colSpan={10}>
-                    <div className="empty-state">暂无节点</div>
+                    <K8sEmptyState variant="empty" title="暂无节点" description="当前集群中没有可显示的节点。" compact />
                   </td>
                 </tr>
               ) : null}
             </tbody>
           </table>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-          <span className="text-muted">共 {total} 条</span>
-          <div className="flex items-center gap-2">
-            <select
-              className="input w-auto"
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-            >
-              {PAGE_SIZES.map((size) => (
-                <option key={size} value={size}>
-                  {size}条/页
-                </option>
-              ))}
-            </select>
-            <button type="button" className="btn-secondary text-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-              上一页
-            </button>
-            <span>
-              {page} / {totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn-secondary text-sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              下一页
-            </button>
-          </div>
-        </div>
-      </section>
+        <K8sPagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          loading={loading}
+          onPageChange={setPage}
+          onPageSizeChange={(next) => {
+            setPageSize(next);
+            setPage(1);
+          }}
+        />
+      </K8sPanelCard>
 
       <Modal
         nested
@@ -569,6 +570,7 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
           />
         ) : null}
       </Modal>
+      {confirmDialog}
     </div>
   );
 }

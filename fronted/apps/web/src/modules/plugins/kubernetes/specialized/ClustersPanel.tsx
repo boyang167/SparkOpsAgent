@@ -3,6 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { platform } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
+import {
+  K8sEmptyState,
+  K8sLoadingState,
+  K8sPagination,
+  useK8sConfirm,
+} from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { notifyEntitlementsUpdated, useShellContext } from "@/components/layout/shell-context";
 import { ApiErrorBanner } from "../ApiErrorBanner";
@@ -23,8 +29,6 @@ import {
 import type { KubernetesCluster } from "../cluster-types";
 import { ClusterAssociateDialog } from "./ClusterAssociateDialog";
 import { ClusterAuthorizeDialog } from "./ClusterAuthorizeDialog";
-
-const PAGE_SIZES = [10, 30, 50];
 
 function settingsPayload(form: ClusterCreateFormValue) {
   return {
@@ -75,6 +79,7 @@ export function ClustersPanel({
   const [associating, setAssociating] = useState<KubernetesCluster | null>(null);
   const [actionError, setActionError] = useState<ApiErrorInfo | null>(null);
   const [statuses, setStatuses] = useState<Record<string, ClusterStatusView>>({});
+  const { ask, dialog: confirmDialog } = useK8sConfirm();
 
   const filtered = useMemo(() => {
     const q = keyword.trim().toLowerCase();
@@ -227,7 +232,13 @@ export function ClustersPanel({
 
   async function revokeCluster(cluster: KubernetesCluster) {
     if (!canManage || !workspaceId) return;
-    if (!window.confirm(`确定撤销集群「${cluster.name || cluster.id}」的工作区授权？平台登记不会被删除。`)) return;
+    const ok = await ask({
+      title: "撤销集群授权",
+      description: `确定撤销集群「${cluster.name || cluster.id}」的工作区授权？平台登记不会被删除。`,
+      confirmLabel: "撤销",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await platform.revokeAuthorizedWorkspaceCluster(workspaceId, cluster.id);
       setSelected((prev) => prev.filter((id) => id !== cluster.id));
@@ -244,7 +255,13 @@ export function ClustersPanel({
 
   async function revokeSelected() {
     if (!canManage || !workspaceId || selected.length === 0) return;
-    if (!window.confirm(`确定批量撤销 ${selected.length} 个集群的工作区授权？`)) return;
+    const ok = await ask({
+      title: "批量撤销授权",
+      description: `确定批量撤销 ${selected.length} 个集群的工作区授权？`,
+      confirmLabel: "撤销",
+      danger: true,
+    });
+    if (!ok) return;
     setActionError(null);
     try {
       for (const id of selected) {
@@ -372,61 +389,40 @@ export function ClustersPanel({
               </tr>
               );
             })}
-            {rows.length === 0 ? (
+            {loading && rows.length === 0 ? (
               <tr>
                 <td colSpan={6}>
-                  <div className="empty-state">{loading ? "加载集群中…" : "暂无集群，点击「新增」接入"}</div>
+                  <K8sLoadingState label="加载集群中…" compact />
+                </td>
+              </tr>
+            ) : null}
+            {!loading && rows.length === 0 ? (
+              <tr>
+                <td colSpan={6}>
+                  <K8sEmptyState
+                    variant="empty"
+                    title="暂无集群"
+                    description="点击「新增」接入第一个 Kubernetes 集群。"
+                    compact
+                  />
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
       </div>
-      <div className="k8s-pagination">
-        <span className="text-muted">共 {total} 条</span>
-        <label className="flex items-center gap-2 text-sm">
-          <select
-            className="input"
-            value={pageSize}
-            onChange={(e) => {
-              setPageSize(Number(e.target.value));
-              setPage(1);
-            }}
-          >
-            {PAGE_SIZES.map((size) => (
-              <option key={size} value={size}>
-                {size}条/页
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="flex items-center gap-2">
-          <button type="button" className="btn-secondary text-sm" disabled={currentPage <= 1} onClick={() => setPage((p) => p - 1)}>
-            上一页
-          </button>
-          <span className="k8s-page-current">{currentPage}</span>
-          <button
-            type="button"
-            className="btn-secondary text-sm"
-            disabled={currentPage >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            下一页
-          </button>
-        </div>
-        <label className="flex items-center gap-1 text-sm text-muted">
-          前往
-          <input
-            className="input k8s-page-jumper"
-            type="number"
-            min={1}
-            max={totalPages}
-            value={currentPage}
-            onChange={(e) => setPage(Math.min(totalPages, Math.max(1, Number(e.target.value) || 1)))}
-          />
-          页
-        </label>
-      </div>
+      <K8sPagination
+        page={currentPage}
+        pageSize={pageSize}
+        total={total}
+        pageSizes={[10, 30, 50]}
+        loading={loading}
+        onPageChange={setPage}
+        onPageSizeChange={(next) => {
+          setPageSize(next);
+          setPage(1);
+        }}
+      />
 
       <Modal
         open={creating}
@@ -476,6 +472,7 @@ export function ClustersPanel({
       <Modal open={Boolean(associating)} title={associating ? `关联 ${associating.name || associating.id}` : "关联"} size="xl" onClose={() => setAssociating(null)}>
         {associating ? <ClusterAssociateDialog cluster={associating} /> : null}
       </Modal>
+      {confirmDialog}
     </div>
   );
 }

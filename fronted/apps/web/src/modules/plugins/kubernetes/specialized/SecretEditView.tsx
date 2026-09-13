@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { K8sResourceTabs } from "@/components/k8s";
 import {
   formStateToSecret,
   secretToFormState,
@@ -52,26 +53,13 @@ export function SecretEditView({ value, saving = false, onSave, onClose }: Secre
         </label>
       </div>
 
-      <div className="k8s-tabs" role="tablist" aria-label="Secret 编辑页签">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "data"}
-          className={tab === "data" ? "k8s-tab k8s-tab-active" : "k8s-tab"}
-          onClick={() => setTab("data")}
-        >
-          数据
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "meta"}
-          className={tab === "meta" ? "k8s-tab k8s-tab-active" : "k8s-tab"}
-          onClick={() => setTab("meta")}
-        >
-          标签/注解
-        </button>
-      </div>
+      <K8sResourceTabs
+        tabs={["data", "meta"] as const}
+        active={tab}
+        ariaLabel="Secret 编辑页签"
+        label={(id) => (id === "data" ? "数据" : "标签/注解")}
+        onChange={setTab}
+      />
 
       {tab === "data" ? (
         <>
