@@ -21,6 +21,7 @@ import {
   shouldContinueDeploymentPoll,
 } from "./deployment-poll";
 import { isActiveDeploymentRun } from "./deployment-console-utils";
+import { deployableClusters } from "./project-environment-status";
 
 interface ProjectDeployModalProps {
   open: boolean;
@@ -106,11 +107,12 @@ export function ProjectDeployModal({
         const buildCluster =
           nextOptions.clusters.find((cluster) => cluster.is_build_env) ??
           nextOptions.clusters[0];
+        const targetClusters = deployableClusters(nextOptions.clusters);
         const preferred = crossCluster
           ? buildCluster?.id
-          : nextOptions.clusters.some((cluster) => cluster.id === project.default_cluster_id)
+          : targetClusters.some((cluster) => cluster.id === project.default_cluster_id)
             ? project.default_cluster_id
-            : nextOptions.clusters[0]?.id;
+            : targetClusters[0]?.id;
         setClusterId(preferred ?? "");
       })
       .catch((err) => {
@@ -290,12 +292,11 @@ export function ProjectDeployModal({
                 required
               >
                 <option value="">请选择授权集群</option>
-                {options.clusters.map((cluster) => {
+                {deployableClusters(options.clusters).map((cluster) => {
                   const label = cluster.cluster_name?.trim() || cluster.id;
                   return (
                     <option key={cluster.id} value={cluster.id}>
                       {label}
-                      {cluster.is_build_env ? "（构建集群）" : ""}
                     </option>
                   );
                 })}

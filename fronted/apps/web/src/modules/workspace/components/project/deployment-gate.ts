@@ -1,6 +1,7 @@
 import type { DeploymentOptionsVM, DeploymentRunVM } from "@sparkops/contracts/delivery";
 import type { SecretVM } from "@sparkops/contracts/secret";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
+import { deployableClusters } from "./project-environment-status";
 
 export interface DeploymentGateResult {
   allowed: boolean;
@@ -26,7 +27,7 @@ export function deploymentGate(
 
   if (project.review_status !== "approved") missing.push("项目审核通过");
   if (activeRun && ACTIVE_STATUSES.has(activeRun.status)) missing.push("已有部署正在进行");
-  if (!options.clusters.length) missing.push("未授权集群");
+  if (!deployableClusters(options.clusters).length) missing.push("未授权集群");
   if (!project.secret_id || !secretIds.has(project.secret_id)) missing.push("Git 密钥");
   if (!project.jenkins_secret_id || !secretIds.has(project.jenkins_secret_id)) {
     missing.push("Jenkins 密钥");
@@ -68,7 +69,7 @@ export function deploymentEntryAction(
   if (loadError) missing.push(loadError);
   if (options) {
     missing.push(...options.missing);
-    if (options.clusters.length === 0) missing.push("未授权集群");
+    if (deployableClusters(options.clusters).length === 0) missing.push("未授权集群");
   } else if (!loadError) {
     missing.push("部署条件不可用");
   }

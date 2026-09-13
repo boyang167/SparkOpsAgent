@@ -4,8 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
-import type { DeploymentRunVM } from "@sparkops/contracts/delivery";
 import type { DeploymentEntryAction } from "./deployment-gate";
+import { ProjectEnvironmentStatus } from "./ProjectEnvironmentStatus";
+import { ProjectRunStats } from "./ProjectRunStats";
+import { isProjectInDeployPhase } from "./project-environment-status";
+import type { ProjectRunSummary } from "./useProjectRunSummary";
 import {
   formatDateTime,
   languageColor,
@@ -33,19 +36,17 @@ interface ProjectOverviewCardProps {
   onReview?: (project: ProjectVM) => void;
   onArchive?: (project: ProjectVM) => void;
   deploymentAction?: DeploymentEntryAction;
-  deploymentSummary?: {
-    total: number | null;
-    latest: DeploymentRunVM | null;
-    loading: boolean;
-    error: string | null;
-  };
+  runSummary?: ProjectRunSummary;
 }
 
 function statusLabelTagClass(label: string) {
   if (label === "审核中") return "project-tag project-tag-blue";
   if (label === "配置中") return "project-tag project-tag-orange";
   if (label === "审核驳回") return "project-tag project-tag-red";
+  if (label === "已部署") return "project-tag project-tag-green";
   if (label === "待部署" || label === "待提交审核") return "project-tag project-tag-green";
+  if (label === "部署中") return "project-tag project-tag-blue";
+  if (label === "部署失败" || label === "已中止") return "project-tag project-tag-red";
   return "project-tag project-tag-gray";
 }
 
@@ -125,34 +126,25 @@ export function ProjectOverviewCard({
   onReview,
   onArchive,
   deploymentAction,
-  deploymentSummary,
+  runSummary,
 }: ProjectOverviewCardProps) {
   const router = useRouter();
-  const { steps, statusLabel, configComplete } = computeProjectProgress(project);
+  const { steps, statusLabel, configComplete } = computeProjectProgress(
+    project,
+    runSummary?.deployment,
+  );
   const primaryAction = projectPrimaryAction(project);
   const showEditConfig = shouldShowEditConfigAction(project);
   const configActionLabel = projectConfigActionLabel(project);
   const langColor = languageColor(project.language);
   const initial = languageLabel(project.language).charAt(0).toUpperCase() || "P";
+  const displayName = projectDisplayName(project);
+  const showTechnicalName = project.name.trim() !== displayName.trim();
   const TitleTag = heading;
   const targetHref = detailsHref ?? `/projects/${project.id}`;
   const cardInteractive = Boolean(detailsHref);
-  const deploymentCount = deploymentSummary?.loading
-    ? "加载中…"
-    : deploymentSummary?.error
-      ? "不可用"
-      : deploymentSummary?.total != null
-        ? String(deploymentSummary.total)
-        : "暂无统计";
-  const latestDeployment = deploymentSummary?.loading
-    ? "加载中…"
-    : deploymentSummary?.error
-      ? "不可用"
-      : deploymentSummary?.latest
-        ? `${deploymentSummary.latest.status} · ${formatDateTime(deploymentSummary.latest.created_at)}`
-        : deploymentSummary
-          ? "暂无"
-          : "暂无统计";
+  const inDeployPhase = isProjectInDeployPhase(project);
+  const description = project.description?.trim() || "暂无项目描述";
 
   function handleCardClick(event: React.MouseEvent<HTMLElement>) {
     if (!cardInteractive) return;
@@ -172,50 +164,57 @@ export function ProjectOverviewCard({
   return (
     <article
       className={`project-overview-card${cardInteractive ? " project-overview-card-interactive" : ""}`}
+      style={{ ["--project-accent" as string]: langColor }}
       onClick={handleCardClick}
       onKeyDown={handleCardKeyDown}
       role={cardInteractive ? "link" : undefined}
       tabIndex={cardInteractive ? 0 : undefined}
     >
-      <header className="project-workbench-header">
-        <div className="project-workbench-title-wrap">
-          <div className="project-lang-icon" style={{ backgroundColor: langColor }}>
+      <header className="project-overview-header">
+        <div className="project-overview-identity">
+          <div className="project-lang-icon project-lang-icon-ring" style={{ backgroundColor: langColor }}>
             {initial}
           </div>
           <div className="project-overview-heading">
-            <div className="project-overview-heading-row">
-              <TitleTag>{projectDisplayName(project)}</TitleTag>
-              <div className="project-card-tags">
-                <span className="project-tag project-tag-lang">{languageLabel(project.language)}</span>
-                {project.namespace ? (
-                  <span className="project-tag project-tag-gray">{project.namespace}</span>
-                ) : null}
-                <span className={statusLabelTagClass(statusLabel)}>{statusLabel}</span>
-              </div>
+            <div className="project-overview-title-row">
+              <TitleTag>{displayName}</TitleTag>
+              <span className={statusLabelTagClass(statusLabel)}>{statusLabel}</span>
             </div>
-            <p className="project-card-subtitle">{project.name}</p>
+            {showTechnicalName ? <p className="project-card-subtitle">{project.name}</p> : null}
+            <div className="project-overview-meta">
+              <span>{languageLabel(project.language)}</span>
+              {project.namespace ? (
+                <>
+                  <span className="project-overview-meta-sep" aria-hidden>
+                    ·
+                  </span>
+                  <span>{project.namespace}</span>
+                </>
+              ) : null}
+            </div>
           </div>
         </div>
         {onArchive ? <MoreMenu onArchive={() => onArchive(project)} /> : null}
       </header>
 
-      <p className="project-card-desc">{project.description || "暂无描述"}</p>
+      <p className={`project-card-desc${description === "暂无项目描述" ? " is-placeholder" : ""}`}>
+        {description}
+      </p>
 
-      <ProgressTrack steps={steps} />
+      <div className="project-overview-body">
+        {inDeployPhase && runSummary ? (
+          <ProjectEnvironmentStatus
+            items={runSummary.environments.items}
+            loading={runSummary.environments.loading}
+            error={runSummary.environments.error}
+          />
+        ) : (
+          <ProgressTrack steps={steps} />
+        )}
 
-      <div className="project-workbench-stats">
-        <div>
-          <span>部署次数</span>
-          <strong>{deploymentCount}</strong>
-        </div>
-        <div>
-          <span>构建次数</span>
-          <strong>暂无统计</strong>
-        </div>
-        <div>
-          <span>最后部署</span>
-          <strong>{latestDeployment}</strong>
-        </div>
+        {runSummary ? (
+          <ProjectRunStats deployment={runSummary.deployment} build={runSummary.build} />
+        ) : null}
       </div>
 
       <footer className="project-workbench-footer">

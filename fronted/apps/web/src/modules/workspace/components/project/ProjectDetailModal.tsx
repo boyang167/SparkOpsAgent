@@ -7,7 +7,7 @@ import type { AgentVM } from "@sparkops/contracts/agent";
 import type { WorkflowVM } from "@sparkops/contracts/workflow";
 import type { TemplateVM } from "@sparkops/contracts/product";
 import type { SecretVM } from "@sparkops/contracts/secret";
-import type { DeploymentRunListVM } from "@sparkops/contracts/delivery";
+import type { BuildVM, DeploymentRunListVM } from "@sparkops/contracts/delivery";
 import { Modal } from "@/components/ui/Modal";
 import { AgentList } from "@/modules/agent/components/AgentList";
 import { CreateAgentForm } from "@/modules/agent/components/CreateAgentForm";
@@ -23,6 +23,8 @@ import { computeProjectProgress, isProjectConfigComplete } from "./project-progr
 import { ProjectGeneratedTemplates } from "./ProjectGeneratedTemplates";
 import { ProjectDockerfileViewer } from "./ProjectDockerfileViewer";
 import { countGeneratedTemplates } from "./project-template-render";
+import { buildStatusLabel, buildSummaryState } from "./build-summary";
+import { deploymentRunStatusLabel } from "./deployment-console-utils";
 import { deploymentSummaryState } from "./deployment-summary";
 
 interface ProjectDetailModalProps {
@@ -212,6 +214,9 @@ export function ProjectDetailModal({
   const [deploymentPage, setDeploymentPage] = useState<DeploymentRunListVM | null>(null);
   const [deploymentLoading, setDeploymentLoading] = useState(false);
   const [deploymentError, setDeploymentError] = useState<string | null>(null);
+  const [builds, setBuilds] = useState<BuildVM[] | null>(null);
+  const [buildLoading, setBuildLoading] = useState(false);
+  const [buildError, setBuildError] = useState<string | null>(null);
   const [loadingExtra, setLoadingExtra] = useState(false);
 
   useEffect(() => {
@@ -254,25 +259,50 @@ export function ProjectDetailModal({
     setDeploymentPage(null);
     setDeploymentError(null);
     setDeploymentLoading(true);
-    void delivery
-      .listDeployments(project.id, workspaceId)
-      .then((page) => {
-        if (!cancelled) setDeploymentPage(page);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setDeploymentError(err instanceof Error ? err.message : "部署统计不可用");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setDeploymentLoading(false);
-      });
+    setBuilds(null);
+    setBuildError(null);
+    setBuildLoading(true);
+
+    void Promise.allSettled([
+      delivery.listDeployments(project.id, workspaceId),
+      delivery.listBuilds(project.id, workspaceId),
+    ]).then(([deploymentResult, buildResult]) => {
+      if (cancelled) return;
+      if (deploymentResult.status === "fulfilled") {
+        setDeploymentPage(deploymentResult.value);
+        setDeploymentError(null);
+      } else {
+        setDeploymentPage(null);
+        setDeploymentError(
+          deploymentResult.reason instanceof Error
+            ? deploymentResult.reason.message
+            : "部署统计不可用",
+        );
+      }
+      if (buildResult.status === "fulfilled") {
+        setBuilds(buildResult.value);
+        setBuildError(null);
+      } else {
+        setBuilds(null);
+        setBuildError(
+          buildResult.reason instanceof Error ? buildResult.reason.message : "构建统计不可用",
+        );
+      }
+      setDeploymentLoading(false);
+      setBuildLoading(false);
+    });
+
     return () => {
       cancelled = true;
     };
   }, [open, project, workspaceId]);
 
-  const progress = project ? computeProjectProgress(project) : null;
+  const progress = project
+    ? computeProjectProgress(project, {
+        latest: deploymentPage?.items[0] ?? null,
+        total: deploymentPage?.total ?? null,
+      })
+    : null;
   const configComplete = project ? isProjectConfigComplete(project) : false;
 
   const generatedTemplateCount = useMemo(
@@ -290,6 +320,7 @@ export function ProjectDetailModal({
     deploymentLoading,
     deploymentError,
   );
+  const buildSummary = buildSummaryState(builds, buildLoading, buildError);
 
   function toggle(key: SectionKey) {
     setOpenKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
@@ -491,14 +522,24 @@ export function ProjectDetailModal({
                 label: "部署次数",
                 value: deploymentSummary.count,
               },
-              { label: "构建次数", value: "暂无统计" },
+              { label: "构建次数", value: buildSummary.count },
               {
                 label: "最后部署",
                 value: deploymentSummary.latest
-                  ? `${deploymentSummary.latest.status} · ${formatDateTime(deploymentSummary.latest.created_at)}`
+                  ? `${deploymentRunStatusLabel(deploymentSummary.latest.status)} · ${formatDateTime(deploymentSummary.latest.created_at)}`
                   : deploymentLoading
                     ? "加载中…"
                     : deploymentSummary.unavailable
+                      ? "不可用"
+                      : "暂无",
+              },
+              {
+                label: "最后构建",
+                value: buildSummary.latest
+                  ? `${buildStatusLabel(buildSummary.latest.status)} · ${formatDateTime(buildSummary.latest.started_at)}`
+                  : buildLoading
+                    ? "加载中…"
+                    : buildSummary.unavailable
                       ? "不可用"
                       : "暂无",
               },

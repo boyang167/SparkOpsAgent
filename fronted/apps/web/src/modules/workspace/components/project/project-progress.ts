@@ -1,5 +1,28 @@
+import type { DeploymentRunVM, DeploymentStatus } from "@sparkops/contracts/delivery";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { hasSelectedProjectTemplate } from "./project-utils";
+
+const ACTIVE_DEPLOYMENT_STATUSES = new Set<DeploymentStatus>([
+  "queued",
+  "preparing",
+  "building",
+  "deploying",
+]);
+
+export interface ProjectDeploymentHint {
+  latest: DeploymentRunVM | null;
+  total?: number | null;
+}
+
+/** Derive display label from latest deployment run, if any. */
+export function deploymentStatusLabel(latest: DeploymentRunVM | null | undefined): string | null {
+  if (!latest) return null;
+  if (latest.status === "succeeded") return "已部署";
+  if (ACTIVE_DEPLOYMENT_STATUSES.has(latest.status)) return "部署中";
+  if (latest.status === "failed") return "部署失败";
+  if (latest.status === "aborted") return "已中止";
+  return null;
+}
 
 export type ProgressStatus = "done" | "active" | "pending";
 
@@ -23,7 +46,10 @@ export function isProjectConfigComplete(
   );
 }
 
-export function computeProjectProgress(project: ProjectVM): {
+export function computeProjectProgress(
+  project: ProjectVM,
+  deployment?: ProjectDeploymentHint | null,
+): {
   steps: ProjectProgressStep[];
   configComplete: boolean;
   statusLabel: string;
@@ -32,6 +58,7 @@ export function computeProjectProgress(project: ProjectVM): {
   const reviewStatus = project.review_status ?? "none";
   const submitted = reviewStatus === "pending" || reviewStatus === "approved";
   const approved = reviewStatus === "approved";
+  const deployedLabel = approved ? deploymentStatusLabel(deployment?.latest) : null;
   const steps: ProjectProgressStep[] = [
     { key: "created", title: "创建项目", subtitle: "基本信息", status: "done" },
     {
@@ -56,7 +83,11 @@ export function computeProjectProgress(project: ProjectVM): {
     {
       key: "approved",
       title: "审核完成",
-      subtitle: approved ? "待部署" : reviewStatus === "pending" ? "等待审核" : "未开始",
+      subtitle: approved
+        ? (deployedLabel ?? "待部署")
+        : reviewStatus === "pending"
+          ? "等待审核"
+          : "未开始",
       status: approved ? "done" : reviewStatus === "pending" ? "active" : "pending",
     },
   ];
@@ -68,7 +99,7 @@ export function computeProjectProgress(project: ProjectVM): {
       : reviewStatus === "pending"
         ? "审核中"
         : reviewStatus === "approved"
-          ? "待部署"
+          ? (deployedLabel ?? "待部署")
           : reviewStatus === "rejected"
             ? "审核驳回"
             : "待提交审核",

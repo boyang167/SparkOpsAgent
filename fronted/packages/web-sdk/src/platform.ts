@@ -1,5 +1,6 @@
 import { bffFetch } from "./client";
 import type {
+  DashboardVM,
   DeploymentStatVM,
   MonitorOverviewVM,
   ProclaimVM,
@@ -13,6 +14,13 @@ export async function getMonitorOverview(workspaceId: string) {
   return bffFetch<MonitorOverviewVM>(`/workspaces/${workspaceId}/monitor/overview`, {
     workspaceId,
   });
+}
+
+export function getDashboard(workspaceId: string) {
+  return bffFetch<DashboardVM & { projects?: number; products?: number; workspace_id?: string }>(
+    `/workspaces/${workspaceId}/dashboard`,
+    { workspaceId },
+  );
 }
 
 export async function listDeploymentStats(workspaceId: string) {

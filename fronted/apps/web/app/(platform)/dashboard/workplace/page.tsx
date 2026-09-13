@@ -1,23 +1,30 @@
-import { PageHeader } from "@/components/ui/PageHeader";
-import { BffResourcePanel } from "@/components/platform/BffResourcePanel";
-import { loadPlatformPageContext } from "@/server/loaders/platform-page";
+import { redirect } from "next/navigation";
+import { WorkplaceDashboard } from "@/modules/dashboard/components/WorkplaceDashboard";
+import { loadProjects } from "@/server/loaders/projects";
+import { loadSession } from "@/server/loaders/session";
+import { loadResolvedWorkspaceId } from "@/server/loaders/workspace-context";
 
 export default async function WorkplacePage() {
-  const { workspaceId } = await loadPlatformPageContext();
+  const session = await loadSession();
+  if (!session) {
+    redirect("/login");
+  }
+
+  const { workspaces, workspaceId } = await loadResolvedWorkspaceId();
+  if (!workspaceId) {
+    redirect("/dashboard");
+  }
+
+  const projects = await loadProjects(workspaceId);
+  const currentWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
 
   return (
-    <div className="stack-lg">
-      <PageHeader
-        eyebrow="Dashboard"
-        title="工作台"
-        description="聚合项目、构建与运行态概览（对应旧 /workplace）"
-      />
-      <BffResourcePanel
-        workspaceId={workspaceId}
-        title="工作台概览"
-        bffPath="/workspaces/{wsId}/dashboard"
-        upstreamPath="/api/v1/workspaces/:wsId/dashboard"
-      />
-    </div>
+    <WorkplaceDashboard
+      session={session}
+      workspaces={workspaces}
+      workspaceId={workspaceId}
+      workspaceName={currentWorkspace?.name ?? "Workspace"}
+      projects={projects}
+    />
   );
 }

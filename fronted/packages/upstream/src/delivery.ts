@@ -36,15 +36,14 @@ function clusterDisplayName(cluster: DeploymentOptionsWire["clusters"][number]):
 
 export function normalizeDeploymentOptions(input: DeploymentOptionsWire): DeploymentOptionsVM {
   return {
-    clusters: input.clusters
-      .filter((cluster) => cluster.available)
-      .map((cluster) => ({
-        id: cluster.id,
-        cluster_name: clusterDisplayName(cluster),
-        server: cluster.server,
-        is_build_env: Boolean(cluster.is_build_env),
-        priority_id: cluster.priority_id ?? 0,
-      })),
+    clusters: input.clusters.map((cluster) => ({
+      id: cluster.id,
+      cluster_name: clusterDisplayName(cluster),
+      server: cluster.server,
+      is_build_env: Boolean(cluster.is_build_env),
+      priority_id: cluster.priority_id ?? 0,
+      available: cluster.available,
+    })),
     missing: [
       ...new Set(
         input.clusters

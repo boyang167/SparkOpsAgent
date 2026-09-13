@@ -286,6 +286,7 @@ export function ProjectPanel({
                   {paged.map((project) => (
                     <ProjectCard
                       key={project.id}
+                      workspaceId={workspaceId}
                       project={project}
                       onArchive={(p) => void onArchive(p)}
                       onViewDetails={(p) => router.push(`/projects/${p.id}`)}

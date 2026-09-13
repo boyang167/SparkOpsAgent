@@ -59,6 +59,27 @@ export function projectDisplayName(project: { display_name?: string; name: strin
   return project.display_name?.trim() || project.name;
 }
 
+/** 卡片上使用的紧凑时间：近期显示相对时间，较早显示月日时分。 */
+export function formatCompactDateTime(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const diffMs = Date.now() - date.getTime();
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} 天前`;
+  return date.toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 export const PROJECT_NAME_RULE_HINT =
   "仅支持英文小写字母数字 - 名称不能纯数字,不能有大写,不能有'_'";
 

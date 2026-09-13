@@ -2,8 +2,10 @@
 
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { ProjectOverviewCard } from "./ProjectOverviewCard";
+import { useProjectRunSummary } from "./useProjectRunSummary";
 
 interface ProjectCardProps {
+  workspaceId: string;
   project: ProjectVM;
   onArchive?: (project: ProjectVM) => void;
   onViewDetails?: (project: ProjectVM) => void;
@@ -14,6 +16,7 @@ interface ProjectCardProps {
 }
 
 export function ProjectCard({
+  workspaceId,
   project,
   onArchive,
   onViewDetails,
@@ -22,9 +25,12 @@ export function ProjectCard({
   onReview,
   onDeploy,
 }: ProjectCardProps) {
+  const runSummary = useProjectRunSummary(workspaceId, project.id);
+
   return (
     <ProjectOverviewCard
       project={project}
+      runSummary={runSummary}
       detailsHref={`/projects/${project.id}`}
       deployHref={`/projects/${project.id}?release=1`}
       onViewDetails={onViewDetails ? () => onViewDetails(project) : undefined}

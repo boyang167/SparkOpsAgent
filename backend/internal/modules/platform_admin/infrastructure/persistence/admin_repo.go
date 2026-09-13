@@ -216,9 +216,10 @@ func (r *AdminRepository) ListWorkspaceClusters(ctx context.Context, wsID kernel
 		ClusterName string
 		Server      string
 		PriorityID  int
+		IsBuildEnv  bool
 	}
 	if err := r.db.WithContext(ctx).Raw(`
-		SELECT c.id, c.cluster_name, c.server, g.priority_id
+		SELECT c.id, c.cluster_name, c.server, g.priority_id, c.is_build_env
 		FROM platform_admin.cluster_info AS c
 		INNER JOIN platform_admin.workspace_clusters AS g ON g.cluster_id = c.id
 		WHERE g.workspace_id = ?
@@ -226,14 +227,14 @@ func (r *AdminRepository) ListWorkspaceClusters(ctx context.Context, wsID kernel
 		return nil, err
 	}
 	out := make([]*repository.ClusterInfo, 0, len(rows))
-	for i, row := range rows {
+	for _, row := range rows {
 		id, err := kernel.ParseClusterInfoID(row.ID)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, &repository.ClusterInfo{
 			ID: id, ClusterName: row.ClusterName, Server: row.Server,
-			PriorityID: row.PriorityID, IsBuildEnv: i == 0,
+			PriorityID: row.PriorityID, IsBuildEnv: row.IsBuildEnv,
 		})
 	}
 	return out, nil
