@@ -290,12 +290,15 @@ export function ProjectDeployModal({
                 required
               >
                 <option value="">请选择授权集群</option>
-                {options.clusters.map((cluster) => (
-                  <option key={cluster.id} value={cluster.id}>
-                    {cluster.cluster_name}
-                    {cluster.is_build_env ? "（构建集群）" : ""}
-                  </option>
-                ))}
+                {options.clusters.map((cluster) => {
+                  const label = cluster.cluster_name?.trim() || cluster.id;
+                  return (
+                    <option key={cluster.id} value={cluster.id}>
+                      {label}
+                      {cluster.is_build_env ? "（构建集群）" : ""}
+                    </option>
+                  );
+                })}
               </select>
               {crossCluster ? (
                 <p className="text-muted text-sm">

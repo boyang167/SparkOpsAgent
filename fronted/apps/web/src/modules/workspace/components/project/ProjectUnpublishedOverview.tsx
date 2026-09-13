@@ -1,9 +1,9 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { ProjectPort, ProjectVM } from "@sparkops/contracts/workspace";
 import type { DeploymentRunListVM } from "@sparkops/contracts/delivery";
-import { formatDateTime, languageLabel } from "./project-utils";
+import { formatDateTime } from "./project-utils";
 
 interface ProjectUnpublishedOverviewProps {
   project: ProjectVM;
@@ -12,11 +12,14 @@ interface ProjectUnpublishedOverviewProps {
 }
 
 function portTags(ports: ProjectPort[] | undefined) {
-  if (!ports?.length) return <span>-</span>;
+  if (!ports?.length) return <span className="text-muted">-</span>;
   return (
     <span className="project-unpublished-tags">
       {ports.map((port, index) => (
-        <span key={`${port.protocol ?? "TCP"}-${port.container_port}-${index}`} className="project-tag project-tag-gray">
+        <span
+          key={`${port.protocol ?? "TCP"}-${port.container_port}-${index}`}
+          className="project-tag project-tag-gray"
+        >
           {port.protocol ?? "TCP"}-{port.service_port ?? port.container_port}
         </span>
       ))}
@@ -58,6 +61,29 @@ function OverviewField({
   );
 }
 
+function CopyableText({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) return <span>-</span>;
+
+  return (
+    <span className="project-overview-copyable">
+      <span className="project-overview-copyable-text">{value}</span>
+      <button
+        type="button"
+        className="project-overview-copy-btn"
+        onClick={() => {
+          void navigator.clipboard.writeText(value).then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+          });
+        }}
+      >
+        {copied ? "已复制" : "复制"}
+      </button>
+    </span>
+  );
+}
+
 export function ProjectUnpublishedOverview({
   project,
   workspaceId,
@@ -73,34 +99,30 @@ export function ProjectUnpublishedOverview({
   return (
     <div className="project-overview-page">
       {approved ? (
-        <div className="project-overview-banner project-overview-banner-info">
+        <div className="project-overview-banner project-overview-banner-info project-overview-banner-soft">
           审核已通过。确认构建与运行配置无误后，点击右上角「发布」完成首次部署。
         </div>
       ) : null}
 
       {latestRun && latestRun.status !== "succeeded" ? (
-        <div className="project-overview-banner project-overview-banner-warning">
+        <div className="project-overview-banner project-overview-banner-warning project-overview-banner-soft">
           最近部署 {deploymentStatusLabel(latestRun.status)} · {latestRun.git_ref_value || "-"} ·{" "}
           {formatDateTime(latestRun.finished_at || latestRun.created_at)}
         </div>
       ) : null}
 
-      <div className="project-overview-stats">
+      <div className="project-overview-stats project-overview-stats-3">
         <div className="project-overview-stat">
-          <span className="project-overview-stat-label">副本数</span>
+          <span className="project-overview-stat-label">副本</span>
           <strong>{replicas}</strong>
-        </div>
-        <div className="project-overview-stat">
-          <span className="project-overview-stat-label">内存</span>
-          <strong>{memory}</strong>
         </div>
         <div className="project-overview-stat">
           <span className="project-overview-stat-label">CPU</span>
           <strong>{cpu}</strong>
         </div>
         <div className="project-overview-stat">
-          <span className="project-overview-stat-label">语言</span>
-          <strong>{languageLabel(project.language)}</strong>
+          <span className="project-overview-stat-label">内存</span>
+          <strong>{memory}</strong>
         </div>
       </div>
 
@@ -108,7 +130,11 @@ export function ProjectUnpublishedOverview({
         <section className="project-overview-panel">
           <h4 className="project-overview-panel-title">构建与源码</h4>
           <dl className="project-overview-fields">
-            <OverviewField label="Git 地址" value={project.git_url || "-"} full />
+            <OverviewField
+              label="Git 地址"
+              value={<CopyableText value={project.git_url || ""} />}
+              full
+            />
             <OverviewField label="分支类型" value={gitRefTypeLabel(project.git_ref_type)} />
             <OverviewField label="Git 版本" value={project.git_ref_value || "-"} />
             <OverviewField label="Dockerfile" value={project.dockerfile_path || "./Dockerfile"} full />
@@ -118,18 +144,22 @@ export function ProjectUnpublishedOverview({
         <section className="project-overview-panel">
           <h4 className="project-overview-panel-title">运行规格</h4>
           <dl className="project-overview-fields">
-            <OverviewField label="命名空间" value={businessSpace} />
+            <OverviewField
+              label="命名空间"
+              value={<span className="project-tag project-tag-blue">{businessSpace}</span>}
+            />
             <OverviewField label="服务类型" value="集群内部访问" />
             <OverviewField
               label="容器规格"
               value={
                 <span className="project-unpublished-tags">
-                  <span className="project-tag project-tag-gray">{replicas} 个</span>
-                  <span className="project-tag project-tag-gray">{memory} 内存</span>
+                  <span className="project-tag project-tag-gray">{replicas} 副本</span>
+                  <span className="project-tag project-tag-gray">CPU {cpu}</span>
+                  <span className="project-tag project-tag-gray">内存 {memory}</span>
                 </span>
               }
             />
-            <OverviewField label="端口信息" value={portTags(project.resources?.ports)} />
+            <OverviewField label="端口信息" value={portTags(project.resources?.ports)} full />
           </dl>
         </section>
       </div>

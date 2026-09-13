@@ -16,10 +16,24 @@ export function getProjectRuntimeOverview(projectId: string, workspaceId: string
   );
 }
 
+export function getDeploymentYAML(projectId: string, workspaceId: string) {
+  return bffFetch<{ yaml: string }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/deployment/yaml`,
+    { workspaceId },
+  );
+}
+
 export function getPod(projectId: string, podId: string, workspaceId: string) {
   return bffFetch<PodVM>(`/workspaces/${workspaceId}/projects/${projectId}/pods/${podId}`, {
     workspaceId,
   });
+}
+
+export function getPodYAML(projectId: string, podId: string, workspaceId: string) {
+  return bffFetch<{ yaml: string }>(
+    `/workspaces/${workspaceId}/projects/${projectId}/pods/${podId}/yaml`,
+    { workspaceId },
+  );
 }
 
 export function getPodLogs(projectId: string, podId: string, workspaceId: string) {

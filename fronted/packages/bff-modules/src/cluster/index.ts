@@ -18,6 +18,14 @@ export async function getProjectRuntimeOverview(
   return ctx.upstream.cluster.getProjectRuntimeOverview(workspaceId, projectId);
 }
 
+export async function getDeploymentYAML(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+): Promise<{ yaml: string }> {
+  return ctx.upstream.cluster.getDeploymentYAML(workspaceId, projectId);
+}
+
 export async function getPod(
   ctx: BffContext,
   workspaceId: string,
@@ -25,6 +33,15 @@ export async function getPod(
   podId: string,
 ): Promise<PodVM> {
   return ctx.upstream.cluster.getPod(workspaceId, projectId, podId);
+}
+
+export async function getPodYAML(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  podId: string,
+): Promise<{ yaml: string }> {
+  return ctx.upstream.cluster.getPodYAML(workspaceId, projectId, podId);
 }
 
 export async function getPodLogs(

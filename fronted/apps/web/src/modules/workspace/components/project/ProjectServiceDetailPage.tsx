@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cluster } from "@sparkops/web-sdk";
 import type { ProjectRuntimeOverviewVM } from "@sparkops/contracts/cluster";
 import type { DeploymentRunListVM, DeploymentRunVM } from "@sparkops/contracts/delivery";
@@ -9,7 +9,6 @@ import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import {
   formatDateTime,
   languageLabel,
-  projectDisplayName,
 } from "./project-utils";
 import {
   isProjectConfigComplete,
@@ -77,19 +76,109 @@ function MetaTag({
   tone = "gray",
 }: {
   children: ReactNode;
-  tone?: "gray" | "orange" | "green" | "blue";
+  tone?: "gray" | "orange" | "green" | "blue" | "red";
 }) {
   return <span className={`project-tag project-tag-${tone}`}>{children}</span>;
 }
 
-function reviewStatusLabel(project: ProjectVM) {
+function reviewStatusMeta(project: ProjectVM): {
+  label: string;
+  tone: "gray" | "orange" | "green" | "blue" | "red";
+} {
   const configComplete = isProjectConfigComplete(project);
-  return {
-    none: configComplete ? "待提交审核" : "配置中",
-    pending: "审核中",
-    approved: "审核通过",
-    rejected: "审核驳回",
-  }[project.review_status ?? "none"];
+  switch (project.review_status) {
+    case "pending":
+      return { label: "审核中", tone: "orange" };
+    case "approved":
+      return { label: "审核通过", tone: "green" };
+    case "rejected":
+      return { label: "审核驳回", tone: "red" };
+    default:
+      return {
+        label: configComplete ? "待提交审核" : "配置中",
+        tone: configComplete ? "blue" : "gray",
+      };
+  }
+}
+
+function CopyableId({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <button
+      type="button"
+      className="project-service-id-copy"
+      title={copied ? "已复制" : "复制项目标识"}
+      onClick={() => {
+        void navigator.clipboard.writeText(value).then(() => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    >
+      <code>{value}</code>
+      <span>{copied ? "已复制" : "复制"}</span>
+    </button>
+  );
+}
+
+function MoreActionsMenu({
+  items,
+}: {
+  items: Array<{
+    key: string;
+    label: string;
+    disabled?: boolean;
+    title?: string;
+    onClick: () => void;
+  }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  if (!items.length) return null;
+
+  return (
+    <div className="project-service-more-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className="btn btn-secondary text-sm"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((value) => !value)}
+      >
+        更多
+      </button>
+      {open ? (
+        <div className="project-service-more-menu" role="menu">
+          {items.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              role="menuitem"
+              disabled={item.disabled}
+              title={item.title}
+              onClick={() => {
+                setOpen(false);
+                item.onClick();
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function PlaceholderTab({ title }: { title: string }) {
@@ -180,7 +269,7 @@ export function ProjectServiceDetailPage({
   const stickyPublished = useStickyPublishedProject(project.id);
   const runtimeRefreshKey = externalRuntimeRefreshKey + localRuntimeRefreshKey;
   const primaryAction = projectPrimaryAction(project);
-  const statusText = reviewStatusLabel(project);
+  const statusMeta = reviewStatusMeta(project);
   const businessSpace = project.namespace || workspaceId;
   const published = resolvePublishedProjectView(deploymentPage, tab, {
     loading: deploymentLoading,
@@ -220,19 +309,59 @@ export function ProjectServiceDetailPage({
     void loadRuntimeOverview();
   }, [loadRuntimeOverview]);
 
+  const moreMenuItems = useMemo(() => {
+    if (primaryAction !== "deploy") return [];
+    const items: Array<{
+      key: string;
+      label: string;
+      disabled?: boolean;
+      title?: string;
+      onClick: () => void;
+    }> = [
+      {
+        key: "cross-cluster",
+        label: "跨集群发布",
+        disabled: deployAction.disabled && deployAction.label === "发布",
+        title: deployAction.reason ?? undefined,
+        onClick: () => onCrossClusterRelease?.(),
+      },
+      {
+        key: "expand",
+        label: "扩容",
+        disabled: !canScale,
+        title: !canScale ? "请先完成首次发布" : undefined,
+        onClick: () => setExpandModalOpen(true),
+      },
+      {
+        key: "scale",
+        label: "伸缩",
+        disabled: !canScale,
+        title: !canScale ? "请先完成首次发布" : undefined,
+        onClick: () => setScaleModalOpen(true),
+      },
+    ];
+    if (published) {
+      items.push({
+        key: "template",
+        label: "模板实例",
+        onClick: () => setTemplateModalOpen(true),
+      });
+    }
+    return items;
+  }, [
+    canScale,
+    deployAction.disabled,
+    deployAction.label,
+    deployAction.reason,
+    onCrossClusterRelease,
+    primaryAction,
+    published,
+  ]);
+
   const headerActions = useMemo(() => {
     if (primaryAction === "deploy") {
       return (
         <>
-          <button
-            type="button"
-            className="btn btn-secondary text-sm"
-            disabled={deployAction.disabled && deployAction.label === "发布"}
-            title={deployAction.reason ?? undefined}
-            onClick={() => onCrossClusterRelease?.()}
-          >
-            跨集群发布
-          </button>
           <button
             type="button"
             className="btn project-btn-primary text-sm"
@@ -257,29 +386,7 @@ export function ProjectServiceDetailPage({
           >
             回滚
           </button>
-          <div className="project-service-btn-group">
-            <button type="button" className="btn btn-secondary text-sm" disabled title="待开发">
-              模式
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary text-sm"
-              disabled={!canScale}
-              title={!canScale ? "请先完成首次发布" : undefined}
-              onClick={() => setExpandModalOpen(true)}
-            >
-              扩容
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary text-sm"
-              disabled={!canScale}
-              title={!canScale ? "请先完成首次发布" : undefined}
-              onClick={() => setScaleModalOpen(true)}
-            >
-              伸缩
-            </button>
-          </div>
+          <MoreActionsMenu items={moreMenuItems} />
         </>
       );
     }
@@ -313,11 +420,10 @@ export function ProjectServiceDetailPage({
       </>
     );
   }, [
-    canScale,
     deployAction,
+    moreMenuItems,
     onConfigure,
     onRelease,
-    onCrossClusterRelease,
     onReview,
     onSubmitReview,
     onViewDeployProgress,
@@ -333,87 +439,47 @@ export function ProjectServiceDetailPage({
 
       <header className="project-service-header">
         <div className="project-service-header-main">
-          <div className="project-service-title-row">
+          <div className="project-service-identity">
             <ProjectIcon language={project.language} />
-            <h1>项目名称: {projectDisplayName(project)}</h1>
-          </div>
-
-          <div className="project-service-meta-grid">
-            <dl>
-              <div>
-                <dt>创建人</dt>
-                <dd>{project.submitted_by || project.reviewed_by || "-"}</dd>
-              </div>
-              <div>
-                <dt>项目中文名</dt>
-                <dd>
+            <div className="project-service-identity-body">
+              <div className="project-service-title-row">
+                <h1>
                   <ProjectDisplayNameField
                     workspaceId={workspaceId}
                     project={project}
                     onSaved={(updated) => onProjectUpdated?.(updated)}
                   />
-                </dd>
+                </h1>
+                <MetaTag tone="orange">{languageLabel(project.language)}</MetaTag>
+                <MetaTag tone="blue">{businessSpace}</MetaTag>
+                <span className={`project-service-status-badge is-${statusMeta.tone}`}>
+                  {statusMeta.label}
+                </span>
               </div>
-              <div>
-                <dt>创建时间</dt>
-                <dd>{formatDateTime(project.created_at)}</dd>
+              <div className="project-service-meta-line">
+                <span>
+                  创建人 <strong>{project.submitted_by || project.reviewed_by || "-"}</strong>
+                </span>
+                <span>
+                  创建时间 <strong>{formatDateTime(project.created_at)}</strong>
+                </span>
+                <span className="project-service-meta-id">
+                  项目 ID <CopyableId value={project.name || project.id} />
+                </span>
               </div>
-              <div>
-                <dt>项目语言</dt>
-                <dd>
-                  <MetaTag tone="orange">{languageLabel(project.language)}</MetaTag>
-                </dd>
+              <div className="project-service-description">
+                <ProjectDescriptionField
+                  workspaceId={workspaceId}
+                  project={project}
+                  onSaved={(updated) => onProjectUpdated?.(updated)}
+                />
               </div>
-            </dl>
-            <dl>
-              <div>
-                <dt>业务空间</dt>
-                <dd>
-                  <MetaTag tone="orange">{businessSpace}</MetaTag>
-                </dd>
-              </div>
-              <div>
-                <dt>项目描述</dt>
-                <dd>
-                  <ProjectDescriptionField
-                    workspaceId={workspaceId}
-                    project={project}
-                    onSaved={(updated) => onProjectUpdated?.(updated)}
-                  />
-                </dd>
-              </div>
-              <div>
-                <dt>分布式链路追踪</dt>
-                <dd>
-                  <span className="text-muted">链路追踪（todo 待开发）</span>
-                </dd>
-              </div>
-              <div>
-                <dt>日志平台</dt>
-                <dd>
-                  <span className="text-muted">日志分析平台（todo 待开发）</span>
-                </dd>
-              </div>
-            </dl>
+            </div>
           </div>
         </div>
 
         <div className="project-service-header-side">
-          <div className="project-service-actions">
-            {published ? (
-              <button
-                type="button"
-                className="btn btn-secondary text-sm"
-                onClick={() => setTemplateModalOpen(true)}
-              >
-                模板实例
-              </button>
-            ) : null}
-            {headerActions}
-          </div>
-          <p className="project-service-status">
-            状态: <strong>{statusText}</strong>
-          </p>
+          <div className="project-service-actions">{headerActions}</div>
         </div>
       </header>
 

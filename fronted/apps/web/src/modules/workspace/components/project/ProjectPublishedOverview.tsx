@@ -673,12 +673,16 @@ export function ProjectPublishedOverview({
       />
       <RuntimeDeploymentYamlModal
         open={deploymentYamlModalOpen}
+        projectId={project.id}
+        workspaceId={workspaceId}
         deployment={deployment}
         pod={pods[0]}
         onClose={() => setDeploymentYamlModalOpen(false)}
       />
       <RuntimePodYamlModal
         open={Boolean(podYamlModalPod)}
+        projectId={project.id}
+        workspaceId={workspaceId}
         pod={podYamlModalPod}
         onClose={() => setPodYamlModalPod(null)}
       />

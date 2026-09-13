@@ -16,11 +16,21 @@ import { getUpstreamBaseUrl, upstreamFetch } from "./core";
 interface DeploymentOptionsWire {
   clusters: Array<{
     id: string;
-    name: string;
+    /** Preferred wire field from delivery options API. */
+    cluster_name?: string;
+    /** Legacy/alternate field accepted for compatibility. */
+    name?: string;
     server?: string;
     available: boolean;
+    is_build_env?: boolean;
+    priority_id?: number;
     reason?: string;
   }>;
+}
+
+function clusterDisplayName(cluster: DeploymentOptionsWire["clusters"][number]): string {
+  const label = cluster.cluster_name?.trim() || cluster.name?.trim() || "";
+  return label;
 }
 
 export function normalizeDeploymentOptions(input: DeploymentOptionsWire): DeploymentOptionsVM {
@@ -29,8 +39,10 @@ export function normalizeDeploymentOptions(input: DeploymentOptionsWire): Deploy
       .filter((cluster) => cluster.available)
       .map((cluster) => ({
         id: cluster.id,
-        cluster_name: cluster.name,
+        cluster_name: clusterDisplayName(cluster),
         server: cluster.server,
+        is_build_env: Boolean(cluster.is_build_env),
+        priority_id: cluster.priority_id ?? 0,
       })),
     missing: [
       ...new Set(

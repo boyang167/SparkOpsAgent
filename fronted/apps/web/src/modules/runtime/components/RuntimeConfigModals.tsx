@@ -409,6 +409,8 @@ interface RuntimeYamlViewModalProps {
   title: string;
   yaml: string;
   emptyMessage: string;
+  loading?: boolean;
+  error?: string | null;
   onClose: () => void;
 }
 
@@ -417,9 +419,11 @@ export function RuntimeYamlViewModal({
   title,
   yaml,
   emptyMessage,
+  loading = false,
+  error = null,
   onClose,
 }: RuntimeYamlViewModalProps) {
-  const lines = useMemo(() => yaml.split("\n"), [yaml]);
+  const lines = useMemo(() => (yaml ? yaml.split("\n") : []), [yaml]);
 
   return (
     <Modal
@@ -436,7 +440,11 @@ export function RuntimeYamlViewModal({
         </div>
       }
     >
-      {!yaml ? (
+      {loading ? (
+        <p className="project-runtime-empty">正在加载集群中的 YAML…</p>
+      ) : error ? (
+        <p className="project-runtime-empty text-danger">{error}</p>
+      ) : !yaml ? (
         <p className="project-runtime-empty">{emptyMessage}</p>
       ) : (
         <div className="k8s-yaml-editor" data-theme="light">
@@ -474,6 +482,8 @@ export function RuntimeServiceYamlModal({ open, service, onClose }: RuntimeServi
 
 interface RuntimeDeploymentYamlModalProps {
   open: boolean;
+  projectId: string;
+  workspaceId: string;
   deployment?: DeploymentOverviewVM | null;
   pod?: PodVM | null;
   onClose: () => void;
@@ -481,20 +491,63 @@ interface RuntimeDeploymentYamlModalProps {
 
 export function RuntimeDeploymentYamlModal({
   open,
+  projectId,
+  workspaceId,
   deployment,
   pod,
   onClose,
 }: RuntimeDeploymentYamlModalProps) {
-  const yaml = useMemo(
+  const [yaml, setYaml] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fallbackYaml = useMemo(
     () => (deployment ? buildDeploymentYaml(deployment, pod) : ""),
     [deployment, pod],
   );
+
+  useEffect(() => {
+    if (!open) {
+      setYaml("");
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void cluster
+      .getDeploymentYAML(projectId, workspaceId)
+      .then((data) => {
+        if (cancelled) return;
+        const text = data.yaml?.trim() ? data.yaml : fallbackYaml;
+        setYaml(text);
+        if (!text) setError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (fallbackYaml) {
+          setYaml(fallbackYaml);
+          setError(null);
+          return;
+        }
+        setError(err instanceof BffError ? err.message : "加载 Deployment YAML 失败");
+        setYaml("");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projectId, workspaceId, fallbackYaml]);
 
   return (
     <RuntimeYamlViewModal
       open={open}
       title="Deployment YAML"
       yaml={yaml}
+      loading={loading}
+      error={error}
       emptyMessage="暂无 Deployment。"
       onClose={onClose}
     />
@@ -503,18 +556,65 @@ export function RuntimeDeploymentYamlModal({
 
 interface RuntimePodYamlModalProps {
   open: boolean;
+  projectId: string;
+  workspaceId: string;
   pod?: PodVM | null;
   onClose: () => void;
 }
 
-export function RuntimePodYamlModal({ open, pod, onClose }: RuntimePodYamlModalProps) {
-  const yaml = useMemo(() => (pod ? buildPodYaml(pod) : ""), [pod]);
+export function RuntimePodYamlModal({
+  open,
+  projectId,
+  workspaceId,
+  pod,
+  onClose,
+}: RuntimePodYamlModalProps) {
+  const [yaml, setYaml] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fallbackYaml = useMemo(() => (pod ? buildPodYaml(pod) : ""), [pod]);
+
+  useEffect(() => {
+    if (!open || !pod) {
+      setYaml("");
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void cluster
+      .getPodYAML(projectId, pod.id, workspaceId)
+      .then((data) => {
+        if (cancelled) return;
+        setYaml(data.yaml?.trim() ? data.yaml : fallbackYaml);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (fallbackYaml) {
+          setYaml(fallbackYaml);
+          setError(null);
+          return;
+        }
+        setError(err instanceof BffError ? err.message : "加载 Pod YAML 失败");
+        setYaml("");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projectId, workspaceId, pod, fallbackYaml]);
 
   return (
     <RuntimeYamlViewModal
       open={open}
       title="Pod YAML"
       yaml={yaml}
+      loading={loading}
+      error={error}
       emptyMessage="暂无 Pod。"
       onClose={onClose}
     />

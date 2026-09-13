@@ -16,13 +16,15 @@ import (
 )
 
 type Handler struct {
-	listPods      *query.ListPodsHandler
-	getPod        *query.GetPodHandler
-	podLogs       *query.GetPodLogsHandler
-	terminal      *query.StreamPodTerminalHandler
-	overview      *query.GetProjectRuntimeOverviewHandler
-	restartPod    *command.RestartPodHandler
-	runtimeConfig *command.RuntimeConfigHandler
+	listPods        *query.ListPodsHandler
+	getPod          *query.GetPodHandler
+	podLogs         *query.GetPodLogsHandler
+	terminal        *query.StreamPodTerminalHandler
+	overview        *query.GetProjectRuntimeOverviewHandler
+	deploymentYAML  *query.GetDeploymentYAMLHandler
+	podYAML         *query.GetPodYAMLHandler
+	restartPod      *command.RestartPodHandler
+	runtimeConfig   *command.RuntimeConfigHandler
 }
 
 func NewHandler(
@@ -31,12 +33,15 @@ func NewHandler(
 	podLogs *query.GetPodLogsHandler,
 	terminal *query.StreamPodTerminalHandler,
 	overview *query.GetProjectRuntimeOverviewHandler,
+	deploymentYAML *query.GetDeploymentYAMLHandler,
+	podYAML *query.GetPodYAMLHandler,
 	restartPod *command.RestartPodHandler,
 	runtimeConfig *command.RuntimeConfigHandler,
 ) *Handler {
 	return &Handler{
 		listPods: listPods, getPod: getPod, podLogs: podLogs, terminal: terminal,
-		overview: overview, restartPod: restartPod, runtimeConfig: runtimeConfig,
+		overview: overview, deploymentYAML: deploymentYAML, podYAML: podYAML,
+		restartPod: restartPod, runtimeConfig: runtimeConfig,
 	}
 }
 
@@ -57,6 +62,29 @@ func (h *Handler) GetProjectRuntimeOverview(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, item)
+}
+
+func (h *Handler) GetDeploymentYAML(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	if h.deploymentYAML == nil {
+		httpx.Fail(c, "K8S_RESOURCE_NOT_FOUND", "deployment yaml unavailable", http.StatusNotFound)
+		return
+	}
+	yamlText, err := h.deploymentYAML.Handle(c.Request.Context(), wsID, projectID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"yaml": yamlText})
 }
 
 func (h *Handler) ListPods(c *gin.Context) {
@@ -100,6 +128,34 @@ func (h *Handler) GetPod(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, item)
+}
+
+func (h *Handler) GetPodYAML(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	podID, err := kernel.ParsePodID(c.Param("podId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid pod id", http.StatusBadRequest)
+		return
+	}
+	if h.podYAML == nil {
+		httpx.Fail(c, "K8S_POD_NOT_FOUND", "pod yaml unavailable", http.StatusNotFound)
+		return
+	}
+	yamlText, err := h.podYAML.Handle(c.Request.Context(), wsID, projectID, podID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"yaml": yamlText})
 }
 
 func (h *Handler) GetPodLogs(c *gin.Context) {

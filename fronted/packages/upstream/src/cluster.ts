@@ -28,6 +28,13 @@ export function createClusterUpstream(options: UpstreamRequestOptions = {}) {
       });
     },
 
+    async getPodYAML(workspaceId: string, projectId: string, podId: string) {
+      return upstreamFetch<{ yaml: string }>(`/api/v1/projects/${projectId}/pods/${podId}/yaml`, {
+        method: "GET",
+        options: { ...options, workspaceId },
+      });
+    },
+
     async getPodLogs(workspaceId: string, projectId: string, podId: string) {
       return upstreamFetch<{ logs: string }>(
         `/api/v1/projects/${projectId}/pods/${podId}/logs`,
@@ -85,6 +92,16 @@ export function createClusterUpstream(options: UpstreamRequestOptions = {}) {
         body: JSON.stringify(body),
         options: { ...options, workspaceId },
       });
+    },
+
+    async getDeploymentYAML(workspaceId: string, projectId: string) {
+      return upstreamFetch<{ yaml: string }>(
+        `/api/v1/projects/${projectId}/runtime/deployment/yaml`,
+        {
+          method: "GET",
+          options: { ...options, workspaceId },
+        },
+      );
     },
 
     async scaleDeployment(workspaceId: string, projectId: string, body: Record<string, unknown>) {

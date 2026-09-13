@@ -10,10 +10,17 @@ describe("normalizeDeploymentOptions", () => {
     expect(
       normalizeDeploymentOptions({
         clusters: [
-          { id: "a", name: "dev", server: "https://dev", available: true },
+          {
+            id: "a",
+            cluster_name: "dev",
+            server: "https://dev",
+            available: true,
+            is_build_env: true,
+            priority_id: 0,
+          },
           {
             id: "b",
-            name: "prod",
+            cluster_name: "prod",
             server: "https://prod",
             available: false,
             reason: "缺少 Kubernetes 密钥",
@@ -21,8 +28,35 @@ describe("normalizeDeploymentOptions", () => {
         ],
       }),
     ).toEqual({
-      clusters: [{ id: "a", cluster_name: "dev", server: "https://dev" }],
+      clusters: [
+        {
+          id: "a",
+          cluster_name: "dev",
+          server: "https://dev",
+          is_build_env: true,
+          priority_id: 0,
+        },
+      ],
       missing: ["缺少 Kubernetes 密钥"],
+    });
+  });
+
+  it("accepts legacy name field when cluster_name is absent", () => {
+    expect(
+      normalizeDeploymentOptions({
+        clusters: [{ id: "a", name: "legacy-dev", available: true }],
+      }),
+    ).toEqual({
+      clusters: [
+        {
+          id: "a",
+          cluster_name: "legacy-dev",
+          server: undefined,
+          is_build_env: false,
+          priority_id: 0,
+        },
+      ],
+      missing: [],
     });
   });
 

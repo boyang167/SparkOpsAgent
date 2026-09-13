@@ -50,6 +50,8 @@ func (m *Module) Register(c *appctx.Container) error {
 	resHandler := runtimehttp.NewResourcesHandler(k8sQuery)
 
 	overview := query.NewGetProjectRuntimeOverviewHandler(checker, adapters.Lister, adapters.Inspector, adapters.PodMetrics)
+	deploymentYAML := query.NewGetDeploymentYAMLHandler(checker, adapters.Inspector)
+	podYAML := query.NewGetPodYAMLHandler(checker, adapters.Inspector)
 	runtimeConfig := command.NewRuntimeConfigHandler(checker, adapters.Configurator)
 	handler := runtimehttp.NewHandler(
 		query.NewListPodsHandler(checker, adapters.Lister),
@@ -57,6 +59,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewGetPodLogsHandler(checker, adapters.Lister, adapters.Logs),
 		query.NewStreamPodTerminalHandler(checker, adapters.Lister, adapters.Terminal),
 		overview,
+		deploymentYAML,
+		podYAML,
 		command.NewRestartPodHandler(checker, adapters.Lister, adapters.Restarter),
 		runtimeConfig,
 	)
@@ -69,8 +73,12 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListPods)
 	c.Engine.GET("/api/v1/projects/:projectId/runtime/overview",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetProjectRuntimeOverview)
+	c.Engine.GET("/api/v1/projects/:projectId/runtime/deployment/yaml",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetDeploymentYAML)
 	c.Engine.GET("/api/v1/projects/:projectId/pods/:podId",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetPod)
+	c.Engine.GET("/api/v1/projects/:projectId/pods/:podId/yaml",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetPodYAML)
 	c.Engine.GET("/api/v1/projects/:projectId/pods/:podId/logs",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetPodLogs)
 	c.Engine.GET("/api/v1/projects/:projectId/pods/:podId/terminal/stream",
