@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BffError } from "@sparkops/contracts";
 import type { BuildVM, DeploymentRunVM } from "@sparkops/contracts/delivery";
 import { delivery } from "@sparkops/web-sdk";
@@ -37,6 +37,12 @@ export interface ProjectRunSummary {
   environments: ProjectEnvironmentSummary;
 }
 
+export interface UseProjectRunSummaryOptions {
+  workspaceClusters?: EnvironmentClusterRef[] | null;
+  workspaceClustersLoading?: boolean;
+  workspaceClustersError?: string | null;
+}
+
 const DEPLOYMENT_INITIAL: ProjectDeploymentSummary = {
   total: null,
   latest: null,
@@ -52,100 +58,148 @@ const BUILD_INITIAL: ProjectBuildSummary = {
   error: null,
 };
 
-const ENVIRONMENT_INITIAL: ProjectEnvironmentSummary = {
-  items: [],
-  loading: true,
-  error: null,
-};
+function buildSharedEnvironmentSummary(
+  deploymentItems: DeploymentRunVM[],
+  options?: UseProjectRunSummaryOptions,
+): ProjectEnvironmentSummary {
+  if (options?.workspaceClustersLoading) {
+    return { items: [], loading: true, error: null };
+  }
+  if (options?.workspaceClustersError) {
+    return { items: [], loading: false, error: options.workspaceClustersError };
+  }
+  return {
+    items: buildEnvironmentDeployRows(options?.workspaceClusters ?? [], deploymentItems),
+    loading: false,
+    error: null,
+  };
+}
 
-const INITIAL: ProjectRunSummary = {
-  deployment: DEPLOYMENT_INITIAL,
-  build: BUILD_INITIAL,
-  environments: ENVIRONMENT_INITIAL,
-};
-
-export function useProjectRunSummary(workspaceId: string, projectId: string): ProjectRunSummary {
-  const [summary, setSummary] = useState<ProjectRunSummary>(INITIAL);
+export function useProjectRunSummary(
+  workspaceId: string,
+  projectId: string,
+  options?: UseProjectRunSummaryOptions,
+): ProjectRunSummary {
+  const useSharedClusters = options?.workspaceClusters !== undefined;
+  const [deployment, setDeployment] = useState<ProjectDeploymentSummary>(DEPLOYMENT_INITIAL);
+  const [build, setBuild] = useState<ProjectBuildSummary>(BUILD_INITIAL);
+  const [optionsClusters, setOptionsClusters] = useState<EnvironmentClusterRef[] | null>(null);
+  const [optionsClustersLoading, setOptionsClustersLoading] = useState(!useSharedClusters);
+  const [optionsClustersError, setOptionsClustersError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setSummary(INITIAL);
+    setDeployment(DEPLOYMENT_INITIAL);
+    setBuild(BUILD_INITIAL);
+    setOptionsClusters(null);
+    setOptionsClustersLoading(!useSharedClusters);
+    setOptionsClustersError(null);
 
-    void Promise.allSettled([
-      delivery.listDeployments(projectId, workspaceId),
-      delivery.listBuilds(projectId, workspaceId),
-      delivery.getDeploymentOptions(projectId, workspaceId),
-    ]).then(([deploymentResult, buildResult, optionsResult]) => {
-      if (cancelled) return;
+    void delivery
+      .listDeployments(projectId, workspaceId)
+      .then((page) => {
+        if (cancelled) return;
+        setDeployment({
+          total: page.total,
+          latest: page.items[0] ?? null,
+          items: page.items,
+          loading: false,
+          error: null,
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setDeployment({
+          total: null,
+          latest: null,
+          items: [],
+          loading: false,
+          error: err instanceof BffError ? err.message : "部署统计不可用",
+        });
+      });
 
-      const deployment =
-        deploymentResult.status === "fulfilled"
-          ? {
-              total: deploymentResult.value.total,
-              latest: deploymentResult.value.items[0] ?? null,
-              items: deploymentResult.value.items,
-              loading: false,
-              error: null,
-            }
-          : {
-              total: null,
-              latest: null,
-              items: [],
-              loading: false,
-              error:
-                deploymentResult.reason instanceof BffError
-                  ? deploymentResult.reason.message
-                  : "部署统计不可用",
-            };
+    void delivery
+      .listBuilds(projectId, workspaceId)
+      .then((items) => {
+        if (cancelled) return;
+        setBuild({
+          total: items.length,
+          latest: items[0] ?? null,
+          loading: false,
+          error: null,
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setBuild({
+          total: null,
+          latest: null,
+          loading: false,
+          error: err instanceof BffError ? err.message : "构建统计不可用",
+        });
+      });
 
-      const build =
-        buildResult.status === "fulfilled"
-          ? {
-              total: buildResult.value.length,
-              latest: buildResult.value[0] ?? null,
-              loading: false,
-              error: null,
-            }
-          : {
-              total: null,
-              latest: null,
-              loading: false,
-              error:
-                buildResult.reason instanceof BffError
-                  ? buildResult.reason.message
-                  : "构建统计不可用",
-            };
-
-      const clusters: EnvironmentClusterRef[] =
-        optionsResult.status === "fulfilled"
-          ? optionsResult.value.clusters.map((cluster) => ({
+    if (!useSharedClusters) {
+      void delivery
+        .getDeploymentOptions(projectId, workspaceId)
+        .then((value) => {
+          if (cancelled) return;
+          setOptionsClusters(
+            value.clusters.map((cluster) => ({
               id: cluster.id,
               cluster_name: cluster.cluster_name,
               is_build_env: cluster.is_build_env,
               priority_id: cluster.priority_id,
               available: cluster.available,
-            }))
-          : [];
-      const clustersError =
-        optionsResult.status === "rejected"
-          ? optionsResult.reason instanceof BffError
-            ? optionsResult.reason.message
-            : "环境信息不可用"
-          : null;
-
-      const environments: ProjectEnvironmentSummary = {
-        items: buildEnvironmentDeployRows(clusters, deployment.items),
-        loading: false,
-        error: clustersError,
-      };
-
-      setSummary({ deployment, build, environments });
-    });
+            })),
+          );
+          setOptionsClustersError(null);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setOptionsClusters([]);
+          setOptionsClustersError(
+            err instanceof BffError ? err.message : "环境信息不可用",
+          );
+        })
+        .finally(() => {
+          if (!cancelled) setOptionsClustersLoading(false);
+        });
+    }
 
     return () => {
       cancelled = true;
     };
-  }, [projectId, workspaceId]);
+  }, [projectId, workspaceId, useSharedClusters]);
 
-  return summary;
+  const environments = useMemo((): ProjectEnvironmentSummary => {
+    if (useSharedClusters) {
+      return buildSharedEnvironmentSummary(deployment.items, options);
+    }
+    if (optionsClustersLoading) {
+      return { items: [], loading: true, error: null };
+    }
+    if (optionsClustersError) {
+      return { items: [], loading: false, error: optionsClustersError };
+    }
+    return {
+      items: buildEnvironmentDeployRows(optionsClusters ?? [], deployment.items),
+      loading: false,
+      error: null,
+    };
+  }, [
+    useSharedClusters,
+    options?.workspaceClusters,
+    options?.workspaceClustersLoading,
+    options?.workspaceClustersError,
+    optionsClustersLoading,
+    optionsClustersError,
+    optionsClusters,
+    deployment.items,
+  ]);
+
+  return useMemo(
+    () => ({ deployment, build, environments }),
+    [deployment, build, environments],
+  );
 }

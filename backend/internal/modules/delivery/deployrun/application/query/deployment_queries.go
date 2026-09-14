@@ -101,27 +101,91 @@ func NewDeploymentOptionsHandler(reader port.ProjectDeploymentReader) *Deploymen
 	return &DeploymentOptionsHandler{reader: reader}
 }
 
+func isProjectLevelDeploymentError(err error) bool {
+	domainErr, ok := kernel.IsDomainError(err)
+	if !ok {
+		return err != nil
+	}
+	switch domainErr.Code() {
+	case "DELIVERY_DEPLOYMENT_CLUSTER_NOT_AUTHORIZED",
+		"DELIVERY_KUBECONFIG_MISSING",
+		"DELIVERY_DEPLOYMENT_CLUSTER_NOT_FOUND":
+		return false
+	default:
+		return true
+	}
+}
+
+func clusterOptionFromLoad(cluster port.DeploymentCluster, loadErr error) (ClusterOption, error) {
+	option := ClusterOption{
+		ID: cluster.ID.String(), Name: cluster.Name, Server: cluster.Server,
+		IsBuildEnv: cluster.IsBuildEnv, PriorityID: cluster.PriorityID,
+	}
+	if loadErr == nil {
+		option.Available = true
+		return option, nil
+	}
+	if domainErr, ok := kernel.IsDomainError(loadErr); ok {
+		option.ReasonCode = domainErr.Code()
+		option.Reason = domainErr.Error()
+		return option, nil
+	}
+	return ClusterOption{}, loadErr
+}
+
 func (h *DeploymentOptionsHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) (DeploymentOptions, error) {
 	clusters, err := h.reader.ListAuthorizedClusters(ctx, wsID)
 	if err != nil {
 		return DeploymentOptions{}, err
 	}
-	options := DeploymentOptions{Clusters: make([]ClusterOption, 0, len(clusters))}
-	for _, cluster := range clusters {
-		option := ClusterOption{
-			ID: cluster.ID.String(), Name: cluster.Name, Server: cluster.Server,
-			IsBuildEnv: cluster.IsBuildEnv, PriorityID: cluster.PriorityID,
+	if len(clusters) == 0 {
+		return DeploymentOptions{Clusters: []ClusterOption{}}, nil
+	}
+
+	_, probeErr := h.reader.Load(ctx, wsID, projectID, clusters[0].ID)
+	if probeErr != nil && isProjectLevelDeploymentError(probeErr) {
+		options := DeploymentOptions{Clusters: make([]ClusterOption, 0, len(clusters))}
+		for _, cluster := range clusters {
+			option, err := clusterOptionFromLoad(cluster, probeErr)
+			if err != nil {
+				return DeploymentOptions{}, err
+			}
+			options.Clusters = append(options.Clusters, option)
 		}
-		_, loadErr := h.reader.Load(ctx, wsID, projectID, cluster.ID)
-		if loadErr == nil {
-			option.Available = true
-		} else if domainErr, ok := kernel.IsDomainError(loadErr); ok {
-			option.ReasonCode = domainErr.Code()
-			option.Reason = domainErr.Error()
-		} else {
-			return DeploymentOptions{}, loadErr
-		}
-		options.Clusters = append(options.Clusters, option)
+		return options, nil
+	}
+
+	options := DeploymentOptions{Clusters: make([]ClusterOption, len(clusters))}
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+	)
+	for index, cluster := range clusters {
+		wg.Add(1)
+		go func(index int, cluster port.DeploymentCluster) {
+			defer wg.Done()
+			var loadErr error
+			if index == 0 {
+				loadErr = probeErr
+			} else {
+				_, loadErr = h.reader.Load(ctx, wsID, projectID, cluster.ID)
+			}
+			option, err := clusterOptionFromLoad(cluster, loadErr)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				return
+			}
+			options.Clusters[index] = option
+		}(index, cluster)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return DeploymentOptions{}, firstErr
 	}
 	return options, nil
 }

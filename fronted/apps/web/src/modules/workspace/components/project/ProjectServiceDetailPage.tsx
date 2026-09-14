@@ -21,6 +21,7 @@ import { ProjectDeploymentConsolePanel } from "./ProjectDeploymentConsolePanel";
 import { ProjectConfigMapTab } from "./ProjectConfigMapTab";
 import { ProjectStorageTab } from "./ProjectStorageTab";
 import { ProjectWebhookTab } from "./ProjectWebhookTab";
+import { ProjectMonitorTab } from "./ProjectMonitorTab";
 import { ProjectYamlTab } from "./ProjectYamlTab";
 import { ProjectJenkinsPreview } from "./ProjectJenkinsPreview";
 import { ProjectPublishedOverview } from "./ProjectPublishedOverview";
@@ -562,7 +563,15 @@ export function ProjectServiceDetailPage({
           {tab === "webhooks" ? (
             <ProjectWebhookTab workspaceId={workspaceId} project={project} active={tab === "webhooks"} />
           ) : null}
-          {tab === "monitor" ? <PlaceholderTab title="监控" /> : null}
+          {tab === "monitor" ? (
+            <ProjectMonitorTab
+              workspaceId={workspaceId}
+              project={project}
+              deploymentPage={deploymentPage ?? null}
+              active={tab === "monitor"}
+              refreshKey={runtimeRefreshKey}
+            />
+          ) : null}
         </div>
       </div>
 

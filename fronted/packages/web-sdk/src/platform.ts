@@ -24,11 +24,10 @@ export function getDashboard(workspaceId: string) {
 }
 
 export async function listDeploymentStats(workspaceId: string) {
-  const data = await bffFetch<{ items: DeploymentStatVM[] }>(
+  return bffFetch<DeploymentStatVM[]>(
     `/workspaces/${workspaceId}/statistics/deployments`,
     { workspaceId },
   );
-  return data.items;
 }
 
 export function getServerStatus(workspaceId: string) {

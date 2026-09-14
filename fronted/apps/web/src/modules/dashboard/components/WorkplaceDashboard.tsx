@@ -153,7 +153,7 @@ export function WorkplaceDashboard({
         dashboardResult.status === "fulfilled" ? dashboardResult.value : null;
       const deploymentTotal =
         statsResult.status === "fulfilled"
-          ? statsResult.value.reduce((sum, item) => sum + (item.count ?? 0), 0)
+          ? (statsResult.value ?? []).reduce((sum, item) => sum + (item.count ?? 0), 0)
           : null;
 
       setMetrics({

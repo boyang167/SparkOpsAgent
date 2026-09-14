@@ -21,7 +21,7 @@ import {
   type CrossClusterConfirmMode,
 } from "./CrossClusterConfirmModal";
 import { projectDisplayName } from "./project-utils";
-import { deploymentEntryAction } from "./deployment-gate";
+import { releaseEntryAction } from "./deployment-gate";
 import {
   createSerialPoller,
   shouldContinueDeploymentPoll,
@@ -58,8 +58,7 @@ export function ProjectWorkbenchPage({
   const [error, setError] = useState<string | null>(null);
   const [deploymentOptions, setDeploymentOptions] = useState<DeploymentOptionsVM | null>(null);
   const [deploymentPage, setDeploymentPage] = useState<DeploymentRunListVM | null>(null);
-  const [deploymentLoading, setDeploymentLoading] = useState(true);
-  const [deploymentOptionsError, setDeploymentOptionsError] = useState<string | null>(null);
+  const [deploymentListLoading, setDeploymentListLoading] = useState(true);
   const [deploymentListError, setDeploymentListError] = useState<string | null>(null);
   const [runtimeRefreshKey, setRuntimeRefreshKey] = useState(0);
   const deploymentGenerationRef = useRef(0);
@@ -69,7 +68,7 @@ export function ProjectWorkbenchPage({
   const stickyPublished = useStickyPublishedProject(currentProject.id);
   const urlTabParam = searchParams.get("tab");
   const publishedForUrl = resolvePublishedProjectView(deploymentPage, urlTabParam, {
-    loading: deploymentLoading,
+    loading: deploymentListLoading,
     stickyPublished,
   });
   const urlTab = parseProjectDetailTab(urlTabParam, publishedForUrl);
@@ -85,39 +84,38 @@ export function ProjectWorkbenchPage({
 
   useEffect(() => {
     const generation = ++deploymentGenerationRef.current;
-    setDeploymentLoading(true);
-    setDeploymentOptionsError(null);
+    setDeploymentListLoading(true);
     setDeploymentListError(null);
-    void Promise.allSettled([
-      delivery.getDeploymentOptions(currentProject.id, workspaceId),
-      delivery.listDeployments(currentProject.id, workspaceId),
-    ])
-      .then(([optionsResult, pageResult]) => {
+
+    void delivery
+      .getDeploymentOptions(currentProject.id, workspaceId)
+      .then((value) => {
         if (deploymentGenerationRef.current !== generation) return;
-        if (optionsResult.status === "fulfilled") {
-          setDeploymentOptions(optionsResult.value);
-        } else {
-          setDeploymentOptionsError(
-            optionsResult.reason instanceof BffError
-              ? optionsResult.reason.message
-              : "部署条件加载失败",
-          );
-        }
-        if (pageResult.status === "fulfilled") {
-          setDeploymentPage(pageResult.value);
-        } else {
-          setDeploymentListError(
-            pageResult.reason instanceof BffError
-              ? pageResult.reason.message
-              : "部署记录加载失败",
-          );
-        }
+        setDeploymentOptions(value);
+      })
+      .catch(() => {
+        if (deploymentGenerationRef.current !== generation) return;
+        setDeploymentOptions(null);
+      });
+
+    void delivery
+      .listDeployments(currentProject.id, workspaceId)
+      .then((page) => {
+        if (deploymentGenerationRef.current !== generation) return;
+        setDeploymentPage(page);
+      })
+      .catch((err) => {
+        if (deploymentGenerationRef.current !== generation) return;
+        setDeploymentListError(
+          err instanceof BffError ? err.message : "部署记录加载失败",
+        );
       })
       .finally(() => {
         if (deploymentGenerationRef.current === generation) {
-          setDeploymentLoading(false);
+          setDeploymentListLoading(false);
         }
       });
+
     return () => {
       if (deploymentGenerationRef.current === generation) {
         deploymentGenerationRef.current += 1;
@@ -133,26 +131,14 @@ export function ProjectWorkbenchPage({
     [deploymentPage],
   );
   const deployAction = useMemo(
-    () => {
-      const preflightError = [deploymentOptionsError, deploymentListError]
-        .filter(Boolean)
-        .join("；");
-      return deploymentEntryAction(
+    () =>
+      releaseEntryAction(
         currentProject,
-        deploymentOptions,
         activeRun,
-        deploymentLoading,
-        preflightError || null,
-      );
-    },
-    [
-      currentProject,
-      deploymentOptions,
-      activeRun,
-      deploymentLoading,
-      deploymentOptionsError,
-      deploymentListError,
-    ],
+        deploymentListLoading,
+        deploymentListError,
+      ),
+    [currentProject, activeRun, deploymentListLoading, deploymentListError],
   );
 
   const refreshDeploymentList = useCallback(async () => {
@@ -407,7 +393,7 @@ export function ProjectWorkbenchPage({
         onReview={() => setReviewOpen(true)}
         onProjectUpdated={(updated) => setCurrentProject(updated)}
         deploymentPage={deploymentPage}
-        deploymentLoading={deploymentLoading}
+        deploymentLoading={deploymentListLoading}
         runtimeRefreshKey={runtimeRefreshKey}
         onRunChanged={handleRunChanged}
       />

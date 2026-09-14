@@ -9,6 +9,7 @@ import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { ProjectCard } from "./project/ProjectCard";
+import { useWorkspaceClusters } from "./project/useWorkspaceClusters";
 import { ProjectCreateModal } from "./project/ProjectCreateModal";
 import { ProjectConfigurePanel } from "./project/ProjectConfigurePanel";
 import { ProjectReviewModal } from "./project/ProjectReviewModal";
@@ -68,6 +69,11 @@ export function ProjectPanel({
   const [namespaceFilter, setNamespaceFilter] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(9);
+  const {
+    clusters: workspaceClusters,
+    loading: workspaceClustersLoading,
+    error: workspaceClustersError,
+  } = useWorkspaceClusters(workspaceId);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -288,6 +294,9 @@ export function ProjectPanel({
                       key={project.id}
                       workspaceId={workspaceId}
                       project={project}
+                      workspaceClusters={workspaceClusters}
+                      workspaceClustersLoading={workspaceClustersLoading}
+                      workspaceClustersError={workspaceClustersError}
                       onArchive={(p) => void onArchive(p)}
                       onViewDetails={(p) => router.push(`/projects/${p.id}`)}
                       onContinueConfig={(p) => setConfigureProject(p)}

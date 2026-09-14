@@ -2,11 +2,15 @@
 
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { ProjectOverviewCard } from "./ProjectOverviewCard";
+import type { EnvironmentClusterRef } from "./project-environment-status";
 import { useProjectRunSummary } from "./useProjectRunSummary";
 
 interface ProjectCardProps {
   workspaceId: string;
   project: ProjectVM;
+  workspaceClusters?: EnvironmentClusterRef[] | null;
+  workspaceClustersLoading?: boolean;
+  workspaceClustersError?: string | null;
   onArchive?: (project: ProjectVM) => void;
   onViewDetails?: (project: ProjectVM) => void;
   onContinueConfig?: (project: ProjectVM) => void;
@@ -18,6 +22,9 @@ interface ProjectCardProps {
 export function ProjectCard({
   workspaceId,
   project,
+  workspaceClusters,
+  workspaceClustersLoading,
+  workspaceClustersError,
   onArchive,
   onViewDetails,
   onContinueConfig,
@@ -25,7 +32,11 @@ export function ProjectCard({
   onReview,
   onDeploy,
 }: ProjectCardProps) {
-  const runSummary = useProjectRunSummary(workspaceId, project.id);
+  const runSummary = useProjectRunSummary(workspaceId, project.id, {
+    workspaceClusters,
+    workspaceClustersLoading,
+    workspaceClustersError,
+  });
 
   return (
     <ProjectOverviewCard
