@@ -21,6 +21,7 @@ export function statusBadgeClass(status?: string) {
 }
 
 export const EMPTY_PROJECT_FORM: CreateProjectCommand = {
+  product_id: undefined,
   name: "",
   display_name: "",
   description: "",
@@ -186,6 +187,7 @@ export function buildProjectUpdatePayload(
     };
   }
   return {
+    product_id: form.product_id === undefined ? undefined : form.product_id,
     name: base?.name ?? form.name.trim(),
     display_name: (base?.display_name ?? form.display_name)?.trim(),
     description: (base?.description ?? form.description)?.trim() ?? "",

@@ -6,7 +6,7 @@ import { product, platform, secret, tenant, workspace } from "@sparkops/web-sdk"
 import { BffError } from "@sparkops/contracts";
 import type { CreateProjectCommand, ProjectVM } from "@sparkops/contracts/workspace";
 import type { SecretVM } from "@sparkops/contracts/secret";
-import type { TemplateVM } from "@sparkops/contracts/product";
+import type { ProductVM, TemplateVM } from "@sparkops/contracts/product";
 import type { AuthorizedClusterVM } from "@sparkops/contracts/delivery";
 import type { WorkspaceVM } from "@sparkops/contracts/tenant";
 import { InlineAlert } from "@/components/ui/InlineAlert";
@@ -44,6 +44,7 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
   const [secrets, setSecrets] = useState<SecretVM[]>([]);
   const [templates, setTemplates] = useState<TemplateVM[]>([]);
   const [clusters, setClusters] = useState<AuthorizedClusterVM[]>([]);
+  const [products, setProducts] = useState<ProductVM[]>([]);
   const [loadingSecrets, setLoadingSecrets] = useState(false);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [loadingClusters, setLoadingClusters] = useState(false);
@@ -87,6 +88,17 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
   }, [targetWorkspaceId, workspaceId, workspaceMode]);
 
   const activeWorkspaceId = workspaceMode === "select" ? targetWorkspaceId : workspaceId;
+
+  useEffect(() => {
+    if (open === false || step < 2) return;
+    void (async () => {
+      try {
+        setProducts(await product.listProducts(activeWorkspaceId));
+      } catch {
+        setProducts([]);
+      }
+    })();
+  }, [open, step, activeWorkspaceId]);
 
   useEffect(() => {
     if (open === false || step !== 3) return;
@@ -451,6 +463,7 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
             gitSecrets={gitSecrets}
             loadingSecrets={loadingSecrets}
             loadSecrets={() => void loadSecrets()}
+            products={products}
           />
         ) : null}
 

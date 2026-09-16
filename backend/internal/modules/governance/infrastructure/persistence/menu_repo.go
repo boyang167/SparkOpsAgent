@@ -512,6 +512,27 @@ func (s *MenuStore) ListDistinctWorkspaceIDs(ctx context.Context) ([]kernel.Work
 	return out, nil
 }
 
+func (s *MenuStore) RestoreSoftDeletedByPath(
+	ctx context.Context,
+	workspaceID kernel.WorkspaceID,
+	path string,
+) (bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false, nil
+	}
+	res := s.db.WithContext(ctx).Unscoped().Model(&menuModel{}).
+		Where("workspace_id = ? AND path = ? AND deleted_at IS NOT NULL", workspaceID.String(), path).
+		Updates(map[string]any{
+			"deleted_at": nil,
+			"updated_at": time.Now().UTC(),
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
 func (s *MenuStore) SoftDelete(ctx context.Context, workspaceID kernel.WorkspaceID, menuID string) error {
 	res := s.db.WithContext(ctx).
 		Where("id = ? AND workspace_id = ? AND deleted_at IS NULL", menuID, workspaceID.String()).

@@ -34,6 +34,12 @@ func (r *createProjectRepo) ListByWorkspace(context.Context, kernel.WorkspaceID)
 func (r *createProjectRepo) CountByWorkspace(context.Context, kernel.WorkspaceID) (int, error) {
 	return 0, nil
 }
+func (r *createProjectRepo) ListByProduct(context.Context, kernel.ProductID) ([]*model.Project, error) {
+	return nil, nil
+}
+func (r *createProjectRepo) CountByProduct(context.Context, kernel.ProductID) (int, error) {
+	return 0, nil
+}
 
 type createProjectMemberRepo struct{}
 
@@ -61,7 +67,7 @@ func TestCreateProjectRejectsUnauthorizedDefaultClusterBeforeSave(t *testing.T) 
 	repo := &createProjectRepo{}
 	handler := command.NewCreateProjectHandler(
 		repo, createProjectMemberRepo{}, updateWorkspaceChecker{}, clusterGrantChecker{},
-		nil, eventbus.NewInMemory(),
+		nil, nil, eventbus.NewInMemory(),
 	)
 
 	_, err := handler.Handle(
@@ -77,7 +83,7 @@ func TestCreateProjectRejectsInvalidDefaultClusterIDBeforeSave(t *testing.T) {
 	repo := &createProjectRepo{}
 	handler := command.NewCreateProjectHandler(
 		repo, createProjectMemberRepo{}, updateWorkspaceChecker{}, clusterGrantChecker{granted: true},
-		nil, eventbus.NewInMemory(),
+		nil, nil, eventbus.NewInMemory(),
 	)
 
 	_, err := handler.Handle(

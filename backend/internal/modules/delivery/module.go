@@ -17,6 +17,7 @@ import (
 	deploystream "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/stream"
 	deployhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/interface/http"
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
+	deliveryport "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/port"
 	deliveryinfra "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/cronjob"
@@ -138,7 +139,7 @@ func (m *Module) Register(c *appctx.Container) error {
 			return
 		}
 		if err := c.EventBus.Publish(ctx, deliveryevent.NewDeployCompleted(
-			run.ID, run.ProjectID, run.WorkspaceID, "", string(run.Status), string(run.RunType), run.ImageTag,
+			run.ID, run.ProjectID, run.WorkspaceID, run.EnvironmentID, "", string(run.Status), string(run.RunType), run.ImageTag,
 		)); err != nil && c.Logger != nil {
 			c.Logger.Warn("publish deploy completed failed", zap.Error(err))
 		}
@@ -167,8 +168,10 @@ func (m *Module) Register(c *appctx.Container) error {
 			c.Logger.Error("deployment reconciliation failed", zap.Error(err))
 		}
 	}).Start(c.Context, c.Config.Deploy.ReconcileInterval)
+	envResolver := deployacl.NewEnvironmentResolver(c.DB)
+	createDeployment := deploycommand.NewCreateDeploymentHandler(deployRepo, deployReader, c.MessageQueue, nil, envResolver)
 	deployHandler := deployhttp.NewHandler(
-		deploycommand.NewCreateDeploymentHandler(deployRepo, deployReader, c.MessageQueue, nil),
+		createDeployment,
 		deploycommand.NewRollbackDeploymentHandler(deployRepo, c.MessageQueue, nil),
 		deploycommand.NewAbortDeploymentHandler(deployRepo, nil, deploycommand.AbortDependencies{
 			Builds: abortBuild,
@@ -236,6 +239,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), deployHandler.Abort)
 
 	c.BuildTrigger = &buildTriggerPort{handler: trigger}
+	c.DeploymentTrigger = &deploymentTriggerPort{create: createDeployment, checker: checker}
 
 	return nil
 }
@@ -250,4 +254,26 @@ func (p *buildTriggerPort) TriggerAutomated(ctx context.Context, projectID kerne
 		return kernel.BuildID{}, err
 	}
 	return build.ID, nil
+}
+
+type deploymentTriggerPort struct {
+	create  *deploycommand.CreateDeploymentHandler
+	checker deliveryport.ProjectChecker
+}
+
+func (p *deploymentTriggerPort) TriggerForEnvironment(ctx context.Context, req appctx.WorkflowDeploymentRequest) (kernel.DeploymentRunID, error) {
+	auto, err := p.checker.ProjectAutomationContext(ctx, req.ProjectID)
+	if err != nil {
+		return kernel.DeploymentRunID{}, err
+	}
+	run, err := p.create.Handle(ctx, auto.WorkspaceID, auto.MemberID, req.ProjectID, deploycommand.CreateInput{
+		EnvironmentID: req.EnvironmentID.String(),
+		GitRefType:    req.GitRefType,
+		GitRefValue:   req.GitRefValue,
+		ImageTag:      req.ImageTag,
+	})
+	if err != nil {
+		return kernel.DeploymentRunID{}, err
+	}
+	return run.ID, nil
 }

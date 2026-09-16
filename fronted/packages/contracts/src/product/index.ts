@@ -86,14 +86,51 @@ export const TEMPLATE_STATUS_OPTIONS = [
 
 export const ProductVMSchema = z.object({
   id: z.string(),
+  workspace_id: z.string().optional(),
   name: z.string(),
+  display_name: z.string().optional(),
   description: z.string().optional(),
+  version: z.string().optional(),
+  next_version: z.string().optional(),
   owner: z.string().optional(),
   status: z.string().optional(),
   created_at: z.string().optional(),
 });
 
 export type ProductVM = z.infer<typeof ProductVMSchema>;
+
+export const CreateProductCommandSchema = z.object({
+  name: z.string().min(3).max(100),
+  display_name: z.string().optional(),
+  description: z.string().optional(),
+  version: z.string().optional(),
+  next_version: z.string().optional(),
+});
+
+export type CreateProductCommand = z.infer<typeof CreateProductCommandSchema>;
+
+export const ProductOverviewVMSchema = z.object({
+  product_id: z.string(),
+  name: z.string(),
+  display_name: z.string().optional(),
+  description: z.string().optional(),
+  status: z.string().optional(),
+  project_count: z.number().int(),
+  environment_count: z.number().int().optional(),
+});
+
+export type ProductOverviewVM = z.infer<typeof ProductOverviewVMSchema>;
+
+export const ProductProjectVMSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  display_name: z.string().optional(),
+  status: z.string(),
+  review_status: z.string().optional(),
+  product_id: z.string().optional(),
+});
+
+export type ProductProjectVM = z.infer<typeof ProductProjectVMSchema>;
 
 export const ProductPlanVMSchema = z.object({
   id: z.string(),
@@ -122,3 +159,8 @@ export const ProductRequirementVMSchema = z.object({
 });
 
 export type ProductRequirementVM = z.infer<typeof ProductRequirementVMSchema>;
+
+export * from "./workflow";
+export * from "./release-plan";
+export * from "./product-workflow";
+export * from "./environment";

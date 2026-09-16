@@ -5,7 +5,7 @@ import { product, platform, secret, workspace } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { CreateProjectCommand, ProjectVM } from "@sparkops/contracts/workspace";
 import type { SecretVM } from "@sparkops/contracts/secret";
-import type { TemplateVM } from "@sparkops/contracts/product";
+import type { ProductVM, TemplateVM } from "@sparkops/contracts/product";
 import type { AuthorizedClusterVM } from "@sparkops/contracts/delivery";
 import { Modal } from "@/components/ui/Modal";
 import { InlineAlert } from "@/components/ui/InlineAlert";
@@ -49,6 +49,7 @@ function projectToForm(project: ProjectVM): CreateProjectCommand {
 
   return {
     ...EMPTY_PROJECT_FORM,
+    product_id: project.product_id || null,
     name: project.name,
     display_name: project.display_name ?? project.name,
     description: project.description ?? "",
@@ -87,6 +88,7 @@ export function ProjectConfigurePanel({
   const [secrets, setSecrets] = useState<SecretVM[]>([]);
   const [templates, setTemplates] = useState<TemplateVM[]>([]);
   const [clusters, setClusters] = useState<AuthorizedClusterVM[]>([]);
+  const [products, setProducts] = useState<ProductVM[]>([]);
   const [loadingSecrets, setLoadingSecrets] = useState(false);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [loadingClusters, setLoadingClusters] = useState(false);
@@ -114,15 +116,17 @@ export function ProjectConfigurePanel({
       setLoadingSecrets(true);
       setLoadingClusters(true);
       try {
-        const [templateList, secretList, clusterList] = await Promise.all([
+        const [templateList, secretList, clusterList, productList] = await Promise.all([
           product.listTemplates(workspaceId),
           secret.listSecrets(workspaceId),
           platform.listAuthorizedWorkspaceClusters(workspaceId),
+          product.listProducts(workspaceId),
         ]);
         if (cancelled) return;
         setTemplates(templateList);
         setSecrets(secretList);
         setClusters(clusterList);
+        setProducts(productList);
       } catch {
         if (cancelled) return;
         setTemplates([]);
@@ -289,6 +293,7 @@ export function ProjectConfigurePanel({
               gitSecrets={gitSecrets}
               loadingSecrets={loadingSecrets}
               loadSecrets={() => void loadSecrets()}
+              products={products}
             />
           ) : (
             <ProjectCreateStep3

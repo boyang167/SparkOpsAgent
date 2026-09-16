@@ -13,5 +13,7 @@ type ProjectRepository interface {
 	FindByID(ctx context.Context, id kernel.ProjectID) (*model.Project, error)
 	FindByWorkspaceAndName(ctx context.Context, wsID kernel.WorkspaceID, name model.ProjectName) (*model.Project, error)
 	ListByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) ([]*model.Project, error)
+	ListByProduct(ctx context.Context, productID kernel.ProductID) ([]*model.Project, error)
 	CountByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) (int, error)
+	CountByProduct(ctx context.Context, productID kernel.ProductID) (int, error)
 }

@@ -87,6 +87,7 @@ type ProjectResources struct {
 type Project struct {
 	ID                 kernel.ProjectID
 	WorkspaceID        kernel.WorkspaceID
+	ProductID          *kernel.ProductID
 	Name               ProjectName
 	DisplayName        string
 	Description        string
@@ -115,7 +116,13 @@ type Project struct {
 	events []events.Event
 }
 
+type ProductIDPatch struct {
+	Set   bool
+	Value *kernel.ProductID
+}
+
 type CreateProjectInput struct {
+	ProductID          *kernel.ProductID
 	Name               string
 	DisplayName        string
 	Description        string
@@ -134,6 +141,7 @@ type CreateProjectInput struct {
 }
 
 type UpdateProjectInput struct {
+	ProductID          ProductIDPatch
 	Name               *string
 	DisplayName        *string
 	Description        *string
@@ -164,6 +172,7 @@ func NewProject(wsID kernel.WorkspaceID, name ProjectName, createdBy kernel.Memb
 	p := &Project{
 		ID:                 kernel.NewProjectID(),
 		WorkspaceID:        wsID,
+		ProductID:          input.ProductID,
 		Name:               name,
 		DisplayName:        strings.TrimSpace(input.DisplayName),
 		Description:        strings.TrimSpace(input.Description),
@@ -222,6 +231,9 @@ func (p *Project) ApplyPatch(input UpdateProjectInput) error {
 	configChanged := p.patchChangesConfiguration(input)
 	if p.ReviewStatus == ProjectReviewPending && configChanged {
 		return domain.ErrProjectReviewLocked
+	}
+	if input.ProductID.Set {
+		p.ProductID = input.ProductID.Value
 	}
 	if input.Name != nil {
 		name, err := NewProjectName(*input.Name)

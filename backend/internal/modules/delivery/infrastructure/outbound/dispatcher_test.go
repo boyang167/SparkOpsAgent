@@ -29,7 +29,7 @@ func TestPayloadFromBuildEvent(t *testing.T) {
 
 func TestPayloadFromRollbackEvent(t *testing.T) {
 	ev := deliveryevent.NewDeployCompleted(
-		kernel.NewDeploymentRunID(), kernel.NewProjectID(), kernel.NewWorkspaceID(),
+		kernel.NewDeploymentRunID(), kernel.NewProjectID(), kernel.NewWorkspaceID(), nil,
 		"test-repo", "succeeded", "rollback", "v1",
 	)
 	_, name, _, ok := payloadFromEvent(ev)

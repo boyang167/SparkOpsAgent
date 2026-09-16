@@ -65,6 +65,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   products: "产品",
   plans: "版本计划",
   releases: "发布",
+  workflows: "产品工作流",
   pods: "运行实例",
   cronjobs: "定时任务",
   secrets: "密钥配置",

@@ -49,6 +49,7 @@ func AutoMigrate(db *gorm.DB) error {
 type projectModel struct {
 	ID                 string `gorm:"column:id;primaryKey"`
 	WorkspaceID        string
+	ProductID          *string
 	Name               string
 	DisplayName        string
 	Description        string
@@ -121,6 +122,10 @@ func (r *ProjectRepository) Save(ctx context.Context, project *model.Project) er
 	if project.KubernetesSecretID != "" {
 		row.KubernetesSecretID = &project.KubernetesSecretID
 	}
+	if project.ProductID != nil {
+		value := project.ProductID.String()
+		row.ProductID = &value
+	}
 	return r.db.WithContext(ctx).Save(&row).Error
 }
 
@@ -182,6 +187,11 @@ func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) 
 	} else {
 		updates["kubernetes_secret_id"] = nil
 	}
+	if project.ProductID != nil {
+		updates["product_id"] = project.ProductID.String()
+	} else {
+		updates["product_id"] = nil
+	}
 	return r.db.WithContext(ctx).Model(&projectModel{}).Where("id = ?", project.ID.String()).Updates(updates).Error
 }
 
@@ -239,6 +249,34 @@ func (r *ProjectRepository) CountByWorkspace(ctx context.Context, wsID kernel.Wo
 	return int(count), err
 }
 
+func (r *ProjectRepository) ListByProduct(ctx context.Context, productID kernel.ProductID) ([]*model.Project, error) {
+	var rows []projectModel
+	err := r.db.WithContext(ctx).
+		Where("product_id = ? AND status = ?", productID.String(), string(model.ProjectStatusActive)).
+		Order("created_at DESC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*model.Project, 0, len(rows))
+	for _, row := range rows {
+		p, err := rowToProject(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func (r *ProjectRepository) CountByProduct(ctx context.Context, productID kernel.ProductID) (int, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&projectModel{}).
+		Where("product_id = ? AND status = ?", productID.String(), string(model.ProjectStatusActive)).
+		Count(&count).Error
+	return int(count), err
+}
+
 func rowToProject(row projectModel) (*model.Project, error) {
 	name, err := model.ProjectNameFromDB(row.Name)
 	if err != nil {
@@ -290,6 +328,13 @@ func rowToProject(row projectModel) (*model.Project, error) {
 	}
 	if row.KubernetesSecretID != nil {
 		p.KubernetesSecretID = *row.KubernetesSecretID
+	}
+	if row.ProductID != nil && *row.ProductID != "" {
+		productID, err := kernel.ParseProductID(*row.ProductID)
+		if err != nil {
+			return nil, err
+		}
+		p.ProductID = &productID
 	}
 	return p, nil
 }

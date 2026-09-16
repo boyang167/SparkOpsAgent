@@ -18,20 +18,22 @@ import (
 )
 
 type CreateInput struct {
-	ClusterID    string               `json:"cluster_id"`
-	GitRefType   string               `json:"git_ref_type"`
-	GitRefValue  string               `json:"git_ref_value"`
-	ImageTag     string               `json:"image_tag"`
-	CrossCluster bool                 `json:"cross_cluster"`
-	SyncOnly     bool                 `json:"sync_only"`
-	Manifests    []model.SyncManifest `json:"manifests"`
+	ClusterID     string               `json:"cluster_id"`
+	EnvironmentID string               `json:"environment_id"`
+	GitRefType    string               `json:"git_ref_type"`
+	GitRefValue   string               `json:"git_ref_value"`
+	ImageTag      string               `json:"image_tag"`
+	CrossCluster  bool                 `json:"cross_cluster"`
+	SyncOnly      bool                 `json:"sync_only"`
+	Manifests     []model.SyncManifest `json:"manifests"`
 }
 
 type CreateDeploymentHandler struct {
-	repo   repository.DeploymentRunRepository
-	reader port.ProjectDeploymentReader
-	queue  messaging.Queue
-	clock  func() time.Time
+	repo        repository.DeploymentRunRepository
+	reader      port.ProjectDeploymentReader
+	environments port.EnvironmentResolver
+	queue       messaging.Queue
+	clock       func() time.Time
 }
 
 func NewCreateDeploymentHandler(
@@ -39,11 +41,16 @@ func NewCreateDeploymentHandler(
 	reader port.ProjectDeploymentReader,
 	queue messaging.Queue,
 	clock func() time.Time,
+	resolvers ...port.EnvironmentResolver,
 ) *CreateDeploymentHandler {
 	if clock == nil {
 		clock = time.Now
 	}
-	return &CreateDeploymentHandler{repo: repo, reader: reader, queue: queue, clock: clock}
+	handler := &CreateDeploymentHandler{repo: repo, reader: reader, queue: queue, clock: clock}
+	if len(resolvers) > 0 {
+		handler.environments = resolvers[0]
+	}
+	return handler
 }
 
 func (h *CreateDeploymentHandler) Handle(
@@ -54,7 +61,25 @@ func (h *CreateDeploymentHandler) Handle(
 	input CreateInput,
 ) (*model.DeploymentRun, error) {
 	var selected kernel.ClusterInfoID
+	var deployNamespace string
+	var environmentID *kernel.EnvironmentID
 	var err error
+	if strings.TrimSpace(input.EnvironmentID) != "" {
+		if h.environments == nil {
+			return nil, domain.ErrDeploymentEnvironmentNotFound
+		}
+		envID, parseErr := kernel.ParseEnvironmentID(input.EnvironmentID)
+		if parseErr != nil {
+			return nil, domain.ErrDeploymentEnvironmentNotFound
+		}
+		target, resolveErr := h.environments.Resolve(ctx, wsID, projectID, envID)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		selected = target.ClusterID
+		deployNamespace = target.Namespace
+		environmentID = &target.EnvironmentID
+	}
 	needsAuthorizedClusters := input.CrossCluster || input.SyncOnly
 	if needsAuthorizedClusters {
 		clusters, listErr := h.reader.ListAuthorizedClusters(ctx, wsID)
@@ -66,7 +91,7 @@ func (h *CreateDeploymentHandler) Handle(
 		}
 		// Force build cluster (priority first); ignore client-selected cluster.
 		selected = kernel.ClusterInfoID{}
-	} else if strings.TrimSpace(input.ClusterID) != "" {
+	} else if environmentID == nil && strings.TrimSpace(input.ClusterID) != "" {
 		selected, err = kernel.ParseClusterInfoID(input.ClusterID)
 		if err != nil {
 			return nil, domain.ErrDeploymentClusterNotFound
@@ -128,6 +153,8 @@ func (h *CreateDeploymentHandler) Handle(
 			gitRefType, gitRefValue, imageTag)
 		run.CrossCluster = input.CrossCluster
 	}
+	run.EnvironmentID = environmentID
+	run.DeployNamespace = deployNamespace
 	run.CreatedAt = h.clock().UTC()
 	if err := h.repo.Create(ctx, run); err != nil {
 		return nil, err

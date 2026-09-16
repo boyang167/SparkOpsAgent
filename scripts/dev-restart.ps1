@@ -118,6 +118,50 @@ function Stop-DevServices {
     Start-Sleep -Milliseconds 500
 }
 
+function Test-PortListening {
+    param([int]$Port)
+
+    try {
+        $connections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+        if ($connections) { return $true }
+    } catch {
+        # fall through to netstat
+    }
+
+    $pattern = ":\s*$Port\s"
+    return [bool](netstat -ano | Select-String $pattern | Select-String "LISTENING")
+}
+
+function Wait-BackendReady {
+    param(
+        [int]$Port,
+        [int]$TimeoutSec = 90
+    )
+
+    Write-Host "  等待后端编译并监听 :$Port ..." -ForegroundColor DarkGray
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-PortListening -Port $Port) {
+            try {
+                $resp = Invoke-WebRequest -Uri "http://localhost:$Port/api/v1/auth/providers" -UseBasicParsing -TimeoutSec 3
+                if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) {
+                    return $true
+                }
+            } catch {
+                $status = $null
+                if ($_.Exception.Response) {
+                    $status = [int]$_.Exception.Response.StatusCode
+                }
+                if ($status -ge 400 -and $status -lt 500) {
+                    return $true
+                }
+            }
+        }
+        Start-Sleep -Seconds 2
+    }
+    return $false
+}
+
 function Start-BackendService {
     if (-not (Test-Path (Join-Path $BackendDir "cmd\server"))) {
         throw "未找到 backend/cmd/server，请确认仓库路径: $BackendDir"
@@ -135,6 +179,10 @@ function Start-BackendService {
         -WorkingDirectory $BackendDir `
         -PassThru `
         -WindowStyle Normal
+
+    if (-not (Wait-BackendReady -Port $BackendPort)) {
+        throw "后端在 90 秒内未就绪，请查看 go run 窗口中的编译/启动错误"
+    }
 
     return @{
         name = "backend"

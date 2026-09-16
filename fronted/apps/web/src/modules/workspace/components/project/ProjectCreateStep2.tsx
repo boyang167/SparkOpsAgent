@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CreateProjectCommand, GitRefVM } from "@sparkops/contracts/workspace";
+import type { ProductVM } from "@sparkops/contracts/product";
 import { PROJECT_LANGUAGE_OPTIONS } from "@sparkops/contracts/workspace";
 import type { SecretVM } from "@sparkops/contracts/secret";
 import { BffError } from "@sparkops/contracts";
@@ -37,6 +38,7 @@ interface ProjectCreateStep2Props {
   gitSecrets: SecretVM[];
   loadingSecrets: boolean;
   loadSecrets: () => void;
+  products?: ProductVM[];
 }
 
 function ResourceRangeField({
@@ -181,6 +183,7 @@ export function ProjectCreateStep2({
   gitSecrets,
   loadingSecrets,
   loadSecrets,
+  products = [],
 }: ProjectCreateStep2Props) {
   const [gitRefMode, setGitRefMode] = useState<"select" | "manual">("select");
   const [remoteRefs, setRemoteRefs] = useState<GitRefVM[]>([]);
@@ -300,6 +303,26 @@ export function ProjectCreateStep2({
 
   return (
     <div className="project-form-section is-horizontal is-ref project-step2">
+      {products.length > 0 ? (
+        <FormRow label="所属产品:">
+          <select
+            className="input"
+            value={form.product_id ?? ""}
+            onChange={(e) => {
+              const value = e.target.value;
+              updateForm({ product_id: value ? value : null });
+            }}
+          >
+            <option value="">无（独立项目）</option>
+            {products.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.display_name?.trim() || p.name}
+              </option>
+            ))}
+          </select>
+        </FormRow>
+      ) : null}
+
       <FormRow label="开发语言:" required>
         <select
           className="input"

@@ -11,6 +11,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	deployport "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/port"
 	deployrepo "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/repository"
+	deployacl "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/acl"
 	buildmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/model"
 	deliveryport "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/port"
 	runtimeport "github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/domain/port"
@@ -153,6 +154,7 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			}
 			return o.handleProjectError(ctx, run, err)
 		}
+		deployacl.OverrideDeployNamespace(&project, run.DeployNamespace)
 		if err := o.prepare.Run(operationCtx, project, PrepareInput{
 			GitRefType: run.GitRefType, GitRefValue: run.GitRefValue,
 			ImageTag: run.ImageTag, ImageRepository: project.ImageRepository,
@@ -260,6 +262,7 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			}
 			return o.handleProjectError(ctx, run, err)
 		}
+		deployacl.OverrideDeployNamespace(&project, run.DeployNamespace)
 		if !(run.IsSyncOnly() && len(run.SyncManifests) > 0) {
 			if err := o.finalizeKubernetes(operationCtx, run, project); err != nil {
 				if operationCtx.Err() != nil {

@@ -35,7 +35,7 @@ func TestUpdateProjectRejectsUnauthorizedDefaultCluster(t *testing.T) {
 	project := reviewReadyProject(t, wsID, actor)
 	repo := &reviewProjectRepo{project: project}
 	clusterID := kernel.NewClusterInfoID().String()
-	handler := command.NewUpdateProjectHandler(repo, updateWorkspaceChecker{}, clusterGrantChecker{})
+	handler := command.NewUpdateProjectHandler(repo, updateWorkspaceChecker{}, clusterGrantChecker{}, nil)
 
 	_, err := handler.Handle(context.Background(), wsID, actor, project.ID, model.UpdateProjectInput{
 		DefaultClusterID: &clusterID,

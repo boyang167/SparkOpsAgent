@@ -20,4 +20,6 @@ var (
 	ErrDeploymentNotSyncable            = kernel.NewDomainError("DELIVERY_DEPLOYMENT_NOT_SYNCABLE", "no succeeded deployment with image tag is available for sync")
 	ErrDeploymentSyncManifestsEmpty     = kernel.NewDomainError("DELIVERY_DEPLOYMENT_SYNC_MANIFESTS_EMPTY", "at least one sync manifest is required")
 	ErrDeploymentSyncManifestInvalid    = kernel.NewDomainError("DELIVERY_DEPLOYMENT_SYNC_MANIFEST_INVALID", "sync manifest is invalid")
+	ErrDeploymentEnvironmentNotFound        = kernel.NewDomainError("DELIVERY_DEPLOYMENT_ENVIRONMENT_NOT_FOUND", "environment not found")
+	ErrDeploymentEnvironmentProductMismatch = kernel.NewDomainError("DELIVERY_DEPLOYMENT_ENVIRONMENT_PRODUCT_MISMATCH", "environment does not belong to project product")
 )

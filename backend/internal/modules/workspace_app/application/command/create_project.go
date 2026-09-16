@@ -17,6 +17,7 @@ type CreateProjectHandler struct {
 	memberRepo     repository.ProjectMemberRepository
 	wsChecker      port.WorkspaceChecker
 	clusterChecker port.WorkspaceClusterChecker
+	productChecker port.ProductChecker
 	engine         policy.Engine
 	bus            eventbus.Bus
 }
@@ -26,12 +27,13 @@ func NewCreateProjectHandler(
 	memberRepo repository.ProjectMemberRepository,
 	wsChecker port.WorkspaceChecker,
 	clusterChecker port.WorkspaceClusterChecker,
+	productChecker port.ProductChecker,
 	engine policy.Engine,
 	bus eventbus.Bus,
 ) *CreateProjectHandler {
 	return &CreateProjectHandler{
 		repo: repo, memberRepo: memberRepo, wsChecker: wsChecker,
-		clusterChecker: clusterChecker, engine: engine, bus: bus,
+		clusterChecker: clusterChecker, productChecker: productChecker, engine: engine, bus: bus,
 	}
 }
 
@@ -57,6 +59,9 @@ func (h *CreateProjectHandler) Handle(ctx context.Context, wsID kernel.Workspace
 		return nil, err
 	}
 	if err := h.wsChecker.CanCreateProject(ctx, wsID, count); err != nil {
+		return nil, err
+	}
+	if err := validateProductMembership(ctx, h.productChecker, wsID, input.ProductID); err != nil {
 		return nil, err
 	}
 	if input.DefaultClusterID != "" {

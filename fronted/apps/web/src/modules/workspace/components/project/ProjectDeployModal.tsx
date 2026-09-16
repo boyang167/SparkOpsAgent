@@ -10,7 +10,8 @@ import type {
 import type { SecretVM } from "@sparkops/contracts/secret";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { BffError } from "@sparkops/contracts";
-import { delivery, secret } from "@sparkops/web-sdk";
+import type { EnvironmentVM } from "@sparkops/contracts/product";
+import { delivery, product, secret } from "@sparkops/web-sdk";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { GitRefValueField } from "./GitRefValueField";
@@ -55,6 +56,9 @@ export function ProjectDeployModal({
   const [activeRun, setActiveRun] = useState<DeploymentRunVM | null>(null);
   const [run, setRun] = useState<DeploymentRunVM | null>(null);
   const [clusterId, setClusterId] = useState("");
+  const [environments, setEnvironments] = useState<EnvironmentVM[]>([]);
+  const [environmentId, setEnvironmentId] = useState("");
+  const [deployTarget, setDeployTarget] = useState<"cluster" | "environment">("cluster");
   const [gitRefType, setGitRefType] = useState<"branch" | "tag">(
     project.git_ref_type === "tag" ? "tag" : "branch",
   );
@@ -89,12 +93,17 @@ export function ProjectDeployModal({
     setGitRefValue(project.git_ref_value ?? "");
     setImageTag("");
 
+    const envPromise = project.product_id
+      ? product.listEnvironments(workspaceId, project.product_id)
+      : Promise.resolve([] as EnvironmentVM[]);
+
     void Promise.all([
       delivery.getDeploymentOptions(project.id, workspaceId),
       secret.listSecrets(workspaceId),
       delivery.listDeployments(project.id, workspaceId),
+      envPromise,
     ])
-      .then(([nextOptions, nextSecrets, deploymentList]) => {
+      .then(([nextOptions, nextSecrets, deploymentList, envItems]) => {
         if (cancelled) return;
         const nextActive =
           deploymentList.items.find((item) => isActiveDeploymentRun(item)) ?? null;
@@ -114,6 +123,9 @@ export function ProjectDeployModal({
             ? project.default_cluster_id
             : targetClusters[0]?.id;
         setClusterId(preferred ?? "");
+        setEnvironments(envItems);
+        setEnvironmentId(envItems[0]?.id ?? "");
+        setDeployTarget(envItems.length > 0 ? "environment" : "cluster");
       })
       .catch((err) => {
         if (!cancelled) {
@@ -201,8 +213,11 @@ export function ProjectDeployModal({
     }
     setSubmitting(true);
     setError(null);
+    const useEnvironment = deployTarget === "environment" && environmentId && !crossCluster;
     const input: CreateDeploymentCommand = {
-      cluster_id: crossCluster ? undefined : clusterId || undefined,
+      ...(useEnvironment
+        ? { environment_id: environmentId }
+        : { cluster_id: crossCluster ? undefined : clusterId || undefined }),
       git_ref_type: gitRefType,
       git_ref_value: trimmedRef,
       ...(imageTag.trim() ? { image_tag: imageTag.trim() } : {}),
@@ -282,32 +297,65 @@ export function ProjectDeployModal({
               </InlineAlert>
             ) : null}
 
-            <label className="stack-sm">
-              <span>目标集群</span>
-              <select
-                className="input"
-                value={clusterId}
-                onChange={(event) => setClusterId(event.target.value)}
-                disabled={loading || Boolean(run) || crossCluster}
-                required
-              >
-                <option value="">请选择授权集群</option>
-                {deployableClusters(options.clusters).map((cluster) => {
-                  const label = cluster.cluster_name?.trim() || cluster.id;
-                  return (
-                    <option key={cluster.id} value={cluster.id}>
-                      {label}
-                    </option>
-                  );
-                })}
-              </select>
-              {crossCluster ? (
-                <p className="text-muted text-sm">
-                  跨集群发布将在构建集群构建并部署，随后把同一镜像同步到其余授权集群。
-                </p>
-              ) : null}
+            {environments.length > 0 && !crossCluster ? (
+              <label className="stack-sm">
+                <span>部署目标</span>
+                <select
+                  className="input"
+                  value={deployTarget}
+                  onChange={(event) => setDeployTarget(event.target.value as "cluster" | "environment")}
+                  disabled={loading || Boolean(run)}
+                >
+                  <option value="environment">产品环境</option>
+                  <option value="cluster">集群直部署</option>
+                </select>
+              </label>
+            ) : null}
 
-            </label>
+            {deployTarget === "environment" && environments.length > 0 && !crossCluster ? (
+              <label className="stack-sm">
+                <span>产品环境</span>
+                <select
+                  className="input"
+                  value={environmentId}
+                  onChange={(event) => setEnvironmentId(event.target.value)}
+                  disabled={loading || Boolean(run)}
+                  required
+                >
+                  {environments.map((env) => (
+                    <option key={env.id} value={env.id}>
+                      {env.name} ({env.namespace})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <label className="stack-sm">
+                <span>目标集群</span>
+                <select
+                  className="input"
+                  value={clusterId}
+                  onChange={(event) => setClusterId(event.target.value)}
+                  disabled={loading || Boolean(run) || crossCluster}
+                  required
+                >
+                  <option value="">请选择授权集群</option>
+                  {deployableClusters(options.clusters).map((cluster) => {
+                    const label = cluster.cluster_name?.trim() || cluster.id;
+                    return (
+                      <option key={cluster.id} value={cluster.id}>
+                        {label}
+                      </option>
+                    );
+                  })}
+                </select>
+                {crossCluster ? (
+                  <p className="text-muted text-sm">
+                    跨集群发布将在构建集群构建并部署，随后把同一镜像同步到其余授权集群。
+                  </p>
+                ) : null}
+              </label>
+            )}
 
             <label className="stack-sm">
               <span>Git 引用类型</span>

@@ -46,6 +46,8 @@ type Container struct {
 	RouteRegistry              *routes.Registry
 	AuditLogger                audit.Logger
 	BuildTrigger               BuildTrigger
+	DeploymentTrigger          DeploymentTrigger
+	WorkflowRunTrigger         WorkflowRunTrigger
 	ManifestDeployer           runtimeport.ManifestDeployer
 	APIPolicyChecker           authz.WorkspaceAPIPolicyChecker
 	LLMClient                  integrationport.LLMClient

@@ -7,8 +7,11 @@ import {
   K8sEmptyState,
   K8sLoadingState,
   K8sPagination,
+  K8sPanelCard,
+  K8sStatusBadge,
   useK8sConfirm,
 } from "@/components/k8s";
+import type { K8sStatusTone } from "@/components/k8s/K8sStatusBadge";
 import { Modal } from "@/components/ui/Modal";
 import { notifyEntitlementsUpdated, useShellContext } from "@/components/layout/shell-context";
 import { ApiErrorBanner } from "../ApiErrorBanner";
@@ -20,13 +23,18 @@ import {
   type ClusterCreateFormValue,
 } from "../ClusterCreateForm";
 import {
-  clusterStatusBadgeClass,
   clusterStatusFromProbe,
   clusterStatusView,
   clusterVersionProxyPath,
   type ClusterStatusView,
 } from "../cluster-status";
 import type { KubernetesCluster } from "../cluster-types";
+import {
+  clusterIntegrationLabel,
+  clusterIntegrations,
+  formatClusterServer,
+  truncateClusterId,
+} from "../cluster-view";
 import { ClusterAssociateDialog } from "./ClusterAssociateDialog";
 import { ClusterAuthorizeDialog } from "./ClusterAuthorizeDialog";
 
@@ -42,6 +50,12 @@ function settingsPayload(form: ClusterCreateFormValue) {
     llm_api_key: form.llm_api_key,
     llm_model: form.llm_model,
   };
+}
+
+function statusTone(status: ClusterStatusView): K8sStatusTone {
+  if (status.kind === "healthy") return "success";
+  if (status.kind === "unhealthy") return "danger";
+  return "info";
 }
 
 export function ClustersPanel({
@@ -77,6 +91,7 @@ export function ClustersPanel({
   const [changeForm, setChangeForm] = useState<ClusterCreateFormValue>(EMPTY_CLUSTER_CREATE_FORM);
   const [authorizing, setAuthorizing] = useState<KubernetesCluster | null>(null);
   const [associating, setAssociating] = useState<KubernetesCluster | null>(null);
+  const [moreCluster, setMoreCluster] = useState<KubernetesCluster | null>(null);
   const [actionError, setActionError] = useState<ApiErrorInfo | null>(null);
   const [statuses, setStatuses] = useState<Record<string, ClusterStatusView>>({});
   const { ask, dialog: confirmDialog } = useK8sConfirm();
@@ -84,7 +99,7 @@ export function ClustersPanel({
   const filtered = useMemo(() => {
     const q = keyword.trim().toLowerCase();
     if (!q) return clusters;
-    return clusters.filter((item) => `${item.name} ${item.id} ${item.server}`.toLowerCase().includes(q));
+    return clusters.filter((item) => `${item.name} ${item.server} ${item.id}`.toLowerCase().includes(q));
   }, [clusters, keyword]);
 
   const total = filtered.length;
@@ -93,6 +108,19 @@ export function ClustersPanel({
   const rows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const rowIds = rows.map((item) => item.id).join(",");
   const allChecked = rows.length > 0 && rows.every((item) => selected.includes(item.id));
+
+  const statusSummary = useMemo(() => {
+    let healthy = 0;
+    let unhealthy = 0;
+    let checking = 0;
+    for (const item of filtered) {
+      const status = statuses[item.id] ?? clusterStatusView("checking");
+      if (status.kind === "healthy") healthy += 1;
+      else if (status.kind === "unhealthy") unhealthy += 1;
+      else checking += 1;
+    }
+    return { healthy, unhealthy, checking };
+  }, [filtered, statuses]);
 
   useEffect(() => {
     if (!rowIds) {
@@ -127,6 +155,18 @@ export function ClustersPanel({
     };
   }, [rowIds, loading]);
 
+  function applySearch() {
+    setKeyword(draftKeyword);
+    setPage(1);
+    onRefresh();
+  }
+
+  function resetSearch() {
+    setDraftKeyword("");
+    setKeyword("");
+    setPage(1);
+  }
+
   function toggleAll(checked: boolean) {
     const ids = rows.map((item) => item.id);
     setSelected((prev) => (checked ? Array.from(new Set([...prev, ...ids])) : prev.filter((id) => !ids.includes(id))));
@@ -146,6 +186,7 @@ export function ClustersPanel({
     setChanging(cluster);
     setChangeForm(formFromCluster(cluster));
     setCreateError(null);
+    setMoreCluster(null);
   }
 
   async function saveCreate() {
@@ -242,6 +283,7 @@ export function ClustersPanel({
     try {
       await platform.revokeAuthorizedWorkspaceCluster(workspaceId, cluster.id);
       setSelected((prev) => prev.filter((id) => id !== cluster.id));
+      setMoreCluster(null);
       notifyEntitlementsUpdated();
       onRefresh();
     } catch (err) {
@@ -279,131 +321,176 @@ export function ClustersPanel({
     }
   }
 
+  async function copyClusterId(id: string) {
+    try {
+      await navigator.clipboard.writeText(id);
+    } catch {
+      setActionError({ code: "CLIPBOARD_FAILED", message: "无法复制集群 ID，请手动选择复制" });
+    }
+  }
+
   return (
-    <div className="k8s-console stack-md">
-      <div className="k8s-search-row">
-        <label className="min-w-64">
-          <span className="label">名称</span>
+    <K8sPanelCard>
+      <div className="k8s-toolbar-row">
+        <label className="min-w-64 flex-1">
+          <span className="label">搜索</span>
           <input
             className="input"
             value={draftKeyword}
-            placeholder="名称"
+            placeholder="名称或接口地址"
             onChange={(e) => setDraftKeyword(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") applySearch();
+            }}
           />
         </label>
-        <button
-          type="button"
-          className="btn"
-          disabled={loading}
-          onClick={() => {
-            setKeyword(draftKeyword);
-            setPage(1);
-            onRefresh();
-          }}
-        >
+        <button type="button" className="btn" disabled={loading} onClick={applySearch}>
           {loading ? "查询中…" : "查询"}
         </button>
-        <button
-          type="button"
-          className="btn-secondary"
-          onClick={() => {
-            setDraftKeyword("");
-            setKeyword("");
-            setPage(1);
-          }}
-        >
+        <button type="button" className="btn-secondary" onClick={resetSearch}>
           重置
         </button>
+        {canManage ? (
+          <div className="k8s-toolbar-actions">
+            <button type="button" className="btn" onClick={openCreate}>
+              接入集群
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={selected.length === 0}
+              onClick={() => void revokeSelected()}
+            >
+              批量撤销{selected.length > 0 ? ` (${selected.length})` : ""}
+            </button>
+          </div>
+        ) : null}
       </div>
-      {canManage ? (
-        <div className="k8s-ops-row">
-          <button type="button" className="btn" onClick={openCreate}>
-            + 新增
-          </button>
-          <button type="button" className="btn-secondary" disabled={selected.length === 0} onClick={() => void revokeSelected()}>
-            批量删除
-          </button>
-        </div>
+
+      {!loading && total > 0 ? (
+        <p className="k8s-cluster-summary" role="status">
+          共 {total} 个集群
+          {statusSummary.healthy > 0 ? ` · ${statusSummary.healthy} 正常` : ""}
+          {statusSummary.unhealthy > 0 ? ` · ${statusSummary.unhealthy} 异常` : ""}
+          {statusSummary.checking > 0 ? ` · ${statusSummary.checking} 检测中` : ""}
+        </p>
       ) : null}
+
       <ApiErrorBanner error={error} />
       <ApiErrorBanner error={actionError} />
+
       <div className="table-wrap">
         <table className="data-table text-sm">
           <thead>
             <tr>
-              <th>
-                <input type="checkbox" checked={allChecked} onChange={(e) => toggleAll(e.target.checked)} aria-label="全选" />
-              </th>
-              <th>ID</th>
-              <th>名称</th>
-              <th>状态</th>
-              <th>Prometheus</th>
-              <th>操作</th>
+              {canManage ? (
+                <th className="w-10">
+                  <input type="checkbox" checked={allChecked} onChange={(e) => toggleAll(e.target.checked)} aria-label="全选" />
+                </th>
+              ) : null}
+              <th>集群</th>
+              <th>接口地址</th>
+              <th>连通性</th>
+              <th>集成</th>
+              <th className="w-28">操作</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((item) => {
               const status = statuses[item.id] ?? clusterStatusView("checking");
+              const integrations = clusterIntegrations(item);
+              const isActive = item.id === selectedId;
               return (
-              <tr key={item.id} className={item.id === selectedId ? "k8s-row-selected" : undefined}>
-                <td>
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(item.id)}
-                    onChange={(e) => toggleOne(item.id, e.target.checked)}
-                    aria-label={`选择 ${item.name || item.id}`}
-                  />
-                </td>
-                <td className="font-mono text-xs">{item.id}</td>
-                <td>
-                  <button type="button" className="k8s-action-link" onClick={() => onSelect(item.id)}>
-                    {item.name || item.id}
-                  </button>
-                </td>
-                <td>
-                  <span className={clusterStatusBadgeClass(status.kind)} title={status.detail}>
-                    {status.label}
-                  </span>
-                </td>
-                <td>{item.prometheus_url || "-"}</td>
-                <td>
+                <tr key={item.id} className={isActive ? "k8s-row-selected" : undefined}>
                   {canManage ? (
-                    <div className="flex flex-wrap gap-3">
-                      <button type="button" className="k8s-action-link" onClick={() => setAuthorizing(item)}>
-                        授权
-                      </button>
-                      <button type="button" className="k8s-action-link" onClick={() => setAssociating(item)}>
-                        关联
-                      </button>
-                      <button type="button" className="k8s-action-link" onClick={() => openChange(item)}>
-                        变更
-                      </button>
-                      <button type="button" className="k8s-action-link" onClick={() => void revokeCluster(item)}>
-                        删除
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(item.id)}
+                        onChange={(e) => toggleOne(item.id, e.target.checked)}
+                        aria-label={`选择 ${item.name || item.id}`}
+                      />
+                    </td>
+                  ) : null}
+                  <td>
+                    <button type="button" className="k8s-action-link font-semibold" onClick={() => onSelect(item.id)}>
+                      {item.name || truncateClusterId(item.id)}
+                    </button>
+                    <div className="k8s-cluster-meta">
+                      <span className="font-mono text-xs text-muted" title={item.id}>
+                        {truncateClusterId(item.id)}
+                      </span>
+                      <button
+                        type="button"
+                        className="k8s-cluster-copy-id"
+                        aria-label={`复制集群 ID ${item.id}`}
+                        onClick={() => void copyClusterId(item.id)}
+                      >
+                        复制 ID
                       </button>
                     </div>
-                  ) : (
-                    <span className="text-muted">只读</span>
-                  )}
-                </td>
-              </tr>
+                  </td>
+                  <td className="max-w-xs">
+                    <span className="font-mono text-xs break-all">{formatClusterServer(item.server)}</span>
+                  </td>
+                  <td>
+                    <K8sStatusBadge tone={statusTone(status)} dot={status.kind === "checking"} title={status.detail}>
+                      {status.label}
+                    </K8sStatusBadge>
+                  </td>
+                  <td>
+                    {integrations.length > 0 ? (
+                      <div className="k8s-role-badges">
+                        {integrations.map((key) => (
+                          <span key={key} className="badge badge-neutral">
+                            {clusterIntegrationLabel(key)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-muted text-xs">未配置</span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap">
+                    {canManage ? (
+                      <>
+                        <button type="button" className="k8s-action-link" onClick={() => openChange(item)}>
+                          变更
+                        </button>
+                        <span className="text-muted"> / </span>
+                        <button type="button" className="k8s-action-link" onClick={() => setMoreCluster(item)}>
+                          更多
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-muted text-xs">只读</span>
+                    )}
+                  </td>
+                </tr>
               );
             })}
             {loading && rows.length === 0 ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={canManage ? 6 : 5}>
                   <K8sLoadingState label="加载集群中…" compact />
                 </td>
               </tr>
             ) : null}
             {!loading && rows.length === 0 ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={canManage ? 6 : 5}>
                   <K8sEmptyState
                     variant="empty"
                     title="暂无集群"
-                    description="点击「新增」接入第一个 Kubernetes 集群。"
+                    description="接入第一个 Kubernetes 集群，即可在此管理工作区内的集群授权与集成配置。"
                     compact
+                    action={
+                      canManage ? (
+                        <button type="button" className="btn" onClick={openCreate}>
+                          接入集群
+                        </button>
+                      ) : undefined
+                    }
                   />
                 </td>
               </tr>
@@ -411,6 +498,7 @@ export function ClustersPanel({
           </tbody>
         </table>
       </div>
+
       <K8sPagination
         page={currentPage}
         pageSize={pageSize}
@@ -426,7 +514,7 @@ export function ClustersPanel({
 
       <Modal
         open={creating}
-        title="创建"
+        title="接入集群"
         size="xl"
         onClose={() => setCreating(false)}
         footer={
@@ -465,6 +553,53 @@ export function ClustersPanel({
         <ClusterCreateForm value={changeForm} onChange={setChangeForm} nameReadOnly credentialOptional />
       </Modal>
 
+      <Modal
+        open={Boolean(moreCluster)}
+        title={moreCluster ? `更多操作 · ${moreCluster.name || moreCluster.id}` : "更多操作"}
+        description={moreCluster ? formatClusterServer(moreCluster.server) : undefined}
+        size="md"
+        onClose={() => setMoreCluster(null)}
+      >
+        {moreCluster ? (
+          <div className="k8s-action-sheet">
+            <button
+              type="button"
+              className="k8s-action-sheet-item"
+              onClick={() => {
+                setAuthorizing(moreCluster);
+                setMoreCluster(null);
+              }}
+            >
+              <span className="k8s-action-sheet-label">授权</span>
+              <span className="k8s-action-sheet-hint">为成员签发 kubeconfig 或管理集群访问角色</span>
+            </button>
+            <button
+              type="button"
+              className="k8s-action-sheet-item"
+              onClick={() => {
+                setAssociating(moreCluster);
+                setMoreCluster(null);
+              }}
+            >
+              <span className="k8s-action-sheet-label">关联</span>
+              <span className="k8s-action-sheet-hint">将集群关联到 Velaux 多集群管理</span>
+            </button>
+            <button type="button" className="k8s-action-sheet-item" onClick={() => openChange(moreCluster)}>
+              <span className="k8s-action-sheet-label">变更配置</span>
+              <span className="k8s-action-sheet-hint">更新凭证、Prometheus、Velaux 与 LLM 设置</span>
+            </button>
+            <button
+              type="button"
+              className="k8s-action-sheet-item is-danger"
+              onClick={() => void revokeCluster(moreCluster)}
+            >
+              <span className="k8s-action-sheet-label">撤销授权</span>
+              <span className="k8s-action-sheet-hint">从当前工作区移除该集群，不删除平台登记</span>
+            </button>
+          </div>
+        ) : null}
+      </Modal>
+
       <Modal open={Boolean(authorizing)} title={authorizing ? `授权 ${authorizing.name || authorizing.id}` : "授权"} size="xl" onClose={() => setAuthorizing(null)}>
         {authorizing ? <ClusterAuthorizeDialog cluster={authorizing} canManage={canManage} /> : null}
       </Modal>
@@ -473,6 +608,6 @@ export function ClustersPanel({
         {associating ? <ClusterAssociateDialog cluster={associating} /> : null}
       </Modal>
       {confirmDialog}
-    </div>
+    </K8sPanelCard>
   );
 }

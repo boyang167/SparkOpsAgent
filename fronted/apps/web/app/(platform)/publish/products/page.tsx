@@ -1,14 +1,15 @@
-import { PageHeader } from "@/components/ui/PageHeader";
 import { ProductsPanel } from "@/modules/product/components/ProductsPanel";
 import { loadPlatformPageContext } from "@/server/loaders/platform-page";
 
-export default async function ProductsPage() {
+export default async function PublishProductsPage() {
   const { workspaceId } = await loadPlatformPageContext();
 
   return (
-    <div className="stack-lg">
-      <PageHeader eyebrow="Publish" title="产品清单" description="发布中心产品列表（对应旧 /PublishCenter/ProductList）" />
-      <ProductsPanel workspaceId={workspaceId} />
-    </div>
+    <ProductsPanel
+      workspaceId={workspaceId}
+      title="产品清单"
+      description="发布中心产品列表，管理产品下的项目、环境与发布计划。"
+      linkToDetail
+    />
   );
 }

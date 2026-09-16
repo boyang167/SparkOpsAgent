@@ -18,6 +18,8 @@ type DeploymentView struct {
 	WorkspaceID     string  `json:"workspace_id"`
 	ProjectID       string  `json:"project_id"`
 	ClusterID       string  `json:"cluster_id"`
+	EnvironmentID   *string `json:"environment_id,omitempty"`
+	DeployNamespace string  `json:"deploy_namespace,omitempty"`
 	BuildID         *string `json:"build_id,omitempty"`
 	GitRefType      string  `json:"git_ref_type"`
 	GitRefValue     string  `json:"git_ref_value"`
@@ -289,8 +291,12 @@ func ToDeploymentView(run *model.DeploymentRun) DeploymentView {
 		ID: run.ID.String(), WorkspaceID: run.WorkspaceID.String(), ProjectID: run.ProjectID.String(),
 		ClusterID: run.ClusterID.String(), GitRefType: run.GitRefType, GitRefValue: run.GitRefValue,
 		ImageTag: run.ImageTag, CrossCluster: run.CrossCluster, Status: string(run.Status), RunType: runType,
-		CurrentStage: string(run.CurrentStage),
+		CurrentStage: string(run.CurrentStage), DeployNamespace: run.DeployNamespace,
 		ErrorMessage: run.ErrorMessage, CreatedBy: run.CreatedBy.String(), CreatedAt: run.CreatedAt.Format(time.RFC3339),
+	}
+	if run.EnvironmentID != nil {
+		value := run.EnvironmentID.String()
+		view.EnvironmentID = &value
 	}
 	if run.RollbackOfRunID != nil {
 		value := run.RollbackOfRunID.String()

@@ -98,6 +98,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 
 	seedMenus := command.NewSeedWorkspaceMenusHandler(menuStore)
+	if err := seedMenus.RepairMisdeletedPluginMenusAllWorkspaces(context.Background()); err != nil {
+		return fmt.Errorf("repair misdeleted plugin menus: %w", err)
+	}
 	if err := seedMenus.RepairRemovedMenusAllWorkspaces(context.Background()); err != nil {
 		return fmt.Errorf("repair removed menus: %w", err)
 	}

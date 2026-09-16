@@ -2,6 +2,8 @@ package command
 
 import (
 	"context"
+	"strings"
+	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
@@ -92,11 +94,12 @@ func (h *CreateProductPlanHandler) Handle(ctx context.Context, productID kernel.
 }
 
 type CreateProductRequirementHandler struct {
-	repo repository.ProductRepository
+	repo  repository.ProductRepository
+	plans repository.ReleasePlanRepository
 }
 
-func NewCreateProductRequirementHandler(repo repository.ProductRepository) *CreateProductRequirementHandler {
-	return &CreateProductRequirementHandler{repo: repo}
+func NewCreateProductRequirementHandler(repo repository.ProductRepository, plans repository.ReleasePlanRepository) *CreateProductRequirementHandler {
+	return &CreateProductRequirementHandler{repo: repo, plans: plans}
 }
 
 func (h *CreateProductRequirementHandler) Handle(ctx context.Context, productID kernel.ProductID, planID kernel.ProductPlanID, projectID kernel.ProjectID, projectName, projectTag, description, operator string, otherInfo map[string]any) (*model.ProductRequirement, error) {
@@ -106,6 +109,30 @@ func (h *CreateProductRequirementHandler) Handle(ctx context.Context, productID 
 	req := model.NewProductRequirement(productID, planID, projectID, projectName, projectTag, description, operator, otherInfo)
 	if err := h.repo.SaveRequirement(ctx, req); err != nil {
 		return nil, err
+	}
+	if h.plans != nil {
+		now := time.Now().UTC()
+		name := strings.TrimSpace(projectName)
+		if name == "" {
+			name = "Requirement " + req.ID.String()[:8]
+		}
+		actor := kernel.NewMemberID()
+		releasePlan := model.NewReleasePlan(productID, name, description, actor, actor, now, now.Add(7*24*time.Hour), model.ApprovalConfig{Enabled: false})
+		releasePlan.ProductPlanID = &planID
+		if err := h.plans.SavePlan(ctx, releasePlan); err == nil {
+			text := description
+			if projectTag != "" {
+				text = "Branch/tag: " + projectTag + "\n" + text
+			}
+			job := &model.ReleasePlanJob{
+				ID: kernel.NewReleasePlanJobID(), ReleasePlanID: releasePlan.ID, SortOrder: 0,
+				Name: "Requirement checklist", Type: model.ReleasePlanJobTypeText, OwnerID: actor,
+				Status: model.ReleasePlanJobStatusTodo, TextContent: text, CreatedAt: now, UpdatedAt: now,
+			}
+			_ = h.plans.SaveJob(ctx, job)
+			req.OtherInfo["release_plan_id"] = releasePlan.ID.String()
+			_ = h.repo.UpdateRequirement(ctx, req)
+		}
 	}
 	return req, nil
 }

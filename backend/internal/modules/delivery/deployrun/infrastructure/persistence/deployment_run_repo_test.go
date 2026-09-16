@@ -30,7 +30,8 @@ func newRunRepo(t *testing.T) (*DeploymentRunRepository, *gorm.DB) {
 		error_message TEXT, created_by TEXT, created_at DATETIME, started_at DATETIME,
 		finished_at DATETIME, current_stage TEXT, run_type TEXT NOT NULL DEFAULT 'normal',
 		rollback_of_run_id TEXT, version INTEGER NOT NULL DEFAULT 0,
-		attempt_count INTEGER NOT NULL DEFAULT 0, lease_owner TEXT, lease_expires_at DATETIME)`).Error)
+		attempt_count INTEGER NOT NULL DEFAULT 0, lease_owner TEXT, lease_expires_at DATETIME,
+		environment_id TEXT, deploy_namespace TEXT NOT NULL DEFAULT '')`).Error)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX delivery.uq_deployment_runs_active_project
 		ON deployment_runs(project_id) WHERE status IN ('queued','preparing','building','deploying')`).Error)
 	require.NoError(t, db.Exec(`CREATE TABLE delivery.deployment_run_events (

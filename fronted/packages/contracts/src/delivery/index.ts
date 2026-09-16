@@ -114,6 +114,7 @@ export type SyncPreviewVM = z.infer<typeof SyncPreviewVMSchema>;
 export const CreateDeploymentCommandSchema = z
   .object({
     cluster_id: z.string().optional(),
+    environment_id: z.string().optional(),
     git_ref_type: z.enum(["branch", "tag"]).optional(),
     git_ref_value: z.string().optional(),
     image_tag: z.string().max(255).optional(),

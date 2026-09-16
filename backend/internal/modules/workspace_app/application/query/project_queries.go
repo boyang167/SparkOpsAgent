@@ -33,6 +33,7 @@ type ProjectResourcesView struct {
 
 type ProjectView struct {
 	ID                 string               `json:"id"`
+	ProductID          string               `json:"product_id,omitempty"`
 	Name               string               `json:"name"`
 	DisplayName        string               `json:"display_name,omitempty"`
 	Description        string               `json:"description"`
@@ -248,6 +249,7 @@ func ToViews(projects []*model.Project) []ProjectView {
 func ToView(p *model.Project) ProjectView {
 	view := ProjectView{
 		ID:                 p.ID.String(),
+		ProductID:          productIDString(p.ProductID),
 		Name:               p.Name.String(),
 		DisplayName:        p.DisplayName,
 		Description:        p.Description,
@@ -298,4 +300,11 @@ func ToView(p *model.Project) ProjectView {
 		view.ReviewedAt = p.ReviewedAt.Format(time.RFC3339)
 	}
 	return view
+}
+
+func productIDString(id *kernel.ProductID) string {
+	if id == nil {
+		return ""
+	}
+	return id.String()
 }

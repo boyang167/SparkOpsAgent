@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { workspace } from "@sparkops/web-sdk";
+import { product, workspace } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
+import type { ProductVM } from "@sparkops/contracts/product";
 import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { ProjectCard } from "./project/ProjectCard";
@@ -67,6 +68,8 @@ export function ProjectPanel({
   const [statusFilter, setStatusFilter] = useState("");
   const [languageFilter, setLanguageFilter] = useState("");
   const [namespaceFilter, setNamespaceFilter] = useState("");
+  const [productFilter, setProductFilter] = useState("");
+  const [products, setProducts] = useState<ProductVM[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(9);
   const {
@@ -79,7 +82,12 @@ export function ProjectPanel({
     setLoading(true);
     setError(null);
     try {
-      setItems(await workspace.listProjects(workspaceId));
+      const [projectItems, productItems] = await Promise.all([
+        workspace.listProjects(workspaceId),
+        product.listProducts(workspaceId),
+      ]);
+      setItems(projectItems);
+      setProducts(productItems);
     } catch (err) {
       setError(err instanceof BffError ? err.message : "加载项目失败");
     } finally {
@@ -97,19 +105,21 @@ export function ProjectPanel({
       if (statusFilter && item.status !== statusFilter) return false;
       if (languageFilter && item.language !== languageFilter) return false;
       if (namespaceFilter && !(item.namespace ?? "").includes(namespaceFilter.trim())) return false;
+      if (productFilter === "__none__" && item.product_id) return false;
+      if (productFilter && productFilter !== "__none__" && item.product_id !== productFilter) return false;
       if (!kw) return true;
       return [item.name, item.display_name, item.description, item.namespace]
         .some((v) => v?.toLowerCase().includes(kw));
     });
-  }, [items, keyword, statusFilter, languageFilter, namespaceFilter]);
+  }, [items, keyword, statusFilter, languageFilter, namespaceFilter, productFilter]);
 
   const hasActiveFilters = Boolean(
-    keyword.trim() || statusFilter || languageFilter || namespaceFilter.trim(),
+    keyword.trim() || statusFilter || languageFilter || namespaceFilter.trim() || productFilter,
   );
 
   useEffect(() => {
     setPage(1);
-  }, [keyword, statusFilter, languageFilter, namespaceFilter, pageSize, viewMode]);
+  }, [keyword, statusFilter, languageFilter, namespaceFilter, productFilter, pageSize, viewMode]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paged = useMemo(() => {
@@ -123,6 +133,7 @@ export function ProjectPanel({
     setStatusFilter("");
     setLanguageFilter("");
     setNamespaceFilter("");
+    setProductFilter("");
   }
 
   async function onArchive(item: ProjectVM) {
@@ -226,6 +237,22 @@ export function ProjectPanel({
               onChange={(e) => setNamespaceFilter(e.target.value)}
               aria-label="命名空间筛选"
             />
+            {products.length > 0 ? (
+              <select
+                className="projects-filter-select"
+                value={productFilter}
+                onChange={(e) => setProductFilter(e.target.value)}
+                aria-label="产品筛选"
+              >
+                <option value="">全部产品</option>
+                <option value="__none__">独立项目</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.display_name?.trim() || p.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             {hasActiveFilters ? (
               <button type="button" className="btn-secondary projects-reset-btn" onClick={resetFilters}>
                 重置

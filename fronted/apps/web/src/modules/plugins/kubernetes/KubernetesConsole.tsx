@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ClusterPicker } from "./ClusterPicker";
 import { ResourceMenuPage } from "./ResourceMenuPage";
 import { ChatPage } from "./specialized/ChatPage";
@@ -51,13 +52,8 @@ export function KubernetesConsole({ mode, title, description, menu, canManage }:
   if (mode === "clusters") {
     return (
       <div className="page stack-lg">
-        <section className="card stack-md p-4">
-          <div>
-            <h1 className="text-xl font-semibold">{title}</h1>
-            {description ? <p className="text-sm text-muted mt-1">{description}</p> : null}
-          </div>
-          <ClusterPicker value={clusterId} onChange={setClusterId} canManage={canManage} layout="table" />
-        </section>
+        <PageHeader eyebrow="Kubernetes" title={title} description={description} />
+        <ClusterPicker value={clusterId} onChange={setClusterId} canManage={canManage} layout="table" />
       </div>
     );
   }

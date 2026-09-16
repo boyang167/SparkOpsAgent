@@ -32,6 +32,12 @@ func (r *reviewProjectRepo) ListByWorkspace(context.Context, kernel.WorkspaceID)
 func (r *reviewProjectRepo) CountByWorkspace(context.Context, kernel.WorkspaceID) (int, error) {
 	return 1, nil
 }
+func (r *reviewProjectRepo) ListByProduct(context.Context, kernel.ProductID) ([]*model.Project, error) {
+	return nil, nil
+}
+func (r *reviewProjectRepo) CountByProduct(context.Context, kernel.ProductID) (int, error) {
+	return 0, nil
+}
 
 type reviewAccessChecker struct {
 	allowed map[string]bool

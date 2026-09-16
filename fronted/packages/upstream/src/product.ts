@@ -1,4 +1,14 @@
-import type { ProductPlanVM, ProductVM } from "@sparkops/contracts/product";
+import type {
+  ProductOverviewVM,
+  ProductPlanVM,
+  ProductProjectVM,
+  ProductVM,
+  ProductWorkflowRunVM,
+  ProductWorkflowVM,
+  ReleasePlanVM,
+  WorkflowTemplatePreviewVM,
+  WorkflowTemplateVM,
+} from "@sparkops/contracts/product";
 import type { UpstreamRequestOptions } from "./core";
 import { upstreamFetch } from "./core";
 
@@ -7,6 +17,34 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
     async listProducts(workspaceId: string) {
       return upstreamFetch<{ items: ProductVM[] }>(
         `/api/v1/workspaces/${workspaceId}/products`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async createProduct(workspaceId: string, input: import("@sparkops/contracts/product").CreateProductCommand) {
+      return upstreamFetch<ProductVM>(
+        `/api/v1/workspaces/${workspaceId}/products`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async getProduct(workspaceId: string, productId: string) {
+      return upstreamFetch<ProductVM>(
+        `/api/v1/products/${productId}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async getProductOverview(workspaceId: string, productId: string) {
+      return upstreamFetch<ProductOverviewVM>(
+        `/api/v1/products/${productId}/overview`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async listProductProjects(workspaceId: string, productId: string) {
+      return upstreamFetch<{ items: ProductProjectVM[] }>(
+        `/api/v1/products/${productId}/projects`,
         { method: "GET", options: { ...options, workspaceId } },
       );
     },
@@ -85,6 +123,247 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       return upstreamFetch<{ deleted: boolean }>(
         `/api/v1/workspaces/${workspaceId}/templates/${templateId}`,
         { method: "DELETE", options: { ...options, workspaceId } },
+      );
+    },
+
+    async listWorkflowTemplates(workspaceId: string) {
+      return upstreamFetch<{ items: WorkflowTemplateVM[] }>(
+        `/api/v1/workspaces/${workspaceId}/workflow-templates`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async getWorkflowTemplate(workspaceId: string, templateId: string) {
+      return upstreamFetch<WorkflowTemplateVM>(
+        `/api/v1/workspaces/${workspaceId}/workflow-templates/${templateId}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async previewWorkflowTemplate(workspaceId: string, templateId: string, keyVals: Record<string, string>) {
+      return upstreamFetch<WorkflowTemplatePreviewVM>(
+        `/api/v1/workspaces/${workspaceId}/workflow-templates/${templateId}/preview`,
+        { method: "POST", body: JSON.stringify({ key_vals: keyVals }), options: { ...options, workspaceId } },
+      );
+    },
+
+    async createWorkflowTemplate(
+      workspaceId: string,
+      input: import("@sparkops/contracts/product").CreateWorkflowTemplateCommand,
+    ) {
+      return upstreamFetch<{ id: string; status: string; version: string }>(
+        `/api/v1/workspaces/${workspaceId}/workflow-templates`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async updateWorkflowTemplate(
+      workspaceId: string,
+      templateId: string,
+      input: import("@sparkops/contracts/product").UpdateWorkflowTemplateCommand,
+    ) {
+      return upstreamFetch<{ id: string; status: string; version: string }>(
+        `/api/v1/workspaces/${workspaceId}/workflow-templates/${templateId}`,
+        { method: "PUT", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async publishWorkflowTemplate(workspaceId: string, templateId: string) {
+      return upstreamFetch<{ id: string; status: string; version: string }>(
+        `/api/v1/workspaces/${workspaceId}/workflow-templates/${templateId}/publish`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async listWorkspaceWorkflows(workspaceId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/product").WorkspaceProductWorkflowVM[] }>(
+        `/api/v1/workspaces/${workspaceId}/workflows`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async listReleasePlans(workspaceId: string, productId: string) {
+      return upstreamFetch<{ items: ReleasePlanVM[] }>(
+        `/api/v1/products/${productId}/release-plans`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async getReleasePlan(workspaceId: string, productId: string, planId: string) {
+      return upstreamFetch<ReleasePlanVM>(
+        `/api/v1/products/${productId}/release-plans/${planId}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async createReleasePlan(workspaceId: string, productId: string, input: Record<string, unknown>) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async addReleasePlanJob(workspaceId: string, productId: string, planId: string, input: Record<string, unknown>) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/jobs`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async finishReleasePlanPlanning(workspaceId: string, productId: string, planId: string) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/finish-planning`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async approveReleasePlan(workspaceId: string, productId: string, planId: string) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/approve`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async markReleasePlanJobDone(workspaceId: string, productId: string, planId: string, jobId: string) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/jobs/${jobId}/done`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async skipReleasePlanJob(workspaceId: string, productId: string, planId: string, jobId: string) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/jobs/${jobId}/skip`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async executeReleasePlan(workspaceId: string, productId: string, planId: string) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/execute`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async retryReleasePlanJob(workspaceId: string, productId: string, planId: string, jobId: string) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/jobs/${jobId}/retry`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async listProductWorkflows(workspaceId: string, productId: string) {
+      return upstreamFetch<{ items: ProductWorkflowVM[] }>(
+        `/api/v1/products/${productId}/workflows`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async createProductWorkflowFromTemplate(
+      workspaceId: string,
+      productId: string,
+      input: import("@sparkops/contracts/product").CreateProductWorkflowCommand,
+    ) {
+      return upstreamFetch<{ id: string; name: string; key: string; status: string }>(
+        `/api/v1/products/${productId}/workflows/from-template`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async startProductWorkflowRun(workspaceId: string, productId: string, workflowId: string) {
+      return upstreamFetch<ProductWorkflowRunVM>(
+        `/api/v1/products/${productId}/workflows/${workflowId}/runs`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async listProductWorkflowRuns(workspaceId: string, productId: string, workflowId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/product").ProductWorkflowRunSummaryVM[] }>(
+        `/api/v1/products/${productId}/workflows/${workflowId}/runs`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async getProductWorkflowRun(
+      workspaceId: string,
+      productId: string,
+      workflowId: string,
+      runId: string,
+    ) {
+      return upstreamFetch<ProductWorkflowRunVM>(
+        `/api/v1/products/${productId}/workflows/${workflowId}/runs/${runId}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async approveWorkflowJob(
+      workspaceId: string,
+      productId: string,
+      workflowId: string,
+      runId: string,
+      jobName: string,
+    ) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/products/${productId}/workflows/${workflowId}/runs/${runId}/jobs/${encodeURIComponent(jobName)}/approve`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async rejectWorkflowJob(
+      workspaceId: string,
+      productId: string,
+      workflowId: string,
+      runId: string,
+      jobName: string,
+      input?: import("@sparkops/contracts/product").RejectWorkflowJobCommand,
+    ) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/products/${productId}/workflows/${workflowId}/runs/${runId}/jobs/${encodeURIComponent(jobName)}/reject`,
+        { method: "POST", body: JSON.stringify(input ?? {}), options: { ...options, workspaceId } },
+      );
+    },
+
+    async listEnvironments(workspaceId: string, productId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/product").EnvironmentVM[] }>(
+        `/api/v1/products/${productId}/environments`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async createEnvironment(
+      workspaceId: string,
+      productId: string,
+      input: import("@sparkops/contracts/product").CreateEnvironmentCommand,
+    ) {
+      return upstreamFetch<{ id: string; name: string; status: string }>(
+        `/api/v1/products/${productId}/environments`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async updateEnvironment(
+      workspaceId: string,
+      productId: string,
+      envId: string,
+      input: import("@sparkops/contracts/product").UpdateEnvironmentCommand,
+    ) {
+      return upstreamFetch<{ id: string; name: string; status: string }>(
+        `/api/v1/products/${productId}/environments/${envId}`,
+        { method: "PATCH", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async deleteEnvironment(workspaceId: string, productId: string, envId: string) {
+      return upstreamFetch<{ deleted: boolean }>(
+        `/api/v1/products/${productId}/environments/${envId}`,
+        { method: "DELETE", options: { ...options, workspaceId } },
+      );
+    },
+
+    async getEnvironmentStatus(workspaceId: string, productId: string, envId: string) {
+      return upstreamFetch<import("@sparkops/contracts/product").EnvironmentStatusVM>(
+        `/api/v1/products/${productId}/environments/${envId}/status`,
+        { method: "GET", options: { ...options, workspaceId } },
       );
     },
   };

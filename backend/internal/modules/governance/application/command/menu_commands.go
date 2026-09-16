@@ -183,7 +183,11 @@ var removedMenuTitles = []string{
 	"构建管理",
 	"版本计划",
 	"发布管理",
-	"集群管理",
+}
+
+// misdeletedPluginMenuPaths lists plugin menus that were incorrectly soft-deleted by legacy title cleanup.
+var misdeletedPluginMenuPaths = []string{
+	"/plugins/kubernetes/clusters",
 }
 
 func normalizeMenuPathLocal(path string) string {
@@ -210,10 +214,29 @@ func menuShouldBeRemoved(menu *model.Menu) bool {
 	title := strings.TrimSpace(menu.Title)
 	for _, removedTitle := range removedMenuTitles {
 		if title == removedTitle {
+			// Plugin menus may reuse legacy titles (e.g. 集群管理 at /plugins/kubernetes/clusters).
+			if strings.HasPrefix(normalized, "/plugins/") {
+				continue
+			}
 			return true
 		}
 	}
 	return false
+}
+
+func (h *SeedWorkspaceMenusHandler) RepairMisdeletedPluginMenusAllWorkspaces(ctx context.Context) error {
+	workspaceIDs, err := h.menus.ListDistinctWorkspaceIDs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, workspaceID := range workspaceIDs {
+		for _, path := range misdeletedPluginMenuPaths {
+			if _, err := h.menus.RestoreSoftDeletedByPath(ctx, workspaceID, path); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (h *SeedWorkspaceMenusHandler) RepairRemovedMenusAllWorkspaces(ctx context.Context) error {

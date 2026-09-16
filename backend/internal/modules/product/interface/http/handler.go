@@ -24,6 +24,10 @@ type Handler struct {
 	getProduct          *query.GetProductHandler
 	listPlans           *query.ListProductPlansHandler
 	listRequirements    *query.ListProductRequirementsHandler
+	listProductProjects *query.ListProductProjectsHandler
+	getProductOverview  *query.GetProductOverviewHandler
+	releasePlans        ReleasePlanHandlers
+	environments        EnvironmentHandlers
 }
 
 func NewHandler(
@@ -38,6 +42,10 @@ func NewHandler(
 	getProduct *query.GetProductHandler,
 	listPlans *query.ListProductPlansHandler,
 	listRequirements *query.ListProductRequirementsHandler,
+	listProductProjects *query.ListProductProjectsHandler,
+	getProductOverview *query.GetProductOverviewHandler,
+	releasePlans ReleasePlanHandlers,
+	environments EnvironmentHandlers,
 ) *Handler {
 	return &Handler{
 		createProduct: createProduct, updateProduct: updateProduct,
@@ -46,6 +54,8 @@ func NewHandler(
 		releaseRequirement: releaseRequirement,
 		listProducts: listProducts, getProduct: getProduct,
 		listPlans: listPlans, listRequirements: listRequirements,
+		listProductProjects: listProductProjects, getProductOverview: getProductOverview,
+		releasePlans: releasePlans, environments: environments,
 	}
 }
 
@@ -147,6 +157,42 @@ func (h *Handler) GetProduct(c *gin.Context) {
 	httpx.OK(c, item)
 }
 
+func (h *Handler) GetProductOverview(c *gin.Context) {
+	wsID, _, ok := memberAndWorkspace(c)
+	if !ok {
+		return
+	}
+	productID, err := kernel.ParseProductID(c.Param("productId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
+		return
+	}
+	item, err := h.getProductOverview.Handle(c.Request.Context(), wsID, productID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, item)
+}
+
+func (h *Handler) ListProductProjects(c *gin.Context) {
+	wsID, _, ok := memberAndWorkspace(c)
+	if !ok {
+		return
+	}
+	productID, err := kernel.ParseProductID(c.Param("productId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
+		return
+	}
+	items, err := h.listProductProjects.Handle(c.Request.Context(), wsID, productID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"items": items})
+}
+
 func (h *Handler) UpdateProduct(c *gin.Context) {
 	wsID, memberID, ok := memberAndWorkspace(c)
 	if !ok {
@@ -210,6 +256,7 @@ func (h *Handler) CreatePlan(c *gin.Context) {
 }
 
 func (h *Handler) ListRequirements(c *gin.Context) {
+	markRequirementDeprecated(c)
 	productID, err := kernel.ParseProductID(c.Param("productId"))
 	if err != nil {
 		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
@@ -224,6 +271,7 @@ func (h *Handler) ListRequirements(c *gin.Context) {
 }
 
 func (h *Handler) CreateRequirement(c *gin.Context) {
+	markRequirementDeprecated(c)
 	productID, err := kernel.ParseProductID(c.Param("productId"))
 	if err != nil {
 		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
@@ -248,6 +296,7 @@ func (h *Handler) CreateRequirement(c *gin.Context) {
 }
 
 func (h *Handler) ApproveRequirement(c *gin.Context) {
+	markRequirementDeprecated(c)
 	productID, reqID, ok := parseProductRequirementIDs(c)
 	if !ok {
 		return
@@ -278,6 +327,7 @@ func (h *Handler) RejectRequirement(c *gin.Context) {
 }
 
 func (h *Handler) ReleaseRequirement(c *gin.Context) {
+	markRequirementDeprecated(c)
 	productID, reqID, ok := parseProductRequirementIDs(c)
 	if !ok {
 		return

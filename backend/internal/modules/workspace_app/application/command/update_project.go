@@ -14,10 +14,18 @@ type UpdateProjectHandler struct {
 	repo           repository.ProjectRepository
 	wsChecker      port.WorkspaceChecker
 	clusterChecker port.WorkspaceClusterChecker
+	productChecker port.ProductChecker
 }
 
-func NewUpdateProjectHandler(repo repository.ProjectRepository, wsChecker port.WorkspaceChecker, clusterChecker port.WorkspaceClusterChecker) *UpdateProjectHandler {
-	return &UpdateProjectHandler{repo: repo, wsChecker: wsChecker, clusterChecker: clusterChecker}
+func NewUpdateProjectHandler(
+	repo repository.ProjectRepository,
+	wsChecker port.WorkspaceChecker,
+	clusterChecker port.WorkspaceClusterChecker,
+	productChecker port.ProductChecker,
+) *UpdateProjectHandler {
+	return &UpdateProjectHandler{
+		repo: repo, wsChecker: wsChecker, clusterChecker: clusterChecker, productChecker: productChecker,
+	}
 }
 
 func (h *UpdateProjectHandler) Handle(
@@ -41,6 +49,11 @@ func (h *UpdateProjectHandler) Handle(
 	}
 	if project.WorkspaceID != wsID {
 		return nil, domain.ErrProjectNotFound
+	}
+	if input.ProductID.Set {
+		if err := validateProductMembership(ctx, h.productChecker, wsID, input.ProductID.Value); err != nil {
+			return nil, err
+		}
 	}
 	if input.DefaultClusterID != nil && *input.DefaultClusterID != "" {
 		clusterID, err := kernel.ParseClusterInfoID(*input.DefaultClusterID)

@@ -22,7 +22,13 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return db.AutoMigrate(&productModel{}, &productPlanModel{}, &productRequirementModel{})
+	if err := db.AutoMigrate(&productModel{}, &productPlanModel{}, &productRequirementModel{}); err != nil {
+		return err
+	}
+	if err := releasePlanAutoMigrate(db); err != nil {
+		return err
+	}
+	return environmentAutoMigrate(db)
 }
 
 type productModel struct {

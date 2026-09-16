@@ -79,7 +79,7 @@ export async function buildDynamicCommandItems(options: {
   }));
 
   const productItems: CommandSearchItem[] = products.slice(0, MAX_PRODUCTS).map((item) => ({
-    href: "/publish/products",
+    href: "/products",
     label: item.name,
     group: "持续交付",
     kind: "product" as const,

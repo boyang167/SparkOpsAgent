@@ -1,7 +1,9 @@
 package http
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -115,6 +117,7 @@ type projectResourcesRequest struct {
 }
 
 type projectPayload struct {
+	ProductID          *string                 `json:"product_id"`
 	Name               string                  `json:"name" binding:"required"`
 	DisplayName        string                  `json:"display_name"`
 	Description        string                  `json:"description"`
@@ -133,6 +136,7 @@ type projectPayload struct {
 }
 
 type projectUpdatePayload struct {
+	ProductID          json.RawMessage          `json:"product_id"`
 	Name               *string                  `json:"name"`
 	DisplayName        *string                  `json:"display_name"`
 	Description        *string                  `json:"description"`
@@ -150,8 +154,52 @@ type projectUpdatePayload struct {
 	Resources          *projectResourcesRequest `json:"resources"`
 }
 
-func toProjectInput(req projectPayload) model.CreateProjectInput {
+func parseOptionalProductID(raw *string) (*kernel.ProductID, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	value := strings.TrimSpace(*raw)
+	if value == "" {
+		return nil, nil
+	}
+	id, err := kernel.ParseProductID(value)
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
+}
+
+func parseProductIDPatch(raw json.RawMessage) (model.ProductIDPatch, error) {
+	if raw == nil {
+		return model.ProductIDPatch{}, nil
+	}
+	patch := model.ProductIDPatch{Set: true}
+	if string(raw) == "null" {
+		return patch, nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return model.ProductIDPatch{}, err
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return patch, nil
+	}
+	id, err := kernel.ParseProductID(value)
+	if err != nil {
+		return model.ProductIDPatch{}, err
+	}
+	patch.Value = &id
+	return patch, nil
+}
+
+func toProjectInput(req projectPayload) (model.CreateProjectInput, error) {
+	productID, err := parseOptionalProductID(req.ProductID)
+	if err != nil {
+		return model.CreateProjectInput{}, err
+	}
 	return model.CreateProjectInput{
+		ProductID:          productID,
 		Name:               req.Name,
 		DisplayName:        req.DisplayName,
 		Description:        req.Description,
@@ -184,11 +232,16 @@ func toProjectInput(req projectPayload) model.CreateProjectInput {
 			SonarqubeSecretID:     req.Resources.SonarqubeSecretID,
 			EnableStaticScan:      req.Resources.EnableStaticScan,
 		},
-	}
+	}, nil
 }
 
-func toProjectUpdateInput(req projectUpdatePayload) model.UpdateProjectInput {
+func toProjectUpdateInput(req projectUpdatePayload) (model.UpdateProjectInput, error) {
+	productPatch, err := parseProductIDPatch(req.ProductID)
+	if err != nil {
+		return model.UpdateProjectInput{}, err
+	}
 	input := model.UpdateProjectInput{
+		ProductID: productPatch,
 		Name: req.Name, DisplayName: req.DisplayName, Description: req.Description,
 		Namespace: req.Namespace, Language: req.Language, GitURL: req.GitURL,
 		SecretID: req.SecretID, GitRefType: req.GitRefType, GitRefValue: req.GitRefValue,
@@ -211,13 +264,14 @@ func toProjectUpdateInput(req projectUpdatePayload) model.UpdateProjectInput {
 			EnableStaticScan:  req.Resources.EnableStaticScan,
 		}
 	}
-	return input
+	return input, nil
 }
 
 func projectResponse(project *model.Project) gin.H {
 	view := query.ToView(project)
 	return gin.H{
 		"id":                   view.ID,
+		"product_id":           view.ProductID,
 		"name":                 view.Name,
 		"display_name":         view.DisplayName,
 		"description":          view.Description,
@@ -262,7 +316,12 @@ func (h *Handler) CreateProject(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
-	project, err := h.create.Handle(c.Request.Context(), wsID, memberID, toProjectInput(req))
+	input, err := toProjectInput(req)
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
+		return
+	}
+	project, err := h.create.Handle(c.Request.Context(), wsID, memberID, input)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
@@ -389,7 +448,12 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
-	project, err := h.update.Handle(c.Request.Context(), wsID, memberID, projectID, toProjectUpdateInput(req))
+	input, err := toProjectUpdateInput(req)
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
+		return
+	}
+	project, err := h.update.Handle(c.Request.Context(), wsID, memberID, projectID, input)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return

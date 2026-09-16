@@ -190,6 +190,76 @@ go run ./cmd/mcp-server
 
 受保护接口需 `Authorization: Bearer <token>` 与 `X-Workspace-Id`。
 
+## Product v2（发布计划 + 产品工作流）
+
+Product v2 在 `product` schema 下引入 **ReleasePlan**（发布计划）、**Environment**（环境）与 **ProductWorkflow**（产品工作流），替代旧版 `ProductRequirement` 发布流程。
+
+设计文档：[product_desgin.md](../docs/product_desgin.md) · 实施计划：[product_implementation_plan.md](../docs/product_implementation_plan.md)
+
+### 数据库迁移（000045–000052）
+
+| 版本 | 说明 |
+|------|------|
+| `000045` | Product v2 基础表（`product.products`、项目 `product_id` 等） |
+| `000046` | 工作流模板 `product.workflow_templates` + 内置模板 seed |
+| `000047` | 发布计划 `product.release_plans` / jobs / audit |
+| `000048` | 产品工作流 `product.product_workflows` / runs |
+| `000050` | 环境 `product.environments` |
+| `000051` | 工作流 deploy 引用 `product.workflow_deploy_refs` |
+| `000052` | **幂等**将 `product_requirements` 历史数据迁移至 `release_plans` |
+
+```bash
+cd backend
+go run ./cmd/migrate    # 含 000052
+# 或启动 server（连库后各模块 AutoMigrate）
+go run ./cmd/server
+```
+
+> 000052 可重复执行：已迁移的 requirement 不会重复插入。回滚见 `000052_migrate_requirements_to_release_plans.down.sql`（仅删除 `migrated_from_requirement` 审计记录，不删 release_plan 本体）。
+
+### 核心 API
+
+| 域 | Method | Path |
+|----|--------|------|
+| 产品 | GET/POST | `/api/v1/workspaces/:wsId/products` |
+| 产品 | GET/PATCH | `/api/v1/products/:productId` |
+| 产品 | GET | `/api/v1/products/:productId/overview`、`/projects` |
+| 发布计划 | GET/POST | `/api/v1/products/:productId/release-plans` |
+| 发布计划 | GET | `/api/v1/products/:productId/release-plans/:planId` |
+| 发布计划 | POST | `.../finish-planning`、`.../approve`、`.../reject`、`.../execute` |
+| 发布计划 Job | POST | `.../jobs`、`.../jobs/:jobId/done`、`.../skip`、`.../retry` |
+| 环境 | GET/POST | `/api/v1/products/:productId/environments` |
+| 环境 | PATCH/DELETE/GET | `.../environments/:envId`、`.../status` |
+| 工作流模板 | GET/POST | `/api/v1/workspaces/:wsId/workflow-templates` |
+| 工作流模板 | GET/PUT/POST | `.../:templateId`、`.../publish`、`.../preview` |
+| 产品工作流 | GET/POST | `/api/v1/products/:productId/workflows`、`.../from-template` |
+| 产品工作流 Run | POST/GET | `.../workflows/:workflowId/runs`、`.../runs/:runId` |
+| 工作流审批 | POST | `.../runs/:runId/jobs/:jobName/approve|reject` |
+| 全局工作流 | GET | `/api/v1/workspaces/:wsId/workflows` |
+
+内置系统模板 key：`std-build-deploy-uat`、`std-release-prod`（启动时 `SyncBuiltinTemplates` 写入）。
+
+### Requirement API 废弃
+
+旧 `ProductRequirement` 接口仍可用（兼容层：创建 Requirement 会同步创建 ReleasePlan），但响应带 RFC 废弃头：
+
+| Header | 值 |
+|--------|-----|
+| `Deprecation` | `true` |
+| `Sunset` | `2026-12-31` |
+| `Link` | `</api/v1/products/{productId}/release-plans>; rel="successor-version"` |
+| `X-SparkOps-Deprecated-Reason` | 说明迁移至 ReleasePlan |
+
+新功能请直接使用 **ReleasePlan** API。
+
+### 验收路径（手动）
+
+1. `go run ./cmd/migrate` → 确认 `product.release_plans` 存在
+2. 前端 `/publish/workflows`：查看工作区全局工作流，从模板一键执行
+3. 产品详情 → **发布计划**：创建 text Job → 完成规划 → 执行 → 标记完成
+4. 产品详情 → **工作流**：从 `std-build-deploy-uat` 创建并 Run（需 UAT 环境）
+5. 集成测试：`go test ./internal/modules/product/application/... -run ProductV2`
+
 ## 测试与构建
 
 ```bash

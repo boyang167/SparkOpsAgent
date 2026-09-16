@@ -51,6 +51,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	secretRepo := persistence.NewSecretRepository(c.DB)
 	wsChecker := acl.NewTenantACL(c.DB)
 	clusterChecker := acl.NewWorkspaceClusterACL(c.DB)
+	productChecker := acl.NewProductChecker(c.DB)
 	memberLookup := acl.NewMemberLookup(c.DB)
 	secretBox, err := crypto.NewSecretBoxFromConfig(c.Config)
 	if err != nil {
@@ -67,8 +68,8 @@ func (m *Module) Register(c *appctx.Container) error {
 
 	generateTemplates := query.NewGenerateProjectTemplatesHandler(repo, templateRepo, secretRepo, wsChecker, c.DB)
 	handler := wshttp.NewHandler(
-		command.NewCreateProjectHandler(repo, memberRepo, wsChecker, clusterChecker, c.PolicyEngine, c.EventBus),
-		command.NewUpdateProjectHandler(repo, wsChecker, clusterChecker),
+		command.NewCreateProjectHandler(repo, memberRepo, wsChecker, clusterChecker, productChecker, c.PolicyEngine, c.EventBus),
+		command.NewUpdateProjectHandler(repo, wsChecker, clusterChecker, productChecker),
 		command.NewArchiveProjectHandler(repo, wsChecker),
 		query.NewListProjectsHandler(repo, memberRepo, wsChecker, c.PermissionChecker),
 		query.NewGetProjectHandler(repo, memberRepo, wsChecker, c.PermissionChecker),

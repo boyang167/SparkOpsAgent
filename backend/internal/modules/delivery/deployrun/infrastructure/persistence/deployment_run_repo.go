@@ -40,6 +40,8 @@ type deploymentRunRow struct {
 	AttemptCount      int     `gorm:"not null;default:0"`
 	LeaseOwner        *string
 	LeaseExpiresAt    *time.Time
+	EnvironmentID     *string
+	DeployNamespace   string `gorm:"not null;default:''"`
 }
 
 func (deploymentRunRow) TableName() string { return "delivery.deployment_runs" }
@@ -460,6 +462,7 @@ func toRunRow(run *model.DeploymentRun) *deploymentRunRow {
 		Version: run.Version,
 		AttemptCount: run.AttemptCount, LeaseOwner: nullableString(run.LeaseOwner),
 		LeaseExpiresAt: run.LeaseExpiresAt,
+		EnvironmentID: environmentIDValue(run.EnvironmentID), DeployNamespace: run.DeployNamespace,
 	}
 }
 
@@ -491,7 +494,7 @@ func fromRunRow(row deploymentRunRow) (*model.DeploymentRun, error) {
 	run := &model.DeploymentRun{
 		ID: id, WorkspaceID: wsID, ProjectID: projectID, ClusterID: clusterID,
 		GitRefType: row.GitRefType, GitRefValue: row.GitRefValue, ImageTag: row.ImageTag,
-		CrossCluster: row.CrossCluster,
+		CrossCluster: row.CrossCluster, DeployNamespace: row.DeployNamespace,
 		Status: model.Status(row.Status), ErrorMessage: row.ErrorMessage, CreatedBy: createdBy,
 		CreatedAt: row.CreatedAt, StartedAt: row.StartedAt, FinishedAt: row.FinishedAt,
 		CurrentStage: model.Stage(row.CurrentStage),
@@ -520,6 +523,13 @@ func fromRunRow(row deploymentRunRow) (*model.DeploymentRun, error) {
 		}
 		run.BuildID = &buildID
 	}
+	if row.EnvironmentID != nil && *row.EnvironmentID != "" {
+		envID, err := kernel.ParseEnvironmentID(*row.EnvironmentID)
+		if err != nil {
+			return nil, fmt.Errorf("parse environment id: %w", err)
+		}
+		run.EnvironmentID = &envID
+	}
 	return run, nil
 }
 
@@ -539,6 +549,14 @@ func buildIDValue(id *kernel.BuildID) *string {
 }
 
 func deploymentRunIDValue(id *kernel.DeploymentRunID) *string {
+	if id == nil {
+		return nil
+	}
+	value := id.String()
+	return &value
+}
+
+func environmentIDValue(id *kernel.EnvironmentID) *string {
 	if id == nil {
 		return nil
 	}

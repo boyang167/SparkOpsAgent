@@ -387,6 +387,17 @@ func selectedTemplateIDs(templateID string, resources workspace.ProjectResources
 	return ids
 }
 
+func OverrideDeployNamespace(project *port.ProjectDeploymentContext, namespace string) {
+	ns := strings.TrimSpace(namespace)
+	if ns == "" || ns == project.Namespace {
+		return
+	}
+	project.Namespace = ns
+	if strings.TrimSpace(project.Harbor.ServiceURL) != "" {
+		project.ImageRepository = deploymentImageRepository(project.Harbor.ServiceURL, ns, project.Name)
+	}
+}
+
 func deploymentImageRepository(registryURL, namespace, projectName string) string {
 	raw := strings.TrimSpace(registryURL)
 	if raw == "" {

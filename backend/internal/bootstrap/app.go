@@ -24,6 +24,7 @@ import (
 	adminpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/infrastructure/persistence"
 	pluginmod "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/tenant"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workflow"
@@ -127,6 +128,7 @@ func Run(ctx context.Context) error {
 			platform_admin.New(tokens),
 			runtime.New(tokens),
 			delivery.New(tokens),
+			product_workflow.New(tokens),
 			product.New(tokens),
 			agent.New(tokens),
 			workflow.New(tokens),

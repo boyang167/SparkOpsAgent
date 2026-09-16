@@ -35,6 +35,7 @@ export type ProjectReviewStatus = z.infer<typeof ProjectReviewStatusSchema>;
 
 export const ProjectVMSchema = z.object({
   id: z.string(),
+  product_id: z.string().optional(),
   name: z.string(),
   display_name: z.string().optional(),
   description: z.string().optional().default(""),
@@ -71,6 +72,7 @@ export const ProjectListVMSchema = z.object({
 export type ProjectListVM = z.infer<typeof ProjectListVMSchema>;
 
 export const CreateProjectCommandSchema = z.object({
+  product_id: z.string().nullable().optional(),
   name: z.string().min(2).max(50).regex(/^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$/),
   display_name: z.string().max(50).optional(),
   description: z.string().max(200).optional().default(""),
