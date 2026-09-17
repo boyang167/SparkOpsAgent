@@ -21,11 +21,12 @@ type EnvironmentHandlers struct {
 }
 
 type createEnvironmentRequest struct {
-	Name      string            `json:"name" binding:"required"`
-	EnvType   string            `json:"env_type"`
-	ClusterID string            `json:"cluster_id" binding:"required"`
-	Namespace string            `json:"namespace" binding:"required"`
-	Variables map[string]string `json:"variables"`
+	Name       string            `json:"name" binding:"required"`
+	EnvType    string            `json:"env_type"`
+	ClusterID  string            `json:"cluster_id" binding:"required"`
+	Namespace  string            `json:"namespace" binding:"required"`
+	Variables  map[string]string `json:"variables"`
+	ProjectIDs []string          `json:"project_ids"`
 }
 
 type updateEnvironmentRequest struct {
@@ -75,9 +76,18 @@ func (h *Handler) CreateEnvironment(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", "invalid cluster id", http.StatusBadRequest)
 		return
 	}
+	projectIDs := make([]kernel.ProjectID, 0, len(req.ProjectIDs))
+	for _, raw := range req.ProjectIDs {
+		pid, parseErr := kernel.ParseProjectID(raw)
+		if parseErr != nil {
+			httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+			return
+		}
+		projectIDs = append(projectIDs, pid)
+	}
 	env, err := h.environments.CreateEnvironment.Handle(c.Request.Context(), wsID, productID, memberID, command.CreateEnvironmentInput{
 		Name: req.Name, EnvType: model.EnvironmentType(req.EnvType), ClusterID: clusterID,
-		Namespace: req.Namespace, Variables: req.Variables,
+		Namespace: req.Namespace, Variables: req.Variables, ProjectIDs: projectIDs,
 	})
 	if err != nil {
 		httpx.HandleError(c, err)

@@ -124,7 +124,15 @@ export function ProjectDeployModal({
             : targetClusters[0]?.id;
         setClusterId(preferred ?? "");
         setEnvironments(envItems);
-        setEnvironmentId(envItems[0]?.id ?? "");
+        const preferredEnv =
+          envItems.find(
+            (env) =>
+              env.cluster_id === project.default_cluster_id &&
+              env.namespace === (project.namespace ?? ""),
+          ) ??
+          envItems.find((env) => env.cluster_id === project.default_cluster_id) ??
+          envItems[0];
+        setEnvironmentId(preferredEnv?.id ?? "");
         setDeployTarget(envItems.length > 0 ? "environment" : "cluster");
       })
       .catch((err) => {
@@ -322,12 +330,20 @@ export function ProjectDeployModal({
                   disabled={loading || Boolean(run)}
                   required
                 >
-                  {environments.map((env) => (
-                    <option key={env.id} value={env.id}>
-                      {env.name} ({env.namespace})
-                    </option>
-                  ))}
+                  {environments.map((env) => {
+                    const clusterLabel =
+                      options.clusters.find((item) => item.id === env.cluster_id)?.cluster_name?.trim() ||
+                      env.cluster_id;
+                    return (
+                      <option key={env.id} value={env.id}>
+                        {env.name} · {clusterLabel}/{env.namespace}
+                      </option>
+                    );
+                  })}
                 </select>
+                <p className="text-muted text-sm">
+                  将按所选环境的集群与 Namespace 部署（优先于项目默认集群）。
+                </p>
               </label>
             ) : (
               <label className="stack-sm">

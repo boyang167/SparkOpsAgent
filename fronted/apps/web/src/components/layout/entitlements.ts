@@ -19,7 +19,7 @@ export function pathEntitlement(path: string): string {
     return pluginId ? `plugin:${pluginId}` : "";
   }
   if (path.startsWith("/knowledge")) return "knowledge";
-  if (path.startsWith("/delivery") || path.startsWith("/publish") || path.startsWith("/config/secrets")) {
+  if (path.startsWith("/delivery") || path.startsWith("/publish") || path.startsWith("/config/secrets") || path.startsWith("/products")) {
     return "delivery";
   }
   if (path.startsWith("/monitor")) return "observability";

@@ -40,11 +40,12 @@ export function resourceListLabel(kind: string, name: string) {
 }
 
 export function belongsToProject(object: K8sMetaObject, projectName: string) {
-  const name = object.metadata?.name?.trim() ?? "";
+  const name = object.metadata?.name?.trim().toLowerCase() ?? "";
   const labels = object.metadata?.labels ?? {};
   const slug = projectName.trim().toLowerCase();
   if (!slug) return false;
-  if (name.toLowerCase() === slug || name.toLowerCase().includes(slug)) return true;
+  if (name === slug) return true;
+  if (name.startsWith(`${slug}-`) || name.endsWith(`-${slug}`)) return true;
   const app = (labels.app ?? labels["app.kubernetes.io/name"] ?? labels["sparkops.project"] ?? "").toLowerCase();
   return app === slug;
 }

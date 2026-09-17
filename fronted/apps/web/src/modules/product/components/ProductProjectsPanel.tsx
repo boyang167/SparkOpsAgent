@@ -15,7 +15,6 @@ import {
   applyResourceToCluster,
   loadClusterResources,
   mergeProjectResources,
-  resourceListLabel,
   templatesToResources,
   type ProductK8sResource,
 } from "./product-k8s-yaml";
@@ -214,7 +213,8 @@ export function ProductProjectsPanel({ workspaceId, productId, onChanged }: Prod
         },
         ...groupItems.map((item) => ({
           id: item.id,
-          title: resourceListLabel(item.kind, item.name),
+          title: item.name,
+          subtitle: item.kind,
           indent: true,
           meta: item.source === "cluster" ? "集群" : "模板",
         })),

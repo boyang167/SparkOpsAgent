@@ -42,6 +42,7 @@ export const CreateEnvironmentCommandSchema = z.object({
   cluster_id: z.string().min(1),
   namespace: z.string().min(1),
   variables: z.record(z.string()).optional(),
+  project_ids: z.array(z.string()).optional(),
 });
 
 export type CreateEnvironmentCommand = z.infer<typeof CreateEnvironmentCommandSchema>;

@@ -83,4 +83,11 @@ describe("isNavHrefActive", () => {
     expect(isNavHrefActive("/plugins/kubernetes/clusters", "/plugins/kubernetes", hrefs)).toBe(false);
     expect(isNavHrefActive("/plugins/kubernetes/clusters", "/plugins/kubernetes/clusters", hrefs)).toBe(true);
   });
+
+  it("keeps 产品管理 inactive on /products/workflows", () => {
+    const hrefs = ["/products", "/products/workflows"];
+    expect(isNavHrefActive("/products/workflows", "/products", hrefs)).toBe(false);
+    expect(isNavHrefActive("/products/workflows", "/products/workflows", hrefs)).toBe(true);
+    expect(isNavHrefActive("/products", "/products", hrefs)).toBe(true);
+  });
 });

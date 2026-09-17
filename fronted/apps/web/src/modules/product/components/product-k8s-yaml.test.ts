@@ -9,6 +9,9 @@ describe("product k8s yaml helpers", () => {
       belongsToProject({ metadata: { name: "web", labels: { app: "reviews" } } }, "reviews"),
     ).toBe(true);
     expect(belongsToProject({ metadata: { name: "details" } }, "reviews")).toBe(false);
+    expect(belongsToProject({ metadata: { name: "test-repo2" } }, "test-repo")).toBe(false);
+    expect(belongsToProject({ metadata: { name: "test-repo" } }, "test-repo2")).toBe(false);
+    expect(belongsToProject({ metadata: { name: "test-repo-api" } }, "test-repo")).toBe(true);
   });
 
   it("parses kind and name from yaml documents", () => {

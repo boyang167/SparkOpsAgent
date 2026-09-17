@@ -96,6 +96,7 @@ func PathEntitlement(path string) string {
 	case strings.HasPrefix(path, "/knowledge"):
 		return "knowledge"
 	case strings.HasPrefix(path, "/delivery"), strings.HasPrefix(path, "/publish"),
+		strings.HasPrefix(path, "/products"),
 		strings.HasPrefix(path, "/config/secrets"):
 		return "delivery"
 	case strings.HasPrefix(path, "/monitor"):

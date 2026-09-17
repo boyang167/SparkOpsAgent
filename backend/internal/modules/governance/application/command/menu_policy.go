@@ -14,6 +14,7 @@ var DefaultMenuRolePolicies = map[string][]string{
 	"/delivery/fleets":    {"admin", "operator"},
 	"/delivery/profiles":  {"admin", "operator"},
 	"/publish/products":   {"admin", "operator"},
+	"/products/workflows": {"admin", "operator"},
 	"/publish/plans":      {"admin", "operator"},
 	"/publish/releases":   {"admin", "operator", "reviewer"},
 	"/config/secrets":     {"admin", "operator"},

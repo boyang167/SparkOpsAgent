@@ -81,15 +81,31 @@ export function ProductProjectYamlWorkbench({
   if (!resource) {
     return (
       <div className="product-yaml-workbench">
-        <div className="product-yaml-empty">选择左侧资源查看 YAML</div>
+        <div className="product-yaml-empty">
+          <strong>选择左侧资源</strong>
+          <span>查看并编辑 Kubernetes YAML，保存后可加入产品环境。</span>
+        </div>
       </div>
     );
   }
+
+  const sourceLabel = resource.source === "cluster" ? "集群" : "模板";
 
   return (
     <div className="product-yaml-workbench">
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       {hint ? <p className="product-yaml-hint">{hint}</p> : null}
+
+      <div className="product-yaml-editor-head">
+        <div className="product-yaml-editor-title">
+          <span className="product-yaml-kind">{resource.kind}</span>
+          <span className="product-yaml-res-name">{resource.name}</span>
+          {dirty ? <span className="badge badge-warning">未保存</span> : null}
+        </div>
+        <span className={`product-yaml-source${resource.source === "cluster" ? " is-cluster" : ""}`}>
+          {sourceLabel}
+        </span>
+      </div>
 
       <div className="product-yaml-body">
         <div className="product-yaml-editor">
@@ -118,30 +134,57 @@ export function ProductProjectYamlWorkbench({
         {inspectorTab === "info" ? (
           <aside className="product-yaml-inspector" aria-label="基本信息">
             <h3>基本信息</h3>
-            <div className="product-yaml-inspector-row">
-              <span>标签</span>
-            </div>
-            <div className="product-yaml-kv-head">
-              <span>键</span>
-              <span>值</span>
-            </div>
+            <dl className="product-yaml-meta">
+              <div>
+                <dt>类型</dt>
+                <dd>{resource.kind}</dd>
+              </div>
+              <div>
+                <dt>名称</dt>
+                <dd>{resource.name}</dd>
+              </div>
+              {resource.namespace ? (
+                <div>
+                  <dt>Namespace</dt>
+                  <dd className="font-mono">{resource.namespace}</dd>
+                </div>
+              ) : null}
+              <div>
+                <dt>来源</dt>
+                <dd>{sourceLabel}</dd>
+              </div>
+            </dl>
+            <div className="product-yaml-inspector-row">标签</div>
             {labels.length === 0 ? (
-              <p className="product-yaml-inspector-empty">暂无数据</p>
+              <p className="product-yaml-inspector-empty">当前 YAML 未声明标签</p>
             ) : (
-              <ul className="product-yaml-kv-list">
-                {labels.map((item) => (
-                  <li key={item.key}>
-                    <span>{item.key}</span>
-                    <span>{item.value}</span>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <div className="product-yaml-kv-head">
+                  <span>键</span>
+                  <span>值</span>
+                </div>
+                <ul className="product-yaml-kv-list">
+                  {labels.map((item) => (
+                    <li key={item.key}>
+                      <span>{item.key}</span>
+                      <span>{item.value}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
+          </aside>
+        ) : inspectorTab === "changes" ? (
+          <aside className="product-yaml-inspector" aria-label="变更">
+            <h3>变更</h3>
+            <p className="product-yaml-inspector-empty">
+              {dirty ? "YAML 已修改，保存后才会写回模板或集群。" : "当前内容与上次保存一致。"}
+            </p>
           </aside>
         ) : (
           <aside className="product-yaml-inspector" aria-label={INSPECTOR_TABS.find((item) => item.id === inspectorTab)?.label}>
             <h3>{INSPECTOR_TABS.find((item) => item.id === inspectorTab)?.label}</h3>
-            <p className="product-yaml-inspector-empty">暂无数据</p>
+            <p className="product-yaml-inspector-empty">该面板即将支持，先在 YAML 中查看完整定义。</p>
           </aside>
         )}
 
@@ -162,17 +205,17 @@ export function ProductProjectYamlWorkbench({
       <div className="product-yaml-footer">
         <div className="product-yaml-footer-left">
           {onUnbind ? (
-            <button type="button" className="btn btn-ghost text-sm" onClick={onUnbind}>
+            <button type="button" className="btn-ghost text-sm product-yaml-unbind" onClick={onUnbind}>
               解绑项目
             </button>
           ) : null}
         </div>
         <div className="product-yaml-footer-right">
-          <button type="button" className="btn btn-primary text-sm" disabled={saving || !dirty} onClick={onSave}>
-            {saving ? "保存中…" : "保存"}
-          </button>
           <button type="button" className="btn btn-secondary text-sm" onClick={() => setJoinOpen(true)}>
             加入环境
+          </button>
+          <button type="button" className="btn btn-primary text-sm" disabled={saving || !dirty} onClick={onSave}>
+            {saving ? "保存中…" : "保存"}
           </button>
         </div>
       </div>
