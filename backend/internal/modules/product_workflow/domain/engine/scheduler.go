@@ -8,8 +8,8 @@ import (
 
 	deployrunmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	buildmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/model"
-	pwfevent "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain"
+	pwfevent "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
@@ -34,6 +34,7 @@ func (s *Scheduler) StartRun(ctx context.Context, wf *model.ProductWorkflow, run
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
 		return err
 	}
+	s.emitNotification(ctx, wf, run, model.NotifyEventCreated)
 	return s.executeCurrentStage(ctx, wf, run)
 }
 
@@ -82,10 +83,19 @@ func (s *Scheduler) HandleBuildCompleted(ctx context.Context, buildID kernel.Bui
 		return nil
 	}
 	if status != string(buildmodel.BuildStatusSuccess) {
+		if job, ok := jobByName(wf, ref.JobName); ok {
+			s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed)
+		}
 		return s.failRun(ctx, run, "build failed")
 	}
 	if failed, msg := s.refreshJobStatuses(run); failed {
+		if job, ok := jobByName(wf, ref.JobName); ok {
+			s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed)
+		}
 		return s.failRun(ctx, run, msg)
+	}
+	if job, ok := jobByName(wf, ref.JobName); ok {
+		s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventPassed)
 	}
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
 		return err
@@ -191,7 +201,7 @@ func (s *Scheduler) RejectJob(ctx context.Context, runID kernel.ProductWorkflowR
 	jobRun.Approval.Message = message
 	jobRun.Status = model.JobRunStatusFailed
 	jobRun.ErrorMessage = message
-	return s.failRun(ctx, run, "approval rejected")
+	return s.failRunEvent(ctx, run, "approval rejected", model.NotifyEventRejected)
 }
 
 func (s *Scheduler) loadPendingApproval(ctx context.Context, runID kernel.ProductWorkflowRunID, jobName string) (*model.ProductWorkflowRun, *model.ProductWorkflow, *model.JobRun, error) {
@@ -228,7 +238,11 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 	if stageRun.ExecMode == model.StageExecManual && !stageRun.ManualConfirmed {
 		stageRun.Status = model.JobRunStatusPaused
 		run.Status = model.RunStatusPaused
-		return s.repo.UpdateRun(ctx, run)
+		if err := s.repo.UpdateRun(ctx, run); err != nil {
+			return err
+		}
+		s.emitNotification(ctx, wf, run, model.NotifyEventManual)
+		return nil
 	}
 	stageRun.Status = model.JobRunStatusRunning
 	if run.Status == model.RunStatusPaused {
@@ -254,6 +268,7 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 			if err := s.builds.RunJob(ctx, run, run.CurrentStage, ji, job); err != nil {
 				return s.failRun(ctx, run, jobRun.ErrorMessage)
 			}
+			s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventCreated)
 		case model.JobTypeSparkopsDeploy:
 			hasAsync = true
 			if err := s.deploys.RunJob(ctx, run, run.CurrentStage, ji, job); err != nil {
@@ -262,6 +277,7 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 		case model.JobTypeSparkopsApproval:
 			hasAsync = true
 			StartApprovalJob(jobRun, job)
+			s.emitNotification(ctx, wf, run, model.NotifyEventWaiting)
 		case model.JobTypeFreestyle:
 			RunFreestyleJob(jobRun, job)
 		case model.JobTypeNotify:
@@ -280,6 +296,20 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 		return s.advanceStage(ctx, wf, run)
 	}
 	return nil
+}
+
+func jobByName(wf *model.ProductWorkflow, name string) (model.WorkflowJob, bool) {
+	if wf == nil {
+		return model.WorkflowJob{}, false
+	}
+	for _, stage := range wf.Stages {
+		for _, job := range stage.Jobs {
+			if job.Name == name {
+				return job, true
+			}
+		}
+	}
+	return model.WorkflowJob{}, false
 }
 
 func StageNeedsManualConfirm(stage model.WorkflowStage, stageRun model.StageRun) bool {
@@ -432,10 +462,15 @@ func (s *Scheduler) completeRun(ctx context.Context, run *model.ProductWorkflowR
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
 		return err
 	}
+	s.emitNotification(ctx, nil, run, model.NotifyEventPassed)
 	return s.publishRunCompleted(ctx, run)
 }
 
 func (s *Scheduler) failRun(ctx context.Context, run *model.ProductWorkflowRun, message string) error {
+	return s.failRunEvent(ctx, run, message, model.NotifyEventFailed)
+}
+
+func (s *Scheduler) failRunEvent(ctx context.Context, run *model.ProductWorkflowRun, message, event string) error {
 	now := time.Now().UTC()
 	run.Status = model.RunStatusFailed
 	if run.ErrorMessage == "" {
@@ -445,6 +480,7 @@ func (s *Scheduler) failRun(ctx context.Context, run *model.ProductWorkflowRun, 
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
 		return err
 	}
+	s.emitNotification(ctx, nil, run, event)
 	return s.publishRunCompleted(ctx, run)
 }
 

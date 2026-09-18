@@ -148,10 +148,14 @@ func (h *CreateBlankWorkflowHandler) Handle(
 }
 
 type UpdateWorkflowInput struct {
-	Name        *string
-	Description *string
-	Status      *string
-	Stages      []model.WorkflowStage
+	Name          *string
+	Description   *string
+	Status        *string
+	Stages        []model.WorkflowStage
+	Notifications *[]model.WorkflowNotification
+	Variables     *[]model.WorkflowVariable
+	Triggers      *[]model.WorkflowTrigger
+	Advanced      *model.WorkflowAdvanced
 }
 
 type UpdateWorkflowHandler struct {
@@ -209,6 +213,26 @@ func (h *UpdateWorkflowHandler) Handle(
 		}
 		wf.Stages = input.Stages
 	}
+	if input.Notifications != nil {
+		wf.Notifications = model.NormalizeNotifications(*input.Notifications)
+	}
+	if input.Variables != nil {
+		variables, err := model.NormalizeVariables(*input.Variables)
+		if err != nil {
+			return nil, err
+		}
+		wf.Variables = variables
+	}
+	if input.Triggers != nil {
+		triggers, err := model.NormalizeTriggers(*input.Triggers)
+		if err != nil {
+			return nil, err
+		}
+		wf.Triggers = triggers
+	}
+	if input.Advanced != nil {
+		wf.Advanced = model.NormalizeAdvanced(*input.Advanced)
+	}
 	wf.UpdatedAt = time.Now().UTC()
 	if err := h.workflows.UpdateWorkflow(ctx, wf); err != nil {
 		return nil, err
@@ -252,6 +276,16 @@ type StartWorkflowRunHandler struct {
 	workflows repository.ProductWorkflowRepository
 	scheduler *engine.Scheduler
 	products  port.ProductChecker
+	gitLookup ProjectGitLookup
+}
+
+type ProjectGit struct {
+	GitURL    string
+	ProductID kernel.ProductID
+}
+
+type ProjectGitLookup interface {
+	LookupProjectGit(ctx context.Context, projectID kernel.ProjectID) (ProjectGit, error)
 }
 
 func NewStartWorkflowRunHandler(
@@ -286,13 +320,31 @@ func (h *StartWorkflowRunHandler) Handle(
 	if wf.Status != model.WorkflowStatusActive {
 		return nil, domain.ErrInvalidWorkflowInput
 	}
-	stages := engine.ApplyRunInput(wf.Stages, input)
-	run := model.NewProductWorkflowRun(workflowID, productID, stages)
-	run.Trigger = json.RawMessage(`{"source":"manual"}`)
-	if input != nil {
-		if raw, err := json.Marshal(input); err == nil {
-			run.Input = raw
-		}
+	return h.launch(ctx, wf, "manual", input, nil)
+}
+
+func (h *StartWorkflowRunHandler) launch(
+	ctx context.Context,
+	wf *model.ProductWorkflow,
+	source string,
+	input map[string]any,
+	git *engine.GitRunContext,
+) (*model.ProductWorkflowRun, error) {
+	if err := h.rejectIfBusy(ctx, wf); err != nil {
+		return nil, err
+	}
+	runID := kernel.NewProductWorkflowRunID()
+	stages, stored, trigger, err := engine.PrepareRun(wf, runID.String(), source, input, git)
+	if err != nil {
+		return nil, err
+	}
+	run := model.NewProductWorkflowRun(wf.ID, wf.ProductID, stages)
+	run.ID = runID
+	if raw, err := json.Marshal(trigger); err == nil {
+		run.Trigger = raw
+	}
+	if raw, err := json.Marshal(stored); err == nil {
+		run.Input = raw
 	}
 	runWF := *wf
 	runWF.Stages = stages
@@ -303,6 +355,21 @@ func (h *StartWorkflowRunHandler) Handle(
 		return nil, err
 	}
 	return h.workflows.FindRunByID(ctx, run.ID)
+}
+
+func (h *StartWorkflowRunHandler) rejectIfBusy(ctx context.Context, wf *model.ProductWorkflow) error {
+	limit := wf.Advanced.Concurrency
+	if limit <= 0 {
+		return nil
+	}
+	count, err := h.workflows.CountActiveRuns(ctx, wf.ID)
+	if err != nil {
+		return err
+	}
+	if count >= int64(limit) {
+		return domain.ErrWorkflowRunBusy
+	}
+	return nil
 }
 
 func slugKey(name string) string {

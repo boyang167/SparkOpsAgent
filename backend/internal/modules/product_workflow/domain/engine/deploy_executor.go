@@ -73,10 +73,11 @@ func (e *DeployExecutor) RunJob(
 		if branch == "" {
 			branch = "main"
 		}
-		imageTag := deploymodel.DefaultImageTag(branch)
+		gitRefType, imageTag, imageRepository := deployImage(target, branch)
 		deployID, triggerErr := e.trigger.TriggerForEnvironment(ctx, appctx.WorkflowDeploymentRequest{
 			ProjectID: projectID, EnvironmentID: envID,
-			GitRefType: "branch", GitRefValue: branch, ImageTag: imageTag,
+			GitRefType: gitRefType, GitRefValue: branch, ImageTag: imageTag, ImageRepository: imageRepository,
+			DeployContents: parseDeployContents(spec), ConfigResources: configResourcesFor(spec, target.ProjectID),
 		})
 		if triggerErr != nil {
 			jobRun.Status = model.JobRunStatusFailed
@@ -113,6 +114,87 @@ func resolveFromJobBuilds(run *model.ProductWorkflowRun, jobName string) []model
 				}
 			}
 		}
+	}
+	return out
+}
+
+func deployImage(target model.ProjectBuildRun, branch string) (gitRefType, imageTag, imageRepository string) {
+	imageTag = strings.TrimSpace(target.ImageTag)
+	if imageTag == "" {
+		imageTag = deploymodel.DefaultImageTag(branch)
+	}
+	gitRefType = "branch"
+	if strings.TrimSpace(target.GitRefType) == "tag" {
+		gitRefType = "tag"
+	}
+	return gitRefType, imageTag, strings.TrimSpace(target.ImageRepository)
+}
+
+func parseDeployContents(spec map[string]any) []string {
+	raw, ok := spec["deploy_contents"]
+	if !ok {
+		return []string{"image"}
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return []string{"image"}
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		value, _ := item.(string)
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return []string{"image"}
+	}
+	return out
+}
+
+func wantsConfigSync(spec map[string]any) bool {
+	for _, item := range parseDeployContents(spec) {
+		if item == "config" {
+			return true
+		}
+	}
+	return false
+}
+
+func configResourcesFor(spec map[string]any, projectID string) []appctx.WorkflowConfigResource {
+	if !wantsConfigSync(spec) {
+		return nil
+	}
+	raw, ok := spec["config_resources"]
+	if !ok {
+		return nil
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]appctx.WorkflowConfigResource, 0, len(items))
+	for _, item := range items {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		pid, _ := row["project_id"].(string)
+		if strings.TrimSpace(pid) != "" && pid != projectID {
+			continue
+		}
+		kind, _ := row["kind"].(string)
+		name, _ := row["name"].(string)
+		yamlDoc, _ := row["yaml"].(string)
+		if kind != "ConfigMap" && kind != "Secret" {
+			continue
+		}
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		out = append(out, appctx.WorkflowConfigResource{Kind: kind, Name: strings.TrimSpace(name), YAML: yamlDoc})
 	}
 	return out
 }

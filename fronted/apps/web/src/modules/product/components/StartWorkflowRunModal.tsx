@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { EnvironmentVM, ProductWorkflowVM } from "@sparkops/contracts/product";
 import { Modal } from "@/components/ui/Modal";
 import { jobTypeLabel } from "./workflow-editor-utils";
@@ -14,6 +14,7 @@ interface StartWorkflowRunModalProps {
   onSubmit: (input: {
     branch?: string;
     environment_overrides?: Record<string, string>;
+    variables?: Record<string, string>;
   }) => void;
 }
 
@@ -30,10 +31,24 @@ export function StartWorkflowRunModal({
     return stages.flatMap((stage) => stage.jobs.filter((job) => job.type === "sparkops-deploy"));
   }, [workflow]);
 
+  const runtimeVariables = useMemo(
+    () => (workflow?.variables ?? []).filter((item) => item.runtime_input && item.key.trim()),
+    [workflow],
+  );
   const [branch, setBranch] = useState("main");
   const [envOverrides, setEnvOverrides] = useState<Record<string, string>>({});
+  const [variables, setVariables] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!open) return;
+    const next: Record<string, string> = {};
+    for (const item of runtimeVariables) next[item.key] = item.value ?? "";
+    setVariables(next);
+  }, [open, runtimeVariables]);
 
   if (!open || !workflow) return null;
+
+  const missingVariable = runtimeVariables.some((item) => !(variables[item.key] ?? "").trim());
 
   return (
     <Modal
@@ -49,11 +64,12 @@ export function StartWorkflowRunModal({
           <button
             type="button"
             className="btn btn-primary text-sm"
-            disabled={busy}
+            disabled={busy || missingVariable}
             onClick={() =>
               onSubmit({
                 branch: branch.trim() || undefined,
                 environment_overrides: Object.keys(envOverrides).length ? envOverrides : undefined,
+                variables: runtimeVariables.length ? variables : undefined,
               })
             }
           >
@@ -96,6 +112,25 @@ export function StartWorkflowRunModal({
         ) : (
           <p className="text-sm text-muted">当前工作流无部署任务，将直接按定义执行。</p>
         )}
+
+        {runtimeVariables.length > 0 ? (
+          <div className="stack-sm">
+            <p className="text-sm font-medium">运行时变量</p>
+            {runtimeVariables.map((item) => (
+              <label key={item.id} className="field">
+                <span className="text-xs text-muted">
+                  {item.key}
+                  {item.description ? ` · ${item.description}` : ""}
+                </span>
+                <input
+                  className="input"
+                  value={variables[item.key] ?? ""}
+                  onChange={(e) => setVariables((prev) => ({ ...prev, [item.key]: e.target.value }))}
+                />
+              </label>
+            ))}
+          </div>
+        ) : null}
       </div>
     </Modal>
   );

@@ -21,16 +21,19 @@ export interface BuildJobStrategy {
 }
 
 export interface BuildJobNotify {
-  on_success: boolean;
-  on_failure: boolean;
-  message: string;
+  id: string;
+  enabled: boolean;
+  events: string[];
+  channel: string;
+  webhook_url: string;
+  targets: string;
 }
 
 export interface BuildJobSpec {
   registry_id: string;
   project_builds: BuildServiceRow[];
   strategy: BuildJobStrategy;
-  notify: BuildJobNotify;
+  notify: BuildJobNotify[];
 }
 
 export function emptyBuildJobSpec(): BuildJobSpec {
@@ -38,7 +41,7 @@ export function emptyBuildJobSpec(): BuildJobSpec {
     registry_id: "",
     project_builds: [],
     strategy: { timeout_minutes: 60, cache: false },
-    notify: { on_success: false, on_failure: true, message: "" },
+    notify: [],
   };
 }
 
@@ -49,6 +52,39 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
+}
+
+function parseNotifyItem(value: unknown, index: number): BuildJobNotify | null {
+  const row = asRecord(value);
+  if (!row) return null;
+  const modern = Array.isArray(row.events) || typeof row.channel === "string";
+  const events = modern
+    ? (Array.isArray(row.events) ? row.events.filter((item): item is string => typeof item === "string") : [])
+    : [
+        ...(row.on_success === true ? ["passed"] : []),
+        ...(row.on_failure !== false ? ["failed"] : []),
+      ];
+  const channel = asString(row.channel);
+  if (events.length === 0 && !channel) return null;
+  return {
+    id: asString(row.id) || `notify-${index + 1}`,
+    enabled: row.enabled !== false,
+    events,
+    channel,
+    webhook_url: asString(row.webhook_url),
+    targets: asString(row.targets),
+  };
+}
+
+function parseNotifyList(value: unknown): BuildJobNotify[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => {
+      const row = parseNotifyItem(item, index);
+      return row ? [row] : [];
+    });
+  }
+  const single = parseNotifyItem(value, 0);
+  return single ? [single] : [];
 }
 
 function parseVariables(value: unknown): BuildVariable[] {
@@ -89,7 +125,6 @@ export function parseBuildJobSpec(raw: Record<string, unknown> | undefined): Bui
       })
     : [];
   const strategy = asRecord(raw.strategy);
-  const notify = asRecord(raw.notify);
   const timeout = Number(strategy?.timeout_minutes);
   return {
     registry_id: asString(raw.registry_id),
@@ -98,11 +133,7 @@ export function parseBuildJobSpec(raw: Record<string, unknown> | undefined): Bui
       timeout_minutes: Number.isFinite(timeout) && timeout > 0 ? timeout : base.strategy.timeout_minutes,
       cache: strategy?.cache === true,
     },
-    notify: {
-      on_success: notify?.on_success === true,
-      on_failure: notify ? notify.on_failure !== false : base.notify.on_failure,
-      message: asString(notify?.message),
-    },
+    notify: parseNotifyList(raw.notify),
   };
 }
 

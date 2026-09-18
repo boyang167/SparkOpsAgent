@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/application/query"
@@ -253,7 +254,7 @@ func (p *buildTriggerPort) TriggerAutomated(ctx context.Context, projectID kerne
 }
 
 func (p *buildTriggerPort) TriggerAutomatedBuild(ctx context.Context, req appctx.AutomatedBuildRequest) (kernel.BuildID, error) {
-	build, err := p.handler.TriggerAutomatedBuild(ctx, req.ProjectID, req.Branch, req.ImageRepository)
+	build, err := p.handler.TriggerAutomatedBuild(ctx, req.ProjectID, req.Branch, req.ImageRepository, req.ImageTag, req.GitRefType, req.Variables)
 	if err != nil {
 		return kernel.BuildID{}, err
 	}
@@ -271,13 +272,32 @@ func (p *deploymentTriggerPort) TriggerForEnvironment(ctx context.Context, req a
 		return kernel.DeploymentRunID{}, err
 	}
 	run, err := p.create.Handle(ctx, auto.WorkspaceID, auto.MemberID, req.ProjectID, deploycommand.CreateInput{
-		EnvironmentID: req.EnvironmentID.String(),
-		GitRefType:    req.GitRefType,
-		GitRefValue:   req.GitRefValue,
-		ImageTag:      req.ImageTag,
+		EnvironmentID:   req.EnvironmentID.String(),
+		GitRefType:      req.GitRefType,
+		GitRefValue:     req.GitRefValue,
+		ImageTag:        req.ImageTag,
+		ImageRepository: req.ImageRepository,
+		Manifests:       configManifests(req.ConfigResources),
 	})
 	if err != nil {
 		return kernel.DeploymentRunID{}, err
 	}
 	return run.ID, nil
+}
+
+func configManifests(items []appctx.WorkflowConfigResource) []deployrunmodel.SyncManifest {
+	out := make([]deployrunmodel.SyncManifest, 0, len(items))
+	for _, item := range items {
+		kind := strings.TrimSpace(item.Kind)
+		name := strings.TrimSpace(item.Name)
+		if kind == "" || name == "" {
+			continue
+		}
+		manifest := deployrunmodel.SyncManifest{Kind: kind, Name: name, YAML: item.YAML}
+		if kind == deployrunmodel.SyncManifestKindSecret && strings.TrimSpace(item.YAML) == "" {
+			manifest.ManagedPullSecret = true
+		}
+		out = append(out, manifest)
+	}
+	return out
 }

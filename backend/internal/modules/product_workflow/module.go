@@ -13,6 +13,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/persistence"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/trigger"
 	pwfhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
@@ -60,6 +61,8 @@ func (m *Module) Register(c *appctx.Container) error {
 	scheduler := engine.NewScheduler(workflowRepo, buildExecutor, deployExecutor, c.EventBus)
 
 	startRun := command.NewStartWorkflowRunHandler(workflowRepo, scheduler, productChecker)
+	startRun.UseGitLookup(acl.NewProjectGitLookup(c.DB))
+	trigger.NewScheduler(workflowRepo, startRun, c.Logger).Start(context.Background())
 	workflowHandlers := pwfhttp.WorkflowHandlers{
 		CreateFromTemplate: command.NewCreateWorkflowFromTemplateHandler(templateRepo, workflowRepo, productChecker),
 		CreateBlank:        command.NewCreateBlankWorkflowHandler(workflowRepo, productChecker),
@@ -127,6 +130,9 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, readPerm, handler.GetWorkflowRun)
 	c.Engine.POST("/api/v1/products/:productId/workflows/:workflowId/runs/:runId/continue",
 		auth, ws, wsMember, writePerm, handler.ContinueWorkflowStage)
+
+	c.Engine.POST("/api/v1/products/:productId/workflows/:workflowId/hooks/:token", handler.WorkflowWebhook)
+	c.Engine.POST("/api/v1/public/workflows/gitlab", handler.GitLabWorkflowHook)
 
 	c.EventBus.Subscribe(deliveryevent.BuildCompletedName, subscriber.NewOnBuildCompleted(scheduler).Handle)
 	c.EventBus.Subscribe(deliveryevent.DeployCompletedName, subscriber.NewOnDeployCompleted(scheduler).Handle)

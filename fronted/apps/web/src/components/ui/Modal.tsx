@@ -10,6 +10,8 @@ interface ModalProps {
   size?: "md" | "lg" | "xl";
   /** Higher stacking + capture Escape so nested dialogs do not close the parent. */
   nested?: boolean;
+  /** Above drawers. Use when this dialog is opened from a drawer. */
+  priority?: boolean;
   panelClassName?: string;
   headerExtra?: React.ReactNode;
   children: React.ReactNode;
@@ -23,6 +25,7 @@ export function Modal({
   description,
   size = "md",
   nested = false,
+  priority = false,
   panelClassName,
   headerExtra,
   children,
@@ -55,7 +58,10 @@ export function Modal({
   if (!open) return null;
 
   return (
-    <div className={nested ? "modal-root modal-nested" : "modal-root"} role="presentation">
+    <div
+      className={`modal-root${nested ? " modal-nested" : ""}${priority ? " modal-priority" : ""}`}
+      role="presentation"
+    >
       <button
         type="button"
         className="modal-backdrop"

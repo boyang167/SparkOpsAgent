@@ -19,7 +19,12 @@ describe("parseBuildJobSpec", () => {
         },
       ],
       strategy: { timeout_minutes: 30, cache: true },
-      notify: { on_success: true, on_failure: false, message: "done" },
+      notify: {
+        events: ["passed", "failed"],
+        channel: "webhook",
+        webhook_url: "https://example.com/hook",
+        targets: "",
+      },
     });
 
     expect(spec.registry_id).toBe("reg-1");
@@ -37,7 +42,16 @@ describe("parseBuildJobSpec", () => {
       },
     ]);
     expect(spec.strategy).toEqual({ timeout_minutes: 30, cache: true });
-    expect(spec.notify).toEqual({ on_success: true, on_failure: false, message: "done" });
+    expect(spec.notify).toEqual([
+      {
+        id: "notify-1",
+        enabled: true,
+        events: ["passed", "failed"],
+        channel: "webhook",
+        webhook_url: "https://example.com/hook",
+        targets: "",
+      },
+    ]);
   });
 
   it("falls back to the job branch for legacy project_builds", () => {
@@ -53,11 +67,27 @@ describe("parseBuildJobSpec", () => {
     });
   });
 
+  it("maps the old success and failure switches onto events", () => {
+    const spec = parseBuildJobSpec({
+      notify: { on_success: true, on_failure: false, message: "done" },
+    });
+    expect(spec.notify).toEqual([
+      {
+        id: "notify-1",
+        enabled: true,
+        events: ["passed"],
+        channel: "",
+        webhook_url: "",
+        targets: "",
+      },
+    ]);
+  });
+
   it("returns an empty editable spec", () => {
     const spec: BuildJobSpec = emptyBuildJobSpec();
     expect(spec.registry_id).toBe("");
     expect(spec.project_builds).toEqual([]);
     expect(spec.strategy.timeout_minutes).toBe(60);
-    expect(spec.notify.on_failure).toBe(true);
+    expect(spec.notify).toEqual([]);
   });
 });

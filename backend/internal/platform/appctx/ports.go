@@ -10,6 +10,9 @@ type AutomatedBuildRequest struct {
 	ProjectID       kernel.ProjectID
 	Branch          string
 	ImageRepository string
+	ImageTag        string
+	GitRefType      string
+	Variables       map[string]string
 }
 
 type BuildTrigger interface {
@@ -18,11 +21,20 @@ type BuildTrigger interface {
 }
 
 type WorkflowDeploymentRequest struct {
-	ProjectID     kernel.ProjectID
-	EnvironmentID kernel.EnvironmentID
-	GitRefType    string
-	GitRefValue   string
-	ImageTag      string
+	ProjectID       kernel.ProjectID
+	EnvironmentID   kernel.EnvironmentID
+	GitRefType      string
+	GitRefValue     string
+	ImageTag        string
+	ImageRepository string
+	DeployContents  []string
+	ConfigResources []WorkflowConfigResource
+}
+
+type WorkflowConfigResource struct {
+	Kind string
+	Name string
+	YAML string
 }
 
 type DeploymentTrigger interface {

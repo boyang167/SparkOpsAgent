@@ -14,6 +14,7 @@ import {
   type BuildServiceRow,
 } from "./build-job-spec";
 import { BuildCodeRepoFields } from "./BuildCodeRepoFields";
+import { BuildNotifyList } from "./BuildNotifyList";
 
 type BuildTab = "basic" | "strategy" | "notify";
 type RowEditor = "code" | "vars" | "script";
@@ -540,54 +541,10 @@ export function BuildJobConfigDrawer({
         ) : null}
 
         {tab === "notify" ? (
-          <div className="pwf-build-form">
-            <div className="pwf-build-field">
-              <span>成功时通知</span>
-              <button
-                type="button"
-                className={`menu-switch${draft.notify.on_success ? " menu-switch-on" : ""}`}
-                aria-pressed={draft.notify.on_success}
-                onClick={() =>
-                  setDraft((current) => ({
-                    ...current,
-                    notify: { ...current.notify, on_success: !current.notify.on_success },
-                  }))
-                }
-              >
-                <span className="menu-switch-thumb" />
-              </button>
-            </div>
-            <div className="pwf-build-field">
-              <span>失败时通知</span>
-              <button
-                type="button"
-                className={`menu-switch${draft.notify.on_failure ? " menu-switch-on" : ""}`}
-                aria-pressed={draft.notify.on_failure}
-                onClick={() =>
-                  setDraft((current) => ({
-                    ...current,
-                    notify: { ...current.notify, on_failure: !current.notify.on_failure },
-                  }))
-                }
-              >
-                <span className="menu-switch-thumb" />
-              </button>
-            </div>
-            <label className="pwf-build-field pwf-build-field-top">
-              <span>通知内容</span>
-              <textarea
-                className="input"
-                rows={4}
-                value={draft.notify.message}
-                onChange={(e) =>
-                  setDraft((current) => ({
-                    ...current,
-                    notify: { ...current.notify, message: e.target.value },
-                  }))
-                }
-              />
-            </label>
-          </div>
+          <BuildNotifyList
+            items={draft.notify}
+            onChange={(notify) => setDraft((current) => ({ ...current, notify }))}
+          />
         ) : null}
       </Drawer>
     </>

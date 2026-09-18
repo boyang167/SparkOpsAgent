@@ -46,6 +46,7 @@ describe("suggestEnvironmentsFromProjects", () => {
     expect(candidates).toHaveLength(2);
     expect(candidates[0]).toMatchObject({
       name: "uat",
+      env_type: "staging",
       cluster_id: "c1",
       namespace: "pay-uat",
       project_ids: ["p1", "p2"],

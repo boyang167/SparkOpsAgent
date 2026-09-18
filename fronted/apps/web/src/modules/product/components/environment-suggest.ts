@@ -1,10 +1,11 @@
 import type { AuthorizedClusterVM } from "@sparkops/contracts/delivery";
+import type { ProductEnvironmentType } from "@sparkops/contracts/product";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 
 export type EnvironmentSuggestCandidate = {
   key: string;
   name: string;
-  env_type: "test" | "production";
+  env_type: ProductEnvironmentType;
   cluster_id: string;
   cluster_name: string;
   namespace: string;
@@ -12,9 +13,12 @@ export type EnvironmentSuggestCandidate = {
   project_labels: string[];
 };
 
-function looksProduction(namespace: string) {
+function inferEnvironmentType(namespace: string): EnvironmentSuggestCandidate["env_type"] {
   const ns = namespace.toLowerCase();
-  return ns.includes("prod") || ns.includes("production");
+  if (ns.includes("prod") || ns.includes("production")) return "production";
+  if (ns.includes("uat") || ns.includes("staging") || ns.includes("pre")) return "staging";
+  if (ns.includes("sit") || ns.includes("qa") || ns.includes("test")) return "test";
+  return "dev";
 }
 
 function defaultEnvName(namespace: string, index: number, total: number) {
@@ -65,7 +69,7 @@ export function suggestEnvironmentsFromProjects(
   return values.map((group, index) => ({
     key: `${group.cluster_id}::${group.namespace}`,
     name: defaultEnvName(group.namespace, index, values.length),
-    env_type: looksProduction(group.namespace) ? "production" : "test",
+    env_type: inferEnvironmentType(group.namespace),
     cluster_id: group.cluster_id,
     cluster_name: clusterNameById.get(group.cluster_id) ?? group.cluster_id,
     namespace: group.namespace,

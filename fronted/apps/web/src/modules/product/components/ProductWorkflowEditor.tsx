@@ -1,29 +1,40 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { EnvironmentVM, ProductProjectVM } from "@sparkops/contracts/product";
+import type { EnvironmentVM, ProductProjectVM, WorkflowAdvancedVM, WorkflowNotificationVM, WorkflowTriggerVM, WorkflowVariableVM } from "@sparkops/contracts/product";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Drawer } from "@/components/ui/Drawer";
 import { Modal } from "@/components/ui/Modal";
 import { WorkflowJobPickerModal } from "./WorkflowJobPickerModal";
 import { BuildJobConfigDrawer } from "./BuildJobConfigDrawer";
+import { DeployJobConfigDrawer } from "./DeployJobConfigDrawer";
+import { BuildNotifyList } from "./BuildNotifyList";
 import {
   defaultJob,
   emptyStage,
   jobTypeLabel,
   nextJobIndex,
   stageExecModeLabel,
+  upstreamBuildJobs,
   type EditorJob,
   type EditorStage,
 } from "./workflow-editor-utils";
+import { fromNotifyItems, toNotifyItems } from "./workflow-notify";
+import { WorkflowAdvancedPanel, WorkflowTriggersPanel, WorkflowVariablesPanel } from "./WorkflowSidePanels";
 
 interface ProductWorkflowEditorProps {
   workspaceId: string;
+  productId: string;
+  workflowId: string;
   name: string;
   workflowKey: string;
   description: string;
   status: string;
   stages: EditorStage[];
+  notifications: WorkflowNotificationVM[];
+  variables: WorkflowVariableVM[];
+  triggers: WorkflowTriggerVM[];
+  advanced: WorkflowAdvancedVM;
   projects: ProductProjectVM[];
   environments: EnvironmentVM[];
   busy?: boolean;
@@ -31,6 +42,10 @@ interface ProductWorkflowEditorProps {
   onNameChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
   onStagesChange: (stages: EditorStage[]) => void;
+  onNotificationsChange: (notifications: WorkflowNotificationVM[]) => void;
+  onVariablesChange: (variables: WorkflowVariableVM[]) => void;
+  onTriggersChange: (triggers: WorkflowTriggerVM[]) => void;
+  onAdvancedChange: (advanced: WorkflowAdvancedVM) => void;
   onSave: (activate: boolean) => void;
   onCancel?: () => void;
 }
@@ -45,11 +60,17 @@ type ViewMode = "visual" | "yaml";
 
 export function ProductWorkflowEditor({
   workspaceId,
+  productId,
+  workflowId,
   name,
   workflowKey,
   description,
   status,
   stages,
+  notifications,
+  variables,
+  triggers,
+  advanced,
   projects,
   environments,
   busy,
@@ -57,6 +78,10 @@ export function ProductWorkflowEditor({
   onNameChange,
   onDescriptionChange,
   onStagesChange,
+  onNotificationsChange,
+  onVariablesChange,
+  onTriggersChange,
+  onAdvancedChange,
   onSave,
   onCancel,
 }: ProductWorkflowEditorProps) {
@@ -78,9 +103,14 @@ export function ProductWorkflowEditor({
     return stages[selection.stageIndex]?.jobs[selection.jobIndex] ?? null;
   }, [selection, stages]);
 
+  const sourceBuildJobs = useMemo(() => {
+    if (!selection || selection.kind !== "job" || selectedJob?.type !== "sparkops-deploy") return [];
+    return upstreamBuildJobs(stages, selection.stageIndex, selection.jobIndex);
+  }, [selection, selectedJob, stages]);
+
   const yamlContent = useMemo(
-    () => JSON.stringify({ name, key: workflowKey, description, status, stages }, null, 2),
-    [name, workflowKey, description, status, stages],
+    () => JSON.stringify({ name, key: workflowKey, description, status, stages, notifications, variables, triggers, advanced }, null, 2),
+    [name, workflowKey, description, status, stages, notifications, variables, triggers, advanced],
   );
 
   function updateStage(stageIndex: number, patch: Partial<EditorStage>) {
@@ -158,12 +188,22 @@ export function ProductWorkflowEditor({
         name?: string;
         description?: string;
         stages?: EditorStage[];
+        notifications?: WorkflowNotificationVM[];
+        variables?: WorkflowVariableVM[];
+        triggers?: WorkflowTriggerVM[];
+        advanced?: WorkflowAdvancedVM;
       };
       if (parsed.name) onNameChange(parsed.name);
       if (typeof parsed.description === "string") onDescriptionChange(parsed.description);
       if (Array.isArray(parsed.stages) && parsed.stages.length > 0) {
         onStagesChange(parsed.stages);
       }
+      if (Array.isArray(parsed.notifications)) {
+        onNotificationsChange(parsed.notifications);
+      }
+      if (Array.isArray(parsed.variables)) onVariablesChange(parsed.variables);
+      if (Array.isArray(parsed.triggers)) onTriggersChange(parsed.triggers);
+      if (parsed.advanced) onAdvancedChange(parsed.advanced);
       setYamlError(null);
       setViewMode("visual");
     } catch {
@@ -556,13 +596,29 @@ export function ProductWorkflowEditor({
         }}
       />
 
+      <DeployJobConfigDrawer
+        open={selection?.kind === "job" && selectedJob?.type === "sparkops-deploy"}
+        workspaceId={workspaceId}
+        jobName={selectedJob?.name ?? ""}
+        spec={selectedJob?.spec}
+        sourceJobs={sourceBuildJobs}
+        environments={environments}
+        projects={projects}
+        onClose={() => setSelection(null)}
+        onConfirm={(nextName, nextSpec) => {
+          if (!selection || selection.kind !== "job") return;
+          updateJob(selection.stageIndex, selection.jobIndex, { name: nextName, spec: nextSpec });
+          setSelection(null);
+        }}
+      />
+
       <Drawer
-        open={selection?.kind === "job" && selectedJob?.type !== "sparkops-build"}
+        open={selection?.kind === "job" && selectedJob?.type !== "sparkops-build" && selectedJob?.type !== "sparkops-deploy"}
         onClose={() => setSelection(null)}
         title={selectedJob ? `任务 · ${selectedJob.name}` : "属性"}
         description={selectedJob ? jobTypeLabel(selectedJob.type) : "配置任务参数"}
       >
-        {selection?.kind === "job" && selectedJob && selectedJob.type !== "sparkops-build" ? (
+        {selection?.kind === "job" && selectedJob && selectedJob.type !== "sparkops-build" && selectedJob.type !== "sparkops-deploy" ? (
           <div className="stack-sm">
             <label className="field">
               <span className="text-xs text-muted">任务名称</span>
@@ -572,42 +628,6 @@ export function ProductWorkflowEditor({
                 onChange={(e) => updateJob(selection.stageIndex, selection.jobIndex, { name: e.target.value })}
               />
             </label>
-
-            {selectedJob.type === "sparkops-deploy" ? (
-              <>
-                <label className="field">
-                  <span className="text-xs text-muted">环境</span>
-                  <select
-                    className="input"
-                    value={String(selectedJob.spec?.environment_id ?? "")}
-                    onChange={(e) =>
-                      updateJobSpec(selection.stageIndex, selection.jobIndex, { environment_id: e.target.value })
-                    }
-                  >
-                    <option value="">请选择环境</option>
-                    {environments.map((env) => (
-                      <option key={env.id} value={env.id}>
-                        {env.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span className="text-xs text-muted">镜像来源 Job</span>
-                  <input
-                    className="input"
-                    value={String(selectedJob.spec?.job_name ?? "")}
-                    onChange={(e) =>
-                      updateJobSpec(selection.stageIndex, selection.jobIndex, {
-                        job_name: e.target.value,
-                        source: "fromjob",
-                      })
-                    }
-                    placeholder="上游构建任务名"
-                  />
-                </label>
-              </>
-            ) : null}
 
             {selectedJob.type === "freestyle" ? (
               <label className="field">
@@ -681,20 +701,34 @@ export function ProductWorkflowEditor({
                 ? "通知"
                 : "高级配置"
         }
-        description="全局工作流配置（部分能力后续开放）"
+        description={
+          sidePanel === "variables"
+            ? "自定义变量与系统变量"
+            : sidePanel === "triggers"
+              ? "Git、Webhook 与定时触发"
+              : sidePanel === "notify"
+                ? "工作流运行时按事件发送通知"
+                : "并发与超时"
+        }
+        panelClassName={sidePanel === "advanced" ? undefined : "drawer-panel-wide"}
       >
-        <div className="stack-sm text-sm text-muted">
-          {sidePanel === "variables" ? (
-            <p>可在任务 Spec 中使用运行时覆盖；全局变量面板即将接入。</p>
-          ) : null}
-          {sidePanel === "triggers" ? <p>支持手动执行；Webhook / Cron 触发后续版本提供。</p> : null}
-          {sidePanel === "notify" ? (
-            <p>可在编排中添加「通知」任务；工作流级通知策略后续开放。</p>
-          ) : null}
-          {sidePanel === "advanced" ? (
-            <p>并发限制、调试断点等高级选项对齐 Zadig Workflow V4，后续迭代。</p>
-          ) : null}
-        </div>
+        {sidePanel === "variables" ? <WorkflowVariablesPanel variables={variables} onChange={onVariablesChange} /> : null}
+        {sidePanel === "triggers" ? (
+          <WorkflowTriggersPanel
+            productId={productId}
+            workflowId={workflowId}
+            triggers={triggers}
+            projects={projects}
+            onChange={onTriggersChange}
+          />
+        ) : null}
+        {sidePanel === "notify" ? (
+          <BuildNotifyList
+            items={toNotifyItems(notifications)}
+            onChange={(items) => onNotificationsChange(fromNotifyItems(items))}
+          />
+        ) : null}
+        {sidePanel === "advanced" ? <WorkflowAdvancedPanel advanced={advanced} onChange={onAdvancedChange} /> : null}
       </Drawer>
     </div>
   );

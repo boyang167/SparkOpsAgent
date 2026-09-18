@@ -23,6 +23,10 @@ type ProductWorkflow struct {
 	Description     string
 	Status          WorkflowStatus
 	Stages          []WorkflowStage
+	Notifications   []WorkflowNotification
+	Variables       []WorkflowVariable
+	Triggers        []WorkflowTrigger
+	Advanced        WorkflowAdvanced
 	TemplateBinding json.RawMessage
 	Origin          json.RawMessage
 	CreatedBy       kernel.MemberID
@@ -52,11 +56,14 @@ const (
 )
 
 type ProjectBuildRun struct {
-	ProjectID    string       `json:"project_id"`
-	Branch       string       `json:"branch"`
-	BuildID      string       `json:"build_id,omitempty"`
-	Status       JobRunStatus `json:"status"`
-	ErrorMessage string       `json:"error_message,omitempty"`
+	ProjectID       string       `json:"project_id"`
+	Branch          string       `json:"branch"`
+	GitRefType      string       `json:"git_ref_type,omitempty"`
+	ImageTag        string       `json:"image_tag,omitempty"`
+	ImageRepository string       `json:"image_repository,omitempty"`
+	BuildID         string       `json:"build_id,omitempty"`
+	Status          JobRunStatus `json:"status"`
+	ErrorMessage    string       `json:"error_message,omitempty"`
 }
 
 type ProjectDeployRun struct {
@@ -127,6 +134,8 @@ func NewProductWorkflow(productID kernel.ProductID, wsID kernel.WorkspaceID, nam
 	return &ProductWorkflow{
 		ID: kernel.NewProductWorkflowID(), ProductID: productID, WorkspaceID: wsID,
 		Name: name, Key: key, Status: WorkflowStatusActive, Stages: stages,
+		Notifications: []WorkflowNotification{}, Variables: []WorkflowVariable{}, Triggers: []WorkflowTrigger{},
+		Advanced: DefaultAdvanced(),
 		Origin: json.RawMessage(`{"kind":"from_template"}`), CreatedBy: createdBy,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -140,6 +149,8 @@ func NewBlankProductWorkflow(productID kernel.ProductID, wsID kernel.WorkspaceID
 	return &ProductWorkflow{
 		ID: kernel.NewProductWorkflowID(), ProductID: productID, WorkspaceID: wsID,
 		Name: name, Key: key, Description: description, Status: WorkflowStatusDraft, Stages: stages,
+		Notifications: []WorkflowNotification{}, Variables: []WorkflowVariable{}, Triggers: []WorkflowTrigger{},
+		Advanced: DefaultAdvanced(),
 		Origin: json.RawMessage(`{"kind":"custom"}`), CreatedBy: createdBy,
 		CreatedAt: now, UpdatedAt: now,
 	}

@@ -2,7 +2,8 @@
 
 import { useEffect, useId, useMemo, useState } from "react";
 import type { AuthorizedClusterVM } from "@sparkops/contracts/delivery";
-import type { EnvironmentVM, ProductProjectVM } from "@sparkops/contracts/product";
+import type { EnvironmentVM, ProductEnvironmentType, ProductProjectVM } from "@sparkops/contracts/product";
+import { PRODUCT_ENVIRONMENT_TYPES } from "@sparkops/contracts/product";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
@@ -15,7 +16,7 @@ const FORM_ID = "create-environment-form";
 
 export type CreateEnvironmentFormValues = {
   name: string;
-  env_type: "test" | "production";
+  env_type: ProductEnvironmentType;
   cluster_id: string;
   namespace: string;
   project_ids: string[];
@@ -53,7 +54,7 @@ export function CreateEnvironmentModal({
   const searchId = useId();
 
   const [name, setName] = useState("dev");
-  const [envType, setEnvType] = useState<"test" | "production">("test");
+  const [envType, setEnvType] = useState<ProductEnvironmentType>("dev");
   const [clusterId, setClusterId] = useState("");
   const [namespace, setNamespace] = useState("");
   const [namespaceTouched, setNamespaceTouched] = useState(false);
@@ -103,7 +104,7 @@ export function CreateEnvironmentModal({
       "";
     const initialName = "dev";
     setName(initialName);
-    setEnvType("test");
+    setEnvType("dev");
     setClusterId(preferredCluster);
     setNamespace(suggestEnvironmentNamespace(productSlug, initialName));
     setNamespaceTouched(false);
@@ -195,11 +196,14 @@ export function CreateEnvironmentModal({
                 id={typeId}
                 className="input"
                 value={envType}
-                onChange={(e) => setEnvType(e.target.value as "test" | "production")}
+                onChange={(e) => setEnvType(e.target.value as ProductEnvironmentType)}
                 disabled={busy}
               >
-                <option value="test">测试</option>
-                <option value="production">生产</option>
+                {PRODUCT_ENVIRONMENT_TYPES.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

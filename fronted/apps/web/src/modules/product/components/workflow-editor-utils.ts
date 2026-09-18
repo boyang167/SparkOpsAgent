@@ -27,14 +27,14 @@ export function defaultJob(type: string, index: number): EditorJob {
           branch: "main",
           project_builds: [],
           strategy: { timeout_minutes: 60, cache: false },
-          notify: { on_success: false, on_failure: true, message: "" },
+          notify: [],
         },
       };
     case "sparkops-deploy":
       return {
         ...base,
         name: `deploy-${index}`,
-        spec: { environment_id: "", source: "fromjob", job_name: "", deploy_contents: ["image"] },
+        spec: { environment_id: "", source: "fromjob", job_name: "", deploy_contents: ["image"], status_check: true },
       };
     case "sparkops-approval":
       return { ...base, name: `approval-${index}`, spec: { timeout_minutes: 60 } };
@@ -49,6 +49,19 @@ export function defaultJob(type: string, index: number): EditorJob {
 
 export function jobTypeLabel(type: string): string {
   return PRODUCT_WORKFLOW_JOB_TYPES.find((item) => item.type === type)?.label ?? type;
+}
+
+export function upstreamBuildJobs(stages: EditorStage[], stageIndex: number, jobIndex: number): EditorJob[] {
+  const out: EditorJob[] = [];
+  for (let s = 0; s < stages.length && s <= stageIndex; s++) {
+    const jobs = stages[s]?.jobs ?? [];
+    const limit = s === stageIndex ? jobIndex : jobs.length;
+    for (let j = 0; j < limit; j++) {
+      const job = jobs[j];
+      if (job?.type === "sparkops-build" && job.name.trim()) out.push(job);
+    }
+  }
+  return out;
 }
 
 export function nextJobIndex(stages: EditorStage[]): number {

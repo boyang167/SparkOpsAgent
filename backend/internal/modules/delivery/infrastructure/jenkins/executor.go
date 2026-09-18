@@ -3,6 +3,7 @@ package jenkins
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -335,6 +336,7 @@ func renderJobXML(spec port.JenkinsJobSpec) string {
 		stringParameterXML("CodeVersion", "") +
 		stringParameterXML("IMAGE_TAG", "") +
 		stringParameterXML("IMAGE_REPOSITORY", "") +
+		stringParameterXML("SPARKOPS_VARS", "") +
 		`</parameterDefinitions></hudson.model.ParametersDefinitionProperty></properties>` +
 		`<definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">` +
 		`<script>` + script.String() + `</script><sandbox>true</sandbox></definition>` +
@@ -364,14 +366,28 @@ func buildParams(req port.BuildRequest) map[string]string {
 		params["CodeVersion"] = branch
 		params["IMAGE_TAG"] = req.ImageTag
 		params["IMAGE_REPOSITORY"] = req.ImageRepository
-	} else if strings.TrimSpace(req.ImageRepository) != "" {
-		params["IMAGE_REPOSITORY"] = strings.TrimSpace(req.ImageRepository)
-		if req.ImageTag != "" {
-			params["IMAGE_TAG"] = req.ImageTag
+	} else {
+		if repo := strings.TrimSpace(req.ImageRepository); repo != "" {
+			params["IMAGE_REPOSITORY"] = repo
+		}
+		if tag := strings.TrimSpace(req.ImageTag); tag != "" {
+			params["IMAGE_TAG"] = tag
 		}
 	}
 	if req.RollbackOf > 0 {
 		params["ROLLBACK_OF"] = strconv.Itoa(req.RollbackOf)
+	}
+	for key, value := range req.Variables {
+		name := strings.TrimSpace(key)
+		if name == "" {
+			continue
+		}
+		params["SPARKOPS_VAR_"+name] = value
+	}
+	if len(req.Variables) > 0 {
+		if raw, err := json.Marshal(req.Variables); err == nil {
+			params["SPARKOPS_VARS"] = string(raw)
+		}
 	}
 	return params
 }

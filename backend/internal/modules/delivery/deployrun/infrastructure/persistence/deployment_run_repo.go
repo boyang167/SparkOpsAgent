@@ -17,31 +17,32 @@ import (
 )
 
 type deploymentRunRow struct {
-	ID             string `gorm:"column:id;primaryKey"`
-	WorkspaceID    string `gorm:"not null"`
-	ProjectID      string `gorm:"not null"`
-	ClusterID      string `gorm:"not null"`
-	GitRefType     string `gorm:"size:16;not null"`
-	GitRefValue    string `gorm:"size:255;not null"`
-	ImageTag       string `gorm:"size:255;not null"`
-	CrossCluster   bool   `gorm:"not null;default:false"`
-	SyncManifests  []byte `gorm:"column:sync_manifests;type:jsonb;not null;default:'[]'"`
-	Status         string `gorm:"size:16;not null"`
-	BuildID        *string
-	ErrorMessage   string    `gorm:"not null;default:''"`
-	CreatedBy      string    `gorm:"not null"`
-	CreatedAt      time.Time `gorm:"not null"`
-	StartedAt      *time.Time
-	FinishedAt     *time.Time
-	CurrentStage      string  `gorm:"size:16;not null;default:''"`
-	RunType           string  `gorm:"size:16;not null;default:normal"`
-	RollbackOfRunID   *string `gorm:"size:36"`
-	Version           int64   `gorm:"not null;default:0"`
-	AttemptCount      int     `gorm:"not null;default:0"`
-	LeaseOwner        *string
-	LeaseExpiresAt    *time.Time
-	EnvironmentID     *string
-	DeployNamespace   string `gorm:"not null;default:''"`
+	ID              string `gorm:"column:id;primaryKey"`
+	WorkspaceID     string `gorm:"not null"`
+	ProjectID       string `gorm:"not null"`
+	ClusterID       string `gorm:"not null"`
+	GitRefType      string `gorm:"size:16;not null"`
+	GitRefValue     string `gorm:"size:255;not null"`
+	ImageTag        string `gorm:"size:255;not null"`
+	ImageRepository string `gorm:"size:512;not null;default:''"`
+	CrossCluster    bool   `gorm:"not null;default:false"`
+	SyncManifests   []byte `gorm:"column:sync_manifests;type:jsonb;not null;default:'[]'"`
+	Status          string `gorm:"size:16;not null"`
+	BuildID         *string
+	ErrorMessage    string    `gorm:"not null;default:''"`
+	CreatedBy       string    `gorm:"not null"`
+	CreatedAt       time.Time `gorm:"not null"`
+	StartedAt       *time.Time
+	FinishedAt      *time.Time
+	CurrentStage    string  `gorm:"size:16;not null;default:''"`
+	RunType         string  `gorm:"size:16;not null;default:normal"`
+	RollbackOfRunID *string `gorm:"size:36"`
+	Version         int64   `gorm:"not null;default:0"`
+	AttemptCount    int     `gorm:"not null;default:0"`
+	LeaseOwner      *string
+	LeaseExpiresAt  *time.Time
+	EnvironmentID   *string
+	DeployNamespace string `gorm:"not null;default:''"`
 }
 
 func (deploymentRunRow) TableName() string { return "delivery.deployment_runs" }
@@ -454,15 +455,15 @@ func toRunRow(run *model.DeploymentRun) *deploymentRunRow {
 	return &deploymentRunRow{
 		ID: run.ID.String(), WorkspaceID: run.WorkspaceID.String(), ProjectID: run.ProjectID.String(),
 		ClusterID: run.ClusterID.String(), GitRefType: run.GitRefType, GitRefValue: run.GitRefValue,
-		ImageTag: run.ImageTag, CrossCluster: run.CrossCluster, SyncManifests: syncManifests,
+		ImageTag: run.ImageTag, ImageRepository: run.ImageRepository, CrossCluster: run.CrossCluster, SyncManifests: syncManifests,
 		Status: string(run.Status), BuildID: buildIDValue(run.BuildID),
 		ErrorMessage: run.ErrorMessage, CreatedBy: run.CreatedBy.String(), CreatedAt: run.CreatedAt,
 		StartedAt: run.StartedAt, FinishedAt: run.FinishedAt, CurrentStage: string(run.CurrentStage),
 		RunType: runType, RollbackOfRunID: deploymentRunIDValue(run.RollbackOfRunID),
-		Version: run.Version,
+		Version:      run.Version,
 		AttemptCount: run.AttemptCount, LeaseOwner: nullableString(run.LeaseOwner),
 		LeaseExpiresAt: run.LeaseExpiresAt,
-		EnvironmentID: environmentIDValue(run.EnvironmentID), DeployNamespace: run.DeployNamespace,
+		EnvironmentID:  environmentIDValue(run.EnvironmentID), DeployNamespace: run.DeployNamespace,
 	}
 }
 
@@ -494,13 +495,14 @@ func fromRunRow(row deploymentRunRow) (*model.DeploymentRun, error) {
 	run := &model.DeploymentRun{
 		ID: id, WorkspaceID: wsID, ProjectID: projectID, ClusterID: clusterID,
 		GitRefType: row.GitRefType, GitRefValue: row.GitRefValue, ImageTag: row.ImageTag,
-		CrossCluster: row.CrossCluster, DeployNamespace: row.DeployNamespace,
+		ImageRepository: row.ImageRepository,
+		CrossCluster:    row.CrossCluster, DeployNamespace: row.DeployNamespace,
 		Status: model.Status(row.Status), ErrorMessage: row.ErrorMessage, CreatedBy: createdBy,
 		CreatedAt: row.CreatedAt, StartedAt: row.StartedAt, FinishedAt: row.FinishedAt,
-		CurrentStage: model.Stage(row.CurrentStage),
-		RunType:      runType,
-		Version:      row.Version,
-		AttemptCount: row.AttemptCount,
+		CurrentStage:   model.Stage(row.CurrentStage),
+		RunType:        runType,
+		Version:        row.Version,
+		AttemptCount:   row.AttemptCount,
 		LeaseExpiresAt: row.LeaseExpiresAt,
 	}
 	if len(row.SyncManifests) > 0 && string(row.SyncManifests) != "null" {

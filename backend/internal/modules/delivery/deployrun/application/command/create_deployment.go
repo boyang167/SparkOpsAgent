@@ -15,25 +15,27 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/consumer"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
+	"gopkg.in/yaml.v3"
 )
 
 type CreateInput struct {
-	ClusterID     string               `json:"cluster_id"`
-	EnvironmentID string               `json:"environment_id"`
-	GitRefType    string               `json:"git_ref_type"`
-	GitRefValue   string               `json:"git_ref_value"`
-	ImageTag      string               `json:"image_tag"`
-	CrossCluster  bool                 `json:"cross_cluster"`
-	SyncOnly      bool                 `json:"sync_only"`
-	Manifests     []model.SyncManifest `json:"manifests"`
+	ClusterID       string               `json:"cluster_id"`
+	EnvironmentID   string               `json:"environment_id"`
+	GitRefType      string               `json:"git_ref_type"`
+	GitRefValue     string               `json:"git_ref_value"`
+	ImageTag        string               `json:"image_tag"`
+	ImageRepository string               `json:"image_repository"`
+	CrossCluster    bool                 `json:"cross_cluster"`
+	SyncOnly        bool                 `json:"sync_only"`
+	Manifests       []model.SyncManifest `json:"manifests"`
 }
 
 type CreateDeploymentHandler struct {
-	repo        repository.DeploymentRunRepository
-	reader      port.ProjectDeploymentReader
+	repo         repository.DeploymentRunRepository
+	reader       port.ProjectDeploymentReader
 	environments port.EnvironmentResolver
-	queue       messaging.Queue
-	clock       func() time.Time
+	queue        messaging.Queue
+	clock        func() time.Time
 }
 
 func NewCreateDeploymentHandler(
@@ -152,9 +154,18 @@ func (h *CreateDeploymentHandler) Handle(
 		run = model.NewDeploymentRun(wsID, projectID, deploymentContext.Cluster.ID, memberID,
 			gitRefType, gitRefValue, imageTag)
 		run.CrossCluster = input.CrossCluster
+		if len(input.Manifests) > 0 {
+			ns := firstNonEmpty(deployNamespace, deploymentContext.Namespace)
+			manifests := rewriteManifestNamespaces(input.Manifests, ns)
+			if err := model.ValidateSyncManifests(manifests, ns); err != nil {
+				return nil, err
+			}
+			run.SyncManifests = manifests
+		}
 	}
 	run.EnvironmentID = environmentID
 	run.DeployNamespace = deployNamespace
+	run.ImageRepository = strings.TrimSpace(input.ImageRepository)
 	run.CreatedAt = h.clock().UTC()
 	if err := h.repo.Create(ctx, run); err != nil {
 		return nil, err
@@ -259,4 +270,46 @@ func (h *AbortDeploymentHandler) Handle(
 		return nil, err
 	}
 	return run, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func rewriteManifestNamespaces(items []model.SyncManifest, namespace string) []model.SyncManifest {
+	ns := strings.TrimSpace(namespace)
+	out := make([]model.SyncManifest, 0, len(items))
+	for _, item := range items {
+		next := item
+		if ns != "" && strings.TrimSpace(item.YAML) != "" {
+			if rewritten, err := setManifestNamespace(item.YAML, ns); err == nil {
+				next.YAML = rewritten
+			}
+		}
+		out = append(out, next)
+	}
+	return out
+}
+
+func setManifestNamespace(raw, namespace string) (string, error) {
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
+		return "", err
+	}
+	metadata, _ := doc["metadata"].(map[string]any)
+	if metadata == nil {
+		metadata = map[string]any{}
+		doc["metadata"] = metadata
+	}
+	metadata["namespace"] = namespace
+	encoded, err := yaml.Marshal(doc)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }

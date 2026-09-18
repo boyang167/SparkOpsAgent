@@ -37,31 +37,32 @@ const (
 )
 
 type DeploymentRun struct {
-	ID               kernel.DeploymentRunID
-	WorkspaceID      kernel.WorkspaceID
-	ProjectID        kernel.ProjectID
-	ClusterID        kernel.ClusterInfoID
-	EnvironmentID    *kernel.EnvironmentID
-	DeployNamespace  string
-	BuildID          *kernel.BuildID
-	GitRefType       string
-	GitRefValue      string
-	ImageTag         string
-	CrossCluster     bool
-	SyncManifests    []SyncManifest
-	Status           Status
-	CurrentStage     Stage
-	RunType          RunType
-	RollbackOfRunID  *kernel.DeploymentRunID
-	ErrorMessage     string
-	CreatedBy        kernel.MemberID
-	CreatedAt        time.Time
-	StartedAt        *time.Time
-	FinishedAt       *time.Time
-	Version          int64
-	AttemptCount     int
-	LeaseOwner       string
-	LeaseExpiresAt   *time.Time
+	ID              kernel.DeploymentRunID
+	WorkspaceID     kernel.WorkspaceID
+	ProjectID       kernel.ProjectID
+	ClusterID       kernel.ClusterInfoID
+	EnvironmentID   *kernel.EnvironmentID
+	DeployNamespace string
+	BuildID         *kernel.BuildID
+	GitRefType      string
+	GitRefValue     string
+	ImageTag        string
+	ImageRepository string
+	CrossCluster    bool
+	SyncManifests   []SyncManifest
+	Status          Status
+	CurrentStage    Stage
+	RunType         RunType
+	RollbackOfRunID *kernel.DeploymentRunID
+	ErrorMessage    string
+	CreatedBy       kernel.MemberID
+	CreatedAt       time.Time
+	StartedAt       *time.Time
+	FinishedAt      *time.Time
+	Version         int64
+	AttemptCount    int
+	LeaseOwner      string
+	LeaseExpiresAt  *time.Time
 }
 
 type DeploymentRunEvent struct {
@@ -154,6 +155,7 @@ func NewRollbackDeploymentRun(
 		GitRefType:      target.GitRefType,
 		GitRefValue:     target.GitRefValue,
 		ImageTag:        target.ImageTag,
+		ImageRepository: target.ImageRepository,
 		CrossCluster:    target.CrossCluster,
 		Status:          StatusQueued,
 		RunType:         RunTypeRollback,
@@ -243,8 +245,8 @@ var validTransitions = map[Status]map[Status]bool{
 	StatusQueued: {
 		StatusPreparing: true,
 		StatusDeploying: true,
-		StatusFailed:      true,
-		StatusAborted:     true,
+		StatusFailed:    true,
+		StatusAborted:   true,
 	},
 	StatusPreparing: {
 		StatusBuilding: true,

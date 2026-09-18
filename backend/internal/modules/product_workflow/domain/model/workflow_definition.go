@@ -26,8 +26,9 @@ type WorkflowJob struct {
 }
 
 type ProjectBuildSpec struct {
-	ProjectID string `json:"project_id"`
-	Branch    string `json:"branch"`
+	ProjectID  string `json:"project_id"`
+	Branch     string `json:"branch"`
+	GitRefType string `json:"git_ref_type,omitempty"`
 }
 
 const (

@@ -155,6 +155,7 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			return o.handleProjectError(ctx, run, err)
 		}
 		deployacl.OverrideDeployNamespace(&project, run.DeployNamespace)
+		applyRunImageRepository(&project, run)
 		if err := o.prepare.Run(operationCtx, project, PrepareInput{
 			GitRefType: run.GitRefType, GitRefValue: run.GitRefValue,
 			ImageTag: run.ImageTag, ImageRepository: project.ImageRepository,
@@ -263,6 +264,7 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			return o.handleProjectError(ctx, run, err)
 		}
 		deployacl.OverrideDeployNamespace(&project, run.DeployNamespace)
+		applyRunImageRepository(&project, run)
 		if !(run.IsSyncOnly() && len(run.SyncManifests) > 0) {
 			if err := o.finalizeKubernetes(operationCtx, run, project); err != nil {
 				if operationCtx.Err() != nil {
@@ -391,6 +393,9 @@ func (o *Orchestrator) bootstrapKubernetes(
 	run *model.DeploymentRun,
 	project deployport.ProjectDeploymentContext,
 ) error {
+	if err := o.applyConfigManifests(ctx, run, project); err != nil {
+		return err
+	}
 	manifests, deploymentName, serviceName, err := o.renderManifests(ctx, project, run.ImageTag)
 	if err != nil {
 		return err
@@ -405,6 +410,9 @@ func (o *Orchestrator) finalizeKubernetes(
 	run *model.DeploymentRun,
 	project deployport.ProjectDeploymentContext,
 ) error {
+	if err := o.applyConfigManifests(ctx, run, project); err != nil {
+		return err
+	}
 	manifests, deploymentName, serviceName, err := o.renderManifests(ctx, project, run.ImageTag)
 	if err != nil {
 		return err
@@ -415,6 +423,18 @@ func (o *Orchestrator) finalizeKubernetes(
 		return err
 	}
 	return o.deployer.RolloutRestart(ctx, target)
+}
+
+func (o *Orchestrator) applyConfigManifests(
+	ctx context.Context,
+	run *model.DeploymentRun,
+	project deployport.ProjectDeploymentContext,
+) error {
+	if run.IsSyncOnly() || len(run.SyncManifests) == 0 {
+		return nil
+	}
+	_, err := o.applySyncManifests(ctx, run, project)
+	return err
 }
 
 func (o *Orchestrator) syncCrossClusterTargets(
@@ -441,6 +461,7 @@ func (o *Orchestrator) syncCrossClusterTargets(
 			_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("cross-cluster sync failed: %s (%v)", cluster.Name, err))
 			return fmt.Errorf("sync cluster %s: %w", cluster.Name, err)
 		}
+		applyRunImageRepository(&project, run)
 		if useSyncManifests {
 			applied, err := o.applySyncManifests(operationCtx, run, project)
 			if err != nil {
@@ -553,5 +574,14 @@ func (o *Orchestrator) resolveConcurrent(ctx context.Context, runID kernel.Deplo
 		return nil
 	default:
 		return updateErr
+	}
+}
+
+func applyRunImageRepository(project *deployport.ProjectDeploymentContext, run *model.DeploymentRun) {
+	if project == nil || run == nil {
+		return
+	}
+	if repo := strings.TrimSpace(run.ImageRepository); repo != "" {
+		project.ImageRepository = repo
 	}
 }

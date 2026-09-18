@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/persistence"
-	"github.com/google/uuid"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"gorm.io/gorm"
 )
@@ -59,14 +59,18 @@ func (h *CreateEnvironmentHandler) Handle(
 	if name == "" || namespace == "" || input.ClusterID.UUID == uuid.Nil {
 		return nil, domain.ErrInvalidEnvironmentInput
 	}
-	ok, err := persistence.ClusterAuthorized(ctx, h.db, wsID, input.ClusterID)
+	envType, ok := model.ParseEnvironmentType(input.EnvType)
+	if !ok {
+		return nil, domain.ErrInvalidEnvironmentInput
+	}
+	ok, err = persistence.ClusterAuthorized(ctx, h.db, wsID, input.ClusterID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, domain.ErrEnvironmentClusterNotAuthorized
 	}
-	env := model.NewEnvironment(productID, wsID, name, namespace, input.EnvType, input.ClusterID, input.Variables, actor)
+	env := model.NewEnvironment(productID, wsID, name, namespace, envType, input.ClusterID, input.Variables, actor)
 	if err := h.environments.SaveEnvironment(ctx, env); err != nil {
 		return nil, err
 	}
@@ -152,7 +156,11 @@ func (h *UpdateEnvironmentHandler) Handle(
 		env.Name = strings.TrimSpace(*input.Name)
 	}
 	if input.EnvType != nil {
-		env.EnvType = *input.EnvType
+		envType, ok := model.ParseEnvironmentType(*input.EnvType)
+		if !ok {
+			return nil, domain.ErrInvalidEnvironmentInput
+		}
+		env.EnvType = envType
 	}
 	if input.ClusterID != nil {
 		ok, checkErr := persistence.ClusterAuthorized(ctx, h.db, wsID, *input.ClusterID)

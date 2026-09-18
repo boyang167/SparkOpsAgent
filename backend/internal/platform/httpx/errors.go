@@ -25,7 +25,7 @@ func HandleError(c *gin.Context, err error) {
 			status = http.StatusConflict
 		case "IDENTITY_CANNOT_MODIFY_SELF", "IDENTITY_CANNOT_DELETE_SELF", "IDENTITY_LAST_SUPER_ADMIN":
 			status = http.StatusForbidden
-		case "AUTH_FORBIDDEN", "PROJECT_ACCESS_DENIED", "PROJECT_REVIEW_SELF":
+		case "AUTH_FORBIDDEN", "PROJECT_ACCESS_DENIED", "PROJECT_REVIEW_SELF", "PRODUCT_WORKFLOW_HOOK_REJECTED":
 			status = http.StatusForbidden
 		case "GOVERNANCE_ROLE_NOT_FOUND", "GOVERNANCE_BINDING_NOT_FOUND", "GOVERNANCE_MENU_NOT_FOUND":
 			status = http.StatusNotFound
@@ -49,11 +49,13 @@ func HandleError(c *gin.Context, err error) {
 			status = http.StatusForbidden
 		case "DELIVERY_PROJECT_NOT_ACTIVE", "DELIVERY_BUILD_RUNNING", "DELIVERY_BUILD_NOT_RUNNING", "DELIVERY_BUILD_NOT_ROLLBACKABLE":
 			status = http.StatusBadRequest
-		case "DELIVERY_DEPLOYMENT_RUNNING":
+		case "DELIVERY_DEPLOYMENT_RUNNING", "PRODUCT_WORKFLOW_RUN_BUSY":
 			status = http.StatusConflict
 		case "DELIVERY_DEPLOYMENT_NOT_FOUND":
 			status = http.StatusNotFound
 		case "DELIVERY_DEPLOYMENT_CLUSTER_NOT_AUTHORIZED", "DELIVERY_KUBECONFIG_MISSING", "DELIVERY_DEPLOYMENT_BINDING_MISSING", "DELIVERY_PROJECT_NOT_APPROVED", "DELIVERY_DEPLOYMENT_CLUSTER_NOT_FOUND":
+			status = http.StatusBadRequest
+		case "PRODUCT_WORKFLOW_VARIABLE_REQUIRED":
 			status = http.StatusBadRequest
 		case "K8S_POD_NOT_FOUND":
 			status = http.StatusNotFound

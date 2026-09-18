@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { platform, product, workspace } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { AuthorizedClusterVM } from "@sparkops/contracts/delivery";
-import type { EnvironmentStatusVM, EnvironmentVM, ProductProjectVM } from "@sparkops/contracts/product";
+import type { EnvironmentStatusVM, EnvironmentVM, ProductEnvironmentType, ProductProjectVM } from "@sparkops/contracts/product";
+import { environmentRequiresApproval, environmentTypeBadgeClass, environmentTypeLabel } from "@sparkops/contracts/product";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
@@ -202,7 +203,7 @@ export function EnvironmentsPanel({ workspaceId, productId }: EnvironmentsPanelP
 
   async function onCreate(values: {
     name: string;
-    env_type: "test" | "production";
+    env_type: ProductEnvironmentType;
     cluster_id: string;
     namespace: string;
     project_ids: string[];
@@ -378,7 +379,9 @@ export function EnvironmentsPanel({ workspaceId, productId }: EnvironmentsPanelP
                   onClick={() => setSelectedId(env.id)}
                 >
                   <span className="product-env-tab-name">{env.name}</span>
-                  {env.env_type === "production" ? <span className="product-env-tab-tag">生产</span> : null}
+                  {environmentRequiresApproval(env.env_type) ? (
+                    <span className="product-env-tab-tag">{environmentTypeLabel(env.env_type)}</span>
+                  ) : null}
                 </button>
               );
             })}
@@ -399,8 +402,8 @@ export function EnvironmentsPanel({ workspaceId, productId }: EnvironmentsPanelP
               <header className="product-env-summary-top">
                 <div className="product-env-summary-identity">
                   <h2 className="product-env-summary-name">{selected.name}</h2>
-                  <span className={`badge ${selected.env_type === "production" ? "badge-warning" : "badge-primary"}`}>
-                    {selected.env_type === "production" ? "生产" : "测试"}
+                  <span className={`badge ${environmentTypeBadgeClass(selected.env_type)}`}>
+                    {environmentTypeLabel(selected.env_type)}
                   </span>
                   <span className={`product-env-status${envRunning ? " is-running" : " is-stopped"}`}>
                     <span className="product-env-status-dot" aria-hidden />
@@ -751,7 +754,7 @@ function GenerateEnvironmentsModal({
                         {item.name} · {item.cluster_name}/{item.namespace}
                       </span>
                       <span className="product-bind-item-sub">
-                        {item.project_labels.join("、")} · {item.env_type === "production" ? "生产" : "测试"}
+                        {item.project_labels.join("、")} · {environmentTypeLabel(item.env_type)}
                       </span>
                       {exists ? <span className="product-bind-item-tag">已存在相同集群/Namespace</span> : null}
                     </span>

@@ -101,6 +101,18 @@ func TestBuildParamsOrdinaryBuildCarriesImageRepositoryOverride(t *testing.T) {
 	require.NotContains(t, params, "CodeVersion")
 }
 
+func TestBuildParamsOrdinaryBuildCarriesImageTag(t *testing.T) {
+	params := buildParams(port.BuildRequest{
+		Job:         "orders-build",
+		GitRefValue: "feature/login",
+		ImageTag:    "feature-login",
+	})
+
+	require.Equal(t, "feature-login", params["IMAGE_TAG"])
+	require.NotContains(t, params, "IMAGE_REPOSITORY")
+	require.NotContains(t, params, "CodeVersion")
+}
+
 func TestCreateOrUpdateCreatesFolderThenCreatesAndUpdatesJobAndCredential(t *testing.T) {
 	const credentialID = "sparkops-workspace-secret"
 	var folderExists, jobExists, credentialExists bool

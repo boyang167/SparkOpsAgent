@@ -164,6 +164,9 @@ func TestTriggerAutomatedBuildPassesImageRepositoryOverride(t *testing.T) {
 		kernel.NewProjectID(),
 		"release",
 		"harbor.example/team-a/orders",
+		"",
+		"",
+		nil,
 	)
 	require.NoError(t, err)
 

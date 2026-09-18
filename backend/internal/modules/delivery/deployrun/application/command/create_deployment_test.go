@@ -318,6 +318,26 @@ func TestCreateDeploymentDefaultsImageTagAndPublishes(t *testing.T) {
 	require.Len(t, queue.payloads, 1)
 }
 
+func TestCreateDeploymentAttachesConfigManifestsOnNormalRun(t *testing.T) {
+	wsID, projectID, clusterID := kernel.NewWorkspaceID(), kernel.NewProjectID(), kernel.NewClusterInfoID()
+	repo, queue := &fakeRunRepo{}, &recordingQueue{}
+	handler := NewCreateDeploymentHandler(repo, approvedReader(wsID, projectID, clusterID), queue, time.Now)
+
+	run, err := handler.Handle(context.Background(), wsID, kernel.NewMemberID(), projectID, CreateInput{
+		GitRefType: "branch", GitRefValue: "main", ImageTag: "main",
+		Manifests: []model.SyncManifest{{
+			Kind: model.SyncManifestKindConfigMap,
+			Name: "app-config",
+			YAML: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-config\n",
+		}},
+	})
+
+	require.NoError(t, err)
+	require.False(t, run.IsSyncOnly())
+	require.Len(t, run.SyncManifests, 1)
+	require.Equal(t, "app-config", run.SyncManifests[0].Name)
+}
+
 func TestCreateDeploymentPublishFailureMarksRunFailed(t *testing.T) {
 	wsID, projectID, clusterID := kernel.NewWorkspaceID(), kernel.NewProjectID(), kernel.NewClusterInfoID()
 	repo := &fakeRunRepo{}

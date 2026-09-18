@@ -313,3 +313,10 @@ auth:
     user_search_base: ou=users,dc=example,dc=com
     user_search_filter: "(uid=%s)"
 ```
+
+GitLab 自动注册 Project Hook
+变量插进 ConfigMap/Secret YAML
+加密变量、Vault
+超时杀任务、调试断点
+PR 评论 / 检查状态回写 GitLab
+邮件、飞书成员补发

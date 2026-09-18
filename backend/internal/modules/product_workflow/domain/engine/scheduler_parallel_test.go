@@ -33,6 +33,12 @@ func (r *updateOnlyRepo) ListWorkflowsByProduct(context.Context, kernel.ProductI
 func (r *updateOnlyRepo) ListWorkflowsByWorkspace(context.Context, kernel.WorkspaceID) ([]*model.ProductWorkflow, error) {
 	return nil, nil
 }
+func (r *updateOnlyRepo) ListAllWorkflows(context.Context) ([]*model.ProductWorkflow, error) {
+	return nil, nil
+}
+func (r *updateOnlyRepo) CountActiveRuns(context.Context, kernel.ProductWorkflowID) (int64, error) {
+	return 0, nil
+}
 func (r *updateOnlyRepo) SaveRun(context.Context, *model.ProductWorkflowRun) error { return nil }
 func (r *updateOnlyRepo) FindRunByID(context.Context, kernel.ProductWorkflowRunID) (*model.ProductWorkflowRun, error) {
 	return nil, nil

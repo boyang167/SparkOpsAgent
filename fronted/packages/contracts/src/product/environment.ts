@@ -1,5 +1,30 @@
 import { z } from "zod";
 
+export const PRODUCT_ENVIRONMENT_TYPES = [
+  { id: "dev", label: "开发" },
+  { id: "test", label: "测试" },
+  { id: "staging", label: "预发" },
+  { id: "production", label: "生产" },
+] as const;
+
+export const ProductEnvironmentTypeSchema = z.enum(["dev", "test", "staging", "production"]);
+export type ProductEnvironmentType = z.infer<typeof ProductEnvironmentTypeSchema>;
+
+export function environmentTypeLabel(type: string | undefined): string {
+  return PRODUCT_ENVIRONMENT_TYPES.find((item) => item.id === type)?.label || "测试";
+}
+
+export function environmentTypeBadgeClass(type: string | undefined): string {
+  if (type === "production") return "badge-warning";
+  if (type === "staging") return "badge-primary";
+  if (type === "dev") return "badge-neutral";
+  return "badge-primary";
+}
+
+export function environmentRequiresApproval(type: string | undefined): boolean {
+  return type === "staging" || type === "production";
+}
+
 export const EnvironmentVMSchema = z.object({
   id: z.string(),
   product_id: z.string(),
@@ -38,7 +63,7 @@ export type EnvironmentStatusVM = z.infer<typeof EnvironmentStatusVMSchema>;
 
 export const CreateEnvironmentCommandSchema = z.object({
   name: z.string().min(1),
-  env_type: z.enum(["test", "production"]).optional(),
+  env_type: ProductEnvironmentTypeSchema.optional(),
   cluster_id: z.string().min(1),
   namespace: z.string().min(1),
   variables: z.record(z.string()).optional(),
@@ -49,7 +74,7 @@ export type CreateEnvironmentCommand = z.infer<typeof CreateEnvironmentCommandSc
 
 export const UpdateEnvironmentCommandSchema = z.object({
   name: z.string().min(1).optional(),
-  env_type: z.enum(["test", "production"]).optional(),
+  env_type: ProductEnvironmentTypeSchema.optional(),
   cluster_id: z.string().optional(),
   namespace: z.string().optional(),
   variables: z.record(z.string()).optional(),

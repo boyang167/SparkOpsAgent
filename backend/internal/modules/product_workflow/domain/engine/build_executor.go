@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	deploymodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
@@ -67,26 +68,30 @@ func (e *BuildExecutor) RunJob(
 			if err != nil {
 				jobRun.Status = model.JobRunStatusFailed
 				jobRun.ErrorMessage = err.Error()
-				jobRun.Builds = append(jobRun.Builds, model.ProjectBuildRun{
-					ProjectID: spec.ProjectID, Branch: branch, Status: model.JobRunStatusFailed, ErrorMessage: err.Error(),
-				})
+				jobRun.Builds = append(jobRun.Builds, failedBuildRun(spec, branch, err.Error()))
 				return err
 			}
 			repoPath = resolved
 		}
+		imageTag := deploymodel.DefaultImageTag(branch)
+		gitRefType := normalizeGitRefType(spec.GitRefType)
 		buildID, err := e.trigger.TriggerAutomatedBuild(ctx, appctx.AutomatedBuildRequest{
-			ProjectID: projectID, Branch: branch, ImageRepository: repoPath,
+			ProjectID: projectID, Branch: branch, ImageRepository: repoPath, ImageTag: imageTag, GitRefType: gitRefType,
+			Variables: VariablesFromRun(run),
 		})
 		if err != nil {
 			jobRun.Status = model.JobRunStatusFailed
 			jobRun.ErrorMessage = err.Error()
-			jobRun.Builds = append(jobRun.Builds, model.ProjectBuildRun{
-				ProjectID: spec.ProjectID, Branch: branch, Status: model.JobRunStatusFailed, ErrorMessage: err.Error(),
-			})
+			failed := failedBuildRun(spec, branch, err.Error())
+			failed.ImageTag = imageTag
+			failed.ImageRepository = repoPath
+			jobRun.Builds = append(jobRun.Builds, failed)
 			return err
 		}
 		jobRun.Builds = append(jobRun.Builds, model.ProjectBuildRun{
-			ProjectID: spec.ProjectID, Branch: branch, BuildID: buildID.String(), Status: model.JobRunStatusRunning,
+			ProjectID: spec.ProjectID, Branch: branch, GitRefType: normalizeGitRefType(spec.GitRefType),
+			ImageTag: imageTag, ImageRepository: repoPath,
+			BuildID: buildID.String(), Status: model.JobRunStatusRunning,
 		})
 		if err := e.repo.SaveBuildRef(ctx, &model.WorkflowBuildRef{
 			BuildID: buildID, RunID: run.ID, JobName: job.Name, ProjectID: projectID,
@@ -122,10 +127,11 @@ func parseProjectBuilds(spec map[string]any) []model.ProjectBuildSpec {
 		}
 		pid, _ := m["project_id"].(string)
 		branch, _ := m["branch"].(string)
+		refType, _ := m["git_ref_type"].(string)
 		if pid == "" {
 			continue
 		}
-		out = append(out, model.ProjectBuildSpec{ProjectID: pid, Branch: branch})
+		out = append(out, model.ProjectBuildSpec{ProjectID: pid, Branch: branch, GitRefType: refType})
 	}
 	return out
 }
@@ -153,4 +159,18 @@ func ImageRepositoryPath(registryURL, namespace, projectName string) string {
 		return strings.ToLower(strings.Trim(host, "/"))
 	}
 	return strings.ToLower(strings.Trim(host, "/")) + "/" + ns + "/" + name
+}
+
+func normalizeGitRefType(gitRefType string) string {
+	if strings.TrimSpace(gitRefType) == "tag" {
+		return "tag"
+	}
+	return "branch"
+}
+
+func failedBuildRun(spec model.ProjectBuildSpec, branch, message string) model.ProjectBuildRun {
+	return model.ProjectBuildRun{
+		ProjectID: spec.ProjectID, Branch: branch, GitRefType: normalizeGitRefType(spec.GitRefType),
+		Status: model.JobRunStatusFailed, ErrorMessage: message,
+	}
 }

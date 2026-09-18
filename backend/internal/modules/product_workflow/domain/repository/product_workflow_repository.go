@@ -14,6 +14,8 @@ type ProductWorkflowRepository interface {
 	FindWorkflowByID(ctx context.Context, id kernel.ProductWorkflowID) (*model.ProductWorkflow, error)
 	ListWorkflowsByProduct(ctx context.Context, productID kernel.ProductID) ([]*model.ProductWorkflow, error)
 	ListWorkflowsByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) ([]*model.ProductWorkflow, error)
+	ListAllWorkflows(ctx context.Context) ([]*model.ProductWorkflow, error)
+	CountActiveRuns(ctx context.Context, workflowID kernel.ProductWorkflowID) (int64, error)
 
 	SaveRun(ctx context.Context, run *model.ProductWorkflowRun) error
 	UpdateRun(ctx context.Context, run *model.ProductWorkflowRun) error

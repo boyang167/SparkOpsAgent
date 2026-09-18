@@ -196,7 +196,11 @@ export function ProductWorkflowsPanel({
     }
   }
 
-  async function onStartRun(input: { branch?: string; environment_overrides?: Record<string, string> }) {
+  async function onStartRun(input: {
+    branch?: string;
+    environment_overrides?: Record<string, string>;
+    variables?: Record<string, string>;
+  }) {
     if (!selectedWorkflowId) return;
     setBusy(true);
     setError(null);

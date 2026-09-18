@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -89,13 +90,13 @@ func (r *ProductWorkflowRepository) SaveWorkflow(ctx context.Context, wf *model.
 }
 
 func (r *ProductWorkflowRepository) UpdateWorkflow(ctx context.Context, wf *model.ProductWorkflow) error {
-	stages, err := json.Marshal(wf.Stages)
+	stages, err := marshalWorkflowDocument(wf)
 	if err != nil {
 		return err
 	}
 	return r.db.WithContext(ctx).Model(&productWorkflowModel{}).Where("id = ?", wf.ID.String()).Updates(map[string]any{
 		"name": wf.Name, "description": wf.Description, "status": wf.Status,
-		"stages": string(stages), "updated_at": time.Now().UTC(),
+		"stages": stages, "updated_at": time.Now().UTC(),
 	}).Error
 }
 
@@ -147,6 +148,31 @@ func (r *ProductWorkflowRepository) ListWorkflowsByProduct(ctx context.Context, 
 		out = append(out, wf)
 	}
 	return out, nil
+}
+
+func (r *ProductWorkflowRepository) ListAllWorkflows(ctx context.Context) ([]*model.ProductWorkflow, error) {
+	var rows []productWorkflowModel
+	err := r.db.WithContext(ctx).Order("created_at DESC").Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*model.ProductWorkflow, 0, len(rows))
+	for _, row := range rows {
+		wf, err := rowToWorkflow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, wf)
+	}
+	return out, nil
+}
+
+func (r *ProductWorkflowRepository) CountActiveRuns(ctx context.Context, workflowID kernel.ProductWorkflowID) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&productWorkflowRunModel{}).
+		Where("workflow_id = ? AND status IN ?", workflowID.String(), []string{"pending", "running", "paused"}).
+		Count(&count).Error
+	return count, err
 }
 
 func (r *ProductWorkflowRepository) SaveRun(ctx context.Context, run *model.ProductWorkflowRun) error {
@@ -259,7 +285,7 @@ func (r *ProductWorkflowRepository) FindRunByDeploymentID(ctx context.Context, d
 }
 
 func toWorkflowModel(wf *model.ProductWorkflow) (productWorkflowModel, error) {
-	stages, err := json.Marshal(wf.Stages)
+	stages, err := marshalWorkflowDocument(wf)
 	if err != nil {
 		return productWorkflowModel{}, err
 	}
@@ -274,7 +300,7 @@ func toWorkflowModel(wf *model.ProductWorkflow) (productWorkflowModel, error) {
 	return productWorkflowModel{
 		ID: wf.ID.String(), ProductID: wf.ProductID.String(), WorkspaceID: wf.WorkspaceID.String(),
 		Name: wf.Name, Key: wf.Key, Description: wf.Description, Status: string(wf.Status),
-		Stages: string(stages), TemplateBinding: tb, Origin: origin, CreatedBy: wf.CreatedBy.String(),
+		Stages: stages, TemplateBinding: tb, Origin: origin, CreatedBy: wf.CreatedBy.String(),
 		AuditColumns: postgres.AuditColumns{CreatedAt: wf.CreatedAt, UpdatedAt: wf.UpdatedAt},
 	}, nil
 }
@@ -296,23 +322,81 @@ func rowToWorkflow(row productWorkflowModel) (*model.ProductWorkflow, error) {
 	if err != nil {
 		return nil, err
 	}
-	var stages []model.WorkflowStage
-	if row.Stages != "" {
-		var wrapper struct {
-			Stages []model.WorkflowStage `json:"stages"`
-		}
-		if err := json.Unmarshal([]byte(row.Stages), &wrapper); err == nil && len(wrapper.Stages) > 0 {
-			stages = wrapper.Stages
-		} else {
-			_ = json.Unmarshal([]byte(row.Stages), &stages)
-		}
-	}
+	stages, notifications, variables, triggers, advanced := parseWorkflowDocument(row.Stages)
 	return &model.ProductWorkflow{
 		ID: id, ProductID: productID, WorkspaceID: wsID, Name: row.Name, Key: row.Key,
 		Description: row.Description, Status: model.WorkflowStatus(row.Status), Stages: stages,
+		Notifications: notifications, Variables: variables, Triggers: triggers, Advanced: advanced,
 		TemplateBinding: json.RawMessage(row.TemplateBinding), Origin: json.RawMessage(row.Origin),
 		CreatedBy: createdBy, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}, nil
+}
+
+func marshalWorkflowDocument(wf *model.ProductWorkflow) (string, error) {
+	stages := wf.Stages
+	if stages == nil {
+		stages = []model.WorkflowStage{}
+	}
+	notes := wf.Notifications
+	if notes == nil {
+		notes = []model.WorkflowNotification{}
+	}
+	variables := wf.Variables
+	if variables == nil {
+		variables = []model.WorkflowVariable{}
+	}
+	triggers := wf.Triggers
+	if triggers == nil {
+		triggers = []model.WorkflowTrigger{}
+	}
+	advanced := model.NormalizeAdvanced(wf.Advanced)
+	raw, err := json.Marshal(struct {
+		Stages        []model.WorkflowStage        `json:"stages"`
+		Notifications []model.WorkflowNotification `json:"notifications"`
+		Variables     []model.WorkflowVariable     `json:"variables"`
+		Triggers      []model.WorkflowTrigger      `json:"triggers"`
+		Advanced      model.WorkflowAdvanced       `json:"advanced"`
+	}{Stages: stages, Notifications: notes, Variables: variables, Triggers: triggers, Advanced: advanced})
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func parseWorkflowDocument(raw string) ([]model.WorkflowStage, []model.WorkflowNotification, []model.WorkflowVariable, []model.WorkflowTrigger, model.WorkflowAdvanced) {
+	advanced := model.DefaultAdvanced()
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return nil, []model.WorkflowNotification{}, []model.WorkflowVariable{}, []model.WorkflowTrigger{}, advanced
+	}
+	if strings.HasPrefix(raw, "[") {
+		var stages []model.WorkflowStage
+		_ = json.Unmarshal([]byte(raw), &stages)
+		return stages, []model.WorkflowNotification{}, []model.WorkflowVariable{}, []model.WorkflowTrigger{}, advanced
+	}
+	var doc struct {
+		Stages        []model.WorkflowStage         `json:"stages"`
+		Notifications []model.WorkflowNotification  `json:"notifications"`
+		Variables     []model.WorkflowVariable      `json:"variables"`
+		Triggers      []model.WorkflowTrigger       `json:"triggers"`
+		Advanced      *model.WorkflowAdvanced       `json:"advanced"`
+	}
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		return nil, []model.WorkflowNotification{}, []model.WorkflowVariable{}, []model.WorkflowTrigger{}, advanced
+	}
+	if doc.Notifications == nil {
+		doc.Notifications = []model.WorkflowNotification{}
+	}
+	if doc.Variables == nil {
+		doc.Variables = []model.WorkflowVariable{}
+	}
+	if doc.Triggers == nil {
+		doc.Triggers = []model.WorkflowTrigger{}
+	}
+	if doc.Advanced != nil {
+		advanced = model.NormalizeAdvanced(*doc.Advanced)
+	}
+	return doc.Stages, doc.Notifications, doc.Variables, doc.Triggers, advanced
 }
 
 func toRunModel(run *model.ProductWorkflowRun) (productWorkflowRunModel, error) {

@@ -111,7 +111,8 @@ func (h *GetProductWorkflowHandler) Handle(ctx context.Context, wsID kernel.Work
 	return map[string]any{
 		"id": wf.ID.String(), "product_id": wf.ProductID.String(), "workspace_id": wf.WorkspaceID.String(),
 		"name": wf.Name, "key": wf.Key, "description": wf.Description, "status": wf.Status,
-		"stages": wf.Stages, "stage_count": len(wf.Stages),
+		"stages": wf.Stages, "notifications": wf.Notifications, "stage_count": len(wf.Stages),
+		"variables": wf.Variables, "triggers": wf.Triggers, "advanced": wf.Advanced,
 		"created_at": wf.CreatedAt.Format(time.RFC3339), "updated_at": wf.UpdatedAt.Format(time.RFC3339),
 	}, nil
 }

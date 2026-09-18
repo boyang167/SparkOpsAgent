@@ -19,6 +19,47 @@ export const WorkflowStageVMSchema = z.object({
 
 export type WorkflowStageVM = z.infer<typeof WorkflowStageVMSchema>;
 
+export const WorkflowNotificationVMSchema = z.object({
+  id: z.string(),
+  enabled: z.boolean().optional().default(true),
+  events: z.array(z.string()).default([]),
+  channel: z.string(),
+  webhook_url: z.string().optional().default(""),
+  targets: z.string().optional().default(""),
+});
+
+export type WorkflowNotificationVM = z.infer<typeof WorkflowNotificationVMSchema>;
+
+export const WorkflowVariableVMSchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  value: z.string().optional().default(""),
+  description: z.string().optional().default(""),
+  runtime_input: z.boolean().optional().default(false),
+});
+
+export type WorkflowVariableVM = z.infer<typeof WorkflowVariableVMSchema>;
+
+export const WorkflowTriggerVMSchema = z.object({
+  id: z.string(),
+  type: z.enum(["git", "webhook", "cron"]),
+  enabled: z.boolean().optional().default(true),
+  project_id: z.string().optional().default(""),
+  events: z.array(z.string()).optional().default([]),
+  branch_filter: z.string().optional().default(""),
+  token: z.string().optional().default(""),
+  schedule: z.string().optional().default(""),
+});
+
+export type WorkflowTriggerVM = z.infer<typeof WorkflowTriggerVMSchema>;
+
+export const WorkflowAdvancedVMSchema = z.object({
+  concurrency: z.number().int().optional().default(1),
+  timeout_minutes: z.number().int().optional().default(0),
+});
+
+export type WorkflowAdvancedVM = z.infer<typeof WorkflowAdvancedVMSchema>;
+
 export const ProductWorkflowVMSchema = z.object({
   id: z.string(),
   product_id: z.string(),
@@ -28,6 +69,10 @@ export const ProductWorkflowVMSchema = z.object({
   stage_count: z.number().int(),
   description: z.string().optional(),
   stages: z.array(WorkflowStageVMSchema).optional(),
+  notifications: z.array(WorkflowNotificationVMSchema).optional().default([]),
+  variables: z.array(WorkflowVariableVMSchema).optional().default([]),
+  triggers: z.array(WorkflowTriggerVMSchema).optional().default([]),
+  advanced: WorkflowAdvancedVMSchema.optional(),
   created_at: z.string().optional(),
   updated_at: z.string().optional(),
 });
@@ -132,6 +177,10 @@ export const UpdateProductWorkflowCommandSchema = z.object({
   description: z.string().optional(),
   status: z.enum(["draft", "active"]).optional(),
   stages: z.array(WorkflowStageVMSchema).optional(),
+  notifications: z.array(WorkflowNotificationVMSchema).optional(),
+  variables: z.array(WorkflowVariableVMSchema).optional(),
+  triggers: z.array(WorkflowTriggerVMSchema).optional(),
+  advanced: WorkflowAdvancedVMSchema.optional(),
 });
 
 export type UpdateProductWorkflowCommand = z.infer<typeof UpdateProductWorkflowCommandSchema>;
@@ -141,6 +190,7 @@ export const StartProductWorkflowRunCommandSchema = z.object({
     .object({
       branch: z.string().optional(),
       environment_overrides: z.record(z.string()).optional(),
+      variables: z.record(z.string()).optional(),
     })
     .optional(),
 });

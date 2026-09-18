@@ -44,6 +44,7 @@ type BuildRequest struct {
 	GitRefValue     string
 	ImageTag        string
 	ImageRepository string
+	Variables       map[string]string
 	RollbackOf      int
 	Timeout         time.Duration
 	Credentials     []JenkinsCredential

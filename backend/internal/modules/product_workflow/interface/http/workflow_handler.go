@@ -56,14 +56,102 @@ type createBlankWorkflowRequest struct {
 }
 
 type updateWorkflowRequest struct {
-	Name        *string            `json:"name"`
-	Description *string            `json:"description"`
-	Status      *string            `json:"status"`
-	Stages      []workflowStageDTO `json:"stages"`
+	Name          *string                    `json:"name"`
+	Description   *string                    `json:"description"`
+	Status        *string                    `json:"status"`
+	Stages        []workflowStageDTO         `json:"stages"`
+	Notifications *[]workflowNotificationDTO `json:"notifications"`
+	Variables     *[]workflowVariableDTO     `json:"variables"`
+	Triggers      *[]workflowTriggerDTO      `json:"triggers"`
+	Advanced      *workflowAdvancedDTO       `json:"advanced"`
 }
 
 type startWorkflowRunRequest struct {
 	Input map[string]any `json:"input"`
+}
+
+type workflowNotificationDTO struct {
+	ID         string   `json:"id"`
+	Enabled    *bool    `json:"enabled"`
+	Events     []string `json:"events"`
+	Channel    string   `json:"channel"`
+	WebhookURL string   `json:"webhook_url"`
+	Targets    string   `json:"targets"`
+}
+
+type workflowVariableDTO struct {
+	ID           string `json:"id"`
+	Key          string `json:"key"`
+	Value        string `json:"value"`
+	Description  string `json:"description"`
+	RuntimeInput bool   `json:"runtime_input"`
+}
+
+type workflowTriggerDTO struct {
+	ID           string   `json:"id"`
+	Type         string   `json:"type"`
+	Enabled      *bool    `json:"enabled"`
+	ProjectID    string   `json:"project_id"`
+	Events       []string `json:"events"`
+	BranchFilter string   `json:"branch_filter"`
+	Token        string   `json:"token"`
+	Schedule     string   `json:"schedule"`
+}
+
+type workflowAdvancedDTO struct {
+	Concurrency    int `json:"concurrency"`
+	TimeoutMinutes int `json:"timeout_minutes"`
+}
+
+func dtoToNotifications(items []workflowNotificationDTO) []model.WorkflowNotification {
+	out := make([]model.WorkflowNotification, 0, len(items))
+	for _, item := range items {
+		out = append(out, model.WorkflowNotification{
+			ID: item.ID, Enabled: item.Enabled, Events: item.Events, Channel: item.Channel, WebhookURL: item.WebhookURL, Targets: item.Targets,
+		})
+	}
+	return out
+}
+
+func dtoToVariables(items []workflowVariableDTO) []model.WorkflowVariable {
+	out := make([]model.WorkflowVariable, 0, len(items))
+	for _, item := range items {
+		out = append(out, model.WorkflowVariable{
+			ID: item.ID, Key: item.Key, Value: item.Value, Description: item.Description, RuntimeInput: item.RuntimeInput,
+		})
+	}
+	return out
+}
+
+func dtoToTriggers(items []workflowTriggerDTO) []model.WorkflowTrigger {
+	out := make([]model.WorkflowTrigger, 0, len(items))
+	for _, item := range items {
+		out = append(out, model.WorkflowTrigger{
+			ID: item.ID, Type: item.Type, Enabled: item.Enabled, ProjectID: item.ProjectID,
+			Events: item.Events, BranchFilter: item.BranchFilter, Token: item.Token, Schedule: item.Schedule,
+		})
+	}
+	return out
+}
+
+func workflowPayload(wf *model.ProductWorkflow) gin.H {
+	variables := wf.Variables
+	if variables == nil {
+		variables = []model.WorkflowVariable{}
+	}
+	triggers := wf.Triggers
+	if triggers == nil {
+		triggers = []model.WorkflowTrigger{}
+	}
+	notes := wf.Notifications
+	if notes == nil {
+		notes = []model.WorkflowNotification{}
+	}
+	advanced := wf.Advanced
+	return gin.H{
+		"id": wf.ID.String(), "name": wf.Name, "key": wf.Key, "status": wf.Status,
+		"stages": wf.Stages, "notifications": notes, "variables": variables, "triggers": triggers, "advanced": advanced,
+	}
 }
 
 func dtoToStages(items []workflowStageDTO) []model.WorkflowStage {
@@ -147,9 +235,7 @@ func (h *Handler) CreateBlankWorkflow(c *gin.Context) {
 		httpx.HandleError(c, err)
 		return
 	}
-	httpx.OK(c, gin.H{
-		"id": wf.ID.String(), "name": wf.Name, "key": wf.Key, "status": wf.Status, "stages": wf.Stages,
-	})
+	httpx.OK(c, workflowPayload(wf))
 }
 
 func (h *Handler) UpdateProductWorkflow(c *gin.Context) {
@@ -176,14 +262,28 @@ func (h *Handler) UpdateProductWorkflow(c *gin.Context) {
 	if req.Stages != nil {
 		input.Stages = dtoToStages(req.Stages)
 	}
+	if req.Notifications != nil {
+		notes := dtoToNotifications(*req.Notifications)
+		input.Notifications = &notes
+	}
+	if req.Variables != nil {
+		variables := dtoToVariables(*req.Variables)
+		input.Variables = &variables
+	}
+	if req.Triggers != nil {
+		triggers := dtoToTriggers(*req.Triggers)
+		input.Triggers = &triggers
+	}
+	if req.Advanced != nil {
+		advanced := model.WorkflowAdvanced{Concurrency: req.Advanced.Concurrency, TimeoutMinutes: req.Advanced.TimeoutMinutes}
+		input.Advanced = &advanced
+	}
 	wf, err := h.workflows.Update.Handle(c.Request.Context(), wsID, productID, workflowID, input)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
 	}
-	httpx.OK(c, gin.H{
-		"id": wf.ID.String(), "name": wf.Name, "key": wf.Key, "status": wf.Status, "stages": wf.Stages,
-	})
+	httpx.OK(c, workflowPayload(wf))
 }
 
 func (h *Handler) DeleteProductWorkflow(c *gin.Context) {
