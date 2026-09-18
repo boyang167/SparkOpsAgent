@@ -65,11 +65,23 @@ func (h *TriggerBuildHandler) TriggerAutomated(
 	projectID kernel.ProjectID,
 	branch string,
 ) (*model.Build, error) {
+	return h.TriggerAutomatedBuild(ctx, projectID, branch, "")
+}
+
+func (h *TriggerBuildHandler) TriggerAutomatedBuild(
+	ctx context.Context,
+	projectID kernel.ProjectID,
+	branch string,
+	imageRepository string,
+) (*model.Build, error) {
 	auto, err := h.checker.ProjectAutomationContext(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return h.trigger(ctx, auto.WorkspaceID, auto.MemberID, projectID, port.BuildRequest{GitRefValue: branch}, false, nil)
+	return h.trigger(ctx, auto.WorkspaceID, auto.MemberID, projectID, port.BuildRequest{
+		GitRefValue:     branch,
+		ImageRepository: strings.TrimSpace(imageRepository),
+	}, false, nil)
 }
 
 func (h *TriggerBuildHandler) TriggerDeployment(

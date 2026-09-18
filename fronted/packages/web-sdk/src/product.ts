@@ -283,6 +283,43 @@ export async function listProductWorkflows(workspaceId: string, productId: strin
   return data.items;
 }
 
+export function getProductWorkflow(workspaceId: string, productId: string, workflowId: string) {
+  return bffFetch<import("@sparkops/contracts/product").ProductWorkflowVM>(
+    `/workspaces/${workspaceId}/products/${productId}/workflows/${workflowId}`,
+    { workspaceId },
+  );
+}
+
+export function createBlankProductWorkflow(
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").CreateBlankProductWorkflowCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/product").ProductWorkflowVM>(
+    `/workspaces/${workspaceId}/products/${productId}/workflows`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function updateProductWorkflow(
+  workspaceId: string,
+  productId: string,
+  workflowId: string,
+  input: import("@sparkops/contracts/product").UpdateProductWorkflowCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/product").ProductWorkflowVM>(
+    `/workspaces/${workspaceId}/products/${productId}/workflows/${workflowId}`,
+    { method: "PATCH", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function deleteProductWorkflow(workspaceId: string, productId: string, workflowId: string) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/products/${productId}/workflows/${workflowId}`,
+    { method: "DELETE", workspaceId },
+  );
+}
+
 export function createProductWorkflowFromTemplate(
   workspaceId: string,
   productId: string,
@@ -294,10 +331,15 @@ export function createProductWorkflowFromTemplate(
   );
 }
 
-export function startProductWorkflowRun(workspaceId: string, productId: string, workflowId: string) {
+export function startProductWorkflowRun(
+  workspaceId: string,
+  productId: string,
+  workflowId: string,
+  input?: import("@sparkops/contracts/product").StartProductWorkflowRunCommand,
+) {
   return bffFetch<import("@sparkops/contracts/product").ProductWorkflowRunVM>(
     `/workspaces/${workspaceId}/products/${productId}/workflows/${workflowId}/runs`,
-    { method: "POST", workspaceId },
+    { method: "POST", body: JSON.stringify(input ?? {}), workspaceId },
   );
 }
 
@@ -345,6 +387,18 @@ export function rejectWorkflowJob(
   return bffFetch<{ ok: boolean }>(
     `/workspaces/${workspaceId}/products/${productId}/workflows/${workflowId}/runs/${runId}/jobs/${encodeURIComponent(jobName)}/reject`,
     { method: "POST", body: JSON.stringify(input ?? {}), workspaceId },
+  );
+}
+
+export function continueProductWorkflowRun(
+  workspaceId: string,
+  productId: string,
+  workflowId: string,
+  runId: string,
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/products/${productId}/workflows/${workflowId}/runs/${runId}/continue`,
+    { method: "POST", workspaceId },
   );
 }
 

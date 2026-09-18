@@ -10,6 +10,7 @@ import (
 type ProductWorkflowRepository interface {
 	SaveWorkflow(ctx context.Context, wf *model.ProductWorkflow) error
 	UpdateWorkflow(ctx context.Context, wf *model.ProductWorkflow) error
+	DeleteWorkflow(ctx context.Context, id kernel.ProductWorkflowID) error
 	FindWorkflowByID(ctx context.Context, id kernel.ProductWorkflowID) (*model.ProductWorkflow, error)
 	ListWorkflowsByProduct(ctx context.Context, productID kernel.ProductID) ([]*model.ProductWorkflow, error)
 	ListWorkflowsByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) ([]*model.ProductWorkflow, error)

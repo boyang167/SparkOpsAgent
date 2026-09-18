@@ -10,10 +10,16 @@ export const GET = createBffHandler(async (ctx, _req, { params }) => {
   return { items };
 });
 
-export const POST = createBffHandler(async (ctx, _req, { params }) => {
+export const POST = createBffHandler(async (ctx, req, { params }) => {
   const wsId = params?.wsId ?? ctx.workspaceId;
   const productId = params?.productId;
   const workflowId = params?.workflowId;
   if (!wsId || !productId || !workflowId) throw new Error("workspace, product and workflow required");
-  return startProductWorkflowRun(ctx, wsId, productId, workflowId);
+  let body: Record<string, unknown> = {};
+  try {
+    body = await req.json();
+  } catch {
+    body = {};
+  }
+  return startProductWorkflowRun(ctx, wsId, productId, workflowId, body);
 });

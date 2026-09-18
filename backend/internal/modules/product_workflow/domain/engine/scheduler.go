@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	deployrunmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
@@ -92,6 +93,9 @@ func (s *Scheduler) HandleBuildCompleted(ctx context.Context, buildID kernel.Bui
 	if s.stageComplete(run, run.CurrentStage) {
 		return s.advanceStage(ctx, wf, run)
 	}
+	if run.CurrentStage < len(wf.Stages) && !wf.Stages[run.CurrentStage].Parallel {
+		return s.executeCurrentStage(ctx, wf, run)
+	}
 	return nil
 }
 
@@ -151,6 +155,9 @@ func (s *Scheduler) HandleDeployCompleted(ctx context.Context, deploymentID kern
 	if s.stageComplete(run, run.CurrentStage) {
 		return s.advanceStage(ctx, wf, run)
 	}
+	if run.CurrentStage < len(wf.Stages) && !wf.Stages[run.CurrentStage].Parallel {
+		return s.executeCurrentStage(ctx, wf, run)
+	}
 	return nil
 }
 
@@ -167,6 +174,9 @@ func (s *Scheduler) ApproveJob(ctx context.Context, runID kernel.ProductWorkflow
 	}
 	if s.stageComplete(run, run.CurrentStage) {
 		return s.advanceStage(ctx, wf, run)
+	}
+	if run.CurrentStage < len(wf.Stages) && !wf.Stages[run.CurrentStage].Parallel {
+		return s.executeCurrentStage(ctx, wf, run)
 	}
 	return nil
 }
@@ -214,7 +224,16 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 	}
 	stage := wf.Stages[run.CurrentStage]
 	stageRun := &run.StageRuns[run.CurrentStage]
+	stageRun.ExecMode = model.NormalizeStageExecMode(stage.ExecMode)
+	if stageRun.ExecMode == model.StageExecManual && !stageRun.ManualConfirmed {
+		stageRun.Status = model.JobRunStatusPaused
+		run.Status = model.RunStatusPaused
+		return s.repo.UpdateRun(ctx, run)
+	}
 	stageRun.Status = model.JobRunStatusRunning
+	if run.Status == model.RunStatusPaused {
+		run.Status = model.RunStatusRunning
+	}
 
 	hasAsync := false
 	for ji, job := range stage.Jobs {
@@ -222,8 +241,11 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 		if jobRun.Status == model.JobRunStatusSuccess || jobRun.Status == model.JobRunStatusSkipped {
 			continue
 		}
-		if IsApprovalWaiting(*jobRun) {
+		if jobRun.Status == model.JobRunStatusRunning || IsApprovalWaiting(*jobRun) {
 			hasAsync = true
+			if !stage.Parallel {
+				break
+			}
 			continue
 		}
 		switch job.Type {
@@ -240,8 +262,15 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 		case model.JobTypeSparkopsApproval:
 			hasAsync = true
 			StartApprovalJob(jobRun, job)
+		case model.JobTypeFreestyle:
+			RunFreestyleJob(jobRun, job)
+		case model.JobTypeNotify:
+			RunNotifyJob(jobRun, job)
 		default:
 			jobRun.Status = model.JobRunStatusSkipped
+		}
+		if !stage.Parallel && jobRun.Status != model.JobRunStatusSuccess && jobRun.Status != model.JobRunStatusSkipped {
+			break
 		}
 	}
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
@@ -251,6 +280,34 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 		return s.advanceStage(ctx, wf, run)
 	}
 	return nil
+}
+
+func StageNeedsManualConfirm(stage model.WorkflowStage, stageRun model.StageRun) bool {
+	return model.NormalizeStageExecMode(stage.ExecMode) == model.StageExecManual && !stageRun.ManualConfirmed
+}
+
+func (s *Scheduler) ContinueManualStage(ctx context.Context, runID kernel.ProductWorkflowRunID) error {
+	run, err := s.repo.FindRunByID(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if run.Status != model.RunStatusPaused || run.CurrentStage >= len(run.StageRuns) {
+		return domain.ErrStageNotWaitingManual
+	}
+	stageRun := &run.StageRuns[run.CurrentStage]
+	if stageRun.Status != model.JobRunStatusPaused {
+		return domain.ErrStageNotWaitingManual
+	}
+	wf, err := s.repo.FindWorkflowByID(ctx, run.WorkflowID)
+	if err != nil {
+		return err
+	}
+	stageRun.ManualConfirmed = true
+	run.Status = model.RunStatusRunning
+	if err := s.repo.UpdateRun(ctx, run); err != nil {
+		return err
+	}
+	return s.executeCurrentStage(ctx, wf, run)
 }
 
 func (s *Scheduler) advanceStage(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun) error {
@@ -434,4 +491,78 @@ func InjectProjectBuilds(stages []model.WorkflowStage, projectIDs []kernel.Proje
 			stages[si].Jobs[ji].Spec["project_builds"] = builds
 		}
 	}
+}
+
+// ApplyRunInput overlays runtime branch / environment overrides onto a copy of stages.
+func ApplyRunInput(stages []model.WorkflowStage, input map[string]any) []model.WorkflowStage {
+	if len(input) == 0 {
+		return stages
+	}
+	out := cloneStages(stages)
+	branch, _ := input["branch"].(string)
+	envOverrides, _ := input["environment_overrides"].(map[string]any)
+	for si := range out {
+		for ji := range out[si].Jobs {
+			job := &out[si].Jobs[ji]
+			if job.Spec == nil {
+				job.Spec = map[string]any{}
+			}
+			if branch != "" && job.Type == model.JobTypeSparkopsBuild {
+				job.Spec["branch"] = branch
+				if builds, ok := job.Spec["project_builds"].([]any); ok {
+					for bi := range builds {
+						if m, ok := builds[bi].(map[string]any); ok {
+							m["branch"] = branch
+							builds[bi] = m
+						}
+					}
+					job.Spec["project_builds"] = builds
+				}
+			}
+			if job.Type == model.JobTypeSparkopsDeploy && len(envOverrides) > 0 {
+				if envID, ok := envOverrides[job.Name].(string); ok && envID != "" {
+					job.Spec["environment_id"] = envID
+				}
+			}
+		}
+	}
+	return out
+}
+
+func cloneStages(stages []model.WorkflowStage) []model.WorkflowStage {
+	raw, err := json.Marshal(stages)
+	if err != nil {
+		return stages
+	}
+	var out []model.WorkflowStage
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return stages
+	}
+	return out
+}
+
+func ValidateStages(stages []model.WorkflowStage) error {
+	if len(stages) == 0 {
+		return domain.ErrInvalidWorkflowInput
+	}
+	seenJobs := map[string]struct{}{}
+	for _, stage := range stages {
+		if strings.TrimSpace(stage.Name) == "" {
+			return domain.ErrInvalidWorkflowInput
+		}
+		for _, job := range stage.Jobs {
+			name := strings.TrimSpace(job.Name)
+			if name == "" || strings.TrimSpace(job.Type) == "" {
+				return domain.ErrInvalidWorkflowInput
+			}
+			if _, ok := seenJobs[name]; ok {
+				return domain.ErrInvalidWorkflowInput
+			}
+			seenJobs[name] = struct{}{}
+			if !model.IsKnownJobType(job.Type) {
+				return domain.ErrInvalidWorkflowInput
+			}
+		}
+	}
+	return nil
 }

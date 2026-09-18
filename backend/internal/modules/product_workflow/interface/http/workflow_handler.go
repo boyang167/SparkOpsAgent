@@ -7,18 +7,24 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/application/query"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type WorkflowHandlers struct {
 	CreateFromTemplate *command.CreateWorkflowFromTemplateHandler
+	CreateBlank        *command.CreateBlankWorkflowHandler
+	Update             *command.UpdateWorkflowHandler
+	Delete             *command.DeleteWorkflowHandler
+	GetWorkflow        *query.GetProductWorkflowHandler
 	StartRun           *command.StartWorkflowRunHandler
 	ListWorkflows      *query.ListProductWorkflowsHandler
 	ListRuns           *query.ListWorkflowRunsHandler
 	GetRun             *query.GetWorkflowRunHandler
 	ApproveJob         *command.ApproveWorkflowJobHandler
 	RejectJob          *command.RejectWorkflowJobHandler
+	ContinueStage      *command.ContinueManualStageHandler
 }
 
 type createFromTemplateRequest struct {
@@ -26,6 +32,56 @@ type createFromTemplateRequest struct {
 	Name       string            `json:"name"`
 	KeyVals    map[string]string `json:"key_vals"`
 	ProjectIDs []string          `json:"project_ids" binding:"required"`
+}
+
+type workflowStageDTO struct {
+	Name     string           `json:"name"`
+	Parallel bool             `json:"parallel"`
+	ExecMode string           `json:"exec_mode"`
+	Jobs     []workflowJobDTO `json:"jobs"`
+}
+
+type workflowJobDTO struct {
+	Name string         `json:"name"`
+	Type string         `json:"type"`
+	Spec map[string]any `json:"spec"`
+}
+
+type createBlankWorkflowRequest struct {
+	Name        string             `json:"name" binding:"required"`
+	Key         string             `json:"key"`
+	Description string             `json:"description"`
+	Stages      []workflowStageDTO `json:"stages"`
+	Activate    bool               `json:"activate"`
+}
+
+type updateWorkflowRequest struct {
+	Name        *string            `json:"name"`
+	Description *string            `json:"description"`
+	Status      *string            `json:"status"`
+	Stages      []workflowStageDTO `json:"stages"`
+}
+
+type startWorkflowRunRequest struct {
+	Input map[string]any `json:"input"`
+}
+
+func dtoToStages(items []workflowStageDTO) []model.WorkflowStage {
+	out := make([]model.WorkflowStage, 0, len(items))
+	for _, stage := range items {
+		jobs := make([]model.WorkflowJob, 0, len(stage.Jobs))
+		for _, job := range stage.Jobs {
+			spec := job.Spec
+			if spec == nil {
+				spec = map[string]any{}
+			}
+			jobs = append(jobs, model.WorkflowJob{Name: job.Name, Type: job.Type, Spec: spec})
+		}
+		out = append(out, model.WorkflowStage{
+			Name: stage.Name, Parallel: stage.Parallel, ExecMode: model.NormalizeStageExecMode(stage.ExecMode), Jobs: jobs,
+		})
+	}
+	return out
 }
 
 func (h *Handler) ListProductWorkflows(c *gin.Context) {
@@ -44,6 +100,112 @@ func (h *Handler) ListProductWorkflows(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) GetProductWorkflow(c *gin.Context) {
+	wsID, _, ok := memberAndWorkspace(c)
+	if !ok {
+		return
+	}
+	productID, err := kernel.ParseProductID(c.Param("productId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
+		return
+	}
+	workflowID, err := kernel.ParseProductWorkflowID(c.Param("workflowId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid workflow id", http.StatusBadRequest)
+		return
+	}
+	item, err := h.workflows.GetWorkflow.Handle(c.Request.Context(), wsID, productID, workflowID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, item)
+}
+
+func (h *Handler) CreateBlankWorkflow(c *gin.Context) {
+	wsID, memberID, ok := memberAndWorkspace(c)
+	if !ok {
+		return
+	}
+	productID, err := kernel.ParseProductID(c.Param("productId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
+		return
+	}
+	var req createBlankWorkflowRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+	wf, err := h.workflows.CreateBlank.Handle(c.Request.Context(), wsID, productID, memberID, command.CreateBlankWorkflowInput{
+		Name: req.Name, Key: req.Key, Description: req.Description, Stages: dtoToStages(req.Stages), Activate: req.Activate,
+	})
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{
+		"id": wf.ID.String(), "name": wf.Name, "key": wf.Key, "status": wf.Status, "stages": wf.Stages,
+	})
+}
+
+func (h *Handler) UpdateProductWorkflow(c *gin.Context) {
+	wsID, _, ok := memberAndWorkspace(c)
+	if !ok {
+		return
+	}
+	productID, err := kernel.ParseProductID(c.Param("productId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
+		return
+	}
+	workflowID, err := kernel.ParseProductWorkflowID(c.Param("workflowId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid workflow id", http.StatusBadRequest)
+		return
+	}
+	var req updateWorkflowRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+	input := command.UpdateWorkflowInput{Name: req.Name, Description: req.Description, Status: req.Status}
+	if req.Stages != nil {
+		input.Stages = dtoToStages(req.Stages)
+	}
+	wf, err := h.workflows.Update.Handle(c.Request.Context(), wsID, productID, workflowID, input)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{
+		"id": wf.ID.String(), "name": wf.Name, "key": wf.Key, "status": wf.Status, "stages": wf.Stages,
+	})
+}
+
+func (h *Handler) DeleteProductWorkflow(c *gin.Context) {
+	wsID, _, ok := memberAndWorkspace(c)
+	if !ok {
+		return
+	}
+	productID, err := kernel.ParseProductID(c.Param("productId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
+		return
+	}
+	workflowID, err := kernel.ParseProductWorkflowID(c.Param("workflowId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid workflow id", http.StatusBadRequest)
+		return
+	}
+	if err := h.workflows.Delete.Handle(c.Request.Context(), wsID, productID, workflowID); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"ok": true})
 }
 
 func (h *Handler) CreateWorkflowFromTemplate(c *gin.Context) {
@@ -100,7 +262,9 @@ func (h *Handler) StartWorkflowRun(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", "invalid workflow id", http.StatusBadRequest)
 		return
 	}
-	run, err := h.workflows.StartRun.Handle(c.Request.Context(), wsID, productID, workflowID)
+	var req startWorkflowRunRequest
+	_ = c.ShouldBindJSON(&req)
+	run, err := h.workflows.StartRun.Handle(c.Request.Context(), wsID, productID, workflowID, req.Input)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
@@ -208,6 +372,28 @@ func (h *Handler) RejectWorkflowJob(c *gin.Context) {
 	var req rejectWorkflowJobRequest
 	_ = c.ShouldBindJSON(&req)
 	if err := h.workflows.RejectJob.Handle(c.Request.Context(), wsID, productID, runID, jobName, memberID, req.Message); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"ok": true})
+}
+
+func (h *Handler) ContinueWorkflowStage(c *gin.Context) {
+	wsID, _, ok := memberAndWorkspace(c)
+	if !ok {
+		return
+	}
+	productID, err := kernel.ParseProductID(c.Param("productId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
+		return
+	}
+	runID, err := kernel.ParseProductWorkflowRunID(c.Param("runId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid run id", http.StatusBadRequest)
+		return
+	}
+	if err := h.workflows.ContinueStage.Handle(c.Request.Context(), wsID, productID, runID); err != nil {
 		httpx.HandleError(c, err)
 		return
 	}

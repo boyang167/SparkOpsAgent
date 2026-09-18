@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
@@ -10,13 +12,18 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
-type BuildExecutor struct {
-	trigger appctx.BuildTrigger
-	repo    repository.ProductWorkflowRepository
+type ImageRepositoryResolver interface {
+	Resolve(ctx context.Context, projectID kernel.ProjectID, registrySecretID string) (string, error)
 }
 
-func NewBuildExecutor(trigger appctx.BuildTrigger, repo repository.ProductWorkflowRepository) *BuildExecutor {
-	return &BuildExecutor{trigger: trigger, repo: repo}
+type BuildExecutor struct {
+	trigger  appctx.BuildTrigger
+	repo     repository.ProductWorkflowRepository
+	registry ImageRepositoryResolver
+}
+
+func NewBuildExecutor(trigger appctx.BuildTrigger, repo repository.ProductWorkflowRepository, registry ImageRepositoryResolver) *BuildExecutor {
+	return &BuildExecutor{trigger: trigger, repo: repo, registry: registry}
 }
 
 func (e *BuildExecutor) RunJob(
@@ -38,6 +45,13 @@ func (e *BuildExecutor) RunJob(
 	jobRun.Status = model.JobRunStatusRunning
 	run.StageRuns[stageIndex].Status = model.JobRunStatusRunning
 
+	registryID := parseRegistryID(job.Spec)
+	if registryID != "" && e.registry == nil {
+		jobRun.Status = model.JobRunStatusFailed
+		jobRun.ErrorMessage = "image registry resolver unavailable"
+		return fmt.Errorf("image registry resolver unavailable")
+	}
+
 	for _, spec := range builds {
 		projectID, err := kernel.ParseProjectID(spec.ProjectID)
 		if err != nil {
@@ -47,7 +61,22 @@ func (e *BuildExecutor) RunJob(
 		if branch == "" {
 			branch = "main"
 		}
-		buildID, err := e.trigger.TriggerAutomated(ctx, projectID, branch)
+		repoPath := ""
+		if registryID != "" {
+			resolved, err := e.registry.Resolve(ctx, projectID, registryID)
+			if err != nil {
+				jobRun.Status = model.JobRunStatusFailed
+				jobRun.ErrorMessage = err.Error()
+				jobRun.Builds = append(jobRun.Builds, model.ProjectBuildRun{
+					ProjectID: spec.ProjectID, Branch: branch, Status: model.JobRunStatusFailed, ErrorMessage: err.Error(),
+				})
+				return err
+			}
+			repoPath = resolved
+		}
+		buildID, err := e.trigger.TriggerAutomatedBuild(ctx, appctx.AutomatedBuildRequest{
+			ProjectID: projectID, Branch: branch, ImageRepository: repoPath,
+		})
 		if err != nil {
 			jobRun.Status = model.JobRunStatusFailed
 			jobRun.ErrorMessage = err.Error()
@@ -66,6 +95,14 @@ func (e *BuildExecutor) RunJob(
 		}
 	}
 	return nil
+}
+
+func parseRegistryID(spec map[string]any) string {
+	if spec == nil {
+		return ""
+	}
+	id, _ := spec["registry_id"].(string)
+	return strings.TrimSpace(id)
 }
 
 func parseProjectBuilds(spec map[string]any) []model.ProjectBuildSpec {
@@ -91,4 +128,29 @@ func parseProjectBuilds(spec map[string]any) []model.ProjectBuildSpec {
 		out = append(out, model.ProjectBuildSpec{ProjectID: pid, Branch: branch})
 	}
 	return out
+}
+
+func ImageRepositoryPath(registryURL, namespace, projectName string) string {
+	raw := strings.TrimSpace(registryURL)
+	if raw == "" {
+		return ""
+	}
+	parseable := raw
+	if !strings.Contains(parseable, "://") {
+		parseable = "https://" + parseable
+	}
+	parsed, err := url.Parse(parseable)
+	host := ""
+	if err == nil {
+		host = parsed.Host
+	}
+	if host == "" {
+		host = strings.Trim(raw, "/")
+	}
+	ns := strings.Trim(strings.ToLower(strings.TrimSpace(namespace)), "/")
+	name := strings.Trim(strings.ToLower(strings.TrimSpace(projectName)), "/")
+	if ns == "" || name == "" {
+		return strings.ToLower(strings.Trim(host, "/"))
+	}
+	return strings.ToLower(strings.Trim(host, "/")) + "/" + ns + "/" + name
 }

@@ -35,6 +35,7 @@ type RunStatus string
 const (
 	RunStatusPending RunStatus = "pending"
 	RunStatusRunning RunStatus = "running"
+	RunStatusPaused  RunStatus = "paused"
 	RunStatusSuccess RunStatus = "success"
 	RunStatusFailed  RunStatus = "failed"
 )
@@ -44,6 +45,7 @@ type JobRunStatus string
 const (
 	JobRunStatusPending JobRunStatus = "pending"
 	JobRunStatusRunning JobRunStatus = "running"
+	JobRunStatusPaused  JobRunStatus = "paused"
 	JobRunStatusSuccess JobRunStatus = "success"
 	JobRunStatusFailed  JobRunStatus = "failed"
 	JobRunStatusSkipped JobRunStatus = "skipped"
@@ -79,13 +81,16 @@ type JobRun struct {
 	Builds       []ProjectBuildRun  `json:"builds,omitempty"`
 	Deploys      []ProjectDeployRun `json:"deploys,omitempty"`
 	Approval     *ApprovalRun       `json:"approval,omitempty"`
+	Message      string             `json:"message,omitempty"`
 	ErrorMessage string             `json:"error_message,omitempty"`
 }
 
 type StageRun struct {
-	Name   string       `json:"name"`
-	Status JobRunStatus `json:"status"`
-	Jobs   []JobRun     `json:"jobs"`
+	Name            string       `json:"name"`
+	Status          JobRunStatus `json:"status"`
+	ExecMode        string       `json:"exec_mode,omitempty"`
+	ManualConfirmed bool         `json:"manual_confirmed,omitempty"`
+	Jobs            []JobRun     `json:"jobs"`
 }
 
 type ProductWorkflowRun struct {
@@ -127,6 +132,19 @@ func NewProductWorkflow(productID kernel.ProductID, wsID kernel.WorkspaceID, nam
 	}
 }
 
+func NewBlankProductWorkflow(productID kernel.ProductID, wsID kernel.WorkspaceID, name, key, description string, stages []WorkflowStage, createdBy kernel.MemberID) *ProductWorkflow {
+	if len(stages) == 0 {
+		stages = []WorkflowStage{{Name: "构建", Parallel: false, Jobs: []WorkflowJob{}}}
+	}
+	now := time.Now().UTC()
+	return &ProductWorkflow{
+		ID: kernel.NewProductWorkflowID(), ProductID: productID, WorkspaceID: wsID,
+		Name: name, Key: key, Description: description, Status: WorkflowStatusDraft, Stages: stages,
+		Origin: json.RawMessage(`{"kind":"custom"}`), CreatedBy: createdBy,
+		CreatedAt: now, UpdatedAt: now,
+	}
+}
+
 func InitStageRuns(stages []WorkflowStage) []StageRun {
 	out := make([]StageRun, 0, len(stages))
 	for _, stage := range stages {
@@ -134,7 +152,9 @@ func InitStageRuns(stages []WorkflowStage) []StageRun {
 		for _, job := range stage.Jobs {
 			jobs = append(jobs, JobRun{Name: job.Name, Type: job.Type, Status: JobRunStatusPending, Builds: nil})
 		}
-		out = append(out, StageRun{Name: stage.Name, Status: JobRunStatusPending, Jobs: jobs})
+		out = append(out, StageRun{
+			Name: stage.Name, Status: JobRunStatusPending, ExecMode: NormalizeStageExecMode(stage.ExecMode), Jobs: jobs,
+		})
 	}
 	return out
 }

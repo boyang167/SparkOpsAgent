@@ -88,6 +88,19 @@ func TestBuildParamsOrdinaryBuildOnlyCarriesLegacyBranch(t *testing.T) {
 	require.Equal(t, map[string]string{"BRANCH": "main", "GIT_REF_TYPE": "branch"}, params)
 }
 
+func TestBuildParamsOrdinaryBuildCarriesImageRepositoryOverride(t *testing.T) {
+	params := buildParams(port.BuildRequest{
+		Job:             "orders-build",
+		GitRefValue:     "main",
+		ImageRepository: "harbor.example/team-a/orders",
+	})
+
+	require.Equal(t, "main", params["BRANCH"])
+	require.Equal(t, "harbor.example/team-a/orders", params["IMAGE_REPOSITORY"])
+	require.NotContains(t, params, "IMAGE_TAG")
+	require.NotContains(t, params, "CodeVersion")
+}
+
 func TestCreateOrUpdateCreatesFolderThenCreatesAndUpdatesJobAndCredential(t *testing.T) {
 	const credentialID = "sparkops-workspace-secret"
 	var folderExists, jobExists, credentialExists bool

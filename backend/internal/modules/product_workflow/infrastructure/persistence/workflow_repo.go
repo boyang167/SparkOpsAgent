@@ -99,6 +99,10 @@ func (r *ProductWorkflowRepository) UpdateWorkflow(ctx context.Context, wf *mode
 	}).Error
 }
 
+func (r *ProductWorkflowRepository) DeleteWorkflow(ctx context.Context, id kernel.ProductWorkflowID) error {
+	return r.db.WithContext(ctx).Where("id = ?", id.String()).Delete(&productWorkflowModel{}).Error
+}
+
 func (r *ProductWorkflowRepository) FindWorkflowByID(ctx context.Context, id kernel.ProductWorkflowID) (*model.ProductWorkflow, error) {
 	var row productWorkflowModel
 	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error

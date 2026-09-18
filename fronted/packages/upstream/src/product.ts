@@ -259,6 +259,43 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async getProductWorkflow(workspaceId: string, productId: string, workflowId: string) {
+      return upstreamFetch<ProductWorkflowVM>(
+        `/api/v1/products/${productId}/workflows/${workflowId}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async createBlankProductWorkflow(
+      workspaceId: string,
+      productId: string,
+      input: import("@sparkops/contracts/product").CreateBlankProductWorkflowCommand,
+    ) {
+      return upstreamFetch<ProductWorkflowVM>(
+        `/api/v1/products/${productId}/workflows`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async updateProductWorkflow(
+      workspaceId: string,
+      productId: string,
+      workflowId: string,
+      input: import("@sparkops/contracts/product").UpdateProductWorkflowCommand,
+    ) {
+      return upstreamFetch<ProductWorkflowVM>(
+        `/api/v1/products/${productId}/workflows/${workflowId}`,
+        { method: "PATCH", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async deleteProductWorkflow(workspaceId: string, productId: string, workflowId: string) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/products/${productId}/workflows/${workflowId}`,
+        { method: "DELETE", options: { ...options, workspaceId } },
+      );
+    },
+
     async createProductWorkflowFromTemplate(
       workspaceId: string,
       productId: string,
@@ -270,10 +307,15 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
-    async startProductWorkflowRun(workspaceId: string, productId: string, workflowId: string) {
+    async startProductWorkflowRun(
+      workspaceId: string,
+      productId: string,
+      workflowId: string,
+      input?: import("@sparkops/contracts/product").StartProductWorkflowRunCommand,
+    ) {
       return upstreamFetch<ProductWorkflowRunVM>(
         `/api/v1/products/${productId}/workflows/${workflowId}/runs`,
-        { method: "POST", options: { ...options, workspaceId } },
+        { method: "POST", body: JSON.stringify(input ?? {}), options: { ...options, workspaceId } },
       );
     },
 
@@ -320,6 +362,13 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       return upstreamFetch<{ ok: boolean }>(
         `/api/v1/products/${productId}/workflows/${workflowId}/runs/${runId}/jobs/${encodeURIComponent(jobName)}/reject`,
         { method: "POST", body: JSON.stringify(input ?? {}), options: { ...options, workspaceId } },
+      );
+    },
+
+    async continueProductWorkflowRun(workspaceId: string, productId: string, workflowId: string, runId: string) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/products/${productId}/workflows/${workflowId}/runs/${runId}/continue`,
+        { method: "POST", options: { ...options, workspaceId } },
       );
     },
 

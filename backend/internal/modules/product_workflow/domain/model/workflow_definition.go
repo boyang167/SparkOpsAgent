@@ -3,7 +3,20 @@ package model
 type WorkflowStage struct {
 	Name     string        `json:"name"`
 	Parallel bool          `json:"parallel"`
+	ExecMode string        `json:"exec_mode,omitempty"`
 	Jobs     []WorkflowJob `json:"jobs"`
+}
+
+const (
+	StageExecAuto   = "auto"
+	StageExecManual = "manual"
+)
+
+func NormalizeStageExecMode(mode string) string {
+	if mode == StageExecManual {
+		return StageExecManual
+	}
+	return StageExecAuto
 }
 
 type WorkflowJob struct {
@@ -18,9 +31,11 @@ type ProjectBuildSpec struct {
 }
 
 const (
-	JobTypeSparkopsBuild     = "sparkops-build"
-	JobTypeSparkopsDeploy    = "sparkops-deploy"
-	JobTypeSparkopsApproval  = "sparkops-approval"
+	JobTypeSparkopsBuild    = "sparkops-build"
+	JobTypeSparkopsDeploy   = "sparkops-deploy"
+	JobTypeSparkopsApproval = "sparkops-approval"
+	JobTypeFreestyle        = "freestyle"
+	JobTypeNotify           = "notify"
 )
 
 const (

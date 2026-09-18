@@ -364,6 +364,11 @@ func buildParams(req port.BuildRequest) map[string]string {
 		params["CodeVersion"] = branch
 		params["IMAGE_TAG"] = req.ImageTag
 		params["IMAGE_REPOSITORY"] = req.ImageRepository
+	} else if strings.TrimSpace(req.ImageRepository) != "" {
+		params["IMAGE_REPOSITORY"] = strings.TrimSpace(req.ImageRepository)
+		if req.ImageTag != "" {
+			params["IMAGE_TAG"] = req.ImageTag
+		}
 	}
 	if req.RollbackOf > 0 {
 		params["ROLLBACK_OF"] = strconv.Itoa(req.RollbackOf)

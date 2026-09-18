@@ -188,6 +188,38 @@ export async function listProductWorkflows(ctx: BffContext, workspaceId: string,
   return data.items;
 }
 
+export function getProductWorkflow(ctx: BffContext, workspaceId: string, productId: string, workflowId: string) {
+  return ctx.upstream.product.getProductWorkflow(workspaceId, productId, workflowId);
+}
+
+export function createBlankProductWorkflow(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").CreateBlankProductWorkflowCommand,
+) {
+  return ctx.upstream.product.createBlankProductWorkflow(workspaceId, productId, input);
+}
+
+export function updateProductWorkflow(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  workflowId: string,
+  input: import("@sparkops/contracts/product").UpdateProductWorkflowCommand,
+) {
+  return ctx.upstream.product.updateProductWorkflow(workspaceId, productId, workflowId, input);
+}
+
+export function deleteProductWorkflow(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  workflowId: string,
+) {
+  return ctx.upstream.product.deleteProductWorkflow(workspaceId, productId, workflowId);
+}
+
 export function createProductWorkflowFromTemplate(
   ctx: BffContext,
   workspaceId: string,
@@ -202,8 +234,9 @@ export function startProductWorkflowRun(
   workspaceId: string,
   productId: string,
   workflowId: string,
+  input?: import("@sparkops/contracts/product").StartProductWorkflowRunCommand,
 ) {
-  return ctx.upstream.product.startProductWorkflowRun(workspaceId, productId, workflowId);
+  return ctx.upstream.product.startProductWorkflowRun(workspaceId, productId, workflowId, input);
 }
 
 export async function listProductWorkflowRuns(
@@ -247,6 +280,16 @@ export function rejectWorkflowJob(
   input?: import("@sparkops/contracts/product").RejectWorkflowJobCommand,
 ) {
   return ctx.upstream.product.rejectWorkflowJob(workspaceId, productId, workflowId, runId, jobName, input);
+}
+
+export function continueProductWorkflowRun(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  workflowId: string,
+  runId: string,
+) {
+  return ctx.upstream.product.continueProductWorkflowRun(workspaceId, productId, workflowId, runId);
 }
 
 export async function listEnvironments(ctx: BffContext, workspaceId: string, productId: string) {

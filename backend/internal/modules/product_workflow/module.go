@@ -55,19 +55,24 @@ func (m *Module) Register(c *appctx.Container) error {
 	workflowRepo := persistence.NewProductWorkflowRepository(c.DB)
 	wsChecker := acl.NewTenantACL(c.DB)
 	productChecker := acl.NewProductChecker(c.DB)
-	buildExecutor := engine.NewBuildExecutor(c.BuildTrigger, workflowRepo)
+	buildExecutor := engine.NewBuildExecutor(c.BuildTrigger, workflowRepo, acl.NewRegistryResolver(c.DB))
 	deployExecutor := engine.NewDeployExecutor(c.DeploymentTrigger, workflowRepo)
 	scheduler := engine.NewScheduler(workflowRepo, buildExecutor, deployExecutor, c.EventBus)
 
 	startRun := command.NewStartWorkflowRunHandler(workflowRepo, scheduler, productChecker)
 	workflowHandlers := pwfhttp.WorkflowHandlers{
 		CreateFromTemplate: command.NewCreateWorkflowFromTemplateHandler(templateRepo, workflowRepo, productChecker),
+		CreateBlank:        command.NewCreateBlankWorkflowHandler(workflowRepo, productChecker),
+		Update:             command.NewUpdateWorkflowHandler(workflowRepo, productChecker),
+		Delete:             command.NewDeleteWorkflowHandler(workflowRepo, productChecker),
+		GetWorkflow:        query.NewGetProductWorkflowHandler(workflowRepo, productChecker),
 		StartRun:           startRun,
 		ListWorkflows:      query.NewListProductWorkflowsHandler(workflowRepo, productChecker),
 		ListRuns:           query.NewListWorkflowRunsHandler(workflowRepo, productChecker),
 		GetRun:             query.NewGetWorkflowRunHandler(workflowRepo, productChecker),
 		ApproveJob:         command.NewApproveWorkflowJobHandler(workflowRepo, scheduler, productChecker),
 		RejectJob:          command.NewRejectWorkflowJobHandler(workflowRepo, scheduler, productChecker),
+		ContinueStage:      command.NewContinueManualStageHandler(workflowRepo, scheduler, productChecker),
 	}
 
 	handler := pwfhttp.NewHandler(
@@ -104,14 +109,24 @@ func (m *Module) Register(c *appctx.Container) error {
 
 	c.Engine.GET("/api/v1/products/:productId/workflows",
 		auth, ws, wsMember, readPerm, handler.ListProductWorkflows)
+	c.Engine.POST("/api/v1/products/:productId/workflows",
+		auth, ws, wsMember, writePerm, handler.CreateBlankWorkflow)
 	c.Engine.POST("/api/v1/products/:productId/workflows/from-template",
 		auth, ws, wsMember, writePerm, handler.CreateWorkflowFromTemplate)
+	c.Engine.GET("/api/v1/products/:productId/workflows/:workflowId",
+		auth, ws, wsMember, readPerm, handler.GetProductWorkflow)
+	c.Engine.PATCH("/api/v1/products/:productId/workflows/:workflowId",
+		auth, ws, wsMember, writePerm, handler.UpdateProductWorkflow)
+	c.Engine.DELETE("/api/v1/products/:productId/workflows/:workflowId",
+		auth, ws, wsMember, writePerm, handler.DeleteProductWorkflow)
 	c.Engine.POST("/api/v1/products/:productId/workflows/:workflowId/runs",
 		auth, ws, wsMember, writePerm, handler.StartWorkflowRun)
 	c.Engine.GET("/api/v1/products/:productId/workflows/:workflowId/runs",
 		auth, ws, wsMember, readPerm, handler.ListWorkflowRuns)
 	c.Engine.GET("/api/v1/products/:productId/workflows/:workflowId/runs/:runId",
 		auth, ws, wsMember, readPerm, handler.GetWorkflowRun)
+	c.Engine.POST("/api/v1/products/:productId/workflows/:workflowId/runs/:runId/continue",
+		auth, ws, wsMember, writePerm, handler.ContinueWorkflowStage)
 
 	c.EventBus.Subscribe(deliveryevent.BuildCompletedName, subscriber.NewOnBuildCompleted(scheduler).Handle)
 	c.EventBus.Subscribe(deliveryevent.DeployCompletedName, subscriber.NewOnDeployCompleted(scheduler).Handle)
@@ -136,7 +151,7 @@ func (p *workflowRunTriggerPort) StartForProduct(ctx context.Context, productID 
 	if err != nil {
 		return kernel.ProductWorkflowRunID{}, err
 	}
-	run, err := p.start.Handle(ctx, wsID, productID, workflowID)
+	run, err := p.start.Handle(ctx, wsID, productID, workflowID, nil)
 	if err != nil {
 		return kernel.ProductWorkflowRunID{}, err
 	}

@@ -84,6 +84,38 @@ func (h *ListProductWorkflowsHandler) Handle(ctx context.Context, wsID kernel.Wo
 	return out, nil
 }
 
+type GetProductWorkflowHandler struct {
+	workflows repository.ProductWorkflowRepository
+	products  port.ProductChecker
+}
+
+func NewGetProductWorkflowHandler(workflows repository.ProductWorkflowRepository, products port.ProductChecker) *GetProductWorkflowHandler {
+	return &GetProductWorkflowHandler{workflows: workflows, products: products}
+}
+
+func (h *GetProductWorkflowHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, productID kernel.ProductID, workflowID kernel.ProductWorkflowID) (map[string]any, error) {
+	productWs, err := h.products.ProductWorkspace(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	if productWs != wsID {
+		return nil, domain.ErrProductNotInWorkspace
+	}
+	wf, err := h.workflows.FindWorkflowByID(ctx, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	if wf.ProductID != productID {
+		return nil, domain.ErrProductWorkflowNotFound
+	}
+	return map[string]any{
+		"id": wf.ID.String(), "product_id": wf.ProductID.String(), "workspace_id": wf.WorkspaceID.String(),
+		"name": wf.Name, "key": wf.Key, "description": wf.Description, "status": wf.Status,
+		"stages": wf.Stages, "stage_count": len(wf.Stages),
+		"created_at": wf.CreatedAt.Format(time.RFC3339), "updated_at": wf.UpdatedAt.Format(time.RFC3339),
+	}, nil
+}
+
 type GetWorkflowRunHandler struct {
 	workflows repository.ProductWorkflowRepository
 	products  port.ProductChecker

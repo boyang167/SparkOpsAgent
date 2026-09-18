@@ -13,11 +13,17 @@ import { productDisplayName } from "./product-utils";
 
 interface ProductWorkflowsHubPanelProps {
   workspaceId: string;
+  initialProductId?: string | null;
+  initialWorkflowId?: string | null;
 }
 
-export function ProductWorkflowsHubPanel({ workspaceId }: ProductWorkflowsHubPanelProps) {
+export function ProductWorkflowsHubPanel({
+  workspaceId,
+  initialProductId,
+  initialWorkflowId,
+}: ProductWorkflowsHubPanelProps) {
   const [products, setProducts] = useState<ProductVM[]>([]);
-  const [productId, setProductId] = useState<string | null>(null);
+  const [productId, setProductId] = useState<string | null>(initialProductId ?? null);
   const [projects, setProjects] = useState<ProductProjectVM[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,6 +35,7 @@ export function ProductWorkflowsHubPanel({ workspaceId }: ProductWorkflowsHubPan
       const items = await product.listProducts(workspaceId);
       setProducts(items);
       setProductId((prev) => {
+        if (initialProductId && items.some((item) => item.id === initialProductId)) return initialProductId;
         if (prev && items.some((item) => item.id === prev)) return prev;
         return items[0]?.id ?? null;
       });
@@ -38,7 +45,7 @@ export function ProductWorkflowsHubPanel({ workspaceId }: ProductWorkflowsHubPan
     } finally {
       setLoading(false);
     }
-  }, [workspaceId]);
+  }, [workspaceId, initialProductId]);
 
   useEffect(() => {
     void loadProducts();
@@ -70,7 +77,7 @@ export function ProductWorkflowsHubPanel({ workspaceId }: ProductWorkflowsHubPan
     <div className="stack-lg">
       <PlatformPanelHead
         title="工作流"
-        description="按产品查看、创建并执行持续交付工作流。"
+        description="可视化编排产品工作流，支持构建、部署、审批、脚本与通知。"
       />
 
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
@@ -112,7 +119,12 @@ export function ProductWorkflowsHubPanel({ workspaceId }: ProductWorkflowsHubPan
           </div>
 
           {productId ? (
-            <ProductWorkflowsPanel workspaceId={workspaceId} productId={productId} projects={projects} />
+            <ProductWorkflowsPanel
+              workspaceId={workspaceId}
+              productId={productId}
+              projects={projects}
+              initialWorkflowId={productId === initialProductId ? initialWorkflowId : null}
+            />
           ) : null}
         </>
       )}

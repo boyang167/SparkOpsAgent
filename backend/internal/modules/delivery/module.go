@@ -249,7 +249,11 @@ type buildTriggerPort struct {
 }
 
 func (p *buildTriggerPort) TriggerAutomated(ctx context.Context, projectID kernel.ProjectID, branch string) (kernel.BuildID, error) {
-	build, err := p.handler.TriggerAutomated(ctx, projectID, branch)
+	return p.TriggerAutomatedBuild(ctx, appctx.AutomatedBuildRequest{ProjectID: projectID, Branch: branch})
+}
+
+func (p *buildTriggerPort) TriggerAutomatedBuild(ctx context.Context, req appctx.AutomatedBuildRequest) (kernel.BuildID, error) {
+	build, err := p.handler.TriggerAutomatedBuild(ctx, req.ProjectID, req.Branch, req.ImageRepository)
 	if err != nil {
 		return kernel.BuildID{}, err
 	}

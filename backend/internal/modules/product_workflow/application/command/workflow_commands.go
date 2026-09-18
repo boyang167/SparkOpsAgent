@@ -92,6 +92,162 @@ func (h *CreateWorkflowFromTemplateHandler) Handle(
 	return wf, nil
 }
 
+type CreateBlankWorkflowInput struct {
+	Name        string
+	Key         string
+	Description string
+	Stages      []model.WorkflowStage
+	Activate    bool
+}
+
+type CreateBlankWorkflowHandler struct {
+	workflows repository.ProductWorkflowRepository
+	products  port.ProductChecker
+}
+
+func NewCreateBlankWorkflowHandler(workflows repository.ProductWorkflowRepository, products port.ProductChecker) *CreateBlankWorkflowHandler {
+	return &CreateBlankWorkflowHandler{workflows: workflows, products: products}
+}
+
+func (h *CreateBlankWorkflowHandler) Handle(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	productID kernel.ProductID,
+	actor kernel.MemberID,
+	input CreateBlankWorkflowInput,
+) (*model.ProductWorkflow, error) {
+	productWs, err := h.products.ProductWorkspace(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	if productWs != wsID {
+		return nil, domain.ErrProductNotInWorkspace
+	}
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return nil, domain.ErrInvalidWorkflowInput
+	}
+	key := strings.TrimSpace(input.Key)
+	if key == "" {
+		key = slugKey(name)
+	}
+	stages := input.Stages
+	if len(stages) == 0 {
+		stages = []model.WorkflowStage{{Name: "阶段1", Parallel: false, Jobs: []model.WorkflowJob{}}}
+	} else if err := engine.ValidateStages(stages); err != nil {
+		return nil, err
+	}
+	wf := model.NewBlankProductWorkflow(productID, wsID, name, key, strings.TrimSpace(input.Description), stages, actor)
+	if input.Activate {
+		wf.Status = model.WorkflowStatusActive
+	}
+	if err := h.workflows.SaveWorkflow(ctx, wf); err != nil {
+		return nil, err
+	}
+	return wf, nil
+}
+
+type UpdateWorkflowInput struct {
+	Name        *string
+	Description *string
+	Status      *string
+	Stages      []model.WorkflowStage
+}
+
+type UpdateWorkflowHandler struct {
+	workflows repository.ProductWorkflowRepository
+	products  port.ProductChecker
+}
+
+func NewUpdateWorkflowHandler(workflows repository.ProductWorkflowRepository, products port.ProductChecker) *UpdateWorkflowHandler {
+	return &UpdateWorkflowHandler{workflows: workflows, products: products}
+}
+
+func (h *UpdateWorkflowHandler) Handle(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	productID kernel.ProductID,
+	workflowID kernel.ProductWorkflowID,
+	input UpdateWorkflowInput,
+) (*model.ProductWorkflow, error) {
+	productWs, err := h.products.ProductWorkspace(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	if productWs != wsID {
+		return nil, domain.ErrProductNotInWorkspace
+	}
+	wf, err := h.workflows.FindWorkflowByID(ctx, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	if wf.ProductID != productID {
+		return nil, domain.ErrProductWorkflowNotFound
+	}
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if name == "" {
+			return nil, domain.ErrInvalidWorkflowInput
+		}
+		wf.Name = name
+	}
+	if input.Description != nil {
+		wf.Description = strings.TrimSpace(*input.Description)
+	}
+	if input.Status != nil {
+		status := model.WorkflowStatus(strings.TrimSpace(*input.Status))
+		switch status {
+		case model.WorkflowStatusDraft, model.WorkflowStatusActive:
+			wf.Status = status
+		default:
+			return nil, domain.ErrInvalidWorkflowInput
+		}
+	}
+	if input.Stages != nil {
+		if err := engine.ValidateStages(input.Stages); err != nil {
+			return nil, err
+		}
+		wf.Stages = input.Stages
+	}
+	wf.UpdatedAt = time.Now().UTC()
+	if err := h.workflows.UpdateWorkflow(ctx, wf); err != nil {
+		return nil, err
+	}
+	return wf, nil
+}
+
+type DeleteWorkflowHandler struct {
+	workflows repository.ProductWorkflowRepository
+	products  port.ProductChecker
+}
+
+func NewDeleteWorkflowHandler(workflows repository.ProductWorkflowRepository, products port.ProductChecker) *DeleteWorkflowHandler {
+	return &DeleteWorkflowHandler{workflows: workflows, products: products}
+}
+
+func (h *DeleteWorkflowHandler) Handle(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	productID kernel.ProductID,
+	workflowID kernel.ProductWorkflowID,
+) error {
+	productWs, err := h.products.ProductWorkspace(ctx, productID)
+	if err != nil {
+		return err
+	}
+	if productWs != wsID {
+		return domain.ErrProductNotInWorkspace
+	}
+	wf, err := h.workflows.FindWorkflowByID(ctx, workflowID)
+	if err != nil {
+		return err
+	}
+	if wf.ProductID != productID {
+		return domain.ErrProductWorkflowNotFound
+	}
+	return h.workflows.DeleteWorkflow(ctx, workflowID)
+}
+
 type StartWorkflowRunHandler struct {
 	workflows repository.ProductWorkflowRepository
 	scheduler *engine.Scheduler
@@ -111,6 +267,7 @@ func (h *StartWorkflowRunHandler) Handle(
 	wsID kernel.WorkspaceID,
 	productID kernel.ProductID,
 	workflowID kernel.ProductWorkflowID,
+	input map[string]any,
 ) (*model.ProductWorkflowRun, error) {
 	productWs, err := h.products.ProductWorkspace(ctx, productID)
 	if err != nil {
@@ -126,12 +283,23 @@ func (h *StartWorkflowRunHandler) Handle(
 	if wf.ProductID != productID {
 		return nil, domain.ErrProductWorkflowNotFound
 	}
-	run := model.NewProductWorkflowRun(workflowID, productID, wf.Stages)
+	if wf.Status != model.WorkflowStatusActive {
+		return nil, domain.ErrInvalidWorkflowInput
+	}
+	stages := engine.ApplyRunInput(wf.Stages, input)
+	run := model.NewProductWorkflowRun(workflowID, productID, stages)
 	run.Trigger = json.RawMessage(`{"source":"manual"}`)
+	if input != nil {
+		if raw, err := json.Marshal(input); err == nil {
+			run.Input = raw
+		}
+	}
+	runWF := *wf
+	runWF.Stages = stages
 	if err := h.workflows.SaveRun(ctx, run); err != nil {
 		return nil, err
 	}
-	if err := h.scheduler.StartRun(ctx, wf, run); err != nil {
+	if err := h.scheduler.StartRun(ctx, &runWF, run); err != nil {
 		return nil, err
 	}
 	return h.workflows.FindRunByID(ctx, run.ID)

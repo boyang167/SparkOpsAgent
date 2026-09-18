@@ -67,6 +67,32 @@ func (h *RejectWorkflowJobHandler) Handle(
 	return h.scheduler.RejectJob(ctx, runID, jobName, actor, message)
 }
 
+type ContinueManualStageHandler struct {
+	workflows repository.ProductWorkflowRepository
+	scheduler *engine.Scheduler
+	products  port.ProductChecker
+}
+
+func NewContinueManualStageHandler(
+	workflows repository.ProductWorkflowRepository,
+	scheduler *engine.Scheduler,
+	products port.ProductChecker,
+) *ContinueManualStageHandler {
+	return &ContinueManualStageHandler{workflows: workflows, scheduler: scheduler, products: products}
+}
+
+func (h *ContinueManualStageHandler) Handle(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	productID kernel.ProductID,
+	runID kernel.ProductWorkflowRunID,
+) error {
+	if err := ensureWorkflowRun(ctx, h.workflows, h.products, wsID, productID, runID); err != nil {
+		return err
+	}
+	return h.scheduler.ContinueManualStage(ctx, runID)
+}
+
 func ensureWorkflowRun(
 	ctx context.Context,
 	workflows repository.ProductWorkflowRepository,

@@ -155,6 +155,28 @@ func TestHandleKeepsOrdinaryBuildJobAndBranchCompatible(t *testing.T) {
 	}
 }
 
+func TestTriggerAutomatedBuildPassesImageRepositoryOverride(t *testing.T) {
+	jenkins := &requestCapturingJenkins{requests: make(chan port.BuildRequest, 1)}
+	handler := newTriggerHandler(jenkins)
+
+	_, err := handler.TriggerAutomatedBuild(
+		context.Background(),
+		kernel.NewProjectID(),
+		"release",
+		"harbor.example/team-a/orders",
+	)
+	require.NoError(t, err)
+
+	select {
+	case req := <-jenkins.requests:
+		require.Equal(t, "release", req.GitRefValue)
+		require.Equal(t, "orders-build", req.Job)
+		require.Equal(t, "harbor.example/team-a/orders", req.ImageRepository)
+	case <-time.After(time.Second):
+		t.Fatal("automated build request was not sent to Jenkins")
+	}
+}
+
 func TestTriggerDeploymentPreservesDeploymentJobAndImageParameters(t *testing.T) {
 	jenkins := &requestCapturingJenkins{requests: make(chan port.BuildRequest, 1)}
 	handler := newTriggerHandler(jenkins)

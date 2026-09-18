@@ -6,8 +6,15 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
+type AutomatedBuildRequest struct {
+	ProjectID       kernel.ProjectID
+	Branch          string
+	ImageRepository string
+}
+
 type BuildTrigger interface {
 	TriggerAutomated(ctx context.Context, projectID kernel.ProjectID, branch string) (kernel.BuildID, error)
+	TriggerAutomatedBuild(ctx context.Context, req AutomatedBuildRequest) (kernel.BuildID, error)
 }
 
 type WorkflowDeploymentRequest struct {
