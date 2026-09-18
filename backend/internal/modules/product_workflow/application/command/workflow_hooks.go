@@ -78,11 +78,8 @@ func (h *StartWorkflowRunHandler) StartFromGitLab(ctx context.Context, token str
 				continue
 			}
 			run, err := h.launch(ctx, wf, "git", nil, &engine.GitRunContext{
-				ProjectID: trigger.ProjectID,
-				Event:     hook.Event,
-				Ref:       hook.Ref,
-				RefType:   hook.RefType,
-				Commit:    hook.Commit,
+				ProjectID: trigger.ProjectID, Event: hook.Event, Ref: hook.Ref, RefType: hook.RefType,
+				Commit: hook.Commit, MergeRequestIID: hook.MergeRequestIID,
 			})
 			return run, false, err
 		}

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,8 @@ type Config struct {
 	Policy        PolicyConfig        `yaml:"policy"`
 	LLM           LLMConfig           `yaml:"llm"`
 	Observability ObservabilityConfig `yaml:"observability"`
+	Notify        NotifyConfig        `yaml:"notify"`
+	Vault         VaultConfig         `yaml:"vault"`
 }
 
 type PolicyConfig struct {
@@ -78,7 +81,8 @@ type ProviderConfig struct {
 }
 
 type ServerConfig struct {
-	Addr string `yaml:"addr"`
+	Addr      string `yaml:"addr"`
+	PublicURL string `yaml:"public_url"`
 }
 
 type DatabaseConfig struct {
@@ -161,6 +165,49 @@ type SecurityConfig struct {
 	SecretEncryptionKey string `yaml:"secret_encryption_key"`
 }
 
+type NotifyConfig struct {
+	SMTP   SMTPConfig   `yaml:"smtp"`
+	Feishu FeishuConfig `yaml:"feishu"`
+}
+
+type SMTPConfig struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	From     string `yaml:"from"`
+}
+
+type FeishuConfig struct {
+	AppID     string `yaml:"app_id"`
+	AppSecret string `yaml:"app_secret"`
+}
+
+type VaultConfig struct {
+	Address string `yaml:"address"`
+	Token   string `yaml:"token"`
+}
+
+func (c *Config) PublicBaseURL() string {
+	if c == nil {
+		return "http://127.0.0.1:8080"
+	}
+	if base := strings.TrimRight(strings.TrimSpace(c.Server.PublicURL), "/"); base != "" {
+		return base
+	}
+	addr := strings.TrimSpace(c.Server.Addr)
+	if addr == "" {
+		return "http://127.0.0.1:8080"
+	}
+	if strings.HasPrefix(addr, ":") {
+		return "http://127.0.0.1" + addr
+	}
+	if strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://") {
+		return strings.TrimRight(addr, "/")
+	}
+	return "http://" + addr
+}
+
 func LoadFromEnv() (*Config, error) {
 	path := os.Getenv("CONFIG_PATH")
 	if path == "" {
@@ -190,6 +237,38 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) applyEnvOverrides() error {
+	if v := os.Getenv("SPARKOPS_PUBLIC_URL"); v != "" {
+		c.Server.PublicURL = v
+	}
+	if v := os.Getenv("VAULT_ADDR"); v != "" {
+		c.Vault.Address = v
+	}
+	if v := os.Getenv("VAULT_TOKEN"); v != "" {
+		c.Vault.Token = v
+	}
+	if v := os.Getenv("SMTP_HOST"); v != "" {
+		c.Notify.SMTP.Host = v
+	}
+	if v := os.Getenv("SMTP_PORT"); v != "" {
+		if port, err := strconv.Atoi(v); err == nil {
+			c.Notify.SMTP.Port = port
+		}
+	}
+	if v := os.Getenv("SMTP_USERNAME"); v != "" {
+		c.Notify.SMTP.Username = v
+	}
+	if v := os.Getenv("SMTP_PASSWORD"); v != "" {
+		c.Notify.SMTP.Password = v
+	}
+	if v := os.Getenv("SMTP_FROM"); v != "" {
+		c.Notify.SMTP.From = v
+	}
+	if v := os.Getenv("FEISHU_APP_ID"); v != "" {
+		c.Notify.Feishu.AppID = v
+	}
+	if v := os.Getenv("FEISHU_APP_SECRET"); v != "" {
+		c.Notify.Feishu.AppSecret = v
+	}
 	if v := os.Getenv("DATABASE_DSN"); v != "" {
 		c.Database.DSN = v
 	}

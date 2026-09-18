@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -112,7 +113,7 @@ func (h *GetProductWorkflowHandler) Handle(ctx context.Context, wsID kernel.Work
 		"id": wf.ID.String(), "product_id": wf.ProductID.String(), "workspace_id": wf.WorkspaceID.String(),
 		"name": wf.Name, "key": wf.Key, "description": wf.Description, "status": wf.Status,
 		"stages": wf.Stages, "notifications": wf.Notifications, "stage_count": len(wf.Stages),
-		"variables": wf.Variables, "triggers": wf.Triggers, "advanced": wf.Advanced,
+		"variables": model.MaskSecretVariables(wf.Variables), "triggers": wf.Triggers, "advanced": wf.Advanced,
 		"created_at": wf.CreatedAt.Format(time.RFC3339), "updated_at": wf.UpdatedAt.Format(time.RFC3339),
 	}, nil
 }

@@ -27,7 +27,7 @@ export function newHookToken() {
 }
 
 export function emptyVariable(): WorkflowVariableVM {
-  return { id: newSettingId(), key: "", value: "", description: "", runtime_input: false };
+  return { id: newSettingId(), key: "", value: "", description: "", runtime_input: false, secret: false, vault_path: "" };
 }
 
 export function emptyTrigger(type: WorkflowTriggerVM["type"]): WorkflowTriggerVM {

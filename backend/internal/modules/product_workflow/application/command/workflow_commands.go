@@ -161,6 +161,20 @@ type UpdateWorkflowInput struct {
 type UpdateWorkflowHandler struct {
 	workflows repository.ProductWorkflowRepository
 	products  port.ProductChecker
+	box       model.ValueCipher
+	hooks     GitHookSync
+}
+
+type GitHookSync interface {
+	Sync(ctx context.Context, wf *model.ProductWorkflow) error
+}
+
+func (h *UpdateWorkflowHandler) UseVariableCipher(box model.ValueCipher) {
+	h.box = box
+}
+
+func (h *UpdateWorkflowHandler) UseGitHooks(hooks GitHookSync) {
+	h.hooks = hooks
 }
 
 func NewUpdateWorkflowHandler(workflows repository.ProductWorkflowRepository, products port.ProductChecker) *UpdateWorkflowHandler {
@@ -217,7 +231,12 @@ func (h *UpdateWorkflowHandler) Handle(
 		wf.Notifications = model.NormalizeNotifications(*input.Notifications)
 	}
 	if input.Variables != nil {
+		previous := append([]model.WorkflowVariable(nil), wf.Variables...)
 		variables, err := model.NormalizeVariables(*input.Variables)
+		if err != nil {
+			return nil, err
+		}
+		variables, err = model.SealVariables(h.box, previous, variables)
 		if err != nil {
 			return nil, err
 		}
@@ -236,6 +255,11 @@ func (h *UpdateWorkflowHandler) Handle(
 	wf.UpdatedAt = time.Now().UTC()
 	if err := h.workflows.UpdateWorkflow(ctx, wf); err != nil {
 		return nil, err
+	}
+	if h.hooks != nil {
+		if err := h.hooks.Sync(ctx, wf); err != nil {
+			return wf, err
+		}
 	}
 	return wf, nil
 }
@@ -277,11 +301,27 @@ type StartWorkflowRunHandler struct {
 	scheduler *engine.Scheduler
 	products  port.ProductChecker
 	gitLookup ProjectGitLookup
+	box       model.ValueCipher
+	vault     VaultReader
+}
+
+type VaultReader interface {
+	Read(ctx context.Context, path string) (string, error)
+}
+
+func (h *StartWorkflowRunHandler) UseVariableCipher(box model.ValueCipher) {
+	h.box = box
+}
+
+func (h *StartWorkflowRunHandler) UseVault(reader VaultReader) {
+	h.vault = reader
 }
 
 type ProjectGit struct {
-	GitURL    string
-	ProductID kernel.ProductID
+	GitURL     string
+	ServiceURL string
+	Token      string
+	ProductID  kernel.ProductID
 }
 
 type ProjectGitLookup interface {
@@ -333,8 +373,14 @@ func (h *StartWorkflowRunHandler) launch(
 	if err := h.rejectIfBusy(ctx, wf); err != nil {
 		return nil, err
 	}
+	prepared := *wf
+	variables, err := h.materializeVariables(ctx, wf.Variables)
+	if err != nil {
+		return nil, err
+	}
+	prepared.Variables = variables
 	runID := kernel.NewProductWorkflowRunID()
-	stages, stored, trigger, err := engine.PrepareRun(wf, runID.String(), source, input, git)
+	stages, stored, trigger, err := engine.PrepareRun(&prepared, runID.String(), source, input, git)
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +392,7 @@ func (h *StartWorkflowRunHandler) launch(
 	if raw, err := json.Marshal(stored); err == nil {
 		run.Input = raw
 	}
-	runWF := *wf
+	runWF := prepared
 	runWF.Stages = stages
 	if err := h.workflows.SaveRun(ctx, run); err != nil {
 		return nil, err
@@ -355,6 +401,53 @@ func (h *StartWorkflowRunHandler) launch(
 		return nil, err
 	}
 	return h.workflows.FindRunByID(ctx, run.ID)
+}
+
+func (h *StartWorkflowRunHandler) materializeVariables(ctx context.Context, items []model.WorkflowVariable) ([]model.WorkflowVariable, error) {
+	revealed, err := model.RevealVariables(h.box, items)
+	if err != nil {
+		return nil, err
+	}
+	if h.vault == nil {
+		return revealed, nil
+	}
+	for i := range revealed {
+		path := strings.TrimSpace(revealed[i].VaultPath)
+		if path == "" {
+			continue
+		}
+		value, err := h.vault.Read(ctx, path)
+		if err != nil {
+			return nil, kernel.NewDomainError("PRODUCT_WORKFLOW_INVALID_INPUT", "读取 Vault 失败: "+err.Error())
+		}
+		revealed[i].Value = value
+	}
+	return revealed, nil
+}
+
+func (h *StartWorkflowRunHandler) ExpireRuns(ctx context.Context) {
+	if h.scheduler == nil {
+		return
+	}
+	runs, err := h.workflows.ListActiveRuns(ctx, 100)
+	if err != nil {
+		return
+	}
+	now := time.Now().UTC()
+	for _, run := range runs {
+		wf, err := h.workflows.FindWorkflowByID(ctx, run.WorkflowID)
+		if err != nil || wf == nil || wf.Advanced.TimeoutMinutes <= 0 {
+			continue
+		}
+		started := run.CreatedAt
+		if run.StartedAt != nil {
+			started = *run.StartedAt
+		}
+		if now.Sub(started) < time.Duration(wf.Advanced.TimeoutMinutes)*time.Minute {
+			continue
+		}
+		_ = h.scheduler.ExpireRun(ctx, run)
+	}
 }
 
 func (h *StartWorkflowRunHandler) rejectIfBusy(ctx context.Context, wf *model.ProductWorkflow) error {

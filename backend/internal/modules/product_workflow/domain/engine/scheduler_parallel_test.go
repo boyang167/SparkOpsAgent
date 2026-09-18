@@ -39,6 +39,9 @@ func (r *updateOnlyRepo) ListAllWorkflows(context.Context) ([]*model.ProductWork
 func (r *updateOnlyRepo) CountActiveRuns(context.Context, kernel.ProductWorkflowID) (int64, error) {
 	return 0, nil
 }
+func (r *updateOnlyRepo) ListActiveRuns(context.Context, int) ([]*model.ProductWorkflowRun, error) {
+	return nil, nil
+}
 func (r *updateOnlyRepo) SaveRun(context.Context, *model.ProductWorkflowRun) error { return nil }
 func (r *updateOnlyRepo) FindRunByID(context.Context, kernel.ProductWorkflowRunID) (*model.ProductWorkflowRun, error) {
 	return nil, nil
@@ -90,4 +93,17 @@ func TestExecuteCurrentStage_parallelStartsEveryApproval(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, model.JobRunStatusRunning, run.StageRuns[0].Jobs[0].Status)
 	require.Equal(t, model.JobRunStatusRunning, run.StageRuns[0].Jobs[1].Status)
+}
+
+func TestExecuteCurrentStage_debugPausesBeforeJobs(t *testing.T) {
+	stages := []model.WorkflowStage{{
+		Name: "审批",
+		Jobs: []model.WorkflowJob{{Name: "a1", Type: model.JobTypeSparkopsApproval}},
+	}}
+	wf := &model.ProductWorkflow{Stages: stages, Advanced: model.WorkflowAdvanced{Debug: true}}
+	run := model.NewProductWorkflowRun(kernel.NewProductWorkflowID(), kernel.ProductID{}, stages)
+	err := NewScheduler(&updateOnlyRepo{}, nil, nil, nil).StartRun(context.Background(), wf, run)
+	require.NoError(t, err)
+	require.Equal(t, model.RunStatusPaused, run.Status)
+	require.Equal(t, model.JobRunStatusPending, run.StageRuns[0].Jobs[0].Status)
 }

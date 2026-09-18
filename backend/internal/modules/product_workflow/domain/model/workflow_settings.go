@@ -28,6 +28,8 @@ type WorkflowVariable struct {
 	Value        string `json:"value,omitempty"`
 	Description  string `json:"description,omitempty"`
 	RuntimeInput bool   `json:"runtime_input,omitempty"`
+	Secret       bool   `json:"secret,omitempty"`
+	VaultPath    string `json:"vault_path,omitempty"`
 }
 
 type WorkflowTrigger struct {
@@ -47,7 +49,8 @@ func (t WorkflowTrigger) Active() bool {
 
 type WorkflowAdvanced struct {
 	Concurrency    int `json:"concurrency"`
-	TimeoutMinutes int `json:"timeout_minutes"`
+	TimeoutMinutes int  `json:"timeout_minutes"`
+	Debug          bool `json:"debug,omitempty"`
 }
 
 func DefaultAdvanced() WorkflowAdvanced {
@@ -83,6 +86,7 @@ func NormalizeVariables(items []WorkflowVariable) ([]WorkflowVariable, error) {
 		seenKey[item.Key] = struct{}{}
 		item.Value = strings.TrimSpace(item.Value)
 		item.Description = strings.TrimSpace(item.Description)
+		item.VaultPath = strings.Trim(strings.TrimSpace(item.VaultPath), "/")
 		out = append(out, item)
 	}
 	return out, nil
@@ -210,4 +214,85 @@ func TriggerAcceptsEvent(item WorkflowTrigger, event string) bool {
 
 func FormatMissingVariables(keys []string) error {
 	return kernel.NewDomainError("PRODUCT_WORKFLOW_VARIABLE_REQUIRED", "缺少运行时必填变量: "+strings.Join(keys, ", "))
+}
+
+const secretValuePrefix = "enc:v1:"
+const maskedSecretValue = "******"
+
+type ValueCipher interface {
+	Encrypt(plaintext string) (string, error)
+	Decrypt(encoded string) (string, error)
+}
+
+func SealVariables(box ValueCipher, previous, next []WorkflowVariable) ([]WorkflowVariable, error) {
+	prev := map[string]WorkflowVariable{}
+	for _, item := range previous {
+		prev[item.Key] = item
+	}
+	for i := range next {
+		item := next[i]
+		old, hasOld := prev[item.Key]
+		switch {
+		case item.Secret && (item.Value == "" || item.Value == maskedSecretValue) && hasOld:
+			item.Value = old.Value
+			item.Secret = true
+		case item.Secret && !strings.HasPrefix(item.Value, secretValuePrefix):
+			if box == nil {
+				return nil, kernel.NewDomainError("PRODUCT_WORKFLOW_INVALID_INPUT", "未配置变量加密密钥")
+			}
+			enc, err := box.Encrypt(item.Value)
+			if err != nil {
+				return nil, err
+			}
+			item.Value = secretValuePrefix + enc
+		case !item.Secret && strings.HasPrefix(item.Value, secretValuePrefix) && box != nil:
+			plain, err := box.Decrypt(strings.TrimPrefix(item.Value, secretValuePrefix))
+			if err != nil {
+				return nil, err
+			}
+			item.Value = plain
+		case !item.Secret && (item.Value == "" || item.Value == maskedSecretValue) && hasOld && old.Secret:
+			item.Secret = false
+			if box == nil {
+				item.Value = old.Value
+				break
+			}
+			plain, err := box.Decrypt(strings.TrimPrefix(old.Value, secretValuePrefix))
+			if err != nil {
+				return nil, err
+			}
+			item.Value = plain
+		}
+		next[i] = item
+	}
+	return next, nil
+}
+
+func RevealVariables(box ValueCipher, items []WorkflowVariable) ([]WorkflowVariable, error) {
+	out := append([]WorkflowVariable(nil), items...)
+	for i := range out {
+		if !strings.HasPrefix(out[i].Value, secretValuePrefix) {
+			continue
+		}
+		if box == nil {
+			return nil, kernel.NewDomainError("PRODUCT_WORKFLOW_INVALID_INPUT", "未配置变量加密密钥")
+		}
+		plain, err := box.Decrypt(strings.TrimPrefix(out[i].Value, secretValuePrefix))
+		if err != nil {
+			return nil, err
+		}
+		out[i].Value = plain
+	}
+	return out, nil
+}
+
+func MaskSecretVariables(items []WorkflowVariable) []WorkflowVariable {
+	out := append([]WorkflowVariable(nil), items...)
+	for i := range out {
+		if out[i].Secret || strings.HasPrefix(out[i].Value, secretValuePrefix) {
+			out[i].Secret = true
+			out[i].Value = ""
+		}
+	}
+	return out
 }

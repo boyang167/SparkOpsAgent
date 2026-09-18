@@ -91,4 +91,5 @@ func (s *Scheduler) tick(ctx context.Context) {
 			s.logger.Info("workflow cron triggered", zap.String("workflow_id", wf.ID.String()), zap.String("schedule", item.Schedule))
 		}
 	}
+	s.start.ExpireRuns(ctx)
 }

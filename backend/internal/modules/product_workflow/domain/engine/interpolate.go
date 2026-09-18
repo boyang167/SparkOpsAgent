@@ -64,9 +64,6 @@ func interpolateValue(value any, vars map[string]string) any {
 		return typed
 	case map[string]any:
 		for key, item := range typed {
-			if key == "yaml" || key == "config_resources" {
-				continue
-			}
 			typed[key] = interpolateValue(item, vars)
 		}
 		return typed

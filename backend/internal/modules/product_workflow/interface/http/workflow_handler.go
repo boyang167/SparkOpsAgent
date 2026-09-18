@@ -85,6 +85,8 @@ type workflowVariableDTO struct {
 	Value        string `json:"value"`
 	Description  string `json:"description"`
 	RuntimeInput bool   `json:"runtime_input"`
+	Secret       bool   `json:"secret"`
+	VaultPath    string `json:"vault_path"`
 }
 
 type workflowTriggerDTO struct {
@@ -99,8 +101,9 @@ type workflowTriggerDTO struct {
 }
 
 type workflowAdvancedDTO struct {
-	Concurrency    int `json:"concurrency"`
-	TimeoutMinutes int `json:"timeout_minutes"`
+	Concurrency    int  `json:"concurrency"`
+	TimeoutMinutes int  `json:"timeout_minutes"`
+	Debug          bool `json:"debug"`
 }
 
 func dtoToNotifications(items []workflowNotificationDTO) []model.WorkflowNotification {
@@ -117,7 +120,8 @@ func dtoToVariables(items []workflowVariableDTO) []model.WorkflowVariable {
 	out := make([]model.WorkflowVariable, 0, len(items))
 	for _, item := range items {
 		out = append(out, model.WorkflowVariable{
-			ID: item.ID, Key: item.Key, Value: item.Value, Description: item.Description, RuntimeInput: item.RuntimeInput,
+			ID: item.ID, Key: item.Key, Value: item.Value, Description: item.Description,
+			RuntimeInput: item.RuntimeInput, Secret: item.Secret, VaultPath: item.VaultPath,
 		})
 	}
 	return out
@@ -135,7 +139,7 @@ func dtoToTriggers(items []workflowTriggerDTO) []model.WorkflowTrigger {
 }
 
 func workflowPayload(wf *model.ProductWorkflow) gin.H {
-	variables := wf.Variables
+	variables := model.MaskSecretVariables(wf.Variables)
 	if variables == nil {
 		variables = []model.WorkflowVariable{}
 	}
@@ -275,7 +279,7 @@ func (h *Handler) UpdateProductWorkflow(c *gin.Context) {
 		input.Triggers = &triggers
 	}
 	if req.Advanced != nil {
-		advanced := model.WorkflowAdvanced{Concurrency: req.Advanced.Concurrency, TimeoutMinutes: req.Advanced.TimeoutMinutes}
+		advanced := model.WorkflowAdvanced{Concurrency: req.Advanced.Concurrency, TimeoutMinutes: req.Advanced.TimeoutMinutes, Debug: req.Advanced.Debug}
 		input.Advanced = &advanced
 	}
 	wf, err := h.workflows.Update.Handle(c.Request.Context(), wsID, productID, workflowID, input)

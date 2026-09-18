@@ -10,9 +10,10 @@ type GitHook struct {
 	Event   string
 	Ref     string
 	RefType string
-	Commit  string
-	HTTPURL string
-	Path    string
+	Commit          string
+	HTTPURL         string
+	Path            string
+	MergeRequestIID int
 }
 
 func ParseGitLabHook(body []byte) (GitHook, bool, error) {
@@ -28,6 +29,7 @@ func ParseGitLabHook(body []byte) (GitHook, bool, error) {
 			WebURL            string `json:"web_url"`
 		} `json:"project"`
 		ObjectAttributes struct {
+			IID          int    `json:"iid"`
 			Action       string `json:"action"`
 			SourceBranch string `json:"source_branch"`
 			LastCommit   struct {
@@ -63,6 +65,7 @@ func ParseGitLabHook(body []byte) (GitHook, bool, error) {
 		hook.RefType = "branch"
 		hook.Ref = strings.TrimSpace(payload.ObjectAttributes.SourceBranch)
 		hook.Commit = payload.ObjectAttributes.LastCommit.ID
+		hook.MergeRequestIID = payload.ObjectAttributes.IID
 	default:
 		return GitHook{}, true, nil
 	}

@@ -36,6 +36,8 @@ export const WorkflowVariableVMSchema = z.object({
   value: z.string().optional().default(""),
   description: z.string().optional().default(""),
   runtime_input: z.boolean().optional().default(false),
+  secret: z.boolean().optional().default(false),
+  vault_path: z.string().optional().default(""),
 });
 
 export type WorkflowVariableVM = z.infer<typeof WorkflowVariableVMSchema>;
@@ -56,6 +58,7 @@ export type WorkflowTriggerVM = z.infer<typeof WorkflowTriggerVMSchema>;
 export const WorkflowAdvancedVMSchema = z.object({
   concurrency: z.number().int().optional().default(1),
   timeout_minutes: z.number().int().optional().default(0),
+  debug: z.boolean().optional().default(false),
 });
 
 export type WorkflowAdvancedVM = z.infer<typeof WorkflowAdvancedVMSchema>;

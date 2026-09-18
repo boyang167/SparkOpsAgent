@@ -314,9 +314,14 @@ auth:
     user_search_filter: "(uid=%s)"
 ```
 
-GitLab 自动注册 Project Hook
-变量插进 ConfigMap/Secret YAML
-加密变量、Vault
-超时杀任务、调试断点
-PR 评论 / 检查状态回写 GitLab
-邮件、飞书成员补发
+工作流补充能力（需在 `config.yaml` 或环境变量中配置后才真正发出）：
+
+| 能力 | 配置 |
+|------|------|
+| 对外 Hook 地址 | `server.public_url` 或 `SPARKOPS_PUBLIC_URL`。保存 Git 触发器时用项目仓库密钥注册 GitLab Project Hook |
+| 加密变量 | 使用 `security.secret_encryption_key`（否则回退 `jwt.secret`）。界面留空表示保持原密文 |
+| Vault | `vault.address` / `vault.token`，或 `VAULT_ADDR` / `VAULT_TOKEN`。变量的 Vault 路径在启动时读取 KV v2 的 `value` |
+| 邮件 | `notify.smtp` 或 `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` |
+| 飞书成员 | `notify.feishu.app_id` / `app_secret`，或 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`。目标填 open_id，含 `@` 时按邮箱发送 |
+
+超时会把运行标为失败；调试断点让每个阶段在继续前暂停。GitLab 的提交状态和 MR 评论使用同一套项目密钥回写。ConfigMap / Secret YAML 支持 `{{.变量名}}`。

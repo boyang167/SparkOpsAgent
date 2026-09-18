@@ -175,6 +175,28 @@ func (r *ProductWorkflowRepository) CountActiveRuns(ctx context.Context, workflo
 	return count, err
 }
 
+func (r *ProductWorkflowRepository) ListActiveRuns(ctx context.Context, limit int) ([]*model.ProductWorkflowRun, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var rows []productWorkflowRunModel
+	err := r.db.WithContext(ctx).
+		Where("status IN ?", []string{"pending", "running", "paused"}).
+		Order("created_at ASC").Limit(limit).Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*model.ProductWorkflowRun, 0, len(rows))
+	for _, row := range rows {
+		run, err := rowToRun(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, run)
+	}
+	return out, nil
+}
+
 func (r *ProductWorkflowRepository) SaveRun(ctx context.Context, run *model.ProductWorkflowRun) error {
 	row, err := toRunModel(run)
 	if err != nil {

@@ -31,7 +31,8 @@ func TestInterpolateStagesSkipsConfigYAML(t *testing.T) {
 	require.Equal(t, "main", out[0].Jobs[0].Spec["branch"])
 	resources := out[0].Jobs[0].Spec["config_resources"].([]any)
 	row := resources[0].(map[string]any)
-	require.Contains(t, row["yaml"], "{{.BRANCH}}")
+	require.Contains(t, row["yaml"], "value: main")
+	require.NotContains(t, row["yaml"], "{{.BRANCH}}")
 }
 
 func TestPrepareRunGitOverridesOnlyMatchingProject(t *testing.T) {

@@ -7,12 +7,41 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/smtp"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 )
+
+type ChannelConfig struct {
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUser     string
+	SMTPPassword string
+	SMTPFrom     string
+	FeishuAppID  string
+	FeishuSecret string
+}
+
+var (
+	channelMu sync.Mutex
+	channels  ChannelConfig
+)
+
+func ConfigureChannels(cfg ChannelConfig) {
+	channelMu.Lock()
+	channels = cfg
+	channelMu.Unlock()
+}
+
+func currentChannels() ChannelConfig {
+	channelMu.Lock()
+	defer channelMu.Unlock()
+	return channels
+}
 
 func (s *Scheduler) emitNotification(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun, event string) {
 	if wf == nil && run != nil {
@@ -144,6 +173,14 @@ func dispatchNotifications(ctx context.Context, notes []model.WorkflowNotificati
 			continue
 		}
 		endpoint := strings.TrimSpace(note.WebhookURL)
+		switch note.Channel {
+		case model.NotifyChannelMail:
+			_ = sendMail(currentChannels(), note.Targets, workflowName, text)
+			continue
+		case model.NotifyChannelFeishuUser:
+			_ = sendFeishuUsers(ctx, currentChannels(), note.Targets, text)
+			continue
+		}
 		if !webhookChannel(note.Channel) || !allowedWebhook(endpoint) {
 			continue
 		}
@@ -233,4 +270,105 @@ func notificationBody(channel, text, event, workflowName, runID, status string) 
 			"text":     text,
 		})
 	}
+}
+
+func splitTargets(raw string) []string {
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == ' ' || r == '\t'
+	})
+	out := make([]string, 0, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			out = append(out, field)
+		}
+	}
+	return out
+}
+
+func sendMail(cfg ChannelConfig, targets, subject, body string) error {
+	host := strings.TrimSpace(cfg.SMTPHost)
+	recipients := splitTargets(targets)
+	if host == "" || len(recipients) == 0 {
+		return nil
+	}
+	port := cfg.SMTPPort
+	if port == 0 {
+		port = 587
+	}
+	from := strings.TrimSpace(cfg.SMTPFrom)
+	if from == "" {
+		from = cfg.SMTPUser
+	}
+	msg := []byte("From: " + from + "\r\nTo: " + strings.Join(recipients, ",") + "\r\nSubject: " + subject + "\r\n\r\n" + body)
+	addr := fmt.Sprintf("%s:%d", host, port)
+	var auth smtp.Auth
+	if cfg.SMTPUser != "" {
+		auth = smtp.PlainAuth("", cfg.SMTPUser, cfg.SMTPPassword, host)
+	}
+	return smtp.SendMail(addr, auth, from, recipients, msg)
+}
+
+func sendFeishuUsers(ctx context.Context, cfg ChannelConfig, targets, text string) error {
+	if strings.TrimSpace(cfg.FeishuAppID) == "" || strings.TrimSpace(cfg.FeishuSecret) == "" {
+		return nil
+	}
+	recipients := splitTargets(targets)
+	if len(recipients) == 0 {
+		return nil
+	}
+	token, err := feishuTenantToken(ctx, cfg.FeishuAppID, cfg.FeishuSecret)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	for _, target := range recipients {
+		idType := "open_id"
+		if strings.Contains(target, "@") {
+			idType = "email"
+		}
+		content, _ := json.Marshal(map[string]string{"text": text})
+		raw, _ := json.Marshal(map[string]string{
+			"receive_id": target, "msg_type": "text", "content": string(content),
+		})
+		endpoint := "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=" + idType
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(raw))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
+	return nil
+}
+
+func feishuTenantToken(ctx context.Context, appID, secret string) (string, error) {
+	raw, _ := json.Marshal(map[string]string{"app_id": appID, "app_secret": secret})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal", bytes.NewReader(raw))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		TenantAccessToken string `json:"tenant_access_token"`
+		Code              int    `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", err
+	}
+	if payload.TenantAccessToken == "" {
+		return "", fmt.Errorf("feishu token code %d", payload.Code)
+	}
+	return payload.TenantAccessToken, nil
 }

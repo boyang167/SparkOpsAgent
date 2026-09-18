@@ -12,12 +12,15 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/engine"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/acl"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/gitlabapi"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/trigger"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/vault"
 	pwfhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -59,14 +62,42 @@ func (m *Module) Register(c *appctx.Container) error {
 	buildExecutor := engine.NewBuildExecutor(c.BuildTrigger, workflowRepo, acl.NewRegistryResolver(c.DB))
 	deployExecutor := engine.NewDeployExecutor(c.DeploymentTrigger, workflowRepo)
 	scheduler := engine.NewScheduler(workflowRepo, buildExecutor, deployExecutor, c.EventBus)
+	box, err := crypto.NewSecretBoxFromConfig(c.Config)
+	if err != nil {
+		log.Printf("product_workflow: variable cipher unavailable: %v", err)
+		box = nil
+	}
+	lookup := acl.NewProjectGitLookup(c.DB, box)
+	publicBase := "http://127.0.0.1:8080"
+	if c.Config != nil {
+		publicBase = c.Config.PublicBaseURL()
+		engine.ConfigureChannels(engine.ChannelConfig{
+			SMTPHost: c.Config.Notify.SMTP.Host, SMTPPort: c.Config.Notify.SMTP.Port,
+			SMTPUser: c.Config.Notify.SMTP.Username, SMTPPassword: c.Config.Notify.SMTP.Password,
+			SMTPFrom: c.Config.Notify.SMTP.From,
+			FeishuAppID: c.Config.Notify.Feishu.AppID, FeishuSecret: c.Config.Notify.Feishu.AppSecret,
+		})
+	}
 
 	startRun := command.NewStartWorkflowRunHandler(workflowRepo, scheduler, productChecker)
-	startRun.UseGitLookup(acl.NewProjectGitLookup(c.DB))
+	startRun.UseGitLookup(lookup)
+	if box != nil {
+		startRun.UseVariableCipher(box)
+	}
+	if c.Config != nil && c.Config.Vault.Address != "" && c.Config.Vault.Token != "" {
+		startRun.UseVault(vault.Client{Address: c.Config.Vault.Address, Token: c.Config.Vault.Token})
+	}
+	scheduler.SetGitReporter(gitlabapi.Reporter{Lookup: lookup, Logger: c.Logger})
 	trigger.NewScheduler(workflowRepo, startRun, c.Logger).Start(context.Background())
+	updateWorkflow := command.NewUpdateWorkflowHandler(workflowRepo, productChecker)
+	if box != nil {
+		updateWorkflow.UseVariableCipher(box)
+	}
+	updateWorkflow.UseGitHooks(gitlabapi.HookSync{Lookup: lookup, PublicBase: publicBase, Logger: c.Logger})
 	workflowHandlers := pwfhttp.WorkflowHandlers{
 		CreateFromTemplate: command.NewCreateWorkflowFromTemplateHandler(templateRepo, workflowRepo, productChecker),
 		CreateBlank:        command.NewCreateBlankWorkflowHandler(workflowRepo, productChecker),
-		Update:             command.NewUpdateWorkflowHandler(workflowRepo, productChecker),
+		Update:             updateWorkflow,
 		Delete:             command.NewDeleteWorkflowHandler(workflowRepo, productChecker),
 		GetWorkflow:        query.NewGetProductWorkflowHandler(workflowRepo, productChecker),
 		StartRun:           startRun,

@@ -56,7 +56,22 @@ export function WorkflowVariablesPanel({
             {error ? <p className="text-xs text-danger">{error}</p> : null}
             <label className="field">
               <span className="text-xs text-muted">默认值</span>
-              <input className="input" value={item.value} onChange={(e) => patch(index, { value: e.target.value })} />
+              <input
+                className="input"
+                type={item.secret ? "password" : "text"}
+                value={item.value}
+                placeholder={item.secret && !item.value ? "留空表示保持原值" : undefined}
+                onChange={(e) => patch(index, { value: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="text-xs text-muted">Vault 路径</span>
+              <input
+                className="input"
+                value={item.vault_path}
+                placeholder="secret/data/app"
+                onChange={(e) => patch(index, { vault_path: e.target.value })}
+              />
             </label>
             <label className="field">
               <span className="text-xs text-muted">说明</span>
@@ -70,6 +85,14 @@ export function WorkflowVariablesPanel({
                   onChange={(e) => patch(index, { runtime_input: e.target.checked })}
                 />
                 运行时填写
+              </label>
+              <label className="pwf-check">
+                <input
+                  type="checkbox"
+                  checked={item.secret}
+                  onChange={(e) => patch(index, { secret: e.target.checked })}
+                />
+                加密保存
               </label>
               <button type="button" className="btn btn-ghost text-sm" onClick={() => onChange(variables.filter((_, i) => i !== index))}>
                 删除
@@ -115,7 +138,7 @@ export function WorkflowTriggersPanel({
 
   return (
     <div className="pwf-build-form">
-      <p className="text-sm text-muted">手动执行始终可用。Git 触发需要把下面的地址和 Token 配到 GitLab 项目 Webhook。</p>
+      <p className="text-sm text-muted">手动执行始终可用。保存 Git 触发器后，会用项目仓库密钥在 GitLab 自动注册 Webhook；也可手动复制下面的地址和 Token。</p>
       {triggers.length === 0 ? <p className="text-sm text-muted">还没有触发器。</p> : null}
       {triggers.map((item, index) => {
         const enabled = item.enabled !== false;
@@ -274,7 +297,19 @@ export function WorkflowAdvancedPanel({
           onChange={(e) => onChange({ ...advanced, timeout_minutes: Math.max(0, Number(e.target.value) || 0) })}
         />
       </label>
-      <p className="text-xs text-muted">0 表示不限制。当前只保存配置，调度还不会按超时中断运行。</p>
+      <p className="text-xs text-muted">0 表示不限制。超时后本次运行记为失败，已发出的 Jenkins 构建不会被中止。</p>
+      <div className="pwf-side-card-foot">
+        <span className="text-xs text-muted">调试断点</span>
+        <button
+          type="button"
+          className={`menu-switch${advanced.debug ? " menu-switch-on" : ""}`}
+          aria-pressed={advanced.debug}
+          onClick={() => onChange({ ...advanced, debug: !advanced.debug })}
+        >
+          <span className="menu-switch-thumb" />
+        </button>
+      </div>
+      <p className="text-xs text-muted">开启后每个阶段开始前暂停，需要手动继续。</p>
     </div>
   );
 }

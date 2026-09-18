@@ -7,11 +7,12 @@ import (
 )
 
 type GitRunContext struct {
-	ProjectID string
-	Event     string
-	Ref       string
-	RefType   string
-	Commit    string
+	ProjectID       string
+	Event           string
+	Ref             string
+	RefType         string
+	Commit          string
+	MergeRequestIID int
 }
 
 func PrepareRun(wf *model.ProductWorkflow, runID, source string, input map[string]any, git *GitRunContext) ([]model.WorkflowStage, map[string]any, map[string]any, error) {
@@ -41,6 +42,9 @@ func PrepareRun(wf *model.ProductWorkflow, runID, source string, input map[strin
 		trigger["event"] = git.Event
 		trigger["ref"] = git.Ref
 		trigger["commit"] = git.Commit
+		if git.MergeRequestIID > 0 {
+			trigger["mr_iid"] = git.MergeRequestIID
+		}
 	}
 	return stages, stored, trigger, nil
 }

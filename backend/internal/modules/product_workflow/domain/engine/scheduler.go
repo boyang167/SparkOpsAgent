@@ -16,11 +16,29 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
+type GitReporter interface {
+	Report(ctx context.Context, run *model.ProductWorkflowRun)
+}
+
 type Scheduler struct {
 	repo    repository.ProductWorkflowRepository
 	builds  *BuildExecutor
 	deploys *DeployExecutor
 	bus     eventbus.Bus
+	git     GitReporter
+}
+
+func (s *Scheduler) SetGitReporter(reporter GitReporter) {
+	if s != nil {
+		s.git = reporter
+	}
+}
+
+func (s *Scheduler) reportGit(ctx context.Context, run *model.ProductWorkflowRun) {
+	if s == nil || s.git == nil || run == nil {
+		return
+	}
+	s.git.Report(ctx, run)
 }
 
 func NewScheduler(repo repository.ProductWorkflowRepository, builds *BuildExecutor, deploys *DeployExecutor, bus eventbus.Bus) *Scheduler {
@@ -35,6 +53,7 @@ func (s *Scheduler) StartRun(ctx context.Context, wf *model.ProductWorkflow, run
 		return err
 	}
 	s.emitNotification(ctx, wf, run, model.NotifyEventCreated)
+	s.reportGit(ctx, run)
 	return s.executeCurrentStage(ctx, wf, run)
 }
 
@@ -235,7 +254,7 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 	stage := wf.Stages[run.CurrentStage]
 	stageRun := &run.StageRuns[run.CurrentStage]
 	stageRun.ExecMode = model.NormalizeStageExecMode(stage.ExecMode)
-	if stageRun.ExecMode == model.StageExecManual && !stageRun.ManualConfirmed {
+	if (stageRun.ExecMode == model.StageExecManual || (wf != nil && wf.Advanced.Debug)) && !stageRun.ManualConfirmed {
 		stageRun.Status = model.JobRunStatusPaused
 		run.Status = model.RunStatusPaused
 		if err := s.repo.UpdateRun(ctx, run); err != nil {
@@ -463,6 +482,7 @@ func (s *Scheduler) completeRun(ctx context.Context, run *model.ProductWorkflowR
 		return err
 	}
 	s.emitNotification(ctx, nil, run, model.NotifyEventPassed)
+	s.reportGit(ctx, run)
 	return s.publishRunCompleted(ctx, run)
 }
 
@@ -481,7 +501,15 @@ func (s *Scheduler) failRunEvent(ctx context.Context, run *model.ProductWorkflow
 		return err
 	}
 	s.emitNotification(ctx, nil, run, event)
+	s.reportGit(ctx, run)
 	return s.publishRunCompleted(ctx, run)
+}
+
+func (s *Scheduler) ExpireRun(ctx context.Context, run *model.ProductWorkflowRun) error {
+	if run == nil || run.Status == model.RunStatusSuccess || run.Status == model.RunStatusFailed {
+		return nil
+	}
+	return s.failRunEvent(ctx, run, "工作流超时", model.NotifyEventTimeout)
 }
 
 func (s *Scheduler) publishRunCompleted(ctx context.Context, run *model.ProductWorkflowRun) error {
