@@ -585,6 +585,71 @@ func (s *MenuStore) SoftDeleteSubtree(ctx context.Context, workspaceID kernel.Wo
 	})
 }
 
+func (s *MenuStore) HardDeleteByPathsOrTitles(ctx context.Context, paths, titles []string) error {
+	if len(paths) == 0 && len(titles) == 0 {
+		return nil
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Unscoped().Model(&menuModel{})
+		switch {
+		case len(paths) > 0 && len(titles) > 0:
+			query = query.Where("path IN ? OR title IN ?", paths, titles)
+		case len(paths) > 0:
+			query = query.Where("path IN ?", paths)
+		default:
+			query = query.Where("title IN ?", titles)
+		}
+		var ids []string
+		if err := query.Pluck("id", &ids).Error; err != nil {
+			return err
+		}
+		seen := map[string]struct{}{}
+		for _, id := range ids {
+			seen[id] = struct{}{}
+		}
+		for {
+			if len(ids) == 0 {
+				return nil
+			}
+			var children []string
+			if err := tx.Unscoped().Model(&menuModel{}).Where("parent_id IN ?", ids).Pluck("id", &children).Error; err != nil {
+				return err
+			}
+			added := false
+			for _, id := range children {
+				if _, ok := seen[id]; ok {
+					continue
+				}
+				seen[id] = struct{}{}
+				ids = append(ids, id)
+				added = true
+			}
+			if !added {
+				break
+			}
+		}
+		if err := tx.Where("menu_id IN ?", ids).Delete(&roleMenuModel{}).Error; err != nil {
+			return err
+		}
+		var buttonIDs []string
+		if err := tx.Unscoped().Model(&menuButtonModel{}).Where("menu_id IN ?", ids).Pluck("id", &buttonIDs).Error; err != nil {
+			return err
+		}
+		if len(buttonIDs) > 0 {
+			if err := tx.Where("button_id IN ?", buttonIDs).Delete(&roleMenuButtonModel{}).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Unscoped().Where("menu_id IN ?", ids).Delete(&menuButtonModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("menu_id IN ?", ids).Delete(&menuParamModel{}).Error; err != nil {
+			return err
+		}
+		return tx.Unscoped().Where("id IN ?", ids).Delete(&menuModel{}).Error
+	})
+}
+
 func collectMenuSubtreeIDs(tx *gorm.DB, workspaceID kernel.WorkspaceID, menuID string, ids *[]string) error {
 	var row menuModel
 	if err := tx.Where("id = ? AND workspace_id = ? AND deleted_at IS NULL", menuID, workspaceID.String()).

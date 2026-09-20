@@ -10,7 +10,7 @@ import (
 func TestDefaultMenuRolePolicies_includeAdminOnRestrictedPaths(t *testing.T) {
 	restricted := []string{
 		"/config/secrets",
-		"/delivery/pipelines",
+		"/publish/products",
 		"/config/webhooks",
 		"/plugins/kubernetes/access-controls",
 	}

@@ -73,7 +73,7 @@ func (h *ListGitRefsHandler) Handle(
 	if refType == "" {
 		refType = "branch"
 	}
-	if refType != "branch" && refType != "tag" && refType != "commit" {
+	if refType != "branch" && refType != "tag" && refType != "commit" && refType != "pr" {
 		return nil, fmt.Errorf("unsupported ref type")
 	}
 

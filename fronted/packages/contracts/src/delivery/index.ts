@@ -111,6 +111,26 @@ export const SyncPreviewVMSchema = z.object({
 
 export type SyncPreviewVM = z.infer<typeof SyncPreviewVMSchema>;
 
+export const RunPreviewItemVMSchema = z.object({
+  kind: SyncManifestKindSchema,
+  name: z.string(),
+  rendered_yaml: z.string().default(""),
+  current_yaml: z.string().default(""),
+  current_found: z.boolean(),
+});
+
+export type RunPreviewItemVM = z.infer<typeof RunPreviewItemVMSchema>;
+
+export const RunPreviewVMSchema = z.object({
+  environment_id: z.string(),
+  cluster_id: z.string().optional(),
+  cluster_name: z.string(),
+  namespace: z.string(),
+  items: z.array(RunPreviewItemVMSchema),
+});
+
+export type RunPreviewVM = z.infer<typeof RunPreviewVMSchema>;
+
 export const CreateDeploymentCommandSchema = z
   .object({
     cluster_id: z.string().optional(),

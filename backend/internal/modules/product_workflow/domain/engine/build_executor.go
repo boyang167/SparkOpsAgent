@@ -162,10 +162,14 @@ func ImageRepositoryPath(registryURL, namespace, projectName string) string {
 }
 
 func normalizeGitRefType(gitRefType string) string {
-	if strings.TrimSpace(gitRefType) == "tag" {
+	switch strings.TrimSpace(gitRefType) {
+	case "tag":
 		return "tag"
+	case "pr":
+		return "pr"
+	default:
+		return "branch"
 	}
-	return "branch"
 }
 
 func failedBuildRun(spec model.ProjectBuildSpec, branch, message string) model.ProjectBuildRun {

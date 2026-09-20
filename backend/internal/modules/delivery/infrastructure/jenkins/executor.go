@@ -355,7 +355,9 @@ func buildParams(req port.BuildRequest) map[string]string {
 		branch = "main"
 	}
 	refType := strings.TrimSpace(req.GitRefType)
-	if refType != "tag" {
+	switch refType {
+	case "tag", "pr":
+	default:
 		refType = "branch"
 	}
 	params := map[string]string{

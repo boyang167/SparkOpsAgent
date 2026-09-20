@@ -1,4 +1,4 @@
-/** 去掉路径里因空格/`%20` 产生的空段，例如 `/%20/delivery/pipelines` → `/delivery/pipelines` */
+/** 去掉路径里因空格/`%20` 产生的空段，例如 `/%20/products` → `/products` */
 export function cleanedPathname(pathname: string): string | null {
   let decoded = pathname;
   try {

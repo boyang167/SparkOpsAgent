@@ -176,6 +176,9 @@ var removedMenuPaths = []string{
 	"/security/ingress",
 	"/security/virtualservices",
 	"/config/consul",
+	"/delivery/pipelines",
+	"/delivery/fleets",
+	"/delivery/profiles",
 }
 
 var removedMenuTitles = []string{
@@ -186,6 +189,9 @@ var removedMenuTitles = []string{
 	"构建管理",
 	"版本计划",
 	"发布管理",
+	"Pipeline Studio",
+	"Fleet 编辑器",
+	"Profile 配置",
 }
 
 // misdeletedPluginMenuPaths lists plugin menus that were incorrectly soft-deleted by legacy title cleanup.
@@ -252,7 +258,15 @@ func (h *SeedWorkspaceMenusHandler) RepairRemovedMenusAllWorkspaces(ctx context.
 			return err
 		}
 	}
-	return nil
+	return h.menus.HardDeleteByPathsOrTitles(ctx, []string{
+		"/delivery/pipelines",
+		"/delivery/fleets",
+		"/delivery/profiles",
+	}, []string{
+		"Pipeline Studio",
+		"Fleet 编辑器",
+		"Profile 配置",
+	})
 }
 
 func (h *SeedWorkspaceMenusHandler) repairRemovedMenus(ctx context.Context, workspaceID kernel.WorkspaceID) error {
@@ -310,9 +324,6 @@ var defaultMenuGroups = []defaultMenuGroup{
 	{
 		ID: "ops-delivery", Label: "持续交付",
 		Items: []struct{ Href, Label string }{
-			{"/delivery/pipelines", "Pipeline Studio"},
-			{"/delivery/fleets", "Fleet 编辑器"},
-			{"/delivery/profiles", "Profile 配置"},
 			{"/publish/products", "产品管理"},
 			{"/products/workflows", "工作流"},
 			{"/config/secrets", "密钥配置"},
@@ -345,20 +356,17 @@ var legacyBusinessNavGroupIDs = []string{
 }
 
 var enterpriseMenuTitleByPath = map[string]string{
-	"/projects":                 "项目管理",
-	"/templates":                "模板管理",
-	"/knowledge":                "知识库",
-	"/delivery/pipelines": "Pipeline Studio",
-	"/delivery/fleets":    "Fleet 编辑器",
-	"/delivery/profiles":  "Profile 配置",
+	"/projects":           "项目管理",
+	"/templates":          "模板管理",
+	"/knowledge":          "知识库",
 	"/publish/products":   "产品管理",
 	"/products/workflows": "工作流",
 	"/config/secrets":     "密钥配置",
-	"/runtime/pods":             "运行实例",
-	"/cronjobs":                 "定时任务",
+	"/runtime/pods":       "运行实例",
+	"/cronjobs":           "定时任务",
 	"/monitor/overview":   "监控概览",
 	"/monitor/log-viewer": "日志查询",
-	"/config/webhooks": "外部集成",
+	"/config/webhooks":    "外部集成",
 }
 
 func (h *SeedWorkspaceMenusHandler) repairSecretConfigMenu(ctx context.Context, workspaceID kernel.WorkspaceID) error {
@@ -526,19 +534,19 @@ func (h *CreateMenuHandler) Handle(ctx context.Context, workspaceID kernel.Works
 		in.ParentID = nil
 	}
 	menu := &model.Menu{
-		WorkspaceID: workspaceID,
-		ParentID:    in.ParentID,
-		Name:        name,
-		Path:        path,
-		Title:       title,
-		Icon:        strings.TrimSpace(in.Icon),
-		Component:   strings.TrimSpace(in.Component),
-		Hidden:      in.Hidden,
-		Sort:        in.Sort,
-		KeepAlive:   in.KeepAlive,
-		ActiveMenu:  strings.TrimSpace(in.ActiveMenu),
-		CloseTab:    in.CloseTab,
-		IsBasic:     in.IsBasic,
+		WorkspaceID:         workspaceID,
+		ParentID:            in.ParentID,
+		Name:                name,
+		Path:                path,
+		Title:               title,
+		Icon:                strings.TrimSpace(in.Icon),
+		Component:           strings.TrimSpace(in.Component),
+		Hidden:              in.Hidden,
+		Sort:                in.Sort,
+		KeepAlive:           in.KeepAlive,
+		ActiveMenu:          strings.TrimSpace(in.ActiveMenu),
+		CloseTab:            in.CloseTab,
+		IsBasic:             in.IsBasic,
 		TransitionAnimation: strings.TrimSpace(in.TransitionAnimation),
 	}
 	if menu.TransitionAnimation == "" {

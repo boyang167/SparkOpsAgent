@@ -104,6 +104,15 @@ export async function getSyncPreview(
   return ctx.upstream.delivery.getSyncPreview(workspaceId, projectId, imageTag);
 }
 
+export async function getRunPreview(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  input: { environmentId: string; imageTag?: string },
+): Promise<import("@sparkops/contracts/delivery").RunPreviewVM> {
+  return ctx.upstream.delivery.getRunPreview(workspaceId, projectId, input);
+}
+
 export async function getDeployment(
   ctx: BffContext,
   workspaceId: string,

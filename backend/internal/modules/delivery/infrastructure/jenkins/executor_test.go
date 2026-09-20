@@ -71,6 +71,17 @@ func TestBuildParamsCarryGitRefTypeTag(t *testing.T) {
 	require.Equal(t, "tag", params["GIT_REF_TYPE"])
 }
 
+func TestBuildParamsCarryGitRefTypePR(t *testing.T) {
+	params := buildParams(port.BuildRequest{
+		Namespace: "team-a", ProjectName: "orders",
+		GitRefType: "pr", GitRefValue: "10",
+		ImageTag: "550e8400e29b", ImageRepository: "registry.example/team/orders",
+	})
+
+	require.Equal(t, "10", params["BRANCH"])
+	require.Equal(t, "pr", params["GIT_REF_TYPE"])
+}
+
 func TestBuildParamsDeploymentAlwaysCarriesFourRequiredParameters(t *testing.T) {
 	params := buildParams(port.BuildRequest{
 		Namespace: "team-a", ProjectName: "orders", GitRefValue: "main",

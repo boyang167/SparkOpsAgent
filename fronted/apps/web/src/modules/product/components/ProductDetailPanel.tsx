@@ -152,7 +152,7 @@ export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPane
       ) : null}
 
       {!error && tab === "workflows" ? (
-        <div className="product-detail-body">
+        <div className="product-detail-body is-workflows">
           <ProductWorkflowsPanel workspaceId={workspaceId} productId={productId} projects={projects} />
         </div>
       ) : null}

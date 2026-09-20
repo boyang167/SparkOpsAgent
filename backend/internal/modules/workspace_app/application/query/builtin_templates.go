@@ -71,12 +71,14 @@ func BuiltinJenkinsfileTemplateDetail() string {
         script {
           def branch = (env.BRANCH ?: 'main').trim()
           def refType = (params.GIT_REF_TYPE ?: env.GIT_REF_TYPE ?: 'branch').trim()
-          def branchSpec = refType == 'tag' ? "refs/tags/${branch}" : "*/${branch}"
+          def branchSpec = refType == 'tag' ? "refs/tags/${branch}" : refType == 'pr' ? "refs/merge-requests/${branch}/head" : "*/${branch}"
           def cloneExtensions = refType == 'tag'
             ? [[$class: 'CloneOption', shallow: false]]
             : [[$class: 'CloneOption', shallow: true, depth: 1]]
           def remoteConfigs = refType == 'tag'
             ? [[url: env.GIT_URL, credentialsId: env.GIT_CREDENTIAL_ID, refspec: '+refs/tags/*:refs/remotes/origin/tags/*']]
+            : refType == 'pr'
+            ? [[url: env.GIT_URL, credentialsId: env.GIT_CREDENTIAL_ID, refspec: "+refs/merge-requests/${branch}/head:refs/remotes/origin/merge-requests/${branch}/head"]]
             : [[url: env.GIT_URL, credentialsId: env.GIT_CREDENTIAL_ID]]
           checkout([
             $class: 'GitSCM',

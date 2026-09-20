@@ -8,6 +8,7 @@ import type {
   ProjectWebhookVM,
   RollbackDeploymentCommand,
   RollbackPreviewVM,
+  RunPreviewVM,
   SyncPreviewVM,
   UpsertProjectWebhookInput,
   WebhookEventCatalogItem,
@@ -105,6 +106,19 @@ export function getSyncPreview(
   const query = imageTag ? `?image_tag=${encodeURIComponent(imageTag)}` : "";
   return bffFetch<SyncPreviewVM>(
     `/workspaces/${workspaceId}/projects/${projectId}/deployments/sync-preview${query}`,
+    { workspaceId },
+  );
+}
+
+export function getRunPreview(
+  projectId: string,
+  workspaceId: string,
+  input: { environmentId: string; imageTag?: string },
+) {
+  const params = new URLSearchParams({ environment_id: input.environmentId });
+  if (input.imageTag) params.set("image_tag", input.imageTag);
+  return bffFetch<RunPreviewVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/deployments/run-preview?${params.toString()}`,
     { workspaceId },
   );
 }

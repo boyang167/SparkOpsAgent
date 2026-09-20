@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildConfigResourceItems, defaultConfigResources, imageRepositoryPath, imageTagFromRef, sourceImageLines } from "./deploy-job-spec";
+import {
+  buildConfigResourceItems,
+  defaultConfigResources,
+  deployImageRef,
+  imageRepositoryPath,
+  imageTagFromRef,
+  sourceImageLines,
+} from "./deploy-job-spec";
 
 describe("deploy image name", () => {
   it("sanitizes the branch into the image tag", () => {
@@ -10,6 +17,18 @@ describe("deploy image name", () => {
 
   it("builds the repository path from the registry host", () => {
     expect(imageRepositoryPath("https://192.168.5.24", "Team-A", "Orders")).toBe("192.168.5.24/team-a/orders");
+  });
+
+  it("builds full deploy image ref from build spec and branch", () => {
+    expect(
+      deployImageRef(
+        { registry_id: "harbor" },
+        "p1",
+        "feature/login",
+        [{ id: "harbor", serviceUrl: "https://192.168.5.24" }],
+        [{ id: "p1", name: "orders", namespace: "team-a" }],
+      ),
+    ).toBe("192.168.5.24/team-a/orders:feature-login");
   });
 
   it("shows the image produced by the source build job", () => {

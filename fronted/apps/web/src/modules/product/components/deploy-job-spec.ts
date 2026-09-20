@@ -198,6 +198,25 @@ export function imageTagFromRef(ref: string): string {
   return value.slice(0, 255);
 }
 
+export function deployImageRef(
+  buildSpec: Record<string, unknown> | undefined,
+  projectId: string,
+  branch: string,
+  registries: { id: string; serviceUrl: string }[],
+  projects: Array<{ id: string; name?: string; namespace?: string; displayName?: string }>,
+): string {
+  const record = asRecord(buildSpec);
+  const registryId = asString(record?.registry_id);
+  const registry = registries.find((item) => item.id === registryId);
+  const project = projects.find((entry) => entry.id === projectId);
+  const projectName = project?.name || projectId;
+  const tag = imageTagFromRef(branch);
+  const repository = imageRepositoryPath(registry?.serviceUrl ?? "", project?.namespace ?? "", projectName);
+  if (repository && repository.includes("/")) return `${repository}:${tag}`;
+  if (projectName) return `${projectName.toLowerCase()}:${tag}`;
+  return tag;
+}
+
 export function imageRepositoryPath(registryURL: string, namespace: string, projectName: string): string {
   const raw = registryURL.trim();
   if (!raw) return "";

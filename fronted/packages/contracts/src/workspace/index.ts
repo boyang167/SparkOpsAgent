@@ -197,7 +197,7 @@ export type GitRefVM = z.infer<typeof GitRefVMSchema>;
 export const ListGitRefsCommandSchema = z.object({
   git_url: z.string().min(1),
   secret_id: z.string().min(1),
-  ref_type: z.enum(["branch", "tag", "commit"]).optional().default("branch"),
+  ref_type: z.enum(["branch", "tag", "commit", "pr"]).optional().default("branch"),
 });
 
 export type ListGitRefsCommand = z.infer<typeof ListGitRefsCommandSchema>;

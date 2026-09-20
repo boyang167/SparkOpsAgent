@@ -82,7 +82,9 @@ func (h *TriggerBuildHandler) TriggerAutomatedBuild(
 		return nil, err
 	}
 	refType := strings.TrimSpace(gitRefType)
-	if refType != "tag" {
+	switch refType {
+	case "tag", "pr":
+	default:
 		refType = "branch"
 	}
 	return h.trigger(ctx, auto.WorkspaceID, auto.MemberID, projectID, port.BuildRequest{

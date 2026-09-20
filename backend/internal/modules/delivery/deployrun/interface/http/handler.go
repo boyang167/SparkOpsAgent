@@ -20,6 +20,7 @@ type Handler struct {
 	options     *query.DeploymentOptionsHandler
 	preview     *query.RollbackPreviewHandler
 	syncPreview *query.SyncPreviewHandler
+	runPreview  *query.RunPreviewHandler
 	stream      *query.StreamDeploymentHandler
 }
 
@@ -32,11 +33,12 @@ func NewHandler(
 	options *query.DeploymentOptionsHandler,
 	preview *query.RollbackPreviewHandler,
 	syncPreview *query.SyncPreviewHandler,
+	runPreview *query.RunPreviewHandler,
 	stream *query.StreamDeploymentHandler,
 ) *Handler {
 	return &Handler{
 		create: create, rollback: rollback, abort: abort, list: list, get: get,
-		options: options, preview: preview, syncPreview: syncPreview, stream: stream,
+		options: options, preview: preview, syncPreview: syncPreview, runPreview: runPreview, stream: stream,
 	}
 }
 
@@ -194,6 +196,29 @@ func (h *Handler) SyncPreview(c *gin.Context) {
 		return
 	}
 	preview, err := h.syncPreview.Handle(c.Request.Context(), wsID, projectID, c.Query("image_tag"))
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, preview)
+}
+
+func (h *Handler) RunPreview(c *gin.Context) {
+	wsID, ok := workspaceID(c)
+	if !ok {
+		return
+	}
+	projectID, ok := projectID(c)
+	if !ok {
+		return
+	}
+	preview, err := h.runPreview.Handle(
+		c.Request.Context(),
+		wsID,
+		projectID,
+		c.Query("environment_id"),
+		c.Query("image_tag"),
+	)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return

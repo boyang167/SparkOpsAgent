@@ -41,9 +41,6 @@ export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
     id: "ops-delivery",
     label: "持续交付",
     items: [
-      { href: "/delivery/pipelines", label: "Pipeline Studio", entitlement: "delivery" },
-      { href: "/delivery/fleets", label: "Fleet 编辑器", entitlement: "delivery" },
-      { href: "/delivery/profiles", label: "Profile 配置", entitlement: "delivery" },
       { href: "/products", label: "产品管理", entitlement: "delivery" },
       { href: "/products/workflows", label: "工作流", entitlement: "delivery" },
       { href: "/config/secrets", label: "密钥配置", entitlement: "delivery" },

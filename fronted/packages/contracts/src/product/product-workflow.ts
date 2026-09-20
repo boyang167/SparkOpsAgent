@@ -192,6 +192,8 @@ export const StartProductWorkflowRunCommandSchema = z.object({
   input: z
     .object({
       branch: z.string().optional(),
+      branch_overrides: z.record(z.string()).optional(),
+      ref_type_overrides: z.record(z.string()).optional(),
       environment_overrides: z.record(z.string()).optional(),
       variables: z.record(z.string()).optional(),
     })

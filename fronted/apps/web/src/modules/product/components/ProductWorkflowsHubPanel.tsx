@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { product } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
@@ -8,7 +8,7 @@ import type { ProductProjectVM, ProductVM } from "@sparkops/contracts/product";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
 import { ProductDetailEmptyState } from "./ProductDetailEmptyState";
-import { ProductWorkflowsPanel } from "./ProductWorkflowsPanel";
+import { WorkflowListPanel } from "./WorkflowListPanel";
 import { productDisplayName } from "./product-utils";
 
 interface ProductWorkflowsHubPanelProps {
@@ -23,10 +23,11 @@ export function ProductWorkflowsHubPanel({
   initialWorkflowId,
 }: ProductWorkflowsHubPanelProps) {
   const [products, setProducts] = useState<ProductVM[]>([]);
-  const [productId, setProductId] = useState<string | null>(initialProductId ?? null);
-  const [projects, setProjects] = useState<ProductProjectVM[]>([]);
+  const [productFilter, setProductFilter] = useState<string | null>(initialProductId ?? null);
+  const [projectsByProduct, setProjectsByProduct] = useState<Record<string, ProductProjectVM[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [createRequestId, setCreateRequestId] = useState(0);
 
   const loadProducts = useCallback(async () => {
     setLoading(true);
@@ -34,10 +35,9 @@ export function ProductWorkflowsHubPanel({
     try {
       const items = await product.listProducts(workspaceId);
       setProducts(items);
-      setProductId((prev) => {
+      setProductFilter((prev) => {
         if (initialProductId && items.some((item) => item.id === initialProductId)) return initialProductId;
-        if (prev && items.some((item) => item.id === prev)) return prev;
-        return items[0]?.id ?? null;
+        return prev;
       });
     } catch (err) {
       setError(err instanceof BffError ? err.message : "加载产品失败");
@@ -52,32 +52,49 @@ export function ProductWorkflowsHubPanel({
   }, [loadProducts]);
 
   useEffect(() => {
-    if (!productId) {
-      setProjects([]);
-      return;
-    }
+    if (products.length === 0) return;
     let cancelled = false;
-    void product
-      .listProductProjects(workspaceId, productId)
-      .then((items) => {
-        if (!cancelled) setProjects(items);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof BffError ? err.message : "加载产品项目失败");
-          setProjects([]);
-        }
-      });
+    void (async () => {
+      const entries = await Promise.all(
+        products.map(async (item) => {
+          try {
+            const projects = await product.listProductProjects(workspaceId, item.id);
+            return [item.id, projects] as const;
+          } catch {
+            return [item.id, []] as const;
+          }
+        }),
+      );
+      if (!cancelled) {
+        setProjectsByProduct(Object.fromEntries(entries));
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, productId]);
+  }, [workspaceId, products]);
+
+  const tabProducts = useMemo(
+    () => products.map((item) => ({ id: item.id, name: item.name, display_name: item.display_name })),
+    [products],
+  );
 
   return (
-    <div className="stack-lg">
+    <div className="stack-lg wf-hub-page">
       <PlatformPanelHead
         title="工作流"
-        description="可视化编排产品工作流，支持构建、部署、审批、脚本与通知。"
+        description="浏览、执行与管理工作区内的产品工作流。"
+        action={
+          products.length > 0 ? (
+            <button
+              type="button"
+              className="btn btn-primary text-sm"
+              onClick={() => setCreateRequestId((n) => n + 1)}
+            >
+              新建工作流
+            </button>
+          ) : null
+        }
       />
 
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
@@ -97,36 +114,43 @@ export function ProductWorkflowsHubPanel({
           }
         />
       ) : (
-        <>
-          <div className="product-env-tabs" role="tablist" aria-label="选择产品">
-            <div className="product-env-tabs-scroll">
-              {products.map((item) => {
-                const active = item.id === productId;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    className={`product-env-tab${active ? " is-active" : ""}`}
-                    onClick={() => setProductId(item.id)}
-                  >
-                    <span className="product-env-tab-name">{productDisplayName(item)}</span>
-                  </button>
-                );
-              })}
-            </div>
+        <section className="wf-hub-card">
+          <div className="wf-hub-tabs" role="tablist" aria-label="筛选产品">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={productFilter === null}
+              className={`wf-hub-tab${productFilter === null ? " is-active" : ""}`}
+              onClick={() => setProductFilter(null)}
+            >
+              所有
+            </button>
+            {products.map((item) => {
+              const active = item.id === productFilter;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={`wf-hub-tab${active ? " is-active" : ""}`}
+                  onClick={() => setProductFilter(item.id)}
+                >
+                  {productDisplayName(item)}
+                </button>
+              );
+            })}
           </div>
 
-          {productId ? (
-            <ProductWorkflowsPanel
-              workspaceId={workspaceId}
-              productId={productId}
-              projects={projects}
-              initialWorkflowId={productId === initialProductId ? initialWorkflowId : null}
-            />
-          ) : null}
-        </>
+          <WorkflowListPanel
+            workspaceId={workspaceId}
+            productFilter={productFilter}
+            products={tabProducts}
+            projectsByProduct={projectsByProduct}
+            initialWorkflowId={initialWorkflowId}
+            createRequestId={createRequestId}
+          />
+        </section>
       )}
     </div>
   );

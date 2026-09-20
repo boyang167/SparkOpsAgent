@@ -123,9 +123,13 @@ func deployImage(target model.ProjectBuildRun, branch string) (gitRefType, image
 	if imageTag == "" {
 		imageTag = deploymodel.DefaultImageTag(branch)
 	}
-	gitRefType = "branch"
-	if strings.TrimSpace(target.GitRefType) == "tag" {
+	switch strings.TrimSpace(target.GitRefType) {
+	case "tag":
 		gitRefType = "tag"
+	case "pr":
+		gitRefType = "pr"
+	default:
+		gitRefType = "branch"
 	}
 	return gitRefType, imageTag, strings.TrimSpace(target.ImageRepository)
 }

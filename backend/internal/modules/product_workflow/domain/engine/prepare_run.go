@@ -118,7 +118,9 @@ func ApplyGitProjectRef(stages []model.WorkflowStage, projectID, ref, refType st
 	if projectID == "" || ref == "" {
 		return stages
 	}
-	if refType != "tag" {
+	switch strings.TrimSpace(refType) {
+	case "tag", "pr":
+	default:
 		refType = "branch"
 	}
 	for si := range stages {

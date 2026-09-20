@@ -50,6 +50,11 @@ func ListGitLabRefs(
 		return nil, fmt.Errorf("git secret token is required")
 	}
 
+	encoded := url.PathEscape(projectPath)
+	if refType == "pr" {
+		return listGitLabMergeRequests(ctx, apiBase, encoded, token)
+	}
+
 	resource := "branches"
 	switch refType {
 	case "tag":
@@ -57,7 +62,6 @@ func ListGitLabRefs(
 	case "commit":
 		resource = "commits"
 	}
-	encoded := url.PathEscape(projectPath)
 	endpoint := fmt.Sprintf("%s/api/v4/projects/%s/repository/%s?per_page=100", apiBase, encoded, resource)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -115,6 +119,62 @@ func ListGitLabRefs(
 			Name:      name,
 			Default:   row.Default,
 			Protected: row.Protected,
+		})
+	}
+	return out, nil
+}
+
+func listGitLabMergeRequests(
+	ctx context.Context,
+	apiBase string,
+	encodedProject string,
+	token string,
+) ([]RefItem, error) {
+	endpoint := fmt.Sprintf(
+		"%s/api/v4/projects/%s/merge_requests?state=opened&order_by=updated_at&sort=desc&per_page=100",
+		apiBase,
+		encodedProject,
+	)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("PRIVATE-TOKEN", token)
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("gitlab request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("gitlab status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var rows []struct {
+		IID          int    `json:"iid"`
+		Title        string `json:"title"`
+		SourceBranch string `json:"source_branch"`
+	}
+	if err := json.Unmarshal(body, &rows); err != nil {
+		return nil, fmt.Errorf("gitlab decode: %w", err)
+	}
+
+	out := make([]RefItem, 0, len(rows))
+	for _, row := range rows {
+		if row.IID <= 0 {
+			continue
+		}
+		title := strings.TrimSpace(row.Title)
+		if title == "" {
+			title = strings.TrimSpace(row.SourceBranch)
+		}
+		out = append(out, RefItem{
+			Name:  fmt.Sprintf("%d", row.IID),
+			Title: title,
 		})
 	}
 	return out, nil

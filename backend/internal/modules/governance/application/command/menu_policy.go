@@ -6,13 +6,10 @@ package command
 //
 // Parent group nodes (e.g. "application") are derived automatically when a child is visible.
 var DefaultMenuRolePolicies = map[string][]string{
-	"/projects":         {"admin", "developer", "operator", "reviewer", "viewer"},
-	"/templates":        {"admin", "developer"},
-	"/knowledge":        {"admin", "developer"},
-	"/delivery/builds":  {"admin", "developer", "operator", "reviewer"},
-	"/delivery/pipelines": {"admin", "operator"},
-	"/delivery/fleets":    {"admin", "operator"},
-	"/delivery/profiles":  {"admin", "operator"},
+	"/projects":           {"admin", "developer", "operator", "reviewer", "viewer"},
+	"/templates":          {"admin", "developer"},
+	"/knowledge":          {"admin", "developer"},
+	"/delivery/builds":    {"admin", "developer", "operator", "reviewer"},
 	"/publish/products":   {"admin", "operator"},
 	"/products/workflows": {"admin", "operator"},
 	"/publish/plans":      {"admin", "operator"},
@@ -32,8 +29,8 @@ var DefaultMenuRolePolicies = map[string][]string{
 	"/plugins/kubernetes/namespaces":      {"admin", "developer", "operator"},
 	"/plugins/kubernetes/networks":        {"admin", "operator"},
 	"/plugins/kubernetes/gateway":         {"admin", "operator"},
-	"/plugins/kubernetes/configs":       {"admin", "developer", "operator"},
-	"/plugins/kubernetes/storages":      {"admin", "operator"},
+	"/plugins/kubernetes/configs":         {"admin", "developer", "operator"},
+	"/plugins/kubernetes/storages":        {"admin", "operator"},
 	"/plugins/kubernetes/access-controls": {"admin", "operator"},
 	"/plugins/kubernetes/records":         {"admin", "operator", "viewer"},
 	"/plugins/kubernetes/diagnosis":       {"admin", "operator"},

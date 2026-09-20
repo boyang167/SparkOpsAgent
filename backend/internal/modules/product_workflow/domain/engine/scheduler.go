@@ -583,6 +583,9 @@ func ApplyRunInput(stages []model.WorkflowStage, input map[string]any) []model.W
 					job.Spec["project_builds"] = builds
 				}
 			}
+			if job.Type == model.JobTypeSparkopsBuild {
+				applyBranchOverrides(job, stringMap(input["branch_overrides"]), stringMap(input["ref_type_overrides"]))
+			}
 			if job.Type == model.JobTypeSparkopsDeploy && len(envOverrides) > 0 {
 				if envID, ok := envOverrides[job.Name].(string); ok && envID != "" {
 					job.Spec["environment_id"] = envID
@@ -591,6 +594,54 @@ func ApplyRunInput(stages []model.WorkflowStage, input map[string]any) []model.W
 		}
 	}
 	return out
+}
+
+func applyBranchOverrides(job *model.WorkflowJob, overrides, refTypes map[string]string) {
+	if len(overrides) == 0 && len(refTypes) == 0 {
+		return
+	}
+	builds, ok := job.Spec["project_builds"].([]any)
+	if !ok || len(builds) == 0 {
+		if branch := overrides[job.Name]; branch != "" {
+			job.Spec["branch"] = branch
+		}
+		if refType := refTypes[job.Name]; refType != "" {
+			job.Spec["git_ref_type"] = refType
+		}
+		return
+	}
+	for i := range builds {
+		row, ok := builds[i].(map[string]any)
+		if !ok {
+			continue
+		}
+		projectID, _ := row["project_id"].(string)
+		key := job.Name + ":" + projectID
+		branch := overrides[key]
+		if branch == "" {
+			branch = overrides[projectID]
+		}
+		if branch != "" {
+			row["branch"] = branch
+		}
+		refType := refTypes[key]
+		if refType == "" {
+			refType = refTypes[projectID]
+		}
+		if refType != "" {
+			row["git_ref_type"] = refType
+		}
+		builds[i] = row
+	}
+	job.Spec["project_builds"] = builds
+	if first, ok := builds[0].(map[string]any); ok {
+		if branch, _ := first["branch"].(string); branch != "" {
+			job.Spec["branch"] = branch
+		}
+		if refType, _ := first["git_ref_type"].(string); refType != "" {
+			job.Spec["git_ref_type"] = refType
+		}
+	}
 }
 
 func cloneStages(stages []model.WorkflowStage) []model.WorkflowStage {
