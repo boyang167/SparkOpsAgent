@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { EnvironmentVM, ProductProjectVM, ProductWorkflowVM } from "@sparkops/contracts/product";
+import type {
+  EnvironmentVM,
+  ProductProjectVM,
+  ProductWorkflowVM,
+  StartProductWorkflowRunCommand,
+} from "@sparkops/contracts/product";
 import type { SecretVM } from "@sparkops/contracts/secret";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { secret, workspace } from "@sparkops/web-sdk";
@@ -60,6 +65,17 @@ export function StartWorkflowRunModal({
   const [environmentId, setEnvironmentId] = useState("");
   const [variables, setVariables] = useState<Record<string, string>>({});
   const [yamlCompare, setYamlCompare] = useState<RunFormDeployRow | null>(null);
+  const [visibleStageIds, setVisibleStageIds] = useState<Set<string>>(new Set());
+  const [collapsedStageIds, setCollapsedStageIds] = useState<Set<string>>(new Set());
+  const [remark, setRemark] = useState("");
+
+  const stageSelectors = useMemo(() => {
+    const items = form.pills.map((pill) => ({ id: pill.id, name: pill.name }));
+    if (runtimeVariables.length > 0) {
+      items.push({ id: "wf-run-variables", name: "运行时变量" });
+    }
+    return items;
+  }, [form.pills, runtimeVariables.length]);
 
   useEffect(() => {
     if (!open || !workspaceId) return;
@@ -106,6 +122,12 @@ export function StartWorkflowRunModal({
     setEnvironmentId(defaultDeployEnvironmentId(workflow.stages) || environments[0]?.id || "");
   }, [open, workflow, environments]);
 
+  useEffect(() => {
+    if (!open || !workflow) return;
+    setVisibleStageIds(new Set(stageSelectors.map((item) => item.id)));
+    setCollapsedStageIds(new Set());
+  }, [open, workflow?.id, stageSelectors]);
+
   if (!open || !workflow) return null;
 
   const registryOptions = registries.map((item) => ({ id: item.id, serviceUrl: item.service_url }));
@@ -139,6 +161,53 @@ export function StartWorkflowRunModal({
   );
   const missingEnv = deployJobs.length > 0 && !environmentId;
 
+  function toggleStageVisibility(stageId: string) {
+    setVisibleStageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(stageId)) {
+        if (next.size <= 1) return prev;
+        next.delete(stageId);
+        return next;
+      }
+      next.add(stageId);
+      requestAnimationFrame(() => {
+        document.getElementById(stageId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      return next;
+    });
+  }
+
+  function toggleStageCollapsed(stageId: string) {
+    setCollapsedStageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(stageId)) next.delete(stageId);
+      else next.add(stageId);
+      return next;
+    });
+  }
+
+  function renderStagePills(className: string) {
+    if (stageSelectors.length === 0) return null;
+    return (
+      <nav className={className} aria-label="阶段筛选">
+        {stageSelectors.map((item) => {
+          const active = visibleStageIds.has(item.id);
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`wf-run-pill${active ? " is-active" : ""}`}
+              aria-pressed={active}
+              onClick={() => toggleStageVisibility(item.id)}
+            >
+              {item.name}
+            </button>
+          );
+        })}
+      </nav>
+    );
+  }
+
   function submit() {
     const environment_overrides =
       deployJobs.length > 0 && environmentId
@@ -156,12 +225,14 @@ export function StartWorkflowRunModal({
       }
     }
     const firstBranch = Object.values(branch_overrides)[0];
+    const trimmedRemark = remark.trim();
     onSubmit({
       branch: hasBuild ? firstBranch : undefined,
       branch_overrides: Object.keys(branch_overrides).length ? branch_overrides : undefined,
       ref_type_overrides: Object.keys(ref_type_overrides).length ? ref_type_overrides : undefined,
       environment_overrides,
       variables: runtimeVariables.length ? variables : undefined,
+      remark: trimmedRemark || undefined,
     });
   }
 
@@ -173,22 +244,7 @@ export function StartWorkflowRunModal({
       title="执行工作流"
       description={workflow.name}
       size="full"
-      headerExtra={
-        form.pills.length > 0 ? (
-          <nav className="wf-run-pills" aria-label="阶段">
-            {form.pills.map((pill) => (
-              <button
-                key={pill.id}
-                type="button"
-                className="wf-run-pill"
-                onClick={() => document.getElementById(pill.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-              >
-                {pill.name}
-              </button>
-            ))}
-          </nav>
-        ) : null
-      }
+      headerExtra={renderStagePills("wf-run-pills")}
       footer={
         <>
           <button
@@ -215,10 +271,24 @@ export function StartWorkflowRunModal({
           </p>
         ) : null}
 
-        {form.stages.map((stage) => (
-          <section key={stage.id} id={stage.id} className="wf-run-stage">
-            <h3 className="wf-run-stage-title">{stage.name}</h3>
+        {form.stages.map((stage) => {
+          if (!visibleStageIds.has(stage.id)) return null;
+          const collapsed = collapsedStageIds.has(stage.id);
+          return (
+          <section key={stage.id} id={stage.id} className={`wf-run-stage${collapsed ? " is-collapsed" : ""}`}>
+            <button
+              type="button"
+              className="wf-run-stage-head"
+              aria-expanded={!collapsed}
+              aria-controls={`${stage.id}-panel`}
+              onClick={() => toggleStageCollapsed(stage.id)}
+            >
+              <span className="wf-run-stage-chevron" aria-hidden />
+              <span className="wf-run-stage-name">{stage.name}</span>
+            </button>
 
+            {!collapsed ? (
+            <div id={`${stage.id}-panel`} className="wf-run-stage-panel">
             {stage.buildRows.length > 0 ? (
               <div className="wf-run-block">
                 <table className="wf-run-table">
@@ -337,27 +407,62 @@ export function StartWorkflowRunModal({
                 </table>
               </div>
             ) : null}
-          </section>
-        ))}
-
-        {runtimeVariables.length > 0 ? (
-          <section className="wf-run-stage" id="wf-run-variables">
-            <h3 className="wf-run-stage-title">运行时变量</h3>
-            <div className="wf-run-block stack-sm">
-              {runtimeVariables.map((item) => (
-                <label key={item.id} className="wf-run-field">
-                  <span className="wf-run-field-label">{item.key}</span>
-                  <input
-                    className="input wf-run-input"
-                    value={variables[item.key] ?? ""}
-                    onChange={(e) => setVariables((prev) => ({ ...prev, [item.key]: e.target.value }))}
-                    placeholder={item.description || item.key}
-                  />
-                </label>
-              ))}
             </div>
+            ) : null}
+          </section>
+        );
+        })}
+
+        {runtimeVariables.length > 0 && visibleStageIds.has("wf-run-variables") ? (
+          <section
+            className={`wf-run-stage${collapsedStageIds.has("wf-run-variables") ? " is-collapsed" : ""}`}
+            id="wf-run-variables"
+          >
+            <button
+              type="button"
+              className="wf-run-stage-head"
+              aria-expanded={!collapsedStageIds.has("wf-run-variables")}
+              aria-controls="wf-run-variables-panel"
+              onClick={() => toggleStageCollapsed("wf-run-variables")}
+            >
+              <span className="wf-run-stage-chevron" aria-hidden />
+              <span className="wf-run-stage-name">运行时变量</span>
+            </button>
+            {!collapsedStageIds.has("wf-run-variables") ? (
+              <div id="wf-run-variables-panel" className="wf-run-stage-panel">
+                <div className="wf-run-block stack-sm">
+                  {runtimeVariables.map((item) => (
+                    <label key={item.id} className="wf-run-field">
+                      <span className="wf-run-field-label">{item.key}</span>
+                      <input
+                        className="input wf-run-input"
+                        value={variables[item.key] ?? ""}
+                        onChange={(e) => setVariables((prev) => ({ ...prev, [item.key]: e.target.value }))}
+                        placeholder={item.description || item.key}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </section>
         ) : null}
+
+        <section className="wf-run-remark">
+          <label className="wf-run-field" htmlFor="wf-run-remark-input">
+            <span className="wf-run-field-label">备注</span>
+            <textarea
+              id="wf-run-remark-input"
+              className="input wf-run-remark-input"
+              value={remark}
+              onChange={(e) => setRemark(e.target.value)}
+              placeholder="记录本次执行说明，便于后续追溯"
+              rows={3}
+              maxLength={500}
+            />
+          </label>
+        </section>
+
       </div>
     </Modal>
     <DeployYamlCompareModal

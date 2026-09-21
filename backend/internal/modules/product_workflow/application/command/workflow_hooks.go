@@ -36,7 +36,7 @@ func (h *StartWorkflowRunHandler) StartFromWebhook(
 	if !trigger.Active() || wf.Status != model.WorkflowStatusActive {
 		return nil, true, nil
 	}
-	run, err := h.launch(ctx, wf, "webhook", input, nil)
+	run, err := h.launch(ctx, wf, "webhook", kernel.MemberID{}, input, nil)
 	return run, false, err
 }
 
@@ -77,7 +77,7 @@ func (h *StartWorkflowRunHandler) StartFromGitLab(ctx context.Context, token str
 			if !engine.GitURLMatches(project.GitURL, hook.HTTPURL, hook.Path) {
 				continue
 			}
-			run, err := h.launch(ctx, wf, "git", nil, &engine.GitRunContext{
+			run, err := h.launch(ctx, wf, "git", kernel.MemberID{}, nil, &engine.GitRunContext{
 				ProjectID: trigger.ProjectID, Event: hook.Event, Ref: hook.Ref, RefType: hook.RefType,
 				Commit: hook.Commit, MergeRequestIID: hook.MergeRequestIID,
 			})
@@ -91,7 +91,7 @@ func (h *StartWorkflowRunHandler) StartFromCron(ctx context.Context, wf *model.P
 	if wf == nil || wf.Status != model.WorkflowStatusActive {
 		return nil, domain.ErrInvalidWorkflowInput
 	}
-	return h.launch(ctx, wf, "cron", nil, nil)
+	return h.launch(ctx, wf, "cron", kernel.MemberID{}, nil, nil)
 }
 
 func matchToken(items []model.WorkflowTrigger, kind, token string) *model.WorkflowTrigger {

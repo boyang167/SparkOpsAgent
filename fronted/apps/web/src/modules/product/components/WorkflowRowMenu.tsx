@@ -7,6 +7,7 @@ import { IconMore, IconPencil, IconProduct, IconRun } from "./WorkflowListIcons"
 
 interface WorkflowRowMenuProps {
   open: boolean;
+  detailHref: string;
   editHref: string;
   productHref: string;
   runDisabled: boolean;
@@ -16,7 +17,7 @@ interface WorkflowRowMenuProps {
 }
 
 const MENU_WIDTH = 196;
-const MENU_HEIGHT = 148;
+const MENU_HEIGHT = 188;
 const GAP = 6;
 
 function placeMenu(anchor: HTMLElement): CSSProperties {
@@ -45,6 +46,7 @@ function placeMenu(anchor: HTMLElement): CSSProperties {
 
 export function WorkflowRowMenu({
   open,
+  detailHref,
   editHref,
   productHref,
   runDisabled,
@@ -99,6 +101,12 @@ export function WorkflowRowMenu({
               style={style}
               onClick={(event) => event.stopPropagation()}
             >
+              <Link href={detailHref} className="wf-list-menu-item" role="menuitem" onClick={onClose}>
+                <span className="wf-list-menu-item-icon">
+                  <IconRun />
+                </span>
+                执行记录
+              </Link>
               <Link href={editHref} className="wf-list-menu-item" role="menuitem" onClick={onClose}>
                 <span className="wf-list-menu-item-icon">
                   <IconPencil />

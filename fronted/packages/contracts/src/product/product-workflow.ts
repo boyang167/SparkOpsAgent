@@ -132,11 +132,29 @@ export const WorkflowStageRunVMSchema = z.object({
 
 export type WorkflowStageRunVM = z.infer<typeof WorkflowStageRunVMSchema>;
 
+export const WorkflowRunBranchVMSchema = z.object({
+  branch: z.string(),
+  ref_type: z.string().optional(),
+  project_id: z.string().optional(),
+});
+
+export type WorkflowRunBranchVM = z.infer<typeof WorkflowRunBranchVMSchema>;
+
 export const ProductWorkflowRunSummaryVMSchema = z.object({
   id: z.string(),
+  run_number: z.number().int().optional(),
   status: z.string(),
   current_stage: z.number().int(),
   created_at: z.string().optional(),
+  started_at: z.string().optional(),
+  completed_at: z.string().optional(),
+  duration_ms: z.number().int().optional(),
+  trigger_source: z.string().optional(),
+  executor_id: z.string().optional(),
+  remark: z.string().optional(),
+  branches: z.array(WorkflowRunBranchVMSchema).optional(),
+  build_services: z.array(z.string()).optional(),
+  deploy_services: z.array(z.string()).optional(),
 });
 
 export type ProductWorkflowRunSummaryVM = z.infer<typeof ProductWorkflowRunSummaryVMSchema>;
@@ -149,6 +167,7 @@ export const ProductWorkflowRunVMSchema = z.object({
   current_stage: z.number().int(),
   stage_runs: z.array(WorkflowStageRunVMSchema),
   error_message: z.string().optional(),
+  remark: z.string().optional(),
   created_at: z.string().optional(),
   started_at: z.string().optional(),
   completed_at: z.string().optional(),
@@ -196,11 +215,18 @@ export const StartProductWorkflowRunCommandSchema = z.object({
       ref_type_overrides: z.record(z.string()).optional(),
       environment_overrides: z.record(z.string()).optional(),
       variables: z.record(z.string()).optional(),
+      remark: z.string().optional(),
     })
     .optional(),
 });
 
 export type StartProductWorkflowRunCommand = z.infer<typeof StartProductWorkflowRunCommandSchema>;
+
+export const UpdateProductWorkflowRunRemarkCommandSchema = z.object({
+  remark: z.string(),
+});
+
+export type UpdateProductWorkflowRunRemarkCommand = z.infer<typeof UpdateProductWorkflowRunRemarkCommandSchema>;
 
 export const RejectWorkflowJobCommandSchema = z.object({
   message: z.string().optional(),

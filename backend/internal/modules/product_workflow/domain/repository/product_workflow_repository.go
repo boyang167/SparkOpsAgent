@@ -22,6 +22,7 @@ type ProductWorkflowRepository interface {
 	UpdateRun(ctx context.Context, run *model.ProductWorkflowRun) error
 	FindRunByID(ctx context.Context, id kernel.ProductWorkflowRunID) (*model.ProductWorkflowRun, error)
 	ListRunsByWorkflow(ctx context.Context, workflowID kernel.ProductWorkflowID, limit int) ([]*model.ProductWorkflowRun, error)
+	CountRunsByWorkflow(ctx context.Context, workflowID kernel.ProductWorkflowID) (int64, error)
 
 	SaveBuildRef(ctx context.Context, ref *model.WorkflowBuildRef) error
 	FindRunByBuildID(ctx context.Context, buildID kernel.BuildID) (*model.WorkflowBuildRef, error)

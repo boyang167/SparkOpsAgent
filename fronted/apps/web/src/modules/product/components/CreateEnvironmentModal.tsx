@@ -9,6 +9,7 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import {
   deployableAuthorizedClusters,
+  resolveWorkspaceNamespace,
   suggestEnvironmentNamespace,
 } from "./environment-suggest";
 
@@ -81,6 +82,11 @@ export function CreateEnvironmentModal({
     });
   }, [productProjects, projectSearch]);
 
+  const defaultWorkspaceNamespace = useMemo(
+    () => resolveWorkspaceNamespace(productProjects, workspaceProjects),
+    [productProjects, workspaceProjects],
+  );
+
   const namespaceConflict = useMemo(() => {
     const ns = namespace.trim();
     if (!ns || !clusterId) return false;
@@ -106,17 +112,16 @@ export function CreateEnvironmentModal({
     setName(initialName);
     setEnvType("dev");
     setClusterId(preferredCluster);
-    setNamespace(suggestEnvironmentNamespace(productSlug, initialName));
+    setNamespace(
+      defaultWorkspaceNamespace || suggestEnvironmentNamespace(productSlug, initialName),
+    );
     setNamespaceTouched(false);
     setSelectedProjectIds(productProjects.map((item) => item.id));
     setProjectSearch("");
-  }, [open, productSlug, clusters, productProjects, workspaceProjects]);
+  }, [open, productSlug, clusters, productProjects, workspaceProjects, defaultWorkspaceNamespace]);
 
   function onNameChange(value: string) {
     setName(value);
-    if (!namespaceTouched) {
-      setNamespace(suggestEnvironmentNamespace(productSlug, value));
-    }
   }
 
   function toggleProject(projectId: string) {
@@ -249,13 +254,13 @@ export function CreateEnvironmentModal({
                   setNamespaceTouched(true);
                   setNamespace(e.target.value);
                 }}
-                placeholder={suggestEnvironmentNamespace(productSlug || "product", name || "dev")}
+                placeholder={defaultWorkspaceNamespace || "例如 test-workspace"}
                 autoComplete="off"
                 disabled={busy}
                 required
               />
               <p className="field-hint">
-                默认规则：产品标识-env-环境名。不同环境建议使用独立 Namespace。
+                默认为工作区 Namespace（与纳入项目的业务空间一致），可按需修改。
               </p>
               {namespaceConflict ? (
                 <InlineAlert tone="warning">

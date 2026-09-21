@@ -95,8 +95,8 @@ export function ProductWorkflowRunDetailPanel({
         title="执行详情"
         description={run ? `状态 ${statusLabel(run.status)} · 当前阶段 #${run.current_stage + 1}` : "加载中…"}
         action={
-          <Link href={`/products/workflows?productId=${productId}&workflowId=${workflowId}`} className="btn btn-ghost text-sm">
-            返回工作流
+          <Link href={`/products/${productId}/workflows/${workflowId}`} className="btn btn-ghost text-sm">
+            返回执行记录
           </Link>
         }
       />
@@ -133,6 +133,12 @@ export function ProductWorkflowRunDetailPanel({
             <span>结束：{run.completed_at ?? "-"}</span>
             <span>创建：{run.created_at ?? "-"}</span>
           </div>
+          {run.remark ? (
+            <div className="pwf-run-remark">
+              <span className="pwf-run-remark-label">备注</span>
+              <p className="pwf-run-remark-body">{run.remark}</p>
+            </div>
+          ) : null}
           {run.stage_runs.map((stage, si) => (
             <section key={`${stage.name}-${si}`} className="pwf-run-stage">
               <header className="pwf-run-stage-head">

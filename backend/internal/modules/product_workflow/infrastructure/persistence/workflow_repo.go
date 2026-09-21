@@ -228,6 +228,12 @@ func (r *ProductWorkflowRepository) FindRunByID(ctx context.Context, id kernel.P
 	return rowToRun(row)
 }
 
+func (r *ProductWorkflowRepository) CountRunsByWorkflow(ctx context.Context, workflowID kernel.ProductWorkflowID) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&productWorkflowRunModel{}).Where("workflow_id = ?", workflowID.String()).Count(&count).Error
+	return count, err
+}
+
 func (r *ProductWorkflowRepository) ListRunsByWorkflow(ctx context.Context, workflowID kernel.ProductWorkflowID, limit int) ([]*model.ProductWorkflowRun, error) {
 	if limit <= 0 {
 		limit = 20

@@ -81,19 +81,34 @@ func (h *TriggerBuildHandler) TriggerAutomatedBuild(
 	if err != nil {
 		return nil, err
 	}
+	projectName, err := h.checker.ProjectName(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	namespace, err := h.checker.ProjectNamespace(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	namespace = strings.TrimSpace(namespace)
+	projectName = strings.TrimSpace(projectName)
 	refType := strings.TrimSpace(gitRefType)
 	switch refType {
 	case "tag", "pr":
 	default:
 		refType = "branch"
 	}
-	return h.trigger(ctx, auto.WorkspaceID, auto.MemberID, projectID, port.BuildRequest{
+	req := port.BuildRequest{
+		Namespace:       namespace,
+		ProjectName:     projectName,
+		Folder:          namespace,
+		Job:             projectName,
 		GitRefType:      refType,
 		GitRefValue:     branch,
 		ImageRepository: strings.TrimSpace(imageRepository),
 		ImageTag:        strings.TrimSpace(imageTag),
 		Variables:       variables,
-	}, false, nil)
+	}
+	return h.trigger(ctx, auto.WorkspaceID, auto.MemberID, projectID, req, false, nil)
 }
 
 func (h *TriggerBuildHandler) TriggerDeployment(

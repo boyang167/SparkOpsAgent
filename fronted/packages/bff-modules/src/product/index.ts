@@ -259,6 +259,17 @@ export function getProductWorkflowRun(
   return ctx.upstream.product.getProductWorkflowRun(workspaceId, productId, workflowId, runId);
 }
 
+export function updateProductWorkflowRunRemark(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  workflowId: string,
+  runId: string,
+  input: import("@sparkops/contracts/product").UpdateProductWorkflowRunRemarkCommand,
+) {
+  return ctx.upstream.product.updateProductWorkflowRunRemark(workspaceId, productId, workflowId, runId, input);
+}
+
 export function approveWorkflowJob(
   ctx: BffContext,
   workspaceId: string,

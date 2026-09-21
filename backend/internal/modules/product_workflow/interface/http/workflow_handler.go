@@ -22,6 +22,8 @@ type WorkflowHandlers struct {
 	ListWorkflows      *query.ListProductWorkflowsHandler
 	ListRuns           *query.ListWorkflowRunsHandler
 	GetRun             *query.GetWorkflowRunHandler
+	UpdateRunRemark    *command.UpdateWorkflowRunRemarkHandler
+	CancelRun          *command.CancelWorkflowRunHandler
 	ApproveJob         *command.ApproveWorkflowJobHandler
 	RejectJob          *command.RejectWorkflowJobHandler
 	ContinueStage      *command.ContinueManualStageHandler
@@ -352,7 +354,7 @@ func (h *Handler) CreateWorkflowFromTemplate(c *gin.Context) {
 }
 
 func (h *Handler) StartWorkflowRun(c *gin.Context) {
-	wsID, _, ok := memberAndWorkspace(c)
+	wsID, memberID, ok := memberAndWorkspace(c)
 	if !ok {
 		return
 	}
@@ -368,12 +370,43 @@ func (h *Handler) StartWorkflowRun(c *gin.Context) {
 	}
 	var req startWorkflowRunRequest
 	_ = c.ShouldBindJSON(&req)
-	run, err := h.workflows.StartRun.Handle(c.Request.Context(), wsID, productID, workflowID, req.Input)
+	run, err := h.workflows.StartRun.Handle(c.Request.Context(), wsID, productID, workflowID, memberID, req.Input)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
 	}
 	httpx.OK(c, gin.H{"id": run.ID.String(), "status": run.Status, "stage_runs": run.StageRuns})
+}
+
+type updateWorkflowRunRemarkRequest struct {
+	Remark string `json:"remark"`
+}
+
+func (h *Handler) UpdateWorkflowRunRemark(c *gin.Context) {
+	wsID, _, ok := memberAndWorkspace(c)
+	if !ok {
+		return
+	}
+	productID, err := kernel.ParseProductID(c.Param("productId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
+		return
+	}
+	runID, err := kernel.ParseProductWorkflowRunID(c.Param("runId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid run id", http.StatusBadRequest)
+		return
+	}
+	var req updateWorkflowRunRemarkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid body", http.StatusBadRequest)
+		return
+	}
+	if err := h.workflows.UpdateRunRemark.Handle(c.Request.Context(), wsID, productID, runID, req.Remark); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"ok": true})
 }
 
 func (h *Handler) ListWorkflowRuns(c *gin.Context) {
@@ -422,8 +455,41 @@ func (h *Handler) GetWorkflowRun(c *gin.Context) {
 	httpx.OK(c, item)
 }
 
+type cancelWorkflowRunRequest struct {
+	Message string `json:"message"`
+}
+
 type rejectWorkflowJobRequest struct {
 	Message string `json:"message"`
+}
+
+func (h *Handler) CancelWorkflowRun(c *gin.Context) {
+	wsID, _, ok := memberAndWorkspace(c)
+	if !ok {
+		return
+	}
+	productID, err := kernel.ParseProductID(c.Param("productId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
+		return
+	}
+	runID, err := kernel.ParseProductWorkflowRunID(c.Param("runId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid run id", http.StatusBadRequest)
+		return
+	}
+	var req cancelWorkflowRunRequest
+	_ = c.ShouldBindJSON(&req)
+	if err := h.workflows.CancelRun.Handle(c.Request.Context(), wsID, productID, runID, req.Message); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	item, err := h.workflows.GetRun.Handle(c.Request.Context(), wsID, productID, runID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, item)
 }
 
 func (h *Handler) ApproveWorkflowJob(c *gin.Context) {

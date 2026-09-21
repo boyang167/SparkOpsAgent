@@ -341,6 +341,7 @@ func (h *StartWorkflowRunHandler) Handle(
 	wsID kernel.WorkspaceID,
 	productID kernel.ProductID,
 	workflowID kernel.ProductWorkflowID,
+	memberID kernel.MemberID,
 	input map[string]any,
 ) (*model.ProductWorkflowRun, error) {
 	productWs, err := h.products.ProductWorkspace(ctx, productID)
@@ -360,13 +361,14 @@ func (h *StartWorkflowRunHandler) Handle(
 	if wf.Status != model.WorkflowStatusActive {
 		return nil, domain.ErrInvalidWorkflowInput
 	}
-	return h.launch(ctx, wf, "manual", input, nil)
+	return h.launch(ctx, wf, "manual", memberID, input, nil)
 }
 
 func (h *StartWorkflowRunHandler) launch(
 	ctx context.Context,
 	wf *model.ProductWorkflow,
 	source string,
+	actor kernel.MemberID,
 	input map[string]any,
 	git *engine.GitRunContext,
 ) (*model.ProductWorkflowRun, error) {
@@ -383,6 +385,9 @@ func (h *StartWorkflowRunHandler) launch(
 	stages, stored, trigger, err := engine.PrepareRun(&prepared, runID.String(), source, input, git)
 	if err != nil {
 		return nil, err
+	}
+	if actor != (kernel.MemberID{}) {
+		trigger["started_by"] = actor.String()
 	}
 	run := model.NewProductWorkflowRun(wf.ID, wf.ProductID, stages)
 	run.ID = runID

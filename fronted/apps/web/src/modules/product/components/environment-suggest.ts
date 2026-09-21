@@ -84,6 +84,39 @@ export function deployableAuthorizedClusters(clusters: AuthorizedClusterVM[]) {
     .sort((a, b) => (a.priority_id ?? 0) - (b.priority_id ?? 0));
 }
 
+/** 从已绑定项目中归纳工作区默认 Namespace（取出现次数最多的业务空间） */
+export function resolveWorkspaceNamespace(
+  productProjects: Array<{ id: string }>,
+  workspaceProjects: ProjectVM[],
+): string {
+  const boundIds = new Set(productProjects.map((item) => item.id));
+  const namespaces = workspaceProjects
+    .filter((project) => boundIds.has(project.id) && project.status === "active")
+    .map((project) => project.namespace?.trim() ?? "")
+    .filter(Boolean);
+  if (namespaces.length === 0) {
+    return (
+      workspaceProjects
+        .filter((project) => project.status === "active")
+        .map((project) => project.namespace?.trim() ?? "")
+        .find(Boolean) ?? ""
+    );
+  }
+  const counts = new Map<string, number>();
+  for (const ns of namespaces) {
+    counts.set(ns, (counts.get(ns) ?? 0) + 1);
+  }
+  let best = "";
+  let max = 0;
+  for (const [ns, count] of counts) {
+    if (count > max) {
+      max = count;
+      best = ns;
+    }
+  }
+  return best;
+}
+
 /** 对齐 Zadig 默认规则：产品名-env-环境名 */
 export function suggestEnvironmentNamespace(productSlug: string, envName: string): string {
   const product = productSlug

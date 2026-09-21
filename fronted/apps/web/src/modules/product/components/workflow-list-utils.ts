@@ -70,11 +70,17 @@ export function computeRunStats(runs: ProductWorkflowRunSummaryVM[]): WorkflowRu
   const successCount = finished.filter((run) => run.status === "success").length;
   const successRate = finished.length > 0 ? Math.round((successCount / finished.length) * 10000) / 100 : null;
 
+  const durations = finished
+    .map((run) => run.duration_ms ?? 0)
+    .filter((value) => value > 0);
+  const avgDurationMs =
+    durations.length > 0 ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null;
+
   const last = ordered[ordered.length - 1];
   return {
     sparkline,
     successRate,
-    avgDurationMs: null,
+    avgDurationMs,
     lastRunAt: last?.created_at ?? null,
     lastRunStatus: last?.status ?? null,
   };

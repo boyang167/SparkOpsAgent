@@ -338,6 +338,19 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async updateProductWorkflowRunRemark(
+      workspaceId: string,
+      productId: string,
+      workflowId: string,
+      runId: string,
+      input: import("@sparkops/contracts/product").UpdateProductWorkflowRunRemarkCommand,
+    ) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/products/${productId}/workflows/${workflowId}/runs/${runId}`,
+        { method: "PATCH", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
     async approveWorkflowJob(
       workspaceId: string,
       productId: string,

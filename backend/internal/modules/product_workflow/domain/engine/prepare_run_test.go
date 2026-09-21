@@ -66,6 +66,17 @@ func TestPrepareRunGitOverridesOnlyMatchingProject(t *testing.T) {
 	require.Equal(t, "main", builds[1].(map[string]any)["branch"])
 }
 
+func TestPrepareRunStoresRemark(t *testing.T) {
+	wf := &model.ProductWorkflow{
+		Stages: []model.WorkflowStage{{Name: "构建", Jobs: []model.WorkflowJob{}}},
+	}
+	_, stored, _, err := PrepareRun(wf, "run-1", "manual", map[string]any{
+		"remark": "  hotfix login  ",
+	}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "  hotfix login  ", stored["remark"])
+}
+
 func TestPrepareRunRequiresRuntimeVariable(t *testing.T) {
 	wf := &model.ProductWorkflow{
 		Variables: []model.WorkflowVariable{{Key: "ENV", RuntimeInput: true}},

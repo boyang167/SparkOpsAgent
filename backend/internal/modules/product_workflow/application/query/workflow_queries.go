@@ -2,6 +2,8 @@ package query
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain"
@@ -118,13 +120,22 @@ func (h *GetProductWorkflowHandler) Handle(ctx context.Context, wsID kernel.Work
 	}, nil
 }
 
-type GetWorkflowRunHandler struct {
-	workflows repository.ProductWorkflowRepository
-	products  port.ProductChecker
+type RunReconciler interface {
+	ReconcileRun(ctx context.Context, runID kernel.ProductWorkflowRunID) error
 }
 
-func NewGetWorkflowRunHandler(workflows repository.ProductWorkflowRepository, products port.ProductChecker) *GetWorkflowRunHandler {
-	return &GetWorkflowRunHandler{workflows: workflows, products: products}
+type GetWorkflowRunHandler struct {
+	workflows  repository.ProductWorkflowRepository
+	products   port.ProductChecker
+	reconciler RunReconciler
+}
+
+func NewGetWorkflowRunHandler(
+	workflows repository.ProductWorkflowRepository,
+	products port.ProductChecker,
+	reconciler RunReconciler,
+) *GetWorkflowRunHandler {
+	return &GetWorkflowRunHandler{workflows: workflows, products: products, reconciler: reconciler}
 }
 
 func (h *GetWorkflowRunHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, productID kernel.ProductID, runID kernel.ProductWorkflowRunID) (map[string]any, error) {
@@ -142,6 +153,13 @@ func (h *GetWorkflowRunHandler) Handle(ctx context.Context, wsID kernel.Workspac
 	if run.ProductID != productID {
 		return nil, domain.ErrProductWorkflowRunNotFound
 	}
+	if h.reconciler != nil && (run.Status == "running" || run.Status == "pending" || run.Status == "paused") {
+		if reconcileErr := h.reconciler.ReconcileRun(ctx, runID); reconcileErr == nil {
+			if refreshed, findErr := h.workflows.FindRunByID(ctx, runID); findErr == nil {
+				run = refreshed
+			}
+		}
+	}
 	out := map[string]any{
 		"id": run.ID.String(), "workflow_id": run.WorkflowID.String(), "product_id": run.ProductID.String(),
 		"status": run.Status, "current_stage": run.CurrentStage, "stage_runs": run.StageRuns,
@@ -153,7 +171,22 @@ func (h *GetWorkflowRunHandler) Handle(ctx context.Context, wsID kernel.Workspac
 	if run.CompletedAt != nil {
 		out["completed_at"] = run.CompletedAt.Format(time.RFC3339)
 	}
+	if remark := runRemark(run.Input); remark != "" {
+		out["remark"] = remark
+	}
 	return out, nil
+}
+
+func runRemark(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return ""
+	}
+	remark, _ := stored["remark"].(string)
+	return strings.TrimSpace(remark)
 }
 
 type ListWorkflowRunsHandler struct {
@@ -180,16 +213,21 @@ func (h *ListWorkflowRunsHandler) Handle(ctx context.Context, wsID kernel.Worksp
 	if wf.ProductID != productID {
 		return nil, domain.ErrProductWorkflowNotFound
 	}
-	runs, err := h.workflows.ListRunsByWorkflow(ctx, workflowID, 20)
+	total, err := h.workflows.CountRunsByWorkflow(ctx, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	runs, err := h.workflows.ListRunsByWorkflow(ctx, workflowID, 50)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]map[string]any, 0, len(runs))
-	for _, run := range runs {
-		out = append(out, map[string]any{
-			"id": run.ID.String(), "status": run.Status, "current_stage": run.CurrentStage,
-			"created_at": run.CreatedAt.Format(time.RFC3339),
-		})
+	for index, run := range runs {
+		runNumber := int(total) - index
+		if runNumber < 1 {
+			runNumber = len(runs) - index
+		}
+		out = append(out, runSummaryView(run, runNumber))
 	}
 	return out, nil
 }

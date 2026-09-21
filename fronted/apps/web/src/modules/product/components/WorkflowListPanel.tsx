@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { product } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type {
-  EnvironmentVM,
   ProductProjectVM,
   ProductWorkflowRunSummaryVM,
   ProductWorkflowVM,
@@ -16,7 +15,6 @@ import type {
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { ProductDetailEmptyState } from "./ProductDetailEmptyState";
-import { StartWorkflowRunModal } from "./StartWorkflowRunModal";
 import {
   computeRunStats,
   formatDurationMs,
@@ -77,12 +75,7 @@ export function WorkflowListPanel({
   const [loading, setLoading] = useState(true);
   const [enriching, setEnriching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-
-  const [runTarget, setRunTarget] = useState<EnrichedWorkflow | null>(null);
-  const [runEnvironments, setRunEnvironments] = useState<EnvironmentVM[]>([]);
-  const [runOpen, setRunOpen] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createMode, setCreateMode] = useState<"template" | "blank">("blank");
@@ -247,59 +240,17 @@ export function WorkflowListPanel({
     });
   }
 
-  async function openRun(row: EnrichedWorkflow | undefined, wf: WorkspaceProductWorkflowVM) {
-    setBusyId(wf.id);
-    setError(null);
-    try {
-      let target = row;
-      if (!target?.detail) {
-        const [detail, runs] = await Promise.all([
-          product.getProductWorkflow(workspaceId, wf.product_id, wf.id),
-          product.listProductWorkflowRuns(workspaceId, wf.product_id, wf.id),
-        ]);
-        target = {
-          wf,
-          detail,
-          stats: computeRunStats(runs as ProductWorkflowRunSummaryVM[]),
-          stageLabels: stagePathLabels(detail.stages),
-        };
-        setEnriched((prev) => ({ ...prev, [wf.id]: target! }));
-      }
-      const envs = await product.listEnvironments(workspaceId, wf.product_id);
-      setRunEnvironments(envs);
-      setRunTarget(target!);
-      setRunOpen(true);
-    } catch (err) {
-      setError(err instanceof BffError ? err.message : "加载工作流失败");
-    } finally {
-      setBusyId(null);
-    }
+  function openWorkflowDetail(wf: WorkspaceProductWorkflowVM, run = false) {
+    const suffix = run ? "?run=1" : "";
+    router.push(`/products/${wf.product_id}/workflows/${wf.id}${suffix}`);
   }
 
-  async function onStartRun(input: {
-    branch?: string;
-    branch_overrides?: Record<string, string>;
-    ref_type_overrides?: Record<string, string>;
-    environment_overrides?: Record<string, string>;
-    variables?: Record<string, string>;
-  }) {
-    if (!runTarget) return;
-    setBusyId(runTarget.wf.id);
-    setError(null);
-    try {
-      const run = await product.startProductWorkflowRun(workspaceId, runTarget.wf.product_id, runTarget.wf.id, {
-        input,
-      });
-      setRunOpen(false);
-      router.push(
-        `/products/${runTarget.wf.product_id}/workflows/${runTarget.wf.id}/runs/${run.id}`,
-      );
-    } catch (err) {
-      setError(err instanceof BffError ? err.message : "启动执行失败");
-    } finally {
-      setBusyId(null);
-    }
-  }
+  useEffect(() => {
+    if (!initialWorkflowId || loading || items.length === 0) return;
+    const wf = items.find((item) => item.id === initialWorkflowId);
+    if (!wf) return;
+    router.replace(`/products/${wf.product_id}/workflows/${wf.id}`);
+  }, [initialWorkflowId, loading, items, router]);
 
   async function onCreate() {
     const productId = createProductId || productFilter || products[0]?.id;
@@ -453,7 +404,7 @@ export function WorkflowListPanel({
                           <div className="wf-list-title-wrap">
                             <div className="wf-list-title-row">
                               <Link
-                                href={`/products/${wf.product_id}/workflows/${wf.id}/edit`}
+                                href={`/products/${wf.product_id}/workflows/${wf.id}`}
                                 className="wf-list-title"
                               >
                                 {wf.name}
@@ -488,8 +439,8 @@ export function WorkflowListPanel({
                             <button
                               type="button"
                               className="wf-list-run-btn"
-                              disabled={busyId === wf.id || wf.status !== "active"}
-                              onClick={() => void openRun(row, wf)}
+                              disabled={wf.status !== "active"}
+                              onClick={() => openWorkflowDetail(wf, true)}
                             >
                               <IconPlay />
                               执行
@@ -504,12 +455,13 @@ export function WorkflowListPanel({
                               </Link>
                               <WorkflowRowMenu
                                 open={menuOpenId === wf.id}
+                                detailHref={`/products/${wf.product_id}/workflows/${wf.id}`}
                                 editHref={`/products/${wf.product_id}/workflows/${wf.id}/edit`}
                                 productHref={`/products/${wf.product_id}`}
                                 runDisabled={wf.status !== "active"}
                                 onToggle={() => setMenuOpenId((prev) => (prev === wf.id ? null : wf.id))}
                                 onClose={() => setMenuOpenId(null)}
-                                onRun={() => void openRun(row, wf)}
+                                onRun={() => openWorkflowDetail(wf, true)}
                               />
                             </div>
                           </div>
@@ -574,17 +526,6 @@ export function WorkflowListPanel({
           </>
         )}
       </div>
-
-      <StartWorkflowRunModal
-        open={runOpen}
-        workspaceId={workspaceId}
-        workflow={runTarget?.detail ?? null}
-        environments={runEnvironments}
-        projects={projectsByProduct[runTarget?.wf.product_id ?? ""] ?? []}
-        busy={Boolean(busyId)}
-        onClose={() => setRunOpen(false)}
-        onSubmit={(input) => void onStartRun(input)}
-      />
 
       <Modal
         open={createOpen}

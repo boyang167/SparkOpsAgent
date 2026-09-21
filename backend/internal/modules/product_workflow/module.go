@@ -88,6 +88,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		startRun.UseVault(vault.Client{Address: c.Config.Vault.Address, Token: c.Config.Vault.Token})
 	}
 	scheduler.SetGitReporter(gitlabapi.Reporter{Lookup: lookup, Logger: c.Logger})
+	scheduler.SetStatusReader(acl.NewDeliveryStatusReader(c.DB))
 	trigger.NewScheduler(workflowRepo, startRun, c.Logger).Start(context.Background())
 	updateWorkflow := command.NewUpdateWorkflowHandler(workflowRepo, productChecker)
 	if box != nil {
@@ -103,7 +104,9 @@ func (m *Module) Register(c *appctx.Container) error {
 		StartRun:           startRun,
 		ListWorkflows:      query.NewListProductWorkflowsHandler(workflowRepo, productChecker),
 		ListRuns:           query.NewListWorkflowRunsHandler(workflowRepo, productChecker),
-		GetRun:             query.NewGetWorkflowRunHandler(workflowRepo, productChecker),
+		GetRun:             query.NewGetWorkflowRunHandler(workflowRepo, productChecker, scheduler),
+		UpdateRunRemark:    command.NewUpdateWorkflowRunRemarkHandler(workflowRepo, productChecker),
+		CancelRun:          command.NewCancelWorkflowRunHandler(workflowRepo, scheduler, productChecker),
 		ApproveJob:         command.NewApproveWorkflowJobHandler(workflowRepo, scheduler, productChecker),
 		RejectJob:          command.NewRejectWorkflowJobHandler(workflowRepo, scheduler, productChecker),
 		ContinueStage:      command.NewContinueManualStageHandler(workflowRepo, scheduler, productChecker),
@@ -159,6 +162,10 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, readPerm, handler.ListWorkflowRuns)
 	c.Engine.GET("/api/v1/products/:productId/workflows/:workflowId/runs/:runId",
 		auth, ws, wsMember, readPerm, handler.GetWorkflowRun)
+	c.Engine.PATCH("/api/v1/products/:productId/workflows/:workflowId/runs/:runId",
+		auth, ws, wsMember, writePerm, handler.UpdateWorkflowRunRemark)
+	c.Engine.POST("/api/v1/products/:productId/workflows/:workflowId/runs/:runId/cancel",
+		auth, ws, wsMember, writePerm, handler.CancelWorkflowRun)
 	c.Engine.POST("/api/v1/products/:productId/workflows/:workflowId/runs/:runId/continue",
 		auth, ws, wsMember, writePerm, handler.ContinueWorkflowStage)
 
@@ -188,7 +195,7 @@ func (p *workflowRunTriggerPort) StartForProduct(ctx context.Context, productID 
 	if err != nil {
 		return kernel.ProductWorkflowRunID{}, err
 	}
-	run, err := p.start.Handle(ctx, wsID, productID, workflowID, nil)
+	run, err := p.start.Handle(ctx, wsID, productID, workflowID, kernel.MemberID{}, nil)
 	if err != nil {
 		return kernel.ProductWorkflowRunID{}, err
 	}

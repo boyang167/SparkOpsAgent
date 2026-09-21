@@ -20,17 +20,30 @@ type GitReporter interface {
 	Report(ctx context.Context, run *model.ProductWorkflowRun)
 }
 
+type ExternalStatusReader interface {
+	BuildStatus(ctx context.Context, buildID kernel.BuildID) (status string, terminal bool, err error)
+	DeployStatus(ctx context.Context, deploymentID kernel.DeploymentRunID) (status string, terminal bool, err error)
+}
+
 type Scheduler struct {
 	repo    repository.ProductWorkflowRepository
 	builds  *BuildExecutor
 	deploys *DeployExecutor
 	bus     eventbus.Bus
 	git     GitReporter
+	locker  runLocker
+	status  ExternalStatusReader
 }
 
 func (s *Scheduler) SetGitReporter(reporter GitReporter) {
 	if s != nil {
 		s.git = reporter
+	}
+}
+
+func (s *Scheduler) SetStatusReader(reader ExternalStatusReader) {
+	if s != nil {
+		s.status = reader
 	}
 }
 
@@ -62,7 +75,19 @@ func (s *Scheduler) HandleBuildCompleted(ctx context.Context, buildID kernel.Bui
 	if err != nil {
 		return nil
 	}
-	run, err := s.repo.FindRunByID(ctx, ref.RunID)
+	unlock := s.locker.lock(ref.RunID)
+	defer unlock()
+	return s.handleBuildCompletedLocked(ctx, ref.RunID, ref.JobName, buildID, status)
+}
+
+func (s *Scheduler) handleBuildCompletedLocked(
+	ctx context.Context,
+	runID kernel.ProductWorkflowRunID,
+	jobName string,
+	buildID kernel.BuildID,
+	status string,
+) error {
+	run, err := s.repo.FindRunByID(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -78,7 +103,7 @@ func (s *Scheduler) HandleBuildCompleted(ctx context.Context, buildID kernel.Bui
 	for si := range run.StageRuns {
 		for ji := range run.StageRuns[si].Jobs {
 			jobRun := &run.StageRuns[si].Jobs[ji]
-			if jobRun.Name != ref.JobName {
+			if jobRun.Name != jobName {
 				continue
 			}
 			for bi := range jobRun.Builds {
@@ -102,18 +127,18 @@ func (s *Scheduler) HandleBuildCompleted(ctx context.Context, buildID kernel.Bui
 		return nil
 	}
 	if status != string(buildmodel.BuildStatusSuccess) {
-		if job, ok := jobByName(wf, ref.JobName); ok {
+		if job, ok := jobByName(wf, jobName); ok {
 			s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed)
 		}
 		return s.failRun(ctx, run, "build failed")
 	}
 	if failed, msg := s.refreshJobStatuses(run); failed {
-		if job, ok := jobByName(wf, ref.JobName); ok {
+		if job, ok := jobByName(wf, jobName); ok {
 			s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed)
 		}
 		return s.failRun(ctx, run, msg)
 	}
-	if job, ok := jobByName(wf, ref.JobName); ok {
+	if job, ok := jobByName(wf, jobName); ok {
 		s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventPassed)
 	}
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
@@ -133,7 +158,19 @@ func (s *Scheduler) HandleDeployCompleted(ctx context.Context, deploymentID kern
 	if err != nil {
 		return nil
 	}
-	run, err := s.repo.FindRunByID(ctx, ref.RunID)
+	unlock := s.locker.lock(ref.RunID)
+	defer unlock()
+	return s.handleDeployCompletedLocked(ctx, ref.RunID, ref.JobName, deploymentID, status)
+}
+
+func (s *Scheduler) handleDeployCompletedLocked(
+	ctx context.Context,
+	runID kernel.ProductWorkflowRunID,
+	jobName string,
+	deploymentID kernel.DeploymentRunID,
+	status string,
+) error {
+	run, err := s.repo.FindRunByID(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -149,7 +186,7 @@ func (s *Scheduler) HandleDeployCompleted(ctx context.Context, deploymentID kern
 	for si := range run.StageRuns {
 		for ji := range run.StageRuns[si].Jobs {
 			jobRun := &run.StageRuns[si].Jobs[ji]
-			if jobRun.Name != ref.JobName {
+			if jobRun.Name != jobName {
 				continue
 			}
 			for di := range jobRun.Deploys {
@@ -190,6 +227,90 @@ func (s *Scheduler) HandleDeployCompleted(ctx context.Context, deploymentID kern
 	return nil
 }
 
+func (s *Scheduler) ReconcileRun(ctx context.Context, runID kernel.ProductWorkflowRunID) error {
+	if s == nil || s.status == nil {
+		return nil
+	}
+	unlock := s.locker.lock(runID)
+	defer unlock()
+
+	run, err := s.repo.FindRunByID(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !runNeedsReconcile(run) {
+		return nil
+	}
+
+	for si := range run.StageRuns {
+		for ji := range run.StageRuns[si].Jobs {
+			job := &run.StageRuns[si].Jobs[ji]
+			for _, build := range job.Builds {
+				if build.BuildID == "" || jobRunTerminal(build.Status) {
+					continue
+				}
+				buildID, err := kernel.ParseBuildID(build.BuildID)
+				if err != nil {
+					continue
+				}
+				status, terminal, err := s.status.BuildStatus(ctx, buildID)
+				if err != nil || !terminal {
+					continue
+				}
+				if err := s.handleBuildCompletedLocked(ctx, runID, job.Name, buildID, status); err != nil {
+					return err
+				}
+				run, err = s.repo.FindRunByID(ctx, runID)
+				if err != nil || !runNeedsReconcile(run) {
+					return err
+				}
+			}
+			for _, deploy := range job.Deploys {
+				if deploy.DeploymentRunID == "" || jobRunTerminal(deploy.Status) {
+					continue
+				}
+				deploymentID, err := kernel.ParseDeploymentRunID(deploy.DeploymentRunID)
+				if err != nil {
+					continue
+				}
+				status, terminal, err := s.status.DeployStatus(ctx, deploymentID)
+				if err != nil || !terminal {
+					continue
+				}
+				if err := s.handleDeployCompletedLocked(ctx, runID, job.Name, deploymentID, status); err != nil {
+					return err
+				}
+				run, err = s.repo.FindRunByID(ctx, runID)
+				if err != nil || !runNeedsReconcile(run) {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func runNeedsReconcile(run *model.ProductWorkflowRun) bool {
+	if run == nil {
+		return false
+	}
+	switch run.Status {
+	case model.RunStatusPending, model.RunStatusRunning, model.RunStatusPaused:
+		return true
+	default:
+		return false
+	}
+}
+
+func jobRunTerminal(status model.JobRunStatus) bool {
+	switch status {
+	case model.JobRunStatusSuccess, model.JobRunStatusFailed, model.JobRunStatusSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Scheduler) ApproveJob(ctx context.Context, runID kernel.ProductWorkflowRunID, jobName string, actor kernel.MemberID) error {
 	run, wf, jobRun, err := s.loadPendingApproval(ctx, runID, jobName)
 	if err != nil {
@@ -208,6 +329,57 @@ func (s *Scheduler) ApproveJob(ctx context.Context, runID kernel.ProductWorkflow
 		return s.executeCurrentStage(ctx, wf, run)
 	}
 	return nil
+}
+
+func (s *Scheduler) CancelRun(ctx context.Context, runID kernel.ProductWorkflowRunID, message string) error {
+	run, err := s.repo.FindRunByID(ctx, runID)
+	if err != nil {
+		return err
+	}
+	switch run.Status {
+	case model.RunStatusSuccess, model.RunStatusFailed:
+		return nil
+	case model.RunStatusPending, model.RunStatusRunning, model.RunStatusPaused:
+	default:
+		return domain.ErrInvalidWorkflowInput
+	}
+	if strings.TrimSpace(message) == "" {
+		message = "用户终止"
+	}
+	for si := range run.StageRuns {
+		stage := &run.StageRuns[si]
+		switch stage.Status {
+		case model.JobRunStatusSuccess, model.JobRunStatusSkipped:
+		default:
+			stage.Status = model.JobRunStatusFailed
+		}
+		for ji := range stage.Jobs {
+			job := &stage.Jobs[ji]
+			switch job.Status {
+			case model.JobRunStatusSuccess, model.JobRunStatusSkipped:
+				continue
+			default:
+				job.Status = model.JobRunStatusFailed
+				if job.ErrorMessage == "" {
+					job.ErrorMessage = message
+				}
+			}
+			for bi := range job.Builds {
+				if job.Builds[bi].Status != model.JobRunStatusSuccess {
+					job.Builds[bi].Status = model.JobRunStatusFailed
+				}
+			}
+			for di := range job.Deploys {
+				if job.Deploys[di].Status != model.JobRunStatusSuccess {
+					job.Deploys[di].Status = model.JobRunStatusFailed
+					if job.Deploys[di].ErrorMessage == "" {
+						job.Deploys[di].ErrorMessage = message
+					}
+				}
+			}
+		}
+	}
+	return s.failRunEvent(ctx, run, message, model.NotifyEventCancelled)
 }
 
 func (s *Scheduler) RejectJob(ctx context.Context, runID kernel.ProductWorkflowRunID, jobName string, actor kernel.MemberID, message string) error {

@@ -173,7 +173,10 @@ func TestTriggerAutomatedBuildPassesImageRepositoryOverride(t *testing.T) {
 	select {
 	case req := <-jenkins.requests:
 		require.Equal(t, "release", req.GitRefValue)
-		require.Equal(t, "orders-build", req.Job)
+		require.Equal(t, "team-a", req.Folder)
+		require.Equal(t, "orders", req.Job)
+		require.Equal(t, "team-a", req.Namespace)
+		require.Equal(t, "orders", req.ProjectName)
 		require.Equal(t, "harbor.example/team-a/orders", req.ImageRepository)
 	case <-time.After(time.Second):
 		t.Fatal("automated build request was not sent to Jenkins")

@@ -49,6 +49,9 @@ func (r *updateOnlyRepo) FindRunByID(context.Context, kernel.ProductWorkflowRunI
 func (r *updateOnlyRepo) ListRunsByWorkflow(context.Context, kernel.ProductWorkflowID, int) ([]*model.ProductWorkflowRun, error) {
 	return nil, nil
 }
+func (r *updateOnlyRepo) CountRunsByWorkflow(context.Context, kernel.ProductWorkflowID) (int64, error) {
+	return 0, nil
+}
 func (r *updateOnlyRepo) SaveBuildRef(context.Context, *model.WorkflowBuildRef) error { return nil }
 func (r *updateOnlyRepo) FindRunByBuildID(context.Context, kernel.BuildID) (*model.WorkflowBuildRef, error) {
 	return nil, nil

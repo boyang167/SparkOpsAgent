@@ -363,6 +363,19 @@ export function getProductWorkflowRun(
   );
 }
 
+export function updateProductWorkflowRunRemark(
+  workspaceId: string,
+  productId: string,
+  workflowId: string,
+  runId: string,
+  input: import("@sparkops/contracts/product").UpdateProductWorkflowRunRemarkCommand,
+) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/products/${productId}/workflows/${workflowId}/runs/${runId}`,
+    { method: "PATCH", body: JSON.stringify(input), workspaceId },
+  );
+}
+
 export function approveWorkflowJob(
   workspaceId: string,
   productId: string,
