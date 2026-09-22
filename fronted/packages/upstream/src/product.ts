@@ -385,6 +385,19 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async cancelProductWorkflowRun(
+      workspaceId: string,
+      productId: string,
+      workflowId: string,
+      runId: string,
+      input?: import("@sparkops/contracts/product").CancelProductWorkflowRunCommand,
+    ) {
+      return upstreamFetch<ProductWorkflowRunVM>(
+        `/api/v1/products/${productId}/workflows/${workflowId}/runs/${runId}/cancel`,
+        { method: "POST", body: JSON.stringify(input ?? {}), options: { ...options, workspaceId } },
+      );
+    },
+
     async listEnvironments(workspaceId: string, productId: string) {
       return upstreamFetch<{ items: import("@sparkops/contracts/product").EnvironmentVM[] }>(
         `/api/v1/products/${productId}/environments`,

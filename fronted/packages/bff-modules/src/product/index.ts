@@ -303,6 +303,17 @@ export function continueProductWorkflowRun(
   return ctx.upstream.product.continueProductWorkflowRun(workspaceId, productId, workflowId, runId);
 }
 
+export function cancelProductWorkflowRun(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  workflowId: string,
+  runId: string,
+  input?: import("@sparkops/contracts/product").CancelProductWorkflowRunCommand,
+) {
+  return ctx.upstream.product.cancelProductWorkflowRun(workspaceId, productId, workflowId, runId, input);
+}
+
 export async function listEnvironments(ctx: BffContext, workspaceId: string, productId: string) {
   const data = await ctx.upstream.product.listEnvironments(workspaceId, productId);
   return data.items;

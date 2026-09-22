@@ -34,6 +34,8 @@ interface StartWorkflowRunModalProps {
     ref_type_overrides?: Record<string, string>;
     environment_overrides?: Record<string, string>;
     variables?: Record<string, string>;
+    remark?: string;
+    stage_indices?: number[];
   }) => void;
 }
 
@@ -57,9 +59,6 @@ export function StartWorkflowRunModal({
     () => (workflow?.variables ?? []).filter((item) => item.runtime_input && item.key.trim()),
     [workflow],
   );
-  const deployJobs = useMemo(() => form.stages.flatMap((stage) => stage.deployJobs), [form.stages]);
-  const hasBuild = form.stages.some((stage) => stage.buildRows.length > 0);
-
   const [branches, setBranches] = useState<Record<string, string>>({});
   const [refTypes, setRefTypes] = useState<Record<string, "branch" | "tag" | "pr">>({});
   const [environmentId, setEnvironmentId] = useState("");
@@ -76,6 +75,16 @@ export function StartWorkflowRunModal({
     }
     return items;
   }, [form.pills, runtimeVariables.length]);
+
+  const selectedStages = useMemo(
+    () => form.stages.filter((stage) => visibleStageIds.has(stage.id)),
+    [form.stages, visibleStageIds],
+  );
+  const selectedDeployJobs = useMemo(
+    () => selectedStages.flatMap((stage) => stage.deployJobs),
+    [selectedStages],
+  );
+  const selectedHasBuild = selectedStages.some((stage) => stage.buildRows.length > 0);
 
   useEffect(() => {
     if (!open || !workspaceId) return;
@@ -156,10 +165,10 @@ export function StartWorkflowRunModal({
     : "";
 
   const missingVariable = runtimeVariables.some((item) => !(variables[item.key] ?? "").trim());
-  const missingBranch = form.stages.some((stage) =>
+  const missingBranch = selectedStages.some((stage) =>
     stage.buildRows.some((row) => !(branches[row.key] ?? row.branch).trim()),
   );
-  const missingEnv = deployJobs.length > 0 && !environmentId;
+  const missingEnv = selectedDeployJobs.length > 0 && !environmentId;
 
   function toggleStageVisibility(stageId: string) {
     setVisibleStageIds((prev) => {
@@ -186,10 +195,15 @@ export function StartWorkflowRunModal({
     });
   }
 
+  function parseStageIndex(stageId: string): number | null {
+    const match = /^wf-run-stage-(\d+)$/.exec(stageId);
+    return match ? Number(match[1]) : null;
+  }
+
   function renderStagePills(className: string) {
     if (stageSelectors.length === 0) return null;
     return (
-      <nav className={className} aria-label="阶段筛选">
+      <nav className={className} aria-label="选择执行阶段">
         {stageSelectors.map((item) => {
           const active = visibleStageIds.has(item.id);
           return (
@@ -210,12 +224,12 @@ export function StartWorkflowRunModal({
 
   function submit() {
     const environment_overrides =
-      deployJobs.length > 0 && environmentId
-        ? Object.fromEntries(deployJobs.map((job) => [job.jobName, environmentId]))
+      selectedDeployJobs.length > 0 && environmentId
+        ? Object.fromEntries(selectedDeployJobs.map((job) => [job.jobName, environmentId]))
         : undefined;
     const branch_overrides: Record<string, string> = {};
     const ref_type_overrides: Record<string, string> = {};
-    for (const stage of form.stages) {
+    for (const stage of selectedStages) {
       for (const row of stage.buildRows) {
         const value = (branches[row.key] ?? row.branch).trim();
         if (!value) continue;
@@ -226,13 +240,19 @@ export function StartWorkflowRunModal({
     }
     const firstBranch = Object.values(branch_overrides)[0];
     const trimmedRemark = remark.trim();
+    const stage_indices = selectedStages
+      .map((stage) => parseStageIndex(stage.id))
+      .filter((index): index is number => index != null)
+      .sort((a, b) => a - b);
+    const runAllStages = stage_indices.length === form.stages.length;
     onSubmit({
-      branch: hasBuild ? firstBranch : undefined,
+      branch: selectedHasBuild ? firstBranch : undefined,
       branch_overrides: Object.keys(branch_overrides).length ? branch_overrides : undefined,
       ref_type_overrides: Object.keys(ref_type_overrides).length ? ref_type_overrides : undefined,
       environment_overrides,
       variables: runtimeVariables.length ? variables : undefined,
       remark: trimmedRemark || undefined,
+      stage_indices: runAllStages ? undefined : stage_indices,
     });
   }
 
@@ -265,6 +285,9 @@ export function StartWorkflowRunModal({
       }
     >
       <div className="wf-run-body">
+        {form.stages.length > 1 ? (
+          <p className="wf-run-hint">顶部胶囊用于选择本次执行的阶段；未选中的阶段将跳过。</p>
+        ) : null}
         {form.stages.length === 0 ? (
           <p className="wf-run-hint wf-run-empty">
             当前工作流尚未配置阶段，将按定义直接执行。

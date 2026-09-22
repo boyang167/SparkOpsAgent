@@ -162,7 +162,7 @@ export function ProductWorkflowDetailPanel({
           </button>
           <Link
             href={`/products/${productId}/workflows/${workflowId}/edit`}
-            className="wf-list-icon-btn"
+            className="wf-list-icon-btn wf-list-settings-btn"
             title="编排设置"
           >
             <IconSettings />

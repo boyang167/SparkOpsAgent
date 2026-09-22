@@ -9,7 +9,7 @@ export function WorkflowStagePath({ labels, fallback }: { labels: string[]; fall
       {labels.map((label, index) => (
         <span key={`${label}-${index}`} className="wf-list-path-seg">
           {index > 0 ? <span className="wf-list-path-sep" aria-hidden="true">&gt;</span> : null}
-          <span className="wf-list-path-item">{label}</span>
+          <span className="wf-list-path-chip">{label}</span>
         </span>
       ))}
     </div>
@@ -38,19 +38,20 @@ export function WorkflowListSkeletonRows({ count = 5 }: { count?: number }) {
           <div className="wf-list-row-main">
             <div className="wf-list-row-head">
               <SkeletonBar width="42%" />
-              <div className="wf-list-sparkline">
-                {Array.from({ length: 20 }, (_, j) => (
-                  <span key={j} className="wf-list-spark is-empty" />
-                ))}
-              </div>
             </div>
             <div className="wf-list-row-body">
               <span className="wf-list-skeleton wf-list-skeleton-fav" />
               <SkeletonBar width="8rem" />
               <SkeletonBar width="4rem" />
               <SkeletonBar width="3rem" />
-              <SkeletonBar width="5rem" />
-              <SkeletonBar width="4.5rem" />
+              <div className="wf-list-last-run">
+                <div className="wf-list-sparkline">
+                  {Array.from({ length: 20 }, (_, j) => (
+                    <span key={j} className="wf-list-spark is-empty" />
+                  ))}
+                </div>
+                <SkeletonBar width="4.5rem" />
+              </div>
             </div>
           </div>
         </div>

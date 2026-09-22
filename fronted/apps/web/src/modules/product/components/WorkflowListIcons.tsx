@@ -41,26 +41,26 @@ const iconStroke = {
 export function IconPlay() {
   return (
     <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-      <path d="M9 7.1v9.8c0 .7.78 1.12 1.36.72l7.1-4.9a.85.85 0 0 0 0-1.44l-7.1-4.9A.85.85 0 0 0 9 7.1Z" fill="currentColor" />
+      <circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M10.2 8.7v6.6L15.6 12 10.2 8.7Z" fill="currentColor" />
     </svg>
   );
 }
 
 export function IconSettings() {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor">
+      <circle cx="9.5" cy="13.5" r="2.35" strokeWidth="1.85" />
       <path
-        d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
+        d="M9.5 10.4V10M9.5 17v-.4M7.15 13.5H6.4M12.6 13.5h-.75M7.45 11.35l-.53-.53M11.55 15.45l-.53-.53M7.45 15.65l-.53.53M11.55 11.55l-.53.53"
+        strokeWidth="1.75"
+        strokeLinecap="round"
       />
+      <circle cx="16" cy="10" r="1.75" strokeWidth="1.85" />
       <path
-        d="M19.4 13a1 1 0 0 0 .2-1.1l-1-1.74a1 1 0 0 0-1-.45l-2 .8-1.2-.7-.24-1.88A1 1 0 0 0 13.2 7h-2.4a1 1 0 0 0-1 .92l-.24 1.88-1.2.7-2-.8a1 1 0 0 0-1 .45l-1 1.74a1 1 0 0 0 .2 1.1l1 1.74-.2 1.88 1.2.7 2-.8 1 .45 1 1.74a1 1 0 0 0 1 .45l2-.8 1.2.7.24 1.88a1 1 0 0 0 1 .92h2.4a1 1 0 0 0 1-.92l.24-1.88 1.2-.7 2 .8 1-.45 1-1.74a1 1 0 0 0-.2-1.1l-1-1.74.2-1.88-1.2-.7-2 .8-1-.45-1-1.74a1 1 0 0 0-1-.45l-2 .8-1.2-.7-.24-1.88a1 1 0 0 0-1-.92z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
+        d="M16 7.65V7.35M16 12.65v-.3M14.55 10H14.2M17.8 10h-.35M14.7 8.85l-.42-.42M17.3 11.15l-.42-.42M14.7 11.15l-.42.42M17.3 8.85l-.42.42"
+        strokeWidth="1.65"
+        strokeLinecap="round"
       />
     </svg>
   );
@@ -69,9 +69,9 @@ export function IconSettings() {
 export function IconMore() {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-      <circle cx="6" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="12" cy="6" r="1.5" fill="currentColor" />
       <circle cx="12" cy="12" r="1.5" fill="currentColor" />
-      <circle cx="18" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="12" cy="18" r="1.5" fill="currentColor" />
     </svg>
   );
 }

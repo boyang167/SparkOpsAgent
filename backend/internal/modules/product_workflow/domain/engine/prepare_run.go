@@ -3,6 +3,7 @@ package engine
 import (
 	"strings"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 )
 
@@ -28,6 +29,14 @@ func PrepareRun(wf *model.ProductWorkflow, runID, source string, input map[strin
 		stages = ApplyGitProjectRef(stages, git.ProjectID, git.Ref, git.RefType)
 	}
 	stages = ApplyRunInput(stages, input)
+	if indices, err := stageIndicesFromInput(input); err != nil {
+		return nil, nil, nil, err
+	} else if len(indices) > 0 {
+		stages, err = FilterStagesByIndices(stages, indices)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
 	stored := map[string]any{}
 	for key, value := range input {
 		if key == "variables" {
@@ -150,6 +159,61 @@ func ApplyGitProjectRef(stages []model.WorkflowStage, projectID, ref, refType st
 		}
 	}
 	return stages
+}
+
+func stageIndicesFromInput(input map[string]any) ([]int, error) {
+	if input == nil {
+		return nil, nil
+	}
+	raw, ok := input["stage_indices"]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	switch typed := raw.(type) {
+	case []int:
+		return typed, nil
+	case []any:
+		out := make([]int, 0, len(typed))
+		for _, item := range typed {
+			switch n := item.(type) {
+			case float64:
+				out = append(out, int(n))
+			case int:
+				out = append(out, n)
+			case int64:
+				out = append(out, int(n))
+			default:
+				return nil, domain.ErrInvalidWorkflowInput
+			}
+		}
+		return out, nil
+	default:
+		return nil, domain.ErrInvalidWorkflowInput
+	}
+}
+
+// FilterStagesByIndices keeps only the selected stages in original workflow order.
+func FilterStagesByIndices(stages []model.WorkflowStage, indices []int) ([]model.WorkflowStage, error) {
+	if len(indices) == 0 {
+		return stages, nil
+	}
+	selected := make(map[int]struct{}, len(indices))
+	for _, idx := range indices {
+		if idx < 0 || idx >= len(stages) {
+			return nil, domain.ErrInvalidWorkflowInput
+		}
+		selected[idx] = struct{}{}
+	}
+	out := make([]model.WorkflowStage, 0, len(indices))
+	for i, stage := range stages {
+		if _, ok := selected[i]; ok {
+			out = append(out, stage)
+		}
+	}
+	if len(out) == 0 {
+		return nil, domain.ErrInvalidWorkflowInput
+	}
+	return out, nil
 }
 
 func stringMap(raw any) map[string]string {

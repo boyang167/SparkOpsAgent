@@ -216,6 +216,8 @@ export const StartProductWorkflowRunCommandSchema = z.object({
       environment_overrides: z.record(z.string()).optional(),
       variables: z.record(z.string()).optional(),
       remark: z.string().optional(),
+      /** 0-based indices of workflow stages to execute; omit or include all to run every stage. */
+      stage_indices: z.array(z.number().int().nonnegative()).optional(),
     })
     .optional(),
 });
@@ -233,6 +235,12 @@ export const RejectWorkflowJobCommandSchema = z.object({
 });
 
 export type RejectWorkflowJobCommand = z.infer<typeof RejectWorkflowJobCommandSchema>;
+
+export const CancelProductWorkflowRunCommandSchema = z.object({
+  message: z.string().optional(),
+});
+
+export type CancelProductWorkflowRunCommand = z.infer<typeof CancelProductWorkflowRunCommandSchema>;
 
 export const PRODUCT_WORKFLOW_JOB_CATEGORIES = [
   { id: "build", label: "构建" },

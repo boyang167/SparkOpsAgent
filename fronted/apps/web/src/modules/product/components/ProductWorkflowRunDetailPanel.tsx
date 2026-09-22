@@ -1,13 +1,34 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { product } from "@sparkops/web-sdk";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { governance, product } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
-import type { ProductWorkflowRunVM } from "@sparkops/contracts/product";
+import type {
+  ProductProjectVM,
+  ProductWorkflowRunSummaryVM,
+  ProductWorkflowRunVM,
+  ProductWorkflowVM,
+} from "@sparkops/contracts/product";
+import type { WorkspaceMemberVM } from "@sparkops/contracts/governance";
 import { InlineAlert } from "@/components/ui/InlineAlert";
-import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
-import { jobTypeLabel } from "./workflow-editor-utils";
+import { Modal } from "@/components/ui/Modal";
+import {
+  buildPipelineStages,
+  formatElapsedSeconds,
+  isRunActive,
+  pickDefaultTask,
+  runElapsedSeconds,
+  type PipelineTask,
+} from "./workflow-run-canvas-utils";
+import { WorkflowRunCanvas } from "./WorkflowRunCanvas";
+import { WorkflowRunTaskPanel } from "./WorkflowRunTaskPanel";
+import {
+  executorLabel,
+  formatRunTime,
+  runStatusLabel,
+  runStatusTone,
+} from "./workflow-run-history-utils";
 
 interface ProductWorkflowRunDetailPanelProps {
   workspaceId: string;
@@ -16,17 +37,7 @@ interface ProductWorkflowRunDetailPanelProps {
   runId: string;
 }
 
-function statusLabel(status: string): string {
-  if (status === "paused") return "等待手动执行";
-  return status;
-}
-
-function statusTone(status: string): string {
-  if (status === "success" || status === "approved") return "text-green-600";
-  if (status === "failed" || status === "rejected") return "text-red-600";
-  if (status === "running" || status === "pending") return "text-blue-600";
-  return "text-muted-foreground";
-}
+type DetailTab = "workflow" | "variables";
 
 export function ProductWorkflowRunDetailPanel({
   workspaceId,
@@ -34,18 +45,68 @@ export function ProductWorkflowRunDetailPanel({
   workflowId,
   runId,
 }: ProductWorkflowRunDetailPanelProps) {
+  const [workflow, setWorkflow] = useState<ProductWorkflowVM | null>(null);
   const [run, setRun] = useState<ProductWorkflowRunVM | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [runSummary, setRunSummary] = useState<ProductWorkflowRunSummaryVM | null>(null);
+  const [projects, setProjects] = useState<ProductProjectVM[]>([]);
+  const [members, setMembers] = useState<WorkspaceMemberVM[]>([]);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [rejectJobName, setRejectJobName] = useState<string | null>(null);
-  const [rejectMessage, setRejectMessage] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<DetailTab>("workflow");
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+  const [cancelOpen, setCancelOpen] = useState(false);
+
+  const projectNames = useMemo(
+    () =>
+      Object.fromEntries(
+        projects.map((item) => [item.id, item.display_name?.trim() || item.name || item.id]),
+      ),
+    [projects],
+  );
+
+  const memberMap = useMemo(
+    () =>
+      Object.fromEntries(
+        members.map((item) => [item.member_id, { email: item.email, display_name: item.display_name }]),
+      ),
+    [members],
+  );
+
+  const pipelineStages = useMemo(
+    () => (run ? buildPipelineStages(run, projectNames) : []),
+    [run, projectNames],
+  );
+
+  const selectedTask = useMemo(() => {
+    if (!selectedTaskId) return null;
+    for (const stage of pipelineStages) {
+      const found = stage.tasks.find((task) => task.id === selectedTaskId);
+      if (found) return found;
+    }
+    return null;
+  }, [pipelineStages, selectedTaskId]);
 
   const load = useCallback(async () => {
     try {
-      setRun(await product.getProductWorkflowRun(workspaceId, productId, workflowId, runId));
+      const [wf, runDetail, runItems, projectItems, memberItems] = await Promise.all([
+        product.getProductWorkflow(workspaceId, productId, workflowId),
+        product.getProductWorkflowRun(workspaceId, productId, workflowId, runId),
+        product.listProductWorkflowRuns(workspaceId, productId, workflowId),
+        product.listProductProjects(workspaceId, productId),
+        governance.listMembers(workspaceId).catch(() => [] as WorkspaceMemberVM[]),
+      ]);
+      setWorkflow(wf);
+      setRun(runDetail);
+      setRunSummary(runItems.find((item) => item.id === runId) ?? null);
+      setProjects(projectItems);
+      setMembers(memberItems);
       setError(null);
     } catch (err) {
       setError(err instanceof BffError ? err.message : "加载执行详情失败");
+    } finally {
+      setLoading(false);
     }
   }, [workspaceId, productId, workflowId, runId]);
 
@@ -54,176 +115,207 @@ export function ProductWorkflowRunDetailPanel({
   }, [load]);
 
   useEffect(() => {
-    if (!run || (run.status !== "running" && run.status !== "pending")) return;
+    if (!run || !isRunActive(run.status)) return;
     const timer = window.setInterval(() => {
       void load();
-    }, 3000);
+    }, 2500);
     return () => window.clearInterval(timer);
   }, [run, load]);
 
-  async function approve(jobName: string) {
+  useEffect(() => {
+    if (!run || !isRunActive(run.status)) return;
+    const timer = window.setInterval(() => setTick((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [run]);
+
+  useEffect(() => {
+    if (!run || selectedTaskId) return;
+    const stages = buildPipelineStages(run, projectNames);
+    const next = pickDefaultTask(stages);
+    if (next) setSelectedTaskId(next.id);
+  }, [run, projectNames, selectedTaskId]);
+
+  async function onCancel() {
     setBusy(true);
+    setError(null);
     try {
-      await product.approveWorkflowJob(workspaceId, productId, workflowId, runId, jobName);
+      await product.cancelProductWorkflowRun(workspaceId, productId, workflowId, runId, {
+        message: "用户取消任务",
+      });
+      setCancelOpen(false);
       await load();
     } catch (err) {
-      setError(err instanceof BffError ? err.message : "审批失败");
+      setError(err instanceof BffError ? err.message : "取消任务失败");
     } finally {
       setBusy(false);
     }
   }
 
-  async function reject(jobName: string) {
-    setBusy(true);
-    try {
-      await product.rejectWorkflowJob(workspaceId, productId, workflowId, runId, jobName, {
-        message: rejectMessage,
-      });
-      setRejectJobName(null);
-      setRejectMessage("");
-      await load();
-    } catch (err) {
-      setError(err instanceof BffError ? err.message : "驳回失败");
-    } finally {
-      setBusy(false);
-    }
+  const elapsed = run ? formatElapsedSeconds(runElapsedSeconds(run)) : "—";
+  void tick;
+
+  if (loading) {
+    return <div className="empty-state text-sm" role="status">加载执行详情…</div>;
   }
+
+  if (!run || !workflow) {
+    return (
+      <div className="stack-md">
+        {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+        <div className="empty-state text-sm">执行记录不存在或无权访问。</div>
+      </div>
+    );
+  }
+
+  const runNumber = runSummary?.run_number;
+  const executor = runSummary ? executorLabel(runSummary, memberMap) : "—";
 
   return (
-    <div className="stack-lg">
-      <PlatformPanelHead
-        title="执行详情"
-        description={run ? `状态 ${statusLabel(run.status)} · 当前阶段 #${run.current_stage + 1}` : "加载中…"}
-        action={
+    <div className="wf-run-live-page stack-lg">
+      <header className="wf-run-live-header">
+        <div className="wf-run-live-header-main">
+          <div className="wf-run-live-title-row">
+            <h1 className="wf-run-live-title">
+              {workflow.name}
+              {runNumber != null ? <span className="wf-run-live-run-no">#{runNumber}</span> : null}
+            </h1>
+            <span className={`wf-run-live-status ${runStatusTone(run.status)}`}>{runStatusLabel(run.status)}</span>
+          </div>
+          <div className="wf-run-live-meta-row">
+            <span>{formatRunTime(run.started_at ?? run.created_at)}</span>
+            <span className="wf-run-live-meta-sep">·</span>
+            <span>{elapsed}</span>
+            <span className="wf-run-live-meta-sep">·</span>
+            <span>{executor}</span>
+          </div>
+        </div>
+        <div className="wf-run-live-header-actions">
           <Link href={`/products/${productId}/workflows/${workflowId}`} className="btn btn-ghost text-sm">
             返回执行记录
           </Link>
-        }
-      />
+          {isRunActive(run.status) ? (
+            <button type="button" className="btn btn-secondary text-sm" disabled={busy} onClick={() => setCancelOpen(true)}>
+              取消任务
+            </button>
+          ) : null}
+        </div>
+      </header>
 
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+      {run.error_message ? <InlineAlert tone="error">{run.error_message}</InlineAlert> : null}
 
-      {!run ? (
-        <div className="empty-state text-sm">加载执行记录…</div>
-      ) : (
-        <div className="pwf-run-detail stack-md">
-          {run.error_message ? <InlineAlert tone="error">{run.error_message}</InlineAlert> : null}
-          {run.status === "paused" ? (
-            <div className="pwf-run-actions">
-              <InlineAlert tone="info">当前阶段为手动执行，确认后才会进入该阶段任务。</InlineAlert>
-              <button
-                type="button"
-                className="btn btn-primary text-sm"
-                disabled={busy}
-                onClick={() => {
-                  setBusy(true);
-                  void product
-                    .continueProductWorkflowRun(workspaceId, productId, workflowId, runId)
-                    .then(() => load())
-                    .catch((err) => setError(err instanceof BffError ? err.message : "继续执行失败"))
-                    .finally(() => setBusy(false));
-                }}
-              >
-                继续执行
-              </button>
-            </div>
-          ) : null}
-          <div className="pwf-run-meta text-sm text-muted">
-            <span>开始：{run.started_at ?? "-"}</span>
-            <span>结束：{run.completed_at ?? "-"}</span>
-            <span>创建：{run.created_at ?? "-"}</span>
-          </div>
-          {run.remark ? (
-            <div className="pwf-run-remark">
-              <span className="pwf-run-remark-label">备注</span>
-              <p className="pwf-run-remark-body">{run.remark}</p>
-            </div>
-          ) : null}
-          {run.stage_runs.map((stage, si) => (
-            <section key={`${stage.name}-${si}`} className="pwf-run-stage">
-              <header className="pwf-run-stage-head">
-                <h3>{stage.name}</h3>
-                <span className={statusTone(stage.status)}>{stage.status}</span>
-              </header>
-              <div className="pwf-run-jobs">
-                {stage.jobs.map((job) => (
-                  <article key={job.name} className="pwf-run-job">
-                    <div className="pwf-run-job-head">
-                      <div>
-                        <p className="text-xs text-muted">{jobTypeLabel(job.type)}</p>
-                        <strong>{job.name}</strong>
-                      </div>
-                      <span className={statusTone(job.status)}>{job.status}</span>
-                    </div>
-                    {job.message ? <pre className="pwf-run-log">{job.message}</pre> : null}
-                    {job.error_message ? <p className="text-sm text-red-600">{job.error_message}</p> : null}
-                    {job.builds?.length ? (
-                      <ul className="pwf-run-list">
-                        {job.builds.map((build) => (
-                          <li key={`${build.project_id}-${build.build_id ?? build.branch}`}>
-                            项目 {build.project_id} · {build.branch} ·{" "}
-                            <span className={statusTone(build.status)}>{build.status}</span>
-                            {build.build_id ? (
-                              <>
-                                {" "}
-                                <Link href={`/delivery/builds/${build.build_id}`} className="text-primary">
-                                  查看构建
-                                </Link>
-                              </>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                    {job.deploys?.length ? (
-                      <ul className="pwf-run-list">
-                        {job.deploys.map((deploy) => (
-                          <li key={`${deploy.project_id}-${deploy.deployment_run_id ?? deploy.environment_id}`}>
-                            环境 {deploy.environment_id} ·{" "}
-                            <span className={statusTone(deploy.status)}>{deploy.status}</span>
-                            {deploy.deployment_run_id ? (
-                              <>
-                                {" "}
-                                <Link href={`/delivery/deployments/${deploy.deployment_run_id}`} className="text-primary">
-                                  查看部署
-                                </Link>
-                              </>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                    {job.approval?.status === "pending" ? (
-                      <div className="pwf-run-actions">
-                        <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void approve(job.name)}>
-                          通过
-                        </button>
-                        {rejectJobName === job.name ? (
-                          <div className="pwf-reject-box">
-                            <input
-                              className="input"
-                              placeholder="驳回原因"
-                              value={rejectMessage}
-                              onChange={(e) => setRejectMessage(e.target.value)}
-                            />
-                            <button type="button" className="btn btn-secondary text-sm" disabled={busy} onClick={() => void reject(job.name)}>
-                              确认驳回
-                            </button>
-                          </div>
-                        ) : (
-                          <button type="button" className="btn btn-ghost text-sm" onClick={() => setRejectJobName(job.name)}>
-                            驳回
-                          </button>
-                        )}
-                      </div>
-                    ) : null}
-                  </article>
-                ))}
-              </div>
-            </section>
-          ))}
+      {run.status === "paused" ? (
+        <div className="wf-run-live-paused">
+          <InlineAlert tone="info">当前阶段为手动执行，确认后才会进入该阶段任务。</InlineAlert>
+          <button
+            type="button"
+            className="btn btn-primary text-sm"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void product
+                .continueProductWorkflowRun(workspaceId, productId, workflowId, runId)
+                .then(() => load())
+                .catch((err) => setError(err instanceof BffError ? err.message : "继续执行失败"))
+                .finally(() => setBusy(false));
+            }}
+          >
+            继续执行
+          </button>
         </div>
+      ) : null}
+
+      <div className="wf-run-live-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "workflow"}
+          className={tab === "workflow" ? "is-active" : undefined}
+          onClick={() => setTab("workflow")}
+        >
+          工作流
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "variables"}
+          className={tab === "variables" ? "is-active" : undefined}
+          onClick={() => setTab("variables")}
+        >
+          变量
+        </button>
+      </div>
+
+      {tab === "workflow" ? (
+        <div className="wf-run-live-body">
+          <WorkflowRunCanvas
+            stages={pipelineStages}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={(task: PipelineTask) => setSelectedTaskId(task.id)}
+          />
+          <WorkflowRunTaskPanel
+            workspaceId={workspaceId}
+            productId={productId}
+            workflowId={workflowId}
+            runId={runId}
+            task={selectedTask}
+            onClose={() => setSelectedTaskId(null)}
+            onRefresh={() => void load()}
+          />
+        </div>
+      ) : (
+        <section className="wf-run-live-vars card stack-sm">
+          {workflow.variables?.length ? (
+            <div className="data-table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>键</th>
+                    <th>说明</th>
+                    <th>运行时输入</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {workflow.variables.map((item) => (
+                    <tr key={item.id ?? item.key}>
+                      <td>{item.key}</td>
+                      <td>{item.description || "—"}</td>
+                      <td>{item.runtime_input ? "是" : "否"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="empty-state text-sm">该工作流未配置变量。</div>
+          )}
+        </section>
       )}
+
+      {run.remark ? (
+        <div className="pwf-run-remark">
+          <span className="pwf-run-remark-label">备注</span>
+          <p className="pwf-run-remark-body">{run.remark}</p>
+        </div>
+      ) : null}
+
+      <Modal
+        open={cancelOpen}
+        title="取消任务"
+        onClose={() => setCancelOpen(false)}
+        footer={
+          <>
+            <button type="button" className="btn btn-ghost text-sm" disabled={busy} onClick={() => setCancelOpen(false)}>
+              返回
+            </button>
+            <button type="button" className="btn btn-secondary text-sm" disabled={busy} onClick={() => void onCancel()}>
+              {busy ? "取消中…" : "确认取消"}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-secondary">取消后当前执行任务将标记为失败并停止后续阶段，此操作不可撤销。</p>
+      </Modal>
     </div>
   );
 }

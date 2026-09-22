@@ -24,9 +24,10 @@ export function ProductWorkflowsPanel({
   return (
     <div className="wf-product-page">
       <div className="wf-product-head">
-        <div>
+        <div className="wf-product-head-copy">
+          <span className="wf-product-eyebrow">持续交付</span>
           <h2 className="wf-product-title">工作流</h2>
-          <p className="wf-product-desc">按阶段路径、成功率和最近执行浏览，并可直接运行或进入编排。</p>
+          <p className="wf-product-desc">浏览阶段路径、成功率与最近执行记录，一键运行或进入可视化编排。</p>
         </div>
         <button type="button" className="btn btn-primary text-sm" onClick={() => setCreateRequestId((n) => n + 1)}>
           新建工作流

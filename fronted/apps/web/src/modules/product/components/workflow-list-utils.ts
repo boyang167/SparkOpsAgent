@@ -123,6 +123,14 @@ export function successRateTone(rate: number | null): "is-good" | "is-mid" | "is
   return "is-low";
 }
 
+export function successRateBadgeClass(rate: number | null): string {
+  const tone = successRateTone(rate);
+  if (tone === "is-good") return "badge-success";
+  if (tone === "is-mid") return "badge-warning";
+  if (tone === "is-low") return "badge-danger";
+  return "badge-neutral";
+}
+
 export function paginationPages(current: number, total: number): number[] {
   if (total <= 1) return total === 1 ? [1] : [];
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);

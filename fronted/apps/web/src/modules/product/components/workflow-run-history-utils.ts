@@ -14,6 +14,12 @@ export function runStatusLabel(status: string): string {
       return "等待手动";
     case "cancelled":
       return "已取消";
+    case "succeeded":
+      return "成功";
+    case "aborted":
+      return "已中止";
+    case "skipped":
+      return "已跳过";
     default:
       return status;
   }

@@ -22,7 +22,7 @@ import {
   paginationPages,
   readWorkflowFavorites,
   stagePathLabels,
-  successRateTone,
+  successRateBadgeClass,
   writeWorkflowFavorites,
   type WorkflowRunStats,
 } from "./workflow-list-utils";
@@ -296,15 +296,25 @@ export function WorkflowListPanel({
       <div className="wf-list-shell">
         <div className="wf-list-toolbar">
           <div className="wf-list-toolbar-left">
-            <button
-              type="button"
-              className={`wf-list-icon-btn${favoritesOnly ? " is-active" : ""}`}
-              aria-pressed={favoritesOnly}
-              title={favoritesOnly ? "显示全部" : "只看收藏"}
-              onClick={() => setFavoritesOnly((v) => !v)}
-            >
-              <IconStar filled={favoritesOnly} />
-            </button>
+            <div className="wf-list-filter-group" role="group" aria-label="列表筛选">
+              <button
+                type="button"
+                className={`wf-list-filter-btn${!favoritesOnly ? " is-active" : ""}`}
+                aria-pressed={!favoritesOnly}
+                onClick={() => setFavoritesOnly(false)}
+              >
+                全部
+              </button>
+              <button
+                type="button"
+                className={`wf-list-filter-btn${favoritesOnly ? " is-active" : ""}`}
+                aria-pressed={favoritesOnly}
+                onClick={() => setFavoritesOnly(true)}
+              >
+                <IconStar filled={favoritesOnly} />
+                收藏
+              </button>
+            </div>
             <label className="wf-list-sort-wrap" title="排序方式">
               <span className="wf-list-sort-icon" aria-hidden="true">
                 <IconSort />
@@ -323,6 +333,9 @@ export function WorkflowListPanel({
             </label>
           </div>
           <div className="wf-list-toolbar-right">
+            {!loading && sorted.length > 0 ? (
+              <span className="wf-list-toolbar-count">共 {sorted.length} 条</span>
+            ) : null}
             <label className="wf-list-search-wrap">
               <span className="wf-list-search-icon" aria-hidden="true">
                 <IconSearch />
@@ -331,7 +344,7 @@ export function WorkflowListPanel({
                 className="input wf-list-search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="搜索工作流"
+                placeholder="搜索工作流名称或标识"
               />
             </label>
           </div>
@@ -375,7 +388,7 @@ export function WorkflowListPanel({
                     (wf.stage_count > 0 ? Array.from({ length: wf.stage_count }, (_, i) => `阶段${i + 1}`) : []);
                   const sparkline = stats?.sparkline ?? Array.from({ length: 20 }, () => "empty" as const);
                   const highlighted = initialWorkflowId === wf.id;
-                  const rateTone = successRateTone(stats?.successRate ?? null);
+                  const rateBadge = successRateBadgeClass(stats?.successRate ?? null);
 
                   return (
                     <article
@@ -388,7 +401,6 @@ export function WorkflowListPanel({
                             labels={stageLabels}
                             fallback={wf.stage_count > 0 ? `${wf.stage_count} 个阶段` : "未配置阶段"}
                           />
-                          <WorkflowSparkline tones={sparkline} />
                         </div>
 
                         <div className="wf-list-row-body">
@@ -409,7 +421,9 @@ export function WorkflowListPanel({
                               >
                                 {wf.name}
                               </Link>
-                              {wf.status !== "active" ? <span className="wf-list-badge">草稿</span> : null}
+                              {wf.status !== "active" ? (
+                                <span className="badge badge-neutral wf-list-status-badge">草稿</span>
+                              ) : null}
                             </div>
                             {!productFilter && wf.product_name ? (
                               <span className="wf-list-product">{wf.product_name}</span>
@@ -424,15 +438,24 @@ export function WorkflowListPanel({
                           </div>
                           <div className="wf-list-metric wf-list-col-metric">
                             <span className="wf-list-metric-mobile-label">成功率</span>
-                            <span className={`wf-list-metric-value wf-list-rate${rateTone ? ` ${rateTone}` : ""}`}>
-                              {loadingRow ? "…" : stats?.successRate != null ? `${stats.successRate.toFixed(2)}%` : "—"}
-                            </span>
+                            {loadingRow ? (
+                              <span className="wf-list-metric-value">…</span>
+                            ) : stats?.successRate != null ? (
+                              <span className={`badge wf-list-rate-badge ${rateBadge}`}>
+                                {stats.successRate.toFixed(2)}%
+                              </span>
+                            ) : (
+                              <span className="wf-list-metric-value wf-list-metric-empty">—</span>
+                            )}
                           </div>
-                          <div className="wf-list-metric wf-list-col-metric">
+                          <div className="wf-list-metric wf-list-col-metric wf-list-metric-last-run">
                             <span className="wf-list-metric-mobile-label">最近执行</span>
-                            <span className="wf-list-metric-value">
-                              {loadingRow ? "…" : formatLastRun(stats?.lastRunAt ?? null)}
-                            </span>
+                            <div className="wf-list-last-run">
+                              <WorkflowSparkline tones={sparkline} />
+                              <span className="wf-list-metric-value">
+                                {loadingRow ? "…" : formatLastRun(stats?.lastRunAt ?? null)}
+                              </span>
+                            </div>
                           </div>
 
                           <div className="wf-list-actions">
@@ -448,7 +471,7 @@ export function WorkflowListPanel({
                             <div className="wf-list-action-icons">
                               <Link
                                 href={`/products/${wf.product_id}/workflows/${wf.id}/edit`}
-                                className="wf-list-icon-btn"
+                                className="wf-list-icon-btn wf-list-settings-btn"
                                 title="编排设置"
                               >
                                 <IconSettings />
@@ -473,7 +496,7 @@ export function WorkflowListPanel({
               </div>
             </div>
 
-            <div className="wf-list-pagination">
+            <div className="wf-list-footer">
               <span className="wf-list-pagination-total">共 {sorted.length} 条</span>
               <select
                 className="input wf-list-page-size"

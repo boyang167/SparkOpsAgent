@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { computeRunStats, formatLastRun, paginationPages, stagePathLabels, successRateTone } from "./workflow-list-utils";
+import {
+  computeRunStats,
+  formatLastRun,
+  paginationPages,
+  stagePathLabels,
+  successRateBadgeClass,
+  successRateTone,
+} from "./workflow-list-utils";
 
 describe("workflow-list-utils", () => {
   it("builds stage path labels from first job type", () => {
@@ -35,5 +42,12 @@ describe("workflow-list-utils", () => {
     expect(successRateTone(90)).toBe("is-good");
     expect(successRateTone(60)).toBe("is-mid");
     expect(successRateTone(20)).toBe("is-low");
+  });
+
+  it("maps success rate badge class", () => {
+    expect(successRateBadgeClass(90)).toBe("badge-success");
+    expect(successRateBadgeClass(60)).toBe("badge-warning");
+    expect(successRateBadgeClass(20)).toBe("badge-danger");
+    expect(successRateBadgeClass(null)).toBe("badge-neutral");
   });
 });

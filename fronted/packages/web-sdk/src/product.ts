@@ -415,6 +415,19 @@ export function continueProductWorkflowRun(
   );
 }
 
+export function cancelProductWorkflowRun(
+  workspaceId: string,
+  productId: string,
+  workflowId: string,
+  runId: string,
+  input?: import("@sparkops/contracts/product").CancelProductWorkflowRunCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/product").ProductWorkflowRunVM>(
+    `/workspaces/${workspaceId}/products/${productId}/workflows/${workflowId}/runs/${runId}/cancel`,
+    { method: "POST", body: JSON.stringify(input ?? {}), workspaceId },
+  );
+}
+
 export async function listEnvironments(workspaceId: string, productId: string) {
   const data = await bffFetch<{ items: import("@sparkops/contracts/product").EnvironmentVM[] }>(
     `/workspaces/${workspaceId}/products/${productId}/environments`,
