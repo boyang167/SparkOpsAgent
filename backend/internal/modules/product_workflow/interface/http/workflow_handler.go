@@ -24,6 +24,7 @@ type WorkflowHandlers struct {
 	GetRun             *query.GetWorkflowRunHandler
 	UpdateRunRemark    *command.UpdateWorkflowRunRemarkHandler
 	CancelRun          *command.CancelWorkflowRunHandler
+	PauseRun           *command.PauseWorkflowRunHandler
 	ApproveJob         *command.ApproveWorkflowJobHandler
 	RejectJob          *command.RejectWorkflowJobHandler
 	ContinueStage      *command.ContinueManualStageHandler
@@ -546,6 +547,33 @@ func (h *Handler) RejectWorkflowJob(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"ok": true})
+}
+
+func (h *Handler) PauseWorkflowRun(c *gin.Context) {
+	wsID, _, ok := memberAndWorkspace(c)
+	if !ok {
+		return
+	}
+	productID, err := kernel.ParseProductID(c.Param("productId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
+		return
+	}
+	runID, err := kernel.ParseProductWorkflowRunID(c.Param("runId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid run id", http.StatusBadRequest)
+		return
+	}
+	if err := h.workflows.PauseRun.Handle(c.Request.Context(), wsID, productID, runID); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	item, err := h.workflows.GetRun.Handle(c.Request.Context(), wsID, productID, runID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, item)
 }
 
 func (h *Handler) ContinueWorkflowStage(c *gin.Context) {

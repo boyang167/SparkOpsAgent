@@ -168,6 +168,7 @@ export const ProductWorkflowRunVMSchema = z.object({
   stage_runs: z.array(WorkflowStageRunVMSchema),
   error_message: z.string().optional(),
   remark: z.string().optional(),
+  pause_kind: z.string().optional(),
   created_at: z.string().optional(),
   started_at: z.string().optional(),
   completed_at: z.string().optional(),

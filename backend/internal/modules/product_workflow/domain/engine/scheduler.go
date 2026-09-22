@@ -91,7 +91,7 @@ func (s *Scheduler) handleBuildCompletedLocked(
 	if err != nil {
 		return err
 	}
-	if run.Status != model.RunStatusRunning {
+	if run.Status != model.RunStatusRunning && run.Status != model.RunStatusPaused {
 		return nil
 	}
 	wf, err := s.repo.FindWorkflowByID(ctx, run.WorkflowID)
@@ -144,10 +144,14 @@ func (s *Scheduler) handleBuildCompletedLocked(
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
 		return err
 	}
+	if !runAllowsProgress(run) {
+		return nil
+	}
+	stages := WorkflowStagesForRun(wf, run)
 	if s.stageComplete(run, run.CurrentStage) {
 		return s.advanceStage(ctx, wf, run)
 	}
-	if run.CurrentStage < len(wf.Stages) && !wf.Stages[run.CurrentStage].Parallel {
+	if run.CurrentStage < len(stages) && !stages[run.CurrentStage].Parallel {
 		return s.executeCurrentStage(ctx, wf, run)
 	}
 	return nil
@@ -174,7 +178,7 @@ func (s *Scheduler) handleDeployCompletedLocked(
 	if err != nil {
 		return err
 	}
-	if run.Status != model.RunStatusRunning {
+	if run.Status != model.RunStatusRunning && run.Status != model.RunStatusPaused {
 		return nil
 	}
 	wf, err := s.repo.FindWorkflowByID(ctx, run.WorkflowID)
@@ -218,10 +222,14 @@ func (s *Scheduler) handleDeployCompletedLocked(
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
 		return err
 	}
+	if !runAllowsProgress(run) {
+		return nil
+	}
+	stages := WorkflowStagesForRun(wf, run)
 	if s.stageComplete(run, run.CurrentStage) {
 		return s.advanceStage(ctx, wf, run)
 	}
-	if run.CurrentStage < len(wf.Stages) && !wf.Stages[run.CurrentStage].Parallel {
+	if run.CurrentStage < len(stages) && !stages[run.CurrentStage].Parallel {
 		return s.executeCurrentStage(ctx, wf, run)
 	}
 	return nil
@@ -287,7 +295,36 @@ func (s *Scheduler) ReconcileRun(ctx context.Context, runID kernel.ProductWorkfl
 			}
 		}
 	}
-	return nil
+	run, err = s.repo.FindRunByID(ctx, runID)
+	if err != nil {
+		return err
+	}
+	return s.healStuckRun(ctx, run)
+}
+
+func (s *Scheduler) healStuckRun(ctx context.Context, run *model.ProductWorkflowRun) error {
+	if run == nil || !runNeedsReconcile(run) || run.Status == model.RunStatusPaused {
+		return nil
+	}
+	allDone := true
+	for si := range run.StageRuns {
+		if !s.stageComplete(run, si) {
+			allDone = false
+			break
+		}
+	}
+	if !allDone {
+		return nil
+	}
+	wf, err := s.repo.FindWorkflowByID(ctx, run.WorkflowID)
+	if err != nil {
+		return err
+	}
+	stages := WorkflowStagesForRun(wf, run)
+	if run.CurrentStage >= len(stages) || run.CurrentStage >= len(run.StageRuns) {
+		return s.completeRun(ctx, run)
+	}
+	return s.advanceStage(ctx, wf, run)
 }
 
 func runNeedsReconcile(run *model.ProductWorkflowRun) bool {
@@ -322,10 +359,11 @@ func (s *Scheduler) ApproveJob(ctx context.Context, runID kernel.ProductWorkflow
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
 		return err
 	}
+	stages := WorkflowStagesForRun(wf, run)
 	if s.stageComplete(run, run.CurrentStage) {
 		return s.advanceStage(ctx, wf, run)
 	}
-	if run.CurrentStage < len(wf.Stages) && !wf.Stages[run.CurrentStage].Parallel {
+	if run.CurrentStage < len(stages) && !stages[run.CurrentStage].Parallel {
 		return s.executeCurrentStage(ctx, wf, run)
 	}
 	return nil
@@ -420,10 +458,11 @@ func (s *Scheduler) loadPendingApproval(ctx context.Context, runID kernel.Produc
 }
 
 func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun) error {
-	if run.CurrentStage >= len(wf.Stages) {
+	stages := WorkflowStagesForRun(wf, run)
+	if run.CurrentStage >= len(stages) || run.CurrentStage >= len(run.StageRuns) {
 		return s.completeRun(ctx, run)
 	}
-	stage := wf.Stages[run.CurrentStage]
+	stage := stages[run.CurrentStage]
 	stageRun := &run.StageRuns[run.CurrentStage]
 	stageRun.ExecMode = model.NormalizeStageExecMode(stage.ExecMode)
 	if (stageRun.ExecMode == model.StageExecManual || (wf != nil && wf.Advanced.Debug)) && !stageRun.ManualConfirmed {
@@ -532,12 +571,13 @@ func (s *Scheduler) ContinueManualStage(ctx context.Context, runID kernel.Produc
 }
 
 func (s *Scheduler) advanceStage(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun) error {
+	stages := WorkflowStagesForRun(wf, run)
 	run.StageRuns[run.CurrentStage].Status = model.JobRunStatusSuccess
 	run.CurrentStage++
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
 		return err
 	}
-	if run.CurrentStage >= len(wf.Stages) {
+	if run.CurrentStage >= len(stages) || run.CurrentStage >= len(run.StageRuns) {
 		return s.completeRun(ctx, run)
 	}
 	return s.executeCurrentStage(ctx, wf, run)

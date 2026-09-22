@@ -147,3 +147,79 @@ func TestHandleBuildCompleted_concurrentUpdatesKeepBothBuildsSuccessful(t *testi
 	require.Equal(t, model.JobRunStatusSuccess, repo.run.StageRuns[0].Jobs[0].Builds[1].Status)
 	require.Equal(t, model.RunStatusSuccess, repo.run.Status)
 }
+
+func TestHandleBuildCompleted_partialStageRunCompletes(t *testing.T) {
+	buildA := kernel.NewBuildID()
+	buildB := kernel.NewBuildID()
+	runID := kernel.NewProductWorkflowRunID()
+	wfID := kernel.NewProductWorkflowID()
+
+	run := &model.ProductWorkflowRun{
+		ID: runID, WorkflowID: wfID, Status: model.RunStatusRunning, CurrentStage: 0,
+		Input: []byte(`{"stage_indices":[0]}`),
+		StageRuns: []model.StageRun{{
+			Name: "build", Status: model.JobRunStatusRunning,
+			Jobs: []model.JobRun{{
+				Name: "build-1", Type: model.JobTypeSparkopsBuild, Status: model.JobRunStatusRunning,
+				Builds: []model.ProjectBuildRun{
+					{BuildID: buildA.String(), Status: model.JobRunStatusRunning},
+					{BuildID: buildB.String(), Status: model.JobRunStatusRunning},
+				},
+			}},
+		}},
+	}
+	repo := &concurrentRunRepo{
+		run: run,
+		wf: &model.ProductWorkflow{
+			ID: wfID,
+			Stages: []model.WorkflowStage{
+				{Name: "build", Jobs: []model.WorkflowJob{{Name: "build-1", Type: model.JobTypeSparkopsBuild}}},
+				{Name: "deploy", Jobs: []model.WorkflowJob{{Name: "deploy-1", Type: model.JobTypeSparkopsDeploy}}},
+			},
+		},
+		refs: map[string]*model.WorkflowBuildRef{
+			buildA.String(): {BuildID: buildA, RunID: runID, JobName: "build-1"},
+			buildB.String(): {BuildID: buildB, RunID: runID, JobName: "build-1"},
+		},
+	}
+	scheduler := NewScheduler(repo, nil, nil, nil)
+
+	require.NoError(t, scheduler.HandleBuildCompleted(context.Background(), buildA, string(buildmodel.BuildStatusSuccess)))
+	require.NoError(t, scheduler.HandleBuildCompleted(context.Background(), buildB, string(buildmodel.BuildStatusSuccess)))
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Equal(t, model.RunStatusSuccess, repo.run.Status)
+	require.NotNil(t, repo.run.CompletedAt)
+}
+
+func TestHealStuckRun_completesWhenAllStagesDone(t *testing.T) {
+	runID := kernel.NewProductWorkflowRunID()
+	wfID := kernel.NewProductWorkflowID()
+	run := &model.ProductWorkflowRun{
+		ID: runID, WorkflowID: wfID, Status: model.RunStatusRunning, CurrentStage: 1,
+		Input: []byte(`{"stage_indices":[0]}`),
+		StageRuns: []model.StageRun{{
+			Name: "build", Status: model.JobRunStatusSuccess,
+			Jobs: []model.JobRun{{
+				Name: "build-1", Type: model.JobTypeSparkopsBuild, Status: model.JobRunStatusSuccess,
+			}},
+		}},
+	}
+	repo := &concurrentRunRepo{
+		run: run,
+		wf: &model.ProductWorkflow{
+			ID: wfID,
+			Stages: []model.WorkflowStage{
+				{Name: "build", Jobs: []model.WorkflowJob{{Name: "build-1", Type: model.JobTypeSparkopsBuild}}},
+				{Name: "deploy", Jobs: []model.WorkflowJob{{Name: "deploy-1", Type: model.JobTypeSparkopsDeploy}}},
+			},
+		},
+	}
+	scheduler := NewScheduler(repo, nil, nil, nil)
+	require.NoError(t, scheduler.healStuckRun(context.Background(), run))
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Equal(t, model.RunStatusSuccess, repo.run.Status)
+}

@@ -135,6 +135,32 @@ export function ProductWorkflowRunDetailPanel({
     if (next) setSelectedTaskId(next.id);
   }, [run, projectNames, selectedTaskId]);
 
+  async function onPause() {
+    setBusy(true);
+    setError(null);
+    try {
+      await product.pauseProductWorkflowRun(workspaceId, productId, workflowId, runId);
+      await load();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "暂停任务失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onResume() {
+    setBusy(true);
+    setError(null);
+    try {
+      await product.continueProductWorkflowRun(workspaceId, productId, workflowId, runId);
+      await load();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "继续执行失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onCancel() {
     setBusy(true);
     setError(null);
@@ -169,6 +195,8 @@ export function ProductWorkflowRunDetailPanel({
 
   const runNumber = runSummary?.run_number;
   const executor = runSummary ? executorLabel(runSummary, memberMap) : "—";
+  const isUserPaused = run.status === "paused" && run.pause_kind === "user";
+  const isManualStagePaused = run.status === "paused" && !isUserPaused;
 
   return (
     <div className="wf-run-live-page stack-lg">
@@ -193,6 +221,11 @@ export function ProductWorkflowRunDetailPanel({
           <Link href={`/products/${productId}/workflows/${workflowId}`} className="btn btn-ghost text-sm">
             返回执行记录
           </Link>
+          {run.status === "running" ? (
+            <button type="button" className="btn btn-ghost text-sm" disabled={busy} onClick={() => void onPause()}>
+              {busy ? "暂停中…" : "暂停任务"}
+            </button>
+          ) : null}
           {isRunActive(run.status) ? (
             <button type="button" className="btn btn-secondary text-sm" disabled={busy} onClick={() => setCancelOpen(true)}>
               取消任务
@@ -206,21 +239,15 @@ export function ProductWorkflowRunDetailPanel({
 
       {run.status === "paused" ? (
         <div className="wf-run-live-paused">
-          <InlineAlert tone="info">当前阶段为手动执行，确认后才会进入该阶段任务。</InlineAlert>
-          <button
-            type="button"
-            className="btn btn-primary text-sm"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              void product
-                .continueProductWorkflowRun(workspaceId, productId, workflowId, runId)
-                .then(() => load())
-                .catch((err) => setError(err instanceof BffError ? err.message : "继续执行失败"))
-                .finally(() => setBusy(false));
-            }}
-          >
-            继续执行
+          <InlineAlert tone="info">
+            {isUserPaused
+              ? "任务已暂停。进行中的构建/部署会继续完成，但不会进入下一阶段，点击继续执行恢复调度。"
+              : isManualStagePaused
+                ? "当前阶段为手动执行，确认后才会进入该阶段任务。"
+                : "任务已暂停，点击继续执行恢复调度。"}
+          </InlineAlert>
+          <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onResume()}>
+            {busy ? "恢复中…" : "继续执行"}
           </button>
         </div>
       ) : null}

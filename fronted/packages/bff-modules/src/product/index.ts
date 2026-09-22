@@ -303,6 +303,16 @@ export function continueProductWorkflowRun(
   return ctx.upstream.product.continueProductWorkflowRun(workspaceId, productId, workflowId, runId);
 }
 
+export function pauseProductWorkflowRun(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  workflowId: string,
+  runId: string,
+) {
+  return ctx.upstream.product.pauseProductWorkflowRun(workspaceId, productId, workflowId, runId);
+}
+
 export function cancelProductWorkflowRun(
   ctx: BffContext,
   workspaceId: string,

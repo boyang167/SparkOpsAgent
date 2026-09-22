@@ -77,6 +77,24 @@ func TestPrepareRunStoresRemark(t *testing.T) {
 	require.Equal(t, "  hotfix login  ", stored["remark"])
 }
 
+func TestWorkflowStagesForRun_partialSelection(t *testing.T) {
+	wf := &model.ProductWorkflow{
+		Stages: []model.WorkflowStage{
+			{Name: "build"},
+			{Name: "deploy"},
+		},
+	}
+	run := &model.ProductWorkflowRun{
+		Input: []byte(`{"stage_indices":[0]}`),
+		StageRuns: []model.StageRun{
+			{Name: "build"},
+		},
+	}
+	stages := WorkflowStagesForRun(wf, run)
+	require.Len(t, stages, 1)
+	require.Equal(t, "build", stages[0].Name)
+}
+
 func TestFilterStagesByIndices_keepsOrder(t *testing.T) {
 	stages := []model.WorkflowStage{
 		{Name: "build"},

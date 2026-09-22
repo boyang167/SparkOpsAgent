@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain"
@@ -193,6 +194,47 @@ func stageIndicesFromInput(input map[string]any) ([]int, error) {
 }
 
 // FilterStagesByIndices keeps only the selected stages in original workflow order.
+// StageIndicesFromRunInput reads optional partial-run stage indices persisted on a run.
+func StageIndicesFromRunInput(raw json.RawMessage) ([]int, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var input map[string]any
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, nil
+	}
+	return stageIndicesFromInput(input)
+}
+
+// WorkflowStagesForRun resolves the stage definitions that belong to this run.
+// Full runs use the workflow definition as-is; partial runs filter by stored stage_indices.
+func WorkflowStagesForRun(wf *model.ProductWorkflow, run *model.ProductWorkflowRun) []model.WorkflowStage {
+	if wf == nil {
+		return nil
+	}
+	var indices []int
+	var err error
+	if run != nil {
+		indices, err = StageIndicesFromRunInput(run.Input)
+	}
+	if err != nil || len(indices) == 0 {
+		if run != nil && len(run.StageRuns) > 0 && len(run.StageRuns) < len(wf.Stages) {
+			return append([]model.WorkflowStage(nil), wf.Stages[:len(run.StageRuns)]...)
+		}
+		return wf.Stages
+	}
+	out := make([]model.WorkflowStage, 0, len(indices))
+	for _, idx := range indices {
+		if idx >= 0 && idx < len(wf.Stages) {
+			out = append(out, wf.Stages[idx])
+		}
+	}
+	if len(out) == 0 {
+		return wf.Stages
+	}
+	return out
+}
+
 func FilterStagesByIndices(stages []model.WorkflowStage, indices []int) ([]model.WorkflowStage, error) {
 	if len(indices) == 0 {
 		return stages, nil

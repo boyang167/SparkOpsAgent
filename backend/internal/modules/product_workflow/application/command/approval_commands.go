@@ -90,7 +90,7 @@ func (h *ContinueManualStageHandler) Handle(
 	if err := ensureWorkflowRun(ctx, h.workflows, h.products, wsID, productID, runID); err != nil {
 		return err
 	}
-	return h.scheduler.ContinueManualStage(ctx, runID)
+	return h.scheduler.ResumeRun(ctx, runID)
 }
 
 func ensureWorkflowRun(

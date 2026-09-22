@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/engine"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
@@ -173,6 +174,9 @@ func (h *GetWorkflowRunHandler) Handle(ctx context.Context, wsID kernel.Workspac
 	}
 	if remark := runRemark(run.Input); remark != "" {
 		out["remark"] = remark
+	}
+	if pauseKind := engine.PauseKind(run); pauseKind != "" {
+		out["pause_kind"] = pauseKind
 	}
 	return out, nil
 }

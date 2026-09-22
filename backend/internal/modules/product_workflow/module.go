@@ -107,6 +107,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		GetRun:             query.NewGetWorkflowRunHandler(workflowRepo, productChecker, scheduler),
 		UpdateRunRemark:    command.NewUpdateWorkflowRunRemarkHandler(workflowRepo, productChecker),
 		CancelRun:          command.NewCancelWorkflowRunHandler(workflowRepo, scheduler, productChecker),
+		PauseRun:           command.NewPauseWorkflowRunHandler(workflowRepo, scheduler, productChecker),
 		ApproveJob:         command.NewApproveWorkflowJobHandler(workflowRepo, scheduler, productChecker),
 		RejectJob:          command.NewRejectWorkflowJobHandler(workflowRepo, scheduler, productChecker),
 		ContinueStage:      command.NewContinueManualStageHandler(workflowRepo, scheduler, productChecker),
@@ -166,6 +167,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, writePerm, handler.UpdateWorkflowRunRemark)
 	c.Engine.POST("/api/v1/products/:productId/workflows/:workflowId/runs/:runId/cancel",
 		auth, ws, wsMember, writePerm, handler.CancelWorkflowRun)
+	c.Engine.POST("/api/v1/products/:productId/workflows/:workflowId/runs/:runId/pause",
+		auth, ws, wsMember, writePerm, handler.PauseWorkflowRun)
 	c.Engine.POST("/api/v1/products/:productId/workflows/:workflowId/runs/:runId/continue",
 		auth, ws, wsMember, writePerm, handler.ContinueWorkflowStage)
 

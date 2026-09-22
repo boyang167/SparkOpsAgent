@@ -385,6 +385,18 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async pauseProductWorkflowRun(
+      workspaceId: string,
+      productId: string,
+      workflowId: string,
+      runId: string,
+    ) {
+      return upstreamFetch<ProductWorkflowRunVM>(
+        `/api/v1/products/${productId}/workflows/${workflowId}/runs/${runId}/pause`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
     async cancelProductWorkflowRun(
       workspaceId: string,
       productId: string,

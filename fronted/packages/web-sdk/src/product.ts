@@ -415,6 +415,18 @@ export function continueProductWorkflowRun(
   );
 }
 
+export function pauseProductWorkflowRun(
+  workspaceId: string,
+  productId: string,
+  workflowId: string,
+  runId: string,
+) {
+  return bffFetch<import("@sparkops/contracts/product").ProductWorkflowRunVM>(
+    `/workspaces/${workspaceId}/products/${productId}/workflows/${workflowId}/runs/${runId}/pause`,
+    { method: "POST", workspaceId },
+  );
+}
+
 export function cancelProductWorkflowRun(
   workspaceId: string,
   productId: string,
