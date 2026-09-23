@@ -430,10 +430,27 @@ func (h *StartWorkflowRunHandler) materializeVariables(ctx context.Context, item
 	return revealed, nil
 }
 
+func (h *StartWorkflowRunHandler) ProgressActiveRuns(ctx context.Context) {
+	if h.scheduler == nil {
+		return
+	}
+	runs, err := h.workflows.ListActiveRuns(ctx, 100)
+	if err != nil {
+		return
+	}
+	for _, run := range runs {
+		if run == nil {
+			continue
+		}
+		_ = h.scheduler.ProgressStuckRun(ctx, run.ID)
+	}
+}
+
 func (h *StartWorkflowRunHandler) ExpireRuns(ctx context.Context) {
 	if h.scheduler == nil {
 		return
 	}
+	h.ProgressActiveRuns(ctx)
 	runs, err := h.workflows.ListActiveRuns(ctx, 100)
 	if err != nil {
 		return

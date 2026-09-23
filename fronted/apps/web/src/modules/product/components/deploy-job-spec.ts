@@ -187,6 +187,14 @@ export function deployJobSpecToRecord(spec: DeployJobSpec): Record<string, unkno
   };
 }
 
+export function formatImageRef(repository?: string, tag?: string): string {
+  const repo = repository?.trim();
+  const imageTag = tag?.trim();
+  if (repo && imageTag) return `${repo}:${imageTag}`;
+  if (repo) return repo;
+  return imageTag || "—";
+}
+
 export function imageTagFromRef(ref: string): string {
   let value = ref.trim().replace(/^refs\/heads\//, "").replace(/^refs\/tags\//, "");
   if (!value) return "latest";

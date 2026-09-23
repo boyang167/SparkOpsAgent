@@ -121,22 +121,23 @@ func (h *GetProductWorkflowHandler) Handle(ctx context.Context, wsID kernel.Work
 	}, nil
 }
 
-type RunReconciler interface {
-	ReconcileRun(ctx context.Context, runID kernel.ProductWorkflowRunID) error
+type RunStatusSyncer interface {
+	SyncRunExternalStatuses(ctx context.Context, runID kernel.ProductWorkflowRunID) error
+	ProgressStuckRun(ctx context.Context, runID kernel.ProductWorkflowRunID) error
 }
 
 type GetWorkflowRunHandler struct {
 	workflows  repository.ProductWorkflowRepository
 	products   port.ProductChecker
-	reconciler RunReconciler
+	statusSyncer RunStatusSyncer
 }
 
 func NewGetWorkflowRunHandler(
 	workflows repository.ProductWorkflowRepository,
 	products port.ProductChecker,
-	reconciler RunReconciler,
+	statusSyncer RunStatusSyncer,
 ) *GetWorkflowRunHandler {
-	return &GetWorkflowRunHandler{workflows: workflows, products: products, reconciler: reconciler}
+	return &GetWorkflowRunHandler{workflows: workflows, products: products, statusSyncer: statusSyncer}
 }
 
 func (h *GetWorkflowRunHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, productID kernel.ProductID, runID kernel.ProductWorkflowRunID) (map[string]any, error) {
@@ -154,12 +155,16 @@ func (h *GetWorkflowRunHandler) Handle(ctx context.Context, wsID kernel.Workspac
 	if run.ProductID != productID {
 		return nil, domain.ErrProductWorkflowRunNotFound
 	}
-	if h.reconciler != nil && (run.Status == "running" || run.Status == "pending" || run.Status == "paused") {
-		if reconcileErr := h.reconciler.ReconcileRun(ctx, runID); reconcileErr == nil {
+	if h.statusSyncer != nil && (run.Status == "running" || run.Status == "pending" || run.Status == "paused") {
+		if syncErr := h.statusSyncer.SyncRunExternalStatuses(ctx, runID); syncErr == nil {
 			if refreshed, findErr := h.workflows.FindRunByID(ctx, runID); findErr == nil {
 				run = refreshed
 			}
 		}
+		progressID := runID
+		go func() {
+			_ = h.statusSyncer.ProgressStuckRun(context.Background(), progressID)
+		}()
 	}
 	out := map[string]any{
 		"id": run.ID.String(), "workflow_id": run.WorkflowID.String(), "product_id": run.ProductID.String(),

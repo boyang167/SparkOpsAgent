@@ -83,14 +83,16 @@ func (e *DeployExecutor) RunJob(
 			jobRun.Status = model.JobRunStatusFailed
 			jobRun.ErrorMessage = triggerErr.Error()
 			jobRun.Deploys = append(jobRun.Deploys, model.ProjectDeployRun{
-				ProjectID: target.ProjectID, EnvironmentID: envID.String(), ImageTag: imageTag,
+				ProjectID: target.ProjectID, EnvironmentID: envID.String(),
+				ImageTag: imageTag, ImageRepository: imageRepository,
 				Status: model.JobRunStatusFailed, ErrorMessage: triggerErr.Error(),
 			})
 			return triggerErr
 		}
 		jobRun.Deploys = append(jobRun.Deploys, model.ProjectDeployRun{
 			ProjectID: target.ProjectID, EnvironmentID: envID.String(),
-			DeploymentRunID: deployID.String(), ImageTag: imageTag, Status: model.JobRunStatusRunning,
+			DeploymentRunID: deployID.String(), ImageTag: imageTag, ImageRepository: imageRepository,
+			Status: model.JobRunStatusRunning,
 		})
 		if err := e.repo.SaveDeployRef(ctx, &model.WorkflowDeployRef{
 			DeploymentRunID: deployID, RunID: run.ID, JobName: job.Name, ProjectID: projectID,

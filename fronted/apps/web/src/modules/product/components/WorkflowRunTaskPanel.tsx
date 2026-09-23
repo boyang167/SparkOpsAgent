@@ -7,6 +7,7 @@ import { BffError } from "@sparkops/contracts";
 import type { BuildVM, DeploymentRunVM } from "@sparkops/contracts/delivery";
 import { BuildLogStream } from "@/modules/delivery/components/BuildLogStream";
 import { DeploymentLogStream } from "@/modules/delivery/components/DeploymentLogStream";
+import { formatImageRef } from "./deploy-job-spec";
 import { isActiveDeploymentRun } from "@/modules/workspace/components/project/deployment-console-utils";
 import type { PipelineTask } from "./workflow-run-canvas-utils";
 import { taskStatusTone } from "./workflow-run-canvas-utils";
@@ -58,6 +59,19 @@ export function WorkflowRunTaskPanel({
     }
   }, [task, workspaceId]);
 
+  const refreshTaskDetail = useCallback(async () => {
+    if (!task) return;
+    try {
+      if (task.kind === "build" && task.refId) {
+        setBuild(await delivery.getBuild(task.refId, workspaceId));
+      } else if (task.kind === "deploy" && task.refId) {
+        setDeploy(await delivery.getDeployment(task.refId, workspaceId));
+      }
+    } catch {
+      // keep existing detail visible while logs are shown
+    }
+  }, [task, workspaceId]);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -75,6 +89,10 @@ export function WorkflowRunTaskPanel({
   const activeDeploy = deploy ? isActiveDeploymentRun(deploy) : task.status === "running";
   const deployStatus = deploy?.status ?? task.status;
   const deployError = deploy?.error_message?.trim() || task.errorMessage;
+  const imageRef = formatImageRef(
+    deploy?.image_repository ?? task.imageRepository,
+    deploy?.image_tag ?? task.imageTag,
+  );
 
   return (
     <section className="wf-run-live-panel">
@@ -118,12 +136,11 @@ export function WorkflowRunTaskPanel({
             </span>
           </div>
         ) : null}
-        {task.imageRepository || task.imageTag ? (
+        {imageRef !== "—" ? (
           <div className="wf-run-live-meta-item">
             <span className="wf-run-live-meta-label">镜像</span>
-            <span>
-              {task.imageRepository ? `${task.imageRepository}:` : ""}
-              {task.imageTag ?? "—"}
+            <span className="wf-run-image-ref mono" title={imageRef}>
+              {imageRef}
             </span>
           </div>
         ) : null}
@@ -160,7 +177,7 @@ export function WorkflowRunTaskPanel({
             initialLog={build?.console_log}
             active={activeBuild}
             terminal
-            onDone={() => void load()}
+            onDone={refreshTaskDetail}
           />
         </div>
       ) : null}
@@ -171,7 +188,7 @@ export function WorkflowRunTaskPanel({
             runId={task.refId}
             active={activeDeploy}
             terminal
-            onDone={() => void load()}
+            onDone={refreshTaskDetail}
           />
           {!activeDeploy && deployError ? (
             <pre className="wf-run-live-panel-log-text">{deployError}</pre>

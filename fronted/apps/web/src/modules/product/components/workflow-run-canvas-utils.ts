@@ -28,12 +28,6 @@ export interface PipelineStageView {
   tasks: PipelineTask[];
 }
 
-type BuildRunExtra = {
-  git_ref_type?: string;
-  image_tag?: string;
-  image_repository?: string;
-};
-
 export function projectDisplayName(projectId: string, names: Record<string, string>): string {
   const label = names[projectId]?.trim();
   return label || projectId;
@@ -49,7 +43,6 @@ export function buildPipelineStages(
       const typeLabel = jobTypeLabel(job.type);
       if (job.type === "sparkops-build" && job.builds?.length) {
         for (const build of job.builds) {
-          const extra = build as typeof build & BuildRunExtra;
           tasks.push({
             id: `${stageIndex}:${job.name}:build:${build.project_id}`,
             stageIndex,
@@ -61,9 +54,9 @@ export function buildPipelineStages(
             status: build.status,
             refId: build.build_id,
             branch: build.branch,
-            gitRefType: extra.git_ref_type,
-            imageTag: extra.image_tag,
-            imageRepository: extra.image_repository,
+            gitRefType: build.git_ref_type,
+            imageTag: build.image_tag,
+            imageRepository: build.image_repository,
             errorMessage: build.error_message,
           });
         }
@@ -82,6 +75,7 @@ export function buildPipelineStages(
             status: deploy.status,
             refId: deploy.deployment_run_id,
             imageTag: deploy.image_tag,
+            imageRepository: deploy.image_repository,
             environmentId: deploy.environment_id,
             errorMessage: deploy.error_message,
           });

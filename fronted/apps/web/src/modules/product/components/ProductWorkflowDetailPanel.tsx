@@ -18,6 +18,7 @@ import { WorkflowRunHistoryTable } from "./WorkflowRunHistoryTable";
 import { IconPlay, IconSettings } from "./WorkflowListIcons";
 import { formatLastRun, stagePathLabels, workflowStagePathText } from "./workflow-list-utils";
 import { WorkflowStagePath } from "./WorkflowStagePath";
+import { prefetchWorkspaceRunAssets } from "./workflow-run-prefetch";
 
 interface ProductWorkflowDetailPanelProps {
   workspaceId: string;
@@ -70,6 +71,10 @@ export function ProductWorkflowDetailPanel({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    prefetchWorkspaceRunAssets(workspaceId);
+  }, [workspaceId]);
 
   useEffect(() => {
     if (searchParams.get("run") === "1" && workflow?.status === "active" && !loading) {
@@ -155,6 +160,8 @@ export function ProductWorkflowDetailPanel({
             type="button"
             className="wf-list-run-btn"
             disabled={busy || workflow.status !== "active"}
+            onMouseEnter={() => prefetchWorkspaceRunAssets(workspaceId)}
+            onFocus={() => prefetchWorkspaceRunAssets(workspaceId)}
             onClick={() => setRunOpen(true)}
           >
             <IconPlay />
@@ -170,7 +177,7 @@ export function ProductWorkflowDetailPanel({
         </div>
       </header>
 
-      {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+      {error && !runOpen ? <InlineAlert tone="error">{error}</InlineAlert> : null}
 
       <section className="wf-history-section">
         <header className="wf-history-head">
@@ -195,7 +202,11 @@ export function ProductWorkflowDetailPanel({
         environments={environments}
         projects={projects}
         busy={busy}
-        onClose={() => setRunOpen(false)}
+        submitError={runOpen ? error : null}
+        onClose={() => {
+          setRunOpen(false);
+          setError(null);
+        }}
         onSubmit={(input) => void onStartRun(input)}
       />
     </div>

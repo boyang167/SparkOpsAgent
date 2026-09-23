@@ -85,6 +85,9 @@ export type ProductWorkflowVM = z.infer<typeof ProductWorkflowVMSchema>;
 export const ProjectBuildRunVMSchema = z.object({
   project_id: z.string(),
   branch: z.string().optional(),
+  git_ref_type: z.string().optional(),
+  image_tag: z.string().optional(),
+  image_repository: z.string().optional(),
   build_id: z.string().optional(),
   status: z.string(),
   error_message: z.string().optional(),
@@ -97,6 +100,7 @@ export const ProjectDeployRunVMSchema = z.object({
   environment_id: z.string().optional(),
   deployment_run_id: z.string().optional(),
   image_tag: z.string().optional(),
+  image_repository: z.string().optional(),
   status: z.string(),
   error_message: z.string().optional(),
 });

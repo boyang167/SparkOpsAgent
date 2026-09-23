@@ -24,6 +24,7 @@ type DeploymentView struct {
 	GitRefType      string  `json:"git_ref_type"`
 	GitRefValue     string  `json:"git_ref_value"`
 	ImageTag        string  `json:"image_tag"`
+	ImageRepository string  `json:"image_repository,omitempty"`
 	CrossCluster    bool    `json:"cross_cluster"`
 	Status          string  `json:"status"`
 	RunType         string  `json:"run_type,omitempty"`
@@ -290,7 +291,8 @@ func ToDeploymentView(run *model.DeploymentRun) DeploymentView {
 	view := DeploymentView{
 		ID: run.ID.String(), WorkspaceID: run.WorkspaceID.String(), ProjectID: run.ProjectID.String(),
 		ClusterID: run.ClusterID.String(), GitRefType: run.GitRefType, GitRefValue: run.GitRefValue,
-		ImageTag: run.ImageTag, CrossCluster: run.CrossCluster, Status: string(run.Status), RunType: runType,
+		ImageTag: run.ImageTag, ImageRepository: run.ImageRepository, CrossCluster: run.CrossCluster,
+		Status: string(run.Status), RunType: runType,
 		CurrentStage: string(run.CurrentStage), DeployNamespace: run.DeployNamespace,
 		ErrorMessage: run.ErrorMessage, CreatedBy: run.CreatedBy.String(), CreatedAt: run.CreatedAt.Format(time.RFC3339),
 	}

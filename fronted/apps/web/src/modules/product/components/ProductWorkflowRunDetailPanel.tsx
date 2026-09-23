@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { governance, product } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type {
@@ -57,6 +57,8 @@ export function ProductWorkflowRunDetailPanel({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const loadSeqRef = useRef(0);
+  const pollBusyRef = useRef(false);
 
   const projectNames = useMemo(
     () =>
@@ -88,36 +90,69 @@ export function ProductWorkflowRunDetailPanel({
     return null;
   }, [pipelineStages, selectedTaskId]);
 
-  const load = useCallback(async () => {
-    try {
-      const [wf, runDetail, runItems, projectItems, memberItems] = await Promise.all([
-        product.getProductWorkflow(workspaceId, productId, workflowId),
-        product.getProductWorkflowRun(workspaceId, productId, workflowId, runId),
-        product.listProductWorkflowRuns(workspaceId, productId, workflowId),
-        product.listProductProjects(workspaceId, productId),
-        governance.listMembers(workspaceId).catch(() => [] as WorkspaceMemberVM[]),
-      ]);
-      setWorkflow(wf);
-      setRun(runDetail);
-      setRunSummary(runItems.find((item) => item.id === runId) ?? null);
-      setProjects(projectItems);
-      setMembers(memberItems);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof BffError ? err.message : "加载执行详情失败");
-    } finally {
-      setLoading(false);
-    }
-  }, [workspaceId, productId, workflowId, runId]);
+  const load = useCallback(
+    async (options?: { initial?: boolean; background?: boolean }) => {
+      const initial = options?.initial ?? false;
+      const background = options?.background ?? false;
+      if (background && pollBusyRef.current) return;
+
+      const seq = ++loadSeqRef.current;
+      if (background) pollBusyRef.current = true;
+      else if (initial) setLoading(true);
+
+      try {
+        if (background) {
+          const runDetail = await product.getProductWorkflowRun(workspaceId, productId, workflowId, runId);
+          if (seq !== loadSeqRef.current) return;
+          setRun(runDetail);
+          setError(null);
+          return;
+        }
+
+        const [runDetail, wf, runItems, projectItems, memberItems] = await Promise.all([
+          product.getProductWorkflowRun(workspaceId, productId, workflowId, runId),
+          product.getProductWorkflow(workspaceId, productId, workflowId),
+          product.listProductWorkflowRuns(workspaceId, productId, workflowId),
+          product.listProductProjects(workspaceId, productId),
+          governance.listMembers(workspaceId).catch(() => [] as WorkspaceMemberVM[]),
+        ]);
+        if (seq !== loadSeqRef.current) return;
+
+        setRun(runDetail);
+        setWorkflow(wf);
+        setRunSummary(runItems.find((item) => item.id === runId) ?? null);
+        setProjects(projectItems);
+        setMembers(memberItems);
+        setError(null);
+      } catch (err) {
+        if (seq !== loadSeqRef.current) return;
+        setError(err instanceof BffError ? err.message : "加载执行详情失败");
+      } finally {
+        if (background) {
+          pollBusyRef.current = false;
+        } else if (initial && seq === loadSeqRef.current) {
+          setLoading(false);
+        }
+      }
+    },
+    [workspaceId, productId, workflowId, runId],
+  );
 
   useEffect(() => {
-    void load();
+    setLoading(true);
+    setRun(null);
+    setWorkflow(null);
+    setRunSummary(null);
+    void load({ initial: true });
+    return () => {
+      loadSeqRef.current += 1;
+    };
   }, [load]);
 
   useEffect(() => {
     if (!run || !isRunActive(run.status)) return;
     const timer = window.setInterval(() => {
-      void load();
+      void load({ background: true });
     }, 2500);
     return () => window.clearInterval(timer);
   }, [run, load]);

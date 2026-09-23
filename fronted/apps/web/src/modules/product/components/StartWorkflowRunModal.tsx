@@ -9,7 +9,7 @@ import type {
 } from "@sparkops/contracts/product";
 import type { SecretVM } from "@sparkops/contracts/secret";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
-import { secret, workspace } from "@sparkops/web-sdk";
+import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { DeployYamlCompareModal } from "./DeployYamlCompareModal";
 import { deployImageRef, imageTagFromRef } from "./deploy-job-spec";
@@ -19,14 +19,20 @@ import {
   defaultDeployEnvironmentId,
   type RunFormDeployRow,
 } from "./workflow-run-form";
+import { peekWorkspaceRunAssets, prefetchWorkspaceRunAssets } from "./workflow-run-prefetch";
+import { WorkflowRunFormSkeleton } from "./WorkflowRunFormSkeleton";
 
 interface StartWorkflowRunModalProps {
-  open: boolean;
+  open?: boolean;
+  presentation?: "modal" | "page";
   workspaceId: string;
   workflow: ProductWorkflowVM | null;
   environments: EnvironmentVM[];
   projects?: ProductProjectVM[];
   busy?: boolean;
+  loading?: boolean;
+  workflowName?: string;
+  submitError?: string | null;
   onClose: () => void;
   onSubmit: (input: {
     branch?: string;
@@ -40,17 +46,23 @@ interface StartWorkflowRunModalProps {
 }
 
 export function StartWorkflowRunModal({
-  open,
+  open = false,
+  presentation = "modal",
   workspaceId,
   workflow,
   environments,
   projects = [],
   busy,
+  loading = false,
+  workflowName,
+  submitError,
   onClose,
   onSubmit,
 }: StartWorkflowRunModalProps) {
-  const [gitProjects, setGitProjects] = useState<ProjectVM[]>([]);
-  const [registries, setRegistries] = useState<SecretVM[]>([]);
+  const active = presentation === "page" ? Boolean(workflow) : open;
+  const initialAssets = peekWorkspaceRunAssets(workspaceId);
+  const [gitProjects, setGitProjects] = useState<ProjectVM[]>(() => initialAssets?.gitProjects ?? []);
+  const [registries, setRegistries] = useState<SecretVM[]>(() => initialAssets?.registries ?? []);
   const form = useMemo(
     () => buildWorkflowRunForm(workflow?.stages, projects, gitProjects),
     [workflow?.stages, projects, gitProjects],
@@ -87,28 +99,20 @@ export function StartWorkflowRunModal({
   const selectedHasBuild = selectedStages.some((stage) => stage.buildRows.length > 0);
 
   useEffect(() => {
-    if (!open || !workspaceId) return;
+    if (!active || !workspaceId) return;
     let cancelled = false;
-    void Promise.all([
-      workspace.listProjects(workspaceId),
-      secret.listSecrets(workspaceId).catch(() => [] as SecretVM[]),
-    ]).then(([projectItems, secretItems]) => {
+    void prefetchWorkspaceRunAssets(workspaceId).then(({ gitProjects: projectItems, registries: registryItems }) => {
       if (cancelled) return;
       setGitProjects(projectItems);
-      setRegistries(
-        secretItems.filter((item) => {
-          const type = item.service_type.toLowerCase();
-          return type.includes("harbor") || type.includes("registry") || type.includes("docker");
-        }),
-      );
+      setRegistries(registryItems);
     });
     return () => {
       cancelled = true;
     };
-  }, [open, workspaceId]);
+  }, [active, workspaceId]);
 
   useEffect(() => {
-    if (!open || !workflow) return;
+    if (!active || !workflow) return;
     const nextBranches: Record<string, string> = {};
     const nextTypes: Record<string, "branch" | "tag"> = {};
     for (const stage of form.stages) {
@@ -124,20 +128,26 @@ export function StartWorkflowRunModal({
     setVariables(next);
     // 只在打开或切换工作流、补全仓库信息后重置。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, workflow?.id, gitProjects]);
+  }, [active, workflow?.id, gitProjects]);
 
   useEffect(() => {
-    if (!open || !workflow) return;
+    if (!active || !workflow) return;
     setEnvironmentId(defaultDeployEnvironmentId(workflow.stages) || environments[0]?.id || "");
-  }, [open, workflow, environments]);
+  }, [active, workflow, environments]);
 
   useEffect(() => {
-    if (!open || !workflow) return;
+    if (!active || !workflow) return;
     setVisibleStageIds(new Set(stageSelectors.map((item) => item.id)));
     setCollapsedStageIds(new Set());
-  }, [open, workflow?.id, stageSelectors]);
+  }, [active, workflow?.id, stageSelectors]);
 
-  if (!open || !workflow) return null;
+  const modalReady = Boolean(workflow) && !loading;
+
+  if (presentation === "page") {
+    if (!active || !workflow) return null;
+  } else if (!open) {
+    return null;
+  }
 
   const registryOptions = registries.map((item) => ({ id: item.id, serviceUrl: item.service_url }));
   const projectOptions = gitProjects.map((item) => ({
@@ -148,7 +158,7 @@ export function StartWorkflowRunModal({
   }));
 
   function buildJobSpec(jobName: string): Record<string, unknown> | undefined {
-    for (const stage of workflow.stages ?? []) {
+    for (const stage of workflow?.stages ?? []) {
       const job = stage.jobs.find((item) => item.name === jobName && item.type === "sparkops-build");
       if (job?.spec) return job.spec;
     }
@@ -256,35 +266,37 @@ export function StartWorkflowRunModal({
     });
   }
 
-  return (
+  const footerActions = modalReady ? (
     <>
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="执行工作流"
-      description={workflow.name}
-      size="full"
-      headerExtra={renderStagePills("wf-run-pills")}
-      footer={
-        <>
-          <button
-            type="button"
-            className="wf-run-submit"
-            disabled={busy || missingVariable || missingEnv || missingBranch}
-            title={
-              missingEnv ? "请选择部署环境" : missingBranch ? "请选择分支" : missingVariable ? "请填写运行时变量" : undefined
-            }
-            onClick={submit}
-          >
-            {busy ? "启动中…" : "执行"}
-          </button>
-          <button type="button" className="btn btn-ghost text-sm" onClick={onClose} disabled={busy}>
-            取消
-          </button>
-        </>
-      }
-    >
+      <button
+        type="button"
+        className="wf-run-submit"
+        disabled={busy || missingVariable || missingEnv || missingBranch}
+        title={
+          missingEnv ? "请选择部署环境" : missingBranch ? "请选择分支" : missingVariable ? "请填写运行时变量" : undefined
+        }
+        onClick={submit}
+      >
+        {busy ? "启动中…" : "执行"}
+      </button>
+      <button type="button" className="btn btn-ghost text-sm" onClick={onClose} disabled={busy}>
+        取消
+      </button>
+    </>
+  ) : (
+    <>
+      <button type="button" className="wf-run-submit" disabled>
+        执行
+      </button>
+      <button type="button" className="btn btn-ghost text-sm" onClick={onClose}>
+        取消
+      </button>
+    </>
+  );
+
+  const formContent = (
       <div className="wf-run-body">
+        {submitError ? <InlineAlert tone="error">{submitError}</InlineAlert> : null}
         {form.stages.length > 1 ? (
           <p className="wf-run-hint">顶部胶囊用于选择本次执行的阶段；未选中的阶段将跳过。</p>
         ) : null}
@@ -487,6 +499,48 @@ export function StartWorkflowRunModal({
         </section>
 
       </div>
+  );
+
+  if (presentation === "page") {
+    return (
+      <>
+        <div className="wf-run-page">
+          <header className="wf-run-page-head">
+            <div className="wf-run-page-head-main">
+              <h1 className="wf-run-page-title">执行工作流</h1>
+              <p className="wf-run-page-desc">{workflow.name}</p>
+            </div>
+            {renderStagePills("wf-run-pills wf-run-page-pills")}
+          </header>
+          <section className="wf-run-page-card">{formContent}</section>
+          <footer className="wf-run-page-footer">{footerActions}</footer>
+        </div>
+        <DeployYamlCompareModal
+          open={yamlCompare !== null}
+          workspaceId={workspaceId}
+          projectId={yamlCompare?.projectId ?? ""}
+          projectName={yamlCompare?.projectName ?? ""}
+          environmentId={environmentId}
+          imageTag={yamlCompareTag}
+          imageRef={yamlCompare ? resolveImageRef(yamlCompare) : ""}
+          onClose={() => setYamlCompare(null)}
+        />
+      </>
+    );
+  }
+
+  return (
+    <>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="执行工作流"
+      description={workflow?.name ?? workflowName}
+      size="full"
+      headerExtra={modalReady ? renderStagePills("wf-run-pills") : null}
+      footer={footerActions}
+    >
+      {modalReady ? formContent : <WorkflowRunFormSkeleton />}
     </Modal>
     <DeployYamlCompareModal
       open={yamlCompare !== null}

@@ -71,6 +71,7 @@ type ProjectDeployRun struct {
 	EnvironmentID   string       `json:"environment_id,omitempty"`
 	DeploymentRunID string       `json:"deployment_run_id,omitempty"`
 	ImageTag        string       `json:"image_tag,omitempty"`
+	ImageRepository string       `json:"image_repository,omitempty"`
 	Status          JobRunStatus `json:"status"`
 	ErrorMessage    string       `json:"error_message,omitempty"`
 }

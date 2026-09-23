@@ -29,6 +29,12 @@ import {
 import { IconPlay, IconSearch, IconSettings, IconSort, IconStar } from "./WorkflowListIcons";
 import { WorkflowRowMenu } from "./WorkflowRowMenu";
 import { WorkflowListSkeletonRows, WorkflowSparkline, WorkflowStagePath } from "./WorkflowStagePath";
+import { WorkflowRunModalHost, type WorkflowRunTarget } from "./WorkflowRunModalHost";
+import {
+  prefetchProductEnvironments,
+  prefetchWorkflowRunContext,
+  prefetchWorkspaceRunAssets,
+} from "./workflow-run-prefetch";
 
 const PAGE_SIZES = [10, 20, 50] as const;
 
@@ -41,6 +47,7 @@ interface WorkflowListPanelProps {
   projectsByProduct: Record<string, ProductProjectVM[]>;
   initialWorkflowId?: string | null;
   createRequestId?: number;
+  toolbarCreate?: boolean;
 }
 
 interface EnrichedWorkflow {
@@ -61,6 +68,7 @@ export function WorkflowListPanel({
   projectsByProduct,
   initialWorkflowId,
   createRequestId,
+  toolbarCreate,
 }: WorkflowListPanelProps) {
   const router = useRouter();
   const [items, setItems] = useState<WorkspaceProductWorkflowVM[]>([]);
@@ -76,6 +84,8 @@ export function WorkflowListPanel({
   const [enriching, setEnriching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [runOpen, setRunOpen] = useState(false);
+  const [runTarget, setRunTarget] = useState<(WorkflowRunTarget & { name: string }) | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createMode, setCreateMode] = useState<"template" | "blank">("blank");
@@ -107,6 +117,10 @@ export function WorkflowListPanel({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    prefetchWorkspaceRunAssets(workspaceId);
+  }, [workspaceId]);
 
   useEffect(() => {
     setFavorites(readWorkflowFavorites());
@@ -230,6 +244,15 @@ export function WorkflowListPanel({
     };
   }, [pageKey, workspaceId]);
 
+  useEffect(() => {
+    const productIds = productFilter
+      ? [productFilter]
+      : [...new Set(pagedRef.current.map((wf) => wf.product_id))];
+    for (const productId of productIds) {
+      void prefetchProductEnvironments(workspaceId, productId);
+    }
+  }, [workspaceId, productFilter, pageKey]);
+
   function toggleFavorite(id: string) {
     setFavorites((prev) => {
       const next = new Set(prev);
@@ -240,9 +263,23 @@ export function WorkflowListPanel({
     });
   }
 
+  function openWorkflowRun(wf: WorkspaceProductWorkflowVM) {
+    prefetchWorkflowRunContext(workspaceId, wf.product_id, wf.id);
+    setRunTarget({ productId: wf.product_id, workflowId: wf.id, name: wf.name });
+    setRunOpen(true);
+  }
+
   function openWorkflowDetail(wf: WorkspaceProductWorkflowVM, run = false) {
-    const suffix = run ? "?run=1" : "";
-    router.push(`/products/${wf.product_id}/workflows/${wf.id}${suffix}`);
+    if (run) {
+      openWorkflowRun(wf);
+      return;
+    }
+    router.push(`/products/${wf.product_id}/workflows/${wf.id}`);
+  }
+
+  function closeRunModal() {
+    setRunOpen(false);
+    setRunTarget(null);
   }
 
   useEffect(() => {
@@ -294,7 +331,7 @@ export function WorkflowListPanel({
   return (
     <>
       <div className="wf-list-shell">
-        <div className="wf-list-toolbar">
+        <div className={`wf-list-toolbar${toolbarCreate ? " is-product" : ""}`}>
           <div className="wf-list-toolbar-left">
             <div className="wf-list-filter-group" role="group" aria-label="列表筛选">
               <button
@@ -333,7 +370,7 @@ export function WorkflowListPanel({
             </label>
           </div>
           <div className="wf-list-toolbar-right">
-            {!loading && sorted.length > 0 ? (
+            {!toolbarCreate && !loading && sorted.length > 0 ? (
               <span className="wf-list-toolbar-count">共 {sorted.length} 条</span>
             ) : null}
             <label className="wf-list-search-wrap">
@@ -344,9 +381,14 @@ export function WorkflowListPanel({
                 className="input wf-list-search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="搜索工作流名称或标识"
+                placeholder="搜索工作流"
               />
             </label>
+            {toolbarCreate ? (
+              <button type="button" className="btn btn-primary text-sm wf-list-create-btn" onClick={openCreateDialog}>
+                新建工作流
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -463,7 +505,9 @@ export function WorkflowListPanel({
                               type="button"
                               className="wf-list-run-btn"
                               disabled={wf.status !== "active"}
-                              onClick={() => openWorkflowDetail(wf, true)}
+                              onMouseEnter={() => prefetchWorkflowRunContext(workspaceId, wf.product_id, wf.id)}
+                              onFocus={() => prefetchWorkflowRunContext(workspaceId, wf.product_id, wf.id)}
+                              onClick={() => openWorkflowRun(wf)}
                             >
                               <IconPlay />
                               执行
@@ -652,6 +696,17 @@ export function WorkflowListPanel({
           ) : null}
         </div>
       </Modal>
+
+      <WorkflowRunModalHost
+        workspaceId={workspaceId}
+        target={runTarget}
+        open={runOpen}
+        seedWorkflow={runTarget ? enriched[runTarget.workflowId]?.detail ?? null : null}
+        seedProjects={runTarget ? projectsByProduct[runTarget.productId] ?? [] : []}
+        workflowName={runTarget?.name}
+        onClose={closeRunModal}
+        onStarted={() => void load()}
+      />
     </>
   );
 }

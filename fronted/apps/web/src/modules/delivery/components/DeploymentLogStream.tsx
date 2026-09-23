@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { delivery } from "@sparkops/web-sdk";
+import { formatDeploymentLogText } from "./deployment-log-format";
 
 interface DeploymentLogStreamProps {
   runId: string;
@@ -10,36 +11,50 @@ interface DeploymentLogStreamProps {
   onDone?: () => void;
 }
 
-export function DeploymentLogStream({ runId, active, terminal = false, onDone }: DeploymentLogStreamProps) {
+const WAITING_LABEL = "等待日志…";
+
+export function DeploymentLogStream({ runId, active: _active, terminal = false, onDone }: DeploymentLogStreamProps) {
+  const [displayLog, setDisplayLog] = useState(WAITING_LABEL);
+  const rawRef = useRef("");
   const logRef = useRef<HTMLPreElement>(null);
-  const logTextRef = useRef("");
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
 
   useEffect(() => {
-    logTextRef.current = "";
-    if (logRef.current) {
-      logRef.current.textContent = "等待日志…";
-    }
-  }, [runId]);
-
-  useEffect(() => {
-    if (!active) {
-      return;
-    }
+    rawRef.current = "";
+    setDisplayLog(WAITING_LABEL);
 
     const stop = delivery.streamDeployment(runId, {
       onDelta: (delta) => {
-        logTextRef.current += delta;
-        if (logRef.current) {
-          logRef.current.textContent = logTextRef.current;
-          logRef.current.scrollTop = logRef.current.scrollHeight;
-        }
+        rawRef.current += delta;
+        const formatted = formatDeploymentLogText(rawRef.current);
+        setDisplayLog(formatted || WAITING_LABEL);
       },
-      onDone: () => onDone?.(),
-      onError: () => onDone?.(),
+      onDone: () => {
+        setDisplayLog((current) => {
+          if (!rawRef.current.trim()) return "暂无日志";
+          return formatDeploymentLogText(rawRef.current) || current;
+        });
+        onDoneRef.current?.();
+      },
+      onError: () => {
+        setDisplayLog((current) => {
+          if (rawRef.current.trim()) {
+            return formatDeploymentLogText(rawRef.current);
+          }
+          return current === WAITING_LABEL ? "日志加载失败" : current;
+        });
+      },
     });
 
     return stop;
-  }, [runId, active, onDone]);
+  }, [runId]);
+
+  useEffect(() => {
+    const el = logRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [displayLog]);
 
   return (
     <pre
@@ -50,7 +65,7 @@ export function DeploymentLogStream({ runId, active, terminal = false, onDone }:
           : "text-xs bg-[var(--surface)] p-3 rounded-lg overflow-x-auto whitespace-pre-wrap max-h-96 overflow-y-auto font-mono"
       }
     >
-      {active ? "等待日志…" : "暂无实时日志"}
+      {displayLog}
     </pre>
   );
 }

@@ -124,8 +124,6 @@ export function ProjectDeploymentConsolePanel({
 
   useEffect(() => {
     if (!active || !run) return;
-    const shouldStream = isActiveDeploymentRun(run) || Boolean(run.cross_cluster);
-    if (!shouldStream) return;
     const generation = ++pollGenerationRef.current;
     let stopStream: (() => void) | null = null;
     const poller = isActiveDeploymentRun(run)

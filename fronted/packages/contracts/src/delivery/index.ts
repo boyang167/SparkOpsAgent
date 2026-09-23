@@ -46,6 +46,7 @@ export const DeploymentRunVMSchema = z.object({
   git_ref_type: z.enum(["branch", "tag"]),
   git_ref_value: z.string(),
   image_tag: z.string(),
+  image_repository: z.string().optional(),
   cross_cluster: z.boolean().optional().default(false),
   status: DeploymentStatusSchema,
   run_type: DeploymentRunTypeSchema.optional().default("normal"),

@@ -235,11 +235,145 @@ func (s *Scheduler) handleDeployCompletedLocked(
 	return nil
 }
 
+func (s *Scheduler) syncExternalStatusesOnRun(ctx context.Context, run *model.ProductWorkflowRun) bool {
+	if s == nil || s.status == nil || run == nil {
+		return false
+	}
+	changed := false
+	for si := range run.StageRuns {
+		for ji := range run.StageRuns[si].Jobs {
+			job := &run.StageRuns[si].Jobs[ji]
+			for bi := range job.Builds {
+				build := &job.Builds[bi]
+				if build.BuildID == "" || jobRunTerminal(build.Status) {
+					continue
+				}
+				buildID, err := kernel.ParseBuildID(build.BuildID)
+				if err != nil {
+					continue
+				}
+				status, terminal, err := s.status.BuildStatus(ctx, buildID)
+				if err != nil || !terminal {
+					continue
+				}
+				switch status {
+				case string(buildmodel.BuildStatusSuccess):
+					build.Status = model.JobRunStatusSuccess
+					changed = true
+				case string(buildmodel.BuildStatusFailed), string(buildmodel.BuildStatusAborted):
+					build.Status = model.JobRunStatusFailed
+					if build.ErrorMessage == "" {
+						build.ErrorMessage = "build " + status
+					}
+					changed = true
+				}
+			}
+			for di := range job.Deploys {
+				deploy := &job.Deploys[di]
+				if deploy.DeploymentRunID == "" || jobRunTerminal(deploy.Status) {
+					continue
+				}
+				deploymentID, err := kernel.ParseDeploymentRunID(deploy.DeploymentRunID)
+				if err != nil {
+					continue
+				}
+				status, terminal, err := s.status.DeployStatus(ctx, deploymentID)
+				if err != nil || !terminal {
+					continue
+				}
+				switch status {
+				case string(deployrunmodel.StatusSucceeded):
+					deploy.Status = model.JobRunStatusSuccess
+					changed = true
+				case string(deployrunmodel.StatusFailed), string(deployrunmodel.StatusAborted):
+					deploy.Status = model.JobRunStatusFailed
+					if deploy.ErrorMessage == "" {
+						deploy.ErrorMessage = "deployment " + status
+					}
+					changed = true
+				}
+			}
+		}
+	}
+	return changed
+}
+
+// SyncRunExternalStatuses refreshes terminal build/deploy statuses for UI reads.
+// It never advances the workflow or triggers new jobs, and skips work when the run lock is busy.
+func (s *Scheduler) SyncRunExternalStatuses(ctx context.Context, runID kernel.ProductWorkflowRunID) error {
+	if s == nil || s.status == nil {
+		return nil
+	}
+	unlock, ok := s.locker.tryLock(runID)
+	if !ok {
+		return nil
+	}
+	defer unlock()
+
+	run, err := s.repo.FindRunByID(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !runNeedsReconcile(run) {
+		return nil
+	}
+	if !s.syncExternalStatusesOnRun(ctx, run) {
+		return nil
+	}
+	return s.repo.UpdateRun(ctx, run)
+}
+
+// ProgressStuckRun syncs external statuses, refreshes job states, and advances or executes pending work.
+func (s *Scheduler) ProgressStuckRun(ctx context.Context, runID kernel.ProductWorkflowRunID) error {
+	if s == nil {
+		return nil
+	}
+	unlock, ok := s.locker.tryLock(runID)
+	if !ok {
+		return nil
+	}
+	defer unlock()
+
+	run, err := s.repo.FindRunByID(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !runNeedsReconcile(run) {
+		return nil
+	}
+	wf, err := s.repo.FindWorkflowByID(ctx, run.WorkflowID)
+	if err != nil {
+		return err
+	}
+
+	_ = s.syncExternalStatusesOnRun(ctx, run)
+	if failed, msg := s.refreshJobStatuses(run); failed {
+		return s.failRun(ctx, run, msg)
+	}
+	if err := s.repo.UpdateRun(ctx, run); err != nil {
+		return err
+	}
+	if !runAllowsProgress(run) {
+		return nil
+	}
+	stages := WorkflowStagesForRun(wf, run)
+	if s.stageComplete(run, run.CurrentStage) {
+		return s.advanceStage(ctx, wf, run)
+	}
+	if run.CurrentStage < len(stages) && run.CurrentStage < len(run.StageRuns) {
+		return s.executeCurrentStage(ctx, wf, run)
+	}
+	return s.healStuckRun(ctx, run)
+}
+
 func (s *Scheduler) ReconcileRun(ctx context.Context, runID kernel.ProductWorkflowRunID) error {
 	if s == nil || s.status == nil {
 		return nil
 	}
-	unlock := s.locker.lock(runID)
+	unlock, ok := s.locker.tryLock(runID)
+	if !ok {
+		return nil
+	}
 	defer unlock()
 
 	run, err := s.repo.FindRunByID(ctx, runID)

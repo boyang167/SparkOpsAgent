@@ -163,24 +163,33 @@ export function streamDeployment(
   handlers: StreamDeploymentHandlers,
 ): () => void {
   const es = new EventSource(`/api/bff/v1/deployments/${runId}/stream`);
+  let finished = false;
+
   es.onmessage = (event) => {
     try {
       const payload = parseDeploymentEvent(event.data);
       if (payload.done) {
+        finished = true;
         handlers.onDone();
         es.close();
       } else if (payload.delta) {
         handlers.onDelta(payload.delta);
       }
     } catch (err) {
-      handlers.onError?.(err instanceof Error ? err : new Error("stream parse error"));
+      if (!finished) {
+        handlers.onError?.(err instanceof Error ? err : new Error("stream parse error"));
+      }
     }
   };
   es.onerror = () => {
+    if (finished) return;
     handlers.onError?.(new Error("stream connection error"));
     es.close();
   };
-  return () => es.close();
+  return () => {
+    finished = true;
+    es.close();
+  };
 }
 
 export interface StreamBuildHandlers {

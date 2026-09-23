@@ -3,12 +3,19 @@ import {
   buildConfigResourceItems,
   defaultConfigResources,
   deployImageRef,
+  formatImageRef,
   imageRepositoryPath,
   imageTagFromRef,
   sourceImageLines,
 } from "./deploy-job-spec";
 
 describe("deploy image name", () => {
+  it("formats full image ref from repository and tag", () => {
+    expect(formatImageRef("192.168.5.24/team-a/orders", "v1.0.1")).toBe("192.168.5.24/team-a/orders:v1.0.1");
+    expect(formatImageRef("", "v1.0.1")).toBe("v1.0.1");
+    expect(formatImageRef("192.168.5.24/team-a/orders", "")).toBe("192.168.5.24/team-a/orders");
+  });
+
   it("sanitizes the branch into the image tag", () => {
     expect(imageTagFromRef("feature/login")).toBe("feature-login");
     expect(imageTagFromRef("refs/tags/v1.0.0")).toBe("v1.0.0");
