@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
@@ -186,6 +187,42 @@ func (h *LinkPmIssueHandler) Handle(ctx context.Context, productID kernel.Produc
 	}
 	if err := h.sprints.UpdateWorkItem(ctx, item); err != nil {
 		return nil, err
+	}
+	return item, nil
+}
+
+type UnlinkPmIssueHandler struct {
+	products repository.ProductRepository
+	sprints  repository.SprintRepository
+	board    *service.SprintBoardNotifier
+}
+
+func NewUnlinkPmIssueHandler(
+	products repository.ProductRepository,
+	sprints repository.SprintRepository,
+	board *service.SprintBoardNotifier,
+) *UnlinkPmIssueHandler {
+	return &UnlinkPmIssueHandler{products: products, sprints: sprints, board: board}
+}
+
+func (h *UnlinkPmIssueHandler) Handle(ctx context.Context, productID kernel.ProductID, workItemID kernel.WorkItemID) (*model.WorkItem, error) {
+	item, sprint, err := loadWorkItem(ctx, h.products, h.sprints, productID, workItemID)
+	if err != nil {
+		return nil, err
+	}
+	if sprint.Status == model.SprintStatusArchived {
+		return nil, domain.ErrSprintNotActive
+	}
+	if model.WorkItemPmIssueKey(item) == "" {
+		return item, nil
+	}
+	item.ExternalRef = nil
+	item.UpdatedAt = time.Now().UTC()
+	if err := h.sprints.UpdateWorkItem(ctx, item); err != nil {
+		return nil, err
+	}
+	if h.board != nil {
+		h.board.BoardChanged(sprint.ID, "pm_unlinked")
 	}
 	return item, nil
 }

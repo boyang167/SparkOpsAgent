@@ -7,7 +7,7 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   description?: string;
-  size?: "md" | "lg" | "xl" | "full";
+  size?: "sm" | "md" | "lg" | "xl" | "full";
   /** Higher stacking + capture Escape so nested dialogs do not close the parent. */
   nested?: boolean;
   /** Above drawers. Use when this dialog is opened from a drawer. */

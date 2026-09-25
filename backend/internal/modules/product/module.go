@@ -108,6 +108,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewListWorkItemExecutionsHandler(repo, sprintRepo),
 		command.NewImportPmSprintHandler(repo, sprintRepo, pmRouter, boardNotifier),
 		command.NewLinkPmIssueHandler(repo, sprintRepo, pmRouter),
+		command.NewUnlinkPmIssueHandler(repo, sprintRepo, boardNotifier),
 		query.NewGetSprintMetricsHandler(repo, sprintRepo),
 		query.NewListActiveSprintsHandler(repo, sprintRepo),
 	)
@@ -267,6 +268,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.LinkJiraIssue)
 	c.Engine.POST("/api/v1/products/:productId/work-items/:workItemId/link-pm",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.LinkPmIssue)
+	c.Engine.DELETE("/api/v1/products/:productId/work-items/:workItemId/link-pm",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.UnlinkPmIssue)
 	c.Engine.GET("/api/v1/products/:productId/sprints/:sprintId/board/ws",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.SprintBoardWebSocket)
 

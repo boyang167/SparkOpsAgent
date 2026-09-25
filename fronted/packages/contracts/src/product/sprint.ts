@@ -156,6 +156,7 @@ export const WorkItemExternalRefSchema = z.object({
   issue_id: z.string().optional(),
   issue_type: z.string().optional(),
   issue_url: z.string().url().optional(),
+  pm_workspace_id: z.string().optional(),
   sync_mode: WorkItemSyncModeSchema.default("link_only"),
 });
 
@@ -290,6 +291,7 @@ export const UpdateWorkItemCommandSchema = z.object({
   priority: WorkItemPrioritySchema.optional(),
   status: WorkItemStatusSchema.optional(),
   assignee_id: z.string().uuid().nullable().optional(),
+  clear_assignee: z.boolean().optional(),
   project_ids: z.array(z.string().uuid()).optional(),
   labels: z.array(z.string()).optional(),
   blocked_reason: z.string().nullable().optional(),
@@ -312,8 +314,12 @@ export const ExecuteWorkItemCommandSchema = z.object({
   input: z
     .object({
       branch: z.string().optional(),
+      branch_overrides: z.record(z.string()).optional(),
+      ref_type_overrides: z.record(z.string()).optional(),
       environment_overrides: z.record(z.string()).optional(),
       variables: z.record(z.string()).optional(),
+      remark: z.string().optional(),
+      stage_indices: z.array(z.number().int().nonnegative()).optional(),
     })
     .optional(),
 });

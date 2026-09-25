@@ -749,6 +749,13 @@ export function linkPmIssue(
   );
 }
 
+export function unlinkPmIssue(workspaceId: string, productId: string, workItemId: string) {
+  return bffFetch<{ id: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/work-items/${workItemId}/link-pm`,
+    { method: "DELETE", workspaceId },
+  );
+}
+
 export function getSprintBoardWsConfig(workspaceId: string, productId: string, sprintId: string) {
   return bffFetch<import("@sparkops/contracts/product").SprintBoardWsConfig>(
     `/workspaces/${workspaceId}/products/${productId}/sprints/${sprintId}/board/ws-config`,

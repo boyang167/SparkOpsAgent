@@ -14,6 +14,9 @@ import type {
 } from "@sparkops/contracts/product";
 import { Drawer } from "@/components/ui/Drawer";
 import { InlineAlert } from "@/components/ui/InlineAlert";
+import { WorkItemAssigneeField } from "./WorkItemAssigneeField";
+import { WorkItemPmChip } from "./WorkItemPmChip";
+import { WorkItemPmLinkModal } from "./WorkItemPmLinkModal";
 
 const EXEC_STATUS_LABEL: Record<string, string> = {
   running: "运行中",
@@ -33,6 +36,7 @@ interface WorkItemDetailDrawerProps {
   sprintStatus: SprintStatus;
   onChanged: () => void;
   onDeleted: (itemId: string) => void;
+  onRequestExecute?: (params: { stageId: string; workflowId: string }) => void;
 }
 
 function formatDuration(startedAt: string, finishedAt?: string) {
@@ -65,6 +69,7 @@ export function WorkItemDetailDrawer({
   sprintStatus,
   onChanged,
   onDeleted,
+  onRequestExecute,
 }: WorkItemDetailDrawerProps) {
   const [detail, setDetail] = useState<WorkItemVM | null>(null);
   const [executions, setExecutions] = useState<WorkItemExecutionVM[]>([]);
@@ -73,6 +78,7 @@ export function WorkItemDetailDrawer({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pmModalOpen, setPmModalOpen] = useState(false);
   const loadSeqRef = useRef(0);
   const itemId = item?.id;
 
@@ -114,6 +120,7 @@ export function WorkItemDetailDrawer({
       setExecutions([]);
       setError(null);
       setLoading(false);
+      setPmModalOpen(false);
       return;
     }
     if (item?.stage_id) setSelectedStageId(item.stage_id);
@@ -163,19 +170,24 @@ export function WorkItemDetailDrawer({
     }
   }
 
-  async function onExecuteWorkflow(workflowId?: string) {
-    if (!item || sprintStatus !== "active") return;
+  async function saveAssignee(nextId: string | null, nextName: string) {
+    if (!item || !detail) return;
+    const currentId = detail.assignee_id ?? "";
+    const targetId = nextId ?? "";
+    if (currentId === targetId) return;
     setBusy(true);
     setError(null);
     try {
-      await product.executeWorkItem(workspaceId, productId, item.id, {
-        stage_id: selectedStageId,
-        workflow_id: workflowId,
-      });
-      await load();
+      if (!nextId) {
+        await product.updateWorkItem(workspaceId, productId, item.id, { clear_assignee: true });
+        setDetail({ ...detail, assignee_id: undefined, assignee_name: undefined });
+      } else {
+        await product.updateWorkItem(workspaceId, productId, item.id, { assignee_id: nextId });
+        setDetail({ ...detail, assignee_id: nextId, assignee_name: nextName });
+      }
       onChanged();
     } catch (err) {
-      setError(err instanceof BffError ? err.message : "执行工作流失败");
+      setError(err instanceof BffError ? err.message : "更改负责人失败");
     } finally {
       setBusy(false);
     }
@@ -227,6 +239,7 @@ export function WorkItemDetailDrawer({
   const isRunning = view?.delivery?.last_workflow_status === "running";
 
   return (
+    <>
     <Drawer
       open={open}
       onClose={onClose}
@@ -271,15 +284,29 @@ export function WorkItemDetailDrawer({
           </div>
 
           <div className="work-item-detail-fields grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label className="stack-xs">
+            <div className="stack-xs">
               <span className="text-sm font-medium">负责人</span>
-              <input
-                className="input"
-                value={view.assignee_name ?? "未分配"}
-                readOnly
-                aria-readonly="true"
+              <WorkItemAssigneeField
+                workspaceId={workspaceId}
+                assigneeId={view.assignee_id}
+                assigneeName={view.assignee_name}
+                disabled={busy || sprintStatus === "archived" || sprintStatus === "completed"}
+                onSelect={(memberId, label) => saveAssignee(memberId, label)}
               />
-            </label>
+            </div>
+            <div className="stack-xs">
+              <span className="text-sm font-medium">PM 关联</span>
+              <WorkItemPmChip
+                external={view.external}
+                disabled={busy}
+                onManage={() => setPmModalOpen(true)}
+                onLink={
+                  sprintStatus !== "archived" && sprintStatus !== "completed"
+                    ? () => setPmModalOpen(true)
+                    : undefined
+                }
+              />
+            </div>
             <label className="stack-xs md:col-span-2">
               <span className="text-sm font-medium">描述</span>
               <textarea
@@ -319,14 +346,19 @@ export function WorkItemDetailDrawer({
                     return (
                       <div key={binding.workflow_id} className="work-item-detail-workflow-row">
                         <span className="work-item-detail-workflow-tag">{wfName}</span>
-                        {canExecute ? (
+                        {canExecute && onRequestExecute ? (
                           <button
                             type="button"
                             className="work-item-detail-play-btn"
                             disabled={busy || isRunning}
-                            title="执行工作流"
-                            aria-label={`执行 ${wfName}`}
-                            onClick={() => void onExecuteWorkflow(binding.workflow_id)}
+                            title="配置并执行工作流"
+                            aria-label={`配置并执行 ${wfName}`}
+                            onClick={() => {
+                              onRequestExecute({
+                                stageId: selectedStageId,
+                                workflowId: binding.workflow_id,
+                              });
+                            }}
                           >
                             ▶
                           </button>
@@ -413,6 +445,23 @@ export function WorkItemDetailDrawer({
         </div>
       ) : null}
     </Drawer>
+    {item && pmModalOpen ? (
+      <WorkItemPmLinkModal
+        open={pmModalOpen}
+        onClose={() => setPmModalOpen(false)}
+        workspaceId={workspaceId}
+        productId={productId}
+        workItemId={item.id}
+        workItemTitle={view?.title}
+        external={view?.external}
+        readOnly={sprintStatus === "archived" || sprintStatus === "completed"}
+        onChanged={() => {
+          void load();
+          onChanged();
+        }}
+      />
+    ) : null}
+    </>
   );
 }
 

@@ -42,6 +42,7 @@ type SprintHandlers struct {
 	listExecutions   *query.ListWorkItemExecutionsHandler
 	importPm         *command.ImportPmSprintHandler
 	linkPm           *command.LinkPmIssueHandler
+	unlinkPm         *command.UnlinkPmIssueHandler
 	getMetrics       *query.GetSprintMetricsHandler
 	listActive       *query.ListActiveSprintsHandler
 }
@@ -85,7 +86,7 @@ func NewSprintHandlers(
 		moveWorkItem: moveWorkItem, deleteWorkItem: deleteWorkItem, executeWorkItem: executeWorkItem,
 		listSprints: listSprints, getSprint: getSprint, getBoard: getBoard, getWorkItem: getWorkItem,
 		listExecutions: listExecutions,
-		importPm: importPm, linkPm: linkPm,
+		importPm: importPm, linkPm: linkPm, unlinkPm: unlinkPm,
 		getMetrics: getMetrics, listActive: listActive,
 	}
 }
@@ -650,6 +651,19 @@ func (h *Handler) LinkPmIssue(c *gin.Context) {
 	item, err := h.sprints.linkPm.Handle(c.Request.Context(), productID, workItemID, command.LinkPmIssueInput{
 		Provider: req.Provider, PmWorkspaceID: req.PmWorkspaceID, IssueKey: req.IssueKey, SyncMode: req.SyncMode,
 	})
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"id": item.ID.String(), "external": item.ExternalRef})
+}
+
+func (h *Handler) UnlinkPmIssue(c *gin.Context) {
+	productID, workItemID, ok := parseProductWorkItemIDs(c)
+	if !ok {
+		return
+	}
+	item, err := h.sprints.unlinkPm.Handle(c.Request.Context(), productID, workItemID)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return

@@ -24,7 +24,12 @@ import { ReleasePlansPanel } from "./ReleasePlansPanel";
 import { SprintStageEditor } from "./SprintStageEditor";
 import { buildStageMigrations } from "./sprint-stage-migrations";
 import { isValidStageKey, normalizeStageForSave, withSortOrder } from "./sprint-process-templates";
+import { SprintWorkItemExecuteModal } from "./SprintWorkItemExecuteModal";
+import { PM_PROVIDER_LABEL } from "./pm-labels";
+import { WorkItemCardMenu } from "./WorkItemCardMenu";
 import { WorkItemDetailDrawer } from "./WorkItemDetailDrawer";
+import { WorkItemPmChip } from "./WorkItemPmChip";
+import { WorkItemPmLinkModal } from "./WorkItemPmLinkModal";
 
 interface SprintBoardPanelProps {
   workspaceId: string;
@@ -49,13 +54,6 @@ const RUN_STATUS_LABEL: Record<string, string> = {
   running: "运行中",
   success: "已成功",
   failed: "已失败",
-};
-
-const PM_PROVIDER_LABEL: Record<PmProvider, string> = {
-  jira: "Jira",
-  tapd: "TAPD",
-  pingcode: "PingCode",
-  feishu: "飞书项目",
 };
 
 function runStatusClass(status?: string) {
@@ -112,13 +110,16 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   const [pmWorkspaceId, setPmWorkspaceId] = useState("");
   const [pmIterationId, setPmIterationId] = useState("");
   const [pmSyncMode, setPmSyncMode] = useState<"link_only" | "bidirectional">("link_only");
-  const [linkPmOpen, setLinkPmOpen] = useState(false);
-  const [linkPmItemId, setLinkPmItemId] = useState<string | null>(null);
-  const [linkPmProvider, setLinkPmProvider] = useState<PmProvider>("jira");
-  const [linkPmWorkspaceId, setLinkPmWorkspaceId] = useState("");
-  const [linkPmKey, setLinkPmKey] = useState("");
+  const [pmLinkTarget, setPmLinkTarget] = useState<WorkItemCardVM | null>(null);
   const [workItemDrawerOpen, setWorkItemDrawerOpen] = useState(false);
   const [selectedWorkItem, setSelectedWorkItem] = useState<WorkItemCardVM | null>(null);
+  const [executeModalOpen, setExecuteModalOpen] = useState(false);
+  const [executeContext, setExecuteContext] = useState<{
+    item: WorkItemCardVM;
+    stage: SprintStage;
+    workflowId: string;
+  } | null>(null);
+  const [cardMenuOpenId, setCardMenuOpenId] = useState<string | null>(null);
 
   const loadSprints = useCallback(async () => {
     setLoading(true);
@@ -165,9 +166,9 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     workspaceId,
     productId,
     sprintId: selectedId,
-    enabled: viewTab === "board" && Boolean(selectedId) && !workItemDrawerOpen,
+    enabled: viewTab === "board" && Boolean(selectedId) && !workItemDrawerOpen && !executeModalOpen,
     onBoardChanged: () => {
-      if (workItemDrawerOpen) return;
+      if (workItemDrawerOpen || executeModalOpen) return;
       void loadBoard();
     },
   });
@@ -203,6 +204,13 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     void product.listProductWorkflows(workspaceId, productId).then(setWorkflows).catch(() => setWorkflows([]));
   }, [workspaceId, productId]);
 
+  useEffect(() => {
+    if (!cardMenuOpenId) return;
+    const onDocClick = () => setCardMenuOpenId(null);
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [cardMenuOpenId]);
+
   const hasRunningItems = useMemo(() => {
     if (!board) return false;
     return board.columns.some((col) =>
@@ -216,13 +224,18 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     return board?.columns.map((column) => column.stage) ?? [];
   }, [board?.sprint.stages, board?.columns]);
 
+  const boardWorkItems = useMemo(
+    () => board?.columns.flatMap((column) => column.work_items) ?? [],
+    [board?.columns],
+  );
+
   useEffect(() => {
-    if (!hasRunningItems || !selectedId || workItemDrawerOpen) return;
+    if (!hasRunningItems || !selectedId || workItemDrawerOpen || executeModalOpen) return;
     const timer = window.setInterval(() => {
       void loadBoard();
     }, 4000);
     return () => window.clearInterval(timer);
-  }, [hasRunningItems, selectedId, loadBoard, workItemDrawerOpen]);
+  }, [hasRunningItems, selectedId, loadBoard, workItemDrawerOpen, executeModalOpen]);
 
   const filteredSprints = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -363,32 +376,6 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     }
   }
 
-  async function onMoveItem(item: WorkItemCardVM, targetStageId: string) {
-    if (targetStageId === item.stage_id) return;
-    setBusy(true);
-    try {
-      await product.moveWorkItem(workspaceId, productId, item.id, {
-        stage_id: targetStageId,
-        sort_order: item.sort_order,
-        version: item.version ?? 0,
-      });
-      await loadBoard();
-    } catch (err) {
-      const msg =
-        err instanceof BffError && err.code === "STAGE_GATE_DENIED"
-          ? "阶段准入未满足（WIP 已满、缺少分支或工作流未成功等）"
-          : err instanceof BffError && err.code === "WORK_ITEM_VERSION_CONFLICT"
-            ? "工作项已被他人修改，请刷新后重试"
-            : err instanceof BffError
-              ? err.message
-              : "移动工作项失败，请刷新后重试";
-      setError(msg);
-      await loadBoard();
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function bindStageWorkflow(stageId: string, workflowId: string) {
     if (!board || !selectedId) return;
     const stages: SprintStage[] = board.sprint.stages.map((stage) => {
@@ -416,18 +403,11 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     setWorkItemDrawerOpen(true);
   }
 
-  async function onDeleteItem(itemId: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      await product.deleteWorkItem(workspaceId, productId, itemId);
-      await loadBoard();
-      await loadSprints();
-    } catch (err) {
-      setError(err instanceof BffError ? err.message : "删除工作项失败");
-    } finally {
-      setBusy(false);
-    }
+  function openExecuteWorkflow(item: WorkItemCardVM, stage: SprintStage, workflowId?: string) {
+    const wfId = workflowId ?? stage.workflows?.[0]?.workflow_id;
+    if (!wfId) return;
+    setExecuteContext({ item, stage, workflowId: wfId });
+    setExecuteModalOpen(true);
   }
 
   function openCreateItem(stageId: string) {
@@ -474,57 +454,36 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     }
   }
 
-  function openLinkPm(itemId: string) {
-    setLinkPmItemId(itemId);
-    setLinkPmKey("");
-    setLinkPmProvider("jira");
-    setLinkPmWorkspaceId("");
-    setLinkPmOpen(true);
-  }
-
-  async function onLinkPm() {
-    if (!linkPmItemId || !linkPmKey.trim()) return;
-    if (linkPmProvider === "tapd" && !linkPmWorkspaceId.trim()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await product.linkPmIssue(workspaceId, productId, linkPmItemId, {
-        provider: linkPmProvider,
-        pm_workspace_id: linkPmWorkspaceId.trim() || undefined,
-        issue_key: linkPmKey.trim(),
-        sync_mode: pmSyncMode,
-      });
-      setLinkPmOpen(false);
-      setLinkPmItemId(null);
-      await loadBoard();
-    } catch (err) {
-      const msg =
-        err instanceof BffError && err.code === "PM_ISSUE_ALREADY_LINKED"
-          ? "该 Issue 已在本迭代中关联"
-          : err instanceof BffError
-            ? err.message
-            : "关联 PM Issue 失败";
-      setError(msg);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function stageHasWorkflow(stage: SprintStage) {
-    return (stage.workflows?.length ?? 0) > 0 && Boolean(stage.workflows?.[0]?.workflow_id);
-  }
-
-  function renderCard(item: WorkItemCardVM, columns: SprintBoardColumnVM[]) {
-    const stages = columns.map((c) => c.stage);
-    const currentStage = columns.find((c) => c.stage.id === item.stage_id)?.stage;
+  function renderCard(item: WorkItemCardVM, _columns: SprintBoardColumnVM[]) {
     const runStatus = item.delivery?.last_workflow_status;
+    const canManageCard =
+      board?.sprint.status !== "archived" && board?.sprint.status !== "completed";
     return (
       <article key={item.id} className="sprint-board-card">
-        <div className="sprint-board-card-head">
-          <span className="sprint-board-card-type">{item.type}</span>
-          <span className="sprint-board-card-priority">{PRIORITY_LABEL[item.priority] ?? item.priority}</span>
-          {runStatus ? (
-            <span className={runStatusClass(runStatus)}>{RUN_STATUS_LABEL[runStatus] ?? runStatus}</span>
+        <div className="sprint-board-card-top">
+          <div className="sprint-board-card-head">
+            <span className="sprint-board-card-type">{item.type}</span>
+            <span className="sprint-board-card-priority">{PRIORITY_LABEL[item.priority] ?? item.priority}</span>
+            {runStatus ? (
+              <span className={runStatusClass(runStatus)}>{RUN_STATUS_LABEL[runStatus] ?? runStatus}</span>
+            ) : null}
+          </div>
+          {canManageCard ? (
+            <WorkItemCardMenu
+              item={item}
+              stages={boardStages}
+              workspaceId={workspaceId}
+              productId={productId}
+              sprintActive={board?.sprint.status === "active"}
+              disabled={busy}
+              open={cardMenuOpenId === item.id}
+              onToggle={() => setCardMenuOpenId((prev) => (prev === item.id ? null : item.id))}
+              onClose={() => setCardMenuOpenId(null)}
+              onChanged={() => {
+                void loadBoard();
+                void loadSprints();
+              }}
+            />
           ) : null}
         </div>
         <button
@@ -534,56 +493,15 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
         >
           {item.title}
         </button>
-        {item.external?.issue_key ? (
-          <a
-            className="sprint-board-card-link text-xs"
-            href={item.external.issue_url ?? "#"}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {item.external.issue_key}
-          </a>
-        ) : board?.sprint.status !== "archived" && board?.sprint.status !== "completed" ? (
-          <button type="button" className="btn-ghost text-xs p-0 h-auto" disabled={busy} onClick={() => openLinkPm(item.id)}>
-            关联 PM
-          </button>
+        {canManageCard || item.external?.issue_key ? (
+          <WorkItemPmChip
+            external={item.external}
+            disabled={busy}
+            compact
+            onManage={() => setPmLinkTarget(item)}
+            onLink={canManageCard ? () => setPmLinkTarget(item) : undefined}
+          />
         ) : null}
-        <div className="sprint-board-card-actions stack-sm">
-          {board?.sprint.status === "active" && currentStage && stageHasWorkflow(currentStage) ? (
-            <button
-              type="button"
-              className="btn btn-primary text-xs w-full"
-              disabled={busy}
-              onClick={() => openWorkItemDetail(item)}
-            >
-              {runStatus === "running" ? "执行中…" : "执行工作流"}
-            </button>
-          ) : null}
-          <div className="flex gap-1">
-            <select
-              className="input text-xs flex-1 min-w-0"
-              value={item.stage_id}
-              disabled={busy || board?.sprint.status !== "active"}
-              onChange={(e) => void onMoveItem(item, e.target.value)}
-              aria-label={`移动工作项 ${item.title}`}
-            >
-              {stages.map((st) => (
-                <option key={st.id} value={st.id}>
-                  {st.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="btn-ghost text-xs shrink-0"
-              disabled={busy || board?.sprint.status === "archived"}
-              onClick={() => void onDeleteItem(item.id)}
-              aria-label={`删除 ${item.title}`}
-            >
-              删除
-            </button>
-          </div>
-        </div>
       </article>
     );
   }
@@ -929,66 +847,26 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
         </div>
       </Modal>
 
-      <Modal
-        open={linkPmOpen}
-        onClose={() => setLinkPmOpen(false)}
-        title="关联 PM Issue"
-        footer={
-          <>
-            <button type="button" className="btn-secondary text-sm" disabled={busy} onClick={() => setLinkPmOpen(false)}>
-              取消
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary text-sm"
-              disabled={busy || !linkPmKey.trim() || (linkPmProvider === "tapd" && !linkPmWorkspaceId.trim())}
-              onClick={() => void onLinkPm()}
-            >
-              {busy ? "关联中…" : "关联"}
-            </button>
-          </>
-        }
-      >
-        <div className="stack-sm">
-          <label className="stack-xs">
-            <span className="text-sm">PM 工具</span>
-            <select className="input" value={linkPmProvider} onChange={(e) => setLinkPmProvider(e.target.value as PmProvider)}>
-              {(Object.keys(PM_PROVIDER_LABEL) as PmProvider[]).map((key) => (
-                <option key={key} value={key}>
-                  {PM_PROVIDER_LABEL[key]}
-                </option>
-              ))}
-            </select>
-          </label>
-          {linkPmProvider === "tapd" ? (
-            <label className="stack-xs">
-              <span className="text-sm">TAPD 项目 ID</span>
-              <input
-                className="input"
-                value={linkPmWorkspaceId}
-                onChange={(e) => setLinkPmWorkspaceId(e.target.value)}
-                placeholder="例如 12345678"
-              />
-            </label>
-          ) : null}
-          <label className="stack-xs">
-            <span className="text-sm">Issue Key / ID</span>
-            <input
-              className="input"
-              value={linkPmKey}
-              onChange={(e) => setLinkPmKey(e.target.value)}
-              placeholder={linkPmProvider === "jira" ? "例如 PROJ-123" : "TAPD Story ID"}
-            />
-          </label>
-          <label className="stack-xs">
-            <span className="text-sm">同步模式</span>
-            <select className="input" value={pmSyncMode} onChange={(e) => setPmSyncMode(e.target.value as "link_only" | "bidirectional")}>
-              <option value="link_only">仅关联</option>
-              <option value="bidirectional">双向同步</option>
-            </select>
-          </label>
-        </div>
-      </Modal>
+      {pmLinkTarget ? (
+        <WorkItemPmLinkModal
+          open
+          onClose={() => setPmLinkTarget(null)}
+          workspaceId={workspaceId}
+          productId={productId}
+          workItemId={pmLinkTarget.id}
+          workItemTitle={pmLinkTarget.title}
+          external={pmLinkTarget.external}
+          readOnly={board?.sprint.status === "archived" || board?.sprint.status === "completed"}
+          onChanged={() => {
+            void loadBoard();
+            if (selectedWorkItem?.id === pmLinkTarget.id) {
+              void product.getWorkItem(workspaceId, productId, pmLinkTarget.id).then((detail) => {
+                setSelectedWorkItem((prev) => (prev?.id === detail.id ? { ...prev, ...detail } : prev));
+              }).catch(() => undefined);
+            }
+          }}
+        />
+      ) : null}
 
       <Modal
         open={itemOpen}
@@ -1029,6 +907,26 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
         </label>
       </Modal>
 
+      {executeContext ? (
+        <SprintWorkItemExecuteModal
+          open={executeModalOpen}
+          onClose={() => {
+            setExecuteModalOpen(false);
+            setExecuteContext(null);
+          }}
+          workspaceId={workspaceId}
+          productId={productId}
+          stage={executeContext.stage}
+          workflowId={executeContext.workflowId}
+          workItems={boardWorkItems}
+          initialSelectedId={executeContext.item.id}
+          onExecuted={() => {
+            void loadBoard();
+            void loadSprints();
+          }}
+        />
+      ) : null}
+
       <WorkItemDetailDrawer
         open={workItemDrawerOpen}
         onClose={() => {
@@ -1048,6 +946,11 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
         onDeleted={() => {
           void loadBoard();
           void loadSprints();
+        }}
+        onRequestExecute={({ stageId, workflowId }) => {
+          if (!selectedWorkItem) return;
+          const stage = boardStages.find((row) => row.id === stageId);
+          if (stage) openExecuteWorkflow(selectedWorkItem, stage, workflowId);
         }}
       />
     </>

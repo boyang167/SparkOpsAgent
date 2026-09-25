@@ -721,6 +721,13 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async unlinkPmIssue(workspaceId: string, productId: string, workItemId: string) {
+      return upstreamFetch<{ id: string; external?: import("@sparkops/contracts/product").WorkItemExternalRef }>(
+        `/api/v1/products/${productId}/work-items/${workItemId}/link-pm`,
+        { method: "DELETE", options: { ...options, workspaceId } },
+      );
+    },
+
     async getSprintMetrics(workspaceId: string, productId: string, sprintId: string) {
       return upstreamFetch<import("@sparkops/contracts/product").SprintMetricsVM>(
         `/api/v1/products/${productId}/sprints/${sprintId}/metrics`,

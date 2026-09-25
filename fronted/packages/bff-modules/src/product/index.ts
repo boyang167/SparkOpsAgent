@@ -571,6 +571,10 @@ export function linkPmIssue(
   return ctx.upstream.product.linkPmIssue(workspaceId, productId, workItemId, input);
 }
 
+export function unlinkPmIssue(ctx: BffContext, workspaceId: string, productId: string, workItemId: string) {
+  return ctx.upstream.product.unlinkPmIssue(workspaceId, productId, workItemId);
+}
+
 export function getSprintBoardWsConfig(
   ctx: BffContext,
   workspaceId: string,

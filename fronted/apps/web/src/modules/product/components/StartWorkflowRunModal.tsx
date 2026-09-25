@@ -24,7 +24,7 @@ import { WorkflowRunFormSkeleton } from "./WorkflowRunFormSkeleton";
 
 interface StartWorkflowRunModalProps {
   open?: boolean;
-  presentation?: "modal" | "page";
+  presentation?: "modal" | "page" | "embedded";
   workspaceId: string;
   workflow: ProductWorkflowVM | null;
   environments: EnvironmentVM[];
@@ -59,7 +59,8 @@ export function StartWorkflowRunModal({
   onClose,
   onSubmit,
 }: StartWorkflowRunModalProps) {
-  const active = presentation === "page" ? Boolean(workflow) : open;
+  const active =
+    presentation === "page" || presentation === "embedded" ? Boolean(workflow) : open;
   const initialAssets = peekWorkspaceRunAssets(workspaceId);
   const [gitProjects, setGitProjects] = useState<ProjectVM[]>(() => initialAssets?.gitProjects ?? []);
   const [registries, setRegistries] = useState<SecretVM[]>(() => initialAssets?.registries ?? []);
@@ -145,6 +146,8 @@ export function StartWorkflowRunModal({
 
   if (presentation === "page") {
     if (!active || !workflow) return null;
+  } else if (presentation === "embedded") {
+    if (!active) return loading ? <WorkflowRunFormSkeleton /> : null;
   } else if (!open) {
     return null;
   }
@@ -500,6 +503,30 @@ export function StartWorkflowRunModal({
 
       </div>
   );
+
+  if (presentation === "embedded") {
+    return (
+      <>
+        <div className="wf-run-embedded">
+          {renderStagePills("wf-run-pills wf-run-embedded-pills")}
+          <div className="wf-run-embedded-body">
+            {modalReady ? formContent : <WorkflowRunFormSkeleton />}
+          </div>
+          <footer className="wf-run-embedded-footer">{footerActions}</footer>
+        </div>
+        <DeployYamlCompareModal
+          open={yamlCompare !== null}
+          workspaceId={workspaceId}
+          projectId={yamlCompare?.projectId ?? ""}
+          projectName={yamlCompare?.projectName ?? ""}
+          environmentId={environmentId}
+          imageTag={yamlCompareTag}
+          imageRef={yamlCompare ? resolveImageRef(yamlCompare) : ""}
+          onClose={() => setYamlCompare(null)}
+        />
+      </>
+    );
+  }
 
   if (presentation === "page") {
     return (
