@@ -27,6 +27,8 @@ type Handler struct {
 	listProductProjects *query.ListProductProjectsHandler
 	getProductOverview  *query.GetProductOverviewHandler
 	releasePlans        ReleasePlanHandlers
+	sprints             SprintHandlers
+	sprintBoardWS       *SprintBoardWSHandler
 	environments        EnvironmentHandlers
 }
 
@@ -45,6 +47,8 @@ func NewHandler(
 	listProductProjects *query.ListProductProjectsHandler,
 	getProductOverview *query.GetProductOverviewHandler,
 	releasePlans ReleasePlanHandlers,
+	sprints SprintHandlers,
+	sprintBoardWS *SprintBoardWSHandler,
 	environments EnvironmentHandlers,
 ) *Handler {
 	return &Handler{
@@ -55,7 +59,7 @@ func NewHandler(
 		listProducts: listProducts, getProduct: getProduct,
 		listPlans: listPlans, listRequirements: listRequirements,
 		listProductProjects: listProductProjects, getProductOverview: getProductOverview,
-		releasePlans: releasePlans, environments: environments,
+		releasePlans: releasePlans, sprints: sprints, sprintBoardWS: sprintBoardWS, environments: environments,
 	}
 }
 
@@ -234,6 +238,10 @@ func (h *Handler) ListPlans(c *gin.Context) {
 }
 
 func (h *Handler) CreatePlan(c *gin.Context) {
+	_, memberID, ok := memberAndWorkspace(c)
+	if !ok {
+		return
+	}
 	productID, err := kernel.ParseProductID(c.Param("productId"))
 	if err != nil {
 		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
@@ -244,7 +252,7 @@ func (h *Handler) CreatePlan(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
-	plan, err := h.createPlan.Handle(c.Request.Context(), productID, req.Name, req.Version, req.Description, req.OtherInfo)
+	plan, err := h.createPlan.Handle(c.Request.Context(), productID, memberID, req.Name, req.Version, req.Description, req.OtherInfo)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return

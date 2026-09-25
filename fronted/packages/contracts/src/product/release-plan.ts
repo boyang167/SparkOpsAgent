@@ -34,6 +34,7 @@ export type ReleasePlanJobVM = z.infer<typeof ReleasePlanJobVMSchema>;
 export const ReleasePlanVMSchema = z.object({
   id: z.string(),
   product_id: z.string(),
+  sprint_id: z.string().optional(),
   name: z.string(),
   description: z.string().optional(),
   status: z.string(),
@@ -54,6 +55,7 @@ export const CreateReleasePlanCommandSchema = z.object({
   release_window_start: z.string(),
   release_window_end: z.string(),
   approval_enabled: z.boolean().optional(),
+  sprint_id: z.string().optional(),
 });
 
 export type CreateReleasePlanCommand = z.infer<typeof CreateReleasePlanCommandSchema>;

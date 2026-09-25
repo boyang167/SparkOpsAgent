@@ -10,11 +10,15 @@ import (
 )
 
 type OnWorkflowRunCompleted struct {
-	executor *service.ReleasePlanExecutor
+	releasePlans *service.ReleasePlanExecutor
+	sprintItems  *service.SprintWorkItemExecutor
 }
 
-func NewOnWorkflowRunCompleted(executor *service.ReleasePlanExecutor) *OnWorkflowRunCompleted {
-	return &OnWorkflowRunCompleted{executor: executor}
+func NewOnWorkflowRunCompleted(
+	releasePlans *service.ReleasePlanExecutor,
+	sprintItems *service.SprintWorkItemExecutor,
+) *OnWorkflowRunCompleted {
+	return &OnWorkflowRunCompleted{releasePlans: releasePlans, sprintItems: sprintItems}
 }
 
 func (h *OnWorkflowRunCompleted) Handle(ctx context.Context, e events.Event) error {
@@ -22,9 +26,16 @@ func (h *OnWorkflowRunCompleted) Handle(ctx context.Context, e events.Event) err
 	if !ok {
 		return nil
 	}
-	if h.executor == nil {
-		return nil
-	}
 	success := ev.Status == "success"
-	return h.executor.OnWorkflowRunCompleted(ctx, ev.RunID, success, ev.ErrorMessage, kernel.MemberID{})
+	if h.releasePlans != nil {
+		if err := h.releasePlans.OnWorkflowRunCompleted(ctx, ev.RunID, success, ev.ErrorMessage, kernel.MemberID{}); err != nil {
+			return err
+		}
+	}
+	if h.sprintItems != nil {
+		if err := h.sprintItems.OnWorkflowRunCompleted(ctx, ev.RunID, success, ev.ErrorMessage); err != nil {
+			return err
+		}
+	}
+	return nil
 }

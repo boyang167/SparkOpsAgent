@@ -77,9 +77,13 @@ type ProjectDeployRun struct {
 }
 
 type ApprovalRun struct {
-	Status  string `json:"status"`
-	ActorID string `json:"actor_id,omitempty"`
-	Message string `json:"message,omitempty"`
+	Status            string   `json:"status"`
+	ActorID           string   `json:"actor_id,omitempty"`
+	Message           string   `json:"message,omitempty"`
+	StartedAt         string   `json:"started_at,omitempty"`
+	TimeoutMinutes    int      `json:"timeout_minutes,omitempty"`
+	RequiredApprovals int      `json:"required_approvals,omitempty"`
+	ApprovedBy        []string `json:"approved_by,omitempty"`
 }
 
 type JobRun struct {

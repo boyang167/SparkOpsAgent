@@ -12,6 +12,8 @@ type ReleasePlanRepository interface {
 	UpdatePlan(ctx context.Context, plan *model.ReleasePlan) error
 	FindPlanByID(ctx context.Context, id kernel.ReleasePlanID) (*model.ReleasePlan, error)
 	ListPlansByProduct(ctx context.Context, productID kernel.ProductID) ([]*model.ReleasePlan, error)
+	ListPlansByProductAndSprint(ctx context.Context, productID kernel.ProductID, sprintID kernel.SprintID) ([]*model.ReleasePlan, error)
+	HasBlockingPlansBySprint(ctx context.Context, sprintID kernel.SprintID) (bool, error)
 	SaveJob(ctx context.Context, job *model.ReleasePlanJob) error
 	UpdateJob(ctx context.Context, job *model.ReleasePlanJob) error
 	DeleteJob(ctx context.Context, jobID kernel.ReleasePlanJobID) error

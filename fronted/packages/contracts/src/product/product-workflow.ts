@@ -111,6 +111,10 @@ export const ApprovalRunVMSchema = z.object({
   status: z.string(),
   actor_id: z.string().optional(),
   message: z.string().optional(),
+  started_at: z.string().optional(),
+  timeout_minutes: z.number().int().optional(),
+  required_approvals: z.number().int().optional(),
+  approved_by: z.array(z.string()).optional(),
 });
 
 export type ApprovalRunVM = z.infer<typeof ApprovalRunVMSchema>;
@@ -276,7 +280,7 @@ export const PRODUCT_WORKFLOW_JOB_TYPES = [
     category: "flow",
     label: "审批",
     title: "人工审批",
-    description: "人工审批门禁",
+    description: "审批通过后才可执行后续操作",
     official: true,
   },
   {

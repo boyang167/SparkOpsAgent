@@ -138,6 +138,7 @@ export const ProductPlanVMSchema = z.object({
   version: z.string().optional(),
   description: z.string().optional(),
   product_id: z.string().optional(),
+  sprint_id: z.string().uuid().optional(),
   created_at: z.string().optional(),
 });
 
@@ -164,3 +165,4 @@ export * from "./workflow";
 export * from "./release-plan";
 export * from "./product-workflow";
 export * from "./environment";
+export * from "./sprint";

@@ -487,12 +487,41 @@ func (s *Scheduler) ApproveJob(ctx context.Context, runID kernel.ProductWorkflow
 	if err != nil {
 		return err
 	}
+	job, ok := jobByName(wf, jobName)
+	if !ok {
+		return domain.ErrApprovalNotPending
+	}
+	spec := ParseApprovalSpec(job.Spec)
+	actorID := actor.String()
+	if len(spec.ApproverIDs) > 0 && !containsString(spec.ApproverIDs, actorID) {
+		return domain.ErrApprovalForbidden
+	}
+	for _, approvedBy := range jobRun.Approval.ApprovedBy {
+		if approvedBy == actorID {
+			return domain.ErrApprovalForbidden
+		}
+	}
+	jobRun.Approval.ApprovedBy = append(jobRun.Approval.ApprovedBy, actorID)
+	jobRun.Approval.ActorID = actorID
+	required := jobRun.Approval.RequiredApprovals
+	if required <= 0 {
+		required = spec.RequiredApprovals
+	}
+	if required <= 0 {
+		required = 1
+	}
+	if len(jobRun.Approval.ApprovedBy) < required {
+		if err := s.repo.UpdateRun(ctx, run); err != nil {
+			return err
+		}
+		return nil
+	}
 	jobRun.Approval.Status = model.ApprovalStatusApproved
-	jobRun.Approval.ActorID = actor.String()
 	jobRun.Status = model.JobRunStatusSuccess
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
 		return err
 	}
+	s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventPassed)
 	stages := WorkflowStagesForRun(wf, run)
 	if s.stageComplete(run, run.CurrentStage) {
 		return s.advanceStage(ctx, wf, run)
@@ -555,9 +584,16 @@ func (s *Scheduler) CancelRun(ctx context.Context, runID kernel.ProductWorkflowR
 }
 
 func (s *Scheduler) RejectJob(ctx context.Context, runID kernel.ProductWorkflowRunID, jobName string, actor kernel.MemberID, message string) error {
-	run, _, jobRun, err := s.loadPendingApproval(ctx, runID, jobName)
+	run, wf, jobRun, err := s.loadPendingApproval(ctx, runID, jobName)
 	if err != nil {
 		return err
+	}
+	if job, ok := jobByName(wf, jobName); ok {
+		spec := ParseApprovalSpec(job.Spec)
+		actorID := actor.String()
+		if len(spec.ApproverIDs) > 0 && !containsString(spec.ApproverIDs, actorID) {
+			return domain.ErrApprovalForbidden
+		}
 	}
 	jobRun.Approval.Status = model.ApprovalStatusRejected
 	jobRun.Approval.ActorID = actor.String()
@@ -734,6 +770,13 @@ func (s *Scheduler) refreshJobStatuses(run *model.ProductWorkflowRun) (bool, str
 				}
 			case model.JobTypeSparkopsApproval:
 				if IsApprovalWaiting(*jobRun) {
+					if approvalTimedOut(jobRun.Approval) {
+						jobRun.Approval.Status = model.ApprovalStatusRejected
+						jobRun.Status = model.JobRunStatusFailed
+						jobRun.ErrorMessage = "approval timeout"
+						run.StageRuns[si].Status = model.JobRunStatusFailed
+						return true, "approval timeout"
+					}
 					continue
 				}
 				if jobRun.Approval != nil && jobRun.Approval.Status == model.ApprovalStatusRejected {

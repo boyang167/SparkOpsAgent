@@ -6,9 +6,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { MeVM } from "@sparkops/contracts/identity";
 import type { OperationRecordVM } from "@sparkops/contracts/platform";
 import type { WorkspaceVM } from "@sparkops/contracts/tenant";
+import type { ActiveSprintSummaryVM } from "@sparkops/contracts/product";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { BffError } from "@sparkops/contracts";
-import { platform, tenant } from "@sparkops/web-sdk";
+import { platform, product, tenant } from "@sparkops/web-sdk";
 import {
   formatCompactDateTime,
   languageColor,
@@ -107,6 +108,8 @@ export function WorkplaceDashboard({
     loading: true,
   });
   const [switchingWorkspace, setSwitchingWorkspace] = useState<string | null>(null);
+  const [activeSprints, setActiveSprints] = useState<ActiveSprintSummaryVM[]>([]);
+  const [activeSprintsLoading, setActiveSprintsLoading] = useState(true);
 
   const displayName = session.display_name?.trim() || session.email.split("@")[0] || "用户";
   const initial = displayName.charAt(0).toUpperCase();
@@ -127,13 +130,15 @@ export function WorkplaceDashboard({
   useEffect(() => {
     let cancelled = false;
     setActivityLoading(true);
+    setActiveSprintsLoading(true);
     setMetrics((prev) => ({ ...prev, loading: true }));
 
     void Promise.allSettled([
       platform.listOperationRecords(workspaceId, { page: 1, page_size: 12 }),
       platform.getDashboard(workspaceId),
       platform.listDeploymentStats(workspaceId),
-    ]).then(([activityResult, dashboardResult, statsResult]) => {
+      product.listActiveSprints(workspaceId),
+    ]).then(([activityResult, dashboardResult, statsResult, sprintsResult]) => {
       if (cancelled) return;
 
       if (activityResult.status === "fulfilled") {
@@ -161,6 +166,13 @@ export function WorkplaceDashboard({
         deploymentTotal,
         loading: false,
       });
+
+      if (sprintsResult.status === "fulfilled") {
+        setActiveSprints(sprintsResult.value);
+      } else {
+        setActiveSprints([]);
+      }
+      setActiveSprintsLoading(false);
     });
 
     return () => {
@@ -246,6 +258,31 @@ export function WorkplaceDashboard({
                     </li>
                   );
                 })}
+              </ul>
+            )}
+          </PanelCard>
+
+          <PanelCard title="进行中的迭代">
+            {activeSprintsLoading ? (
+              <EmptyHint>加载活跃迭代…</EmptyHint>
+            ) : activeSprints.length === 0 ? (
+              <EmptyHint>当前空间暂无进行中的产品迭代。</EmptyHint>
+            ) : (
+              <ul className="workplace-service-list">
+                {activeSprints.slice(0, 8).map((sprint) => (
+                  <li key={sprint.id}>
+                    <Link href={`/products/${sprint.product_id}`} className="workplace-service-item">
+                      <span className="workplace-service-body">
+                        <strong>{sprint.name}</strong>
+                        <span>
+                          {sprint.product_name ?? "产品"} · 工作项 {sprint.work_item_count ?? 0} / 完成{" "}
+                          {sprint.done_work_item_count ?? 0}
+                        </span>
+                      </span>
+                      <span className="workplace-service-status is-running">进行中</span>
+                    </Link>
+                  </li>
+                ))}
               </ul>
             )}
           </PanelCard>

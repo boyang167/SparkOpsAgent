@@ -34,6 +34,11 @@ type ReleasePlanJobID struct{ uuid.UUID }
 type ProductWorkflowID struct{ uuid.UUID }
 type ProductWorkflowRunID struct{ uuid.UUID }
 type EnvironmentID struct{ uuid.UUID }
+type SprintProcessID struct{ uuid.UUID }
+type WorkspaceSprintProcessTemplateID struct{ uuid.UUID }
+type SprintID struct{ uuid.UUID }
+type WorkItemID struct{ uuid.UUID }
+type WorkItemExecutionID struct{ uuid.UUID }
 type ClusterInfoID struct{ uuid.UUID }
 type ProclaimID struct{ uuid.UUID }
 type PluginInstallID struct{ uuid.UUID }
@@ -77,6 +82,13 @@ func NewReleasePlanJobID() ReleasePlanJobID       { return ReleasePlanJobID{UUID
 func NewProductWorkflowID() ProductWorkflowID     { return ProductWorkflowID{UUID: uuid.New()} }
 func NewProductWorkflowRunID() ProductWorkflowRunID { return ProductWorkflowRunID{UUID: uuid.New()} }
 func NewEnvironmentID() EnvironmentID             { return EnvironmentID{UUID: uuid.New()} }
+func NewSprintProcessID() SprintProcessID         { return SprintProcessID{UUID: uuid.New()} }
+func NewWorkspaceSprintProcessTemplateID() WorkspaceSprintProcessTemplateID {
+	return WorkspaceSprintProcessTemplateID{UUID: uuid.New()}
+}
+func NewSprintID() SprintID                       { return SprintID{UUID: uuid.New()} }
+func NewWorkItemID() WorkItemID                   { return WorkItemID{UUID: uuid.New()} }
+func NewWorkItemExecutionID() WorkItemExecutionID { return WorkItemExecutionID{UUID: uuid.New()} }
 func NewClusterInfoID() ClusterInfoID             { return ClusterInfoID{UUID: uuid.New()} }
 func NewProclaimID() ProclaimID           { return ProclaimID{UUID: uuid.New()} }
 func NewPluginInstallID() PluginInstallID { return PluginInstallID{UUID: uuid.New()} }
@@ -231,6 +243,31 @@ func ParseEnvironmentID(s string) (EnvironmentID, error) {
 	return EnvironmentID{UUID: id}, err
 }
 
+func ParseSprintProcessID(s string) (SprintProcessID, error) {
+	id, err := uuid.Parse(s)
+	return SprintProcessID{UUID: id}, err
+}
+
+func ParseWorkspaceSprintProcessTemplateID(s string) (WorkspaceSprintProcessTemplateID, error) {
+	id, err := uuid.Parse(s)
+	return WorkspaceSprintProcessTemplateID{UUID: id}, err
+}
+
+func ParseSprintID(s string) (SprintID, error) {
+	id, err := uuid.Parse(s)
+	return SprintID{UUID: id}, err
+}
+
+func ParseWorkItemID(s string) (WorkItemID, error) {
+	id, err := uuid.Parse(s)
+	return WorkItemID{UUID: id}, err
+}
+
+func ParseWorkItemExecutionID(s string) (WorkItemExecutionID, error) {
+	id, err := uuid.Parse(s)
+	return WorkItemExecutionID{UUID: id}, err
+}
+
 func ParseClusterInfoID(s string) (ClusterInfoID, error) {
 	id, err := uuid.Parse(s)
 	return ClusterInfoID{UUID: id}, err
@@ -277,6 +314,10 @@ func (id ReleasePlanJobID) String() string       { return id.UUID.String() }
 func (id ProductWorkflowID) String() string      { return id.UUID.String() }
 func (id ProductWorkflowRunID) String() string   { return id.UUID.String() }
 func (id EnvironmentID) String() string          { return id.UUID.String() }
+func (id SprintProcessID) String() string        { return id.UUID.String() }
+func (id SprintID) String() string                 { return id.UUID.String() }
+func (id WorkItemID) String() string               { return id.UUID.String() }
+func (id WorkItemExecutionID) String() string      { return id.UUID.String() }
 func (id ClusterInfoID) String() string          { return id.UUID.String() }
 func (id ProclaimID) String() string           { return id.UUID.String() }
 func (id PluginInstallID) String() string      { return id.UUID.String() }

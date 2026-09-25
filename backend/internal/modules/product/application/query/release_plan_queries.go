@@ -20,11 +20,17 @@ func NewListReleasePlansHandler(products repository.ProductRepository, plans rep
 	return &ListReleasePlansHandler{products: products, plans: plans}
 }
 
-func (h *ListReleasePlansHandler) Handle(ctx context.Context, productID kernel.ProductID) ([]map[string]any, error) {
+func (h *ListReleasePlansHandler) Handle(ctx context.Context, productID kernel.ProductID, sprintID *kernel.SprintID) ([]map[string]any, error) {
 	if _, err := h.products.FindProductByID(ctx, productID); err != nil {
 		return nil, err
 	}
-	items, err := h.plans.ListPlansByProduct(ctx, productID)
+	var items []*model.ReleasePlan
+	var err error
+	if sprintID != nil {
+		items, err = h.plans.ListPlansByProductAndSprint(ctx, productID, *sprintID)
+	} else {
+		items, err = h.plans.ListPlansByProduct(ctx, productID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +77,7 @@ func (h *GetReleasePlanHandler) Handle(ctx context.Context, productID kernel.Pro
 }
 
 func releasePlanSummary(plan *model.ReleasePlan) map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"id": plan.ID.String(), "product_id": plan.ProductID.String(), "name": plan.Name,
 		"description": plan.Description, "status": plan.Status,
 		"release_window_start": plan.ReleaseWindowStart.Format(time.RFC3339),
@@ -79,6 +85,10 @@ func releasePlanSummary(plan *model.ReleasePlan) map[string]any {
 		"approval_enabled":     plan.ApprovalConfig.Enabled,
 		"created_at":           plan.CreatedAt.Format(time.RFC3339),
 	}
+	if plan.SprintID != nil {
+		out["sprint_id"] = plan.SprintID.String()
+	}
+	return out
 }
 
 func releasePlanDetail(plan *model.ReleasePlan) map[string]any {

@@ -20,6 +20,7 @@ func TestJobCatalog_registersExecutableSparkOpsJobs(t *testing.T) {
 	require.Equal(t, "SparkOps 构建", got[model.JobTypeSparkopsBuild].Title)
 	require.Equal(t, "SparkOps 部署", got[model.JobTypeSparkopsDeploy].Title)
 	require.Equal(t, "人工审批", got[model.JobTypeSparkopsApproval].Title)
+	require.Equal(t, "审批通过后才可执行后续操作", got[model.JobTypeSparkopsApproval].Description)
 	require.Equal(t, "自由脚本", got[model.JobTypeFreestyle].Title)
 	require.Equal(t, "通知", got[model.JobTypeNotify].Title)
 	require.True(t, model.IsKnownJobType(model.JobTypeSparkopsBuild))

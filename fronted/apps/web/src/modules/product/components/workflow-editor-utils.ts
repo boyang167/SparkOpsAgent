@@ -37,7 +37,18 @@ export function defaultJob(type: string, index: number): EditorJob {
         spec: { environment_id: "", source: "fromjob", job_name: "", deploy_contents: ["image"], status_check: true },
       };
     case "sparkops-approval":
-      return { ...base, name: `approval-${index}`, spec: { timeout_minutes: 60 } };
+      return {
+        ...base,
+        name: `approval-${index}`,
+        spec: {
+          provider: "sparkops",
+          approver_ids: [],
+          required_approvals: 1,
+          timeout_minutes: 60,
+          strategy: { timeout_minutes: 60, on_timeout: "fail" },
+          notify: [],
+        },
+      };
     case "freestyle":
       return { ...base, name: `freestyle-${index}`, spec: { script: "echo hello" } };
     case "notify":

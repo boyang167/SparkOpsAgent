@@ -12,6 +12,7 @@ var (
 	ErrWorkflowRunBusy                   = kernel.NewDomainError("PRODUCT_WORKFLOW_RUN_BUSY", "已有运行中的实例")
 	ErrWorkflowHookRejected              = kernel.NewDomainError("PRODUCT_WORKFLOW_HOOK_REJECTED", "invalid workflow hook token")
 	ErrApprovalNotPending                = kernel.NewDomainError("PRODUCT_WORKFLOW_APPROVAL_NOT_PENDING", "approval is not pending")
+	ErrApprovalForbidden                 = kernel.NewDomainError("PRODUCT_WORKFLOW_APPROVAL_FORBIDDEN", "approval actor is not allowed")
 	ErrStageNotWaitingManual             = kernel.NewDomainError("PRODUCT_WORKFLOW_STAGE_NOT_WAITING", "stage is not waiting for manual execution")
 	ErrRunNotPausable                    = kernel.NewDomainError("PRODUCT_WORKFLOW_RUN_NOT_PAUSABLE", "workflow run cannot be paused")
 	ErrRunNotPaused                      = kernel.NewDomainError("PRODUCT_WORKFLOW_RUN_NOT_PAUSED", "workflow run is not paused")

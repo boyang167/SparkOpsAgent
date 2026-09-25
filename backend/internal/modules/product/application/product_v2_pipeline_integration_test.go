@@ -66,7 +66,7 @@ func createProductV2TestTables(t *testing.T, db *gorm.DB) {
 			status TEXT, multicluster_status TEXT, operator TEXT, other_info TEXT,
 			created_at DATETIME, updated_at DATETIME, deleted_at DATETIME)`,
 		`CREATE TABLE product.release_plans (
-			id TEXT PRIMARY KEY, product_id TEXT, product_plan_id TEXT, name TEXT,
+			id TEXT PRIMARY KEY, product_id TEXT, product_plan_id TEXT, sprint_id TEXT, name TEXT,
 			description TEXT, manager_id TEXT, approver_id TEXT, status TEXT,
 			release_window_start DATETIME, release_window_end DATETIME,
 			schedule_execute_time DATETIME, approval_config TEXT, created_by TEXT,
@@ -126,6 +126,7 @@ func TestProductV2ReleasePlanTextPipeline(t *testing.T) {
 	db := openProductV2TestDB(t)
 	productRepo := persistence.NewProductRepository(db)
 	releasePlanRepo := persistence.NewReleasePlanRepository(db)
+	sprintRepo := persistence.NewSprintRepository(db)
 	executor := service.NewReleasePlanExecutor(releasePlanRepo, nil)
 
 	wsID := kernel.NewWorkspaceID()
@@ -136,7 +137,7 @@ func TestProductV2ReleasePlanTextPipeline(t *testing.T) {
 	require.NoError(t, productRepo.SaveProduct(ctx, product))
 
 	now := time.Now().UTC()
-	createPlan := command.NewCreateReleasePlanHandler(productRepo, releasePlanRepo)
+	createPlan := command.NewCreateReleasePlanHandler(productRepo, releasePlanRepo, sprintRepo)
 	addJob := command.NewAddReleasePlanJobHandler(productRepo, releasePlanRepo)
 	finish := command.NewFinishReleasePlanPlanningHandler(productRepo, releasePlanRepo, executor)
 	markDone := command.NewMarkReleasePlanJobDoneHandler(productRepo, releasePlanRepo, executor)

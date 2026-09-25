@@ -66,11 +66,12 @@ func (h *GetProductHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID,
 }
 
 type ListProductPlansHandler struct {
-	repo repository.ProductRepository
+	repo    repository.ProductRepository
+	sprints repository.SprintRepository
 }
 
-func NewListProductPlansHandler(repo repository.ProductRepository) *ListProductPlansHandler {
-	return &ListProductPlansHandler{repo: repo}
+func NewListProductPlansHandler(repo repository.ProductRepository, sprints repository.SprintRepository) *ListProductPlansHandler {
+	return &ListProductPlansHandler{repo: repo, sprints: sprints}
 }
 
 func (h *ListProductPlansHandler) Handle(ctx context.Context, productID kernel.ProductID) ([]map[string]any, error) {
@@ -83,11 +84,17 @@ func (h *ListProductPlansHandler) Handle(ctx context.Context, productID kernel.P
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, plan := range items {
-		out = append(out, map[string]any{
+		row := map[string]any{
 			"id": plan.ID.String(), "product_id": plan.ProductID.String(), "name": plan.Name,
 			"version": plan.Version, "status": plan.Status, "description": plan.Description,
 			"submitted": plan.Submitted, "other_info": plan.OtherInfo, "created_at": plan.CreatedAt,
-		})
+		}
+		if h.sprints != nil {
+			if sprint, err := h.sprints.FindSprintByLegacyPlanID(ctx, plan.ID); err == nil {
+				row["sprint_id"] = sprint.ID.String()
+			}
+		}
+		out = append(out, row)
 	}
 	return out, nil
 }

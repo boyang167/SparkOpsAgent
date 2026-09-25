@@ -54,7 +54,16 @@ func (h *Handler) ListReleasePlans(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
 		return
 	}
-	items, err := h.releasePlans.listPlans.Handle(c.Request.Context(), productID)
+	var sprintID *kernel.SprintID
+	if raw := c.Query("sprint_id"); raw != "" {
+		parsed, err := kernel.ParseSprintID(raw)
+		if err != nil {
+			httpx.Fail(c, "INVALID_REQUEST", "invalid sprint_id", http.StatusBadRequest)
+			return
+		}
+		sprintID = &parsed
+	}
+	items, err := h.releasePlans.listPlans.Handle(c.Request.Context(), productID, sprintID)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
@@ -81,6 +90,7 @@ type createReleasePlanRequest struct {
 	ReleaseWindowStart string `json:"release_window_start" binding:"required"`
 	ReleaseWindowEnd   string `json:"release_window_end" binding:"required"`
 	ApprovalEnabled    bool   `json:"approval_enabled"`
+	SprintID           string `json:"sprint_id"`
 }
 
 func (h *Handler) CreateReleasePlan(c *gin.Context) {
@@ -109,10 +119,19 @@ func (h *Handler) CreateReleasePlan(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", "invalid release_window_end", http.StatusBadRequest)
 		return
 	}
-	plan, err := h.releasePlans.createPlan.Handle(c.Request.Context(), productID, memberID, command.CreateReleasePlanInput{
+	input := command.CreateReleasePlanInput{
 		Name: req.Name, Description: req.Description,
 		ReleaseWindowStart: start, ReleaseWindowEnd: end, ApprovalEnabled: req.ApprovalEnabled,
-	})
+	}
+	if req.SprintID != "" {
+		sid, err := kernel.ParseSprintID(req.SprintID)
+		if err != nil {
+			httpx.Fail(c, "INVALID_REQUEST", "invalid sprint_id", http.StatusBadRequest)
+			return
+		}
+		input.SprintID = &sid
+	}
+	plan, err := h.releasePlans.createPlan.Handle(c.Request.Context(), productID, memberID, input)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return

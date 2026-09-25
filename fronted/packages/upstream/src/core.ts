@@ -84,9 +84,24 @@ export async function upstreamFetch<T>(
     throw new BffError("upstream unavailable", "UPSTREAM_UNAVAILABLE", 503);
   }
 
+  if (res.status === 204 || res.status === 205) {
+    if (!res.ok) {
+      throw new BffError("upstream request failed", "UPSTREAM_ERROR", res.status);
+    }
+    return undefined as T;
+  }
+
+  const raw = await res.text();
+  if (!raw.trim()) {
+    if (res.ok) {
+      return undefined as T;
+    }
+    throw new BffError("upstream returned empty error response", "UPSTREAM_ERROR", res.status || 502);
+  }
+
   let body: ApiEnvelope<T>;
   try {
-    body = (await res.json()) as ApiEnvelope<T>;
+    body = JSON.parse(raw) as ApiEnvelope<T>;
   } catch {
     throw new BffError("upstream returned invalid response", "UPSTREAM_ERROR", res.status || 502);
   }

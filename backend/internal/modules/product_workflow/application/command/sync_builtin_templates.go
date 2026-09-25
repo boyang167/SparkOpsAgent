@@ -53,7 +53,7 @@ func SyncBuiltinTemplates(ctx context.Context, db *gorm.DB) error {
 				"stages": [
 					{"name": "构建", "parallel": true, "jobs": [{"name": "build-services", "type": "sparkops-build", "spec": {"branch": "{{build_branch}}"}}]},
 					{"name": "部署 UAT", "jobs": [{"name": "deploy-uat", "type": "sparkops-deploy", "spec": {"environment_id": "{{uat_env_id}}", "source": "fromjob", "job_name": "build-services"}}]},
-					{"name": "生产审批", "jobs": [{"name": "prod-approval", "type": "sparkops-approval", "spec": {"provider": "sparkops"}}]},
+					{"name": "生产审批", "jobs": [{"name": "prod-approval", "type": "sparkops-approval", "spec": {"provider": "sparkops", "approver_ids": [], "required_approvals": 1, "timeout_minutes": 120, "strategy": {"timeout_minutes": 120, "on_timeout": "fail"}, "notify": []}}]},
 					{"name": "部署生产", "jobs": [{"name": "deploy-prod", "type": "sparkops-deploy", "spec": {"environment_id": "{{prod_env_id}}", "source": "fromjob", "job_name": "build-services"}}]}
 				]
 			}`),

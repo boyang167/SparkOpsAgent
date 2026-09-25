@@ -1,0 +1,1384 @@
+openapi: 3.0.3
+info:
+  title: SparkOps Sprint Management API
+  version: 1.0.0-draft
+  description: |
+    产品级迭代管理（Sprint Process / Sprint / WorkItem）。
+    前缀与现网一致：`/api/v1/products/{productId}/...`，Workspace 通过 `X-Workspace-Id` 传递。
+
+tags:
+  - name: sprint-process
+    description: 迭代流程模板
+  - name: sprint
+    description: 迭代实例
+  - name: work-item
+    description: 工作项与看板
+  - name: sprint-metrics
+    description: 迭代度量
+
+paths:
+  # -------------------------------------------------------------------------
+  # Sprint Process
+  # -------------------------------------------------------------------------
+  /api/v1/products/{productId}/sprint-process:
+    get:
+      tags: [sprint-process]
+      summary: 获取产品默认迭代流程
+      operationId: getSprintProcess
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SprintProcess"
+        "404":
+          description: 流程未配置（首次访问可返回默认 seed）
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/ErrorEnvelope"
+    put:
+      tags: [sprint-process]
+      summary: 更新迭代流程（版本 +1）
+      operationId: upsertSprintProcess
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertSprintProcessRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SprintProcess"
+
+  /api/v1/products/{productId}/sprint-process/preview:
+    post:
+      tags: [sprint-process]
+      summary: 预览流程配置（不落库）
+      operationId: previewSprintProcess
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertSprintProcessRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SprintProcess"
+
+  # -------------------------------------------------------------------------
+  # Sprint
+  # -------------------------------------------------------------------------
+  /api/v1/products/{productId}/sprints:
+    get:
+      tags: [sprint]
+      summary: 迭代列表
+      operationId: listSprints
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/SprintStatus"
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/SprintSummary"
+                          total:
+                            type: integer
+    post:
+      tags: [sprint]
+      summary: 创建迭代
+      operationId: createSprint
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSprintRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Sprint"
+
+  /api/v1/products/{productId}/sprints/{sprintId}:
+    get:
+      tags: [sprint]
+      summary: 迭代详情
+      operationId: getSprint
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/SprintId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Sprint"
+    patch:
+      tags: [sprint]
+      summary: 更新迭代元数据
+      operationId: updateSprint
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/SprintId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSprintRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Sprint"
+
+  /api/v1/products/{productId}/sprints/{sprintId}/start:
+    post:
+      tags: [sprint]
+      summary: 启动迭代（planning → active）
+      operationId: startSprint
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/SprintId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Sprint"
+
+  /api/v1/products/{productId}/sprints/{sprintId}/complete:
+    post:
+      tags: [sprint]
+      summary: 完成迭代（active → completed）
+      operationId: completeSprint
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/SprintId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Sprint"
+
+  /api/v1/products/{productId}/sprints/{sprintId}/archive:
+    post:
+      tags: [sprint]
+      summary: 归档迭代（completed → archived）
+      operationId: archiveSprint
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/SprintId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Sprint"
+
+  /api/v1/products/{productId}/sprints/{sprintId}/board:
+    get:
+      tags: [work-item]
+      summary: 迭代看板（阶段列 + 工作项卡片）
+      operationId: getSprintBoard
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/SprintId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SprintBoard"
+
+  /api/v1/products/{productId}/sprints/{sprintId}/import/jira:
+    post:
+      tags: [sprint]
+      summary: 从 Jira Sprint 导入工作项
+      operationId: importJiraSprint
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/SprintId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportJiraSprintRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ImportJiraSprintResult"
+
+  /api/v1/products/{productId}/sprints/{sprintId}/metrics:
+    get:
+      tags: [sprint-metrics]
+      summary: 迭代度量
+      operationId: getSprintMetrics
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/SprintId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SprintMetrics"
+
+  # -------------------------------------------------------------------------
+  # Work Items (nested under sprint for create/list)
+  # -------------------------------------------------------------------------
+  /api/v1/products/{productId}/sprints/{sprintId}/work-items:
+    post:
+      tags: [work-item]
+      summary: 创建工作项
+      operationId: createWorkItem
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/SprintId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkItemRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WorkItem"
+
+  /api/v1/products/{productId}/work-items/{workItemId}:
+    get:
+      tags: [work-item]
+      summary: 工作项详情
+      operationId: getWorkItem
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/WorkItemId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WorkItem"
+    patch:
+      tags: [work-item]
+      summary: 更新工作项
+      operationId: updateWorkItem
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/WorkItemId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkItemRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WorkItem"
+    delete:
+      tags: [work-item]
+      summary: 删除工作项
+      operationId: deleteWorkItem
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/WorkItemId"
+      responses:
+        "204":
+          description: Deleted
+
+  /api/v1/products/{productId}/work-items/{workItemId}/move:
+    post:
+      tags: [work-item]
+      summary: 移动工作项（看板拖拽）
+      operationId: moveWorkItem
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/WorkItemId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveWorkItemRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WorkItemCard"
+        "409":
+          description: 乐观锁冲突或阶段准入失败
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/ErrorEnvelope"
+
+  /api/v1/products/{productId}/work-items/{workItemId}/execute:
+    post:
+      tags: [work-item]
+      summary: 执行工作项当前阶段工作流
+      operationId: executeWorkItem
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/WorkItemId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecuteWorkItemRequest"
+      responses:
+        "202":
+          description: Accepted（异步启动 Workflow Run）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          execution_id:
+                            type: string
+                            format: uuid
+                          workflow_run_id:
+                            type: string
+                            format: uuid
+
+  /api/v1/products/{productId}/work-items/{workItemId}/link-jira:
+    post:
+      tags: [work-item]
+      summary: 绑定 Jira Issue
+      operationId: linkJiraIssue
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/WorkItemId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkJiraIssueRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WorkItem"
+
+  /api/v1/products/{productId}/work-items/{workItemId}/executions:
+    get:
+      tags: [work-item]
+      summary: 工作项执行记录
+      operationId: listWorkItemExecutions
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/WorkItemId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/WorkItemExecution"
+
+  /api/v1/products/{productId}/work-items/{workItemId}/activities:
+    get:
+      tags: [work-item]
+      summary: 工作项活动日志
+      operationId: listWorkItemActivities
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/WorkItemId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/WorkItemActivity"
+
+  # -------------------------------------------------------------------------
+  # Workspace-level
+  # -------------------------------------------------------------------------
+  /api/v1/workspaces/{workspaceId}/sprints/active:
+    get:
+      tags: [sprint]
+      summary: 跨产品活跃迭代列表
+      operationId: listActiveSprints
+      security:
+        - bearerAuth: []
+        - workspaceHeader: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./components.yaml#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              allOf:
+                                - $ref: "#/components/schemas/SprintSummary"
+                                - type: object
+                                  properties:
+                                    product_name:
+                                      type: string
+
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: "./components.yaml#/components/securitySchemes/bearerAuth"
+    workspaceHeader:
+      $ref: "./components.yaml#/components/securitySchemes/workspaceHeader"
+
+  parameters:
+    ProductId:
+      name: productId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SprintId:
+      name: sprintId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    WorkItemId:
+      name: workItemId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    SprintStatus:
+      type: string
+      enum: [planning, active, completed, archived]
+
+    WorkItemType:
+      type: string
+      enum: [story, task, bug, epic, release, custom]
+
+    WorkItemPriority:
+      type: string
+      enum: [critical, high, medium, low]
+
+    WorkItemStatus:
+      type: string
+      enum: [open, in_progress, blocked, done, cancelled]
+
+    StageWorkflowTriggerMode:
+      type: string
+      enum: [manual, auto_on_enter, auto_on_exit]
+
+    StageWorkflowBinding:
+      type: object
+      required: [workflow_id]
+      properties:
+        workflow_id:
+          type: string
+          format: uuid
+        workflow_name:
+          type: string
+        trigger_mode:
+          $ref: "#/components/schemas/StageWorkflowTriggerMode"
+        default_parameters:
+          type: object
+          additionalProperties:
+            type: string
+        required_for_exit:
+          type: boolean
+          default: false
+
+    StageGatePolicy:
+      type: object
+      properties:
+        require_branch:
+          type: boolean
+        require_workflow_success:
+          type: array
+          items:
+            type: string
+            format: uuid
+        require_jira_status:
+          type: array
+          items:
+            type: string
+        require_approval:
+          type: boolean
+        protected_branches:
+          type: array
+          items:
+            type: string
+
+    SprintStage:
+      type: object
+      required: [id, key, name, sort_order]
+      properties:
+        id:
+          type: string
+          format: uuid
+        key:
+          type: string
+        name:
+          type: string
+        sort_order:
+          type: integer
+          minimum: 0
+        color:
+          type: string
+        wip_limit:
+          type: integer
+          minimum: 1
+        entry_policy:
+          $ref: "#/components/schemas/StageGatePolicy"
+        workflows:
+          type: array
+          items:
+            $ref: "#/components/schemas/StageWorkflowBinding"
+
+    SprintProcess:
+      type: object
+      required: [id, product_id, name, version, stages]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        version:
+          type: integer
+        is_default:
+          type: boolean
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/SprintStage"
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UpsertSprintProcessRequest:
+      type: object
+      required: [name, stages]
+      properties:
+        name:
+          type: string
+        stages:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/SprintStage"
+
+    SprintExternalRef:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          type: string
+          enum: [jira, tapd, pingcode, feishu]
+        project_key:
+          type: string
+        sprint_id:
+          type: string
+        board_id:
+          type: string
+        sprint_url:
+          type: string
+          format: uri
+
+    SprintSummary:
+      type: object
+      required: [id, product_id, name, status, process_version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        goal:
+          type: string
+        status:
+          $ref: "#/components/schemas/SprintStatus"
+        planned_start:
+          type: string
+          format: date-time
+        planned_end:
+          type: string
+          format: date-time
+        actual_start:
+          type: string
+          format: date-time
+        actual_end:
+          type: string
+          format: date-time
+        owner_id:
+          type: string
+          format: uuid
+        owner_name:
+          type: string
+        process_version:
+          type: integer
+        work_item_count:
+          type: integer
+        done_work_item_count:
+          type: integer
+        external:
+          $ref: "#/components/schemas/SprintExternalRef"
+        legacy_plan_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Sprint:
+      allOf:
+        - $ref: "#/components/schemas/SprintSummary"
+        - type: object
+          required: [process_id, stages]
+          properties:
+            process_id:
+              type: string
+              format: uuid
+            stages:
+              type: array
+              items:
+                $ref: "#/components/schemas/SprintStage"
+
+    CreateSprintRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        goal:
+          type: string
+        planned_start:
+          type: string
+          format: date-time
+        planned_end:
+          type: string
+          format: date-time
+        owner_id:
+          type: string
+          format: uuid
+        process_id:
+          type: string
+          format: uuid
+        external:
+          $ref: "#/components/schemas/SprintExternalRef"
+
+    UpdateSprintRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        goal:
+          type: string
+        planned_start:
+          type: string
+          format: date-time
+        planned_end:
+          type: string
+          format: date-time
+        owner_id:
+          type: string
+          format: uuid
+        external:
+          $ref: "#/components/schemas/SprintExternalRef"
+
+    WorkItemExternalRef:
+      type: object
+      required: [provider, issue_key]
+      properties:
+        provider:
+          type: string
+          enum: [jira, tapd, pingcode, feishu]
+        issue_key:
+          type: string
+        issue_id:
+          type: string
+        issue_type:
+          type: string
+        issue_url:
+          type: string
+          format: uri
+        sync_mode:
+          type: string
+          enum: [link_only, bidirectional]
+          default: link_only
+
+    WorkItemDelivery:
+      type: object
+      properties:
+        branch:
+          type: string
+        commit_sha:
+          type: string
+        image_tags:
+          type: object
+          additionalProperties:
+            type: string
+        last_workflow_run_id:
+          type: string
+          format: uuid
+        last_workflow_status:
+          type: string
+
+    WorkItemCard:
+      type: object
+      required: [id, sprint_id, stage_id, sort_order, type, title, priority, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sprint_id:
+          type: string
+          format: uuid
+        stage_id:
+          type: string
+          format: uuid
+        parent_id:
+          type: string
+          format: uuid
+        sort_order:
+          type: integer
+        type:
+          $ref: "#/components/schemas/WorkItemType"
+        title:
+          type: string
+        priority:
+          $ref: "#/components/schemas/WorkItemPriority"
+        status:
+          $ref: "#/components/schemas/WorkItemStatus"
+        assignee_id:
+          type: string
+          format: uuid
+        assignee_name:
+          type: string
+        project_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        labels:
+          type: array
+          items:
+            type: string
+        external:
+          $ref: "#/components/schemas/WorkItemExternalRef"
+        delivery:
+          $ref: "#/components/schemas/WorkItemDelivery"
+        blocked_reason:
+          type: string
+        version:
+          type: integer
+        updated_at:
+          type: string
+          format: date-time
+
+    WorkItem:
+      allOf:
+        - $ref: "#/components/schemas/WorkItemCard"
+        - type: object
+          properties:
+            description:
+              type: string
+            reporter_id:
+              type: string
+              format: uuid
+            reporter_name:
+              type: string
+            created_by:
+              type: string
+              format: uuid
+            created_at:
+              type: string
+              format: date-time
+
+    CreateWorkItemRequest:
+      type: object
+      required: [stage_id, title]
+      properties:
+        stage_id:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/WorkItemType"
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          $ref: "#/components/schemas/WorkItemPriority"
+        assignee_id:
+          type: string
+          format: uuid
+        project_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        labels:
+          type: array
+          items:
+            type: string
+        parent_id:
+          type: string
+          format: uuid
+        external:
+          $ref: "#/components/schemas/WorkItemExternalRef"
+        sort_order:
+          type: integer
+
+    UpdateWorkItemRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        type:
+          $ref: "#/components/schemas/WorkItemType"
+        priority:
+          $ref: "#/components/schemas/WorkItemPriority"
+        status:
+          $ref: "#/components/schemas/WorkItemStatus"
+        assignee_id:
+          type: string
+          format: uuid
+          nullable: true
+        project_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        labels:
+          type: array
+          items:
+            type: string
+        blocked_reason:
+          type: string
+          nullable: true
+        external:
+          $ref: "#/components/schemas/WorkItemExternalRef"
+
+    MoveWorkItemRequest:
+      type: object
+      required: [stage_id, sort_order, version]
+      properties:
+        stage_id:
+          type: string
+          format: uuid
+        sort_order:
+          type: integer
+          minimum: 0
+        version:
+          type: integer
+          minimum: 0
+
+    ExecuteWorkItemRequest:
+      type: object
+      properties:
+        workflow_id:
+          type: string
+          format: uuid
+        stage_id:
+          type: string
+          format: uuid
+        input:
+          type: object
+          properties:
+            branch:
+              type: string
+            environment_overrides:
+              type: object
+              additionalProperties:
+                type: string
+            variables:
+              type: object
+              additionalProperties:
+                type: string
+
+    LinkJiraIssueRequest:
+      type: object
+      required: [issue_key]
+      properties:
+        issue_key:
+          type: string
+        sync_mode:
+          type: string
+          enum: [link_only, bidirectional]
+          default: link_only
+
+    SprintBoardColumn:
+      type: object
+      required: [stage, work_items, wip_count]
+      properties:
+        stage:
+          $ref: "#/components/schemas/SprintStage"
+        work_items:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkItemCard"
+        wip_count:
+          type: integer
+        wip_limit_exceeded:
+          type: boolean
+
+    SprintBoard:
+      type: object
+      required: [sprint, columns]
+      properties:
+        sprint:
+          $ref: "#/components/schemas/Sprint"
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/SprintBoardColumn"
+
+    WorkItemExecution:
+      type: object
+      required: [id, work_item_id, stage_id, workflow_id, workflow_run_id, triggered_by, status, started_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        work_item_id:
+          type: string
+          format: uuid
+        stage_id:
+          type: string
+          format: uuid
+        workflow_id:
+          type: string
+          format: uuid
+        workflow_name:
+          type: string
+        workflow_run_id:
+          type: string
+          format: uuid
+        triggered_by:
+          type: string
+          format: uuid
+        triggered_by_name:
+          type: string
+        status:
+          type: string
+          enum: [running, success, failed, cancelled]
+        artifacts:
+          type: object
+          properties:
+            branch:
+              type: string
+            commit_sha:
+              type: string
+            images:
+              type: array
+              items:
+                type: object
+                properties:
+                  project_id:
+                    type: string
+                  tag:
+                    type: string
+            deploy_envs:
+              type: array
+              items:
+                type: string
+            logs_url:
+              type: string
+              format: uri
+        error_message:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+
+    WorkItemActivity:
+      type: object
+      required: [id, work_item_id, actor_id, action, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        work_item_id:
+          type: string
+          format: uuid
+        actor_id:
+          type: string
+          format: uuid
+        actor_name:
+          type: string
+        action:
+          type: string
+          enum:
+            - created
+            - updated
+            - moved_stage
+            - assigned
+            - linked_jira
+            - workflow_started
+            - workflow_completed
+            - workflow_failed
+            - comment
+            - blocked
+            - unblocked
+        detail:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+
+    SprintMetrics:
+      type: object
+      required: [sprint_id, total_work_items, done_work_items, blocked_work_items]
+      properties:
+        sprint_id:
+          type: string
+          format: uuid
+        total_work_items:
+          type: integer
+        done_work_items:
+          type: integer
+        blocked_work_items:
+          type: integer
+        burndown:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              remaining:
+                type: integer
+        stage_cycle_time_hours:
+          type: object
+          additionalProperties:
+            type: number
+        deployment_frequency:
+          type: number
+        change_failure_rate:
+          type: number
+
+    ImportJiraSprintRequest:
+      type: object
+      required: [jira_sprint_id]
+      properties:
+        jira_sprint_id:
+          type: string
+        jira_board_id:
+          type: string
+        target_stage_id:
+          type: string
+          format: uuid
+        issue_types:
+          type: array
+          items:
+            type: string
+        sync_mode:
+          type: string
+          enum: [link_only, bidirectional]
+          default: link_only
+
+    ImportJiraSprintResult:
+      type: object
+      required: [sprint_id, imported_count, skipped_count, work_item_ids]
+      properties:
+        sprint_id:
+          type: string
+          format: uuid
+        imported_count:
+          type: integer
+        skipped_count:
+          type: integer
+        work_item_ids:
+          type: array
+          items:
+            type: string
+            format: uuid

@@ -19,6 +19,10 @@ export interface PipelineTask {
   imageRepository?: string;
   environmentId?: string;
   errorMessage?: string;
+  approvalStatus?: string;
+  approvedCount?: number;
+  requiredApprovals?: number;
+  timeoutMinutes?: number;
 }
 
 export interface PipelineStageView {
@@ -91,6 +95,10 @@ export function buildPipelineStages(
         jobTypeLabel: typeLabel,
         status: job.status,
         errorMessage: job.error_message,
+        approvalStatus: job.approval?.status,
+        approvedCount: job.approval?.approved_by?.length ?? 0,
+        requiredApprovals: job.approval?.required_approvals ?? 1,
+        timeoutMinutes: job.approval?.timeout_minutes,
       });
     }
     return { index: stageIndex, name: stage.name, status: stage.status, tasks };

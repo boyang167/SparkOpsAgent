@@ -113,8 +113,13 @@ export async function listWorkspaceWorkflows(ctx: BffContext, workspaceId: strin
   return data.items;
 }
 
-export async function listReleasePlans(ctx: BffContext, workspaceId: string, productId: string) {
-  const data = await ctx.upstream.product.listReleasePlans(workspaceId, productId);
+export async function listReleasePlans(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  sprintId?: string,
+) {
+  const data = await ctx.upstream.product.listReleasePlans(workspaceId, productId, sprintId);
   return data.items;
 }
 
@@ -354,4 +359,239 @@ export function deleteEnvironment(ctx: BffContext, workspaceId: string, productI
 
 export function getEnvironmentStatus(ctx: BffContext, workspaceId: string, productId: string, envId: string) {
   return ctx.upstream.product.getEnvironmentStatus(workspaceId, productId, envId);
+}
+
+export function getSprintProcess(ctx: BffContext, workspaceId: string, productId: string) {
+  return ctx.upstream.product.getSprintProcess(workspaceId, productId);
+}
+
+export function upsertSprintProcess(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").UpsertSprintProcessCommand,
+) {
+  return ctx.upstream.product.upsertSprintProcess(workspaceId, productId, input);
+}
+
+export async function listSprintProcesses(ctx: BffContext, workspaceId: string, productId: string) {
+  const data = await ctx.upstream.product.listSprintProcesses(workspaceId, productId);
+  return data.items;
+}
+
+export function createSprintProcess(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").CreateSprintProcessCommand,
+) {
+  return ctx.upstream.product.createSprintProcess(workspaceId, productId, input);
+}
+
+export function updateSprintProcessById(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  processId: string,
+  input: import("@sparkops/contracts/product").UpsertSprintProcessCommand,
+) {
+  return ctx.upstream.product.updateSprintProcessById(workspaceId, productId, processId, input);
+}
+
+export function deleteSprintProcess(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  processId: string,
+) {
+  return ctx.upstream.product.deleteSprintProcess(workspaceId, productId, processId);
+}
+
+export async function listWorkspaceSprintProcessTemplates(ctx: BffContext, workspaceId: string) {
+  const data = await ctx.upstream.product.listWorkspaceSprintProcessTemplates(workspaceId);
+  return data.items;
+}
+
+export function createWorkspaceSprintProcessTemplate(
+  ctx: BffContext,
+  workspaceId: string,
+  input: import("@sparkops/contracts/product").CreateWorkspaceSprintProcessTemplateCommand,
+) {
+  return ctx.upstream.product.createWorkspaceSprintProcessTemplate(workspaceId, input);
+}
+
+export function deleteWorkspaceSprintProcessTemplate(ctx: BffContext, workspaceId: string, templateId: string) {
+  return ctx.upstream.product.deleteWorkspaceSprintProcessTemplate(workspaceId, templateId);
+}
+
+export function importWorkspaceSprintTemplate(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").ImportWorkspaceSprintTemplateCommand,
+) {
+  return ctx.upstream.product.importWorkspaceSprintTemplate(workspaceId, productId, input);
+}
+
+export async function listSprints(ctx: BffContext, workspaceId: string, productId: string, status?: string) {
+  const data = await ctx.upstream.product.listSprints(workspaceId, productId, status);
+  return data.items;
+}
+
+export function createSprint(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").CreateSprintCommand,
+) {
+  return ctx.upstream.product.createSprint(workspaceId, productId, input);
+}
+
+export function getSprint(ctx: BffContext, workspaceId: string, productId: string, sprintId: string) {
+  return ctx.upstream.product.getSprint(workspaceId, productId, sprintId);
+}
+
+export function getSprintBoard(ctx: BffContext, workspaceId: string, productId: string, sprintId: string) {
+  return ctx.upstream.product.getSprintBoard(workspaceId, productId, sprintId);
+}
+
+export function startSprint(ctx: BffContext, workspaceId: string, productId: string, sprintId: string) {
+  return ctx.upstream.product.startSprint(workspaceId, productId, sprintId);
+}
+
+export function completeSprint(ctx: BffContext, workspaceId: string, productId: string, sprintId: string) {
+  return ctx.upstream.product.completeSprint(workspaceId, productId, sprintId);
+}
+
+export function createWorkItem(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  sprintId: string,
+  input: import("@sparkops/contracts/product").CreateWorkItemCommand,
+) {
+  return ctx.upstream.product.createWorkItem(workspaceId, productId, sprintId, input);
+}
+
+export function getWorkItem(ctx: BffContext, workspaceId: string, productId: string, workItemId: string) {
+  return ctx.upstream.product.getWorkItem(workspaceId, productId, workItemId);
+}
+
+export function updateWorkItem(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  workItemId: string,
+  input: import("@sparkops/contracts/product").UpdateWorkItemCommand,
+) {
+  return ctx.upstream.product.updateWorkItem(workspaceId, productId, workItemId, input);
+}
+
+export function moveWorkItem(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  workItemId: string,
+  input: import("@sparkops/contracts/product").MoveWorkItemCommand,
+) {
+  return ctx.upstream.product.moveWorkItem(workspaceId, productId, workItemId, input);
+}
+
+export function deleteWorkItem(ctx: BffContext, workspaceId: string, productId: string, workItemId: string) {
+  return ctx.upstream.product.deleteWorkItem(workspaceId, productId, workItemId);
+}
+
+export function updateSprint(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  sprintId: string,
+  input: import("@sparkops/contracts/product").UpdateSprintCommand,
+) {
+  return ctx.upstream.product.updateSprint(workspaceId, productId, sprintId, input);
+}
+
+export function executeWorkItem(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  workItemId: string,
+  input?: import("@sparkops/contracts/product").ExecuteWorkItemCommand,
+) {
+  return ctx.upstream.product.executeWorkItem(workspaceId, productId, workItemId, input);
+}
+
+export async function listWorkItemExecutions(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  workItemId: string,
+) {
+  const data = await ctx.upstream.product.listWorkItemExecutions(workspaceId, productId, workItemId);
+  return data.items;
+}
+
+export function importJiraSprint(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  sprintId: string,
+  input: import("@sparkops/contracts/product").ImportJiraSprintCommand,
+) {
+  return ctx.upstream.product.importJiraSprint(workspaceId, productId, sprintId, input);
+}
+
+export function linkJiraIssue(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  workItemId: string,
+  input: import("@sparkops/contracts/product").LinkJiraIssueCommand,
+) {
+  return ctx.upstream.product.linkJiraIssue(workspaceId, productId, workItemId, input);
+}
+
+export function importPmSprint(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  sprintId: string,
+  input: import("@sparkops/contracts/product").ImportPmSprintCommand,
+) {
+  return ctx.upstream.product.importPmSprint(workspaceId, productId, sprintId, input);
+}
+
+export function linkPmIssue(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  workItemId: string,
+  input: import("@sparkops/contracts/product").LinkPmIssueCommand,
+) {
+  return ctx.upstream.product.linkPmIssue(workspaceId, productId, workItemId, input);
+}
+
+export function getSprintBoardWsConfig(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  sprintId: string,
+): import("@sparkops/contracts/product").SprintBoardWsConfig {
+  if (!ctx.token) {
+    throw new Error("authorization required");
+  }
+  return {
+    websocket_path: `/api/v1/products/${productId}/sprints/${sprintId}/board/ws`,
+    access_token: ctx.token,
+    workspace_id: workspaceId,
+  };
+}
+
+export function getSprintMetrics(ctx: BffContext, workspaceId: string, productId: string, sprintId: string) {
+  return ctx.upstream.product.getSprintMetrics(workspaceId, productId, sprintId);
+}
+
+export async function listActiveSprints(ctx: BffContext, workspaceId: string) {
+  const data = await ctx.upstream.product.listActiveSprints(workspaceId);
+  return data.items;
 }

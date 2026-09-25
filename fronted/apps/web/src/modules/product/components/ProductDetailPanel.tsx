@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { product } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
@@ -11,6 +12,8 @@ import { ProductMasterDetail } from "./ProductMasterDetail";
 import { ProductProjectsPanel } from "./ProductProjectsPanel";
 import { ProductWorkflowsPanel } from "./ProductWorkflowsPanel";
 import { ReleasePlansPanel } from "./ReleasePlansPanel";
+import { SprintBoardPanel } from "./SprintBoardPanel";
+import { SprintProcessPanel } from "./SprintProcessPanel";
 import { ProductDetailEmptyState } from "./ProductDetailEmptyState";
 import { productDetailTabIcons } from "./product-detail-icons";
 
@@ -19,19 +22,30 @@ interface ProductDetailPanelProps {
   productId: string;
 }
 
-type Tab = "overview" | "iterations" | "workflows" | "environments" | "projects" | "settings";
+type Tab = "overview" | "iterations" | "releases" | "workflows" | "environments" | "projects" | "settings";
 
 const TABS: Array<{ id: Tab; label: string; icon: ReactNode }> = [
   { id: "overview", label: "概览", icon: productDetailTabIcons.overview },
   { id: "iterations", label: "迭代管理", icon: productDetailTabIcons.iterations },
+  { id: "releases", label: "发布计划", icon: productDetailTabIcons.releases },
   { id: "workflows", label: "工作流", icon: productDetailTabIcons.workflow },
   { id: "environments", label: "环境", icon: productDetailTabIcons.environment },
   { id: "projects", label: "项目配置", icon: productDetailTabIcons.projects },
   { id: "settings", label: "设置", icon: productDetailTabIcons.settings },
 ];
 
+const TAB_IDS = new Set<Tab>(["overview", "iterations", "releases", "workflows", "environments", "projects", "settings"]);
+
+function parseTab(value: string | null): Tab {
+  if (value && TAB_IDS.has(value as Tab)) {
+    return value as Tab;
+  }
+  return "overview";
+}
+
 export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPanelProps) {
-  const [tab, setTab] = useState<Tab>("overview");
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => parseTab(searchParams.get("tab")));
   const [overview, setOverview] = useState<ProductOverviewVM | null>(null);
   const [projects, setProjects] = useState<ProductProjectVM[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +71,10 @@ export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPane
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setTab(parseTab(searchParams.get("tab")));
+  }, [searchParams]);
 
   const title = overview?.display_name?.trim() || overview?.name || "产品";
 
@@ -147,6 +165,12 @@ export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPane
 
       {!error && tab === "iterations" ? (
         <div className="product-detail-body">
+          <SprintBoardPanel workspaceId={workspaceId} productId={productId} />
+        </div>
+      ) : null}
+
+      {!error && tab === "releases" ? (
+        <div className="product-detail-body">
           <ReleasePlansPanel workspaceId={workspaceId} productId={productId} />
         </div>
       ) : null}
@@ -172,10 +196,7 @@ export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPane
       {!error && tab === "settings" ? (
         <div className="product-detail-body">
           <main className="product-master-main">
-            <ProductDetailEmptyState
-              title="设置功能即将上线"
-              description="全局变量、ReleaseFlow 绑定与成员管理将在后续版本接入。"
-            />
+            <SprintProcessPanel workspaceId={workspaceId} productId={productId} />
           </main>
         </div>
       ) : null}

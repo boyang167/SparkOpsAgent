@@ -194,11 +194,21 @@ type workflowRunTriggerPort struct {
 }
 
 func (p *workflowRunTriggerPort) StartForProduct(ctx context.Context, productID kernel.ProductID, workflowID kernel.ProductWorkflowID) (kernel.ProductWorkflowRunID, error) {
+	return p.StartForProductWithInput(ctx, productID, workflowID, kernel.MemberID{}, nil)
+}
+
+func (p *workflowRunTriggerPort) StartForProductWithInput(
+	ctx context.Context,
+	productID kernel.ProductID,
+	workflowID kernel.ProductWorkflowID,
+	actor kernel.MemberID,
+	input map[string]any,
+) (kernel.ProductWorkflowRunID, error) {
 	wsID, err := p.products.ProductWorkspace(ctx, productID)
 	if err != nil {
 		return kernel.ProductWorkflowRunID{}, err
 	}
-	run, err := p.start.Handle(ctx, wsID, productID, workflowID, kernel.MemberID{}, nil)
+	run, err := p.start.Handle(ctx, wsID, productID, workflowID, actor, input)
 	if err != nil {
 		return kernel.ProductWorkflowRunID{}, err
 	}

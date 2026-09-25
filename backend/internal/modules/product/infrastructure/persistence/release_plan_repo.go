@@ -20,6 +20,7 @@ type releasePlanModel struct {
 	ID                  string `gorm:"column:id;primaryKey"`
 	ProductID           string
 	ProductPlanID       *string
+	SprintID            *string
 	Name                string
 	Description         string `gorm:"type:text"`
 	ManagerID           string
@@ -124,6 +125,36 @@ func (r *ReleasePlanRepository) ListPlansByProduct(ctx context.Context, productI
 	if err != nil {
 		return nil, err
 	}
+	return rowsToReleasePlans(rows)
+}
+
+func (r *ReleasePlanRepository) ListPlansByProductAndSprint(ctx context.Context, productID kernel.ProductID, sprintID kernel.SprintID) ([]*model.ReleasePlan, error) {
+	var rows []releasePlanModel
+	err := r.db.WithContext(ctx).
+		Where("product_id = ? AND sprint_id = ?", productID.String(), sprintID.String()).
+		Order("created_at DESC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rowsToReleasePlans(rows)
+}
+
+func (r *ReleasePlanRepository) HasBlockingPlansBySprint(ctx context.Context, sprintID kernel.SprintID) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&releasePlanModel{}).
+		Where("sprint_id = ? AND status IN ?", sprintID.String(), []string{
+			string(model.ReleasePlanStatusExecuting),
+			string(model.ReleasePlanStatusWaitForApproval),
+		}).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func rowsToReleasePlans(rows []releasePlanModel) ([]*model.ReleasePlan, error) {
 	out := make([]*model.ReleasePlan, 0, len(rows))
 	for _, row := range rows {
 		plan, err := rowToReleasePlan(row)
@@ -254,6 +285,10 @@ func toReleasePlanModel(plan *model.ReleasePlan) (releasePlanModel, error) {
 		v := plan.ProductPlanID.String()
 		row.ProductPlanID = &v
 	}
+	if plan.SprintID != nil {
+		v := plan.SprintID.String()
+		row.SprintID = &v
+	}
 	if plan.ApproverID != nil {
 		v := plan.ApproverID.String()
 		row.ApproverID = &v
@@ -291,6 +326,12 @@ func rowToReleasePlan(row releasePlanModel) (*model.ReleasePlan, error) {
 		pp, err := kernel.ParseProductPlanID(*row.ProductPlanID)
 		if err == nil {
 			plan.ProductPlanID = &pp
+		}
+	}
+	if row.SprintID != nil {
+		sid, err := kernel.ParseSprintID(*row.SprintID)
+		if err == nil {
+			plan.SprintID = &sid
 		}
 	}
 	if row.ApproverID != nil {

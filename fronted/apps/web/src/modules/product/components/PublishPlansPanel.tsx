@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { product } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
@@ -58,6 +59,7 @@ export function PublishPlansPanel({ workspaceId, products }: PublishPlansPanelPr
                 <th>计划名称</th>
                 <th>版本</th>
                 <th>描述</th>
+                <th>关联迭代</th>
               </tr>
             </thead>
             <tbody>
@@ -66,6 +68,15 @@ export function PublishPlansPanel({ workspaceId, products }: PublishPlansPanelPr
                   <td>{plan.name}</td>
                   <td>{plan.version ?? "-"}</td>
                   <td>{plan.description ?? "-"}</td>
+                  <td>
+                    {plan.sprint_id ? (
+                      <Link className="text-primary text-sm" href={`/products/${productId}?tab=iterations`}>
+                        查看迭代
+                      </Link>
+                    ) : (
+                      "-"
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

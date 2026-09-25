@@ -43,4 +43,11 @@ type DeploymentTrigger interface {
 
 type WorkflowRunTrigger interface {
 	StartForProduct(ctx context.Context, productID kernel.ProductID, workflowID kernel.ProductWorkflowID) (kernel.ProductWorkflowRunID, error)
+	StartForProductWithInput(
+		ctx context.Context,
+		productID kernel.ProductID,
+		workflowID kernel.ProductWorkflowID,
+		actor kernel.MemberID,
+		input map[string]any,
+	) (kernel.ProductWorkflowRunID, error)
 }

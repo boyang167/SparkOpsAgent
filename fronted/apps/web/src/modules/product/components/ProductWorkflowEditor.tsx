@@ -6,6 +6,7 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Drawer } from "@/components/ui/Drawer";
 import { Modal } from "@/components/ui/Modal";
 import { WorkflowJobPickerModal } from "./WorkflowJobPickerModal";
+import { ApprovalJobConfigDrawer } from "./ApprovalJobConfigDrawer";
 import { BuildJobConfigDrawer } from "./BuildJobConfigDrawer";
 import { DeployJobConfigDrawer } from "./DeployJobConfigDrawer";
 import { BuildNotifyList } from "./BuildNotifyList";
@@ -14,12 +15,12 @@ import {
   emptyStage,
   jobTypeLabel,
   nextJobIndex,
-  stageExecModeLabel,
   upstreamBuildJobs,
   type EditorJob,
   type EditorStage,
 } from "./workflow-editor-utils";
 import { fromNotifyItems, toNotifyItems } from "./workflow-notify";
+import { WorkflowEditorFlowCanvas } from "./WorkflowEditorFlowCanvas";
 import { WorkflowAdvancedPanel, WorkflowTriggersPanel, WorkflowVariablesPanel } from "./WorkflowSidePanels";
 
 interface ProductWorkflowEditorProps {
@@ -315,136 +316,19 @@ export function ProductWorkflowEditor({
         </div>
       ) : (
         <div className="pwf-studio-main">
-          <div className="pwf-flow-canvas">
-            <div className="pwf-flow-track">
-              <div className="pwf-endpoint">
-                <span className="pwf-endpoint-dot">开始</span>
-              </div>
-
-              {stages.map((stage, stageIndex) => (
-                <div key={`stage-wrap-${stageIndex}`} className="pwf-flow-segment">
-                  <div className="pwf-connector">
-                    <span className="pwf-connector-line" />
-                    <button
-                      type="button"
-                      className="pwf-connector-add"
-                      title="在此插入阶段"
-                      onClick={() => insertStage(stageIndex)}
-                    >
-                      +
-                    </button>
-                    <button
-                      type="button"
-                      className="pwf-connector-mode"
-                      onClick={() => openExecMode(stageIndex)}
-                    >
-                      {stageExecModeLabel(stage.exec_mode)}
-                    </button>
-                    <span className="pwf-connector-line" />
-                  </div>
-
-                  <article
-                    className={`pwf-stage-card${
-                      selection?.stageIndex === stageIndex ? " is-active" : ""
-                    }`}
-                  >
-                    <header className="pwf-stage-card-head">
-                      <input
-                        className="pwf-stage-name"
-                        value={stage.name}
-                        onChange={(e) => updateStage(stageIndex, { name: e.target.value })}
-                      />
-                      <button
-                        type="button"
-                        className="pwf-icon-btn"
-                        title="编辑阶段"
-                        onClick={() => openEditStage(stageIndex)}
-                      >
-                        ⚙
-                      </button>
-                    </header>
-
-                    <div className="pwf-stage-jobs">
-                      {stage.jobs.map((job, jobIndex) => (
-                        <button
-                          key={`${job.name}-${jobIndex}`}
-                          type="button"
-                          className={`pwf-task-row${
-                            selection?.kind === "job" &&
-                            selection.stageIndex === stageIndex &&
-                            selection.jobIndex === jobIndex
-                              ? " is-active"
-                              : ""
-                          }`}
-                          onClick={() => setSelection({ kind: "job", stageIndex, jobIndex })}
-                        >
-                          <span className="pwf-task-dot" aria-hidden />
-                          <span className="pwf-task-name">{job.name}</span>
-                          <span className="pwf-task-type">{jobTypeLabel(job.type)}</span>
-                          <span
-                            className="pwf-task-remove"
-                            role="button"
-                            tabIndex={0}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              removeJob(stageIndex, jobIndex);
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                removeJob(stageIndex, jobIndex);
-                              }
-                            }}
-                          >
-                            ×
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="pwf-stage-footer">
-                      <button
-                        type="button"
-                        className="pwf-add-task"
-                        onClick={() => setJobPickerStage(stageIndex)}
-                      >
-                        + 任务
-                      </button>
-                      {stages.length > 1 ? (
-                        <button
-                          type="button"
-                          className="btn btn-ghost text-xs"
-                          onClick={() => removeStage(stageIndex)}
-                        >
-                          删除阶段
-                        </button>
-                      ) : null}
-                    </div>
-                  </article>
-                </div>
-              ))}
-
-              <div className="pwf-flow-segment">
-                <div className="pwf-connector">
-                  <span className="pwf-connector-line" />
-                  <button
-                    type="button"
-                    className="pwf-connector-add is-stage"
-                    title="添加阶段"
-                    onClick={() => insertStage(stages.length)}
-                  >
-                    +
-                  </button>
-                  <span className="pwf-connector-label">+ 阶段</span>
-                  <span className="pwf-connector-line" />
-                </div>
-                <div className="pwf-endpoint">
-                  <span className="pwf-endpoint-dot">结束</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          <WorkflowEditorFlowCanvas
+            stages={stages}
+            selection={selection}
+            onStagesChange={onStagesChange}
+            onSelectionChange={setSelection}
+            onInsertStage={insertStage}
+            onOpenExecMode={openExecMode}
+            onOpenEditStage={openEditStage}
+            onRemoveStage={removeStage}
+            onAddJob={(stageIndex) => setJobPickerStage(stageIndex)}
+            onRemoveJob={removeJob}
+            onUpdateStageName={(stageIndex, name) => updateStage(stageIndex, { name })}
+          />
 
           <aside className="pwf-rail" aria-label="工作流配置">
             {(
@@ -612,13 +496,35 @@ export function ProductWorkflowEditor({
         }}
       />
 
+      <ApprovalJobConfigDrawer
+        open={selection?.kind === "job" && selectedJob?.type === "sparkops-approval"}
+        workspaceId={workspaceId}
+        jobName={selectedJob?.name ?? ""}
+        spec={selectedJob?.spec}
+        onClose={() => setSelection(null)}
+        onConfirm={(nextName, nextSpec) => {
+          if (!selection || selection.kind !== "job") return;
+          updateJob(selection.stageIndex, selection.jobIndex, { name: nextName, spec: nextSpec });
+          setSelection(null);
+        }}
+      />
+
       <Drawer
-        open={selection?.kind === "job" && selectedJob?.type !== "sparkops-build" && selectedJob?.type !== "sparkops-deploy"}
+        open={
+          selection?.kind === "job" &&
+          selectedJob?.type !== "sparkops-build" &&
+          selectedJob?.type !== "sparkops-deploy" &&
+          selectedJob?.type !== "sparkops-approval"
+        }
         onClose={() => setSelection(null)}
         title={selectedJob ? `任务 · ${selectedJob.name}` : "属性"}
         description={selectedJob ? jobTypeLabel(selectedJob.type) : "配置任务参数"}
       >
-        {selection?.kind === "job" && selectedJob && selectedJob.type !== "sparkops-build" && selectedJob.type !== "sparkops-deploy" ? (
+        {selection?.kind === "job" &&
+        selectedJob &&
+        selectedJob.type !== "sparkops-build" &&
+        selectedJob.type !== "sparkops-deploy" &&
+        selectedJob.type !== "sparkops-approval" ? (
           <div className="stack-sm">
             <label className="field">
               <span className="text-xs text-muted">任务名称</span>
@@ -669,22 +575,6 @@ export function ProductWorkflowEditor({
               </>
             ) : null}
 
-            {selectedJob.type === "sparkops-approval" ? (
-              <label className="field">
-                <span className="text-xs text-muted">超时（分钟）</span>
-                <input
-                  className="input"
-                  type="number"
-                  min={1}
-                  value={Number(selectedJob.spec?.timeout_minutes ?? 60)}
-                  onChange={(e) =>
-                    updateJobSpec(selection.stageIndex, selection.jobIndex, {
-                      timeout_minutes: Number(e.target.value) || 60,
-                    })
-                  }
-                />
-              </label>
-            ) : null}
           </div>
         ) : null}
       </Drawer>

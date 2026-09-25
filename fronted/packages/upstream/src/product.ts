@@ -182,9 +182,10 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
-    async listReleasePlans(workspaceId: string, productId: string) {
+    async listReleasePlans(workspaceId: string, productId: string, sprintId?: string) {
+      const query = sprintId ? `?sprint_id=${encodeURIComponent(sprintId)}` : "";
       return upstreamFetch<{ items: ReleasePlanVM[] }>(
-        `/api/v1/products/${productId}/release-plans`,
+        `/api/v1/products/${productId}/release-plans${query}`,
         { method: "GET", options: { ...options, workspaceId } },
       );
     },
@@ -450,6 +451,286 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
     async getEnvironmentStatus(workspaceId: string, productId: string, envId: string) {
       return upstreamFetch<import("@sparkops/contracts/product").EnvironmentStatusVM>(
         `/api/v1/products/${productId}/environments/${envId}/status`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async getSprintProcess(workspaceId: string, productId: string) {
+      return upstreamFetch<import("@sparkops/contracts/product").SprintProcessVM>(
+        `/api/v1/products/${productId}/sprint-process`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async upsertSprintProcess(
+      workspaceId: string,
+      productId: string,
+      input: import("@sparkops/contracts/product").UpsertSprintProcessCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/product").SprintProcessVM>(
+        `/api/v1/products/${productId}/sprint-process`,
+        { method: "PUT", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async listSprintProcesses(workspaceId: string, productId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/product").SprintProcessVM[] }>(
+        `/api/v1/products/${productId}/sprint-processes`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async createSprintProcess(
+      workspaceId: string,
+      productId: string,
+      input: import("@sparkops/contracts/product").CreateSprintProcessCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/product").SprintProcessVM>(
+        `/api/v1/products/${productId}/sprint-processes`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async updateSprintProcessById(
+      workspaceId: string,
+      productId: string,
+      processId: string,
+      input: import("@sparkops/contracts/product").UpsertSprintProcessCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/product").SprintProcessVM>(
+        `/api/v1/products/${productId}/sprint-processes/${processId}`,
+        { method: "PUT", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async deleteSprintProcess(workspaceId: string, productId: string, processId: string) {
+      return upstreamFetch<void>(
+        `/api/v1/products/${productId}/sprint-processes/${processId}`,
+        { method: "DELETE", options: { ...options, workspaceId } },
+      );
+    },
+
+    async listWorkspaceSprintProcessTemplates(workspaceId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/product").WorkspaceSprintProcessTemplateVM[] }>(
+        `/api/v1/workspaces/${workspaceId}/sprint-process-templates`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async createWorkspaceSprintProcessTemplate(
+      workspaceId: string,
+      input: import("@sparkops/contracts/product").CreateWorkspaceSprintProcessTemplateCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/product").WorkspaceSprintProcessTemplateVM>(
+        `/api/v1/workspaces/${workspaceId}/sprint-process-templates`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async deleteWorkspaceSprintProcessTemplate(workspaceId: string, templateId: string) {
+      return upstreamFetch<void>(
+        `/api/v1/workspaces/${workspaceId}/sprint-process-templates/${templateId}`,
+        { method: "DELETE", options: { ...options, workspaceId } },
+      );
+    },
+
+    async importWorkspaceSprintTemplate(
+      workspaceId: string,
+      productId: string,
+      input: import("@sparkops/contracts/product").ImportWorkspaceSprintTemplateCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/product").SprintProcessVM>(
+        `/api/v1/workspaces/${workspaceId}/products/${productId}/sprint-processes/import-workspace`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async listSprints(workspaceId: string, productId: string, status?: string) {
+      const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+      return upstreamFetch<{ items: import("@sparkops/contracts/product").SprintSummaryVM[] }>(
+        `/api/v1/products/${productId}/sprints${qs}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async createSprint(
+      workspaceId: string,
+      productId: string,
+      input: import("@sparkops/contracts/product").CreateSprintCommand,
+    ) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/sprints`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async getSprint(workspaceId: string, productId: string, sprintId: string) {
+      return upstreamFetch<import("@sparkops/contracts/product").SprintVM>(
+        `/api/v1/products/${productId}/sprints/${sprintId}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async getSprintBoard(workspaceId: string, productId: string, sprintId: string) {
+      return upstreamFetch<import("@sparkops/contracts/product").SprintBoardVM>(
+        `/api/v1/products/${productId}/sprints/${sprintId}/board`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async startSprint(workspaceId: string, productId: string, sprintId: string) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/sprints/${sprintId}/start`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async completeSprint(workspaceId: string, productId: string, sprintId: string) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/sprints/${sprintId}/complete`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async createWorkItem(
+      workspaceId: string,
+      productId: string,
+      sprintId: string,
+      input: import("@sparkops/contracts/product").CreateWorkItemCommand,
+    ) {
+      return upstreamFetch<{ id: string }>(
+        `/api/v1/products/${productId}/sprints/${sprintId}/work-items`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async getWorkItem(workspaceId: string, productId: string, workItemId: string) {
+      return upstreamFetch<import("@sparkops/contracts/product").WorkItemVM>(
+        `/api/v1/products/${productId}/work-items/${workItemId}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async updateWorkItem(
+      workspaceId: string,
+      productId: string,
+      workItemId: string,
+      input: import("@sparkops/contracts/product").UpdateWorkItemCommand,
+    ) {
+      return upstreamFetch<{ id: string; version: number }>(
+        `/api/v1/products/${productId}/work-items/${workItemId}`,
+        { method: "PATCH", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async moveWorkItem(
+      workspaceId: string,
+      productId: string,
+      workItemId: string,
+      input: import("@sparkops/contracts/product").MoveWorkItemCommand,
+    ) {
+      return upstreamFetch<{ id: string; stage_id: string; version: number }>(
+        `/api/v1/products/${productId}/work-items/${workItemId}/move`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async deleteWorkItem(workspaceId: string, productId: string, workItemId: string) {
+      return upstreamFetch<void>(
+        `/api/v1/products/${productId}/work-items/${workItemId}`,
+        { method: "DELETE", options: { ...options, workspaceId } },
+      );
+    },
+
+    async updateSprint(
+      workspaceId: string,
+      productId: string,
+      sprintId: string,
+      input: import("@sparkops/contracts/product").UpdateSprintCommand,
+    ) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/sprints/${sprintId}`,
+        { method: "PATCH", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async executeWorkItem(
+      workspaceId: string,
+      productId: string,
+      workItemId: string,
+      input?: import("@sparkops/contracts/product").ExecuteWorkItemCommand,
+    ) {
+      return upstreamFetch<{ execution_id: string; workflow_run_id: string }>(
+        `/api/v1/products/${productId}/work-items/${workItemId}/execute`,
+        { method: "POST", body: JSON.stringify(input ?? {}), options: { ...options, workspaceId } },
+      );
+    },
+
+    async listWorkItemExecutions(workspaceId: string, productId: string, workItemId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/product").WorkItemExecutionVM[] }>(
+        `/api/v1/products/${productId}/work-items/${workItemId}/executions`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async importJiraSprint(
+      workspaceId: string,
+      productId: string,
+      sprintId: string,
+      input: import("@sparkops/contracts/product").ImportJiraSprintCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/product").ImportJiraSprintResult>(
+        `/api/v1/products/${productId}/sprints/${sprintId}/import/jira`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async linkJiraIssue(
+      workspaceId: string,
+      productId: string,
+      workItemId: string,
+      input: import("@sparkops/contracts/product").LinkJiraIssueCommand,
+    ) {
+      return upstreamFetch<{ id: string; external?: import("@sparkops/contracts/product").WorkItemExternalRef }>(
+        `/api/v1/products/${productId}/work-items/${workItemId}/link-jira`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async importPmSprint(
+      workspaceId: string,
+      productId: string,
+      sprintId: string,
+      input: import("@sparkops/contracts/product").ImportPmSprintCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/product").ImportPmSprintResult>(
+        `/api/v1/products/${productId}/sprints/${sprintId}/import/pm`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async linkPmIssue(
+      workspaceId: string,
+      productId: string,
+      workItemId: string,
+      input: import("@sparkops/contracts/product").LinkPmIssueCommand,
+    ) {
+      return upstreamFetch<{ id: string; external?: import("@sparkops/contracts/product").WorkItemExternalRef }>(
+        `/api/v1/products/${productId}/work-items/${workItemId}/link-pm`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async getSprintMetrics(workspaceId: string, productId: string, sprintId: string) {
+      return upstreamFetch<import("@sparkops/contracts/product").SprintMetricsVM>(
+        `/api/v1/products/${productId}/sprints/${sprintId}/metrics`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async listActiveSprints(workspaceId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/product").ActiveSprintSummaryVM[] }>(
+        `/api/v1/workspaces/${workspaceId}/sprints/active`,
         { method: "GET", options: { ...options, workspaceId } },
       );
     },

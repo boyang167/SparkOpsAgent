@@ -57,6 +57,7 @@ type ReleasePlan struct {
 	ID                  kernel.ReleasePlanID
 	ProductID           kernel.ProductID
 	ProductPlanID       *kernel.ProductPlanID
+	SprintID            *kernel.SprintID
 	Name                string
 	Description         string
 	ManagerID           kernel.MemberID

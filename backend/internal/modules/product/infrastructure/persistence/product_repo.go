@@ -28,6 +28,9 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := releasePlanAutoMigrate(db); err != nil {
 		return err
 	}
+	if err := sprintAutoMigrate(db); err != nil {
+		return err
+	}
 	return environmentAutoMigrate(db)
 }
 

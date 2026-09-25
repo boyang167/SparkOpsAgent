@@ -18,26 +18,42 @@ type CreateReleasePlanInput struct {
 	ReleaseWindowStart time.Time
 	ReleaseWindowEnd   time.Time
 	ApprovalEnabled    bool
+	SprintID           *kernel.SprintID
 }
 
 type CreateReleasePlanHandler struct {
 	products repository.ProductRepository
 	plans    repository.ReleasePlanRepository
+	sprints  repository.SprintRepository
 }
 
-func NewCreateReleasePlanHandler(products repository.ProductRepository, plans repository.ReleasePlanRepository) *CreateReleasePlanHandler {
-	return &CreateReleasePlanHandler{products: products, plans: plans}
+func NewCreateReleasePlanHandler(products repository.ProductRepository, plans repository.ReleasePlanRepository, sprints repository.SprintRepository) *CreateReleasePlanHandler {
+	return &CreateReleasePlanHandler{products: products, plans: plans, sprints: sprints}
 }
 
 func (h *CreateReleasePlanHandler) Handle(ctx context.Context, productID kernel.ProductID, actor kernel.MemberID, input CreateReleasePlanInput) (*model.ReleasePlan, error) {
 	if _, err := h.products.FindProductByID(ctx, productID); err != nil {
 		return nil, err
 	}
+	if input.SprintID != nil {
+		sprint, err := h.sprints.FindSprintByID(ctx, *input.SprintID)
+		if err != nil {
+			return nil, err
+		}
+		if sprint.ProductID != productID {
+			return nil, domain.ErrSprintNotFound
+		}
+	}
 	plan := model.NewReleasePlan(productID, input.Name, input.Description, actor, actor, input.ReleaseWindowStart, input.ReleaseWindowEnd, model.ApprovalConfig{Enabled: input.ApprovalEnabled})
+	plan.SprintID = input.SprintID
 	if err := h.plans.SavePlan(ctx, plan); err != nil {
 		return nil, err
 	}
-	_ = h.audit(ctx, plan.ID, actor, "create", map[string]any{"name": plan.Name})
+	auditDetail := map[string]any{"name": plan.Name}
+	if input.SprintID != nil {
+		auditDetail["sprint_id"] = input.SprintID.String()
+	}
+	_ = h.audit(ctx, plan.ID, actor, "create", auditDetail)
 	return plan, nil
 }
 

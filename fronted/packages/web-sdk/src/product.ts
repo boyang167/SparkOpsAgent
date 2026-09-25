@@ -190,9 +190,10 @@ export async function listWorkspaceWorkflows(workspaceId: string) {
   return data.items;
 }
 
-export async function listReleasePlans(workspaceId: string, productId: string) {
+export async function listReleasePlans(workspaceId: string, productId: string, sprintId?: string) {
+  const query = sprintId ? `?sprint_id=${encodeURIComponent(sprintId)}` : "";
   const data = await bffFetch<{ items: import("@sparkops/contracts/product").ReleasePlanVM[] }>(
-    `/workspaces/${workspaceId}/products/${productId}/release-plans`,
+    `/workspaces/${workspaceId}/products/${productId}/release-plans${query}`,
     { workspaceId },
   );
   return data.items;
@@ -483,4 +484,289 @@ export function getEnvironmentStatus(workspaceId: string, productId: string, env
     `/workspaces/${workspaceId}/products/${productId}/environments/${envId}/status`,
     { workspaceId },
   );
+}
+
+export function getSprintProcess(workspaceId: string, productId: string) {
+  return bffFetch<import("@sparkops/contracts/product").SprintProcessVM>(
+    `/workspaces/${workspaceId}/products/${productId}/sprint-process`,
+    { workspaceId },
+  );
+}
+
+export function upsertSprintProcess(
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").UpsertSprintProcessCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/product").SprintProcessVM>(
+    `/workspaces/${workspaceId}/products/${productId}/sprint-process`,
+    { method: "PUT", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export async function listSprintProcesses(workspaceId: string, productId: string) {
+  const data = await bffFetch<{ items: import("@sparkops/contracts/product").SprintProcessVM[] }>(
+    `/workspaces/${workspaceId}/products/${productId}/sprint-processes`,
+    { workspaceId },
+  );
+  return data.items;
+}
+
+export function createSprintProcess(
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").CreateSprintProcessCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/product").SprintProcessVM>(
+    `/workspaces/${workspaceId}/products/${productId}/sprint-processes`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function updateSprintProcessById(
+  workspaceId: string,
+  productId: string,
+  processId: string,
+  input: import("@sparkops/contracts/product").UpsertSprintProcessCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/product").SprintProcessVM>(
+    `/workspaces/${workspaceId}/products/${productId}/sprint-processes/${processId}`,
+    { method: "PUT", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function deleteSprintProcess(workspaceId: string, productId: string, processId: string) {
+  return bffFetch<void>(
+    `/workspaces/${workspaceId}/products/${productId}/sprint-processes/${processId}`,
+    { method: "DELETE", workspaceId },
+  );
+}
+
+export async function listWorkspaceSprintProcessTemplates(workspaceId: string) {
+  const data = await bffFetch<{ items: import("@sparkops/contracts/product").WorkspaceSprintProcessTemplateVM[] }>(
+    `/workspaces/${workspaceId}/sprint-process-templates`,
+    { workspaceId },
+  );
+  return data.items;
+}
+
+export function createWorkspaceSprintProcessTemplate(
+  workspaceId: string,
+  input: import("@sparkops/contracts/product").CreateWorkspaceSprintProcessTemplateCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/product").WorkspaceSprintProcessTemplateVM>(
+    `/workspaces/${workspaceId}/sprint-process-templates`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function deleteWorkspaceSprintProcessTemplate(workspaceId: string, templateId: string) {
+  return bffFetch<void>(`/workspaces/${workspaceId}/sprint-process-templates/${templateId}`, {
+    method: "DELETE",
+    workspaceId,
+  });
+}
+
+export function importWorkspaceSprintTemplate(
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").ImportWorkspaceSprintTemplateCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/product").SprintProcessVM>(
+    `/workspaces/${workspaceId}/products/${productId}/sprint-processes/import-workspace`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export async function listSprints(workspaceId: string, productId: string, status?: string) {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  const data = await bffFetch<{ items: import("@sparkops/contracts/product").SprintSummaryVM[] }>(
+    `/workspaces/${workspaceId}/products/${productId}/sprints${qs}`,
+    { workspaceId },
+  );
+  return data.items;
+}
+
+export function createSprint(
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").CreateSprintCommand,
+) {
+  return bffFetch<{ id: string; status: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/sprints`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function getSprintBoard(workspaceId: string, productId: string, sprintId: string) {
+  return bffFetch<import("@sparkops/contracts/product").SprintBoardVM>(
+    `/workspaces/${workspaceId}/products/${productId}/sprints/${sprintId}/board`,
+    { workspaceId },
+  );
+}
+
+export function startSprint(workspaceId: string, productId: string, sprintId: string) {
+  return bffFetch<{ id: string; status: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/sprints/${sprintId}/start`,
+    { method: "POST", workspaceId },
+  );
+}
+
+export function completeSprint(workspaceId: string, productId: string, sprintId: string) {
+  return bffFetch<{ id: string; status: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/sprints/${sprintId}/complete`,
+    { method: "POST", workspaceId },
+  );
+}
+
+export function createWorkItem(
+  workspaceId: string,
+  productId: string,
+  sprintId: string,
+  input: import("@sparkops/contracts/product").CreateWorkItemCommand,
+) {
+  return bffFetch<{ id: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/sprints/${sprintId}/work-items`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function getWorkItem(workspaceId: string, productId: string, workItemId: string) {
+  return bffFetch<import("@sparkops/contracts/product").WorkItemVM>(
+    `/workspaces/${workspaceId}/products/${productId}/work-items/${workItemId}`,
+    { workspaceId },
+  );
+}
+
+export function updateWorkItem(
+  workspaceId: string,
+  productId: string,
+  workItemId: string,
+  input: import("@sparkops/contracts/product").UpdateWorkItemCommand,
+) {
+  return bffFetch<{ id: string; version: number }>(
+    `/workspaces/${workspaceId}/products/${productId}/work-items/${workItemId}`,
+    { method: "PATCH", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function moveWorkItem(
+  workspaceId: string,
+  productId: string,
+  workItemId: string,
+  input: import("@sparkops/contracts/product").MoveWorkItemCommand,
+) {
+  return bffFetch<{ id: string; stage_id: string; version: number }>(
+    `/workspaces/${workspaceId}/products/${productId}/work-items/${workItemId}/move`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function deleteWorkItem(workspaceId: string, productId: string, workItemId: string) {
+  return bffFetch<void>(
+    `/workspaces/${workspaceId}/products/${productId}/work-items/${workItemId}`,
+    { method: "DELETE", workspaceId },
+  );
+}
+
+export function updateSprint(
+  workspaceId: string,
+  productId: string,
+  sprintId: string,
+  input: import("@sparkops/contracts/product").UpdateSprintCommand,
+) {
+  return bffFetch<{ id: string; status: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/sprints/${sprintId}`,
+    { method: "PATCH", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function executeWorkItem(
+  workspaceId: string,
+  productId: string,
+  workItemId: string,
+  input?: import("@sparkops/contracts/product").ExecuteWorkItemCommand,
+) {
+  return bffFetch<{ execution_id: string; workflow_run_id: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/work-items/${workItemId}/execute`,
+    { method: "POST", body: JSON.stringify(input ?? {}), workspaceId },
+  );
+}
+
+export async function listWorkItemExecutions(workspaceId: string, productId: string, workItemId: string) {
+  const data = await bffFetch<{ items: import("@sparkops/contracts/product").WorkItemExecutionVM[] }>(
+    `/workspaces/${workspaceId}/products/${productId}/work-items/${workItemId}/executions`,
+    { workspaceId },
+  );
+  return data.items;
+}
+
+export function importJiraSprint(
+  workspaceId: string,
+  productId: string,
+  sprintId: string,
+  input: import("@sparkops/contracts/product").ImportJiraSprintCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/product").ImportJiraSprintResult>(
+    `/workspaces/${workspaceId}/products/${productId}/sprints/${sprintId}/import/jira`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function linkJiraIssue(
+  workspaceId: string,
+  productId: string,
+  workItemId: string,
+  input: import("@sparkops/contracts/product").LinkJiraIssueCommand,
+) {
+  return bffFetch<{ id: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/work-items/${workItemId}/link-jira`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function importPmSprint(
+  workspaceId: string,
+  productId: string,
+  sprintId: string,
+  input: import("@sparkops/contracts/product").ImportPmSprintCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/product").ImportPmSprintResult>(
+    `/workspaces/${workspaceId}/products/${productId}/sprints/${sprintId}/import/pm`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function linkPmIssue(
+  workspaceId: string,
+  productId: string,
+  workItemId: string,
+  input: import("@sparkops/contracts/product").LinkPmIssueCommand,
+) {
+  return bffFetch<{ id: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/work-items/${workItemId}/link-pm`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function getSprintBoardWsConfig(workspaceId: string, productId: string, sprintId: string) {
+  return bffFetch<import("@sparkops/contracts/product").SprintBoardWsConfig>(
+    `/workspaces/${workspaceId}/products/${productId}/sprints/${sprintId}/board/ws-config`,
+    { workspaceId },
+  );
+}
+
+export function getSprintMetrics(workspaceId: string, productId: string, sprintId: string) {
+  return bffFetch<import("@sparkops/contracts/product").SprintMetricsVM>(
+    `/workspaces/${workspaceId}/products/${productId}/sprints/${sprintId}/metrics`,
+    { workspaceId },
+  );
+}
+
+export async function listActiveSprints(workspaceId: string) {
+  const data = await bffFetch<{ items: import("@sparkops/contracts/product").ActiveSprintSummaryVM[] }>(
+    `/workspaces/${workspaceId}/sprints/active`,
+    { workspaceId },
+  );
+  return data.items;
 }

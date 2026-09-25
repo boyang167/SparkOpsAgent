@@ -17,6 +17,9 @@ func RequireWorkspace() gin.HandlerFunc {
 			raw = c.Param("wsId")
 		}
 		if raw == "" {
+			raw = c.Query("workspace_id")
+		}
+		if raw == "" {
 			Fail(c, "TENANT_WORKSPACE_REQUIRED", "X-Workspace-Id header required", http.StatusBadRequest)
 			c.Abort()
 			return

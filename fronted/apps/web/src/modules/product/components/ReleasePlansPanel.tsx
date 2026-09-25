@@ -12,6 +12,10 @@ import { ProductMasterDetail } from "./ProductMasterDetail";
 interface ReleasePlansPanelProps {
   workspaceId: string;
   productId: string;
+  /** 限定某次迭代的发布计划；传入后创建计划会自动关联 sprint_id */
+  sprintId?: string;
+  /** 嵌入迭代看板时使用，调整侧栏文案 */
+  embedded?: boolean;
 }
 
 function defaultWindow() {
@@ -27,7 +31,7 @@ function statusTone(status: string): string {
   return "text-muted-foreground";
 }
 
-export function ReleasePlansPanel({ workspaceId, productId }: ReleasePlansPanelProps) {
+export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }: ReleasePlansPanelProps) {
   const [items, setItems] = useState<ReleasePlanVM[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<ReleasePlanVM | null>(null);
@@ -45,7 +49,7 @@ export function ReleasePlansPanel({ workspaceId, productId }: ReleasePlansPanelP
     setLoading(true);
     setError(null);
     try {
-      const list = await product.listReleasePlans(workspaceId, productId);
+      const list = await product.listReleasePlans(workspaceId, productId, sprintId);
       setItems(list);
       setSelectedId((prev) => {
         if (prev && list.some((item) => item.id === prev)) return prev;
@@ -56,7 +60,7 @@ export function ReleasePlansPanel({ workspaceId, productId }: ReleasePlansPanelP
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, productId]);
+  }, [workspaceId, productId, sprintId]);
 
   useEffect(() => {
     void load();
@@ -130,6 +134,7 @@ export function ReleasePlansPanel({ workspaceId, productId }: ReleasePlansPanelP
         release_window_start: win.start,
         release_window_end: win.end,
         approval_enabled: true,
+        ...(sprintId ? { sprint_id: sprintId } : {}),
       });
       setName("");
       setCreateOpen(false);
@@ -307,7 +312,7 @@ export function ReleasePlansPanel({ workspaceId, productId }: ReleasePlansPanelP
       ) : null}
 
       <ProductMasterDetail
-        sidebarTitle="迭代计划"
+        sidebarTitle={embedded ? "本迭代发布" : "发布计划"}
         searchPlaceholder="搜索计划"
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -320,8 +325,12 @@ export function ReleasePlansPanel({ workspaceId, productId }: ReleasePlansPanelP
         showMain={Boolean(selected)}
         emptyMain={
           <ProductDetailEmptyState
-            title="暂无发布计划，请点击 + 新建"
-            description="创建迭代计划后，可规划发布项、提交审批并执行发布。"
+            title={embedded ? "本迭代暂无发布计划" : "暂无发布计划，请点击 + 新建"}
+            description={
+              embedded
+                ? "为本迭代创建发布计划，规划发布项并执行上线。"
+                : "创建迭代计划后，可规划发布项、提交审批并执行发布。"
+            }
             action={
               <button type="button" className="btn btn-primary text-sm" onClick={() => setCreateOpen(true)}>
                 新建发布计划

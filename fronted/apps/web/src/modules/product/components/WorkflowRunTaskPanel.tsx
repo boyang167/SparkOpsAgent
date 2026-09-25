@@ -201,7 +201,13 @@ export function WorkflowRunTaskPanel({
 
       {task.kind === "approval" && task.status === "running" ? (
         <div className="wf-run-live-panel-approval">
-          <div className="wf-run-live-panel-note text-sm text-muted">该任务等待人工审批。</div>
+          <div className="wf-run-live-panel-note text-sm text-muted">
+            该任务等待人工审批。
+            {task.requiredApprovals && task.requiredApprovals > 1
+              ? ` 已通过 ${task.approvedCount ?? 0}/${task.requiredApprovals}。`
+              : null}
+            {task.timeoutMinutes ? ` 超时 ${task.timeoutMinutes} 分钟。` : null}
+          </div>
           <div className="pwf-run-actions">
             <button
               type="button"

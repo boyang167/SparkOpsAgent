@@ -16,6 +16,9 @@ func RequireAuth(tokens *TokenProvider) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		raw := extractBearer(c.GetHeader("Authorization"))
 		if raw == "" {
+			raw = strings.TrimSpace(c.Query("access_token"))
+		}
+		if raw == "" {
 			httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
 			c.Abort()
 			return

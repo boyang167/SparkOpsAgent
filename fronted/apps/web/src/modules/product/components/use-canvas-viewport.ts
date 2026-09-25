@@ -16,7 +16,38 @@ export function clampScale(value: number): number {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number(value.toFixed(2))));
 }
 
-export function useCanvasViewport(initial: CanvasViewport = { scale: 1, offsetX: 0, offsetY: 0 }) {
+export function computeFitViewport(
+  containerWidth: number,
+  containerHeight: number,
+  contentWidth: number,
+  contentHeight: number,
+  padding = 40,
+): CanvasViewport {
+  if (containerWidth <= 0 || containerHeight <= 0) {
+    return { scale: 1, offsetX: 0, offsetY: 0 };
+  }
+  if (contentWidth <= 0 || contentHeight <= 0) {
+    return { scale: 1, offsetX: padding, offsetY: padding };
+  }
+
+  const availableWidth = Math.max(containerWidth - padding * 2, 1);
+  const availableHeight = Math.max(containerHeight - padding * 2, 1);
+  const scale = clampScale(Math.min(1, availableWidth / contentWidth, availableHeight / contentHeight));
+  return {
+    scale,
+    offsetX: padding + (availableWidth - contentWidth * scale) / 2,
+    offsetY: padding + (availableHeight - contentHeight * scale) / 2,
+  };
+}
+
+interface UseCanvasViewportOptions {
+  panBlockSelector?: string;
+}
+
+export function useCanvasViewport(
+  initial: CanvasViewport = { scale: 1, offsetX: 0, offsetY: 0 },
+  options: UseCanvasViewportOptions = {},
+) {
   const [viewport, setViewport] = useState<CanvasViewport>(initial);
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
@@ -29,10 +60,25 @@ export function useCanvasViewport(initial: CanvasViewport = { scale: 1, offsetX:
     setViewport({ scale: 1, offsetX: 0, offsetY: 0 });
   }, []);
 
+  const fitToView = useCallback((container: HTMLElement | null, content: HTMLElement | null, padding = 40) => {
+    if (!container || !content) return;
+    setViewport(
+      computeFitViewport(
+        container.clientWidth,
+        container.clientHeight,
+        content.offsetWidth,
+        content.offsetHeight,
+        padding,
+      ),
+    );
+  }, []);
+
+  const panBlockSelector = options.panBlockSelector ?? ".wf-run-live-task";
+
   const onPointerDown = useCallback((event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
-    if (target.closest(".wf-run-live-task")) return;
+    if (panBlockSelector && target.closest(panBlockSelector)) return;
     dragRef.current = {
       startX: event.clientX,
       startY: event.clientY,
@@ -41,7 +87,7 @@ export function useCanvasViewport(initial: CanvasViewport = { scale: 1, offsetX:
     };
     setDragging(true);
     event.currentTarget.setPointerCapture(event.pointerId);
-  }, [viewport.offsetX, viewport.offsetY]);
+  }, [viewport.offsetX, viewport.offsetY, panBlockSelector]);
 
   const onPointerMove = useCallback((event: PointerEvent<HTMLElement>) => {
     const drag = dragRef.current;
@@ -72,6 +118,7 @@ export function useCanvasViewport(initial: CanvasViewport = { scale: 1, offsetX:
     viewport,
     zoomBy,
     reset,
+    fitToView,
     zoomIn: () => zoomBy(SCALE_STEP),
     zoomOut: () => zoomBy(-SCALE_STEP),
     onPointerDown,

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/port"
@@ -75,20 +76,29 @@ func (h *UpdateProductHandler) Handle(ctx context.Context, wsID kernel.Workspace
 }
 
 type CreateProductPlanHandler struct {
-	repo repository.ProductRepository
+	repo        repository.ProductRepository
+	sprints     repository.SprintRepository
+	seedProcess func(ctx context.Context, productID kernel.ProductID, actor kernel.MemberID) (*model.SprintProcess, error)
 }
 
-func NewCreateProductPlanHandler(repo repository.ProductRepository) *CreateProductPlanHandler {
-	return &CreateProductPlanHandler{repo: repo}
+func NewCreateProductPlanHandler(
+	repo repository.ProductRepository,
+	sprints repository.SprintRepository,
+	seedProcess func(ctx context.Context, productID kernel.ProductID, actor kernel.MemberID) (*model.SprintProcess, error),
+) *CreateProductPlanHandler {
+	return &CreateProductPlanHandler{repo: repo, sprints: sprints, seedProcess: seedProcess}
 }
 
-func (h *CreateProductPlanHandler) Handle(ctx context.Context, productID kernel.ProductID, name, version, description string, otherInfo map[string]any) (*model.ProductPlan, error) {
+func (h *CreateProductPlanHandler) Handle(ctx context.Context, productID kernel.ProductID, actor kernel.MemberID, name, version, description string, otherInfo map[string]any) (*model.ProductPlan, error) {
 	if _, err := h.repo.FindProductByID(ctx, productID); err != nil {
 		return nil, err
 	}
 	plan := model.NewProductPlan(productID, name, version, description, otherInfo)
 	if err := h.repo.SavePlan(ctx, plan); err != nil {
 		return nil, err
+	}
+	if h.sprints != nil && h.seedProcess != nil {
+		_, _ = service.EnsureSprintForProductPlan(ctx, plan, actor, h.sprints, h.seedProcess)
 	}
 	return plan, nil
 }

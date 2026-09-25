@@ -11,7 +11,14 @@ export const productDetailTabIcons = {
   ),
   iterations: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
-      <path d="M4 6h16M4 12h10M4 18h14" strokeLinecap="round" />
+      <rect x="3" y="4" width="5" height="16" rx="1" />
+      <rect x="10" y="4" width="5" height="11" rx="1" />
+      <rect x="17" y="4" width="5" height="14" rx="1" />
+    </svg>
+  ),
+  releases: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+      <path d="M12 3v12M8 11l4 4 4-4M5 21h14" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
   workflow: (
