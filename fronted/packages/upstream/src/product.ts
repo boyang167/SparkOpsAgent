@@ -527,6 +527,17 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async updateWorkspaceSprintProcessTemplate(
+      workspaceId: string,
+      templateId: string,
+      input: import("@sparkops/contracts/product").UpdateWorkspaceSprintProcessTemplateCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/product").WorkspaceSprintProcessTemplateVM>(
+        `/api/v1/workspaces/${workspaceId}/sprint-process-templates/${templateId}`,
+        { method: "PUT", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
     async deleteWorkspaceSprintProcessTemplate(workspaceId: string, templateId: string) {
       return upstreamFetch<void>(
         `/api/v1/workspaces/${workspaceId}/sprint-process-templates/${templateId}`,

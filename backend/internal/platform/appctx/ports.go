@@ -3,6 +3,7 @@ package appctx
 import (
 	"context"
 
+	spmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/sprint_process/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -50,4 +51,9 @@ type WorkflowRunTrigger interface {
 		actor kernel.MemberID,
 		input map[string]any,
 	) (kernel.ProductWorkflowRunID, error)
+}
+
+type SprintProcessPort interface {
+	GetOrSeedDefault(ctx context.Context, productID kernel.ProductID, actor kernel.MemberID) (*spmodel.SprintProcess, error)
+	FindByID(ctx context.Context, productID kernel.ProductID, processID kernel.SprintProcessID) (*spmodel.SprintProcess, error)
 }

@@ -48,6 +48,7 @@ type Container struct {
 	BuildTrigger               BuildTrigger
 	DeploymentTrigger          DeploymentTrigger
 	WorkflowRunTrigger         WorkflowRunTrigger
+	SprintProcessPort          SprintProcessPort
 	ManifestDeployer           runtimeport.ManifestDeployer
 	APIPolicyChecker           authz.WorkspaceAPIPolicyChecker
 	LLMClient                  integrationport.LLMClient

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { product } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
@@ -13,7 +13,6 @@ import { ProductProjectsPanel } from "./ProductProjectsPanel";
 import { ProductWorkflowsPanel } from "./ProductWorkflowsPanel";
 import { ReleasePlansPanel } from "./ReleasePlansPanel";
 import { SprintBoardPanel } from "./SprintBoardPanel";
-import { SprintProcessPanel } from "./SprintProcessPanel";
 import { ProductDetailEmptyState } from "./ProductDetailEmptyState";
 import { productDetailTabIcons } from "./product-detail-icons";
 
@@ -22,7 +21,7 @@ interface ProductDetailPanelProps {
   productId: string;
 }
 
-type Tab = "overview" | "iterations" | "releases" | "workflows" | "environments" | "projects" | "settings";
+type Tab = "overview" | "iterations" | "releases" | "workflows" | "environments" | "projects";
 
 const TABS: Array<{ id: Tab; label: string; icon: ReactNode }> = [
   { id: "overview", label: "概览", icon: productDetailTabIcons.overview },
@@ -31,12 +30,12 @@ const TABS: Array<{ id: Tab; label: string; icon: ReactNode }> = [
   { id: "workflows", label: "工作流", icon: productDetailTabIcons.workflow },
   { id: "environments", label: "环境", icon: productDetailTabIcons.environment },
   { id: "projects", label: "项目配置", icon: productDetailTabIcons.projects },
-  { id: "settings", label: "设置", icon: productDetailTabIcons.settings },
 ];
 
-const TAB_IDS = new Set<Tab>(["overview", "iterations", "releases", "workflows", "environments", "projects", "settings"]);
+const TAB_IDS = new Set<Tab>(["overview", "iterations", "releases", "workflows", "environments", "projects"]);
 
 function parseTab(value: string | null): Tab {
+  if (value === "settings" || value === "process") return "iterations";
   if (value && TAB_IDS.has(value as Tab)) {
     return value as Tab;
   }
@@ -44,6 +43,8 @@ function parseTab(value: string | null): Tab {
 }
 
 export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPanelProps) {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<Tab>(() => parseTab(searchParams.get("tab")));
   const [overview, setOverview] = useState<ProductOverviewVM | null>(null);
@@ -77,6 +78,13 @@ export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPane
   }, [searchParams]);
 
   const title = overview?.display_name?.trim() || overview?.name || "产品";
+
+  function selectTab(next: Tab) {
+    setTab(next);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", next);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }
 
   if (loading) {
     return (
@@ -113,7 +121,7 @@ export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPane
             role="tab"
             aria-selected={tab === item.id}
             className={`product-detail-tab${tab === item.id ? " is-active" : ""}`}
-            onClick={() => setTab(item.id)}
+            onClick={() => selectTab(item.id)}
           >
             {item.icon}
             {item.label}
@@ -193,13 +201,6 @@ export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPane
         </div>
       ) : null}
 
-      {!error && tab === "settings" ? (
-        <div className="product-detail-body">
-          <main className="product-master-main">
-            <SprintProcessPanel workspaceId={workspaceId} productId={productId} />
-          </main>
-        </div>
-      ) : null}
     </div>
   );
 }

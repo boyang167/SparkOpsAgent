@@ -41,13 +41,11 @@ export const productDetailTabIcons = {
       <path d="M9 9h6v6H9z" />
     </svg>
   ),
-  settings: (
+  process: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
-      <circle cx="12" cy="12" r="3" />
-      <path
-        d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"
-        strokeLinecap="round"
-      />
+      <rect x="3" y="5" width="5" height="14" rx="1" />
+      <rect x="10" y="5" width="5" height="10" rx="1" />
+      <rect x="17" y="5" width="5" height="12" rx="1" />
     </svg>
   ),
   plus: (

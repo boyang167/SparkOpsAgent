@@ -10,8 +10,8 @@ import type {
   SprintBoardColumnVM,
   SprintBoardVM,
   SprintMetricsVM,
-  SprintProcessVM,
   SprintSummaryVM,
+  WorkspaceSprintProcessTemplateVM,
   SprintStage,
   WorkItemCardVM,
 } from "@sparkops/contracts/product";
@@ -37,7 +37,7 @@ interface SprintBoardPanelProps {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  planning: "规划中",
+  planning: "待启动",
   active: "进行中",
   completed: "已完成",
   archived: "已归档",
@@ -97,8 +97,9 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createGoal, setCreateGoal] = useState("");
-  const [createProcessId, setCreateProcessId] = useState("");
-  const [sprintProcesses, setSprintProcesses] = useState<SprintProcessVM[]>([]);
+  const [createTemplateId, setCreateTemplateId] = useState("");
+  const [wsProcessTemplates, setWsProcessTemplates] = useState<WorkspaceSprintProcessTemplateVM[]>([]);
+  const [createTemplatesLoading, setCreateTemplatesLoading] = useState(false);
   const [stagesEditOpen, setStagesEditOpen] = useState(false);
   const [editStages, setEditStages] = useState<SprintStage[]>([]);
   const [itemOpen, setItemOpen] = useState(false);
@@ -205,6 +206,32 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   }, [workspaceId, productId]);
 
   useEffect(() => {
+    if (!createOpen) return;
+    let cancelled = false;
+    setCreateTemplatesLoading(true);
+    void product
+      .listWorkspaceSprintProcessTemplates(workspaceId)
+      .then((items) => {
+        if (cancelled) return;
+        setWsProcessTemplates(items);
+        const defaultTpl = items.find((item) => item.template_key === "agile-4") ?? items[0];
+        setCreateTemplateId(defaultTpl?.id ?? "");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWsProcessTemplates([]);
+          setCreateTemplateId("");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCreateTemplatesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [createOpen, workspaceId]);
+
+  useEffect(() => {
     if (!cardMenuOpenId) return;
     const onDocClick = () => setCardMenuOpenId(null);
     document.addEventListener("click", onDocClick);
@@ -254,19 +281,37 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     [filteredSprints],
   );
 
+  async function resolveProcessIdForTemplate(templateId: string): Promise<string | undefined> {
+    if (!templateId) return undefined;
+    const tpl = wsProcessTemplates.find((item) => item.id === templateId);
+    if (!tpl) return undefined;
+    const processes = await product.listSprintProcesses(workspaceId, productId);
+    if (tpl.template_key) {
+      const existing = processes.find((proc) => proc.template_key === tpl.template_key);
+      if (existing) return existing.id;
+    }
+    const imported = await product.importWorkspaceSprintTemplate(workspaceId, productId, {
+      workspace_template_id: tpl.id,
+      name: tpl.name,
+    });
+    return imported.id;
+  }
+
   async function onCreateSprint() {
     if (!createName.trim()) return;
     setBusy(true);
     setError(null);
     try {
+      const processId = createTemplateId ? await resolveProcessIdForTemplate(createTemplateId) : undefined;
       const created = await product.createSprint(workspaceId, productId, {
         name: createName.trim(),
         goal: createGoal.trim() || undefined,
-        ...(createProcessId ? { process_id: createProcessId } : {}),
+        ...(processId ? { process_id: processId } : {}),
       });
       setCreateOpen(false);
       setCreateName("");
       setCreateGoal("");
+      setCreateTemplateId("");
       await loadSprints();
       setSelectedId(created.id);
     } catch (err) {
@@ -561,12 +606,6 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                   <span className={`text-sm font-medium ${statusTone(sprint.status)}`}>
                     {STATUS_LABEL[sprint.status] ?? sprint.status}
                   </span>
-                  <Link
-                    href={`/products/${productId}?tab=settings`}
-                    className="btn-ghost text-xs"
-                  >
-                    流程设置
-                  </Link>
                   {sprint.status === "planning" || sprint.status === "active" ? (
                     <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => setPmImportOpen(true)}>
                       导入 PM
@@ -751,18 +790,30 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
             <span className="text-sm">迭代目标</span>
             <textarea className="input min-h-20" value={createGoal} onChange={(e) => setCreateGoal(e.target.value)} placeholder="可选：本次迭代要达成的目标" />
           </label>
-          {sprintProcesses.length > 0 ? (
-            <label className="stack-xs">
-              <span className="text-sm">流程模板</span>
-              <select className="input" value={createProcessId} onChange={(e) => setCreateProcessId(e.target.value)}>
-                {sprintProcesses.map((proc) => (
-                  <option key={proc.id} value={proc.id}>
-                    {proc.name}{proc.is_default ? "（默认）" : ""} · {proc.stages.length} 列
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
+          <label className="stack-xs">
+            <span className="text-sm">迭代流程模板</span>
+            <select
+              className="input"
+              value={createTemplateId}
+              disabled={createTemplatesLoading || wsProcessTemplates.length === 0}
+              onChange={(e) => setCreateTemplateId(e.target.value)}
+            >
+              {createTemplatesLoading ? <option value="">加载模板…</option> : null}
+              {!createTemplatesLoading && wsProcessTemplates.length === 0 ? (
+                <option value="">暂无工作区模板</option>
+              ) : null}
+              {wsProcessTemplates.map((tpl) => (
+                <option key={tpl.id} value={tpl.id}>
+                  {tpl.name} · {tpl.stages?.length ?? 0} 列
+                  {tpl.template_key === "agile-4" ? "（默认）" : ""}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-muted-foreground">
+              模板来自工作空间，
+              <Link href="/templates?tab=sprint-process" className="link-primary">前往模板管理</Link>
+            </span>
+          </label>
         </div>
       </Modal>
 

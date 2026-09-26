@@ -1,7 +1,6 @@
 package product
 
 import (
-	"context"
 	"fmt"
 
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
@@ -10,7 +9,6 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/subscriber"
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/persistence"
@@ -21,7 +19,6 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
-	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type Module struct {
@@ -76,22 +73,11 @@ func (m *Module) Register(c *appctx.Container) error {
 	boardNotifier := service.NewSprintBoardNotifier(boardHub)
 	releasePlanExecutor := service.NewReleasePlanExecutor(releasePlanRepo, c.WorkflowRunTrigger)
 	sprintWorkItemExecutor := service.NewSprintWorkItemExecutor(repo, sprintRepo, c.WorkflowRunTrigger, pmRouter, boardNotifier)
-	getOrSeedSprintProcess := command.NewGetOrSeedSprintProcessHandler(repo, sprintRepo)
-	seedProcess := func(ctx context.Context, productID kernel.ProductID, actor kernel.MemberID) (*model.SprintProcess, error) {
-		return getOrSeedSprintProcess.Handle(ctx, productID, actor)
+	if c.SprintProcessPort == nil {
+		return fmt.Errorf("product module requires sprint process port")
 	}
 	sprintHandlers := producthttp.NewSprintHandlers(
-		getOrSeedSprintProcess,
-		command.NewUpsertSprintProcessHandler(repo, sprintRepo, getOrSeedSprintProcess),
-		command.NewListSprintProcessesHandler(repo, sprintRepo, getOrSeedSprintProcess),
-		command.NewCreateSprintProcessHandler(repo, sprintRepo),
-		command.NewUpdateSprintProcessByIDHandler(repo, sprintRepo),
-		command.NewDeleteSprintProcessHandler(repo, sprintRepo),
-		command.NewImportWorkspaceTemplateToProductHandler(repo, sprintRepo),
-		command.NewListWorkspaceSprintTemplatesHandler(sprintRepo),
-		command.NewCreateWorkspaceSprintTemplateHandler(sprintRepo),
-		command.NewDeleteWorkspaceSprintTemplateHandler(sprintRepo),
-		command.NewCreateSprintHandler(repo, sprintRepo, getOrSeedSprintProcess),
+		command.NewCreateSprintHandler(repo, sprintRepo, c.SprintProcessPort),
 		command.NewUpdateSprintHandler(repo, sprintRepo, boardNotifier),
 		command.NewStartSprintHandler(repo, sprintRepo),
 		command.NewCompleteSprintHandler(repo, sprintRepo, releasePlanRepo),
@@ -131,7 +117,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	handler := producthttp.NewHandler(
 		command.NewCreateProductHandler(repo, wsChecker),
 		command.NewUpdateProductHandler(repo, wsChecker),
-		command.NewCreateProductPlanHandler(repo, sprintRepo, seedProcess),
+		command.NewCreateProductPlanHandler(repo, sprintRepo, c.SprintProcessPort),
 		command.NewCreateProductRequirementHandler(repo, releasePlanRepo),
 		command.NewApproveRequirementHandler(repo),
 		command.NewRejectRequirementHandler(repo),
@@ -208,26 +194,6 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.EventBus.Subscribe(pwfevent.WorkflowRunCompletedName, subscriber.NewOnWorkflowRunCompleted(releasePlanExecutor, sprintWorkItemExecutor).Handle)
 	c.EventBus.Subscribe(deliveryevent.DeployCompletedName, subscriber.NewOnDeployCompleted(environmentRepo).Handle)
 
-	c.Engine.GET("/api/v1/workspaces/:wsId/sprint-process-templates",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListWorkspaceSprintTemplates)
-	c.Engine.POST("/api/v1/workspaces/:wsId/sprint-process-templates",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CreateWorkspaceSprintTemplate)
-	c.Engine.DELETE("/api/v1/workspaces/:wsId/sprint-process-templates/:templateId",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.DeleteWorkspaceSprintTemplate)
-	c.Engine.GET("/api/v1/products/:productId/sprint-process",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetSprintProcess)
-	c.Engine.PUT("/api/v1/products/:productId/sprint-process",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.UpsertSprintProcess)
-	c.Engine.GET("/api/v1/products/:productId/sprint-processes",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListSprintProcesses)
-	c.Engine.POST("/api/v1/products/:productId/sprint-processes",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CreateSprintProcess)
-	c.Engine.PUT("/api/v1/products/:productId/sprint-processes/:processId",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.UpdateSprintProcessByID)
-	c.Engine.DELETE("/api/v1/products/:productId/sprint-processes/:processId",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.DeleteSprintProcess)
-	c.Engine.POST("/api/v1/workspaces/:wsId/products/:productId/sprint-processes/import-workspace",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.ImportWorkspaceSprintTemplate)
 	c.Engine.GET("/api/v1/products/:productId/sprints",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListSprints)
 	c.Engine.POST("/api/v1/products/:productId/sprints",

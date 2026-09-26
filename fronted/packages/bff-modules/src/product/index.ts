@@ -420,6 +420,15 @@ export function createWorkspaceSprintProcessTemplate(
   return ctx.upstream.product.createWorkspaceSprintProcessTemplate(workspaceId, input);
 }
 
+export function updateWorkspaceSprintProcessTemplate(
+  ctx: BffContext,
+  workspaceId: string,
+  templateId: string,
+  input: import("@sparkops/contracts/product").UpdateWorkspaceSprintProcessTemplateCommand,
+) {
+  return ctx.upstream.product.updateWorkspaceSprintProcessTemplate(workspaceId, templateId, input);
+}
+
 export function deleteWorkspaceSprintProcessTemplate(ctx: BffContext, workspaceId: string, templateId: string) {
   return ctx.upstream.product.deleteWorkspaceSprintProcessTemplate(workspaceId, templateId);
 }

@@ -215,9 +215,14 @@ export function SprintProcessPanel({ workspaceId, productId }: SprintProcessPane
   return (
     <div className="product-master-main-inner stack-md max-w-3xl">
       <div className="stack-xs">
-        <h2 className="section-title">迭代流程</h2>
+        <h2 className="section-title">产品流程模板</h2>
         <p className="text-sm text-muted-foreground">
-          管理产品级流程模板。保存后仅影响使用该模板<strong>新建</strong>的迭代。
+          配置本产品迭代看板的阶段与默认工作流。保存后仅影响使用该模板<strong>新建</strong>的迭代。
+          工作空间共享模板可在
+          {" "}
+          <a href="/templates?tab=sprint-process" className="link-primary">模板管理 → 迭代流程模板</a>
+          {" "}
+          中维护。
         </p>
       </div>
 

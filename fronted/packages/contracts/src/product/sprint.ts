@@ -129,6 +129,11 @@ export type CreateWorkspaceSprintProcessTemplateCommand = z.infer<
   typeof CreateWorkspaceSprintProcessTemplateCommandSchema
 >;
 
+export const UpdateWorkspaceSprintProcessTemplateCommandSchema = UpsertSprintProcessCommandSchema;
+export type UpdateWorkspaceSprintProcessTemplateCommand = z.infer<
+  typeof UpdateWorkspaceSprintProcessTemplateCommandSchema
+>;
+
 export const ImportWorkspaceSprintTemplateCommandSchema = z.object({
   workspace_template_id: z.string().uuid(),
   name: z.string().optional(),

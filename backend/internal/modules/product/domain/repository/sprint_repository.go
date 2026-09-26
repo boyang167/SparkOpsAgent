@@ -8,19 +8,6 @@ import (
 )
 
 type SprintRepository interface {
-	FindDefaultProcessByProduct(ctx context.Context, productID kernel.ProductID) (*model.SprintProcess, error)
-	FindProcessByID(ctx context.Context, productID kernel.ProductID, processID kernel.SprintProcessID) (*model.SprintProcess, error)
-	ListProcessesByProduct(ctx context.Context, productID kernel.ProductID) ([]*model.SprintProcess, error)
-	SaveProcess(ctx context.Context, process *model.SprintProcess) error
-	UpdateProcess(ctx context.Context, process *model.SprintProcess) error
-	DeleteProcess(ctx context.Context, productID kernel.ProductID, processID kernel.SprintProcessID) error
-	CountSprintsByProcess(ctx context.Context, processID kernel.SprintProcessID) (int, error)
-
-	ListWorkspaceSprintTemplates(ctx context.Context, workspaceID kernel.WorkspaceID) ([]*model.WorkspaceSprintProcessTemplate, error)
-	SaveWorkspaceSprintTemplate(ctx context.Context, tpl *model.WorkspaceSprintProcessTemplate) error
-	FindWorkspaceSprintTemplateByID(ctx context.Context, workspaceID kernel.WorkspaceID, id kernel.WorkspaceSprintProcessTemplateID) (*model.WorkspaceSprintProcessTemplate, error)
-	DeleteWorkspaceSprintTemplate(ctx context.Context, workspaceID kernel.WorkspaceID, id kernel.WorkspaceSprintProcessTemplateID) error
-
 	SaveSprint(ctx context.Context, sprint *model.Sprint) error
 	UpdateSprint(ctx context.Context, sprint *model.Sprint) error
 	FindSprintByID(ctx context.Context, id kernel.SprintID) (*model.Sprint, error)

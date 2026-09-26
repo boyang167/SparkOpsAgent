@@ -8,6 +8,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -27,7 +28,7 @@ func EnsureSprintForProductPlan(
 	plan *model.ProductPlan,
 	actor kernel.MemberID,
 	sprints repository.SprintRepository,
-	seedProcess func(ctx context.Context, productID kernel.ProductID, actor kernel.MemberID) (*model.SprintProcess, error),
+	processes appctx.SprintProcessPort,
 ) (*model.Sprint, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("plan required")
@@ -39,7 +40,7 @@ func EnsureSprintForProductPlan(
 	if !errors.Is(err, domain.ErrSprintNotFound) {
 		return nil, err
 	}
-	process, err := seedProcess(ctx, plan.ProductID, actor)
+	process, err := processes.GetOrSeedDefault(ctx, plan.ProductID, actor)
 	if err != nil {
 		return nil, err
 	}

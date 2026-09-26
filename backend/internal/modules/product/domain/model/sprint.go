@@ -4,8 +4,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -18,47 +16,6 @@ const (
 	SprintStatusCompleted SprintStatus = "completed"
 	SprintStatusArchived  SprintStatus = "archived"
 )
-
-type StageWorkflowBinding struct {
-	WorkflowID         string            `json:"workflow_id"`
-	WorkflowName       string            `json:"workflow_name,omitempty"`
-	TriggerMode        string            `json:"trigger_mode"`
-	DefaultParameters  map[string]string `json:"default_parameters,omitempty"`
-	RequiredForExit    bool              `json:"required_for_exit,omitempty"`
-}
-
-type StageGatePolicy struct {
-	RequireBranch          bool     `json:"require_branch,omitempty"`
-	RequireWorkflowSuccess []string `json:"require_workflow_success,omitempty"`
-	RequireJiraStatus      []string `json:"require_jira_status,omitempty"`
-	RequireApproval        bool     `json:"require_approval,omitempty"`
-	ProtectedBranches      []string `json:"protected_branches,omitempty"`
-}
-
-type SprintStage struct {
-	ID          string                 `json:"id"`
-	Key         string                 `json:"key"`
-	Name        string                 `json:"name"`
-	SortOrder   int                    `json:"sort_order"`
-	Color       string                 `json:"color,omitempty"`
-	WipLimit    int                    `json:"wip_limit,omitempty"`
-	EntryPolicy *StageGatePolicy       `json:"entry_policy,omitempty"`
-	Workflows   []StageWorkflowBinding `json:"workflows,omitempty"`
-}
-
-type SprintProcess struct {
-	ID          kernel.SprintProcessID
-	ProductID   kernel.ProductID
-	Name        string
-	TemplateKey string
-	Description string
-	Version     int
-	IsDefault   bool
-	Stages      []SprintStage
-	CreatedBy   kernel.MemberID
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-}
 
 type Sprint struct {
 	ID             kernel.SprintID
@@ -79,33 +36,6 @@ type Sprint struct {
 	CreatedBy      kernel.MemberID
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-}
-
-func DefaultSprintStages() []SprintStage {
-	return []SprintStage{
-		{ID: uuid.NewString(), Key: "dev", Name: "开发", SortOrder: 0, Color: "#3b82f6"},
-		{ID: uuid.NewString(), Key: "test", Name: "测试", SortOrder: 1, Color: "#8b5cf6"},
-		{ID: uuid.NewString(), Key: "uat", Name: "预发", SortOrder: 2, Color: "#f59e0b"},
-		{ID: uuid.NewString(), Key: "release", Name: "发布", SortOrder: 3, Color: "#10b981"},
-	}
-}
-
-func NewSprintProcess(productID kernel.ProductID, name string, stages []SprintStage, createdBy kernel.MemberID) *SprintProcess {
-	if len(stages) == 0 {
-		stages = DefaultSprintStages()
-	}
-	now := time.Now().UTC()
-	return &SprintProcess{
-		ID:        kernel.NewSprintProcessID(),
-		ProductID: productID,
-		Name:      strings.TrimSpace(name),
-		Version:   1,
-		IsDefault: true,
-		Stages:    stages,
-		CreatedBy: createdBy,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
 }
 
 func NewSprint(productID kernel.ProductID, process *SprintProcess, name, goal string, ownerID *kernel.MemberID, createdBy kernel.MemberID) *Sprint {

@@ -15,16 +15,6 @@ import (
 )
 
 type SprintHandlers struct {
-	getOrSeedProcess   *command.GetOrSeedSprintProcessHandler
-	upsertProcess      *command.UpsertSprintProcessHandler
-	listProcesses      *command.ListSprintProcessesHandler
-	createProcess      *command.CreateSprintProcessHandler
-	updateProcessByID  *command.UpdateSprintProcessByIDHandler
-	deleteProcess      *command.DeleteSprintProcessHandler
-	importWsTemplate   *command.ImportWorkspaceTemplateToProductHandler
-	listWsTemplates    *command.ListWorkspaceSprintTemplatesHandler
-	createWsTemplate   *command.CreateWorkspaceSprintTemplateHandler
-	deleteWsTemplate   *command.DeleteWorkspaceSprintTemplateHandler
 	createSprint     *command.CreateSprintHandler
 	updateSprint     *command.UpdateSprintHandler
 	startSprint      *command.StartSprintHandler
@@ -48,16 +38,6 @@ type SprintHandlers struct {
 }
 
 func NewSprintHandlers(
-	getOrSeedProcess *command.GetOrSeedSprintProcessHandler,
-	upsertProcess *command.UpsertSprintProcessHandler,
-	listProcesses *command.ListSprintProcessesHandler,
-	createProcess *command.CreateSprintProcessHandler,
-	updateProcessByID *command.UpdateSprintProcessByIDHandler,
-	deleteProcess *command.DeleteSprintProcessHandler,
-	importWsTemplate *command.ImportWorkspaceTemplateToProductHandler,
-	listWsTemplates *command.ListWorkspaceSprintTemplatesHandler,
-	createWsTemplate *command.CreateWorkspaceSprintTemplateHandler,
-	deleteWsTemplate *command.DeleteWorkspaceSprintTemplateHandler,
 	createSprint *command.CreateSprintHandler,
 	updateSprint *command.UpdateSprintHandler,
 	startSprint *command.StartSprintHandler,
@@ -75,11 +55,11 @@ func NewSprintHandlers(
 	listExecutions *query.ListWorkItemExecutionsHandler,
 	importPm *command.ImportPmSprintHandler,
 	linkPm *command.LinkPmIssueHandler,
+	unlinkPm *command.UnlinkPmIssueHandler,
 	getMetrics *query.GetSprintMetricsHandler,
 	listActive *query.ListActiveSprintsHandler,
 ) SprintHandlers {
 	return SprintHandlers{
-		getOrSeedProcess: getOrSeedProcess, upsertProcess: upsertProcess,
 		createSprint: createSprint, updateSprint: updateSprint,
 		startSprint: startSprint, completeSprint: completeSprint, archiveSprint: archiveSprint,
 		createWorkItem: createWorkItem, updateWorkItem: updateWorkItem,
@@ -119,54 +99,6 @@ func (h *Handler) GetSprintMetrics(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, metrics)
-}
-
-func (h *Handler) GetSprintProcess(c *gin.Context) {
-	_, memberID, ok := memberAndWorkspace(c)
-	if !ok {
-		return
-	}
-	productID, err := kernel.ParseProductID(c.Param("productId"))
-	if err != nil {
-		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
-		return
-	}
-	process, err := h.sprints.getOrSeedProcess.Handle(c.Request.Context(), productID, memberID)
-	if err != nil {
-		httpx.HandleError(c, err)
-		return
-	}
-	httpx.OK(c, sprintProcessVM(process))
-}
-
-type upsertSprintProcessRequest struct {
-	Name   string              `json:"name" binding:"required"`
-	Stages []model.SprintStage `json:"stages" binding:"required"`
-}
-
-func (h *Handler) UpsertSprintProcess(c *gin.Context) {
-	_, memberID, ok := memberAndWorkspace(c)
-	if !ok {
-		return
-	}
-	productID, err := kernel.ParseProductID(c.Param("productId"))
-	if err != nil {
-		httpx.Fail(c, "INVALID_REQUEST", "invalid product id", http.StatusBadRequest)
-		return
-	}
-	var req upsertSprintProcessRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
-		return
-	}
-	process, err := h.sprints.upsertProcess.Handle(c.Request.Context(), productID, memberID, command.UpsertSprintProcessInput{
-		Name: req.Name, Stages: req.Stages,
-	})
-	if err != nil {
-		httpx.HandleError(c, err)
-		return
-	}
-	httpx.OK(c, sprintProcessVM(process))
 }
 
 func (h *Handler) ListSprints(c *gin.Context) {
@@ -730,25 +662,4 @@ func parseProductWorkItemIDs(c *gin.Context) (kernel.ProductID, kernel.WorkItemI
 		return kernel.ProductID{}, kernel.WorkItemID{}, false
 	}
 	return productID, workItemID, true
-}
-
-func sprintProcessVM(p *model.SprintProcess) gin.H {
-	return gin.H{
-		"id": p.ID.String(), "product_id": p.ProductID.String(), "name": p.Name,
-		"template_key": p.TemplateKey, "description": p.Description,
-		"version": p.Version, "is_default": p.IsDefault, "stages": p.Stages,
-		"created_by": p.CreatedBy.String(),
-		"created_at": p.CreatedAt.Format(time.RFC3339),
-		"updated_at": p.UpdatedAt.Format(time.RFC3339),
-	}
-}
-
-func workspaceSprintTemplateVM(t *model.WorkspaceSprintProcessTemplate) gin.H {
-	return gin.H{
-		"id": t.ID.String(), "workspace_id": t.WorkspaceID.String(), "name": t.Name,
-		"template_key": t.TemplateKey, "description": t.Description, "stages": t.Stages,
-		"created_by": t.CreatedBy.String(),
-		"created_at": t.CreatedAt.Format(time.RFC3339),
-		"updated_at": t.UpdatedAt.Format(time.RFC3339),
-	}
 }

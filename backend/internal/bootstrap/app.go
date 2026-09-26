@@ -25,6 +25,7 @@ import (
 	pluginmod "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/sprint_process"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/tenant"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workflow"
@@ -129,6 +130,7 @@ func Run(ctx context.Context) error {
 			runtime.New(tokens),
 			delivery.New(tokens),
 			product_workflow.New(tokens),
+			sprint_process.New(tokens),
 			product.New(tokens),
 			agent.New(tokens),
 			workflow.New(tokens),

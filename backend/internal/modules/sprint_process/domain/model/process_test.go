@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/sprint_process/domain"
 )
 
 func TestNormalizeSprintStages_assignsIDsAndSortOrder(t *testing.T) {

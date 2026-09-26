@@ -9,6 +9,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/persistence"
+	sppersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/sprint_process/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -54,11 +55,12 @@ func openJiraCommandTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS product").Error)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS sprint_process").Error)
 	require.NoError(t, db.Exec(`CREATE TABLE product.products (
 		id TEXT PRIMARY KEY, workspace_id TEXT, name TEXT, display_name TEXT,
 		description TEXT, version TEXT, next_version TEXT, created_by TEXT,
 		created_at DATETIME, updated_at DATETIME, deleted_at DATETIME)`).Error)
-	require.NoError(t, db.Exec(`CREATE TABLE product.sprint_processes (
+	require.NoError(t, db.Exec(`CREATE TABLE sprint_process.sprint_processes (
 		id TEXT PRIMARY KEY, product_id TEXT, name TEXT, template_key TEXT, description TEXT,
 		version INT, is_default INT, stages TEXT, created_by TEXT, created_at DATETIME, updated_at DATETIME)`).Error)
 	require.NoError(t, db.Exec(`CREATE TABLE product.sprints (
@@ -90,7 +92,8 @@ func TestImportJiraSprintSkipsDuplicates(t *testing.T) {
 
 	stages := model.DefaultSprintStages()
 	process := model.NewSprintProcess(product.ID, "标准流程", stages, memberID)
-	require.NoError(t, sprintRepo.SaveProcess(ctx, process))
+	processRepo := sppersistence.NewProcessRepository(db)
+	require.NoError(t, processRepo.Save(ctx, process))
 	sprint := model.NewSprint(product.ID, process, "v1.0", "", nil, memberID)
 	require.NoError(t, sprintRepo.SaveSprint(ctx, sprint))
 

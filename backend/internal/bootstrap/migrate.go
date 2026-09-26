@@ -16,6 +16,7 @@ import (
 	pluginpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin/infrastructure/persistence"
 	productpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/persistence"
 	pwfpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/persistence"
+	sppersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/sprint_process/infrastructure/persistence"
 	tenantpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/infrastructure/persistence"
 	workflowpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/infrastructure/persistence"
 	wspersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/persistence"
@@ -33,6 +34,7 @@ func AutoMigrate(db *gorm.DB) error {
 		{"governance", govpersistence.AutoMigrate},
 		{"workspace_app", wspersistence.AutoMigrate},
 		{"product", productpersistence.AutoMigrate},
+		{"sprint_process", sppersistence.AutoMigrate},
 		{"product_workflow", pwfpersistence.AutoMigrate},
 		{"platform_admin", platformadminpersistence.AutoMigrate},
 		{"agent", agentpersistence.AutoMigrate},

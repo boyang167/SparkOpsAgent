@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -10,73 +9,9 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
-
-type UpsertSprintProcessInput struct {
-	Name   string
-	Stages []model.SprintStage
-}
-
-type GetOrSeedSprintProcessHandler struct {
-	products repository.ProductRepository
-	sprints  repository.SprintRepository
-}
-
-func NewGetOrSeedSprintProcessHandler(products repository.ProductRepository, sprints repository.SprintRepository) *GetOrSeedSprintProcessHandler {
-	return &GetOrSeedSprintProcessHandler{products: products, sprints: sprints}
-}
-
-func (h *GetOrSeedSprintProcessHandler) Handle(ctx context.Context, productID kernel.ProductID, actor kernel.MemberID) (*model.SprintProcess, error) {
-	if _, err := h.products.FindProductByID(ctx, productID); err != nil {
-		return nil, err
-	}
-	process, err := h.sprints.FindDefaultProcessByProduct(ctx, productID)
-	if err == nil {
-		return process, nil
-	}
-	if !errors.Is(err, domain.ErrSprintProcessNotFound) {
-		return nil, err
-	}
-	process = model.NewSprintProcess(productID, "标准敏捷流程", model.DefaultSprintStages(), actor)
-	if err := h.sprints.SaveProcess(ctx, process); err != nil {
-		return nil, err
-	}
-	return process, nil
-}
-
-type UpsertSprintProcessHandler struct {
-	products repository.ProductRepository
-	sprints  repository.SprintRepository
-	seed     *GetOrSeedSprintProcessHandler
-}
-
-func NewUpsertSprintProcessHandler(products repository.ProductRepository, sprints repository.SprintRepository, seed *GetOrSeedSprintProcessHandler) *UpsertSprintProcessHandler {
-	return &UpsertSprintProcessHandler{products: products, sprints: sprints, seed: seed}
-}
-
-func (h *UpsertSprintProcessHandler) Handle(ctx context.Context, productID kernel.ProductID, actor kernel.MemberID, input UpsertSprintProcessInput) (*model.SprintProcess, error) {
-	process, err := h.seed.Handle(ctx, productID, actor)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(input.Name) != "" {
-		process.Name = strings.TrimSpace(input.Name)
-	}
-	if len(input.Stages) > 0 {
-		stages, err := model.NormalizeSprintStages(input.Stages)
-		if err != nil {
-			return nil, err
-		}
-		process.Stages = stages
-	}
-	process.Version++
-	process.UpdatedAt = time.Now().UTC()
-	if err := h.sprints.UpdateProcess(ctx, process); err != nil {
-		return nil, err
-	}
-	return process, nil
-}
 
 type CreateSprintInput struct {
 	Name         string
@@ -88,13 +23,13 @@ type CreateSprintInput struct {
 }
 
 type CreateSprintHandler struct {
-	products repository.ProductRepository
-	sprints  repository.SprintRepository
-	seed     *GetOrSeedSprintProcessHandler
+	products  repository.ProductRepository
+	sprints   repository.SprintRepository
+	processes appctx.SprintProcessPort
 }
 
-func NewCreateSprintHandler(products repository.ProductRepository, sprints repository.SprintRepository, seed *GetOrSeedSprintProcessHandler) *CreateSprintHandler {
-	return &CreateSprintHandler{products: products, sprints: sprints, seed: seed}
+func NewCreateSprintHandler(products repository.ProductRepository, sprints repository.SprintRepository, processes appctx.SprintProcessPort) *CreateSprintHandler {
+	return &CreateSprintHandler{products: products, sprints: sprints, processes: processes}
 }
 
 func (h *CreateSprintHandler) Handle(ctx context.Context, productID kernel.ProductID, actor kernel.MemberID, input CreateSprintInput) (*model.Sprint, error) {
@@ -110,12 +45,12 @@ func (h *CreateSprintHandler) Handle(ctx context.Context, productID kernel.Produ
 	}
 	var process *model.SprintProcess
 	if input.ProcessID != nil {
-		process, err = h.sprints.FindProcessByID(ctx, productID, *input.ProcessID)
+		process, err = h.processes.FindByID(ctx, productID, *input.ProcessID)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		process, err = h.seed.Handle(ctx, productID, actor)
+		process, err = h.processes.GetOrSeedDefault(ctx, productID, actor)
 		if err != nil {
 			return nil, err
 		}

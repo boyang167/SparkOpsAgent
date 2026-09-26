@@ -560,6 +560,17 @@ export function createWorkspaceSprintProcessTemplate(
   );
 }
 
+export function updateWorkspaceSprintProcessTemplate(
+  workspaceId: string,
+  templateId: string,
+  input: import("@sparkops/contracts/product").UpdateWorkspaceSprintProcessTemplateCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/product").WorkspaceSprintProcessTemplateVM>(
+    `/workspaces/${workspaceId}/sprint-process-templates/${templateId}`,
+    { method: "PUT", body: JSON.stringify(input), workspaceId },
+  );
+}
+
 export function deleteWorkspaceSprintProcessTemplate(workspaceId: string, templateId: string) {
   return bffFetch<void>(`/workspaces/${workspaceId}/sprint-process-templates/${templateId}`, {
     method: "DELETE",

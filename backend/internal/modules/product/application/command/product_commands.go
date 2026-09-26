@@ -10,6 +10,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -78,15 +79,15 @@ func (h *UpdateProductHandler) Handle(ctx context.Context, wsID kernel.Workspace
 type CreateProductPlanHandler struct {
 	repo        repository.ProductRepository
 	sprints     repository.SprintRepository
-	seedProcess func(ctx context.Context, productID kernel.ProductID, actor kernel.MemberID) (*model.SprintProcess, error)
+	processes   appctx.SprintProcessPort
 }
 
 func NewCreateProductPlanHandler(
 	repo repository.ProductRepository,
 	sprints repository.SprintRepository,
-	seedProcess func(ctx context.Context, productID kernel.ProductID, actor kernel.MemberID) (*model.SprintProcess, error),
+	processes appctx.SprintProcessPort,
 ) *CreateProductPlanHandler {
-	return &CreateProductPlanHandler{repo: repo, sprints: sprints, seedProcess: seedProcess}
+	return &CreateProductPlanHandler{repo: repo, sprints: sprints, processes: processes}
 }
 
 func (h *CreateProductPlanHandler) Handle(ctx context.Context, productID kernel.ProductID, actor kernel.MemberID, name, version, description string, otherInfo map[string]any) (*model.ProductPlan, error) {
@@ -97,8 +98,8 @@ func (h *CreateProductPlanHandler) Handle(ctx context.Context, productID kernel.
 	if err := h.repo.SavePlan(ctx, plan); err != nil {
 		return nil, err
 	}
-	if h.sprints != nil && h.seedProcess != nil {
-		_, _ = service.EnsureSprintForProductPlan(ctx, plan, actor, h.sprints, h.seedProcess)
+	if h.sprints != nil && h.processes != nil {
+		_, _ = service.EnsureSprintForProductPlan(ctx, plan, actor, h.sprints, h.processes)
 	}
 	return plan, nil
 }
