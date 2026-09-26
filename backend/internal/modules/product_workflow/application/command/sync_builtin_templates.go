@@ -14,9 +14,10 @@ import (
 )
 
 var (
-	stdBuildDeployUATID = kernel.WorkflowTemplateID{UUID: uuid.MustParse("00000000-0000-4000-8000-000000000001")}
-	stdReleaseProdID    = kernel.WorkflowTemplateID{UUID: uuid.MustParse("00000000-0000-4000-8000-000000000002")}
-	systemMemberID      = kernel.MemberID{UUID: uuid.MustParse("00000000-0000-4000-8000-000000000099")}
+	stdBuildDeployUATID   = kernel.WorkflowTemplateID{UUID: uuid.MustParse("00000000-0000-4000-8000-000000000001")}
+	stdReleaseProdID      = kernel.WorkflowTemplateID{UUID: uuid.MustParse("00000000-0000-4000-8000-000000000002")}
+	stdVersionReleaseID   = kernel.WorkflowTemplateID{UUID: uuid.MustParse("00000000-0000-4000-8000-000000000003")}
+	systemMemberID        = kernel.MemberID{UUID: uuid.MustParse("00000000-0000-4000-8000-000000000099")}
 )
 
 func SyncBuiltinTemplates(ctx context.Context, db *gorm.DB) error {
@@ -58,6 +59,24 @@ func SyncBuiltinTemplates(ctx context.Context, db *gorm.DB) error {
 				]
 			}`),
 			SlotSchema: json.RawMessage(`{"build_branch": {"label": "构建分支"}, "uat_env_id": {"label": "UAT 环境"}, "prod_env_id": {"label": "生产环境"}}`),
+			Runtime:    json.RawMessage(`{}`), CreatedBy: systemMemberID, CreatedAt: now, UpdatedAt: now,
+		},
+		{
+			ID: stdVersionReleaseID, Scope: model.TemplateScopeSystem, Name: "标准发布（版本化）",
+			Key: "std-version-release", Description: "构建 → 创建版本 → 部署版本",
+			Category: "release", Status: model.TemplateStatusActive, Version: "1.0.0",
+			KeyVals: []model.KeyVal{
+				{Key: "build_branch", Description: "构建分支", Type: "string", Required: true, Value: "main"},
+				{Key: "version", Description: "交付版本号", Type: "string", Required: true},
+				{Key: "prod_env_id", Description: "生产环境 ID", Type: "string", Required: true},
+			},
+			Definition: json.RawMessage(`{
+				"stages": [
+					{"name": "构建", "parallel": true, "jobs": [{"name": "build-all", "type": "sparkops-build", "spec": {"branch": "{{build_branch}}"}}]},
+					{"name": "发布", "jobs": [{"name": "deploy-prod", "type": "sparkops-deploy", "spec": {"artifact_source": "version", "source_kind": "build", "environment_id": "{{prod_env_id}}", "source": "fromjob", "job_name": "build-all"}}]}
+				]
+			}`),
+			SlotSchema: json.RawMessage(`{"build_branch": {"label": "构建分支"}, "version": {"label": "版本号"}, "prod_env_id": {"label": "生产环境"}}`),
 			Runtime:    json.RawMessage(`{}`), CreatedBy: systemMemberID, CreatedAt: now, UpdatedAt: now,
 		},
 	}

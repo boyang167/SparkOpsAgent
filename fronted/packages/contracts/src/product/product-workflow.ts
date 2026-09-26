@@ -99,6 +99,7 @@ export const ProjectDeployRunVMSchema = z.object({
   project_id: z.string(),
   environment_id: z.string().optional(),
   deployment_run_id: z.string().optional(),
+  version_id: z.string().optional(),
   image_tag: z.string().optional(),
   image_repository: z.string().optional(),
   status: z.string(),
@@ -106,6 +107,16 @@ export const ProjectDeployRunVMSchema = z.object({
 });
 
 export type ProjectDeployRunVM = z.infer<typeof ProjectDeployRunVMSchema>;
+
+export const ProjectVersionRunVMSchema = z.object({
+  project_id: z.string(),
+  version_id: z.string(),
+  version_tag: z.string(),
+  status: z.string(),
+  error_message: z.string().optional(),
+});
+
+export type ProjectVersionRunVM = z.infer<typeof ProjectVersionRunVMSchema>;
 
 export const ApprovalRunVMSchema = z.object({
   status: z.string(),
@@ -124,6 +135,7 @@ export const WorkflowJobRunVMSchema = z.object({
   type: z.string(),
   status: z.string(),
   builds: z.array(ProjectBuildRunVMSchema).optional(),
+  versions: z.array(ProjectVersionRunVMSchema).optional(),
   deploys: z.array(ProjectDeployRunVMSchema).optional(),
   approval: ApprovalRunVMSchema.optional(),
   message: z.string().optional(),
@@ -223,6 +235,7 @@ export const StartProductWorkflowRunCommandSchema = z.object({
       branch_overrides: z.record(z.string()).optional(),
       ref_type_overrides: z.record(z.string()).optional(),
       environment_overrides: z.record(z.string()).optional(),
+      version_tag_overrides: z.record(z.string()).optional(),
       variables: z.record(z.string()).optional(),
       remark: z.string().optional(),
       /** 0-based indices of workflow stages to execute; omit or include all to run every stage. */
@@ -268,11 +281,19 @@ export const PRODUCT_WORKFLOW_JOB_TYPES = [
     official: true,
   },
   {
+    type: "sparkops-create-version",
+    category: "build",
+    label: "创建版本",
+    title: "创建交付版本",
+    description: "从构建产物快照 YAML 并创建版本",
+    official: true,
+  },
+  {
     type: "sparkops-deploy",
     category: "deploy",
     label: "部署",
     title: "SparkOps 部署",
-    description: "部署到产品环境",
+    description: "部署构建产物或交付版本到产品环境",
     official: true,
   },
   {

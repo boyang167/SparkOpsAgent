@@ -1,5 +1,6 @@
 import type { ProductProjectVM, WorkflowJobVM, WorkflowStageVM } from "@sparkops/contracts/product";
 import { parseBuildJobSpec } from "./build-job-spec";
+import { parseCreateVersionJobSpec } from "./create-version-job-spec";
 import { parseDeployJobSpec } from "./deploy-job-spec";
 import { jobTypeLabel } from "./workflow-editor-utils";
 
@@ -41,10 +42,18 @@ export interface RunFormOtherJob {
   typeLabel: string;
 }
 
+export interface RunFormVersionJob {
+  jobName: string;
+  versionTag: string;
+  /** deploy job that inline-creates version from build */
+  fromDeploy?: boolean;
+}
+
 export interface RunFormStage {
   id: string;
   name: string;
   buildRows: RunFormBuildRow[];
+  versionJobs: RunFormVersionJob[];
   deployJobs: RunFormDeployJob[];
   otherJobs: RunFormOtherJob[];
 }
@@ -116,6 +125,20 @@ function buildRowsForJob(
   });
 }
 
+function findUpstreamJob(stages: WorkflowStageVM[], jobName: string): WorkflowJobVM | undefined {
+  if (!jobName.trim()) return undefined;
+  return stages.flatMap((stage) => stage.jobs).find((item) => item.name === jobName);
+}
+
+function deployVersionNeedsRunTag(stages: WorkflowStageVM[], job: WorkflowJobVM): boolean {
+  const parsed = parseDeployJobSpec(job.spec, job.type);
+  if (parsed.artifactSource !== "version") return false;
+  if (parsed.sourceKind === "build") return true;
+  if (parsed.sourceKind === "create-version") return false;
+  const upstream = findUpstreamJob(stages, parsed.jobName);
+  return upstream?.type === "sparkops-build";
+}
+
 function deployRows(
   job: WorkflowJobVM,
   stages: WorkflowStageVM[],
@@ -166,8 +189,8 @@ export function defaultRunBranch(stages: WorkflowStageVM[] | undefined): string 
 export function defaultDeployEnvironmentId(stages: WorkflowStageVM[] | undefined): string {
   for (const stage of stages ?? []) {
     for (const job of stage.jobs) {
-      if (job.type !== "sparkops-deploy") continue;
-      const env = parseDeployJobSpec(job.spec).environmentId.trim();
+      if (job.type !== "sparkops-deploy" && job.type !== "sparkops-deploy-version") continue;
+      const env = parseDeployJobSpec(job.spec, job.type).environmentId.trim();
       if (env) return env;
     }
   }
@@ -183,6 +206,7 @@ export function buildWorkflowRunForm(
   const mapped = list
     .map((stage, index) => {
       const buildRows: RunFormBuildRow[] = [];
+      const versionJobs: RunFormVersionJob[] = [];
       const deployJobs: RunFormDeployJob[] = [];
       const otherJobs: RunFormOtherJob[] = [];
       for (const job of stage.jobs) {
@@ -190,11 +214,26 @@ export function buildWorkflowRunForm(
           buildRows.push(...buildRowsForJob(job, products, gitProjects));
           continue;
         }
-        if (job.type === "sparkops-deploy") {
+        if (job.type === "sparkops-create-version") {
+          versionJobs.push({
+            jobName: job.name,
+            versionTag: parseCreateVersionJobSpec(job.spec).versionTag,
+          });
+          continue;
+        }
+        if (job.type === "sparkops-deploy" || job.type === "sparkops-deploy-version") {
+          const parsed = parseDeployJobSpec(job.spec, job.type);
+          if (deployVersionNeedsRunTag(list, job)) {
+            versionJobs.push({
+              jobName: job.name,
+              versionTag: "",
+              fromDeploy: true,
+            });
+          }
           deployJobs.push({
             jobName: job.name,
-            environmentId: parseDeployJobSpec(job.spec).environmentId,
-            rows: deployRows(job, list, products, gitProjects),
+            environmentId: parsed.environmentId,
+            rows: parsed.artifactSource === "version" ? [] : deployRows(job, list, products, gitProjects),
           });
           continue;
         }
@@ -202,9 +241,16 @@ export function buildWorkflowRunForm(
       }
       const id = `wf-run-stage-${index}`;
       const name = stage.name.trim() || `阶段${index + 1}`;
-      return { id, name, buildRows, deployJobs, otherJobs };
+      return { id, name, buildRows, versionJobs, deployJobs, otherJobs };
     })
-    .filter((stage) => stage.buildRows.length + stage.deployJobs.length + stage.otherJobs.length > 0);
+    .filter(
+      (stage) =>
+        stage.buildRows.length +
+          stage.versionJobs.length +
+          stage.deployJobs.length +
+          stage.otherJobs.length >
+        0,
+    );
 
   return {
     stages: mapped,

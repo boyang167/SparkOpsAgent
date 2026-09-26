@@ -135,6 +135,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		c.Config.Deploy.JenkinsTimeout,
 		deployOperations,
 	)
+	deployOrchestrator.SetProjectVersionReader(c.ProjectVersionReader)
 	deployOrchestrator.SetTerminalHook(func(ctx context.Context, run *deployrunmodel.DeploymentRun) {
 		if run == nil {
 			return
@@ -274,14 +275,18 @@ func (p *deploymentTriggerPort) TriggerForEnvironment(ctx context.Context, req a
 	if err != nil {
 		return kernel.DeploymentRunID{}, err
 	}
-	run, err := p.create.Handle(ctx, auto.WorkspaceID, auto.MemberID, req.ProjectID, deploycommand.CreateInput{
+	input := deploycommand.CreateInput{
 		EnvironmentID:   req.EnvironmentID.String(),
 		GitRefType:      req.GitRefType,
 		GitRefValue:     req.GitRefValue,
 		ImageTag:        req.ImageTag,
 		ImageRepository: req.ImageRepository,
 		Manifests:       configManifests(req.ConfigResources),
-	})
+	}
+	if req.ProjectVersionID != nil {
+		input.ProjectVersionID = req.ProjectVersionID.String()
+	}
+	run, err := p.create.Handle(ctx, auto.WorkspaceID, auto.MemberID, req.ProjectID, input)
 	if err != nil {
 		return kernel.DeploymentRunID{}, err
 	}

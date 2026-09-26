@@ -147,6 +147,21 @@ export function updateGeneratedTemplate(
   );
 }
 
+export async function listProjectVersions(workspaceId: string, projectId: string) {
+  const data = await bffFetch<import("@sparkops/contracts/workspace").ProjectVersionListVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/versions`,
+    withWorkspace(workspaceId),
+  );
+  return data.items;
+}
+
+export function getProjectVersion(workspaceId: string, projectId: string, versionId: string) {
+  return bffFetch<import("@sparkops/contracts/workspace").ProjectVersionDetailVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/versions/${versionId}`,
+    withWorkspace(workspaceId),
+  );
+}
+
 export async function listGitRefs(
   workspaceId: string,
   input: import("@sparkops/contracts/workspace").ListGitRefsCommand,

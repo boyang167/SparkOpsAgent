@@ -21,6 +21,7 @@ import {
 } from "./project-utils";
 import { computeProjectProgress, isProjectConfigComplete } from "./project-progress";
 import { ProjectGeneratedTemplates } from "./ProjectGeneratedTemplates";
+import { ProjectVersionsTab } from "./ProjectVersionsTab";
 import { ProjectDockerfileViewer } from "./ProjectDockerfileViewer";
 import { countGeneratedTemplates } from "./project-template-render";
 import { buildStatusLabel, buildSummaryState } from "./build-summary";
@@ -43,6 +44,7 @@ type SectionKey =
   | "dockerfile"
   | "secret"
   | "templates"
+  | "versions"
   | "stats"
   | "env"
   | "deploys"
@@ -508,6 +510,15 @@ export function ProjectDetailModal({
           }
         >
           <ProjectGeneratedTemplates workspaceId={workspaceId} project={project} />
+        </DetailAccordion>
+
+        <DetailAccordion
+          title="交付版本"
+          icon={<IconDoc />}
+          open={isOpen("versions")}
+          onToggle={() => toggle("versions")}
+        >
+          <ProjectVersionsTab workspaceId={workspaceId} projectId={project.id} active={isOpen("versions")} />
         </DetailAccordion>
 
         <DetailAccordion

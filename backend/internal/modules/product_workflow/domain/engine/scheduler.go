@@ -26,13 +26,14 @@ type ExternalStatusReader interface {
 }
 
 type Scheduler struct {
-	repo    repository.ProductWorkflowRepository
-	builds  *BuildExecutor
+	repo           repository.ProductWorkflowRepository
+	builds         *BuildExecutor
+	createVersions *CreateVersionExecutor
 	deploys *DeployExecutor
 	bus     eventbus.Bus
-	git     GitReporter
-	locker  runLocker
-	status  ExternalStatusReader
+	git            GitReporter
+	locker         runLocker
+	status         ExternalStatusReader
 }
 
 func (s *Scheduler) SetGitReporter(reporter GitReporter) {
@@ -54,8 +55,17 @@ func (s *Scheduler) reportGit(ctx context.Context, run *model.ProductWorkflowRun
 	s.git.Report(ctx, run)
 }
 
-func NewScheduler(repo repository.ProductWorkflowRepository, builds *BuildExecutor, deploys *DeployExecutor, bus eventbus.Bus) *Scheduler {
-	return &Scheduler{repo: repo, builds: builds, deploys: deploys, bus: bus}
+func NewScheduler(
+	repo repository.ProductWorkflowRepository,
+	builds *BuildExecutor,
+	createVersions *CreateVersionExecutor,
+	deploys *DeployExecutor,
+	bus eventbus.Bus,
+) *Scheduler {
+	return &Scheduler{
+		repo: repo, builds: builds, createVersions: createVersions,
+		deploys: deploys, bus: bus,
+	}
 }
 
 func (s *Scheduler) StartRun(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun) error {
@@ -669,9 +679,23 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 				return s.failRun(ctx, run, jobRun.ErrorMessage)
 			}
 			s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventCreated)
-		case model.JobTypeSparkopsDeploy:
+		case model.JobTypeSparkopsCreateVersion:
+			if s.createVersions == nil {
+				jobRun.Status = model.JobRunStatusFailed
+				jobRun.ErrorMessage = "version creator unavailable"
+				return s.failRun(ctx, run, jobRun.ErrorMessage)
+			}
+			if err := s.createVersions.RunJob(ctx, wf, run, run.CurrentStage, ji, job); err != nil {
+				return s.failRun(ctx, run, jobRun.ErrorMessage)
+			}
+		case model.JobTypeSparkopsDeploy, model.JobTypeSparkopsDeployVersion:
 			hasAsync = true
-			if err := s.deploys.RunJob(ctx, run, run.CurrentStage, ji, job); err != nil {
+			if s.deploys == nil {
+				jobRun.Status = model.JobRunStatusFailed
+				jobRun.ErrorMessage = "deploy executor unavailable"
+				return s.failRun(ctx, run, jobRun.ErrorMessage)
+			}
+			if err := s.deploys.RunJob(ctx, wf, run, run.CurrentStage, ji, job); err != nil {
 				return s.failRun(ctx, run, jobRun.ErrorMessage)
 			}
 		case model.JobTypeSparkopsApproval:
@@ -763,7 +787,7 @@ func (s *Scheduler) refreshJobStatuses(run *model.ProductWorkflowRun) (bool, str
 					run.StageRuns[si].Status = model.JobRunStatusFailed
 					return true, msg
 				}
-			case model.JobTypeSparkopsDeploy:
+			case model.JobTypeSparkopsDeploy, model.JobTypeSparkopsDeployVersion:
 				if failed, msg := refreshDeployJob(jobRun); failed {
 					run.StageRuns[si].Status = model.JobRunStatusFailed
 					return true, msg
@@ -975,9 +999,24 @@ func ApplyRunInput(stages []model.WorkflowStage, input map[string]any) []model.W
 			if job.Type == model.JobTypeSparkopsBuild {
 				applyBranchOverrides(job, stringMap(input["branch_overrides"]), stringMap(input["ref_type_overrides"]))
 			}
-			if job.Type == model.JobTypeSparkopsDeploy && len(envOverrides) > 0 {
+			if (job.Type == model.JobTypeSparkopsDeploy || job.Type == model.JobTypeSparkopsDeployVersion) && len(envOverrides) > 0 {
 				if envID, ok := envOverrides[job.Name].(string); ok && envID != "" {
 					job.Spec["environment_id"] = envID
+				}
+			}
+			if job.Type == model.JobTypeSparkopsCreateVersion {
+				if tagOverrides, ok := input["version_tag_overrides"].(map[string]any); ok {
+					if tag, ok := tagOverrides[job.Name].(string); ok && strings.TrimSpace(tag) != "" {
+						job.Spec["version_tag"] = strings.TrimSpace(tag)
+					}
+				}
+			}
+			if (job.Type == model.JobTypeSparkopsDeploy || job.Type == model.JobTypeSparkopsDeployVersion) &&
+				deployArtifactSource(job.Type, job.Spec) == "version" {
+				if tagOverrides, ok := input["version_tag_overrides"].(map[string]any); ok {
+					if tag, ok := tagOverrides[job.Name].(string); ok && strings.TrimSpace(tag) != "" {
+						job.Spec["version_tag"] = strings.TrimSpace(tag)
+					}
 				}
 			}
 		}

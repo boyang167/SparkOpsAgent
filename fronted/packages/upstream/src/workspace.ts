@@ -107,6 +107,20 @@ export function createWorkspaceUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async listProjectVersions(workspaceId: string, projectId: string) {
+      return upstreamFetch<import("@sparkops/contracts/workspace").ProjectVersionListVM>(
+        `/api/v1/projects/${projectId}/versions`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async getProjectVersion(workspaceId: string, projectId: string, versionId: string) {
+      return upstreamFetch<import("@sparkops/contracts/workspace").ProjectVersionDetailVM>(
+        `/api/v1/projects/${projectId}/versions/${versionId}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
     async updateGeneratedTemplate(
       workspaceId: string,
       projectId: string,

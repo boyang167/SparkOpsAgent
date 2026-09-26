@@ -12,6 +12,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/persistence"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/portadapter"
 	wshttp "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
@@ -46,6 +47,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 
 	repo := persistence.NewProjectRepository(c.DB)
+	versionRepo := persistence.NewProjectVersionRepository(c.DB)
 	memberRepo := persistence.NewProjectMemberRepository(c.DB)
 	templateRepo := persistence.NewTemplateRepository(c.DB)
 	secretRepo := persistence.NewSecretRepository(c.DB)
@@ -67,6 +69,11 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 
 	generateTemplates := query.NewGenerateProjectTemplatesHandler(repo, templateRepo, secretRepo, wsChecker, c.DB)
+	createProjectVersion := command.NewCreateProjectVersionHandler(repo, versionRepo, generateTemplates)
+	c.VersionCreator = portadapter.NewVersionCreatorPort(createProjectVersion)
+	c.ProjectVersionReader = portadapter.NewProjectVersionReaderPort(versionRepo)
+	listProjectVersions := query.NewListProjectVersionsHandler(versionRepo, repo, wsChecker)
+	getProjectVersion := query.NewGetProjectVersionHandler(versionRepo, repo, wsChecker)
 	handler := wshttp.NewHandler(
 		command.NewCreateProjectHandler(repo, memberRepo, wsChecker, clusterChecker, productChecker, c.PolicyEngine, c.EventBus),
 		command.NewUpdateProjectHandler(repo, wsChecker, clusterChecker, productChecker),
@@ -94,6 +101,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewListProjectMembersHandler(repo, memberRepo),
 		generateTemplates,
 		command.NewUpdateGeneratedTemplateHandler(repo, wsChecker, generateTemplates),
+		listProjectVersions,
+		getProjectVersion,
 		command.NewSubmitProjectReviewHandler(repo, c.ProjectAccessChecker, c.PermissionChecker),
 		command.NewReviewProjectHandler(repo, c.ProjectAccessChecker, c.PermissionChecker),
 		memberLookup,
@@ -112,6 +121,10 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListProjects)
 	c.Engine.GET("/api/v1/projects/:projectId",
 		auth, ws, wsMember, projectRead, handler.GetProject)
+	c.Engine.GET("/api/v1/projects/:projectId/versions",
+		auth, ws, wsMember, projectRead, handler.ListProjectVersions)
+	c.Engine.GET("/api/v1/projects/:projectId/versions/:versionId",
+		auth, ws, wsMember, projectRead, handler.GetProjectVersion)
 	c.Engine.GET("/api/v1/projects/:projectId/generated-templates",
 		auth, ws, wsMember, projectRead, handler.GenerateProjectTemplates)
 	c.Engine.PUT("/api/v1/projects/:projectId/generated-templates/:kind",

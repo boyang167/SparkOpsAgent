@@ -13,16 +13,24 @@ import (
 )
 
 type DeployExecutor struct {
-	trigger appctx.DeploymentTrigger
-	repo    repository.ProductWorkflowRepository
+	trigger  appctx.DeploymentTrigger
+	creator  appctx.VersionCreator
+	reader   appctx.ProjectVersionReader
+	repo     repository.ProductWorkflowRepository
 }
 
-func NewDeployExecutor(trigger appctx.DeploymentTrigger, repo repository.ProductWorkflowRepository) *DeployExecutor {
-	return &DeployExecutor{trigger: trigger, repo: repo}
+func NewDeployExecutor(
+	trigger appctx.DeploymentTrigger,
+	creator appctx.VersionCreator,
+	reader appctx.ProjectVersionReader,
+	repo repository.ProductWorkflowRepository,
+) *DeployExecutor {
+	return &DeployExecutor{trigger: trigger, creator: creator, reader: reader, repo: repo}
 }
 
 func (e *DeployExecutor) RunJob(
 	ctx context.Context,
+	wf *model.ProductWorkflow,
 	run *model.ProductWorkflowRun,
 	stageIndex int,
 	jobIndex int,
@@ -53,6 +61,34 @@ func (e *DeployExecutor) RunJob(
 		return fmt.Errorf("unsupported deploy source")
 	}
 	refJobName, _ := spec["job_name"].(string)
+	if deployArtifactSource(job.Type, spec) == "version" {
+		return e.runVersionDeploy(ctx, wf, run, stageIndex, jobIndex, job, envID, refJobName, spec)
+	}
+	return e.runBuildDeploy(ctx, run, stageIndex, jobIndex, job, envID, refJobName, spec)
+}
+
+func deployArtifactSource(jobType string, spec map[string]any) string {
+	if jobType == model.JobTypeSparkopsDeployVersion {
+		return "version"
+	}
+	raw, _ := spec["artifact_source"].(string)
+	if strings.TrimSpace(raw) == "version" {
+		return "version"
+	}
+	return "build"
+}
+
+func (e *DeployExecutor) runBuildDeploy(
+	ctx context.Context,
+	run *model.ProductWorkflowRun,
+	stageIndex int,
+	jobIndex int,
+	job model.WorkflowJob,
+	envID kernel.EnvironmentID,
+	refJobName string,
+	spec map[string]any,
+) error {
+	jobRun := &run.StageRuns[stageIndex].Jobs[jobIndex]
 	targets := resolveFromJobBuilds(run, refJobName)
 	if len(targets) == 0 {
 		jobRun.Status = model.JobRunStatusFailed
@@ -101,6 +137,206 @@ func (e *DeployExecutor) RunJob(
 		}
 	}
 	return nil
+}
+
+func versionSourceKind(jobType string, spec map[string]any, run *model.ProductWorkflowRun, refJobName string) string {
+	if kind, _ := spec["source_kind"].(string); kind == "build" || kind == "create-version" {
+		return kind
+	}
+	switch resolveUpstreamJobType(run, refJobName) {
+	case model.JobTypeSparkopsBuild:
+		return "build"
+	case model.JobTypeSparkopsCreateVersion:
+		return "create-version"
+	}
+	if len(resolveFromJobVersions(run, refJobName)) > 0 {
+		return "create-version"
+	}
+	if jobType == model.JobTypeSparkopsDeployVersion {
+		return "create-version"
+	}
+	return "build"
+}
+
+func (e *DeployExecutor) runVersionDeploy(
+	ctx context.Context,
+	wf *model.ProductWorkflow,
+	run *model.ProductWorkflowRun,
+	stageIndex int,
+	jobIndex int,
+	job model.WorkflowJob,
+	envID kernel.EnvironmentID,
+	refJobName string,
+	spec map[string]any,
+) error {
+	switch versionSourceKind(job.Type, spec, run, refJobName) {
+	case "create-version":
+		return e.runVersionDeployFromCreateJob(ctx, run, stageIndex, jobIndex, job, envID, refJobName)
+	default:
+		return e.runVersionDeployFromBuild(ctx, wf, run, stageIndex, jobIndex, job, envID, refJobName, spec)
+	}
+}
+
+func (e *DeployExecutor) runVersionDeployFromCreateJob(
+	ctx context.Context,
+	run *model.ProductWorkflowRun,
+	stageIndex int,
+	jobIndex int,
+	job model.WorkflowJob,
+	envID kernel.EnvironmentID,
+	refJobName string,
+) error {
+	jobRun := &run.StageRuns[stageIndex].Jobs[jobIndex]
+	targets := resolveFromJobVersions(run, refJobName)
+	if len(targets) == 0 {
+		jobRun.Status = model.JobRunStatusFailed
+		jobRun.ErrorMessage = "no successful versions from job " + refJobName
+		return fmt.Errorf("no version outputs")
+	}
+	return e.deployVersionTargets(ctx, run, stageIndex, jobIndex, job, envID, targets)
+}
+
+func (e *DeployExecutor) runVersionDeployFromBuild(
+	ctx context.Context,
+	wf *model.ProductWorkflow,
+	run *model.ProductWorkflowRun,
+	stageIndex int,
+	jobIndex int,
+	job model.WorkflowJob,
+	envID kernel.EnvironmentID,
+	refJobName string,
+	spec map[string]any,
+) error {
+	if e.creator == nil {
+		return fmt.Errorf("version creator unavailable")
+	}
+	if wf == nil {
+		return fmt.Errorf("workflow context required for version deploy")
+	}
+	jobRun := &run.StageRuns[stageIndex].Jobs[jobIndex]
+	versionTag, _ := spec["version_tag"].(string)
+	versionTag = strings.TrimSpace(versionTag)
+	if versionTag == "" {
+		jobRun.Status = model.JobRunStatusFailed
+		jobRun.ErrorMessage = "version_tag is required for delivery version deploy"
+		return fmt.Errorf("version_tag is required")
+	}
+	builds := resolveFromJobBuilds(run, refJobName)
+	if len(builds) == 0 {
+		jobRun.Status = model.JobRunStatusFailed
+		jobRun.ErrorMessage = "no successful builds from job " + refJobName
+		return fmt.Errorf("no build outputs")
+	}
+	targets := make([]model.ProjectVersionRun, 0, len(builds))
+	for _, target := range builds {
+		projectID, err := kernel.ParseProjectID(target.ProjectID)
+		if err != nil {
+			return err
+		}
+		branch := target.Branch
+		if branch == "" {
+			branch = "main"
+		}
+		gitRefType, imageTag, imageRepository := deployImage(target, branch)
+		versionID, err := e.creator.CreateFromWorkflow(ctx, appctx.CreateVersionRequest{
+			WorkspaceID: wf.WorkspaceID, ProjectID: projectID, ProductID: run.ProductID,
+			VersionTag: versionTag, WorkflowRunID: run.ID, WorkflowJobName: job.Name,
+			GitRefType: gitRefType, GitRefValue: branch,
+			ImageTag: imageTag, ImageRepository: imageRepository, BuildID: target.BuildID,
+			CreatedBy: wf.CreatedBy,
+		})
+		if err != nil {
+			jobRun.Status = model.JobRunStatusFailed
+			jobRun.ErrorMessage = err.Error()
+			return err
+		}
+		targets = append(targets, model.ProjectVersionRun{
+			ProjectID: target.ProjectID, VersionID: versionID.String(),
+			VersionTag: versionTag, Status: model.JobRunStatusSuccess,
+		})
+	}
+	jobRun.Versions = targets
+	return e.deployVersionTargets(ctx, run, stageIndex, jobIndex, job, envID, targets)
+}
+
+func (e *DeployExecutor) deployVersionTargets(
+	ctx context.Context,
+	run *model.ProductWorkflowRun,
+	stageIndex int,
+	jobIndex int,
+	job model.WorkflowJob,
+	envID kernel.EnvironmentID,
+	targets []model.ProjectVersionRun,
+) error {
+	jobRun := &run.StageRuns[stageIndex].Jobs[jobIndex]
+	jobRun.Deploys = make([]model.ProjectDeployRun, 0, len(targets))
+	jobRun.Status = model.JobRunStatusRunning
+	run.StageRuns[stageIndex].Status = model.JobRunStatusRunning
+
+	for _, target := range targets {
+		projectID, parseErr := kernel.ParseProjectID(target.ProjectID)
+		if parseErr != nil {
+			return parseErr
+		}
+		versionID, parseErr := kernel.ParseProjectVersionID(target.VersionID)
+		if parseErr != nil {
+			return parseErr
+		}
+		gitRefType := "branch"
+		gitRefValue := "main"
+		imageTag := ""
+		imageRepository := ""
+		if e.reader != nil {
+			snapshot, snapErr := e.reader.LoadSnapshot(ctx, versionID)
+			if snapErr == nil {
+				gitRefType = snapshot.GitRefType
+				gitRefValue = snapshot.GitRefValue
+				if len(snapshot.Images) > 0 {
+					imageTag = snapshot.Images[0].Tag
+					imageRepository = snapshot.Images[0].Image
+				}
+			}
+		}
+		deployID, triggerErr := e.trigger.TriggerForEnvironment(ctx, appctx.WorkflowDeploymentRequest{
+			ProjectID: projectID, EnvironmentID: envID,
+			GitRefType: gitRefType, GitRefValue: gitRefValue,
+			ImageTag: imageTag, ImageRepository: imageRepository,
+			ProjectVersionID: &versionID,
+		})
+		if triggerErr != nil {
+			jobRun.Status = model.JobRunStatusFailed
+			jobRun.ErrorMessage = triggerErr.Error()
+			jobRun.Deploys = append(jobRun.Deploys, model.ProjectDeployRun{
+				ProjectID: target.ProjectID, EnvironmentID: envID.String(),
+				VersionID: target.VersionID, ImageTag: imageTag, ImageRepository: imageRepository,
+				Status: model.JobRunStatusFailed, ErrorMessage: triggerErr.Error(),
+			})
+			return triggerErr
+		}
+		jobRun.Deploys = append(jobRun.Deploys, model.ProjectDeployRun{
+			ProjectID: target.ProjectID, EnvironmentID: envID.String(),
+			DeploymentRunID: deployID.String(), VersionID: target.VersionID,
+			ImageTag: imageTag, ImageRepository: imageRepository,
+			Status: model.JobRunStatusRunning,
+		})
+		if err := e.repo.SaveDeployRef(ctx, &model.WorkflowDeployRef{
+			DeploymentRunID: deployID, RunID: run.ID, JobName: job.Name, ProjectID: projectID,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func resolveUpstreamJobType(run *model.ProductWorkflowRun, jobName string) string {
+	for _, stage := range run.StageRuns {
+		for _, job := range stage.Jobs {
+			if job.Name == jobName {
+				return job.Type
+			}
+		}
+	}
+	return ""
 }
 
 func resolveFromJobBuilds(run *model.ProductWorkflowRun, jobName string) []model.ProjectBuildRun {

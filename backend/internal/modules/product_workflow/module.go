@@ -48,6 +48,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	if c.DeploymentTrigger == nil {
 		return fmt.Errorf("product_workflow module requires deployment trigger")
 	}
+	if c.VersionCreator == nil {
+		return fmt.Errorf("product_workflow module requires version creator")
+	}
 	if err := persistence.AutoMigrate(c.DB); err != nil {
 		return fmt.Errorf("product_workflow migrate: %w", err)
 	}
@@ -60,8 +63,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	wsChecker := acl.NewTenantACL(c.DB)
 	productChecker := acl.NewProductChecker(c.DB)
 	buildExecutor := engine.NewBuildExecutor(c.BuildTrigger, workflowRepo, acl.NewRegistryResolver(c.DB))
-	deployExecutor := engine.NewDeployExecutor(c.DeploymentTrigger, workflowRepo)
-	scheduler := engine.NewScheduler(workflowRepo, buildExecutor, deployExecutor, c.EventBus)
+	createVersionExecutor := engine.NewCreateVersionExecutor(c.VersionCreator)
+	deployExecutor := engine.NewDeployExecutor(c.DeploymentTrigger, c.VersionCreator, c.ProjectVersionReader, workflowRepo)
+	scheduler := engine.NewScheduler(workflowRepo, buildExecutor, createVersionExecutor, deployExecutor, c.EventBus)
 	box, err := crypto.NewSecretBoxFromConfig(c.Config)
 	if err != nil {
 		log.Printf("product_workflow: variable cipher unavailable: %v", err)

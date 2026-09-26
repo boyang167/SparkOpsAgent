@@ -39,6 +39,7 @@ interface StartWorkflowRunModalProps {
     branch_overrides?: Record<string, string>;
     ref_type_overrides?: Record<string, string>;
     environment_overrides?: Record<string, string>;
+    version_tag_overrides?: Record<string, string>;
     variables?: Record<string, string>;
     remark?: string;
     stage_indices?: number[];
@@ -80,6 +81,7 @@ export function StartWorkflowRunModal({
   const [visibleStageIds, setVisibleStageIds] = useState<Set<string>>(new Set());
   const [collapsedStageIds, setCollapsedStageIds] = useState<Set<string>>(new Set());
   const [remark, setRemark] = useState("");
+  const [versionTags, setVersionTags] = useState<Record<string, string>>({});
 
   const stageSelectors = useMemo(() => {
     const items = form.pills.map((pill) => ({ id: pill.id, name: pill.name }));
@@ -182,6 +184,9 @@ export function StartWorkflowRunModal({
     stage.buildRows.some((row) => !(branches[row.key] ?? row.branch).trim()),
   );
   const missingEnv = selectedDeployJobs.length > 0 && !environmentId;
+  const missingVersionTag = selectedStages.some((stage) =>
+    stage.versionJobs.some((job) => !(versionTags[job.jobName] ?? job.versionTag).trim()),
+  );
 
   function toggleStageVisibility(stageId: string) {
     setVisibleStageIds((prev) => {
@@ -253,6 +258,13 @@ export function StartWorkflowRunModal({
     }
     const firstBranch = Object.values(branch_overrides)[0];
     const trimmedRemark = remark.trim();
+    const version_tag_overrides: Record<string, string> = {};
+    for (const stage of selectedStages) {
+      for (const job of stage.versionJobs) {
+        const value = (versionTags[job.jobName] ?? job.versionTag).trim();
+        if (value) version_tag_overrides[job.jobName] = value;
+      }
+    }
     const stage_indices = selectedStages
       .map((stage) => parseStageIndex(stage.id))
       .filter((index): index is number => index != null)
@@ -263,6 +275,7 @@ export function StartWorkflowRunModal({
       branch_overrides: Object.keys(branch_overrides).length ? branch_overrides : undefined,
       ref_type_overrides: Object.keys(ref_type_overrides).length ? ref_type_overrides : undefined,
       environment_overrides,
+      version_tag_overrides: Object.keys(version_tag_overrides).length ? version_tag_overrides : undefined,
       variables: runtimeVariables.length ? variables : undefined,
       remark: trimmedRemark || undefined,
       stage_indices: runAllStages ? undefined : stage_indices,
@@ -274,9 +287,17 @@ export function StartWorkflowRunModal({
       <button
         type="button"
         className="wf-run-submit"
-        disabled={busy || missingVariable || missingEnv || missingBranch}
+        disabled={busy || missingVariable || missingEnv || missingBranch || missingVersionTag}
         title={
-          missingEnv ? "请选择部署环境" : missingBranch ? "请选择分支" : missingVariable ? "请填写运行时变量" : undefined
+          missingEnv
+            ? "请选择部署环境"
+            : missingBranch
+              ? "请选择分支"
+              : missingVersionTag
+                ? "请填写交付版本号"
+                : missingVariable
+                  ? "请填写运行时变量"
+                  : undefined
         }
         onClick={submit}
       >
@@ -354,6 +375,39 @@ export function StartWorkflowRunModal({
                               setBranches((prev) => ({ ...prev, [row.key]: next }));
                               setRefTypes((prev) => ({ ...prev, [row.key]: nextType }));
                             }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {stage.versionJobs.length > 0 ? (
+              <div className="wf-run-block">
+                <table className="wf-run-table">
+                  <thead>
+                    <tr>
+                      <th>任务</th>
+                      <th>版本号</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stage.versionJobs.map((job) => (
+                      <tr key={job.jobName}>
+                        <td>
+                          {job.jobName}
+                          {job.fromDeploy ? <span className="text-muted text-xs">（交付版本部署）</span> : null}
+                        </td>
+                        <td>
+                          <input
+                            className="input"
+                            value={versionTags[job.jobName] ?? job.versionTag}
+                            placeholder="例如 v1.2.0"
+                            onChange={(event) =>
+                              setVersionTags((prev) => ({ ...prev, [job.jobName]: event.target.value }))
+                            }
                           />
                         </td>
                       </tr>

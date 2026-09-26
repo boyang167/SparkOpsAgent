@@ -41,8 +41,9 @@ type DeploymentRun struct {
 	WorkspaceID     kernel.WorkspaceID
 	ProjectID       kernel.ProjectID
 	ClusterID       kernel.ClusterInfoID
-	EnvironmentID   *kernel.EnvironmentID
-	DeployNamespace string
+	EnvironmentID     *kernel.EnvironmentID
+	ProjectVersionID  *kernel.ProjectVersionID
+	DeployNamespace   string
 	BuildID         *kernel.BuildID
 	GitRefType      string
 	GitRefValue     string

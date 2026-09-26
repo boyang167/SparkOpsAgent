@@ -25,4 +25,6 @@ var (
 	ErrSecretNotFound               = kernel.NewDomainError("WORKSPACE_APP_SECRET_NOT_FOUND", "secret not found")
 	ErrInvalidManifestKind          = kernel.NewDomainError("INVALID_REQUEST", "invalid manifest kind")
 	ErrInvalidManifestContent       = kernel.NewDomainError("INVALID_REQUEST", "manifest content is required")
+	ErrProjectVersionNotFound       = kernel.NewDomainError("WORKSPACE_APP_PROJECT_VERSION_NOT_FOUND", "project version not found")
+	ErrProjectVersionTagExists      = kernel.NewDomainError("WORKSPACE_APP_PROJECT_VERSION_EXISTS", "project version tag already exists")
 )

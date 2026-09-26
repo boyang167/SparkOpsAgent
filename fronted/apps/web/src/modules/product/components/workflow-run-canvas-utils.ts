@@ -66,7 +66,27 @@ export function buildPipelineStages(
         }
         continue;
       }
-      if (job.type === "sparkops-deploy" && job.deploys?.length) {
+      if (job.type === "sparkops-create-version" && job.versions?.length) {
+        for (const version of job.versions) {
+          tasks.push({
+            id: `${stageIndex}:${job.name}:version:${version.project_id}`,
+            stageIndex,
+            jobName: job.name,
+            kind: "build",
+            projectId: version.project_id,
+            projectLabel: `${projectDisplayName(version.project_id, projectNames)} · ${version.version_tag}`,
+            jobTypeLabel: typeLabel,
+            status: version.status,
+            refId: version.version_id,
+            errorMessage: version.error_message,
+          });
+        }
+        continue;
+      }
+      if (
+        (job.type === "sparkops-deploy" || job.type === "sparkops-deploy-version") &&
+        job.deploys?.length
+      ) {
         for (const deploy of job.deploys) {
           tasks.push({
             id: `${stageIndex}:${job.name}:deploy:${deploy.project_id}`,
@@ -77,7 +97,7 @@ export function buildPipelineStages(
             projectLabel: projectDisplayName(deploy.project_id, projectNames),
             jobTypeLabel: typeLabel,
             status: deploy.status,
-            refId: deploy.deployment_run_id,
+            refId: deploy.deployment_run_id || deploy.version_id,
             imageTag: deploy.image_tag,
             imageRepository: deploy.image_repository,
             environmentId: deploy.environment_id,

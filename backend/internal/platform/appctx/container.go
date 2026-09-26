@@ -47,6 +47,8 @@ type Container struct {
 	AuditLogger                audit.Logger
 	BuildTrigger               BuildTrigger
 	DeploymentTrigger          DeploymentTrigger
+	VersionCreator             VersionCreator
+	ProjectVersionReader       ProjectVersionReader
 	WorkflowRunTrigger         WorkflowRunTrigger
 	SprintProcessPort          SprintProcessPort
 	ManifestDeployer           runtimeport.ManifestDeployer

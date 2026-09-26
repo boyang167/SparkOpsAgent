@@ -39,7 +39,7 @@ func TestSyncRunExternalStatuses_skipsWhenRunLockBusy(t *testing.T) {
 			}},
 		},
 	}
-	scheduler := NewScheduler(repo, nil, nil, nil)
+	scheduler := NewScheduler(repo, nil, nil, nil, nil)
 	scheduler.SetStatusReader(stubStatusReader{buildStatus: string(buildmodel.BuildStatusSuccess)})
 
 	unlock := scheduler.locker.lock(runID)

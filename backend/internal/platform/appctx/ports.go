@@ -22,14 +22,57 @@ type BuildTrigger interface {
 }
 
 type WorkflowDeploymentRequest struct {
+	ProjectID        kernel.ProjectID
+	EnvironmentID    kernel.EnvironmentID
+	GitRefType       string
+	GitRefValue      string
+	ImageTag         string
+	ImageRepository  string
+	ProjectVersionID *kernel.ProjectVersionID
+	DeployContents   []string
+	ConfigResources  []WorkflowConfigResource
+}
+
+type VersionManifest struct {
+	Kind    string
+	Content string
+}
+
+type VersionImage struct {
+	ServiceName string
+	Image       string
+	Tag         string
+	BuildID     string
+}
+
+type VersionSnapshot struct {
+	Manifests   []VersionManifest
+	Images      []VersionImage
+	GitRefType  string
+	GitRefValue string
+}
+
+type CreateVersionRequest struct {
+	WorkspaceID     kernel.WorkspaceID
 	ProjectID       kernel.ProjectID
-	EnvironmentID   kernel.EnvironmentID
+	ProductID       kernel.ProductID
+	VersionTag      string
+	WorkflowRunID   kernel.ProductWorkflowRunID
+	WorkflowJobName string
 	GitRefType      string
 	GitRefValue     string
 	ImageTag        string
 	ImageRepository string
-	DeployContents  []string
-	ConfigResources []WorkflowConfigResource
+	BuildID         string
+	CreatedBy       kernel.MemberID
+}
+
+type VersionCreator interface {
+	CreateFromWorkflow(ctx context.Context, req CreateVersionRequest) (kernel.ProjectVersionID, error)
+}
+
+type ProjectVersionReader interface {
+	LoadSnapshot(ctx context.Context, versionID kernel.ProjectVersionID) (VersionSnapshot, error)
 }
 
 type WorkflowConfigResource struct {

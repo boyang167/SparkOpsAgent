@@ -8,6 +8,7 @@ import { Modal } from "@/components/ui/Modal";
 import { WorkflowJobPickerModal } from "./WorkflowJobPickerModal";
 import { ApprovalJobConfigDrawer } from "./ApprovalJobConfigDrawer";
 import { BuildJobConfigDrawer } from "./BuildJobConfigDrawer";
+import { CreateVersionJobConfigDrawer } from "./CreateVersionJobConfigDrawer";
 import { DeployJobConfigDrawer } from "./DeployJobConfigDrawer";
 import { BuildNotifyList } from "./BuildNotifyList";
 import {
@@ -16,6 +17,7 @@ import {
   jobTypeLabel,
   nextJobIndex,
   upstreamBuildJobs,
+  upstreamVersionSourceJobs,
   type EditorJob,
   type EditorStage,
 } from "./workflow-editor-utils";
@@ -105,8 +107,20 @@ export function ProductWorkflowEditor({
   }, [selection, stages]);
 
   const sourceBuildJobs = useMemo(() => {
-    if (!selection || selection.kind !== "job" || selectedJob?.type !== "sparkops-deploy") return [];
+    if (!selection || selection.kind !== "job") return [];
+    if (selectedJob?.type !== "sparkops-deploy" && selectedJob?.type !== "sparkops-create-version") return [];
     return upstreamBuildJobs(stages, selection.stageIndex, selection.jobIndex);
+  }, [selection, selectedJob, stages]);
+
+  const sourceVersionJobs = useMemo(() => {
+    if (!selection || selection.kind !== "job") return [];
+    if (
+      selectedJob?.type !== "sparkops-deploy" &&
+      selectedJob?.type !== "sparkops-deploy-version"
+    ) {
+      return [];
+    }
+    return upstreamVersionSourceJobs(stages, selection.stageIndex, selection.jobIndex);
   }, [selection, selectedJob, stages]);
 
   const yamlContent = useMemo(
@@ -481,13 +495,35 @@ export function ProductWorkflowEditor({
       />
 
       <DeployJobConfigDrawer
-        open={selection?.kind === "job" && selectedJob?.type === "sparkops-deploy"}
+        open={
+          selection?.kind === "job" &&
+          (selectedJob?.type === "sparkops-deploy" || selectedJob?.type === "sparkops-deploy-version")
+        }
         workspaceId={workspaceId}
+        jobName={selectedJob?.name ?? ""}
+        jobType={selectedJob?.type}
+        spec={selectedJob?.spec}
+        sourceJobs={sourceBuildJobs}
+        sourceVersionJobs={sourceVersionJobs}
+        environments={environments}
+        projects={projects}
+        onClose={() => setSelection(null)}
+        onConfirm={(nextName, nextSpec) => {
+          if (!selection || selection.kind !== "job") return;
+          updateJob(selection.stageIndex, selection.jobIndex, {
+            name: nextName,
+            type: "sparkops-deploy",
+            spec: nextSpec,
+          });
+          setSelection(null);
+        }}
+      />
+
+      <CreateVersionJobConfigDrawer
+        open={selection?.kind === "job" && selectedJob?.type === "sparkops-create-version"}
         jobName={selectedJob?.name ?? ""}
         spec={selectedJob?.spec}
         sourceJobs={sourceBuildJobs}
-        environments={environments}
-        projects={projects}
         onClose={() => setSelection(null)}
         onConfirm={(nextName, nextSpec) => {
           if (!selection || selection.kind !== "job") return;

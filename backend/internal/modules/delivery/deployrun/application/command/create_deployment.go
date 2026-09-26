@@ -19,15 +19,16 @@ import (
 )
 
 type CreateInput struct {
-	ClusterID       string               `json:"cluster_id"`
-	EnvironmentID   string               `json:"environment_id"`
-	GitRefType      string               `json:"git_ref_type"`
-	GitRefValue     string               `json:"git_ref_value"`
-	ImageTag        string               `json:"image_tag"`
-	ImageRepository string               `json:"image_repository"`
-	CrossCluster    bool                 `json:"cross_cluster"`
-	SyncOnly        bool                 `json:"sync_only"`
-	Manifests       []model.SyncManifest `json:"manifests"`
+	ClusterID        string               `json:"cluster_id"`
+	EnvironmentID    string               `json:"environment_id"`
+	ProjectVersionID string               `json:"project_version_id"`
+	GitRefType       string               `json:"git_ref_type"`
+	GitRefValue      string               `json:"git_ref_value"`
+	ImageTag         string               `json:"image_tag"`
+	ImageRepository  string               `json:"image_repository"`
+	CrossCluster     bool                 `json:"cross_cluster"`
+	SyncOnly         bool                 `json:"sync_only"`
+	Manifests        []model.SyncManifest `json:"manifests"`
 }
 
 type CreateDeploymentHandler struct {
@@ -166,6 +167,13 @@ func (h *CreateDeploymentHandler) Handle(
 	run.EnvironmentID = environmentID
 	run.DeployNamespace = deployNamespace
 	run.ImageRepository = strings.TrimSpace(input.ImageRepository)
+	if strings.TrimSpace(input.ProjectVersionID) != "" {
+		versionID, parseErr := kernel.ParseProjectVersionID(input.ProjectVersionID)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		run.ProjectVersionID = &versionID
+	}
 	run.CreatedAt = h.clock().UTC()
 	if err := h.repo.Create(ctx, run); err != nil {
 		return nil, err

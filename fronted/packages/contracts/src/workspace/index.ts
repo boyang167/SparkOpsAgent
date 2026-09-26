@@ -185,6 +185,50 @@ export const UpdateGeneratedTemplateCommandSchema = z.object({
 
 export type UpdateGeneratedTemplateCommand = z.infer<typeof UpdateGeneratedTemplateCommandSchema>;
 
+export const VersionImageVMSchema = z.object({
+  service_name: z.string(),
+  image: z.string(),
+  tag: z.string(),
+  build_id: z.string().optional(),
+});
+
+export type VersionImageVM = z.infer<typeof VersionImageVMSchema>;
+
+export const ProjectVersionListItemVMSchema = z.object({
+  id: z.string(),
+  version_tag: z.string(),
+  status: z.string(),
+  images: z.array(VersionImageVMSchema).default([]),
+  workflow_run_id: z.string().optional(),
+  product_id: z.string().optional(),
+  created_at: z.string(),
+});
+
+export type ProjectVersionListItemVM = z.infer<typeof ProjectVersionListItemVMSchema>;
+
+export const ProjectVersionListVMSchema = z.object({
+  items: z.array(ProjectVersionListItemVMSchema),
+});
+
+export type ProjectVersionListVM = z.infer<typeof ProjectVersionListVMSchema>;
+
+export const VersionManifestVMSchema = z.object({
+  kind: z.string(),
+  content: z.string(),
+  hash: z.string().optional(),
+});
+
+export type VersionManifestVM = z.infer<typeof VersionManifestVMSchema>;
+
+export const ProjectVersionDetailVMSchema = ProjectVersionListItemVMSchema.extend({
+  git_ref_type: z.string(),
+  git_ref_value: z.string(),
+  manifests: z.array(VersionManifestVMSchema).default([]),
+  error_message: z.string().optional(),
+});
+
+export type ProjectVersionDetailVM = z.infer<typeof ProjectVersionDetailVMSchema>;
+
 export const GitRefVMSchema = z.object({
   name: z.string(),
   title: z.string().optional(),

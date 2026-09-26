@@ -27,8 +27,10 @@ interface DeployJobConfigDrawerProps {
   open: boolean;
   workspaceId: string;
   jobName: string;
+  jobType?: string;
   spec: Record<string, unknown> | undefined;
   sourceJobs: EditorJob[];
+  sourceVersionJobs: EditorJob[];
   environments: EnvironmentVM[];
   projects: ProductProjectVM[];
   onClose: () => void;
@@ -44,8 +46,10 @@ export function DeployJobConfigDrawer({
   open,
   workspaceId,
   jobName,
+  jobType,
   spec,
   sourceJobs,
+  sourceVersionJobs,
   environments,
   projects,
   onClose,
@@ -53,7 +57,7 @@ export function DeployJobConfigDrawer({
 }: DeployJobConfigDrawerProps) {
   const [tab, setTab] = useState<DeployTab>("basic");
   const [name, setName] = useState(jobName);
-  const [draft, setDraft] = useState<DeployJobSpec>(() => parseDeployJobSpec(spec));
+  const [draft, setDraft] = useState<DeployJobSpec>(() => parseDeployJobSpec(spec, jobType));
   const [envType, setEnvType] = useState("test");
   const [projectDetails, setProjectDetails] = useState<ProjectVM[]>([]);
   const [registries, setRegistries] = useState<SecretVM[]>([]);
@@ -63,11 +67,21 @@ export function DeployJobConfigDrawer({
 
   useEffect(() => {
     if (!open) return;
-    const parsed = parseDeployJobSpec(spec);
+    const parsed = parseDeployJobSpec(spec, jobType);
     const current = environments.find((item) => item.id === parsed.environmentId);
+    const versionJobs =
+      parsed.artifactSource === "version"
+        ? sourceVersionJobs.filter((job) => job.name.trim())
+        : [];
+    const nextDraft =
+      parsed.artifactSource === "version" &&
+      !parsed.jobName.trim() &&
+      versionJobs.length === 1
+        ? { ...parsed, jobName: versionJobs[0].name }
+        : parsed;
     setTab("basic");
     setName(jobName);
-    setDraft(parsed);
+    setDraft(nextDraft);
     setEnvType(current?.env_type || environments[0]?.env_type || "test");
     if (!workspaceId) return;
     let cancelled = false;
@@ -83,12 +97,14 @@ export function DeployJobConfigDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open, jobName, spec, workspaceId, environments, projects]);
+  }, [open, jobName, jobType, spec, workspaceId, environments, projects, sourceVersionJobs]);
 
   const envTypes = PRODUCT_ENVIRONMENT_TYPES.map((item) => item.id);
+  const isVersionDeploy = draft.artifactSource === "version";
+  const upstreamJobs = isVersionDeploy ? sourceVersionJobs : sourceJobs;
 
   const typedEnvironments = environments.filter((item) => (item.env_type || "test") === envType);
-  const sourceJob = sourceJobs.find((item) => item.name === draft.jobName);
+  const sourceJob = upstreamJobs.find((item) => item.name === draft.jobName);
   const images = sourceImageLines(
     sourceJob?.spec,
     registries.map((item) => ({ id: item.id, serviceUrl: item.service_url })),
@@ -102,13 +118,13 @@ export function DeployJobConfigDrawer({
       };
     }),
   );
-  const knownSource = sourceJobs.some((item) => item.name === draft.jobName);
-  const configEnabled = draft.contents.includes("config");
+  const knownSource = upstreamJobs.some((item) => item.name === draft.jobName);
+  const configEnabled = !isVersionDeploy && draft.contents.includes("config");
   const canConfirm =
     name.trim().length > 0 &&
     draft.environmentId.trim().length > 0 &&
     draft.jobName.trim().length > 0 &&
-    draft.contents.length > 0 &&
+    (isVersionDeploy || draft.contents.length > 0) &&
     !(configEnabled && configLoading);
 
   function toggleContent(id: string) {
@@ -221,7 +237,21 @@ export function DeployJobConfigDrawer({
             type="button"
             className="btn btn-primary text-sm"
             disabled={!canConfirm}
-            onClick={() => onConfirm(name.trim(), deployJobSpecToRecord({ ...draft, jobName: draft.jobName.trim() }))}
+            onClick={() => {
+              const picked = upstreamJobs.find((item) => item.name === draft.jobName);
+              const sourceKind =
+                draft.artifactSource === "version"
+                  ? picked?.type === "sparkops-create-version"
+                    ? "create-version"
+                    : picked?.type === "sparkops-build"
+                      ? "build"
+                      : draft.sourceKind
+                  : draft.sourceKind;
+              onConfirm(
+                name.trim(),
+                deployJobSpecToRecord({ ...draft, sourceKind, jobName: draft.jobName.trim() }),
+              );
+            }}
           >
             确定
           </button>
@@ -289,66 +319,119 @@ export function DeployJobConfigDrawer({
           </div>
 
           <label className="pwf-build-field">
-            <span>镜像来源 Job</span>
+            <span>部署来源</span>
             <span className="pwf-build-control">
               <span className="pwf-required" aria-hidden>
                 *
               </span>
               <select
                 className="input"
-                aria-label="镜像来源 Job"
-                value={draft.jobName}
-                onChange={(e) => setDraft((current) => ({ ...current, jobName: e.target.value }))}
+                aria-label="部署来源"
+                value={draft.artifactSource}
+                onChange={(e) => {
+                  const artifactSource = e.target.value === "version" ? "version" : "build";
+                  const versionJobs = sourceVersionJobs.filter((job) => job.name.trim());
+                  setDraft((current) => ({
+                    ...current,
+                    artifactSource,
+                    jobName:
+                      artifactSource === "version" && versionJobs.length === 1 ? versionJobs[0].name : "",
+                    configResourcesSet: false,
+                    configResources: [],
+                  }));
+                }}
               >
-                <option value="">请选择上游构建任务</option>
-                {sourceJobs.map((job, index) => (
-                  <option key={`${job.name}-${index}`} value={job.name}>
-                    {job.name}
-                  </option>
-                ))}
-                {draft.jobName && !knownSource ? <option value={draft.jobName}>{draft.jobName}（已不在上游）</option> : null}
+                <option value="build">构建产物</option>
+                <option value="version">交付版本</option>
               </select>
             </span>
           </label>
 
-          <div className="pwf-build-field pwf-build-field-top">
-            <span>镜像名称</span>
-            <div className="pwf-deploy-images">
-              {!draft.jobName ? <span className="text-xs text-muted">选择上游构建任务后显示</span> : null}
-              {draft.jobName && !sourceJob ? <span className="text-xs text-muted">该构建任务已不在上游，无法显示镜像名称</span> : null}
-              {sourceJob && images.length === 0 ? <span className="text-xs text-muted">该构建任务还没有项目组件</span> : null}
-              {images.map((line) => (
-                <div key={line.projectId} className="pwf-deploy-image">
-                  <span>{line.name}</span>
-                  <code>{line.image}</code>
-                </div>
-              ))}
-              {images.some((line) => !line.complete) ? (
-                <span className="text-xs text-muted">镜像仓库或命名空间未配置时，只显示项目名和 Tag</span>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="pwf-build-field">
-            <span>部署内容</span>
+          <label className="pwf-build-field">
+            <span>{isVersionDeploy ? "版本来源 Job" : "镜像来源 Job"}</span>
             <span className="pwf-build-control">
               <span className="pwf-required" aria-hidden>
                 *
               </span>
-              <span className="pwf-deploy-checks">
-                {DEPLOY_CONTENTS.map((item) => (
-                  <label key={item.id} className="pwf-check">
-                    <input
-                      type="checkbox"
-                      checked={draft.contents.includes(item.id)}
-                      onChange={() => toggleContent(item.id)}
-                    />
-                    {item.label}
-                  </label>
+              <select
+                className="input"
+                aria-label={isVersionDeploy ? "版本来源 Job" : "镜像来源 Job"}
+                value={draft.jobName}
+                onChange={(e) => setDraft((current) => ({ ...current, jobName: e.target.value }))}
+              >
+                <option value="">
+                  {isVersionDeploy ? "请选择上游构建或创建版本任务" : "请选择上游构建任务"}
+                </option>
+                {upstreamJobs.map((job, index) => (
+                  <option key={`${job.name}-${index}`} value={job.name}>
+                    {job.name}
+                    {isVersionDeploy
+                      ? job.type === "sparkops-build"
+                        ? "（构建）"
+                        : "（创建交付版本）"
+                      : ""}
+                  </option>
                 ))}
-              </span>
+                {draft.jobName && !knownSource ? <option value={draft.jobName}>{draft.jobName}（已不在上游）</option> : null}
+              </select>
+              {isVersionDeploy && upstreamJobs.length === 0 ? (
+                <span className="pwf-deploy-empty-hint">
+                  当前部署任务之前没有可用的上游任务。请在本阶段或上游阶段添加「SparkOps 构建」或「创建交付版本」，并排在部署之前。
+                </span>
+              ) : null}
             </span>
-          </div>
+          </label>
+
+          {!isVersionDeploy ? (
+            <div className="pwf-build-field pwf-build-field-top">
+              <span>镜像名称</span>
+              <div className="pwf-deploy-images">
+                {!draft.jobName ? <span className="text-xs text-muted">选择上游构建任务后显示</span> : null}
+                {draft.jobName && !sourceJob ? (
+                  <span className="text-xs text-muted">该构建任务已不在上游，无法显示镜像名称</span>
+                ) : null}
+                {sourceJob && images.length === 0 ? <span className="text-xs text-muted">该构建任务还没有项目组件</span> : null}
+                {images.map((line) => (
+                  <div key={line.projectId} className="pwf-deploy-image">
+                    <span>{line.name}</span>
+                    <code>{line.image}</code>
+                  </div>
+                ))}
+                {images.some((line) => !line.complete) ? (
+                  <span className="text-xs text-muted">镜像仓库或命名空间未配置时，只显示项目名和 Tag</span>
+                ) : null}
+              </div>
+            </div>
+          ) : upstreamJobs.length > 0 ? (
+            <p className="text-xs text-muted pwf-deploy-version-hint">
+              {sourceJob?.type === "sparkops-build"
+                ? "将基于上游构建产物自动创建交付版本并部署；运行工作流时需填写版本号。"
+                : "将使用上游「创建交付版本」任务产生的 YAML 快照与镜像坐标进行部署。"}
+            </p>
+          ) : null}
+
+          {!isVersionDeploy ? (
+            <div className="pwf-build-field">
+              <span>部署内容</span>
+              <span className="pwf-build-control">
+                <span className="pwf-required" aria-hidden>
+                  *
+                </span>
+                <span className="pwf-deploy-checks">
+                  {DEPLOY_CONTENTS.map((item) => (
+                    <label key={item.id} className="pwf-check">
+                      <input
+                        type="checkbox"
+                        checked={draft.contents.includes(item.id)}
+                        onChange={() => toggleContent(item.id)}
+                      />
+                      {item.label}
+                    </label>
+                  ))}
+                </span>
+              </span>
+            </div>
+          ) : null}
 
           {configEnabled ? (
             <div className="pwf-build-field pwf-build-field-top">

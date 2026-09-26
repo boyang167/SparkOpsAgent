@@ -10,6 +10,7 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 import { EnvironmentsPanel } from "./EnvironmentsPanel";
 import { ProductMasterDetail } from "./ProductMasterDetail";
 import { ProductProjectsPanel } from "./ProductProjectsPanel";
+import { ProductVersionsPanel } from "./ProductVersionsPanel";
 import { ProductWorkflowsPanel } from "./ProductWorkflowsPanel";
 import { ReleasePlansPanel } from "./ReleasePlansPanel";
 import { SprintBoardPanel } from "./SprintBoardPanel";
@@ -21,7 +22,7 @@ interface ProductDetailPanelProps {
   productId: string;
 }
 
-type Tab = "overview" | "iterations" | "releases" | "workflows" | "environments" | "projects";
+type Tab = "overview" | "iterations" | "releases" | "workflows" | "environments" | "projects" | "versions";
 
 const TABS: Array<{ id: Tab; label: string; icon: ReactNode }> = [
   { id: "overview", label: "概览", icon: productDetailTabIcons.overview },
@@ -30,9 +31,18 @@ const TABS: Array<{ id: Tab; label: string; icon: ReactNode }> = [
   { id: "workflows", label: "工作流", icon: productDetailTabIcons.workflow },
   { id: "environments", label: "环境", icon: productDetailTabIcons.environment },
   { id: "projects", label: "项目配置", icon: productDetailTabIcons.projects },
+  { id: "versions", label: "版本管理", icon: productDetailTabIcons.versions },
 ];
 
-const TAB_IDS = new Set<Tab>(["overview", "iterations", "releases", "workflows", "environments", "projects"]);
+const TAB_IDS = new Set<Tab>([
+  "overview",
+  "iterations",
+  "releases",
+  "workflows",
+  "environments",
+  "projects",
+  "versions",
+]);
 
 function parseTab(value: string | null): Tab {
   if (value === "settings" || value === "process") return "iterations";
@@ -198,6 +208,12 @@ export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPane
       {!error && tab === "projects" ? (
         <div className="product-detail-body">
           <ProductProjectsPanel workspaceId={workspaceId} productId={productId} onChanged={() => void load()} />
+        </div>
+      ) : null}
+
+      {!error && tab === "versions" ? (
+        <div className="product-detail-body is-versions">
+          <ProductVersionsPanel workspaceId={workspaceId} productId={productId} projects={projects} />
         </div>
       ) : null}
 

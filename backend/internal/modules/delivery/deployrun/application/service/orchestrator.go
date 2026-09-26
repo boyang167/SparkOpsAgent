@@ -15,6 +15,7 @@ import (
 	buildmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/model"
 	deliveryport "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/port"
 	runtimeport "github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/domain/port"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -67,6 +68,13 @@ type Orchestrator struct {
 	owner          string
 	operations     ExecutionRegistry
 	onTerminal     func(context.Context, *model.DeploymentRun)
+	versions       appctx.ProjectVersionReader
+}
+
+func (o *Orchestrator) SetProjectVersionReader(reader appctx.ProjectVersionReader) {
+	if o != nil {
+		o.versions = reader
+	}
 }
 
 func NewOrchestrator(
@@ -396,7 +404,7 @@ func (o *Orchestrator) bootstrapKubernetes(
 	if err := o.applyConfigManifests(ctx, run, project); err != nil {
 		return err
 	}
-	manifests, deploymentName, serviceName, err := o.renderManifests(ctx, project, run.ImageTag)
+	manifests, deploymentName, serviceName, err := o.renderManifests(ctx, project, run, run.ImageTag)
 	if err != nil {
 		return err
 	}
@@ -413,7 +421,7 @@ func (o *Orchestrator) finalizeKubernetes(
 	if err := o.applyConfigManifests(ctx, run, project); err != nil {
 		return err
 	}
-	manifests, deploymentName, serviceName, err := o.renderManifests(ctx, project, run.ImageTag)
+	manifests, deploymentName, serviceName, err := o.renderManifests(ctx, project, run, run.ImageTag)
 	if err != nil {
 		return err
 	}
@@ -531,8 +539,26 @@ func (o *Orchestrator) applySyncManifests(
 func (o *Orchestrator) renderManifests(
 	ctx context.Context,
 	project deployport.ProjectDeploymentContext,
+	run *model.DeploymentRun,
 	imageTag string,
 ) ([]runtimeport.Manifest, string, string, error) {
+	if run != nil && run.ProjectVersionID != nil && o.versions != nil {
+		snapshot, err := o.versions.LoadSnapshot(ctx, *run.ProjectVersionID)
+		if err != nil {
+			return nil, "", "", err
+		}
+		for _, item := range snapshot.Manifests {
+			switch item.Kind {
+			case "Service":
+				project.ServiceYAML = item.Content
+			case "Deployment":
+				project.DeploymentYAML = item.Content
+			}
+		}
+		if imageTag == "" && len(snapshot.Images) > 0 {
+			imageTag = snapshot.Images[0].Tag
+		}
+	}
 	manifests, err := o.renderer.Render(ctx, project, imageTag)
 	if err != nil {
 		return nil, "", "", err

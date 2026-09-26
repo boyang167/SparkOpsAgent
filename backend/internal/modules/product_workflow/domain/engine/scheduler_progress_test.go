@@ -64,8 +64,8 @@ func TestProgressStuckRun_advancesToDeployAfterBuildSuccess(t *testing.T) {
 			},
 		},
 	}
-	deploys := NewDeployExecutor(stubDeployTrigger{}, repo)
-	scheduler := NewScheduler(repo, nil, deploys, nil)
+	deploys := NewDeployExecutor(stubDeployTrigger{}, nil, nil, repo)
+	scheduler := NewScheduler(repo, nil, nil, deploys, nil)
 	scheduler.SetStatusReader(stubStatusReader{buildStatus: string(buildmodel.BuildStatusSuccess)})
 
 	require.NoError(t, scheduler.ProgressStuckRun(context.Background(), runID))

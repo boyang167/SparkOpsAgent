@@ -30,11 +30,24 @@ export function defaultJob(type: string, index: number): EditorJob {
           notify: [],
         },
       };
+    case "sparkops-create-version":
+      return {
+        ...base,
+        name: `create-version-${index}`,
+        spec: { version_tag: "{{version}}", source: "fromjob", job_name: "", project_ids: [] },
+      };
     case "sparkops-deploy":
       return {
         ...base,
         name: `deploy-${index}`,
-        spec: { environment_id: "", source: "fromjob", job_name: "", deploy_contents: ["image"], status_check: true },
+        spec: {
+          artifact_source: "build",
+          environment_id: "",
+          source: "fromjob",
+          job_name: "",
+          deploy_contents: ["image"],
+          status_check: true,
+        },
       };
     case "sparkops-approval":
       return {
@@ -70,6 +83,37 @@ export function upstreamBuildJobs(stages: EditorStage[], stageIndex: number, job
     for (let j = 0; j < limit; j++) {
       const job = jobs[j];
       if (job?.type === "sparkops-build" && job.name.trim()) out.push(job);
+    }
+  }
+  return out;
+}
+
+export function upstreamCreateVersionJobs(stages: EditorStage[], stageIndex: number, jobIndex: number): EditorJob[] {
+  const out: EditorJob[] = [];
+  for (let s = 0; s < stages.length && s <= stageIndex; s++) {
+    const jobs = stages[s]?.jobs ?? [];
+    const limit = s === stageIndex ? jobIndex : jobs.length;
+    for (let j = 0; j < limit; j++) {
+      const job = jobs[j];
+      if (job?.type === "sparkops-create-version" && job.name.trim()) out.push(job);
+    }
+  }
+  return out;
+}
+
+export function upstreamVersionSourceJobs(stages: EditorStage[], stageIndex: number, jobIndex: number): EditorJob[] {
+  const out: EditorJob[] = [];
+  for (let s = 0; s < stages.length && s <= stageIndex; s++) {
+    const jobs = stages[s]?.jobs ?? [];
+    const limit = s === stageIndex ? jobIndex : jobs.length;
+    for (let j = 0; j < limit; j++) {
+      const job = jobs[j];
+      if (
+        (job?.type === "sparkops-build" || job?.type === "sparkops-create-version") &&
+        job.name.trim()
+      ) {
+        out.push(job);
+      }
     }
   }
   return out;

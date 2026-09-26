@@ -41,6 +41,11 @@ export const productDetailTabIcons = {
       <path d="M9 9h6v6H9z" />
     </svg>
   ),
+  versions: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+      <path d="M12 3 15 8h5l-4 3.5 1.5 6.5L12 16l-5.5 2L8 14.5 4 11h5L12 3Z" strokeLinejoin="round" />
+    </svg>
+  ),
   process: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
       <rect x="3" y="5" width="5" height="14" rx="1" />

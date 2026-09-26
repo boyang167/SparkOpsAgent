@@ -9,6 +9,7 @@ export {
   removeProjectMember,
 } from "./projectMembers";
 export { listGeneratedTemplates, updateGeneratedTemplate } from "./generatedTemplates";
+export { listProjectVersions, getProjectVersion } from "./projectVersions";
 export { listGitRefs } from "./gitRefs";
 export { listGitTree } from "./gitTree";
 export { getGitFileContent } from "./gitFile";

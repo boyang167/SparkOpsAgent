@@ -42,11 +42,13 @@ type Handler struct {
 	updateMemberRole  *command.UpdateProjectMemberRoleHandler
 	removeMember      *command.RemoveProjectMemberHandler
 	listMembers       *query.ListProjectMembersHandler
-	generateTemplates *query.GenerateProjectTemplatesHandler
+	generateTemplates       *query.GenerateProjectTemplatesHandler
 	updateGeneratedTemplate *command.UpdateGeneratedTemplateHandler
-	submitReview      *command.SubmitProjectReviewHandler
-	reviewProject     *command.ReviewProjectHandler
-	memberLookup      port.MemberLookup
+	listProjectVersions     *query.ListProjectVersionsHandler
+	getProjectVersion       *query.GetProjectVersionHandler
+	submitReview            *command.SubmitProjectReviewHandler
+	reviewProject           *command.ReviewProjectHandler
+	memberLookup            port.MemberLookup
 }
 
 func NewHandler(
@@ -76,6 +78,8 @@ func NewHandler(
 	listMembers *query.ListProjectMembersHandler,
 	generateTemplates *query.GenerateProjectTemplatesHandler,
 	updateGeneratedTemplate *command.UpdateGeneratedTemplateHandler,
+	listProjectVersions *query.ListProjectVersionsHandler,
+	getProjectVersion *query.GetProjectVersionHandler,
 	submitReview *command.SubmitProjectReviewHandler,
 	reviewProject *command.ReviewProjectHandler,
 	memberLookup port.MemberLookup,
@@ -93,8 +97,62 @@ func NewHandler(
 		addMember:         addMember, updateMemberRole: updateMemberRole, removeMember: removeMember,
 		listMembers: listMembers, generateTemplates: generateTemplates,
 		updateGeneratedTemplate: updateGeneratedTemplate,
+		listProjectVersions: listProjectVersions, getProjectVersion: getProjectVersion,
 		submitReview: submitReview, reviewProject: reviewProject, memberLookup: memberLookup,
 	}
+}
+
+func (h *Handler) ListProjectVersions(c *gin.Context) {
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	items, err := h.listProjectVersions.Handle(c.Request.Context(), wsID, memberID, projectID, 50, 0)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) GetProjectVersion(c *gin.Context) {
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	versionID, err := kernel.ParseProjectVersionID(c.Param("versionId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid version id", http.StatusBadRequest)
+		return
+	}
+	item, err := h.getProjectVersion.Handle(c.Request.Context(), wsID, memberID, projectID, versionID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, item)
 }
 
 type projectResourcesRequest struct {

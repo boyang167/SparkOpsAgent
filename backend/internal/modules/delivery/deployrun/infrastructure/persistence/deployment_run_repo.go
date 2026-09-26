@@ -41,8 +41,9 @@ type deploymentRunRow struct {
 	AttemptCount    int     `gorm:"not null;default:0"`
 	LeaseOwner      *string
 	LeaseExpiresAt  *time.Time
-	EnvironmentID   *string
-	DeployNamespace string `gorm:"not null;default:''"`
+	EnvironmentID     *string
+	ProjectVersionID  *string
+	DeployNamespace   string `gorm:"not null;default:''"`
 }
 
 func (deploymentRunRow) TableName() string { return "delivery.deployment_runs" }
@@ -463,7 +464,8 @@ func toRunRow(run *model.DeploymentRun) *deploymentRunRow {
 		Version:      run.Version,
 		AttemptCount: run.AttemptCount, LeaseOwner: nullableString(run.LeaseOwner),
 		LeaseExpiresAt: run.LeaseExpiresAt,
-		EnvironmentID:  environmentIDValue(run.EnvironmentID), DeployNamespace: run.DeployNamespace,
+		EnvironmentID: environmentIDValue(run.EnvironmentID), DeployNamespace: run.DeployNamespace,
+		ProjectVersionID: projectVersionIDValue(run.ProjectVersionID),
 	}
 }
 
@@ -532,7 +534,22 @@ func fromRunRow(row deploymentRunRow) (*model.DeploymentRun, error) {
 		}
 		run.EnvironmentID = &envID
 	}
+	if row.ProjectVersionID != nil && *row.ProjectVersionID != "" {
+		versionID, err := kernel.ParseProjectVersionID(*row.ProjectVersionID)
+		if err != nil {
+			return nil, fmt.Errorf("parse project_version_id: %w", err)
+		}
+		run.ProjectVersionID = &versionID
+	}
 	return run, nil
+}
+
+func projectVersionIDValue(id *kernel.ProjectVersionID) *string {
+	if id == nil {
+		return nil
+	}
+	value := id.String()
+	return &value
 }
 
 func nullableString(value string) *string {

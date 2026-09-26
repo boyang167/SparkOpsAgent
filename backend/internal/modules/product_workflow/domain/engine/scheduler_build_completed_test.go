@@ -127,7 +127,7 @@ func TestHandleBuildCompleted_concurrentUpdatesKeepBothBuildsSuccessful(t *testi
 			buildB.String(): {BuildID: buildB, RunID: runID, JobName: "build-1"},
 		},
 	}
-	scheduler := NewScheduler(repo, nil, nil, nil)
+	scheduler := NewScheduler(repo, nil, nil, nil, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -182,7 +182,7 @@ func TestHandleBuildCompleted_partialStageRunCompletes(t *testing.T) {
 			buildB.String(): {BuildID: buildB, RunID: runID, JobName: "build-1"},
 		},
 	}
-	scheduler := NewScheduler(repo, nil, nil, nil)
+	scheduler := NewScheduler(repo, nil, nil, nil, nil)
 
 	require.NoError(t, scheduler.HandleBuildCompleted(context.Background(), buildA, string(buildmodel.BuildStatusSuccess)))
 	require.NoError(t, scheduler.HandleBuildCompleted(context.Background(), buildB, string(buildmodel.BuildStatusSuccess)))
@@ -216,7 +216,7 @@ func TestHealStuckRun_completesWhenAllStagesDone(t *testing.T) {
 			},
 		},
 	}
-	scheduler := NewScheduler(repo, nil, nil, nil)
+	scheduler := NewScheduler(repo, nil, nil, nil, nil)
 	require.NoError(t, scheduler.healStuckRun(context.Background(), run))
 
 	repo.mu.Lock()

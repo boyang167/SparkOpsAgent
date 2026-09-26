@@ -7,7 +7,12 @@ export const DEPLOY_CONTENTS = [
   { id: "config", label: "服务配置" },
 ] as const;
 
+export type DeployArtifactSource = "build" | "version";
+export type DeployVersionSourceKind = "auto" | "build" | "create-version";
+
 export interface DeployJobSpec {
+  artifactSource: DeployArtifactSource;
+  sourceKind: DeployVersionSourceKind;
   environmentId: string;
   jobName: string;
   contents: string[];
@@ -146,7 +151,15 @@ function configMapPreviewYaml(name: string, namespace: string, data: Record<stri
   return lines.join("\n");
 }
 
-export function parseDeployJobSpec(spec: Record<string, unknown> | undefined): DeployJobSpec {
+export function parseDeployJobSpec(
+  spec: Record<string, unknown> | undefined,
+  jobType?: string,
+): DeployJobSpec {
+  const artifactSource: DeployArtifactSource =
+    jobType === "sparkops-deploy-version" || asString(spec?.artifact_source) === "version" ? "version" : "build";
+  const rawSourceKind = asString(spec?.source_kind);
+  const sourceKind: DeployVersionSourceKind =
+    rawSourceKind === "build" || rawSourceKind === "create-version" ? rawSourceKind : "auto";
   const contents = Array.isArray(spec?.deploy_contents)
     ? spec.deploy_contents.filter((item): item is string => typeof item === "string" && DEPLOY_CONTENTS.some((row) => row.id === item))
     : [];
@@ -154,6 +167,8 @@ export function parseDeployJobSpec(spec: Record<string, unknown> | undefined): D
   const timeout = Number(strategy?.timeout_minutes);
   const notify = Array.isArray(spec?.notify) ? toNotifyItems(spec.notify as WorkflowNotificationVM[]) : [];
   return {
+    artifactSource,
+    sourceKind,
     environmentId: asString(spec?.environment_id),
     jobName: asString(spec?.job_name),
     contents: contents.length > 0 ? contents : ["image"],
@@ -166,25 +181,30 @@ export function parseDeployJobSpec(spec: Record<string, unknown> | undefined): D
 }
 
 export function deployJobSpecToRecord(spec: DeployJobSpec): Record<string, unknown> {
-  return {
+  const base: Record<string, unknown> = {
+    artifact_source: spec.artifactSource,
+    ...(spec.artifactSource === "version" && spec.sourceKind !== "auto"
+      ? { source_kind: spec.sourceKind }
+      : {}),
     environment_id: spec.environmentId,
     source: "fromjob",
     job_name: spec.jobName,
-    deploy_contents: spec.contents,
     status_check: spec.statusCheck,
     strategy: { timeout_minutes: spec.timeoutMinutes },
     notify: spec.notify,
-    ...(spec.configResourcesSet
-      ? {
-          config_resources: spec.configResources.map((item) => ({
-            project_id: item.projectId,
-            kind: item.kind,
-            name: item.name,
-            yaml: item.yaml ?? "",
-          })),
-        }
-      : {}),
   };
+  if (spec.artifactSource === "build") {
+    base.deploy_contents = spec.contents;
+    if (spec.configResourcesSet) {
+      base.config_resources = spec.configResources.map((item) => ({
+        project_id: item.projectId,
+        kind: item.kind,
+        name: item.name,
+        yaml: item.yaml ?? "",
+      }));
+    }
+  }
+  return base;
 }
 
 export function formatImageRef(repository?: string, tag?: string): string {

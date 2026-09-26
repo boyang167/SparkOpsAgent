@@ -70,10 +70,19 @@ type ProjectDeployRun struct {
 	ProjectID       string       `json:"project_id"`
 	EnvironmentID   string       `json:"environment_id,omitempty"`
 	DeploymentRunID string       `json:"deployment_run_id,omitempty"`
+	VersionID       string       `json:"version_id,omitempty"`
 	ImageTag        string       `json:"image_tag,omitempty"`
 	ImageRepository string       `json:"image_repository,omitempty"`
 	Status          JobRunStatus `json:"status"`
 	ErrorMessage    string       `json:"error_message,omitempty"`
+}
+
+type ProjectVersionRun struct {
+	ProjectID    string       `json:"project_id"`
+	VersionID    string       `json:"version_id"`
+	VersionTag   string       `json:"version_tag"`
+	Status       JobRunStatus `json:"status"`
+	ErrorMessage string       `json:"error_message,omitempty"`
 }
 
 type ApprovalRun struct {
@@ -87,14 +96,15 @@ type ApprovalRun struct {
 }
 
 type JobRun struct {
-	Name         string             `json:"name"`
-	Type         string             `json:"type"`
-	Status       JobRunStatus       `json:"status"`
-	Builds       []ProjectBuildRun  `json:"builds,omitempty"`
-	Deploys      []ProjectDeployRun `json:"deploys,omitempty"`
-	Approval     *ApprovalRun       `json:"approval,omitempty"`
-	Message      string             `json:"message,omitempty"`
-	ErrorMessage string             `json:"error_message,omitempty"`
+	Name         string              `json:"name"`
+	Type         string              `json:"type"`
+	Status       JobRunStatus        `json:"status"`
+	Builds       []ProjectBuildRun   `json:"builds,omitempty"`
+	Versions     []ProjectVersionRun `json:"versions,omitempty"`
+	Deploys      []ProjectDeployRun  `json:"deploys,omitempty"`
+	Approval     *ApprovalRun        `json:"approval,omitempty"`
+	Message      string              `json:"message,omitempty"`
+	ErrorMessage string              `json:"error_message,omitempty"`
 }
 
 type StageRun struct {
