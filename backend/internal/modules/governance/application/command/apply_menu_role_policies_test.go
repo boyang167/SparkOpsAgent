@@ -11,6 +11,7 @@ func TestDefaultMenuRolePolicies_includeAdminOnRestrictedPaths(t *testing.T) {
 	restricted := []string{
 		"/config/secrets",
 		"/publish/products",
+		"/publish/release-plans",
 		"/config/webhooks",
 		"/plugins/kubernetes/access-controls",
 	}

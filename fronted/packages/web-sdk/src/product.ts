@@ -248,10 +248,11 @@ export function markReleasePlanJobDone(
   productId: string,
   planId: string,
   jobId: string,
+  input: import("@sparkops/contracts/product").MarkReleasePlanJobDoneCommand = {},
 ) {
   return bffFetch<{ id: string; status: string }>(
     `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/jobs/${jobId}/done`,
-    { method: "POST", workspaceId },
+    { method: "POST", body: JSON.stringify(input), workspaceId },
   );
 }
 
@@ -274,6 +275,149 @@ export function retryReleasePlanJob(workspaceId: string, productId: string, plan
     `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/jobs/${jobId}/retry`,
     { method: "POST", workspaceId },
   );
+}
+
+export async function listWorkspaceReleasePlans(
+  workspaceId: string,
+  query?: { status?: string; from?: string; to?: string },
+) {
+  const params = new URLSearchParams();
+  if (query?.status) params.set("status", query.status);
+  if (query?.from) params.set("from", query.from);
+  if (query?.to) params.set("to", query.to);
+  const qs = params.toString();
+  const data = await bffFetch<{ items: import("@sparkops/contracts/product").WorkspaceReleasePlanVM[] }>(
+    `/workspaces/${workspaceId}/release-plans${qs ? `?${qs}` : ""}`,
+    { workspaceId },
+  );
+  return data.items;
+}
+
+export function updateReleasePlan(
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  input: import("@sparkops/contracts/product").UpdateReleasePlanCommand,
+) {
+  return bffFetch<{ id: string; status: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}`,
+    { method: "PATCH", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function cancelReleasePlan(workspaceId: string, productId: string, planId: string) {
+  return bffFetch<{ id: string; status: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/cancel`,
+    { method: "POST", workspaceId },
+  );
+}
+
+export function reopenReleasePlanPlanning(workspaceId: string, productId: string, planId: string) {
+  return bffFetch<{ id: string; status: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/reopen-planning`,
+    { method: "POST", workspaceId },
+  );
+}
+
+export function rejectReleasePlan(
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  input: import("@sparkops/contracts/product").RejectReleasePlanCommand = {},
+) {
+  return bffFetch<{ id: string; status: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/reject`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function reorderReleasePlanJobs(workspaceId: string, productId: string, planId: string, jobIds: string[]) {
+  return bffFetch<{ id: string; status: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/jobs/reorder`,
+    { method: "PUT", body: JSON.stringify({ job_ids: jobIds }), workspaceId },
+  );
+}
+
+export function updateReleasePlanJob(
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  jobId: string,
+  input: import("@sparkops/contracts/product").UpdateReleasePlanJobCommand,
+) {
+  return bffFetch<{ id: string; status: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/jobs/${jobId}`,
+    { method: "PATCH", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function deleteReleasePlanJob(workspaceId: string, productId: string, planId: string, jobId: string) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/jobs/${jobId}`,
+    { method: "DELETE", workspaceId },
+  );
+}
+
+export function addReleasePlanJobsFromWorkItems(
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  workItemIds: string[],
+) {
+  return bffFetch<{ id: string; status: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/jobs/from-work-items`,
+    { method: "POST", body: JSON.stringify({ work_item_ids: workItemIds }), workspaceId },
+  );
+}
+
+export function copyReleasePlan(
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  input: import("@sparkops/contracts/product").CopyReleasePlanCommand = {},
+) {
+  return bffFetch<{ id: string; status: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/copy`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function saveReleasePlanTemplate(
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  input: import("@sparkops/contracts/product").SaveReleasePlanTemplateCommand = {},
+) {
+  return bffFetch<{ id: string; name: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/save-template`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export async function listReleasePlanTemplates(workspaceId: string) {
+  const data = await bffFetch<{ items: import("@sparkops/contracts/product").ReleasePlanTemplateVM[] }>(
+    `/workspaces/${workspaceId}/release-plan-templates`,
+    { workspaceId },
+  );
+  return data.items;
+}
+
+export function createReleasePlanFromTemplate(
+  workspaceId: string,
+  templateId: string,
+  input: import("@sparkops/contracts/product").CreateReleasePlanFromTemplateCommand,
+) {
+  return bffFetch<{ id: string; status: string; product_id: string }>(
+    `/workspaces/${workspaceId}/release-plan-templates/${templateId}/create-plan`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function deleteReleasePlanTemplate(workspaceId: string, templateId: string) {
+  return bffFetch<{ ok: boolean }>(`/workspaces/${workspaceId}/release-plan-templates/${templateId}`, {
+    method: "DELETE",
+    workspaceId,
+  });
 }
 
 export async function listProductWorkflows(workspaceId: string, productId: string) {

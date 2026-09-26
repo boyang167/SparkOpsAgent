@@ -225,10 +225,16 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
-    async markReleasePlanJobDone(workspaceId: string, productId: string, planId: string, jobId: string) {
+    async markReleasePlanJobDone(
+      workspaceId: string,
+      productId: string,
+      planId: string,
+      jobId: string,
+      input: Record<string, unknown> = {},
+    ) {
       return upstreamFetch<{ id: string; status: string }>(
         `/api/v1/products/${productId}/release-plans/${planId}/jobs/${jobId}/done`,
-        { method: "POST", options: { ...options, workspaceId } },
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
       );
     },
 
@@ -250,6 +256,129 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       return upstreamFetch<{ id: string; status: string }>(
         `/api/v1/products/${productId}/release-plans/${planId}/jobs/${jobId}/retry`,
         { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async listWorkspaceReleasePlans(workspaceId: string, query?: { status?: string; from?: string; to?: string }) {
+      const params = new URLSearchParams();
+      if (query?.status) params.set("status", query.status);
+      if (query?.from) params.set("from", query.from);
+      if (query?.to) params.set("to", query.to);
+      const qs = params.toString();
+      return upstreamFetch<{ items: import("@sparkops/contracts/product").WorkspaceReleasePlanVM[] }>(
+        `/api/v1/workspaces/${workspaceId}/release-plans${qs ? `?${qs}` : ""}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async updateReleasePlan(workspaceId: string, productId: string, planId: string, input: Record<string, unknown>) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}`,
+        { method: "PATCH", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async cancelReleasePlan(workspaceId: string, productId: string, planId: string) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/cancel`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async reopenReleasePlanPlanning(workspaceId: string, productId: string, planId: string) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/reopen-planning`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async rejectReleasePlan(workspaceId: string, productId: string, planId: string, input: Record<string, unknown>) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/reject`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async reorderReleasePlanJobs(workspaceId: string, productId: string, planId: string, jobIds: string[]) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/jobs/reorder`,
+        { method: "PUT", body: JSON.stringify({ job_ids: jobIds }), options: { ...options, workspaceId } },
+      );
+    },
+
+    async updateReleasePlanJob(
+      workspaceId: string,
+      productId: string,
+      planId: string,
+      jobId: string,
+      input: Record<string, unknown>,
+    ) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/jobs/${jobId}`,
+        { method: "PATCH", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async deleteReleasePlanJob(workspaceId: string, productId: string, planId: string, jobId: string) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/jobs/${jobId}`,
+        { method: "DELETE", options: { ...options, workspaceId } },
+      );
+    },
+
+    async addReleasePlanJobsFromWorkItems(
+      workspaceId: string,
+      productId: string,
+      planId: string,
+      workItemIds: string[],
+    ) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/jobs/from-work-items`,
+        { method: "POST", body: JSON.stringify({ work_item_ids: workItemIds }), options: { ...options, workspaceId } },
+      );
+    },
+
+    async copyReleasePlan(workspaceId: string, productId: string, planId: string, input: Record<string, unknown> = {}) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/copy`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async saveReleasePlanTemplate(
+      workspaceId: string,
+      productId: string,
+      planId: string,
+      input: Record<string, unknown> = {},
+    ) {
+      return upstreamFetch<{ id: string; name: string }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/save-template`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async listReleasePlanTemplates(workspaceId: string) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/product").ReleasePlanTemplateVM[] }>(
+        `/api/v1/workspaces/${workspaceId}/release-plan-templates`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async createReleasePlanFromTemplate(
+      workspaceId: string,
+      templateId: string,
+      input: Record<string, unknown>,
+    ) {
+      return upstreamFetch<{ id: string; status: string; product_id: string }>(
+        `/api/v1/workspaces/${workspaceId}/release-plan-templates/${templateId}/create-plan`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async deleteReleasePlanTemplate(workspaceId: string, templateId: string) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/workspaces/${workspaceId}/release-plan-templates/${templateId}`,
+        { method: "DELETE", options: { ...options, workspaceId } },
       );
     },
 

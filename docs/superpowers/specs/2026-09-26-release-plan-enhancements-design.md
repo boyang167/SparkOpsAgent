@@ -1,7 +1,7 @@
 # 发布计划增强设计（A + B + C）
 
 > Date: 2026-09-26  
-> Status: **Draft — 待评审**  
+> Status: **Implemented — A+B+C 首版**  
 > Reference: [Zadig 发布计划 v4.3](https://docs.koderover.com/zadig/cn/Zadig%20v4.3/release/plan/) · [KodeRover 示例](https://course.koderover.com/v1/releasePlan/index)  
 > 前置: `2026-09-25-sprint-management-design.md` · 现有 `ReleasePlansPanel` / `release_plan.go`
 
@@ -351,10 +351,16 @@ Workspace 列表：仅返回用户有 read 权限的产品下的 plans。
 
 ---
 
-## 14. 不在范围
+## 14. 阶段 D（已实现）
 
-- 飞书/钉钉审批、外部 Hook
-- `schedule_execute_time` 自动调度
-- 发布计划复制、模板
-- Release Plan 级细粒度 RBAC
-- 富文本编辑器（text job 仍用 textarea，后续可换 TipTap）
+| 能力 | 说明 |
+|------|------|
+| 飞书/钉钉审批 | `ApprovalConfig` 扩展 provider/webhook/instance；完成规划发卡片；公开 token 回调 approve/reject |
+| 定时自动执行 | `schedule_execute_time` + 分钟级调度器；到期自动推进首个 workflow 项 |
+| 复制 / 模板 | `POST .../copy`；工作区模板 CRUD；工作区页「从模板创建」向导 |
+| 富文本检查项 | `RichTextField`（HTML）；`text_format` 字段 |
+
+**仍不在范围：**
+
+- Release Plan 级细粒度 RBAC（仅 manager 可执行等）
+- TipTap 等重型编辑器替换（当前为轻量 contenteditable）

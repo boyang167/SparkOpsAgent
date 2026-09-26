@@ -23,12 +23,18 @@ func OK(c *gin.Context, data interface{}) {
 	})
 }
 
-func Fail(c *gin.Context, code, message string, status int) {
+func Fail(c *gin.Context, code, message string, status int, extra ...map[string]any) {
 	traceID := GetTraceID(c)
+	data := map[string]any{"error_code": code}
+	if len(extra) > 0 && extra[0] != nil {
+		for k, v := range extra[0] {
+			data[k] = v
+		}
+	}
 	c.JSON(status, Envelope{
 		Code:    1,
 		Message: message,
-		Data:    map[string]string{"error_code": code},
+		Data:    data,
 		TraceID: traceID,
 	})
 }

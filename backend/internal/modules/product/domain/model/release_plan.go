@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
@@ -19,6 +20,50 @@ type ExecutionRef struct {
 	WorkflowRunID string `json:"workflow_run_id,omitempty"`
 	BuildID       string `json:"build_id,omitempty"`
 	ErrorMessage  string `json:"error_message,omitempty"`
+	DoneRemark    string `json:"done_remark,omitempty"`
+}
+
+type ApprovalProvider string
+
+const (
+	ApprovalProviderInternal ApprovalProvider = "internal"
+	ApprovalProviderFeishu   ApprovalProvider = "feishu"
+	ApprovalProviderDingTalk ApprovalProvider = "dingtalk"
+)
+
+type ApprovalInstance struct {
+	Token     string     `json:"token,omitempty"`
+	Status    string     `json:"status,omitempty"`
+	SentAt    *time.Time `json:"sent_at,omitempty"`
+	ActedAt   *time.Time `json:"acted_at,omitempty"`
+	ActorNote string     `json:"actor_note,omitempty"`
+}
+
+type ApprovalConfig struct {
+	Enabled     bool               `json:"enabled"`
+	Provider    ApprovalProvider   `json:"provider,omitempty"`
+	WebhookURL  string             `json:"webhook_url,omitempty"`
+	ApproverIDs []string           `json:"approver_ids,omitempty"`
+	Instance    *ApprovalInstance  `json:"instance,omitempty"`
+}
+
+func (c ApprovalConfig) ProviderOrDefault() ApprovalProvider {
+	if c.Provider == "" {
+		return ApprovalProviderInternal
+	}
+	return c.Provider
+}
+
+func (c ApprovalConfig) UsesExternalApproval() bool {
+	if !c.Enabled {
+		return false
+	}
+	switch c.ProviderOrDefault() {
+	case ApprovalProviderFeishu, ApprovalProviderDingTalk:
+		return true
+	default:
+		return false
+	}
 }
 
 type ReleasePlanStatus string
@@ -49,10 +94,6 @@ const (
 	ReleasePlanJobStatusFailed  ReleasePlanJobStatus = "failed"
 )
 
-type ApprovalConfig struct {
-	Enabled bool `json:"enabled"`
-}
-
 type ReleasePlan struct {
 	ID                  kernel.ReleasePlanID
 	ProductID           kernel.ProductID
@@ -82,6 +123,7 @@ type ReleasePlanJob struct {
 	OwnerID       kernel.MemberID
 	Status        ReleasePlanJobStatus
 	TextContent   string
+	TextFormat    string
 	TextChecked   bool
 	WorkflowRef   json.RawMessage
 	ExecutionRef  json.RawMessage
@@ -140,6 +182,16 @@ func (p *ReleasePlan) Reject() error {
 		return domain.ErrInvalidReleasePlanTransition
 	}
 	p.Status = ReleasePlanStatusDenied
+	p.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+func (p *ReleasePlan) ReopenPlanning() error {
+	if p.Status != ReleasePlanStatusDenied {
+		return domain.ErrInvalidReleasePlanTransition
+	}
+	p.Status = ReleasePlanStatusPlanning
+	p.ApprovalConfig.Instance = nil
 	p.UpdatedAt = time.Now().UTC()
 	return nil
 }
@@ -303,7 +355,55 @@ func (p *ReleasePlan) RetryWorkflowJob(jobID kernel.ReleasePlanJobID) error {
 	return nil
 }
 
-func (p *ReleasePlan) MarkTextJobDone(jobID kernel.ReleasePlanJobID) error {
+func (p *ReleasePlan) InitApprovalInstance(token string, now time.Time) {
+	if p.ApprovalConfig.Instance == nil {
+		p.ApprovalConfig.Instance = &ApprovalInstance{}
+	}
+	p.ApprovalConfig.Instance.Token = token
+	p.ApprovalConfig.Instance.Status = "pending"
+	p.ApprovalConfig.Instance.SentAt = &now
+}
+
+func (p *ReleasePlan) ApproveByToken(note string, now time.Time) error {
+	if p.Status != ReleasePlanStatusWaitForApproval {
+		return domain.ErrInvalidReleasePlanTransition
+	}
+	if p.ApprovalConfig.Instance == nil || p.ApprovalConfig.Instance.Status != "pending" {
+		return domain.ErrInvalidReleasePlanTransition
+	}
+	if err := p.Approve(); err != nil {
+		return err
+	}
+	p.ApprovalConfig.Instance.Status = "approved"
+	p.ApprovalConfig.Instance.ActedAt = &now
+	p.ApprovalConfig.Instance.ActorNote = note
+	return nil
+}
+
+func (p *ReleasePlan) RejectByToken(note string, now time.Time) error {
+	if p.Status != ReleasePlanStatusWaitForApproval {
+		return domain.ErrInvalidReleasePlanTransition
+	}
+	if p.ApprovalConfig.Instance == nil || p.ApprovalConfig.Instance.Status != "pending" {
+		return domain.ErrInvalidReleasePlanTransition
+	}
+	if err := p.Reject(); err != nil {
+		return err
+	}
+	p.ApprovalConfig.Instance.Status = "rejected"
+	p.ApprovalConfig.Instance.ActedAt = &now
+	p.ApprovalConfig.Instance.ActorNote = note
+	return nil
+}
+
+func (p *ReleasePlan) ScheduledExecutionPending(now time.Time) bool {
+	if p.ScheduleExecuteTime == nil {
+		return false
+	}
+	return now.Before(*p.ScheduleExecuteTime)
+}
+
+func (p *ReleasePlan) MarkTextJobDone(jobID kernel.ReleasePlanJobID, remark string) error {
 	if err := p.EnsureExecutingWindow(time.Now().UTC()); err != nil {
 		return err
 	}
@@ -319,6 +419,10 @@ func (p *ReleasePlan) MarkTextJobDone(jobID kernel.ReleasePlanJobID) error {
 		}
 		p.Jobs[i].TextChecked = true
 		p.Jobs[i].Status = ReleasePlanJobStatusDone
+		if strings.TrimSpace(remark) != "" {
+			ref, _ := json.Marshal(ExecutionRef{DoneRemark: strings.TrimSpace(remark)})
+			p.Jobs[i].ExecutionRef = ref
+		}
 		p.Jobs[i].UpdatedAt = time.Now().UTC()
 		p.maybeComplete()
 		p.UpdatedAt = time.Now().UTC()

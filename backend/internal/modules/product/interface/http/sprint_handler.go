@@ -279,6 +279,11 @@ func (h *Handler) CompleteSprint(c *gin.Context) {
 	}
 	sprint, err := h.sprints.completeSprint.Handle(c.Request.Context(), productID, sprintID)
 	if err != nil {
+		if de, ok := kernel.IsDomainError(err); ok && de.Code() == "SPRINT_BLOCKING_RELEASE" {
+			plans, _ := h.releasePlans.blockingPlans.Handle(c.Request.Context(), sprintID)
+			httpx.Fail(c, de.Code(), de.Error(), http.StatusConflict, gin.H{"blocking_plans": plans})
+			return
+		}
 		httpx.HandleError(c, err)
 		return
 	}

@@ -87,6 +87,9 @@ func (h *SeedWorkspaceMenusHandler) ensureDefaults(ctx context.Context, workspac
 	if err := h.repairProductWorkflowsMenu(ctx, workspaceID); err != nil {
 		return err
 	}
+	if err := h.repairReleasePlansMenu(ctx, workspaceID); err != nil {
+		return err
+	}
 	for _, group := range defaultMenuGroups {
 		parent, err := h.menus.FindGroupMenu(ctx, workspaceID, group.ID)
 		if err != nil {
@@ -326,6 +329,7 @@ var defaultMenuGroups = []defaultMenuGroup{
 		Items: []struct{ Href, Label string }{
 			{"/publish/products", "产品管理"},
 			{"/products/workflows", "工作流"},
+			{"/publish/release-plans", "发布计划"},
 			{"/config/secrets", "密钥配置"},
 		},
 	},
@@ -360,8 +364,9 @@ var enterpriseMenuTitleByPath = map[string]string{
 	"/templates":          "模板管理",
 	"/knowledge":          "知识库",
 	"/publish/products":   "产品管理",
-	"/products/workflows": "工作流",
-	"/config/secrets":     "密钥配置",
+	"/products/workflows":    "工作流",
+	"/publish/release-plans": "发布计划",
+	"/config/secrets":        "密钥配置",
 	"/runtime/pods":       "运行实例",
 	"/cronjobs":           "定时任务",
 	"/monitor/overview":   "监控概览",
@@ -438,6 +443,61 @@ func (h *SeedWorkspaceMenusHandler) repairProductWorkflowsMenu(ctx context.Conte
 	changed := false
 	if menu.Title != "工作流" {
 		menu.Title = "工作流"
+		menu.Name = menuNameFromPath(path)
+		menu.Component = path
+		changed = true
+	}
+	if menu.ParentID == nil || *menu.ParentID != deliveryGroup.ID {
+		pid := deliveryGroup.ID
+		menu.ParentID = &pid
+		changed = true
+	}
+	if menu.Sort != desiredSort {
+		menu.Sort = desiredSort
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return h.menus.Save(ctx, menu)
+}
+
+// repairReleasePlansMenu ensures 「发布计划」 sits under 持续交付, directly after 工作流.
+func (h *SeedWorkspaceMenusHandler) repairReleasePlansMenu(ctx context.Context, workspaceID kernel.WorkspaceID) error {
+	const path = "/publish/release-plans"
+	deliveryGroup, err := h.menus.FindGroupMenu(ctx, workspaceID, "ops-delivery")
+	if err != nil {
+		if deliveryGroup, err = h.menus.FindByPath(ctx, workspaceID, "ops-delivery"); err != nil {
+			return nil
+		}
+	}
+
+	desiredSort := 5
+	if workflows, err := h.menus.FindByPath(ctx, workspaceID, "/products/workflows"); err == nil {
+		desiredSort = workflows.Sort + 1
+	}
+
+	menu, err := h.menus.FindByPath(ctx, workspaceID, path)
+	if err != nil {
+		pid := deliveryGroup.ID
+		menu = &model.Menu{
+			WorkspaceID: workspaceID,
+			ParentID:    &pid,
+			Name:        menuNameFromPath(path),
+			Path:        path,
+			Title:       "发布计划",
+			Component:   path,
+			Sort:        desiredSort,
+		}
+		if err := h.menus.Save(ctx, menu); err != nil {
+			return err
+		}
+		return h.menus.AppendMenuToRolesWithSiblingBindings(ctx, workspaceID, deliveryGroup.ID, menu.ID)
+	}
+
+	changed := false
+	if menu.Title != "发布计划" {
+		menu.Title = "发布计划"
 		menu.Name = menuNameFromPath(path)
 		menu.Component = path
 		changed = true

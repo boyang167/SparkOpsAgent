@@ -165,8 +165,9 @@ export function ProductVersionsPanel({ workspaceId, productId, projects }: Produ
                 <td colSpan={showProjectColumn ? 6 : 5} className="product-versions-placeholder">
                   <span>暂无交付版本</span>
                   <span className="product-versions-placeholder-hint">
-                    版本由工作流中的「创建交付版本」任务产生。
-                    <Link href={`/products/${productId}?tab=workflows`}>前往工作流</Link>
+                    版本在工作流<strong>运行成功</strong>后产生：部署任务选「交付版本」并执行，或运行「创建交付版本」任务。
+                    仅保存工作流配置不会产生版本。
+                    <Link href={`/products/${productId}?tab=workflows`}>前往工作流运行</Link>
                   </span>
                 </td>
               </tr>

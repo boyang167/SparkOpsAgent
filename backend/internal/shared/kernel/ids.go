@@ -31,6 +31,7 @@ type ProductRequirementID struct{ uuid.UUID }
 type WorkflowTemplateID struct{ uuid.UUID }
 type ReleasePlanID struct{ uuid.UUID }
 type ReleasePlanJobID struct{ uuid.UUID }
+type ReleasePlanTemplateID struct{ uuid.UUID }
 type ProductWorkflowID struct{ uuid.UUID }
 type ProductWorkflowRunID struct{ uuid.UUID }
 type EnvironmentID struct{ uuid.UUID }
@@ -80,6 +81,9 @@ func NewProductRequirementID() ProductRequirementID {
 func NewWorkflowTemplateID() WorkflowTemplateID { return WorkflowTemplateID{UUID: uuid.New()} }
 func NewReleasePlanID() ReleasePlanID           { return ReleasePlanID{UUID: uuid.New()} }
 func NewReleasePlanJobID() ReleasePlanJobID       { return ReleasePlanJobID{UUID: uuid.New()} }
+func NewReleasePlanTemplateID() ReleasePlanTemplateID {
+	return ReleasePlanTemplateID{UUID: uuid.New()}
+}
 func NewProductWorkflowID() ProductWorkflowID     { return ProductWorkflowID{UUID: uuid.New()} }
 func NewProductWorkflowRunID() ProductWorkflowRunID { return ProductWorkflowRunID{UUID: uuid.New()} }
 func NewEnvironmentID() EnvironmentID             { return EnvironmentID{UUID: uuid.New()} }
@@ -230,6 +234,11 @@ func ParseReleasePlanJobID(s string) (ReleasePlanJobID, error) {
 	return ReleasePlanJobID{UUID: id}, err
 }
 
+func ParseReleasePlanTemplateID(s string) (ReleasePlanTemplateID, error) {
+	id, err := uuid.Parse(s)
+	return ReleasePlanTemplateID{UUID: id}, err
+}
+
 func ParseProductWorkflowID(s string) (ProductWorkflowID, error) {
 	id, err := uuid.Parse(s)
 	return ProductWorkflowID{UUID: id}, err
@@ -318,6 +327,7 @@ func (id ProductRequirementID) String() string { return id.UUID.String() }
 func (id WorkflowTemplateID) String() string   { return id.UUID.String() }
 func (id ReleasePlanID) String() string        { return id.UUID.String() }
 func (id ReleasePlanJobID) String() string       { return id.UUID.String() }
+func (id ReleasePlanTemplateID) String() string  { return id.UUID.String() }
 func (id ProductWorkflowID) String() string      { return id.UUID.String() }
 func (id ProductWorkflowRunID) String() string   { return id.UUID.String() }
 func (id EnvironmentID) String() string          { return id.UUID.String() }

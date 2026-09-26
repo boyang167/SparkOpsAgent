@@ -8,39 +8,31 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { ProductDetailEmptyState } from "./ProductDetailEmptyState";
 import { ProductMasterDetail } from "./ProductMasterDetail";
+import { ReleasePlanForm, buildApprovalConfig, type ReleasePlanFormValues } from "./ReleasePlanForm";
+import { ReleasePlanJobEditor } from "./ReleasePlanJobEditor";
+import { ReleasePlanStatusSteps } from "./ReleasePlanStatusSteps";
+import { SprintWorkItemsSummary } from "./SprintWorkItemsSummary";
+import { releasePlanStatusLabel, statusTone } from "./release-plan-utils";
 
 interface ReleasePlansPanelProps {
   workspaceId: string;
   productId: string;
-  /** 限定某次迭代的发布计划；传入后创建计划会自动关联 sprint_id */
   sprintId?: string;
-  /** 嵌入迭代看板时使用，调整侧栏文案 */
   embedded?: boolean;
+  initialPlanId?: string | null;
 }
 
-function defaultWindow() {
-  const start = new Date();
-  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
-  return { start: start.toISOString(), end: end.toISOString() };
-}
-
-function statusTone(status: string): string {
-  if (status === "success" || status === "done") return "text-green-600";
-  if (status === "failed" || status === "denied") return "text-red-600";
-  if (status === "running" || status === "executing") return "text-blue-600";
-  return "text-muted-foreground";
-}
-
-export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }: ReleasePlansPanelProps) {
+export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, initialPlanId }: ReleasePlansPanelProps) {
   const [items, setItems] = useState<ReleasePlanVM[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialPlanId ?? null);
   const [selected, setSelected] = useState<ReleasePlanVM | null>(null);
   const [workflows, setWorkflows] = useState<ProductWorkflowVM[]>([]);
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState("");
   const [detailTab, setDetailTab] = useState<"jobs" | "audit">("jobs");
   const [searchQuery, setSearchQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [name, setName] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -52,6 +44,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
       const list = await product.listReleasePlans(workspaceId, productId, sprintId);
       setItems(list);
       setSelectedId((prev) => {
+        if (initialPlanId && list.some((item) => item.id === initialPlanId)) return initialPlanId;
         if (prev && list.some((item) => item.id === prev)) return prev;
         return list[0]?.id ?? null;
       });
@@ -60,7 +53,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, productId, sprintId]);
+  }, [workspaceId, productId, sprintId, initialPlanId]);
 
   useEffect(() => {
     void load();
@@ -90,13 +83,14 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
     try {
       const wfItems = await product.listProductWorkflows(workspaceId, productId);
       setWorkflows(wfItems);
-      if (wfItems.length > 0) {
-        setSelectedWorkflowId((prev) => prev || wfItems[0].id);
-      }
     } catch {
       setWorkflows([]);
     }
   }, [workspaceId, productId]);
+
+  useEffect(() => {
+    void loadWorkflows();
+  }, [loadWorkflows]);
 
   const needsPolling =
     selected?.status === "executing" &&
@@ -111,37 +105,56 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
     return () => window.clearInterval(timer);
   }, [selected, needsPolling, load, loadDetail]);
 
-  useEffect(() => {
-    if (selected?.status === "planning") {
-      void loadWorkflows();
-    }
-  }, [selected?.status, loadWorkflows]);
-
   async function refreshDetail() {
     if (!selectedId) return;
     await loadDetail(selectedId);
     await load();
   }
 
-  async function onCreate() {
-    if (!name.trim()) return;
+  async function onCreate(values: ReleasePlanFormValues) {
     setBusy(true);
     setError(null);
     try {
-      const win = defaultWindow();
       const created = await product.createReleasePlan(workspaceId, productId, {
-        name: name.trim(),
-        release_window_start: win.start,
-        release_window_end: win.end,
-        approval_enabled: true,
+        name: values.name,
+        description: values.description || undefined,
+        release_window_start: values.windowStart,
+        release_window_end: values.windowEnd,
+        approval_enabled: values.approvalEnabled,
+        approval_config: buildApprovalConfig(values),
+        schedule_execute_time: values.scheduleExecuteTime || undefined,
+        manager_id: values.managerId || undefined,
         ...(sprintId ? { sprint_id: sprintId } : {}),
       });
-      setName("");
       setCreateOpen(false);
       await load();
       setSelectedId(created.id);
     } catch (err) {
       setError(err instanceof BffError ? err.message : "创建失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onUpdate(values: ReleasePlanFormValues) {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await product.updateReleasePlan(workspaceId, productId, selected.id, {
+        name: values.name,
+        description: values.description || undefined,
+        release_window_start: values.windowStart,
+        release_window_end: values.windowEnd,
+        approval_enabled: values.approvalEnabled,
+        approval_config: buildApprovalConfig(values),
+        schedule_execute_time: values.scheduleExecuteTime || undefined,
+        clear_schedule_time: !values.scheduleExecuteTime,
+        manager_id: values.managerId || undefined,
+      });
+      setEditOpen(false);
+      await refreshDetail();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "更新失败");
     } finally {
       setBusy(false);
     }
@@ -154,7 +167,8 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
       await product.addReleasePlanJob(workspaceId, productId, selected.id, {
         name: `检查项 ${(selected.jobs?.length ?? 0) + 1}`,
         type: "text",
-        text_content: "发布前检查清单",
+        text_content: "<p>发布前检查清单</p>",
+        text_format: "html",
         sort_order: selected.jobs?.length ?? 0,
       });
       await refreshDetail();
@@ -165,20 +179,40 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
     }
   }
 
-  async function onAddWorkflowJob() {
-    if (!selected || !selectedWorkflowId) return;
+  async function onAddWorkflowJob(workflowId: string) {
+    if (!selected || !workflowId) return;
     setBusy(true);
     try {
-      const wf = workflows.find((w) => w.id === selectedWorkflowId);
+      const wf = workflows.find((w) => w.id === workflowId);
       await product.addReleasePlanJob(workspaceId, productId, selected.id, {
         name: wf?.name ?? "工作流发布",
         type: "workflow",
         sort_order: selected.jobs?.length ?? 0,
-        workflow_ref: { mode: "reference", workflow_id: selectedWorkflowId },
+        workflow_ref: { mode: "reference", workflow_id: workflowId },
       });
       await refreshDetail();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "添加工作流发布项失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onMoveJob(jobId: string, direction: "up" | "down") {
+    if (!selected?.jobs) return;
+    const sorted = [...selected.jobs].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    const idx = sorted.findIndex((j) => j.id === jobId);
+    if (idx < 0) return;
+    const swap = direction === "up" ? idx - 1 : idx + 1;
+    if (swap < 0 || swap >= sorted.length) return;
+    const ids = sorted.map((j) => j.id);
+    [ids[idx], ids[swap]] = [ids[swap], ids[idx]];
+    setBusy(true);
+    try {
+      await product.reorderReleasePlanJobs(workspaceId, productId, selected.id, ids);
+      await refreshDetail();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "排序失败");
     } finally {
       setBusy(false);
     }
@@ -210,6 +244,47 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
     }
   }
 
+  async function onReject() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await product.rejectReleasePlan(workspaceId, productId, selected.id, { reason: rejectReason.trim() || undefined });
+      setRejectOpen(false);
+      setRejectReason("");
+      await refreshDetail();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "驳回失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onReopen() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await product.reopenReleasePlanPlanning(workspaceId, productId, selected.id);
+      await refreshDetail();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "重新编辑失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onCancel() {
+    if (!selected || !window.confirm("确定取消此发布计划？")) return;
+    setBusy(true);
+    try {
+      await product.cancelReleasePlan(workspaceId, productId, selected.id);
+      await refreshDetail();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "取消失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onExecute() {
     if (!selected) return;
     setBusy(true);
@@ -225,9 +300,10 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
 
   async function onJobDone(jobId: string) {
     if (!selected) return;
+    const remark = window.prompt("完成备注（可选）") ?? "";
     setBusy(true);
     try {
-      await product.markReleasePlanJobDone(workspaceId, productId, selected.id, jobId);
+      await product.markReleasePlanJobDone(workspaceId, productId, selected.id, jobId, { remark: remark.trim() || undefined });
       await refreshDetail();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "操作失败");
@@ -257,6 +333,19 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
       await refreshDetail();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "重试失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onGenerateFromWorkItems(workItemIds: string[]) {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await product.addReleasePlanJobsFromWorkItems(workspaceId, productId, selected.id, workItemIds);
+      await refreshDetail();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "生成检查项失败");
     } finally {
       setBusy(false);
     }
@@ -298,10 +387,40 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
       items.map((row) => ({
         id: row.id,
         title: row.name,
-        meta: row.status,
+        meta: releasePlanStatusLabel(row.status),
       })),
     [items],
   );
+
+  const canEditJobs = selected?.status === "planning";
+  const usesExternalApproval =
+    selected?.approval_config?.provider === "feishu" || selected?.approval_config?.provider === "dingtalk";
+
+  async function onCopyPlan() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const copied = await product.copyReleasePlan(workspaceId, productId, selected.id, {});
+      await load();
+      setSelectedId(copied.id);
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "复制失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSaveTemplate() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await product.saveReleasePlanTemplate(workspaceId, productId, selected.id, { name: `${selected.name} 模板` });
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "保存模板失败");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <>
@@ -349,67 +468,58 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
                   发布窗口：{new Date(selected.release_window_start).toLocaleString()} —{" "}
                   {new Date(selected.release_window_end).toLocaleString()}
                 </p>
+                {selected.schedule_execute_time ? (
+                  <p className="text-xs text-muted-foreground">
+                    定时执行：{new Date(selected.schedule_execute_time).toLocaleString()}
+                  </p>
+                ) : null}
+                {usesExternalApproval ? (
+                  <p className="text-xs text-muted-foreground">
+                    外部审批（{selected.approval_config?.provider === "feishu" ? "飞书" : "钉钉"}）
+                    {selected.approval_config?.instance?.status ? ` · ${selected.approval_config.instance.status}` : ""}
+                  </p>
+                ) : null}
               </div>
-              <span className={`text-sm font-medium ${statusTone(selected.status)}`}>{selected.status}</span>
+              <span className={`text-sm font-medium ${statusTone(selected.status)}`}>
+                {releasePlanStatusLabel(selected.status)}
+              </span>
             </div>
 
-            <ol className="flex flex-wrap gap-2 text-xs">
-              {(["planning", "wait_for_approval", "executing", "success"] as const).map((step) => {
-                const active = selected.status === step;
-                const done =
-                  (step === "planning" && selected.status !== "planning") ||
-                  (step === "wait_for_approval" &&
-                    !["planning", "wait_for_approval"].includes(selected.status) &&
-                    selected.approval_enabled) ||
-                  (step === "executing" && ["executing", "success"].includes(selected.status)) ||
-                  (step === "success" && selected.status === "success");
-                return (
-                  <li
-                    key={step}
-                    className={`rounded px-2 py-1 border ${
-                      active ? "border-primary bg-primary/5 text-primary" : done ? "border-green-600/30 text-green-700" : "text-muted-foreground"
-                    }`}
-                  >
-                    {step}
-                  </li>
-                );
-              })}
-            </ol>
+            <ReleasePlanStatusSteps status={selected.status} approvalEnabled={selected.approval_enabled} />
 
             <div className="flex flex-wrap gap-2">
               {selected.status === "planning" ? (
                 <>
-                  <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onAddTextJob()}>
-                    添加 text 项
+                  <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => setEditOpen(true)}>
+                    编辑
                   </button>
-                  {workflows.length > 0 ? (
-                    <>
-                      <select
-                        className="input text-xs"
-                        value={selectedWorkflowId}
-                        onChange={(e) => setSelectedWorkflowId(e.target.value)}
-                      >
-                        {workflows.map((wf) => (
-                          <option key={wf.id} value={wf.id}>
-                            {wf.name}
-                          </option>
-                        ))}
-                      </select>
-                      <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onAddWorkflowJob()}>
-                        添加 workflow 项
-                      </button>
-                    </>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">请先在「工作流」Tab 创建工作流</span>
-                  )}
                   <button type="button" className="btn text-xs" disabled={busy} onClick={() => void onFinishPlanning()}>
                     完成规划
                   </button>
                 </>
               ) : null}
-              {selected.status === "wait_for_approval" ? (
-                <button type="button" className="btn text-xs" disabled={busy} onClick={() => void onApprove()}>
-                  审批通过
+              {selected.status === "wait_for_approval" && !usesExternalApproval ? (
+                <>
+                  <button type="button" className="btn text-xs" disabled={busy} onClick={() => void onApprove()}>
+                    审批通过
+                  </button>
+                  <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => setRejectOpen(true)}>
+                    驳回
+                  </button>
+                </>
+              ) : null}
+              {selected.status === "wait_for_approval" && usesExternalApproval ? (
+                <span className="text-xs text-muted-foreground self-center">等待飞书/钉钉审批回调</span>
+              ) : null}
+              <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onCopyPlan()}>
+                复制计划
+              </button>
+              <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onSaveTemplate()}>
+                存为模板
+              </button>
+              {selected.status === "denied" ? (
+                <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onReopen()}>
+                  重新编辑
                 </button>
               ) : null}
               {selected.status === "executing" ? (
@@ -417,7 +527,19 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
                   继续执行
                 </button>
               ) : null}
+              {["planning", "wait_for_approval", "executing"].includes(selected.status) ? (
+                <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onCancel()}>
+                  取消计划
+                </button>
+              ) : null}
             </div>
+
+            <SprintWorkItemsSummary
+              plan={selected}
+              canEdit={canEditJobs}
+              busy={busy}
+              onGenerateJobs={onGenerateFromWorkItems}
+            />
 
             <div className="flex gap-2 text-xs border-b pb-2">
               <button
@@ -437,33 +559,40 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
             </div>
 
             {detailTab === "jobs" ? (
-              <ul className="stack-xs text-sm">
-                {(selected.jobs ?? []).map((job) => (
-                  <li key={job.id} className="flex justify-between gap-2 border-b py-2">
-                    <div className="stack-xs">
-                      <span>
-                        {job.name}{" "}
-                        <span className="text-muted-foreground">({job.type})</span>{" "}
-                        <span className={statusTone(job.status)}>{job.status}</span>
-                      </span>
-                      {job.type === "workflow" && job.workflow_ref?.workflow_id ? (
-                        <span className="text-xs text-muted-foreground">
-                          工作流 {job.workflow_ref.workflow_id.slice(0, 8)}…
-                        </span>
-                      ) : null}
-                      {job.execution_ref?.workflow_run_id ? (
-                        <span className="text-xs text-muted-foreground font-mono">
-                          Run {job.execution_ref.workflow_run_id.slice(0, 8)}…
-                        </span>
-                      ) : null}
-                      {job.execution_ref?.error_message ? (
-                        <span className="text-xs text-red-600">{job.execution_ref.error_message}</span>
-                      ) : null}
-                    </div>
-                    {renderJobActions(job)}
-                  </li>
-                ))}
-              </ul>
+              <ReleasePlanJobEditor
+                workspaceId={workspaceId}
+                productId={productId}
+                plan={selected}
+                workflows={workflows}
+                canEdit={canEditJobs}
+                busy={busy}
+                onMove={onMoveJob}
+                onDelete={async (jobId) => {
+                  setBusy(true);
+                  try {
+                    await product.deleteReleasePlanJob(workspaceId, productId, selected.id, jobId);
+                    await refreshDetail();
+                  } catch (err) {
+                    setError(err instanceof BffError ? err.message : "删除失败");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                onUpdate={async (jobId, patch) => {
+                  setBusy(true);
+                  try {
+                    await product.updateReleasePlanJob(workspaceId, productId, selected.id, jobId, patch);
+                    await refreshDetail();
+                  } catch (err) {
+                    setError(err instanceof BffError ? err.message : "更新失败");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                onAddText={onAddTextJob}
+                onAddWorkflow={onAddWorkflowJob}
+                renderJobActions={renderJobActions}
+              />
             ) : (
               <ul className="stack-xs text-xs max-h-64 overflow-auto">
                 {(selected.audit_logs ?? []).length === 0 ? (
@@ -484,25 +613,43 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded }
         ) : null}
       </ProductMasterDetail>
 
-      <Modal
+      <ReleasePlanForm
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
         title="新建发布计划"
-        description="创建迭代发布计划，规划发布窗口与发布项。"
+        workspaceId={workspaceId}
+        busy={busy}
+        onClose={() => setCreateOpen(false)}
+        onSubmit={onCreate}
+      />
+
+      <ReleasePlanForm
+        open={editOpen}
+        title="编辑发布计划"
+        workspaceId={workspaceId}
+        busy={busy}
+        initial={selected}
+        onClose={() => setEditOpen(false)}
+        onSubmit={onUpdate}
+      />
+
+      <Modal
+        open={rejectOpen}
+        onClose={() => setRejectOpen(false)}
+        title="驳回发布计划"
         footer={
           <>
-            <button type="button" className="btn btn-secondary text-sm" onClick={() => setCreateOpen(false)}>
+            <button type="button" className="btn btn-secondary text-sm" onClick={() => setRejectOpen(false)}>
               取消
             </button>
-            <button type="button" className="btn btn-primary text-sm" disabled={busy || !name.trim()} onClick={() => void onCreate()}>
-              {busy ? "创建中…" : "创建"}
+            <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onReject()}>
+              确认驳回
             </button>
           </>
         }
       >
         <label className="stack-xs text-sm">
-          <span className="text-muted-foreground">计划名称</span>
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 v2.4 迭代发布" />
+          <span className="text-muted-foreground">驳回原因（可选）</span>
+          <textarea className="input min-h-[80px]" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} />
         </label>
       </Modal>
     </>

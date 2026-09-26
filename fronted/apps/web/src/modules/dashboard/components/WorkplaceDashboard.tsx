@@ -6,7 +6,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { MeVM } from "@sparkops/contracts/identity";
 import type { OperationRecordVM } from "@sparkops/contracts/platform";
 import type { WorkspaceVM } from "@sparkops/contracts/tenant";
-import type { ActiveSprintSummaryVM } from "@sparkops/contracts/product";
+import type { ActiveSprintSummaryVM, WorkspaceReleasePlanVM } from "@sparkops/contracts/product";
+import { releasePlanStatusLabel } from "@/modules/product/components/release-plan-utils";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { BffError } from "@sparkops/contracts";
 import { platform, product, tenant } from "@sparkops/web-sdk";
@@ -110,6 +111,8 @@ export function WorkplaceDashboard({
   const [switchingWorkspace, setSwitchingWorkspace] = useState<string | null>(null);
   const [activeSprints, setActiveSprints] = useState<ActiveSprintSummaryVM[]>([]);
   const [activeSprintsLoading, setActiveSprintsLoading] = useState(true);
+  const [releasePlans, setReleasePlans] = useState<WorkspaceReleasePlanVM[]>([]);
+  const [releasePlansLoading, setReleasePlansLoading] = useState(true);
 
   const displayName = session.display_name?.trim() || session.email.split("@")[0] || "用户";
   const initial = displayName.charAt(0).toUpperCase();
@@ -131,6 +134,7 @@ export function WorkplaceDashboard({
     let cancelled = false;
     setActivityLoading(true);
     setActiveSprintsLoading(true);
+    setReleasePlansLoading(true);
     setMetrics((prev) => ({ ...prev, loading: true }));
 
     void Promise.allSettled([
@@ -138,7 +142,10 @@ export function WorkplaceDashboard({
       platform.getDashboard(workspaceId),
       platform.listDeploymentStats(workspaceId),
       product.listActiveSprints(workspaceId),
-    ]).then(([activityResult, dashboardResult, statsResult, sprintsResult]) => {
+      product.listWorkspaceReleasePlans(workspaceId, {
+        status: "planning,wait_for_approval,executing",
+      }),
+    ]).then(([activityResult, dashboardResult, statsResult, sprintsResult, releasePlansResult]) => {
       if (cancelled) return;
 
       if (activityResult.status === "fulfilled") {
@@ -173,6 +180,13 @@ export function WorkplaceDashboard({
         setActiveSprints([]);
       }
       setActiveSprintsLoading(false);
+
+      if (releasePlansResult.status === "fulfilled") {
+        setReleasePlans(releasePlansResult.value);
+      } else {
+        setReleasePlans([]);
+      }
+      setReleasePlansLoading(false);
     });
 
     return () => {
@@ -280,6 +294,43 @@ export function WorkplaceDashboard({
                         </span>
                       </span>
                       <span className="workplace-service-status is-running">进行中</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </PanelCard>
+
+          <PanelCard
+            title="进行中的发布计划"
+            action={
+              <Link href="/publish/release-plans" className="workplace-panel-link">
+                查看全部
+              </Link>
+            }
+          >
+            {releasePlansLoading ? (
+              <EmptyHint>加载发布计划…</EmptyHint>
+            ) : releasePlans.length === 0 ? (
+              <EmptyHint>当前空间暂无进行中的发布计划。</EmptyHint>
+            ) : (
+              <ul className="workplace-service-list">
+                {releasePlans.slice(0, 8).map((plan) => (
+                  <li key={plan.id}>
+                    <Link
+                      href={`/products/${plan.product_id}?tab=releases&planId=${plan.id}`}
+                      className="workplace-service-item"
+                    >
+                      <span className="workplace-service-body">
+                        <strong>{plan.name}</strong>
+                        <span>
+                          {plan.product_name ?? "产品"}
+                          {plan.sprint_name ? ` · ${plan.sprint_name}` : ""}
+                        </span>
+                      </span>
+                      <span className="workplace-service-status is-running">
+                        {releasePlanStatusLabel(plan.status)}
+                      </span>
                     </Link>
                   </li>
                 ))}

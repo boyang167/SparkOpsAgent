@@ -83,7 +83,11 @@ func releasePlanSummary(plan *model.ReleasePlan) map[string]any {
 		"release_window_start": plan.ReleaseWindowStart.Format(time.RFC3339),
 		"release_window_end":   plan.ReleaseWindowEnd.Format(time.RFC3339),
 		"approval_enabled":     plan.ApprovalConfig.Enabled,
+		"approval_config":      plan.ApprovalConfig,
 		"created_at":           plan.CreatedAt.Format(time.RFC3339),
+	}
+	if plan.ScheduleExecuteTime != nil {
+		out["schedule_execute_time"] = plan.ScheduleExecuteTime.Format(time.RFC3339)
 	}
 	if plan.SprintID != nil {
 		out["sprint_id"] = plan.SprintID.String()
@@ -99,7 +103,7 @@ func releasePlanDetail(plan *model.ReleasePlan) map[string]any {
 		item := map[string]any{
 			"id": job.ID.String(), "name": job.Name, "type": job.Type, "sort_order": job.SortOrder,
 			"owner_id": job.OwnerID.String(), "status": job.Status,
-			"text_content": job.TextContent, "text_checked": job.TextChecked,
+			"text_content": job.TextContent, "text_format": job.TextFormat, "text_checked": job.TextChecked,
 		}
 		if len(job.WorkflowRef) > 0 {
 			var wfRef any

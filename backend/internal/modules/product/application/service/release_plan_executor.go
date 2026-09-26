@@ -28,6 +28,9 @@ func (e *ReleasePlanExecutor) Advance(ctx context.Context, plan *model.ReleasePl
 	if plan.Status != model.ReleasePlanStatusExecuting {
 		return nil
 	}
+	if plan.ScheduledExecutionPending(time.Now().UTC()) {
+		return nil
+	}
 	if err := plan.EnsureExecutingWindow(time.Now().UTC()); err != nil {
 		return err
 	}

@@ -49,7 +49,7 @@ func HandleError(c *gin.Context, err error) {
 			status = http.StatusForbidden
 		case "DELIVERY_PROJECT_NOT_ACTIVE", "DELIVERY_BUILD_RUNNING", "DELIVERY_BUILD_NOT_RUNNING", "DELIVERY_BUILD_NOT_ROLLBACKABLE":
 			status = http.StatusBadRequest
-		case "DELIVERY_DEPLOYMENT_RUNNING", "PRODUCT_WORKFLOW_RUN_BUSY":
+		case "DELIVERY_DEPLOYMENT_RUNNING", "PRODUCT_WORKFLOW_RUN_BUSY", "SPRINT_BLOCKING_RELEASE":
 			status = http.StatusConflict
 		case "DELIVERY_DEPLOYMENT_NOT_FOUND":
 			status = http.StatusNotFound

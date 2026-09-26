@@ -189,7 +189,11 @@ export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPane
 
       {!error && tab === "releases" ? (
         <div className="product-detail-body">
-          <ReleasePlansPanel workspaceId={workspaceId} productId={productId} />
+          <ReleasePlansPanel
+            workspaceId={workspaceId}
+            productId={productId}
+            initialPlanId={searchParams.get("planId")}
+          />
         </div>
       ) : null}
 

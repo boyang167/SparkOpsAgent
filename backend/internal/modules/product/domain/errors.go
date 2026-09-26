@@ -10,6 +10,7 @@ var (
 	ErrInvalidRequirementTransition = kernel.NewDomainError("PRODUCT_INVALID_REQUIREMENT_TRANSITION", "invalid requirement status transition")
 	ErrWorkspaceAccessDenied        = kernel.NewDomainError("PRODUCT_ACCESS_DENIED", "workspace access denied")
 	ErrReleasePlanNotFound          = kernel.NewDomainError("RELEASE_PLAN_NOT_FOUND", "release plan not found")
+	ErrReleasePlanTemplateNotFound  = kernel.NewDomainError("RELEASE_PLAN_TEMPLATE_NOT_FOUND", "release plan template not found")
 	ErrReleasePlanJobNotFound       = kernel.NewDomainError("RELEASE_PLAN_JOB_NOT_FOUND", "release plan job not found")
 	ErrInvalidReleasePlanTransition = kernel.NewDomainError("RELEASE_PLAN_INVALID_TRANSITION", "invalid release plan status transition")
 	ErrInvalidReleasePlanJobTransition = kernel.NewDomainError("RELEASE_PLAN_JOB_INVALID_TRANSITION", "invalid release plan job transition")

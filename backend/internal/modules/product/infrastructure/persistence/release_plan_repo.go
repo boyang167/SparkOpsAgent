@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,6 +47,7 @@ type releasePlanJobModel struct {
 	OwnerID       string
 	Status        string
 	TextContent   string `gorm:"type:text"`
+	TextFormat    string
 	TextChecked   bool
 	WorkflowRef   string `gorm:"type:jsonb"`
 	ExecutionRef  string `gorm:"type:jsonb"`
@@ -73,7 +75,10 @@ func NewReleasePlanRepository(db *gorm.DB) repository.ReleasePlanRepository {
 }
 
 func releasePlanAutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(&releasePlanModel{}, &releasePlanJobModel{}, &releasePlanAuditLogModel{})
+	return db.AutoMigrate(
+		&releasePlanModel{}, &releasePlanJobModel{}, &releasePlanAuditLogModel{},
+		&releasePlanTemplateModel{},
+	)
 }
 
 func (r *ReleasePlanRepository) SavePlan(ctx context.Context, plan *model.ReleasePlan) error {
@@ -89,13 +94,14 @@ func (r *ReleasePlanRepository) UpdatePlan(ctx context.Context, plan *model.Rele
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Model(&releasePlanModel{}).Where("id = ?", row.ID).Updates(map[string]any{
+	updates := map[string]any{
 		"name": row.Name, "description": row.Description, "manager_id": row.ManagerID,
-		"approver_id": row.ApproverID, "status": row.Status,
+		"approver_id": row.ApproverID, "status": row.Status, "sprint_id": row.SprintID,
 		"release_window_start": row.ReleaseWindowStart, "release_window_end": row.ReleaseWindowEnd,
 		"schedule_execute_time": row.ScheduleExecuteTime, "approval_config": row.ApprovalConfig,
 		"updated_at": time.Now().UTC(),
-	}).Error
+	}
+	return r.db.WithContext(ctx).Model(&releasePlanModel{}).Where("id = ?", row.ID).Updates(updates).Error
 }
 
 func (r *ReleasePlanRepository) FindPlanByID(ctx context.Context, id kernel.ReleasePlanID) (*model.ReleasePlan, error) {
@@ -140,18 +146,78 @@ func (r *ReleasePlanRepository) ListPlansByProductAndSprint(ctx context.Context,
 	return rowsToReleasePlans(rows)
 }
 
+func blockingReleasePlanStatuses() []string {
+	return []string{
+		string(model.ReleasePlanStatusExecuting),
+		string(model.ReleasePlanStatusWaitForApproval),
+	}
+}
+
 func (r *ReleasePlanRepository) HasBlockingPlansBySprint(ctx context.Context, sprintID kernel.SprintID) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&releasePlanModel{}).
-		Where("sprint_id = ? AND status IN ?", sprintID.String(), []string{
-			string(model.ReleasePlanStatusExecuting),
-			string(model.ReleasePlanStatusWaitForApproval),
-		}).
+		Where("sprint_id = ? AND status IN ?", sprintID.String(), blockingReleasePlanStatuses()).
 		Count(&count).Error
 	if err != nil {
 		return false, err
 	}
 	return count > 0, nil
+}
+
+func (r *ReleasePlanRepository) ListBlockingPlansBySprint(ctx context.Context, sprintID kernel.SprintID) ([]*model.ReleasePlan, error) {
+	var rows []releasePlanModel
+	err := r.db.WithContext(ctx).
+		Where("sprint_id = ? AND status IN ?", sprintID.String(), blockingReleasePlanStatuses()).
+		Order("created_at DESC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rowsToReleasePlans(rows)
+}
+
+func (r *ReleasePlanRepository) ListPlansByProductFiltered(ctx context.Context, productID kernel.ProductID, sprintID *kernel.SprintID, filter repository.ReleasePlanListFilter) ([]*model.ReleasePlan, error) {
+	q := r.db.WithContext(ctx).Where("product_id = ?", productID.String())
+	if sprintID != nil {
+		q = q.Where("sprint_id = ?", sprintID.String())
+	}
+	q = applyReleasePlanListFilter(q, filter, "")
+	var rows []releasePlanModel
+	if err := q.Order("created_at DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rowsToReleasePlans(rows)
+}
+
+func (r *ReleasePlanRepository) ListPlansByWorkspace(ctx context.Context, wsID kernel.WorkspaceID, filter repository.ReleasePlanListFilter) ([]*model.ReleasePlan, error) {
+	q := r.db.WithContext(ctx).
+		Table("product.release_plans AS rp").
+		Select("rp.*").
+		Joins("INNER JOIN product.products AS p ON p.id = rp.product_id").
+		Where("p.workspace_id = ? AND rp.deleted_at IS NULL", wsID.String())
+	q = applyReleasePlanListFilter(q, filter, "rp.")
+	var rows []releasePlanModel
+	if err := q.Order("rp.created_at DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rowsToReleasePlans(rows)
+}
+
+func applyReleasePlanListFilter(q *gorm.DB, filter repository.ReleasePlanListFilter, prefix string) *gorm.DB {
+	if len(filter.Statuses) > 0 {
+		statuses := make([]string, 0, len(filter.Statuses))
+		for _, s := range filter.Statuses {
+			statuses = append(statuses, string(s))
+		}
+		q = q.Where(prefix+"status IN ?", statuses)
+	}
+	if filter.From != nil {
+		q = q.Where(prefix+"release_window_end >= ?", *filter.From)
+	}
+	if filter.To != nil {
+		q = q.Where(prefix+"release_window_start <= ?", *filter.To)
+	}
+	return q
 }
 
 func rowsToReleasePlans(rows []releasePlanModel) ([]*model.ReleasePlan, error) {
@@ -181,7 +247,7 @@ func (r *ReleasePlanRepository) UpdateJob(ctx context.Context, job *model.Releas
 	}
 	return r.db.WithContext(ctx).Model(&releasePlanJobModel{}).Where("id = ?", row.ID).Updates(map[string]any{
 		"sort_order": row.SortOrder, "name": row.Name, "type": row.Type, "owner_id": row.OwnerID,
-		"status": row.Status, "text_content": row.TextContent, "text_checked": row.TextChecked,
+		"status": row.Status, "text_content": row.TextContent, "text_format": row.TextFormat, "text_checked": row.TextChecked,
 		"workflow_ref": row.WorkflowRef, "execution_ref": row.ExecutionRef, "updated_at": time.Now().UTC(),
 	}).Error
 }
@@ -245,6 +311,62 @@ func (r *ReleasePlanRepository) FindJobByWorkflowRunID(ctx context.Context, runI
 		}
 	}
 	return nil, nil, domain.ErrReleasePlanJobNotFound
+}
+
+func (r *ReleasePlanRepository) FindPlanByApprovalToken(ctx context.Context, token string) (*model.ReleasePlan, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, domain.ErrReleasePlanNotFound
+	}
+	var row releasePlanModel
+	err := r.db.WithContext(ctx).
+		Where("approval_config->'instance'->>'token' = ?", token).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrReleasePlanNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	plan, err := rowToReleasePlan(row)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := r.ListJobsByPlan(ctx, plan.ID)
+	if err != nil {
+		return nil, err
+	}
+	plan.Jobs = jobs
+	return plan, nil
+}
+
+func (r *ReleasePlanRepository) ListDueScheduledPlans(ctx context.Context, now time.Time) ([]*model.ReleasePlan, error) {
+	var rows []releasePlanModel
+	err := r.db.WithContext(ctx).
+		Where("status = ? AND schedule_execute_time IS NOT NULL AND schedule_execute_time <= ?",
+			string(model.ReleasePlanStatusExecuting), now).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rowsToReleasePlansWithJobs(ctx, r, rows)
+}
+
+func rowsToReleasePlansWithJobs(ctx context.Context, r *ReleasePlanRepository, rows []releasePlanModel) ([]*model.ReleasePlan, error) {
+	out := make([]*model.ReleasePlan, 0, len(rows))
+	for _, row := range rows {
+		plan, err := rowToReleasePlan(row)
+		if err != nil {
+			return nil, err
+		}
+		jobs, err := r.ListJobsByPlan(ctx, plan.ID)
+		if err != nil {
+			return nil, err
+		}
+		plan.Jobs = jobs
+		out = append(out, plan)
+	}
+	return out, nil
 }
 
 func (r *ReleasePlanRepository) ListAuditLogs(ctx context.Context, planID kernel.ReleasePlanID, limit int) ([]model.ReleasePlanAuditLog, error) {
@@ -355,7 +477,7 @@ func toReleasePlanJobModel(job *model.ReleasePlanJob) (releasePlanJobModel, erro
 	return releasePlanJobModel{
 		ID: job.ID.String(), ReleasePlanID: job.ReleasePlanID.String(), SortOrder: job.SortOrder,
 		Name: job.Name, Type: string(job.Type), OwnerID: job.OwnerID.String(), Status: string(job.Status),
-		TextContent: job.TextContent, TextChecked: job.TextChecked,
+		TextContent: job.TextContent, TextFormat: job.TextFormat, TextChecked: job.TextChecked,
 		WorkflowRef: wf, ExecutionRef: ex, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt,
 	}, nil
 }
@@ -376,7 +498,7 @@ func rowToReleasePlanJob(row releasePlanJobModel) (*model.ReleasePlanJob, error)
 	return &model.ReleasePlanJob{
 		ID: id, ReleasePlanID: planID, SortOrder: row.SortOrder, Name: row.Name,
 		Type: model.ReleasePlanJobType(row.Type), OwnerID: ownerID, Status: model.ReleasePlanJobStatus(row.Status),
-		TextContent: row.TextContent, TextChecked: row.TextChecked,
+		TextContent: row.TextContent, TextFormat: row.TextFormat, TextChecked: row.TextChecked,
 		WorkflowRef: json.RawMessage(row.WorkflowRef), ExecutionRef: json.RawMessage(row.ExecutionRef),
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}, nil

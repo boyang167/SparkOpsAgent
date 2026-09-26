@@ -72,6 +72,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	boardHub := service.NewSprintBoardHub()
 	boardNotifier := service.NewSprintBoardNotifier(boardHub)
 	releasePlanExecutor := service.NewReleasePlanExecutor(releasePlanRepo, c.WorkflowRunTrigger)
+	releasePlanNotifier := service.NewReleasePlanApprovalNotifier(c.Config.PublicBaseURL())
+	releasePlanTemplateRepo := persistence.NewReleasePlanTemplateRepository(c.DB)
+	service.NewReleasePlanScheduler(releasePlanRepo, releasePlanExecutor, c.Logger).Start(c.Context)
 	sprintWorkItemExecutor := service.NewSprintWorkItemExecutor(repo, sprintRepo, c.WorkflowRunTrigger, pmRouter, boardNotifier)
 	if c.SprintProcessPort == nil {
 		return fmt.Errorf("product module requires sprint process port")
@@ -102,16 +105,32 @@ func (m *Module) Register(c *appctx.Container) error {
 
 	releasePlanHandlers := producthttp.NewReleasePlanHandlers(
 		command.NewCreateReleasePlanHandler(repo, releasePlanRepo, sprintRepo),
+		command.NewUpdateReleasePlanHandler(repo, releasePlanRepo, sprintRepo),
+		command.NewCancelReleasePlanHandler(repo, releasePlanRepo),
+		command.NewReopenReleasePlanPlanningHandler(repo, releasePlanRepo),
 		command.NewAddReleasePlanJobHandler(repo, releasePlanRepo),
-		command.NewFinishReleasePlanPlanningHandler(repo, releasePlanRepo, releasePlanExecutor),
+		command.NewAddReleasePlanJobsFromWorkItemsHandler(repo, releasePlanRepo, sprintRepo),
+		command.NewUpdateReleasePlanJobHandler(repo, releasePlanRepo),
+		command.NewDeleteReleasePlanJobHandler(repo, releasePlanRepo),
+		command.NewReorderReleasePlanJobsHandler(repo, releasePlanRepo),
+		command.NewFinishReleasePlanPlanningHandler(repo, releasePlanRepo, releasePlanExecutor, releasePlanNotifier),
 		command.NewApproveReleasePlanHandler(repo, releasePlanRepo, releasePlanExecutor),
 		command.NewRejectReleasePlanHandler(repo, releasePlanRepo),
 		command.NewMarkReleasePlanJobDoneHandler(repo, releasePlanRepo, releasePlanExecutor),
 		command.NewSkipReleasePlanJobHandler(repo, releasePlanRepo, releasePlanExecutor),
 		command.NewExecuteReleasePlanHandler(repo, releasePlanRepo, releasePlanExecutor),
 		command.NewRetryReleasePlanJobHandler(repo, releasePlanRepo, releasePlanExecutor),
+		command.NewCopyReleasePlanHandler(repo, releasePlanRepo),
+		command.NewSaveReleasePlanTemplateHandler(repo, releasePlanRepo, releasePlanTemplateRepo),
+		command.NewCreateReleasePlanFromTemplateHandler(repo, releasePlanRepo, releasePlanTemplateRepo, sprintRepo),
+		command.NewListReleasePlanTemplatesHandler(releasePlanTemplateRepo),
+		command.NewDeleteReleasePlanTemplateHandler(releasePlanTemplateRepo),
+		command.NewApproveReleasePlanByTokenHandler(releasePlanRepo, releasePlanExecutor),
+		command.NewRejectReleasePlanByTokenHandler(releasePlanRepo),
 		query.NewListReleasePlansHandler(repo, releasePlanRepo),
-		query.NewGetReleasePlanHandler(repo, releasePlanRepo),
+		query.NewListWorkspaceReleasePlansHandler(repo, releasePlanRepo, sprintRepo),
+		query.NewGetReleasePlanHandlerWithSprint(repo, releasePlanRepo, sprintRepo),
+		query.NewListBlockingReleasePlansHandler(releasePlanRepo),
 	)
 
 	handler := producthttp.NewHandler(
@@ -140,6 +159,8 @@ func (m *Module) Register(c *appctx.Container) error {
 
 	c.Engine.GET("/api/v1/workspaces/:wsId/sprints/active",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListActiveSprints)
+	c.Engine.GET("/api/v1/workspaces/:wsId/release-plans",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListWorkspaceReleasePlans)
 	c.Engine.GET("/api/v1/workspaces/:wsId/products",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListProducts)
 	c.Engine.POST("/api/v1/workspaces/:wsId/products",
@@ -173,6 +194,12 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CreateReleasePlan)
 	c.Engine.GET("/api/v1/products/:productId/release-plans/:planId",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetReleasePlan)
+	c.Engine.PATCH("/api/v1/products/:productId/release-plans/:planId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.UpdateReleasePlan)
+	c.Engine.POST("/api/v1/products/:productId/release-plans/:planId/cancel",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CancelReleasePlan)
+	c.Engine.POST("/api/v1/products/:productId/release-plans/:planId/reopen-planning",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.ReopenReleasePlanPlanning)
 	c.Engine.POST("/api/v1/products/:productId/release-plans/:planId/finish-planning",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.FinishReleasePlanPlanning)
 	c.Engine.POST("/api/v1/products/:productId/release-plans/:planId/approve",
@@ -181,6 +208,14 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.RejectReleasePlan)
 	c.Engine.POST("/api/v1/products/:productId/release-plans/:planId/jobs",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.AddReleasePlanJob)
+	c.Engine.POST("/api/v1/products/:productId/release-plans/:planId/jobs/from-work-items",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.AddReleasePlanJobsFromWorkItems)
+	c.Engine.PUT("/api/v1/products/:productId/release-plans/:planId/jobs/reorder",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.ReorderReleasePlanJobs)
+	c.Engine.PATCH("/api/v1/products/:productId/release-plans/:planId/jobs/:jobId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.UpdateReleasePlanJob)
+	c.Engine.DELETE("/api/v1/products/:productId/release-plans/:planId/jobs/:jobId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.DeleteReleasePlanJob)
 	c.Engine.POST("/api/v1/products/:productId/release-plans/:planId/jobs/:jobId/done",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.MarkReleasePlanJobDone)
 	c.Engine.POST("/api/v1/products/:productId/release-plans/:planId/jobs/:jobId/skip",
@@ -189,6 +224,20 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.ExecuteReleasePlan)
 	c.Engine.POST("/api/v1/products/:productId/release-plans/:planId/jobs/:jobId/retry",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.RetryReleasePlanJob)
+	c.Engine.POST("/api/v1/products/:productId/release-plans/:planId/copy",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CopyReleasePlan)
+	c.Engine.POST("/api/v1/products/:productId/release-plans/:planId/save-template",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.SaveReleasePlanTemplate)
+	c.Engine.GET("/api/v1/workspaces/:wsId/release-plan-templates",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListReleasePlanTemplates)
+	c.Engine.POST("/api/v1/workspaces/:wsId/release-plan-templates/:templateId/create-plan",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CreateReleasePlanFromTemplate)
+	c.Engine.DELETE("/api/v1/workspaces/:wsId/release-plan-templates/:templateId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.DeleteReleasePlanTemplate)
+	c.Engine.GET("/api/v1/public/release-plans/approval/:token/approve", handler.PublicApproveReleasePlanByToken)
+	c.Engine.POST("/api/v1/public/release-plans/approval/:token/approve", handler.PublicApproveReleasePlanByToken)
+	c.Engine.GET("/api/v1/public/release-plans/approval/:token/reject", handler.PublicRejectReleasePlanByToken)
+	c.Engine.POST("/api/v1/public/release-plans/approval/:token/reject", handler.PublicRejectReleasePlanByToken)
 
 	c.EventBus.Subscribe(deliveryevent.BuildCompletedName, subscriber.NewOnBuildCompleted(repo).Handle)
 	c.EventBus.Subscribe(pwfevent.WorkflowRunCompletedName, subscriber.NewOnWorkflowRunCompleted(releasePlanExecutor, sprintWorkItemExecutor).Handle)

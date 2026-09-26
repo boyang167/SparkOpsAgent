@@ -121,6 +121,28 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     workflowId: string;
   } | null>(null);
   const [cardMenuOpenId, setCardMenuOpenId] = useState<string | null>(null);
+  const [blockingPlans, setBlockingPlans] = useState<Array<{ id: string; name: string; status: string }>>([]);
+  const [activeReleasePlanCount, setActiveReleasePlanCount] = useState(0);
+
+  const loadReleasePlansMeta = useCallback(
+    async (sprintId: string) => {
+      try {
+        const plans = await product.listReleasePlans(workspaceId, productId, sprintId);
+        setActiveReleasePlanCount(
+          plans.filter((p) => ["planning", "wait_for_approval", "executing"].includes(p.status)).length,
+        );
+        setBlockingPlans(
+          plans
+            .filter((p) => ["executing", "wait_for_approval"].includes(p.status))
+            .map((p) => ({ id: p.id, name: p.name, status: p.status })),
+        );
+      } catch {
+        setActiveReleasePlanCount(0);
+        setBlockingPlans([]);
+      }
+    },
+    [workspaceId, productId],
+  );
 
   const loadSprints = useCallback(async () => {
     setLoading(true);
@@ -177,7 +199,8 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   useEffect(() => {
     setViewTab("board");
     setMetrics(null);
-  }, [selectedId]);
+    if (selectedId) void loadReleasePlansMeta(selectedId);
+  }, [selectedId, loadReleasePlansMeta]);
 
   const loadMetrics = useCallback(async () => {
     if (!selectedId) {
@@ -383,18 +406,19 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   async function onCompleteSprint() {
     if (!selectedId) return;
     setBusy(true);
+    setBlockingPlans([]);
     try {
       await product.completeSprint(workspaceId, productId, selectedId);
       await loadSprints();
       await loadBoard();
+      await loadReleasePlansMeta(selectedId);
     } catch (err) {
-      const msg =
-        err instanceof BffError && err.code === "SPRINT_BLOCKING_RELEASE"
-          ? "存在未完成的发布计划，请先完成或取消后再结束迭代"
-          : err instanceof BffError
-            ? err.message
-            : "完成迭代失败";
-      setError(msg);
+      if (err instanceof BffError && err.code === "SPRINT_BLOCKING_RELEASE") {
+        await loadReleasePlansMeta(selectedId);
+        setError("存在未完成的发布计划，请先完成或取消后再结束迭代");
+      } else {
+        setError(err instanceof BffError ? err.message : "完成迭代失败");
+      }
     } finally {
       setBusy(false);
     }
@@ -561,6 +585,29 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
         </div>
       ) : null}
 
+      {blockingPlans.length > 0 ? (
+        <div className="product-master-main-inner">
+          <InlineAlert tone="warning">
+            <div className="stack-xs">
+              <span>以下发布计划阻塞迭代完成：</span>
+              <ul className="list-disc pl-4">
+                {blockingPlans.map((plan) => (
+                  <li key={plan.id}>
+                    <button
+                      type="button"
+                      className="text-primary hover:underline"
+                      onClick={() => setViewTab("release")}
+                    >
+                      {plan.name} ({plan.status})
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </InlineAlert>
+        </div>
+      ) : null}
+
       <ProductMasterDetail
         sidebarTitle="迭代"
         searchPlaceholder="搜索迭代"
@@ -643,6 +690,9 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                   onClick={() => setViewTab("release")}
                 >
                   发布计划
+                  {activeReleasePlanCount > 0 ? (
+                    <span className="ml-1 rounded-full bg-primary/10 text-primary px-1.5 text-xs">{activeReleasePlanCount}</span>
+                  ) : null}
                 </button>
                 <button
                   type="button"

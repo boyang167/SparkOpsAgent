@@ -73,7 +73,7 @@ func createProductV2TestTables(t *testing.T, db *gorm.DB) {
 			created_at DATETIME, updated_at DATETIME, deleted_at DATETIME)`,
 		`CREATE TABLE product.release_plan_jobs (
 			id TEXT PRIMARY KEY, release_plan_id TEXT, sort_order INTEGER, name TEXT,
-			type TEXT, owner_id TEXT, status TEXT, text_content TEXT, text_checked INTEGER,
+			type TEXT, owner_id TEXT, status TEXT, text_content TEXT, text_format TEXT, text_checked INTEGER,
 			workflow_ref TEXT, execution_ref TEXT, created_at DATETIME, updated_at DATETIME)`,
 		`CREATE TABLE product.release_plan_audit_logs (
 			id TEXT PRIMARY KEY, release_plan_id TEXT, actor_id TEXT, action TEXT,
@@ -139,7 +139,7 @@ func TestProductV2ReleasePlanTextPipeline(t *testing.T) {
 	now := time.Now().UTC()
 	createPlan := command.NewCreateReleasePlanHandler(productRepo, releasePlanRepo, sprintRepo)
 	addJob := command.NewAddReleasePlanJobHandler(productRepo, releasePlanRepo)
-	finish := command.NewFinishReleasePlanPlanningHandler(productRepo, releasePlanRepo, executor)
+	finish := command.NewFinishReleasePlanPlanningHandler(productRepo, releasePlanRepo, executor, nil)
 	markDone := command.NewMarkReleasePlanJobDoneHandler(productRepo, releasePlanRepo, executor)
 
 	plan, err := createPlan.Handle(ctx, product.ID, memberID, command.CreateReleasePlanInput{
@@ -156,7 +156,7 @@ func TestProductV2ReleasePlanTextPipeline(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, model.ReleasePlanStatusExecuting, plan.Status)
 
-	plan, err = markDone.Handle(ctx, product.ID, plan.ID, job.ID, memberID)
+	plan, err = markDone.Handle(ctx, product.ID, plan.ID, job.ID, memberID, "")
 	require.NoError(t, err)
 	require.Equal(t, model.ReleasePlanStatusSuccess, plan.Status)
 }

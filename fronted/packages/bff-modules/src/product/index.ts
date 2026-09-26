@@ -188,6 +188,122 @@ export function retryReleasePlanJob(
   return ctx.upstream.product.retryReleasePlanJob(workspaceId, productId, planId, jobId);
 }
 
+export async function listWorkspaceReleasePlans(
+  ctx: BffContext,
+  workspaceId: string,
+  query?: { status?: string; from?: string; to?: string },
+) {
+  const data = await ctx.upstream.product.listWorkspaceReleasePlans(workspaceId, query);
+  return data.items;
+}
+
+export function updateReleasePlan(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  input: import("@sparkops/contracts/product").UpdateReleasePlanCommand,
+) {
+  return ctx.upstream.product.updateReleasePlan(workspaceId, productId, planId, input);
+}
+
+export function cancelReleasePlan(ctx: BffContext, workspaceId: string, productId: string, planId: string) {
+  return ctx.upstream.product.cancelReleasePlan(workspaceId, productId, planId);
+}
+
+export function reopenReleasePlanPlanning(ctx: BffContext, workspaceId: string, productId: string, planId: string) {
+  return ctx.upstream.product.reopenReleasePlanPlanning(workspaceId, productId, planId);
+}
+
+export function rejectReleasePlan(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  input: import("@sparkops/contracts/product").RejectReleasePlanCommand,
+) {
+  return ctx.upstream.product.rejectReleasePlan(workspaceId, productId, planId, input);
+}
+
+export function reorderReleasePlanJobs(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  jobIds: string[],
+) {
+  return ctx.upstream.product.reorderReleasePlanJobs(workspaceId, productId, planId, jobIds);
+}
+
+export function updateReleasePlanJob(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  jobId: string,
+  input: import("@sparkops/contracts/product").UpdateReleasePlanJobCommand,
+) {
+  return ctx.upstream.product.updateReleasePlanJob(workspaceId, productId, planId, jobId, input);
+}
+
+export function deleteReleasePlanJob(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  jobId: string,
+) {
+  return ctx.upstream.product.deleteReleasePlanJob(workspaceId, productId, planId, jobId);
+}
+
+export function addReleasePlanJobsFromWorkItems(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  workItemIds: string[],
+) {
+  return ctx.upstream.product.addReleasePlanJobsFromWorkItems(workspaceId, productId, planId, workItemIds);
+}
+
+export function copyReleasePlan(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  input: import("@sparkops/contracts/product").CopyReleasePlanCommand,
+) {
+  return ctx.upstream.product.copyReleasePlan(workspaceId, productId, planId, input);
+}
+
+export function saveReleasePlanTemplate(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  input: import("@sparkops/contracts/product").SaveReleasePlanTemplateCommand,
+) {
+  return ctx.upstream.product.saveReleasePlanTemplate(workspaceId, productId, planId, input);
+}
+
+export async function listReleasePlanTemplates(ctx: BffContext, workspaceId: string) {
+  const data = await ctx.upstream.product.listReleasePlanTemplates(workspaceId);
+  return data.items;
+}
+
+export function createReleasePlanFromTemplate(
+  ctx: BffContext,
+  workspaceId: string,
+  templateId: string,
+  input: import("@sparkops/contracts/product").CreateReleasePlanFromTemplateCommand,
+) {
+  return ctx.upstream.product.createReleasePlanFromTemplate(workspaceId, templateId, input);
+}
+
+export function deleteReleasePlanTemplate(ctx: BffContext, workspaceId: string, templateId: string) {
+  return ctx.upstream.product.deleteReleasePlanTemplate(workspaceId, templateId);
+}
+
 export async function listProductWorkflows(ctx: BffContext, workspaceId: string, productId: string) {
   const data = await ctx.upstream.product.listProductWorkflows(workspaceId, productId);
   return data.items;
