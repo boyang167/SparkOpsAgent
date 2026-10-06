@@ -73,12 +73,15 @@ export function DeployJobConfigDrawer({
       parsed.artifactSource === "version"
         ? sourceVersionJobs.filter((job) => job.name.trim())
         : [];
-    const nextDraft =
-      parsed.artifactSource === "version" &&
-      !parsed.jobName.trim() &&
-      versionJobs.length === 1
-        ? { ...parsed, jobName: versionJobs[0].name }
-        : parsed;
+    const buildJobs = sourceJobs.filter((job) => job.name.trim());
+    let nextDraft = parsed;
+    if (!parsed.jobName.trim()) {
+      if (parsed.artifactSource === "version" && versionJobs.length > 0) {
+        nextDraft = { ...parsed, jobName: versionJobs[versionJobs.length - 1].name };
+      } else if (parsed.artifactSource === "build" && buildJobs.length > 0) {
+        nextDraft = { ...parsed, jobName: buildJobs[buildJobs.length - 1].name };
+      }
+    }
     setTab("basic");
     setName(jobName);
     setDraft(nextDraft);
@@ -97,7 +100,7 @@ export function DeployJobConfigDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open, jobName, jobType, spec, workspaceId, environments, projects, sourceVersionJobs]);
+  }, [open, jobName, jobType, spec, workspaceId, environments, projects, sourceJobs, sourceVersionJobs]);
 
   const envTypes = PRODUCT_ENVIRONMENT_TYPES.map((item) => item.id);
   const isVersionDeploy = draft.artifactSource === "version";

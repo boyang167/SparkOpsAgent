@@ -12,7 +12,8 @@ import { ReleasePlanForm, buildApprovalConfig, type ReleasePlanFormValues } from
 import { ReleasePlanJobEditor } from "./ReleasePlanJobEditor";
 import { ReleasePlanStatusSteps } from "./ReleasePlanStatusSteps";
 import { SprintWorkItemsSummary } from "./SprintWorkItemsSummary";
-import { releasePlanStatusLabel, statusTone } from "./release-plan-utils";
+import { ReleasePlanModalFooter } from "./ReleasePlanModalFooter";
+import { formatReleaseWindow, releasePlanStatusBadgeClass, releasePlanStatusLabel } from "./release-plan-utils";
 
 interface ReleasePlansPanelProps {
   workspaceId: string;
@@ -33,6 +34,9 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
   const [editOpen, setEditOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [jobDoneTarget, setJobDoneTarget] = useState<string | null>(null);
+  const [jobDoneRemark, setJobDoneRemark] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -273,10 +277,11 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
   }
 
   async function onCancel() {
-    if (!selected || !window.confirm("确定取消此发布计划？")) return;
+    if (!selected) return;
     setBusy(true);
     try {
       await product.cancelReleasePlan(workspaceId, productId, selected.id);
+      setCancelOpen(false);
       await refreshDetail();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "取消失败");
@@ -298,12 +303,13 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
     }
   }
 
-  async function onJobDone(jobId: string) {
+  async function onJobDone(jobId: string, remark?: string) {
     if (!selected) return;
-    const remark = window.prompt("完成备注（可选）") ?? "";
     setBusy(true);
     try {
-      await product.markReleasePlanJobDone(workspaceId, productId, selected.id, jobId, { remark: remark.trim() || undefined });
+      await product.markReleasePlanJobDone(workspaceId, productId, selected.id, jobId, { remark: remark?.trim() || undefined });
+      setJobDoneTarget(null);
+      setJobDoneRemark("");
       await refreshDetail();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "操作失败");
@@ -356,7 +362,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
     if (job.type === "text" && job.status !== "done" && job.status !== "skipped") {
       return (
         <div className="flex gap-1">
-          <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onJobDone(job.id)}>
+          <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => setJobDoneTarget(job.id)}>
             完成
           </button>
           <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onJobSkip(job.id)}>
@@ -388,6 +394,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
         id: row.id,
         title: row.name,
         meta: releasePlanStatusLabel(row.status),
+        metaClassName: `badge ${releasePlanStatusBadgeClass(row.status)} product-master-item-badge`,
       })),
     [items],
   );
@@ -459,79 +466,91 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
         }
       >
         {selected ? (
-          <div className="product-master-main-inner stack-md">
-            <div className="flex justify-between items-start gap-3">
-              <div className="stack-xs">
-                <h2 className="section-title">{selected.name}</h2>
-                {selected.description ? <p className="text-sm text-muted-foreground">{selected.description}</p> : null}
-                <p className="text-xs text-muted-foreground">
-                  发布窗口：{new Date(selected.release_window_start).toLocaleString()} —{" "}
-                  {new Date(selected.release_window_end).toLocaleString()}
-                </p>
+          <div className="product-master-main-inner release-plan-detail stack-md">
+            <header className="release-plan-detail-header">
+              <div className="release-plan-detail-head">
+                <div className="stack-xs min-w-0">
+                  <h2 className="section-title">{selected.name}</h2>
+                  {selected.description ? <p className="text-sm text-muted-foreground">{selected.description}</p> : null}
+                </div>
+                <span className={`badge shrink-0 ${releasePlanStatusBadgeClass(selected.status)}`}>
+                  {releasePlanStatusLabel(selected.status)}
+                </span>
+              </div>
+              <dl className="release-plan-detail-meta">
+                <div className="release-plan-detail-meta-item">
+                  <dt>发布窗口</dt>
+                  <dd>{formatReleaseWindow(selected.release_window_start, selected.release_window_end)}</dd>
+                </div>
                 {selected.schedule_execute_time ? (
-                  <p className="text-xs text-muted-foreground">
-                    定时执行：{new Date(selected.schedule_execute_time).toLocaleString()}
-                  </p>
+                  <div className="release-plan-detail-meta-item">
+                    <dt>定时执行</dt>
+                    <dd>{new Date(selected.schedule_execute_time).toLocaleString("zh-CN")}</dd>
+                  </div>
                 ) : null}
                 {usesExternalApproval ? (
-                  <p className="text-xs text-muted-foreground">
-                    外部审批（{selected.approval_config?.provider === "feishu" ? "飞书" : "钉钉"}）
-                    {selected.approval_config?.instance?.status ? ` · ${selected.approval_config.instance.status}` : ""}
-                  </p>
+                  <div className="release-plan-detail-meta-item">
+                    <dt>外部审批</dt>
+                    <dd>
+                      {selected.approval_config?.provider === "feishu" ? "飞书" : "钉钉"}
+                      {selected.approval_config?.instance?.status ? ` · ${selected.approval_config.instance.status}` : ""}
+                    </dd>
+                  </div>
                 ) : null}
-              </div>
-              <span className={`text-sm font-medium ${statusTone(selected.status)}`}>
-                {releasePlanStatusLabel(selected.status)}
-              </span>
-            </div>
+              </dl>
+            </header>
 
             <ReleasePlanStatusSteps status={selected.status} approvalEnabled={selected.approval_enabled} />
 
-            <div className="flex flex-wrap gap-2">
-              {selected.status === "planning" ? (
-                <>
-                  <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => setEditOpen(true)}>
-                    编辑
+            <div className="release-plan-detail-actions">
+              <div className="release-plan-detail-actions-primary">
+                {selected.status === "planning" ? (
+                  <>
+                    <button type="button" className="btn btn-primary text-xs" disabled={busy} onClick={() => void onFinishPlanning()}>
+                      完成规划
+                    </button>
+                    <button type="button" className="btn btn-secondary text-xs" disabled={busy} onClick={() => setEditOpen(true)}>
+                      编辑
+                    </button>
+                  </>
+                ) : null}
+                {selected.status === "wait_for_approval" && !usesExternalApproval ? (
+                  <>
+                    <button type="button" className="btn btn-primary text-xs" disabled={busy} onClick={() => void onApprove()}>
+                      审批通过
+                    </button>
+                    <button type="button" className="btn btn-secondary text-xs" disabled={busy} onClick={() => setRejectOpen(true)}>
+                      驳回
+                    </button>
+                  </>
+                ) : null}
+                {selected.status === "wait_for_approval" && usesExternalApproval ? (
+                  <span className="text-xs text-muted-foreground">等待飞书/钉钉审批回调</span>
+                ) : null}
+                {selected.status === "executing" ? (
+                  <button type="button" className="btn btn-primary text-xs" disabled={busy} onClick={() => void onExecute()}>
+                    继续执行
                   </button>
-                  <button type="button" className="btn text-xs" disabled={busy} onClick={() => void onFinishPlanning()}>
-                    完成规划
+                ) : null}
+                {selected.status === "denied" ? (
+                  <button type="button" className="btn btn-primary text-xs" disabled={busy} onClick={() => void onReopen()}>
+                    重新编辑
                   </button>
-                </>
-              ) : null}
-              {selected.status === "wait_for_approval" && !usesExternalApproval ? (
-                <>
-                  <button type="button" className="btn text-xs" disabled={busy} onClick={() => void onApprove()}>
-                    审批通过
-                  </button>
-                  <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => setRejectOpen(true)}>
-                    驳回
-                  </button>
-                </>
-              ) : null}
-              {selected.status === "wait_for_approval" && usesExternalApproval ? (
-                <span className="text-xs text-muted-foreground self-center">等待飞书/钉钉审批回调</span>
-              ) : null}
-              <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onCopyPlan()}>
-                复制计划
-              </button>
-              <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onSaveTemplate()}>
-                存为模板
-              </button>
-              {selected.status === "denied" ? (
-                <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onReopen()}>
-                  重新编辑
+                ) : null}
+              </div>
+              <div className="release-plan-detail-actions-secondary">
+                <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => void onCopyPlan()}>
+                  复制计划
                 </button>
-              ) : null}
-              {selected.status === "executing" ? (
-                <button type="button" className="btn text-xs" disabled={busy} onClick={() => void onExecute()}>
-                  继续执行
+                <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => void onSaveTemplate()}>
+                  存为模板
                 </button>
-              ) : null}
-              {["planning", "wait_for_approval", "executing"].includes(selected.status) ? (
-                <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onCancel()}>
-                  取消计划
-                </button>
-              ) : null}
+                {["planning", "wait_for_approval", "executing"].includes(selected.status) ? (
+                  <button type="button" className="btn-ghost text-xs text-red-600" disabled={busy} onClick={() => setCancelOpen(true)}>
+                    取消计划
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             <SprintWorkItemsSummary
@@ -541,22 +560,30 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
               onGenerateJobs={onGenerateFromWorkItems}
             />
 
-            <div className="flex gap-2 text-xs border-b pb-2">
-              <button
-                type="button"
-                className={detailTab === "jobs" ? "font-medium text-primary" : "text-muted-foreground"}
-                onClick={() => setDetailTab("jobs")}
-              >
-                发布项
-              </button>
-              <button
-                type="button"
-                className={detailTab === "audit" ? "font-medium text-primary" : "text-muted-foreground"}
-                onClick={() => setDetailTab("audit")}
-              >
-                操作记录
-              </button>
-            </div>
+            <section className="release-plan-detail-body">
+              <div className="release-plan-detail-tabs">
+                <div className="segmented-control" role="tablist" aria-label="详情视图">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={detailTab === "jobs"}
+                    className={`segmented-item ${detailTab === "jobs" ? "segmented-item-active" : ""}`}
+                    onClick={() => setDetailTab("jobs")}
+                  >
+                    发布项
+                    {(selected.jobs?.length ?? 0) > 0 ? ` (${selected.jobs?.length})` : ""}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={detailTab === "audit"}
+                    className={`segmented-item ${detailTab === "audit" ? "segmented-item-active" : ""}`}
+                    onClick={() => setDetailTab("audit")}
+                  >
+                    操作记录
+                  </button>
+                </div>
+              </div>
 
             {detailTab === "jobs" ? (
               <ReleasePlanJobEditor
@@ -594,21 +621,22 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                 renderJobActions={renderJobActions}
               />
             ) : (
-              <ul className="stack-xs text-xs max-h-64 overflow-auto">
+              <ul className="release-plan-audit-list">
                 {(selected.audit_logs ?? []).length === 0 ? (
-                  <li className="text-muted-foreground">暂无操作记录</li>
+                  <li className="release-plan-audit-empty">暂无操作记录</li>
                 ) : (
                   (selected.audit_logs ?? []).map((log, i) => (
-                    <li key={String(log.id ?? i)} className="border-b py-1">
-                      <span className="font-medium">{String(log.action ?? "-")}</span>
+                    <li key={String(log.id ?? i)} className="release-plan-audit-item">
+                      <span className="release-plan-audit-action">{String(log.action ?? "-")}</span>
                       {log.created_at ? (
-                        <span className="text-muted-foreground ml-2">{new Date(String(log.created_at)).toLocaleString()}</span>
+                        <time className="release-plan-audit-time">{new Date(String(log.created_at)).toLocaleString("zh-CN")}</time>
                       ) : null}
                     </li>
                   ))
                 )}
               </ul>
             )}
+            </section>
           </div>
         ) : null}
       </ProductMasterDetail>
@@ -637,19 +665,62 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
         onClose={() => setRejectOpen(false)}
         title="驳回发布计划"
         footer={
-          <>
-            <button type="button" className="btn btn-secondary text-sm" onClick={() => setRejectOpen(false)}>
-              取消
-            </button>
-            <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onReject()}>
-              确认驳回
-            </button>
-          </>
+          <ReleasePlanModalFooter
+            onCancel={() => setRejectOpen(false)}
+            submitLabel="确认驳回"
+            submittingLabel="提交中…"
+            busy={busy}
+            onSubmit={() => void onReject()}
+          />
         }
       >
         <label className="stack-xs text-sm">
           <span className="text-muted-foreground">驳回原因（可选）</span>
           <textarea className="input min-h-[80px]" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} />
+        </label>
+      </Modal>
+
+      <Modal
+        open={cancelOpen}
+        onClose={() => setCancelOpen(false)}
+        title="取消发布计划"
+        description="取消后计划将无法继续执行，此操作不可撤销。"
+        footer={
+          <ReleasePlanModalFooter
+            onCancel={() => setCancelOpen(false)}
+            submitLabel="确认取消"
+            submittingLabel="取消中…"
+            busy={busy}
+            onSubmit={() => void onCancel()}
+          />
+        }
+      >
+        <p className="text-sm text-muted-foreground">确定要取消「{selected?.name}」吗？</p>
+      </Modal>
+
+      <Modal
+        open={Boolean(jobDoneTarget)}
+        onClose={() => {
+          setJobDoneTarget(null);
+          setJobDoneRemark("");
+        }}
+        title="标记检查项完成"
+        footer={
+          <ReleasePlanModalFooter
+            onCancel={() => {
+              setJobDoneTarget(null);
+              setJobDoneRemark("");
+            }}
+            submitLabel="确认完成"
+            submittingLabel="提交中…"
+            busy={busy}
+            onSubmit={() => jobDoneTarget && void onJobDone(jobDoneTarget, jobDoneRemark)}
+          />
+        }
+      >
+        <label className="stack-xs text-sm">
+          <span className="text-muted-foreground">完成备注（可选）</span>
+          <textarea className="input min-h-[80px]" value={jobDoneRemark} onChange={(e) => setJobDoneRemark(e.target.value)} placeholder="记录检查结果或注意事项" />
         </label>
       </Modal>
     </>

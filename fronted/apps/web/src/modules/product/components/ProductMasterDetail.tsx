@@ -8,6 +8,7 @@ export interface ProductMasterListItem {
   title: string;
   subtitle?: string;
   meta?: string;
+  metaClassName?: string;
   isGroup?: boolean;
   indent?: boolean;
 }
@@ -197,7 +198,9 @@ export function ProductMasterDetail({
                 >
                   <span className="product-master-item-title">{item.title}</span>
                   {item.subtitle ? <span className="product-master-item-sub">{item.subtitle}</span> : null}
-                  {item.meta ? <span className="product-master-item-meta">{item.meta}</span> : null}
+                  {item.meta ? (
+                    <span className={`product-master-item-meta${item.metaClassName ? ` ${item.metaClassName}` : ""}`}>{item.meta}</span>
+                  ) : null}
                 </button>
               );
             })

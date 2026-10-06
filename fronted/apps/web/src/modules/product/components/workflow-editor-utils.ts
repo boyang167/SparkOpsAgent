@@ -2,7 +2,6 @@
 
 import type { WorkflowJobVM, WorkflowStageVM } from "@sparkops/contracts/product";
 import { PRODUCT_WORKFLOW_JOB_TYPES } from "@sparkops/contracts/product";
-
 export type EditorJob = WorkflowJobVM;
 export type EditorStage = WorkflowStageVM;
 
@@ -128,4 +127,44 @@ export function nextJobIndex(stages: EditorStage[]): number {
     }
   }
   return max + 1;
+}
+
+export function pickDefaultUpstreamBuildJob(stages: EditorStage[], stageIndex: number, jobIndex: number): string {
+  const upstream = upstreamBuildJobs(stages, stageIndex, jobIndex);
+  return upstream[upstream.length - 1]?.name.trim() ?? "";
+}
+
+export function pickDefaultDeployUpstreamJob(
+  stages: EditorStage[],
+  stageIndex: number,
+  jobIndex: number,
+  jobType: string,
+  spec?: Record<string, unknown>,
+): string {
+  const artifactSource =
+    jobType === "sparkops-deploy-version" || spec?.artifact_source === "version" ? "version" : "build";
+  if (artifactSource === "version") {
+    const versionJobs = upstreamCreateVersionJobs(stages, stageIndex, jobIndex);
+    if (versionJobs.length > 0) {
+      return versionJobs[versionJobs.length - 1].name.trim();
+    }
+  }
+  return pickDefaultUpstreamBuildJob(stages, stageIndex, jobIndex);
+}
+
+export function prepareNewJob(type: string, stages: EditorStage[], stageIndex: number, jobIndex: number): EditorJob {
+  const job = defaultJob(type, nextJobIndex(stages));
+  const spec = { ...(job.spec ?? {}) };
+
+  if (type === "sparkops-create-version") {
+    const upstream = pickDefaultUpstreamBuildJob(stages, stageIndex, jobIndex);
+    if (upstream) spec.job_name = upstream;
+  }
+
+  if (type === "sparkops-deploy" || type === "sparkops-deploy-version") {
+    const upstream = pickDefaultDeployUpstreamJob(stages, stageIndex, jobIndex, type, spec);
+    if (upstream) spec.job_name = upstream;
+  }
+
+  return { ...job, spec };
 }

@@ -32,8 +32,13 @@ export function CreateVersionJobConfigDrawer({
   useEffect(() => {
     if (!open) return;
     setName(jobName);
-    setDraft(parseCreateVersionJobSpec(spec));
-  }, [open, jobName, spec]);
+    const parsed = parseCreateVersionJobSpec(spec);
+    const fallback = sourceJobs.length > 0 ? sourceJobs[sourceJobs.length - 1].name : "";
+    setDraft({
+      ...parsed,
+      jobName: parsed.jobName.trim() || fallback,
+    });
+  }, [open, jobName, spec, sourceJobs]);
 
   return (
     <Drawer open={open} title="创建交付版本" onClose={onClose} width={480}>

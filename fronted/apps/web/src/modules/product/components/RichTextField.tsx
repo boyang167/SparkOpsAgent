@@ -30,17 +30,17 @@ export function RichTextField({ value, onChange, placeholder, readOnly, classNam
   return (
     <div className={className}>
       {!readOnly ? (
-        <div className="flex flex-wrap gap-1 mb-1">
-          <button type="button" className="btn-secondary text-xs px-2 py-0.5" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("bold")}>
+        <div className="rich-text-toolbar">
+          <button type="button" className="rich-text-tool" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("bold")}>
             粗体
           </button>
-          <button type="button" className="btn-secondary text-xs px-2 py-0.5" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("italic")}>
+          <button type="button" className="rich-text-tool" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("italic")}>
             斜体
           </button>
-          <button type="button" className="btn-secondary text-xs px-2 py-0.5" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("insertUnorderedList")}>
+          <button type="button" className="rich-text-tool" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("insertUnorderedList")}>
             列表
           </button>
-          <button type="button" className="btn-secondary text-xs px-2 py-0.5" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("insertOrderedList")}>
+          <button type="button" className="rich-text-tool" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("insertOrderedList")}>
             编号
           </button>
         </div>

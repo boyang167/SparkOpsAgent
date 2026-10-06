@@ -14,6 +14,7 @@ import type {
 } from "@sparkops/contracts/product";
 import { ProductWorkflowEditor } from "./ProductWorkflowEditor";
 import { emptyStage } from "./workflow-editor-utils";
+import { formatWorkflowValidationErrors, validateWorkflowStages } from "./workflow-stage-validation";
 
 interface ProductWorkflowEditorPageProps {
   workspaceId: string;
@@ -74,6 +75,11 @@ export function ProductWorkflowEditorPage({
   }, [load]);
 
   async function handleSave(activate: boolean) {
+    const issues = validateWorkflowStages(stages);
+    if (issues.length > 0) {
+      setError(formatWorkflowValidationErrors(issues));
+      return;
+    }
     setBusy(true);
     setError(null);
     try {

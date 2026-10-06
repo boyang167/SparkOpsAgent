@@ -33,3 +33,47 @@ export function statusTone(status: string): string {
   if (status === "running" || status === "executing") return "text-blue-600";
   return "text-muted-foreground";
 }
+
+export function releasePlanStatusBadgeClass(status: string): string {
+  switch (status) {
+    case "success":
+      return "badge-success";
+    case "executing":
+      return "badge-primary";
+    case "wait_for_approval":
+      return "badge-warning";
+    case "denied":
+    case "cancel":
+      return "badge-danger";
+    default:
+      return "badge-neutral";
+  }
+}
+
+export function formatReleaseWindow(start: string, end: string): string {
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleString("zh-CN", {
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  return `${fmt(start)} — ${fmt(end)}`;
+}
+
+export function releasePlanStatusCalendarClass(status: string): string {
+  switch (status) {
+    case "success":
+      return "release-plan-cal-event-success";
+    case "executing":
+      return "release-plan-cal-event-executing";
+    case "wait_for_approval":
+      return "release-plan-cal-event-approval";
+    case "denied":
+    case "cancel":
+      return "release-plan-cal-event-cancelled";
+    default:
+      return "release-plan-cal-event-planning";
+  }
+}

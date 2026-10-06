@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import type { ProductWorkflowVM, ReleasePlanJobVM, ReleasePlanVM } from "@sparkops/contracts/product";
+import { InlineAlert } from "@/components/ui/InlineAlert";
 import { RichTextField } from "./RichTextField";
 import { WorkItemAssigneeField } from "./WorkItemAssigneeField";
-import { releasePlanStatusLabel, statusTone } from "./release-plan-utils";
+import { releasePlanStatusBadgeClass, releasePlanStatusLabel } from "./release-plan-utils";
 
 interface ReleasePlanJobEditorProps {
   workspaceId: string;
@@ -20,6 +21,10 @@ interface ReleasePlanJobEditorProps {
   onAddText: () => void | Promise<void>;
   onAddWorkflow: (workflowId: string) => void | Promise<void>;
   renderJobActions?: (job: ReleasePlanJobVM) => ReactNode;
+}
+
+function jobTypeLabel(type: string) {
+  return type === "text" ? "检查项" : "工作流";
 }
 
 export function ReleasePlanJobEditor({
@@ -40,44 +45,91 @@ export function ReleasePlanJobEditor({
   const jobs = [...(plan.jobs ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
 
   return (
-    <div className="stack-md">
+    <div className="release-plan-jobs">
       {canEdit ? (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onAddText()}>
-            添加检查项
-          </button>
-          {workflows.length > 0 ? (
-            <>
-              <select className="input text-xs" value={selectedWorkflowId} onChange={(e) => setSelectedWorkflowId(e.target.value)}>
-                {workflows.map((wf) => (
-                  <option key={wf.id} value={wf.id}>
-                    {wf.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="btn-secondary text-xs"
-                disabled={busy || !selectedWorkflowId}
-                onClick={() => void onAddWorkflow(selectedWorkflowId)}
-              >
-                添加工作流项
-              </button>
-            </>
-          ) : (
-            <span className="text-xs text-muted-foreground">请先在「工作流」Tab 创建工作流</span>
-          )}
+        <div className="release-plan-jobs-toolbar">
+          <div className="release-plan-jobs-toolbar-primary">
+            <button type="button" className="btn btn-secondary text-xs" disabled={busy} onClick={() => void onAddText()}>
+              添加检查项
+            </button>
+            {workflows.length > 0 ? (
+              <div className="release-plan-jobs-workflow-add">
+                <select className="input text-xs" value={selectedWorkflowId} onChange={(e) => setSelectedWorkflowId(e.target.value)} aria-label="选择工作流">
+                  {workflows.map((wf) => (
+                    <option key={wf.id} value={wf.id}>
+                      {wf.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn btn-secondary text-xs shrink-0"
+                  disabled={busy || !selectedWorkflowId}
+                  onClick={() => void onAddWorkflow(selectedWorkflowId)}
+                >
+                  添加工作流项
+                </button>
+              </div>
+            ) : (
+              <span className="text-xs text-muted-foreground">请先在「工作流」Tab 创建工作流</span>
+            )}
+          </div>
+          <span className="text-xs text-muted-foreground">{jobs.length} 项</span>
         </div>
       ) : null}
 
-      <ul className="stack-xs text-sm">
-        {jobs.map((job, index) => (
-          <li key={job.id} className="border rounded p-3 stack-sm">
-            <div className="flex justify-between gap-2 items-start">
-              <div className="stack-xs flex-1">
+      {jobs.length === 0 ? (
+        <div className="empty-state release-plan-jobs-empty">
+          <p>{canEdit ? "还没有发布项，从上方添加检查项或工作流" : "暂无发布项"}</p>
+          {canEdit ? (
+            <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onAddText()}>
+              添加第一个检查项
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <ul className="release-plan-jobs-list">
+          {jobs.map((job, index) => (
+            <li key={job.id} className="release-plan-job-card">
+              <div className="release-plan-job-card-head">
+                <div className="release-plan-job-card-title-row">
+                  <span className={`badge badge-neutral release-plan-job-type`}>{jobTypeLabel(job.type)}</span>
+                  <span className={`badge ${releasePlanStatusBadgeClass(job.status)}`}>{releasePlanStatusLabel(job.status)}</span>
+                </div>
+                <div className="release-plan-job-card-actions">
+                  {canEdit ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn-ghost text-xs px-1.5"
+                        disabled={busy || index === 0}
+                        aria-label="上移"
+                        onClick={() => void onMove(job.id, "up")}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ghost text-xs px-1.5"
+                        disabled={busy || index === jobs.length - 1}
+                        aria-label="下移"
+                        onClick={() => void onMove(job.id, "down")}
+                      >
+                        ↓
+                      </button>
+                      <button type="button" className="btn-ghost text-xs text-red-600 px-1.5" disabled={busy} onClick={() => void onDelete(job.id)}>
+                        删除
+                      </button>
+                    </>
+                  ) : null}
+                  {renderJobActions?.(job)}
+                </div>
+              </div>
+
+              <div className="release-plan-job-card-body">
                 {canEdit ? (
                   <input
-                    className="input text-sm"
+                    className="input text-sm font-medium"
                     defaultValue={job.name}
                     onBlur={(e) => {
                       const v = e.target.value.trim();
@@ -85,81 +137,62 @@ export function ReleasePlanJobEditor({
                     }}
                   />
                 ) : (
-                  <span className="font-medium">{job.name}</span>
+                  <h4 className="release-plan-job-name">{job.name}</h4>
                 )}
-                <span className="text-xs text-muted-foreground">
-                  {job.type === "text" ? "检查项" : "工作流"} · {releasePlanStatusLabel(job.status)}
-                </span>
-              </div>
-              <div className="flex gap-1 items-center">
-                {canEdit ? (
-                  <>
-                    <button type="button" className="btn-secondary text-xs px-2" disabled={busy || index === 0} onClick={() => void onMove(job.id, "up")}>
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-secondary text-xs px-2"
-                      disabled={busy || index === jobs.length - 1}
-                      onClick={() => void onMove(job.id, "down")}
-                    >
-                      ↓
-                    </button>
-                    <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onDelete(job.id)}>
-                      删除
-                    </button>
-                  </>
+
+                {job.type === "text" ? (
+                  canEdit ? (
+                    <RichTextField
+                      className="rich-text-field-compact"
+                      value={job.text_content ?? ""}
+                      onChange={(html) => {
+                        if (html !== (job.text_content ?? "")) void onUpdate(job.id, { text_content: html, text_format: "html" });
+                      }}
+                      placeholder="检查项说明"
+                    />
+                  ) : job.text_content ? (
+                    <div className="release-plan-job-content prose prose-sm max-w-none text-sm" dangerouslySetInnerHTML={{ __html: job.text_content }} />
+                  ) : null
                 ) : null}
-                {renderJobActions?.(job)}
+
+                {job.type === "workflow" && job.workflow_ref?.workflow_id ? (
+                  <p className="text-xs text-muted-foreground">关联工作流 · {job.workflow_ref.workflow_id.slice(0, 8)}…</p>
+                ) : null}
+
+                {job.execution_ref?.workflow_run_id && job.workflow_ref?.workflow_id ? (
+                  <Link
+                    href={`/products/${productId}/workflows/${job.workflow_ref.workflow_id}/runs/${job.execution_ref.workflow_run_id}`}
+                    className="text-xs text-primary hover:underline font-mono w-fit"
+                  >
+                    查看 Run {job.execution_ref.workflow_run_id.slice(0, 8)}…
+                  </Link>
+                ) : null}
+
+                {job.execution_ref?.error_message ? (
+                  <InlineAlert tone="error">{job.execution_ref.error_message}</InlineAlert>
+                ) : null}
+
+                {canEdit || job.owner_id ? (
+                  <label className="release-plan-job-owner">
+                    <span className="release-plan-job-owner-label">执行人</span>
+                    {canEdit ? (
+                      <WorkItemAssigneeField
+                        workspaceId={workspaceId}
+                        assigneeId={job.owner_id}
+                        onSelect={(id) => {
+                          if (id) void onUpdate(job.id, { owner_id: id });
+                        }}
+                      />
+                    ) : (
+                      <span className="text-sm text-muted-foreground">{job.owner_id ?? "—"}</span>
+                    )}
+                  </label>
+                ) : null}
               </div>
-            </div>
-
-            {job.type === "text" ? (
-              canEdit ? (
-                <RichTextField
-                  value={job.text_content ?? ""}
-                  onChange={(html) => {
-                    if (html !== (job.text_content ?? "")) void onUpdate(job.id, { text_content: html, text_format: "html" });
-                  }}
-                  placeholder="检查项说明"
-                />
-              ) : job.text_content ? (
-                <div className="prose prose-sm max-w-none text-xs dark:prose-invert" dangerouslySetInnerHTML={{ __html: job.text_content }} />
-              ) : null
-            ) : null}
-
-            {canEdit ? (
-              <div className="text-xs">
-                <span className="text-muted-foreground mr-2">执行人</span>
-                <WorkItemAssigneeField
-                  workspaceId={workspaceId}
-                  assigneeId={job.owner_id}
-                  onSelect={(id) => {
-                    if (id) void onUpdate(job.id, { owner_id: id });
-                  }}
-                />
-              </div>
-            ) : null}
-
-            {job.type === "workflow" && job.workflow_ref?.workflow_id ? (
-              <span className="text-xs text-muted-foreground">工作流 {job.workflow_ref.workflow_id.slice(0, 8)}…</span>
-            ) : null}
-
-            {job.execution_ref?.workflow_run_id && job.workflow_ref?.workflow_id ? (
-              <Link
-                href={`/products/${productId}/workflows/${job.workflow_ref.workflow_id}/runs/${job.execution_ref.workflow_run_id}`}
-                className="text-xs text-primary hover:underline font-mono"
-              >
-                查看 Run {job.execution_ref.workflow_run_id.slice(0, 8)}…
-              </Link>
-            ) : null}
-
-            {job.execution_ref?.error_message ? (
-              <span className={`text-xs ${statusTone("failed")}`}>{job.execution_ref.error_message}</span>
-            ) : null}
-          </li>
-        ))}
-      </ul>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

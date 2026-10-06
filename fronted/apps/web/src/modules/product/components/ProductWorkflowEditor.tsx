@@ -12,10 +12,9 @@ import { CreateVersionJobConfigDrawer } from "./CreateVersionJobConfigDrawer";
 import { DeployJobConfigDrawer } from "./DeployJobConfigDrawer";
 import { BuildNotifyList } from "./BuildNotifyList";
 import {
-  defaultJob,
   emptyStage,
   jobTypeLabel,
-  nextJobIndex,
+  prepareNewJob,
   upstreamBuildJobs,
   upstreamVersionSourceJobs,
   type EditorJob,
@@ -174,7 +173,8 @@ export function ProductWorkflowEditor({
   }
 
   function addJob(stageIndex: number, type: string) {
-    const job = defaultJob(type, nextJobIndex(stages));
+    const jobIndex = stages[stageIndex]?.jobs.length ?? 0;
+    const job = prepareNewJob(type, stages, stageIndex, jobIndex);
     onStagesChange(
       stages.map((stage, i) => (i === stageIndex ? { ...stage, jobs: [...stage.jobs, job] } : stage)),
     );

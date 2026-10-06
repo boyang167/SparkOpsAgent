@@ -1107,5 +1107,5 @@ func ValidateStages(stages []model.WorkflowStage) error {
 			}
 		}
 	}
-	return nil
+	return validateStageJobRefs(stages)
 }
