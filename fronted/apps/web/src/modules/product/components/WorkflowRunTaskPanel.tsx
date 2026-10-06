@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { delivery, product } from "@sparkops/web-sdk";
+import { delivery, product, workspace } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { BuildVM, DeploymentRunVM } from "@sparkops/contracts/delivery";
+import type { ProjectVersionDetailVM } from "@sparkops/contracts/workspace";
 import { BuildLogStream } from "@/modules/delivery/components/BuildLogStream";
 import { DeploymentLogStream } from "@/modules/delivery/components/DeploymentLogStream";
-import { formatImageRef } from "./deploy-job-spec";
 import { isActiveDeploymentRun } from "@/modules/workspace/components/project/deployment-console-utils";
+import { formatImageRef } from "./deploy-job-spec";
 import type { PipelineTask } from "./workflow-run-canvas-utils";
 import { taskStatusTone } from "./workflow-run-canvas-utils";
 import { runStatusLabel } from "./workflow-run-history-utils";
@@ -24,6 +25,11 @@ interface WorkflowRunTaskPanelProps {
   onRefresh: () => void;
 }
 
+function versionImageSummary(images: ProjectVersionDetailVM["images"]): string {
+  if (!images.length) return "—";
+  return images.map((item) => `${item.image}${item.tag ? `:${item.tag}` : ""}`.trim()).join(" · ");
+}
+
 export function WorkflowRunTaskPanel({
   workspaceId,
   productId,
@@ -35,6 +41,7 @@ export function WorkflowRunTaskPanel({
 }: WorkflowRunTaskPanelProps) {
   const [build, setBuild] = useState<BuildVM | null>(null);
   const [deploy, setDeploy] = useState<DeploymentRunVM | null>(null);
+  const [version, setVersion] = useState<ProjectVersionDetailVM | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [rejectMessage, setRejectMessage] = useState("");
@@ -46,11 +53,14 @@ export function WorkflowRunTaskPanel({
     setError(null);
     setBuild(null);
     setDeploy(null);
+    setVersion(null);
     try {
       if (task.kind === "build" && task.refId) {
         setBuild(await delivery.getBuild(task.refId, workspaceId));
       } else if (task.kind === "deploy" && task.refId) {
         setDeploy(await delivery.getDeployment(task.refId, workspaceId));
+      } else if (task.kind === "version" && task.refId && task.projectId) {
+        setVersion(await workspace.getProjectVersion(workspaceId, task.projectId, task.refId));
       }
     } catch (err) {
       setError(err instanceof BffError ? err.message : "加载任务详情失败");
@@ -66,6 +76,8 @@ export function WorkflowRunTaskPanel({
         setBuild(await delivery.getBuild(task.refId, workspaceId));
       } else if (task.kind === "deploy" && task.refId) {
         setDeploy(await delivery.getDeployment(task.refId, workspaceId));
+      } else if (task.kind === "version" && task.refId && task.projectId) {
+        setVersion(await workspace.getProjectVersion(workspaceId, task.projectId, task.refId));
       }
     } catch {
       // keep existing detail visible while logs are shown
@@ -79,7 +91,7 @@ export function WorkflowRunTaskPanel({
   if (!task) {
     return (
       <div className="wf-run-live-panel is-empty">
-        <p className="text-sm text-muted">点击上方流水线中的任务，查看构建日志与部署详情。</p>
+        <p className="text-sm text-muted">点击上方流水线中的任务，查看构建日志、版本快照与部署详情。</p>
       </div>
     );
   }
@@ -89,7 +101,11 @@ export function WorkflowRunTaskPanel({
   const activeDeploy = deploy ? isActiveDeploymentRun(deploy) : task.status === "running";
   const deployStatus = deploy?.status ?? task.status;
   const deployError = deploy?.error_message?.trim() || task.errorMessage;
-  const imageRef = formatImageRef(
+  const versionImageRef =
+    version && version.images.length > 0
+      ? versionImageSummary(version.images)
+      : formatImageRef(task.imageRepository, task.imageTag);
+  const imageRef = task.kind === "version" ? versionImageRef : formatImageRef(
     deploy?.image_repository ?? task.imageRepository,
     deploy?.image_tag ?? task.imageTag,
   );
@@ -113,6 +129,11 @@ export function WorkflowRunTaskPanel({
               打开构建页
             </Link>
           ) : null}
+          {task.kind === "version" && task.refId ? (
+            <Link href={`/products/${productId}?tab=versions`} className="btn btn-ghost text-sm">
+              打开版本管理
+            </Link>
+          ) : null}
           {task.kind === "deploy" && task.refId ? (
             <Link href={`/delivery/deployments/${task.refId}`} className="btn btn-ghost text-sm">
               打开部署页
@@ -125,14 +146,30 @@ export function WorkflowRunTaskPanel({
       </header>
 
       {error ? <p className="text-sm text-red-600 px-4 pt-3">{error}</p> : null}
-      {task.errorMessage ? <p className="text-sm text-red-600 px-4 pt-3">{task.errorMessage}</p> : null}
+      {task.errorMessage && task.errorMessage !== error ? (
+        <p className="text-sm text-red-600 px-4 pt-3">{task.errorMessage}</p>
+      ) : null}
 
       <div className="wf-run-live-panel-meta">
+        {task.kind === "version" && task.versionTag ? (
+          <div className="wf-run-live-meta-item">
+            <span className="wf-run-live-meta-label">版本号</span>
+            <span className="mono">{task.versionTag}</span>
+          </div>
+        ) : null}
         {task.branch ? (
           <div className="wf-run-live-meta-item">
             <span className="wf-run-live-meta-label">代码信息</span>
             <span>
               {task.gitRefType === "tag" ? "Tag" : "Branch"} · {task.branch}
+            </span>
+          </div>
+        ) : null}
+        {task.kind === "version" && version ? (
+          <div className="wf-run-live-meta-item">
+            <span className="wf-run-live-meta-label">Git 引用</span>
+            <span>
+              {version.git_ref_type} / {version.git_ref_value}
             </span>
           </div>
         ) : null}
@@ -179,6 +216,30 @@ export function WorkflowRunTaskPanel({
             terminal
             onDone={refreshTaskDetail}
           />
+        </div>
+      ) : null}
+
+      {task.kind === "version" ? (
+        <div className="wf-run-live-panel-version">
+          {!loading && !error && version ? (
+            <>
+              <p className="wf-run-live-panel-note text-sm text-muted">
+                已快照 Service / Deployment YAML，并绑定上游构建镜像。
+              </p>
+              {version.manifests.map((manifest) => (
+                <details key={manifest.kind} open={manifest.kind === "Deployment"}>
+                  <summary className="text-sm font-medium">{manifest.kind}</summary>
+                  <pre className="product-version-yaml">{manifest.content}</pre>
+                </details>
+              ))}
+            </>
+          ) : null}
+          {!loading && !error && !version && task.status === "success" ? (
+            <p className="wf-run-live-panel-note text-sm text-muted">版本已创建，暂无快照详情。</p>
+          ) : null}
+          {!loading && task.kind === "version" && task.status !== "running" && !task.refId ? (
+            <p className="wf-run-live-panel-note text-sm text-muted">该版本任务未产生版本记录。</p>
+          ) : null}
         </div>
       ) : null}
 

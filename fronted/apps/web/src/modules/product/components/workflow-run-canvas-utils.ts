@@ -1,7 +1,7 @@
 import type { ProductWorkflowRunVM } from "@sparkops/contracts/product";
 import { jobTypeLabel } from "./workflow-editor-utils";
 
-export type PipelineTaskKind = "build" | "deploy" | "approval";
+export type PipelineTaskKind = "build" | "deploy" | "version" | "approval";
 
 export interface PipelineTask {
   id: string;
@@ -13,6 +13,7 @@ export interface PipelineTask {
   jobTypeLabel: string;
   status: string;
   refId?: string;
+  versionTag?: string;
   branch?: string;
   gitRefType?: string;
   imageTag?: string;
@@ -72,12 +73,13 @@ export function buildPipelineStages(
             id: `${stageIndex}:${job.name}:version:${version.project_id}`,
             stageIndex,
             jobName: job.name,
-            kind: "build",
+            kind: "version",
             projectId: version.project_id,
             projectLabel: `${projectDisplayName(version.project_id, projectNames)} · ${version.version_tag}`,
             jobTypeLabel: typeLabel,
             status: version.status,
             refId: version.version_id,
+            versionTag: version.version_tag,
             errorMessage: version.error_message,
           });
         }

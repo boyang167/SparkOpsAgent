@@ -41,9 +41,11 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const load = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const list = await product.listReleasePlans(workspaceId, productId, sprintId);
       setItems(list);
@@ -53,9 +55,11 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
         return list[0]?.id ?? null;
       });
     } catch (err) {
-      setError(err instanceof BffError ? err.message : "加载发布计划失败");
+      if (!options?.silent) {
+        setError(err instanceof BffError ? err.message : "加载发布计划失败");
+      }
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
   }, [workspaceId, productId, sprintId, initialPlanId]);
 
@@ -66,7 +70,13 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
   const loadDetail = useCallback(
     async (planId: string) => {
       try {
-        setSelected(await product.getReleasePlan(workspaceId, productId, planId));
+        const detail = await product.getReleasePlan(workspaceId, productId, planId);
+        setSelected(detail);
+        setItems((prev) =>
+          prev.map((item) =>
+            item.id === planId ? { ...item, name: detail.name, status: detail.status } : item,
+          ),
+        );
       } catch (err) {
         setError(err instanceof BffError ? err.message : "加载详情失败");
         setSelected(null);
@@ -104,15 +114,14 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
     if (!selected || !needsPolling) return;
     const timer = window.setInterval(() => {
       void loadDetail(selected.id);
-      void load();
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [selected, needsPolling, load, loadDetail]);
+  }, [selected, needsPolling, loadDetail]);
 
-  async function refreshDetail() {
+  async function refreshDetail(options?: { reloadList?: boolean }) {
     if (!selectedId) return;
     await loadDetail(selectedId);
-    await load();
+    if (options?.reloadList) await load({ silent: true });
   }
 
   async function onCreate(values: ReleasePlanFormValues) {
@@ -606,14 +615,17 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                   }
                 }}
                 onUpdate={async (jobId, patch) => {
-                  setBusy(true);
+                  const isTextOnly =
+                    patch.text_content !== undefined &&
+                    Object.keys(patch).every((key) => key === "text_content" || key === "text_format");
+                  if (!isTextOnly) setBusy(true);
                   try {
                     await product.updateReleasePlanJob(workspaceId, productId, selected.id, jobId, patch);
-                    await refreshDetail();
+                    if (!isTextOnly) await refreshDetail();
                   } catch (err) {
                     setError(err instanceof BffError ? err.message : "更新失败");
                   } finally {
-                    setBusy(false);
+                    if (!isTextOnly) setBusy(false);
                   }
                 }}
                 onAddText={onAddTextJob}

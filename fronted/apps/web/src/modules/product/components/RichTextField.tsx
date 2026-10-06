@@ -5,12 +5,13 @@ import { useCallback, useEffect, useRef } from "react";
 interface RichTextFieldProps {
   value: string;
   onChange: (html: string) => void;
+  onBlur?: (html: string) => void;
   placeholder?: string;
   readOnly?: boolean;
   className?: string;
 }
 
-export function RichTextField({ value, onChange, placeholder, readOnly, className }: RichTextFieldProps) {
+export function RichTextField({ value, onChange, onBlur, placeholder, readOnly, className }: RichTextFieldProps) {
   const editorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -52,7 +53,11 @@ export function RichTextField({ value, onChange, placeholder, readOnly, classNam
         suppressContentEditableWarning
         data-placeholder={placeholder}
         onInput={() => onChange(editorRef.current?.innerHTML ?? "")}
-        onBlur={() => onChange(editorRef.current?.innerHTML ?? "")}
+        onBlur={() => {
+          const html = editorRef.current?.innerHTML ?? "";
+          onChange(html);
+          onBlur?.(html);
+        }}
       />
     </div>
   );

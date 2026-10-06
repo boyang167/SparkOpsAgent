@@ -40,6 +40,38 @@ describe("buildPipelineStages", () => {
     expect(stages[0]?.tasks[0]?.projectLabel).toBe("backend");
     expect(stages[0]?.tasks[1]?.kind).toBe("build");
   });
+
+  it("maps create-version tasks to version kind", () => {
+    const versionRun: ProductWorkflowRunVM = {
+      ...run,
+      stage_runs: [
+        {
+          name: "版本",
+          status: "success",
+          jobs: [
+            {
+              name: "create-version-1",
+              type: "sparkops-create-version",
+              status: "success",
+              versions: [
+                {
+                  project_id: "p1",
+                  version_id: "ver-1",
+                  version_tag: "v1.0.0",
+                  status: "success",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const stages = buildPipelineStages(versionRun, { p1: "backend" });
+    const task = stages[0]?.tasks[0];
+    expect(task?.kind).toBe("version");
+    expect(task?.refId).toBe("ver-1");
+    expect(task?.versionTag).toBe("v1.0.0");
+  });
 });
 
 describe("pickDefaultTask", () => {

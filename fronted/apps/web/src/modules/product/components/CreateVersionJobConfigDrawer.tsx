@@ -40,49 +40,97 @@ export function CreateVersionJobConfigDrawer({
     });
   }, [open, jobName, spec, sourceJobs]);
 
+  const canConfirm =
+    name.trim().length > 0 && draft.versionTag.trim().length > 0 && draft.jobName.trim().length > 0;
+
   return (
-    <Drawer open={open} title="创建交付版本" onClose={onClose} width={480}>
-      <div className="pwf-drawer-form">
-        <label className="pwf-field">
-          <span>任务名称</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} />
-        </label>
-        <label className="pwf-field">
-          <span>版本号</span>
-          <input
-            value={draft.versionTag}
-            placeholder="{{version}}"
-            onChange={(event) => setDraft((prev) => ({ ...prev, versionTag: event.target.value }))}
-          />
-        </label>
-        <label className="pwf-field">
-          <span>上游构建任务</span>
-          <select
-            value={draft.jobName}
-            onChange={(event) => setDraft((prev) => ({ ...prev, jobName: event.target.value }))}
-          >
-            <option value="">请选择</option>
-            {sourceJobs.map((job) => (
-              <option key={job.name} value={job.name}>
-                {job.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="pwf-field-hint">执行时将快照当前 Service/Deployment YAML，并绑定上游构建镜像。</p>
-        <div className="pwf-drawer-actions">
+    <Drawer
+      open={open}
+      title="创建交付版本"
+      description="执行时将快照当前 Service/Deployment YAML，并绑定上游构建镜像。"
+      onClose={onClose}
+      panelClassName="drawer-panel--config"
+      footer={
+        <div className="modal-footer-actions">
           <button type="button" className="btn-secondary" onClick={onClose}>
             取消
           </button>
           <button
             type="button"
             className="btn-primary"
-            disabled={!name.trim() || !draft.versionTag.trim() || !draft.jobName.trim()}
+            disabled={!canConfirm}
             onClick={() => onConfirm(name.trim(), createVersionJobSpecToRecord(draft))}
           >
             确定
           </button>
         </div>
+      }
+    >
+      <div className="pwf-build-form">
+        <label className="pwf-build-field">
+          <span>
+            任务名称
+            <span className="pwf-required" aria-hidden>
+              *
+            </span>
+          </span>
+          <span className="pwf-build-control">
+            <input
+              className="input"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              aria-label="任务名称"
+            />
+          </span>
+        </label>
+
+        <label className="pwf-build-field">
+          <span>
+            版本号
+            <span className="pwf-required" aria-hidden>
+              *
+            </span>
+          </span>
+          <span className="pwf-build-control">
+            <input
+              className="input input-mono"
+              value={draft.versionTag}
+              placeholder="{{version}}"
+              onChange={(event) => setDraft((prev) => ({ ...prev, versionTag: event.target.value }))}
+              aria-label="版本号"
+            />
+          </span>
+        </label>
+
+        <label className="pwf-build-field">
+          <span>
+            上游构建任务
+            <span className="pwf-required" aria-hidden>
+              *
+            </span>
+          </span>
+          <span className="pwf-build-control">
+            <select
+              className="input"
+              value={draft.jobName}
+              onChange={(event) => setDraft((prev) => ({ ...prev, jobName: event.target.value }))}
+              aria-label="上游构建任务"
+            >
+              <option value="">请选择</option>
+              {sourceJobs.map((job) => (
+                <option key={job.name} value={job.name}>
+                  {job.name}
+                </option>
+              ))}
+            </select>
+          </span>
+        </label>
+
+        {sourceJobs.length === 0 ? (
+          <div className="create-form-notice">
+            <p>当前阶段没有可用的上游构建任务，请先在本阶段或上游阶段添加构建任务。</p>
+          </div>
+        ) : null}
       </div>
     </Drawer>
   );

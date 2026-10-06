@@ -57,6 +57,16 @@ type Selection =
   | { kind: "job"; stageIndex: number; jobIndex: number }
   | null;
 
+function hasDedicatedJobConfigDrawer(type?: string): boolean {
+  return (
+    type === "sparkops-build" ||
+    type === "sparkops-deploy" ||
+    type === "sparkops-deploy-version" ||
+    type === "sparkops-create-version" ||
+    type === "sparkops-approval"
+  );
+}
+
 type SidePanel = "variables" | "triggers" | "notify" | "advanced" | null;
 type ViewMode = "visual" | "yaml";
 
@@ -546,21 +556,12 @@ export function ProductWorkflowEditor({
       />
 
       <Drawer
-        open={
-          selection?.kind === "job" &&
-          selectedJob?.type !== "sparkops-build" &&
-          selectedJob?.type !== "sparkops-deploy" &&
-          selectedJob?.type !== "sparkops-approval"
-        }
+        open={selection?.kind === "job" && Boolean(selectedJob) && !hasDedicatedJobConfigDrawer(selectedJob?.type)}
         onClose={() => setSelection(null)}
         title={selectedJob ? `任务 · ${selectedJob.name}` : "属性"}
         description={selectedJob ? jobTypeLabel(selectedJob.type) : "配置任务参数"}
       >
-        {selection?.kind === "job" &&
-        selectedJob &&
-        selectedJob.type !== "sparkops-build" &&
-        selectedJob.type !== "sparkops-deploy" &&
-        selectedJob.type !== "sparkops-approval" ? (
+        {selection?.kind === "job" && selectedJob && !hasDedicatedJobConfigDrawer(selectedJob.type) ? (
           <div className="stack-sm">
             <label className="field">
               <span className="text-xs text-muted">任务名称</span>
