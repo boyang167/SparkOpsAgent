@@ -4,5 +4,10 @@ import { loadBffContext } from "./context";
 
 export async function loadNotifications(workspaceId: string): Promise<NotificationListVM> {
   const ctx = await loadBffContext();
-  return listNotifications(ctx, workspaceId);
+  try {
+    return await listNotifications(ctx, workspaceId);
+  } catch (err) {
+    console.error("[notifications] list failed", err);
+    return { items: [], unread_count: 0 };
+  }
 }

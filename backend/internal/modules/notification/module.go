@@ -56,12 +56,10 @@ func (m *Module) Register(c *appctx.Container) error {
 	ws := httpx.RequireWorkspace()
 	wsMember := authz.RequireWorkspaceMember(c.WorkspaceMemberChecker)
 
-	c.Engine.GET("/api/v1/notifications",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermChatUse), handler.ListNotifications)
-	c.Engine.PATCH("/api/v1/notifications/:notificationId/read",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermChatUse), handler.MarkRead)
-	c.Engine.POST("/api/v1/notifications/read-all",
-		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermChatUse), handler.MarkAllRead)
+	// Notifications are scoped to the calling member, so workspace membership is the only gate.
+	c.Engine.GET("/api/v1/notifications", auth, ws, wsMember, handler.ListNotifications)
+	c.Engine.PATCH("/api/v1/notifications/:notificationId/read", auth, ws, wsMember, handler.MarkRead)
+	c.Engine.POST("/api/v1/notifications/read-all", auth, ws, wsMember, handler.MarkAllRead)
 
 	return nil
 }

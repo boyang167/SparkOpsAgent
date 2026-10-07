@@ -141,6 +141,11 @@ export function ProjectWorkbenchPage({
     [currentProject, activeRun, deploymentListLoading, deploymentListError],
   );
 
+  useEffect(() => {
+    if (deploymentListLoading) return;
+    setError((current) => (current === "正在检查发布条件" ? null : current));
+  }, [deploymentListLoading]);
+
   const refreshDeploymentList = useCallback(async () => {
     try {
       const page = await delivery.listDeployments(currentProject.id, workspaceId);
@@ -335,13 +340,14 @@ export function ProjectWorkbenchPage({
 
   useEffect(() => {
     if (searchParams.get("release") !== "1" || releaseHandledRef.current) return;
+    if (deploymentListLoading) return;
     releaseHandledRef.current = true;
     openDeploy();
     const params = new URLSearchParams(searchParams.toString());
     params.delete("release");
     const query = params.toString();
     router.replace(query ? `/projects/${currentProject.id}?${query}` : `/projects/${currentProject.id}`);
-  }, [currentProject.id, openDeploy, router, searchParams]);
+  }, [currentProject.id, deploymentListLoading, openDeploy, router, searchParams]);
 
   async function submitReview() {
     if (!window.confirm(`确定提交项目「${projectDisplayName(currentProject)}」审核？提交后配置将暂时锁定。`)) {

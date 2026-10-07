@@ -18,7 +18,15 @@ export function resolveCreator(item: CreatorLike): TemplateCreatorVM | undefined
   return { id: item.created_by };
 }
 
+/** Member ID the backend uses when seeding built-in default templates. */
+const SYSTEM_CREATOR_ID = "00000000-0000-4000-8000-000000000099";
+
+export function isSystemCreated(item: CreatorLike) {
+  return (item.creator?.id ?? item.created_by) === SYSTEM_CREATOR_ID;
+}
+
 export function creatorDisplayName(item: CreatorLike) {
+  if (isSystemCreated(item)) return "系统内置";
   const creator = resolveCreator(item);
   if (!creator) return "未知用户";
   const nick = creator.display_name?.trim();

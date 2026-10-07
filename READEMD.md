@@ -132,48 +132,13 @@ go run ./cmd/grant-super-admin -email superadmin@sparkops.local -password "Super
 ```
 
 
-Demo / 平台超管（空间 owner）
-demo@sparkops.local
-Demo1234!
-管理员
-admin@sparkops.local
-Demo1234!
-研发
-developer@sparkops.local
-Demo1234!
-审核员
-reviewer@sparkops.local
-Demo1234!
-运维
-operator@sparkops.local
-Demo1234!
-只读
-viewer@sparkops.local
-Demo1234!
-
-SparkOps = 多租户 Agent 控制面 + 可编排数据面；对外通过 REST/OpenAPI 给系统集成，通过 MCP 给 AI 客户端集成，通过 Webhook 给事件驱动集成。
-
-https://docker.aityp.com/i/search?search=jenkins
-
-gitlab: root asdf!123456
-glpat-emaYfTem-JstBup3_U43d286MQp1OjEH.01.0w0hwoe9p
-
-admin 
-Harbor12345
-
-test-gitlab  glpat-LOYje5HyX9RQd1Kjs-4Vx286MQp1OjMH.01.0w16qu9hd
-ssh://git@192.168.5.24:2224/cicd/test-repo.git
 
 
-http://192.168.5.24:8929/cicd/test-repo.git
-user: root pwd: asdf!123456
 
-jenkins : root 123456
 
-https://192.168.5.21:6443
-rabbit mq :
-admin 
-BdsDevopsAdmin!2024
 
-jenkins mcp  tokne: 11523e6d669dc0fd29f9420036120a753e
-docker pull dockerhub.kubekey.local/test-workspace/test-repo@sha256:1232afbd8c8d9bef89fdad05781da70e5ce92c482661cc8b571f3936696f54e3
+
+
+
+
+

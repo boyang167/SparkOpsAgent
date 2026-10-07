@@ -324,7 +324,7 @@ export function ProjectServiceDetailPage({
       {
         key: "cross-cluster",
         label: "跨集群发布",
-        disabled: deployAction.disabled && deployAction.label === "发布",
+        disabled: deployAction.disabled,
         title: deployAction.reason ?? undefined,
         onClick: () => onCrossClusterRelease?.(),
       },
@@ -376,7 +376,8 @@ export function ProjectServiceDetailPage({
           <button
             type="button"
             className="btn project-btn-primary text-sm"
-            disabled={deployAction.disabled && deployAction.label === "发布"}
+            disabled={deployAction.disabled}
+            aria-busy={deployAction.label === "发布检查中…"}
             title={deployAction.reason ?? undefined}
             onClick={() => {
               if (deployAction.label === "查看部署进度") {
@@ -386,7 +387,9 @@ export function ProjectServiceDetailPage({
               onRelease();
             }}
           >
-            {deployAction.label === "查看部署进度" ? "查看部署进度" : "发布"}
+            {deployAction.label === "查看部署进度" || deployAction.label === "发布检查中…"
+              ? deployAction.label
+              : "发布"}
           </button>
           <button
             type="button"

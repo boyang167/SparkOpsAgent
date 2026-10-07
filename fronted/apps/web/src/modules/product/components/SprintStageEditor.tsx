@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import type { ProductWorkflowVM, SprintStage } from "@sparkops/contracts/product";
 import { isValidStageKey, nextStageColor, slugifyStageKey, withSortOrder } from "./sprint-process-templates";
 
@@ -104,102 +104,57 @@ export function SprintStageEditor({
 
   if (variant === "board") {
     return (
-      <div className="sprint-stage-editor-board">
-        <div className="sprint-stage-preview" aria-label="列顺序预览">
-          {stages.map((stage) => (
-            <div
-              key={stage.id}
-              className="sprint-stage-preview-chip"
-              style={{ borderTopColor: stage.color ?? "#3b82f6" }}
-              title={stage.name}
-            >
-              <span className="sprint-stage-preview-chip-label">{stage.name || "未命名"}</span>
-            </div>
-          ))}
-        </div>
-
-        <ul className="sprint-stage-rows">
+      <div className="stage-board">
+        <ol className="stage-board-track">
           {stages.map((stage, index) => {
             const keyInvalid = !isValidStageKey(stage.key);
             const expanded = expandedIds.has(stage.id);
+            const color = stage.color ?? "#3b82f6";
             return (
-              <li key={stage.id} className={`sprint-stage-row${keyInvalid ? " sprint-stage-row-invalid" : ""}`}>
-                <div className="sprint-stage-row-main">
-                  <label className="sprint-stage-color-btn" title="列颜色">
-                    <span className="sprint-stage-color-swatch" style={{ backgroundColor: stage.color ?? "#3b82f6" }} />
+              <li
+                key={stage.id}
+                className={`stage-col${expanded ? " is-expanded" : ""}${keyInvalid ? " is-invalid" : ""}`}
+                style={{ "--stage-color": color } as CSSProperties}
+              >
+                <div className="stage-col-bar" aria-hidden="true" />
+                <div className="stage-col-head">
+                  <label className="stage-col-color" title="列颜色">
+                    <span className="stage-col-dot" />
                     <input
                       type="color"
-                      className="sprint-stage-color-input"
-                      value={stage.color ?? "#3b82f6"}
+                      value={color}
                       onChange={(e) => updateStage(stage.id, { color: e.target.value })}
                       aria-label={`${stage.name || "列"} 颜色`}
                     />
                   </label>
                   <input
-                    className="input sprint-stage-name-input"
+                    className="stage-col-name"
                     value={stage.name}
                     placeholder="列名称"
                     onChange={(e) => updateStage(stage.id, { name: e.target.value })}
                     onBlur={(e) => syncStageKey(stage.id, e.target.value, index)}
                     aria-label={`第 ${index + 1} 列名称`}
                   />
-                  <button
-                    type="button"
-                    className={`sprint-stage-more-btn${expanded ? " sprint-stage-more-btn-active" : ""}`}
-                    onClick={() => toggleExpanded(stage.id)}
-                    aria-expanded={expanded}
-                    aria-label={expanded ? "收起高级设置" : "展开高级设置"}
-                  >
-                    {expanded ? "收起" : "高级"}
-                  </button>
-                  <div className="sprint-stage-row-actions">
-                    <button
-                      type="button"
-                      className="sprint-stage-icon-btn"
-                      disabled={index === 0}
-                      onClick={() => moveStage(stage.id, -1)}
-                      aria-label="上移"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      className="sprint-stage-icon-btn"
-                      disabled={index === stages.length - 1}
-                      onClick={() => moveStage(stage.id, 1)}
-                      aria-label="下移"
-                    >
-                      ↓
-                    </button>
-                    <button
-                      type="button"
-                      className="sprint-stage-icon-btn sprint-stage-icon-btn-danger"
-                      disabled={stages.length <= minStages}
-                      onClick={() => removeStage(stage.id)}
-                      aria-label="删除列"
-                    >
-                      ×
-                    </button>
-                  </div>
+                  {stage.wip_limit ? <span className="stage-col-wip" title="WIP 上限">{stage.wip_limit}</span> : null}
                 </div>
 
                 {expanded ? (
-                  <div className="sprint-stage-row-detail">
-                    <label className="sprint-stage-detail-field">
-                      <span className="sprint-stage-detail-label">标识 key</span>
+                  <div className="stage-col-detail">
+                    <label>
+                      <span>标识 key</span>
                       <input
-                        className={`input text-sm font-mono sprint-stage-detail-input${keyInvalid ? " border-red-500" : ""}`}
+                        className="input font-mono"
                         value={stage.key}
                         onChange={(e) => updateStage(stage.id, { key: e.target.value.toLowerCase() })}
                         placeholder="dev"
                       />
                     </label>
-                    <label className="sprint-stage-detail-field sprint-stage-detail-field-narrow">
-                      <span className="sprint-stage-detail-label">WIP 上限</span>
+                    <label>
+                      <span>WIP 上限</span>
                       <input
                         type="number"
                         min={0}
-                        className="input text-sm sprint-stage-detail-input"
+                        className="input"
                         value={stage.wip_limit ?? ""}
                         onChange={(e) => {
                           const raw = e.target.value.trim();
@@ -208,44 +163,86 @@ export function SprintStageEditor({
                         placeholder="不限"
                       />
                     </label>
-                    <label className="sprint-stage-detail-field sprint-stage-detail-field-wide">
-                      <span className="sprint-stage-detail-label">默认工作流</span>
-                      <select
-                        className="input text-sm sprint-stage-detail-input"
-                        value={stage.workflows?.[0]?.workflow_id ?? ""}
-                        onChange={(e) => bindWorkflow(stage.id, e.target.value)}
-                      >
-                        <option value="">不绑定</option>
-                        {workflows.map((wf) => (
-                          <option key={wf.id} value={wf.id}>{wf.name}</option>
-                        ))}
-                      </select>
-                    </label>
-                    {keyInvalid ? (
-                      <p className="sprint-stage-row-hint sprint-stage-row-hint-detail">key 须以小写字母开头，仅含 a-z、0-9、下划线</p>
+                    {workflows.length > 0 ? (
+                      <label>
+                        <span>默认工作流</span>
+                        <select
+                          className="input"
+                          value={stage.workflows?.[0]?.workflow_id ?? ""}
+                          onChange={(e) => bindWorkflow(stage.id, e.target.value)}
+                        >
+                          <option value="">不绑定</option>
+                          {workflows.map((wf) => (
+                            <option key={wf.id} value={wf.id}>{wf.name}</option>
+                          ))}
+                        </select>
+                      </label>
                     ) : null}
                   </div>
+                ) : (
+                  <div className="stage-col-body" aria-hidden="true">
+                    <span className="stage-col-card" />
+                    <span className="stage-col-card is-short" />
+                  </div>
+                )}
+
+                {keyInvalid ? (
+                  <p className="stage-col-hint">key 须以小写字母开头，仅含 a-z、0-9、下划线</p>
                 ) : null}
 
-                {!expanded && keyInvalid ? (
-                  <p className="sprint-stage-row-hint">key 无效，点击「高级」修正</p>
-                ) : null}
+                <div className="stage-col-actions">
+                  <button
+                    type="button"
+                    disabled={index === 0}
+                    onClick={() => moveStage(stage.id, -1)}
+                    aria-label="左移"
+                    title="左移"
+                  >
+                    <StageIcon d="M15 18l-6-6 6-6" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={index === stages.length - 1}
+                    onClick={() => moveStage(stage.id, 1)}
+                    aria-label="右移"
+                    title="右移"
+                  >
+                    <StageIcon d="M9 18l6-6-6-6" />
+                  </button>
+                  <button
+                    type="button"
+                    className={expanded ? "is-active" : undefined}
+                    onClick={() => toggleExpanded(stage.id)}
+                    aria-expanded={expanded}
+                    aria-label={expanded ? "收起设置" : "列设置"}
+                    title={expanded ? "收起设置" : "列设置"}
+                  >
+                    <StageIcon d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" />
+                  </button>
+                  <button
+                    type="button"
+                    className="is-danger"
+                    disabled={stages.length <= minStages}
+                    onClick={() => removeStage(stage.id)}
+                    aria-label="删除列"
+                    title="删除列"
+                  >
+                    <StageIcon d="M6 6l12 12M18 6L6 18" />
+                  </button>
+                </div>
               </li>
             );
           })}
-        </ul>
-
-        <div className="sprint-stage-editor-footer">
-          <span className="sprint-stage-editor-count">{stages.length} / {maxStages} 列</span>
-          <button
-            type="button"
-            className="btn-ghost text-sm"
-            disabled={stages.length >= maxStages}
-            onClick={addStage}
-          >
-            + 添加列
-          </button>
-        </div>
+          {stages.length < maxStages ? (
+            <li className="stage-col-add">
+              <button type="button" onClick={addStage}>
+                <StageIcon d="M12 5v14M5 12h14" />
+                添加列
+              </button>
+            </li>
+          ) : null}
+        </ol>
+        <p className="stage-board-count">{stages.length} / {maxStages} 列 · 至少 {minStages} 列</p>
       </div>
     );
   }
@@ -324,5 +321,13 @@ export function SprintStageEditor({
         ))}
       </ul>
     </div>
+  );
+}
+
+function StageIcon({ d }: { d: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={d} />
+    </svg>
   );
 }

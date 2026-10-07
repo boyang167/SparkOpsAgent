@@ -12,7 +12,7 @@ import { TemplateDetail } from "./template/TemplateDetail";
 import { TemplateForm } from "./template/TemplateForm";
 import {
   filterTemplates,
-  formatDateTime,
+  formatDate,
   labelOf,
   sortTemplates,
   statusBadgeClass,
@@ -23,7 +23,6 @@ import {
   TEMPLATE_STATUS_OPTIONS,
   type SortField,
   type SortOrder,
-  type TableDensity,
 } from "./template/template-utils";
 
 interface TemplatePanelProps {
@@ -44,13 +43,20 @@ const EMPTY_FORM: CreateTemplateCommand = {
 
 const PAGE_SIZES = [10, 20, 50, 100];
 
+const SORT_OPTIONS: { value: `${SortField}:${SortOrder}`; label: string }[] = [
+  { value: "created_at:desc", label: "最新创建" },
+  { value: "created_at:asc", label: "最早创建" },
+  { value: "name:asc", label: "名称 A–Z" },
+  { value: "name:desc", label: "名称 Z–A" },
+  { value: "status:asc", label: "按状态" },
+];
+
 export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
   const keywordRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<TemplateVM[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("card");
-  const [density, setDensity] = useState<TableDensity>("comfortable");
   const [keyword, setKeyword] = useState("");
   const [kindFilter, setKindFilter] = useState("");
   const [languageFilter, setLanguageFilter] = useState("");
@@ -65,6 +71,8 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
   const [selected, setSelected] = useState<TemplateVM | null>(null);
   const [form, setForm] = useState<CreateTemplateCommand>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<TemplateVM | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,6 +111,8 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
     return sortTemplates(list, sortField, sortOrder);
   }, [items, keyword, kindFilter, languageFilter, statusFilter, sortField, sortOrder]);
 
+  const hasFilters = Boolean(keyword.trim() || kindFilter || languageFilter || statusFilter);
+
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paged = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -122,8 +132,12 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
     setKindFilter("");
     setLanguageFilter("");
     setStatusFilter("");
-    setSortField("created_at");
-    setSortOrder("desc");
+  }
+
+  function onSortChange(value: string) {
+    const [field, order] = value.split(":") as [SortField, SortOrder];
+    setSortField(field);
+    setSortOrder(order);
   }
 
   function openCreate() {
@@ -171,15 +185,20 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
     }
   }
 
-  async function onDelete(item: TemplateVM) {
-    if (!window.confirm(`确定删除模板「${item.name}」？`)) return;
+  async function confirmDelete() {
+    const item = pendingDelete;
+    if (!item) return;
+    setDeleting(true);
     setError(null);
     try {
       await product.deleteTemplate(workspaceId, item.id);
       if (selected?.id === item.id) setDetailOpen(false);
+      setPendingDelete(null);
       await load();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "删除失败");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -219,94 +238,113 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
     URL.revokeObjectURL(url);
   }
 
-  const tableRows = viewMode === "table" ? paged : filtered;
-
   return (
     <div className="template-panel">
       <div className="template-toolbar">
-        <span className="template-total-badge">总数：{filtered.length}</span>
-        <button type="button" className="btn" onClick={openCreate}>
+        <div className="template-filters">
+          <label className="template-search">
+            <SearchIcon />
+            <input
+              ref={keywordRef}
+              className="template-search-input"
+              placeholder="搜索名称或内容"
+              aria-label="搜索模板"
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+            />
+            <kbd className="template-search-kbd">Ctrl K</kbd>
+          </label>
+          <select
+            className="input template-filter-select"
+            aria-label="分类"
+            value={kindFilter}
+            onChange={(e) => setKindFilter(e.target.value)}
+          >
+            <option value="">全部分类</option>
+            {TEMPLATE_KIND_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <select
+            className="input template-filter-select"
+            aria-label="语言"
+            value={languageFilter}
+            onChange={(e) => setLanguageFilter(e.target.value)}
+          >
+            <option value="">全部语言</option>
+            {TEMPLATE_LANGUAGE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <select
+            className="input template-filter-select"
+            aria-label="状态"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="">全部状态</option>
+            {TEMPLATE_STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <select
+            className="input template-filter-select"
+            aria-label="排序"
+            value={`${sortField}:${sortOrder}`}
+            onChange={(e) => onSortChange(e.target.value)}
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+        <button type="button" className="btn-primary" onClick={openCreate}>
           <PlusIcon />
           创建模板
         </button>
       </div>
 
-      <div className="template-search-bar">
-        <div className="template-search-grid">
-          <label className="template-search-field">
-            <span>关键词</span>
-            <div className="template-search-input-wrap">
-              <input
-                ref={keywordRef}
-                className="input"
-                placeholder="请输入模板名称或内容 (Ctrl+K)"
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-              />
-              <button type="button" className="template-search-btn" aria-label="搜索">⌕</button>
-            </div>
-          </label>
-          <label className="template-search-field">
-            <span>分类</span>
-            <select className="input" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}>
-              <option value="">请选择分类</option>
-              {TEMPLATE_KIND_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="template-search-field">
-            <span>语言</span>
-            <select className="input" value={languageFilter} onChange={(e) => setLanguageFilter(e.target.value)}>
-              <option value="">请选择语言</option>
-              {TEMPLATE_LANGUAGE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="template-search-field">
-            <span>状态</span>
-            <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="">请选择状态</option>
-              {TEMPLATE_STATUS_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="template-search-field">
-            <span>排序</span>
-            <div className="template-sort-row">
-              <select className="input" value={sortField} onChange={(e) => setSortField(e.target.value as SortField)}>
-                <option value="created_at">创建时间</option>
-                <option value="name">名称</option>
-                <option value="status">状态</option>
-              </select>
-              <select className="input" value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)}>
-                <option value="desc">降序</option>
-                <option value="asc">升序</option>
-              </select>
-            </div>
-          </label>
-          <div className="template-search-field template-search-reset">
-            <button type="button" className="btn-secondary" onClick={resetFilters}>重置</button>
-          </div>
-        </div>
-      </div>
-
-      <div className="template-view-controls">
-        <div className="template-view-switch">
-          <button type="button" className={viewMode === "card" ? "is-active" : ""} onClick={() => setViewMode("card")}>卡片视图</button>
-          <button type="button" className={viewMode === "table" ? "is-active" : ""} onClick={() => setViewMode("table")}>表格视图</button>
-        </div>
-        <div className="template-view-actions">
-          {viewMode === "table" ? (
-            <div className="template-density-switch">
-              <button type="button" className={density === "compact" ? "is-active" : ""} onClick={() => setDensity("compact")}>紧凑</button>
-              <button type="button" className={density === "comfortable" ? "is-active" : ""} onClick={() => setDensity("comfortable")}>适中</button>
-            </div>
+      <div className="template-result-bar">
+        <p className="template-result-count">
+          {loading ? "加载中…" : `${filtered.length} 个模板`}
+          {hasFilters && !loading ? (
+            <button type="button" className="template-clear-filters" onClick={resetFilters}>
+              清除筛选
+            </button>
           ) : null}
-          <button type="button" className="btn-secondary text-sm" onClick={() => void load()} disabled={loading}>
-            ↻ 刷新
+        </p>
+        <div className="template-view-actions">
+          <div className="template-view-switch" role="group" aria-label="视图">
+            <button
+              type="button"
+              className={viewMode === "card" ? "is-active" : ""}
+              aria-pressed={viewMode === "card"}
+              aria-label="卡片视图"
+              title="卡片视图"
+              onClick={() => setViewMode("card")}
+            >
+              <GridIcon />
+            </button>
+            <button
+              type="button"
+              className={viewMode === "table" ? "is-active" : ""}
+              aria-pressed={viewMode === "table"}
+              aria-label="表格视图"
+              title="表格视图"
+              onClick={() => setViewMode("table")}
+            >
+              <ListIcon />
+            </button>
+          </div>
+          <button
+            type="button"
+            className="template-icon-btn"
+            onClick={() => void load()}
+            disabled={loading}
+            aria-label="刷新"
+            title="刷新"
+          >
+            <RefreshIcon />
           </button>
         </div>
       </div>
@@ -314,15 +352,30 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
 
       {loading ? (
-        <div className="template-skeleton">
-          <div className="template-skeleton-line" />
-          <div className="template-skeleton-line" />
-          <div className="template-skeleton-line short" />
+        <div className="template-card-grid" role="status" aria-label="加载模板">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="template-card template-card-skeleton">
+              <div className="template-skeleton-line short" />
+              <div className="template-skeleton-line" />
+              <div className="template-skeleton-block" />
+            </div>
+          ))}
         </div>
       ) : filtered.length === 0 ? (
         <div className="template-empty">
-          <p>暂无模板</p>
-          <button type="button" className="btn" onClick={openCreate}>创建第一个模板</button>
+          {hasFilters ? (
+            <>
+              <p className="template-empty-title">没有符合条件的模板</p>
+              <p className="template-empty-desc">试试换个关键词，或清除筛选条件。</p>
+              <button type="button" className="btn-secondary" onClick={resetFilters}>清除筛选</button>
+            </>
+          ) : (
+            <>
+              <p className="template-empty-title">还没有模板</p>
+              <p className="template-empty-desc">模板用于生成项目的部署清单与流水线。</p>
+              <button type="button" className="btn-primary" onClick={openCreate}>创建第一个模板</button>
+            </>
+          )}
         </div>
       ) : viewMode === "card" ? (
         <div className="template-card-grid">
@@ -333,12 +386,12 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
               onView={openDetail}
               onEdit={openEdit}
               onCopy={(t) => void onCopy(t)}
-              onDelete={(t) => void onDelete(t)}
+              onDelete={setPendingDelete}
             />
           ))}
         </div>
       ) : (
-        <div className={`template-table-shell density-${density}`}>
+        <div className="template-table-shell">
           <div className="table-wrap">
             <table className="data-table template-table text-sm">
               <thead>
@@ -350,34 +403,34 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
                   <th>可见性</th>
                   <th>创建者</th>
                   <th>创建时间</th>
-                  <th>操作</th>
+                  <th aria-label="操作" />
                 </tr>
               </thead>
               <tbody>
-                {tableRows.map((item) => (
+                {paged.map((item) => (
                   <tr key={item.id}>
                     <td>
-                      <div className="template-table-name">
-                        <DocumentIcon />
-                        <span>{item.name}</span>
-                      </div>
+                      <button type="button" className="template-table-name" onClick={() => openDetail(item)}>
+                        {item.name}
+                      </button>
                     </td>
-                    <td><span className="badge badge-primary">{labelOf(TEMPLATE_KIND_OPTIONS, item.kind)}</span></td>
-                    <td><span className="badge badge-neutral">{labelOf(TEMPLATE_LANGUAGE_OPTIONS, item.language)}</span></td>
+                    <td className="template-table-muted">{labelOf(TEMPLATE_KIND_OPTIONS, item.kind)}</td>
+                    <td className="template-table-muted">{labelOf(TEMPLATE_LANGUAGE_OPTIONS, item.language)}</td>
                     <td><span className={statusBadgeClass(item.status)}>{labelOf(TEMPLATE_STATUS_OPTIONS, item.status)}</span></td>
-                    <td><span className={`badge ${item.is_public || item.shared ? "badge-success" : "badge-neutral"}`}>{templateVisibilityLabel(item)}</span></td>
+                    <td className="template-table-muted">{templateVisibilityLabel(item)}</td>
                     <td><TemplateCreator template={item} compact /></td>
-                    <td>{formatDateTime(item.created_at)}</td>
+                    <td className="template-table-muted">{formatDate(item.created_at)}</td>
                     <td>
                       <div className="template-row-actions">
-                        <button type="button" onClick={() => openDetail(item)}>查看</button>
                         {templateIsEditable(item) ? (
                           <>
                             <button type="button" onClick={() => openEdit(item)}>编辑</button>
-                            <button type="button" className="is-danger" onClick={() => void onDelete(item)}>删除</button>
+                            <button type="button" onClick={() => void onCopy(item)}>复制</button>
+                            <button type="button" className="is-danger" onClick={() => setPendingDelete(item)}>删除</button>
                           </>
-                        ) : null}
-                        <button type="button" onClick={() => void onCopy(item)}>复制</button>
+                        ) : (
+                          <button type="button" onClick={() => void onCopy(item)}>复制</button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -385,17 +438,23 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
               </tbody>
             </table>
           </div>
-          <div className="template-pagination">
-            <span className="text-sm text-muted-foreground">共 {filtered.length} 条</span>
-            <select className="input template-page-size" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
-              {PAGE_SIZES.map((size) => (
-                <option key={size} value={size}>{size} 条/页</option>
-              ))}
-            </select>
-            <button type="button" className="btn-secondary text-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>上一页</button>
-            <span className="text-sm">{page} / {totalPages}</span>
-            <button type="button" className="btn-secondary text-sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>下一页</button>
-          </div>
+          {filtered.length > PAGE_SIZES[0] ? (
+            <div className="template-pagination">
+              <select
+                className="input template-page-size"
+                aria-label="每页条数"
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+              >
+                {PAGE_SIZES.map((size) => (
+                  <option key={size} value={size}>{size} 条/页</option>
+                ))}
+              </select>
+              <button type="button" className="btn-ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>上一页</button>
+              <span className="template-page-indicator">{page} / {totalPages}</span>
+              <button type="button" className="btn-ghost" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>下一页</button>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -419,23 +478,74 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
           />
         ) : null}
       </Modal>
+
+      <Modal
+        open={Boolean(pendingDelete)}
+        onClose={() => (deleting ? undefined : setPendingDelete(null))}
+        title="删除模板"
+        description={pendingDelete ? `确定删除「${pendingDelete.name}」？已引用该模板的项目将回退到系统默认内容。` : undefined}
+        size="sm"
+        footer={
+          <>
+            <button type="button" className="btn-secondary" disabled={deleting} onClick={() => setPendingDelete(null)}>
+              取消
+            </button>
+            <button type="button" className="btn-danger-solid" disabled={deleting} onClick={() => void confirmDelete()}>
+              {deleting ? "删除中…" : "删除"}
+            </button>
+          </>
+        }
+      >
+        <p className="template-delete-hint">删除后无法恢复。</p>
+      </Modal>
     </div>
   );
 }
 
 function PlusIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <path d="M12 5v14M5 12h14" strokeLinecap="round" />
     </svg>
   );
 }
 
-function DocumentIcon() {
+function SearchIcon() {
   return (
-    <svg className="template-doc-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" />
+    <svg className="template-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function GridIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <rect x="4" y="4" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5" />
+      <rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5" />
+    </svg>
+  );
+}
+
+function ListIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="M8 6h12M8 12h12M8 18h12" strokeLinecap="round" />
+      <circle cx="4" cy="6" r="1" fill="currentColor" />
+      <circle cx="4" cy="12" r="1" fill="currentColor" />
+      <circle cx="4" cy="18" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="M20 11a8 8 0 1 0-2.3 5.7" strokeLinecap="round" />
+      <path d="M20 4v7h-7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

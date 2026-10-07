@@ -28,6 +28,21 @@ func TestAPIPathEntitlementSkipsOnlyWorkspacePluginManagementRoutes(t *testing.T
 	require.Equal(t, "plugin:example", APIPathEntitlement("/api/v1/plugins/example/workspaces/ws"))
 }
 
+func TestAPIPathEntitlementMapsProjectReleaseToDelivery(t *testing.T) {
+	for _, path := range []string{
+		"/api/v1/projects/p1/deployments",
+		"/api/v1/projects/p1/deployments/options",
+		"/api/v1/projects/p1/deployments/rollback",
+		"/api/v1/deployments/run-1",
+		"/api/v1/deployments/run-1/stream",
+	} {
+		t.Run(path, func(t *testing.T) {
+			require.Equal(t, "delivery", APIPathEntitlement(path))
+		})
+	}
+	require.Equal(t, "k8s", APIPathEntitlement("/api/v1/workspaces/ws/k8s/projects/p1/deployments"))
+}
+
 func TestAllowsModuleRequiresPluginInWorkspaceEntitlements(t *testing.T) {
 	ents := WorkspaceEntitlements{Plugins: []string{"other"}}
 	require.False(t, ents.AllowsModule("plugin:example"))

@@ -93,12 +93,15 @@ export function apiPathEntitlement(path: string): string {
   }
   if (path.includes("/builds") || path.includes("/products") || path.includes("/webhooks")) return "delivery";
   if (path.includes("/workspaces/") && path.includes("/secrets")) return "delivery";
+  if (path.startsWith("/api/v1/deployments/")) return "delivery";
+  if (path.includes("/projects/") && path.includes("/deployments") && !path.includes("/k8s/")) {
+    return "delivery";
+  }
   if (path.includes("/mcp/")) return "mcp";
   if (
     path.includes("/cronjobs") ||
     path.includes("/pods") ||
     path.includes("/k8s/") ||
-    path.includes("/deployments") ||
     path.includes("/storageclasses")
   ) {
     return "k8s";

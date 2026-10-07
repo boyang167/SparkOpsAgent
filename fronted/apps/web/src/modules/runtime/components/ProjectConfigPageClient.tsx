@@ -6,6 +6,10 @@ import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProjectConfigurePanel } from "@/modules/workspace/components/project/ProjectConfigurePanel";
 import { projectDisplayName } from "@/modules/workspace/components/project/project-utils";
+import {
+  projectConfigActionLabel,
+  shouldShowEditConfigAction,
+} from "@/modules/workspace/components/project/project-progress";
 import { ProjectRuntimeConfigView } from "@/modules/runtime/components/ProjectRuntimeConfigView";
 
 interface ProjectConfigPageClientProps {
@@ -28,15 +32,17 @@ export function ProjectConfigPageClient({
   return (
     <div className="stack-lg">
       <PageHeader
-        eyebrow={projectDisplayName(project)}
         title="配置"
-        description="管理项目运行配置（含 K8s ConfigMap）、密钥与构建相关参数。"
+        description={`${projectDisplayName(project)} 的代码源、运行资源与凭证。`}
+        actions={
+          shouldShowEditConfigAction(project) ? (
+            <button type="button" className="btn-secondary" onClick={() => setConfigureOpen(true)}>
+              {projectConfigActionLabel(project)}
+            </button>
+          ) : null
+        }
       />
-      <ProjectRuntimeConfigView
-        workspaceId={workspaceId}
-        project={project}
-        onConfigure={() => setConfigureOpen(true)}
-      />
+      <ProjectRuntimeConfigView workspaceId={workspaceId} project={project} />
       <ProjectConfigurePanel
         open={configureOpen}
         workspaceId={workspaceId}

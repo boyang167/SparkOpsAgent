@@ -22,6 +22,20 @@ export function formatDateTime(value?: string) {
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString("zh-CN");
 }
 
+export function formatDate(value?: string) {
+  if (!value) return "-";
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString("zh-CN");
+}
+
+export function previewLines(content?: string, max = 4) {
+  if (!content) return [];
+  return content
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && !line.trim().startsWith("{{-"))
+    .slice(0, max);
+}
+
 export function statusBadgeClass(status?: string) {
   if (status === "active") return "badge badge-success";
   if (status === "inactive") return "badge badge-danger";

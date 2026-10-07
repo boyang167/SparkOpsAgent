@@ -3,15 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { TemplateVM } from "@sparkops/contracts/product";
 import {
-  formatDateTime,
+  formatDate,
   labelOf,
+  previewLines,
   statusBadgeClass,
   TEMPLATE_KIND_OPTIONS,
   TEMPLATE_LANGUAGE_OPTIONS,
   TEMPLATE_STATUS_OPTIONS,
-  truncateContent,
 } from "./template-utils";
-import { TemplateCreator } from "./TemplateCreator";
+import { creatorDisplayName } from "./TemplateCreator";
 
 interface TemplateCardProps {
   template: TemplateVM;
@@ -25,6 +25,9 @@ export function TemplateCard({ template, onView, onEdit, onCopy, onDelete }: Tem
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const editable = template.editable ?? !template.shared;
+  const lines = previewLines(template.detail);
+  const showStatus = template.status && template.status !== "active";
+  const showLanguage = template.language && template.language !== "other";
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -37,7 +40,7 @@ export function TemplateCard({ template, onView, onEdit, onCopy, onDelete }: Tem
 
   return (
     <article
-      className="template-card"
+      className={`template-card${menuOpen ? " is-menu-open" : ""}`}
       onClick={() => onView(template)}
       onKeyDown={(e) => {
         if (e.key === "Enter") onView(template);
@@ -45,68 +48,72 @@ export function TemplateCard({ template, onView, onEdit, onCopy, onDelete }: Tem
       role="button"
       tabIndex={0}
     >
-      <div className="template-card-header">
-        <div className="template-card-info">
-          <div className="template-card-name">
-            <DocumentIcon />
-            <span className="template-card-title">{template.name}</span>
-          </div>
-          <div className="template-card-meta">
-            <span className={statusBadgeClass(template.status)}>
-              {labelOf(TEMPLATE_STATUS_OPTIONS, template.status)}
-            </span>
-            <span className="badge badge-neutral">
-              {labelOf(TEMPLATE_LANGUAGE_OPTIONS, template.language)}
-            </span>
-            {template.shared ? (
-              <span className="badge badge-primary" title={template.workspace_name ?? "其他工作区"}>
-                组织共享{template.workspace_name ? ` · ${template.workspace_name}` : ""}
-              </span>
-            ) : null}
-          </div>
+      <header className="template-card-header">
+        <div className="template-card-heading">
+          <span className="template-card-kind">{labelOf(TEMPLATE_KIND_OPTIONS, template.kind)}</span>
+          <h3 className="template-card-title" title={template.name}>{template.name}</h3>
         </div>
         <div className="template-card-actions" ref={menuRef} onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
             className="template-card-menu-btn"
             aria-label="更多操作"
+            aria-expanded={menuOpen}
             onClick={() => setMenuOpen((v) => !v)}
           >
-            ⋮
+            <MoreIcon />
           </button>
           {menuOpen ? (
-            <div className="template-card-menu">
-              <button type="button" onClick={() => { setMenuOpen(false); onView(template); }}>查看详情</button>
+            <div className="template-card-menu" role="menu">
+              <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onView(template); }}>查看详情</button>
               {editable ? (
-                <>
-                  <button type="button" onClick={() => { setMenuOpen(false); onEdit(template); }}>编辑模板</button>
-                  <button type="button" className="is-danger" onClick={() => { setMenuOpen(false); onDelete(template); }}>删除模板</button>
-                </>
+                <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onEdit(template); }}>编辑</button>
               ) : null}
-              <button type="button" onClick={() => { setMenuOpen(false); onCopy(template); }}>复制到本工作区</button>
+              <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onCopy(template); }}>
+                {editable ? "复制" : "复制到本工作区"}
+              </button>
+              {editable ? (
+                <button type="button" role="menuitem" className="is-danger" onClick={() => { setMenuOpen(false); onDelete(template); }}>删除</button>
+              ) : null}
             </div>
           ) : null}
         </div>
-      </div>
+      </header>
 
-      <div className="template-card-body">
-        <span className="badge badge-primary">{labelOf(TEMPLATE_KIND_OPTIONS, template.kind)}</span>
-        <p className="template-card-desc">{truncateContent(template.detail)}</p>
-      </div>
+      {lines.length > 0 ? (
+        <pre className="template-card-preview" aria-hidden="true">{lines.join("\n")}</pre>
+      ) : (
+        <p className="template-card-preview is-empty">暂无内容</p>
+      )}
 
-      <div className="template-card-footer">
-        <TemplateCreator template={template} compact />
-        <span className="template-card-time">{formatDateTime(template.created_at)}</span>
-      </div>
+      <footer className="template-card-footer">
+        <span className="template-card-meta">
+          {creatorDisplayName(template)} · {formatDate(template.created_at)}
+        </span>
+        <span className="template-card-tags">
+          {showLanguage ? (
+            <span className="template-card-tag">{labelOf(TEMPLATE_LANGUAGE_OPTIONS, template.language)}</span>
+          ) : null}
+          {template.shared ? (
+            <span className="template-card-tag" title={template.workspace_name ?? "其他工作区"}>组织共享</span>
+          ) : null}
+          {showStatus ? (
+            <span className={statusBadgeClass(template.status)}>
+              {labelOf(TEMPLATE_STATUS_OPTIONS, template.status)}
+            </span>
+          ) : null}
+        </span>
+      </footer>
     </article>
   );
 }
 
-function DocumentIcon() {
+function MoreIcon() {
   return (
-    <svg className="template-doc-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" />
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+      <circle cx="5" cy="12" r="1.6" />
+      <circle cx="12" cy="12" r="1.6" />
+      <circle cx="19" cy="12" r="1.6" />
     </svg>
   );
 }
