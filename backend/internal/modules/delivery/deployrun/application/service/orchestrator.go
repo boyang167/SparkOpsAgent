@@ -376,9 +376,11 @@ func (o *Orchestrator) clearLease(run *model.DeploymentRun) {
 }
 
 func (o *Orchestrator) recordInfrastructureFailure(ctx context.Context, run *model.DeploymentRun, cause error) error {
-	updated, err := o.repo.RecordInfrastructureFailure(
-		ctx, run.ID, run.Version, "infrastructure retry budget exhausted",
-	)
+	message := "infrastructure retry budget exhausted"
+	if cause != nil {
+		message = cause.Error()
+	}
+	updated, err := o.repo.RecordInfrastructureFailure(ctx, run.ID, run.Version, message)
 	if err != nil {
 		return err
 	}

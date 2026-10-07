@@ -15,4 +15,21 @@ describe("apiPathEntitlement", () => {
   it("keeps k8s workload deployments under k8s", () => {
     expect(apiPathEntitlement("/api/v1/workspaces/ws/k8s/projects/p1/deployments")).toBe("k8s");
   });
+
+  it.each([
+    "/api/v1/projects/p1/pods",
+    "/api/v1/projects/p1/pods/pod-1/logs",
+    "/api/v1/projects/p1/pods/pod-1/terminal-ticket",
+    "/api/v1/projects/p1/pods/pod-1/terminal/stream",
+    "/api/v1/projects/p1/runtime/overview",
+    "/api/v1/workspaces/ws/projects/p1/pods",
+    "/api/v1/workspaces/ws/projects/p1/pods/pod-1/terminal-ticket",
+    "/api/v1/workspaces/ws/projects/p1/runtime/overview",
+  ])("maps project runtime API %s to delivery", (path) => {
+    expect(apiPathEntitlement(path)).toBe("delivery");
+  });
+
+  it("keeps Kubernetes plugin pod APIs under k8s", () => {
+    expect(apiPathEntitlement("/api/v1/workspaces/ws/k8s/projects/p1/pods")).toBe("k8s");
+  });
 });

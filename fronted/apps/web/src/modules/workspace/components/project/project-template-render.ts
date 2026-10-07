@@ -34,8 +34,17 @@ function looksLikeManifest(text: string) {
   );
 }
 
+const YAML_NON_STRING_SCALAR =
+  /^(?:|~|null|true|false|y|yes|n|no|on|off|[-+]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?|0x[\da-f]+|0o[0-7]+|[-+]?\.inf|\.nan)$/i;
+
 function escapeYaml(value: string) {
-  if (/[:#{}[\],&*?|>!%@`]/.test(value) || value.includes("\n") || value.includes('"')) {
+  if (
+    /[:#{}[\],&*?|>!%@`]/.test(value) ||
+    value.includes("\n") ||
+    value.includes('"') ||
+    value !== value.trim() ||
+    YAML_NON_STRING_SCALAR.test(value)
+  ) {
     return JSON.stringify(value);
   }
   return value;

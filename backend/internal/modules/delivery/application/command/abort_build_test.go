@@ -69,3 +69,15 @@ func TestAbortBuildCancelsExecutionAndPersistsAbortedStatus(t *testing.T) {
 	require.Equal(t, model.BuildStatusAborted, build.Status)
 	require.Equal(t, 1, repo.updateCalls)
 }
+
+func TestAbortBuildMarksOrphanedRunningBuildAborted(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	build := model.NewBuild(kernel.NewProjectID(), kernel.NewMemberID(), wsID, "main")
+	repo := &abortBuildRepo{build: build}
+	handler := NewAbortBuildHandler(repo, abortProjectChecker{}, runner.NewRegistry(), stream.NewHub())
+
+	require.NoError(t, handler.Handle(context.Background(), wsID, build.ID))
+
+	require.Equal(t, model.BuildStatusAborted, build.Status)
+	require.Equal(t, 1, repo.updateCalls)
+}

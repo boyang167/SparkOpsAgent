@@ -120,11 +120,54 @@ func renderDeployment(raw, image string) (string, error) {
 		}
 		container["image"] = image
 	}
+	for _, key := range []string{"initContainers", "containers"} {
+		items, _ := podSpec[key].([]any)
+		for _, item := range items {
+			if container, ok := item.(map[string]any); ok {
+				coerceContainerStrings(container)
+			}
+		}
+	}
 	rendered, err := yaml.Marshal(manifest)
 	if err != nil {
 		return "", fmt.Errorf("encode generated Deployment manifest: %w", err)
 	}
 	return string(rendered), nil
+}
+
+// Kubernetes requires env values, command and args to be strings; unquoted YAML
+// scalars such as `true` or `8080` decode as bool/int and are rejected on apply.
+func coerceContainerStrings(container map[string]any) {
+	for _, key := range []string{"command", "args"} {
+		items, ok := container[key].([]any)
+		if !ok {
+			continue
+		}
+		for i, item := range items {
+			items[i] = scalarString(item)
+		}
+	}
+	envs, _ := container["env"].([]any)
+	for _, item := range envs {
+		env, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if value, exists := env["value"]; exists {
+			env["value"] = scalarString(value)
+		}
+	}
+}
+
+func scalarString(value any) any {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string, map[string]any, []any:
+		return v
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 func stringValue(value any) string {

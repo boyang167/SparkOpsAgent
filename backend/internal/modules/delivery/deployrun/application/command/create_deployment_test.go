@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
+	deliverydomain "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -441,6 +442,24 @@ func TestAbortBuildingFailureDoesNotPretendRunWasAborted(t *testing.T) {
 	require.ErrorIs(t, err, abortErr)
 	require.Empty(t, repo.updated)
 	require.Equal(t, model.StatusBuilding, run.Status)
+}
+
+func TestAbortBuildingStillAbortsRunWhenBuildAlreadyFinished(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	run := model.NewDeploymentRun(wsID, kernel.NewProjectID(), kernel.NewClusterInfoID(), kernel.NewMemberID(), "branch", "main", "")
+	run.Status = model.StatusBuilding
+	buildID := kernel.NewBuildID()
+	run.BuildID = &buildID
+	repo := &fakeRunRepoWithRun{run: run}
+	handler := NewAbortDeploymentHandler(repo, time.Now, AbortDependencies{
+		Builds: &recordingBuildAborter{err: deliverydomain.ErrBuildNotRunning},
+	})
+
+	aborted, err := handler.Handle(context.Background(), wsID, run.ID)
+
+	require.NoError(t, err)
+	require.Len(t, repo.updated, 1)
+	require.Equal(t, model.StatusAborted, aborted.Status)
 }
 
 func TestAbortDeployingCancelsOperationAndRepeatedAbortIsIdempotent(t *testing.T) {

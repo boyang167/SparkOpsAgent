@@ -36,6 +36,17 @@ func TestInjectProjectConfigEnv_AppendsBeforeVolumeMounts(t *testing.T) {
 	}
 }
 
+func TestEscapeYAMLQuotesNonStringScalars(t *testing.T) {
+	for value, want := range map[string]string{
+		"true": `"true"`, "False": `"False"`, "yes": `"yes"`, "8080": `"8080"`,
+		"1.5": `"1.5"`, "null": `"null"`, "~": `"~"`, "": `""`, "prod": "prod",
+	} {
+		if got := escapeYAML(value); got != want {
+			t.Fatalf("escapeYAML(%q) = %s, want %s", value, got, want)
+		}
+	}
+}
+
 func TestInjectProjectConfigEnv_CreatesEnvBlockWhenMissing(t *testing.T) {
 	source := `      containers:
       - image: demo:latest

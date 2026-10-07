@@ -42,9 +42,9 @@ func (h *AbortBuildHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID,
 	if !build.IsRunning() {
 		return domain.ErrBuildNotRunning
 	}
-	if !h.registry.Cancel(build.ID.String()) {
-		return domain.ErrBuildNotRunning
-	}
+	// No registered executor means the tracking goroutine is gone (e.g. process restart);
+	// the persisted running status is stale and must still be closed out.
+	h.registry.Cancel(build.ID.String())
 	build.Abort(build.ConsoleLog)
 	if err := h.builds.Update(ctx, build); err != nil {
 		return err

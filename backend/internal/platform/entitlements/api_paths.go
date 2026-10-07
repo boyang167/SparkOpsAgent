@@ -27,7 +27,9 @@ func APIPathEntitlement(path string) string {
 		strings.Contains(path, "/workspaces/") && strings.Contains(path, "/secrets"),
 		strings.Contains(path, "/projects/") && strings.Contains(path, "/webhooks"),
 		strings.HasPrefix(path, "/api/v1/deployments/"),
-		strings.Contains(path, "/projects/") && strings.Contains(path, "/deployments") && !strings.Contains(path, "/k8s/"):
+		strings.Contains(path, "/projects/") && strings.Contains(path, "/deployments") && !strings.Contains(path, "/k8s/"),
+		strings.HasPrefix(path, "/api/v1/projects/") &&
+			(strings.Contains(path, "/pods") || strings.Contains(path, "/runtime/")):
 		return "delivery"
 	case strings.Contains(path, "/mcp/"):
 		return "mcp"

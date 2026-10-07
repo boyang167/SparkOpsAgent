@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
+	deliverydomain "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/repository"
@@ -251,7 +252,8 @@ func (h *AbortDeploymentHandler) Handle(
 		if h.buildAborter == nil {
 			return nil, errors.New("deployment build aborter is unavailable")
 		}
-		if err := h.buildAborter.Handle(ctx, wsID, *run.BuildID); err != nil {
+		if err := h.buildAborter.Handle(ctx, wsID, *run.BuildID); err != nil &&
+			!errors.Is(err, deliverydomain.ErrBuildNotRunning) {
 			return nil, err
 		}
 	case model.StatusPreparing, model.StatusDeploying:

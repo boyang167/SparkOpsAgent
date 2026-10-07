@@ -97,6 +97,13 @@ export function apiPathEntitlement(path: string): string {
   if (path.includes("/projects/") && path.includes("/deployments") && !path.includes("/k8s/")) {
     return "delivery";
   }
+  if (
+    path.includes("/projects/") &&
+    !path.includes("/k8s/") &&
+    (path.includes("/pods") || path.includes("/runtime/"))
+  ) {
+    return "delivery";
+  }
   if (path.includes("/mcp/")) return "mcp";
   if (
     path.includes("/cronjobs") ||

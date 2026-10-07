@@ -9,6 +9,7 @@ import (
 	"strings"
 	"text/template"
 
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain"
@@ -675,11 +676,28 @@ func formatPortsYAML(ports []model.ProjectPort) string {
 }
 
 func escapeYAML(value string) string {
-	if strings.ContainsAny(value, ":#{}[],&*?|>!%@`\"'\n") {
+	if strings.ContainsAny(value, ":#{}[],&*?|>!%@`\"'\n") || !decodesAsSameString(value) {
 		b, _ := json.Marshal(value)
 		return string(b)
 	}
 	return value
+}
+
+// YAML 1.1 booleans (still honoured by Kubernetes' YAML decoder) that yaml.v3 treats as strings.
+var yaml11Bools = map[string]bool{
+	"y": true, "yes": true, "n": true, "no": true, "on": true, "off": true,
+}
+
+func decodesAsSameString(value string) bool {
+	if yaml11Bools[strings.ToLower(value)] {
+		return false
+	}
+	var decoded any
+	if err := yaml.Unmarshal([]byte(value), &decoded); err != nil {
+		return false
+	}
+	text, ok := decoded.(string)
+	return ok && text == value
 }
 
 func defaultContent(kind string, project *model.Project, vars map[string]string, _ TemplateRenderContext) string {
