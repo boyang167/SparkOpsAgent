@@ -42,11 +42,11 @@ export function OrgAuditLogsPanel() {
   }
 
   return (
-    <div className="stack-md">
+    <div className="org-audit-page">
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-      <label className="stack-xs max-w-sm">
-        <span className="label">组织</span>
-        <select className="input" value={orgId} onChange={(e) => setOrgId(e.target.value)}>
+      <label className="org-audit-org">
+        <span>组织</span>
+        <select value={orgId} onChange={(e) => setOrgId(e.target.value)}>
           {orgs.map((org) => (
             <option key={org.id} value={org.id}>
               {org.name}
@@ -54,7 +54,9 @@ export function OrgAuditLogsPanel() {
           ))}
         </select>
       </label>
-      {orgId ? <PlatformAuditLogsPanel orgId={orgId} title="组织审计日志" /> : null}
+      {orgId ? (
+        <PlatformAuditLogsPanel orgId={orgId} showHeading={false} showBreadcrumb={false} />
+      ) : null}
     </div>
   );
 }

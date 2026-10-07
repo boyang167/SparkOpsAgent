@@ -130,7 +130,6 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
         icon={icons.dashboard}
         items={[...DASHBOARD_NAV_GROUP.items]}
         pathname={pathname}
-        defaultOpen
       />
 
       {groups.map((group) => (
@@ -140,7 +139,6 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
           icon={resolveGroupIcon(group.id)}
           items={group.items}
           pathname={pathname}
-          defaultOpen={!group.defaultCollapsed}
         />
       ))}
     </>

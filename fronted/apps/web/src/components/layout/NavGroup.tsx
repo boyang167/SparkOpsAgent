@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { isNavHrefActive } from "@/components/layout/menu-tree-nav";
 
 export interface NavLeafItem {
@@ -22,15 +22,9 @@ function isGroupActive(pathname: string, items: NavLeafItem[]) {
   return items.some((item) => isNavHrefActive(pathname, item.href, hrefs));
 }
 
-export function NavGroup({ label, icon, items, pathname, defaultOpen }: NavGroupProps) {
+export function NavGroup({ label, icon, items, pathname, defaultOpen = false }: NavGroupProps) {
   const active = isGroupActive(pathname, items);
-  const [open, setOpen] = useState(defaultOpen ?? active);
-
-  useEffect(() => {
-    if (active) {
-      setOpen(true);
-    }
-  }, [active]);
+  const [open, setOpen] = useState(defaultOpen);
 
   return (
     <div className="nav-group">

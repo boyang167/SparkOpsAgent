@@ -151,8 +151,7 @@ export function RoleTreePanel({ workspaceId }: RoleTreePanelProps) {
         />
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted">管理角色层级与权限分配，参考 GVA 角色管理交互。</p>
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <button type="button" className="btn" onClick={() => openCreate()}>
           新增角色
         </button>

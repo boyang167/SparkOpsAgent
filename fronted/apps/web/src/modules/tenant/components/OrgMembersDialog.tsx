@@ -17,13 +17,22 @@ const ROLE_LABELS: Record<string, string> = {
   member: "成员",
 };
 
-type Tab = "members" | "audit" | "transfer" | "quota";
+type Tab = "members" | "audit" | "quota";
 
 interface OrgMembersDialogProps {
   open: boolean;
   orgId: string;
   orgName: string;
   onClose: () => void;
+}
+
+function MemberAvatar({ name, email }: { name: string; email: string }) {
+  const initial = (name || email).charAt(0).toUpperCase();
+  return (
+    <span className="org-member-avatar" aria-hidden>
+      {initial}
+    </span>
+  );
 }
 
 export function OrgMembersDialog({ open, orgId, orgName, onClose }: OrgMembersDialogProps) {
@@ -33,14 +42,19 @@ export function OrgMembersDialog({ open, orgId, orgName, onClose }: OrgMembersDi
   const [myRole, setMyRole] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // invite state
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
   const [inviting, setInviting] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
+
+  // transfer state
   const [transferEmail, setTransferEmail] = useState("");
   const [transferring, setTransferring] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
 
   const canManage = permissions.includes("org:member:manage");
   const canRead = permissions.includes("org:read") || canManage;
@@ -72,6 +86,7 @@ export function OrgMembersDialog({ open, orgId, orgName, onClose }: OrgMembersDi
     setEmail("");
     setInviteRole("member");
     setTransferEmail("");
+    setShowTransfer(false);
     setError(null);
     setInviteError(null);
     setInviteSuccess(null);
@@ -130,6 +145,7 @@ export function OrgMembersDialog({ open, orgId, orgName, onClose }: OrgMembersDi
     try {
       await tenant.transferOrgOwner(orgId, transferEmail.trim());
       setTransferEmail("");
+      setShowTransfer(false);
       await load();
       setTab("members");
     } catch (err) {
@@ -139,56 +155,39 @@ export function OrgMembersDialog({ open, orgId, orgName, onClose }: OrgMembersDi
     }
   }
 
+  const tabs: { key: Tab; label: string; visible: boolean }[] = [
+    { key: "members", label: "成员", visible: true },
+    { key: "quota", label: "配额", visible: canRead },
+    { key: "audit", label: "审计", visible: canManage },
+  ];
+
   return (
     <Modal open={open} onClose={onClose} title={`${orgName} · 组织管理`} size="lg">
-      <div className="stack-md">
-        <div className="flex gap-2 border-b border-[var(--border)] pb-2">
-          <button
-            type="button"
-            className={`text-sm px-3 py-1 rounded-md ${tab === "members" ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-muted"}`}
-            onClick={() => setTab("members")}
-          >
-            成员
-          </button>
-          {canManage ? (
+      <div className="org-manage">
+        {/* ── Segmented Tab Control ── */}
+        <nav className="org-manage-tabs" aria-label="组织管理导航">
+          {tabs.filter((t) => t.visible).map((t) => (
             <button
+              key={t.key}
               type="button"
-              className={`text-sm px-3 py-1 rounded-md ${tab === "audit" ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-muted"}`}
-              onClick={() => setTab("audit")}
+              className={`org-manage-tab${tab === t.key ? " is-active" : ""}`}
+              onClick={() => setTab(t.key)}
+              aria-current={tab === t.key ? "page" : undefined}
             >
-              审计
+              {t.label}
             </button>
-          ) : null}
-          {canRead ? (
-            <button
-              type="button"
-              className={`text-sm px-3 py-1 rounded-md ${tab === "quota" ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-muted"}`}
-              onClick={() => setTab("quota")}
-            >
-              配额
-            </button>
-          ) : null}
-          {isOwner ? (
-            <button
-              type="button"
-              className={`text-sm px-3 py-1 rounded-md ${tab === "transfer" ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-muted"}`}
-              onClick={() => setTab("transfer")}
-            >
-              转让 Owner
-            </button>
-          ) : null}
-        </div>
+          ))}
+        </nav>
 
         {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
 
+        {/* ── Members Panel ── */}
         {tab === "members" ? (
-          <>
+          <div className="org-manage-panel">
+            {/* Invite inline bar */}
             {canManage ? (
-              <form onSubmit={onInvite} className="tenant-invite-form">
-                <p className="tenant-invite-hint">
-                  搜索并选择已注册的平台用户；对方不在本组织时才会被加入。
-                </p>
-                <div className="tenant-invite-row">
+              <form onSubmit={onInvite} className="org-invite">
+                <div className="org-invite-row">
                   <MemberInviteSearchInput
                     value={email}
                     onChange={(value) => {
@@ -197,23 +196,20 @@ export function OrgMembersDialog({ open, orgId, orgName, onClose }: OrgMembersDi
                       setInviteSuccess(null);
                     }}
                     variant="org"
-                    placeholder="搜索邮箱或姓名"
+                    placeholder="搜索邮箱或姓名，邀请加入组织…"
                     disabled={inviting}
                     searchCandidates={(query, limit) => tenant.searchOrgMemberCandidates(orgId, query, limit)}
                   />
-                  <label className="tenant-invite-role">
-                    <span className="tenant-invite-role-label">组织角色</span>
-                    <select
-                      className="input tenant-invite-role-select"
-                      value={inviteRole}
-                      onChange={(e) => setInviteRole(e.target.value as "admin" | "member")}
-                      disabled={inviting}
-                    >
-                      <option value="member">成员</option>
-                      <option value="admin">管理员</option>
-                    </select>
-                  </label>
-                  <button type="submit" className="btn tenant-invite-btn" disabled={inviting || !email.trim()}>
+                  <select
+                    className="org-invite-role"
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole(e.target.value as "admin" | "member")}
+                    disabled={inviting}
+                  >
+                    <option value="member">成员</option>
+                    <option value="admin">管理员</option>
+                  </select>
+                  <button type="submit" className="org-invite-btn" disabled={inviting || !email.trim()}>
                     {inviting ? "邀请中…" : "邀请"}
                   </button>
                 </div>
@@ -221,102 +217,127 @@ export function OrgMembersDialog({ open, orgId, orgName, onClose }: OrgMembersDi
                 {inviteSuccess ? <InlineAlert tone="success">{inviteSuccess}</InlineAlert> : null}
               </form>
             ) : null}
+
+            {/* Member list */}
             {loading ? (
-              <div className="empty-state">加载中…</div>
-            ) : members.length === 0 ? (
-              <div className="empty-state">暂无组织成员</div>
-            ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>成员</th>
-                      <th>角色</th>
-                      {canManage ? <th>操作</th> : null}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {members.map((member) => (
-                      <tr key={member.member_id}>
-                        <td>
-                          <p className="font-medium">{member.display_name || member.email}</p>
-                          <p className="text-xs text-muted mt-0.5">{member.email}</p>
-                        </td>
-                        <td>
-                          <span className="badge badge-neutral">{ROLE_LABELS[member.role] ?? member.role}</span>
-                        </td>
-                        {canManage ? (
-                          <td>
-                            {member.role === "owner" ? (
-                              <span className="text-xs text-muted">—</span>
-                            ) : (
-                              <div className="flex flex-wrap gap-2">
-                                {member.role !== "admin" ? (
-                                  <button
-                                    type="button"
-                                    className="btn-secondary !py-1 !px-2 text-xs"
-                                    disabled={actionId === member.member_id}
-                                    onClick={() => onChangeRole(member.member_id, "admin")}
-                                  >
-                                    设为管理员
-                                  </button>
-                                ) : null}
-                                {member.role !== "member" ? (
-                                  <button
-                                    type="button"
-                                    className="btn-secondary !py-1 !px-2 text-xs"
-                                    disabled={actionId === member.member_id}
-                                    onClick={() => onChangeRole(member.member_id, "member")}
-                                  >
-                                    设为成员
-                                  </button>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  className="btn-secondary !py-1 !px-2 text-xs text-red-600"
-                                  disabled={actionId === `remove:${member.member_id}`}
-                                  onClick={() => onRemove(member.member_id)}
-                                >
-                                  移除
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                        ) : null}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="org-member-skeleton">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="org-member-skeleton-row" />
+                ))}
               </div>
+            ) : members.length === 0 ? (
+              <div className="org-empty">
+                <p>暂无组织成员</p>
+              </div>
+            ) : (
+              <ul className="org-member-list">
+                {members.map((member) => (
+                  <li key={member.member_id} className="org-member-item">
+                    <MemberAvatar name={member.display_name || ""} email={member.email} />
+                    <div className="org-member-info">
+                      <span className="org-member-name">{member.display_name || member.email}</span>
+                      {member.display_name ? (
+                        <span className="org-member-email">{member.email}</span>
+                      ) : null}
+                    </div>
+                    <span className={`org-member-role${member.role === "owner" ? " is-owner" : ""}`}>
+                      {ROLE_LABELS[member.role] ?? member.role}
+                    </span>
+                    {canManage && member.role !== "owner" ? (
+                      <div className="org-member-actions">
+                        {member.role !== "admin" ? (
+                          <button
+                            type="button"
+                            className="org-member-action"
+                            disabled={actionId === member.member_id}
+                            onClick={() => onChangeRole(member.member_id, "admin")}
+                          >
+                            设为管理员
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="org-member-action"
+                            disabled={actionId === member.member_id}
+                            onClick={() => onChangeRole(member.member_id, "member")}
+                          >
+                            设为成员
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="org-member-action is-danger"
+                          disabled={actionId === `remove:${member.member_id}`}
+                          onClick={() => onRemove(member.member_id)}
+                        >
+                          移除
+                        </button>
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
             )}
-          </>
+
+            {/* Transfer Owner — danger zone, collapsed by default */}
+            {isOwner ? (
+              <div className="org-danger-zone">
+                {!showTransfer ? (
+                  <button
+                    type="button"
+                    className="org-danger-trigger"
+                    onClick={() => setShowTransfer(true)}
+                  >
+                    <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14" aria-hidden>
+                      <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                    </svg>
+                    转让 Owner
+                  </button>
+                ) : (
+                  <form onSubmit={onTransfer} className="org-transfer-form">
+                    <p className="org-transfer-warn">
+                      转让后您将降为管理员，此操作不可撤销。新 Owner 须已在平台注册。
+                    </p>
+                    <div className="org-transfer-row">
+                      <input
+                        className="org-transfer-input"
+                        type="email"
+                        placeholder="新 Owner 邮箱"
+                        value={transferEmail}
+                        onChange={(e) => setTransferEmail(e.target.value)}
+                        required
+                        autoFocus
+                      />
+                      <button type="submit" className="org-transfer-btn" disabled={transferring}>
+                        {transferring ? "转让中…" : "确认转让"}
+                      </button>
+                      <button
+                        type="button"
+                        className="org-transfer-cancel"
+                        onClick={() => { setShowTransfer(false); setTransferEmail(""); }}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
-        {tab === "audit" && canManage ? (
-          <PlatformAuditLogsPanel orgId={orgId} title="组织审计日志" />
-        ) : null}
-
+        {/* ── Quota Panel ── */}
         {tab === "quota" && canRead ? (
-          <OrgQuotaPanel orgId={orgId} canEdit={canManage} />
+          <div className="org-manage-panel">
+            <OrgQuotaPanel orgId={orgId} canEdit={canManage} />
+          </div>
         ) : null}
 
-        {tab === "transfer" && isOwner ? (
-          <form onSubmit={onTransfer} className="stack-md">
-            <p className="text-sm text-muted">
-              转让后您将降为管理员。新 Owner 须已在平台注册；若不在本组织会自动加入。
-            </p>
-            <input
-              className="input"
-              type="email"
-              placeholder="新 Owner 邮箱"
-              value={transferEmail}
-              onChange={(e) => setTransferEmail(e.target.value)}
-              required
-            />
-            <button type="submit" className="btn w-fit" disabled={transferring}>
-              {transferring ? "转让中…" : "确认转让 Owner"}
-            </button>
-          </form>
+        {/* ── Audit Panel ── */}
+        {tab === "audit" && canManage ? (
+          <div className="org-manage-panel">
+            <PlatformAuditLogsPanel orgId={orgId} title="组织审计日志" showBreadcrumb={false} />
+          </div>
         ) : null}
       </div>
     </Modal>

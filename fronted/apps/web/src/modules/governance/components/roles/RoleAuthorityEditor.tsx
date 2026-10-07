@@ -356,7 +356,6 @@ export function RoleAuthorityEditor({
       open={open}
       onClose={onClose}
       title={role && mode !== "create" ? `${title} · ${role.name}` : title}
-      description="参考 GVA 角色管理：统一配置功能、菜单、按钮、API 与数据访问范围。"
       panelClassName="drawer-panel-wide"
       tabs={
         <>

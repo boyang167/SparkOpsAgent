@@ -22,6 +22,7 @@ interface PlatformAuditLogsPanelProps {
   orgId?: string;
   title?: string;
   showBreadcrumb?: boolean;
+  showHeading?: boolean;
   variant?: "platform" | "default";
 }
 
@@ -29,6 +30,7 @@ export function PlatformAuditLogsPanel({
   orgId,
   title = "平台审计日志",
   showBreadcrumb = true,
+  showHeading = true,
   variant = "default",
 }: PlatformAuditLogsPanelProps) {
   const isPlatform = variant === "platform" && !orgId;
@@ -110,14 +112,16 @@ export function PlatformAuditLogsPanel({
   }
 
   return (
-    <div className="stack-lg">
+    <div className="org-audit-logs">
       {!orgId && showBreadcrumb ? (
         <Breadcrumb items={[{ label: "设置", href: "/settings/profile" }, { label: "审计日志" }]} />
       ) : null}
-      <div>
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <p className="text-sm text-muted mt-1">权限变更与平台操作记录</p>
-      </div>
+      {showHeading ? (
+        <div className="org-audit-logs-head">
+          <h2>{title}</h2>
+          <p>权限变更与平台操作记录</p>
+        </div>
+      ) : null}
       {table}
     </div>
   );

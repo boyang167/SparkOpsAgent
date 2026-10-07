@@ -6,7 +6,6 @@ import type { PluginRecordVM } from "@sparkops/contracts/plugin";
 import { plugin } from "@sparkops/web-sdk";
 import { notifyEntitlementsUpdated } from "@/components/layout/shell-context";
 import { InlineAlert } from "@/components/ui/InlineAlert";
-import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
 
 export function WorkspacePluginsPanel({ workspaceId }: { workspaceId: string }) {
   const [items, setItems] = useState<PluginRecordVM[]>([]);
@@ -55,42 +54,34 @@ export function WorkspacePluginsPanel({ workspaceId }: { workspaceId: string }) 
   }
 
   return (
-    <section className="platform-table-card admin-page-card">
-      <PlatformPanelHead
-        title="工作区插件"
-        description="启用已部署插件；启用后插件菜单与接口权限会加入当前工作区。"
-      />
-      <div className="admin-page-card-body stack-md">
-        {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-        {loading ? (
-          <div className="empty-state">加载插件中…</div>
-        ) : items.length === 0 ? (
-          <div className="empty-state">暂无可启用的已部署插件。</div>
-        ) : (
-          <div className="stack-sm">
-            {items.map((item) => (
-              <div key={item.id} className="config-switch-row">
-                <div>
-                  <div className="font-medium">{item.display_name}</div>
-                  <div className="text-sm text-muted">
-                    {item.id} · {item.version}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className={item.enabled ? "menu-switch menu-switch-on" : "menu-switch"}
-                  aria-label={`${item.enabled ? "停用" : "启用"} ${item.display_name}`}
-                  aria-pressed={item.enabled === true}
-                  disabled={pendingId === item.id}
-                  onClick={() => void toggle(item)}
-                >
-                  <span className="menu-switch-thumb" />
-                </button>
-              </div>
-            ))}
+    <div className="workspace-plugin-list">
+      {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+      {loading ? (
+        <div className="empty-state">加载插件中…</div>
+      ) : items.length === 0 ? (
+        <div className="empty-state">暂无可启用的已部署插件。</div>
+      ) : (
+        items.map((item) => (
+          <div key={item.id} className="workspace-plugin-row">
+            <div className="workspace-plugin-copy">
+              <p className="workspace-plugin-name">{item.display_name}</p>
+              <p className="workspace-plugin-meta">
+                {item.id} · {item.version}
+              </p>
+            </div>
+            <button
+              type="button"
+              className={item.enabled ? "menu-switch menu-switch-on" : "menu-switch"}
+              aria-label={`${item.enabled ? "停用" : "启用"} ${item.display_name}`}
+              aria-pressed={item.enabled === true}
+              disabled={pendingId === item.id}
+              onClick={() => void toggle(item)}
+            >
+              <span className="menu-switch-thumb" />
+            </button>
           </div>
-        )}
-      </div>
-    </section>
+        ))
+      )}
+    </div>
   );
 }

@@ -59,55 +59,66 @@ export function OrgQuotaPanel({ orgId, canEdit }: OrgQuotaPanelProps) {
     }
   }
 
-  if (loading) return <div className="empty-state">加载配额中…</div>;
+  if (loading) {
+    return (
+      <div className="org-quota-skeleton">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="org-quota-skeleton-card" />
+        ))}
+      </div>
+    );
+  }
 
   return (
-    <div className="stack-md">
+    <div className="org-quota">
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+
       {usage ? (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="org-quota-usage">
           <QuotaUsageCard label="工作区" used={usage.workspaces} max={quota?.max_workspaces ?? 0} />
           <QuotaUsageCard label="Agent" used={usage.agents} max={quota?.max_agents ?? 0} />
           <QuotaUsageCard label="项目" used={usage.projects} max={quota?.max_projects ?? 0} />
         </div>
       ) : null}
+
       {canEdit ? (
-        <form onSubmit={onSave} className="stack-md">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label className="stack-xs">
-              <span className="label">最大工作区</span>
+        <form onSubmit={onSave} className="org-quota-form">
+          <h3 className="org-quota-form-title">配额设置</h3>
+          <div className="org-quota-fields">
+            <label className="org-quota-field">
+              <span className="org-quota-field-label">最大工作区</span>
               <input
-                className="input"
+                className="org-quota-field-input"
                 type="number"
                 min={1}
                 value={form.max_workspaces}
                 onChange={(e) => setForm((f) => ({ ...f, max_workspaces: Number(e.target.value) }))}
               />
             </label>
-            <label className="stack-xs">
-              <span className="label">最大 Agent</span>
+            <label className="org-quota-field">
+              <span className="org-quota-field-label">最大 Agent</span>
               <input
-                className="input"
+                className="org-quota-field-input"
                 type="number"
                 min={1}
                 value={form.max_agents}
                 onChange={(e) => setForm((f) => ({ ...f, max_agents: Number(e.target.value) }))}
               />
             </label>
-            <label className="stack-xs">
-              <span className="label">最大项目</span>
+            <label className="org-quota-field">
+              <span className="org-quota-field-label">最大项目</span>
               <input
-                className="input"
+                className="org-quota-field-input"
                 type="number"
                 min={1}
                 value={form.max_projects}
                 onChange={(e) => setForm((f) => ({ ...f, max_projects: Number(e.target.value) }))}
               />
             </label>
-            <label className="stack-xs">
-              <span className="label">Token 预算</span>
+            <label className="org-quota-field">
+              <span className="org-quota-field-label">Token 预算</span>
               <input
-                className="input"
+                className="org-quota-field-input"
                 type="number"
                 min={0}
                 value={form.token_budget}
@@ -115,7 +126,7 @@ export function OrgQuotaPanel({ orgId, canEdit }: OrgQuotaPanelProps) {
               />
             </label>
           </div>
-          <button type="submit" className="btn w-fit" disabled={saving}>
+          <button type="submit" className="org-invite-btn" disabled={saving} style={{ alignSelf: "flex-start" }}>
             {saving ? "保存中…" : "保存配额"}
           </button>
         </form>
@@ -126,14 +137,23 @@ export function OrgQuotaPanel({ orgId, canEdit }: OrgQuotaPanelProps) {
 
 function QuotaUsageCard({ label, used, max }: { label: string; used: number; max: number }) {
   const pct = max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0;
+  const isHigh = pct >= 80;
   return (
-    <div className="card p-4">
-      <p className="text-sm text-muted">{label}</p>
-      <p className="text-xl font-semibold mt-1">
-        {used} / {max}
+    <div className="org-quota-card">
+      <div className="org-quota-card-header">
+        <span className="org-quota-card-label">{label}</span>
+        <span className={`org-quota-card-pct${isHigh ? " is-high" : ""}`}>{pct}%</span>
+      </div>
+      <p className="org-quota-card-value">
+        <span className="org-quota-card-used">{used}</span>
+        <span className="org-quota-card-sep">/</span>
+        <span className="org-quota-card-max">{max}</span>
       </p>
-      <div className="mt-2 h-2 rounded bg-[var(--border)] overflow-hidden">
-        <div className="h-full bg-[var(--accent)]" style={{ width: `${pct}%` }} />
+      <div className="org-quota-bar">
+        <div
+          className={`org-quota-bar-fill${isHigh ? " is-high" : ""}`}
+          style={{ width: `${pct}%` }}
+        />
       </div>
     </div>
   );

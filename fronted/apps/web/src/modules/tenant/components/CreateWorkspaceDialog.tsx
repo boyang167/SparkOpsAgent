@@ -7,7 +7,6 @@ import { tenant } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import { Modal } from "@/components/ui/Modal";
 import { InlineAlert } from "@/components/ui/InlineAlert";
-import { orgAccentColor, orgInitial } from "@/modules/tenant/lib/org-display";
 import { slugify, isValidSlug, slugPreview } from "@/modules/tenant/lib/slug-utils";
 import type { OrgMeta } from "@/modules/tenant/lib/org-display";
 
@@ -132,13 +131,17 @@ export function CreateWorkspaceDialog({
   }
 
   const noOrgs = organizations.length === 0;
+  const selectedOrg = organizations.find((org) => org.id === orgId);
+  const trimmedSlug = slug.trim();
+  const slugValid = isValidSlug(trimmedSlug);
+  const canSubmit = Boolean(orgId && name.trim() && slugValid);
+  const useOrgMenu = organizations.length > 5;
 
   return (
     <Modal
       open={open}
       onClose={handleClose}
       title="新建工作区"
-      description="工作区是日常协作上下文，项目、Agent 与权限均绑定在当前工作区。"
       footer={
         noOrgs ? (
           <div className="modal-footer-actions">
@@ -154,7 +157,7 @@ export function CreateWorkspaceDialog({
             <button type="button" className="btn-secondary" onClick={handleClose} disabled={loading}>
               取消
             </button>
-            <button type="submit" form="create-ws-dialog-form" className="btn" disabled={loading || !orgId}>
+            <button type="submit" form="create-ws-dialog-form" className="btn" disabled={loading || !canSubmit}>
               {loading ? "创建中..." : "创建工作区"}
             </button>
           </div>
@@ -168,41 +171,44 @@ export function CreateWorkspaceDialog({
       ) : (
         <form id="create-ws-dialog-form" className="create-dialog-form" onSubmit={onSubmit} noValidate>
           <div className="create-field">
-            <span className="label">
+            <span className="label" id="dialog-ws-org-label">
               所属组织 <span className="label-required">*</span>
             </span>
-            <div className="org-picker" role="radiogroup" aria-label="选择组织">
-              {organizations.map((org) => {
-                const selected = orgId === org.id;
-                const color = orgAccentColor(org.id);
-                return (
-                  <label
-                    key={org.id}
-                    className={`org-picker-item ${selected ? "org-picker-item-active" : ""}`}
-                  >
-                    <input
-                      type="radio"
-                      name="workspace-org"
-                      value={org.id}
-                      checked={selected}
-                      onChange={() => setOrgId(org.id)}
-                      className="sr-only"
-                    />
-                    <span
-                      className="org-picker-avatar"
-                      style={{ background: `${color}14`, color }}
-                    >
-                      {orgInitial(org.name)}
-                    </span>
-                    <span className="org-picker-copy">
-                      <span className="org-picker-name">{org.name}</span>
-                      <span className="org-picker-slug">{org.slug}</span>
-                    </span>
-                    {selected ? <span className="org-picker-check" aria-hidden>✓</span> : null}
-                  </label>
-                );
-              })}
-            </div>
+            {organizations.length === 1 && selectedOrg ? (
+              <p className="ws-create-org-current">{selectedOrg.name}</p>
+            ) : useOrgMenu ? (
+              <select
+                className="ws-create-org-select"
+                aria-labelledby="dialog-ws-org-label"
+                value={orgId}
+                onChange={(event) => setOrgId(event.target.value)}
+              >
+                {organizations.map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="ws-create-org-list" role="radiogroup" aria-labelledby="dialog-ws-org-label">
+                {organizations.map((org) => {
+                  const selected = orgId === org.id;
+                  return (
+                    <label key={org.id} className={selected ? "is-active" : ""}>
+                      <input
+                        type="radio"
+                        name="workspace-org"
+                        value={org.id}
+                        checked={selected}
+                        onChange={() => setOrgId(org.id)}
+                        className="sr-only"
+                      />
+                      <span>{org.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="create-field">
@@ -216,9 +222,9 @@ export function CreateWorkspaceDialog({
               value={name}
               onChange={(e) => handleNameChange(e.target.value)}
               autoComplete="off"
+              autoFocus
               disabled={!orgId}
             />
-            <p className="field-hint">团队成员看到的协作空间名称。</p>
           </div>
 
           <div className="create-field">
@@ -226,26 +232,31 @@ export function CreateWorkspaceDialog({
               <label className="label" htmlFor="dialog-ws-slug">
                 唯一标识 <span className="label-required">*</span>
               </label>
-              {!slugTouched && slug ? <span className="create-auto-badge">自动生成</span> : null}
+              {!slugTouched && trimmedSlug ? <span className="ws-create-generated">已根据名称生成</span> : null}
             </div>
             <input
               id="dialog-ws-slug"
               className="input input-mono"
-              placeholder="例如：dev-team"
+              placeholder="dev-team"
               value={slug}
               onChange={(e) => {
                 setSlugTouched(true);
                 setSlug(e.target.value);
               }}
               autoComplete="off"
+              spellCheck={false}
               disabled={!orgId}
+              aria-invalid={slugTouched && trimmedSlug.length > 0 && !slugValid}
             />
-            <p className="field-hint">用于 API、Webhook 与路由，建议按环境或团队命名。</p>
-            {slug ? (
+            {trimmedSlug && slugValid ? (
               <p className="create-preview">
-                预览 <code>{slugPreview(slug, "workspace")}</code>
+                路径 <code>{slugPreview(trimmedSlug, "workspace")}</code>
               </p>
-            ) : null}
+            ) : slugTouched && trimmedSlug && !slugValid ? (
+              <p className="ws-create-slug-error">仅支持小写英文、数字和连字符</p>
+            ) : (
+              <p className="field-hint">英文名称会自动生成；中文名称请手动填写，例如 dev-team。</p>
+            )}
           </div>
 
           {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
