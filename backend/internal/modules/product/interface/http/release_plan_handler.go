@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +19,7 @@ type ReleasePlanHandlers struct {
 	createPlan       *command.CreateReleasePlanHandler
 	updatePlan       *command.UpdateReleasePlanHandler
 	cancelPlan       *command.CancelReleasePlanHandler
+	deletePlan       *command.DeleteReleasePlanHandler
 	reopenPlanning   *command.ReopenReleasePlanPlanningHandler
 	addJob           *command.AddReleasePlanJobHandler
 	addJobsFromItems *command.AddReleasePlanJobsFromWorkItemsHandler
@@ -38,9 +40,12 @@ type ReleasePlanHandlers struct {
 	deleteTemplate   *command.DeleteReleasePlanTemplateHandler
 	approveByToken   *command.ApproveReleasePlanByTokenHandler
 	rejectByToken    *command.RejectReleasePlanByTokenHandler
+	hookCallback     *command.ReleasePlanHookCallbackHandler
 	listPlans        *query.ListReleasePlansHandler
 	listWorkspace    *query.ListWorkspaceReleasePlansHandler
 	getPlan          *query.GetReleasePlanHandlerWithSprint
+	listVersions     *query.ListReleasePlanVersionsHandler
+	getVersionDiff   *query.GetReleasePlanVersionDiffHandler
 	blockingPlans    *query.ListBlockingReleasePlansHandler
 }
 
@@ -48,6 +53,7 @@ func NewReleasePlanHandlers(
 	createPlan *command.CreateReleasePlanHandler,
 	updatePlan *command.UpdateReleasePlanHandler,
 	cancelPlan *command.CancelReleasePlanHandler,
+	deletePlan *command.DeleteReleasePlanHandler,
 	reopenPlanning *command.ReopenReleasePlanPlanningHandler,
 	addJob *command.AddReleasePlanJobHandler,
 	addJobsFromItems *command.AddReleasePlanJobsFromWorkItemsHandler,
@@ -68,20 +74,24 @@ func NewReleasePlanHandlers(
 	deleteTemplate *command.DeleteReleasePlanTemplateHandler,
 	approveByToken *command.ApproveReleasePlanByTokenHandler,
 	rejectByToken *command.RejectReleasePlanByTokenHandler,
+	hookCallback *command.ReleasePlanHookCallbackHandler,
 	listPlans *query.ListReleasePlansHandler,
 	listWorkspace *query.ListWorkspaceReleasePlansHandler,
 	getPlan *query.GetReleasePlanHandlerWithSprint,
+	listVersions *query.ListReleasePlanVersionsHandler,
+	getVersionDiff *query.GetReleasePlanVersionDiffHandler,
 	blockingPlans *query.ListBlockingReleasePlansHandler,
 ) ReleasePlanHandlers {
 	return ReleasePlanHandlers{
-		createPlan: createPlan, updatePlan: updatePlan, cancelPlan: cancelPlan, reopenPlanning: reopenPlanning,
+		createPlan: createPlan, updatePlan: updatePlan, cancelPlan: cancelPlan, deletePlan: deletePlan, reopenPlanning: reopenPlanning,
 		addJob: addJob, addJobsFromItems: addJobsFromItems, updateJob: updateJob, deleteJob: deleteJob, reorderJobs: reorderJobs,
 		finishPlanning: finishPlanning, approvePlan: approvePlan, rejectPlan: rejectPlan,
 		markJobDone: markJobDone, skipJob: skipJob, executePlan: executePlan, retryJob: retryJob,
 		copyPlan: copyPlan, saveTemplate: saveTemplate, createFromTpl: createFromTpl,
 		listTemplates: listTemplates, deleteTemplate: deleteTemplate,
-		approveByToken: approveByToken, rejectByToken: rejectByToken,
-		listPlans: listPlans, listWorkspace: listWorkspace, getPlan: getPlan, blockingPlans: blockingPlans,
+		approveByToken: approveByToken, rejectByToken: rejectByToken, hookCallback: hookCallback,
+		listPlans: listPlans, listWorkspace: listWorkspace, getPlan: getPlan,
+		listVersions: listVersions, getVersionDiff: getVersionDiff, blockingPlans: blockingPlans,
 	}
 }
 
@@ -151,11 +161,78 @@ func (h *Handler) GetReleasePlan(c *gin.Context) {
 	httpx.OK(c, item)
 }
 
+func (h *Handler) ListReleasePlanVersions(c *gin.Context) {
+	productID, planID, ok := parseProductReleasePlanIDs(c)
+	if !ok {
+		return
+	}
+	items, err := h.releasePlans.listVersions.Handle(c.Request.Context(), productID, planID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) GetReleasePlanVersionDiff(c *gin.Context) {
+	productID, planID, ok := parseProductReleasePlanIDs(c)
+	if !ok {
+		return
+	}
+	version, err := strconv.Atoi(c.Param("version"))
+	if err != nil || version <= 0 {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid version", http.StatusBadRequest)
+		return
+	}
+	var compareVersion *int
+	if raw := c.Query("compare"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			httpx.Fail(c, "INVALID_REQUEST", "invalid compare version", http.StatusBadRequest)
+			return
+		}
+		compareVersion = &parsed
+	}
+	diff, err := h.releasePlans.getVersionDiff.Handle(c.Request.Context(), productID, planID, version, compareVersion)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, diff)
+}
+
 type approvalConfigRequest struct {
 	Enabled     bool     `json:"enabled"`
 	Provider    string   `json:"provider"`
 	WebhookURL  string   `json:"webhook_url"`
 	ApproverIDs []string `json:"approver_ids"`
+}
+
+type hookEventConfigRequest struct {
+	Enabled     bool   `json:"enabled"`
+	URL         string `json:"url"`
+	Description string `json:"description"`
+}
+
+type hookSettingsRequest struct {
+	Enabled bool                                `json:"enabled"`
+	Events  map[string]hookEventConfigRequest `json:"events"`
+}
+
+func parseHookSettingsRequest(req *hookSettingsRequest) *model.ReleasePlanHookSettings {
+	if req == nil {
+		return nil
+	}
+	out := &model.ReleasePlanHookSettings{Enabled: req.Enabled}
+	if len(req.Events) > 0 {
+		out.Events = make(map[model.ReleasePlanHookEvent]model.ReleasePlanHookEventConfig, len(req.Events))
+		for key, cfg := range req.Events {
+			out.Events[model.ReleasePlanHookEvent(key)] = model.ReleasePlanHookEventConfig{
+				Enabled: cfg.Enabled, URL: cfg.URL, Description: cfg.Description,
+			}
+		}
+	}
+	return out
 }
 
 type createReleasePlanRequest struct {
@@ -423,6 +500,7 @@ type updateReleasePlanRequest struct {
 	ReleaseWindowEnd    *string                `json:"release_window_end"`
 	ApprovalEnabled     *bool                  `json:"approval_enabled"`
 	ApprovalConfig      *approvalConfigRequest `json:"approval_config"`
+	HookSettings        *hookSettingsRequest   `json:"hook_settings"`
 	ScheduleExecuteTime *string                `json:"schedule_execute_time"`
 	ClearScheduleTime   bool                   `json:"clear_schedule_time"`
 	SprintID            *string                `json:"sprint_id"`
@@ -446,6 +524,7 @@ func (h *Handler) UpdateReleasePlan(c *gin.Context) {
 	input := command.UpdateReleasePlanInput{
 		Name: req.Name, Description: req.Description, ApprovalEnabled: req.ApprovalEnabled,
 		ApprovalConfig: parseApprovalConfigRequest(req.ApprovalConfig),
+		HookSettings:   parseHookSettingsRequest(req.HookSettings),
 		ClearSprintID: req.ClearSprintID, ClearScheduleTime: req.ClearScheduleTime,
 	}
 	if req.ScheduleExecuteTime != nil && *req.ScheduleExecuteTime != "" {
@@ -519,6 +598,22 @@ func (h *Handler) CancelReleasePlan(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"id": plan.ID.String(), "status": plan.Status})
+}
+
+func (h *Handler) DeleteReleasePlan(c *gin.Context) {
+	_, _, ok := memberAndWorkspace(c)
+	if !ok {
+		return
+	}
+	productID, planID, ok := parseProductReleasePlanIDs(c)
+	if !ok {
+		return
+	}
+	if err := h.releasePlans.deletePlan.Handle(c.Request.Context(), productID, planID); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"ok": true})
 }
 
 func (h *Handler) ReopenReleasePlanPlanning(c *gin.Context) {
@@ -876,6 +971,50 @@ func (h *Handler) PublicRejectReleasePlanByToken(c *gin.Context) {
 	}
 	if c.Request.Method == http.MethodGet {
 		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(command.FormatApprovalHTML("已拒绝", "发布计划「"+plan.Name+"」已驳回")))
+		return
+	}
+	httpx.OK(c, gin.H{"id": plan.ID.String(), "status": plan.Status})
+}
+
+func (h *Handler) PublicPassReleasePlanHook(c *gin.Context) {
+	h.handlePublicReleasePlanHook(c, true)
+}
+
+func (h *Handler) PublicFailReleasePlanHook(c *gin.Context) {
+	h.handlePublicReleasePlanHook(c, false)
+}
+
+func (h *Handler) handlePublicReleasePlanHook(c *gin.Context, pass bool) {
+	token := c.Param("token")
+	var req struct {
+		Message string `json:"message"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if req.Message == "" {
+		req.Message = c.Query("message")
+	}
+	plan, err := h.releasePlans.hookCallback.Handle(c.Request.Context(), token, command.ReleasePlanHookCallbackInput{
+		Pass: pass, Message: req.Message,
+	})
+	title := "外部校验通过"
+	body := "发布计划「" + plan.Name + "」外部校验已通过"
+	if !pass {
+		title = "外部校验失败"
+		body = "发布计划「" + plan.Name + "」外部校验未通过"
+		if req.Message != "" {
+			body += "：" + req.Message
+		}
+	}
+	if err != nil {
+		if c.Request.Method == http.MethodGet {
+			c.Data(http.StatusBadRequest, "text/html; charset=utf-8", []byte(command.FormatApprovalHTML("操作失败", err.Error())))
+			return
+		}
+		httpx.HandleError(c, err)
+		return
+	}
+	if c.Request.Method == http.MethodGet {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(command.FormatApprovalHTML(title, body)))
 		return
 	}
 	httpx.OK(c, gin.H{"id": plan.ID.String(), "status": plan.Status})

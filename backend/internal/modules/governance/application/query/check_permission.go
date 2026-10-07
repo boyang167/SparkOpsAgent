@@ -6,18 +6,29 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type Checker struct {
-	bindings repository.BindingRepository
+	bindings    repository.BindingRepository
+	systemRoles authz.SystemRoleChecker
 }
 
-func NewChecker(bindings repository.BindingRepository) *Checker {
-	return &Checker{bindings: bindings}
+func NewChecker(bindings repository.BindingRepository, systemRoles authz.SystemRoleChecker) *Checker {
+	return &Checker{bindings: bindings, systemRoles: systemRoles}
 }
 
 func (c *Checker) HasPermission(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID, perm string) (bool, error) {
+	if c.systemRoles != nil {
+		isSuper, err := c.systemRoles.IsSuperAdmin(ctx, memberID)
+		if err != nil {
+			return false, err
+		}
+		if isSuper {
+			return true, nil
+		}
+	}
 	roles, err := c.bindings.ListRolesForMember(ctx, workspaceID, memberID)
 	if err != nil {
 		return false, err

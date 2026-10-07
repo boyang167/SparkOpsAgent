@@ -171,10 +171,10 @@ export function PermissionApisPanel({ workspaceId, canManage }: PermissionApisPa
     }
   }
 
-  async function confirmSync() {
+  async function confirmSync(selectedDeletes: SyncRow[] = deleteApis) {
     setSyncLoading(true);
     try {
-      await governance.confirmApiSync(workspaceId, { new: newApis, delete: deleteApis });
+      await governance.confirmApiSync(workspaceId, { new: newApis, delete: selectedDeletes });
       setSyncOpen(false);
       flashSuccess("API 同步完成");
       await load();
@@ -554,9 +554,18 @@ export function PermissionApisPanel({ workspaceId, canManage }: PermissionApisPa
         deleteApis={deleteApis}
         ignoreApis={ignoreApis}
         onClose={() => setSyncOpen(false)}
-        onConfirm={() => void confirmSync()}
+        onConfirm={({ deleteApis: selectedDeletes }) => void confirmSync(selectedDeletes)}
         onChangeNewApi={(index, patch) =>
           setNewApis((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)))
+        }
+        onApplyBatch={(patch) =>
+          setNewApis((prev) =>
+            prev.map((item) => ({
+              ...item,
+              ...(patch.api_group !== undefined ? { api_group: patch.api_group } : {}),
+              ...(patch.description !== undefined ? { description: patch.description } : {}),
+            })),
+          )
         }
       />
 

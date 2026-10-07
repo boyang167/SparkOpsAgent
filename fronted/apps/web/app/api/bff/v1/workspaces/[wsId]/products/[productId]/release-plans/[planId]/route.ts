@@ -1,5 +1,5 @@
 import { createBffHandler } from "@sparkops/bff-core";
-import { getReleasePlan, updateReleasePlan } from "@sparkops/bff-modules/product";
+import { deleteReleasePlan, getReleasePlan, updateReleasePlan } from "@sparkops/bff-modules/product";
 import type { UpdateReleasePlanCommand } from "@sparkops/contracts/product";
 
 export const GET = createBffHandler(async (ctx, _req, { params }) => {
@@ -17,4 +17,12 @@ export const PATCH = createBffHandler(async (ctx, req, { params }) => {
   if (!wsId || !productId || !planId) throw new Error("workspace, product and plan required");
   const input = (await req.json()) as UpdateReleasePlanCommand;
   return updateReleasePlan(ctx, wsId, productId, planId, input);
+});
+
+export const DELETE = createBffHandler(async (ctx, _req, { params }) => {
+  const wsId = params?.wsId ?? ctx.workspaceId;
+  const productId = params?.productId;
+  const planId = params?.planId;
+  if (!wsId || !productId || !planId) throw new Error("workspace, product and plan required");
+  return deleteReleasePlan(ctx, wsId, productId, planId);
 });

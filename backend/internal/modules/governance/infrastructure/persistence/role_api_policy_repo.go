@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 )
 
 type roleAPIPolicyModel struct {
@@ -27,6 +29,9 @@ func NewRoleAPIPolicyStore(db *gorm.DB) *RoleAPIPolicyStore {
 }
 
 func (s *RoleAPIPolicyStore) AutoMigrate() error {
+	if !postgres.ShouldRunAutoMigrate(s.db) {
+		return nil
+	}
 	if s.db.Dialector.Name() == "postgres" {
 		if err := s.db.Exec("CREATE SCHEMA IF NOT EXISTS governance").Error; err != nil {
 			return err

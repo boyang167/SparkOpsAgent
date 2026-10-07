@@ -1,11 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { ProductWorkflowVM, ReleasePlanJobVM, ReleasePlanVM } from "@sparkops/contracts/product";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { EnvironmentVM, ProductWorkflowVM, ReleasePlanJobVM, ReleasePlanVM } from "@sparkops/contracts/product";
 import { InlineAlert } from "@/components/ui/InlineAlert";
+import { MemberNameLabel } from "./MemberNameLabel";
 import { RichTextField } from "./RichTextField";
 import { WorkItemAssigneeField } from "./WorkItemAssigneeField";
+import {
+  defaultBranchForWorkflow,
+  defaultEnvironmentIdForWorkflow,
+  environmentLabel,
+  parseWorkflowJobBranch,
+  parseWorkflowJobEnvironmentId,
+  workflowHasBuildJobs,
+  type WorkflowJobParamsPatch,
+} from "./release-plan-workflow-params";
 import { releasePlanStatusBadgeClass, releasePlanStatusLabel } from "./release-plan-utils";
 
 interface ReleasePlanJobEditorProps {
@@ -13,14 +23,34 @@ interface ReleasePlanJobEditorProps {
   productId: string;
   plan: ReleasePlanVM;
   workflows: ProductWorkflowVM[];
+  environments: EnvironmentVM[];
   canEdit: boolean;
   busy?: boolean;
   onMove: (jobId: string, direction: "up" | "down") => void | Promise<void>;
+  onReorder: (jobIds: string[]) => void | Promise<void>;
   onDelete: (jobId: string) => void | Promise<void>;
-  onUpdate: (jobId: string, patch: { name?: string; text_content?: string; text_format?: string; owner_id?: string; workflow_ref?: { workflow_id: string; parameters?: Record<string, string> } }) => void | Promise<void>;
+  onUpdate: (
+    jobId: string,
+    patch: {
+      name?: string;
+      text_content?: string;
+      text_format?: string;
+      owner_id?: string;
+      workflow_ref?: { mode?: string; workflow_id: string; parameters?: Record<string, string> };
+    },
+  ) => void | Promise<void>;
   onAddText: () => void | Promise<void>;
-  onAddWorkflow: (workflowId: string) => void | Promise<void>;
+  onAddWorkflow: (
+    workflowId: string,
+    options?: { environmentId?: string; branch?: string },
+  ) => void | Promise<void>;
+  onWorkflowParamsChange: (
+    jobId: string,
+    workflowId: string,
+    patch: WorkflowJobParamsPatch,
+  ) => void | Promise<void>;
   renderJobActions?: (job: ReleasePlanJobVM) => ReactNode;
+  memberName?: (memberId?: string | null) => string;
 }
 
 function jobTypeLabel(type: string) {
@@ -47,25 +77,52 @@ export function ReleasePlanJobEditor({
   productId,
   plan,
   workflows,
+  environments,
   canEdit,
   busy,
   onMove,
+  onReorder,
   onDelete,
   onUpdate,
   onAddText,
   onAddWorkflow,
+  onWorkflowParamsChange,
   renderJobActions,
+  memberName,
 }: ReleasePlanJobEditorProps) {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState(workflows[0]?.id ?? "");
+  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState("");
+  const [selectedBranch, setSelectedBranch] = useState("main");
+  const [dragJobId, setDragJobId] = useState<string | null>(null);
+  const [dropJobId, setDropJobId] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const debounceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const prevJobCount = useRef(0);
 
+  const selectedWorkflow = useMemo(
+    () => workflows.find((item) => item.id === selectedWorkflowId) ?? null,
+    [workflows, selectedWorkflowId],
+  );
+
   const jobs = [...(plan.jobs ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const hasDeployJobs = (selectedWorkflow?.stages ?? []).some((stage) =>
+    (stage.jobs ?? []).some(
+      (job) => job.type === "sparkops-deploy" || job.type === "sparkops-deploy-version",
+    ),
+  );
+  const hasBuildJobs = workflowHasBuildJobs(selectedWorkflow);
 
   useEffect(() => {
     setSelectedWorkflowId(workflows[0]?.id ?? "");
   }, [workflows]);
+
+  useEffect(() => {
+    setSelectedEnvironmentId(defaultEnvironmentIdForWorkflow(selectedWorkflow, environments));
+  }, [selectedWorkflow, environments]);
+
+  useEffect(() => {
+    setSelectedBranch(defaultBranchForWorkflow(selectedWorkflow));
+  }, [selectedWorkflow]);
 
   useEffect(() => {
     const sorted = [...(plan.jobs ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
@@ -130,8 +187,16 @@ export function ReleasePlanJobEditor({
   function toggleExpanded(jobId: string) {
     setExpandedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(jobId)) next.delete(jobId);
-      else next.add(jobId);
+      const willExpand = !next.has(jobId);
+      if (willExpand) next.add(jobId);
+      else next.delete(jobId);
+      if (willExpand) {
+        requestAnimationFrame(() => {
+          document
+            .getElementById(`release-plan-job-${jobId}`)
+            ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        });
+      }
       return next;
     });
   }
@@ -142,6 +207,18 @@ export function ReleasePlanJobEditor({
 
   function collapseAll() {
     setExpandedIds(new Set());
+  }
+
+  function reorderByDrop(sourceId: string, targetId: string) {
+    if (sourceId === targetId) return;
+    const ids = jobs.map((job) => job.id);
+    const from = ids.indexOf(sourceId);
+    const to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    const next = [...ids];
+    next.splice(from, 1);
+    next.splice(to, 0, sourceId);
+    void onReorder(next);
   }
 
   const expandedCount = expandedIds.size;
@@ -181,6 +258,32 @@ export function ReleasePlanJobEditor({
     );
   }
 
+  function renderEnvironmentSelect(
+    value: string,
+    onChange: (environmentId: string) => void,
+    ariaLabel: string,
+    disabled?: boolean,
+  ) {
+    if (environments.length === 0) {
+      return <span className="release-plan-jobs-toolbar-hint">请先在「环境」Tab 创建环境</span>;
+    }
+    return (
+      <select
+        className="input text-xs"
+        value={value}
+        disabled={disabled || busy}
+        aria-label={ariaLabel}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {environments.map((env) => (
+          <option key={env.id} value={env.id}>
+            {env.name}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
   return (
     <div className="release-plan-jobs">
       {canEdit ? (
@@ -213,11 +316,39 @@ export function ReleasePlanJobEditor({
                     </option>
                   ))}
                 </select>
+                {hasDeployJobs ? (
+                  <>
+                    <span className="release-plan-jobs-input-group-label">环境</span>
+                    {renderEnvironmentSelect(
+                      selectedEnvironmentId,
+                      setSelectedEnvironmentId,
+                      "选择部署环境",
+                    )}
+                  </>
+                ) : null}
+                {hasBuildJobs ? (
+                  <>
+                    <span className="release-plan-jobs-input-group-label">分支</span>
+                    <input
+                      className="input text-xs release-plan-jobs-branch-input"
+                      value={selectedBranch}
+                      disabled={busy}
+                      aria-label="构建分支"
+                      placeholder="main"
+                      onChange={(e) => setSelectedBranch(e.target.value)}
+                    />
+                  </>
+                ) : null}
                 <button
                   type="button"
                   className="btn btn-primary text-xs release-plan-jobs-input-group-btn"
-                  disabled={busy || !selectedWorkflowId}
-                  onClick={() => void onAddWorkflow(selectedWorkflowId)}
+                  disabled={busy || !selectedWorkflowId || (hasDeployJobs && !selectedEnvironmentId)}
+                  onClick={() =>
+                    void onAddWorkflow(selectedWorkflowId, {
+                      ...(hasDeployJobs ? { environmentId: selectedEnvironmentId } : {}),
+                      ...(hasBuildJobs ? { branch: selectedBranch.trim() || "main" } : {}),
+                    })
+                  }
                 >
                   添加
                 </button>
@@ -245,14 +376,59 @@ export function ReleasePlanJobEditor({
           {jobs.map((job, index) => {
             const expanded = expandedIds.has(job.id);
             const preview = job.type === "text" ? textPreview(job.text_content ?? "") : "";
-            const wfLabel = workflowName(workflows, job.workflow_ref?.workflow_id);
+            const workflowId = job.workflow_ref?.workflow_id;
+            const workflowLocked = job.workflow_ref?.mode === "snapshot";
+            const canEditJob = canEdit && !workflowLocked;
+            const wfLabel = workflowName(workflows, workflowId);
+            const jobWorkflow = workflows.find((item) => item.id === workflowId) ?? null;
+            const jobHasDeploy = (jobWorkflow?.stages ?? []).some((stage) =>
+              (stage.jobs ?? []).some(
+                (stageJob) =>
+                  stageJob.type === "sparkops-deploy" || stageJob.type === "sparkops-deploy-version",
+              ),
+            );
+            const jobEnvironmentId = parseWorkflowJobEnvironmentId(job.workflow_ref?.parameters);
+            const jobBranch = parseWorkflowJobBranch(job.workflow_ref?.parameters);
+            const jobHasBuild = workflowHasBuildJobs(jobWorkflow);
+
+            const isDragging = dragJobId === job.id;
+            const isDropTarget = dropJobId === job.id && dragJobId !== job.id;
 
             return (
               <li
                 key={job.id}
-                className={`release-plan-job-card${expanded ? " is-expanded" : " is-collapsed"}`}
+                id={`release-plan-job-${job.id}`}
+                className={`release-plan-job-card${expanded ? " is-expanded" : " is-collapsed"}${isDragging ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`}
+                onDragOver={(event) => {
+                  if (!canEdit || !dragJobId) return;
+                  event.preventDefault();
+                  setDropJobId(job.id);
+                }}
+                onDragLeave={() => {
+                  if (dropJobId === job.id) setDropJobId(null);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (dragJobId) reorderByDrop(dragJobId, job.id);
+                  setDragJobId(null);
+                  setDropJobId(null);
+                }}
               >
                 <div className="release-plan-job-card-head">
+                  {canEdit ? (
+                    <span
+                      className="release-plan-job-drag-handle"
+                      draggable
+                      aria-label="拖拽排序"
+                      onDragStart={() => setDragJobId(job.id)}
+                      onDragEnd={() => {
+                        setDragJobId(null);
+                        setDropJobId(null);
+                      }}
+                    >
+                      ⋮⋮
+                    </span>
+                  ) : null}
                   <button
                     type="button"
                     className="release-plan-job-card-toggle"
@@ -265,7 +441,15 @@ export function ReleasePlanJobEditor({
                       <span className="release-plan-job-summary-name">{job.name}</span>
                       {!expanded ? (
                         <span className="release-plan-job-summary-meta">
-                          {job.type === "workflow" ? wfLabel : preview || "暂无说明"}
+                          {job.type === "workflow"
+                            ? [
+                                wfLabel,
+                                jobEnvironmentId ? environmentLabel(environments, jobEnvironmentId) : null,
+                                jobBranch ? `分支 ${jobBranch}` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")
+                            : preview || "暂无说明"}
                         </span>
                       ) : null}
                     </span>
@@ -347,13 +531,63 @@ export function ReleasePlanJobEditor({
                       ) : null
                     ) : null}
 
-                    {job.type === "workflow" && job.workflow_ref?.workflow_id ? (
-                      <p className="text-xs text-muted">关联工作流 · {wfLabel}</p>
+                    {job.type === "workflow" && workflowId ? (
+                      <div className="release-plan-job-workflow-meta stack-xs">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-xs text-muted-foreground">关联工作流 · {wfLabel}</p>
+                          {workflowLocked ? <span className="badge badge-neutral text-[10px]">工作流已锁定</span> : null}
+                        </div>
+                        {jobHasDeploy ? (
+                          <label className="release-plan-job-env">
+                            <span className="release-plan-job-owner-label">部署环境</span>
+                            {canEditJob ? (
+                              renderEnvironmentSelect(
+                                jobEnvironmentId || defaultEnvironmentIdForWorkflow(jobWorkflow, environments),
+                                (environmentId) => {
+                                  if (!environmentId || environmentId === jobEnvironmentId) return;
+                                  void onWorkflowParamsChange(job.id, workflowId, { environmentId });
+                                },
+                                "部署环境",
+                              )
+                            ) : (
+                              <span className="text-sm text-muted-foreground">
+                                {environmentLabel(environments, jobEnvironmentId)}
+                              </span>
+                            )}
+                          </label>
+                        ) : null}
+                        {jobHasBuild ? (
+                          <label className="release-plan-job-env">
+                            <span className="release-plan-job-owner-label">构建分支</span>
+                            {canEditJob ? (
+                              <input
+                                className="input text-xs"
+                                defaultValue={jobBranch || defaultBranchForWorkflow(jobWorkflow)}
+                                disabled={busy}
+                                aria-label="构建分支"
+                                placeholder="main"
+                                onBlur={(e) => {
+                                  const value = e.target.value.trim();
+                                  const current = jobBranch || defaultBranchForWorkflow(jobWorkflow);
+                                  if (value === current) return;
+                                  void onWorkflowParamsChange(job.id, workflowId, {
+                                    branch: value || null,
+                                  });
+                                }}
+                              />
+                            ) : (
+                              <span className="text-sm text-muted-foreground">
+                                {jobBranch || defaultBranchForWorkflow(jobWorkflow)}
+                              </span>
+                            )}
+                          </label>
+                        ) : null}
+                      </div>
                     ) : null}
 
-                    {job.execution_ref?.workflow_run_id && job.workflow_ref?.workflow_id ? (
+                    {job.execution_ref?.workflow_run_id && workflowId ? (
                       <Link
-                        href={`/products/${productId}/workflows/${job.workflow_ref.workflow_id}/runs/${job.execution_ref.workflow_run_id}`}
+                        href={`/products/${productId}/workflows/${workflowId}/runs/${job.execution_ref.workflow_run_id}`}
                         className="text-xs text-primary hover:underline font-mono w-fit"
                       >
                         查看 Run {job.execution_ref.workflow_run_id.slice(0, 8)}…
@@ -376,7 +610,12 @@ export function ReleasePlanJobEditor({
                             }}
                           />
                         ) : (
-                          <span className="text-sm text-muted">{job.owner_id ?? "—"}</span>
+                          <MemberNameLabel
+                            workspaceId={workspaceId}
+                            memberId={job.owner_id}
+                            memberName={memberName}
+                            className="text-sm text-muted-foreground"
+                          />
                         )}
                       </label>
                     ) : null}

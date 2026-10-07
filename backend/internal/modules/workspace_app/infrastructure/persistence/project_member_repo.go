@@ -15,8 +15,8 @@ import (
 )
 
 type projectMemberModel struct {
-	ProjectID string `gorm:"primaryKey"`
-	MemberID  string `gorm:"primaryKey"`
+	ProjectID string `gorm:"primaryKey;type:uuid"`
+	MemberID  string `gorm:"primaryKey;type:uuid"`
 	Role      string
 	JoinedAt  time.Time
 	postgres.AuditColumns
@@ -45,7 +45,7 @@ func (r *ProjectMemberRepository) Save(ctx context.Context, member *model.Projec
 func (r *ProjectMemberRepository) Find(ctx context.Context, projectID kernel.ProjectID, memberID kernel.MemberID) (*model.ProjectMember, error) {
 	var row projectMemberModel
 	err := r.db.WithContext(ctx).
-		Where("project_id = ? AND member_id = ?", projectID.String(), memberID.String()).
+		Where(postgres.UUIDEq("project_id")+" AND "+postgres.UUIDEq("member_id"), projectID.String(), memberID.String()).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrProjectMemberNotFound
@@ -71,7 +71,7 @@ func (r *ProjectMemberRepository) ListByProject(ctx context.Context, projectID k
 		SELECT pm.member_id, m.email, m.display_name, pm.role, pm.joined_at
 		FROM workspace_app.project_members pm
 		JOIN identity.members m ON m.id = pm.member_id
-		WHERE pm.project_id = ? AND pm.deleted_at IS NULL AND m.deleted_at IS NULL
+		WHERE pm.project_id::uuid = ?::uuid AND pm.deleted_at IS NULL AND m.deleted_at IS NULL
 		ORDER BY pm.role ASC, m.display_name ASC
 	`, projectID.String()).Scan(&rows).Error
 	if err != nil {
@@ -98,7 +98,7 @@ func (r *ProjectMemberRepository) ListProjectIDsForMember(ctx context.Context, w
 		SELECT p.id
 		FROM workspace_app.project_members pm
 		JOIN workspace_app.projects p ON p.id = pm.project_id
-		WHERE pm.member_id = ? AND p.workspace_id = ? AND p.status = 'active'
+		WHERE pm.member_id::uuid = ?::uuid AND p.workspace_id::uuid = ?::uuid AND p.status = 'active'
 		  AND pm.deleted_at IS NULL AND p.deleted_at IS NULL
 	`, memberID.String(), wsID.String()).Scan(&rows).Error
 	if err != nil {
@@ -117,7 +117,7 @@ func (r *ProjectMemberRepository) ListProjectIDsForMember(ctx context.Context, w
 
 func (r *ProjectMemberRepository) UpdateRole(ctx context.Context, projectID kernel.ProjectID, memberID kernel.MemberID, role string) error {
 	res := r.db.WithContext(ctx).Model(&projectMemberModel{}).
-		Where("project_id = ? AND member_id = ?", projectID.String(), memberID.String()).
+		Where(postgres.UUIDEq("project_id")+" AND "+postgres.UUIDEq("member_id"), projectID.String(), memberID.String()).
 		Updates(map[string]interface{}{"role": role, "updated_at": time.Now().UTC()})
 	if res.Error != nil {
 		return res.Error
@@ -130,7 +130,7 @@ func (r *ProjectMemberRepository) UpdateRole(ctx context.Context, projectID kern
 
 func (r *ProjectMemberRepository) Remove(ctx context.Context, projectID kernel.ProjectID, memberID kernel.MemberID) error {
 	res := r.db.WithContext(ctx).
-		Where("project_id = ? AND member_id = ?", projectID.String(), memberID.String()).
+		Where(postgres.UUIDEq("project_id")+" AND "+postgres.UUIDEq("member_id"), projectID.String(), memberID.String()).
 		Delete(&projectMemberModel{})
 	if res.Error != nil {
 		return res.Error
@@ -144,7 +144,7 @@ func (r *ProjectMemberRepository) Remove(ctx context.Context, projectID kernel.P
 func (r *ProjectMemberRepository) HasAccess(ctx context.Context, projectID kernel.ProjectID, memberID kernel.MemberID) (bool, string, error) {
 	var row projectMemberModel
 	err := r.db.WithContext(ctx).
-		Where("project_id = ? AND member_id = ?", projectID.String(), memberID.String()).
+		Where(postgres.UUIDEq("project_id")+" AND "+postgres.UUIDEq("member_id"), projectID.String(), memberID.String()).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, "", nil

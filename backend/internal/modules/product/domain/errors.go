@@ -12,6 +12,7 @@ var (
 	ErrReleasePlanNotFound          = kernel.NewDomainError("RELEASE_PLAN_NOT_FOUND", "release plan not found")
 	ErrReleasePlanTemplateNotFound  = kernel.NewDomainError("RELEASE_PLAN_TEMPLATE_NOT_FOUND", "release plan template not found")
 	ErrReleasePlanJobNotFound       = kernel.NewDomainError("RELEASE_PLAN_JOB_NOT_FOUND", "release plan job not found")
+	ErrReleasePlanVersionNotFound   = kernel.NewDomainError("RELEASE_PLAN_VERSION_NOT_FOUND", "release plan version not found")
 	ErrInvalidReleasePlanTransition = kernel.NewDomainError("RELEASE_PLAN_INVALID_TRANSITION", "invalid release plan status transition")
 	ErrInvalidReleasePlanJobTransition = kernel.NewDomainError("RELEASE_PLAN_JOB_INVALID_TRANSITION", "invalid release plan job transition")
 	ErrEnvironmentNotFound             = kernel.NewDomainError("ENVIRONMENT_NOT_FOUND", "environment not found")

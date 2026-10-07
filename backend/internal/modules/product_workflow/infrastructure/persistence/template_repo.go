@@ -16,6 +16,9 @@ import (
 )
 
 func AutoMigrate(db *gorm.DB) error {
+	if !postgres.ShouldRunAutoMigrate(db) {
+		return nil
+	}
 	if db.Dialector.Name() == "postgres" {
 		if err := db.Exec("CREATE SCHEMA IF NOT EXISTS product").Error; err != nil {
 			return err

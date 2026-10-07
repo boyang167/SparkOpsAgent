@@ -5,6 +5,8 @@ import type {
   ProductVM,
   ProductWorkflowRunVM,
   ProductWorkflowVM,
+  ReleasePlanVersionDiffVM,
+  ReleasePlanVersionSummaryVM,
   ReleasePlanVM,
   WorkflowTemplatePreviewVM,
   WorkflowTemplateVM,
@@ -197,6 +199,27 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async listReleasePlanVersions(workspaceId: string, productId: string, planId: string) {
+      return upstreamFetch<{ items: ReleasePlanVersionSummaryVM[] }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/versions`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async getReleasePlanVersionDiff(
+      workspaceId: string,
+      productId: string,
+      planId: string,
+      version: number,
+      compareVersion?: number,
+    ) {
+      const query = compareVersion != null ? `?compare=${compareVersion}` : "";
+      return upstreamFetch<ReleasePlanVersionDiffVM>(
+        `/api/v1/products/${productId}/release-plans/${planId}/versions/${version}/diff${query}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
     async createReleasePlan(workspaceId: string, productId: string, input: Record<string, unknown>) {
       return upstreamFetch<{ id: string; status: string }>(
         `/api/v1/products/${productId}/release-plans`,
@@ -278,10 +301,24 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async listReleasePlanCollabEditors(workspaceId: string, productId: string, planId: string) {
+      return upstreamFetch<{ editors: import("@sparkops/contracts/product").ReleasePlanCollabEditor[] }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/collaboration/editors`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
     async cancelReleasePlan(workspaceId: string, productId: string, planId: string) {
       return upstreamFetch<{ id: string; status: string }>(
         `/api/v1/products/${productId}/release-plans/${planId}/cancel`,
         { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async deleteReleasePlan(workspaceId: string, productId: string, planId: string) {
+      return upstreamFetch<{ ok: boolean }>(
+        `/api/v1/products/${productId}/release-plans/${planId}`,
+        { method: "DELETE", options: { ...options, workspaceId } },
       );
     },
 

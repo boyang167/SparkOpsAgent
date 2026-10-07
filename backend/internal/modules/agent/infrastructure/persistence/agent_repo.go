@@ -16,6 +16,9 @@ import (
 )
 
 func AutoMigrate(db *gorm.DB) error {
+	if !postgres.ShouldRunAutoMigrate(db) {
+		return nil
+	}
 	if db.Dialector.Name() == "postgres" {
 		if err := db.Exec("CREATE SCHEMA IF NOT EXISTS agent").Error; err != nil {
 			return err
@@ -41,9 +44,9 @@ type versionModel struct {
 	Version          int
 	SystemPrompt     string
 	ModelName        string
-	ModelConfig      []byte
-	ToolIDs          []byte
-	KnowledgeBaseIDs []byte
+	ModelConfig      []byte `gorm:"type:jsonb;not null;default:'{}'"`
+	ToolIDs          []byte `gorm:"type:jsonb;not null;default:'[]'"`
+	KnowledgeBaseIDs []byte `gorm:"type:jsonb;not null;default:'[]'"`
 	postgres.AuditColumns
 }
 

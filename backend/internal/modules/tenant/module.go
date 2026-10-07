@@ -57,6 +57,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewGetOrganizationHandler(orgRepo),
 		query.NewListOrgMembersHandler(orgRepo),
 		query.NewMyOrgPermissionsHandler(orgRepo),
+		query.NewSearchOrgMemberCandidatesHandler(identityACL),
 		command.NewInviteOrgMemberHandler(orgRepo, identityACL, auditSvc),
 		command.NewUpdateOrgMemberRoleHandler(orgRepo, auditSvc),
 		command.NewRemoveOrgMemberHandler(orgRepo, auditSvc),
@@ -86,6 +87,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.GET("/api/v1/orgs/:orgId", auth, org, orgRead, handler.GetOrganization)
 	c.Engine.GET("/api/v1/orgs/:orgId/me/permissions", auth, org, orgMember, handler.MyOrgPermissions)
 	c.Engine.GET("/api/v1/orgs/:orgId/members", auth, org, orgManage, handler.ListOrgMembers)
+	c.Engine.GET("/api/v1/orgs/:orgId/member-candidates", auth, org, orgManage, handler.SearchOrgMemberCandidates)
 	c.Engine.POST("/api/v1/orgs/:orgId/members", auth, org, orgManage, handler.InviteOrgMember)
 	c.Engine.PATCH("/api/v1/orgs/:orgId/members/:memberId", auth, org, orgManage, handler.UpdateOrgMemberRole)
 	c.Engine.DELETE("/api/v1/orgs/:orgId/members/:memberId", auth, org, orgManage, handler.RemoveOrgMember)

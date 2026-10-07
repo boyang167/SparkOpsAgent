@@ -10,6 +10,7 @@ import (
 	tenantdomain "github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/port"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -20,7 +21,7 @@ func NewTenantACL(db *gorm.DB) *TenantACL { return &TenantACL{db: db} }
 func (a *TenantACL) MemberInWorkspace(ctx context.Context, memberID kernel.MemberID, wsID kernel.WorkspaceID) (bool, error) {
 	var count int64
 	err := a.db.WithContext(ctx).Table("tenant.workspace_members").
-		Where("workspace_id = ? AND member_id = ?", wsID.String(), memberID.String()).
+		Where(postgres.UUIDEq("workspace_id")+" AND "+postgres.UUIDEq("member_id"), wsID.String(), memberID.String()).
 		Count(&count).Error
 	return count > 0, err
 }
@@ -32,7 +33,7 @@ func (a *TenantACL) CanCreateProject(ctx context.Context, wsID kernel.WorkspaceI
 	}
 	err := a.db.WithContext(ctx).Table("tenant.workspaces").
 		Select("max_projects, org_id").
-		Where("id = ?", wsID.String()).
+		Where(postgres.UUIDEq("id"), wsID.String()).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return tenantdomain.ErrWorkspaceNotFound
@@ -54,7 +55,7 @@ func (a *TenantACL) CanCreateProject(ctx context.Context, wsID kernel.WorkspaceI
 	}
 	err = a.db.WithContext(ctx).Table("tenant.organizations").
 		Select("max_projects").
-		Where("id = ?", orgID.String()).
+		Where(postgres.UUIDEq("id"), orgID.String()).
 		First(&orgRow).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return tenantdomain.ErrOrganizationNotFound
@@ -70,7 +71,7 @@ func (a *TenantACL) CanCreateProject(ctx context.Context, wsID kernel.WorkspaceI
 	err = a.db.WithContext(ctx).Raw(`
 		SELECT COUNT(*) FROM workspace_app.projects p
 		JOIN tenant.workspaces w ON w.id = p.workspace_id
-		WHERE w.org_id = ? AND p.status = 'active' AND p.deleted_at IS NULL
+		WHERE w.org_id::uuid = ?::uuid AND p.status = 'active' AND p.deleted_at IS NULL
 	`, orgID.String()).Scan(&orgProjectCount).Error
 	if err != nil {
 		return err
@@ -84,7 +85,7 @@ func (a *TenantACL) OrgIDForWorkspace(ctx context.Context, wsID kernel.Workspace
 	}
 	err := a.db.WithContext(ctx).Table("tenant.workspaces").
 		Select("org_id").
-		Where("id = ? AND deleted_at IS NULL", wsID.String()).
+		Where(postgres.UUIDEq("id")+" AND deleted_at IS NULL", wsID.String()).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return kernel.OrgID{}, tenantdomain.ErrWorkspaceNotFound

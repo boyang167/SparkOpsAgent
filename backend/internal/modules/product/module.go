@@ -1,7 +1,9 @@
 package product
 
 import (
+	"context"
 	"fmt"
+	"log"
 
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	pwfevent "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/event"
@@ -44,6 +46,11 @@ func (m *Module) Register(c *appctx.Container) error {
 
 	repo := persistence.NewProductRepository(c.DB)
 	releasePlanRepo := persistence.NewReleasePlanRepository(c.DB)
+	if count, err := service.BackfillReleasePlanVersions(context.Background(), releasePlanRepo, 500); err != nil {
+		log.Printf("product: release plan version backfill failed: %v", err)
+	} else if count > 0 {
+		log.Printf("product: backfilled release plan version snapshots for %d plans", count)
+	}
 	sprintRepo := persistence.NewSprintRepository(c.DB)
 	environmentRepo := persistence.NewEnvironmentRepository(c.DB)
 	projectRepo := wspersistence.NewProjectRepository(c.DB)
@@ -71,8 +78,11 @@ func (m *Module) Register(c *appctx.Container) error {
 	)
 	boardHub := service.NewSprintBoardHub()
 	boardNotifier := service.NewSprintBoardNotifier(boardHub)
-	releasePlanExecutor := service.NewReleasePlanExecutor(releasePlanRepo, c.WorkflowRunTrigger)
+	releasePlanCollabHub := service.NewReleasePlanCollabHub()
+	releasePlanHookNotifier := service.NewReleasePlanHookNotifier(c.Config.PublicBaseURL())
+	releasePlanExecutor := service.NewReleasePlanExecutor(releasePlanRepo, c.WorkflowRunTrigger, releasePlanHookNotifier)
 	releasePlanNotifier := service.NewReleasePlanApprovalNotifier(c.Config.PublicBaseURL())
+	workflowSnapshotReader := acl.NewWorkflowSnapshotReader(c.DB)
 	releasePlanTemplateRepo := persistence.NewReleasePlanTemplateRepository(c.DB)
 	service.NewReleasePlanScheduler(releasePlanRepo, releasePlanExecutor, c.Logger).Start(c.Context)
 	sprintWorkItemExecutor := service.NewSprintWorkItemExecutor(repo, sprintRepo, c.WorkflowRunTrigger, pmRouter, boardNotifier)
@@ -102,19 +112,21 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewListActiveSprintsHandler(repo, sprintRepo),
 	)
 	sprintBoardWS := producthttp.NewSprintBoardWSHandler(boardHub)
+	releasePlanCollabWS := producthttp.NewReleasePlanCollabWSHandler(releasePlanCollabHub)
 
 	releasePlanHandlers := producthttp.NewReleasePlanHandlers(
 		command.NewCreateReleasePlanHandler(repo, releasePlanRepo, sprintRepo),
 		command.NewUpdateReleasePlanHandler(repo, releasePlanRepo, sprintRepo),
 		command.NewCancelReleasePlanHandler(repo, releasePlanRepo),
+		command.NewDeleteReleasePlanHandler(repo, releasePlanRepo),
 		command.NewReopenReleasePlanPlanningHandler(repo, releasePlanRepo),
 		command.NewAddReleasePlanJobHandler(repo, releasePlanRepo),
 		command.NewAddReleasePlanJobsFromWorkItemsHandler(repo, releasePlanRepo, sprintRepo),
 		command.NewUpdateReleasePlanJobHandler(repo, releasePlanRepo),
 		command.NewDeleteReleasePlanJobHandler(repo, releasePlanRepo),
 		command.NewReorderReleasePlanJobsHandler(repo, releasePlanRepo),
-		command.NewFinishReleasePlanPlanningHandler(repo, releasePlanRepo, releasePlanExecutor, releasePlanNotifier),
-		command.NewApproveReleasePlanHandler(repo, releasePlanRepo, releasePlanExecutor),
+		command.NewFinishReleasePlanPlanningHandler(repo, releasePlanRepo, releasePlanExecutor, releasePlanNotifier, releasePlanHookNotifier, workflowSnapshotReader),
+		command.NewApproveReleasePlanHandler(repo, releasePlanRepo, releasePlanExecutor, releasePlanHookNotifier),
 		command.NewRejectReleasePlanHandler(repo, releasePlanRepo),
 		command.NewMarkReleasePlanJobDoneHandler(repo, releasePlanRepo, releasePlanExecutor),
 		command.NewSkipReleasePlanJobHandler(repo, releasePlanRepo, releasePlanExecutor),
@@ -125,11 +137,14 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewCreateReleasePlanFromTemplateHandler(repo, releasePlanRepo, releasePlanTemplateRepo, sprintRepo),
 		command.NewListReleasePlanTemplatesHandler(releasePlanTemplateRepo),
 		command.NewDeleteReleasePlanTemplateHandler(releasePlanTemplateRepo),
-		command.NewApproveReleasePlanByTokenHandler(releasePlanRepo, releasePlanExecutor),
+		command.NewApproveReleasePlanByTokenHandler(releasePlanRepo, releasePlanExecutor, releasePlanHookNotifier),
 		command.NewRejectReleasePlanByTokenHandler(releasePlanRepo),
+		command.NewReleasePlanHookCallbackHandler(releasePlanRepo, releasePlanExecutor, releasePlanNotifier, releasePlanHookNotifier),
 		query.NewListReleasePlansHandler(repo, releasePlanRepo),
 		query.NewListWorkspaceReleasePlansHandler(repo, releasePlanRepo, sprintRepo),
 		query.NewGetReleasePlanHandlerWithSprint(repo, releasePlanRepo, sprintRepo),
+		query.NewListReleasePlanVersionsHandler(repo, releasePlanRepo),
+		query.NewGetReleasePlanVersionDiffHandler(repo, releasePlanRepo),
 		query.NewListBlockingReleasePlansHandler(releasePlanRepo),
 	)
 
@@ -150,6 +165,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		releasePlanHandlers,
 		sprintHandlers,
 		sprintBoardWS,
+		releasePlanCollabWS,
 		environmentHandlers,
 	)
 
@@ -194,8 +210,14 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CreateReleasePlan)
 	c.Engine.GET("/api/v1/products/:productId/release-plans/:planId",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetReleasePlan)
+	c.Engine.GET("/api/v1/products/:productId/release-plans/:planId/versions",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListReleasePlanVersions)
+	c.Engine.GET("/api/v1/products/:productId/release-plans/:planId/versions/:version/diff",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetReleasePlanVersionDiff)
 	c.Engine.PATCH("/api/v1/products/:productId/release-plans/:planId",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.UpdateReleasePlan)
+	c.Engine.DELETE("/api/v1/products/:productId/release-plans/:planId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.DeleteReleasePlan)
 	c.Engine.POST("/api/v1/products/:productId/release-plans/:planId/cancel",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CancelReleasePlan)
 	c.Engine.POST("/api/v1/products/:productId/release-plans/:planId/reopen-planning",
@@ -238,6 +260,14 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.POST("/api/v1/public/release-plans/approval/:token/approve", handler.PublicApproveReleasePlanByToken)
 	c.Engine.GET("/api/v1/public/release-plans/approval/:token/reject", handler.PublicRejectReleasePlanByToken)
 	c.Engine.POST("/api/v1/public/release-plans/approval/:token/reject", handler.PublicRejectReleasePlanByToken)
+	c.Engine.GET("/api/v1/public/release-plans/hook/:token/pass", handler.PublicPassReleasePlanHook)
+	c.Engine.POST("/api/v1/public/release-plans/hook/:token/pass", handler.PublicPassReleasePlanHook)
+	c.Engine.GET("/api/v1/public/release-plans/hook/:token/fail", handler.PublicFailReleasePlanHook)
+	c.Engine.POST("/api/v1/public/release-plans/hook/:token/fail", handler.PublicFailReleasePlanHook)
+	c.Engine.GET("/api/v1/products/:productId/release-plans/:planId/collaboration/editors",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListReleasePlanCollabEditors)
+	c.Engine.GET("/api/v1/products/:productId/release-plans/:planId/collaboration/ws",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ReleasePlanCollabWebSocket)
 
 	c.EventBus.Subscribe(deliveryevent.BuildCompletedName, subscriber.NewOnBuildCompleted(repo).Handle)
 	c.EventBus.Subscribe(pwfevent.WorkflowRunCompletedName, subscriber.NewOnWorkflowRunCompleted(releasePlanExecutor, sprintWorkItemExecutor).Handle)

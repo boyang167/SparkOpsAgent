@@ -21,7 +21,8 @@ type dataResourceModel struct {
 	Title           string
 	Description     string
 	Enabled         bool
-	postgres.AuditColumns
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func (dataResourceModel) TableName() string { return "governance.data_resources" }
@@ -46,7 +47,8 @@ type roleDataPolicyModel struct {
 	CustomRules    []byte `gorm:"column:custom_rules;type:jsonb"`
 	AllowedColumns []byte `gorm:"column:allowed_columns;type:jsonb"`
 	DeniedColumns  []byte `gorm:"column:denied_columns;type:jsonb"`
-	postgres.AuditColumns
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 func (roleDataPolicyModel) TableName() string { return "governance.role_data_policies" }
@@ -77,6 +79,9 @@ func NewDataPolicyStore(db *gorm.DB) *DataPolicyStore {
 }
 
 func (s *DataPolicyStore) AutoMigrate() error {
+	if postgres.SQLMigrationsApplied(s.db) {
+		return nil
+	}
 	if s.db.Dialector.Name() == "postgres" {
 		if err := s.db.Exec("CREATE SCHEMA IF NOT EXISTS governance").Error; err != nil {
 			return err
@@ -95,21 +100,21 @@ func (s *DataPolicyStore) seedDefaultResources(ctx context.Context) error {
 			SchemaName: "workspace_app", PhysicalTable: "projects",
 			OwnerColumn: "created_by", WorkspaceColumn: "workspace_id",
 			Title: "项目", Description: "工作区项目数据", Enabled: true,
-			AuditColumns: postgres.AuditColumns{CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
+			CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 		},
 		{
 			ID: "a1000001-0000-4000-8000-000000000002", ResourceKey: "agent",
 			SchemaName: "agent", PhysicalTable: "agents",
 			OwnerColumn: "created_by", WorkspaceColumn: "workspace_id",
 			Title: "Agent", Description: "工作区 Agent 数据", Enabled: true,
-			AuditColumns: postgres.AuditColumns{CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
+			CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 		},
 		{
 			ID: "a1000001-0000-4000-8000-000000000003", ResourceKey: "member",
 			SchemaName: "governance", PhysicalTable: "role_bindings",
 			OwnerColumn: "member_id", WorkspaceColumn: "workspace_id",
 			Title: "成员绑定", Description: "工作区成员角色绑定", Enabled: true,
-			AuditColumns: postgres.AuditColumns{CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
+			CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 		},
 	}
 	for _, row := range rows {
@@ -173,8 +178,8 @@ func (s *DataPolicyStore) ReplaceForRole(ctx context.Context, roleID string, pol
 			}
 			if err := tx.Create(&roleDataPolicyModel{
 				RoleID: roleID, ResourceKey: resourceKey, Action: action, DataScope: scope,
-				CustomRules:  customRules,
-				AuditColumns: postgres.AuditColumns{CreatedAt: now, UpdatedAt: now},
+				CustomRules: customRules,
+				CreatedAt:   now, UpdatedAt: now,
 			}).Error; err != nil {
 				return err
 			}

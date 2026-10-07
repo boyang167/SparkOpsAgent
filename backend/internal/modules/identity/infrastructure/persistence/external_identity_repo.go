@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -28,6 +29,9 @@ func NewExternalIdentityRepository(db *gorm.DB) *ExternalIdentityRepository {
 }
 
 func (r *ExternalIdentityRepository) AutoMigrate() error {
+	if !postgres.ShouldRunAutoMigrate(r.db) {
+		return nil
+	}
 	if r.db.Dialector.Name() == "postgres" {
 		if err := r.db.Exec("CREATE SCHEMA IF NOT EXISTS identity").Error; err != nil {
 			return err

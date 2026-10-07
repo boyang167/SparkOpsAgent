@@ -82,7 +82,7 @@ func (a *IdentityACL) SearchInviteCandidates(
 		  )
 		  AND NOT EXISTS (
 		    SELECT 1 FROM tenant.workspace_members wm
-		    WHERE wm.workspace_id = ? AND wm.member_id = m.id
+		    WHERE wm.workspace_id::uuid = ?::uuid AND wm.member_id::uuid = m.id::uuid
 		  )
 		ORDER BY
 		  CASE WHEN lower(m.email) LIKE ? THEN 0 ELSE 1 END,

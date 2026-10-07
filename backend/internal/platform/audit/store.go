@@ -7,6 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 )
 
 type GormStore struct {
@@ -18,6 +20,9 @@ func NewGormStore(db *gorm.DB) *GormStore {
 }
 
 func (s *GormStore) AutoMigrate() error {
+	if !postgres.ShouldRunAutoMigrate(s.db) {
+		return nil
+	}
 	if s.db.Dialector.Name() == "postgres" {
 		if err := s.db.Exec("CREATE SCHEMA IF NOT EXISTS platform").Error; err != nil {
 			return err

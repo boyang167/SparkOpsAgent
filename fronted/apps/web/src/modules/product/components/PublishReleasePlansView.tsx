@@ -3,23 +3,26 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { ReleasePlanCreateModal } from "./ReleasePlanCreateModal";
 import { WorkspaceReleasePlansPanel } from "./WorkspaceReleasePlansPanel";
 
 interface PublishReleasePlansViewProps {
   workspaceId: string;
 }
 
+function buildCreateHref(productId?: string) {
+  const params = new URLSearchParams();
+  if (productId) params.set("productId", productId);
+  const query = params.toString();
+  return query ? `/publish/release-plans/new?${query}` : "/publish/release-plans/new";
+}
+
 export function PublishReleasePlansView({ workspaceId }: PublishReleasePlansViewProps) {
   const router = useRouter();
-  const [createOpen, setCreateOpen] = useState(false);
   const [templateCreateOpen, setTemplateCreateOpen] = useState(false);
   const [templateCount, setTemplateCount] = useState(0);
-  const [defaultProductId, setDefaultProductId] = useState<string | undefined>();
 
   function openCreate(productId?: string) {
-    setDefaultProductId(productId);
-    setCreateOpen(true);
+    router.push(buildCreateHref(productId));
   }
 
   function onPlanCreated(productId: string, planId: string) {
@@ -56,13 +59,6 @@ export function PublishReleasePlansView({ workspaceId }: PublishReleasePlansView
         onTemplatesLoaded={setTemplateCount}
         templateCreateOpen={templateCreateOpen}
         onTemplateCreateOpenChange={setTemplateCreateOpen}
-      />
-      <ReleasePlanCreateModal
-        open={createOpen}
-        workspaceId={workspaceId}
-        defaultProductId={defaultProductId}
-        onClose={() => setCreateOpen(false)}
-        onCreated={onPlanCreated}
       />
     </div>
   );

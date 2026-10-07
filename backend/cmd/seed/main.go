@@ -140,6 +140,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	bootstrapWorkspace := govcommand.NewBootstrapWorkspaceHandler(roleRepo, bindingRepo, nil)
+	for _, ws := range workspaces {
+		if err := bootstrapWorkspace.Handle(ctx, ws.ID, memberID, authz.DefaultAdminPermissions); err != nil {
+			log.Fatal(err)
+		}
+	}
 	accounts, err := seedRoleMembersAcrossWorkspaces(
 		ctx, db, register, orgRepo, wsRepo, roleRepo, bindingRepo, projectRepo, projectMemberRepo, workspaces,
 	)

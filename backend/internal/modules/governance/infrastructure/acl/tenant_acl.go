@@ -17,7 +17,7 @@ func NewTenantACL(db *gorm.DB) *TenantACL { return &TenantACL{db: db} }
 func (a *TenantACL) MemberInWorkspace(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID) (bool, error) {
 	var count int64
 	err := a.db.WithContext(ctx).Table("tenant.workspace_members").
-		Where("workspace_id = ? AND member_id = ?", wsID.String(), memberID.String()).
+		Where(postgres.UUIDEq("workspace_id")+" AND "+postgres.UUIDEq("member_id"), wsID.String(), memberID.String()).
 		Count(&count).Error
 	return count > 0, err
 }
@@ -35,8 +35,8 @@ func (a *TenantACL) AddWorkspaceMember(ctx context.Context, wsID kernel.Workspac
 }
 
 type workspaceMemberInsertRow struct {
-	WorkspaceID string `gorm:"column:workspace_id;primaryKey"`
-	MemberID    string `gorm:"column:member_id;primaryKey"`
+	WorkspaceID string `gorm:"column:workspace_id;primaryKey;type:uuid"`
+	MemberID    string `gorm:"column:member_id;primaryKey;type:uuid"`
 	Role        string `gorm:"column:role"`
 	JoinedAt    time.Time `gorm:"column:joined_at"`
 	postgres.AuditColumns

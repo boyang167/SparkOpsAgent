@@ -3,6 +3,7 @@ package http
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -21,9 +22,10 @@ type Handler struct {
 	listWs           *query.ListWorkspacesHandler
 	listOrgs         *query.ListOrganizationsHandler
 	getOrg           *query.GetOrganizationHandler
-	listOrgMembers   *query.ListOrgMembersHandler
-	myOrgPerms       *query.MyOrgPermissionsHandler
-	inviteOrgMember  *command.InviteOrgMemberHandler
+	listOrgMembers          *query.ListOrgMembersHandler
+	myOrgPerms              *query.MyOrgPermissionsHandler
+	searchOrgMemberCandidates *query.SearchOrgMemberCandidatesHandler
+	inviteOrgMember         *command.InviteOrgMemberHandler
 	updateOrgRole    *command.UpdateOrgMemberRoleHandler
 	removeOrgMember  *command.RemoveOrgMemberHandler
 	listPlatformOrgs *query.ListPlatformOrganizationsHandler
@@ -47,6 +49,7 @@ func NewHandler(
 	getOrg *query.GetOrganizationHandler,
 	listOrgMembers *query.ListOrgMembersHandler,
 	myOrgPerms *query.MyOrgPermissionsHandler,
+	searchOrgMemberCandidates *query.SearchOrgMemberCandidatesHandler,
 	inviteOrgMember *command.InviteOrgMemberHandler,
 	updateOrgRole *command.UpdateOrgMemberRoleHandler,
 	removeOrgMember *command.RemoveOrgMemberHandler,
@@ -65,6 +68,7 @@ func NewHandler(
 	return &Handler{
 		createOrg: createOrg, createWs: createWs, listWs: listWs, listOrgs: listOrgs,
 		getOrg: getOrg, listOrgMembers: listOrgMembers, myOrgPerms: myOrgPerms,
+		searchOrgMemberCandidates: searchOrgMemberCandidates,
 		inviteOrgMember: inviteOrgMember, updateOrgRole: updateOrgRole, removeOrgMember: removeOrgMember,
 		listPlatformOrgs: listPlatformOrgs, createPlatformOrg: createPlatformOrg,
 		updateOrgStatus: updateOrgStatus, deletePlatformOrg: deletePlatformOrg, transferOwner: transferOwner, listAuditLogs: listAuditLogs,
@@ -175,6 +179,27 @@ func (h *Handler) MyOrgPermissions(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"permissions": perms})
+}
+
+func (h *Handler) SearchOrgMemberCandidates(c *gin.Context) {
+	orgID, ok := httpx.OrgIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_ORG_REQUIRED", "organization required", http.StatusBadRequest)
+		return
+	}
+	q := strings.TrimSpace(c.Query("q"))
+	limit := query.DefaultOrgMemberSearchLimit
+	if raw := c.Query("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	items, err := h.searchOrgMemberCandidates.Handle(c.Request.Context(), orgID, q, limit)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"items": items})
 }
 
 func (h *Handler) InviteOrgMember(c *gin.Context) {

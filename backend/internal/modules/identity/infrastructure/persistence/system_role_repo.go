@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -19,6 +20,9 @@ func NewSystemRoleStore(db *gorm.DB) *SystemRoleStore {
 }
 
 func (s *SystemRoleStore) AutoMigrate() error {
+	if postgres.SQLMigrationsApplied(s.db) {
+		return nil
+	}
 	if s.db.Dialector.Name() == "postgres" {
 		if err := s.db.Exec("CREATE SCHEMA IF NOT EXISTS identity").Error; err != nil {
 			return err

@@ -24,6 +24,9 @@ func NewTenantStore(db *gorm.DB) *TenantStore {
 }
 
 func AutoMigrate(db *gorm.DB) error {
+	if !postgres.ShouldRunAutoMigrate(db) {
+		return nil
+	}
 	if db.Dialector.Name() == "postgres" {
 		if err := db.Exec("CREATE SCHEMA IF NOT EXISTS tenant").Error; err != nil {
 			return err
@@ -56,8 +59,8 @@ func ensureOrganizationSlugPartialUniqueIndex(db *gorm.DB) error {
 }
 
 type organizationMemberModel struct {
-	OrgID    string `gorm:"primaryKey"`
-	MemberID string `gorm:"primaryKey"`
+	OrgID    string `gorm:"primaryKey;type:uuid"`
+	MemberID string `gorm:"primaryKey;type:uuid"`
 	Role     string
 	JoinedAt time.Time
 	postgres.AuditColumns
@@ -66,7 +69,7 @@ type organizationMemberModel struct {
 func (organizationMemberModel) TableName() string { return "tenant.organization_members" }
 
 type organizationModel struct {
-	ID            string `gorm:"column:id;primaryKey"`
+	ID            string `gorm:"column:id;primaryKey;type:uuid"`
 	Name          string
 	Slug          string
 	Status        string
@@ -80,8 +83,8 @@ type organizationModel struct {
 func (organizationModel) TableName() string { return "tenant.organizations" }
 
 type workspaceModel struct {
-	ID              string `gorm:"column:id;primaryKey"`
-	OrgID           string
+	ID              string `gorm:"column:id;primaryKey;type:uuid"`
+	OrgID           string `gorm:"type:uuid"`
 	Name            string
 	Slug            string
 	Status          string
@@ -94,8 +97,8 @@ type workspaceModel struct {
 func (workspaceModel) TableName() string { return "tenant.workspaces" }
 
 type workspaceMemberModel struct {
-	WorkspaceID string `gorm:"primaryKey"`
-	MemberID    string `gorm:"primaryKey"`
+	WorkspaceID string `gorm:"primaryKey;type:uuid"`
+	MemberID    string `gorm:"primaryKey;type:uuid"`
 	Role        string
 	JoinedAt    time.Time
 	postgres.AuditColumns
@@ -116,7 +119,7 @@ func (s *TenantStore) SaveOrganization(ctx context.Context, org *model.Organizat
 
 func (s *TenantStore) FindOrganizationByID(ctx context.Context, id kernel.OrgID) (*model.Organization, error) {
 	var row organizationModel
-	err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", id.String()).First(&row).Error
+	err := s.db.WithContext(ctx).Where("id = ?::uuid AND deleted_at IS NULL", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrOrganizationNotFound
 	}
@@ -170,7 +173,7 @@ func (s *TenantStore) listOrganizations(ctx context.Context, includeDeleted bool
 
 func (s *TenantStore) UpdateOrganizationStatus(ctx context.Context, orgID kernel.OrgID, status string) error {
 	res := s.db.WithContext(ctx).Model(&organizationModel{}).
-		Where("id = ? AND deleted_at IS NULL", orgID.String()).
+		Where("id = ?::uuid AND deleted_at IS NULL", orgID.String()).
 		Updates(map[string]interface{}{"status": status, "updated_at": time.Now().UTC()})
 	if res.Error != nil {
 		return res.Error
@@ -183,7 +186,7 @@ func (s *TenantStore) UpdateOrganizationStatus(ctx context.Context, orgID kernel
 
 func (s *TenantStore) SoftDeleteOrganization(ctx context.Context, orgID kernel.OrgID) error {
 	res := s.db.WithContext(ctx).
-		Where("id = ? AND deleted_at IS NULL", orgID.String()).
+		Where("id = ?::uuid AND deleted_at IS NULL", orgID.String()).
 		Delete(&organizationModel{})
 	if res.Error != nil {
 		return res.Error
@@ -197,7 +200,7 @@ func (s *TenantStore) SoftDeleteOrganization(ctx context.Context, orgID kernel.O
 func (s *TenantStore) TransferOrganizationOwner(ctx context.Context, orgID kernel.OrgID, fromID, toID kernel.MemberID) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var fromRow organizationMemberModel
-		if err := tx.Where("org_id = ? AND member_id = ?", orgID.String(), fromID.String()).
+		if err := tx.Where("org_id = ?::uuid AND member_id = ?::uuid", orgID.String(), fromID.String()).
 			First(&fromRow).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return domain.ErrOrgMemberNotFound
@@ -208,7 +211,7 @@ func (s *TenantStore) TransferOrganizationOwner(ctx context.Context, orgID kerne
 			return domain.ErrOnlyOwnerCanTransfer
 		}
 		var toRow organizationMemberModel
-		if err := tx.Where("org_id = ? AND member_id = ?", orgID.String(), toID.String()).
+		if err := tx.Where("org_id = ?::uuid AND member_id = ?::uuid", orgID.String(), toID.String()).
 			First(&toRow).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return domain.ErrNewOwnerNotMember
@@ -220,12 +223,12 @@ func (s *TenantStore) TransferOrganizationOwner(ctx context.Context, orgID kerne
 		}
 		now := time.Now().UTC()
 		if err := tx.Model(&organizationMemberModel{}).
-			Where("org_id = ? AND member_id = ?", orgID.String(), fromID.String()).
+			Where("org_id = ?::uuid AND member_id = ?::uuid", orgID.String(), fromID.String()).
 			Updates(map[string]interface{}{"role": domain.OrgRoleAdmin, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		return tx.Model(&organizationMemberModel{}).
-			Where("org_id = ? AND member_id = ?", orgID.String(), toID.String()).
+			Where("org_id = ?::uuid AND member_id = ?::uuid", orgID.String(), toID.String()).
 			Updates(map[string]interface{}{"role": domain.OrgRoleOwner, "updated_at": now}).Error
 	})
 }
@@ -241,7 +244,7 @@ func (s *TenantStore) ExistsOrganizationBySlug(ctx context.Context, slug string)
 func (s *TenantStore) AddOrganizationMember(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID, role string) error {
 	var existing int64
 	err := s.db.WithContext(ctx).Model(&organizationMemberModel{}).
-		Where("org_id = ? AND member_id = ?", orgID.String(), memberID.String()).
+		Where("org_id = ?::uuid AND member_id = ?::uuid", orgID.String(), memberID.String()).
 		Count(&existing).Error
 	if err != nil {
 		return err
@@ -263,7 +266,7 @@ func (s *TenantStore) AddOrganizationMember(ctx context.Context, orgID kernel.Or
 func (s *TenantStore) IsWorkspaceMember(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID) (bool, error) {
 	var count int64
 	err := s.db.WithContext(ctx).Model(&workspaceMemberModel{}).
-		Where("workspace_id = ? AND member_id = ?", workspaceID.String(), memberID.String()).
+		Where("workspace_id = ?::uuid AND member_id = ?::uuid", workspaceID.String(), memberID.String()).
 		Count(&count).Error
 	return count > 0, err
 }
@@ -279,7 +282,7 @@ func (s *TenantStore) CanCreateWorkspaceInOrg(ctx context.Context, orgID kernel.
 func (s *TenantStore) IsOrganizationMember(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID) (bool, error) {
 	var count int64
 	err := s.db.WithContext(ctx).Model(&organizationMemberModel{}).
-		Where("org_id = ? AND member_id = ?", orgID.String(), memberID.String()).
+		Where("org_id = ?::uuid AND member_id = ?::uuid", orgID.String(), memberID.String()).
 		Count(&count).Error
 	return count > 0, err
 }
@@ -287,7 +290,7 @@ func (s *TenantStore) IsOrganizationMember(ctx context.Context, orgID kernel.Org
 func (s *TenantStore) GetOrganizationMemberRole(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID) (string, error) {
 	var row organizationMemberModel
 	err := s.db.WithContext(ctx).
-		Where("org_id = ? AND member_id = ?", orgID.String(), memberID.String()).
+		Where("org_id = ?::uuid AND member_id = ?::uuid", orgID.String(), memberID.String()).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", domain.ErrOrgMemberNotFound
@@ -367,7 +370,7 @@ func (s *TenantStore) ListOrganizationMembers(ctx context.Context, orgID kernel.
 
 func (s *TenantStore) UpdateOrganizationMemberRole(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID, role string) error {
 	res := s.db.WithContext(ctx).Model(&organizationMemberModel{}).
-		Where("org_id = ? AND member_id = ?", orgID.String(), memberID.String()).
+		Where("org_id = ?::uuid AND member_id = ?::uuid", orgID.String(), memberID.String()).
 		Updates(map[string]interface{}{"role": role, "updated_at": time.Now().UTC()})
 	if res.Error != nil {
 		return res.Error
@@ -380,7 +383,7 @@ func (s *TenantStore) UpdateOrganizationMemberRole(ctx context.Context, orgID ke
 
 func (s *TenantStore) RemoveOrganizationMember(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID) error {
 	res := s.db.WithContext(ctx).
-		Where("org_id = ? AND member_id = ?", orgID.String(), memberID.String()).
+		Where("org_id = ?::uuid AND member_id = ?::uuid", orgID.String(), memberID.String()).
 		Delete(&organizationMemberModel{})
 	if res.Error != nil {
 		return res.Error
@@ -394,7 +397,7 @@ func (s *TenantStore) RemoveOrganizationMember(ctx context.Context, orgID kernel
 func (s *TenantStore) CountOrganizationMembersByRole(ctx context.Context, orgID kernel.OrgID, role string) (int, error) {
 	var count int64
 	err := s.db.WithContext(ctx).Model(&organizationMemberModel{}).
-		Where("org_id = ? AND role = ?", orgID.String(), role).
+		Where("org_id = ?::uuid AND role = ?", orgID.String(), role).
 		Count(&count).Error
 	return int(count), err
 }
@@ -447,7 +450,7 @@ func (s *TenantStore) SaveWorkspace(ctx context.Context, ws *model.Workspace) er
 
 func (s *TenantStore) FindWorkspaceByID(ctx context.Context, id kernel.WorkspaceID) (*model.Workspace, error) {
 	var row workspaceModel
-	err := s.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := s.db.WithContext(ctx).Where("id = ?::uuid", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrWorkspaceNotFound
 	}
@@ -513,7 +516,7 @@ func (s *TenantStore) ListWorkspacesByMember(ctx context.Context, memberID kerne
 		Select("tenant.workspaces.*").
 		Joins("JOIN tenant.workspace_members wm ON wm.workspace_id = tenant.workspaces.id").
 		Joins("JOIN tenant.organizations o ON o.id = tenant.workspaces.org_id AND o.deleted_at IS NULL").
-		Where("wm.member_id = ?", memberID.String()).
+		Where("wm.member_id = ?::uuid", memberID.String()).
 		Where("tenant.workspaces.deleted_at IS NULL").
 		Find(&rows).Error
 	if err != nil {
@@ -529,7 +532,7 @@ func (s *TenantStore) ListWorkspacesByMember(ctx context.Context, memberID kerne
 func (s *TenantStore) ExistsWorkspaceByOrgSlug(ctx context.Context, orgID kernel.OrgID, slug string) (bool, error) {
 	var count int64
 	err := s.db.WithContext(ctx).Model(&workspaceModel{}).
-		Where("org_id = ? AND slug = ?", orgID.String(), slug).Count(&count).Error
+		Where("org_id = ?::uuid AND slug = ?", orgID.String(), slug).Count(&count).Error
 	return count > 0, err
 }
 
@@ -621,7 +624,7 @@ func (r *orgRepo) CountMembersByRole(ctx context.Context, orgID kernel.OrgID, ro
 }
 func (s *TenantStore) UpdateOrganizationQuota(ctx context.Context, orgID kernel.OrgID, quota model.OrgQuota) error {
 	res := s.db.WithContext(ctx).Model(&organizationModel{}).
-		Where("id = ?", orgID.String()).
+		Where("id = ?::uuid", orgID.String()).
 		Updates(map[string]interface{}{
 			"max_workspaces": quota.MaxWorkspaces,
 			"max_agents":     quota.MaxAgents,
@@ -641,7 +644,7 @@ func (s *TenantStore) UpdateOrganizationQuota(ctx context.Context, orgID kernel.
 func (s *TenantStore) CountWorkspacesByOrg(ctx context.Context, orgID kernel.OrgID) (int, error) {
 	var count int64
 	err := s.db.WithContext(ctx).Model(&workspaceModel{}).
-		Where("org_id = ? AND deleted_at IS NULL", orgID.String()).
+		Where("org_id = ?::uuid AND deleted_at IS NULL", orgID.String()).
 		Count(&count).Error
 	return int(count), err
 }

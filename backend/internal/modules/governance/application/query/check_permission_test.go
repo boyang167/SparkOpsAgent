@@ -181,7 +181,7 @@ func TestCheckerHasPermission(t *testing.T) {
 
 	roles := newMemoryRoleRepo()
 	bindings := newMemoryBindingRepo(roles)
-	checker := query.NewChecker(bindings)
+	checker := query.NewChecker(bindings, nil)
 
 	role := model.NewRole(wsID, "admin", []string{"governance:admin"}, nil)
 	require.NoError(t, roles.Save(ctx, role))

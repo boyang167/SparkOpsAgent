@@ -11,7 +11,9 @@ alwaysApply: false
 
 交付**企业版控制台**体验：信息层次清晰、操作可预期、页面干净清爽、交互友好、视觉克制但有艺术感。避免「后台模板感」和「堆组件感」。
 
-详细规范与 checklist：`.cursor/skills/fronted/SKILL.md`
+**设计方法论（内容优先 / 近乎无色 / 空间层级）：** `.cursor/skills/apple-restrained-ui/SKILL.md`
+
+**组件与交互规范：** `.cursor/skills/fronted/SKILL.md`
 
 ## 路径约定
 

@@ -17,6 +17,7 @@ type ReleasePlanListFilter struct {
 type ReleasePlanRepository interface {
 	SavePlan(ctx context.Context, plan *model.ReleasePlan) error
 	UpdatePlan(ctx context.Context, plan *model.ReleasePlan) error
+	DeletePlan(ctx context.Context, planID kernel.ReleasePlanID) error
 	FindPlanByID(ctx context.Context, id kernel.ReleasePlanID) (*model.ReleasePlan, error)
 	ListPlansByProduct(ctx context.Context, productID kernel.ProductID) ([]*model.ReleasePlan, error)
 	ListPlansByProductFiltered(ctx context.Context, productID kernel.ProductID, sprintID *kernel.SprintID, filter ReleasePlanListFilter) ([]*model.ReleasePlan, error)
@@ -30,8 +31,14 @@ type ReleasePlanRepository interface {
 	ListJobsByPlan(ctx context.Context, planID kernel.ReleasePlanID) ([]model.ReleasePlanJob, error)
 	SaveAuditLog(ctx context.Context, log *model.ReleasePlanAuditLog) error
 	ListAuditLogs(ctx context.Context, planID kernel.ReleasePlanID, limit int) ([]model.ReleasePlanAuditLog, error)
+	SaveVersion(ctx context.Context, version *model.ReleasePlanVersion) error
+	ListVersionsByPlan(ctx context.Context, planID kernel.ReleasePlanID, limit int) ([]model.ReleasePlanVersion, error)
+	GetVersion(ctx context.Context, planID kernel.ReleasePlanID, version int) (*model.ReleasePlanVersion, error)
+	UpdatePlanVersion(ctx context.Context, planID kernel.ReleasePlanID, version int) error
+	ListPlanIDsWithoutVersions(ctx context.Context, limit int) ([]kernel.ReleasePlanID, error)
 	FindJobByWorkflowRunID(ctx context.Context, runID kernel.ProductWorkflowRunID) (*model.ReleasePlanJob, *model.ReleasePlan, error)
 	FindPlanByApprovalToken(ctx context.Context, token string) (*model.ReleasePlan, error)
+	FindPlanByHookToken(ctx context.Context, token string) (*model.ReleasePlan, error)
 	ListDueScheduledPlans(ctx context.Context, now time.Time) ([]*model.ReleasePlan, error)
 }
 

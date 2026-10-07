@@ -84,6 +84,9 @@ func NewMenuStore(db *gorm.DB) *MenuStore {
 }
 
 func (s *MenuStore) AutoMigrate() error {
+	if !postgres.ShouldRunAutoMigrate(s.db) {
+		return nil
+	}
 	if s.db.Dialector.Name() == "postgres" {
 		if err := s.db.Exec("CREATE SCHEMA IF NOT EXISTS governance").Error; err != nil {
 			return err
@@ -390,7 +393,7 @@ func (s *MenuStore) FindGroupMenu(ctx context.Context, workspaceID kernel.Worksp
 	var row menuModel
 	err := s.db.WithContext(ctx).
 		Where("workspace_id = ? AND deleted_at IS NULL", workspaceID.String()).
-		Where("(path = ? OR name = ?) AND (parent_id IS NULL OR parent_id = '' OR parent_id = '0')", groupKey, groupKey).
+		Where("(path = ? OR name = ?) AND parent_id IS NULL", groupKey, groupKey).
 		Order("sort ASC, created_at ASC").
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

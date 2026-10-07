@@ -8,6 +8,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -33,6 +34,7 @@ type UpdateReleasePlanInput struct {
 	ReleaseWindowEnd    *time.Time
 	ApprovalEnabled     *bool
 	ApprovalConfig      *model.ApprovalConfig
+	HookSettings        *model.ReleasePlanHookSettings
 	ScheduleExecuteTime *time.Time
 	ClearScheduleTime   bool
 	SprintID            *kernel.SprintID
@@ -81,6 +83,7 @@ func (h *CreateReleasePlanHandler) Handle(ctx context.Context, productID kernel.
 		auditDetail["sprint_id"] = input.SprintID.String()
 	}
 	_ = h.audit(ctx, plan.ID, actor, "create", auditDetail)
+	_ = persistReleasePlanVersion(ctx, h.plans, plan, actor, "create")
 	return plan, nil
 }
 
@@ -123,14 +126,17 @@ func (h *AddReleasePlanJobHandler) Handle(ctx context.Context, productID kernel.
 		return nil, err
 	}
 	_ = h.audit(ctx, plan.ID, actor, "add_job", map[string]any{"job_id": job.ID.String(), "name": job.Name})
+	_ = recordPlanVersionAfterReload(ctx, h.plans, plan.ID, actor, "add_job")
 	return job, nil
 }
 
 type FinishReleasePlanPlanningHandler struct {
-	products repository.ProductRepository
-	plans    repository.ReleasePlanRepository
-	executor *service.ReleasePlanExecutor
-	notifier *service.ReleasePlanApprovalNotifier
+	products   repository.ProductRepository
+	plans      repository.ReleasePlanRepository
+	executor   *service.ReleasePlanExecutor
+	notifier   *service.ReleasePlanApprovalNotifier
+	hooks      *service.ReleasePlanHookNotifier
+	snapshots  port.WorkflowSnapshotReader
 }
 
 func NewFinishReleasePlanPlanningHandler(
@@ -138,8 +144,13 @@ func NewFinishReleasePlanPlanningHandler(
 	plans repository.ReleasePlanRepository,
 	executor *service.ReleasePlanExecutor,
 	notifier *service.ReleasePlanApprovalNotifier,
+	hooks *service.ReleasePlanHookNotifier,
+	snapshots port.WorkflowSnapshotReader,
 ) *FinishReleasePlanPlanningHandler {
-	return &FinishReleasePlanPlanningHandler{products: products, plans: plans, executor: executor, notifier: notifier}
+	return &FinishReleasePlanPlanningHandler{
+		products: products, plans: plans, executor: executor,
+		notifier: notifier, hooks: hooks, snapshots: snapshots,
+	}
 }
 
 func (h *FinishReleasePlanPlanningHandler) Handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID, actor kernel.MemberID) (*model.ReleasePlan, error) {
@@ -147,22 +158,34 @@ func (h *FinishReleasePlanPlanningHandler) Handle(ctx context.Context, productID
 	if err != nil {
 		return nil, err
 	}
+	if plan.Status != model.ReleasePlanStatusPlanning {
+		return nil, domain.ErrInvalidReleasePlanTransition
+	}
+	if err := service.MaterializeWorkflowSnapshots(ctx, plan, h.snapshots); err != nil {
+		return nil, err
+	}
+	flow := releasePlanFlowDeps{plans: h.plans, executor: h.executor, approval: h.notifier, hooks: h.hooks}
+	if err := flow.persistJobs(ctx, plan); err != nil {
+		return nil, err
+	}
+	if plan.HookSettings.EventEnabled(model.ReleasePlanHookEventFinishPlanning) {
+		flow.beginHookWait(plan, model.ReleasePlanHookEventFinishPlanning)
+		if err := h.plans.UpdatePlan(ctx, plan); err != nil {
+			return nil, err
+		}
+		_ = h.audit(ctx, plan.ID, actor, "finish_planning", map[string]any{"status": plan.Status, "hook": "finish_planning"})
+		_ = recordPlanVersionAfterReload(ctx, h.plans, plan.ID, actor, "finish_planning")
+		flow.sendHookAsync(plan, model.ReleasePlanHookEventFinishPlanning)
+		return h.plans.FindPlanByID(ctx, planID)
+	}
 	if err := plan.FinishPlanning(); err != nil {
 		return nil, err
 	}
-	initApprovalToken(plan)
-	if err := h.plans.UpdatePlan(ctx, plan); err != nil {
+	_ = h.audit(ctx, plan.ID, actor, "finish_planning", map[string]any{"status": plan.Status})
+	_ = recordPlanVersionAfterReload(ctx, h.plans, plan.ID, actor, "finish_planning")
+	if err := flow.afterPlanningComplete(ctx, plan, actor); err != nil {
 		return nil, err
 	}
-	_ = h.audit(ctx, plan.ID, actor, "finish_planning", map[string]any{"status": plan.Status})
-	if plan.Status == model.ReleasePlanStatusWaitForApproval && h.notifier != nil {
-		go func() {
-			notifyCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			_ = h.notifier.NotifyApproval(notifyCtx, plan)
-		}()
-	}
-	maybeAdvanceReleasePlan(ctx, h.plans, h.executor, plan.ID, actor)
 	return h.plans.FindPlanByID(ctx, planID)
 }
 
@@ -170,10 +193,16 @@ type ApproveReleasePlanHandler struct {
 	products repository.ProductRepository
 	plans    repository.ReleasePlanRepository
 	executor *service.ReleasePlanExecutor
+	hooks    *service.ReleasePlanHookNotifier
 }
 
-func NewApproveReleasePlanHandler(products repository.ProductRepository, plans repository.ReleasePlanRepository, executor *service.ReleasePlanExecutor) *ApproveReleasePlanHandler {
-	return &ApproveReleasePlanHandler{products: products, plans: plans, executor: executor}
+func NewApproveReleasePlanHandler(
+	products repository.ProductRepository,
+	plans repository.ReleasePlanRepository,
+	executor *service.ReleasePlanExecutor,
+	hooks *service.ReleasePlanHookNotifier,
+) *ApproveReleasePlanHandler {
+	return &ApproveReleasePlanHandler{products: products, plans: plans, executor: executor, hooks: hooks}
 }
 
 func (h *ApproveReleasePlanHandler) Handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID, actor kernel.MemberID) (*model.ReleasePlan, error) {
@@ -183,6 +212,16 @@ func (h *ApproveReleasePlanHandler) Handle(ctx context.Context, productID kernel
 	}
 	if err := plan.Approve(); err != nil {
 		return nil, err
+	}
+	flow := releasePlanFlowDeps{plans: h.plans, executor: h.executor, hooks: h.hooks}
+	if plan.Status == model.ReleasePlanStatusWaitExecuteExternalCheck {
+		flow.beginHookWait(plan, model.ReleasePlanHookEventBeforeExecute)
+		if err := h.plans.UpdatePlan(ctx, plan); err != nil {
+			return nil, err
+		}
+		_ = h.audit(ctx, plan.ID, actor, "approve", map[string]any{"hook": "before_execute"})
+		flow.sendHookAsync(plan, model.ReleasePlanHookEventBeforeExecute)
+		return h.plans.FindPlanByID(ctx, planID)
 	}
 	if err := h.plans.UpdatePlan(ctx, plan); err != nil {
 		return nil, err
@@ -231,13 +270,20 @@ func (h *MarkReleasePlanJobDoneHandler) Handle(ctx context.Context, productID ke
 	if err != nil {
 		return nil, err
 	}
-	if err := plan.MarkTextJobDone(jobID, remark); err != nil {
+	needsHook, err := plan.MarkTextJobDone(jobID, remark)
+	if err != nil {
 		return nil, err
 	}
 	if err := persistPlanJobs(ctx, h.plans, h.executor, plan); err != nil {
 		return nil, err
 	}
 	_ = h.audit(ctx, plan.ID, actor, "job_done", map[string]any{"job_id": jobID.String(), "remark": remark})
+	if needsHook {
+		if err := h.executor.BeginAllDoneHook(ctx, plan, actor); err != nil {
+			return nil, err
+		}
+		return h.plans.FindPlanByID(ctx, planID)
+	}
 	maybeAdvanceReleasePlan(ctx, h.plans, h.executor, planID, actor)
 	return h.plans.FindPlanByID(ctx, planID)
 }
@@ -257,13 +303,20 @@ func (h *SkipReleasePlanJobHandler) Handle(ctx context.Context, productID kernel
 	if err != nil {
 		return nil, err
 	}
-	if err := plan.SkipJob(jobID); err != nil {
+	needsHook, err := plan.SkipJob(jobID)
+	if err != nil {
 		return nil, err
 	}
 	if err := persistPlanJobs(ctx, h.plans, h.executor, plan); err != nil {
 		return nil, err
 	}
 	_ = h.audit(ctx, plan.ID, actor, "job_skip", map[string]any{"job_id": jobID.String()})
+	if needsHook {
+		if err := h.executor.BeginAllDoneHook(ctx, plan, actor); err != nil {
+			return nil, err
+		}
+		return h.plans.FindPlanByID(ctx, planID)
+	}
 	maybeAdvanceReleasePlan(ctx, h.plans, h.executor, planID, actor)
 	return h.plans.FindPlanByID(ctx, planID)
 }
@@ -442,6 +495,9 @@ func (h *UpdateReleasePlanHandler) Handle(ctx context.Context, productID kernel.
 	if input.ApprovalConfig != nil {
 		plan.ApprovalConfig = mergeApprovalConfig(plan.ApprovalConfig, input.ApprovalConfig)
 	}
+	if input.HookSettings != nil {
+		plan.HookSettings = *input.HookSettings
+	}
 	if input.ClearScheduleTime {
 		plan.ScheduleExecuteTime = nil
 	} else if input.ScheduleExecuteTime != nil {
@@ -464,6 +520,7 @@ func (h *UpdateReleasePlanHandler) Handle(ctx context.Context, productID kernel.
 		return nil, err
 	}
 	_ = auditReleasePlan(ctx, h.plans, plan.ID, actor, "update", nil)
+	_ = recordPlanVersionAfterReload(ctx, h.plans, plan.ID, actor, "update")
 	return h.plans.FindPlanByID(ctx, planID)
 }
 
@@ -491,6 +548,26 @@ func (h *CancelReleasePlanHandler) Handle(ctx context.Context, productID kernel.
 	return plan, nil
 }
 
+type DeleteReleasePlanHandler struct {
+	products repository.ProductRepository
+	plans    repository.ReleasePlanRepository
+}
+
+func NewDeleteReleasePlanHandler(products repository.ProductRepository, plans repository.ReleasePlanRepository) *DeleteReleasePlanHandler {
+	return &DeleteReleasePlanHandler{products: products, plans: plans}
+}
+
+func (h *DeleteReleasePlanHandler) Handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID) error {
+	plan, err := loadReleasePlan(ctx, h.products, h.plans, productID, planID)
+	if err != nil {
+		return err
+	}
+	if err := plan.CanDelete(); err != nil {
+		return err
+	}
+	return h.plans.DeletePlan(ctx, planID)
+}
+
 type ReopenReleasePlanPlanningHandler struct {
 	products repository.ProductRepository
 	plans    repository.ReleasePlanRepository
@@ -512,6 +589,7 @@ func (h *ReopenReleasePlanPlanningHandler) Handle(ctx context.Context, productID
 		return nil, err
 	}
 	_ = auditReleasePlan(ctx, h.plans, plan.ID, actor, "reopen_planning", nil)
+	_ = recordPlanVersionAfterReload(ctx, h.plans, plan.ID, actor, "reopen_planning")
 	return plan, nil
 }
 
@@ -555,6 +633,7 @@ func (h *ReorderReleasePlanJobsHandler) Handle(ctx context.Context, productID ke
 		}
 	}
 	_ = auditReleasePlan(ctx, h.plans, plan.ID, actor, "reorder_jobs", nil)
+	_ = recordPlanVersionAfterReload(ctx, h.plans, plan.ID, actor, "reorder_jobs")
 	return h.plans.FindPlanByID(ctx, planID)
 }
 
@@ -618,6 +697,7 @@ func (h *UpdateReleasePlanJobHandler) Handle(ctx context.Context, productID kern
 		return nil, err
 	}
 	_ = auditReleasePlan(ctx, h.plans, plan.ID, actor, "update_job", map[string]any{"job_id": jobID.String()})
+	_ = recordPlanVersionAfterReload(ctx, h.plans, plan.ID, actor, "update_job")
 	return job, nil
 }
 
@@ -652,6 +732,7 @@ func (h *DeleteReleasePlanJobHandler) Handle(ctx context.Context, productID kern
 		return err
 	}
 	_ = auditReleasePlan(ctx, h.plans, plan.ID, actor, "delete_job", map[string]any{"job_id": jobID.String()})
+	_ = recordPlanVersionAfterReload(ctx, h.plans, plan.ID, actor, "delete_job")
 	return nil
 }
 
@@ -709,5 +790,6 @@ func (h *AddReleasePlanJobsFromWorkItemsHandler) Handle(ctx context.Context, pro
 		}
 	}
 	_ = auditReleasePlan(ctx, h.plans, plan.ID, actor, "add_jobs_from_work_items", map[string]any{"count": len(input.WorkItemIDs)})
+	_ = recordPlanVersionAfterReload(ctx, h.plans, plan.ID, actor, "add_jobs_from_work_items")
 	return h.plans.FindPlanByID(ctx, planID)
 }

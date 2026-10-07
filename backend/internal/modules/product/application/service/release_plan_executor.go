@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
@@ -15,10 +17,11 @@ import (
 type ReleasePlanExecutor struct {
 	plans   repository.ReleasePlanRepository
 	trigger appctx.WorkflowRunTrigger
+	hooks   *ReleasePlanHookNotifier
 }
 
-func NewReleasePlanExecutor(plans repository.ReleasePlanRepository, trigger appctx.WorkflowRunTrigger) *ReleasePlanExecutor {
-	return &ReleasePlanExecutor{plans: plans, trigger: trigger}
+func NewReleasePlanExecutor(plans repository.ReleasePlanRepository, trigger appctx.WorkflowRunTrigger, hooks *ReleasePlanHookNotifier) *ReleasePlanExecutor {
+	return &ReleasePlanExecutor{plans: plans, trigger: trigger, hooks: hooks}
 }
 
 func (e *ReleasePlanExecutor) Advance(ctx context.Context, plan *model.ReleasePlan, actor kernel.MemberID) error {
@@ -63,7 +66,13 @@ func (e *ReleasePlanExecutor) Advance(ctx context.Context, plan *model.ReleasePl
 	if err != nil {
 		return domain.ErrInvalidWorkflowRef
 	}
-	runID, err := e.trigger.StartForProduct(ctx, plan.ProductID, workflowID)
+	runInput := spec.ToRunInput()
+	var runID kernel.ProductWorkflowRunID
+	if len(runInput) == 0 {
+		runID, err = e.trigger.StartForProduct(ctx, plan.ProductID, workflowID)
+	} else {
+		runID, err = e.trigger.StartForProductWithInput(ctx, plan.ProductID, workflowID, actor, runInput)
+	}
 	if err != nil {
 		return err
 	}
@@ -98,7 +107,8 @@ func (e *ReleasePlanExecutor) OnWorkflowRunCompleted(
 	if plan.Status != model.ReleasePlanStatusExecuting {
 		return nil
 	}
-	if err := plan.CompleteWorkflowJob(job.ID, success, errMsg); err != nil {
+	needsHook, err := plan.CompleteWorkflowJob(job.ID, success, errMsg)
+	if err != nil {
 		return err
 	}
 	if err := e.plans.UpdateJob(ctx, job); err != nil {
@@ -116,8 +126,32 @@ func (e *ReleasePlanExecutor) OnWorkflowRunCompleted(
 	}); err != nil {
 		return err
 	}
+	if needsHook {
+		return e.beginAllDoneHook(ctx, plan, actor)
+	}
 	if success && plan.Status == model.ReleasePlanStatusExecuting {
 		return e.Advance(ctx, plan, actor)
+	}
+	return nil
+}
+
+func (e *ReleasePlanExecutor) BeginAllDoneHook(ctx context.Context, plan *model.ReleasePlan, actor kernel.MemberID) error {
+	return e.beginAllDoneHook(ctx, plan, actor)
+}
+
+func (e *ReleasePlanExecutor) beginAllDoneHook(ctx context.Context, plan *model.ReleasePlan, actor kernel.MemberID) error {
+	now := time.Now().UTC()
+	plan.InitHookWait(model.ReleasePlanHookEventAllDone, uuid.NewString(), now)
+	if err := e.plans.UpdatePlan(ctx, plan); err != nil {
+		return err
+	}
+	_ = e.audit(ctx, plan.ID, actor, "wait_all_done_hook", nil)
+	if e.hooks != nil {
+		go func() {
+			hookCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = e.hooks.Send(hookCtx, plan, model.ReleasePlanHookEventAllDone)
+		}()
 	}
 	return nil
 }

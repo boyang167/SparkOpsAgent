@@ -6,6 +6,8 @@ import { BffError } from "@sparkops/contracts";
 import type { OrgMemberVM } from "@sparkops/contracts/tenant";
 import { Modal } from "@/components/ui/Modal";
 import { InlineAlert } from "@/components/ui/InlineAlert";
+import { MemberInviteSearchInput } from "@/modules/governance/components/MemberInviteSearchInput";
+import { formatInviteError } from "@/modules/governance/components/invite-member-utils";
 import { PlatformAuditLogsPanel } from "./PlatformAuditLogsPanel";
 import { OrgQuotaPanel } from "./OrgQuotaPanel";
 
@@ -31,6 +33,8 @@ export function OrgMembersDialog({ open, orgId, orgName, onClose }: OrgMembersDi
   const [myRole, setMyRole] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
   const [inviting, setInviting] = useState(false);
@@ -69,6 +73,8 @@ export function OrgMembersDialog({ open, orgId, orgName, onClose }: OrgMembersDi
     setInviteRole("member");
     setTransferEmail("");
     setError(null);
+    setInviteError(null);
+    setInviteSuccess(null);
     void load();
   }, [open, load]);
 
@@ -76,13 +82,15 @@ export function OrgMembersDialog({ open, orgId, orgName, onClose }: OrgMembersDi
     e.preventDefault();
     if (!email.trim()) return;
     setInviting(true);
-    setError(null);
+    setInviteError(null);
+    setInviteSuccess(null);
     try {
-      await tenant.inviteOrgMember(orgId, { email: email.trim(), role: inviteRole });
+      const invited = await tenant.inviteOrgMember(orgId, { email: email.trim(), role: inviteRole });
       setEmail("");
+      setInviteSuccess(`已邀请 ${invited.display_name || invited.email} 为${ROLE_LABELS[invited.role] ?? invited.role}`);
       await load();
     } catch (err) {
-      setError(err instanceof BffError ? err.message : "邀请失败");
+      setInviteError(formatInviteError(err));
     } finally {
       setInviting(false);
     }
@@ -177,27 +185,40 @@ export function OrgMembersDialog({ open, orgId, orgName, onClose }: OrgMembersDi
           <>
             {canManage ? (
               <form onSubmit={onInvite} className="tenant-invite-form">
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    className="input flex-1"
-                    type="email"
-                    placeholder="成员邮箱（须已注册）"
+                <p className="tenant-invite-hint">
+                  搜索并选择已注册的平台用户；对方不在本组织时才会被加入。
+                </p>
+                <div className="tenant-invite-row">
+                  <MemberInviteSearchInput
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
+                    onChange={(value) => {
+                      setEmail(value);
+                      setInviteError(null);
+                      setInviteSuccess(null);
+                    }}
+                    variant="org"
+                    placeholder="搜索邮箱或姓名"
+                    disabled={inviting}
+                    searchCandidates={(query, limit) => tenant.searchOrgMemberCandidates(orgId, query, limit)}
                   />
-                  <select
-                    className="input sm:w-32"
-                    value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value as "admin" | "member")}
-                  >
-                    <option value="member">成员</option>
-                    <option value="admin">管理员</option>
-                  </select>
-                  <button type="submit" className="btn shrink-0" disabled={inviting}>
+                  <label className="tenant-invite-role">
+                    <span className="tenant-invite-role-label">组织角色</span>
+                    <select
+                      className="input tenant-invite-role-select"
+                      value={inviteRole}
+                      onChange={(e) => setInviteRole(e.target.value as "admin" | "member")}
+                      disabled={inviting}
+                    >
+                      <option value="member">成员</option>
+                      <option value="admin">管理员</option>
+                    </select>
+                  </label>
+                  <button type="submit" className="btn tenant-invite-btn" disabled={inviting || !email.trim()}>
                     {inviting ? "邀请中…" : "邀请"}
                   </button>
                 </div>
+                {inviteError ? <InlineAlert tone="error">{inviteError}</InlineAlert> : null}
+                {inviteSuccess ? <InlineAlert tone="success">{inviteSuccess}</InlineAlert> : null}
               </form>
             ) : null}
             {loading ? (

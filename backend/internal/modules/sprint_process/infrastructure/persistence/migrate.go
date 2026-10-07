@@ -1,8 +1,15 @@
 package persistence
 
-import "gorm.io/gorm"
+import (
+	"gorm.io/gorm"
+
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
+)
 
 func AutoMigrate(db *gorm.DB) error {
+	if !postgres.ShouldRunAutoMigrate(db) {
+		return nil
+	}
 	if db.Dialector.Name() == "postgres" {
 		if err := db.Exec("CREATE SCHEMA IF NOT EXISTS sprint_process").Error; err != nil {
 			return err

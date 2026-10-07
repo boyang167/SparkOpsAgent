@@ -31,7 +31,10 @@ type releasePlanModel struct {
 	ReleaseWindowEnd    time.Time
 	ScheduleExecuteTime *time.Time
 	ApprovalConfig      string `gorm:"type:jsonb"`
+	HookSettings        string `gorm:"type:jsonb"`
+	HookState           *string `gorm:"type:jsonb"`
 	CreatedBy           string
+	Version             int
 	postgres.AuditColumns
 	DeletedAt gorm.DeletedAt
 }
@@ -68,6 +71,20 @@ type releasePlanAuditLogModel struct {
 
 func (releasePlanAuditLogModel) TableName() string { return "product.release_plan_audit_logs" }
 
+type releasePlanVersionModel struct {
+	ReleasePlanID   string `gorm:"column:release_plan_id;primaryKey"`
+	Version         int    `gorm:"column:version;primaryKey"`
+	PreviousVersion int
+	ActorID         string
+	Verb            string
+	SectionKey      string
+	SectionName     string
+	Snapshot        string `gorm:"type:jsonb"`
+	CreatedAt       time.Time
+}
+
+func (releasePlanVersionModel) TableName() string { return "product.release_plan_versions" }
+
 type ReleasePlanRepository struct{ db *gorm.DB }
 
 func NewReleasePlanRepository(db *gorm.DB) repository.ReleasePlanRepository {
@@ -76,7 +93,7 @@ func NewReleasePlanRepository(db *gorm.DB) repository.ReleasePlanRepository {
 
 func releasePlanAutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
-		&releasePlanModel{}, &releasePlanJobModel{}, &releasePlanAuditLogModel{},
+		&releasePlanModel{}, &releasePlanJobModel{}, &releasePlanAuditLogModel{}, &releasePlanVersionModel{},
 		&releasePlanTemplateModel{},
 	)
 }
@@ -99,9 +116,23 @@ func (r *ReleasePlanRepository) UpdatePlan(ctx context.Context, plan *model.Rele
 		"approver_id": row.ApproverID, "status": row.Status, "sprint_id": row.SprintID,
 		"release_window_start": row.ReleaseWindowStart, "release_window_end": row.ReleaseWindowEnd,
 		"schedule_execute_time": row.ScheduleExecuteTime, "approval_config": row.ApprovalConfig,
-		"updated_at": time.Now().UTC(),
+		"hook_settings": row.HookSettings, "hook_state": row.HookState,
+		"version": row.Version, "updated_at": time.Now().UTC(),
 	}
 	return r.db.WithContext(ctx).Model(&releasePlanModel{}).Where("id = ?", row.ID).Updates(updates).Error
+}
+
+func (r *ReleasePlanRepository) DeletePlan(ctx context.Context, planID kernel.ReleasePlanID) error {
+	pid := planID.String()
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("release_plan_id = ?", pid).Delete(&releasePlanJobModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("release_plan_id = ?", pid).Delete(&releasePlanAuditLogModel{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", pid).Delete(&releasePlanModel{}).Error
+	})
 }
 
 func (r *ReleasePlanRepository) FindPlanByID(ctx context.Context, id kernel.ReleasePlanID) (*model.ReleasePlan, error) {
@@ -313,6 +344,33 @@ func (r *ReleasePlanRepository) FindJobByWorkflowRunID(ctx context.Context, runI
 	return nil, nil, domain.ErrReleasePlanJobNotFound
 }
 
+func (r *ReleasePlanRepository) FindPlanByHookToken(ctx context.Context, token string) (*model.ReleasePlan, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, domain.ErrReleasePlanNotFound
+	}
+	var row releasePlanModel
+	err := r.db.WithContext(ctx).
+		Where("hook_state->>'token' = ?", token).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrReleasePlanNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	plan, err := rowToReleasePlan(row)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := r.ListJobsByPlan(ctx, plan.ID)
+	if err != nil {
+		return nil, err
+	}
+	plan.Jobs = jobs
+	return plan, nil
+}
+
 func (r *ReleasePlanRepository) FindPlanByApprovalToken(ctx context.Context, token string) (*model.ReleasePlan, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -369,6 +427,87 @@ func rowsToReleasePlansWithJobs(ctx context.Context, r *ReleasePlanRepository, r
 	return out, nil
 }
 
+func (r *ReleasePlanRepository) UpdatePlanVersion(ctx context.Context, planID kernel.ReleasePlanID, version int) error {
+	return r.db.WithContext(ctx).Model(&releasePlanModel{}).
+		Where("id = ?", planID.String()).
+		Updates(map[string]any{"version": version, "updated_at": time.Now().UTC()}).Error
+}
+
+func (r *ReleasePlanRepository) SaveVersion(ctx context.Context, version *model.ReleasePlanVersion) error {
+	raw, err := json.Marshal(version.Snapshot)
+	if err != nil {
+		return err
+	}
+	row := releasePlanVersionModel{
+		ReleasePlanID: version.ReleasePlanID.String(), Version: version.Version,
+		PreviousVersion: version.PreviousVersion, ActorID: version.ActorID.String(),
+		Verb: version.Verb, SectionKey: version.SectionKey, SectionName: version.SectionName,
+		Snapshot: string(raw), CreatedAt: version.CreatedAt,
+	}
+	return r.db.WithContext(ctx).Create(&row).Error
+}
+
+func (r *ReleasePlanRepository) ListVersionsByPlan(ctx context.Context, planID kernel.ReleasePlanID, limit int) ([]model.ReleasePlanVersion, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var rows []releasePlanVersionModel
+	err := r.db.WithContext(ctx).
+		Where("release_plan_id = ?", planID.String()).
+		Order("version DESC").
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rowsToReleasePlanVersions(rows)
+}
+
+func (r *ReleasePlanRepository) ListPlanIDsWithoutVersions(ctx context.Context, limit int) ([]kernel.ReleasePlanID, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	var ids []string
+	err := r.db.WithContext(ctx).
+		Table("product.release_plans AS rp").
+		Select("rp.id").
+		Where("rp.deleted_at IS NULL").
+		Where("NOT EXISTS (SELECT 1 FROM product.release_plan_versions v WHERE v.release_plan_id = rp.id)").
+		Order("rp.created_at ASC").
+		Limit(limit).
+		Pluck("id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]kernel.ReleasePlanID, 0, len(ids))
+	for _, id := range ids {
+		planID, err := kernel.ParseReleasePlanID(id)
+		if err != nil {
+			continue
+		}
+		out = append(out, planID)
+	}
+	return out, nil
+}
+
+func (r *ReleasePlanRepository) GetVersion(ctx context.Context, planID kernel.ReleasePlanID, version int) (*model.ReleasePlanVersion, error) {
+	var row releasePlanVersionModel
+	err := r.db.WithContext(ctx).
+		Where("release_plan_id = ? AND version = ?", planID.String(), version).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrReleasePlanVersionNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	out, err := rowToReleasePlanVersion(row)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (r *ReleasePlanRepository) ListAuditLogs(ctx context.Context, planID kernel.ReleasePlanID, limit int) ([]model.ReleasePlanAuditLog, error) {
 	if limit <= 0 {
 		limit = 50
@@ -395,13 +534,29 @@ func toReleasePlanModel(plan *model.ReleasePlan) (releasePlanModel, error) {
 	if err != nil {
 		return releasePlanModel{}, err
 	}
+	hookSettings, err := json.Marshal(plan.HookSettings)
+	if err != nil {
+		return releasePlanModel{}, err
+	}
 	row := releasePlanModel{
 		ID: plan.ID.String(), ProductID: plan.ProductID.String(), Name: plan.Name,
 		Description: plan.Description, ManagerID: plan.ManagerID.String(), Status: string(plan.Status),
 		ReleaseWindowStart: plan.ReleaseWindowStart, ReleaseWindowEnd: plan.ReleaseWindowEnd,
 		ScheduleExecuteTime: plan.ScheduleExecuteTime, ApprovalConfig: string(approval),
-		CreatedBy: plan.CreatedBy.String(),
+		HookSettings: string(hookSettings),
+		CreatedBy: plan.CreatedBy.String(), Version: plan.Version,
 		AuditColumns: postgres.AuditColumns{CreatedAt: plan.CreatedAt, UpdatedAt: plan.UpdatedAt},
+	}
+	if plan.HookState != nil {
+		raw, err := json.Marshal(plan.HookState)
+		if err != nil {
+			return releasePlanModel{}, err
+		}
+		s := string(raw)
+		row.HookState = &s
+	}
+	if row.Version <= 0 {
+		row.Version = 1
 	}
 	if plan.ProductPlanID != nil {
 		v := plan.ProductPlanID.String()
@@ -437,12 +592,27 @@ func rowToReleasePlan(row releasePlanModel) (*model.ReleasePlan, error) {
 	}
 	var approval model.ApprovalConfig
 	_ = json.Unmarshal([]byte(row.ApprovalConfig), &approval)
+	var hookSettings model.ReleasePlanHookSettings
+	if row.HookSettings != "" {
+		_ = json.Unmarshal([]byte(row.HookSettings), &hookSettings)
+	}
 	plan := &model.ReleasePlan{
 		ID: id, ProductID: productID, Name: row.Name, Description: row.Description,
 		ManagerID: managerID, Status: model.ReleasePlanStatus(row.Status),
 		ReleaseWindowStart: row.ReleaseWindowStart, ReleaseWindowEnd: row.ReleaseWindowEnd,
 		ScheduleExecuteTime: row.ScheduleExecuteTime, ApprovalConfig: approval,
+		HookSettings: hookSettings,
 		CreatedBy: createdBy, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		Version: row.Version,
+	}
+	if row.HookState != nil && *row.HookState != "" {
+		var hookState model.ReleasePlanHookState
+		if err := json.Unmarshal([]byte(*row.HookState), &hookState); err == nil {
+			plan.HookState = &hookState
+		}
+	}
+	if plan.Version <= 0 {
+		plan.Version = 1
 	}
 	if row.ProductPlanID != nil {
 		pp, err := kernel.ParseProductPlanID(*row.ProductPlanID)
@@ -501,5 +671,37 @@ func rowToReleasePlanJob(row releasePlanJobModel) (*model.ReleasePlanJob, error)
 		TextContent: row.TextContent, TextFormat: row.TextFormat, TextChecked: row.TextChecked,
 		WorkflowRef: json.RawMessage(row.WorkflowRef), ExecutionRef: json.RawMessage(row.ExecutionRef),
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+	}, nil
+}
+
+func rowsToReleasePlanVersions(rows []releasePlanVersionModel) ([]model.ReleasePlanVersion, error) {
+	out := make([]model.ReleasePlanVersion, 0, len(rows))
+	for _, row := range rows {
+		item, err := rowToReleasePlanVersion(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func rowToReleasePlanVersion(row releasePlanVersionModel) (model.ReleasePlanVersion, error) {
+	planID, err := kernel.ParseReleasePlanID(row.ReleasePlanID)
+	if err != nil {
+		return model.ReleasePlanVersion{}, err
+	}
+	actorID, err := kernel.ParseMemberID(row.ActorID)
+	if err != nil {
+		return model.ReleasePlanVersion{}, err
+	}
+	var snapshot model.ReleasePlanVersionSnapshot
+	if err := json.Unmarshal([]byte(row.Snapshot), &snapshot); err != nil {
+		return model.ReleasePlanVersion{}, err
+	}
+	return model.ReleasePlanVersion{
+		ReleasePlanID: planID, Version: row.Version, PreviousVersion: row.PreviousVersion,
+		ActorID: actorID, Verb: row.Verb, SectionKey: row.SectionKey, SectionName: row.SectionName,
+		Snapshot: snapshot, CreatedAt: row.CreatedAt,
 	}, nil
 }

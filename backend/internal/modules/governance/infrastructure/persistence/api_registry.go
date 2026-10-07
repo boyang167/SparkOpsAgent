@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,6 +52,12 @@ func NewAPIRegistryStore(db *gorm.DB) *APIRegistryStore {
 }
 
 func (s *APIRegistryStore) AutoMigrate() error {
+	if !postgres.ShouldRunAutoMigrate(s.db) {
+		return s.db.Exec(`
+			CREATE UNIQUE INDEX IF NOT EXISTS ux_platform_apis_path_method
+			ON platform.apis (path, method)
+		`).Error
+	}
 	if s.db.Dialector.Name() == "postgres" {
 		if err := s.db.Exec("CREATE SCHEMA IF NOT EXISTS platform").Error; err != nil {
 			return err
@@ -110,8 +117,10 @@ func (s *APIRegistryStore) Diff(
 			continue
 		}
 		if _, ok := existingMap[k]; !ok {
+			group, desc := inferAPIMeta(route.Path, route.Method)
 			diff.New = append(diff.New, RegisteredAPI{
 				ID: uuid.NewString(), Path: route.Path, Method: route.Method,
+				APIGroup: group, Description: desc,
 			})
 		}
 	}
@@ -193,3 +202,136 @@ func rowsToAPIs(rows []apiModel) []RegisteredAPI {
 }
 
 func key(method, path string) string { return method + " " + path }
+
+func inferAPIMeta(path, method string) (group, description string) {
+	path = strings.Split(path, "?")[0]
+	path = strings.TrimRight(path, "/")
+	segments := strings.Split(strings.Trim(path, "/"), "/")
+	if len(segments) < 2 || segments[0] != "api" || segments[1] != "v1" {
+		return "default", methodActionLabel(method)
+	}
+	rest := segments[2:]
+	action := methodActionLabel(method)
+
+	if len(rest) >= 2 && rest[0] == "plugins" {
+		pluginID := rest[1]
+		tail := firstLiteralSegment(rest[2:])
+		group = "plugin:" + pluginID
+		if tail != "" {
+			description = humanizeSegment(tail) + " · " + action
+		} else {
+			description = pluginID + " · " + action
+		}
+		return group, description
+	}
+
+	if len(rest) >= 3 && rest[0] == "workspaces" {
+		resource := rest[2]
+		tail := firstLiteralSegment(rest[3:])
+		group = "governance:" + resource
+		if tail != "" {
+			description = humanizeSegment(resource) + " · " + humanizeSegment(tail) + " · " + action
+		} else {
+			description = humanizeSegment(resource) + " · " + action
+		}
+		return group, description
+	}
+
+	if len(rest) >= 3 && rest[0] == "projects" {
+		tail := literalSegments(rest[2:])
+		if len(tail) >= 2 {
+			group = tail[0] + ":" + tail[1]
+			description = humanizeSegment(tail[0]) + " · " + humanizeSegment(tail[1]) + " · " + action
+			return group, description
+		}
+		if len(tail) == 1 {
+			group = "project:" + tail[0]
+			description = humanizeSegment(tail[0]) + " · " + action
+			return group, description
+		}
+	}
+
+	if len(rest) >= 3 && rest[0] == "products" {
+		resource := rest[2]
+		tail := firstLiteralSegment(rest[3:])
+		group = "product:" + resource
+		if tail != "" {
+			description = "产品 · " + humanizeSegment(resource) + " · " + humanizeSegment(tail) + " · " + action
+		} else {
+			description = "产品 · " + humanizeSegment(resource) + " · " + action
+		}
+		return group, description
+	}
+
+	if len(rest) >= 3 && rest[0] == "orgs" {
+		resource := rest[2]
+		group = "tenant:" + resource
+		description = "组织 · " + humanizeSegment(resource) + " · " + action
+		return group, description
+	}
+
+	if len(rest) >= 1 {
+		module := rest[0]
+		tail := firstLiteralSegment(rest[1:])
+		group = module
+		if tail != "" {
+			description = humanizeSegment(module) + " · " + humanizeSegment(tail) + " · " + action
+		} else {
+			description = humanizeSegment(module) + " · " + action
+		}
+		return group, description
+	}
+
+	return "default", action
+}
+
+func methodActionLabel(method string) string {
+	switch strings.ToUpper(method) {
+	case "GET":
+		return "查询"
+	case "POST":
+		return "创建"
+	case "PUT":
+		return "更新"
+	case "PATCH":
+		return "部分更新"
+	case "DELETE":
+		return "删除"
+	case "ANY":
+		return "代理"
+	default:
+		return strings.ToUpper(method)
+	}
+}
+
+func firstLiteralSegment(segments []string) string {
+	for _, segment := range segments {
+		if segment != "" && !strings.HasPrefix(segment, ":") {
+			return segment
+		}
+	}
+	return ""
+}
+
+func literalSegments(segments []string) []string {
+	out := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		if segment != "" && !strings.HasPrefix(segment, ":") {
+			out = append(out, segment)
+		}
+	}
+	return out
+}
+
+func humanizeSegment(segment string) string {
+	labels := map[string]string{
+		"members": "成员", "roles": "角色", "menus": "菜单", "apis": "API",
+		"projects": "项目", "products": "产品", "builds": "构建", "runtime": "运行时",
+		"deployment": "部署", "orgs": "组织", "workspaces": "工作区", "notifications": "通知",
+		"auth": "认证", "plugins": "插件", "kubernetes": "Kubernetes",
+	}
+	if label, ok := labels[segment]; ok {
+		return label
+	}
+	return strings.ReplaceAll(segment, "-", " ")
+}

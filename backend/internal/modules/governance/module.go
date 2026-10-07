@@ -51,7 +51,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	roleRepo := persistence.NewRoleRepository(store)
 	bindingRepo := persistence.NewBindingRepository(store)
 
-	checker := query.NewChecker(bindingRepo)
+	checker := query.NewChecker(bindingRepo, c.SystemRoleChecker)
 	c.PermissionChecker = checker
 
 	engine, err := policy.NewEngine(c.Config.Policy, c.DB)

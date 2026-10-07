@@ -206,6 +206,28 @@ export function getReleasePlan(workspaceId: string, productId: string, planId: s
   );
 }
 
+export async function listReleasePlanVersions(workspaceId: string, productId: string, planId: string) {
+  const data = await bffFetch<{ items: import("@sparkops/contracts/product").ReleasePlanVersionSummaryVM[] }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/versions`,
+    { workspaceId },
+  );
+  return data.items;
+}
+
+export function getReleasePlanVersionDiff(
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  version: number,
+  compareVersion?: number,
+) {
+  const query = compareVersion != null ? `?compare=${compareVersion}` : "";
+  return bffFetch<import("@sparkops/contracts/product").ReleasePlanVersionDiffVM>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/versions/${version}/diff${query}`,
+    { workspaceId },
+  );
+}
+
 export function createReleasePlan(
   workspaceId: string,
   productId: string,
@@ -305,10 +327,31 @@ export function updateReleasePlan(
   );
 }
 
+export function getReleasePlanCollabWsConfig(workspaceId: string, productId: string, planId: string) {
+  return bffFetch<import("@sparkops/contracts/product").ReleasePlanCollabWsConfig>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/collaboration/ws-config`,
+    { workspaceId },
+  );
+}
+
+export function listReleasePlanCollabEditors(workspaceId: string, productId: string, planId: string) {
+  return bffFetch<{ editors: import("@sparkops/contracts/product").ReleasePlanCollabEditor[] }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/collaboration/editors`,
+    { workspaceId },
+  );
+}
+
 export function cancelReleasePlan(workspaceId: string, productId: string, planId: string) {
   return bffFetch<{ id: string; status: string }>(
     `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/cancel`,
     { method: "POST", workspaceId },
+  );
+}
+
+export function deleteReleasePlan(workspaceId: string, productId: string, planId: string) {
+  return bffFetch<{ ok: boolean }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}`,
+    { method: "DELETE", workspaceId },
   );
 }
 

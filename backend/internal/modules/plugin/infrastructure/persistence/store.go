@@ -16,43 +16,54 @@ import (
 	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"gorm.io/gorm"
+
+
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"gorm.io/gorm/clause"
 )
 
 func AutoMigrate(db *gorm.DB) error {
-	if db.Dialector.Name() == "postgres" {
-		if err := db.Exec("CREATE SCHEMA IF NOT EXISTS plugin").Error; err != nil {
+	if postgres.ShouldRunAutoMigrate(db) {
+		if db.Dialector.Name() == "postgres" {
+			if err := db.Exec("CREATE SCHEMA IF NOT EXISTS plugin").Error; err != nil {
+				return err
+			}
+		}
+		if err := db.AutoMigrate(&pluginModel{}, &workspaceBindingModel{}, &uninstallReceiptModel{}); err != nil {
 			return err
 		}
-	}
-	if err := db.AutoMigrate(&pluginModel{}, &workspaceBindingModel{}, &uninstallReceiptModel{}); err != nil {
-		return err
-	}
-	if db.Dialector.Name() == "postgres" {
-		if err := db.Exec(`
-			DO $$
-			BEGIN
-				IF NOT EXISTS (
-					SELECT 1
-					FROM pg_constraint c
-					JOIN pg_class rel ON rel.oid = c.conrelid
-					JOIN pg_namespace ns ON ns.oid = rel.relnamespace
-					WHERE ns.nspname = 'plugin'
-					  AND rel.relname = 'workspace_bindings'
-					  AND c.conname = 'fk_plugin_workspace_bindings_plugin'
-					  AND c.contype = 'f'
-				) THEN
-					ALTER TABLE plugin.workspace_bindings
-						ADD CONSTRAINT fk_plugin_workspace_bindings_plugin
-						FOREIGN KEY (plugin_id)
-						REFERENCES plugin.plugins(id);
-				END IF;
-			END
-			$$;
-		`).Error; err != nil {
-			return err
+		if db.Dialector.Name() == "postgres" {
+			if err := db.Exec(`
+				DO $$
+				BEGIN
+					IF NOT EXISTS (
+						SELECT 1
+						FROM pg_constraint c
+						JOIN pg_class rel ON rel.oid = c.conrelid
+						JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+						WHERE ns.nspname = 'plugin'
+						  AND rel.relname = 'workspace_bindings'
+						  AND c.conname = 'fk_plugin_workspace_bindings_plugin'
+						  AND c.contype = 'f'
+					) THEN
+						ALTER TABLE plugin.workspace_bindings
+							ADD CONSTRAINT fk_plugin_workspace_bindings_plugin
+							FOREIGN KEY (plugin_id)
+							REFERENCES plugin.plugins(id);
+					END IF;
+				END
+				$$;
+			`).Error; err != nil {
+				return err
+			}
 		}
 	}
+	return SeedBundledPlugins(db)
+}
+
+// SeedBundledPlugins ensures built-in plugin records exist even when SQL migrations
+// already applied and GORM AutoMigrate is skipped.
+func SeedBundledPlugins(db *gorm.DB) error {
 	if err := seedBundledExamplePlugin(db); err != nil {
 		return err
 	}

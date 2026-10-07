@@ -15,6 +15,9 @@ import (
 )
 
 func AutoMigrate(db *gorm.DB) error {
+	if !postgres.ShouldRunAutoMigrate(db) {
+		return nil
+	}
 	if db.Dialector.Name() == "postgres" {
 		if err := db.Exec("CREATE SCHEMA IF NOT EXISTS workspace_app").Error; err != nil {
 			return err
@@ -47,32 +50,32 @@ func AutoMigrate(db *gorm.DB) error {
 }
 
 type projectModel struct {
-	ID                 string `gorm:"column:id;primaryKey"`
-	WorkspaceID        string
-	ProductID          *string
+	ID                 string  `gorm:"column:id;primaryKey;type:uuid"`
+	WorkspaceID        string  `gorm:"type:uuid"`
+	ProductID          *string `gorm:"type:uuid"`
 	Name               string
 	DisplayName        string
 	Description        string
 	Namespace          string
 	Language           string
 	GitURL             string
-	SecretID           *string
+	SecretID           *string `gorm:"type:uuid"`
 	GitRefType         string
 	GitRefValue        string
 	DockerfilePath     string
-	TemplateID         *string
-	DefaultClusterID   *string
-	JenkinsSecretID    *string
-	KubernetesSecretID *string
-	Resources          []byte `gorm:"type:jsonb"`
+	TemplateID         *string `gorm:"type:uuid"`
+	DefaultClusterID   *string `gorm:"type:uuid"`
+	JenkinsSecretID    *string `gorm:"type:uuid"`
+	KubernetesSecretID *string `gorm:"type:uuid"`
+	Resources          []byte  `gorm:"type:jsonb"`
 	Status             string
 	ReviewStatus       string `gorm:"default:none;not null"`
-	SubmittedBy        *string
+	SubmittedBy        *string `gorm:"type:uuid"`
 	SubmittedAt        *time.Time
-	ReviewedBy         *string
+	ReviewedBy         *string `gorm:"type:uuid"`
 	ReviewedAt         *time.Time
 	ReviewComment      string `gorm:"default:'';not null"`
-	CreatedBy          string
+	CreatedBy          string `gorm:"type:uuid"`
 	postgres.AuditColumns
 }
 
@@ -192,12 +195,12 @@ func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) 
 	} else {
 		updates["product_id"] = nil
 	}
-	return r.db.WithContext(ctx).Model(&projectModel{}).Where("id = ?", project.ID.String()).Updates(updates).Error
+	return r.db.WithContext(ctx).Model(&projectModel{}).Where(postgres.UUIDEq("id"), project.ID.String()).Updates(updates).Error
 }
 
 func (r *ProjectRepository) FindByID(ctx context.Context, id kernel.ProjectID) (*model.Project, error) {
 	var row projectModel
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := r.db.WithContext(ctx).Where(postgres.UUIDEq("id"), id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrProjectNotFound
 	}
@@ -210,7 +213,7 @@ func (r *ProjectRepository) FindByID(ctx context.Context, id kernel.ProjectID) (
 func (r *ProjectRepository) FindByWorkspaceAndName(ctx context.Context, wsID kernel.WorkspaceID, name model.ProjectName) (*model.Project, error) {
 	var row projectModel
 	err := r.db.WithContext(ctx).
-		Where("workspace_id = ? AND name = ? AND status = ?", wsID.String(), name.String(), string(model.ProjectStatusActive)).
+		Where(postgres.UUIDEq("workspace_id")+" AND name = ? AND status = ?", wsID.String(), name.String(), string(model.ProjectStatusActive)).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrProjectNotFound
@@ -224,7 +227,7 @@ func (r *ProjectRepository) FindByWorkspaceAndName(ctx context.Context, wsID ker
 func (r *ProjectRepository) ListByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) ([]*model.Project, error) {
 	var rows []projectModel
 	err := r.db.WithContext(ctx).
-		Where("workspace_id = ? AND status = ?", wsID.String(), string(model.ProjectStatusActive)).
+		Where(postgres.UUIDEq("workspace_id")+" AND status = ?", wsID.String(), string(model.ProjectStatusActive)).
 		Order("created_at DESC").
 		Find(&rows).Error
 	if err != nil {
@@ -244,7 +247,7 @@ func (r *ProjectRepository) ListByWorkspace(ctx context.Context, wsID kernel.Wor
 func (r *ProjectRepository) CountByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) (int, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&projectModel{}).
-		Where("workspace_id = ? AND status = ?", wsID.String(), string(model.ProjectStatusActive)).
+		Where(postgres.UUIDEq("workspace_id")+" AND status = ?", wsID.String(), string(model.ProjectStatusActive)).
 		Count(&count).Error
 	return int(count), err
 }
@@ -252,7 +255,7 @@ func (r *ProjectRepository) CountByWorkspace(ctx context.Context, wsID kernel.Wo
 func (r *ProjectRepository) ListByProduct(ctx context.Context, productID kernel.ProductID) ([]*model.Project, error) {
 	var rows []projectModel
 	err := r.db.WithContext(ctx).
-		Where("product_id = ? AND status = ?", productID.String(), string(model.ProjectStatusActive)).
+		Where(postgres.UUIDEq("product_id")+" AND status = ?", productID.String(), string(model.ProjectStatusActive)).
 		Order("created_at DESC").
 		Find(&rows).Error
 	if err != nil {
@@ -272,7 +275,7 @@ func (r *ProjectRepository) ListByProduct(ctx context.Context, productID kernel.
 func (r *ProjectRepository) CountByProduct(ctx context.Context, productID kernel.ProductID) (int, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&projectModel{}).
-		Where("product_id = ? AND status = ?", productID.String(), string(model.ProjectStatusActive)).
+		Where(postgres.UUIDEq("product_id")+" AND status = ?", productID.String(), string(model.ProjectStatusActive)).
 		Count(&count).Error
 	return int(count), err
 }

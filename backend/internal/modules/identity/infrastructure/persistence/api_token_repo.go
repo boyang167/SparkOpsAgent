@@ -55,6 +55,9 @@ func NewAPITokenStore(db *gorm.DB) *APITokenStore {
 }
 
 func (s *APITokenStore) AutoMigrate() error {
+	if !postgres.ShouldRunAutoMigrate(s.db) {
+		return nil
+	}
 	return s.db.AutoMigrate(&apiTokenModel{}, &tokenBlacklistModel{})
 }
 

@@ -24,13 +24,14 @@ func (a *MemberACL) ListWorkspaceMembers(ctx context.Context, wsID kernel.Worksp
 		Email       string
 		DisplayName string
 	}
-	err := a.db.WithContext(ctx).
-		Table("tenant.workspace_members wm").
-		Select("wm.member_id, m.email, m.display_name").
-		Joins("JOIN identity.members m ON m.id = wm.member_id").
-		Where("wm.workspace_id = ?", wsID.String()).
-		Order("m.email asc").
-		Find(&rows).Error
+	err := a.db.WithContext(ctx).Raw(`
+		SELECT wm.member_id, m.email, m.display_name
+		FROM tenant.workspace_members wm
+		JOIN identity.members m ON m.id::uuid = wm.member_id::uuid
+		WHERE wm.workspace_id::uuid = ?::uuid
+		  AND m.deleted_at IS NULL
+		ORDER BY m.email ASC
+	`, wsID.String()).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}

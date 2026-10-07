@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { governance } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
@@ -41,20 +41,65 @@ function roleChipClass(name: string) {
   return ROLE_CHIP_CLASS[key] ?? "admin-role-chip";
 }
 
+function unboundRoles(member: WorkspaceMemberVM, roles: RoleVM[]) {
+  const bound = new Set(member.roles.map((role) => role.id));
+  return roles.filter((role) => !bound.has(role.id));
+}
+
+function isRoleBound(member: WorkspaceMemberVM, roleId: string) {
+  return member.roles.some((role) => role.id === roleId);
+}
+
 export function MemberBindings({ workspaceId, members, roles, variant = "default" }: MemberBindingsProps) {
   const router = useRouter();
   const [selectedRoles, setSelectedRoles] = useState<Record<string, string>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [successId, setSuccessId] = useState<string | null>(null);
   const [removingKey, setRemovingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const successTimerRef = useRef<number | null>(null);
 
-  async function onAssign(memberId: string) {
-    const roleId = selectedRoles[memberId];
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current !== null) {
+        window.clearTimeout(successTimerRef.current);
+      }
+    };
+  }, []);
+
+  function flashSuccess(memberId: string) {
+    setSuccessId(memberId);
+    if (successTimerRef.current !== null) {
+      window.clearTimeout(successTimerRef.current);
+    }
+    successTimerRef.current = window.setTimeout(() => {
+      setSuccessId((current) => (current === memberId ? null : current));
+      successTimerRef.current = null;
+    }, 2000);
+  }
+
+  async function onAssign(member: WorkspaceMemberVM) {
+    const roleId = selectedRoles[member.member_id];
     if (!roleId) return;
-    setLoadingId(memberId);
+    if (isRoleBound(member, roleId)) {
+      setError("该成员已拥有此角色，无需重复绑定");
+      setSelectedRoles((prev) => {
+        const next = { ...prev };
+        delete next[member.member_id];
+        return next;
+      });
+      return;
+    }
+    setLoadingId(member.member_id);
     setError(null);
     try {
-      await governance.assignRole(workspaceId, memberId, roleId);
+      await governance.assignRole(workspaceId, member.member_id, roleId);
+      setSelectedRoles((prev) => {
+        const next = { ...prev };
+        delete next[member.member_id];
+        return next;
+      });
+      flashSuccess(member.member_id);
       router.refresh();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "绑定失败");
@@ -63,15 +108,27 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
     }
   }
 
-  async function onRemove(memberId: string, roleId: string) {
+  async function onRemove(member: WorkspaceMemberVM, roleId: string, roleName: string) {
+    const memberId = member.member_id;
     const key = `${memberId}:${roleId}`;
+    const displayName = member.display_name || member.email;
+    if (!window.confirm(`确定解除 ${displayName} 的「${roleName}」角色？`)) {
+      return;
+    }
     setRemovingKey(key);
     setError(null);
     try {
       await governance.removeRoleBinding(workspaceId, memberId, roleId);
       router.refresh();
     } catch (err) {
-      setError(err instanceof BffError ? err.message : "解绑失败");
+      const message =
+        err instanceof BffError
+          ? err.code === "GOVERNANCE_BINDING_NOT_FOUND"
+            ? "该角色绑定已不存在，请刷新页面"
+            : err.message
+          : "解绑失败";
+      setError(message);
+      router.refresh();
     } finally {
       setRemovingKey(null);
     }
@@ -92,6 +149,13 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
         {members.map((member) => {
           const accent = memberAccent(member.member_id);
           const displayName = member.display_name || member.email.split("@")[0];
+          const availableRoles = unboundRoles(member, roles);
+          const selectedRoleId = selectedRoles[member.member_id] ?? "";
+          const canAssign =
+            Boolean(selectedRoleId) &&
+            !isRoleBound(member, selectedRoleId) &&
+            loadingId !== member.member_id &&
+            successId !== member.member_id;
           return (
             <article key={member.member_id} className="admin-member-row">
               <div className="admin-member-main">
@@ -124,7 +188,7 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
                         className="admin-role-chip-remove"
                         title="解除绑定"
                         disabled={removingKey === `${member.member_id}:${role.id}`}
-                        onClick={() => void onRemove(member.member_id, role.id)}
+                        onClick={() => void onRemove(member, role.id, role.name)}
                       >
                         ×
                       </button>
@@ -136,8 +200,9 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
               <div className="admin-member-assign">
                 <select
                   className="admin-member-select"
-                  value={selectedRoles[member.member_id] ?? ""}
+                  value={selectedRoleId}
                   aria-label={`为 ${displayName} 选择角色`}
+                  disabled={availableRoles.length === 0 || loadingId === member.member_id}
                   onChange={(e) =>
                     setSelectedRoles((prev) => ({
                       ...prev,
@@ -145,8 +210,10 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
                     }))
                   }
                 >
-                  <option value="">选择角色</option>
-                  {roles.map((role) => (
+                  <option value="">
+                    {availableRoles.length === 0 ? "角色已全部绑定" : "选择角色"}
+                  </option>
+                  {availableRoles.map((role) => (
                     <option key={role.id} value={role.id}>
                       {role.name}
                     </option>
@@ -154,11 +221,11 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
                 </select>
                 <button
                   type="button"
-                  className="btn admin-member-assign-btn"
-                  disabled={!selectedRoles[member.member_id] || loadingId === member.member_id}
-                  onClick={() => void onAssign(member.member_id)}
+                  className={`admin-member-assign-btn ${canAssign ? "btn" : successId === member.member_id ? "btn admin-member-assign-btn-success" : "btn-secondary"}`}
+                  disabled={!canAssign}
+                  onClick={() => void onAssign(member)}
                 >
-                  {loadingId === member.member_id ? "…" : "绑定"}
+                  {loadingId === member.member_id ? "绑定中…" : successId === member.member_id ? "已绑定" : "绑定"}
                 </button>
               </div>
             </article>
@@ -181,7 +248,15 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
             </tr>
           </thead>
           <tbody>
-            {members.map((member) => (
+            {members.map((member) => {
+              const availableRoles = unboundRoles(member, roles);
+              const selectedRoleId = selectedRoles[member.member_id] ?? "";
+              const canAssign =
+                Boolean(selectedRoleId) &&
+                !isRoleBound(member, selectedRoleId) &&
+                loadingId !== member.member_id &&
+                successId !== member.member_id;
+              return (
               <tr key={member.member_id}>
                 <td>
                   <p className="font-medium">{member.display_name || member.email}</p>
@@ -203,7 +278,7 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
                             className="rounded-full px-1 text-muted hover:text-red-600"
                             title="解除绑定"
                             disabled={removingKey === `${member.member_id}:${role.id}`}
-                            onClick={() => void onRemove(member.member_id, role.id)}
+                            onClick={() => void onRemove(member, role.id, role.name)}
                           >
                             ×
                           </button>
@@ -216,7 +291,8 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
                   <div className="flex flex-col sm:flex-row gap-2 min-w-[220px]">
                     <select
                       className="input"
-                      value={selectedRoles[member.member_id] ?? ""}
+                      value={selectedRoleId}
+                      disabled={availableRoles.length === 0 || loadingId === member.member_id}
                       onChange={(e) =>
                         setSelectedRoles((prev) => ({
                           ...prev,
@@ -224,25 +300,28 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
                         }))
                       }
                     >
-                      <option value="">选择角色</option>
-                      {roles.map((role) => (
+                      <option value="">
+                        {availableRoles.length === 0 ? "角色已全部绑定" : "选择角色"}
+                      </option>
+                      {availableRoles.map((role) => (
                         <option key={role.id} value={role.id}>
                           {role.name}
                         </option>
                       ))}
                     </select>
                     <button
-                      className="btn shrink-0"
+                      className={`shrink-0 ${canAssign ? "btn" : successId === member.member_id ? "btn admin-member-assign-btn-success" : "btn-secondary"}`}
                       type="button"
-                      disabled={!selectedRoles[member.member_id] || loadingId === member.member_id}
-                      onClick={() => void onAssign(member.member_id)}
+                      disabled={!canAssign}
+                      onClick={() => void onAssign(member)}
                     >
-                      {loadingId === member.member_id ? "绑定中..." : "绑定"}
+                      {loadingId === member.member_id ? "绑定中..." : successId === member.member_id ? "已绑定" : "绑定"}
                     </button>
                   </div>
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       </div>

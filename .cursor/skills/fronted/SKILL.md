@@ -5,6 +5,8 @@ description: Builds SparkOps enterprise frontend UI with refined visual taste, f
 
 # SparkOps 企业级前端 UI
 
+> **设计哲学：** 先读 [apple-restrained-ui/SKILL.md](../apple-restrained-ui/SKILL.md)（Apple 克制方法论：内容优先、近乎无色、空间层级、呼吸感动效），再按本文档落地组件与交互。
+
 ## 设计目标
 
 交付**企业级控制台**体验：信息层次清晰、操作可预期、视觉克制但有品位。避免「后台模板感」和「堆组件感」——每个页面应有明确的视觉焦点与呼吸感。
@@ -164,5 +166,6 @@ table-wrap → data-table
 
 ## 延伸阅读
 
+- **设计方法论（优先）：** [apple-restrained-ui/SKILL.md](../apple-restrained-ui/SKILL.md)
 - K8s 与专项组件清单：[reference.md](reference.md)
 - 设计 Token 与全局类完整定义：`fronted/apps/web/app/globals.css`

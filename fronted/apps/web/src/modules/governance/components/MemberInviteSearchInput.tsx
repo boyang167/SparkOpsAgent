@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, useCallback } from "react";
 import type { MemberCandidateVM } from "@sparkops/contracts/governance";
 import { governance } from "@sparkops/web-sdk";
 
@@ -9,13 +9,14 @@ const SEARCH_DEBOUNCE_MS = 300;
 const MAX_RESULTS = 10;
 
 interface MemberInviteSearchInputProps {
-  workspaceId: string;
+  workspaceId?: string;
   value: string;
   onChange: (value: string) => void;
   onSelect?: (candidate: MemberCandidateVM) => void;
+  searchCandidates?: (query: string, limit: number) => Promise<MemberCandidateVM[]>;
   placeholder?: string;
   disabled?: boolean;
-  variant?: "default" | "admin";
+  variant?: "default" | "admin" | "org";
   inputId?: string;
 }
 
@@ -29,7 +30,8 @@ export function MemberInviteSearchInput({
   value,
   onChange,
   onSelect,
-  placeholder = "输入邮箱或姓名搜索成员",
+  searchCandidates,
+  placeholder = "搜索邮箱或姓名（须已注册）",
   disabled = false,
   variant = "default",
   inputId,
@@ -40,32 +42,49 @@ export function MemberInviteSearchInput({
   const [loading, setLoading] = useState(false);
   const [candidates, setCandidates] = useState<MemberCandidateVM[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [searched, setSearched] = useState(false);
+
+  const searchCandidatesRef = useRef(searchCandidates);
+  searchCandidatesRef.current = searchCandidates;
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
+
+  const runSearch = useCallback((query: string, limit: number) => {
+    const custom = searchCandidatesRef.current;
+    if (custom) return custom(query, limit);
+    const wsId = workspaceIdRef.current;
+    if (wsId) return governance.searchMemberCandidates(wsId, query, limit);
+    return Promise.resolve([] as MemberCandidateVM[]);
+  }, []);
 
   useEffect(() => {
     const query = value.trim();
-    if (query.length < MIN_QUERY_LEN) {
-      setCandidates([]);
-      setLoading(false);
-      setOpen(false);
-      setActiveIndex(-1);
+    const canSearch = Boolean(searchCandidatesRef.current || workspaceIdRef.current);
+    if (!canSearch || query.length < MIN_QUERY_LEN) {
+      setCandidates((prev) => (prev.length === 0 ? prev : []));
+      setLoading((prev) => (prev ? false : prev));
+      setOpen((prev) => (prev ? false : prev));
+      setActiveIndex((prev) => (prev === -1 ? prev : -1));
+      setSearched((prev) => (prev ? false : prev));
       return;
     }
 
     setLoading(true);
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      governance
-        .searchMemberCandidates(workspaceId, query, MAX_RESULTS)
+      runSearch(query, MAX_RESULTS)
         .then((items) => {
           if (cancelled) return;
           setCandidates(items);
-          setOpen(items.length > 0);
+          setSearched(true);
+          setOpen(true);
           setActiveIndex(items.length > 0 ? 0 : -1);
         })
         .catch(() => {
           if (cancelled) return;
           setCandidates([]);
-          setOpen(false);
+          setSearched(true);
+          setOpen(true);
           setActiveIndex(-1);
         })
         .finally(() => {
@@ -79,7 +98,7 @@ export function MemberInviteSearchInput({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [value, workspaceId]);
+  }, [value, runSearch]);
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
@@ -126,23 +145,23 @@ export function MemberInviteSearchInput({
     }
   }
 
-  const inputClass =
-    variant === "admin" ? "admin-members-invite-input" : "input flex-1";
+  const fieldClass =
+    variant === "org"
+      ? "tenant-invite-field"
+      : "admin-members-invite-field";
 
-  const showPanel = open && candidates.length > 0;
+  const inputClass = "admin-members-invite-input";
+
+  const showResults = open && value.trim().length >= MIN_QUERY_LEN && !loading;
   const showHint = value.trim().length > 0 && value.trim().length < MIN_QUERY_LEN;
+  const showEmpty = showResults && searched && candidates.length === 0;
 
   return (
-    <div
-      ref={rootRef}
-      className={variant === "admin" ? "admin-members-invite-field" : "member-invite-search relative flex-1"}
-    >
-      {variant === "admin" ? (
-        <svg className="admin-members-invite-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <circle cx="11" cy="11" r="7" />
-          <path d="M20 20l-3.5-3.5" strokeLinecap="round" />
-        </svg>
-      ) : null}
+    <div ref={rootRef} className={fieldClass}>
+      <svg className="admin-members-invite-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+        <circle cx="11" cy="11" r="7" />
+        <path d="M20 20l-3.5-3.5" strokeLinecap="round" />
+      </svg>
 
       <input
         id={inputId}
@@ -150,7 +169,7 @@ export function MemberInviteSearchInput({
         type="search"
         autoComplete="off"
         role="combobox"
-        aria-expanded={showPanel}
+        aria-expanded={showResults && candidates.length > 0}
         aria-controls={listId}
         aria-autocomplete="list"
         aria-activedescendant={activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
@@ -159,7 +178,7 @@ export function MemberInviteSearchInput({
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         onFocus={() => {
-          if (candidates.length > 0) {
+          if (value.trim().length >= MIN_QUERY_LEN) {
             setOpen(true);
           }
         }}
@@ -176,7 +195,7 @@ export function MemberInviteSearchInput({
         </span>
       ) : null}
 
-      {showPanel ? (
+      {showResults && candidates.length > 0 ? (
         <ul id={listId} className="member-invite-search-menu" role="listbox">
           {candidates.map((candidate, index) => (
             <li key={candidate.member_id} role="presentation">
@@ -201,6 +220,12 @@ export function MemberInviteSearchInput({
             </li>
           ))}
         </ul>
+      ) : null}
+
+      {showEmpty ? (
+        <div className="member-invite-search-menu member-invite-search-empty" role="status">
+          未找到可邀请的注册用户，或该用户已在当前范围内
+        </div>
       ) : null}
     </div>
   );

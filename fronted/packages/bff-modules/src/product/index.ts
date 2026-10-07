@@ -127,6 +127,21 @@ export async function getReleasePlan(ctx: BffContext, workspaceId: string, produ
   return ctx.upstream.product.getReleasePlan(workspaceId, productId, planId);
 }
 
+export function listReleasePlanVersions(ctx: BffContext, workspaceId: string, productId: string, planId: string) {
+  return ctx.upstream.product.listReleasePlanVersions(workspaceId, productId, planId);
+}
+
+export function getReleasePlanVersionDiff(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  version: number,
+  compareVersion?: number,
+) {
+  return ctx.upstream.product.getReleasePlanVersionDiff(workspaceId, productId, planId, version, compareVersion);
+}
+
 export async function createReleasePlan(
   ctx: BffContext,
   workspaceId: string,
@@ -209,6 +224,10 @@ export function updateReleasePlan(
 
 export function cancelReleasePlan(ctx: BffContext, workspaceId: string, productId: string, planId: string) {
   return ctx.upstream.product.cancelReleasePlan(workspaceId, productId, planId);
+}
+
+export function deleteReleasePlan(ctx: BffContext, workspaceId: string, productId: string, planId: string) {
+  return ctx.upstream.product.deleteReleasePlan(workspaceId, productId, planId);
 }
 
 export function reopenReleasePlanPlanning(ctx: BffContext, workspaceId: string, productId: string, planId: string) {
@@ -714,6 +733,31 @@ export function getSprintBoardWsConfig(
     access_token: ctx.token,
     workspace_id: workspaceId,
   };
+}
+
+export function getReleasePlanCollabWsConfig(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  planId: string,
+): import("@sparkops/contracts/product").ReleasePlanCollabWsConfig {
+  if (!ctx.token) {
+    throw new Error("authorization required");
+  }
+  return {
+    websocket_path: `/api/v1/products/${productId}/release-plans/${planId}/collaboration/ws`,
+    access_token: ctx.token,
+    workspace_id: workspaceId,
+  };
+}
+
+export async function listReleasePlanCollabEditors(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  planId: string,
+) {
+  return ctx.upstream.product.listReleasePlanCollabEditors(workspaceId, productId, planId);
 }
 
 export function getSprintMetrics(ctx: BffContext, workspaceId: string, productId: string, sprintId: string) {

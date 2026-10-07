@@ -65,11 +65,30 @@ export function SprintWorkItemsSummary({ plan, canEdit, busy, onGenerateJobs }: 
                 <span className="text-xs text-muted-foreground">
                   {item.stage_id} · {item.status}
                 </span>
-                {item.pm_links?.map((link) => (
-                  <span key={`${link.provider}-${link.external_key}`} className="text-xs rounded bg-muted px-1.5 py-0.5 w-fit">
-                    {link.provider}:{link.external_key}
-                  </span>
-                ))}
+                {item.pm_links?.map((link) => {
+                  const label = `${link.provider ?? "pm"}:${link.external_key ?? "—"}`;
+                  if (link.url) {
+                    return (
+                      <a
+                        key={`${link.provider}-${link.external_key}`}
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-xs rounded bg-muted px-1.5 py-0.5 w-fit text-primary hover:underline"
+                      >
+                        {label}
+                      </a>
+                    );
+                  }
+                  return (
+                    <span
+                      key={`${link.provider}-${link.external_key}`}
+                      className="text-xs rounded bg-muted px-1.5 py-0.5 w-fit"
+                    >
+                      {label}
+                    </span>
+                  );
+                })}
               </div>
             </li>
           ))}

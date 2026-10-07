@@ -84,7 +84,10 @@ func releasePlanSummary(plan *model.ReleasePlan) map[string]any {
 		"release_window_end":   plan.ReleaseWindowEnd.Format(time.RFC3339),
 		"approval_enabled":     plan.ApprovalConfig.Enabled,
 		"approval_config":      plan.ApprovalConfig,
+		"hook_settings":        plan.HookSettings,
+		"hook_state":           plan.HookState,
 		"created_at":           plan.CreatedAt.Format(time.RFC3339),
+		"version":              plan.Version,
 	}
 	if plan.ScheduleExecuteTime != nil {
 		out["schedule_execute_time"] = plan.ScheduleExecuteTime.Format(time.RFC3339)
@@ -97,6 +100,7 @@ func releasePlanSummary(plan *model.ReleasePlan) map[string]any {
 
 func releasePlanDetail(plan *model.ReleasePlan) map[string]any {
 	out := releasePlanSummary(plan)
+	out["version"] = plan.Version
 	out["manager_id"] = plan.ManagerID.String()
 	jobs := make([]map[string]any, 0, len(plan.Jobs))
 	for _, job := range plan.Jobs {

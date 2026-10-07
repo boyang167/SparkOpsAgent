@@ -4,6 +4,7 @@ export const WorkflowRefSpecSchema = z.object({
   mode: z.string().optional(),
   workflow_id: z.string().optional(),
   parameters: z.record(z.string()).optional(),
+  workflow_snapshot: z.unknown().optional(),
 });
 
 export type WorkflowRefSpec = z.infer<typeof WorkflowRefSpecSchema>;
@@ -36,6 +37,37 @@ export const ApprovalConfigSchema = z.object({
 });
 
 export type ApprovalConfig = z.infer<typeof ApprovalConfigSchema>;
+
+export const ReleasePlanHookEventConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  url: z.string().optional(),
+  description: z.string().optional(),
+});
+
+export const ReleasePlanHookSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  events: z.record(ReleasePlanHookEventConfigSchema).optional(),
+});
+
+export type ReleasePlanHookSettings = z.infer<typeof ReleasePlanHookSettingsSchema>;
+
+export const ReleasePlanHookStateSchema = z.object({
+  event: z.string().optional(),
+  token: z.string().optional(),
+  status: z.string().optional(),
+  sent_at: z.string().optional(),
+  acted_at: z.string().optional(),
+  message: z.string().optional(),
+});
+
+export type ReleasePlanHookState = z.infer<typeof ReleasePlanHookStateSchema>;
+
+export const ReleasePlanCollabEditorSchema = z.object({
+  member_id: z.string(),
+  section: z.string(),
+});
+
+export type ReleasePlanCollabEditor = z.infer<typeof ReleasePlanCollabEditorSchema>;
 
 export const ReleasePlanJobVMSchema = z.object({
   id: z.string(),
@@ -80,17 +112,66 @@ export const LinkedWorkItemVMSchema = z.object({
 
 export type LinkedWorkItemVM = z.infer<typeof LinkedWorkItemVMSchema>;
 
+export const ReleasePlanVersionSummaryVMSchema = z.object({
+  version: z.number().int(),
+  previous_version: z.number().int(),
+  actor_id: z.string(),
+  verb: z.string(),
+  section_key: z.string().optional(),
+  section_name: z.string().optional(),
+  created_at: z.string(),
+});
+
+export type ReleasePlanVersionSummaryVM = z.infer<typeof ReleasePlanVersionSummaryVMSchema>;
+
+export const ReleasePlanVersionDiffChangeVMSchema = z.object({
+  change_type: z.string().optional(),
+  path: z.string().optional(),
+  label: z.string(),
+  before: z.unknown().optional(),
+  after: z.unknown().optional(),
+  before_order: z
+    .array(z.object({ id: z.string(), name: z.string() }))
+    .optional(),
+  after_order: z
+    .array(z.object({ id: z.string(), name: z.string() }))
+    .optional(),
+});
+
+export type ReleasePlanVersionDiffChangeVM = z.infer<typeof ReleasePlanVersionDiffChangeVMSchema>;
+
+export const ReleasePlanVersionDiffGroupVMSchema = z.object({
+  group_key: z.string(),
+  group_name: z.string(),
+  group_type: z.string(),
+  changes: z.array(ReleasePlanVersionDiffChangeVMSchema),
+});
+
+export type ReleasePlanVersionDiffGroupVM = z.infer<typeof ReleasePlanVersionDiffGroupVMSchema>;
+
+export const ReleasePlanVersionDiffVMSchema = z.object({
+  plan_id: z.string(),
+  version: z.number().int(),
+  previous_version: z.number().int(),
+  groups: z.array(ReleasePlanVersionDiffGroupVMSchema),
+});
+
+export type ReleasePlanVersionDiffVM = z.infer<typeof ReleasePlanVersionDiffVMSchema>;
+
 export const ReleasePlanVMSchema = z.object({
   id: z.string(),
   product_id: z.string(),
   sprint_id: z.string().optional(),
   name: z.string(),
   description: z.string().optional(),
+  version: z.number().int().optional(),
   status: z.string(),
   release_window_start: z.string(),
   release_window_end: z.string(),
   approval_enabled: z.boolean().optional(),
   approval_config: ApprovalConfigSchema.optional(),
+  hook_settings: ReleasePlanHookSettingsSchema.optional(),
+  hook_state: ReleasePlanHookStateSchema.optional(),
   schedule_execute_time: z.string().optional(),
   created_at: z.string().optional(),
   manager_id: z.string().optional(),
@@ -141,6 +222,7 @@ export const UpdateReleasePlanCommandSchema = z.object({
   release_window_end: z.string().optional(),
   approval_enabled: z.boolean().optional(),
   approval_config: ApprovalConfigSchema.optional(),
+  hook_settings: ReleasePlanHookSettingsSchema.optional(),
   schedule_execute_time: z.string().optional(),
   clear_schedule_time: z.boolean().optional(),
   sprint_id: z.string().optional(),
@@ -148,6 +230,14 @@ export const UpdateReleasePlanCommandSchema = z.object({
 });
 
 export type UpdateReleasePlanCommand = z.infer<typeof UpdateReleasePlanCommandSchema>;
+
+export const ReleasePlanCollabWsConfigSchema = z.object({
+  websocket_path: z.string(),
+  access_token: z.string(),
+  workspace_id: z.string(),
+});
+
+export type ReleasePlanCollabWsConfig = z.infer<typeof ReleasePlanCollabWsConfigSchema>;
 
 export const RejectReleasePlanCommandSchema = z.object({
   reason: z.string().optional(),

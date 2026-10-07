@@ -20,11 +20,15 @@ import (
 	tenantpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/infrastructure/persistence"
 	workflowpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/infrastructure/persistence"
 	wspersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/persistence"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	k8sschema "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/schema"
 )
 
 // AutoMigrate creates BC schemas and tables via GORM.
 func AutoMigrate(db *gorm.DB) error {
+	if postgres.SQLMigrationsApplied(db) {
+		return nil
+	}
 	steps := []struct {
 		name string
 		fn   func(*gorm.DB) error

@@ -29,6 +29,7 @@ type Handler struct {
 	releasePlans        ReleasePlanHandlers
 	sprints             SprintHandlers
 	sprintBoardWS       *SprintBoardWSHandler
+	releasePlanCollabWS *ReleasePlanCollabWSHandler
 	environments        EnvironmentHandlers
 }
 
@@ -49,6 +50,7 @@ func NewHandler(
 	releasePlans ReleasePlanHandlers,
 	sprints SprintHandlers,
 	sprintBoardWS *SprintBoardWSHandler,
+	releasePlanCollabWS *ReleasePlanCollabWSHandler,
 	environments EnvironmentHandlers,
 ) *Handler {
 	return &Handler{
@@ -59,7 +61,8 @@ func NewHandler(
 		listProducts: listProducts, getProduct: getProduct,
 		listPlans: listPlans, listRequirements: listRequirements,
 		listProductProjects: listProductProjects, getProductOverview: getProductOverview,
-		releasePlans: releasePlans, sprints: sprints, sprintBoardWS: sprintBoardWS, environments: environments,
+		releasePlans: releasePlans, sprints: sprints, sprintBoardWS: sprintBoardWS,
+		releasePlanCollabWS: releasePlanCollabWS, environments: environments,
 	}
 }
 

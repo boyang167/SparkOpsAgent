@@ -7,6 +7,9 @@ import (
 
 	"gorm.io/gorm"
 
+
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
+
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain/repository"
@@ -81,16 +84,41 @@ func (r *MemberRepository) ListAll(ctx context.Context) ([]*model.Member, error)
 }
 
 func AutoMigrate(db *gorm.DB) error {
+	if !postgres.ShouldRunAutoMigrate(db) {
+		return nil
+	}
 	if db.Dialector.Name() == "postgres" {
 		if err := db.Exec("CREATE SCHEMA IF NOT EXISTS identity").Error; err != nil {
+			return err
+		}
+		if err := reconcileMemberEmailUniqueIndex(db); err != nil {
 			return err
 		}
 	}
 	return db.AutoMigrate(&memberModel{})
 }
 
+// reconcileMemberEmailUniqueIndex aligns SQL migration constraint names with GORM tags.
+func reconcileMemberEmailUniqueIndex(db *gorm.DB) error {
+	return db.Exec(`
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'members_email_key'
+      AND conrelid = 'identity.members'::regclass
+  ) AND NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'uni_members_email'
+      AND conrelid = 'identity.members'::regclass
+  ) THEN
+    ALTER TABLE identity.members RENAME CONSTRAINT members_email_key TO uni_members_email;
+  END IF;
+END $$`).Error
+}
+
 type memberModel struct {
-	ID           string `gorm:"column:id;primaryKey"`
+	ID           string `gorm:"column:id;primaryKey;type:uuid"`
 	Email        string `gorm:"column:email;uniqueIndex"`
 	DisplayName  string `gorm:"column:display_name"`
 	PasswordHash string `gorm:"column:password_hash"`

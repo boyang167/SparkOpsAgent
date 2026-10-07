@@ -59,6 +59,13 @@ export function createTenantUpstream(options: UpstreamRequestOptions = {}) {
         options,
       });
     },
+    async searchOrgMemberCandidates(orgId: string, q: string, limit = 10) {
+      const params = new URLSearchParams({ q, limit: String(limit) });
+      return upstreamFetch<{ items: import("@sparkops/contracts/governance").MemberCandidateVM[] }>(
+        `/api/v1/orgs/${orgId}/member-candidates?${params.toString()}`,
+        { method: "GET", options },
+      );
+    },
     async inviteOrgMember(orgId: string, input: InviteOrgMemberCommand) {
       return upstreamFetch<{ member_id: string; email: string; display_name: string; role: string }>(
         `/api/v1/orgs/${orgId}/members`,

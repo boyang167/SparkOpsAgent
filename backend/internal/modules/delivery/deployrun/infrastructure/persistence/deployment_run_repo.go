@@ -11,6 +11,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	domainrepo "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -60,6 +61,9 @@ type deploymentRunEventRow struct {
 func (deploymentRunEventRow) TableName() string { return "delivery.deployment_run_events" }
 
 func AutoMigrate(db *gorm.DB) error {
+	if !postgres.ShouldRunAutoMigrate(db) {
+		return nil
+	}
 	if err := db.AutoMigrate(&deploymentRunRow{}, &deploymentRunEventRow{}); err != nil {
 		return err
 	}

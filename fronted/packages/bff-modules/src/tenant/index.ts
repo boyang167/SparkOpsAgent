@@ -4,6 +4,7 @@ export { getOrganization } from "./getOrganization";
 export { createOrganization } from "./createOrganization";
 export { createWorkspace } from "./createWorkspace";
 export { listOrgMembers } from "./listOrgMembers";
+export { searchOrgMemberCandidates } from "./searchOrgMemberCandidates";
 export { inviteOrgMember } from "./inviteOrgMember";
 export { updateOrgMemberRole } from "./updateOrgMemberRole";
 export { removeOrgMember } from "./removeOrgMember";

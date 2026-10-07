@@ -62,7 +62,12 @@ func (h *CopyReleasePlanHandler) Handle(ctx context.Context, productID kernel.Pr
 		}
 	}
 	_ = auditReleasePlan(ctx, h.plans, clone.ID, actor, "copy", map[string]any{"source_plan_id": planID.String()})
-	return h.plans.FindPlanByID(ctx, clone.ID)
+	clonePlan, err := h.plans.FindPlanByID(ctx, clone.ID)
+	if err != nil {
+		return nil, err
+	}
+	_ = persistReleasePlanVersion(ctx, h.plans, clonePlan, actor, "copy")
+	return clonePlan, nil
 }
 
 type SaveReleasePlanTemplateInput struct {
@@ -209,7 +214,12 @@ func (h *CreateReleasePlanFromTemplateHandler) Handle(
 		}
 	}
 	_ = auditReleasePlan(ctx, h.plans, plan.ID, actor, "create_from_template", map[string]any{"template_id": templateID.String()})
-	return h.plans.FindPlanByID(ctx, plan.ID)
+	created, err := h.plans.FindPlanByID(ctx, plan.ID)
+	if err != nil {
+		return nil, err
+	}
+	_ = persistReleasePlanVersion(ctx, h.plans, created, actor, "create_from_template")
+	return created, nil
 }
 
 type ListReleasePlanTemplatesHandler struct {
@@ -250,10 +260,15 @@ type ApprovalByTokenInput struct {
 type ApproveReleasePlanByTokenHandler struct {
 	plans    repository.ReleasePlanRepository
 	executor *service.ReleasePlanExecutor
+	hooks    *service.ReleasePlanHookNotifier
 }
 
-func NewApproveReleasePlanByTokenHandler(plans repository.ReleasePlanRepository, executor *service.ReleasePlanExecutor) *ApproveReleasePlanByTokenHandler {
-	return &ApproveReleasePlanByTokenHandler{plans: plans, executor: executor}
+func NewApproveReleasePlanByTokenHandler(
+	plans repository.ReleasePlanRepository,
+	executor *service.ReleasePlanExecutor,
+	hooks *service.ReleasePlanHookNotifier,
+) *ApproveReleasePlanByTokenHandler {
+	return &ApproveReleasePlanByTokenHandler{plans: plans, executor: executor, hooks: hooks}
 }
 
 func (h *ApproveReleasePlanByTokenHandler) Handle(ctx context.Context, token string, input ApprovalByTokenInput) (*model.ReleasePlan, error) {
@@ -264,6 +279,16 @@ func (h *ApproveReleasePlanByTokenHandler) Handle(ctx context.Context, token str
 	now := time.Now().UTC()
 	if err := plan.ApproveByToken(strings.TrimSpace(input.Note), now); err != nil {
 		return nil, err
+	}
+	flow := releasePlanFlowDeps{plans: h.plans, executor: h.executor, hooks: h.hooks}
+	if plan.Status == model.ReleasePlanStatusWaitExecuteExternalCheck {
+		flow.beginHookWait(plan, model.ReleasePlanHookEventBeforeExecute)
+		if err := h.plans.UpdatePlan(ctx, plan); err != nil {
+			return nil, err
+		}
+		_ = auditReleasePlan(ctx, h.plans, plan.ID, kernel.MemberID{}, "approve_by_token", map[string]any{"note": input.Note, "hook": "before_execute"})
+		flow.sendHookAsync(plan, model.ReleasePlanHookEventBeforeExecute)
+		return h.plans.FindPlanByID(ctx, plan.ID)
 	}
 	if err := h.plans.UpdatePlan(ctx, plan); err != nil {
 		return nil, err

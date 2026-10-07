@@ -11,9 +11,10 @@ import (
 )
 
 type WorkflowRefSpec struct {
-	Mode       string            `json:"mode"`
-	WorkflowID string            `json:"workflow_id"`
-	Parameters map[string]string `json:"parameters,omitempty"`
+	Mode             string            `json:"mode"`
+	WorkflowID       string            `json:"workflow_id"`
+	Parameters       map[string]string `json:"parameters,omitempty"`
+	WorkflowSnapshot json.RawMessage   `json:"workflow_snapshot,omitempty"`
 }
 
 type ExecutionRef struct {
@@ -108,9 +109,12 @@ type ReleasePlan struct {
 	ReleaseWindowEnd    time.Time
 	ScheduleExecuteTime *time.Time
 	ApprovalConfig      ApprovalConfig
+	HookSettings        ReleasePlanHookSettings
+	HookState           *ReleasePlanHookState
 	CreatedBy           kernel.MemberID
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	Version             int
 	Jobs                []ReleasePlanJob
 }
 
@@ -151,18 +155,16 @@ func NewReleasePlan(productID kernel.ProductID, name, description string, manage
 }
 
 func (p *ReleasePlan) FinishPlanning() error {
-	if p.Status != ReleasePlanStatusPlanning {
+	if p.Status != ReleasePlanStatusPlanning &&
+		p.Status != ReleasePlanStatusWaitFinishPlanningExternalCheck {
 		return domain.ErrInvalidReleasePlanTransition
 	}
 	if p.ApprovalConfig.Enabled {
 		p.Status = ReleasePlanStatusWaitForApproval
+	} else if p.HookSettings.EventEnabled(ReleasePlanHookEventBeforeExecute) {
+		p.Status = ReleasePlanStatusWaitExecuteExternalCheck
 	} else {
 		p.Status = ReleasePlanStatusExecuting
-		for i := range p.Jobs {
-			if p.Jobs[i].Status == ReleasePlanJobStatusTodo {
-				p.Jobs[i].Status = ReleasePlanJobStatusTodo
-			}
-		}
 	}
 	p.UpdatedAt = time.Now().UTC()
 	return nil
@@ -172,7 +174,11 @@ func (p *ReleasePlan) Approve() error {
 	if p.Status != ReleasePlanStatusWaitForApproval {
 		return domain.ErrInvalidReleasePlanTransition
 	}
-	p.Status = ReleasePlanStatusExecuting
+	if p.HookSettings.EventEnabled(ReleasePlanHookEventBeforeExecute) {
+		p.Status = ReleasePlanStatusWaitExecuteExternalCheck
+	} else {
+		p.Status = ReleasePlanStatusExecuting
+	}
 	p.UpdatedAt = time.Now().UTC()
 	return nil
 }
@@ -198,9 +204,23 @@ func (p *ReleasePlan) ReopenPlanning() error {
 
 func (p *ReleasePlan) Cancel() error {
 	switch p.Status {
-	case ReleasePlanStatusPlanning, ReleasePlanStatusWaitForApproval, ReleasePlanStatusExecuting:
+	case ReleasePlanStatusPlanning, ReleasePlanStatusWaitForApproval, ReleasePlanStatusExecuting,
+		ReleasePlanStatusWaitFinishPlanningExternalCheck, ReleasePlanStatusWaitExecuteExternalCheck,
+		ReleasePlanStatusWaitAllDoneExternalCheck:
 		p.Status = ReleasePlanStatusCancel
+		p.HookState = nil
 		p.UpdatedAt = time.Now().UTC()
+		return nil
+	default:
+		return domain.ErrInvalidReleasePlanTransition
+	}
+}
+
+func (p *ReleasePlan) CanDelete() error {
+	switch p.Status {
+	case ReleasePlanStatusPlanning, ReleasePlanStatusDenied, ReleasePlanStatusCancel, ReleasePlanStatusSuccess,
+		ReleasePlanStatusFinishPlanningExternalFailed, ReleasePlanStatusExecuteExternalFailed,
+		ReleasePlanStatusAllDoneExternalFailed:
 		return nil
 	default:
 		return domain.ErrInvalidReleasePlanTransition
@@ -275,10 +295,52 @@ func (p *ReleasePlan) ParseWorkflowRef(job *ReleasePlanJob) (WorkflowRefSpec, er
 	if spec.Mode == "" {
 		spec.Mode = "reference"
 	}
-	if spec.Mode != "reference" || spec.WorkflowID == "" {
+	if spec.WorkflowID == "" {
 		return WorkflowRefSpec{}, domain.ErrInvalidWorkflowRef
 	}
-	return spec, nil
+	switch spec.Mode {
+	case "reference", "snapshot":
+		return spec, nil
+	default:
+		return WorkflowRefSpec{}, domain.ErrInvalidWorkflowRef
+	}
+}
+
+func (spec WorkflowRefSpec) ToRunInput() map[string]any {
+	input := map[string]any{}
+	if len(spec.Parameters) == 0 {
+		return input
+	}
+	if branch := strings.TrimSpace(spec.Parameters["branch"]); branch != "" {
+		input["branch"] = branch
+	}
+	if raw := strings.TrimSpace(spec.Parameters["_environment_overrides"]); raw != "" {
+		var overrides map[string]string
+		if err := json.Unmarshal([]byte(raw), &overrides); err == nil && len(overrides) > 0 {
+			envMap := make(map[string]any, len(overrides))
+			for jobName, envID := range overrides {
+				if strings.TrimSpace(envID) != "" {
+					envMap[jobName] = envID
+				}
+			}
+			if len(envMap) > 0 {
+				input["environment_overrides"] = envMap
+			}
+		}
+	}
+	variables := map[string]any{}
+	for key, value := range spec.Parameters {
+		if key == "branch" || key == "environment_id" || key == "_environment_overrides" || strings.HasPrefix(key, "_") {
+			continue
+		}
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			variables[key] = trimmed
+		}
+	}
+	if len(variables) > 0 {
+		input["variables"] = variables
+	}
+	return input
 }
 
 func (p *ReleasePlan) MarkWorkflowJobRunning(jobID kernel.ReleasePlanJobID, runID kernel.ProductWorkflowRunID) error {
@@ -304,14 +366,14 @@ func (p *ReleasePlan) MarkWorkflowJobRunning(jobID kernel.ReleasePlanJobID, runI
 	return nil
 }
 
-func (p *ReleasePlan) CompleteWorkflowJob(jobID kernel.ReleasePlanJobID, success bool, errMsg string) error {
+func (p *ReleasePlan) CompleteWorkflowJob(jobID kernel.ReleasePlanJobID, success bool, errMsg string) (bool, error) {
 	idx := p.jobIndexByID(jobID)
 	if idx < 0 {
-		return domain.ErrReleasePlanJobNotFound
+		return false, domain.ErrReleasePlanJobNotFound
 	}
 	job := &p.Jobs[idx]
 	if job.Type != ReleasePlanJobTypeWorkflow || job.Status != ReleasePlanJobStatusRunning {
-		return domain.ErrInvalidReleasePlanJobTransition
+		return false, domain.ErrInvalidReleasePlanJobTransition
 	}
 	var ref ExecutionRef
 	_ = json.Unmarshal(job.ExecutionRef, &ref)
@@ -326,11 +388,11 @@ func (p *ReleasePlan) CompleteWorkflowJob(jobID kernel.ReleasePlanJobID, success
 	job.UpdatedAt = time.Now().UTC()
 	if !success {
 		p.UpdatedAt = time.Now().UTC()
-		return nil
+		return false, nil
 	}
-	p.maybeComplete()
+	needsHook := p.maybeComplete()
 	p.UpdatedAt = time.Now().UTC()
-	return nil
+	return needsHook, nil
 }
 
 func (p *ReleasePlan) RetryWorkflowJob(jobID kernel.ReleasePlanJobID) error {
@@ -377,6 +439,7 @@ func (p *ReleasePlan) ApproveByToken(note string, now time.Time) error {
 	p.ApprovalConfig.Instance.Status = "approved"
 	p.ApprovalConfig.Instance.ActedAt = &now
 	p.ApprovalConfig.Instance.ActorNote = note
+	p.UpdatedAt = now
 	return nil
 }
 
@@ -403,19 +466,19 @@ func (p *ReleasePlan) ScheduledExecutionPending(now time.Time) bool {
 	return now.Before(*p.ScheduleExecuteTime)
 }
 
-func (p *ReleasePlan) MarkTextJobDone(jobID kernel.ReleasePlanJobID, remark string) error {
+func (p *ReleasePlan) MarkTextJobDone(jobID kernel.ReleasePlanJobID, remark string) (bool, error) {
 	if err := p.EnsureExecutingWindow(time.Now().UTC()); err != nil {
-		return err
+		return false, err
 	}
 	if err := p.ensureCurrentJob(jobID); err != nil {
-		return err
+		return false, err
 	}
 	for i := range p.Jobs {
 		if p.Jobs[i].ID != jobID {
 			continue
 		}
 		if p.Jobs[i].Type != ReleasePlanJobTypeText {
-			return domain.ErrInvalidReleasePlanJobTransition
+			return false, domain.ErrInvalidReleasePlanJobTransition
 		}
 		p.Jobs[i].TextChecked = true
 		p.Jobs[i].Status = ReleasePlanJobStatusDone
@@ -424,19 +487,19 @@ func (p *ReleasePlan) MarkTextJobDone(jobID kernel.ReleasePlanJobID, remark stri
 			p.Jobs[i].ExecutionRef = ref
 		}
 		p.Jobs[i].UpdatedAt = time.Now().UTC()
-		p.maybeComplete()
+		needsHook := p.maybeComplete()
 		p.UpdatedAt = time.Now().UTC()
-		return nil
+		return needsHook, nil
 	}
-	return domain.ErrReleasePlanJobNotFound
+	return false, domain.ErrReleasePlanJobNotFound
 }
 
-func (p *ReleasePlan) SkipJob(jobID kernel.ReleasePlanJobID) error {
+func (p *ReleasePlan) SkipJob(jobID kernel.ReleasePlanJobID) (bool, error) {
 	if err := p.EnsureExecutingWindow(time.Now().UTC()); err != nil {
-		return err
+		return false, err
 	}
 	if err := p.ensureCurrentJob(jobID); err != nil {
-		return err
+		return false, err
 	}
 	for i := range p.Jobs {
 		if p.Jobs[i].ID != jobID {
@@ -444,25 +507,32 @@ func (p *ReleasePlan) SkipJob(jobID kernel.ReleasePlanJobID) error {
 		}
 		p.Jobs[i].Status = ReleasePlanJobStatusSkipped
 		p.Jobs[i].UpdatedAt = time.Now().UTC()
-		p.maybeComplete()
+		needsHook := p.maybeComplete()
 		p.UpdatedAt = time.Now().UTC()
-		return nil
+		return needsHook, nil
 	}
-	return domain.ErrReleasePlanJobNotFound
+	return false, domain.ErrReleasePlanJobNotFound
 }
 
-func (p *ReleasePlan) maybeComplete() {
+func (p *ReleasePlan) maybeComplete() bool {
 	if len(p.Jobs) == 0 {
+		if p.HookSettings.EventEnabled(ReleasePlanHookEventAllDone) {
+			return true
+		}
 		p.Status = ReleasePlanStatusSuccess
-		return
+		return false
 	}
 	for _, job := range p.Jobs {
 		switch job.Status {
 		case ReleasePlanJobStatusDone, ReleasePlanJobStatusSkipped:
 			continue
 		default:
-			return
+			return false
 		}
 	}
+	if p.HookSettings.EventEnabled(ReleasePlanHookEventAllDone) {
+		return true
+	}
 	p.Status = ReleasePlanStatusSuccess
+	return false
 }

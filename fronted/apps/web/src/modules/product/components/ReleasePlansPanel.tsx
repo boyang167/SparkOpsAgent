@@ -1,19 +1,39 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { product } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
-import type { ProductWorkflowVM, ReleasePlanJobVM, ReleasePlanVM } from "@sparkops/contracts/product";
+import type { EnvironmentVM, ProductWorkflowVM, ReleasePlanJobVM, ReleasePlanVM } from "@sparkops/contracts/product";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { ProductDetailEmptyState } from "./ProductDetailEmptyState";
 import { ProductMasterDetail } from "./ProductMasterDetail";
-import { ReleasePlanForm, buildApprovalConfig, type ReleasePlanFormValues } from "./ReleasePlanForm";
+import { useWorkspaceMembers } from "../hooks/useWorkspaceMembers";
+import { ReleasePlanAuditList, type ReleasePlanAuditLogEntry } from "./ReleasePlanAuditList";
+import { ReleasePlanVersionHistory } from "./ReleasePlanVersionHistory";
+import {
+  ReleasePlanForm,
+  buildApprovalConfig,
+  buildHookSettingsConfig,
+  type ReleasePlanFormValues,
+  type ReleasePlanSprintOption,
+} from "./ReleasePlanForm";
+import { ReleasePlanCollabBanner } from "./ReleasePlanCollabBanner";
+import { ReleasePlanExternalCheckBanner } from "./ReleasePlanExternalCheckBanner";
+import { useReleasePlanCollab } from "../hooks/useReleasePlanCollab";
+import { ReleasePlanNamePromptModal } from "./ReleasePlanNamePromptModal";
 import { ReleasePlanJobEditor } from "./ReleasePlanJobEditor";
 import { ReleasePlanStatusSteps } from "./ReleasePlanStatusSteps";
 import { SprintWorkItemsSummary } from "./SprintWorkItemsSummary";
 import { ReleasePlanModalFooter } from "./ReleasePlanModalFooter";
-import { formatReleaseWindow, releasePlanStatusBadgeClass, releasePlanStatusLabel } from "./release-plan-utils";
+import { buildWorkflowJobParameters, mergeWorkflowJobParameters } from "./release-plan-workflow-params";
+import {
+  formatReleaseWindow,
+  releasePlanCanDelete,
+  releasePlanStatusBadgeClass,
+  releasePlanStatusLabel,
+} from "./release-plan-utils";
 
 interface ReleasePlansPanelProps {
   workspaceId: string;
@@ -23,18 +43,32 @@ interface ReleasePlansPanelProps {
   initialPlanId?: string | null;
 }
 
+function buildCreateHref(productId: string, sprintId?: string) {
+  const params = new URLSearchParams({ productId });
+  if (sprintId) params.set("sprintId", sprintId);
+  return `/publish/release-plans/new?${params.toString()}`;
+}
+
 export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, initialPlanId }: ReleasePlansPanelProps) {
+  const router = useRouter();
+  const { memberName } = useWorkspaceMembers(workspaceId);
   const [items, setItems] = useState<ReleasePlanVM[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(initialPlanId ?? null);
   const [selected, setSelected] = useState<ReleasePlanVM | null>(null);
   const [workflows, setWorkflows] = useState<ProductWorkflowVM[]>([]);
-  const [detailTab, setDetailTab] = useState<"jobs" | "audit">("jobs");
+  const [environments, setEnvironments] = useState<EnvironmentVM[]>([]);
+  const [sprintOptions, setSprintOptions] = useState<ReleasePlanSprintOption[]>([]);
+  const [extraSprintOptions, setExtraSprintOptions] = useState<ReleasePlanSprintOption[]>([]);
+  const [detailTab, setDetailTab] = useState<"jobs" | "audit" | "versions">("jobs");
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+  const [templateSaved, setTemplateSaved] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [jobDoneTarget, setJobDoneTarget] = useState<string | null>(null);
   const [jobDoneRemark, setJobDoneRemark] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -95,16 +129,40 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
 
   const loadWorkflows = useCallback(async () => {
     try {
-      const wfItems = await product.listProductWorkflows(workspaceId, productId);
+      const [wfItems, envItems, sprints] = await Promise.all([
+        product.listProductWorkflows(workspaceId, productId),
+        product.listEnvironments(workspaceId, productId),
+        product.listSprints(workspaceId, productId),
+      ]);
       setWorkflows(wfItems);
+      setEnvironments(envItems);
+      setSprintOptions(
+        sprints.map((sprint) => ({
+          id: sprint.id,
+          name: sprint.name,
+          external: sprint.external,
+        })),
+      );
     } catch {
       setWorkflows([]);
+      setEnvironments([]);
+      setSprintOptions([]);
     }
   }, [workspaceId, productId]);
 
   useEffect(() => {
     void loadWorkflows();
   }, [loadWorkflows]);
+
+  async function resolveWorkflow(workflowId: string): Promise<ProductWorkflowVM | null> {
+    const cached = workflows.find((item) => item.id === workflowId);
+    if (cached?.stages?.length) return cached;
+    try {
+      return await product.getProductWorkflow(workspaceId, productId, workflowId);
+    } catch {
+      return cached ?? null;
+    }
+  }
 
   const needsPolling =
     selected?.status === "executing" &&
@@ -124,29 +182,8 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
     if (options?.reloadList) await load({ silent: true });
   }
 
-  async function onCreate(values: ReleasePlanFormValues) {
-    setBusy(true);
-    setError(null);
-    try {
-      const created = await product.createReleasePlan(workspaceId, productId, {
-        name: values.name,
-        description: values.description || undefined,
-        release_window_start: values.windowStart,
-        release_window_end: values.windowEnd,
-        approval_enabled: values.approvalEnabled,
-        approval_config: buildApprovalConfig(values),
-        schedule_execute_time: values.scheduleExecuteTime || undefined,
-        manager_id: values.managerId || undefined,
-        ...(sprintId ? { sprint_id: sprintId } : {}),
-      });
-      setCreateOpen(false);
-      await load();
-      setSelectedId(created.id);
-    } catch (err) {
-      setError(err instanceof BffError ? err.message : "创建失败");
-    } finally {
-      setBusy(false);
-    }
+  function openCreatePage() {
+    router.push(buildCreateHref(productId, embedded ? sprintId : undefined));
   }
 
   async function onUpdate(values: ReleasePlanFormValues) {
@@ -160,9 +197,11 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
         release_window_end: values.windowEnd,
         approval_enabled: values.approvalEnabled,
         approval_config: buildApprovalConfig(values),
+        hook_settings: buildHookSettingsConfig(values),
         schedule_execute_time: values.scheduleExecuteTime || undefined,
         clear_schedule_time: !values.scheduleExecuteTime,
         manager_id: values.managerId || undefined,
+        ...resolveSprintUpdatePayload(values.sprintId),
       });
       setEditOpen(false);
       await refreshDetail();
@@ -192,20 +231,83 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
     }
   }
 
-  async function onAddWorkflowJob(workflowId: string) {
+  async function onAddWorkflowJob(
+    workflowId: string,
+    options?: { environmentId?: string; branch?: string },
+  ) {
     if (!selected || !workflowId) return;
     setBusy(true);
     try {
-      const wf = workflows.find((w) => w.id === workflowId);
+      const wf = (await resolveWorkflow(workflowId)) ?? workflows.find((w) => w.id === workflowId);
+      const parameters =
+        options?.environmentId || options?.branch
+          ? buildWorkflowJobParameters(wf, options.environmentId, options.branch)
+          : undefined;
       await product.addReleasePlanJob(workspaceId, productId, selected.id, {
         name: wf?.name ?? "工作流发布",
         type: "workflow",
         sort_order: selected.jobs?.length ?? 0,
-        workflow_ref: { mode: "reference", workflow_id: workflowId },
+        workflow_ref: {
+          mode: "reference",
+          workflow_id: workflowId,
+          ...(parameters && Object.keys(parameters).length > 0 ? { parameters } : {}),
+        },
       });
       await refreshDetail();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "添加工作流发布项失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onWorkflowParamsChange(
+    jobId: string,
+    workflowId: string,
+    patch: { environmentId?: string; branch?: string | null },
+  ) {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const wf = await resolveWorkflow(workflowId);
+      const job = selected.jobs?.find((item) => item.id === jobId);
+      const parameters = mergeWorkflowJobParameters(job?.workflow_ref?.parameters, wf, patch);
+      await product.updateReleasePlanJob(workspaceId, productId, selected.id, jobId, {
+        workflow_ref: {
+          mode: "reference",
+          workflow_id: workflowId,
+          parameters,
+        },
+      });
+      await refreshDetail();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "更新工作流参数失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function resolveSprintPayload(id?: string) {
+    const value = id?.trim();
+    return value ? { sprint_id: value } : {};
+  }
+
+  function resolveSprintUpdatePayload(id: string) {
+    const value = id.trim();
+    if (embedded && sprintId) {
+      return { sprint_id: sprintId };
+    }
+    return value ? { sprint_id: value } : { clear_sprint_id: true };
+  }
+
+  async function onReorderJobs(jobIds: string[]) {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await product.reorderReleasePlanJobs(workspaceId, productId, selected.id, jobIds);
+      await refreshDetail();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "排序失败");
     } finally {
       setBusy(false);
     }
@@ -294,6 +396,22 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
       await refreshDetail();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "取消失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDelete() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await product.deleteReleasePlan(workspaceId, productId, selected.id);
+      setDeleteOpen(false);
+      setSelectedId(null);
+      setSelected(null);
+      await load({ silent: true });
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "删除失败");
     } finally {
       setBusy(false);
     }
@@ -411,12 +529,29 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
   const canEditJobs = selected?.status === "planning";
   const usesExternalApproval =
     selected?.approval_config?.provider === "feishu" || selected?.approval_config?.provider === "dingtalk";
+  const approverLabels = (selected?.approval_config?.approver_ids ?? [])
+    .map((id) => memberName(id))
+    .filter(Boolean);
 
-  async function onCopyPlan() {
+  const collab = useReleasePlanCollab({
+    enabled: selected?.status === "planning",
+    workspaceId,
+    productId,
+    planId: selected?.id,
+    section: detailTab === "jobs" ? "jobs" : "plan",
+    location:
+      typeof window !== "undefined"
+        ? window.location
+        : { protocol: "http:", hostname: "localhost", host: "localhost", origin: "http://localhost" },
+    isDev: process.env.NODE_ENV === "development",
+  });
+
+  async function onCopyPlan(name: string) {
     if (!selected) return;
     setBusy(true);
     try {
-      const copied = await product.copyReleasePlan(workspaceId, productId, selected.id, {});
+      const copied = await product.copyReleasePlan(workspaceId, productId, selected.id, { name });
+      setCopyOpen(false);
       await load();
       setSelectedId(copied.id);
     } catch (err) {
@@ -426,16 +561,48 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
     }
   }
 
-  async function onSaveTemplate() {
+  async function onSaveTemplate(name: string, description?: string) {
     if (!selected) return;
     setBusy(true);
     try {
-      await product.saveReleasePlanTemplate(workspaceId, productId, selected.id, { name: `${selected.name} 模板` });
+      await product.saveReleasePlanTemplate(workspaceId, productId, selected.id, { name, description });
+      setSaveTemplateOpen(false);
+      setTemplateSaved(true);
+      window.setTimeout(() => setTemplateSaved(false), 3000);
     } catch (err) {
       setError(err instanceof BffError ? err.message : "保存模板失败");
     } finally {
       setBusy(false);
     }
+  }
+
+  const sprintFormOptions = useMemo(() => {
+    const map = new Map<string, ReleasePlanSprintOption>();
+    for (const item of [...extraSprintOptions, ...sprintOptions]) {
+      map.set(item.id, item);
+    }
+    const options = [...map.values()];
+    if (selected?.sprint_id && !map.has(selected.sprint_id)) {
+      options.unshift({
+        id: selected.sprint_id,
+        name: selected.sprint?.name ?? selected.sprint_id,
+        external: selected.sprint?.external_ref as ReleasePlanSprintOption["external"],
+      });
+    }
+    if (embedded && sprintId && !options.some((item) => item.id === sprintId)) {
+      options.unshift({ id: sprintId, name: sprintId });
+    }
+    return options;
+  }, [sprintOptions, extraSprintOptions, selected?.sprint_id, selected?.sprint?.name, selected?.sprint?.external_ref, embedded, sprintId]);
+
+  function handleSprintOptionsChange(options: ReleasePlanSprintOption[]) {
+    setExtraSprintOptions((prev) => {
+      const map = new Map<string, ReleasePlanSprintOption>();
+      for (const item of [...prev, ...options]) {
+        map.set(item.id, item);
+      }
+      return [...map.values()];
+    });
   }
 
   return (
@@ -454,7 +621,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
         items={listItems}
         selectedId={selectedId}
         onSelect={setSelectedId}
-        onAdd={() => setCreateOpen(true)}
+        onAdd={openCreatePage}
         addAriaLabel="新建发布计划"
         loading={loading}
         showMain={Boolean(selected)}
@@ -467,7 +634,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                 : "创建迭代计划后，可规划发布项、提交审批并执行发布。"
             }
             action={
-              <button type="button" className="btn btn-primary text-sm" onClick={() => setCreateOpen(true)}>
+              <button type="button" className="btn btn-primary text-sm" onClick={openCreatePage}>
                 新建发布计划
               </button>
             }
@@ -491,10 +658,22 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                   <dt>发布窗口</dt>
                   <dd>{formatReleaseWindow(selected.release_window_start, selected.release_window_end)}</dd>
                 </div>
+                {selected.manager_id ? (
+                  <div className="release-plan-detail-meta-item">
+                    <dt>发布负责人</dt>
+                    <dd>{memberName(selected.manager_id)}</dd>
+                  </div>
+                ) : null}
                 {selected.schedule_execute_time ? (
                   <div className="release-plan-detail-meta-item">
                     <dt>定时执行</dt>
                     <dd>{new Date(selected.schedule_execute_time).toLocaleString("zh-CN")}</dd>
+                  </div>
+                ) : null}
+                {selected.approval_enabled && !usesExternalApproval && approverLabels.length > 0 ? (
+                  <div className="release-plan-detail-meta-item">
+                    <dt>审批人</dt>
+                    <dd>{approverLabels.join("、")}</dd>
                   </div>
                 ) : null}
                 {usesExternalApproval ? (
@@ -508,6 +687,9 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                 ) : null}
               </dl>
             </header>
+
+            <ReleasePlanCollabBanner workspaceId={workspaceId} editors={collab.editors} />
+            <ReleasePlanExternalCheckBanner plan={selected} />
 
             <ReleasePlanStatusSteps status={selected.status} approvalEnabled={selected.approval_enabled} />
 
@@ -548,15 +730,28 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                 ) : null}
               </div>
               <div className="release-plan-detail-actions-secondary">
-                <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => void onCopyPlan()}>
+                <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => setCopyOpen(true)}>
                   复制计划
                 </button>
-                <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => void onSaveTemplate()}>
+                <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => setSaveTemplateOpen(true)}>
                   存为模板
                 </button>
-                {["planning", "wait_for_approval", "executing"].includes(selected.status) ? (
+                {templateSaved ? <span className="text-xs text-green-600">模板已保存</span> : null}
+                {[
+                  "planning",
+                  "wait_for_approval",
+                  "executing",
+                  "wait_for_finish_planning_external_check",
+                  "wait_for_execute_external_check",
+                  "wait_for_all_done_external_check",
+                ].includes(selected.status) ? (
                   <button type="button" className="btn-ghost text-xs text-red-600" disabled={busy} onClick={() => setCancelOpen(true)}>
                     取消计划
+                  </button>
+                ) : null}
+                {releasePlanCanDelete(selected.status) ? (
+                  <button type="button" className="btn-ghost text-xs text-red-600" disabled={busy} onClick={() => setDeleteOpen(true)}>
+                    删除计划
                   </button>
                 ) : null}
               </div>
@@ -591,6 +786,16 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                   >
                     操作记录
                   </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={detailTab === "versions"}
+                    className={`segmented-item ${detailTab === "versions" ? "segmented-item-active" : ""}`}
+                    onClick={() => setDetailTab("versions")}
+                  >
+                    版本历史
+                    {selected.version ? ` (v${selected.version})` : ""}
+                  </button>
                 </div>
               </div>
 
@@ -600,9 +805,11 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                 productId={productId}
                 plan={selected}
                 workflows={workflows}
+                environments={environments}
                 canEdit={canEditJobs}
                 busy={busy}
                 onMove={onMoveJob}
+                onReorder={onReorderJobs}
                 onDelete={async (jobId) => {
                   setBusy(true);
                   try {
@@ -630,23 +837,25 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                 }}
                 onAddText={onAddTextJob}
                 onAddWorkflow={onAddWorkflowJob}
+                onWorkflowParamsChange={onWorkflowParamsChange}
                 renderJobActions={renderJobActions}
+                memberName={memberName}
+              />
+            ) : detailTab === "audit" ? (
+              <ReleasePlanAuditList
+                logs={(selected.audit_logs ?? []) as ReleasePlanAuditLogEntry[]}
+                memberName={memberName}
               />
             ) : (
-              <ul className="release-plan-audit-list">
-                {(selected.audit_logs ?? []).length === 0 ? (
-                  <li className="release-plan-audit-empty">暂无操作记录</li>
-                ) : (
-                  (selected.audit_logs ?? []).map((log, i) => (
-                    <li key={String(log.id ?? i)} className="release-plan-audit-item">
-                      <span className="release-plan-audit-action">{String(log.action ?? "-")}</span>
-                      {log.created_at ? (
-                        <time className="release-plan-audit-time">{new Date(String(log.created_at)).toLocaleString("zh-CN")}</time>
-                      ) : null}
-                    </li>
-                  ))
-                )}
-              </ul>
+              <ReleasePlanVersionHistory
+                workspaceId={workspaceId}
+                productId={productId}
+                planId={selected.id}
+                currentVersion={selected.version}
+                refreshKey={selected.version}
+                active={detailTab === "versions"}
+                memberName={memberName}
+              />
             )}
             </section>
           </div>
@@ -654,22 +863,46 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
       </ProductMasterDetail>
 
       <ReleasePlanForm
-        open={createOpen}
-        title="新建发布计划"
-        workspaceId={workspaceId}
-        busy={busy}
-        onClose={() => setCreateOpen(false)}
-        onSubmit={onCreate}
-      />
-
-      <ReleasePlanForm
         open={editOpen}
         title="编辑发布计划"
         workspaceId={workspaceId}
+        productId={productId}
         busy={busy}
         initial={selected}
+        sprintOptions={sprintFormOptions}
+        sprintLocked={Boolean(embedded && sprintId)}
+        onSprintOptionsChange={handleSprintOptionsChange}
         onClose={() => setEditOpen(false)}
         onSubmit={onUpdate}
+      />
+
+      <ReleasePlanNamePromptModal
+        open={copyOpen}
+        title="复制发布计划"
+        description="为新计划指定名称，发布项与配置将一并复制。"
+        initialName={selected ? `${selected.name} 副本` : ""}
+        namePlaceholder="例如 v2.4 副本"
+        submitLabel="确认复制"
+        submittingLabel="复制中…"
+        busy={busy}
+        onClose={() => setCopyOpen(false)}
+        onSubmit={({ name }) => onCopyPlan(name)}
+      />
+
+      <ReleasePlanNamePromptModal
+        open={saveTemplateOpen}
+        title="存为模板"
+        description="保存当前计划的发布项结构，便于后续快速创建。"
+        initialName={selected ? `${selected.name} 模板` : ""}
+        initialDescription={selected?.description ?? ""}
+        showDescription
+        nameLabel="模板名称"
+        descriptionLabel="模板描述"
+        submitLabel="保存模板"
+        submittingLabel="保存中…"
+        busy={busy}
+        onClose={() => setSaveTemplateOpen(false)}
+        onSubmit={({ name, description }) => onSaveTemplate(name, description)}
       />
 
       <Modal
@@ -708,6 +941,24 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
         }
       >
         <p className="text-sm text-muted-foreground">确定要取消「{selected?.name}」吗？</p>
+      </Modal>
+
+      <Modal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        title="删除发布计划"
+        description="删除后计划及其发布项、操作记录将被永久移除，此操作不可撤销。"
+        footer={
+          <ReleasePlanModalFooter
+            onCancel={() => setDeleteOpen(false)}
+            submitLabel="确认删除"
+            submittingLabel="删除中…"
+            busy={busy}
+            onSubmit={() => void onDelete()}
+          />
+        }
+      >
+        <p className="text-sm text-muted-foreground">确定要删除「{selected?.name}」吗？</p>
       </Modal>
 
       <Modal

@@ -44,6 +44,14 @@ export function listOrgMembers(orgId: string) {
   ).then((data) => data.items);
 }
 
+export async function searchOrgMemberCandidates(orgId: string, q: string, limit = 10) {
+  const params = new URLSearchParams({ q, limit: String(limit) });
+  const data = await bffFetch<{ items: import("@sparkops/contracts/governance").MemberCandidateVM[] }>(
+    `/orgs/${orgId}/member-candidates?${params.toString()}`,
+  );
+  return data.items;
+}
+
 export function inviteOrgMember(orgId: string, input: { email: string; role?: "admin" | "member" }) {
   return bffFetch<{ member_id: string; email: string; display_name: string; role: string }>(
     `/orgs/${orgId}/members`,
