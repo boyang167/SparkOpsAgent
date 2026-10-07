@@ -1,0 +1,58 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{.name}}-job
+  namespace: {{.namespace}}
+  labels:
+    app: {{.app_label}}
+    app.kubernetes.io/name: {{.app_label}}
+    app.kubernetes.io/managed-by: sparkops
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 3600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: {{.app_label}}
+        app.kubernetes.io/name: {{.app_label}}
+    spec:
+      restartPolicy: Never
+{{- if .image_pull_secret_name}}
+      imagePullSecrets:
+      - name: {{.image_pull_secret_name}}
+{{- end}}
+      containers:
+      - name: {{.app_label}}
+        image: {{.image}}
+        imagePullPolicy: IfNotPresent
+{{- if .command}}
+        command:
+{{- range .command}}
+        - {{printf "%q" .}}
+{{- end}}
+{{- end}}
+{{- if .args}}
+        args:
+{{- range .args}}
+        - {{printf "%q" .}}
+{{- end}}
+{{- end}}
+{{- if .project_env}}
+        env:
+{{- range .project_env}}
+        - name: {{.name}}
+          value: {{printf "%q" .value}}
+{{- end}}
+{{- end}}
+        envFrom:
+        - configMapRef:
+            name: {{.name}}-config
+            optional: true
+        resources:
+          requests:
+            cpu: {{.resources.requests.cpu}}
+            memory: {{.resources.requests.memory}}
+          limits:
+            cpu: {{.resources.limits.cpu}}
+            memory: {{.resources.limits.memory}}

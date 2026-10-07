@@ -27,7 +27,7 @@ import (
 // AutoMigrate creates BC schemas and tables via GORM.
 func AutoMigrate(db *gorm.DB) error {
 	if postgres.SQLMigrationsApplied(db) {
-		return nil
+		return migratePluginSchemas(db)
 	}
 	steps := []struct {
 		name string
@@ -54,6 +54,14 @@ func AutoMigrate(db *gorm.DB) error {
 		if err := step.fn(db); err != nil {
 			return fmt.Errorf("migrate %s: %w", step.name, err)
 		}
+	}
+	return nil
+}
+
+// migratePluginSchemas covers plugin-owned schemas, which backend/migrations does not create.
+func migratePluginSchemas(db *gorm.DB) error {
+	if err := k8sschema.AutoMigrate(db); err != nil {
+		return fmt.Errorf("migrate plugin_kubernetes: %w", err)
 	}
 	return nil
 }

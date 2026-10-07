@@ -25,7 +25,7 @@ func SyncBuiltinTemplates(ctx context.Context, db *gorm.DB) error {
 		Table("workspace_app.templates").
 		Select("id").
 		Where("deleted_at IS NULL").
-		Where("LOWER(name) = ?", "jenkinsfile").
+		Where("LOWER(name) IN ?", []string{"jenkinsfile", "default-jenkinsfile"}).
 		Where("LOWER(kind) = ?", "jenkinsfile").
 		Find(&rows).Error
 	if err != nil {

@@ -22,7 +22,7 @@ export function buildNavSearchItems(options?: {
   const entitlements = options?.entitlements;
 
   const items: NavSearchItem[] = [
-    { href: "/dashboard/workplace", label: "工作台", group: "Dashboard" },
+    { href: "/dashboard/workplace", label: "工作台", group: "工作台" },
     { href: "/settings/profile", label: "个人资料", group: "账户中心" },
     { href: "/notifications", label: "消息中心", group: "账户中心" },
   ];

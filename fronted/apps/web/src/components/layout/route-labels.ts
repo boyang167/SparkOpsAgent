@@ -13,8 +13,8 @@ export interface RouteLabelRule {
 }
 
 const STATIC_RULES: RouteLabelRule[] = [
-  { prefix: "/dashboard/workplace", label: "工作台", group: "Dashboard", exact: true },
-  { prefix: "/dashboard/module-unavailable", label: "模块不可用", group: "Dashboard", exact: true },
+  { prefix: "/dashboard/workplace", label: "工作台", group: "工作台", exact: true },
+  { prefix: "/dashboard/module-unavailable", label: "模块不可用", group: "工作台", exact: true },
   { prefix: "/projects/create", label: "新建项目", group: "项目", exact: true },
   { prefix: "/settings/profile", label: "个人资料", group: "设置", exact: true },
   { prefix: "/settings/rbac", label: "权限说明", group: "设置", exact: true },
@@ -46,8 +46,8 @@ function rulesFromNavTree(): RouteLabelRule[] {
 
 const DYNAMIC_RULES: RouteLabelRule[] = [
   { prefix: "/projects/", label: "项目详情", group: "项目" },
-  { prefix: "/knowledge/", label: "知识库", group: "应用中心" },
-  { prefix: "/delivery/builds/", label: "构建详情", group: "持续交付" },
+  { prefix: "/knowledge/", label: "知识库", group: "构建" },
+  { prefix: "/delivery/builds/", label: "构建详情", group: "交付" },
 ];
 
 export const ROUTE_LABEL_RULES: RouteLabelRule[] = [

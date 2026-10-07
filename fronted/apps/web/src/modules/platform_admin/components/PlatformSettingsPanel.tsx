@@ -22,7 +22,7 @@ type SettingsTab = "features" | "sso" | "license" | "workspace";
 const FEATURE_KEYS = Object.keys(FEATURE_MODULE_LABELS) as FeatureKey[];
 
 const FEATURE_HINTS: Partial<Record<FeatureKey, string>> = {
-  k8s: "运行实例、定时任务、基础设施等依赖 Kubernetes 的能力",
+  k8s: "运行实例、定时任务等依赖 Kubernetes 的能力",
   mcp: "外部集成 / Webhook / MCP 工具链",
   delivery: "构建流水线、发布与交付相关能力",
   observability: "监控概览、日志、链路追踪与指标",
@@ -43,9 +43,24 @@ const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
 
 type WorkspaceFeatureOverrides = Record<string, Partial<Record<FeatureKey, boolean>>>;
 
+type FeatureLocks = Partial<Record<FeatureKey, string>>;
+
+/** Mirrors backend applyLicense: modules the license forces off regardless of the saved switch. */
+function licenseFeatureLocks(edition: string, expired: boolean): FeatureLocks {
+  if (expired) {
+    const reason = "许可证已过期";
+    return { delivery: reason, k8s: reason, observability: reason, mcp: reason };
+  }
+  if (edition !== "enterprise") {
+    return { mcp: "需企业版许可证，可在「许可证」中升级" };
+  }
+  return {};
+}
+
 function FeatureSwitch({
   label,
   description,
+  lockReason,
   checked,
   disabled,
   onChange,
@@ -53,6 +68,7 @@ function FeatureSwitch({
 }: {
   label: string;
   description?: string;
+  lockReason?: string;
   checked: boolean;
   disabled?: boolean;
   onChange: (next: boolean) => void;
@@ -60,16 +76,17 @@ function FeatureSwitch({
 }) {
   const rowClass = platformStyle ? "platform-settings-switch-row" : "config-switch-row";
   return (
-    <div className={rowClass}>
+    <div className={lockReason ? `${rowClass} is-locked` : rowClass}>
       <div className="platform-settings-switch-copy">
         <div className="platform-settings-switch-label">{label}</div>
         {description ? <div className="platform-settings-switch-desc">{description}</div> : null}
+        {lockReason ? <div className="platform-settings-switch-lock">{lockReason}</div> : null}
       </div>
       <button
         type="button"
-        className={checked ? "menu-switch menu-switch-on" : "menu-switch"}
-        aria-pressed={checked}
-        disabled={disabled}
+        className={checked && !lockReason ? "menu-switch menu-switch-on" : "menu-switch"}
+        aria-pressed={checked && !lockReason}
+        disabled={disabled || Boolean(lockReason)}
         onClick={() => onChange(!checked)}
       >
         <span className="menu-switch-thumb" />
@@ -146,9 +163,13 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
   const [licenseExpiresAt, setLicenseExpiresAt] = useState("");
 
   const licenseExpired = useMemo(() => isLicenseExpired(licenseExpiresAt || null), [licenseExpiresAt]);
+  const featureLocks = useMemo(
+    () => licenseFeatureLocks(licenseEdition, licenseExpired),
+    [licenseEdition, licenseExpired],
+  );
   const enabledFeatureCount = useMemo(
-    () => FEATURE_KEYS.filter((key) => features[key]).length,
-    [features],
+    () => FEATURE_KEYS.filter((key) => features[key] && !featureLocks[key]).length,
+    [features, featureLocks],
   );
 
   const selectedWorkspaceOverrides = useMemo(() => {
@@ -327,6 +348,7 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
           platformStyle={isPlatform}
           label={FEATURE_MODULE_LABELS[key]}
           description={FEATURE_HINTS[key]}
+          lockReason={featureLocks[key]}
           checked={values[key]}
           onChange={(next) => onChange(key, next)}
         />

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{.name}}-config
+  namespace: {{.namespace}}
+  labels:
+    app: {{.app_label}}
+    app.kubernetes.io/name: {{.app_label}}
+    app.kubernetes.io/managed-by: sparkops
+data:
+  APP_NAME: {{printf "%q" .name}}
+  APP_NAMESPACE: {{printf "%q" .namespace}}
+{{- range .project_env}}
+  {{.name}}: {{printf "%q" .value}}
+{{- end}}

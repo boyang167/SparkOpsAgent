@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{.name}}-ingress
+  namespace: {{.namespace}}
+  labels:
+    app: {{.app_label}}
+    app.kubernetes.io/name: {{.app_label}}
+    app.kubernetes.io/managed-by: sparkops
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: {{if .ingress_host}}{{.ingress_host}}{{else}}{{.name}}.{{.workspace_slug}}.example.com{{end}}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{.service_name}}
+            port:
+{{- range $i, $p := .ports}}{{if eq $i 0}}
+              number: {{$p.service_port}}
+{{- end}}{{end}}

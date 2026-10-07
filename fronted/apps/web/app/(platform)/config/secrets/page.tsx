@@ -8,7 +8,6 @@ export default async function SecretsPage() {
   return (
     <div className="stack-lg">
       <PageHeader
-        eyebrow="Infrastructure"
         title="服务连接配置管理"
         description="管理各种服务的连接和认证信息，如 GitLab、Jenkins、Harbor 等"
       />

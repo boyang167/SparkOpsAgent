@@ -37,6 +37,10 @@ func (h *SeedWorkspaceMenusHandler) seedAll(ctx context.Context, workspaceID ker
 	for _, group := range defaultMenuGroups {
 		groupID := uuid.NewString()
 		parentID := groupID
+		groupSort := sort
+		if group.Sort > 0 {
+			groupSort = group.Sort
+		}
 		if err := h.menus.Save(ctx, &model.Menu{
 			WorkspaceID: workspaceID,
 			ID:          groupID,
@@ -45,7 +49,7 @@ func (h *SeedWorkspaceMenusHandler) seedAll(ctx context.Context, workspaceID ker
 			Title:       group.Label,
 			Icon:        group.ID,
 			Component:   "layout/routerHolder",
-			Sort:        sort,
+			Sort:        groupSort,
 		}); err != nil {
 			return err
 		}
@@ -309,47 +313,56 @@ func menuNameFromPath(path string) string {
 type defaultMenuGroup struct {
 	ID    string
 	Label string
+	// Sort overrides the position among root menus; zero keeps declaration order.
+	Sort  int
 	Items []struct {
 		Href  string
 		Label string
 	}
 }
 
+const (
+	settingsGroupID    = "ops-infra"
+	settingsGroupTitle = "设置"
+	// settingsGroupSort keeps 设置 below plugin roots, which are created with sort 90.
+	settingsGroupSort = 100
+)
+
 var defaultMenuGroups = []defaultMenuGroup{
 	{
-		ID: "application", Label: "应用中心",
+		ID: "application", Label: "构建",
 		Items: []struct{ Href, Label string }{
-			{"/projects", "项目管理"},
-			{"/templates", "模板管理"},
+			{"/projects", "项目"},
+			{"/templates", "模板"},
 			{"/knowledge", "知识库"},
 		},
 	},
 	{
-		ID: "ops-delivery", Label: "持续交付",
+		ID: "ops-delivery", Label: "交付",
 		Items: []struct{ Href, Label string }{
-			{"/publish/products", "产品管理"},
+			{"/publish/products", "产品"},
 			{"/products/workflows", "工作流"},
 			{"/publish/release-plans", "发布计划"},
-			{"/config/secrets", "密钥配置"},
 		},
 	},
 	{
-		ID: "ops-runtime", Label: "运行管理",
+		ID: "ops-runtime", Label: "运行",
 		Items: []struct{ Href, Label string }{
 			{"/runtime/pods", "运行实例"},
 			{"/cronjobs", "定时任务"},
 		},
 	},
 	{
-		ID: "ops-observability", Label: "可观测性",
+		ID: "ops-observability", Label: "观测",
 		Items: []struct{ Href, Label string }{
-			{"/monitor/overview", "监控概览"},
-			{"/monitor/log-viewer", "日志查询"},
+			{"/monitor/overview", "监控"},
+			{"/monitor/log-viewer", "日志"},
 		},
 	},
 	{
-		ID: "ops-infra", Label: "基础设施",
+		ID: settingsGroupID, Label: settingsGroupTitle, Sort: settingsGroupSort,
 		Items: []struct{ Href, Label string }{
+			{"/config/secrets", "密钥"},
 			{"/config/webhooks", "外部集成"},
 		},
 	},
@@ -359,45 +372,77 @@ var legacyBusinessNavGroupIDs = []string{
 	"delivery", "infra", "resource", "monitor", "permission", "platform", "settings",
 }
 
+// enterpriseMenuTitleByPath also covers group menus, whose path equals the group ID.
 var enterpriseMenuTitleByPath = map[string]string{
-	"/projects":           "项目管理",
-	"/templates":          "模板管理",
-	"/knowledge":          "知识库",
-	"/publish/products":   "产品管理",
+	"application":            "构建",
+	"ops-delivery":           "交付",
+	"ops-runtime":            "运行",
+	"ops-observability":      "观测",
+	settingsGroupID:          settingsGroupTitle,
+	"/projects":              "项目",
+	"/templates":             "模板",
+	"/knowledge":             "知识库",
+	"/publish/products":      "产品",
 	"/products/workflows":    "工作流",
 	"/publish/release-plans": "发布计划",
-	"/config/secrets":        "密钥配置",
-	"/runtime/pods":       "运行实例",
-	"/cronjobs":           "定时任务",
-	"/monitor/overview":   "监控概览",
-	"/monitor/log-viewer": "日志查询",
-	"/config/webhooks":    "外部集成",
+	"/config/secrets":        "密钥",
+	"/runtime/pods":          "运行实例",
+	"/cronjobs":              "定时任务",
+	"/monitor/overview":      "监控",
+	"/monitor/log-viewer":    "日志",
+	"/config/webhooks":       "外部集成",
 }
 
+// ensureSettingsGroup finds or creates the 设置 root group and pins it below plugin roots.
+func (h *SeedWorkspaceMenusHandler) ensureSettingsGroup(ctx context.Context, workspaceID kernel.WorkspaceID) (*model.Menu, error) {
+	group, err := h.menus.FindGroupMenu(ctx, workspaceID, settingsGroupID)
+	if err != nil {
+		group = &model.Menu{
+			WorkspaceID: workspaceID,
+			ID:          uuid.NewString(),
+			Name:        settingsGroupID,
+			Path:        settingsGroupID,
+			Title:       settingsGroupTitle,
+			Icon:        settingsGroupID,
+			Component:   "layout/routerHolder",
+			Sort:        settingsGroupSort,
+		}
+		if err := h.menus.Save(ctx, group); err != nil {
+			return nil, err
+		}
+		return group, nil
+	}
+	if group.Sort == settingsGroupSort && group.Title == settingsGroupTitle {
+		return group, nil
+	}
+	group.Sort = settingsGroupSort
+	group.Title = settingsGroupTitle
+	if err := h.menus.Save(ctx, group); err != nil {
+		return nil, err
+	}
+	return group, nil
+}
+
+// repairSecretConfigMenu moves 「密钥」 from 交付 into 设置 as its first item.
 func (h *SeedWorkspaceMenusHandler) repairSecretConfigMenu(ctx context.Context, workspaceID kernel.WorkspaceID) error {
 	menu, err := h.menus.FindByPath(ctx, workspaceID, "/config/secrets")
 	if err != nil {
 		return nil
 	}
+	settingsGroup, err := h.ensureSettingsGroup(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
 	changed := false
-	if menu.Title != "密钥配置" {
-		menu.Title = "密钥配置"
+	if menu.Title != "密钥" {
+		menu.Title = "密钥"
 		menu.Name = menuNameFromPath(menu.Path)
 		changed = true
 	}
-	deliveryGroup, err := h.menus.FindGroupMenu(ctx, workspaceID, "ops-delivery")
-	if err != nil {
-		if deliveryGroup, err = h.menus.FindByPath(ctx, workspaceID, "ops-delivery"); err != nil {
-			if !changed {
-				return nil
-			}
-			return h.menus.Save(ctx, menu)
-		}
-	}
-	if menu.ParentID == nil || *menu.ParentID != deliveryGroup.ID {
-		pid := deliveryGroup.ID
+	if menu.ParentID == nil || *menu.ParentID != settingsGroup.ID {
+		pid := settingsGroup.ID
 		menu.ParentID = &pid
-		menu.Sort = 5
+		menu.Sort = 0
 		changed = true
 	}
 	if !changed {
@@ -406,7 +451,7 @@ func (h *SeedWorkspaceMenusHandler) repairSecretConfigMenu(ctx context.Context, 
 	return h.menus.Save(ctx, menu)
 }
 
-// repairProductWorkflowsMenu ensures 「工作流」 sits under 持续交付, directly after 产品管理.
+// repairProductWorkflowsMenu ensures 「工作流」 sits under 交付, directly after 产品.
 func (h *SeedWorkspaceMenusHandler) repairProductWorkflowsMenu(ctx context.Context, workspaceID kernel.WorkspaceID) error {
 	const path = "/products/workflows"
 	deliveryGroup, err := h.menus.FindGroupMenu(ctx, workspaceID, "ops-delivery")
@@ -462,7 +507,7 @@ func (h *SeedWorkspaceMenusHandler) repairProductWorkflowsMenu(ctx context.Conte
 	return h.menus.Save(ctx, menu)
 }
 
-// repairReleasePlansMenu ensures 「发布计划」 sits under 持续交付, directly after 工作流.
+// repairReleasePlansMenu ensures 「发布计划」 sits under 交付, directly after 工作流.
 func (h *SeedWorkspaceMenusHandler) repairReleasePlansMenu(ctx context.Context, workspaceID kernel.WorkspaceID) error {
 	const path = "/publish/release-plans"
 	deliveryGroup, err := h.menus.FindGroupMenu(ctx, workspaceID, "ops-delivery")

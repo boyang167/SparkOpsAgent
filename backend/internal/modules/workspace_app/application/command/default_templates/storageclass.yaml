@@ -1,0 +1,11 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{if .storage_class}}{{.storage_class}}{{else}}{{.workspace_slug}}-standard{{end}}
+  labels:
+    app.kubernetes.io/part-of: {{.workspace_slug}}
+    app.kubernetes.io/managed-by: sparkops
+provisioner: {{if .storage_provisioner}}{{.storage_provisioner}}{{else}}kubernetes.io/no-provisioner{{end}}
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

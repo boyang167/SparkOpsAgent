@@ -2058,6 +2058,12 @@ textarea {
   transition: background var(--motion-duration) var(--motion-ease), box-shadow var(--motion-duration) var(--motion-ease);
 }
 
+textarea.input {
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+  line-height: 1.55;
+}
+
 .input:focus,
 .select:focus {
   outline: none;
@@ -10306,6 +10312,18 @@ textarea {
   font-size: 0.75rem;
   line-height: 1.45;
   color: var(--muted);
+}
+
+.platform-settings-switch-lock {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.platform-settings-switch-row.is-locked .platform-settings-switch-label,
+.platform-settings-switch-row.is-locked .platform-settings-switch-desc {
+  opacity: 0.55;
 }
 
 .platform-settings-status-grid {

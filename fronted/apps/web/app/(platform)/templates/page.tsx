@@ -8,7 +8,6 @@ export default async function TemplatesPage() {
   return (
     <div className="stack-lg">
       <PageHeader
-        eyebrow="Template"
         title="模板管理"
         description="管理项目脚手架与工作空间级迭代流程模板"
       />

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{.namespace}}-{{.name}}-pv
+  labels:
+    app: {{.app_label}}
+    app.kubernetes.io/name: {{.app_label}}
+    app.kubernetes.io/managed-by: sparkops
+spec:
+  capacity:
+    storage: {{if .storage_size}}{{.storage_size}}{{else}}10Gi{{end}}
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: {{if .storage_class}}{{.storage_class}}{{else}}manual{{end}}
+  claimRef:
+    namespace: {{.namespace}}
+    name: {{.name}}-data
+  nfs:
+    server: {{if .nfs_server}}{{.nfs_server}}{{else}}nfs.example.com{{end}}
+    path: {{if .nfs_path}}{{.nfs_path}}{{else}}/data/{{.namespace}}/{{.name}}{{end}}

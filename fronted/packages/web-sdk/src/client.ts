@@ -6,6 +6,16 @@ export interface BffFetchOptions extends RequestInit {
   workspaceId?: string;
 }
 
+function isAbortError(err: unknown) {
+  return err instanceof DOMException && err.name === "AbortError";
+}
+
+/** Browsers surface dropped connections as bare TypeErrors (e.g. "Error in input stream"). */
+function toNetworkError(err: unknown, status = 0) {
+  if (isAbortError(err)) return err;
+  return new BffError("网络连接中断，请稍后重试", "BFF_NETWORK_ERROR", status);
+}
+
 export async function bffFetch<T>(path: string, options: BffFetchOptions = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const hasMultipartBody =
@@ -17,13 +27,27 @@ export async function bffFetch<T>(path: string, options: BffFetchOptions = {}): 
     headers.set("X-Workspace-Id", options.workspaceId);
   }
 
-  const res = await fetch(`${BFF_BASE}${path}`, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BFF_BASE}${path}`, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+  } catch (err) {
+    throw toNetworkError(err);
+  }
 
-  const body = (await res.json()) as ApiEnvelope<T>;
+  let body: ApiEnvelope<T>;
+  try {
+    body = (await res.json()) as ApiEnvelope<T>;
+  } catch (err) {
+    if (isAbortError(err)) throw err;
+    if (err instanceof SyntaxError) {
+      throw new BffError("服务返回了无法解析的响应", "BFF_INVALID_RESPONSE", res.status || 502);
+    }
+    throw toNetworkError(err, res.status);
+  }
   if (!res.ok || body.code !== 0) {
     const errorCode =
       typeof body.data === "object" &&

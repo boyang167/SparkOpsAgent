@@ -1,12 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { governance } from "@sparkops/web-sdk";
 import type { MenuTreeVM } from "@sparkops/contracts/governance";
 import { NavGroup } from "@/components/layout/NavGroup";
 import { menuTreeToNavGroups } from "@/components/layout/menu-tree-nav";
-import { DASHBOARD_NAV_GROUP, filterBusinessNavGroups } from "@/components/layout/nav-tree";
+import { WORKPLACE_NAV_ITEM, filterBusinessNavGroups } from "@/components/layout/nav-tree";
 import { useShellContext } from "@/components/layout/shell-context";
 
 interface PlatformNavProps {
@@ -46,7 +47,9 @@ const icons = {
   ),
   "ops-infra": (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M4 6h16M4 12h16M4 18h10" strokeLinecap="round" />
+      <path d="M4 7h10M18 7h2M4 17h4M12 17h8" strokeLinecap="round" />
+      <circle cx="16" cy="7" r="2" />
+      <circle cx="10" cy="17" r="2" />
     </svg>
   ),
   "plugin-kubernetes": (
@@ -112,25 +115,27 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
 
   const fallbackGroups = useMemo(
     () =>
-      filterBusinessNavGroups({ showSuperAdmin: false, entitlements })
-        .filter((group) => group.id !== DASHBOARD_NAV_GROUP.id)
-        .map((group) => ({
-          ...group,
-          defaultCollapsed: group.defaultCollapsed ?? false,
-        })),
+      filterBusinessNavGroups({ showSuperAdmin: false, entitlements }).map((group) => ({
+        ...group,
+        defaultCollapsed: group.defaultCollapsed ?? false,
+      })),
     [entitlements],
   );
 
   const groups = dynamicGroups ?? fallbackGroups;
+  const workplaceActive =
+    pathname === WORKPLACE_NAV_ITEM.href || pathname.startsWith(`${WORKPLACE_NAV_ITEM.href}/`);
 
   return (
     <>
-      <NavGroup
-        label={DASHBOARD_NAV_GROUP.label}
-        icon={icons.dashboard}
-        items={[...DASHBOARD_NAV_GROUP.items]}
-        pathname={pathname}
-      />
+      <Link
+        href={WORKPLACE_NAV_ITEM.href}
+        className={`nav-group-trigger ${workplaceActive ? "nav-group-trigger-active" : ""}`}
+        aria-current={workplaceActive ? "page" : undefined}
+      >
+        <span className="nav-icon">{icons.dashboard}</span>
+        <span className="flex-1 text-left">{WORKPLACE_NAV_ITEM.label}</span>
+      </Link>
 
       {groups.map((group) => (
         <NavGroup

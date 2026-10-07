@@ -20,6 +20,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/policy"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 )
 
 type Module struct {
@@ -44,6 +46,18 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 	if err := command.SyncBuiltinTemplates(context.Background(), c.DB); err != nil {
 		log.Printf("workspace_app: sync builtin templates: %v", err)
+	}
+	if err := command.SeedDefaultTemplates(context.Background(), c.DB); err != nil {
+		log.Printf("workspace_app: seed default templates: %v", err)
+	}
+	if c.EventBus != nil {
+		c.EventBus.Subscribe(integration.EventWorkspaceCreated, func(ctx context.Context, e events.Event) error {
+			ev, ok := e.(integration.WorkspaceCreated)
+			if !ok {
+				return nil
+			}
+			return command.SeedWorkspaceDefaultTemplates(ctx, c.DB, ev.WorkspaceID.String(), ev.OwnerID.String())
+		})
 	}
 
 	repo := persistence.NewProjectRepository(c.DB)

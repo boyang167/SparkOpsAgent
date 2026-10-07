@@ -1,0 +1,23 @@
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: {{.name}}-dr
+  namespace: {{.namespace}}
+  labels:
+    app: {{.app_label}}
+    app.kubernetes.io/name: {{.app_label}}
+    app.kubernetes.io/managed-by: sparkops
+spec:
+  host: {{.service_name}}.{{.namespace}}.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 100
+        maxRequestsPerConnection: 10
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50

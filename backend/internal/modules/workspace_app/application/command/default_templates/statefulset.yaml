@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{.name}}
+  namespace: {{.namespace}}
+  labels:
+    app: {{.app_label}}
+    app.kubernetes.io/name: {{.app_label}}
+    app.kubernetes.io/part-of: {{.workspace_slug}}
+    app.kubernetes.io/managed-by: sparkops
+spec:
+  serviceName: {{.service_name}}
+  replicas: {{.replicas}}
+  podManagementPolicy: OrderedReady
+  selector:
+    matchLabels:
+      app: {{.app_label}}
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: {{.app_label}}
+        app.kubernetes.io/name: {{.app_label}}
+    spec:
+{{- if .image_pull_secret_name}}
+      imagePullSecrets:
+      - name: {{.image_pull_secret_name}}
+{{- end}}
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: {{.app_label}}
+        image: {{.image}}
+        imagePullPolicy: IfNotPresent
+{{- if .command}}
+        command:
+{{- range .command}}
+        - {{printf "%q" .}}
+{{- end}}
+{{- end}}
+{{- if .args}}
+        args:
+{{- range .args}}
+        - {{printf "%q" .}}
+{{- end}}
+{{- end}}
+{{- if .project_env}}
+        env:
+{{- range .project_env}}
+        - name: {{.name}}
+          value: {{printf "%q" .value}}
+{{- end}}
+{{- end}}
+        envFrom:
+        - configMapRef:
+            name: {{.name}}-config
+            optional: true
+        ports:
+{{- range .ports}}
+        - name: {{.name}}
+          containerPort: {{.container_port}}
+          protocol: {{.protocol}}
+{{- end}}
+        volumeMounts:
+        - name: data
+          mountPath: {{if .data_mount_path}}{{.data_mount_path}}{{else}}/data{{end}}
+        resources:
+          requests:
+            cpu: {{.resources.requests.cpu}}
+            memory: {{.resources.requests.memory}}
+          limits:
+            cpu: {{.resources.limits.cpu}}
+            memory: {{.resources.limits.memory}}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+{{- if .storage_class}}
+      storageClassName: {{.storage_class}}
+{{- end}}
+      resources:
+        requests:
+          storage: {{if .storage_size}}{{.storage_size}}{{else}}10Gi{{end}}
