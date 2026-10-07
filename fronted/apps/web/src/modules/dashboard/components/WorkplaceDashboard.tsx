@@ -11,6 +11,7 @@ import { releasePlanStatusLabel } from "@/modules/product/components/release-pla
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { BffError } from "@sparkops/contracts";
 import { platform, product, tenant } from "@sparkops/web-sdk";
+import { isWorkspaceReadOnly } from "@/modules/tenant/lib/org-display";
 import {
   formatCompactDateTime,
   languageColor,
@@ -26,17 +27,22 @@ interface WorkplaceDashboardProps {
   projects: ProjectVM[];
 }
 
-interface WorkplaceMetrics {
-  products: number | null;
-  deploymentTotal: number | null;
-  loading: boolean;
-}
-
-function workspaceAccent(name: string) {
-  const palette = ["#6366f1", "#0ea5e9", "#14b8a6", "#f59e0b", "#ec4899", "#8b5cf6"];
-  let hash = 0;
-  for (let i = 0; i < name.length; i += 1) hash = (hash + name.charCodeAt(i) * (i + 1)) % palette.length;
-  return palette[hash] ?? palette[0];
+function operationLabel(record: OperationRecordVM) {
+  const path = record.path.replace(/^\/api\/(?:bff\/v1|v1)\//, "");
+  const verb =
+    record.method === "POST"
+      ? "创建"
+      : record.method === "PUT" || record.method === "PATCH"
+        ? "更新"
+        : record.method === "DELETE"
+          ? "删除"
+          : record.method;
+  if (path.includes("release-plans")) return `${verb}发布计划`;
+  if (path.includes("sprints")) return `${verb}迭代`;
+  if (path.includes("products")) return `${verb}产品`;
+  if (path.includes("projects")) return `${verb}项目`;
+  if (path.includes("members")) return `${verb}成员`;
+  return `${verb}记录`;
 }
 
 function projectStatusLabel(project: ProjectVM) {
@@ -55,9 +61,8 @@ function projectStatusTone(project: ProjectVM) {
   return "neutral";
 }
 
-function operationTitle(record: OperationRecordVM) {
-  const path = record.path.replace(/^\/api\/(?:bff\/v1|v1)\//, "").replace(/\/{2,}/g, "/");
-  return `${record.method} ${path}`;
+function isWriteOperation(record: OperationRecordVM) {
+  return !["GET", "HEAD", "OPTIONS"].includes(record.method);
 }
 
 function operationTone(record: OperationRecordVM) {
@@ -94,28 +99,18 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
 
 export function WorkplaceDashboard({
   session,
-  workspaces,
   workspaceId,
-  workspaceName,
+  workspaces,
   projects,
 }: WorkplaceDashboardProps) {
   const router = useRouter();
   const [activity, setActivity] = useState<OperationRecordVM[]>([]);
-  const [activityLoading, setActivityLoading] = useState(true);
   const [activityError, setActivityError] = useState<string | null>(null);
-  const [metrics, setMetrics] = useState<WorkplaceMetrics>({
-    products: null,
-    deploymentTotal: null,
-    loading: true,
-  });
-  const [switchingWorkspace, setSwitchingWorkspace] = useState<string | null>(null);
   const [activeSprints, setActiveSprints] = useState<ActiveSprintSummaryVM[]>([]);
   const [activeSprintsLoading, setActiveSprintsLoading] = useState(true);
   const [releasePlans, setReleasePlans] = useState<WorkspaceReleasePlanVM[]>([]);
   const [releasePlansLoading, setReleasePlansLoading] = useState(true);
-
-  const displayName = session.display_name?.trim() || session.email.split("@")[0] || "用户";
-  const initial = displayName.charAt(0).toUpperCase();
+  const [switchingWorkspace, setSwitchingWorkspace] = useState<string | null>(null);
 
   const activeProjects = useMemo(
     () => projects.filter((project) => (project.review_status ?? "none") === "approved"),
@@ -132,20 +127,16 @@ export function WorkplaceDashboard({
 
   useEffect(() => {
     let cancelled = false;
-    setActivityLoading(true);
     setActiveSprintsLoading(true);
     setReleasePlansLoading(true);
-    setMetrics((prev) => ({ ...prev, loading: true }));
 
     void Promise.allSettled([
       platform.listOperationRecords(workspaceId, { page: 1, page_size: 12 }),
-      platform.getDashboard(workspaceId),
-      platform.listDeploymentStats(workspaceId),
       product.listActiveSprints(workspaceId),
       product.listWorkspaceReleasePlans(workspaceId, {
         status: "planning,wait_for_approval,executing",
       }),
-    ]).then(([activityResult, dashboardResult, statsResult, sprintsResult, releasePlansResult]) => {
+    ]).then(([activityResult, sprintsResult, releasePlansResult]) => {
       if (cancelled) return;
 
       if (activityResult.status === "fulfilled") {
@@ -159,21 +150,6 @@ export function WorkplaceDashboard({
             : "动态加载失败",
         );
       }
-      setActivityLoading(false);
-
-      const dashboard =
-        dashboardResult.status === "fulfilled" ? dashboardResult.value : null;
-      const deploymentTotal =
-        statsResult.status === "fulfilled"
-          ? (statsResult.value ?? []).reduce((sum, item) => sum + (item.count ?? 0), 0)
-          : null;
-
-      setMetrics({
-        products: dashboard?.products ?? dashboard?.product_count ?? null,
-        deploymentTotal,
-        loading: false,
-      });
-
       if (sprintsResult.status === "fulfilled") {
         setActiveSprints(sprintsResult.value);
       } else {
@@ -196,6 +172,8 @@ export function WorkplaceDashboard({
 
   async function handleSwitchWorkspace(nextWorkspaceId: string) {
     if (nextWorkspaceId === workspaceId || switchingWorkspace) return;
+    const target = workspaces.find((workspace) => workspace.id === nextWorkspaceId);
+    if (!target || isWorkspaceReadOnly(target)) return;
     setSwitchingWorkspace(nextWorkspaceId);
     try {
       await tenant.selectWorkspace(nextWorkspaceId);
@@ -205,157 +183,170 @@ export function WorkplaceDashboard({
     }
   }
 
+  const workLoading = activeSprintsLoading || releasePlansLoading;
+  const hasWork = activeProjects.length > 0 || activeSprints.length > 0 || releasePlans.length > 0;
+  const changes = activity.filter(isWriteOperation);
+  const displayName = session.display_name.trim() || session.email.split("@")[0] || "用户";
+
   return (
     <div className="workplace-page">
-      <header className="workplace-hero">
-        <div className="workplace-hero-main">
-          <div className="workplace-avatar" aria-hidden>
-            {initial}
-          </div>
-          <div className="workplace-hero-copy">
-            <div className="workplace-hero-title-row">
-              <h1 className="workplace-hero-title">{displayName}</h1>
-              {session.is_super_admin ? (
-                <span className="workplace-hero-badge">超级管理员</span>
-              ) : null}
-            </div>
-            <p className="workplace-hero-meta">
-              {session.email}
-              <span className="workplace-hero-sep">·</span>
-              当前空间 <strong>{workspaceName}</strong>
-            </p>
-          </div>
+      <header className="workplace-welcome">
+        <div>
+          <h1 className="workplace-welcome-title">你好，{displayName}</h1>
+          <p className="workplace-welcome-meta">
+            {workLoading ? "正在汇总当前工作" : hasWork ? "这里是当前进行中的工作。" : "从一个项目开始构建你的工作空间。"}
+          </p>
         </div>
-        <div className="workplace-hero-actions">
-          <Link href="/projects" className="workplace-hero-link">
-            项目中心
-          </Link>
-          <Link href="/dashboard?create=1" className="workplace-hero-primary">
-            + 创建项目
-          </Link>
-        </div>
+        <Link href="/dashboard?create=1" className="workplace-hero-primary">
+          创建项目
+        </Link>
       </header>
 
       <div className="workplace-layout">
         <div className="workplace-main">
-          <PanelCard
-            title={`当前 ${workspaceName} 的服务`}
-            action={
+          <section className="workplace-overview-panel">
+            <header className="workplace-panel-head">
+              <div>
+                <h2 className="workplace-panel-title">工作概览</h2>
+                <p className="workplace-panel-description">当前空间的交付进展</p>
+              </div>
               <Link href="/projects" className="workplace-panel-link">
-                查看全部
+                项目中心
               </Link>
-            }
-          >
-            {activeProjects.length === 0 ? (
-              <EmptyHint>暂无已审核通过的项目，完成配置并审核后将在此展示。</EmptyHint>
-            ) : (
-              <ul className="workplace-service-list">
-                {activeProjects.slice(0, 6).map((project) => {
-                  const tone = projectStatusTone(project);
-                  return (
-                    <li key={project.id}>
-                      <Link href={`/projects/${project.id}`} className="workplace-service-item">
-                        <span
-                          className="workplace-service-icon"
-                          style={{ backgroundColor: languageColor(project.language) }}
+            </header>
+            <dl className="workplace-keyline">
+              <div>
+                <dt>项目</dt>
+                <dd>{projects.length}</dd>
+              </div>
+              <div>
+                <dt>可发布</dt>
+                <dd>{activeProjects.length}</dd>
+              </div>
+              <div>
+                <dt>进行中的迭代</dt>
+                <dd>{workLoading ? "—" : activeSprints.length}</dd>
+              </div>
+              <div>
+                <dt>发布计划</dt>
+                <dd>{workLoading ? "—" : releasePlans.length}</dd>
+              </div>
+            </dl>
+            {!workLoading && !hasWork ? (
+              <p className="workplace-overview-hint">暂无进行中的工作，可以从创建项目开始。</p>
+            ) : null}
+          </section>
+
+          {hasWork ? (
+            <>
+              {activeProjects.length > 0 ? (
+                <PanelCard
+                  title="可发布项目"
+                  action={
+                    <Link href="/projects" className="workplace-panel-link">
+                      查看全部
+                    </Link>
+                  }
+                >
+                  <ul className="workplace-service-list">
+                    {activeProjects.slice(0, 6).map((project) => {
+                      const tone = projectStatusTone(project);
+                      return (
+                        <li key={project.id}>
+                          <Link href={`/projects/${project.id}`} className="workplace-service-item">
+                            <span
+                              className="workplace-service-icon"
+                              style={{ backgroundColor: languageColor(project.language) }}
+                            >
+                              {languageLabel(project.language).charAt(0).toUpperCase()}
+                            </span>
+                            <span className="workplace-service-body">
+                              <strong>{projectDisplayName(project)}</strong>
+                              <span>{project.namespace || project.name}</span>
+                            </span>
+                            <span className={`workplace-service-status is-${tone}`}>
+                              {projectStatusLabel(project)}
+                            </span>
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </PanelCard>
+              ) : null}
+
+              {activeSprints.length > 0 ? (
+                <PanelCard title="进行中的迭代">
+                  <ul className="workplace-service-list">
+                    {activeSprints.slice(0, 8).map((sprint) => (
+                      <li key={sprint.id}>
+                        <Link href={`/products/${sprint.product_id}`} className="workplace-service-item">
+                          <span className="workplace-service-body">
+                            <strong>{sprint.name}</strong>
+                            <span>
+                              {sprint.product_name ?? "产品"} · 工作项 {sprint.work_item_count ?? 0} / 完成{" "}
+                              {sprint.done_work_item_count ?? 0}
+                            </span>
+                          </span>
+                          <span className="workplace-service-status is-running">进行中</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </PanelCard>
+              ) : null}
+
+              {releasePlans.length > 0 ? (
+                <PanelCard
+                  title="进行中的发布计划"
+                  action={
+                    <Link href="/publish/release-plans" className="workplace-panel-link">
+                      查看全部
+                    </Link>
+                  }
+                >
+                  <ul className="workplace-service-list">
+                    {releasePlans.slice(0, 8).map((plan) => (
+                      <li key={plan.id}>
+                        <Link
+                          href={`/products/${plan.product_id}?tab=releases&planId=${plan.id}`}
+                          className="workplace-service-item"
                         >
-                          {languageLabel(project.language).charAt(0).toUpperCase()}
-                        </span>
-                        <span className="workplace-service-body">
-                          <strong>{projectDisplayName(project)}</strong>
-                          <span>{project.namespace || project.name}</span>
-                        </span>
-                        <span className={`workplace-service-status is-${tone}`}>
-                          {projectStatusLabel(project)}
-                        </span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </PanelCard>
+                          <span className="workplace-service-body">
+                            <strong>{plan.name}</strong>
+                            <span>
+                              {plan.product_name ?? "产品"}
+                              {plan.sprint_name ? ` · ${plan.sprint_name}` : ""}
+                            </span>
+                          </span>
+                          <span className="workplace-service-status is-running">
+                            {releasePlanStatusLabel(plan.status)}
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </PanelCard>
+              ) : null}
+            </>
+          ) : null}
 
-          <PanelCard title="进行中的迭代">
-            {activeSprintsLoading ? (
-              <EmptyHint>加载活跃迭代…</EmptyHint>
-            ) : activeSprints.length === 0 ? (
-              <EmptyHint>当前空间暂无进行中的产品迭代。</EmptyHint>
-            ) : (
-              <ul className="workplace-service-list">
-                {activeSprints.slice(0, 8).map((sprint) => (
-                  <li key={sprint.id}>
-                    <Link href={`/products/${sprint.product_id}`} className="workplace-service-item">
-                      <span className="workplace-service-body">
-                        <strong>{sprint.name}</strong>
-                        <span>
-                          {sprint.product_name ?? "产品"} · 工作项 {sprint.work_item_count ?? 0} / 完成{" "}
-                          {sprint.done_work_item_count ?? 0}
-                        </span>
-                      </span>
-                      <span className="workplace-service-status is-running">进行中</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </PanelCard>
-
-          <PanelCard
-            title="进行中的发布计划"
-            action={
-              <Link href="/publish/release-plans" className="workplace-panel-link">
-                查看全部
-              </Link>
-            }
-          >
-            {releasePlansLoading ? (
-              <EmptyHint>加载发布计划…</EmptyHint>
-            ) : releasePlans.length === 0 ? (
-              <EmptyHint>当前空间暂无进行中的发布计划。</EmptyHint>
-            ) : (
-              <ul className="workplace-service-list">
-                {releasePlans.slice(0, 8).map((plan) => (
-                  <li key={plan.id}>
-                    <Link
-                      href={`/products/${plan.product_id}?tab=releases&planId=${plan.id}`}
-                      className="workplace-service-item"
-                    >
-                      <span className="workplace-service-body">
-                        <strong>{plan.name}</strong>
-                        <span>
-                          {plan.product_name ?? "产品"}
-                          {plan.sprint_name ? ` · ${plan.sprint_name}` : ""}
-                        </span>
-                      </span>
-                      <span className="workplace-service-status is-running">
-                        {releasePlanStatusLabel(plan.status)}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </PanelCard>
-
-          <PanelCard title="动态">
-            {activityLoading ? (
-              <EmptyHint>加载最近动态…</EmptyHint>
-            ) : activityError ? (
-              <EmptyHint>{activityError}</EmptyHint>
-            ) : activity.length === 0 ? (
-              <EmptyHint>暂无操作记录，平台活动将在这里呈现。</EmptyHint>
-            ) : (
+          {changes.length > 0 ? (
+            <PanelCard
+              title="最近变更"
+              action={
+                <Link href="/admin/operation-logs" className="workplace-panel-link">
+                  操作日志
+                </Link>
+              }
+            >
               <ul className="workplace-activity-list">
-                {activity.map((record) => (
+                {changes.map((record) => (
                   <li key={record.id} className="workplace-activity-item">
                     <span className={`workplace-activity-dot is-${operationTone(record)}`} />
                     <div className="workplace-activity-copy">
-                      <strong>{operationTitle(record)}</strong>
-                      <span>
-                        HTTP {record.status}
-                        {record.latency_ms ? ` · ${record.latency_ms}ms` : ""}
-                      </span>
+                      <strong>{operationLabel(record)}</strong>
+                      <span>{record.status >= 400 ? "未完成" : "已完成"}</span>
                     </div>
                     <time className="workplace-activity-time">
                       {formatCompactDateTime(record.created_at)}
@@ -363,88 +354,76 @@ export function WorkplaceDashboard({
                   </li>
                 ))}
               </ul>
-            )}
-          </PanelCard>
+            </PanelCard>
+          ) : activityError ? (
+            <EmptyHint>{activityError}</EmptyHint>
+          ) : null}
         </div>
 
         <aside className="workplace-aside">
-          <PanelCard title="指数">
-            <div className="workplace-metrics">
-              <div className="workplace-metric">
-                <span>项目</span>
-                <strong>{projects.length}</strong>
-              </div>
-              <div className="workplace-metric">
-                <span>可发布</span>
-                <strong>{activeProjects.length}</strong>
-              </div>
-              <div className="workplace-metric">
-                <span>产品</span>
-                <strong>{metrics.loading ? "—" : (metrics.products ?? 0)}</strong>
-              </div>
-              <div className="workplace-metric">
-                <span>部署统计</span>
-                <strong>{metrics.loading ? "—" : (metrics.deploymentTotal ?? 0)}</strong>
-              </div>
+          <section className="workplace-context-panel">
+            <div className="workplace-context-section">
+              <header className="workplace-context-head">
+                <h2>业务空间</h2>
+                <span>{workspaces.length} 个</span>
+              </header>
+              {workspaces.length === 0 ? (
+                <EmptyHint>暂无可用工作区</EmptyHint>
+              ) : (
+                <ul className="workplace-space-grid">
+                  {workspaces.map((workspace) => {
+                    const active = workspace.id === workspaceId;
+                    return (
+                      <li key={workspace.id}>
+                        <button
+                          type="button"
+                          className={`workplace-space-item${active ? " is-active" : ""}`}
+                          disabled={
+                            Boolean(switchingWorkspace) ||
+                            (!active && isWorkspaceReadOnly(workspace))
+                          }
+                          onClick={() => void handleSwitchWorkspace(workspace.id)}
+                        >
+                          <span className="workplace-space-icon">
+                            {workspace.name.charAt(0).toUpperCase()}
+                          </span>
+                          <span className="workplace-space-name" title={workspace.name}>
+                            {workspace.name}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </div>
-          </PanelCard>
 
-          <PanelCard title="业务空间">
-            {workspaces.length === 0 ? (
-              <EmptyHint>暂无可用 Workspace</EmptyHint>
-            ) : (
-              <ul className="workplace-space-grid">
-                {workspaces.map((workspace) => {
-                  const active = workspace.id === workspaceId;
-                  const accent = workspaceAccent(workspace.name);
-                  return (
-                    <li key={workspace.id}>
-                      <button
-                        type="button"
-                        className={`workplace-space-item${active ? " is-active" : ""}`}
-                        disabled={Boolean(switchingWorkspace)}
-                        onClick={() => void handleSwitchWorkspace(workspace.id)}
-                      >
-                        <span className="workplace-space-icon" style={{ backgroundColor: accent }}>
-                          {workspace.name.charAt(0).toUpperCase()}
-                        </span>
-                        <span className="workplace-space-name" title={workspace.name}>
-                          {workspace.name}
-                        </span>
-                      </button>
+            <div className="workplace-context-section">
+              <header className="workplace-context-head">
+                <h2>快捷项目</h2>
+                <Link href="/projects" className="workplace-panel-link">
+                  查看全部
+                </Link>
+              </header>
+              {quickProjects.length === 0 ? (
+                <p className="workplace-context-empty">创建项目后，可从这里快速进入。</p>
+              ) : (
+                <ul className="workplace-quick-list">
+                  {quickProjects.map((project) => (
+                    <li key={project.id}>
+                      <Link href={`/projects/${project.id}`} className="workplace-quick-item">
+                        <span
+                          className="workplace-quick-dot"
+                          style={{ backgroundColor: languageColor(project.language) }}
+                        />
+                        <span>{projectDisplayName(project)}</span>
+                      </Link>
                     </li>
-                  );
-                })}
-              </ul>
-            )}
-          </PanelCard>
-
-          <PanelCard
-            title="快捷项目"
-            action={
-              <Link href="/projects" className="workplace-panel-link">
-                查看详情
-              </Link>
-            }
-          >
-            {quickProjects.length === 0 ? (
-              <EmptyHint>还没有项目，点击上方创建第一个吧。</EmptyHint>
-            ) : (
-              <ul className="workplace-quick-list">
-                {quickProjects.map((project) => (
-                  <li key={project.id}>
-                    <Link href={`/projects/${project.id}`} className="workplace-quick-item">
-                      <span
-                        className="workplace-quick-dot"
-                        style={{ backgroundColor: languageColor(project.language) }}
-                      />
-                      <span>{projectDisplayName(project)}</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </PanelCard>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
         </aside>
       </div>
     </div>
