@@ -79,8 +79,8 @@ UI 的精髓在于极度克制——通过留白、空间层级、近乎无色�
 |------|----------------|
 | 内容优先 | 每 `.card`/`.section` 一个主题；`PageHeader` 标题 + 一句 description 即止 |
 | 克制用色 | `var(--bg)` / `var(--surface)` / `var(--surface-muted)` 为主；`var(--primary)` 仅主按钮、链接、选中 |
-| 空间层级 | `stack-lg` → `stack-md` → `stack-sm`；模块间靠间距，不靠 `border-b` 堆叠 |
-| elevation | `var(--shadow-sm)` 日常分离；`var(--shadow-md)` 浮层/Modal；禁止多层 shadow-lg 嵌套 |
+| 空间层级 | `page-canvas` 主内容漂浮白卡片；`stack-lg` → `stack-md` → `stack-sm` 留白分层 |
+| elevation | `var(--shadow-float)` 主画布；`var(--shadow-sm/md)` 卡片；`var(--shadow-lg)` Modal/Drawer |
 | 少用边框 | 优先无 border 面板；必要时 `var(--border)` 1px，禁止彩色 border |
 | 图标 | Lucide/现有 icon，统一 size（16/20），`var(--muted)` 或 `var(--text-secondary)` |
 | 动效 | `transition: 150ms ease`；禁止 bounce、>300ms、大面积 gradient 动画 |

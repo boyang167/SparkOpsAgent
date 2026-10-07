@@ -89,7 +89,8 @@ K8s / 集群资源页必须使用 `src/components/k8s/` 套件，详见 [referen
 
 | 类名 | 用途 |
 |------|------|
-| `.card` / `.section` | 白色面板，带边框与轻阴影 |
+| `.page-canvas` | 主内容漂浮白卡片（大圆角 + 轻阴影，在 AppShell 内） |
+| `.card` / `.section` | 无边框面板，靠 elevation 与留白分层 |
 | `.card-hover` | 可点击卡片，hover 微抬升 |
 | `.section-header` | 区块标题行（标题 + 右侧操作） |
 | `.table-wrap` + `.data-table` | 数据表格 |

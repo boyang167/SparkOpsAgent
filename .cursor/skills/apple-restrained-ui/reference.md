@@ -1,12 +1,20 @@
 # Apple 克制设计 — SparkOps 实现参考
 
+## 视觉基准（White Agency 风格）
+
+- 页面底 `#f5f5f7`，主内容区为 `#ffffff` 大圆角漂浮卡片（`page-canvas`，32px 圆角）
+- 几乎无边框，模块靠留白 + 轻阴影分离
+- 主色近黑 `#1d1d1f`，仅用于主按钮与关键交互
+- 输入框/按钮药丸形（`border-radius: 999px`），内凹浅灰背景
+- 侧栏透明融入页面底，导航选中态为 `rgba(0,0,0,0.06)` 灰底
+
 ## 设计 Token（近乎无色）
 
 ```css
 /* 背景层 — 大面积极浅 */
-var(--bg)           /* #f4f7fb 页面底 */
+var(--bg)           /* #f5f5f7 页面底 */
 var(--surface)      /* #ffffff 卡片/面板 */
-var(--surface-muted)/* #f8fafc 次级区域 */
+var(--surface-muted)/* #fafafa 次级区域 */
 
 /* 文字层 — 层级来自字色与字重，非色块 */
 var(--text)              /* 主文案 */

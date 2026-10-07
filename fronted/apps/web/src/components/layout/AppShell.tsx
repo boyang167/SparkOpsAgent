@@ -151,7 +151,9 @@ export function AppShell({
             </div>
           </header>
 
-          <main className="page-content">{children}</main>
+          <main className="page-content">
+            <div className="page-canvas">{children}</div>
+          </main>
         </div>
         </div>
       </ShellProvider>
