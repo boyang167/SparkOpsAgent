@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BffError } from "@sparkops/contracts";
 import type { ProjectPVCVM, StorageClassVM } from "@sparkops/contracts/cluster";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
@@ -16,6 +16,12 @@ import {
   type AccessMode,
   type StorageUnit,
 } from "./pvc-form";
+import {
+  invalidateProjectStorage,
+  loadProjectStorage,
+  projectStorageKey,
+  readProjectStorageCache,
+} from "./project-storage-data";
 
 interface ProjectStorageTabProps {
   workspaceId: string;
@@ -42,9 +48,18 @@ function phaseBadge(phase?: string) {
 }
 
 export function ProjectStorageTab({ workspaceId, project, active }: ProjectStorageTabProps) {
-  const [items, setItems] = useState<ProjectPVCVM[]>([]);
-  const [classes, setClasses] = useState<StorageClassVM[]>([]);
-  const [loading, setLoading] = useState(false);
+  const cacheKey = useMemo(
+    () => projectStorageKey(workspaceId, project.id),
+    [project.id, workspaceId],
+  );
+  const cached = readProjectStorageCache(cacheKey);
+  const mountedRef = useRef(true);
+  const hasVisibleDataRef = useRef(Boolean(cached?.items.length));
+  const [items, setItems] = useState<ProjectPVCVM[]>(cached?.items ?? []);
+  const [classes, setClasses] = useState<StorageClassVM[]>(cached?.classes ?? []);
+  const [warnings, setWarnings] = useState<string[]>(cached?.warnings ?? []);
+  const [loading, setLoading] = useState(!cached);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -65,28 +80,45 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
     [items, selectedName],
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
+    if (readProjectStorageCache(cacheKey) !== null || hasVisibleDataRef.current) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const [next, nextClasses] = await Promise.all([
-        cluster.listPVCs(project.id, workspaceId),
-        cluster.listStorageClasses(project.id, workspaceId).catch(() => [] as StorageClassVM[]),
-      ]);
-      setItems(next);
-      setClasses(nextClasses);
+      const next = await loadProjectStorage(
+        cacheKey,
+        () => cluster.getStorageOverview(project.id, workspaceId),
+        { force },
+      );
+      if (!mountedRef.current) return;
+      hasVisibleDataRef.current = next.items.length > 0;
+      setItems(next.items);
+      setClasses(next.classes);
+      setWarnings(next.warnings);
       setSelectedName((current) => {
-        if (current && next.some((item) => item.name === current)) return current;
-        return next[0]?.name ?? null;
+        if (current && next.items.some((item) => item.name === current)) return current;
+        return next.items[0]?.name ?? null;
       });
     } catch (err) {
+      if (!mountedRef.current) return;
       setError(formatStorageError(err, "持久化存储加载失败"));
-      setItems([]);
-      setSelectedName(null);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [project.id, workspaceId]);
+  }, [cacheKey, project.id, workspaceId]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!active) return;
@@ -131,7 +163,8 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
         mount_path: path,
       });
       setCreateOpen(false);
-      await load();
+      invalidateProjectStorage(cacheKey);
+      await load({ force: true });
       setSelectedName(name);
     } catch (err) {
       setFormError(formatStorageError(err, "创建 PVC 失败"));
@@ -152,7 +185,8 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
     try {
       await cluster.bindPVC(project.id, workspaceId, selected.name, { mount_path: path });
       setBindOpen(false);
-      await load();
+      invalidateProjectStorage(cacheKey);
+      await load({ force: true });
     } catch (err) {
       setFormError(formatStorageError(err, "挂载失败"));
     } finally {
@@ -172,7 +206,8 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
     setError(null);
     try {
       await cluster.unbindPVC(project.id, workspaceId, selected.name);
-      await load();
+      invalidateProjectStorage(cacheKey);
+      await load({ force: true });
     } catch (err) {
       setError(formatStorageError(err, "卸载失败"));
     }
@@ -190,7 +225,8 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
     setError(null);
     try {
       await cluster.deletePVC(project.id, workspaceId, selected.name);
-      await load();
+      invalidateProjectStorage(cacheKey);
+      await load({ force: true });
     } catch (err) {
       setError(formatStorageError(err, "删除失败"));
     }
@@ -208,8 +244,13 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
           </p>
         </div>
         <div className="project-configmap-toolbar-actions">
-          <button type="button" className="btn btn-secondary text-sm" onClick={() => void load()} disabled={loading}>
-            刷新
+          <button
+            type="button"
+            className="btn btn-secondary text-sm"
+            onClick={() => void load({ force: true })}
+            disabled={loading || refreshing}
+          >
+            {refreshing ? "刷新中…" : "刷新"}
           </button>
           <button
             type="button"
@@ -223,14 +264,20 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
         </div>
       </header>
 
-      {loading ? <K8sLoadingState label="持久化存储加载中…" /> : null}
+      {loading && items.length === 0 ? <K8sLoadingState label="持久化存储加载中…" /> : null}
 
       {error ? (
         <div className="project-configmap-alert">
-          <p>{error}</p>
-          <button type="button" className="btn btn-secondary text-sm" onClick={() => void load()}>
+          <p>{items.length > 0 ? `刷新失败，当前为缓存数据：${error}` : error}</p>
+          <button type="button" className="btn btn-secondary text-sm" onClick={() => void load({ force: true })}>
             重试
           </button>
+        </div>
+      ) : null}
+
+      {warnings.length > 0 ? (
+        <div className="project-configmap-alert" role="status">
+          <p>{warnings.join("；")}</p>
         </div>
       ) : null}
 
@@ -242,7 +289,7 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
         />
       ) : null}
 
-      {!error && items.length > 1 ? (
+      {items.length > 1 ? (
         <div className="project-configmap-names" role="tablist" aria-label="PVC 列表">
           {items.map((item) => (
             <button
@@ -260,7 +307,7 @@ export function ProjectStorageTab({ workspaceId, project, active }: ProjectStora
         </div>
       ) : null}
 
-      {!error && selected ? (
+      {selected ? (
         <section className="project-configmap-card">
           <div className="project-configmap-meta">
             <div className="project-configmap-meta-item">
