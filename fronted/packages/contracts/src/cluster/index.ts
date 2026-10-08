@@ -193,6 +193,14 @@ export const StorageClassVMSchema = z.object({
 
 export type StorageClassVM = z.infer<typeof StorageClassVMSchema>;
 
+export const ProjectStorageOverviewVMSchema = z.object({
+  items: z.array(ProjectPVCVMSchema),
+  classes: z.array(StorageClassVMSchema),
+  warnings: z.array(z.string()),
+});
+
+export type ProjectStorageOverviewVM = z.infer<typeof ProjectStorageOverviewVMSchema>;
+
 export interface CreateProjectPVCInput {
   name?: string;
   storage?: string;

@@ -231,6 +231,13 @@ export async function listStorageClasses(projectId: string, workspaceId: string)
   return data.items ?? [];
 }
 
+export function getStorageOverview(projectId: string, workspaceId: string) {
+  return bffFetch<import("@sparkops/contracts/cluster").ProjectStorageOverviewVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/runtime/storage-overview`,
+    { workspaceId },
+  );
+}
+
 export interface StreamPodTerminalHandlers {
   onDelta: (delta: string) => void;
   onDone: () => void;

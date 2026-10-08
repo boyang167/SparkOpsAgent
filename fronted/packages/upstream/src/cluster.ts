@@ -239,6 +239,16 @@ export function createClusterUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async getStorageOverview(workspaceId: string, projectId: string) {
+      return upstreamFetch<import("@sparkops/contracts/cluster").ProjectStorageOverviewVM>(
+        `/api/v1/projects/${projectId}/runtime/storage-overview`,
+        {
+          method: "GET",
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+
     podTerminalStreamUrl(projectId: string, podId: string) {
       return `${getUpstreamBaseUrl()}/api/v1/projects/${projectId}/pods/${podId}/terminal/stream`;
     },

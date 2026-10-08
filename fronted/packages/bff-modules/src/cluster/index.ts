@@ -198,6 +198,10 @@ export async function listStorageClasses(ctx: BffContext, workspaceId: string, p
   return ctx.upstream.cluster.listStorageClasses(workspaceId, projectId);
 }
 
+export async function getStorageOverview(ctx: BffContext, workspaceId: string, projectId: string) {
+  return ctx.upstream.cluster.getStorageOverview(workspaceId, projectId);
+}
+
 export async function createPodTerminalTicket(
   ctx: BffContext,
   workspaceId: string,
