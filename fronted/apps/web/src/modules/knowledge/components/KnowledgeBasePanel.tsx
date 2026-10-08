@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { knowledge } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { KnowledgeBaseVM } from "@sparkops/contracts/knowledge";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface CreateKnowledgeBaseFormProps {
   workspaceId: string;
@@ -95,6 +96,7 @@ export function KnowledgeBaseSettings({ workspaceId, kb }: KnowledgeBaseSettings
   const [description, setDescription] = useState(kb.description);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
@@ -112,9 +114,8 @@ export function KnowledgeBaseSettings({ workspaceId, kb }: KnowledgeBaseSettings
   }
 
   async function onDelete() {
-    if (!window.confirm(`确定删除知识库「${kb.name}」？`)) {
-      return;
-    }
+    const ok = await confirm({ title: `确定删除知识库「${kb.name}」？`, danger: true });
+    if (!ok) return;
     setLoading(true);
     setError(null);
     try {
@@ -130,6 +131,7 @@ export function KnowledgeBaseSettings({ workspaceId, kb }: KnowledgeBaseSettings
 
   if (!editing) {
     return (
+      <>
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn-secondary" type="button" onClick={() => setEditing(true)}>
           编辑知识库
@@ -144,10 +146,13 @@ export function KnowledgeBaseSettings({ workspaceId, kb }: KnowledgeBaseSettings
         </button>
         {error ? <p className="error">{error}</p> : null}
       </div>
+      <ConfirmDialog />
+      </>
     );
   }
 
   return (
+    <>
     <form className="form-panel space-y-4" onSubmit={onSave}>
       <div>
         <label className="label" htmlFor="edit-kb-name">
@@ -182,5 +187,7 @@ export function KnowledgeBaseSettings({ workspaceId, kb }: KnowledgeBaseSettings
         </button>
       </div>
     </form>
+    <ConfirmDialog />
+    </>
   );
 }

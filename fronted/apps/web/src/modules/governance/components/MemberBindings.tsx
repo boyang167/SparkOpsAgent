@@ -6,6 +6,7 @@ import { governance } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { RoleVM, WorkspaceMemberVM } from "@sparkops/contracts/governance";
 import { InlineAlert } from "@/components/ui/InlineAlert";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface MemberBindingsProps {
   workspaceId: string;
@@ -52,6 +53,7 @@ function isRoleBound(member: WorkspaceMemberVM, roleId: string) {
 
 export function MemberBindings({ workspaceId, members, roles, variant = "default" }: MemberBindingsProps) {
   const router = useRouter();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [selectedRoles, setSelectedRoles] = useState<Record<string, string>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [successId, setSuccessId] = useState<string | null>(null);
@@ -112,9 +114,8 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
     const memberId = member.member_id;
     const key = `${memberId}:${roleId}`;
     const displayName = member.display_name || member.email;
-    if (!window.confirm(`确定解除 ${displayName} 的「${roleName}」角色？`)) {
-      return;
-    }
+    const ok = await confirm({ title: `确定解除 ${displayName} 的「${roleName}」角色？`, danger: true });
+    if (!ok) return;
     setRemovingKey(key);
     setError(null);
     try {
@@ -144,7 +145,7 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
 
   if (variant === "admin") {
     return (
-      <div className="admin-members-list">
+      <><div className="admin-members-list">
         {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
         {members.map((member) => {
           const accent = memberAccent(member.member_id);
@@ -231,12 +232,12 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
             </article>
           );
         })}
-      </div>
+      </div><ConfirmDialog /></>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <><div className="space-y-4">
       {error ? <p className="error">{error}</p> : null}
       <div className="table-wrap">
         <table className="data-table">
@@ -325,6 +326,6 @@ export function MemberBindings({ workspaceId, members, roles, variant = "default
           </tbody>
         </table>
       </div>
-    </div>
+    </div><ConfirmDialog /></>
   );
 }

@@ -14,6 +14,7 @@ import { useWorkspaceClusters } from "./project/useWorkspaceClusters";
 import { ProjectCreateModal } from "./project/ProjectCreateModal";
 import { ProjectConfigurePanel } from "./project/ProjectConfigurePanel";
 import { ProjectReviewModal } from "./project/ProjectReviewModal";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 import {
   formatDateTime,
   labelOf,
@@ -56,6 +57,7 @@ export function ProjectPanel({
   createQueryPath = "/projects",
 }: ProjectPanelProps) {
   const router = useRouter();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [items, setItems] = useState<ProjectVM[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -137,7 +139,8 @@ export function ProjectPanel({
   }
 
   async function onArchive(item: ProjectVM) {
-    if (!window.confirm(`确定归档项目「${projectDisplayName(item)}」？`)) return;
+    const ok = await confirm({ title: `确定归档项目「${projectDisplayName(item)}」？`, danger: true });
+    if (!ok) return;
     setError(null);
     try {
       await workspace.archiveProject(workspaceId, item.id);
@@ -148,7 +151,8 @@ export function ProjectPanel({
   }
 
   async function onSubmitReview(item: ProjectVM) {
-    if (!window.confirm(`确定提交项目「${projectDisplayName(item)}」审核？提交后配置将暂时锁定。`)) return;
+    const ok = await confirm({ title: `确定提交项目「${projectDisplayName(item)}」审核？提交后配置将暂时锁定。` });
+    if (!ok) return;
     setError(null);
     try {
       await workspace.submitProjectReview(workspaceId, item.id);
@@ -178,7 +182,7 @@ export function ProjectPanel({
   }
 
   return (
-    <div className="projects-page">
+    <><div className="projects-page">
       <section className="platform-table-card projects-card">
         <PlatformPanelHead
           title="项目管理"
@@ -521,6 +525,6 @@ export function ProjectPanel({
         }}
         onSubmit={(input) => void onReview(input)}
       />
-    </div>
+    </div><ConfirmDialog /></>
   );
 }

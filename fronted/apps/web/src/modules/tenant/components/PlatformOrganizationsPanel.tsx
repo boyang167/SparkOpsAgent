@@ -12,6 +12,7 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { orgAccentColor, orgInitial } from "@/modules/tenant/lib/org-display";
 import { slugify, isValidSlug } from "@/modules/tenant/lib/slug-utils";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 type StatusFilter = "all" | "active" | "suspended" | "deleted";
 type ViewMode = "card" | "table";
@@ -212,6 +213,7 @@ export function PlatformOrganizationsPanel({ variant = "platform" }: PlatformOrg
   const [actionOrgId, setActionOrgId] = useState<string | null>(null);
   const [transferOrg, setTransferOrg] = useState<PlatformOrganizationVM | null>(null);
   const [transferEmail, setTransferEmail] = useState("");
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -344,7 +346,8 @@ export function PlatformOrganizationsPanel({ variant = "platform" }: PlatformOrg
   }
 
   async function onDelete(org: PlatformOrganizationVM) {
-    if (!window.confirm(`确定删除组织「${org.name}」？此操作为软删除，数据仍保留在数据库中。`)) return;
+    const ok = await confirm({ title: `确定删除组织「${org.name}」？此操作为软删除，数据仍保留在数据库中。`, danger: true });
+    if (!ok) return;
     setActionOrgId(org.id);
     setError(null);
     try {
@@ -673,5 +676,7 @@ export function PlatformOrganizationsPanel({ variant = "platform" }: PlatformOrg
         </form>
       </Modal>
     </div>
+    <ConfirmDialog />
+    </>
   );
 }

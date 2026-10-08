@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { workflow } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { WorkflowVM } from "@sparkops/contracts/workflow";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface CreateWorkflowFormProps {
   workspaceId: string;
@@ -110,11 +111,11 @@ export function WorkflowSettings({ workspaceId, workflows }: WorkflowSettingsPro
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   async function onDelete(wf: WorkflowVM) {
-    if (!window.confirm(`确定删除 Workflow「${wf.name}」？`)) {
-      return;
-    }
+    const ok = await confirm({ title: `确定删除 Workflow「${wf.name}」？`, danger: true });
+    if (!ok) return;
     setLoadingId(wf.id);
     setError(null);
     try {
@@ -132,6 +133,7 @@ export function WorkflowSettings({ workspaceId, workflows }: WorkflowSettingsPro
   }
 
   return (
+    <>
     <div className="stack-md mt-4">
       {workflows.map((wf) => (
         <WorkflowEditRow
@@ -151,6 +153,8 @@ export function WorkflowSettings({ workspaceId, workflows }: WorkflowSettingsPro
       ))}
       {error ? <p className="error">{error}</p> : null}
     </div>
+    <ConfirmDialog />
+    </>
   );
 }
 

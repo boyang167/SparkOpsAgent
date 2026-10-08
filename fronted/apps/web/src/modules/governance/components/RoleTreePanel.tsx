@@ -7,6 +7,7 @@ import { BffError, PERMISSION_OPTIONS } from "@sparkops/contracts";
 import type { RoleTreeVM } from "@sparkops/contracts/governance";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { MetricCard } from "@/components/ui/MetricCard";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 import { RoleAuthorityEditor, type RoleAuthorityMode } from "./roles/RoleAuthorityEditor";
 import {
   computeRoleStats,
@@ -26,6 +27,7 @@ interface RoleTreePanelProps {
 
 export function RoleTreePanel({ workspaceId }: RoleTreePanelProps) {
   const router = useRouter();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [tree, setTree] = useState<RoleTreeVM[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +87,8 @@ export function RoleTreePanel({ workspaceId }: RoleTreePanelProps) {
   }
 
   async function onDelete(role: RoleTreeVM) {
-    if (!window.confirm(`确定删除角色「${role.name}」？`)) return;
+    const ok = await confirm({ title: `确定删除角色「${role.name}」？`, danger: true });
+    if (!ok) return;
     setLoadingId(role.id);
     setError(null);
     try {
@@ -101,7 +104,7 @@ export function RoleTreePanel({ workspaceId }: RoleTreePanelProps) {
   }
 
   return (
-    <div className="space-y-4">
+    <><div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="角色总数"
@@ -268,6 +271,6 @@ export function RoleTreePanel({ workspaceId }: RoleTreePanelProps) {
           router.refresh();
         }}
       />
-    </div>
+    </div><ConfirmDialog /></>
   );
 }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { agent } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface AgentSettingsPanelProps {
   workspaceId: string;
@@ -23,6 +24,7 @@ export function AgentSettingsPanel({
   const [name, setName] = useState(agentName);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
@@ -40,9 +42,12 @@ export function AgentSettingsPanel({
   }
 
   async function onDelete() {
-    if (!window.confirm(`确定删除 Agent「${agentName}」？\n归档后不再出现在列表中。`)) {
-      return;
-    }
+    const ok = await confirm({
+      title: `确定删除 Agent「${agentName}」？`,
+      description: "归档后不再出现在列表中。",
+      danger: true,
+    });
+    if (!ok) return;
     setLoading(true);
     setError(null);
     try {
@@ -57,6 +62,7 @@ export function AgentSettingsPanel({
   }
 
   return (
+    <>
     <section className="section stack-md">
       <div className="section-header !mb-0">
         <div>
@@ -114,5 +120,7 @@ export function AgentSettingsPanel({
         </form>
       ) : null}
     </section>
+    <ConfirmDialog />
+    </>
   );
 }

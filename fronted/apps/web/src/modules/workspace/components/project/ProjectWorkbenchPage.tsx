@@ -21,6 +21,7 @@ import {
   type CrossClusterConfirmMode,
 } from "./CrossClusterConfirmModal";
 import { projectDisplayName } from "./project-utils";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 import { releaseEntryAction } from "./deployment-gate";
 import {
   createSerialPoller,
@@ -44,6 +45,7 @@ export function ProjectWorkbenchPage({
 }: ProjectWorkbenchPageProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [configureOpen, setConfigureOpen] = useState(initialConfigure);
   const [deployOpen, setDeployOpen] = useState(false);
   const [crossClusterDeploy, setCrossClusterDeploy] = useState(false);
@@ -350,9 +352,8 @@ export function ProjectWorkbenchPage({
   }, [currentProject.id, deploymentListLoading, openDeploy, router, searchParams]);
 
   async function submitReview() {
-    if (!window.confirm(`确定提交项目「${projectDisplayName(currentProject)}」审核？提交后配置将暂时锁定。`)) {
-      return;
-    }
+    const ok = await confirm({ title: `确定提交项目「${projectDisplayName(currentProject)}」审核？提交后配置将暂时锁定。` });
+    if (!ok) return;
     setError(null);
     try {
       setCurrentProject(await workspace.submitProjectReview(workspaceId, currentProject.id));
@@ -377,7 +378,7 @@ export function ProjectWorkbenchPage({
   }
 
   return (
-    <div className="stack-lg">
+    <><div className="stack-lg">
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
 
       <ProjectServiceDetailPage
@@ -466,7 +467,7 @@ export function ProjectWorkbenchPage({
         }}
         onSubmit={(input) => void reviewProject(input)}
       />
-    </div>
+    </div><ConfirmDialog /></>
   );
 }
 

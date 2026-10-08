@@ -9,6 +9,7 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
 import { orgAccentColor, orgInitial } from "@/modules/tenant/lib/org-display";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface PlatformMembersPanelProps {
   currentMemberId: string;
@@ -112,6 +113,7 @@ export function PlatformMembersPanel({
 
   const [resetMember, setResetMember] = useState<PlatformMemberVM | null>(null);
   const [newPassword, setNewPassword] = useState("");
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -270,7 +272,8 @@ export function PlatformMembersPanel({
 
   async function onDelete(member: PlatformMemberVM) {
     if (member.id === currentMemberId) return;
-    if (!window.confirm(`确定删除用户「${member.display_name}」（${member.email}）？此操作为软删除。`)) return;
+    const ok = await confirm({ title: `确定删除用户「${member.display_name}」（${member.email}）？此操作为软删除。`, danger: true });
+    if (!ok) return;
     setActionId(`del:${member.id}`);
     setError(null);
     try {

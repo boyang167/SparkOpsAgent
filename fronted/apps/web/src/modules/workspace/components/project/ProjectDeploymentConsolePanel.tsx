@@ -7,6 +7,7 @@ import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { delivery } from "@sparkops/web-sdk";
 import { BuildLogStream } from "@/modules/delivery/components/BuildLogStream";
 import { formatDateTime } from "./project-utils";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 import {
   createSerialPoller,
   shouldContinueDeploymentPoll,
@@ -60,6 +61,7 @@ export function ProjectDeploymentConsolePanel({
   headerExtra,
 }: ProjectDeploymentConsolePanelProps) {
   const runs = deploymentPage?.items ?? [];
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null);
   const [run, setRun] = useState<DeploymentRunVM | null>(null);
   const [builds, setBuilds] = useState<BuildVM[]>([]);
@@ -176,7 +178,8 @@ export function ProjectDeploymentConsolePanel({
 
   async function handleAbort() {
     if (!run || !isActiveDeploymentRun(run)) return;
-    if (!window.confirm("确定要终止本次部署？")) return;
+    const ok = await confirm({ title: "确定要终止本次部署？", danger: true });
+    if (!ok) return;
     setAborting(true);
     setError(null);
     try {
@@ -198,7 +201,7 @@ export function ProjectDeploymentConsolePanel({
   );
 
   return (
-    <div className="project-build-logs-layout">
+    <><div className="project-build-logs-layout">
       <aside className="project-build-logs-history">
         <div className="project-build-logs-history-header">Build history</div>
         {runs.length === 0 ? (
@@ -342,6 +345,6 @@ export function ProjectDeploymentConsolePanel({
           <pre className="project-build-logs-placeholder">请选择左侧部署记录，查看控制台输出</pre>
         )}
       </section>
-    </div>
+    </div><ConfirmDialog /></>
   );
 }

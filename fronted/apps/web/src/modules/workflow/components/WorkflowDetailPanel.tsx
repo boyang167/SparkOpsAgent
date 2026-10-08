@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { workflow } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { WorkflowVM } from "@sparkops/contracts/workflow";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface WorkflowDetailPanelProps {
   workspaceId: string;
@@ -19,6 +20,7 @@ export function WorkflowDetailPanel({ workspaceId, projectId, workflow: wf }: Wo
   const [definition, setDefinition] = useState(wf.definition ?? "{}");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
@@ -48,9 +50,8 @@ export function WorkflowDetailPanel({ workspaceId, projectId, workflow: wf }: Wo
   }
 
   async function onDelete() {
-    if (!window.confirm(`确定删除 Workflow「${wf.name}」？`)) {
-      return;
-    }
+    const ok = await confirm({ title: `确定删除 Workflow「${wf.name}」？`, danger: true });
+    if (!ok) return;
     setLoading(true);
     setError(null);
     try {
@@ -65,6 +66,7 @@ export function WorkflowDetailPanel({ workspaceId, projectId, workflow: wf }: Wo
   }
 
   return (
+    <>
     <div className="stack-lg">
       <div className="flex flex-wrap items-center gap-2">
         <span className={`badge ${wf.status === "active" ? "badge-success" : "badge-neutral"}`}>
@@ -126,5 +128,7 @@ export function WorkflowDetailPanel({ workspaceId, projectId, workflow: wf }: Wo
         </button>
       </form>
     </div>
+    <ConfirmDialog />
+    </>
   );
 }

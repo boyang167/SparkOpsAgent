@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { workspace } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface EditProjectFormProps {
   workspaceId: string;
@@ -93,17 +94,16 @@ export function DeleteProjectButton({
   projectName,
 }: DeleteProjectButtonProps) {
   const router = useRouter();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function onDelete() {
-    if (
-      !window.confirm(
-        `确定删除项目「${projectName}」？\n项目将归档，不再出现在列表中。`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `确定删除项目「${projectName}」？\n项目将归档，不再出现在列表中。`,
+      danger: true,
+    });
+    if (!ok) return;
     setLoading(true);
     setError(null);
     try {
@@ -118,6 +118,7 @@ export function DeleteProjectButton({
   }
 
   return (
+    <>
     <div className="flex flex-col items-end gap-2">
       <button
         className="btn-secondary !text-red-600 !border-red-200 hover:!bg-red-50"
@@ -129,5 +130,7 @@ export function DeleteProjectButton({
       </button>
       {error ? <p className="error">{error}</p> : null}
     </div>
+    <ConfirmDialog />
+    </>
   );
 }

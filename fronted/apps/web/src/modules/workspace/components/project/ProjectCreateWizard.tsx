@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { product, platform, secret, tenant, workspace } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
@@ -53,6 +53,11 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
   const [displayNameManual, setDisplayNameManual] = useState(false);
   const [draftProject, setDraftProject] = useState<{ id: string; workspaceId: string } | null>(null);
   const [nameTouched, setNameTouched] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [step]);
 
   const gitSecrets = useMemo(
     () => secrets.filter((s) => s.service_type === gitServiceType),
@@ -333,7 +338,7 @@ export function ProjectCreateWizard({ workspaceId, open, onClose, onSuccess }: P
       </div>
 
       <form className="project-wizard-form is-modal-layout" onSubmit={handleSubmit}>
-        <div className="project-wizard-scroll">
+        <div className="project-wizard-scroll" ref={scrollRef}>
           {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
 
         {step === 1 ? (

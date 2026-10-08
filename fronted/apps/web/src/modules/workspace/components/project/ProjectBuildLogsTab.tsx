@@ -7,6 +7,7 @@ import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { delivery } from "@sparkops/web-sdk";
 import { BuildLogStream } from "@/modules/delivery/components/BuildLogStream";
 import { formatDateTime } from "./project-utils";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface ProjectBuildLogsTabProps {
   workspaceId: string;
@@ -49,6 +50,7 @@ function BuildStatusIcon({ status }: { status: string }) {
 }
 
 export function ProjectBuildLogsTab({ workspaceId, project, active }: ProjectBuildLogsTabProps) {
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [builds, setBuilds] = useState<BuildVM[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedBuild, setSelectedBuild] = useState<BuildVM | null>(null);
@@ -112,7 +114,8 @@ export function ProjectBuildLogsTab({ workspaceId, project, active }: ProjectBui
 
   async function handleAbort() {
     if (!selectedBuild || selectedBuild.status !== "running") return;
-    if (!window.confirm("确定要终止本次 Build？")) return;
+    const ok = await confirm({ title: "确定要终止本次 Build？", danger: true });
+    if (!ok) return;
     setAborting(true);
     setError(null);
     try {
@@ -130,7 +133,7 @@ export function ProjectBuildLogsTab({ workspaceId, project, active }: ProjectBui
   const isRunning = selectedBuild?.status === "running";
 
   return (
-    <div className="project-build-logs-layout">
+    <><div className="project-build-logs-layout">
       <aside className="project-build-logs-history">
         <div className="project-build-logs-history-header">Build history</div>
         {loading && builds.length === 0 ? (
@@ -213,6 +216,6 @@ export function ProjectBuildLogsTab({ workspaceId, project, active }: ProjectBui
           <pre className="project-build-logs-placeholder">请选择左侧版本，查看 Build 控制台输出</pre>
         )}
       </section>
-    </div>
+    </div><ConfirmDialog /></>
   );
 }

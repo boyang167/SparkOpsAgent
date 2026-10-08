@@ -6,6 +6,7 @@ import { BffError } from "@sparkops/contracts";
 import type { APITokenVM, RoleTreeVM, WorkspaceMemberVM } from "@sparkops/contracts/governance";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface PermissionApiTokensPanelProps {
   workspaceId: string;
@@ -18,6 +19,7 @@ function flattenRoles(nodes: RoleTreeVM[]): RoleTreeVM[] {
 }
 
 export function PermissionApiTokensPanel({ workspaceId, members, roles }: PermissionApiTokensPanelProps) {
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [tokens, setTokens] = useState<APITokenVM[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +67,8 @@ export function PermissionApiTokensPanel({ workspaceId, members, roles }: Permis
   }
 
   async function onRevoke(id: string) {
-    if (!window.confirm("确定作废该 Token？")) return;
+    const ok = await confirm({ title: "确定作废该 Token？", danger: true });
+    if (!ok) return;
     try {
       await governance.revokeApiToken(workspaceId, id);
       await load();
@@ -75,7 +78,7 @@ export function PermissionApiTokensPanel({ workspaceId, members, roles }: Permis
   }
 
   return (
-    <div className="section stack-md">
+    <><div className="section stack-md">
       <div className="flex justify-between gap-3">
         <div>
           <h2 className="section-title">API Token</h2>
@@ -176,6 +179,6 @@ export function PermissionApiTokensPanel({ workspaceId, members, roles }: Permis
           </div>
         </form>
       </Modal>
-    </div>
+    </div><ConfirmDialog /></>
   );
 }

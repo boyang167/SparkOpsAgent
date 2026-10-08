@@ -6,6 +6,7 @@ import type { ProjectWebhookVM, WebhookEventCatalogItem } from "@sparkops/contra
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { delivery } from "@sparkops/web-sdk";
 import { Modal } from "@/components/ui/Modal";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 import {
   WEBHOOK_EVENT_OPTIONS,
   isValidWebhookName,
@@ -28,6 +29,7 @@ function formatWebhookError(err: unknown, fallback: string) {
 }
 
 export function ProjectWebhookTab({ workspaceId, project, active }: ProjectWebhookTabProps) {
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [items, setItems] = useState<ProjectWebhookVM[]>([]);
   const [catalog, setCatalog] = useState<WebhookEventCatalogItem[]>([...WEBHOOK_EVENT_OPTIONS]);
   const [loading, setLoading] = useState(false);
@@ -138,7 +140,8 @@ export function ProjectWebhookTab({ workspaceId, project, active }: ProjectWebho
   }
 
   async function handleDelete(item: ProjectWebhookVM) {
-    if (!window.confirm(`确定删除 Webhook「${item.name}」？`)) return;
+    const ok = await confirm({ title: `确定删除 Webhook「${item.name}」？`, danger: true });
+    if (!ok) return;
     setError(null);
     try {
       await delivery.deleteWebhook(workspaceId, project.id, item.id);
@@ -151,7 +154,7 @@ export function ProjectWebhookTab({ workspaceId, project, active }: ProjectWebho
   const showEmpty = !loading && !error && items.length === 0;
 
   return (
-    <div className="project-configmap-page">
+    <><div className="project-configmap-page">
       <header className="project-configmap-toolbar">
         <div>
           <h4 className="project-configmap-title">Webhooks</h4>
@@ -330,7 +333,7 @@ export function ProjectWebhookTab({ workspaceId, project, active }: ProjectWebho
           </div>
         </div>
       </Modal>
-    </div>
+    </div><ConfirmDialog /></>
   );
 }
 

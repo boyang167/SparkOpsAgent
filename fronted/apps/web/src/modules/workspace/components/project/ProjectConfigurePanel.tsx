@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { product, platform, secret, workspace } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { CreateProjectCommand, ProjectVM } from "@sparkops/contracts/workspace";
@@ -94,6 +94,11 @@ export function ProjectConfigurePanel({
   const [loadingClusters, setLoadingClusters] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [step]);
 
   const gitSecrets = useMemo(
     () => secrets.filter((s) => s.service_type === gitServiceType),
@@ -280,7 +285,7 @@ export function ProjectConfigurePanel({
           })}
         </div>
 
-        <div className="project-configure-scroll">
+        <div className="project-configure-scroll" ref={scrollRef}>
           {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
 
           {step === 2 ? (

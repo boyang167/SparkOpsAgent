@@ -23,6 +23,7 @@ import {
   statusBadgeClass,
   type ConnectionStatus,
 } from "./secret/secret-utils";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface SecretPanelProps {
   workspaceId: string;
@@ -74,6 +75,7 @@ export function SecretPanel({ workspaceId }: SecretPanelProps) {
   const [form, setForm] = useState<CreateSecretCommand>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -273,7 +275,8 @@ export function SecretPanel({ workspaceId }: SecretPanelProps) {
   }
 
   async function onDelete(item: SecretVM) {
-    if (!window.confirm(`确定删除配置「${item.name}」？此操作不可恢复。`)) return;
+    const ok = await confirm({ title: `确定删除配置「${item.name}」？此操作不可恢复。`, danger: true });
+    if (!ok) return;
     setError(null);
     setSuccess(null);
     try {
@@ -292,7 +295,8 @@ export function SecretPanel({ workspaceId }: SecretPanelProps) {
 
   async function onBatchDelete() {
     if (selectedIds.size === 0) return;
-    if (!window.confirm(`确定删除选中的 ${selectedIds.size} 个配置？`)) return;
+    const ok = await confirm({ title: `确定删除选中的 ${selectedIds.size} 个配置？`, danger: true });
+    if (!ok) return;
     setError(null);
     try {
       await Promise.all([...selectedIds].map((id) => secret.deleteSecret(workspaceId, id)));
@@ -322,6 +326,7 @@ export function SecretPanel({ workspaceId }: SecretPanelProps) {
   }
 
   return (
+    <>
     <div className="secret-panel">
       <div className="secret-search-section">
         <div className="secret-search-form">
@@ -597,5 +602,7 @@ export function SecretPanel({ workspaceId }: SecretPanelProps) {
         ) : null}
       </Modal>
     </div>
+    <ConfirmDialog />
+    </>
   );
 }

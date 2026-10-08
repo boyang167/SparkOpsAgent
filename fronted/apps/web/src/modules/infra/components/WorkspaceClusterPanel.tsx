@@ -6,6 +6,7 @@ import { BffError } from "@sparkops/contracts";
 import type { AuthorizedClusterVM } from "@sparkops/contracts/delivery";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { notifyEntitlementsUpdated } from "@/components/layout/shell-context";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface WorkspaceClusterPanelProps {
   workspaceId: string;
@@ -34,6 +35,7 @@ export function WorkspaceClusterPanel({ workspaceId }: WorkspaceClusterPanelProp
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,7 +78,8 @@ export function WorkspaceClusterPanel({ workspaceId }: WorkspaceClusterPanelProp
   }
 
   async function onRevoke(clusterId: string) {
-    if (!window.confirm("确定从当前工作空间撤销该集群授权？")) return;
+    const ok = await confirm({ title: "确定从当前工作空间撤销该集群授权？", danger: true });
+    if (!ok) return;
     setError(null);
     try {
       await platform.revokeAuthorizedWorkspaceCluster(workspaceId, clusterId);
@@ -88,6 +91,7 @@ export function WorkspaceClusterPanel({ workspaceId }: WorkspaceClusterPanelProp
   }
 
   return (
+    <>
     <div className="stack-md">
       <p className="text-sm text-muted">
         拖拽排序暂未开放，请使用上移/下移调整顺序。排在最前的集群为<strong>构建集群</strong>
@@ -161,5 +165,7 @@ export function WorkspaceClusterPanel({ workspaceId }: WorkspaceClusterPanelProp
         </div>
       )}
     </div>
+    <ConfirmDialog />
+    </>
   );
 }

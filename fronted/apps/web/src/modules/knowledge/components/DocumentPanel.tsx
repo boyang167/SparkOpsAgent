@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { knowledge } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { DocumentVM } from "@sparkops/contracts/knowledge";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface DocumentPanelProps {
   workspaceId: string;
@@ -20,6 +21,7 @@ export function DocumentPanel({ workspaceId, kbId, documents }: DocumentPanelPro
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -39,9 +41,8 @@ export function DocumentPanel({ workspaceId, kbId, documents }: DocumentPanelPro
   }
 
   async function onDelete(doc: DocumentVM) {
-    if (!window.confirm(`确定删除文档「${doc.title}」？`)) {
-      return;
-    }
+    const ok = await confirm({ title: `确定删除文档「${doc.title}」？`, danger: true });
+    if (!ok) return;
     setLoading(true);
     setError(null);
     try {
@@ -55,6 +56,7 @@ export function DocumentPanel({ workspaceId, kbId, documents }: DocumentPanelPro
   }
 
   return (
+    <>
     <div className="stack-md">
       <div className="flex items-center justify-between gap-4">
         <h2 className="section-title">文档</h2>
@@ -124,6 +126,8 @@ export function DocumentPanel({ workspaceId, kbId, documents }: DocumentPanelPro
         </div>
       )}
     </div>
+    <ConfirmDialog />
+    </>
   );
 }
 

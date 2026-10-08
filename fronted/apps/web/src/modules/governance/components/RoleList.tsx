@@ -6,6 +6,7 @@ import { governance } from "@sparkops/web-sdk";
 import { BffError, PERMISSION_OPTIONS } from "@sparkops/contracts";
 import type { RoleVM } from "@sparkops/contracts/governance";
 import { isProtectedRole, roleDisplayName } from "./roles/role-utils";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 function permissionLabel(value: string) {
   return PERMISSION_OPTIONS.find((p) => p.value === value)?.label ?? value;
@@ -18,6 +19,7 @@ interface RoleListProps {
 
 export function RoleList({ workspaceId, roles }: RoleListProps) {
   const router = useRouter();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [permissions, setPermissions] = useState<string[]>([]);
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -57,9 +59,8 @@ export function RoleList({ workspaceId, roles }: RoleListProps) {
     if (isProtectedRole(role.name)) {
       return;
     }
-    if (!window.confirm(`确定删除角色「${role.name}」？相关成员绑定也会一并移除。`)) {
-      return;
-    }
+    const ok = await confirm({ title: `确定删除角色「${role.name}」？相关成员绑定也会一并移除。`, danger: true });
+    if (!ok) return;
     setLoadingId(role.id);
     setError(null);
     try {
@@ -80,7 +81,7 @@ export function RoleList({ workspaceId, roles }: RoleListProps) {
   }
 
   return (
-    <div className="space-y-4">
+    <><div className="space-y-4">
       {error ? <p className="error">{error}</p> : null}
       <div className="table-wrap">
         <table className="data-table">
@@ -177,6 +178,6 @@ export function RoleList({ workspaceId, roles }: RoleListProps) {
           </tbody>
         </table>
       </div>
-    </div>
+    </div><ConfirmDialog /></>
   );
 }

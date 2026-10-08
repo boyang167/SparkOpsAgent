@@ -7,6 +7,7 @@ import type { CronJobVM } from "@sparkops/contracts/delivery";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface CronJobsPanelProps {
   workspaceId: string;
@@ -23,6 +24,7 @@ export function CronJobsPanel({ workspaceId, projects, initialProjectId }: CronJ
   const [name, setName] = useState("");
   const [schedule, setSchedule] = useState("0 * * * *");
   const [branch, setBranch] = useState("main");
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   const load = useCallback(async () => {
     if (!projectId) {
@@ -59,7 +61,9 @@ export function CronJobsPanel({ workspaceId, projects, initialProjectId }: CronJ
   }
 
   async function onDelete(id: string) {
-    if (!projectId || !window.confirm("确定删除该定时任务？")) return;
+    if (!projectId) return;
+    const ok = await confirm({ title: "确定删除该定时任务？", danger: true });
+    if (!ok) return;
     try {
       await delivery.deleteCronJob(workspaceId, projectId, id);
       await load();
@@ -69,6 +73,7 @@ export function CronJobsPanel({ workspaceId, projects, initialProjectId }: CronJ
   }
 
   return (
+    <>
     <div className="stack-md">
       <div className="flex flex-wrap gap-3 justify-between">
         <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
@@ -123,5 +128,7 @@ export function CronJobsPanel({ workspaceId, projects, initialProjectId }: CronJ
         </form>
       </Modal>
     </div>
+    <ConfirmDialog />
+    </>
   );
 }
