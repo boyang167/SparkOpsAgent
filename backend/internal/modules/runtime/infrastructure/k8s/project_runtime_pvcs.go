@@ -36,6 +36,12 @@ type StorageClassVM struct {
 	ReclaimPolicy string `json:"reclaim_policy,omitempty"`
 }
 
+type StorageOverviewVM struct {
+	Items    []ProjectPVCVM   `json:"items"`
+	Classes  []StorageClassVM `json:"classes"`
+	Warnings []string         `json:"warnings"`
+}
+
 type CreatePVCInput struct {
 	Name         string `json:"name"`
 	Storage      string `json:"storage"`
@@ -64,6 +70,13 @@ func (c *ProjectRuntimeConfigurator) ListPVCs(
 	if err != nil {
 		return nil, err
 	}
+	return listPVCsWithSession(ctx, session)
+}
+
+func listPVCsWithSession(
+	ctx context.Context,
+	session *ProjectClusterSession,
+) ([]ProjectPVCVM, error) {
 	list, err := session.Client.CoreV1().PersistentVolumeClaims(session.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
@@ -90,6 +103,13 @@ func (c *ProjectRuntimeConfigurator) ListStorageClasses(
 	if err != nil {
 		return nil, err
 	}
+	return listStorageClassesWithSession(ctx, session)
+}
+
+func listStorageClassesWithSession(
+	ctx context.Context,
+	session *ProjectClusterSession,
+) ([]StorageClassVM, error) {
 	list, err := session.Client.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
@@ -100,6 +120,62 @@ func (c *ProjectRuntimeConfigurator) ListStorageClasses(
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+func (c *ProjectRuntimeConfigurator) GetStorageOverview(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	projectID kernel.ProjectID,
+) (StorageOverviewVM, error) {
+	session, err := c.access.Open(ctx, wsID, projectID)
+	if err != nil {
+		return StorageOverviewVM{}, err
+	}
+	return getStorageOverviewWithSession(ctx, session)
+}
+
+func getStorageOverviewWithSession(
+	ctx context.Context,
+	session *ProjectClusterSession,
+) (StorageOverviewVM, error) {
+	type pvcResult struct {
+		items []ProjectPVCVM
+		err   error
+	}
+	type classResult struct {
+		items []StorageClassVM
+		err   error
+	}
+
+	pvcCh := make(chan pvcResult, 1)
+	classCh := make(chan classResult, 1)
+	go func() {
+		items, err := listPVCsWithSession(ctx, session)
+		pvcCh <- pvcResult{items: items, err: err}
+	}()
+	go func() {
+		items, err := listStorageClassesWithSession(ctx, session)
+		classCh <- classResult{items: items, err: err}
+	}()
+
+	pvcs := <-pvcCh
+	classes := <-classCh
+	if pvcs.err != nil {
+		return StorageOverviewVM{}, pvcs.err
+	}
+	overview := StorageOverviewVM{
+		Items:    pvcs.items,
+		Classes:  classes.items,
+		Warnings: []string{},
+	}
+	if classes.err != nil {
+		overview.Classes = []StorageClassVM{}
+		overview.Warnings = append(
+			overview.Warnings,
+			"StorageClass 加载失败："+classes.err.Error(),
+		)
+	}
+	return overview, nil
 }
 
 func (c *ProjectRuntimeConfigurator) CreatePVC(

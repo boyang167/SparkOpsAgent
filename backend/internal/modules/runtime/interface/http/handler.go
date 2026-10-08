@@ -16,15 +16,15 @@ import (
 )
 
 type Handler struct {
-	listPods        *query.ListPodsHandler
-	getPod          *query.GetPodHandler
-	podLogs         *query.GetPodLogsHandler
-	terminal        *query.StreamPodTerminalHandler
-	overview        *query.GetProjectRuntimeOverviewHandler
-	deploymentYAML  *query.GetDeploymentYAMLHandler
-	podYAML         *query.GetPodYAMLHandler
-	restartPod      *command.RestartPodHandler
-	runtimeConfig   *command.RuntimeConfigHandler
+	listPods       *query.ListPodsHandler
+	getPod         *query.GetPodHandler
+	podLogs        *query.GetPodLogsHandler
+	terminal       *query.StreamPodTerminalHandler
+	overview       *query.GetProjectRuntimeOverviewHandler
+	deploymentYAML *query.GetDeploymentYAMLHandler
+	podYAML        *query.GetPodYAMLHandler
+	restartPod     *command.RestartPodHandler
+	runtimeConfig  *command.RuntimeConfigHandler
 }
 
 func NewHandler(
@@ -404,6 +404,29 @@ func (h *Handler) ListStorageClasses(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) GetStorageOverview(c *gin.Context) {
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	if h.runtimeConfig == nil {
+		httpx.Fail(c, "RUNTIME_NOT_CONFIGURED", "runtime configurator unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	overview, err := h.runtimeConfig.GetStorageOverview(c.Request.Context(), wsID, projectID)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, overview)
 }
 
 func (h *Handler) CreatePVC(c *gin.Context) {

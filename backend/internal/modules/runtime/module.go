@@ -121,6 +121,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), handler.UnbindPVC)
 	c.Engine.GET("/api/v1/projects/:projectId/runtime/storageclasses",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListStorageClasses)
+	c.Engine.GET("/api/v1/projects/:projectId/runtime/storage-overview",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetStorageOverview)
 
 	terminalHandler := runtimehttp.NewProjectTerminalHandler(
 		checker, adapters.Lister, projectAccess, runtimeterminal.NewTicketStore(nil),

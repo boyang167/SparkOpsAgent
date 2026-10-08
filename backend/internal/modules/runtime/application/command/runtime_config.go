@@ -206,6 +206,17 @@ func (h *RuntimeConfigHandler) ListStorageClasses(
 	return h.configurator.ListStorageClasses(ctx, wsID, projectID)
 }
 
+func (h *RuntimeConfigHandler) GetStorageOverview(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	projectID kernel.ProjectID,
+) (runtimek8s.StorageOverviewVM, error) {
+	if err := h.authorize(ctx, wsID, projectID); err != nil {
+		return runtimek8s.StorageOverviewVM{}, err
+	}
+	return h.configurator.GetStorageOverview(ctx, wsID, projectID)
+}
+
 func (h *RuntimeConfigHandler) CreatePVC(
 	ctx context.Context,
 	wsID kernel.WorkspaceID,

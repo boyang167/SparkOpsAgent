@@ -1,12 +1,64 @@
 package k8s
 
 import (
+	"context"
+	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
+
+func TestGetStorageOverviewReturnsPVCsAndStorageClasses(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{
+			Name: "orders-data", Namespace: "team-a", Labels: map[string]string{"app": "orders"},
+		}},
+		&storagev1.StorageClass{
+			ObjectMeta:  metav1.ObjectMeta{Name: "fast"},
+			Provisioner: "example.com/fast",
+		},
+	)
+	session := &ProjectClusterSession{
+		Client: client, Namespace: "team-a", ProjectName: "orders",
+	}
+
+	overview, err := getStorageOverviewWithSession(context.Background(), session)
+
+	require.NoError(t, err)
+	require.Len(t, overview.Items, 1)
+	require.Len(t, overview.Classes, 1)
+	require.Empty(t, overview.Warnings)
+}
+
+func TestGetStorageOverviewKeepsPVCsWhenStorageClassesFail(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{
+		Name: "orders-data", Namespace: "team-a", Labels: map[string]string{"app": "orders"},
+	}})
+	client.PrependReactor(
+		"list",
+		"storageclasses",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("storage API unavailable")
+		},
+	)
+	session := &ProjectClusterSession{
+		Client: client, Namespace: "team-a", ProjectName: "orders",
+	}
+
+	overview, err := getStorageOverviewWithSession(context.Background(), session)
+
+	require.NoError(t, err)
+	require.Len(t, overview.Items, 1)
+	require.Empty(t, overview.Classes)
+	require.Equal(t, []string{"StorageClass 加载失败：storage API unavailable"}, overview.Warnings)
+}
 
 func TestPVCBelongsToProject(t *testing.T) {
 	pvc := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Labels: map[string]string{"app": "test-repo"}}}
