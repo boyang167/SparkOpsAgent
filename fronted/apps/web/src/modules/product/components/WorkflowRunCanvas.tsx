@@ -125,7 +125,6 @@ export function WorkflowRunCanvas({ stages, selectedTaskId, onSelectTask }: Work
         </div>
       </div>
 
-      <p className="wf-run-live-canvas-hint text-xs text-muted">拖拽空白区域平移 · Ctrl + 滚轮缩放</p>
     </div>
   );
 }
