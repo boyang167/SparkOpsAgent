@@ -55,13 +55,14 @@ export function ProjectNav({ projectId, projectName }: ProjectNavProps) {
             key={item.label}
             href={href}
             className={`nav-link${active ? " nav-link-active" : ""}`}
+            aria-current={active ? "page" : undefined}
           >
-            <span className="nav-icon">
+            <span className="nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="2" />
               </svg>
             </span>
-            {item.label}
+            <span className="nav-link-label">{item.label}</span>
           </Link>
         );
       })}

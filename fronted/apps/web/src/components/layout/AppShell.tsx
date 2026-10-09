@@ -5,9 +5,8 @@ import { usePathname } from "next/navigation";
 import type { MeVM } from "@sparkops/contracts/identity";
 import type { OrganizationVM, WorkspaceVM } from "@sparkops/contracts/tenant";
 import { ConsoleSwitcher } from "@/components/layout/ConsoleSwitcher";
-import { AdminContextHint } from "@/components/layout/AdminContextHint";
-import { ContextBar } from "@/components/layout/ContextBar";
 import { RouteVisitRecorder } from "@/components/layout/RouteVisitRecorder";
+import { SidebarWorkspaceSwitcher } from "@/components/layout/SidebarWorkspaceSwitcher";
 import { ShellProvider } from "@/components/layout/shell-context";
 import { PlatformShell } from "@/components/layout/PlatformShell";
 import { TopBarTools } from "@/components/layout/TopBarTools";
@@ -86,7 +85,13 @@ export function AppShell({
           <nav className="sidebar-nav">{nav}</nav>
 
           <div className="sidebar-footer">
-            {session && workspaces.length === 0 ? (
+            {session && workspaces.length > 0 ? (
+              <SidebarWorkspaceSwitcher
+                organizations={organizations}
+                workspaces={workspaces}
+                currentWorkspaceId={workspaceId}
+              />
+            ) : session ? (
               <Link href="/settings/tenant" className="text-sm text-[var(--accent)] hover:underline px-1">
                 创建组织与工作区
               </Link>
@@ -98,25 +103,6 @@ export function AppShell({
           <header className="topbar">
             <div className="topbar-leading">
               <ConsoleSwitcher isSuperAdmin={isSuperAdmin} canManageAdmin={canManageAdmin} />
-              {session && workspaces.length > 0 ? (
-                consoleKind === "business" ? (
-                  <ContextBar
-                    organizations={organizations}
-                    workspaces={workspaces}
-                    currentWorkspaceId={workspaceId}
-                    projects={projects}
-                    currentProjectId={currentProjectId}
-                  />
-                ) : (
-                  <AdminContextHint
-                    consoleKind={consoleKind}
-                    workspaces={workspaces}
-                    currentWorkspaceId={workspaceId}
-                  />
-                )
-              ) : (
-                <span className="topbar-hint hidden sm:inline">{topbarHint ?? TOPBAR_HINTS[consoleKind]}</span>
-              )}
             </div>
 
             <div className="topbar-actions">

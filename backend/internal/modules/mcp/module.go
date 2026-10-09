@@ -48,6 +48,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	projectRepo := workspacepersistence.NewProjectRepository(c.DB)
 	projectMemberRepo := workspacepersistence.NewProjectMemberRepository(c.DB)
 	wsChecker := workspaceacl.NewTenantACL(c.DB)
+	memberLookup := workspaceacl.NewMemberLookup(c.DB)
 
 	kbRepo := knowledgepersistence.NewKnowledgeRepository(c.DB)
 	kbWsChecker := knowledgeacl.NewTenantACL(c.DB)
@@ -64,7 +65,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	hub := runtimestream.NewHub()
 
 	toolExecutor := application.NewToolExecutor(
-		workspacequery.NewListProjectsHandler(projectRepo, projectMemberRepo, wsChecker, c.PermissionChecker),
+		workspacequery.NewListProjectsHandler(projectRepo, projectMemberRepo, wsChecker, c.PermissionChecker, memberLookup),
 		knowledgequery.NewListKnowledgeBasesHandler(kbRepo, kbWsChecker),
 		knowledgequery.NewSearchDocumentsHandler(kbRepo, kbWsChecker),
 		agentquery.NewListAgentsHandler(agentRepo, projectChecker),

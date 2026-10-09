@@ -16,7 +16,6 @@ interface ProductCardProps {
   overview?: ProductOverviewVM | null;
   overviewLoading?: boolean;
   detailsHref: string;
-  onViewDetails?: () => void;
 }
 
 function MetricBlock({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
@@ -33,7 +32,6 @@ export function ProductCard({
   overview,
   overviewLoading = false,
   detailsHref,
-  onViewDetails,
 }: ProductCardProps) {
   const router = useRouter();
   const displayName = productDisplayName(product);
@@ -115,15 +113,6 @@ export function ProductCard({
       <footer className="project-workbench-footer">
         <span className="text-muted">创建于 {formatDateTime(product.created_at)}</span>
         <div className="project-workbench-actions">
-          {onViewDetails ? (
-            <button type="button" className="project-action-btn is-view" onClick={onViewDetails}>
-              查看详情
-            </button>
-          ) : (
-            <Link href={detailsHref} className="project-action-btn is-view">
-              查看详情
-            </Link>
-          )}
           <Link href={detailsHref} className="project-action-btn is-config">
             进入产品
           </Link>

@@ -26,8 +26,7 @@ import {
   writeWorkflowFavorites,
   type WorkflowRunStats,
 } from "./workflow-list-utils";
-import { IconPlay, IconSearch, IconSettings, IconSort, IconStar } from "./WorkflowListIcons";
-import { WorkflowRowMenu } from "./WorkflowRowMenu";
+import { IconPlay, IconRun, IconSearch, IconSettings, IconSort, IconStar } from "./WorkflowListIcons";
 import { WorkflowListSkeletonRows, WorkflowSparkline, WorkflowStagePath } from "./WorkflowStagePath";
 import { WorkflowRunModalHost, type WorkflowRunTarget } from "./WorkflowRunModalHost";
 import {
@@ -83,7 +82,6 @@ export function WorkflowListPanel({
   const [loading, setLoading] = useState(true);
   const [enriching, setEnriching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [runOpen, setRunOpen] = useState(false);
   const [runTarget, setRunTarget] = useState<(WorkflowRunTarget & { name: string }) | null>(null);
 
@@ -129,13 +127,6 @@ export function WorkflowListPanel({
   useEffect(() => {
     setPage(1);
   }, [productFilter, search, favoritesOnly, sortKey, pageSize]);
-
-  useEffect(() => {
-    if (!menuOpenId) return;
-    const onDocClick = () => setMenuOpenId(null);
-    document.addEventListener("click", onDocClick);
-    return () => document.removeEventListener("click", onDocClick);
-  }, [menuOpenId]);
 
   useEffect(() => {
     if (!createRequestId) return;
@@ -520,16 +511,13 @@ export function WorkflowListPanel({
                               >
                                 <IconSettings />
                               </Link>
-                              <WorkflowRowMenu
-                                open={menuOpenId === wf.id}
-                                detailHref={`/products/${wf.product_id}/workflows/${wf.id}`}
-                                editHref={`/products/${wf.product_id}/workflows/${wf.id}/edit`}
-                                productHref={`/products/${wf.product_id}`}
-                                runDisabled={wf.status !== "active"}
-                                onToggle={() => setMenuOpenId((prev) => (prev === wf.id ? null : wf.id))}
-                                onClose={() => setMenuOpenId(null)}
-                                onRun={() => openWorkflowDetail(wf, true)}
-                              />
+                              <Link
+                                href={`/products/${wf.product_id}/workflows/${wf.id}`}
+                                className="wf-list-icon-btn"
+                                title="执行记录"
+                              >
+                                <IconRun />
+                              </Link>
                             </div>
                           </div>
                         </div>

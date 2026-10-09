@@ -472,7 +472,7 @@ export function ProjectServiceDetailPage({
               </div>
               <div className="project-service-meta-line">
                 <span>
-                  创建人 <strong>{project.submitted_by || project.reviewed_by || "-"}</strong>
+                  创建人 <strong>{project.submitted_by_name || project.reviewed_by_name || "-"}</strong>
                 </span>
                 <span>
                   创建时间 <strong>{formatDateTime(project.created_at)}</strong>

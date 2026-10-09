@@ -258,7 +258,6 @@ export function ProductsPanel({
                       overview={overviews[item.id]}
                       overviewLoading={overviewLoading}
                       detailsHref={productHref(item.id)}
-                      onViewDetails={() => router.push(productHref(item.id))}
                     />
                   ))}
                 </div>
@@ -307,7 +306,6 @@ export function ProductsPanel({
                             <td>{formatDateTime(item.created_at)}</td>
                             <td>
                               <div className="project-row-actions">
-                                <Link href={productHref(item.id)}>查看详情</Link>
                                 <Link href={productHref(item.id)}>进入产品</Link>
                               </div>
                             </td>

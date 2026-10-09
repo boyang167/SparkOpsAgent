@@ -59,13 +59,16 @@ type ProjectView struct {
 	CanSubmitReview    bool                 `json:"can_submit_review"`
 	CanReview          bool                 `json:"can_review"`
 	CreatedAt          string               `json:"created_at,omitempty"`
+	SubmittedByName    string               `json:"submitted_by_name,omitempty"`
+	ReviewedByName     string               `json:"reviewed_by_name,omitempty"`
 }
 
 type ListProjectsHandler struct {
-	repo       repository.ProjectRepository
-	memberRepo repository.ProjectMemberRepository
-	wsChecker  port.WorkspaceChecker
-	governance authz.PermissionChecker
+	repo         repository.ProjectRepository
+	memberRepo   repository.ProjectMemberRepository
+	wsChecker    port.WorkspaceChecker
+	governance   authz.PermissionChecker
+	memberLookup port.MemberLookup
 }
 
 func NewListProjectsHandler(
@@ -73,8 +76,9 @@ func NewListProjectsHandler(
 	memberRepo repository.ProjectMemberRepository,
 	wsChecker port.WorkspaceChecker,
 	governance authz.PermissionChecker,
+	memberLookup port.MemberLookup,
 ) *ListProjectsHandler {
-	return &ListProjectsHandler{repo: repo, memberRepo: memberRepo, wsChecker: wsChecker, governance: governance}
+	return &ListProjectsHandler{repo: repo, memberRepo: memberRepo, wsChecker: wsChecker, governance: governance, memberLookup: memberLookup}
 }
 
 func (h *ListProjectsHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID) ([]ProjectView, error) {
@@ -122,10 +126,11 @@ func (h *ListProjectsHandler) Handle(ctx context.Context, wsID kernel.WorkspaceI
 }
 
 type GetProjectHandler struct {
-	repo       repository.ProjectRepository
-	memberRepo repository.ProjectMemberRepository
-	wsChecker  port.WorkspaceChecker
-	governance authz.PermissionChecker
+	repo         repository.ProjectRepository
+	memberRepo   repository.ProjectMemberRepository
+	wsChecker    port.WorkspaceChecker
+	governance   authz.PermissionChecker
+	memberLookup port.MemberLookup
 }
 
 func NewGetProjectHandler(
@@ -133,8 +138,9 @@ func NewGetProjectHandler(
 	memberRepo repository.ProjectMemberRepository,
 	wsChecker port.WorkspaceChecker,
 	governance authz.PermissionChecker,
+	memberLookup port.MemberLookup,
 ) *GetProjectHandler {
-	return &GetProjectHandler{repo: repo, memberRepo: memberRepo, wsChecker: wsChecker, governance: governance}
+	return &GetProjectHandler{repo: repo, memberRepo: memberRepo, wsChecker: wsChecker, governance: governance, memberLookup: memberLookup}
 }
 
 func (h *GetProjectHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID, projectID kernel.ProjectID) (*ProjectView, error) {
@@ -163,6 +169,9 @@ func (h *GetProjectHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID,
 	if err := applyReviewCapabilities(ctx, &view, project, wsID, memberID, isAdmin, h.memberRepo, h.governance); err != nil {
 		return nil, err
 	}
+	views := []ProjectView{view}
+	enrichMemberNames(ctx, h.memberLookup, views)
+	view = views[0]
 	return &view, nil
 }
 
@@ -179,6 +188,7 @@ func (h *ListProjectsHandler) toViewsForActor(
 			return nil, err
 		}
 	}
+	enrichMemberNames(ctx, h.memberLookup, views)
 	return views, nil
 }
 
@@ -236,6 +246,56 @@ func CanReviewProject(project *model.Project, actorID kernel.MemberID, canRead, 
 		project.ReviewStatus == model.ProjectReviewPending &&
 		(project.SubmittedBy == nil || *project.SubmittedBy != actorID) &&
 		canRead && hasReviewPermission
+}
+
+func enrichMemberNames(ctx context.Context, lookup port.MemberLookup, views []ProjectView) {
+	if lookup == nil {
+		return
+	}
+	ids := make([]kernel.MemberID, 0, len(views)*2)
+	for _, v := range views {
+		if v.SubmittedBy != "" {
+			if id, err := kernel.ParseMemberID(v.SubmittedBy); err == nil {
+				ids = append(ids, id)
+			}
+		}
+		if v.ReviewedBy != "" {
+			if id, err := kernel.ParseMemberID(v.ReviewedBy); err == nil {
+				ids = append(ids, id)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	members, err := lookup.FindByIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+	for i := range views {
+		if views[i].SubmittedBy != "" {
+			if id, err := kernel.ParseMemberID(views[i].SubmittedBy); err == nil {
+				if m, ok := members[id]; ok {
+					name := m.DisplayName
+					if name == "" {
+						name = m.Email
+					}
+					views[i].SubmittedByName = name
+				}
+			}
+		}
+		if views[i].ReviewedBy != "" {
+			if id, err := kernel.ParseMemberID(views[i].ReviewedBy); err == nil {
+				if m, ok := members[id]; ok {
+					name := m.DisplayName
+					if name == "" {
+						name = m.Email
+					}
+					views[i].ReviewedByName = name
+				}
+			}
+		}
+	}
 }
 
 func ToViews(projects []*model.Project) []ProjectView {

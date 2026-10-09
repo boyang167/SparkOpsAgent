@@ -147,6 +147,10 @@ export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPane
 
       {!error && tab === "overview" && overview ? (
         <div className="product-detail-body is-overview">
+          {overview.description?.trim() && overview.description.trim() !== overview.name ? (
+            <p className="product-detail-desc">{overview.description}</p>
+          ) : null}
+
           <div className="product-detail-overview-grid">
             <div className="product-detail-stat">
               <div className="product-detail-stat-label">关联项目</div>
@@ -157,27 +161,6 @@ export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPane
               <div className="product-detail-stat-value">{overview.environment_count ?? 0}</div>
             </div>
           </div>
-
-          <dl className="product-detail-meta">
-            <div>
-              <dt>产品标识</dt>
-              <dd>{overview.name}</dd>
-            </div>
-            <div>
-              <dt>显示名称</dt>
-              <dd>{overview.display_name || "-"}</dd>
-            </div>
-            <div className="sm:col-span-2">
-              <dt>描述</dt>
-              <dd>{overview.description || "-"}</dd>
-            </div>
-          </dl>
-
-          {(overview.environment_count ?? 0) > 0 ? (
-            <p className="text-sm text-muted-foreground mt-4">
-              在「环境」Tab 中查看各环境下 Project 的部署版本矩阵。
-            </p>
-          ) : null}
         </div>
       ) : null}
 

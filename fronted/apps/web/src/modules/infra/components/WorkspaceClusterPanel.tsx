@@ -93,9 +93,8 @@ export function WorkspaceClusterPanel({ workspaceId }: WorkspaceClusterPanelProp
   return (
     <>
     <div className="stack-md">
-      <p className="text-sm text-muted">
-        拖拽排序暂未开放，请使用上移/下移调整顺序。排在最前的集群为<strong>构建集群</strong>
-        ，发布时在此构建镜像并部署；其余集群用于后续跨集群同步配置。
+      <p className="runtime-hint">
+        使用上移/下移调整集群顺序。排在最前的集群为<strong>构建集群</strong>，发布时在此构建镜像并部署；其余集群用于跨集群同步。
       </p>
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       {loading ? (
@@ -103,66 +102,62 @@ export function WorkspaceClusterPanel({ workspaceId }: WorkspaceClusterPanelProp
       ) : items.length === 0 ? (
         <div className="empty-state">当前工作空间暂无授权集群。</div>
       ) : (
-        <div className="table-wrap">
-          <table className="data-table text-sm workspace-cluster-table">
-            <thead>
-              <tr>
-                <th>排序</th>
-                <th>名称</th>
-                <th>角色</th>
-                <th>API Server</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((row, index) => (
-                <tr key={row.id}>
-                  <td>
-                    <div className="workspace-cluster-sort-actions">
-                      <button
-                        type="button"
-                        className="btn-ghost text-xs"
-                        disabled={saving || index === 0}
-                        onClick={() => void onMove(index, "up")}
-                        aria-label={`上移 ${row.cluster_name}`}
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-ghost text-xs"
-                        disabled={saving || index === items.length - 1}
-                        onClick={() => void onMove(index, "down")}
-                        aria-label={`下移 ${row.cluster_name}`}
-                      >
-                        ↓
-                      </button>
-                    </div>
-                  </td>
-                  <td>{row.cluster_name}</td>
-                  <td>
-                    {row.is_build_env ? (
-                      <span className="project-tag project-tag-green">构建集群</span>
-                    ) : (
-                      <span className="project-tag project-tag-blue">同步集群</span>
-                    )}
-                  </td>
-                  <td className="font-mono text-xs">{row.server || "-"}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      disabled={saving}
-                      onClick={() => void onRevoke(row.id)}
-                    >
-                      撤销授权
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ul className="runtime-cluster-list" role="list">
+          {items.map((row, index) => (
+            <li key={row.id} className={`runtime-cluster-card${row.is_build_env ? " is-primary" : ""}`}>
+              <div className="runtime-cluster-leading">
+                <span className="runtime-cluster-rank">{index + 1}</span>
+                <div className="runtime-cluster-sort">
+                  <button
+                    type="button"
+                    className="runtime-sort-btn"
+                    disabled={saving || index === 0}
+                    onClick={() => void onMove(index, "up")}
+                    aria-label={`上移 ${row.cluster_name}`}
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M4 10l4-4 4 4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className="runtime-sort-btn"
+                    disabled={saving || index === items.length - 1}
+                    onClick={() => void onMove(index, "down")}
+                    aria-label={`下移 ${row.cluster_name}`}
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div className="runtime-cluster-body">
+                <div className="runtime-cluster-name-row">
+                  <strong className="runtime-cluster-name">{row.cluster_name}</strong>
+                  {row.is_build_env ? (
+                    <span className="runtime-role-tag is-build">构建集群</span>
+                  ) : (
+                    <span className="runtime-role-tag is-sync">同步集群</span>
+                  )}
+                </div>
+                {row.server ? (
+                  <span className="runtime-cluster-server" title={row.server}>{row.server}</span>
+                ) : null}
+              </div>
+              <div className="runtime-cluster-trailing">
+                <button
+                  type="button"
+                  className="runtime-revoke-btn"
+                  disabled={saving}
+                  onClick={() => void onRevoke(row.id)}
+                >
+                  撤销授权
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
     <ConfirmDialog />

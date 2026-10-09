@@ -3,21 +3,18 @@
 import Link from "next/link";
 import { useLayoutEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { IconMore, IconPencil, IconProduct, IconRun } from "./WorkflowListIcons";
+import { IconMore, IconPencil, IconRun } from "./WorkflowListIcons";
 
 interface WorkflowRowMenuProps {
   open: boolean;
   detailHref: string;
   editHref: string;
-  productHref: string;
-  runDisabled: boolean;
   onToggle: () => void;
   onClose: () => void;
-  onRun: () => void;
 }
 
 const MENU_WIDTH = 196;
-const MENU_HEIGHT = 188;
+const MENU_HEIGHT = 96;
 const GAP = 6;
 
 function placeMenu(anchor: HTMLElement): CSSProperties {
@@ -48,11 +45,8 @@ export function WorkflowRowMenu({
   open,
   detailHref,
   editHref,
-  productHref,
-  runDisabled,
   onToggle,
   onClose,
-  onRun,
 }: WorkflowRowMenuProps) {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const [style, setStyle] = useState<CSSProperties | null>(null);
@@ -112,28 +106,6 @@ export function WorkflowRowMenu({
                   <IconPencil />
                 </span>
                 编辑编排
-              </Link>
-              <button
-                type="button"
-                className="wf-list-menu-item"
-                role="menuitem"
-                disabled={runDisabled}
-                onClick={() => {
-                  onClose();
-                  onRun();
-                }}
-              >
-                <span className="wf-list-menu-item-icon">
-                  <IconRun />
-                </span>
-                执行工作流
-              </button>
-              <div className="wf-list-menu-sep" role="separator" />
-              <Link href={productHref} className="wf-list-menu-item" role="menuitem" onClick={onClose}>
-                <span className="wf-list-menu-item-icon">
-                  <IconProduct />
-                </span>
-                查看所属产品
               </Link>
             </div>,
             document.body,
