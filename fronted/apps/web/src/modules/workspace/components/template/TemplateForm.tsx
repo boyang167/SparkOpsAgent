@@ -16,6 +16,13 @@ interface TemplateFormProps {
   onCancel: () => void;
 }
 
+const NAME_MAX = 50;
+const DETAIL_MAX = 5000;
+
+function nearLimit(length: number, max: number) {
+  return length >= max * 0.8;
+}
+
 export function TemplateForm({
   form,
   isEdit,
@@ -25,24 +32,25 @@ export function TemplateForm({
   onCancel,
 }: TemplateFormProps) {
   return (
-    <form onSubmit={onSubmit} className="template-form stack-md">
+    <form onSubmit={onSubmit} className="template-form">
       <label className="template-field">
-        <span className="template-field-label">模板名称</span>
+        <span className="template-field-label">名称</span>
         <input
           className="input"
           value={form.name}
           onChange={(e) => onChange({ ...form, name: e.target.value })}
-          placeholder="请输入模板名称"
           required
           minLength={2}
-          maxLength={50}
+          maxLength={NAME_MAX}
         />
-        <span className="template-field-hint">{form.name.length}/50</span>
+        {nearLimit(form.name.length, NAME_MAX) ? (
+          <span className="template-field-hint">{form.name.length}/{NAME_MAX}</span>
+        ) : null}
       </label>
 
-      <div className="template-form-grid">
+      <div className="template-form-row3">
         <label className="template-field">
-          <span className="template-field-label">模板分类</span>
+          <span className="template-field-label">分类</span>
           <select
             className="input"
             value={form.kind}
@@ -55,7 +63,7 @@ export function TemplateForm({
           </select>
         </label>
         <label className="template-field">
-          <span className="template-field-label">开发语言</span>
+          <span className="template-field-label">语言</span>
           <select
             className="input"
             value={form.language}
@@ -67,11 +75,8 @@ export function TemplateForm({
             ))}
           </select>
         </label>
-      </div>
-
-      <div className="template-form-grid">
         <label className="template-field">
-          <span className="template-field-label">模板状态</span>
+          <span className="template-field-label">状态</span>
           <select
             className="input"
             value={form.status}
@@ -82,44 +87,43 @@ export function TemplateForm({
             ))}
           </select>
         </label>
-        <label className="template-switch-field">
-          <span className="template-field-label">是否公开</span>
-          <div className="template-switch-row">
-            <button
-              type="button"
-              className={`template-switch ${form.is_public ? "is-on" : ""}`}
-              role="switch"
-              aria-checked={form.is_public}
-              onClick={() => onChange({ ...form, is_public: !form.is_public })}
-            >
-              <span className="template-switch-thumb" />
-            </button>
-            <span className="text-sm text-muted-foreground">
-              {form.is_public ? "组织内所有工作区可见" : "仅当前工作区可见"}
-            </span>
-          </div>
-        </label>
       </div>
 
       <label className="template-field">
-        <span className="template-field-label">模板内容</span>
+        <span className="template-field-label">内容</span>
         <textarea
-          className="input template-content-input"
+          className="input template-content-input template-content-editor"
           value={form.detail}
           onChange={(e) => onChange({ ...form, detail: e.target.value })}
-          placeholder="请输入模板内容"
+          spellCheck={false}
           required
           minLength={10}
-          maxLength={5000}
+          maxLength={DETAIL_MAX}
         />
-        <span className="template-field-hint">{form.detail.length}/5000</span>
+        {nearLimit(form.detail.length, DETAIL_MAX) ? (
+          <span className="template-field-hint">{form.detail.length}/{DETAIL_MAX}</span>
+        ) : null}
       </label>
 
-      <div className="template-form-actions">
-        <button type="button" className="btn-secondary" onClick={onCancel}>取消</button>
-        <button type="submit" className="btn" disabled={submitting}>
-          {submitting ? "保存中…" : isEdit ? "更新" : "创建"}
-        </button>
+      <div className="template-form-footer">
+        <label className="template-switch-inline">
+          <button
+            type="button"
+            className={`template-switch ${form.is_public ? "is-on" : ""}`}
+            role="switch"
+            aria-checked={form.is_public}
+            onClick={() => onChange({ ...form, is_public: !form.is_public })}
+          >
+            <span className="template-switch-thumb" />
+          </button>
+          <span>组织内公开</span>
+        </label>
+        <div className="template-form-actions">
+          <button type="button" className="btn-secondary" onClick={onCancel}>取消</button>
+          <button type="submit" className="btn" disabled={submitting}>
+            {submitting ? "保存中…" : isEdit ? "保存" : "创建"}
+          </button>
+        </div>
       </div>
     </form>
   );

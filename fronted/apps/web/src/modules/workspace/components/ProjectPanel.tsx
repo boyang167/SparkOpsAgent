@@ -69,7 +69,6 @@ export function ProjectPanel({
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [languageFilter, setLanguageFilter] = useState("");
-  const [namespaceFilter, setNamespaceFilter] = useState("");
   const [productFilter, setProductFilter] = useState("");
   const [products, setProducts] = useState<ProductVM[]>([]);
   const [page, setPage] = useState(1);
@@ -106,22 +105,21 @@ export function ProjectPanel({
     return items.filter((item) => {
       if (statusFilter && item.status !== statusFilter) return false;
       if (languageFilter && item.language !== languageFilter) return false;
-      if (namespaceFilter && !(item.namespace ?? "").includes(namespaceFilter.trim())) return false;
       if (productFilter === "__none__" && item.product_id) return false;
       if (productFilter && productFilter !== "__none__" && item.product_id !== productFilter) return false;
       if (!kw) return true;
       return [item.name, item.display_name, item.description, item.namespace]
         .some((v) => v?.toLowerCase().includes(kw));
     });
-  }, [items, keyword, statusFilter, languageFilter, namespaceFilter, productFilter]);
+  }, [items, keyword, statusFilter, languageFilter, productFilter]);
 
   const hasActiveFilters = Boolean(
-    keyword.trim() || statusFilter || languageFilter || namespaceFilter.trim() || productFilter,
+    keyword.trim() || statusFilter || languageFilter || productFilter,
   );
 
   useEffect(() => {
     setPage(1);
-  }, [keyword, statusFilter, languageFilter, namespaceFilter, productFilter, pageSize, viewMode]);
+  }, [keyword, statusFilter, languageFilter, productFilter, pageSize, viewMode]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paged = useMemo(() => {
@@ -134,7 +132,6 @@ export function ProjectPanel({
     setKeyword("");
     setStatusFilter("");
     setLanguageFilter("");
-    setNamespaceFilter("");
     setProductFilter("");
   }
 
@@ -186,7 +183,7 @@ export function ProjectPanel({
       <section className="platform-table-card projects-card">
         <PlatformPanelHead
           title="项目管理"
-          description="管理产品下的项目，创建、配置并进入项目工作区。"
+          description=""
           action={
             <button type="button" className="btn platform-add-btn" onClick={() => setCreateOpen(true)}>
               <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -214,7 +211,7 @@ export function ProjectPanel({
               onChange={(e) => setStatusFilter(e.target.value)}
               aria-label="状态筛选"
             >
-              <option value="">全部状态</option>
+              <option value="">状态</option>
               {PROJECT_STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
@@ -227,20 +224,13 @@ export function ProjectPanel({
               onChange={(e) => setLanguageFilter(e.target.value)}
               aria-label="开发语言筛选"
             >
-              <option value="">全部语言</option>
+              <option value="">语言</option>
               {PROJECT_LANGUAGE_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
                 </option>
               ))}
             </select>
-            <input
-              className="projects-filter-input"
-              placeholder="命名空间"
-              value={namespaceFilter}
-              onChange={(e) => setNamespaceFilter(e.target.value)}
-              aria-label="命名空间筛选"
-            />
             {products.length > 0 ? (
               <select
                 className="projects-filter-select"
@@ -248,7 +238,7 @@ export function ProjectPanel({
                 onChange={(e) => setProductFilter(e.target.value)}
                 aria-label="产品筛选"
               >
-                <option value="">全部产品</option>
+                <option value="">产品</option>
                 <option value="__none__">独立项目</option>
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -265,7 +255,6 @@ export function ProjectPanel({
           </div>
 
           <div className="projects-toolbar-actions">
-            <span className="projects-count">{filtered.length} 个项目</span>
             <div className="projects-view-toggle" role="group" aria-label="视图切换">
               <button
                 type="button"

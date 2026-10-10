@@ -10,6 +10,7 @@ import { TemplateCard } from "./template/TemplateCard";
 import { TemplateCreator } from "./template/TemplateCreator";
 import { TemplateDetail } from "./template/TemplateDetail";
 import { TemplateForm } from "./template/TemplateForm";
+import { paginateItems } from "./template/template-pagination";
 import {
   filterTemplates,
   formatDate,
@@ -114,10 +115,10 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
   const hasFilters = Boolean(keyword.trim() || kindFilter || languageFilter || statusFilter);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paged = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, page, pageSize]);
+  const paged = useMemo(
+    () => paginateItems(filtered, page, pageSize),
+    [filtered, page, pageSize],
+  );
 
   useEffect(() => {
     setPage(1);
@@ -252,7 +253,6 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
             />
-            <kbd className="template-search-kbd">Ctrl K</kbd>
           </label>
           <select
             className="input template-filter-select"
@@ -260,7 +260,7 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
             value={kindFilter}
             onChange={(e) => setKindFilter(e.target.value)}
           >
-            <option value="">全部分类</option>
+            <option value="">分类</option>
             {TEMPLATE_KIND_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
@@ -271,7 +271,7 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
             value={languageFilter}
             onChange={(e) => setLanguageFilter(e.target.value)}
           >
-            <option value="">全部语言</option>
+            <option value="">语言</option>
             {TEMPLATE_LANGUAGE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
@@ -282,7 +282,7 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
-            <option value="">全部状态</option>
+            <option value="">状态</option>
             {TEMPLATE_STATUS_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
@@ -378,18 +378,27 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
           )}
         </div>
       ) : viewMode === "card" ? (
-        <div className="template-card-grid">
-          {filtered.map((item) => (
-            <TemplateCard
-              key={item.id}
-              template={item}
-              onView={openDetail}
-              onEdit={openEdit}
-              onCopy={(t) => void onCopy(t)}
-              onDelete={setPendingDelete}
-            />
-          ))}
-        </div>
+        <>
+          <div className="template-card-grid">
+            {paged.map((item) => (
+              <TemplateCard
+                key={item.id}
+                template={item}
+                onView={openDetail}
+                onEdit={openEdit}
+                onCopy={(t) => void onCopy(t)}
+                onDelete={setPendingDelete}
+              />
+            ))}
+          </div>
+          <TemplatePagination
+            page={page}
+            pageSize={pageSize}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
+        </>
       ) : (
         <div className="template-table-shell">
           <div className="table-wrap">
@@ -438,23 +447,13 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
               </tbody>
             </table>
           </div>
-          {filtered.length > PAGE_SIZES[0] ? (
-            <div className="template-pagination">
-              <select
-                className="input template-page-size"
-                aria-label="每页条数"
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-              >
-                {PAGE_SIZES.map((size) => (
-                  <option key={size} value={size}>{size} 条/页</option>
-                ))}
-              </select>
-              <button type="button" className="btn-ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>上一页</button>
-              <span className="template-page-indicator">{page} / {totalPages}</span>
-              <button type="button" className="btn-ghost" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>下一页</button>
-            </div>
-          ) : null}
+          <TemplatePagination
+            page={page}
+            pageSize={pageSize}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         </div>
       )}
 
@@ -498,6 +497,47 @@ export function TemplatePanel({ workspaceId }: TemplatePanelProps) {
       >
         <p className="template-delete-hint">删除后无法恢复。</p>
       </Modal>
+    </div>
+  );
+}
+
+function TemplatePagination({
+  page,
+  pageSize,
+  totalPages,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+}) {
+  return (
+    <div className="template-pagination">
+      <select
+        className="input template-page-size"
+        aria-label="每页条数"
+        value={pageSize}
+        onChange={(event) => onPageSizeChange(Number(event.target.value))}
+      >
+        {PAGE_SIZES.map((size) => (
+          <option key={size} value={size}>{size} 条/页</option>
+        ))}
+      </select>
+      <button type="button" className="btn-ghost" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+        上一页
+      </button>
+      <span className="template-page-indicator">{page} / {totalPages}</span>
+      <button
+        type="button"
+        className="btn-ghost"
+        disabled={page >= totalPages}
+        onClick={() => onPageChange(page + 1)}
+      >
+        下一页
+      </button>
     </div>
   );
 }

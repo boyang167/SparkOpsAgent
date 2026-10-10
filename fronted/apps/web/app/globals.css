@@ -11296,8 +11296,26 @@ textarea.input {
 
 .template-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
+  grid-template-columns: 1fr;
   gap: 1rem;
+}
+
+@media (min-width: 700px) {
+  .template-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1050px) {
+  .template-card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1600px) {
+  .template-card-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .template-card {
@@ -11773,6 +11791,52 @@ textarea.input {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+
+.template-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.125rem;
+}
+
+.template-form-row3 {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 560px) {
+  .template-form-row3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.template-form .template-field-label {
+  font-size: 0.8125rem;
+  color: var(--text-secondary, var(--muted-foreground));
+}
+
+.template-content-editor {
+  min-height: 18rem;
+  resize: vertical;
+  padding: 0.875rem 1rem;
+}
+
+.template-form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.25rem;
+}
+
+.template-switch-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary, var(--muted-foreground));
+  cursor: pointer;
 }
 
 .template-detail-header {
@@ -13425,9 +13489,10 @@ textarea.input {
 
 .project-workbench-footer {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   gap: 0.75rem;
+  width: 100%;
   margin-top: 1rem;
   padding-top: 0.875rem;
   border-top: none;
@@ -13481,7 +13546,9 @@ textarea.input {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
   gap: 0.4rem;
+  margin-left: auto;
 }
 
 @media (max-width: 768px) {
@@ -13495,12 +13562,11 @@ textarea.input {
   }
 
   .project-workbench-footer {
-    flex-direction: column;
-    align-items: stretch;
+    justify-content: flex-end;
   }
 
   .project-workbench-actions {
-    justify-content: flex-start;
+    justify-content: flex-end;
   }
 }
 
@@ -19003,28 +19069,20 @@ textarea.input {
   margin: 0 0 1.5rem;
 }
 
-.workplace-welcome {
+.workplace-hero {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 2rem;
-  min-height: 8.5rem;
-  padding: 1rem 0.25rem 0.5rem;
+  gap: 1.5rem;
+  padding: 1.5rem 1.75rem 1.25rem;
+  background: var(--surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
 }
 
-.workplace-welcome-title {
-  margin: 0;
-  font-size: clamp(2.25rem, 4vw, 3.5rem);
-  font-weight: 560;
-  letter-spacing: -0.055em;
-  line-height: 1;
-  color: var(--text);
-}
-
-.workplace-welcome-meta {
-  margin: 0.75rem 0 0;
-  font-size: 0.875rem;
-  color: var(--text-secondary);
+.workplace-hero-actions {
+  flex-shrink: 0;
+  padding-bottom: 0.25rem;
 }
 
 .workplace-hero-primary {
@@ -19055,7 +19113,9 @@ textarea.input {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.5rem;
-  margin: 1.5rem 0 0;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
 }
 
 .workplace-keyline div {
@@ -19537,15 +19597,15 @@ textarea.input {
 }
 
 @media (max-width: 640px) {
-  .workplace-welcome {
+  .workplace-hero {
     flex-direction: column;
-    align-items: flex-start;
-    min-height: 0;
-    padding-top: 0.5rem;
+    align-items: stretch;
+    padding: 1.25rem 1rem 1rem;
   }
 
-  .workplace-welcome-title {
-    font-size: 2.35rem;
+  .workplace-hero-actions {
+    padding-bottom: 0;
+    padding-top: 0.5rem;
   }
 
   .workplace-keyline {

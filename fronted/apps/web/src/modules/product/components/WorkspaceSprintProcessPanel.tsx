@@ -8,49 +8,65 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { SprintStageEditor } from "./SprintStageEditor";
 import { normalizeStageForSave, SPRINT_PROCESS_TEMPLATES, withSortOrder } from "./sprint-process-templates";
+import { paginateItems } from "@/modules/workspace/components/template/template-pagination";
 
 interface WorkspaceSprintProcessPanelProps {
   workspaceId: string;
 }
 
 const FALLBACK_STAGE_COLOR = "#86868b";
+const PAGE_SIZES = [10, 20, 50, 100];
+
+const SORT_OPTIONS = [
+  { value: "created_at:desc", label: "最新创建" },
+  { value: "created_at:asc", label: "最早创建" },
+  { value: "name:asc", label: "名称 A–Z" },
+  { value: "name:desc", label: "名称 Z–A" },
+  { value: "columns:desc", label: "列数多→少" },
+  { value: "columns:asc", label: "列数少→多" },
+] as const;
 
 function stageFlow(stages: SprintStage[] | undefined) {
   return (stages ?? []).map((stage) => stage.name || "未命名").join(" → ");
 }
 
+function compareTemplates(
+  a: WorkspaceSprintProcessTemplateVM,
+  b: WorkspaceSprintProcessTemplateVM,
+  field: string,
+  order: "asc" | "desc",
+) {
+  const dir = order === "asc" ? 1 : -1;
+  if (field === "name") return a.name.localeCompare(b.name) * dir;
+  if (field === "columns") return ((a.stages?.length ?? 0) - (b.stages?.length ?? 0)) * dir;
+  const at = a.created_at ?? "";
+  const bt = b.created_at ?? "";
+  return at.localeCompare(bt) * dir;
+}
+
 export function WorkspaceSprintProcessPanel({ workspaceId }: WorkspaceSprintProcessPanelProps) {
   const [templates, setTemplates] = useState<WorkspaceSprintProcessTemplateVM[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [stages, setStages] = useState<SprintStage[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newStages, setNewStages] = useState<SprintStage[]>([]);
-  const [saved, setSaved] = useState(true);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [sortField, setSortField] = useState<string>("created_at");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
-  const selected = useMemo(
-    () => templates.find((item) => item.id === selectedId) ?? null,
-    [templates, selectedId],
-  );
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formName, setFormName] = useState("");
+  const [formStages, setFormStages] = useState<SprintStage[]>([]);
+
+  const [pendingDelete, setPendingDelete] = useState<WorkspaceSprintProcessTemplateVM | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const items = await product.listWorkspaceSprintProcessTemplates(workspaceId);
-      setTemplates(items);
-      setSelectedId((prev) => {
-        if (prev && items.some((item) => item.id === prev)) return prev;
-        return items[0]?.id ?? null;
-      });
+      setTemplates(await product.listWorkspaceSprintProcessTemplates(workspaceId));
     } catch (err) {
       setError(err instanceof BffError ? err.message : "加载迭代流程模板失败");
     } finally {
@@ -62,50 +78,36 @@ export function WorkspaceSprintProcessPanel({ workspaceId }: WorkspaceSprintProc
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (!selected) {
-      setName("");
-      setStages([]);
-      return;
-    }
-    setName(selected.name);
-    setStages(selected.stages ?? []);
-    setSaved(true);
-  }, [selected]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    function onDocClick(e: MouseEvent) {
-      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [menuOpen]);
-
-  const visibleTemplates = useMemo(() => {
+  const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return templates;
-    return templates.filter(
-      (item) => item.name.toLowerCase().includes(q) || stageFlow(item.stages).toLowerCase().includes(q),
-    );
-  }, [templates, searchQuery]);
+    const list = templates.filter((item) => {
+      if (q && !(item.name.toLowerCase().includes(q) || stageFlow(item.stages).toLowerCase().includes(q))) {
+        return false;
+      }
+      return true;
+    });
+    return [...list].sort((a, b) => compareTemplates(a, b, sortField, sortOrder));
+  }, [templates, searchQuery, sortField, sortOrder]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paged = useMemo(() => paginateItems(filtered, page, pageSize), [filtered, page, pageSize]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, sortField, sortOrder, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  function onSortChange(value: string) {
+    const [field, order] = value.split(":") as [string, "asc" | "desc"];
+    setSortField(field);
+    setSortOrder(order);
+  }
 
   function freshStages(source: SprintStage[]) {
     return withSortOrder(source.map((stage) => ({ ...stage, id: crypto.randomUUID() })));
-  }
-
-  function applyPresetToEditor(presetId: string) {
-    const preset = SPRINT_PROCESS_TEMPLATES.find((item) => item.id === presetId);
-    if (!preset) return;
-    setStages(freshStages(preset.stages));
-    setSaved(false);
-  }
-
-  function applyPresetToCreate(presetId: string) {
-    const preset = SPRINT_PROCESS_TEMPLATES.find((item) => item.id === presetId);
-    if (!preset) return;
-    setNewName((current) => current.trim() || preset.label);
-    setNewStages(freshStages(preset.stages));
   }
 
   function toPayload(source: SprintStage[]) {
@@ -124,51 +126,52 @@ export function WorkspaceSprintProcessPanel({ workspaceId }: WorkspaceSprintProc
     });
   }
 
-  function openCreateModal() {
-    setNewName("");
-    setNewStages(freshStages(SPRINT_PROCESS_TEMPLATES[0].stages));
-    setCreateOpen(true);
+  function applyPreset(presetId: string) {
+    const preset = SPRINT_PROCESS_TEMPLATES.find((item) => item.id === presetId);
+    if (!preset) return;
+    setFormStages(freshStages(preset.stages));
+    if (!editingId) setFormName((current) => current.trim() || preset.label);
   }
 
-  function openCreateFromCurrent() {
-    setMenuOpen(false);
-    setNewName(name.trim() ? `${name.trim()} 副本` : "");
-    setNewStages(freshStages(stages));
-    setCreateOpen(true);
+  function openCreate() {
+    setEditingId(null);
+    setFormName("");
+    setFormStages(freshStages(SPRINT_PROCESS_TEMPLATES[0].stages));
+    setFormOpen(true);
   }
 
-  async function onCreateTemplate() {
-    if (!newName.trim() || newStages.length < 2) return;
+  function openEdit(item: WorkspaceSprintProcessTemplateVM) {
+    setEditingId(item.id);
+    setFormName(item.name);
+    setFormStages((item.stages ?? []).map((stage) => ({ ...stage })));
+    setFormOpen(true);
+  }
+
+  function openCopy(item: WorkspaceSprintProcessTemplateVM) {
+    setEditingId(null);
+    setFormName(item.name.trim() ? `${item.name.trim()} 副本` : "");
+    setFormStages(freshStages(item.stages ?? []));
+    setFormOpen(true);
+  }
+
+  async function onSubmit() {
+    if (!formName.trim() || formStages.length < 2) return;
     setBusy(true);
     setError(null);
     try {
-      const created = await product.createWorkspaceSprintProcessTemplate(workspaceId, {
-        name: newName.trim(),
-        stages: toPayload(newStages),
-      });
-      setCreateOpen(false);
+      if (editingId) {
+        await product.updateWorkspaceSprintProcessTemplate(workspaceId, editingId, {
+          name: formName.trim(),
+          stages: toPayload(formStages),
+        });
+      } else {
+        await product.createWorkspaceSprintProcessTemplate(workspaceId, {
+          name: formName.trim(),
+          stages: toPayload(formStages),
+        });
+      }
+      setFormOpen(false);
       await load();
-      setSelectedId(created.id);
-    } catch (err) {
-      setError(err instanceof BffError ? err.message : "创建模板失败");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onSaveTemplate() {
-    if (!selected || !name.trim() || stages.length < 2) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const updated = await product.updateWorkspaceSprintProcessTemplate(workspaceId, selected.id, {
-        name: name.trim(),
-        stages: toPayload(stages),
-      });
-      setTemplates((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-      setName(updated.name);
-      setStages(updated.stages ?? []);
-      setSaved(true);
     } catch (err) {
       setError(err instanceof BffError ? err.message : "保存模板失败");
     } finally {
@@ -176,20 +179,14 @@ export function WorkspaceSprintProcessPanel({ workspaceId }: WorkspaceSprintProc
     }
   }
 
-  function discardChanges() {
-    if (!selected) return;
-    setName(selected.name);
-    setStages(selected.stages ?? []);
-    setSaved(true);
-  }
-
   async function onDeleteTemplate() {
-    if (!selected) return;
+    const item = pendingDelete;
+    if (!item) return;
     setBusy(true);
     setError(null);
     try {
-      await product.deleteWorkspaceSprintProcessTemplate(workspaceId, selected.id);
-      setDeleteOpen(false);
+      await product.deleteWorkspaceSprintProcessTemplate(workspaceId, item.id);
+      setPendingDelete(null);
       await load();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "删除模板失败");
@@ -198,193 +195,122 @@ export function WorkspaceSprintProcessPanel({ workspaceId }: WorkspaceSprintProc
     }
   }
 
-  const canSave = !busy && !saved && Boolean(name.trim()) && stages.length >= 2;
+  const hasFilters = Boolean(searchQuery.trim());
+
+  function resetFilters() {
+    setSearchQuery("");
+  }
 
   return (
-    <div className="sp-tpl">
-      {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-
-      <div className="sp-tpl-layout">
-        <aside className="sp-tpl-sidebar" aria-label="流程模板">
-          <div className="sp-tpl-sidebar-head">
-            <span className="sp-tpl-sidebar-title">
-              流程模板
-              {!loading ? <span className="sp-tpl-sidebar-count">{templates.length}</span> : null}
-            </span>
-            <button type="button" className="sp-tpl-icon-btn" onClick={openCreateModal} aria-label="新建流程模板" title="新建流程模板">
-              <PlusIcon />
-            </button>
-          </div>
-
-          {templates.length > 4 ? (
-            <label className="sp-tpl-search">
-              <SearchIcon />
-              <input
-                type="search"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="搜索模板"
-                aria-label="搜索模板"
-              />
-            </label>
-          ) : null}
-
-          <div className="sp-tpl-list" role="listbox" aria-label="流程模板列表">
-            {loading ? (
-              Array.from({ length: 3 }).map((_, i) => <div key={i} className="sp-tpl-item is-skeleton" />)
-            ) : visibleTemplates.length === 0 ? (
-              <p className="sp-tpl-list-empty">{templates.length === 0 ? "还没有流程模板" : "没有匹配的模板"}</p>
-            ) : (
-              visibleTemplates.map((item) => {
-                const active = item.id === selectedId;
-                const itemStages = item.stages ?? [];
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="option"
-                    aria-selected={active}
-                    className={`sp-tpl-item${active ? " is-active" : ""}`}
-                    onClick={() => setSelectedId(item.id)}
-                  >
-                    <span className="sp-tpl-item-row">
-                      <span className="sp-tpl-item-name">{item.name}</span>
-                      <span className="sp-tpl-item-meta">{itemStages.length} 列</span>
-                    </span>
-                    <span className="sp-tpl-item-strip" aria-hidden="true">
-                      {itemStages.map((stage) => (
-                        <span key={stage.id} style={{ backgroundColor: stage.color || FALLBACK_STAGE_COLOR }} />
-                      ))}
-                    </span>
-                    <span className="sp-tpl-item-flow">{stageFlow(itemStages)}</span>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </aside>
-
-        <section className="sp-tpl-main">
-          {loading ? (
-            <div className="sp-tpl-main-skeleton" role="status" aria-label="加载中">
-              <div className="template-skeleton-line short" />
-              <div className="sp-tpl-skeleton-block" />
-            </div>
-          ) : !selected ? (
-            <div className="sp-tpl-empty">
-              <p className="sp-tpl-empty-title">{templates.length === 0 ? "还没有迭代流程模板" : "选择一个模板开始编辑"}</p>
-              <p className="sp-tpl-empty-desc">流程模板定义迭代看板的列，新建迭代时可直接选用。</p>
-              {templates.length === 0 ? (
-                <button type="button" className="btn-primary" onClick={openCreateModal}>新建流程模板</button>
-              ) : null}
-            </div>
-          ) : (
-            <>
-              <header className="sp-tpl-head">
-                <div className="sp-tpl-head-copy">
-                  <input
-                    className="sp-tpl-name-input"
-                    value={name}
-                    onChange={(e) => {
-                      setName(e.target.value);
-                      setSaved(false);
-                    }}
-                    placeholder="模板名称"
-                    aria-label="模板名称"
-                  />
-                  <p className="sp-tpl-head-sub">
-                    {stages.length} 列 · 修改不影响已创建的迭代
-                  </p>
-                </div>
-                <div className="sp-tpl-head-actions">
-                  {!saved ? (
-                    <>
-                      <span className="sp-tpl-dirty">未保存</span>
-                      <button type="button" className="btn-ghost" disabled={busy} onClick={discardChanges}>
-                        放弃
-                      </button>
-                    </>
-                  ) : null}
-                  <button type="button" className="btn-primary" disabled={!canSave} onClick={() => void onSaveTemplate()}>
-                    {busy ? "保存中…" : "保存"}
-                  </button>
-                  <div className="sp-tpl-menu-wrap" ref={menuRef}>
-                    <button
-                      type="button"
-                      className="sp-tpl-icon-btn"
-                      aria-label="更多操作"
-                      aria-expanded={menuOpen}
-                      onClick={() => setMenuOpen((v) => !v)}
-                    >
-                      <MoreIcon />
-                    </button>
-                    {menuOpen ? (
-                      <div className="sp-tpl-menu" role="menu">
-                        <span className="sp-tpl-menu-label">用预设替换列</span>
-                        {SPRINT_PROCESS_TEMPLATES.map((preset) => (
-                          <button
-                            key={preset.id}
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              setMenuOpen(false);
-                              applyPresetToEditor(preset.id);
-                            }}
-                          >
-                            {preset.label}
-                          </button>
-                        ))}
-                        <span className="sp-tpl-menu-divider" />
-                        <button type="button" role="menuitem" onClick={openCreateFromCurrent}>另存为新模板</button>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          className="is-danger"
-                          onClick={() => {
-                            setMenuOpen(false);
-                            setDeleteOpen(true);
-                          }}
-                        >
-                          删除模板
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </header>
-
-              <SprintStageEditor
-                stages={stages}
-                workflows={[]}
-                onChange={(next) => {
-                  setStages(next);
-                  setSaved(false);
-                }}
-                variant="board"
-              />
-            </>
-          )}
-        </section>
+    <div className="template-panel">
+      <div className="template-toolbar">
+        <div className="template-filters">
+          <label className="template-search">
+            <SearchIcon />
+            <input
+              className="template-search-input"
+              placeholder="搜索名称或流程"
+              aria-label="搜索流程模板"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </label>
+          <select
+            className="input template-filter-select"
+            aria-label="排序"
+            value={`${sortField}:${sortOrder}`}
+            onChange={(e) => onSortChange(e.target.value)}
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+        <button type="button" className="btn-primary" onClick={openCreate}>
+          <PlusIcon />
+          新建流程模板
+        </button>
       </div>
 
+      {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+
+      {loading ? (
+        <div className="template-card-grid" role="status" aria-label="加载模板">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="template-card template-card-skeleton">
+              <div className="template-skeleton-line short" />
+              <div className="template-skeleton-line" />
+            </div>
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="template-empty">
+          {hasFilters ? (
+            <>
+              <p className="template-empty-title">没有符合条件的模板</p>
+              <p className="template-empty-desc">试试换个关键词或清除筛选。</p>
+              <button type="button" className="btn-secondary" onClick={resetFilters}>清除筛选</button>
+            </>
+          ) : (
+            <>
+              <p className="template-empty-title">还没有流程模板</p>
+              <p className="template-empty-desc">流程模板定义迭代看板的列，新建迭代时可直接选用。</p>
+              <button type="button" className="btn-primary" onClick={openCreate}>创建第一个模板</button>
+            </>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="template-card-grid">
+            {paged.map((item) => (
+              <SprintTemplateCard
+                key={item.id}
+                template={item}
+                onEdit={openEdit}
+                onCopy={openCopy}
+                onDelete={setPendingDelete}
+              />
+            ))}
+          </div>
+          <div className="template-pagination">
+            <select
+              className="input template-page-size"
+              aria-label="每页条数"
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+            >
+              {PAGE_SIZES.map((size) => (
+                <option key={size} value={size}>{size} 条/页</option>
+              ))}
+            </select>
+            <button type="button" className="btn-ghost" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+              上一页
+            </button>
+            <span className="template-page-indicator">{page} / {totalPages}</span>
+            <button type="button" className="btn-ghost" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
+              下一页
+            </button>
+          </div>
+        </>
+      )}
+
       <Modal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        title="新建流程模板"
-        description="从预设开始，再按团队习惯调整列。"
+        open={formOpen}
+        onClose={() => (busy ? undefined : setFormOpen(false))}
+        title={editingId ? "编辑流程模板" : "新建流程模板"}
         size="lg"
         footer={
           <>
-            <button type="button" className="btn-secondary" onClick={() => setCreateOpen(false)}>
+            <button type="button" className="btn-secondary" disabled={busy} onClick={() => setFormOpen(false)}>
               取消
             </button>
             <button
               type="button"
               className="btn-primary"
-              disabled={busy || !newName.trim() || newStages.length < 2}
-              onClick={() => void onCreateTemplate()}
+              disabled={busy || !formName.trim() || formStages.length < 2}
+              onClick={() => void onSubmit()}
             >
-              {busy ? "创建中…" : "创建"}
+              {busy ? "保存中…" : editingId ? "保存" : "创建"}
             </button>
           </>
         }
@@ -394,8 +320,8 @@ export function WorkspaceSprintProcessPanel({ workspaceId }: WorkspaceSprintProc
             <span className="label">模板名称</span>
             <input
               className="input"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
               placeholder="例如 标准敏捷"
             />
           </label>
@@ -407,7 +333,7 @@ export function WorkspaceSprintProcessPanel({ workspaceId }: WorkspaceSprintProc
                   key={preset.id}
                   type="button"
                   className="sp-tpl-preset"
-                  onClick={() => applyPresetToCreate(preset.id)}
+                  onClick={() => applyPreset(preset.id)}
                 >
                   <span className="sp-tpl-item-strip" aria-hidden="true">
                     {preset.stages.map((stage, i) => (
@@ -419,19 +345,19 @@ export function WorkspaceSprintProcessPanel({ workspaceId }: WorkspaceSprintProc
               ))}
             </div>
           </div>
-          <SprintStageEditor stages={newStages} workflows={[]} onChange={setNewStages} variant="board" />
+          <SprintStageEditor stages={formStages} workflows={[]} onChange={setFormStages} variant="board" />
         </div>
       </Modal>
 
       <Modal
-        open={deleteOpen}
-        onClose={() => (busy ? undefined : setDeleteOpen(false))}
+        open={Boolean(pendingDelete)}
+        onClose={() => (busy ? undefined : setPendingDelete(null))}
         title="删除流程模板"
-        description={`确定删除「${selected?.name ?? ""}」？已创建的迭代不会受影响。`}
+        description={pendingDelete ? `确定删除「${pendingDelete.name}」？已创建的迭代不会受影响。` : undefined}
         size="sm"
         footer={
           <>
-            <button type="button" className="btn-secondary" disabled={busy} onClick={() => setDeleteOpen(false)}>
+            <button type="button" className="btn-secondary" disabled={busy} onClick={() => setPendingDelete(null)}>
               取消
             </button>
             <button type="button" className="btn-danger-solid" disabled={busy} onClick={() => void onDeleteTemplate()}>
@@ -443,6 +369,72 @@ export function WorkspaceSprintProcessPanel({ workspaceId }: WorkspaceSprintProc
         <p className="sp-tpl-delete-hint">删除后，新建迭代时将无法再选择此模板。</p>
       </Modal>
     </div>
+  );
+}
+
+interface SprintTemplateCardProps {
+  template: WorkspaceSprintProcessTemplateVM;
+  onEdit: (template: WorkspaceSprintProcessTemplateVM) => void;
+  onCopy: (template: WorkspaceSprintProcessTemplateVM) => void;
+  onDelete: (template: WorkspaceSprintProcessTemplateVM) => void;
+}
+
+function SprintTemplateCard({ template, onEdit, onCopy, onDelete }: SprintTemplateCardProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const stages = template.stages ?? [];
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onDocClick(e: MouseEvent) {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [menuOpen]);
+
+  return (
+    <article
+      className={`template-card${menuOpen ? " is-menu-open" : ""}`}
+      onClick={() => onEdit(template)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onEdit(template);
+      }}
+      role="button"
+      tabIndex={0}
+    >
+      <header className="template-card-header">
+        <div className="template-card-heading">
+          <span className="template-card-kind">{stages.length} 列</span>
+          <h3 className="template-card-title" title={template.name}>{template.name}</h3>
+        </div>
+        <div className="template-card-actions" ref={menuRef} onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className="template-card-menu-btn"
+            aria-label="更多操作"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <MoreIcon />
+          </button>
+          {menuOpen ? (
+            <div className="template-card-menu" role="menu">
+              <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onEdit(template); }}>编辑</button>
+              <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onCopy(template); }}>另存为新模板</button>
+              <button type="button" role="menuitem" className="is-danger" onClick={() => { setMenuOpen(false); onDelete(template); }}>删除</button>
+            </div>
+          ) : null}
+        </div>
+      </header>
+
+      <span className="sp-tpl-item-strip" aria-hidden="true">
+        {stages.map((stage) => (
+          <span key={stage.id} style={{ backgroundColor: stage.color || FALLBACK_STAGE_COLOR }} />
+        ))}
+      </span>
+      <p className="sp-tpl-item-flow">{stageFlow(stages)}</p>
+    </article>
   );
 }
 

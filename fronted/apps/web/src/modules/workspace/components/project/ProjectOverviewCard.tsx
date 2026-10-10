@@ -10,7 +10,6 @@ import { ProjectRunStats } from "./ProjectRunStats";
 import { isProjectInDeployPhase } from "./project-environment-status";
 import type { ProjectRunSummary } from "./useProjectRunSummary";
 import {
-  formatDateTime,
   languageColor,
   languageLabel,
   projectDisplayName,
@@ -183,23 +182,15 @@ export function ProjectOverviewCard({
             {showTechnicalName ? <p className="project-card-subtitle">{project.name}</p> : null}
             <div className="project-overview-meta">
               <span>{languageLabel(project.language)}</span>
-              {project.namespace ? (
-                <>
-                  <span className="project-overview-meta-sep" aria-hidden>
-                    ·
-                  </span>
-                  <span>{project.namespace}</span>
-                </>
-              ) : null}
             </div>
           </div>
         </div>
         {onArchive ? <MoreMenu onArchive={() => onArchive(project)} /> : null}
       </header>
 
-      <p className={`project-card-desc${description === "暂无项目描述" ? " is-placeholder" : ""}`}>
-        {description}
-      </p>
+      {description !== "暂无项目描述" && description !== project.name && description !== displayName ? (
+        <p className="project-card-desc">{description}</p>
+      ) : null}
 
       <div className="project-overview-body">
         {inDeployPhase && runSummary ? (
@@ -218,17 +209,7 @@ export function ProjectOverviewCard({
       </div>
 
       <footer className="project-workbench-footer">
-        <span className="text-muted">创建于 {formatDateTime(project.created_at)}</span>
         <div className="project-workbench-actions">
-          {onViewDetails ? (
-            <button type="button" className="project-action-btn is-view" onClick={onViewDetails}>
-              查看详情
-            </button>
-          ) : (
-            <Link href={detailsHref ?? `/projects/${project.id}`} className="project-action-btn is-view">
-              查看详情
-            </Link>
-          )}
           {primaryAction === "pending" ? (
             <button type="button" className="project-action-btn is-submit" disabled>
               审核中
