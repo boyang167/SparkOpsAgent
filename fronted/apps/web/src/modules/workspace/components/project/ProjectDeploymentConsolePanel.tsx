@@ -233,6 +233,12 @@ export function ProjectDeploymentConsolePanel({
                             {" · "}
                           </>
                         ) : null}
+                        {item.run_type === "undeploy" ? (
+                          <>
+                            <span className="project-tag project-tag-gray">下线</span>
+                            {" · "}
+                          </>
+                        ) : null}
                         {item.cross_cluster && item.run_type !== "sync" ? (
                           <>
                             <span className="project-tag project-tag-blue">跨集群</span>

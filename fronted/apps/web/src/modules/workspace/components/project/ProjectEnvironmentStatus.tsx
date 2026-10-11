@@ -4,6 +4,7 @@ import {
   environmentStatusLabel,
   environmentStatusTone,
   environmentVersionLabel,
+  isRunOnline,
   type EnvironmentDeployRow,
 } from "./project-environment-status";
 
@@ -11,6 +12,7 @@ interface ProjectEnvironmentStatusProps {
   items: EnvironmentDeployRow[];
   loading: boolean;
   error: string | null;
+  onUndeploy?: (row: EnvironmentDeployRow) => void;
 }
 
 function StatusBadge({ label, tone }: { label: string; tone: string }) {
@@ -26,8 +28,9 @@ export function ProjectEnvironmentStatus({
   items,
   loading,
   error,
+  onUndeploy,
 }: ProjectEnvironmentStatusProps) {
-  const deployedCount = items.filter((item) => item.latest?.status === "succeeded").length;
+  const deployedCount = items.filter((item) => isRunOnline(item.latest)).length;
 
   return (
     <section className="project-overview-panel project-env-panel" aria-label="环境部署">
@@ -40,7 +43,7 @@ export function ProjectEnvironmentStatus({
         ) : null}
       </header>
       {loading ? (
-        <p className="project-overview-panel-empty">加载环境信息…</p>
+        <p className="project-overview-panel-empty" role="status">加载环境信息…</p>
       ) : error ? (
         <p className="project-overview-panel-empty">{error}</p>
       ) : items.length === 0 ? (
@@ -51,6 +54,7 @@ export function ProjectEnvironmentStatus({
             const statusLabel = environmentStatusLabel(item.latest);
             const statusTone = environmentStatusTone(item.latest);
             const version = environmentVersionLabel(item.latest);
+            const canUndeploy = Boolean(onUndeploy) && isRunOnline(item.latest);
             return (
               <li key={item.clusterId} className={`project-env-item is-${statusTone}`}>
                 <span className="project-env-chip" title={item.clusterName}>
@@ -60,6 +64,19 @@ export function ProjectEnvironmentStatus({
                   {version}
                 </span>
                 <StatusBadge label={statusLabel} tone={statusTone} />
+                {canUndeploy ? (
+                  <button
+                    type="button"
+                    className="project-env-undeploy"
+                    aria-label={`下线 ${item.clusterName}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onUndeploy?.(item);
+                    }}
+                  >
+                    下线
+                  </button>
+                ) : null}
               </li>
             );
           })}

@@ -7,7 +7,7 @@ import type { ProjectVM } from "@sparkops/contracts/workspace";
 import type { DeploymentEntryAction } from "./deployment-gate";
 import { ProjectEnvironmentStatus } from "./ProjectEnvironmentStatus";
 import { ProjectRunStats } from "./ProjectRunStats";
-import { isProjectInDeployPhase } from "./project-environment-status";
+import { isProjectInDeployPhase, type EnvironmentDeployRow } from "./project-environment-status";
 import type { ProjectRunSummary } from "./useProjectRunSummary";
 import {
   languageColor,
@@ -36,6 +36,7 @@ interface ProjectOverviewCardProps {
   onArchive?: (project: ProjectVM) => void;
   deploymentAction?: DeploymentEntryAction;
   runSummary?: ProjectRunSummary;
+  onUndeploy?: (row: EnvironmentDeployRow) => void;
 }
 
 function statusLabelTagClass(label: string) {
@@ -126,6 +127,7 @@ export function ProjectOverviewCard({
   onArchive,
   deploymentAction,
   runSummary,
+  onUndeploy,
 }: ProjectOverviewCardProps) {
   const router = useRouter();
   const { steps, statusLabel, configComplete } = computeProjectProgress(
@@ -198,6 +200,7 @@ export function ProjectOverviewCard({
             items={runSummary.environments.items}
             loading={runSummary.environments.loading}
             error={runSummary.environments.error}
+            onUndeploy={project.status === "active" ? onUndeploy : undefined}
           />
         ) : (
           <ProgressTrack steps={steps} />

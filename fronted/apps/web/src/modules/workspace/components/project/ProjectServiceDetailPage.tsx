@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { cluster } from "@sparkops/web-sdk";
+import { cluster, delivery } from "@sparkops/web-sdk";
 import type { ProjectRuntimeOverviewVM } from "@sparkops/contracts/cluster";
 import type { DeploymentRunListVM, DeploymentRunVM } from "@sparkops/contracts/delivery";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
@@ -27,6 +27,13 @@ import { ProjectJenkinsPreview } from "./ProjectJenkinsPreview";
 import { ProjectPublishedOverview } from "./ProjectPublishedOverview";
 import { ProjectUnpublishedOverview } from "./ProjectUnpublishedOverview";
 import { ProjectTemplateArtifactsModal } from "./ProjectTemplateArtifactsModal";
+import { UndeployModal } from "./UndeployModal";
+import {
+  buildEnvironmentDeployRows,
+  isRunOnline,
+  latestRunByCluster,
+  type EnvironmentDeployRow,
+} from "./project-environment-status";
 import { RuntimeExpandModal } from "@/modules/runtime/components/RuntimeExpandModal";
 import { RuntimeRollbackModal } from "@/modules/runtime/components/RuntimeRollbackModal";
 import { RuntimeScaleModal } from "@/modules/runtime/components/RuntimeConfigModals";
@@ -267,6 +274,8 @@ export function ProjectServiceDetailPage({
   const [expandModalOpen, setExpandModalOpen] = useState(false);
   const [scaleModalOpen, setScaleModalOpen] = useState(false);
   const [rollbackModalOpen, setRollbackModalOpen] = useState(false);
+  const [undeployOpen, setUndeployOpen] = useState(false);
+  const [undeployRows, setUndeployRows] = useState<EnvironmentDeployRow[]>([]);
   const [runtimeOverview, setRuntimeOverview] = useState<ProjectRuntimeOverviewVM | null>(null);
   const [localRuntimeRefreshKey, setLocalRuntimeRefreshKey] = useState(0);
   const stickyPublished = useStickyPublishedProject(project.id);
@@ -306,6 +315,23 @@ export function ProjectServiceDetailPage({
   useEffect(() => {
     void loadRuntimeOverview();
   }, [loadRuntimeOverview, runtimeRefreshKey]);
+
+  const hasOnlineEnvironment = useMemo(
+    () => [...latestRunByCluster(deploymentPage?.items ?? []).values()].some(isRunOnline),
+    [deploymentPage?.items],
+  );
+
+  const openUndeploy = useCallback(async () => {
+    const options = await delivery.getDeploymentOptions(project.id, workspaceId).catch(() => null);
+    const clusters = (options?.clusters ?? []).map((item) => ({
+      id: item.id,
+      cluster_name: item.cluster_name,
+      is_build_env: item.is_build_env,
+      priority_id: item.priority_id,
+    }));
+    setUndeployRows(buildEnvironmentDeployRows(clusters, deploymentPage?.items ?? []));
+    setUndeployOpen(true);
+  }, [deploymentPage?.items, project.id, workspaceId]);
 
   const handleRuntimeScaled = useCallback(() => {
     setLocalRuntimeRefreshKey((value) => value + 1);
@@ -349,6 +375,19 @@ export function ProjectServiceDetailPage({
         title: !canScale ? "请先完成首次发布" : undefined,
         onClick: () => setScaleModalOpen(true),
       },
+      {
+        key: "undeploy",
+        label: "下线环境",
+        disabled: !hasOnlineEnvironment || hasActiveRun || project.status !== "active",
+        title: !hasOnlineEnvironment
+          ? "当前没有在线环境"
+          : hasActiveRun
+            ? "部署进行中"
+            : project.status !== "active"
+              ? "项目已归档"
+              : undefined,
+        onClick: () => void openUndeploy(),
+      },
     ];
     if (published) {
       items.push({
@@ -360,6 +399,10 @@ export function ProjectServiceDetailPage({
     return items;
   }, [
     canScale,
+    hasActiveRun,
+    hasOnlineEnvironment,
+    openUndeploy,
+    project.status,
     deployAction.disabled,
     deployAction.label,
     deployAction.reason,
@@ -614,6 +657,18 @@ export function ProjectServiceDetailPage({
         deployment={runtimeOverview?.deployment}
         onClose={() => setRollbackModalOpen(false)}
         onRollbackStarted={(run) => {
+          onRunChanged?.(run);
+          onViewDeployProgress();
+        }}
+      />
+      <UndeployModal
+        open={undeployOpen}
+        workspaceId={workspaceId}
+        project={project}
+        rows={undeployRows}
+        onClose={() => setUndeployOpen(false)}
+        onStarted={(run) => {
+          setUndeployOpen(false);
           onRunChanged?.(run);
           onViewDeployProgress();
         }}

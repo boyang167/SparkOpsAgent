@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { BffError } from "@sparkops/contracts";
 import type { BuildVM, DeploymentRunVM } from "@sparkops/contracts/delivery";
 import { delivery } from "@sparkops/web-sdk";
@@ -35,6 +35,7 @@ export interface ProjectRunSummary {
   deployment: ProjectDeploymentSummary;
   build: ProjectBuildSummary;
   environments: ProjectEnvironmentSummary;
+  reload: () => void;
 }
 
 export interface UseProjectRunSummaryOptions {
@@ -86,6 +87,7 @@ export function useProjectRunSummary(
   const [optionsClusters, setOptionsClusters] = useState<EnvironmentClusterRef[] | null>(null);
   const [optionsClustersLoading, setOptionsClustersLoading] = useState(!useSharedClusters);
   const [optionsClustersError, setOptionsClustersError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,9 +101,10 @@ export function useProjectRunSummary(
       .listDeployments(projectId, workspaceId)
       .then((page) => {
         if (cancelled) return;
+        const releaseItems = page.items.filter((item) => item.run_type !== "undeploy");
         setDeployment({
-          total: page.total,
-          latest: page.items[0] ?? null,
+          total: page.total - (page.items.length - releaseItems.length),
+          latest: releaseItems[0] ?? null,
           items: page.items,
           loading: false,
           error: null,
@@ -170,7 +173,7 @@ export function useProjectRunSummary(
     return () => {
       cancelled = true;
     };
-  }, [projectId, workspaceId, useSharedClusters]);
+  }, [projectId, workspaceId, useSharedClusters, reloadKey]);
 
   const environments = useMemo((): ProjectEnvironmentSummary => {
     if (useSharedClusters) {
@@ -198,8 +201,9 @@ export function useProjectRunSummary(
     deployment.items,
   ]);
 
+  const reload = useCallback(() => setReloadKey((value) => value + 1), []);
   return useMemo(
-    () => ({ deployment, build, environments }),
-    [deployment, build, environments],
+    () => ({ deployment, build, environments, reload }),
+    [deployment, build, environments, reload],
   );
 }
