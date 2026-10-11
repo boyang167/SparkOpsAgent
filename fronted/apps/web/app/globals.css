@@ -13658,6 +13658,40 @@ textarea.input {
   gap: 1.25rem;
 }
 
+.product-binding-notice {
+  display: grid;
+  gap: 0.375rem;
+  justify-items: start;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-md);
+  background: var(--warning-bg);
+}
+
+.product-binding-notice-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.product-binding-notice-desc {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.product-binding-notice-link {
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--warning);
+}
+
+.product-binding-notice-link:hover {
+  text-decoration: underline;
+}
+
 .undeploy-summary {
   display: grid;
   gap: 0.75rem;
@@ -22110,6 +22144,41 @@ textarea.input {
   gap: 0.25rem;
   min-width: 0;
   width: 100%;
+}
+
+.product-master-group {
+  position: relative;
+}
+
+.product-master-group .product-master-item {
+  padding-right: 3rem;
+}
+
+.product-master-group-action {
+  position: absolute;
+  top: 50%;
+  right: 0.375rem;
+  transform: translateY(-50%);
+  padding: 0.125rem 0.5rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.product-master-group:hover .product-master-group-action,
+.product-master-group-action:focus-visible {
+  opacity: 1;
+}
+
+.product-master-group-action:hover {
+  color: var(--danger);
+  background: var(--danger-bg);
 }
 
 .product-master-chevron {

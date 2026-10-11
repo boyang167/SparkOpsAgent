@@ -1,6 +1,7 @@
 import type {
   CreateProjectCommand,
   DecideProjectReviewCommand,
+  UpdateProjectCommand,
 } from "@sparkops/contracts/workspace";
 import { bffFetch, type BffFetchOptions } from "./client";
 
@@ -34,7 +35,7 @@ export function createProject(workspaceId: string, input: CreateProjectCommand) 
 export function updateProject(
   workspaceId: string,
   projectId: string,
-  input: CreateProjectCommand,
+  input: UpdateProjectCommand,
 ) {
   return bffFetch<import("@sparkops/contracts/workspace").ProjectVM>(
     `/workspaces/${workspaceId}/projects/${projectId}`,

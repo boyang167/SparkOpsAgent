@@ -7,8 +7,9 @@ import (
 )
 
 type ProjectLifecycle struct {
-	Name   string
-	Status string
+	Name      string
+	Status    string
+	ProductID string
 }
 
 type ProjectLifecycleReader interface {

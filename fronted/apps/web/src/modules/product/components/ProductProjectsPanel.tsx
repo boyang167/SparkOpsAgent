@@ -78,7 +78,7 @@ export function ProductProjectsPanel({ workspaceId, productId, onChanged }: Prod
   const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [bindOpen, setBindOpen] = useState(false);
-  const [unbindOpen, setUnbindOpen] = useState(false);
+  const [unbindTarget, setUnbindTarget] = useState<ProductProjectVM | null>(null);
   const [workspaceProjects, setWorkspaceProjects] = useState<ProjectVM[]>([]);
   const [bindSearch, setBindSearch] = useState("");
   const [selectedBindIds, setSelectedBindIds] = useState<string[]>([]);
@@ -275,16 +275,22 @@ export function ProductProjectsPanel({ workspaceId, productId, onChanged }: Prod
     }
   }
 
+  function openUnbindForGroup(groupId: string) {
+    const projectId = groupId.slice("group:".length);
+    setError(null);
+    setUnbindTarget(projects.find((row) => row.id === projectId) ?? null);
+  }
+
   async function onUnbindProject() {
-    if (!selectedProject) return;
+    if (!unbindTarget) return;
     setBusy(true);
     setError(null);
     try {
-      await workspace.updateProject(workspaceId, selectedProject.id, {
+      await workspace.updateProject(workspaceId, unbindTarget.id, {
         product_id: null,
-        name: selectedProject.name,
+        name: unbindTarget.name,
       });
-      setUnbindOpen(false);
+      setUnbindTarget(null);
       setSelectedResourceId(null);
       await load();
       onChanged?.();
@@ -321,7 +327,7 @@ export function ProductProjectsPanel({ workspaceId, productId, onChanged }: Prod
 
   return (
     <>
-      {error && !bindOpen ? (
+      {error && !bindOpen && !unbindTarget ? (
         <div className="product-master-main-inner">
           <InlineAlert tone="error">{error}</InlineAlert>
         </div>
@@ -337,6 +343,8 @@ export function ProductProjectsPanel({ workspaceId, productId, onChanged }: Prod
         onSelect={onSelectListItem}
         onAdd={() => void openBindModal()}
         addAriaLabel="绑定项目"
+        groupActionLabel="解绑"
+        onGroupAction={openUnbindForGroup}
         loading={loading}
         showMain={projects.length > 0}
         emptyMain={
@@ -370,7 +378,7 @@ export function ProductProjectsPanel({ workspaceId, productId, onChanged }: Prod
             error={null}
             hint={clusterLoading ? "正在后台同步集群资源…" : hint}
             onSave={() => void onSaveYaml()}
-            onUnbind={selectedProject ? () => setUnbindOpen(true) : undefined}
+            onUnbind={selectedProject ? () => setUnbindTarget(selectedProject) : undefined}
           />
         )}
       </ProductMasterDetail>
@@ -450,26 +458,33 @@ export function ProductProjectsPanel({ workspaceId, productId, onChanged }: Prod
       </Modal>
 
       <Modal
-        open={unbindOpen}
-        onClose={() => setUnbindOpen(false)}
+        open={unbindTarget !== null}
+        onClose={() => {
+          if (!busy) setUnbindTarget(null);
+        }}
         title="解绑项目"
         description={
-          selectedProject
-            ? `确定将「${selectedProject.display_name || selectedProject.name}」从当前产品解绑？解绑后项目恢复为独立项目。`
+          unbindTarget
+            ? `确定将「${unbindTarget.display_name || unbindTarget.name}」从当前产品解绑？解绑后项目恢复为独立项目。`
             : undefined
         }
         footer={
-          <>
-            <button type="button" className="btn btn-secondary text-sm" onClick={() => setUnbindOpen(false)}>
+          <div className="modal-footer-actions">
+            <button type="button" className="btn-secondary" disabled={busy} onClick={() => setUnbindTarget(null)}>
               取消
             </button>
-            <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onUnbindProject()}>
+            <button type="button" className="btn-danger-solid" disabled={busy} onClick={() => void onUnbindProject()}>
               {busy ? "解绑中…" : "确认解绑"}
             </button>
-          </>
+          </div>
         }
       >
-        <p className="text-sm text-muted-foreground">解绑不会删除项目，仅取消与当前产品的关联关系。</p>
+        <div className="stack-sm">
+          {error && unbindTarget ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+          <p className="text-sm text-muted">
+            解绑不会删除项目，也不会影响集群中运行的服务，仅取消与当前产品的关联。解绑后该项目不再出现在产品的环境、版本与工作流中。
+          </p>
+        </div>
       </Modal>
     </>
   );

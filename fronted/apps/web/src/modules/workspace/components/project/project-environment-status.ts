@@ -82,7 +82,7 @@ export function onlineEnvironmentRows(rows: EnvironmentDeployRow[]) {
   return rows.filter((row) => isRunOnline(row.latest));
 }
 
-function isUndeployRun(run: DeploymentRunVM | null): run is DeploymentRunVM {
+function isUndeployRun(run: DeploymentRunVM | null): boolean {
   return run?.run_type === "undeploy";
 }
 

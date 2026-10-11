@@ -8,6 +8,7 @@ import { delivery, workspace } from "@sparkops/web-sdk";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { archiveSteps, type ArchiveStep } from "./archive-progress";
+import { ProductBindingNotice } from "./ProductBindingNotice";
 import {
   buildEnvironmentDeployRows,
   onlineEnvironmentRows,
@@ -125,7 +126,8 @@ export function ArchiveProjectModal({
 
   if (!project) return null;
   const hasOnline = online.length > 0;
-  const canSubmit = phase === "confirm" && confirmName === project.name && !submitting;
+  const boundProductId = project.product_id || null;
+  const canSubmit = phase === "confirm" && confirmName === project.name && !submitting && !boundProductId;
 
   async function submit() {
     if (!project || !canSubmit) return;
@@ -188,7 +190,10 @@ export function ArchiveProjectModal({
         {phase === "loading" ? (
           <p className="text-sm text-muted" role="status">检查在线环境…</p>
         ) : null}
-        {phase === "confirm" ? (
+        {phase === "confirm" && boundProductId ? (
+          <ProductBindingNotice workspaceId={workspaceId} productId={boundProductId} action="归档" />
+        ) : null}
+        {phase === "confirm" && !boundProductId ? (
           <>
             {hasOnline ? (
               <div className="stack-sm">

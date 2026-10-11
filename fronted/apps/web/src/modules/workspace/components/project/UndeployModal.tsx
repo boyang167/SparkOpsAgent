@@ -7,6 +7,7 @@ import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { delivery } from "@sparkops/web-sdk";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
+import { ProductBindingNotice } from "./ProductBindingNotice";
 import {
   environmentVersionLabel,
   onlineEnvironmentRows,
@@ -75,7 +76,8 @@ export function UndeployModal({
   const namespace = selected?.latest?.deploy_namespace?.trim() || project.namespace || "—";
   const version = selected ? environmentVersionLabel(selected.latest) : "—";
   const confirmed = confirmName === project.name;
-  const canSubmit = Boolean(selected) && confirmed && !submitting;
+  const boundProductId = project.product_id || null;
+  const canSubmit = Boolean(selected) && confirmed && !submitting && !boundProductId;
 
   const resources = [
     { kind: "Deployment", name: project.name },
@@ -116,20 +118,24 @@ export function UndeployModal({
       footer={
         <div className="modal-footer-actions">
           <button type="button" className="btn-secondary" disabled={submitting} onClick={onClose}>
-            取消
+            {boundProductId ? "关闭" : "取消"}
           </button>
-          <button
-            type="button"
-            className="btn-danger-solid"
-            disabled={!canSubmit}
-            onClick={() => void submit()}
-          >
-            {submitting ? "下线中…" : "确认下线"}
-          </button>
+          {boundProductId ? null : (
+            <button
+              type="button"
+              className="btn-danger-solid"
+              disabled={!canSubmit}
+              onClick={() => void submit()}
+            >
+              {submitting ? "下线中…" : "确认下线"}
+            </button>
+          )}
         </div>
       }
     >
-      {onlineRows.length === 0 ? (
+      {boundProductId ? (
+        <ProductBindingNotice workspaceId={workspaceId} productId={boundProductId} action="下线" />
+      ) : onlineRows.length === 0 ? (
         <InlineAlert tone="info">当前没有在线环境。</InlineAlert>
       ) : (
         <div className="undeploy-modal">

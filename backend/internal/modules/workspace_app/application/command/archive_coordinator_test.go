@@ -123,6 +123,18 @@ func TestArchiveRequiresTeardownWhenOnline(t *testing.T) {
 	require.Equal(t, model.ProjectStatusActive, project.Status)
 }
 
+func TestArchiveRejectsProjectBoundToProduct(t *testing.T) {
+	handler, _, teardown, project := archiveFixture(t)
+	productID := kernel.NewProductID()
+	project.ProductID = &productID
+
+	_, err := handler.Handle(context.Background(), project.WorkspaceID, kernel.NewMemberID(), project.ID, command.ArchiveInput{ConfirmName: "orders", Teardown: true})
+
+	require.ErrorIs(t, err, domain.ErrProjectBoundToProduct)
+	require.Equal(t, model.ProjectStatusActive, project.Status)
+	require.Zero(t, teardown.disabled)
+}
+
 func TestArchiveRejectsConfirmMismatch(t *testing.T) {
 	handler, _, _, project := archiveFixture(t)
 

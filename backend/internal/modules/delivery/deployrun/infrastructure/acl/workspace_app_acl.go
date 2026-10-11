@@ -48,6 +48,7 @@ type deploymentProjectRow struct {
 	DefaultClusterID   *string
 	JenkinsSecretID    *string
 	KubernetesSecretID *string
+	ProductID          *string
 }
 
 func (a *WorkspaceAppACL) loadProject(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) (deploymentProjectRow, error) {
@@ -66,7 +67,11 @@ func (a *WorkspaceAppACL) ProjectLifecycle(ctx context.Context, wsID kernel.Work
 	if err != nil {
 		return port.ProjectLifecycle{}, err
 	}
-	return port.ProjectLifecycle{Name: row.Name, Status: row.Status}, nil
+	lifecycle := port.ProjectLifecycle{Name: row.Name, Status: row.Status}
+	if row.ProductID != nil {
+		lifecycle.ProductID = *row.ProductID
+	}
+	return lifecycle, nil
 }
 
 var _ port.ProjectLifecycleReader = (*WorkspaceAppACL)(nil)

@@ -102,6 +102,9 @@ func (h *ArchiveProjectHandler) archive(
 	memberID kernel.MemberID,
 	withTeardown bool,
 ) (ArchiveResult, error) {
+	if project.ProductID != nil {
+		return ArchiveResult{}, domain.ErrProjectBoundToProduct
+	}
 	teardown, err := h.coordinator.port()
 	if err != nil {
 		return ArchiveResult{}, err

@@ -29,6 +29,8 @@ interface ProductMasterDetailProps {
   children: ReactNode;
   emptyMain?: ReactNode;
   showMain?: boolean;
+  groupActionLabel?: string;
+  onGroupAction?: (groupId: string) => void;
 }
 
 export function ProductMasterDetail({
@@ -47,6 +49,8 @@ export function ProductMasterDetail({
   children,
   emptyMain,
   showMain = true,
+  groupActionLabel,
+  onGroupAction,
 }: ProductMasterDetailProps) {
   const groupIds = useMemo(
     () => items.filter((item) => item.isGroup).map((item) => item.id),
@@ -167,7 +171,7 @@ export function ProductMasterDetail({
               const active = selectedId === item.id;
               if (item.isGroup) {
                 const collapsed = !searching && collapsedIds.has(item.id);
-                return (
+                const groupButton = (
                   <button
                     key={item.id}
                     type="button"
@@ -185,6 +189,20 @@ export function ProductMasterDetail({
                     </span>
                     {item.subtitle ? <span className="product-master-item-sub">{item.subtitle}</span> : null}
                   </button>
+                );
+                if (!onGroupAction || !groupActionLabel) return groupButton;
+                return (
+                  <div key={item.id} className="product-master-group">
+                    {groupButton}
+                    <button
+                      type="button"
+                      className="product-master-group-action"
+                      aria-label={`${groupActionLabel} ${item.title}`}
+                      onClick={() => onGroupAction(item.id)}
+                    >
+                      {groupActionLabel}
+                    </button>
+                  </div>
                 );
               }
               return (

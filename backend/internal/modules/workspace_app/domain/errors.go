@@ -11,6 +11,7 @@ var (
 	ErrProjectNotArchiving          = kernel.NewDomainError("WORKSPACE_APP_PROJECT_NOT_ARCHIVING", "project is not being archived")
 	ErrProjectArchiving             = kernel.NewDomainError("WORKSPACE_APP_PROJECT_ARCHIVING", "project is being archived")
 	ErrProjectHasOnlineEnvironments = kernel.NewDomainError("WORKSPACE_APP_PROJECT_HAS_ONLINE_ENVIRONMENTS", "project still has online environments")
+	ErrProjectBoundToProduct        = kernel.NewDomainError("WORKSPACE_APP_PROJECT_BOUND_TO_PRODUCT", "project is bound to a product; unbind it before archiving")
 	ErrProjectDeploymentRunning     = kernel.NewDomainError("WORKSPACE_APP_PROJECT_DEPLOYMENT_RUNNING", "a deployment is running for this project")
 	ErrConfirmNameMismatch          = kernel.NewDomainError("WORKSPACE_APP_CONFIRM_NAME_MISMATCH", "confirmation name does not match project name")
 	ErrWorkspaceAccessDenied        = kernel.NewDomainError("WORKSPACE_APP_ACCESS_DENIED", "workspace access denied")

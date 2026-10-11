@@ -95,6 +95,7 @@ export const CreateProjectCommandSchema = z.object({
 export type CreateProjectCommand = z.infer<typeof CreateProjectCommandSchema>;
 
 export const UpdateProjectCommandSchema = CreateProjectCommandSchema.extend({
+  description: z.string().max(200).optional(),
   namespace: z.string().max(63).optional(),
 });
 

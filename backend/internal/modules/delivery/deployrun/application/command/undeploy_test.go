@@ -63,6 +63,18 @@ func TestUndeployRejectsConfirmNameMismatch(t *testing.T) {
 	require.Empty(t, repo.created)
 }
 
+func TestUndeployRejectsProjectBoundToProduct(t *testing.T) {
+	handler, repo, _, wsID, projectID, clusterID := newUndeployFixture("active")
+	handler.lifecycle = fakeLifecycle{value: port.ProjectLifecycle{Name: "orders", Status: "active", ProductID: kernel.NewProductID().String()}}
+
+	_, err := handler.Handle(context.Background(), wsID, kernel.NewMemberID(), projectID, UndeployInput{
+		ClusterID: clusterID.String(), ConfirmName: "orders",
+	})
+
+	require.ErrorIs(t, err, domain.ErrProjectBoundToProduct)
+	require.Empty(t, repo.created)
+}
+
 func TestUndeployRejectsWhenRunActive(t *testing.T) {
 	handler, repo, _, wsID, projectID, clusterID := newUndeployFixture("active")
 	repo.active = true

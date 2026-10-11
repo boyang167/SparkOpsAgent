@@ -66,6 +66,9 @@ func (h *UndeployHandler) Handle(
 	if err := requireActive(lifecycle); err != nil {
 		return nil, err
 	}
+	if lifecycle.ProductID != "" {
+		return nil, domain.ErrProjectBoundToProduct
+	}
 	clusterID, err := kernel.ParseClusterInfoID(strings.TrimSpace(input.ClusterID))
 	if err != nil {
 		return nil, domain.ErrDeploymentClusterNotFound

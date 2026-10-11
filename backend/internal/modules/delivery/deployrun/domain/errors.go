@@ -26,5 +26,6 @@ var (
 	ErrConfirmNameMismatch                  = kernel.NewDomainError("DELIVERY_CONFIRM_NAME_MISMATCH", "confirmation name does not match project name")
 	ErrEnvironmentNotDeployed               = kernel.NewDomainError("DELIVERY_ENVIRONMENT_NOT_DEPLOYED", "environment has no online deployment")
 	ErrProjectArchiving                     = kernel.NewDomainError("DELIVERY_PROJECT_ARCHIVING", "project is being archived")
+	ErrProjectBoundToProduct                = kernel.NewDomainError("DELIVERY_PROJECT_BOUND_TO_PRODUCT", "project is bound to a product; unbind it before undeploying")
 	ErrProjectNotActive                     = kernel.NewDomainError("DELIVERY_DEPLOYMENT_PROJECT_NOT_ACTIVE", "project is not active")
 )
