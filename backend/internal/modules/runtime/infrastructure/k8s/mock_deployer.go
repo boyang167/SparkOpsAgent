@@ -39,4 +39,15 @@ func (d *MockManifestDeployer) RolloutRestart(ctx context.Context, target port.D
 	return nil
 }
 
+func (d *MockManifestDeployer) Remove(ctx context.Context, target port.DeploymentTarget, _ port.RemoveSpec) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(target.Kubeconfig) == "" {
+		return domain.ErrKubeconfigMissing
+	}
+	return nil
+}
+
 var _ port.ManifestDeployer = (*MockManifestDeployer)(nil)
+var _ port.ManifestRemover = (*MockManifestDeployer)(nil)

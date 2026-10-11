@@ -72,3 +72,16 @@ type ManifestDeployer interface {
 	Deploy(ctx context.Context, target DeploymentTarget, manifests []Manifest) error
 	RolloutRestart(ctx context.Context, target DeploymentTarget) error
 }
+
+// RemoveSpec describes the workloads to delete. Manifests and AppLabel are both
+// used to discover targets; the namespace and image pull secrets are never deleted.
+type RemoveSpec struct {
+	Manifests     []Manifest
+	AppLabel      string
+	DeleteConfig  bool
+	DeleteStorage bool
+}
+
+type ManifestRemover interface {
+	Remove(ctx context.Context, target DeploymentTarget, spec RemoveSpec) error
+}
