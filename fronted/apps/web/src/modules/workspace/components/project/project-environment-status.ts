@@ -74,8 +74,21 @@ export function buildEnvironmentDeployRows(
   }));
 }
 
+export function isRunOnline(run: DeploymentRunVM | null | undefined): boolean {
+  return Boolean(run && run.status === "succeeded" && run.run_type !== "undeploy");
+}
+
+export function onlineEnvironmentRows(rows: EnvironmentDeployRow[]) {
+  return rows.filter((row) => isRunOnline(row.latest));
+}
+
+function isUndeployRun(run: DeploymentRunVM | null): run is DeploymentRunVM {
+  return run?.run_type === "undeploy";
+}
+
 export function environmentVersionLabel(run: DeploymentRunVM | null) {
   if (!run) return "—";
+  if (isUndeployRun(run) && run.status === "succeeded") return "—";
   const tag = run.image_tag?.trim();
   const ref = run.git_ref_value?.trim();
   if (tag && ref) return tag === ref ? tag : `${ref} · ${tag}`;
@@ -86,10 +99,17 @@ export function environmentVersionLabel(run: DeploymentRunVM | null) {
 
 export function environmentStatusLabel(run: DeploymentRunVM | null) {
   if (!run) return "未部署";
+  if (isUndeployRun(run)) {
+    if (run.status === "succeeded") return "已下线";
+    if (run.status === "failed") return "下线失败";
+    if (run.status === "aborted") return "已中止";
+    return "下线中";
+  }
   return deploymentRunStatusLabel(run.status);
 }
 
 export function environmentStatusTone(run: DeploymentRunVM | null) {
   if (!run) return "neutral";
+  if (isUndeployRun(run) && run.status === "succeeded") return "neutral";
   return deploymentStatusTone(run.status);
 }

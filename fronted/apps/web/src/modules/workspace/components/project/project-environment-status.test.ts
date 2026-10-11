@@ -3,8 +3,11 @@ import type { DeploymentRunVM } from "@sparkops/contracts/delivery";
 import {
   buildEnvironmentDeployRows,
   environmentStatusLabel,
+  environmentStatusTone,
   environmentVersionLabel,
   isProjectInDeployPhase,
+  isRunOnline,
+  onlineEnvironmentRows,
   type EnvironmentClusterRef,
 } from "./project-environment-status";
 
@@ -74,5 +77,35 @@ describe("environmentVersionLabel", () => {
 describe("environmentStatusLabel", () => {
   it("shows undeployed when no run exists", () => {
     expect(environmentStatusLabel(null)).toBe("未部署");
+  });
+});
+
+describe("undeploy runs", () => {
+  const undeployed = {
+    id: "u1", cluster_id: "dev", status: "succeeded", run_type: "undeploy", image_tag: "v1", git_ref_value: "main",
+  } as DeploymentRunVM;
+
+  it("treats succeeded undeploy as offline", () => {
+    expect(isRunOnline(undeployed)).toBe(false);
+    expect(environmentStatusLabel(undeployed)).toBe("已下线");
+    expect(environmentStatusTone(undeployed)).toBe("neutral");
+    expect(environmentVersionLabel(undeployed)).toBe("—");
+  });
+
+  it("labels running and failed undeploy", () => {
+    expect(environmentStatusLabel({ ...undeployed, status: "deploying" })).toBe("下线中");
+    expect(environmentStatusTone({ ...undeployed, status: "deploying" })).toBe("running");
+    expect(environmentStatusLabel({ ...undeployed, status: "failed" })).toBe("下线失败");
+    expect(environmentStatusTone({ ...undeployed, status: "failed" })).toBe("failed");
+  });
+
+  it("keeps normal succeeded run online", () => {
+    const run = { ...undeployed, run_type: "normal" } as DeploymentRunVM;
+    expect(isRunOnline(run)).toBe(true);
+    expect(onlineEnvironmentRows([
+      { clusterId: "dev", clusterName: "dev", latest: run },
+      { clusterId: "uat", clusterName: "uat", latest: undeployed },
+      { clusterId: "prod", clusterName: "prod", latest: null },
+    ]).map((row) => row.clusterId)).toEqual(["dev"]);
   });
 });

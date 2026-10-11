@@ -23,7 +23,13 @@ export function deploymentRunTitle(run: DeploymentRunVM) {
   const ref = run.git_ref_value?.trim();
   const tag = run.image_tag?.trim();
   const prefix =
-    run.run_type === "rollback" ? "回滚 · " : run.run_type === "sync" ? "同步 · " : "";
+    run.run_type === "rollback"
+      ? "回滚 · "
+      : run.run_type === "sync"
+        ? "同步 · "
+        : run.run_type === "undeploy"
+          ? "下线 · "
+          : "";
   if (ref && tag) return `${prefix}${ref} · ${tag}`;
   if (ref) return `${prefix}${ref}`;
   if (tag) return `${prefix}${tag}`;
@@ -31,6 +37,7 @@ export function deploymentRunTitle(run: DeploymentRunVM) {
 }
 
 export function deploymentRunKindLabel(run: DeploymentRunVM) {
+  if (run.run_type === "undeploy") return "下线";
   if (run.run_type === "rollback") return "回滚部署";
   if (run.run_type === "sync") return "跨集群同步";
   if (run.cross_cluster) return "跨集群发布";
