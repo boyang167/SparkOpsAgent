@@ -34,7 +34,13 @@ const (
 	RunTypeNormal   RunType = "normal"
 	RunTypeRollback RunType = "rollback"
 	RunTypeSync     RunType = "sync"
+	RunTypeUndeploy RunType = "undeploy"
 )
+
+type UndeployOptions struct {
+	DeleteConfig  bool `json:"delete_config"`
+	DeleteStorage bool `json:"delete_storage"`
+}
 
 type DeploymentRun struct {
 	ID              kernel.DeploymentRunID
@@ -55,6 +61,7 @@ type DeploymentRun struct {
 	CurrentStage    Stage
 	RunType         RunType
 	RollbackOfRunID *kernel.DeploymentRunID
+	UndeployOptions *UndeployOptions
 	ErrorMessage    string
 	CreatedBy       kernel.MemberID
 	CreatedAt       time.Time
@@ -194,6 +201,33 @@ func NewSyncDeploymentRun(
 	}
 }
 
+func NewUndeployRun(
+	wsID kernel.WorkspaceID,
+	projectID kernel.ProjectID,
+	createdBy kernel.MemberID,
+	baseline *DeploymentRun,
+	opts UndeployOptions,
+) *DeploymentRun {
+	options := opts
+	return &DeploymentRun{
+		ID:              kernel.NewDeploymentRunID(),
+		WorkspaceID:     wsID,
+		ProjectID:       projectID,
+		ClusterID:       baseline.ClusterID,
+		EnvironmentID:   baseline.EnvironmentID,
+		DeployNamespace: baseline.DeployNamespace,
+		CreatedBy:       createdBy,
+		GitRefType:      baseline.GitRefType,
+		GitRefValue:     baseline.GitRefValue,
+		ImageTag:        baseline.ImageTag,
+		ImageRepository: baseline.ImageRepository,
+		Status:          StatusQueued,
+		RunType:         RunTypeUndeploy,
+		UndeployOptions: &options,
+		CreatedAt:       time.Now().UTC(),
+	}
+}
+
 func (r *DeploymentRun) IsRollback() bool {
 	return r.RunType == RunTypeRollback
 }
@@ -202,8 +236,12 @@ func (r *DeploymentRun) IsSyncOnly() bool {
 	return r.RunType == RunTypeSync
 }
 
+func (r *DeploymentRun) IsUndeploy() bool {
+	return r.RunType == RunTypeUndeploy
+}
+
 func (r *DeploymentRun) SkipsBuild() bool {
-	return r.IsRollback() || r.IsSyncOnly()
+	return r.IsRollback() || r.IsSyncOnly() || r.IsUndeploy()
 }
 
 func (r *DeploymentRun) Transition(to Status, at time.Time) error {

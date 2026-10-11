@@ -314,6 +314,10 @@ func acceptanceDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	// Every new connection to ":memory:" opens an empty database without the attached schemas.
+	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS delivery").Error)
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS workspace_app").Error)
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform_admin").Error)
@@ -326,7 +330,7 @@ func acceptanceDB(t *testing.T) *gorm.DB {
 		finished_at DATETIME, current_stage TEXT, run_type TEXT NOT NULL DEFAULT 'normal',
 		rollback_of_run_id TEXT, version INTEGER NOT NULL DEFAULT 0,
 		attempt_count INTEGER NOT NULL DEFAULT 0, lease_owner TEXT, lease_expires_at DATETIME,
-		environment_id TEXT, deploy_namespace TEXT NOT NULL DEFAULT '')`).Error)
+		environment_id TEXT, deploy_namespace TEXT NOT NULL DEFAULT '', project_version_id TEXT, undeploy_options TEXT)`).Error)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX delivery.uq_deployment_runs_active_project
 		ON deployment_runs(project_id) WHERE status IN ('queued','preparing','building','deploying')`).Error)
 	require.NoError(t, db.Exec(`CREATE TABLE delivery.deployment_run_events (

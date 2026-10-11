@@ -92,6 +92,9 @@ func ResolveRollbackTarget(
 		if run.WorkspaceID != wsID || run.ProjectID != projectID {
 			continue
 		}
+		if run.IsUndeploy() {
+			continue
+		}
 		if run.Status != model.StatusSucceeded || strings.TrimSpace(run.ImageTag) == "" {
 			continue
 		}

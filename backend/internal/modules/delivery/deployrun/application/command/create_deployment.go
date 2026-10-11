@@ -124,7 +124,7 @@ func (h *CreateDeploymentHandler) Handle(
 			}
 			var source *model.DeploymentRun
 			for _, item := range latest {
-				if item.Status == model.StatusSucceeded && strings.TrimSpace(item.ImageTag) != "" {
+				if item.Status == model.StatusSucceeded && !item.IsUndeploy() && strings.TrimSpace(item.ImageTag) != "" {
 					source = item
 					break
 				}
