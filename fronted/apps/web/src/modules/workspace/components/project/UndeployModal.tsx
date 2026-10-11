@@ -110,7 +110,7 @@ export function UndeployModal({
       onClose={() => {
         if (!submitting) onClose();
       }}
-      title={selected ? `下线 ${selected.clusterName} 环境` : "下线环境"}
+      title={selected ? `从 ${selected.clusterName} 下线服务` : "下线服务"}
       description="移除该环境中运行的工作负载。项目配置、构建记录与流水线保留，可随时重新发布。"
       size="md"
       footer={

@@ -377,7 +377,7 @@ export function ProjectServiceDetailPage({
       },
       {
         key: "undeploy",
-        label: "下线环境",
+        label: "下线服务",
         disabled: !hasOnlineEnvironment || hasActiveRun || project.status !== "active",
         title: !hasOnlineEnvironment
           ? "当前没有在线环境"
