@@ -17,6 +17,30 @@ func (s *stubVersionCreator) CreateFromWorkflow(context.Context, appctx.CreateVe
 	return kernel.ProjectVersionID{}, nil
 }
 
+func TestWorkflowStagesForRunAppliesPersistedVersionOverride(t *testing.T) {
+	wf := &model.ProductWorkflow{Stages: []model.WorkflowStage{
+		{Name: "build", Jobs: []model.WorkflowJob{{Name: "build", Type: model.JobTypeSparkopsBuild, Spec: map[string]any{}}}},
+		{Name: "阶段3", Jobs: []model.WorkflowJob{{
+			Name: "archive",
+			Type: model.JobTypeSparkopsCreateVersion,
+			Spec: map[string]any{"version_tag": "{{version}}", "source": "fromjob", "job_name": "build"},
+		}}},
+	}}
+	run := &model.ProductWorkflowRun{
+		Input:     []byte(`{"version_tag_overrides":{"archive":"v1.0.0"},"variables":{}}`),
+		StageRuns: []model.StageRun{{}, {}},
+	}
+
+	stages := WorkflowStagesForRun(wf, run)
+
+	if got := stages[1].Jobs[0].Spec["version_tag"]; got != "v1.0.0" {
+		t.Fatalf("version_tag = %v, want v1.0.0", got)
+	}
+	if got := wf.Stages[1].Jobs[0].Spec["version_tag"]; got != "{{version}}" {
+		t.Fatalf("workflow definition mutated: %v", got)
+	}
+}
+
 func TestCreateVersionRejectsUnresolvedPlaceholder(t *testing.T) {
 	creator := &stubVersionCreator{}
 	executor := NewCreateVersionExecutor(creator)

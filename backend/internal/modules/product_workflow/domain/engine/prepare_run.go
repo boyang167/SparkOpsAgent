@@ -206,9 +206,23 @@ func StageIndicesFromRunInput(raw json.RawMessage) ([]int, error) {
 	return stageIndicesFromInput(input)
 }
 
-// WorkflowStagesForRun resolves the stage definitions that belong to this run.
-// Full runs use the workflow definition as-is; partial runs filter by stored stage_indices.
+// WorkflowStagesForRun resolves the stage definitions that belong to this run,
+// re-applying the variables and runtime overrides persisted on the run so that
+// stages advanced after a reload see the same specs as the first stage.
 func WorkflowStagesForRun(wf *model.ProductWorkflow, run *model.ProductWorkflowRun) []model.WorkflowStage {
+	stages := selectRunStages(wf, run)
+	if run == nil || len(run.Input) == 0 || len(stages) == 0 {
+		return stages
+	}
+	var input map[string]any
+	if err := json.Unmarshal(run.Input, &input); err != nil {
+		return stages
+	}
+	stages = InterpolateStages(cloneStages(stages), VariablesFromRun(run))
+	return ApplyRunInput(stages, input)
+}
+
+func selectRunStages(wf *model.ProductWorkflow, run *model.ProductWorkflowRun) []model.WorkflowStage {
 	if wf == nil {
 		return nil
 	}
