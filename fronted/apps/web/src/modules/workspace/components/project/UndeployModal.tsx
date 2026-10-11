@@ -114,7 +114,7 @@ export function UndeployModal({
       description="移除该环境中运行的工作负载。项目配置、构建记录与流水线保留，可随时重新发布。"
       size="md"
       footer={
-        <>
+        <div className="modal-footer-actions">
           <button type="button" className="btn-secondary" disabled={submitting} onClick={onClose}>
             取消
           </button>
@@ -126,7 +126,7 @@ export function UndeployModal({
           >
             {submitting ? "下线中…" : "确认下线"}
           </button>
-        </>
+        </div>
       }
     >
       {onlineRows.length === 0 ? (

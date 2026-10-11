@@ -153,7 +153,7 @@ export function ArchiveProjectModal({
 
   const footer =
     phase === "confirm" || phase === "loading" ? (
-      <>
+      <div className="modal-footer-actions">
         <button type="button" className="btn-secondary" disabled={submitting} onClick={onClose}>
           取消
         </button>
@@ -165,11 +165,13 @@ export function ArchiveProjectModal({
         >
           {submitting ? "提交中…" : hasOnline ? "下线全部环境并归档" : "归档"}
         </button>
-      </>
+      </div>
     ) : (
-      <button type="button" className="btn-secondary" onClick={onClose}>
-        {phase === "progress" ? "后台继续，关闭" : "关闭"}
-      </button>
+      <div className="modal-footer-actions">
+        <button type="button" className="btn-secondary" onClick={onClose}>
+          {phase === "progress" ? "后台继续，关闭" : "关闭"}
+        </button>
+      </div>
     );
 
   return (
