@@ -176,9 +176,13 @@ func (m *Module) Register(c *appctx.Container) error {
 	}).Start(c.Context, c.Config.Deploy.ReconcileInterval)
 	envResolver := deployacl.NewEnvironmentResolver(c.DB)
 	createDeployment := deploycommand.NewCreateDeploymentHandler(deployRepo, deployReader, c.MessageQueue, nil, envResolver)
+	createDeployment.SetProjectLifecycleReader(deployReader)
+	rollbackDeployment := deploycommand.NewRollbackDeploymentHandler(deployRepo, c.MessageQueue, nil)
+	rollbackDeployment.SetProjectLifecycleReader(deployReader)
+	undeploy := deploycommand.NewUndeployHandler(deployRepo, deployReader, c.MessageQueue, nil)
 	deployHandler := deployhttp.NewHandler(
 		createDeployment,
-		deploycommand.NewRollbackDeploymentHandler(deployRepo, c.MessageQueue, nil),
+		rollbackDeployment,
 		deploycommand.NewAbortDeploymentHandler(deployRepo, nil, deploycommand.AbortDependencies{
 			Builds: abortBuild,
 			Runs:   deployOperations,
@@ -190,6 +194,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		deployquery.NewSyncPreviewHandler(deployReader),
 		deployquery.NewRunPreviewHandler(deployReader, envResolver),
 		deployquery.NewStreamDeploymentHandler(deployRepo, deployHub),
+		undeploy,
 	)
 
 	auth := authn.RequireAuth(m.tokens)
@@ -230,6 +235,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), deployHandler.Create)
 	c.Engine.POST("/api/v1/projects/:projectId/deployments/rollback",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), deployHandler.Rollback)
+	c.Engine.POST("/api/v1/projects/:projectId/undeployments",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), deployHandler.Undeploy)
 	c.Engine.GET("/api/v1/projects/:projectId/deployments/rollback-preview",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), deployHandler.RollbackPreview)
 	c.Engine.GET("/api/v1/projects/:projectId/deployments/sync-preview",

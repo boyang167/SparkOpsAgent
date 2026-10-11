@@ -22,6 +22,7 @@ type Handler struct {
 	syncPreview *query.SyncPreviewHandler
 	runPreview  *query.RunPreviewHandler
 	stream      *query.StreamDeploymentHandler
+	undeploy    *command.UndeployHandler
 }
 
 func NewHandler(
@@ -35,10 +36,12 @@ func NewHandler(
 	syncPreview *query.SyncPreviewHandler,
 	runPreview *query.RunPreviewHandler,
 	stream *query.StreamDeploymentHandler,
+	undeploy *command.UndeployHandler,
 ) *Handler {
 	return &Handler{
 		create: create, rollback: rollback, abort: abort, list: list, get: get,
 		options: options, preview: preview, syncPreview: syncPreview, runPreview: runPreview, stream: stream,
+		undeploy: undeploy,
 	}
 }
 
@@ -160,6 +163,35 @@ func (h *Handler) Rollback(c *gin.Context) {
 		return
 	}
 	run, err := h.rollback.Handle(c.Request.Context(), wsID, memberID, projectID, input)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, httpx.Envelope{
+		Code: 0, Message: "ok", Data: query.ToDeploymentView(run), TraceID: httpx.GetTraceID(c),
+	})
+}
+
+func (h *Handler) Undeploy(c *gin.Context) {
+	wsID, ok := workspaceID(c)
+	if !ok {
+		return
+	}
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	projectID, ok := projectID(c)
+	if !ok {
+		return
+	}
+	var input command.UndeployInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+	run, err := h.undeploy.Handle(c.Request.Context(), wsID, memberID, projectID, input)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return

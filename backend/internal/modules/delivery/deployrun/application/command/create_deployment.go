@@ -38,6 +38,11 @@ type CreateDeploymentHandler struct {
 	environments port.EnvironmentResolver
 	queue        messaging.Queue
 	clock        func() time.Time
+	lifecycle    port.ProjectLifecycleReader
+}
+
+func (h *CreateDeploymentHandler) SetProjectLifecycleReader(reader port.ProjectLifecycleReader) {
+	h.lifecycle = reader
 }
 
 func NewCreateDeploymentHandler(
@@ -64,6 +69,9 @@ func (h *CreateDeploymentHandler) Handle(
 	projectID kernel.ProjectID,
 	input CreateInput,
 ) (*model.DeploymentRun, error) {
+	if err := checkLifecycle(ctx, h.lifecycle, wsID, projectID); err != nil {
+		return nil, err
+	}
 	var selected kernel.ClusterInfoID
 	var deployNamespace string
 	var environmentID *kernel.EnvironmentID

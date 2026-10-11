@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/consumer"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
@@ -21,9 +22,14 @@ type RollbackInput struct {
 }
 
 type RollbackDeploymentHandler struct {
-	repo  repository.DeploymentRunRepository
-	queue messaging.Queue
-	clock func() time.Time
+	repo      repository.DeploymentRunRepository
+	queue     messaging.Queue
+	clock     func() time.Time
+	lifecycle port.ProjectLifecycleReader
+}
+
+func (h *RollbackDeploymentHandler) SetProjectLifecycleReader(reader port.ProjectLifecycleReader) {
+	h.lifecycle = reader
 }
 
 func NewRollbackDeploymentHandler(
@@ -44,6 +50,9 @@ func (h *RollbackDeploymentHandler) Handle(
 	projectID kernel.ProjectID,
 	input RollbackInput,
 ) (*model.DeploymentRun, error) {
+	if err := checkLifecycle(ctx, h.lifecycle, wsID, projectID); err != nil {
+		return nil, err
+	}
 	active, err := h.repo.HasActiveByProject(ctx, projectID)
 	if err != nil {
 		return nil, err

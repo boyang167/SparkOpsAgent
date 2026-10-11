@@ -23,4 +23,8 @@ var (
 	ErrDeploymentEnvironmentNotFound        = kernel.NewDomainError("DELIVERY_DEPLOYMENT_ENVIRONMENT_NOT_FOUND", "environment not found")
 	ErrDeploymentEnvironmentProductMismatch = kernel.NewDomainError("DELIVERY_DEPLOYMENT_ENVIRONMENT_PRODUCT_MISMATCH", "environment does not belong to project product")
 	ErrDeploymentRemoverUnavailable         = kernel.NewDomainError("DELIVERY_DEPLOYMENT_REMOVER_UNAVAILABLE", "manifest remover is not configured")
+	ErrConfirmNameMismatch                  = kernel.NewDomainError("DELIVERY_CONFIRM_NAME_MISMATCH", "confirmation name does not match project name")
+	ErrEnvironmentNotDeployed               = kernel.NewDomainError("DELIVERY_ENVIRONMENT_NOT_DEPLOYED", "environment has no online deployment")
+	ErrProjectArchiving                     = kernel.NewDomainError("DELIVERY_PROJECT_ARCHIVING", "project is being archived")
+	ErrProjectNotActive                     = kernel.NewDomainError("DELIVERY_DEPLOYMENT_PROJECT_NOT_ACTIVE", "project is not active")
 )

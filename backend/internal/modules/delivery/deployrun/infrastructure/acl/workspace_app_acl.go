@@ -43,6 +43,7 @@ type deploymentProjectRow struct {
 	TemplateID         string
 	SecretID           *string
 	ReviewStatus       string
+	Status             string
 	Resources          []byte
 	DefaultClusterID   *string
 	JenkinsSecretID    *string
@@ -59,6 +60,16 @@ func (a *WorkspaceAppACL) loadProject(ctx context.Context, wsID kernel.Workspace
 	}
 	return row, err
 }
+
+func (a *WorkspaceAppACL) ProjectLifecycle(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) (port.ProjectLifecycle, error) {
+	row, err := a.loadProject(ctx, wsID, projectID)
+	if err != nil {
+		return port.ProjectLifecycle{}, err
+	}
+	return port.ProjectLifecycle{Name: row.Name, Status: row.Status}, nil
+}
+
+var _ port.ProjectLifecycleReader = (*WorkspaceAppACL)(nil)
 
 func (a *WorkspaceAppACL) loadSecret(ctx context.Context, wsID kernel.WorkspaceID, secretID string, allowedTypes ...string) (port.DeploymentSecret, error) {
 	if strings.TrimSpace(secretID) == "" {
