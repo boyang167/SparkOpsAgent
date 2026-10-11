@@ -123,11 +123,12 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 	deployPublisher := deployconsumer.NewPublisher(c.MessageQueue)
 	deployOperations := runner.NewRegistry()
+	prepareService := deployservice.NewPrepareService(c.Config.Jenkins.JobSuffix, deployacl.NewWorkspacePipelineRenderer(c.DB))
 	deployOrchestrator := deployservice.NewOrchestrator(
 		deployRepo,
 		repo,
 		deployReader,
-		deployservice.NewPrepareService(c.Config.Jenkins.JobSuffix, deployacl.NewWorkspacePipelineRenderer(c.DB)),
+		prepareService,
 		trigger,
 		deployservice.NewManifestRenderer(),
 		c.ManifestDeployer,
@@ -144,9 +145,11 @@ func (m *Module) Register(c *appctx.Container) error {
 		if run == nil {
 			return
 		}
-		if err := c.EventBus.Publish(ctx, deliveryevent.NewDeployCompleted(
+		completed := deliveryevent.NewDeployCompleted(
 			run.ID, run.ProjectID, run.WorkspaceID, run.EnvironmentID, "", string(run.Status), string(run.RunType), run.ImageTag,
-		)); err != nil && c.Logger != nil {
+		)
+		completed.CreatedBy = run.CreatedBy
+		if err := c.EventBus.Publish(ctx, completed); err != nil && c.Logger != nil {
 			c.Logger.Warn("publish deploy completed failed", zap.Error(err))
 		}
 	})
@@ -256,6 +259,7 @@ func (m *Module) Register(c *appctx.Container) error {
 
 	c.BuildTrigger = &buildTriggerPort{handler: trigger}
 	c.DeploymentTrigger = &deploymentTriggerPort{create: createDeployment, checker: checker}
+	c.ProjectTeardown = &teardownPort{runs: deployRepo, undeploy: undeploy, reader: deployReader, prepare: prepareService}
 
 	return nil
 }

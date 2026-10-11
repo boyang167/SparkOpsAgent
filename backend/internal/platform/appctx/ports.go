@@ -85,6 +85,21 @@ type DeploymentTrigger interface {
 	TriggerForEnvironment(ctx context.Context, req WorkflowDeploymentRequest) (kernel.DeploymentRunID, error)
 }
 
+type UndeployRequest struct {
+	WorkspaceID kernel.WorkspaceID
+	ProjectID   kernel.ProjectID
+	MemberID    kernel.MemberID
+	ClusterID   kernel.ClusterInfoID
+}
+
+// ProjectTeardown lets workspace_app take a project offline before archiving it.
+type ProjectTeardown interface {
+	OnlineClusters(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) ([]kernel.ClusterInfoID, error)
+	HasActiveRun(ctx context.Context, projectID kernel.ProjectID) (bool, error)
+	StartUndeploy(ctx context.Context, req UndeployRequest) (kernel.DeploymentRunID, error)
+	DisablePipeline(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) error
+}
+
 type WorkflowRunTrigger interface {
 	StartForProduct(ctx context.Context, productID kernel.ProductID, workflowID kernel.ProductWorkflowID) (kernel.ProductWorkflowRunID, error)
 	StartForProductWithInput(

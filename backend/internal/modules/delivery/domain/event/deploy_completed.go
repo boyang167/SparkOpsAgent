@@ -17,6 +17,7 @@ type DeployCompleted struct {
 	Status        string
 	RunType       string
 	ImageTag      string
+	CreatedBy     kernel.MemberID
 }
 
 func NewDeployCompleted(
