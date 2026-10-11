@@ -218,25 +218,41 @@ export function StartWorkflowRunModal({
     return match ? Number(match[1]) : null;
   }
 
-  function renderStagePills(className: string) {
-    if (stageSelectors.length === 0) return null;
+  function renderStageBar(className?: string) {
+    if (stageSelectors.length < 2) return null;
+    const skipped = stageSelectors.filter((item) => !visibleStageIds.has(item.id));
+    const summary =
+      skipped.length === 0
+        ? `全部 ${stageSelectors.length} 个阶段将执行，点击可取消选择`
+        : `将跳过 ${skipped.length} 个阶段：${skipped.map((item) => item.name).join("、")}`;
     return (
-      <nav className={className} aria-label="选择执行阶段">
-        {stageSelectors.map((item) => {
-          const active = visibleStageIds.has(item.id);
-          return (
-            <button
-              key={item.id}
-              type="button"
-              className={`wf-run-pill${active ? " is-active" : ""}`}
-              aria-pressed={active}
-              onClick={() => toggleStageVisibility(item.id)}
-            >
-              {item.name}
-            </button>
-          );
-        })}
-      </nav>
+      <div className={`wf-run-stagebar${className ? ` ${className}` : ""}`}>
+        <div className="wf-run-stagebar-copy">
+          <span className="wf-run-stagebar-title">执行阶段</span>
+          <span className={`wf-run-stagebar-desc${skipped.length > 0 ? " is-skipping" : ""}`} aria-live="polite">
+            {summary}
+          </span>
+        </div>
+        <nav className="wf-run-pills" aria-label="选择执行阶段">
+          {stageSelectors.map((item) => {
+            const active = visibleStageIds.has(item.id);
+            const locked = active && visibleStageIds.size <= 1;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`wf-run-pill${active ? " is-active" : ""}`}
+                aria-pressed={active}
+                title={locked ? "至少保留一个阶段" : active ? "点击跳过该阶段" : "点击执行该阶段"}
+                onClick={() => toggleStageVisibility(item.id)}
+              >
+                <span className="wf-run-pill-check" aria-hidden />
+                {item.name}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
     );
   }
 
@@ -320,9 +336,11 @@ export function StartWorkflowRunModal({
 
   const formContent = (
       <div className="wf-run-body">
-        {submitError ? <InlineAlert tone="error">{submitError}</InlineAlert> : null}
-        {form.stages.length > 1 ? (
-          <p className="wf-run-hint">顶部胶囊用于选择本次执行的阶段；未选中的阶段将跳过。</p>
+        {presentation === "modal" ? renderStageBar("is-sticky") : null}
+        {submitError ? (
+          <div className="wf-run-block">
+            <InlineAlert tone="error">{submitError}</InlineAlert>
+          </div>
         ) : null}
         {form.stages.length === 0 ? (
           <p className="wf-run-hint wf-run-empty">
@@ -562,7 +580,7 @@ export function StartWorkflowRunModal({
     return (
       <>
         <div className="wf-run-embedded">
-          {renderStagePills("wf-run-pills wf-run-embedded-pills")}
+          {modalReady ? renderStageBar("wf-run-embedded-stagebar") : null}
           <div className="wf-run-embedded-body">
             {modalReady ? formContent : <WorkflowRunFormSkeleton />}
           </div>
@@ -591,9 +609,11 @@ export function StartWorkflowRunModal({
               <h1 className="wf-run-page-title">执行工作流</h1>
               <p className="wf-run-page-desc">{workflow.name}</p>
             </div>
-            {renderStagePills("wf-run-pills wf-run-page-pills")}
           </header>
-          <section className="wf-run-page-card">{formContent}</section>
+          <section className="wf-run-page-card">
+            {renderStageBar()}
+            {formContent}
+          </section>
           <footer className="wf-run-page-footer">{footerActions}</footer>
         </div>
         <DeployYamlCompareModal
@@ -618,7 +638,6 @@ export function StartWorkflowRunModal({
       title="执行工作流"
       description={workflow?.name ?? workflowName}
       size="full"
-      headerExtra={modalReady ? renderStagePills("wf-run-pills") : null}
       footer={footerActions}
     >
       {modalReady ? formContent : <WorkflowRunFormSkeleton />}
