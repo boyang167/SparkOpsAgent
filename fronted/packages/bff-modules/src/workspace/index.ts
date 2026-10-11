@@ -2,6 +2,7 @@ export { listProjects, getProject } from "./projects";
 export { createProject } from "./createProject";
 export { updateProject } from "./updateProject";
 export { archiveProject } from "./archiveProject";
+export { archiveProjectWithTeardown } from "./archiveProjectWithTeardown";
 export {
   listProjectMembers,
   addProjectMember,

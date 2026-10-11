@@ -9,6 +9,7 @@ import type {
   RollbackPreviewVM,
   RunPreviewVM,
   SyncPreviewVM,
+  UndeployCommand,
 } from "@sparkops/contracts/delivery";
 import { RollbackPreviewVMSchema, RunPreviewVMSchema, SyncPreviewVMSchema } from "@sparkops/contracts/delivery";
 import { DeploymentRunVMSchema } from "@sparkops/contracts/delivery";
@@ -167,6 +168,15 @@ export function createDeliveryUpstream(options: UpstreamRequestOptions = {}) {
           options: { ...options, workspaceId },
         },
       );
+      return normalizeDeploymentRun(data);
+    },
+
+    async undeploy(workspaceId: string, projectId: string, input: UndeployCommand) {
+      const data = await upstreamFetch<unknown>(`/api/v1/projects/${projectId}/undeployments`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        options: { ...options, workspaceId },
+      });
       return normalizeDeploymentRun(data);
     },
 

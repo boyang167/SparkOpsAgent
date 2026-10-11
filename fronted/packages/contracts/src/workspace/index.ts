@@ -129,8 +129,23 @@ export const PROJECT_LANGUAGE_OPTIONS = [
 
 export const PROJECT_STATUS_OPTIONS = [
   { value: "active", label: "活跃" },
+  { value: "archiving", label: "归档中" },
   { value: "archived", label: "已归档" },
 ] as const;
+
+export const ArchiveProjectCommandSchema = z.object({
+  confirm_name: z.string().min(1),
+  teardown: z.boolean().default(false),
+});
+
+export type ArchiveProjectCommand = z.infer<typeof ArchiveProjectCommandSchema>;
+
+export const ArchiveProjectResultVMSchema = z.object({
+  status: z.enum(["archived", "archiving"]),
+  pending_clusters: z.array(z.string()).default([]),
+});
+
+export type ArchiveProjectResultVM = z.infer<typeof ArchiveProjectResultVMSchema>;
 
 export function languageLabel(value?: string) {
   return PROJECT_LANGUAGE_OPTIONS.find((o) => o.value === value)?.label ?? value ?? "-";

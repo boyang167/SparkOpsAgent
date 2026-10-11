@@ -34,7 +34,7 @@ export const DeploymentStatusSchema = z.enum([
 
 export type DeploymentStatus = z.infer<typeof DeploymentStatusSchema>;
 
-export const DeploymentRunTypeSchema = z.enum(["normal", "rollback", "sync"]);
+export const DeploymentRunTypeSchema = z.enum(["normal", "rollback", "sync", "undeploy"]);
 
 export type DeploymentRunType = z.infer<typeof DeploymentRunTypeSchema>;
 
@@ -51,6 +51,10 @@ export const DeploymentRunVMSchema = z.object({
   status: DeploymentStatusSchema,
   run_type: DeploymentRunTypeSchema.optional().default("normal"),
   rollback_of_run_id: z.string().optional(),
+  deploy_namespace: z.string().optional(),
+  undeploy_options: z
+    .object({ delete_config: z.boolean(), delete_storage: z.boolean() })
+    .optional(),
   build_id: z.string().optional(),
   error_message: z.string().default(""),
   current_stage: z.enum(["", "preparing", "building", "deploying"]),
@@ -268,3 +272,12 @@ export interface UpsertProjectWebhookInput {
   events: string[];
   enabled: boolean;
 }
+
+export const UndeployCommandSchema = z.object({
+  cluster_id: z.string().min(1),
+  confirm_name: z.string().min(1),
+  delete_config: z.boolean().default(false),
+  delete_storage: z.boolean().default(false),
+});
+
+export type UndeployCommand = z.infer<typeof UndeployCommandSchema>;

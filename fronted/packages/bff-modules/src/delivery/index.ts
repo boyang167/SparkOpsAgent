@@ -9,6 +9,7 @@ import type {
   RollbackPreviewVM,
   SyncPreviewVM,
   TriggerBuildCommand,
+  UndeployCommand,
 } from "@sparkops/contracts/delivery";
 
 export async function listBuilds(
@@ -84,6 +85,15 @@ export async function rollbackDeployment(
   input: RollbackDeploymentCommand = {},
 ): Promise<DeploymentRunVM> {
   return ctx.upstream.delivery.rollbackDeployment(workspaceId, projectId, input);
+}
+
+export async function undeploy(
+  ctx: BffContext,
+  workspaceId: string,
+  projectId: string,
+  input: UndeployCommand,
+): Promise<DeploymentRunVM> {
+  return ctx.upstream.delivery.undeploy(workspaceId, projectId, input);
 }
 
 export async function getRollbackPreview(

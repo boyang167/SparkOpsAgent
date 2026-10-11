@@ -53,6 +53,17 @@ export function archiveProject(workspaceId: string, projectId: string) {
   });
 }
 
+export function archiveProjectWithTeardown(
+  workspaceId: string,
+  projectId: string,
+  input: import("@sparkops/contracts/workspace").ArchiveProjectCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/workspace").ArchiveProjectResultVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/archive`,
+    { method: "POST", body: JSON.stringify(input), ...withWorkspace(workspaceId) },
+  );
+}
+
 export function submitProjectReview(workspaceId: string, projectId: string) {
   return bffFetch<import("@sparkops/contracts/workspace").ProjectVM>(
     `/workspaces/${workspaceId}/projects/${projectId}/submit-review`,

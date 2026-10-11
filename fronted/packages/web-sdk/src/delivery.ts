@@ -10,6 +10,7 @@ import type {
   RollbackPreviewVM,
   RunPreviewVM,
   SyncPreviewVM,
+  UndeployCommand,
   UpsertProjectWebhookInput,
   WebhookEventCatalogItem,
 } from "@sparkops/contracts/delivery";
@@ -82,6 +83,13 @@ export function rollbackDeployment(
 ) {
   return bffFetch<DeploymentRunVM>(
     `/workspaces/${workspaceId}/projects/${projectId}/deployments/rollback`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function undeploy(projectId: string, workspaceId: string, input: UndeployCommand) {
+  return bffFetch<DeploymentRunVM>(
+    `/workspaces/${workspaceId}/projects/${projectId}/undeployments`,
     { method: "POST", body: JSON.stringify(input), workspaceId },
   );
 }
