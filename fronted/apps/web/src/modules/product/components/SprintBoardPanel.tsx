@@ -69,17 +69,18 @@ function runStatusClass(status?: string) {
   }
 }
 
-function statusTone(status: string) {
-  switch (status) {
-    case "active":
-      return "text-primary";
-    case "completed":
-      return "text-emerald-600";
-    case "archived":
-      return "text-muted-foreground";
-    default:
-      return "text-amber-600";
-  }
+const WORK_ITEM_TYPE_LABEL: Record<string, string> = {
+  story: "需求",
+  task: "任务",
+  bug: "缺陷",
+  epic: "史诗",
+  release: "发布",
+  custom: "自定义",
+};
+
+function sprintProgressPercent(done?: number, total?: number) {
+  if (!total || !done) return 0;
+  return Math.min(100, Math.round((done / total) * 100));
 }
 
 export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelProps) {
@@ -533,8 +534,13 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
       <article key={item.id} className="sprint-board-card">
         <div className="sprint-board-card-top">
           <div className="sprint-board-card-head">
-            <span className="sprint-board-card-type">{item.type}</span>
-            <span className="sprint-board-card-priority">{PRIORITY_LABEL[item.priority] ?? item.priority}</span>
+            <span className="sprint-board-card-type">
+              {WORK_ITEM_TYPE_LABEL[item.type] ?? item.type}
+              <span className="sprint-board-card-sep" aria-hidden>·</span>
+              <span className={`sprint-board-card-priority is-${item.priority}`}>
+                {PRIORITY_LABEL[item.priority] ?? item.priority}优先级
+              </span>
+            </span>
             {runStatus ? (
               <span className={runStatusClass(runStatus)}>{RUN_STATUS_LABEL[runStatus] ?? runStatus}</span>
             ) : null}
@@ -642,67 +648,75 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
           </div>
         ) : sprint ? (
           <>
-            <div className="product-master-main-inner stack-md">
-              <div className="flex flex-wrap justify-between items-start gap-3">
-                <div className="stack-xs">
-                  <h2 className="section-title">{sprint.name}</h2>
-                  {sprint.goal ? <p className="text-sm text-muted-foreground">{sprint.goal}</p> : null}
-                  <p className="text-xs text-muted-foreground">
-                    工作项 {sprint.work_item_count ?? 0} · 已完成 {sprint.done_work_item_count ?? 0}
-                  </p>
+            <div className="product-master-main-inner sprint-head">
+              <div className="sprint-head-top">
+                <div className="sprint-head-main">
+                  <div className="sprint-head-title-row">
+                    <h2 className="sprint-head-title">{sprint.name}</h2>
+                    <span className={`sprint-status is-${sprint.status}`}>
+                      <span className="sprint-status-dot" aria-hidden />
+                      {STATUS_LABEL[sprint.status] ?? sprint.status}
+                    </span>
+                  </div>
+                  {sprint.goal ? <p className="sprint-head-goal">{sprint.goal}</p> : null}
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={`text-sm font-medium ${statusTone(sprint.status)}`}>
-                    {STATUS_LABEL[sprint.status] ?? sprint.status}
-                  </span>
+                <div className="sprint-head-actions">
                   {sprint.status === "planning" || sprint.status === "active" ? (
-                    <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => setPmImportOpen(true)}>
+                    <button type="button" className="btn-secondary text-sm" disabled={busy} onClick={() => setPmImportOpen(true)}>
                       导入 PM
                     </button>
                   ) : null}
                   {sprint.status === "planning" ? (
                     <>
-                      <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={openEditStages}>
+                      <button type="button" className="btn-secondary text-sm" disabled={busy} onClick={openEditStages}>
                         编辑看板列
                       </button>
-                      <button type="button" className="btn btn-primary text-xs" disabled={busy} onClick={() => void onStartSprint()}>
+                      <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onStartSprint()}>
                         启动迭代
                       </button>
                     </>
                   ) : null}
                   {sprint.status === "active" ? (
-                    <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void onCompleteSprint()}>
+                    <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onCompleteSprint()}>
                       完成迭代
                     </button>
                   ) : null}
                 </div>
               </div>
 
-              <div className="flex gap-2 text-sm border-b pb-2">
-                <button
-                  type="button"
-                  className={viewTab === "board" ? "font-medium text-primary" : "text-muted-foreground"}
-                  onClick={() => setViewTab("board")}
-                >
-                  看板
-                </button>
-                <button
-                  type="button"
-                  className={viewTab === "release" ? "font-medium text-primary" : "text-muted-foreground"}
-                  onClick={() => setViewTab("release")}
-                >
-                  发布计划
-                  {activeReleasePlanCount > 0 ? (
-                    <span className="ml-1 rounded-full bg-primary/10 text-primary px-1.5 text-xs">{activeReleasePlanCount}</span>
-                  ) : null}
-                </button>
-                <button
-                  type="button"
-                  className={viewTab === "metrics" ? "font-medium text-primary" : "text-muted-foreground"}
-                  onClick={() => setViewTab("metrics")}
-                >
-                  度量
-                </button>
+              <div className="sprint-head-bar">
+                <div className="segmented-control sprint-head-tabs" role="tablist" aria-label="迭代视图">
+                  {(
+                    [
+                      { id: "board", label: "看板" },
+                      { id: "release", label: "发布计划", count: activeReleasePlanCount },
+                      { id: "metrics", label: "度量" },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={viewTab === tab.id}
+                      className={`segmented-item${viewTab === tab.id ? " segmented-item-active" : ""}`}
+                      onClick={() => setViewTab(tab.id)}
+                    >
+                      {tab.label}
+                      {"count" in tab && tab.count > 0 ? <span className="sprint-head-tab-count">{tab.count}</span> : null}
+                    </button>
+                  ))}
+                </div>
+                <div className="sprint-progress" aria-label="迭代进度">
+                  <span className="sprint-progress-track">
+                    <span
+                      className="sprint-progress-fill"
+                      style={{ width: `${sprintProgressPercent(sprint.done_work_item_count, sprint.work_item_count)}%` }}
+                    />
+                  </span>
+                  <span className="sprint-progress-text">
+                    已完成 {sprint.done_work_item_count ?? 0} / {sprint.work_item_count ?? 0}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -714,22 +728,24 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                   <p className="text-sm text-muted-foreground">度量加载中…</p>
                 ) : metrics ? (
                   <>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div className="rounded border p-3 stack-xs">
-                        <span className="text-xs text-muted-foreground">工作项总数</span>
-                        <span className="text-xl font-semibold">{metrics.total_work_items}</span>
+                    <div className="sprint-metrics">
+                      <div className="sprint-metric">
+                        <span className="sprint-metric-label">工作项总数</span>
+                        <span className="sprint-metric-value">{metrics.total_work_items}</span>
                       </div>
-                      <div className="rounded border p-3 stack-xs">
-                        <span className="text-xs text-muted-foreground">已完成</span>
-                        <span className="text-xl font-semibold text-emerald-600">{metrics.done_work_items}</span>
+                      <div className="sprint-metric">
+                        <span className="sprint-metric-label">已完成</span>
+                        <span className="sprint-metric-value is-success">{metrics.done_work_items}</span>
                       </div>
-                      <div className="rounded border p-3 stack-xs">
-                        <span className="text-xs text-muted-foreground">阻塞中</span>
-                        <span className="text-xl font-semibold text-amber-600">{metrics.blocked_work_items}</span>
+                      <div className="sprint-metric">
+                        <span className="sprint-metric-label">阻塞中</span>
+                        <span className={`sprint-metric-value${metrics.blocked_work_items > 0 ? " is-warning" : ""}`}>
+                          {metrics.blocked_work_items}
+                        </span>
                       </div>
-                      <div className="rounded border p-3 stack-xs">
-                        <span className="text-xs text-muted-foreground">工作流执行次数</span>
-                        <span className="text-xl font-semibold">{metrics.deployment_frequency ?? 0}</span>
+                      <div className="sprint-metric">
+                        <span className="sprint-metric-label">工作流执行次数</span>
+                        <span className="sprint-metric-value">{metrics.deployment_frequency ?? 0}</span>
                       </div>
                     </div>
                     {metrics.change_failure_rate != null ? (
@@ -742,7 +758,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                         <h3 className="text-sm font-medium">燃尽趋势（剩余工作项）</h3>
                         <ul className="text-xs grid grid-cols-2 md:grid-cols-4 gap-2">
                           {metrics.burndown.slice(-8).map((point) => (
-                            <li key={point.date} className="border rounded px-2 py-1">
+                            <li key={point.date} className="sprint-burndown-item">
                               {point.date}：<strong>{point.remaining}</strong>
                             </li>
                           ))}
@@ -759,45 +775,56 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                 <div className="sprint-board" role="region" aria-label="迭代看板">
                   {board.columns.map((column) => (
                     <section key={column.stage.id} className="sprint-board-column">
-                      <header className="sprint-board-column-head" style={{ borderTopColor: column.stage.color ?? "var(--primary)" }}>
-                        <div className="stack-xs w-full min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="sprint-board-column-title">{column.stage.name}</span>
-                        <span className={`sprint-board-column-count ${column.wip_limit_exceeded ? "text-red-600" : ""}`}>
-                          {column.wip_count}
-                          {column.stage.wip_limit ? ` / ${column.stage.wip_limit}` : ""}
-                        </span>
-                      </div>
-                      {column.wip_limit_exceeded ? (
-                        <span className="text-xs text-red-600">WIP 超限</span>
-                      ) : null}
-                          {sprint.status !== "archived" ? (
+                      <header className="sprint-board-column-head">
+                        <div className="sprint-board-column-title-row">
+                          <span
+                            className="sprint-board-column-dot"
+                            style={{ background: column.stage.color || "var(--muted)" }}
+                            aria-hidden
+                          />
+                          <span className="sprint-board-column-title">{column.stage.name}</span>
+                          <span className={`sprint-board-column-count${column.wip_limit_exceeded ? " is-over" : ""}`}>
+                            {column.wip_count}
+                            {column.stage.wip_limit ? ` / ${column.stage.wip_limit}` : ""}
+                          </span>
+                        </div>
+                        {column.wip_limit_exceeded ? <span className="sprint-board-column-warn">超出 WIP 上限</span> : null}
+                        {sprint.status !== "archived" ? (
+                          <label
+                            className={`sprint-board-column-wf${column.stage.workflows?.[0]?.workflow_id ? " is-bound" : ""}`}
+                          >
+                            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden>
+                              <path
+                                d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8l1-5.5Z"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.3"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
                             <select
-                              className="input text-xs w-full"
                               value={column.stage.workflows?.[0]?.workflow_id ?? ""}
                               disabled={busy}
                               onChange={(e) => void bindStageWorkflow(column.stage.id, e.target.value)}
                               aria-label={`${column.stage.name} 绑定工作流`}
                             >
-                              <option value="">绑定工作流…</option>
+                              <option value="">未绑定工作流</option>
                               {workflows.map((wf) => (
                                 <option key={wf.id} value={wf.id}>
                                   {wf.name}
                                 </option>
                               ))}
                             </select>
-                          ) : null}
-                        </div>
+                          </label>
+                        ) : null}
                       </header>
                       <div className="sprint-board-column-body">
                         {column.work_items.length === 0 ? (
-                          <p className="sprint-board-column-empty">拖拽或点击下方添加</p>
+                          <p className="sprint-board-column-empty">暂无工作项</p>
                         ) : (
                           column.work_items.map((item) => renderCard(item, board.columns))
                         )}
-                      </div>
-                      {sprint.status === "planning" || sprint.status === "active" ? (
-                        <div className="sprint-board-column-footer">
+                        {sprint.status === "planning" || sprint.status === "active" ? (
                           <button
                             type="button"
                             className="sprint-board-column-add"
@@ -806,8 +833,8 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                           >
                             + 添加工作项
                           </button>
-                        </div>
-                      ) : null}
+                        ) : null}
+                      </div>
                     </section>
                   ))}
                 </div>
