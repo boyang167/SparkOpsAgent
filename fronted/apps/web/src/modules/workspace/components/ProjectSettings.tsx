@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { workspace } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
-import { useConfirmDialog } from "@/hooks/useConfirmDialog";
+import { ArchiveProjectModal } from "./project/ArchiveProjectModal";
 
 interface EditProjectFormProps {
   workspaceId: string;
@@ -94,24 +94,19 @@ export function DeleteProjectButton({
   projectName,
 }: DeleteProjectButtonProps) {
   const router = useRouter();
-  const { confirm, ConfirmDialog } = useConfirmDialog();
+  const [open, setOpen] = useState(false);
+  const [project, setProject] = useState<ProjectVM | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function onDelete() {
-    const ok = await confirm({
-      title: `确定删除项目「${projectName}」？\n项目将归档，不再出现在列表中。`,
-      danger: true,
-    });
-    if (!ok) return;
+  async function openModal() {
     setLoading(true);
     setError(null);
     try {
-      await workspace.archiveProject(workspaceId, projectId);
-      router.push("/dashboard");
-      router.refresh();
+      setProject(await workspace.getProject(workspaceId, projectId));
+      setOpen(true);
     } catch (err) {
-      setError(err instanceof BffError ? err.message : "删除失败");
+      setError(err instanceof BffError ? err.message : "加载项目失败");
     } finally {
       setLoading(false);
     }
@@ -119,18 +114,28 @@ export function DeleteProjectButton({
 
   return (
     <>
-    <div className="flex flex-col items-end gap-2">
-      <button
-        className="btn-secondary !text-red-600 !border-red-200 hover:!bg-red-50"
-        type="button"
-        onClick={onDelete}
-        disabled={loading}
-      >
-        {loading ? "删除中..." : "删除项目"}
-      </button>
-      {error ? <p className="error">{error}</p> : null}
-    </div>
-    <ConfirmDialog />
+      <div className="flex flex-col items-end gap-2">
+        <button
+          className="btn-secondary !text-red-600 !border-red-200 hover:!bg-red-50"
+          type="button"
+          onClick={() => void openModal()}
+          disabled={loading}
+          aria-label={`归档项目 ${projectName}`}
+        >
+          {loading ? "加载中…" : "删除项目"}
+        </button>
+        {error ? <p className="error">{error}</p> : null}
+      </div>
+      <ArchiveProjectModal
+        open={open}
+        workspaceId={workspaceId}
+        project={project}
+        onClose={() => setOpen(false)}
+        onArchived={() => {
+          router.push("/dashboard");
+          router.refresh();
+        }}
+      />
     </>
   );
 }

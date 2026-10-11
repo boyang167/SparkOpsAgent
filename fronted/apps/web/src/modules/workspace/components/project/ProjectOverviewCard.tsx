@@ -40,6 +40,7 @@ interface ProjectOverviewCardProps {
 }
 
 function statusLabelTagClass(label: string) {
+  if (label === "归档中") return "project-tag project-tag-orange";
   if (label === "审核中") return "project-tag project-tag-blue";
   if (label === "配置中") return "project-tag project-tag-orange";
   if (label === "审核驳回") return "project-tag project-tag-red";
@@ -146,6 +147,8 @@ export function ProjectOverviewCard({
   const cardInteractive = Boolean(detailsHref);
   const inDeployPhase = isProjectInDeployPhase(project);
   const description = project.description?.trim() || "暂无项目描述";
+  const archiving = project.status === "archiving";
+  const headerStatusLabel = archiving ? "归档中" : statusLabel;
 
   function handleCardClick(event: React.MouseEvent<HTMLElement>) {
     if (!cardInteractive) return;
@@ -179,7 +182,7 @@ export function ProjectOverviewCard({
           <div className="project-overview-heading">
             <div className="project-overview-title-row">
               <TitleTag>{displayName}</TitleTag>
-              <span className={statusLabelTagClass(statusLabel)}>{statusLabel}</span>
+              <span className={statusLabelTagClass(headerStatusLabel)}>{headerStatusLabel}</span>
             </div>
             {showTechnicalName ? <p className="project-card-subtitle">{project.name}</p> : null}
             <div className="project-overview-meta">
@@ -187,7 +190,7 @@ export function ProjectOverviewCard({
             </div>
           </div>
         </div>
-        {onArchive ? <MoreMenu onArchive={() => onArchive(project)} /> : null}
+        {onArchive && !archiving ? <MoreMenu onArchive={() => onArchive(project)} /> : null}
       </header>
 
       {description !== "暂无项目描述" && description !== project.name && description !== displayName ? (
@@ -229,6 +232,7 @@ export function ProjectOverviewCard({
                   type="button"
                   className="project-action-btn is-deploy"
                   onClick={onDeploy}
+                  disabled={archiving}
                   aria-disabled={deploymentAction?.disabled || undefined}
                   title={deploymentAction?.reason ?? undefined}
                   aria-describedby={deploymentAction?.reason ? `deploy-reason-${project.id}` : undefined}

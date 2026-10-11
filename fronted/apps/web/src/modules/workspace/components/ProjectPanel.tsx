@@ -14,6 +14,7 @@ import { useWorkspaceClusters } from "./project/useWorkspaceClusters";
 import { ProjectCreateModal } from "./project/ProjectCreateModal";
 import { ProjectConfigurePanel } from "./project/ProjectConfigurePanel";
 import { ProjectReviewModal } from "./project/ProjectReviewModal";
+import { ArchiveProjectModal } from "./project/ArchiveProjectModal";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 import {
   formatDateTime,
@@ -65,6 +66,7 @@ export function ProjectPanel({
   const [configureProject, setConfigureProject] = useState<ProjectVM | null>(null);
   const [reviewProject, setReviewProject] = useState<ProjectVM | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<ProjectVM | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("card");
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -135,16 +137,8 @@ export function ProjectPanel({
     setProductFilter("");
   }
 
-  async function onArchive(item: ProjectVM) {
-    const ok = await confirm({ title: `确定归档项目「${projectDisplayName(item)}」？`, danger: true });
-    if (!ok) return;
-    setError(null);
-    try {
-      await workspace.archiveProject(workspaceId, item.id);
-      await load();
-    } catch (err) {
-      setError(err instanceof BffError ? err.message : "归档失败");
-    }
+  function onArchive(item: ProjectVM) {
+    setArchiveTarget(item);
   }
 
   async function onSubmitReview(item: ProjectVM) {
@@ -317,7 +311,7 @@ export function ProjectPanel({
                       workspaceClusters={workspaceClusters}
                       workspaceClustersLoading={workspaceClustersLoading}
                       workspaceClustersError={workspaceClustersError}
-                      onArchive={(p) => void onArchive(p)}
+                      onArchive={onArchive}
                       onViewDetails={(p) => router.push(`/projects/${p.id}`)}
                       onContinueConfig={(p) => setConfigureProject(p)}
                       onSubmitReview={(p) => void onSubmitReview(p)}
@@ -384,7 +378,11 @@ export function ProjectPanel({
                                           修改配置
                                         </button>
                                       ) : null}
-                                      <button type="button" onClick={() => router.push(`/projects/${project.id}?release=1`)}>
+                                      <button
+                                        type="button"
+                                        disabled={project.status === "archiving"}
+                                        onClick={() => router.push(`/projects/${project.id}?release=1`)}
+                                      >
                                         发布
                                       </button>
                                     </>
@@ -430,9 +428,11 @@ export function ProjectPanel({
                                   </button>
                                 );
                               })()}
-                              <button type="button" className="is-danger" onClick={() => void onArchive(project)}>
-                                归档
-                              </button>
+                              {project.status === "archiving" ? null : (
+                                <button type="button" className="is-danger" onClick={() => onArchive(project)}>
+                                  归档
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -513,6 +513,17 @@ export function ProjectPanel({
           if (!reviewLoading) setReviewProject(null);
         }}
         onSubmit={(input) => void onReview(input)}
+      />
+
+      <ArchiveProjectModal
+        open={Boolean(archiveTarget)}
+        workspaceId={workspaceId}
+        project={archiveTarget}
+        onClose={() => {
+          setArchiveTarget(null);
+          void load();
+        }}
+        onArchived={() => void load()}
       />
     </div><ConfirmDialog /></>
   );
