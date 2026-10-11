@@ -29,6 +29,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/stream"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/webhook"
 	deliveryhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/interface/http"
+	runtimeport "github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
@@ -136,6 +137,9 @@ func (m *Module) Register(c *appctx.Container) error {
 		deployOperations,
 	)
 	deployOrchestrator.SetProjectVersionReader(c.ProjectVersionReader)
+	if remover, ok := c.ManifestDeployer.(runtimeport.ManifestRemover); ok {
+		deployOrchestrator.SetManifestRemover(remover)
+	}
 	deployOrchestrator.SetTerminalHook(func(ctx context.Context, run *deployrunmodel.DeploymentRun) {
 		if run == nil {
 			return

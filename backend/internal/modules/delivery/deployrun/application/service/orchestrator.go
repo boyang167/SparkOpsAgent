@@ -69,11 +69,18 @@ type Orchestrator struct {
 	operations     ExecutionRegistry
 	onTerminal     func(context.Context, *model.DeploymentRun)
 	versions       appctx.ProjectVersionReader
+	remover        runtimeport.ManifestRemover
 }
 
 func (o *Orchestrator) SetProjectVersionReader(reader appctx.ProjectVersionReader) {
 	if o != nil {
 		o.versions = reader
+	}
+}
+
+func (o *Orchestrator) SetManifestRemover(remover runtimeport.ManifestRemover) {
+	if o != nil {
+		o.remover = remover
 	}
 }
 
@@ -273,6 +280,23 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 		}
 		deployacl.OverrideDeployNamespace(&project, run.DeployNamespace)
 		applyRunImageRepository(&project, run)
+		if run.IsUndeploy() {
+			if err := o.removeKubernetes(operationCtx, run, project); err != nil {
+				if operationCtx.Err() != nil {
+					return operationCtx.Err()
+				}
+				return o.handleDependencyError(ctx, run, err)
+			}
+			if err := run.Transition(model.StatusSucceeded, o.clock()); err != nil {
+				return err
+			}
+			o.clearLease(run)
+			if err := o.repo.Update(ctx, run); err != nil {
+				return o.resolveConcurrent(ctx, run.ID, err)
+			}
+			o.notifyTerminal(ctx, run)
+			return nil
+		}
 		if !(run.IsSyncOnly() && len(run.SyncManifests) > 0) {
 			if err := o.finalizeKubernetes(operationCtx, run, project); err != nil {
 				if operationCtx.Err() != nil {
@@ -433,6 +457,30 @@ func (o *Orchestrator) finalizeKubernetes(
 		return err
 	}
 	return o.deployer.RolloutRestart(ctx, target)
+}
+
+func (o *Orchestrator) removeKubernetes(
+	ctx context.Context,
+	run *model.DeploymentRun,
+	project deployport.ProjectDeploymentContext,
+) error {
+	if o.remover == nil {
+		return domain.ErrDeploymentRemoverUnavailable
+	}
+	spec := runtimeport.RemoveSpec{AppLabel: project.Name}
+	if run.UndeployOptions != nil {
+		spec.DeleteConfig = run.UndeployOptions.DeleteConfig
+		spec.DeleteStorage = run.UndeployOptions.DeleteStorage
+	}
+	manifests, deploymentName, serviceName, err := o.renderManifests(ctx, project, run, run.ImageTag)
+	if err == nil {
+		spec.Manifests = manifests
+	} else {
+		_ = o.repo.AppendEvent(ctx, run, "render manifests failed, falling back to label selector: "+err.Error())
+	}
+	target := o.buildDeploymentTarget(project, run, deploymentName, serviceName)
+	_ = o.repo.AppendEvent(ctx, run, fmt.Sprintf("removing workloads from %s/%s", project.Cluster.Name, project.Namespace))
+	return o.remover.Remove(ctx, target, spec)
 }
 
 func (o *Orchestrator) applyConfigManifests(
