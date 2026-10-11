@@ -13,6 +13,7 @@ import (
 type MockExecutor struct {
 	LastJobSpec      port.JenkinsJobSpec
 	LastBuildRequest port.BuildRequest
+	LastDisabledJob  string
 }
 
 func NewMockExecutor() *MockExecutor { return &MockExecutor{} }
@@ -80,4 +81,10 @@ func (e *MockExecutor) RunStreaming(
 	return buf.String(), nil
 }
 
+func (e *MockExecutor) DisableJob(_ context.Context, folder, job string) error {
+	e.LastDisabledJob = folder + "/" + job
+	return nil
+}
+
 var _ port.JenkinsExecutor = (*MockExecutor)(nil)
+var _ port.JenkinsJobDisabler = (*MockExecutor)(nil)

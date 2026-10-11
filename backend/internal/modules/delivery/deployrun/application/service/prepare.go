@@ -86,6 +86,18 @@ func (s *PrepareService) Run(ctx context.Context, project deployport.ProjectDepl
 	return nil
 }
 
+func (s *PrepareService) DisableJob(ctx context.Context, project deployport.ProjectDeploymentContext) error {
+	executor, err := s.resolveJenkins(project.Jenkins)
+	if err != nil {
+		return fmt.Errorf("resolve project jenkins: %w", err)
+	}
+	disabler, ok := executor.(deliveryport.JenkinsJobDisabler)
+	if !ok {
+		return nil
+	}
+	return disabler.DisableJob(ctx, strings.TrimSpace(project.Namespace), strings.TrimSpace(project.Name))
+}
+
 func (s *PrepareService) ensureHarborProject(ctx context.Context, project deployport.ProjectDeploymentContext) error {
 	if !strings.EqualFold(strings.TrimSpace(project.Harbor.ServiceType), "Harbor") {
 		return nil

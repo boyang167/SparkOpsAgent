@@ -71,6 +71,10 @@ type JenkinsExecutor interface {
 	) (consoleLog string, err error)
 }
 
+type JenkinsJobDisabler interface {
+	DisableJob(ctx context.Context, folder, job string) error
+}
+
 // JenkinsExecutorProvider resolves a Jenkins client from project-bound secrets.
 type JenkinsExecutorProvider interface {
 	ForProject(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) (JenkinsExecutor, error)
