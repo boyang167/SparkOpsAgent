@@ -19,7 +19,7 @@
 非目标：
 
 - 取消归档（unarchive）。
-- 删除 Jenkins Job / Harbor 仓库。
+- 删除 Jenkins Job / 保留Harbor 仓库。
 - 删除命名空间。
 - 停用（缩容到 0）作为独立功能。
 

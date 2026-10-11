@@ -129,7 +129,13 @@ func (r *ProjectRepository) Save(ctx context.Context, project *model.Project) er
 		value := project.ProductID.String()
 		row.ProductID = &value
 	}
-	return r.db.WithContext(ctx).Save(&row).Error
+	if err := r.db.WithContext(ctx).Save(&row).Error; err != nil {
+		if isUniqueViolation(err) {
+			return domain.ErrProjectNameExists
+		}
+		return err
+	}
+	return nil
 }
 
 func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) error {
@@ -195,7 +201,11 @@ func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) 
 	} else {
 		updates["product_id"] = nil
 	}
-	return r.db.WithContext(ctx).Model(&projectModel{}).Where(postgres.UUIDEq("id"), project.ID.String()).Updates(updates).Error
+	err = r.db.WithContext(ctx).Model(&projectModel{}).Where(postgres.UUIDEq("id"), project.ID.String()).Updates(updates).Error
+	if isUniqueViolation(err) {
+		return domain.ErrProjectNameExists
+	}
+	return err
 }
 
 func (r *ProjectRepository) FindByID(ctx context.Context, id kernel.ProjectID) (*model.Project, error) {
