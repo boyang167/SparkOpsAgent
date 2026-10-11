@@ -28,6 +28,18 @@ func (s *OnDeployCompleted) Handle(ctx context.Context, e events.Event) error {
 	if ev.EnvironmentID == nil || ev.Status != string(deploymodel.StatusSucceeded) {
 		return nil
 	}
+	if ev.RunType == string(deploymodel.RunTypeUndeploy) {
+		row, err := s.environments.FindEnvironmentProject(ctx, *ev.EnvironmentID, ev.ProjectID)
+		if err != nil {
+			if err == domain.ErrEnvironmentProjectNotFound {
+				return nil
+			}
+			return err
+		}
+		row.CurrentImageTag = ""
+		row.CurrentDeploymentRunID = nil
+		return s.environments.SaveEnvironmentProject(ctx, row)
+	}
 	row, err := s.environments.FindEnvironmentProject(ctx, *ev.EnvironmentID, ev.ProjectID)
 	if err != nil {
 		if err == domain.ErrEnvironmentProjectNotFound {
