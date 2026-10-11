@@ -52,6 +52,56 @@ function secretName(item: SecretVM): string {
   return item.display_name?.trim() || item.name;
 }
 
+function repoLabel(gitUrl: string): string {
+  const trimmed = gitUrl.trim().replace(/\.git$/, "").replace(/\/+$/, "");
+  if (!trimmed) return "";
+  const parts = trimmed.split(/[/:]/).filter(Boolean);
+  return parts.slice(-2).join("/");
+}
+
+const EDITORS: Array<{ kind: RowEditor; label: string }> = [
+  { kind: "code", label: "代码" },
+  { kind: "vars", label: "变量" },
+  { kind: "script", label: "脚本" },
+];
+
+function EditorIcon({ kind }: { kind: RowEditor }) {
+  if (kind === "code") {
+    return (
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+        <path d="m8 7-5 5 5 5M16 7l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (kind === "vars") {
+    return (
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+        <path
+          d="M7 4C5 4 5 6 5 8s-1 4-2 4c1 0 2 2 2 4s0 4 2 4M17 4c2 0 2 2 2 4s1 4 2 4c-1 0-2 2-2 4s0 4-2 4"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <path d="m5 8 4 4-4 4M12 17h7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconTrash() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <path
+        d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function emptyRow(project: ProjectVM | ProductProjectVM, templates: TemplateVM[]): BuildServiceRow {
   const full = "git_url" in project ? project : null;
   const templateId = full?.resources?.jenkinsfile_template_id;
@@ -87,8 +137,6 @@ export function BuildJobConfigDrawer({
   const [details, setDetails] = useState<ProjectVM[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pendingProjectId, setPendingProjectId] = useState("");
   const [editing, setEditing] = useState<{ index: number; kind: RowEditor } | null>(null);
 
   useEffect(() => {
@@ -96,8 +144,6 @@ export function BuildJobConfigDrawer({
     setTab("basic");
     setName(jobName);
     setDraft(parseBuildJobSpec(spec));
-    setPickerOpen(false);
-    setPendingProjectId("");
     setEditing(null);
     setLoadError(null);
     if (!workspaceId) {
@@ -147,10 +193,16 @@ export function BuildJobConfigDrawer({
   }, [projects, details]);
 
   const selectedIds = new Set(draft.project_builds.map((row) => row.project_id));
+  const availableProjects = projects.filter((project) => !selectedIds.has(project.id));
   const canConfirm = name.trim().length > 0 && draft.registry_id.trim().length > 0;
-  const editingRow = editing ? draft.project_builds[editing.index] : null;
-  const boundGitSecretId = editingRow ? projectGitSecretId(projectById.get(editingRow.project_id)) : "";
-  const selectedGitSecretId = editingRow ? editingRow.secret_id || boundGitSecretId : "";
+
+  function toggleEditor(index: number, kind: RowEditor) {
+    setEditing((current) => (current?.index === index && current.kind === kind ? null : { index, kind }));
+  }
+
+  function confirm() {
+    onConfirm(name.trim(), buildJobSpecToRecord({ ...draft, registry_id: draft.registry_id.trim() }));
+  }
 
   function patchRow(index: number, patch: Partial<BuildServiceRow>) {
     setDraft((current) => ({
@@ -170,10 +222,124 @@ export function BuildJobConfigDrawer({
   }
 
   function removeProject(projectId: string) {
+    setEditing(null);
     setDraft((current) => ({
       ...current,
       project_builds: current.project_builds.filter((row) => row.project_id !== projectId),
     }));
+  }
+
+  function renderEditor(index: number, kind: RowEditor, row: BuildServiceRow) {
+    const selectedGitSecretId = row.secret_id || projectGitSecretId(projectById.get(row.project_id));
+    if (kind === "code") {
+      return (
+        <div className="build-cfg-editor-grid">
+          <label className="build-cfg-editor-field">
+            <span>代码库</span>
+            <input
+              className="input"
+              value={row.git_url}
+              placeholder="https://git.example.com/group/repo.git"
+              onChange={(e) => patchRow(index, { git_url: e.target.value })}
+            />
+          </label>
+          <label className="build-cfg-editor-field">
+            <span>仓库密钥</span>
+            <select
+              className="input"
+              aria-label="仓库密钥"
+              value={selectedGitSecretId}
+              onChange={(e) => patchRow(index, { secret_id: e.target.value })}
+            >
+              {!selectedGitSecretId ? <option value="">请选择</option> : null}
+              {gitSecrets.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {secretName(item)}
+                </option>
+              ))}
+              {selectedGitSecretId && !gitSecrets.some((item) => item.id === selectedGitSecretId) ? (
+                <option value={selectedGitSecretId}>{selectedGitSecretId}</option>
+              ) : null}
+            </select>
+          </label>
+          <div className="build-cfg-editor-wide">
+            <BuildCodeRepoFields
+              workspaceId={workspaceId}
+              row={{ ...row, secret_id: selectedGitSecretId }}
+              gitSecrets={gitSecrets}
+              selectedSecretId={selectedGitSecretId}
+              onPatch={(patch) => patchRow(index, patch)}
+            />
+          </div>
+        </div>
+      );
+    }
+    if (kind === "vars") {
+      return (
+        <div className="build-cfg-vars">
+          {row.variables.length === 0 ? (
+            <p className="build-cfg-editor-empty">尚未添加构建变量。</p>
+          ) : null}
+          {row.variables.map((variable, varIndex) => (
+            <div key={varIndex} className="build-cfg-var-row">
+              <input
+                className="input"
+                aria-label="变量名"
+                placeholder="变量名"
+                value={variable.key}
+                onChange={(e) => {
+                  const variables = row.variables.map((item, i) =>
+                    i === varIndex ? { ...item, key: e.target.value } : item,
+                  );
+                  patchRow(index, { variables });
+                }}
+              />
+              <input
+                className="input"
+                aria-label="变量值"
+                placeholder="变量值"
+                value={variable.value}
+                onChange={(e) => {
+                  const variables = row.variables.map((item, i) =>
+                    i === varIndex ? { ...item, value: e.target.value } : item,
+                  );
+                  patchRow(index, { variables });
+                }}
+              />
+              <button
+                type="button"
+                className="build-cfg-icon-btn is-danger"
+                aria-label="删除变量"
+                title="删除变量"
+                onClick={() => patchRow(index, { variables: row.variables.filter((_, i) => i !== varIndex) })}
+              >
+                <IconTrash />
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="build-cfg-text-btn"
+            onClick={() => patchRow(index, { variables: [...row.variables, { key: "", value: "" }] })}
+          >
+            + 添加变量
+          </button>
+        </div>
+      );
+    }
+    return (
+      <label className="build-cfg-editor-field">
+        <span>构建脚本</span>
+        <textarea
+          className="input build-cfg-script"
+          rows={8}
+          value={row.script}
+          placeholder="可选，自定义构建脚本"
+          spellCheck={false}
+          onChange={(e) => patchRow(index, { script: e.target.value })}
+        />
+      </label>
+    );
   }
 
   return (
@@ -203,302 +369,156 @@ export function BuildJobConfigDrawer({
                 {label}
               </button>
             ))}
-            <span className="pwf-build-tab-spacer" />
-            <button
-              type="button"
-              className="btn btn-primary text-sm"
-              disabled={!canConfirm}
-              onClick={() => onConfirm(name.trim(), buildJobSpecToRecord({ ...draft, registry_id: draft.registry_id.trim() }))}
-            >
-              确定
-            </button>
-            <button type="button" className="btn btn-secondary text-sm" onClick={onClose}>
-              取消
-            </button>
           </>
         }
+        footer={
+          <div className="build-cfg-footer">
+            <span className="build-cfg-footer-hint">{!canConfirm ? "请填写任务名称并选择镜像仓库" : null}</span>
+            <button type="button" className="btn-secondary" onClick={onClose}>
+              取消
+            </button>
+            <button type="button" className="btn btn-primary text-sm" disabled={!canConfirm} onClick={confirm}>
+              确定
+            </button>
+          </div>
+        }
       >
-        {loading ? (
-          <p className="text-sm text-muted" role="status">
-            加载构建配置…
-          </p>
-        ) : null}
         {loadError ? <InlineAlert tone="error">{loadError}</InlineAlert> : null}
 
         {tab === "basic" ? (
-          <div className="pwf-build-form">
-            <label className="pwf-build-field">
-              <span>任务名称</span>
-              <span className="pwf-build-control">
-                <span className="pwf-required" aria-hidden>
-                  *
+          <div className="build-cfg">
+            <section className="build-cfg-section">
+              <label className="build-cfg-field">
+                <span className="build-cfg-label">
+                  任务名称<span className="build-cfg-required">*</span>
                 </span>
                 <input className="input" value={name} aria-label="任务名称" onChange={(e) => setName(e.target.value)} />
-              </span>
-            </label>
-            <label className="pwf-build-field">
-              <span>镜像仓库</span>
-              <span className="pwf-build-control">
-                <span className="pwf-required" aria-hidden>
-                  *
+              </label>
+              <label className="build-cfg-field">
+                <span className="build-cfg-label">
+                  镜像仓库<span className="build-cfg-required">*</span>
                 </span>
-                <select
-                  className="input"
-                  aria-label="镜像仓库"
-                  value={draft.registry_id}
-                  onChange={(e) => setDraft((current) => ({ ...current, registry_id: e.target.value }))}
-                >
-                  <option value="">请选择镜像仓库</option>
-                  {registries.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.service_url || item.display_name || item.name}
-                    </option>
-                  ))}
-                </select>
-              </span>
-            </label>
-            {registries.length === 0 && !loading ? (
-              <p className="text-xs text-muted">工作空间还没有 Harbor 或 Docker Registry 密钥。</p>
-            ) : null}
+                <span className="build-cfg-control">
+                  <select
+                    className="input"
+                    aria-label="镜像仓库"
+                    value={draft.registry_id}
+                    disabled={loading}
+                    onChange={(e) => setDraft((current) => ({ ...current, registry_id: e.target.value }))}
+                  >
+                    <option value="">{loading ? "加载中…" : "请选择镜像仓库"}</option>
+                    {registries.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.service_url || item.display_name || item.name}
+                      </option>
+                    ))}
+                  </select>
+                  {registries.length === 0 && !loading ? (
+                    <span className="build-cfg-help">工作空间还没有 Harbor 或 Docker Registry 密钥，请先在密钥管理中添加。</span>
+                  ) : null}
+                </span>
+              </label>
+            </section>
 
-            <div className="pwf-build-field">
-              <span>项目组件</span>
-              <div className="pwf-chip-select">
-                {draft.project_builds.map((row) => {
-                  const project = projectById.get(row.project_id);
-                  return (
-                    <span key={row.project_id} className="pwf-chip">
-                      {project ? projectLabel(project) : row.project_id}
-                      <button type="button" aria-label="移除项目" onClick={() => removeProject(row.project_id)}>
-                        ×
-                      </button>
-                    </span>
-                  );
-                })}
-                <button type="button" className="pwf-chip-add" onClick={() => setPickerOpen((value) => !value)}>
-                  选择项目
-                </button>
-              </div>
-              {pickerOpen ? (
-                <div className="pwf-chip-menu">
-                  {projects.length === 0 ? <p className="text-xs text-muted">暂无关联项目</p> : null}
-                  {projects.map((project) => (
-                    <label key={project.id} className="pwf-check">
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(project.id)}
-                        onChange={(e) => (e.target.checked ? addProject(project.id) : removeProject(project.id))}
-                      />
-                      {projectLabel(project)}
-                    </label>
-                  ))}
+            <section className="build-cfg-section">
+              <header className="build-cfg-section-head">
+                <h3 className="build-cfg-section-title">
+                  项目组件
+                  {draft.project_builds.length > 0 ? (
+                    <span className="build-cfg-count">{draft.project_builds.length}</span>
+                  ) : null}
+                </h3>
+                {availableProjects.length > 0 ? (
+                  <select
+                    className="input build-cfg-add"
+                    aria-label="添加项目组件"
+                    value=""
+                    onChange={(e) => addProject(e.target.value)}
+                  >
+                    <option value="">+ 添加项目</option>
+                    {availableProjects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {projectLabel(project)}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+              </header>
+
+              {draft.project_builds.length === 0 ? (
+                <div className="build-cfg-empty">
+                  {projects.length === 0
+                    ? "产品还没有关联项目，请先在「项目配置」中绑定项目。"
+                    : "选择要构建的项目，每个项目会使用各自的 Jenkinsfile 模板构建镜像。"}
                 </div>
-              ) : null}
-            </div>
-
-            <div className="pwf-build-table-wrap">
-              <table className="pwf-build-table">
-                <thead>
-                  <tr>
-                    <th>项目组件</th>
-                    <th>Jenkinsfile 模板</th>
-                    <th>构建配置</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
+              ) : (
+                <ul className="build-cfg-list">
                   {draft.project_builds.map((row, index) => {
                     const project = projectById.get(row.project_id);
                     const names = new Set(jenkinsTemplates.map((item) => item.name));
                     if (row.build_name) names.add(row.build_name);
+                    const repo = repoLabel(row.git_url);
+                    const expanded = editing?.index === index ? editing.kind : null;
                     return (
-                      <tr key={row.project_id}>
-                        <td>{project ? projectLabel(project) : row.project_id}</td>
-                        <td>
+                      <li key={row.project_id} className={`build-cfg-item${expanded ? " is-expanded" : ""}`}>
+                        <div className="build-cfg-item-row">
+                          <div className="build-cfg-item-name">
+                            <span className="build-cfg-item-title">
+                              {project ? projectLabel(project) : row.project_id}
+                            </span>
+                            <span className="build-cfg-item-sub" title={row.git_url || undefined}>
+                              {repo ? `${repo} · ${row.branch || "main"}` : "未配置代码库"}
+                            </span>
+                          </div>
                           <select
-                            className="input"
+                            className="input build-cfg-template"
                             aria-label="Jenkinsfile 模板"
+                            title="Jenkinsfile 模板"
                             value={row.build_name}
                             onChange={(e) => patchRow(index, { build_name: e.target.value })}
                           >
-                            <option value="">请选择</option>
+                            <option value="">选择 Jenkinsfile 模板</option>
                             {[...names].map((item) => (
                               <option key={item} value={item}>
                                 {item}
                               </option>
                             ))}
                           </select>
-                        </td>
-                        <td>
-                          <div className="pwf-build-icons">
-                            <button type="button" aria-label="代码配置" onClick={() => setEditing({ index, kind: "code" })}>
-                              {"</>"}
-                            </button>
-                            <button type="button" aria-label="变量配置" onClick={() => setEditing({ index, kind: "vars" })}>
-                              节点
-                            </button>
-                            <button type="button" aria-label="脚本配置" onClick={() => setEditing({ index, kind: "script" })}>
-                              脚本
-                            </button>
+                          <div className="build-cfg-segment" role="group" aria-label="构建配置">
+                            {EDITORS.map((item) => (
+                              <button
+                                key={item.kind}
+                                type="button"
+                                className={`build-cfg-segment-btn${expanded === item.kind ? " is-active" : ""}`}
+                                aria-pressed={expanded === item.kind}
+                                aria-label={`${item.label}配置`}
+                                onClick={() => toggleEditor(index, item.kind)}
+                              >
+                                <EditorIcon kind={item.kind} />
+                                {item.label}
+                                {item.kind === "vars" && row.variables.length > 0 ? (
+                                  <span className="build-cfg-segment-badge">{row.variables.length}</span>
+                                ) : null}
+                              </button>
+                            ))}
                           </div>
-                        </td>
-                        <td>
-                          <button type="button" className="pwf-build-delete" onClick={() => removeProject(row.project_id)}>
-                            删除
+                          <button
+                            type="button"
+                            className="build-cfg-icon-btn is-danger"
+                            aria-label="移除项目"
+                            title="移除项目"
+                            onClick={() => removeProject(row.project_id)}
+                          >
+                            <IconTrash />
                           </button>
-                        </td>
-                      </tr>
+                        </div>
+                        {expanded ? <div className="build-cfg-editor">{renderEditor(index, expanded, row)}</div> : null}
+                      </li>
                     );
                   })}
-                  <tr>
-                    <td colSpan={4}>
-                      <div className="pwf-build-add-row">
-                        <select
-                          className="input"
-                          aria-label="添加项目组件"
-                          value={pendingProjectId}
-                          onChange={(e) => setPendingProjectId(e.target.value)}
-                        >
-                          <option value="">请选择</option>
-                          {projects
-                            .filter((project) => !selectedIds.has(project.id))
-                            .map((project) => (
-                              <option key={project.id} value={project.id}>
-                                {projectLabel(project)}
-                              </option>
-                            ))}
-                        </select>
-                        <button
-                          type="button"
-                          className="btn btn-secondary text-sm"
-                          disabled={!pendingProjectId}
-                          onClick={() => {
-                            addProject(pendingProjectId);
-                            setPendingProjectId("");
-                          }}
-                        >
-                          + 添加
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            {!canConfirm ? <p className="text-xs text-muted">任务名称和镜像仓库为必填。</p> : null}
-            {editing && editingRow ? (
-              <div className="pwf-build-inline">
-                <div className="pwf-build-inline-head">
-                  <strong>
-                    {editing.kind === "code" ? "代码配置" : editing.kind === "vars" ? "变量配置" : "脚本配置"}
-                  </strong>
-                  <button type="button" className="btn btn-secondary text-sm" onClick={() => setEditing(null)}>
-                    完成
-                  </button>
-                </div>
-                {editing.kind === "code" ? (
-                  <div className="stack-sm">
-                    <label className="field">
-                      <span className="text-xs text-muted">代码库</span>
-                      <input
-                        className="input"
-                        value={editingRow.git_url}
-                        onChange={(e) => patchRow(editing.index, { git_url: e.target.value })}
-                      />
-                    </label>
-                    <label className="field">
-                      <span className="text-xs text-muted">仓库密钥</span>
-                      <select
-                        className="input"
-                        aria-label="仓库密钥"
-                        value={selectedGitSecretId}
-                        onChange={(e) => patchRow(editing.index, { secret_id: e.target.value })}
-                      >
-                        {!selectedGitSecretId ? <option value="">请选择</option> : null}
-                        {gitSecrets.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {secretName(item)}
-                          </option>
-                        ))}
-                        {selectedGitSecretId && !gitSecrets.some((item) => item.id === selectedGitSecretId) ? (
-                          <option value={selectedGitSecretId}>{selectedGitSecretId}</option>
-                        ) : null}
-                      </select>
-                    </label>
-                    <BuildCodeRepoFields
-                      workspaceId={workspaceId}
-                      row={{ ...editingRow, secret_id: selectedGitSecretId }}
-                      gitSecrets={gitSecrets}
-                      selectedSecretId={selectedGitSecretId}
-                      onPatch={(patch) => patchRow(editing.index, patch)}
-                    />
-                  </div>
-                ) : null}
-                {editing.kind === "vars" ? (
-                  <div className="stack-sm">
-                    {editingRow.variables.map((variable, varIndex) => (
-                      <div key={`${variable.key}-${varIndex}`} className="pwf-build-var-row">
-                        <input
-                          className="input"
-                          aria-label="变量名"
-                          placeholder="变量名"
-                          value={variable.key}
-                          onChange={(e) => {
-                            const variables = editingRow.variables.map((item, i) =>
-                              i === varIndex ? { ...item, key: e.target.value } : item,
-                            );
-                            patchRow(editing.index, { variables });
-                          }}
-                        />
-                        <input
-                          className="input"
-                          aria-label="变量值"
-                          placeholder="变量值"
-                          value={variable.value}
-                          onChange={(e) => {
-                            const variables = editingRow.variables.map((item, i) =>
-                              i === varIndex ? { ...item, value: e.target.value } : item,
-                            );
-                            patchRow(editing.index, { variables });
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-ghost text-xs"
-                          onClick={() =>
-                            patchRow(editing.index, {
-                              variables: editingRow.variables.filter((_, i) => i !== varIndex),
-                            })
-                          }
-                        >
-                          删除
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      className="btn btn-secondary text-sm"
-                      onClick={() =>
-                        patchRow(editing.index, { variables: [...editingRow.variables, { key: "", value: "" }] })
-                      }
-                    >
-                      + 添加变量
-                    </button>
-                  </div>
-                ) : null}
-                {editing.kind === "script" ? (
-                  <label className="field">
-                    <span className="text-xs text-muted">构建脚本</span>
-                    <textarea
-                      className="input"
-                      rows={8}
-                      value={editingRow.script}
-                      onChange={(e) => patchRow(editing.index, { script: e.target.value })}
-                    />
-                  </label>
-                ) : null}
-              </div>
-            ) : null}
+                </ul>
+              )}
+            </section>
           </div>
         ) : null}
 
