@@ -14,6 +14,8 @@ import type {
   WorkspaceSprintProcessTemplateVM,
   SprintStage,
   WorkItemCardVM,
+  WorkItemPriority,
+  WorkItemType,
 } from "@sparkops/contracts/product";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
@@ -26,6 +28,12 @@ import { buildStageMigrations } from "./sprint-stage-migrations";
 import { isValidStageKey, normalizeStageForSave, withSortOrder } from "./sprint-process-templates";
 import { SprintWorkItemExecuteModal } from "./SprintWorkItemExecuteModal";
 import { PM_PROVIDER_LABEL } from "./pm-labels";
+import { WorkItemAttributeFields } from "./WorkItemAttributeFields";
+import {
+  DEFAULT_WORK_ITEM_PRIORITY,
+  DEFAULT_WORK_ITEM_TYPE,
+  workItemMetaParts,
+} from "./work-item-attributes";
 import { WorkItemCardMenu } from "./WorkItemCardMenu";
 import { WorkItemDetailDrawer } from "./WorkItemDetailDrawer";
 import { WorkItemPmChip } from "./WorkItemPmChip";
@@ -41,13 +49,6 @@ const STATUS_LABEL: Record<string, string> = {
   active: "进行中",
   completed: "已完成",
   archived: "已归档",
-};
-
-const PRIORITY_LABEL: Record<string, string> = {
-  critical: "紧急",
-  high: "高",
-  medium: "中",
-  low: "低",
 };
 
 const RUN_STATUS_LABEL: Record<string, string> = {
@@ -68,15 +69,6 @@ function runStatusClass(status?: string) {
       return "";
   }
 }
-
-const WORK_ITEM_TYPE_LABEL: Record<string, string> = {
-  story: "需求",
-  task: "任务",
-  bug: "缺陷",
-  epic: "史诗",
-  release: "发布",
-  custom: "自定义",
-};
 
 function sprintProgressPercent(done?: number, total?: number) {
   if (!total || !done) return 0;
@@ -107,6 +99,8 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   const [itemOpen, setItemOpen] = useState(false);
   const [itemTitle, setItemTitle] = useState("");
   const [itemStageId, setItemStageId] = useState("");
+  const [itemType, setItemType] = useState<WorkItemType>(DEFAULT_WORK_ITEM_TYPE);
+  const [itemPriority, setItemPriority] = useState<WorkItemPriority>(DEFAULT_WORK_ITEM_PRIORITY);
   const [workflows, setWorkflows] = useState<ProductWorkflowVM[]>([]);
   const [pmImportOpen, setPmImportOpen] = useState(false);
   const [pmProvider, setPmProvider] = useState<PmProvider>("jira");
@@ -434,8 +428,10 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
       await product.createWorkItem(workspaceId, productId, selectedId, {
         stage_id: itemStageId,
         title: itemTitle.trim(),
-        type: "story",
-        priority: "medium",
+        type: itemType,
+        priority: itemPriority,
+        project_ids: [],
+        labels: [],
       });
       setItemOpen(false);
       setItemTitle("");
@@ -485,6 +481,8 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   function openCreateItem(stageId: string) {
     setItemStageId(stageId);
     setItemTitle("");
+    setItemType(DEFAULT_WORK_ITEM_TYPE);
+    setItemPriority(DEFAULT_WORK_ITEM_PRIORITY);
     setItemOpen(true);
   }
 
@@ -528,23 +526,19 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
 
   function renderCard(item: WorkItemCardVM, _columns: SprintBoardColumnVM[]) {
     const runStatus = item.delivery?.last_workflow_status;
+    const metaParts = workItemMetaParts(item);
     const canManageCard =
       board?.sprint.status !== "archived" && board?.sprint.status !== "completed";
     return (
       <article key={item.id} className="sprint-board-card">
         <div className="sprint-board-card-top">
-          <div className="sprint-board-card-head">
-            <span className="sprint-board-card-type">
-              {WORK_ITEM_TYPE_LABEL[item.type] ?? item.type}
-              <span className="sprint-board-card-sep" aria-hidden>·</span>
-              <span className={`sprint-board-card-priority is-${item.priority}`}>
-                {PRIORITY_LABEL[item.priority] ?? item.priority}优先级
-              </span>
-            </span>
-            {runStatus ? (
-              <span className={runStatusClass(runStatus)}>{RUN_STATUS_LABEL[runStatus] ?? runStatus}</span>
-            ) : null}
-          </div>
+          <button
+            type="button"
+            className="sprint-board-card-title sprint-board-card-title-btn"
+            onClick={() => openWorkItemDetail(item)}
+          >
+            {item.title}
+          </button>
           {canManageCard ? (
             <WorkItemCardMenu
               item={item}
@@ -563,13 +557,18 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
             />
           ) : null}
         </div>
-        <button
-          type="button"
-          className="sprint-board-card-title sprint-board-card-title-btn"
-          onClick={() => openWorkItemDetail(item)}
-        >
-          {item.title}
-        </button>
+        {metaParts.length > 0 || runStatus ? (
+          <div className="sprint-board-card-meta">
+            {metaParts.map((part) => (
+              <span key={part.key} className={`sprint-board-card-tag is-${part.tone}`}>
+                {part.label}
+              </span>
+            ))}
+            {runStatus ? (
+              <span className={runStatusClass(runStatus)}>{RUN_STATUS_LABEL[runStatus] ?? runStatus}</span>
+            ) : null}
+          </div>
+        ) : null}
         {canManageCard || item.external?.issue_key ? (
           <WorkItemPmChip
             external={item.external}
@@ -1045,7 +1044,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
         title="添加工作项"
         description={createItemStageName ? `添加到「${createItemStageName}」列` : undefined}
         footer={
-          <>
+          <div className="modal-footer-actions">
             <button type="button" className="btn-secondary text-sm" disabled={busy} onClick={() => setItemOpen(false)}>
               取消
             </button>
@@ -1057,25 +1056,37 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
             >
               {busy ? "添加中…" : "添加"}
             </button>
-          </>
+          </div>
         }
       >
-        <label className="stack-xs">
-          <span className="text-sm">标题</span>
-          <input
-            className="input"
-            value={itemTitle}
-            onChange={(e) => setItemTitle(e.target.value)}
-            placeholder="工作项标题"
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && itemTitle.trim() && itemStageId && !busy) {
-                e.preventDefault();
-                void onCreateWorkItem();
-              }
-            }}
+        <div className="sprint-create">
+          <label className="sprint-create-field">
+            <span className="sprint-create-label">
+              标题<span className="sprint-create-required" aria-hidden>*</span>
+            </span>
+            <input
+              className="input"
+              value={itemTitle}
+              onChange={(e) => setItemTitle(e.target.value)}
+              placeholder="要做的事情"
+              autoFocus
+              maxLength={512}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && itemTitle.trim() && itemStageId && !busy) {
+                  e.preventDefault();
+                  void onCreateWorkItem();
+                }
+              }}
+            />
+          </label>
+          <WorkItemAttributeFields
+            type={itemType}
+            priority={itemPriority}
+            disabled={busy}
+            onTypeChange={setItemType}
+            onPriorityChange={setItemPriority}
           />
-        </label>
+        </div>
       </Modal>
 
       {executeContext ? (

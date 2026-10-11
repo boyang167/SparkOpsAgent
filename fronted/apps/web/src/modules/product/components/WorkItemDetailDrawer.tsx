@@ -10,11 +10,14 @@ import type {
   SprintStatus,
   WorkItemCardVM,
   WorkItemExecutionVM,
+  WorkItemPriority,
+  WorkItemType,
   WorkItemVM,
 } from "@sparkops/contracts/product";
 import { Drawer } from "@/components/ui/Drawer";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { WorkItemAssigneeField } from "./WorkItemAssigneeField";
+import { WorkItemAttributeFields } from "./WorkItemAttributeFields";
 import { WorkItemPmChip } from "./WorkItemPmChip";
 import { WorkItemPmLinkModal } from "./WorkItemPmLinkModal";
 
@@ -170,6 +173,21 @@ export function WorkItemDetailDrawer({
     }
   }
 
+  async function saveAttributes(patch: { type?: WorkItemType; priority?: WorkItemPriority }) {
+    if (!item || !detail) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await product.updateWorkItem(workspaceId, productId, item.id, patch);
+      setDetail({ ...detail, ...patch });
+      onChanged();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "保存失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveAssignee(nextId: string | null, nextName: string) {
     if (!item || !detail) return;
     const currentId = detail.assignee_id ?? "";
@@ -234,6 +252,7 @@ export function WorkItemDetailDrawer({
     [view, stages],
   );
 
+  const readOnly = sprintStatus === "archived" || sprintStatus === "completed";
   const stageBindings = selectedStage?.workflows ?? [];
   const canExecute = sprintStatus === "active" && stageBindings.length > 0;
   const isRunning = view?.delivery?.last_workflow_status === "running";
@@ -279,9 +298,15 @@ export function WorkItemDetailDrawer({
             {currentStage ? (
               <span className="work-item-detail-stage-badge">{currentStage.name}</span>
             ) : null}
-            <span className="text-xs text-muted-foreground uppercase">{view.type}</span>
-            <span className="text-xs text-muted-foreground">{view.priority}</span>
           </div>
+
+          <WorkItemAttributeFields
+            type={view.type}
+            priority={view.priority}
+            disabled={busy || readOnly}
+            onTypeChange={(value) => void saveAttributes({ type: value })}
+            onPriorityChange={(value) => void saveAttributes({ priority: value })}
+          />
 
           <div className="work-item-detail-fields grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="stack-xs">
