@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/query"
@@ -86,12 +89,20 @@ func (m *Module) Register(c *appctx.Container) error {
 	createProjectVersion := command.NewCreateProjectVersionHandler(repo, versionRepo, generateTemplates)
 	c.VersionCreator = portadapter.NewVersionCreatorPort(createProjectVersion)
 	c.ProjectVersionReader = portadapter.NewProjectVersionReaderPort(versionRepo)
+	archiveCoordinator := command.NewArchiveCoordinator(repo, func() appctx.ProjectTeardown { return c.ProjectTeardown }, func(msg string, err error) {
+		if c.Logger != nil {
+			c.Logger.Warn(msg, zap.Error(err))
+		}
+	})
+	if c.EventBus != nil {
+		c.EventBus.Subscribe(deliveryevent.DeployCompletedName, archiveCoordinator.HandleDeployCompleted)
+	}
 	listProjectVersions := query.NewListProjectVersionsHandler(versionRepo, repo, wsChecker)
 	getProjectVersion := query.NewGetProjectVersionHandler(versionRepo, repo, wsChecker)
 	handler := wshttp.NewHandler(
 		command.NewCreateProjectHandler(repo, memberRepo, wsChecker, clusterChecker, productChecker, c.PolicyEngine, c.EventBus),
 		command.NewUpdateProjectHandler(repo, wsChecker, clusterChecker, productChecker),
-		command.NewArchiveProjectHandler(repo, wsChecker),
+		command.NewArchiveProjectHandler(repo, wsChecker, archiveCoordinator),
 		query.NewListProjectsHandler(repo, memberRepo, wsChecker, c.PermissionChecker, memberLookup),
 		query.NewGetProjectHandler(repo, memberRepo, wsChecker, c.PermissionChecker, memberLookup),
 		command.NewCreateTemplateHandler(templateRepo, wsChecker),
@@ -151,6 +162,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, projectRead, handler.ReviewProject)
 	c.Engine.DELETE("/api/v1/projects/:projectId",
 		auth, ws, wsMember, projectAdmin, handler.ArchiveProject)
+	c.Engine.POST("/api/v1/projects/:projectId/archive",
+		auth, ws, wsMember, projectAdmin, handler.ArchiveProjectWithTeardown)
 	c.Engine.GET("/api/v1/projects/:projectId/members",
 		auth, ws, wsMember, projectRead, handler.ListProjectMembers)
 	c.Engine.POST("/api/v1/projects/:projectId/members",
@@ -188,7 +201,28 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.POST("/api/v1/workspaces/:wsId/git/file",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetGitFileContent)
 
+	startArchiveResumer(c, archiveCoordinator)
 	return nil
+}
+
+func startArchiveResumer(c *appctx.Container, coordinator *command.ArchiveCoordinator) {
+	if c.Context == nil || c.Config == nil || c.Config.Deploy.ReconcileInterval <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(c.Config.Deploy.ReconcileInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-c.Context.Done():
+				return
+			case <-ticker.C:
+				if err := coordinator.ResumeAll(c.Context); err != nil && c.Logger != nil {
+					c.Logger.Warn("resume archiving projects failed", zap.Error(err))
+				}
+			}
+		}
+	}()
 }
 
 func syncExistingProjectPolicies(db *gorm.DB, engine policy.Engine) error {

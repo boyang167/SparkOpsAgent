@@ -606,11 +606,40 @@ func (h *Handler) ArchiveProject(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
 		return
 	}
-	if err := h.archive.Handle(c.Request.Context(), wsID, memberID, projectID); err != nil {
+	if err := h.archive.HandleLegacy(c.Request.Context(), wsID, memberID, projectID); err != nil {
 		httpx.HandleError(c, err)
 		return
 	}
 	httpx.OK(c, gin.H{"deleted": true})
+}
+
+func (h *Handler) ArchiveProjectWithTeardown(c *gin.Context) {
+	memberID, ok := authn.MemberIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "AUTH_UNAUTHORIZED", "authorization required", http.StatusUnauthorized)
+		return
+	}
+	wsID, ok := httpx.WorkspaceIDFromContext(c)
+	if !ok {
+		httpx.Fail(c, "TENANT_WORKSPACE_REQUIRED", "workspace required", http.StatusBadRequest)
+		return
+	}
+	projectID, err := kernel.ParseProjectID(c.Param("projectId"))
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid project id", http.StatusBadRequest)
+		return
+	}
+	var input command.ArchiveInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+	result, err := h.archive.Handle(c.Request.Context(), wsID, memberID, projectID, input)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, result)
 }
 
 type createTemplateRequest struct {
