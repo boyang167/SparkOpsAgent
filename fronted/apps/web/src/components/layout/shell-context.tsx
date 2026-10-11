@@ -1,6 +1,15 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  Fragment,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  useTransition,
+} from "react";
+import { useRouter } from "next/navigation";
 import type { WorkspaceEntitlementsVM } from "@sparkops/contracts/platform";
 import { platform } from "@sparkops/web-sdk";
 import { DEFAULT_ENTITLEMENTS } from "@/components/layout/entitlements";
@@ -15,6 +24,9 @@ export interface ShellContextValue {
   isSuperAdmin: boolean;
   entitlements: WorkspaceEntitlementsVM;
   entitlementsLoading: boolean;
+  refreshKey: number;
+  refreshing: boolean;
+  refreshPage: () => void;
 }
 
 const ShellContext = createContext<ShellContextValue>({
@@ -22,7 +34,12 @@ const ShellContext = createContext<ShellContextValue>({
   isSuperAdmin: false,
   entitlements: DEFAULT_ENTITLEMENTS,
   entitlementsLoading: false,
+  refreshKey: 0,
+  refreshing: false,
+  refreshPage: () => {},
 });
+
+const MIN_REFRESH_FEEDBACK_MS = 600;
 
 export function ShellProvider({
   workspaceId,
@@ -37,6 +54,20 @@ export function ShellProvider({
 }) {
   const [entitlements, setEntitlements] = useState<WorkspaceEntitlementsVM>(DEFAULT_ENTITLEMENTS);
   const [entitlementsLoading, setEntitlementsLoading] = useState(false);
+  const router = useRouter();
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [isPending, startTransition] = useTransition();
+  const [feedbackActive, setFeedbackActive] = useState(false);
+
+  const refreshPage = useCallback(() => {
+    setFeedbackActive(true);
+    window.setTimeout(() => setFeedbackActive(false), MIN_REFRESH_FEEDBACK_MS);
+    startTransition(() => {
+      router.refresh();
+      setRefreshKey((key) => key + 1);
+    });
+    if (workspaceId) notifyEntitlementsUpdated();
+  }, [router, workspaceId]);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -83,6 +114,9 @@ export function ShellProvider({
         isSuperAdmin,
         entitlements,
         entitlementsLoading,
+        refreshKey,
+        refreshing: isPending || feedbackActive,
+        refreshPage,
       }}
     >
       {children}
@@ -92,6 +126,12 @@ export function ShellProvider({
 
 export function useShellContext() {
   return useContext(ShellContext);
+}
+
+/** Remounts page content on refresh so client panels re-run their data fetching. */
+export function RefreshBoundary({ children }: { children: React.ReactNode }) {
+  const { refreshKey } = useShellContext();
+  return <Fragment key={refreshKey}>{children}</Fragment>;
 }
 
 export function notifyEntitlementsUpdated() {

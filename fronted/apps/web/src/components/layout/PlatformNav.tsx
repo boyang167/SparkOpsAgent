@@ -47,9 +47,9 @@ const icons = {
   ),
   "ops-infra": (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M4 7h10M18 7h2M4 17h4M12 17h8" strokeLinecap="round" />
-      <circle cx="16" cy="7" r="2" />
-      <circle cx="10" cy="17" r="2" />
+      <path d="M9 2v5M15 2v5" strokeLinecap="round" />
+      <path d="M6 7h12v4a6 6 0 01-12 0V7z" strokeLinejoin="round" />
+      <path d="M12 17v5" strokeLinecap="round" />
     </svg>
   ),
   "plugin-kubernetes": (

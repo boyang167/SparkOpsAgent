@@ -3,42 +3,21 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { resolveConsoleKind, type ConsoleKind } from "@/components/layout/nav-tree";
-
-interface ConsoleOption {
-  kind: ConsoleKind;
-  label: string;
-  href: string;
-}
+import {
+  buildConsoleOptions,
+  CONSOLE_LABELS,
+  resolveConsoleKind,
+} from "@/components/layout/nav-tree";
 
 interface ConsoleSwitcherProps {
   isSuperAdmin: boolean;
   canManageAdmin: boolean;
 }
 
-const CONSOLE_LABELS: Record<ConsoleKind, string> = {
-  business: "业务控制台",
-  admin: "管理控制台",
-  platform: "平台运营中心",
-};
-
-function buildOptions(isSuperAdmin: boolean, canManageAdmin: boolean): ConsoleOption[] {
-  const options: ConsoleOption[] = [
-    { kind: "business", label: CONSOLE_LABELS.business, href: "/dashboard/workplace" },
-  ];
-  if (canManageAdmin || isSuperAdmin) {
-    options.push({ kind: "admin", label: CONSOLE_LABELS.admin, href: "/admin/members" });
-  }
-  if (isSuperAdmin) {
-    options.push({ kind: "platform", label: CONSOLE_LABELS.platform, href: "/platform/accounts" });
-  }
-  return options;
-}
-
 export function ConsoleSwitcher({ isSuperAdmin, canManageAdmin }: ConsoleSwitcherProps) {
   const pathname = usePathname();
   const current = resolveConsoleKind(pathname);
-  const options = buildOptions(isSuperAdmin, canManageAdmin);
+  const options = buildConsoleOptions(isSuperAdmin, canManageAdmin);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 

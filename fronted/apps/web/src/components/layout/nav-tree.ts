@@ -21,7 +21,7 @@ export type ConsoleKind = "business" | "admin" | "platform";
 /** 业务控制台顶层入口，不归入任何分组 */
 export const WORKPLACE_NAV_ITEM: NavLeafConfig = { href: "/dashboard/workplace", label: "工作台" };
 
-/** 业务控制台按交付生命周期分组：构建 → 交付 → 运行 → 观测，设置沉底 */
+/** 业务控制台按交付生命周期分组：构建 → 交付 → 运行 → 观测，集成沉底 */
 export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
   {
     id: "application",
@@ -59,7 +59,7 @@ export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
   },
   {
     id: "ops-infra",
-    label: "设置",
+    label: "集成",
     defaultCollapsed: true,
     items: [
       { href: "/config/secrets", label: "密钥", entitlement: "delivery" },
@@ -140,6 +140,34 @@ export function resolveConsoleKind(pathname: string): ConsoleKind {
   if (pathname.startsWith("/admin")) return "admin";
   if (pathname.startsWith("/platform")) return "platform";
   return "business";
+}
+
+export const CONSOLE_LABELS: Record<ConsoleKind, string> = {
+  business: "业务控制台",
+  admin: "管理控制台",
+  platform: "平台运营中心",
+};
+
+export interface ConsoleOption {
+  kind: ConsoleKind;
+  label: string;
+  href: string;
+}
+
+export function buildConsoleOptions(
+  isSuperAdmin: boolean,
+  canManageAdmin: boolean,
+): ConsoleOption[] {
+  const options: ConsoleOption[] = [
+    { kind: "business", label: CONSOLE_LABELS.business, href: "/dashboard/workplace" },
+  ];
+  if (canManageAdmin || isSuperAdmin) {
+    options.push({ kind: "admin", label: CONSOLE_LABELS.admin, href: "/admin/members" });
+  }
+  if (isSuperAdmin) {
+    options.push({ kind: "platform", label: CONSOLE_LABELS.platform, href: "/platform/accounts" });
+  }
+  return options;
 }
 
 export function filterBusinessNavGroups(options: {

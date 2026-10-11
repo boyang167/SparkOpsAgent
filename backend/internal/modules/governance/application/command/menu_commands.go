@@ -323,8 +323,8 @@ type defaultMenuGroup struct {
 
 const (
 	settingsGroupID    = "ops-infra"
-	settingsGroupTitle = "设置"
-	// settingsGroupSort keeps 设置 below plugin roots, which are created with sort 90.
+	settingsGroupTitle = "集成"
+	// settingsGroupSort keeps 集成 below plugin roots, which are created with sort 90.
 	settingsGroupSort = 100
 )
 
@@ -393,7 +393,7 @@ var enterpriseMenuTitleByPath = map[string]string{
 	"/config/webhooks":       "外部集成",
 }
 
-// ensureSettingsGroup finds or creates the 设置 root group and pins it below plugin roots.
+// ensureSettingsGroup finds or creates the 集成 root group and pins it below plugin roots.
 func (h *SeedWorkspaceMenusHandler) ensureSettingsGroup(ctx context.Context, workspaceID kernel.WorkspaceID) (*model.Menu, error) {
 	group, err := h.menus.FindGroupMenu(ctx, workspaceID, settingsGroupID)
 	if err != nil {
@@ -423,7 +423,7 @@ func (h *SeedWorkspaceMenusHandler) ensureSettingsGroup(ctx context.Context, wor
 	return group, nil
 }
 
-// repairSecretConfigMenu moves 「密钥」 from 交付 into 设置 as its first item.
+// repairSecretConfigMenu moves 「密钥」 from 交付 into 集成 as its first item.
 func (h *SeedWorkspaceMenusHandler) repairSecretConfigMenu(ctx context.Context, workspaceID kernel.WorkspaceID) error {
 	menu, err := h.menus.FindByPath(ctx, workspaceID, "/config/secrets")
 	if err != nil {

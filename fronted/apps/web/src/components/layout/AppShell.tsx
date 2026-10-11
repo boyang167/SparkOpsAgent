@@ -4,14 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { MeVM } from "@sparkops/contracts/identity";
 import type { OrganizationVM, WorkspaceVM } from "@sparkops/contracts/tenant";
-import { ConsoleSwitcher } from "@/components/layout/ConsoleSwitcher";
 import { RouteVisitRecorder } from "@/components/layout/RouteVisitRecorder";
 import { SidebarWorkspaceSwitcher } from "@/components/layout/SidebarWorkspaceSwitcher";
-import { ShellProvider } from "@/components/layout/shell-context";
+import { RefreshBoundary, ShellProvider } from "@/components/layout/shell-context";
 import { PlatformShell } from "@/components/layout/PlatformShell";
 import { TopBarTools } from "@/components/layout/TopBarTools";
 import type { ConsoleKind } from "@/components/layout/nav-tree";
-import { LogoutButton } from "@/modules/identity/components/LogoutButton";
 import { resolveConsoleKind } from "@/components/layout/nav-tree";
 
 interface ProjectOption {
@@ -101,17 +99,14 @@ export function AppShell({
 
         <div className="app-main">
           <header className="topbar">
-            <div className="topbar-leading">
-              <ConsoleSwitcher isSuperAdmin={isSuperAdmin} canManageAdmin={canManageAdmin} />
-            </div>
+            <div className="topbar-leading" />
 
             <div className="topbar-actions">
               <TopBarTools />
 
-              {session ? <span className="topbar-divider" aria-hidden /> : null}
-
               {session ? (
                 <>
+                  <span className="topbar-divider" aria-hidden />
                   <Link
                     href="/notifications"
                     className="topbar-tool-btn"
@@ -123,22 +118,23 @@ export function AppShell({
                       <path d="M13.7 21a2 2 0 01-3.4 0" strokeLinecap="round" />
                     </svg>
                   </Link>
-                  <Link href="/settings/profile" className="user-pill hover:opacity-90 transition-opacity">
+                  <Link
+                    href="/settings/profile"
+                    className="user-pill hover:opacity-90 transition-opacity"
+                    title={`${session.display_name} · ${session.email}`}
+                    aria-label={session.display_name}
+                  >
                     <span className="user-avatar">{userInitial(session.email)}</span>
-                    <div className="min-w-0 hidden sm:block">
-                      <p className="text-sm font-medium truncate">{session.display_name}</p>
-                      <p className="text-xs text-muted truncate">{session.email}</p>
-                    </div>
                   </Link>
                 </>
               ) : null}
-
-              {session ? <LogoutButton /> : null}
             </div>
           </header>
 
           <main className="page-content">
-            <div className="page-canvas">{children}</div>
+            <div className="page-canvas">
+              <RefreshBoundary>{children}</RefreshBoundary>
+            </div>
           </main>
         </div>
         </div>

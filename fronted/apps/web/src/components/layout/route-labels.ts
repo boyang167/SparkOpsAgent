@@ -16,8 +16,8 @@ const STATIC_RULES: RouteLabelRule[] = [
   { prefix: "/dashboard/workplace", label: "工作台", group: "工作台", exact: true },
   { prefix: "/dashboard/module-unavailable", label: "模块不可用", group: "工作台", exact: true },
   { prefix: "/projects/create", label: "新建项目", group: "项目", exact: true },
-  { prefix: "/settings/profile", label: "个人资料", group: "设置", exact: true },
-  { prefix: "/settings/rbac", label: "权限说明", group: "设置", exact: true },
+  { prefix: "/settings/profile", label: "个人设置", group: "账号", exact: true },
+  { prefix: "/settings/rbac", label: "权限说明", group: "账号", exact: true },
   { prefix: "/notifications", label: "消息中心", group: "概览", exact: true },
 ];
 

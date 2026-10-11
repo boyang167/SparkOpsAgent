@@ -370,6 +370,7 @@ export function PlatformOrganizationsPanel({ variant = "platform" }: PlatformOrg
   ];
 
   return (
+    <>
     <div className={isPlatform ? "platform-orgs-page" : "stack-lg"}>
       {!isPlatform ? (
         <>

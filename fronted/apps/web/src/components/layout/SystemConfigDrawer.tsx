@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Drawer } from "@/components/ui/Drawer";
 import {
+  isPresetActive,
   PRIMARY_PRESETS,
   THEME_PRESETS,
   type CardStyle,
@@ -50,7 +51,7 @@ export function SystemConfigDrawer({ open, onClose }: SystemConfigDrawerProps) {
     <Drawer
       open={open}
       onClose={onClose}
-      title="系统配置"
+      title="界面偏好"
       panelClassName="drawer-panel--config"
       tabs={tabs}
       footer={
@@ -124,7 +125,7 @@ export function SystemConfigDrawer({ open, onClose }: SystemConfigDrawerProps) {
                 <input
                   type="range"
                   min={0}
-                  max={1}
+                  max={1.5}
                   step={0.05}
                   value={config.borderRadius}
                   onChange={(e) => patchConfig({ borderRadius: Number(e.target.value) })}
@@ -165,15 +166,12 @@ export function SystemConfigDrawer({ open, onClose }: SystemConfigDrawerProps) {
                 onChange={(e) => patchConfig({ sidebarDark: e.target.checked })}
               />
             </label>
-          </section>
-          <section>
-            <h3 className="config-section-title">标签栏</h3>
             <label className="config-switch-row">
-              <span>展示图标</span>
+              <span>显示菜单图标</span>
               <input
                 type="checkbox"
-                checked={config.showTabIcons}
-                onChange={(e) => patchConfig({ showTabIcons: e.target.checked })}
+                checked={config.showNavIcons}
+                onChange={(e) => patchConfig({ showNavIcons: e.target.checked })}
               />
             </label>
           </section>
@@ -182,17 +180,21 @@ export function SystemConfigDrawer({ open, onClose }: SystemConfigDrawerProps) {
 
       {tab === "presets" ? (
         <div className="config-section stack-sm">
-          {THEME_PRESETS.map((preset) => (
-            <button
-              key={preset.name}
-              type="button"
-              className="config-preset-card"
-              onClick={() => patchConfig(preset.config)}
-            >
-              <span className="font-medium">{preset.name}</span>
-              <span className="text-sm text-muted">一键应用常用组合</span>
-            </button>
-          ))}
+          {THEME_PRESETS.map((preset) => {
+            const active = isPresetActive(config, preset.config);
+            return (
+              <button
+                key={preset.name}
+                type="button"
+                className={active ? "config-preset-card is-active" : "config-preset-card"}
+                aria-pressed={active}
+                onClick={() => patchConfig(preset.config)}
+              >
+                <span className="font-medium">{preset.name}</span>
+                <span className="text-sm text-muted">{preset.description}</span>
+              </button>
+            );
+          })}
         </div>
       ) : null}
 

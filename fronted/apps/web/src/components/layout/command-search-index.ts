@@ -32,9 +32,10 @@ export function buildQuickActions(options: {
     },
     {
       href: "/settings/profile",
-      label: "个人资料",
+      label: "个人设置",
       group: "快捷操作",
       kind: "action",
+      keywords: "profile account password logout 个人资料 密码 退出 控制台",
     },
     {
       href: "/notifications",

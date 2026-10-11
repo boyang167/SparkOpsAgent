@@ -1,22 +1,20 @@
 import { redirect } from "next/navigation";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { ProfileSettings } from "@/modules/identity/components/ProfileSettings";
-import { loadSession } from "@/server/loaders/session";
+import { loadConsoleAccess } from "@/server/loaders/console-access";
 
 export default async function ProfileSettingsPage() {
-  const session = await loadSession();
+  const { session, isSuperAdmin, canManageAdmin } = await loadConsoleAccess();
   if (!session) {
     redirect("/login");
   }
 
   return (
     <div className="stack-lg">
-      <PageHeader
-        eyebrow="Settings"
-        title="个人设置"
-        description="管理显示名称与登录密码"
+      <ProfileSettings
+        session={session}
+        isSuperAdmin={isSuperAdmin}
+        canManageAdmin={canManageAdmin}
       />
-      <ProfileSettings session={session} />
     </div>
   );
 }
