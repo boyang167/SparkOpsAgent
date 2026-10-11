@@ -27509,3 +27509,157 @@ textarea.input {
 .df-viewer-state.is-error span {
   color: var(--danger);
 }
+
+/* New sprint modal */
+.sprint-create {
+  display: flex;
+  flex-direction: column;
+  gap: 1.125rem;
+}
+
+.sprint-create-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sprint-create-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.sprint-create-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sprint-create-required {
+  margin-left: 0.125rem;
+  color: var(--danger);
+  font-weight: 500;
+}
+
+.sprint-create-optional {
+  margin-left: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.sprint-create-goal {
+  min-height: 4.25rem;
+  resize: none;
+  line-height: 1.5;
+}
+
+.sprint-create-link {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  transition: color var(--motion-duration) var(--motion-ease);
+}
+
+.sprint-create-link:hover {
+  color: var(--text);
+}
+
+.sprint-create-hint {
+  margin: 0;
+  padding: 0.75rem 0.875rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.sprint-create-templates {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+
+.sprint-create-tpl {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-duration) var(--motion-ease),
+    background var(--motion-duration) var(--motion-ease),
+    box-shadow var(--motion-duration) var(--motion-ease);
+}
+
+.sprint-create-tpl:hover {
+  background: var(--surface-muted);
+}
+
+.sprint-create-tpl.is-selected {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.sprint-create-tpl:focus-visible {
+  outline: 2px solid var(--border-strong);
+  outline-offset: 2px;
+}
+
+.sprint-create-tpl-radio {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.125rem;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+  transition:
+    border-color var(--motion-duration) var(--motion-ease),
+    border-width var(--motion-duration) var(--motion-ease);
+}
+
+.sprint-create-tpl.is-selected .sprint-create-tpl-radio {
+  border: 5px solid var(--primary);
+}
+
+.sprint-create-tpl-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.sprint-create-tpl-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.sprint-create-tpl-tag {
+  padding: 0.0625rem 0.4375rem;
+  border-radius: var(--radius-pill);
+  background: var(--primary-soft);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.sprint-create-tpl-stages {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

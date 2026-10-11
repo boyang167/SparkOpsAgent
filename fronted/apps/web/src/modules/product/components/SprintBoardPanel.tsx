@@ -98,6 +98,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   const [createName, setCreateName] = useState("");
   const [createGoal, setCreateGoal] = useState("");
   const [createTemplateId, setCreateTemplateId] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
   const [wsProcessTemplates, setWsProcessTemplates] = useState<WorkspaceSprintProcessTemplateVM[]>([]);
   const [createTemplatesLoading, setCreateTemplatesLoading] = useState(false);
   const [stagesEditOpen, setStagesEditOpen] = useState(false);
@@ -231,6 +232,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   useEffect(() => {
     if (!createOpen) return;
     let cancelled = false;
+    setCreateError(null);
     setCreateTemplatesLoading(true);
     void product
       .listWorkspaceSprintProcessTemplates(workspaceId)
@@ -323,7 +325,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   async function onCreateSprint() {
     if (!createName.trim()) return;
     setBusy(true);
-    setError(null);
+    setCreateError(null);
     try {
       const processId = createTemplateId ? await resolveProcessIdForTemplate(createTemplateId) : undefined;
       const created = await product.createSprint(workspaceId, productId, {
@@ -338,7 +340,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
       await loadSprints();
       setSelectedId(created.id);
     } catch (err) {
-      setError(err instanceof BffError ? err.message : "创建迭代失败");
+      setCreateError(err instanceof BffError ? err.message : "创建迭代失败");
     } finally {
       setBusy(false);
     }
@@ -819,52 +821,93 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="新建迭代"
-        description="为产品创建一次交付周期，例如 v3.2.4。"
+        description="为产品开启一次交付周期。"
         footer={
-          <>
+          <div className="modal-footer-actions">
             <button type="button" className="btn-secondary text-sm" disabled={busy} onClick={() => setCreateOpen(false)}>
               取消
             </button>
             <button type="button" className="btn btn-primary text-sm" disabled={busy || !createName.trim()} onClick={() => void onCreateSprint()}>
-              {busy ? "创建中…" : "创建"}
+              {busy ? "创建中…" : "创建迭代"}
             </button>
-          </>
+          </div>
         }
       >
-        <div className="stack-sm">
-          <label className="stack-xs">
-            <span className="text-sm">迭代名称</span>
-            <input className="input" value={createName} onChange={(e) => setCreateName(e.target.value)} placeholder="例如 v3.2.4" />
-          </label>
-          <label className="stack-xs">
-            <span className="text-sm">迭代目标</span>
-            <textarea className="input min-h-20" value={createGoal} onChange={(e) => setCreateGoal(e.target.value)} placeholder="可选：本次迭代要达成的目标" />
-          </label>
-          <label className="stack-xs">
-            <span className="text-sm">迭代流程模板</span>
-            <select
-              className="input"
-              value={createTemplateId}
-              disabled={createTemplatesLoading || wsProcessTemplates.length === 0}
-              onChange={(e) => setCreateTemplateId(e.target.value)}
-            >
-              {createTemplatesLoading ? <option value="">加载模板…</option> : null}
-              {!createTemplatesLoading && wsProcessTemplates.length === 0 ? (
-                <option value="">暂无工作区模板</option>
-              ) : null}
-              {wsProcessTemplates.map((tpl) => (
-                <option key={tpl.id} value={tpl.id}>
-                  {tpl.name} · {tpl.stages?.length ?? 0} 列
-                  {tpl.template_key === "agile-4" ? "（默认）" : ""}
-                </option>
-              ))}
-            </select>
-            <span className="text-xs text-muted-foreground">
-              模板来自工作空间，
-              <Link href="/templates?tab=sprint-process" className="link-primary">前往模板管理</Link>
+        <form
+          className="sprint-create"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!busy && createName.trim()) void onCreateSprint();
+          }}
+        >
+          {createError ? <InlineAlert tone="error">{createError}</InlineAlert> : null}
+          <label className="sprint-create-field">
+            <span className="sprint-create-label">
+              迭代名称<span className="sprint-create-required" aria-hidden>*</span>
             </span>
+            <input
+              className="input"
+              value={createName}
+              autoFocus
+              maxLength={128}
+              onChange={(e) => setCreateName(e.target.value)}
+              placeholder="例如 v3.2.4"
+            />
           </label>
-        </div>
+          <label className="sprint-create-field">
+            <span className="sprint-create-label">
+              迭代目标<span className="sprint-create-optional">可选</span>
+            </span>
+            <textarea
+              className="input sprint-create-goal"
+              rows={2}
+              value={createGoal}
+              onChange={(e) => setCreateGoal(e.target.value)}
+              placeholder="这次迭代要达成什么"
+            />
+          </label>
+          <div className="sprint-create-field">
+            <div className="sprint-create-label-row">
+              <span className="sprint-create-label">看板流程</span>
+              <Link href="/templates?tab=sprint-process" className="sprint-create-link">
+                管理模板
+              </Link>
+            </div>
+            {createTemplatesLoading ? (
+              <p className="sprint-create-hint">正在加载模板…</p>
+            ) : wsProcessTemplates.length === 0 ? (
+              <p className="sprint-create-hint">工作空间暂无流程模板，将使用默认看板列。</p>
+            ) : (
+              <div className="sprint-create-templates" role="radiogroup" aria-label="看板流程">
+                {wsProcessTemplates.map((tpl) => {
+                  const selected = tpl.id === createTemplateId;
+                  const stages = [...(tpl.stages ?? [])].sort((a, b) => a.sort_order - b.sort_order);
+                  return (
+                    <button
+                      key={tpl.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      className={`sprint-create-tpl${selected ? " is-selected" : ""}`}
+                      onClick={() => setCreateTemplateId(tpl.id)}
+                    >
+                      <span className="sprint-create-tpl-radio" aria-hidden />
+                      <span className="sprint-create-tpl-body">
+                        <span className="sprint-create-tpl-title">
+                          {tpl.name}
+                          {tpl.template_key === "agile-4" ? <span className="sprint-create-tpl-tag">默认</span> : null}
+                        </span>
+                        <span className="sprint-create-tpl-stages">
+                          {stages.length > 0 ? stages.map((stage) => stage.name).join(" → ") : "未配置看板列"}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </form>
       </Modal>
 
       <Modal
