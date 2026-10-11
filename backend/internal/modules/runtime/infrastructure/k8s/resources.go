@@ -49,10 +49,40 @@ func (s *ResourceService) ListDeployments(ctx context.Context, projectID kernel.
 		return nil, err
 	}
 	out := make([]map[string]any, 0, len(list.Items))
-	for _, d := range list.Items {
-		out = append(out, deploymentView(d))
+	for i := range list.Items {
+		if deploymentBelongsToProject(&list.Items[i], projectName) {
+			out = append(out, deploymentView(list.Items[i]))
+		}
 	}
 	return out, nil
+}
+
+// Projects may share a namespace, so a deployment is only treated as the
+// project's own when its app label or conventional name matches.
+func deploymentBelongsToProject(dep *appsv1.Deployment, projectName string) bool {
+	if dep == nil || projectName == "" {
+		return false
+	}
+	if dep.Labels[sparkopsAppLabel] == projectName {
+		return true
+	}
+	return dep.Name == projectName || dep.Name == projectName+"-deployment"
+}
+
+func (s *ResourceService) projectDeployment(
+	ctx context.Context,
+	projectID kernel.ProjectID,
+	projectName, name string,
+) (string, *appsv1.Deployment, error) {
+	ns, err := s.checker.ProjectNamespace(ctx, projectID, projectName)
+	if err != nil {
+		return "", nil, err
+	}
+	dep, err := s.client.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil || !deploymentBelongsToProject(dep, projectName) {
+		return "", nil, domain.ErrResourceNotFound
+	}
+	return ns, dep, nil
 }
 
 func (s *ResourceService) GetDeployment(ctx context.Context, projectID kernel.ProjectID, projectName, name string) (map[string]any, error) {
@@ -64,13 +94,9 @@ func (s *ResourceService) GetDeployment(ctx context.Context, projectID kernel.Pr
 		}
 		return nil, domain.ErrResourceNotFound
 	}
-	ns, err := s.checker.ProjectNamespace(ctx, projectID, projectName)
+	_, dep, err := s.projectDeployment(ctx, projectID, projectName, name)
 	if err != nil {
 		return nil, err
-	}
-	dep, err := s.client.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return nil, domain.ErrResourceNotFound
 	}
 	return deploymentView(*dep), nil
 }
@@ -79,11 +105,7 @@ func (s *ResourceService) ScaleDeployment(ctx context.Context, projectID kernel.
 	if s.client == nil {
 		return nil
 	}
-	ns, err := s.checker.ProjectNamespace(ctx, projectID, projectName)
-	if err != nil {
-		return err
-	}
-	dep, err := s.client.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
+	ns, dep, err := s.projectDeployment(ctx, projectID, projectName, name)
 	if err != nil {
 		return err
 	}

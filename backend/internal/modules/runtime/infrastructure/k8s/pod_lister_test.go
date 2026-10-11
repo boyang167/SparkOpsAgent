@@ -36,6 +36,7 @@ func TestPodLister_ListByProject_maps_pods(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "demo-api-0",
 			Namespace: ns,
+			Labels:    map[string]string{"app": "demo-api"},
 		},
 		Spec: corev1.PodSpec{
 			NodeName: "node-1",
@@ -78,7 +79,7 @@ func TestPodLogReader_ReadLogs(t *testing.T) {
 	projectID := kernel.NewProjectID()
 	ns := "sparkops-demo"
 	podObj := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "demo-api-0", Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{Name: "demo-api-0", Namespace: ns, Labels: map[string]string{"app": "demo-api"}},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "demo-api"}}},
 	}
 	client := fake.NewSimpleClientset(podObj)

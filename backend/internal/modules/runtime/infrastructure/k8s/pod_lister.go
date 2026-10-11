@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/domain"
@@ -48,15 +47,7 @@ func (l *PodLister) ListByProject(
 	if err != nil {
 		return nil, err
 	}
-	items, err := l.client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("list pods in %s: %w", namespace, err)
-	}
-	out := make([]*model.Pod, 0, len(items.Items))
-	for i := range items.Items {
-		out = append(out, MapPod(projectID, items.Items[i]))
-	}
-	return out, nil
+	return listProjectPods(ctx, l.client, projectID, namespace, projectName)
 }
 
 func (l *PodLister) FindByID(

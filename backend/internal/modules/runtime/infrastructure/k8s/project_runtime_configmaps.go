@@ -256,7 +256,7 @@ func referencedConfigMapNames(ctx context.Context, session *ProjectClusterSessio
 	if session == nil || session.Client == nil {
 		return out
 	}
-	dep, err := session.Client.AppsV1().Deployments(session.Namespace).Get(ctx, session.ProjectName, metav1.GetOptions{})
+	dep, err := getDeployment(ctx, session.Client, session.Namespace, session.ProjectName)
 	if err != nil {
 		return out
 	}
