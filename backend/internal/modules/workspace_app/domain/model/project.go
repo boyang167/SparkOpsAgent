@@ -16,8 +16,9 @@ import (
 type ProjectStatus string
 
 const (
-	ProjectStatusActive   ProjectStatus = "active"
-	ProjectStatusArchived ProjectStatus = "archived"
+	ProjectStatusActive    ProjectStatus = "active"
+	ProjectStatusArchiving ProjectStatus = "archiving"
+	ProjectStatusArchived  ProjectStatus = "archived"
 )
 
 type ProjectReviewStatus string
@@ -196,6 +197,24 @@ func NewProject(wsID kernel.WorkspaceID, name ProjectName, createdBy kernel.Memb
 	p.record(event.NewProjectCreated(p.ID, p.WorkspaceID, p.CreatedBy))
 	return p
 }
+
+func (p *Project) BeginArchiving() error {
+	if p.Status != ProjectStatusActive {
+		return domain.ErrProjectNotActive
+	}
+	p.Status = ProjectStatusArchiving
+	return nil
+}
+
+func (p *Project) AbortArchiving() error {
+	if p.Status != ProjectStatusArchiving {
+		return domain.ErrProjectNotArchiving
+	}
+	p.Status = ProjectStatusActive
+	return nil
+}
+
+func (p *Project) IsArchiving() bool { return p.Status == ProjectStatusArchiving }
 
 func (p *Project) Archive() error {
 	if p.Status == ProjectStatusArchived {

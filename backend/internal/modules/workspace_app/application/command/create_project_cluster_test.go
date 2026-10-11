@@ -37,6 +37,9 @@ func (r *createProjectRepo) CountByWorkspace(context.Context, kernel.WorkspaceID
 func (r *createProjectRepo) ListByProduct(context.Context, kernel.ProductID) ([]*model.Project, error) {
 	return nil, nil
 }
+func (r *createProjectRepo) ListByStatus(context.Context, model.ProjectStatus) ([]*model.Project, error) {
+	return nil, nil
+}
 func (r *createProjectRepo) CountByProduct(context.Context, kernel.ProductID) (int, error) {
 	return 0, nil
 }

@@ -158,7 +158,7 @@ func (h *GetProjectHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID,
 	if project.WorkspaceID != wsID {
 		return nil, domain.ErrProjectNotFound
 	}
-	if project.Status != model.ProjectStatusActive {
+	if project.Status != model.ProjectStatusActive && project.Status != model.ProjectStatusArchiving {
 		return nil, domain.ErrProjectNotFound
 	}
 	view := ToView(project)

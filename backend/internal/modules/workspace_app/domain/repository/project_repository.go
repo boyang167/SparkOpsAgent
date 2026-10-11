@@ -16,4 +16,5 @@ type ProjectRepository interface {
 	ListByProduct(ctx context.Context, productID kernel.ProductID) ([]*model.Project, error)
 	CountByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) (int, error)
 	CountByProduct(ctx context.Context, productID kernel.ProductID) (int, error)
+	ListByStatus(ctx context.Context, status model.ProjectStatus) ([]*model.Project, error)
 }

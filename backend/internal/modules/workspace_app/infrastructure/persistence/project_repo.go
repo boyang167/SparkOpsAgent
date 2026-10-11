@@ -213,7 +213,7 @@ func (r *ProjectRepository) FindByID(ctx context.Context, id kernel.ProjectID) (
 func (r *ProjectRepository) FindByWorkspaceAndName(ctx context.Context, wsID kernel.WorkspaceID, name model.ProjectName) (*model.Project, error) {
 	var row projectModel
 	err := r.db.WithContext(ctx).
-		Where(postgres.UUIDEq("workspace_id")+" AND name = ? AND status = ?", wsID.String(), name.String(), string(model.ProjectStatusActive)).
+		Where(postgres.UUIDEq("workspace_id")+" AND name = ? AND status IN ?", wsID.String(), name.String(), visibleProjectStatuses()).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrProjectNotFound
@@ -227,7 +227,7 @@ func (r *ProjectRepository) FindByWorkspaceAndName(ctx context.Context, wsID ker
 func (r *ProjectRepository) ListByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) ([]*model.Project, error) {
 	var rows []projectModel
 	err := r.db.WithContext(ctx).
-		Where(postgres.UUIDEq("workspace_id")+" AND status = ?", wsID.String(), string(model.ProjectStatusActive)).
+		Where(postgres.UUIDEq("workspace_id")+" AND status IN ?", wsID.String(), visibleProjectStatuses()).
 		Order("created_at DESC").
 		Find(&rows).Error
 	if err != nil {
@@ -247,7 +247,7 @@ func (r *ProjectRepository) ListByWorkspace(ctx context.Context, wsID kernel.Wor
 func (r *ProjectRepository) CountByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) (int, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&projectModel{}).
-		Where(postgres.UUIDEq("workspace_id")+" AND status = ?", wsID.String(), string(model.ProjectStatusActive)).
+		Where(postgres.UUIDEq("workspace_id")+" AND status IN ?", wsID.String(), visibleProjectStatuses()).
 		Count(&count).Error
 	return int(count), err
 }
@@ -255,7 +255,7 @@ func (r *ProjectRepository) CountByWorkspace(ctx context.Context, wsID kernel.Wo
 func (r *ProjectRepository) ListByProduct(ctx context.Context, productID kernel.ProductID) ([]*model.Project, error) {
 	var rows []projectModel
 	err := r.db.WithContext(ctx).
-		Where(postgres.UUIDEq("product_id")+" AND status = ?", productID.String(), string(model.ProjectStatusActive)).
+		Where(postgres.UUIDEq("product_id")+" AND status IN ?", productID.String(), visibleProjectStatuses()).
 		Order("created_at DESC").
 		Find(&rows).Error
 	if err != nil {
@@ -275,9 +275,30 @@ func (r *ProjectRepository) ListByProduct(ctx context.Context, productID kernel.
 func (r *ProjectRepository) CountByProduct(ctx context.Context, productID kernel.ProductID) (int, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&projectModel{}).
-		Where(postgres.UUIDEq("product_id")+" AND status = ?", productID.String(), string(model.ProjectStatusActive)).
+		Where(postgres.UUIDEq("product_id")+" AND status IN ?", productID.String(), visibleProjectStatuses()).
 		Count(&count).Error
 	return int(count), err
+}
+
+func (r *ProjectRepository) ListByStatus(ctx context.Context, status model.ProjectStatus) ([]*model.Project, error) {
+	var rows []projectModel
+	if err := r.db.WithContext(ctx).Where("status = ?", string(status)).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*model.Project, 0, len(rows))
+	for _, row := range rows {
+		p, err := rowToProject(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// visibleProjectStatuses keeps archiving projects listed so their progress stays visible.
+func visibleProjectStatuses() []string {
+	return []string{string(model.ProjectStatusActive), string(model.ProjectStatusArchiving)}
 }
 
 func rowToProject(row projectModel) (*model.Project, error) {
