@@ -28,6 +28,7 @@ export function runStatusLabel(status: string): string {
 export function runStatusTone(status: string): string {
   switch (status) {
     case "success":
+    case "succeeded":
       return "is-success";
     case "failed":
       return "is-failed";
@@ -37,7 +38,7 @@ export function runStatusTone(status: string): string {
     case "paused":
       return "is-paused";
     default:
-      return "";
+      return "is-neutral";
   }
 }
 
@@ -85,15 +86,35 @@ export function formatRunTime(at?: string): string {
 }
 
 export function projectLabel(projectId: string, names: Record<string, string>): string {
-  return names[projectId]?.trim() || projectId;
+  return names[projectId]?.trim() || `项目 ${projectId.slice(0, 8)}`;
 }
 
-export function serviceLines(ids: string[] | undefined, names: Record<string, string>): string[] {
-  if (!ids?.length) return [];
-  return ids.map((id) => {
-    const label = projectLabel(id, names);
-    return label === id ? label : `${label}(${id})`;
-  });
+export interface ServiceGroup {
+  id: string;
+  label: string;
+  known: boolean;
+  kinds: Array<"构建" | "部署">;
+}
+
+export function serviceGroups(
+  buildIds: string[] | undefined,
+  deployIds: string[] | undefined,
+  names: Record<string, string>,
+): ServiceGroup[] {
+  const groups = new Map<string, ServiceGroup>();
+  const add = (id: string, kind: "构建" | "部署") => {
+    const group = groups.get(id) ?? {
+      id,
+      label: projectLabel(id, names),
+      known: Boolean(names[id]?.trim()),
+      kinds: [],
+    };
+    if (!group.kinds.includes(kind)) group.kinds.push(kind);
+    groups.set(id, group);
+  };
+  for (const id of buildIds ?? []) add(id, "构建");
+  for (const id of deployIds ?? []) add(id, "部署");
+  return [...groups.values()];
 }
 
 export function branchSummary(run: ProductWorkflowRunSummaryVM): string {

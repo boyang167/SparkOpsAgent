@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { governance, product } from "@sparkops/web-sdk";
+import { governance, product, workspace } from "@sparkops/web-sdk";
 import type { WorkspaceMemberVM } from "@sparkops/contracts/governance";
+import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { BffError } from "@sparkops/contracts";
 import type {
   EnvironmentVM,
@@ -38,6 +39,7 @@ export function ProductWorkflowDetailPanel({
   const [projects, setProjects] = useState<ProductProjectVM[]>([]);
   const [environments, setEnvironments] = useState<EnvironmentVM[]>([]);
   const [members, setMembers] = useState<WorkspaceMemberVM[]>([]);
+  const [workspaceProjects, setWorkspaceProjects] = useState<ProjectVM[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,18 +49,20 @@ export function ProductWorkflowDetailPanel({
     setLoading(true);
     setError(null);
     try {
-      const [wf, runItems, projectItems, envItems, memberItems] = await Promise.all([
+      const [wf, runItems, projectItems, envItems, memberItems, workspaceProjectItems] = await Promise.all([
         product.getProductWorkflow(workspaceId, productId, workflowId),
         product.listProductWorkflowRuns(workspaceId, productId, workflowId),
         product.listProductProjects(workspaceId, productId),
         product.listEnvironments(workspaceId, productId),
         governance.listMembers(workspaceId).catch(() => [] as WorkspaceMemberVM[]),
+        workspace.listProjects(workspaceId).catch(() => [] as ProjectVM[]),
       ]);
       setWorkflow(wf);
       setRuns(runItems);
       setProjects(projectItems);
       setEnvironments(envItems);
       setMembers(memberItems);
+      setWorkspaceProjects(workspaceProjectItems);
     } catch (err) {
       setError(err instanceof BffError ? err.message : "加载工作流失败");
       setWorkflow(null);
@@ -86,9 +90,9 @@ export function ProductWorkflowDetailPanel({
   const projectNames = useMemo(
     () =>
       Object.fromEntries(
-        projects.map((item) => [item.id, item.display_name?.trim() || item.name || item.id]),
+        [...workspaceProjects, ...projects].map((item) => [item.id, item.display_name?.trim() || item.name]),
       ),
-    [projects],
+    [workspaceProjects, projects],
   );
   const memberNames = useMemo(
     () =>
@@ -132,48 +136,49 @@ export function ProductWorkflowDetailPanel({
   return (
     <div className="stack-lg wf-detail-page">
       <header className="wf-detail-header">
-        <div className="wf-detail-header-main">
-          <div className="wf-detail-breadcrumb">
-            <Link href="/products/workflows" className="wf-detail-back">
-              工作流
-            </Link>
-            <span aria-hidden>/</span>
-            <span>{workflow.name}</span>
-          </div>
-          <div className="wf-detail-title-row">
+        <nav className="wf-detail-breadcrumb" aria-label="面包屑">
+          <Link href="/products/workflows" className="wf-detail-back">
+            工作流
+          </Link>
+          <span aria-hidden>/</span>
+          <span>{workflow.name}</span>
+        </nav>
+        <div className="wf-detail-title-row">
+          <div className="wf-detail-title-main">
             <h1 className="wf-detail-title">{workflow.name}</h1>
             {workflow.status !== "active" ? <span className="wf-list-badge">草稿</span> : null}
           </div>
-          <div className="wf-detail-stage-row">
-            <WorkflowStagePath
-              labels={stageLabels}
-              fallback={workflowStagePathText(workflow, workflow.stage_count)}
-            />
-          </div>
-          <div className="wf-detail-meta text-sm text-muted">
-            <span>最后修改：{formatLastRun(workflow.updated_at ?? null)}</span>
-            {workflow.description ? <span>{workflow.description}</span> : null}
+          <div className="wf-detail-header-actions">
+            <Link
+              href={`/products/${productId}/workflows/${workflowId}/edit`}
+              className="wf-detail-icon-btn"
+              title="编排设置"
+              aria-label="编排设置"
+            >
+              <IconSettings />
+            </Link>
+            <button
+              type="button"
+              className="btn btn-primary text-sm wf-detail-run-btn"
+              disabled={busy || workflow.status !== "active"}
+              title={workflow.status !== "active" ? "草稿状态的工作流需先发布才能执行" : undefined}
+              onMouseEnter={() => prefetchWorkspaceRunAssets(workspaceId)}
+              onFocus={() => prefetchWorkspaceRunAssets(workspaceId)}
+              onClick={() => setRunOpen(true)}
+            >
+              <IconPlay />
+              执行
+            </button>
           </div>
         </div>
-        <div className="wf-detail-header-actions">
-          <button
-            type="button"
-            className="wf-list-run-btn"
-            disabled={busy || workflow.status !== "active"}
-            onMouseEnter={() => prefetchWorkspaceRunAssets(workspaceId)}
-            onFocus={() => prefetchWorkspaceRunAssets(workspaceId)}
-            onClick={() => setRunOpen(true)}
-          >
-            <IconPlay />
-            执行
-          </button>
-          <Link
-            href={`/products/${productId}/workflows/${workflowId}/edit`}
-            className="wf-list-icon-btn wf-list-settings-btn"
-            title="编排设置"
-          >
-            <IconSettings />
-          </Link>
+        {workflow.description ? <p className="wf-detail-desc">{workflow.description}</p> : null}
+        <div className="wf-detail-meta">
+          <WorkflowStagePath
+            labels={stageLabels}
+            fallback={workflowStagePathText(workflow, workflow.stage_count)}
+          />
+          <span className="wf-detail-meta-sep" aria-hidden>·</span>
+          <span>最后修改 {formatLastRun(workflow.updated_at ?? null)}</span>
         </div>
       </header>
 
@@ -182,7 +187,7 @@ export function ProductWorkflowDetailPanel({
       <section className="wf-history-section">
         <header className="wf-history-head">
           <h2 className="wf-history-title">执行记录</h2>
-          <span className="wf-history-count">{runs.length} 条</span>
+          {runs.length > 0 ? <span className="wf-history-count">{runs.length}</span> : null}
         </header>
         <WorkflowRunHistoryTable
           workspaceId={workspaceId}
