@@ -29,6 +29,7 @@ type DeploymentView struct {
 	Status          string  `json:"status"`
 	RunType         string  `json:"run_type,omitempty"`
 	RollbackOfRunID *string `json:"rollback_of_run_id,omitempty"`
+	UndeployOptions *model.UndeployOptions `json:"undeploy_options,omitempty"`
 	CurrentStage    string  `json:"current_stage,omitempty"`
 	ErrorMessage    string  `json:"error_message,omitempty"`
 	CreatedBy       string  `json:"created_by"`
@@ -304,6 +305,7 @@ func ToDeploymentView(run *model.DeploymentRun) DeploymentView {
 		value := run.RollbackOfRunID.String()
 		view.RollbackOfRunID = &value
 	}
+	view.UndeployOptions = run.UndeployOptions
 	if run.BuildID != nil {
 		value := run.BuildID.String()
 		view.BuildID = &value

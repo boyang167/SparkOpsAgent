@@ -45,6 +45,7 @@ type deploymentRunRow struct {
 	EnvironmentID     *string
 	ProjectVersionID  *string
 	DeployNamespace   string `gorm:"not null;default:''"`
+	UndeployOptions   []byte `gorm:"column:undeploy_options;type:jsonb"`
 }
 
 func (deploymentRunRow) TableName() string { return "delivery.deployment_runs" }
@@ -114,10 +115,7 @@ func NewDeploymentRunRepositoryWithObserver(
 }
 
 func (r *DeploymentRunRepository) Create(ctx context.Context, run *model.DeploymentRun) error {
-	message := "deployment queued"
-	if run.IsRollback() {
-		message = "rollback queued"
-	}
+	message := runMessagePrefix(run) + " queued"
 	eventRow := deploymentRunEventRow{
 		RunID: run.ID.String(), At: run.CreatedAt, Status: string(run.Status),
 		Stage: string(run.CurrentStage), Message: message,
@@ -145,10 +143,7 @@ func (r *DeploymentRunRepository) Update(ctx context.Context, run *model.Deploym
 	} else if run.StartedAt != nil {
 		at = *run.StartedAt
 	}
-	message := "deployment " + string(run.Status)
-	if run.IsRollback() {
-		message = "rollback " + string(run.Status)
-	}
+	message := runMessagePrefix(run) + " " + string(run.Status)
 	if run.ErrorMessage != "" {
 		message = run.ErrorMessage
 	}
@@ -470,6 +465,7 @@ func toRunRow(run *model.DeploymentRun) *deploymentRunRow {
 		LeaseExpiresAt: run.LeaseExpiresAt,
 		EnvironmentID: environmentIDValue(run.EnvironmentID), DeployNamespace: run.DeployNamespace,
 		ProjectVersionID: projectVersionIDValue(run.ProjectVersionID),
+		UndeployOptions:  undeployOptionsValue(run.UndeployOptions),
 	}
 }
 
@@ -514,6 +510,12 @@ func fromRunRow(row deploymentRunRow) (*model.DeploymentRun, error) {
 	if len(row.SyncManifests) > 0 && string(row.SyncManifests) != "null" {
 		_ = json.Unmarshal(row.SyncManifests, &run.SyncManifests)
 	}
+	if len(row.UndeployOptions) > 0 && string(row.UndeployOptions) != "null" {
+		var opts model.UndeployOptions
+		if err := json.Unmarshal(row.UndeployOptions, &opts); err == nil {
+			run.UndeployOptions = &opts
+		}
+	}
 	if row.RollbackOfRunID != nil && *row.RollbackOfRunID != "" {
 		rollbackOf, parseErr := kernel.ParseDeploymentRunID(*row.RollbackOfRunID)
 		if parseErr != nil {
@@ -546,6 +548,28 @@ func fromRunRow(row deploymentRunRow) (*model.DeploymentRun, error) {
 		run.ProjectVersionID = &versionID
 	}
 	return run, nil
+}
+
+func runMessagePrefix(run *model.DeploymentRun) string {
+	switch {
+	case run.IsRollback():
+		return "rollback"
+	case run.IsUndeploy():
+		return "undeploy"
+	default:
+		return "deployment"
+	}
+}
+
+func undeployOptionsValue(opts *model.UndeployOptions) []byte {
+	if opts == nil {
+		return nil
+	}
+	raw, err := json.Marshal(opts)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 func projectVersionIDValue(id *kernel.ProjectVersionID) *string {

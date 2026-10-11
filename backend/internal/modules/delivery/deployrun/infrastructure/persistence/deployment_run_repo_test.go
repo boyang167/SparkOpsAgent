@@ -21,6 +21,10 @@ func newRunRepo(t *testing.T) (*DeploymentRunRepository, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	// Every new connection to ":memory:" opens an empty database without the attached schemas.
+	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS delivery").Error)
 	require.NoError(t, db.Exec(`CREATE TABLE delivery.deployment_runs (
 		id TEXT PRIMARY KEY, workspace_id TEXT, project_id TEXT, cluster_id TEXT,
@@ -411,4 +415,23 @@ func TestPostgresEventInsertStatementReturnsGeneratedID(t *testing.T) {
 
 	require.True(t, strings.Contains(statement, `RETURNING "id"`) ||
 		strings.Contains(statement, "RETURNING id"), statement)
+}
+
+func TestRepositoryPersistsUndeployOptionsAndQueuedMessage(t *testing.T) {
+	repo, _ := newRunRepo(t)
+	baseline := newRun(kernel.NewProjectID())
+	baseline.Status = model.StatusSucceeded
+	run := model.NewUndeployRun(baseline.WorkspaceID, baseline.ProjectID, kernel.NewMemberID(), baseline,
+		model.UndeployOptions{DeleteConfig: true, DeleteStorage: true})
+	run.CreatedAt = baseline.CreatedAt
+
+	require.NoError(t, repo.Create(context.Background(), run))
+	found, err := repo.FindByID(context.Background(), run.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.RunTypeUndeploy, found.RunType)
+	require.Equal(t, &model.UndeployOptions{DeleteConfig: true, DeleteStorage: true}, found.UndeployOptions)
+
+	events, err := repo.ListEvents(context.Background(), run.ID)
+	require.NoError(t, err)
+	require.Equal(t, "undeploy queued", events[0].Message)
 }
