@@ -93,12 +93,6 @@ func listProjectPods(
 	if err != nil {
 		return nil, fmt.Errorf("list pods in %s: %w", namespace, err)
 	}
-	if len(items.Items) == 0 {
-		items, err = client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("list pods in %s: %w", namespace, err)
-		}
-	}
 	out := make([]*model.Pod, 0, len(items.Items))
 	for i := range items.Items {
 		out = append(out, MapPod(projectID, items.Items[i]))
