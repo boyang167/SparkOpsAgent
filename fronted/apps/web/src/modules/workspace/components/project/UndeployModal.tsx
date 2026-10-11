@@ -7,7 +7,11 @@ import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { delivery } from "@sparkops/web-sdk";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
-import { onlineEnvironmentRows, type EnvironmentDeployRow } from "./project-environment-status";
+import {
+  environmentVersionLabel,
+  onlineEnvironmentRows,
+  type EnvironmentDeployRow,
+} from "./project-environment-status";
 
 interface UndeployModalProps {
   open: boolean;
@@ -17,6 +21,28 @@ interface UndeployModalProps {
   initialClusterId?: string;
   onClose: () => void;
   onStarted: (run: DeploymentRunVM) => void;
+}
+
+interface UndeployOptionProps {
+  checked: boolean;
+  danger?: boolean;
+  title: string;
+  description: string;
+  onChange: (checked: boolean) => void;
+}
+
+function UndeployOption({ checked, danger, title, description, onChange }: UndeployOptionProps) {
+  return (
+    <label
+      className={`undeploy-option${checked ? " is-checked" : ""}${checked && danger ? " is-danger" : ""}`}
+    >
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="undeploy-option-copy">
+        <span className="undeploy-option-title">{title}</span>
+        <span className="undeploy-option-desc">{description}</span>
+      </span>
+    </label>
+  );
 }
 
 export function UndeployModal({
@@ -47,7 +73,17 @@ export function UndeployModal({
 
   const selected = onlineRows.find((row) => row.clusterId === clusterId) ?? null;
   const namespace = selected?.latest?.deploy_namespace?.trim() || project.namespace || "—";
-  const canSubmit = Boolean(selected) && confirmName === project.name && !submitting;
+  const version = selected ? environmentVersionLabel(selected.latest) : "—";
+  const confirmed = confirmName === project.name;
+  const canSubmit = Boolean(selected) && confirmed && !submitting;
+
+  const resources = [
+    { kind: "Deployment", name: project.name },
+    { kind: "Service", name: project.name },
+    { kind: "Ingress", name: `app=${project.name}` },
+    ...(deleteConfig ? [{ kind: "ConfigMap · Secret", name: `app=${project.name}` }] : []),
+    ...(deleteStorage ? [{ kind: "PVC", name: `app=${project.name}`, danger: true }] : []),
+  ];
 
   async function submit() {
     if (!selected || !canSubmit) return;
@@ -74,8 +110,8 @@ export function UndeployModal({
       onClose={() => {
         if (!submitting) onClose();
       }}
-      title={selected ? `下线 ${project.name} · ${selected.clusterName}` : `下线 ${project.name}`}
-      description="删除该环境中的工作负载，项目配置与历史记录保留，可随时重新发布。"
+      title={selected ? `下线 ${selected.clusterName} 环境` : "下线环境"}
+      description="移除该环境中运行的工作负载。项目配置、构建记录与流水线保留，可随时重新发布。"
       size="md"
       footer={
         <>
@@ -88,74 +124,107 @@ export function UndeployModal({
             disabled={!canSubmit}
             onClick={() => void submit()}
           >
-            {submitting ? "下线中…" : "下线"}
+            {submitting ? "下线中…" : "确认下线"}
           </button>
         </>
       }
     >
-      <div className="stack-md">
-        {onlineRows.length === 0 ? (
-          <InlineAlert tone="info">当前没有在线环境。</InlineAlert>
-        ) : (
-          <>
+      {onlineRows.length === 0 ? (
+        <InlineAlert tone="info">当前没有在线环境。</InlineAlert>
+      ) : (
+        <div className="undeploy-modal">
+          <section className="undeploy-summary" aria-label="环境信息">
             {onlineRows.length > 1 ? (
-              <label className="stack-sm">
-                <span className="text-sm font-medium">环境</span>
-                <select
-                  className="input"
-                  value={clusterId}
-                  onChange={(e) => setClusterId(e.target.value)}
-                >
-                  {onlineRows.map((row) => (
-                    <option key={row.clusterId} value={row.clusterId}>
-                      {row.clusterName}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="undeploy-env-switch" role="radiogroup" aria-label="选择环境">
+                {onlineRows.map((row) => (
+                  <button
+                    key={row.clusterId}
+                    type="button"
+                    role="radio"
+                    aria-checked={row.clusterId === clusterId}
+                    className={`undeploy-env-pill${row.clusterId === clusterId ? " is-active" : ""}`}
+                    onClick={() => setClusterId(row.clusterId)}
+                  >
+                    {row.clusterName}
+                  </button>
+                ))}
+              </div>
             ) : null}
-            <div className="stack-sm">
-              <span className="text-sm font-medium">将删除以下资源</span>
-              <ul className="undeploy-resource-list">
-                <li>Deployment/{project.name}</li>
-                <li>Service/{project.name}</li>
-                <li>Ingress（app={project.name}）</li>
-                <li className="text-muted">命名空间：{namespace}</li>
-              </ul>
-            </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
+            <dl className="undeploy-summary-grid">
+              <div>
+                <dt>项目</dt>
+                <dd>{project.name}</dd>
+              </div>
+              <div>
+                <dt>命名空间</dt>
+                <dd>{namespace}</dd>
+              </div>
+              <div>
+                <dt>当前版本</dt>
+                <dd title={version}>{version}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="undeploy-section">
+            <h4 className="undeploy-section-title">
+              将删除的资源
+              <span className="undeploy-section-count">{resources.length}</span>
+            </h4>
+            <ul className="undeploy-resources">
+              {resources.map((item) => (
+                <li key={item.kind} className={"danger" in item ? "is-danger" : undefined}>
+                  <span className="undeploy-resource-kind">{item.kind}</span>
+                  <span className="undeploy-resource-name">{item.name}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="undeploy-section">
+            <h4 className="undeploy-section-title">额外清理</h4>
+            <div className="undeploy-options">
+              <UndeployOption
                 checked={deleteConfig}
-                onChange={(e) => setDeleteConfig(e.target.checked)}
+                title="删除配置"
+                description="ConfigMap 与 Secret。默认保留，重新发布时直接复用。"
+                onChange={setDeleteConfig}
               />
-              同时删除配置（ConfigMap / Secret）
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
+              <UndeployOption
                 checked={deleteStorage}
-                onChange={(e) => setDeleteStorage(e.target.checked)}
+                danger
+                title="删除存储卷"
+                description={
+                  deleteStorage
+                    ? "PVC 及其中的数据将被永久删除，无法恢复。"
+                    : "PVC 及其数据。默认保留，避免数据丢失。"
+                }
+                onChange={setDeleteStorage}
               />
-              同时删除存储卷（PVC）
-            </label>
-            {deleteStorage ? <p className="undeploy-danger-hint">PVC 删除后数据不可恢复。</p> : null}
-            <label className="stack-sm">
-              <span className="text-sm">
-                输入项目名 <strong>{project.name}</strong> 以确认
-              </span>
-              <input
-                className="input"
-                value={confirmName}
-                onChange={(e) => setConfirmName(e.target.value)}
-                autoComplete="off"
-                aria-label="确认项目名"
-              />
-            </label>
-          </>
-        )}
-        {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-      </div>
+            </div>
+          </section>
+
+          <label className="undeploy-confirm">
+            <span className="undeploy-confirm-label">
+              请输入 <code>{project.name}</code> 确认下线
+            </span>
+            <input
+              className={`input undeploy-confirm-input${confirmed ? " is-match" : ""}`}
+              value={confirmName}
+              onChange={(e) => setConfirmName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void submit();
+              }}
+              placeholder={project.name}
+              autoComplete="off"
+              spellCheck={false}
+              aria-label="确认项目名"
+            />
+          </label>
+
+          {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+        </div>
+      )}
     </Modal>
   );
 }
