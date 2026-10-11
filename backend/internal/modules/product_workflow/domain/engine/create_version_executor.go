@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -41,8 +42,13 @@ func (e *CreateVersionExecutor) RunJob(
 	versionTag = strings.TrimSpace(versionTag)
 	if versionTag == "" {
 		jobRun.Status = model.JobRunStatusFailed
-		jobRun.ErrorMessage = "version_tag is required"
+		jobRun.ErrorMessage = "未填写版本号，请在执行时填写交付版本号"
 		return fmt.Errorf("version_tag is required")
+	}
+	if strings.Contains(versionTag, "{{") {
+		jobRun.Status = model.JobRunStatusFailed
+		jobRun.ErrorMessage = fmt.Sprintf("版本号 %q 包含未替换的占位符，请在执行时填写真实版本号", versionTag)
+		return fmt.Errorf("version_tag has unresolved placeholder: %s", versionTag)
 	}
 	source, _ := spec["source"].(string)
 	if source != "fromjob" {
@@ -82,11 +88,16 @@ func (e *CreateVersionExecutor) RunJob(
 			CreatedBy: wf.CreatedBy,
 		})
 		if err != nil {
+			message := err.Error()
+			var de *kernel.DomainError
+			if errors.As(err, &de) && de.Code() == "WORKSPACE_APP_PROJECT_VERSION_EXISTS" {
+				message = fmt.Sprintf("版本号 %s 已存在，请换一个版本号", versionTag)
+			}
 			jobRun.Status = model.JobRunStatusFailed
-			jobRun.ErrorMessage = err.Error()
+			jobRun.ErrorMessage = message
 			jobRun.Versions = append(jobRun.Versions, model.ProjectVersionRun{
 				ProjectID: target.ProjectID, VersionTag: versionTag,
-				Status: model.JobRunStatusFailed, ErrorMessage: err.Error(),
+				Status: model.JobRunStatusFailed, ErrorMessage: message,
 			})
 			return err
 		}

@@ -1,6 +1,6 @@
 import type { ProductProjectVM, WorkflowJobVM, WorkflowStageVM } from "@sparkops/contracts/product";
 import { parseBuildJobSpec } from "./build-job-spec";
-import { parseCreateVersionJobSpec } from "./create-version-job-spec";
+import { parseCreateVersionJobSpec, runtimeVersionTag } from "./create-version-job-spec";
 import { parseDeployJobSpec } from "./deploy-job-spec";
 import { jobTypeLabel } from "./workflow-editor-utils";
 
@@ -217,7 +217,7 @@ export function buildWorkflowRunForm(
         if (job.type === "sparkops-create-version") {
           versionJobs.push({
             jobName: job.name,
-            versionTag: parseCreateVersionJobSpec(job.spec).versionTag,
+            versionTag: runtimeVersionTag(parseCreateVersionJobSpec(job.spec).versionTag),
           });
           continue;
         }

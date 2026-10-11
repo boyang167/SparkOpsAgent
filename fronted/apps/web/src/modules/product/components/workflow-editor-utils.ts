@@ -33,7 +33,7 @@ export function defaultJob(type: string, index: number): EditorJob {
       return {
         ...base,
         name: `create-version-${index}`,
-        spec: { version_tag: "{{version}}", source: "fromjob", job_name: "", project_ids: [] },
+        spec: { version_tag: "", source: "fromjob", job_name: "", project_ids: [] },
       };
     case "sparkops-deploy":
       return {

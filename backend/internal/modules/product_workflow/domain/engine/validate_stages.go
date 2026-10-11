@@ -20,9 +20,6 @@ func validateStageJobRefs(stages []model.WorkflowStage) error {
 				if err := requireUpstreamJobName(job.Name, jobSpecString(spec, "job_name"), upstreamBuildJobNames(stages, si, ji), "上游构建任务"); err != nil {
 					return err
 				}
-				if strings.TrimSpace(jobSpecString(spec, "version_tag")) == "" {
-					return invalidJobRef(job.Name, "version_tag 不能为空")
-				}
 			case model.JobTypeSparkopsDeploy, model.JobTypeSparkopsDeployVersion:
 				source := jobSpecString(spec, "source")
 				if source != "" && source != "fromjob" {

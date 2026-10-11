@@ -39,13 +39,6 @@ export function validateWorkflowStages(stages: EditorStage[]): WorkflowValidatio
             message: `上游构建任务「${parsed.jobName}」无效或不在当前任务之前`,
           });
         }
-        if (!parsed.versionTag.trim()) {
-          issues.push({
-            stageName,
-            jobName,
-            message: "版本号不能为空",
-          });
-        }
         continue;
       }
 

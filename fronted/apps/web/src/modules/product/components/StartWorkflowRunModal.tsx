@@ -11,6 +11,7 @@ import type { SecretVM } from "@sparkops/contracts/secret";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
+import { runtimeVersionTag } from "./create-version-job-spec";
 import { DeployYamlCompareModal } from "./DeployYamlCompareModal";
 import { deployImageRef, imageTagFromRef } from "./deploy-job-spec";
 import { RunBranchField } from "./RunBranchField";
@@ -185,7 +186,7 @@ export function StartWorkflowRunModal({
   );
   const missingEnv = selectedDeployJobs.length > 0 && !environmentId;
   const missingVersionTag = selectedStages.some((stage) =>
-    stage.versionJobs.some((job) => !(versionTags[job.jobName] ?? job.versionTag).trim()),
+    stage.versionJobs.some((job) => !runtimeVersionTag(versionTags[job.jobName] ?? job.versionTag)),
   );
 
   function toggleStageVisibility(stageId: string) {
@@ -310,7 +311,7 @@ export function StartWorkflowRunModal({
             : missingBranch
               ? "请选择分支"
               : missingVersionTag
-                ? "请填写交付版本号"
+                ? "请填写交付版本号（不能包含 {{…}} 占位符）"
                 : missingVariable
                   ? "请填写运行时变量"
                   : undefined

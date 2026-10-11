@@ -40,8 +40,7 @@ export function CreateVersionJobConfigDrawer({
     });
   }, [open, jobName, spec, sourceJobs]);
 
-  const canConfirm =
-    name.trim().length > 0 && draft.versionTag.trim().length > 0 && draft.jobName.trim().length > 0;
+  const canConfirm = name.trim().length > 0 && draft.jobName.trim().length > 0;
 
   return (
     <Drawer
@@ -85,17 +84,12 @@ export function CreateVersionJobConfigDrawer({
         </label>
 
         <label className="pwf-build-field">
-          <span>
-            版本号
-            <span className="pwf-required" aria-hidden>
-              *
-            </span>
-          </span>
+          <span>版本号</span>
           <span className="pwf-build-control">
             <input
               className="input input-mono"
               value={draft.versionTag}
-              placeholder="{{version}}"
+              placeholder="留空则在执行时填写，如 v1.2.0"
               onChange={(event) => setDraft((prev) => ({ ...prev, versionTag: event.target.value }))}
               aria-label="版本号"
             />

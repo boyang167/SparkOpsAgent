@@ -25,6 +25,17 @@ export function parseCreateVersionJobSpec(value: unknown): CreateVersionJobSpec 
   };
 }
 
+const PLACEHOLDER_PATTERN = /\{\{[^}]*\}\}/;
+
+export function hasVersionPlaceholder(tag: string): boolean {
+  return PLACEHOLDER_PATTERN.test(tag);
+}
+
+export function runtimeVersionTag(tag: string): string {
+  const trimmed = tag.trim();
+  return hasVersionPlaceholder(trimmed) ? "" : trimmed;
+}
+
 export function createVersionJobSpecToRecord(spec: CreateVersionJobSpec): Record<string, unknown> {
   return {
     version_tag: spec.versionTag,
