@@ -1,14 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { product } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { EnvironmentVM, ProductWorkflowVM, ReleasePlanJobVM, ReleasePlanVM } from "@sparkops/contracts/product";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { ProductDetailEmptyState } from "./ProductDetailEmptyState";
-import { ProductMasterDetail } from "./ProductMasterDetail";
+import { ProductMasterDetail, type ProductMasterListItem } from "./ProductMasterDetail";
 import { useWorkspaceMembers } from "../hooks/useWorkspaceMembers";
 import { ReleasePlanAuditList, type ReleasePlanAuditLogEntry } from "./ReleasePlanAuditList";
 import { ReleasePlanVersionHistory } from "./ReleasePlanVersionHistory";
@@ -43,6 +43,8 @@ interface ReleasePlansPanelProps {
   initialPlanId?: string | null;
 }
 
+const PAGE_SIZE = 50;
+
 function buildCreateHref(productId: string, sprintId?: string) {
   const params = new URLSearchParams({ productId });
   if (sprintId) params.set("sprintId", sprintId);
@@ -68,38 +70,87 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const itemsCountRef = useRef(0);
+  const scopeRef = useRef("");
+  const appliedInitialRef = useRef<string | null>(null);
   const [jobDoneTarget, setJobDoneTarget] = useState<string | null>(null);
   const [jobDoneRemark, setJobDoneRemark] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async (options?: { silent?: boolean }) => {
-    if (!options?.silent) {
+  useEffect(() => {
+    itemsCountRef.current = items.length;
+  }, [items.length]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(searchQuery.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  /** silent：操作后静默刷新，保留已加载的条数；search：搜索词变化，不闪烁加载态 */
+  const load = useCallback(async (options?: { silent?: boolean; search?: boolean }) => {
+    const scope = `${productId}:${sprintId ?? ""}`;
+    const sameScope = scopeRef.current === scope;
+    scopeRef.current = scope;
+    const showSpinner = !options?.silent && !(options?.search && sameScope);
+    if (showSpinner) {
       setLoading(true);
       setError(null);
     }
     try {
-      const list = await product.listReleasePlans(workspaceId, productId, sprintId);
-      setItems(list);
+      const limit = options?.silent && sameScope ? Math.max(PAGE_SIZE, itemsCountRef.current) : PAGE_SIZE;
+      const page = await product.listReleasePlansPage(workspaceId, productId, {
+        sprintId,
+        q: debouncedQuery || undefined,
+        limit,
+      });
+      setItems(page.items);
+      setHasMore(page.has_more);
+      const applyInitial = Boolean(initialPlanId) && appliedInitialRef.current !== initialPlanId;
+      if (applyInitial) appliedInitialRef.current = initialPlanId ?? null;
       setSelectedId((prev) => {
-        if (initialPlanId && list.some((item) => item.id === initialPlanId)) return initialPlanId;
-        if (prev && list.some((item) => item.id === prev)) return prev;
-        return list[0]?.id ?? null;
+        if (applyInitial) return initialPlanId ?? null;
+        if (sameScope && prev) return prev;
+        return page.items[0]?.id ?? null;
       });
     } catch (err) {
       if (!options?.silent) {
         setError(err instanceof BffError ? err.message : "加载发布计划失败");
       }
     } finally {
-      if (!options?.silent) setLoading(false);
+      if (showSpinner) setLoading(false);
     }
-  }, [workspaceId, productId, sprintId, initialPlanId]);
+  }, [workspaceId, productId, sprintId, initialPlanId, debouncedQuery]);
 
   useEffect(() => {
-    void load();
+    void load({ search: true });
   }, [load]);
+
+  async function loadMore() {
+    setLoadingMore(true);
+    try {
+      const page = await product.listReleasePlansPage(workspaceId, productId, {
+        sprintId,
+        q: debouncedQuery || undefined,
+        limit: PAGE_SIZE,
+        offset: items.length,
+      });
+      setItems((prev) => {
+        const seen = new Set(prev.map((item) => item.id));
+        return [...prev, ...page.items.filter((item) => !seen.has(item.id))];
+      });
+      setHasMore(page.has_more);
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "加载更多失败");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const loadDetail = useCallback(
     async (planId: string) => {
@@ -402,13 +453,17 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
   }
 
   async function onDelete() {
-    if (!selected) return;
+    if (!deleteTarget) return;
+    const targetId = deleteTarget.id;
     setBusy(true);
     try {
-      await product.deleteReleasePlan(workspaceId, productId, selected.id);
-      setDeleteOpen(false);
-      setSelectedId(null);
-      setSelected(null);
+      await product.deleteReleasePlan(workspaceId, productId, targetId);
+      setDeleteTarget(null);
+      setItems((prev) => prev.filter((item) => item.id !== targetId));
+      if (selectedId === targetId) {
+        setSelectedId(null);
+        setSelected(null);
+      }
       await load({ silent: true });
     } catch (err) {
       setError(err instanceof BffError ? err.message : "删除失败");
@@ -526,6 +581,22 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
     [items],
   );
 
+  const statusById = useMemo(() => new Map(items.map((row) => [row.id, row.status])), [items]);
+
+  function listItemActions(item: ProductMasterListItem) {
+    const status = statusById.get(item.id) ?? "";
+    const deletable = releasePlanCanDelete(status);
+    return [
+      {
+        label: "删除",
+        danger: true,
+        disabled: !deletable,
+        title: deletable ? undefined : "进行中的计划需先取消后才能删除",
+        onSelect: () => setDeleteTarget({ id: item.id, name: item.title }),
+      },
+    ];
+  }
+
   const canEditJobs = selected?.status === "planning";
   const usesExternalApproval =
     selected?.approval_config?.provider === "feishu" || selected?.approval_config?.provider === "dingtalk";
@@ -618,7 +689,24 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
         searchPlaceholder="搜索计划"
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        serverSearch
         items={listItems}
+        itemActions={listItemActions}
+        listEmpty={
+          debouncedQuery ? <div className="product-master-list-status">没有匹配「{debouncedQuery}」的计划</div> : undefined
+        }
+        listFooter={
+          hasMore ? (
+            <button
+              type="button"
+              className="product-master-load-more"
+              disabled={loadingMore}
+              onClick={() => void loadMore()}
+            >
+              {loadingMore ? "加载中…" : "加载更多"}
+            </button>
+          ) : null
+        }
         selectedId={selectedId}
         onSelect={setSelectedId}
         onAdd={openCreatePage}
@@ -750,7 +838,12 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                   </button>
                 ) : null}
                 {releasePlanCanDelete(selected.status) ? (
-                  <button type="button" className="btn-ghost text-xs text-red-600" disabled={busy} onClick={() => setDeleteOpen(true)}>
+                  <button
+                    type="button"
+                    className="btn-ghost text-xs text-red-600"
+                    disabled={busy}
+                    onClick={() => setDeleteTarget({ id: selected.id, name: selected.name })}
+                  >
                     删除计划
                   </button>
                 ) : null}
@@ -944,13 +1037,13 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
       </Modal>
 
       <Modal
-        open={deleteOpen}
-        onClose={() => setDeleteOpen(false)}
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
         title="删除发布计划"
         description="删除后计划及其发布项、操作记录将被永久移除，此操作不可撤销。"
         footer={
           <ReleasePlanModalFooter
-            onCancel={() => setDeleteOpen(false)}
+            onCancel={() => setDeleteTarget(null)}
             submitLabel="确认删除"
             submittingLabel="删除中…"
             busy={busy}
@@ -958,7 +1051,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
           />
         }
       >
-        <p className="text-sm text-muted-foreground">确定要删除「{selected?.name}」吗？</p>
+        <p className="text-sm text-muted-foreground">确定要删除「{deleteTarget?.name}」吗？</p>
       </Modal>
 
       <Modal

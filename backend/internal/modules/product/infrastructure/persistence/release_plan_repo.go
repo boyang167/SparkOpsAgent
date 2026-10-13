@@ -207,14 +207,29 @@ func (r *ReleasePlanRepository) ListBlockingPlansBySprint(ctx context.Context, s
 	return rowsToReleasePlans(rows)
 }
 
+// releasePlanListColumns 列表查询不读取需求说明与 Hook 等大字段。
+var releasePlanListColumns = []string{
+	"id", "product_id", "product_plan_id", "sprint_id", "name", "manager_id", "approver_id", "status",
+	"release_window_start", "release_window_end", "schedule_execute_time", "approval_config",
+	"created_by", "version", "created_at", "updated_at",
+}
+
+func prefixedColumns(prefix string, cols []string) []string {
+	out := make([]string, len(cols))
+	for i, col := range cols {
+		out[i] = prefix + col
+	}
+	return out
+}
+
 func (r *ReleasePlanRepository) ListPlansByProductFiltered(ctx context.Context, productID kernel.ProductID, sprintID *kernel.SprintID, filter repository.ReleasePlanListFilter) ([]*model.ReleasePlan, error) {
-	q := r.db.WithContext(ctx).Where("product_id = ?", productID.String())
+	q := r.db.WithContext(ctx).Select(releasePlanListColumns).Where("product_id = ?", productID.String())
 	if sprintID != nil {
 		q = q.Where("sprint_id = ?", sprintID.String())
 	}
 	q = applyReleasePlanListFilter(q, filter, "")
 	var rows []releasePlanModel
-	if err := q.Order("created_at DESC").Find(&rows).Error; err != nil {
+	if err := q.Order("created_at DESC, id DESC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rowsToReleasePlans(rows)
@@ -223,12 +238,12 @@ func (r *ReleasePlanRepository) ListPlansByProductFiltered(ctx context.Context, 
 func (r *ReleasePlanRepository) ListPlansByWorkspace(ctx context.Context, wsID kernel.WorkspaceID, filter repository.ReleasePlanListFilter) ([]*model.ReleasePlan, error) {
 	q := r.db.WithContext(ctx).
 		Table("product.release_plans AS rp").
-		Select("rp.*").
+		Select(prefixedColumns("rp.", releasePlanListColumns)).
 		Joins("INNER JOIN product.products AS p ON p.id = rp.product_id").
 		Where("p.workspace_id = ? AND rp.deleted_at IS NULL", wsID.String())
 	q = applyReleasePlanListFilter(q, filter, "rp.")
 	var rows []releasePlanModel
-	if err := q.Order("rp.created_at DESC").Find(&rows).Error; err != nil {
+	if err := q.Order("rp.created_at DESC, rp.id DESC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rowsToReleasePlans(rows)
@@ -248,7 +263,20 @@ func applyReleasePlanListFilter(q *gorm.DB, filter repository.ReleasePlanListFil
 	if filter.To != nil {
 		q = q.Where(prefix+"release_window_start <= ?", *filter.To)
 	}
+	if kw := strings.TrimSpace(filter.Keyword); kw != "" {
+		q = q.Where(prefix+"name ILIKE ? ESCAPE '\\'", "%"+escapeLikePattern(kw)+"%")
+	}
+	if filter.Limit > 0 {
+		q = q.Limit(filter.Limit)
+	}
+	if filter.Offset > 0 {
+		q = q.Offset(filter.Offset)
+	}
 	return q
+}
+
+func escapeLikePattern(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 func rowsToReleasePlans(rows []releasePlanModel) ([]*model.ReleasePlan, error) {

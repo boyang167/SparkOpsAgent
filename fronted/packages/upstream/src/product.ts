@@ -184,9 +184,19 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
-    async listReleasePlans(workspaceId: string, productId: string, sprintId?: string) {
-      const query = sprintId ? `?sprint_id=${encodeURIComponent(sprintId)}` : "";
-      return upstreamFetch<{ items: ReleasePlanVM[] }>(
+    async listReleasePlans(
+      workspaceId: string,
+      productId: string,
+      sprintId?: string,
+      page?: { q?: string; limit?: number; offset?: number },
+    ) {
+      const params = new URLSearchParams();
+      if (sprintId) params.set("sprint_id", sprintId);
+      if (page?.q) params.set("q", page.q);
+      if (page?.limit) params.set("limit", String(page.limit));
+      if (page?.offset) params.set("offset", String(page.offset));
+      const query = params.toString() ? `?${params.toString()}` : "";
+      return upstreamFetch<{ items: ReleasePlanVM[]; has_more?: boolean }>(
         `/api/v1/products/${productId}/release-plans${query}`,
         { method: "GET", options: { ...options, workspaceId } },
       );

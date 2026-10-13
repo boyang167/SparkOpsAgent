@@ -16,6 +16,32 @@ type ReleasePlanListQuery struct {
 	Statuses []model.ReleasePlanStatus
 	From     *time.Time
 	To       *time.Time
+	Keyword  string
+	Limit    int
+	Offset   int
+}
+
+const MaxReleasePlanPageSize = 200
+
+func (q ReleasePlanListQuery) filter() repository.ReleasePlanListFilter {
+	f := repository.ReleasePlanListFilter{Statuses: q.Statuses, From: q.From, To: q.To, Keyword: q.Keyword, Offset: q.Offset}
+	if q.Limit > 0 {
+		f.Limit = q.Limit + 1
+	}
+	return f
+}
+
+// ReleasePlanListPage 在请求了 limit 时多取一条以判断是否还有下一页。
+type ReleasePlanListPage struct {
+	Items   []map[string]any
+	HasMore bool
+}
+
+func pageReleasePlans(items []*model.ReleasePlan, limit int) ([]*model.ReleasePlan, bool) {
+	if limit > 0 && len(items) > limit {
+		return items[:limit], true
+	}
+	return items, false
 }
 
 func ParseReleasePlanListQuery(statusRaw string, fromRaw, toRaw string) (ReleasePlanListQuery, error) {
@@ -46,20 +72,20 @@ func ParseReleasePlanListQuery(statusRaw string, fromRaw, toRaw string) (Release
 	return q, nil
 }
 
-func (h *ListReleasePlansHandler) HandleFiltered(ctx context.Context, productID kernel.ProductID, query ReleasePlanListQuery) ([]map[string]any, error) {
+func (h *ListReleasePlansHandler) HandleFiltered(ctx context.Context, productID kernel.ProductID, query ReleasePlanListQuery) (ReleasePlanListPage, error) {
 	if _, err := h.products.FindProductByID(ctx, productID); err != nil {
-		return nil, err
+		return ReleasePlanListPage{}, err
 	}
-	filter := repository.ReleasePlanListFilter{Statuses: query.Statuses, From: query.From, To: query.To}
-	items, err := h.plans.ListPlansByProductFiltered(ctx, productID, query.SprintID, filter)
+	items, err := h.plans.ListPlansByProductFiltered(ctx, productID, query.SprintID, query.filter())
 	if err != nil {
-		return nil, err
+		return ReleasePlanListPage{}, err
 	}
+	items, hasMore := pageReleasePlans(items, query.Limit)
 	out := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		out = append(out, releasePlanSummary(item))
+		out = append(out, releasePlanListItem(item))
 	}
-	return out, nil
+	return ReleasePlanListPage{Items: out, HasMore: hasMore}, nil
 }
 
 type ListWorkspaceReleasePlansHandler struct {
@@ -73,16 +99,16 @@ func NewListWorkspaceReleasePlansHandler(products repository.ProductRepository, 
 }
 
 func (h *ListWorkspaceReleasePlansHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, query ReleasePlanListQuery) ([]map[string]any, error) {
-	filter := repository.ReleasePlanListFilter{Statuses: query.Statuses, From: query.From, To: query.To}
-	items, err := h.plans.ListPlansByWorkspace(ctx, wsID, filter)
+	items, err := h.plans.ListPlansByWorkspace(ctx, wsID, query.filter())
 	if err != nil {
 		return nil, err
 	}
+	items, _ = pageReleasePlans(items, query.Limit)
 	productNames := map[kernel.ProductID]string{}
 	sprintNames := map[kernel.SprintID]string{}
 	out := make([]map[string]any, 0, len(items))
 	for _, plan := range items {
-		row := releasePlanSummary(plan)
+		row := releasePlanListItem(plan)
 		name := productNames[plan.ProductID]
 		if name == "" {
 			if p, err := h.products.FindProductByID(ctx, plan.ProductID); err == nil {

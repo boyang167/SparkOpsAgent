@@ -98,6 +98,27 @@ func releasePlanSummary(plan *model.ReleasePlan) map[string]any {
 	return out
 }
 
+// releasePlanListItem 列表视图：不含需求说明、审批详情与 Hook 配置/状态，详情接口按需加载。
+func releasePlanListItem(plan *model.ReleasePlan) map[string]any {
+	out := map[string]any{
+		"id": plan.ID.String(), "product_id": plan.ProductID.String(), "name": plan.Name,
+		"status":               plan.Status,
+		"release_window_start": plan.ReleaseWindowStart.Format(time.RFC3339),
+		"release_window_end":   plan.ReleaseWindowEnd.Format(time.RFC3339),
+		"approval_enabled":     plan.ApprovalConfig.Enabled,
+		"manager_id":           plan.ManagerID.String(),
+		"created_at":           plan.CreatedAt.Format(time.RFC3339),
+		"version":              plan.Version,
+	}
+	if plan.ScheduleExecuteTime != nil {
+		out["schedule_execute_time"] = plan.ScheduleExecuteTime.Format(time.RFC3339)
+	}
+	if plan.SprintID != nil {
+		out["sprint_id"] = plan.SprintID.String()
+	}
+	return out
+}
+
 func releasePlanDetail(plan *model.ReleasePlan) map[string]any {
 	out := releasePlanSummary(plan)
 	out["version"] = plan.Version

@@ -64,6 +64,13 @@ export const productDetailTabIcons = {
       <path d="M13.5 13.5 17 17" strokeLinecap="round" />
     </svg>
   ),
+  more: (
+    <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+      <circle cx="5" cy="10" r="1.4" />
+      <circle cx="10" cy="10" r="1.4" />
+      <circle cx="15" cy="10" r="1.4" />
+    </svg>
+  ),
   sort: (
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
       <path d="M6 4v12M6 16l-2.5-2.5M6 16l2.5-2.5" strokeLinecap="round" strokeLinejoin="round" />

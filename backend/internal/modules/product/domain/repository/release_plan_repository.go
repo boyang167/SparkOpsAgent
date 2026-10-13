@@ -12,6 +12,9 @@ type ReleasePlanListFilter struct {
 	Statuses []model.ReleasePlanStatus
 	From     *time.Time
 	To       *time.Time
+	Keyword  string
+	Limit    int
+	Offset   int
 }
 
 type ReleasePlanRepository interface {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { productDetailTabIcons } from "./product-detail-icons";
 
 export interface ProductMasterListItem {
@@ -11,6 +11,14 @@ export interface ProductMasterListItem {
   metaClassName?: string;
   isGroup?: boolean;
   indent?: boolean;
+}
+
+export interface ProductMasterItemAction {
+  label: string;
+  danger?: boolean;
+  disabled?: boolean;
+  title?: string;
+  onSelect: () => void;
 }
 
 interface ProductMasterDetailProps {
@@ -31,6 +39,10 @@ interface ProductMasterDetailProps {
   showMain?: boolean;
   groupActionLabel?: string;
   onGroupAction?: (groupId: string) => void;
+  /** 由调用方按 searchQuery 查询服务端，组件内不再本地过滤 */
+  serverSearch?: boolean;
+  listFooter?: ReactNode;
+  itemActions?: (item: ProductMasterListItem) => ProductMasterItemAction[];
 }
 
 export function ProductMasterDetail({
@@ -51,7 +63,29 @@ export function ProductMasterDetail({
   showMain = true,
   groupActionLabel,
   onGroupAction,
+  serverSearch = false,
+  listFooter,
+  itemActions,
 }: ProductMasterDetailProps) {
+  const [menuItemId, setMenuItemId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuItemId) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuItemId(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuItemId(null);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuItemId]);
+
   const groupIds = useMemo(
     () => items.filter((item) => item.isGroup).map((item) => item.id),
     [items],
@@ -88,7 +122,7 @@ export function ProductMasterDetail({
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return items;
+    if (!q || serverSearch) return items;
     const matched = new Set<string>();
     items.forEach((item, index) => {
       const hit =
@@ -113,7 +147,7 @@ export function ProductMasterDetail({
       }
     });
     return items.filter((item) => matched.has(item.id));
-  }, [items, searchQuery]);
+  }, [items, searchQuery, serverSearch]);
 
   const searching = searchQuery.trim().length > 0;
 
@@ -205,7 +239,7 @@ export function ProductMasterDetail({
                   </div>
                 );
               }
-              return (
+              const itemButton = (
                 <button
                   key={item.id}
                   type="button"
@@ -221,8 +255,51 @@ export function ProductMasterDetail({
                   ) : null}
                 </button>
               );
+              const actions = itemActions?.(item) ?? [];
+              if (actions.length === 0) return itemButton;
+              const menuOpen = menuItemId === item.id;
+              return (
+                <div
+                  key={item.id}
+                  className={`product-master-item-wrap${menuOpen ? " is-menu-open" : ""}`}
+                  ref={menuOpen ? menuRef : undefined}
+                >
+                  {itemButton}
+                  <button
+                    type="button"
+                    className="product-master-item-more"
+                    aria-label={`${item.title} 更多操作`}
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                    onClick={() => setMenuItemId(menuOpen ? null : item.id)}
+                  >
+                    {productDetailTabIcons.more}
+                  </button>
+                  {menuOpen ? (
+                    <div className="product-master-item-menu" role="menu">
+                      {actions.map((action) => (
+                        <button
+                          key={action.label}
+                          type="button"
+                          role="menuitem"
+                          className={`product-master-item-menu-option${action.danger ? " is-danger" : ""}`}
+                          disabled={action.disabled}
+                          title={action.title}
+                          onClick={() => {
+                            setMenuItemId(null);
+                            action.onSelect();
+                          }}
+                        >
+                          {action.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              );
             })
           )}
+          {!loading && listFooter ? listFooter : null}
         </div>
 
         <label className="product-master-search">

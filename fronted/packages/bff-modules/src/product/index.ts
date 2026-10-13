@@ -123,6 +123,17 @@ export async function listReleasePlans(
   return data.items;
 }
 
+export async function listReleasePlansPage(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  query: { sprintId?: string; q?: string; limit?: number; offset?: number },
+) {
+  const { sprintId, ...page } = query;
+  const data = await ctx.upstream.product.listReleasePlans(workspaceId, productId, sprintId, page);
+  return { items: data.items, has_more: data.has_more ?? false };
+}
+
 export async function getReleasePlan(ctx: BffContext, workspaceId: string, productId: string, planId: string) {
   return ctx.upstream.product.getReleasePlan(workspaceId, productId, planId);
 }

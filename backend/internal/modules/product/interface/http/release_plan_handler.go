@@ -2,8 +2,10 @@ package http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -106,12 +108,12 @@ func (h *Handler) ListReleasePlans(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", "invalid list query", http.StatusBadRequest)
 		return
 	}
-	items, err := h.releasePlans.listPlans.HandleFiltered(c.Request.Context(), productID, listQuery)
+	page, err := h.releasePlans.listPlans.HandleFiltered(c.Request.Context(), productID, listQuery)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
 	}
-	httpx.OK(c, gin.H{"items": items})
+	httpx.OK(c, gin.H{"items": page.Items, "has_more": page.HasMore})
 }
 
 func (h *Handler) ListWorkspaceReleasePlans(c *gin.Context) {
@@ -144,6 +146,21 @@ func parseReleasePlanListQueryFromRequest(c *gin.Context) (query.ReleasePlanList
 			return q, err
 		}
 		q.SprintID = &parsed
+	}
+	q.Keyword = strings.TrimSpace(c.Query("q"))
+	if raw := c.Query("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			return q, fmt.Errorf("invalid limit")
+		}
+		q.Limit = min(n, query.MaxReleasePlanPageSize)
+	}
+	if raw := c.Query("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			return q, fmt.Errorf("invalid offset")
+		}
+		q.Offset = n
 	}
 	return q, nil
 }

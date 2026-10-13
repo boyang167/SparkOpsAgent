@@ -199,6 +199,23 @@ export async function listReleasePlans(workspaceId: string, productId: string, s
   return data.items;
 }
 
+export async function listReleasePlansPage(
+  workspaceId: string,
+  productId: string,
+  query: { sprintId?: string; q?: string; limit?: number; offset?: number },
+) {
+  const params = new URLSearchParams();
+  if (query.sprintId) params.set("sprint_id", query.sprintId);
+  if (query.q) params.set("q", query.q);
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.offset) params.set("offset", String(query.offset));
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  return bffFetch<{ items: import("@sparkops/contracts/product").ReleasePlanVM[]; has_more: boolean }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans${qs}`,
+    { workspaceId },
+  );
+}
+
 export function getReleasePlan(workspaceId: string, productId: string, planId: string) {
   return bffFetch<import("@sparkops/contracts/product").ReleasePlanVM>(
     `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}`,
