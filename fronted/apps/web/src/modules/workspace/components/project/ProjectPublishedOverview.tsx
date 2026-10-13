@@ -315,6 +315,7 @@ export function ProjectPublishedOverview({
             onClick={() => void loadOverview()}
             disabled={loading}
             title="刷新"
+            aria-label="刷新"
           >
             ↻
           </button>
@@ -387,7 +388,7 @@ export function ProjectPublishedOverview({
           <DetailItem label="容器组" value={loading ? "加载中…" : replicaStatus(deployment)} />
           <DetailItem label="命令、参数" value="-" />
 
-          <DetailItem label="hosts" value="-" />
+          <DetailItem label="Hosts" value="-" />
         </dl>
       </section>
 
