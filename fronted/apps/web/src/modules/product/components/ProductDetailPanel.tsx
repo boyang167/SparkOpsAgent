@@ -15,6 +15,7 @@ import { ProductWorkflowsPanel } from "./ProductWorkflowsPanel";
 import { ReleasePlansPanel } from "./ReleasePlansPanel";
 import { SprintBoardPanel } from "./SprintBoardPanel";
 import { ProductDetailEmptyState } from "./ProductDetailEmptyState";
+import { ProductOverviewTab } from "./ProductOverviewTab";
 import { productDetailTabIcons } from "./product-detail-icons";
 
 interface ProductDetailPanelProps {
@@ -147,20 +148,13 @@ export function ProductDetailPanel({ workspaceId, productId }: ProductDetailPane
 
       {!error && tab === "overview" && overview ? (
         <div className="product-detail-body is-overview">
-          {overview.description?.trim() && overview.description.trim() !== overview.name ? (
-            <p className="product-detail-desc">{overview.description}</p>
-          ) : null}
-
-          <div className="product-detail-overview-grid">
-            <div className="product-detail-stat">
-              <div className="product-detail-stat-label">关联项目</div>
-              <div className="product-detail-stat-value">{overview.project_count}</div>
-            </div>
-            <div className="product-detail-stat">
-              <div className="product-detail-stat-label">环境</div>
-              <div className="product-detail-stat-value">{overview.environment_count ?? 0}</div>
-            </div>
-          </div>
+          <ProductOverviewTab
+            workspaceId={workspaceId}
+            productId={productId}
+            overview={overview}
+            projects={projects}
+            onNavigate={selectTab}
+          />
         </div>
       ) : null}
 
