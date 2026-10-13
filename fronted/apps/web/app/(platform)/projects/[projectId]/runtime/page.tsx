@@ -34,7 +34,7 @@ export default async function ProjectRuntimePage({ params }: ProjectRuntimePageP
       <PageHeader
         eyebrow={projectDisplayName(project)}
         title="运行环境"
-        description="查看并调整当前工作空间已授权集群的发布顺序。排第一的为构建集群，其余为跨集群同步目标。"
+        description="首个集群负责构建与部署，其余集群自动同步。"
       />
       <WorkspaceClusterPanel workspaceId={workspaceId} />
     </div>

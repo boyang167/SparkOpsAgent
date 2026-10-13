@@ -93,9 +93,6 @@ export function WorkspaceClusterPanel({ workspaceId }: WorkspaceClusterPanelProp
   return (
     <>
     <div className="stack-md">
-      <p className="runtime-hint">
-        使用上移/下移调整集群顺序。排在最前的集群为<strong>构建集群</strong>，发布时在此构建镜像并部署；其余集群用于跨集群同步。
-      </p>
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       {loading ? (
         <div className="empty-state">加载中…</div>
