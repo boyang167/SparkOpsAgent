@@ -15087,10 +15087,14 @@ textarea.input {
 
 .project-runtime-detail-item {
   display: grid;
-  grid-template-columns: 6rem minmax(0, 1fr);
+  grid-template-columns: 5.5rem minmax(0, 1fr);
   gap: 0.75rem;
   align-items: start;
   min-width: 0;
+}
+
+.project-runtime-detail-item.is-wide {
+  grid-column: 1 / -1;
 }
 
 .project-runtime-detail-item dt {
@@ -15098,7 +15102,7 @@ textarea.input {
   font-size: 0.8125rem;
   line-height: 1.5rem;
   color: var(--muted);
-  text-align: right;
+  text-align: left;
   white-space: nowrap;
 }
 
@@ -15123,8 +15127,14 @@ textarea.input {
 }
 
 .project-runtime-detail-item dd .project-tag {
+  max-width: 100%;
   margin: 0;
   line-height: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
+.project-runtime-detail-item dd {
+  overflow-wrap: anywhere;
 }
 
 .project-runtime-empty {

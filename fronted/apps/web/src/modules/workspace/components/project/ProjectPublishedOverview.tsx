@@ -126,9 +126,9 @@ function replicaStatus(deployment: DeploymentOverviewVM | undefined) {
   );
 }
 
-function DetailItem({ label, value }: { label: string; value: ReactNode }) {
+function DetailItem({ label, value, wide = false }: { label: string; value: ReactNode; wide?: boolean }) {
   return (
-    <div className="project-runtime-detail-item">
+    <div className={`project-runtime-detail-item${wide ? " is-wide" : ""}`}>
       <dt>{label}</dt>
       <dd>{value}</dd>
     </div>
@@ -324,36 +324,6 @@ export function ProjectPublishedOverview({
         <dl className="project-runtime-detail-grid">
           <DetailItem label="名称" value={deployment?.name || project.name} />
           <DetailItem label="命名空间" value={namespace} />
-          <DetailItem label="标签" value={loading ? "加载中…" : labelTags(deployment?.labels)} />
-
-          <DetailItem
-            label="当前镜像版本"
-            value={
-              imageTag ? <span className="project-tag project-tag-blue">{imageTag}</span> : "-"
-            }
-          />
-          {latestDeploy?.run_type === "rollback" && latestDeploy.rollback_of_run_id ? (
-            <DetailItem
-              label="回滚来源"
-              value={
-                <span className="project-tag project-tag-orange">
-                  {deploymentRollbackSourceTitle(latestDeploy, deploymentPage?.items ?? [])}
-                </span>
-              }
-            />
-          ) : null}
-          <DetailItem label="升级策略" value={deployment?.strategy || "RollingUpdate"} />
-          <DetailItem
-            label="TOKEN"
-            value={
-              deployment?.uid ? (
-                <span className="project-tag project-tag-orange">{deployment.uid}</span>
-              ) : (
-                "-"
-              )
-            }
-          />
-
           <DetailItem
             label="创建时间"
             value={
@@ -364,6 +334,20 @@ export function ProjectPublishedOverview({
                   : "-"
             }
           />
+
+          <DetailItem
+            label="镜像"
+            value={deployment?.image || (imageTag ? `${project.name}:${imageTag}` : "-")}
+          />
+          <DetailItem
+            label="当前镜像版本"
+            value={
+              imageTag ? <span className="project-tag project-tag-blue">{imageTag}</span> : "-"
+            }
+          />
+          <DetailItem label="升级策略" value={deployment?.strategy || "RollingUpdate"} />
+
+          <DetailItem label="容器组" value={loading ? "加载中…" : replicaStatus(deployment)} />
           <DetailItem
             label="配置资源"
             value={
@@ -374,21 +358,38 @@ export function ProjectPublishedOverview({
               )
             }
           />
+          <DetailItem label="命令、参数" value="-" />
+
           <DetailItem
             label="Git"
             value={
               project.git_url ? <span className="project-tag project-tag-gray">{project.git_url}</span> : "-"
             }
           />
-
           <DetailItem
-            label="镜像"
-            value={deployment?.image || (imageTag ? `${project.name}:${imageTag}` : "-")}
+            label="TOKEN"
+            value={
+              deployment?.uid ? (
+                <span className="project-tag project-tag-orange">{deployment.uid}</span>
+              ) : (
+                "-"
+              )
+            }
           />
-          <DetailItem label="容器组" value={loading ? "加载中…" : replicaStatus(deployment)} />
-          <DetailItem label="命令、参数" value="-" />
-
           <DetailItem label="Hosts" value="-" />
+
+          {latestDeploy?.run_type === "rollback" && latestDeploy.rollback_of_run_id ? (
+            <DetailItem
+              wide
+              label="回滚来源"
+              value={
+                <span className="project-tag project-tag-orange">
+                  {deploymentRollbackSourceTitle(latestDeploy, deploymentPage?.items ?? [])}
+                </span>
+              }
+            />
+          ) : null}
+          <DetailItem wide label="标签" value={loading ? "加载中…" : labelTags(deployment?.labels)} />
         </dl>
       </section>
 
