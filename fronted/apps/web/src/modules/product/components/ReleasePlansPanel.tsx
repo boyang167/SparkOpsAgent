@@ -104,9 +104,12 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
+  const itemsRef = useRef<ReleasePlanVM[]>([]);
+
   useEffect(() => {
+    itemsRef.current = items;
     itemsCountRef.current = items.length;
-  }, [items.length]);
+  }, [items]);
 
   useEffect(() => {
     void identity
@@ -191,8 +194,15 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
           ),
         );
       } catch (err) {
-        setError(err instanceof BffError ? err.message : "加载详情失败");
         setSelected(null);
+        // 链接中的计划可能已被删除：静默回退到列表第一项
+        if (err instanceof BffError && (err.status === 404 || err.code === "RELEASE_PLAN_NOT_FOUND")) {
+          const rest = itemsRef.current.filter((item) => item.id !== planId);
+          setItems(rest);
+          setSelectedId(rest[0]?.id ?? null);
+          return;
+        }
+        setError(err instanceof BffError ? err.message : "加载详情失败");
       }
     },
     [workspaceId, productId],
