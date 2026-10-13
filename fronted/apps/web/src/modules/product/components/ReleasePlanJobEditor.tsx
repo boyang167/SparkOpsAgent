@@ -4,7 +4,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { EnvironmentVM, ProductWorkflowVM, ReleasePlanJobVM, ReleasePlanVM } from "@sparkops/contracts/product";
 import { InlineAlert } from "@/components/ui/InlineAlert";
+import { Modal } from "@/components/ui/Modal";
+import { ActionMenu } from "./ActionMenu";
 import { MemberNameLabel } from "./MemberNameLabel";
+import { ReleasePlanAddWorkflowModal } from "./ReleasePlanAddWorkflowModal";
+import { ReleasePlanModalFooter } from "./ReleasePlanModalFooter";
+import { SprintWorkItemsImportModal } from "./SprintWorkItemsImportModal";
+import { productDetailTabIcons } from "./product-detail-icons";
 import { RichTextField } from "./RichTextField";
 import { WorkItemAssigneeField } from "./WorkItemAssigneeField";
 import {
@@ -51,6 +57,8 @@ interface ReleasePlanJobEditorProps {
   ) => void | Promise<void>;
   renderJobActions?: (job: ReleasePlanJobVM) => ReactNode;
   memberName?: (memberId?: string | null) => string;
+  /** 计划关联了迭代时提供，用于从迭代需求批量生成检查项 */
+  onImportWorkItems?: (workItemIds: string[]) => void | Promise<void>;
 }
 
 function jobTypeLabel(type: string) {
@@ -89,40 +97,22 @@ export function ReleasePlanJobEditor({
   onWorkflowParamsChange,
   renderJobActions,
   memberName,
+  onImportWorkItems,
 }: ReleasePlanJobEditorProps) {
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState(workflows[0]?.id ?? "");
-  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState("");
-  const [selectedBranch, setSelectedBranch] = useState("main");
+  const [addWorkflowOpen, setAddWorkflowOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [deleteJobTarget, setDeleteJobTarget] = useState<ReleasePlanJobVM | null>(null);
   const [dragJobId, setDragJobId] = useState<string | null>(null);
   const [dropJobId, setDropJobId] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const debounceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const prevJobCount = useRef(0);
 
-  const selectedWorkflow = useMemo(
-    () => workflows.find((item) => item.id === selectedWorkflowId) ?? null,
-    [workflows, selectedWorkflowId],
+  const jobs = useMemo(
+    () => [...(plan.jobs ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [plan.jobs],
   );
-
-  const jobs = [...(plan.jobs ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  const hasDeployJobs = (selectedWorkflow?.stages ?? []).some((stage) =>
-    (stage.jobs ?? []).some(
-      (job) => job.type === "sparkops-deploy" || job.type === "sparkops-deploy-version",
-    ),
-  );
-  const hasBuildJobs = workflowHasBuildJobs(selectedWorkflow);
-
-  useEffect(() => {
-    setSelectedWorkflowId(workflows[0]?.id ?? "");
-  }, [workflows]);
-
-  useEffect(() => {
-    setSelectedEnvironmentId(defaultEnvironmentIdForWorkflow(selectedWorkflow, environments));
-  }, [selectedWorkflow, environments]);
-
-  useEffect(() => {
-    setSelectedBranch(defaultBranchForWorkflow(selectedWorkflow));
-  }, [selectedWorkflow]);
+  const canImport = Boolean(canEdit && onImportWorkItems && plan.sprint);
 
   useEffect(() => {
     const sorted = [...(plan.jobs ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
@@ -224,38 +214,31 @@ export function ReleasePlanJobEditor({
   const expandedCount = expandedIds.size;
   const allExpanded = jobs.length > 0 && expandedCount === jobs.length;
 
-  function renderListControls() {
-    if (jobs.length <= 1) return null;
-    return (
-      <div className="segmented-control release-plan-jobs-view-toggle" role="group" aria-label="列表视图">
-        <button
-          type="button"
-          className={`segmented-item${allExpanded ? " segmented-item-active" : ""}`}
-          disabled={allExpanded}
-          onClick={expandAll}
-        >
-          展开全部
-        </button>
-        <button
-          type="button"
-          className={`segmented-item${expandedCount === 0 ? " segmented-item-active" : ""}`}
-          disabled={expandedCount === 0}
-          onClick={collapseAll}
-        >
-          收起全部
-        </button>
-      </div>
-    );
+  const addMenuItems = [
+    { label: "检查项", onSelect: () => void onAddText() },
+    {
+      label: "工作流…",
+      disabled: workflows.length === 0,
+      title: workflows.length === 0 ? "请先在「工作流」Tab 创建工作流" : undefined,
+      onSelect: () => setAddWorkflowOpen(true),
+    },
+    canImport ? { label: "从迭代需求导入…", separatorBefore: true, onSelect: () => setImportOpen(true) } : null,
+  ];
+
+  async function submitAddWorkflow(workflowId: string, options: { environmentId?: string; branch?: string }) {
+    await onAddWorkflow(workflowId, options);
+    setAddWorkflowOpen(false);
   }
 
-  function renderToolbarSummary() {
-    return (
-      <div className="release-plan-jobs-toolbar-summary">
-        <span className="release-plan-jobs-toolbar-title">发布项</span>
-        <span className="release-plan-jobs-count">{jobs.length}</span>
-        {renderListControls()}
-      </div>
-    );
+  async function submitImport(workItemIds: string[]) {
+    await onImportWorkItems?.(workItemIds);
+    setImportOpen(false);
+  }
+
+  async function confirmDeleteJob() {
+    if (!deleteJobTarget) return;
+    await onDelete(deleteJobTarget.id);
+    setDeleteJobTarget(null);
   }
 
   function renderEnvironmentSelect(
@@ -286,89 +269,59 @@ export function ReleasePlanJobEditor({
 
   return (
     <div className="release-plan-jobs">
-      {canEdit ? (
+      {jobs.length > 0 && (canEdit || jobs.length > 1) ? (
         <div className="release-plan-jobs-toolbar">
-          {renderToolbarSummary()}
-          <div className="release-plan-jobs-toolbar-actions">
+          {jobs.length > 1 ? (
             <button
               type="button"
-              className="btn btn-secondary text-xs release-plan-jobs-add-check"
-              disabled={busy}
-              onClick={() => void onAddText()}
+              className="release-plan-jobs-expand"
+              onClick={allExpanded ? collapseAll : expandAll}
             >
-              <span className="release-plan-jobs-add-icon" aria-hidden>
-                +
-              </span>
-              检查项
+              {allExpanded ? "全部收起" : "全部展开"}
             </button>
-            {workflows.length > 0 ? (
-              <div className="release-plan-jobs-input-group">
-                <span className="release-plan-jobs-input-group-label">工作流</span>
-                <select
-                  className="input text-xs"
-                  value={selectedWorkflowId}
-                  onChange={(e) => setSelectedWorkflowId(e.target.value)}
-                  aria-label="选择工作流"
-                >
-                  {workflows.map((wf) => (
-                    <option key={wf.id} value={wf.id}>
-                      {wf.name}
-                    </option>
-                  ))}
-                </select>
-                {hasDeployJobs ? (
-                  <>
-                    <span className="release-plan-jobs-input-group-label">环境</span>
-                    {renderEnvironmentSelect(
-                      selectedEnvironmentId,
-                      setSelectedEnvironmentId,
-                      "选择部署环境",
-                    )}
-                  </>
-                ) : null}
-                {hasBuildJobs ? (
-                  <>
-                    <span className="release-plan-jobs-input-group-label">分支</span>
-                    <input
-                      className="input text-xs release-plan-jobs-branch-input"
-                      value={selectedBranch}
-                      disabled={busy}
-                      aria-label="构建分支"
-                      placeholder="main"
-                      onChange={(e) => setSelectedBranch(e.target.value)}
-                    />
-                  </>
-                ) : null}
-                <button
-                  type="button"
-                  className="btn btn-primary text-xs release-plan-jobs-input-group-btn"
-                  disabled={busy || !selectedWorkflowId || (hasDeployJobs && !selectedEnvironmentId)}
-                  onClick={() =>
-                    void onAddWorkflow(selectedWorkflowId, {
-                      ...(hasDeployJobs ? { environmentId: selectedEnvironmentId } : {}),
-                      ...(hasBuildJobs ? { branch: selectedBranch.trim() || "main" } : {}),
-                    })
-                  }
-                >
-                  添加
-                </button>
-              </div>
-            ) : (
-              <span className="release-plan-jobs-toolbar-hint">请先在「工作流」Tab 创建工作流</span>
-            )}
-          </div>
+          ) : (
+            <span />
+          )}
+          {canEdit ? (
+            <ActionMenu
+              ariaLabel="添加发布项"
+              triggerClassName="btn btn-secondary text-xs"
+              disabled={busy}
+              trigger="+ 添加发布项"
+              items={addMenuItems}
+            />
+          ) : null}
         </div>
-      ) : jobs.length > 0 ? (
-        <div className="release-plan-jobs-toolbar release-plan-jobs-toolbar-readonly">{renderToolbarSummary()}</div>
       ) : null}
 
       {jobs.length === 0 ? (
         <div className="empty-state release-plan-jobs-empty">
-          <p>{canEdit ? "还没有发布项，从上方添加检查项或工作流" : "暂无发布项"}</p>
+          <p className="release-plan-jobs-empty-title">{canEdit ? "还没有发布项" : "暂无发布项"}</p>
           {canEdit ? (
-            <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onAddText()}>
-              添加第一个检查项
-            </button>
+            <>
+              <p className="release-plan-jobs-empty-desc">
+                检查项需要人工确认，工作流会自动执行构建与部署；执行时按顺序逐项推进。
+              </p>
+              <div className="release-plan-jobs-empty-actions">
+                <button type="button" className="btn btn-secondary text-sm" disabled={busy} onClick={() => void onAddText()}>
+                  添加检查项
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary text-sm"
+                  disabled={busy || workflows.length === 0}
+                  title={workflows.length === 0 ? "请先在「工作流」Tab 创建工作流" : undefined}
+                  onClick={() => setAddWorkflowOpen(true)}
+                >
+                  添加工作流
+                </button>
+                {canImport ? (
+                  <button type="button" className="btn-ghost text-sm" disabled={busy} onClick={() => setImportOpen(true)}>
+                    从迭代需求导入
+                  </button>
+                ) : null}
+              </div>
+            </>
           ) : null}
         </div>
       ) : (
@@ -465,37 +418,23 @@ export function ReleasePlanJobEditor({
                     onClick={(event) => event.stopPropagation()}
                     onKeyDown={(event) => event.stopPropagation()}
                   >
-                    {canEdit ? (
-                      <>
-                        <button
-                          type="button"
-                          className="btn-ghost text-xs px-1.5"
-                          disabled={busy || index === 0}
-                          aria-label="上移"
-                          onClick={() => void onMove(job.id, "up")}
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-ghost text-xs px-1.5"
-                          disabled={busy || index === jobs.length - 1}
-                          aria-label="下移"
-                          onClick={() => void onMove(job.id, "down")}
-                        >
-                          ↓
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-ghost text-xs text-red-600 px-1.5"
-                          disabled={busy}
-                          onClick={() => void onDelete(job.id)}
-                        >
-                          删除
-                        </button>
-                      </>
-                    ) : null}
                     {renderJobActions?.(job)}
+                    {canEdit ? (
+                      <ActionMenu
+                        ariaLabel={`${job.name} 更多操作`}
+                        disabled={busy}
+                        trigger={productDetailTabIcons.more}
+                        items={[
+                          { label: "上移", disabled: index === 0, onSelect: () => void onMove(job.id, "up") },
+                          {
+                            label: "下移",
+                            disabled: index === jobs.length - 1,
+                            onSelect: () => void onMove(job.id, "down"),
+                          },
+                          { label: "删除", danger: true, separatorBefore: true, onSelect: () => setDeleteJobTarget(job) },
+                        ]}
+                      />
+                    ) : null}
                   </div>
                 </div>
 
@@ -626,6 +565,42 @@ export function ReleasePlanJobEditor({
           })}
         </ul>
       )}
+
+      <ReleasePlanAddWorkflowModal
+        open={addWorkflowOpen}
+        workflows={workflows}
+        environments={environments}
+        busy={busy}
+        onClose={() => setAddWorkflowOpen(false)}
+        onSubmit={submitAddWorkflow}
+      />
+
+      {canImport ? (
+        <SprintWorkItemsImportModal
+          open={importOpen}
+          plan={plan}
+          busy={busy}
+          onClose={() => setImportOpen(false)}
+          onSubmit={submitImport}
+        />
+      ) : null}
+
+      <Modal
+        open={Boolean(deleteJobTarget)}
+        onClose={() => setDeleteJobTarget(null)}
+        title="删除发布项"
+        footer={
+          <ReleasePlanModalFooter
+            onCancel={() => setDeleteJobTarget(null)}
+            submitLabel="确认删除"
+            submittingLabel="删除中…"
+            busy={busy}
+            onSubmit={() => void confirmDeleteJob()}
+          />
+        }
+      >
+        <p className="text-sm text-muted-foreground">确定要删除「{deleteJobTarget?.name}」吗？</p>
+      </Modal>
     </div>
   );
 }

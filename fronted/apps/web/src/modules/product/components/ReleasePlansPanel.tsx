@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { product } from "@sparkops/web-sdk";
+import { identity, product } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { EnvironmentVM, ProductWorkflowVM, ReleasePlanJobVM, ReleasePlanVM } from "@sparkops/contracts/product";
 import { InlineAlert } from "@/components/ui/InlineAlert";
@@ -25,8 +25,9 @@ import { useReleasePlanCollab } from "../hooks/useReleasePlanCollab";
 import { ReleasePlanNamePromptModal } from "./ReleasePlanNamePromptModal";
 import { ReleasePlanJobEditor } from "./ReleasePlanJobEditor";
 import { ReleasePlanStatusSteps } from "./ReleasePlanStatusSteps";
-import { SprintWorkItemsSummary } from "./SprintWorkItemsSummary";
 import { ReleasePlanModalFooter } from "./ReleasePlanModalFooter";
+import { ActionMenu } from "./ActionMenu";
+import { productDetailTabIcons } from "./product-detail-icons";
 import { buildWorkflowJobParameters, mergeWorkflowJobParameters } from "./release-plan-workflow-params";
 import {
   formatReleaseWindow,
@@ -44,6 +45,25 @@ interface ReleasePlansPanelProps {
 }
 
 const PAGE_SIZE = 50;
+
+const STEP_STATUSES = new Set(["planning", "wait_for_approval", "executing", "success"]);
+
+const CANCELLABLE_STATUSES = new Set([
+  "planning",
+  "wait_for_approval",
+  "executing",
+  "wait_for_finish_planning_external_check",
+  "wait_for_execute_external_check",
+  "wait_for_all_done_external_check",
+]);
+
+function plainText(html?: string | null) {
+  return (html ?? "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function buildCreateHref(productId: string, sprintId?: string) {
   const params = new URLSearchParams({ productId });
@@ -74,6 +94,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [currentMemberId, setCurrentMemberId] = useState<string | undefined>();
   const itemsCountRef = useRef(0);
   const scopeRef = useRef("");
   const appliedInitialRef = useRef<string | null>(null);
@@ -86,6 +107,13 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
   useEffect(() => {
     itemsCountRef.current = items.length;
   }, [items.length]);
+
+  useEffect(() => {
+    void identity
+      .getSession()
+      .then((me) => setCurrentMemberId(me?.id))
+      .catch(() => setCurrentMemberId(undefined));
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(searchQuery.trim()), 250);
@@ -598,6 +626,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
   }
 
   const canEditJobs = selected?.status === "planning";
+  const descriptionText = useMemo(() => plainText(selected?.description), [selected?.description]);
   const usesExternalApproval =
     selected?.approval_config?.provider === "feishu" || selected?.approval_config?.provider === "dingtalk";
   const approverLabels = (selected?.approval_config?.approver_ids ?? [])
@@ -609,6 +638,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
     workspaceId,
     productId,
     planId: selected?.id,
+    memberId: currentMemberId,
     section: detailTab === "jobs" ? "jobs" : "plan",
     location:
       typeof window !== "undefined"
@@ -733,163 +763,124 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
           <div className="product-master-main-inner release-plan-detail stack-md">
             <header className="release-plan-detail-header">
               <div className="release-plan-detail-head">
-                <div className="stack-xs min-w-0">
-                  <h2 className="section-title">{selected.name}</h2>
-                  {selected.description ? <p className="text-sm text-muted-foreground">{selected.description}</p> : null}
+                <div className="release-plan-detail-heading">
+                  <div className="release-plan-detail-title-row">
+                    <h2 className="release-plan-detail-title">{selected.name}</h2>
+                    {!STEP_STATUSES.has(selected.status) ? (
+                      <span className={`badge shrink-0 ${releasePlanStatusBadgeClass(selected.status)}`}>
+                        {releasePlanStatusLabel(selected.status)}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="release-plan-detail-meta">
+                    <span>{formatReleaseWindow(selected.release_window_start, selected.release_window_end)}</span>
+                    {selected.manager_id ? <span>负责人 {memberName(selected.manager_id)}</span> : null}
+                    {selected.sprint?.name ? <span>迭代 {selected.sprint.name}</span> : null}
+                    {selected.schedule_execute_time ? (
+                      <span>定时 {new Date(selected.schedule_execute_time).toLocaleString("zh-CN")}</span>
+                    ) : null}
+                    {selected.approval_enabled && !usesExternalApproval && approverLabels.length > 0 ? (
+                      <span>审批人 {approverLabels.join("、")}</span>
+                    ) : null}
+                    {usesExternalApproval ? (
+                      <span>
+                        {selected.approval_config?.provider === "feishu" ? "飞书审批" : "钉钉审批"}
+                        {selected.approval_config?.instance?.status ? ` · ${selected.approval_config.instance.status}` : ""}
+                      </span>
+                    ) : null}
+                  </p>
                 </div>
-                <span className={`badge shrink-0 ${releasePlanStatusBadgeClass(selected.status)}`}>
-                  {releasePlanStatusLabel(selected.status)}
-                </span>
+
+                <div className="release-plan-detail-actions">
+                  {templateSaved ? <span className="release-plan-detail-flash">模板已保存</span> : null}
+                  {selected.status === "planning" ? (
+                    <>
+                      <button type="button" className="btn btn-secondary text-sm" disabled={busy} onClick={() => setEditOpen(true)}>
+                        编辑
+                      </button>
+                      <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onFinishPlanning()}>
+                        完成规划
+                      </button>
+                    </>
+                  ) : null}
+                  {selected.status === "wait_for_approval" && !usesExternalApproval ? (
+                    <>
+                      <button type="button" className="btn btn-secondary text-sm" disabled={busy} onClick={() => setRejectOpen(true)}>
+                        驳回
+                      </button>
+                      <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onApprove()}>
+                        审批通过
+                      </button>
+                    </>
+                  ) : null}
+                  {selected.status === "wait_for_approval" && usesExternalApproval ? (
+                    <span className="release-plan-detail-flash">等待飞书/钉钉审批回调</span>
+                  ) : null}
+                  {selected.status === "executing" ? (
+                    <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onExecute()}>
+                      继续执行
+                    </button>
+                  ) : null}
+                  {selected.status === "denied" ? (
+                    <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onReopen()}>
+                      重新编辑
+                    </button>
+                  ) : null}
+                  <ActionMenu
+                    ariaLabel="更多操作"
+                    disabled={busy}
+                    triggerClassName="action-menu-trigger is-boxed"
+                    trigger={productDetailTabIcons.more}
+                    items={[
+                      { label: "复制计划", onSelect: () => setCopyOpen(true) },
+                      { label: "存为模板", onSelect: () => setSaveTemplateOpen(true) },
+                      CANCELLABLE_STATUSES.has(selected.status)
+                        ? { label: "取消计划", danger: true, separatorBefore: true, onSelect: () => setCancelOpen(true) }
+                        : null,
+                      releasePlanCanDelete(selected.status)
+                        ? {
+                            label: "删除计划",
+                            danger: true,
+                            separatorBefore: !CANCELLABLE_STATUSES.has(selected.status),
+                            onSelect: () => setDeleteTarget({ id: selected.id, name: selected.name }),
+                          }
+                        : null,
+                    ]}
+                  />
+                </div>
               </div>
-              <dl className="release-plan-detail-meta">
-                <div className="release-plan-detail-meta-item">
-                  <dt>发布窗口</dt>
-                  <dd>{formatReleaseWindow(selected.release_window_start, selected.release_window_end)}</dd>
-                </div>
-                {selected.manager_id ? (
-                  <div className="release-plan-detail-meta-item">
-                    <dt>发布负责人</dt>
-                    <dd>{memberName(selected.manager_id)}</dd>
-                  </div>
-                ) : null}
-                {selected.schedule_execute_time ? (
-                  <div className="release-plan-detail-meta-item">
-                    <dt>定时执行</dt>
-                    <dd>{new Date(selected.schedule_execute_time).toLocaleString("zh-CN")}</dd>
-                  </div>
-                ) : null}
-                {selected.approval_enabled && !usesExternalApproval && approverLabels.length > 0 ? (
-                  <div className="release-plan-detail-meta-item">
-                    <dt>审批人</dt>
-                    <dd>{approverLabels.join("、")}</dd>
-                  </div>
-                ) : null}
-                {usesExternalApproval ? (
-                  <div className="release-plan-detail-meta-item">
-                    <dt>外部审批</dt>
-                    <dd>
-                      {selected.approval_config?.provider === "feishu" ? "飞书" : "钉钉"}
-                      {selected.approval_config?.instance?.status ? ` · ${selected.approval_config.instance.status}` : ""}
-                    </dd>
-                  </div>
-                ) : null}
-              </dl>
+
+              {descriptionText && descriptionText !== selected.name ? (
+                <p className="release-plan-detail-desc">{descriptionText}</p>
+              ) : null}
+
+              <ReleasePlanStatusSteps status={selected.status} approvalEnabled={selected.approval_enabled} />
             </header>
 
             <ReleasePlanCollabBanner workspaceId={workspaceId} editors={collab.editors} />
             <ReleasePlanExternalCheckBanner plan={selected} />
 
-            <ReleasePlanStatusSteps status={selected.status} approvalEnabled={selected.approval_enabled} />
-
-            <div className="release-plan-detail-actions">
-              <div className="release-plan-detail-actions-primary">
-                {selected.status === "planning" ? (
-                  <>
-                    <button type="button" className="btn btn-primary text-xs" disabled={busy} onClick={() => void onFinishPlanning()}>
-                      完成规划
-                    </button>
-                    <button type="button" className="btn btn-secondary text-xs" disabled={busy} onClick={() => setEditOpen(true)}>
-                      编辑
-                    </button>
-                  </>
-                ) : null}
-                {selected.status === "wait_for_approval" && !usesExternalApproval ? (
-                  <>
-                    <button type="button" className="btn btn-primary text-xs" disabled={busy} onClick={() => void onApprove()}>
-                      审批通过
-                    </button>
-                    <button type="button" className="btn btn-secondary text-xs" disabled={busy} onClick={() => setRejectOpen(true)}>
-                      驳回
-                    </button>
-                  </>
-                ) : null}
-                {selected.status === "wait_for_approval" && usesExternalApproval ? (
-                  <span className="text-xs text-muted-foreground">等待飞书/钉钉审批回调</span>
-                ) : null}
-                {selected.status === "executing" ? (
-                  <button type="button" className="btn btn-primary text-xs" disabled={busy} onClick={() => void onExecute()}>
-                    继续执行
-                  </button>
-                ) : null}
-                {selected.status === "denied" ? (
-                  <button type="button" className="btn btn-primary text-xs" disabled={busy} onClick={() => void onReopen()}>
-                    重新编辑
-                  </button>
-                ) : null}
-              </div>
-              <div className="release-plan-detail-actions-secondary">
-                <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => setCopyOpen(true)}>
-                  复制计划
-                </button>
-                <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => setSaveTemplateOpen(true)}>
-                  存为模板
-                </button>
-                {templateSaved ? <span className="text-xs text-green-600">模板已保存</span> : null}
-                {[
-                  "planning",
-                  "wait_for_approval",
-                  "executing",
-                  "wait_for_finish_planning_external_check",
-                  "wait_for_execute_external_check",
-                  "wait_for_all_done_external_check",
-                ].includes(selected.status) ? (
-                  <button type="button" className="btn-ghost text-xs text-red-600" disabled={busy} onClick={() => setCancelOpen(true)}>
-                    取消计划
-                  </button>
-                ) : null}
-                {releasePlanCanDelete(selected.status) ? (
-                  <button
-                    type="button"
-                    className="btn-ghost text-xs text-red-600"
-                    disabled={busy}
-                    onClick={() => setDeleteTarget({ id: selected.id, name: selected.name })}
-                  >
-                    删除计划
-                  </button>
-                ) : null}
-              </div>
-            </div>
-
-            <SprintWorkItemsSummary
-              plan={selected}
-              canEdit={canEditJobs}
-              busy={busy}
-              onGenerateJobs={onGenerateFromWorkItems}
-            />
-
             <section className="release-plan-detail-body">
-              <div className="release-plan-detail-tabs">
-                <div className="segmented-control" role="tablist" aria-label="详情视图">
+              <div className="release-plan-tabs" role="tablist" aria-label="详情视图">
+                {(
+                  [
+                    { key: "jobs", label: "发布项", count: selected.jobs?.length ?? 0 },
+                    { key: "audit", label: "操作记录" },
+                    { key: "versions", label: "版本历史", count: selected.version ? `v${selected.version}` : undefined },
+                  ] as const
+                ).map((tab) => (
                   <button
+                    key={tab.key}
                     type="button"
                     role="tab"
-                    aria-selected={detailTab === "jobs"}
-                    className={`segmented-item ${detailTab === "jobs" ? "segmented-item-active" : ""}`}
-                    onClick={() => setDetailTab("jobs")}
+                    aria-selected={detailTab === tab.key}
+                    className={`release-plan-tab${detailTab === tab.key ? " is-active" : ""}`}
+                    onClick={() => setDetailTab(tab.key)}
                   >
-                    发布项
-                    {(selected.jobs?.length ?? 0) > 0 ? ` (${selected.jobs?.length})` : ""}
+                    {tab.label}
+                    {"count" in tab && tab.count ? <span className="release-plan-tab-count">{tab.count}</span> : null}
                   </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={detailTab === "audit"}
-                    className={`segmented-item ${detailTab === "audit" ? "segmented-item-active" : ""}`}
-                    onClick={() => setDetailTab("audit")}
-                  >
-                    操作记录
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={detailTab === "versions"}
-                    className={`segmented-item ${detailTab === "versions" ? "segmented-item-active" : ""}`}
-                    onClick={() => setDetailTab("versions")}
-                  >
-                    版本历史
-                    {selected.version ? ` (v${selected.version})` : ""}
-                  </button>
-                </div>
+                ))}
               </div>
 
             {detailTab === "jobs" ? (
@@ -933,6 +924,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                 onWorkflowParamsChange={onWorkflowParamsChange}
                 renderJobActions={renderJobActions}
                 memberName={memberName}
+                onImportWorkItems={onGenerateFromWorkItems}
               />
             ) : detailTab === "audit" ? (
               <ReleasePlanAuditList

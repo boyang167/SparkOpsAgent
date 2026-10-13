@@ -477,7 +477,7 @@ export function ReleasePlanCreatePage({
             managerName={managerName}
             onManagerNameChange={setManagerName}
             releaseContent={releaseContent}
-            releaseContentAction={releaseContentAction}
+              releaseContentAction={plan ? undefined : releaseContentAction}
           />
         </div>
       </div>
