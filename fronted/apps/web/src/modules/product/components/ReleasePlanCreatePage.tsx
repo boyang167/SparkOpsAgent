@@ -17,7 +17,6 @@ import {
 } from "./ReleasePlanForm";
 import { ReleasePlanFormFields } from "./ReleasePlanFormFields";
 import { ReleasePlanJobEditor } from "./ReleasePlanJobEditor";
-import { ReleasePlanStatusSteps } from "./ReleasePlanStatusSteps";
 import { buildWorkflowJobParameters, mergeWorkflowJobParameters } from "./release-plan-workflow-params";
 import { fromDatetimeLocalValue } from "./release-plan-utils";
 
@@ -446,7 +445,7 @@ export function ReleasePlanCreatePage({
           <div className="release-plan-create-toolbar-row">
             <h1 className="release-plan-create-title">新建发布计划</h1>
             <div className="release-plan-create-toolbar-actions">
-              <Link href="/publish/release-plans" className="btn-secondary text-sm">
+              <Link href="/publish/release-plans" className="btn-ghost text-sm">
                 取消
               </Link>
               <button
@@ -464,40 +463,22 @@ export function ReleasePlanCreatePage({
 
       <div className="release-plan-create-workspace">
         <div className="release-plan-create-sheet">
-          <div className="release-plan-create-sheet-main">
-            {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-            <ReleasePlanFormFields
-              workspaceId={workspaceId}
-              productId={productId}
-              products={products}
-              onProductChange={setProductId}
-              values={form}
-              variant="page"
-              sprintOptions={mergedSprintOptions}
-              onSprintOptionsChange={handleSprintOptionsChange}
-              onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
-              managerName={managerName}
-              onManagerNameChange={setManagerName}
-              releaseContent={releaseContent}
-              releaseContentAction={releaseContentAction}
-            />
-          </div>
-
-          <aside className="release-plan-create-rail" aria-label="发布进度">
-            <span className="release-plan-create-rail-badge">规划中</span>
-            <p className="release-plan-create-rail-label">发布进度</p>
-            <ReleasePlanStatusSteps status="planning" approvalEnabled={form.approvalEnabled} layout="vertical" />
-            <div className="release-plan-create-rail-mobile-actions">
-              <button
-                type="button"
-                className="btn btn-primary text-sm w-full"
-                disabled={busy || !productId || !form.name.trim()}
-                onClick={() => void onSaveDraft()}
-              >
-                {busy ? "保存中…" : "保存草稿"}
-              </button>
-            </div>
-          </aside>
+          {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+          <ReleasePlanFormFields
+            workspaceId={workspaceId}
+            productId={productId}
+            products={products}
+            onProductChange={setProductId}
+            values={form}
+            variant="page"
+            sprintOptions={mergedSprintOptions}
+            onSprintOptionsChange={handleSprintOptionsChange}
+            onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
+            managerName={managerName}
+            onManagerNameChange={setManagerName}
+            releaseContent={releaseContent}
+            releaseContentAction={releaseContentAction}
+          />
         </div>
       </div>
     </div>

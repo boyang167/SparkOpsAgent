@@ -134,42 +134,44 @@ export function ReleasePlanFormFields({
                 }}
               />
             </label>
+            <div className="form-field release-plan-create-span-2">
+              <span className="form-label">发布窗口</span>
+              <div className="release-plan-create-window">
+                <input
+                  className="input"
+                  type="datetime-local"
+                  aria-label="发布窗口开始"
+                  value={values.windowStart}
+                  onChange={(e) => onChange({ windowStart: e.target.value })}
+                />
+                <span className="release-plan-create-window-sep">至</span>
+                <input
+                  className="input"
+                  type="datetime-local"
+                  aria-label="发布窗口结束"
+                  value={values.windowEnd}
+                  onChange={(e) => onChange({ windowEnd: e.target.value })}
+                />
+              </div>
+            </div>
             <label className="form-field">
-              <span className="form-label">发布窗口开始</span>
-              <input
-                className="input"
-                type="datetime-local"
-                value={values.windowStart}
-                onChange={(e) => onChange({ windowStart: e.target.value })}
-              />
-            </label>
-            <label className="form-field">
-              <span className="form-label">发布窗口结束</span>
-              <input
-                className="input"
-                type="datetime-local"
-                value={values.windowEnd}
-                onChange={(e) => onChange({ windowEnd: e.target.value })}
-              />
-            </label>
-            <label className="form-field">
-              <span className="form-label">定时执行</span>
+              <span className="form-label">
+                定时执行 <span className="release-plan-create-optional">可选</span>
+              </span>
               <input
                 className="input"
                 type="datetime-local"
                 value={values.scheduleExecuteTime}
                 onChange={(e) => onChange({ scheduleExecuteTime: e.target.value })}
               />
+              <span className="release-plan-create-field-hint">到时自动触发首个工作流项，检查项仍需人工确认</span>
             </label>
           </div>
-          <p className="release-plan-create-inline-hint">定时执行到达后将自动触发首个工作流项；检查项仍需人工确认。</p>
         </ReleasePlanCreateBlock>
 
-        <div className="release-plan-create-columns">
-          <ReleasePlanCreateBlock
-            title="需求关联"
-            className="release-plan-create-block-fill"
-            action={
+        <ReleasePlanCreateBlock
+          title="需求说明"
+          action={
             showSprintField ? (
               <ReleasePlanSprintLinkAction
                 workspaceId={workspaceId}
@@ -200,21 +202,31 @@ export function ReleasePlanFormFields({
             className="release-plan-create-requirements"
             value={values.description}
             onChange={(html) => onChange({ description: html })}
-            placeholder="请输入内容..."
+            placeholder="描述本次发布包含的需求、风险与回滚方案"
           />
-          </ReleasePlanCreateBlock>
+        </ReleasePlanCreateBlock>
 
-          <ReleasePlanCreateBlock title="审批配置" className="release-plan-create-block-fill">
+        <ReleasePlanCreateBlock title="发布内容" action={releaseContentAction}>
+          {releaseContent ?? (
+            <p className="release-plan-create-empty">
+              填写计划名称后，可添加检查项与工作流发布项；也可保存草稿后继续编辑。
+            </p>
+          )}
+        </ReleasePlanCreateBlock>
+
+        <ReleasePlanCreateBlock title="审批">
           <label className="release-plan-create-toggle">
-            <input
-              type="checkbox"
-              checked={values.approvalEnabled}
-              onChange={(e) => onChange({ approvalEnabled: e.target.checked })}
-            />
             <span className="release-plan-create-toggle-body">
               <span className="release-plan-create-toggle-title">完成规划后需审批</span>
               <span className="release-plan-create-toggle-desc">规划完成后进入审批，通过后再执行发布</span>
             </span>
+            <input
+              type="checkbox"
+              role="switch"
+              className="release-plan-create-switch"
+              checked={values.approvalEnabled}
+              onChange={(e) => onChange({ approvalEnabled: e.target.checked })}
+            />
           </label>
           {values.approvalEnabled ? (
             <div className="release-plan-create-subfields stack-sm">
@@ -255,19 +267,10 @@ export function ReleasePlanFormFields({
               ) : null}
             </div>
           ) : null}
-          </ReleasePlanCreateBlock>
-        </div>
-
-        <ReleasePlanCreateBlock title="发布内容" action={releaseContentAction}>
-          {releaseContent ?? (
-            <p className="release-plan-create-inline-hint">
-              填写计划名称后，可添加检查项与工作流发布项；也可在保存草稿后继续编辑。
-            </p>
-          )}
         </ReleasePlanCreateBlock>
 
         <details className="release-plan-create-advanced">
-          <summary>外部系统 Hook（可选）</summary>
+          <summary>外部系统 Hook <span className="release-plan-create-optional">可选</span></summary>
           <ReleasePlanHookSettingsField
             values={values.hookSettings}
             onChange={(hookSettings) => onChange({ hookSettings })}
