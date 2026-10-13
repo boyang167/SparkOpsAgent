@@ -64,12 +64,17 @@ func (e *CreateVersionExecutor) RunJob(
 		return fmt.Errorf("no build outputs")
 	}
 	allowed := parseProjectIDFilter(spec["project_ids"])
+	prior := reusableVersions(jobRun.Versions)
 	jobRun.Versions = make([]model.ProjectVersionRun, 0, len(targets))
 	for _, target := range targets {
 		if len(allowed) > 0 {
 			if _, ok := allowed[target.ProjectID]; !ok {
 				continue
 			}
+		}
+		if kept, ok := prior[target.ProjectID]; ok {
+			jobRun.Versions = append(jobRun.Versions, kept)
+			continue
 		}
 		projectID, err := kernel.ParseProjectID(target.ProjectID)
 		if err != nil {

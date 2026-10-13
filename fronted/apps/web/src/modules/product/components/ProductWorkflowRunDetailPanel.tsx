@@ -196,6 +196,19 @@ export function ProductWorkflowRunDetailPanel({
     }
   }
 
+  async function onRetry() {
+    setBusy(true);
+    setError(null);
+    try {
+      await product.retryProductWorkflowRun(workspaceId, productId, workflowId, runId);
+      await load();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "重试失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onCancel() {
     setBusy(true);
     setError(null);
@@ -270,7 +283,19 @@ export function ProductWorkflowRunDetailPanel({
       </header>
 
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-      {run.error_message ? <InlineAlert tone="error">{run.error_message}</InlineAlert> : null}
+      {run.status === "failed" ? (
+        <div className="wf-run-live-paused">
+          <InlineAlert tone="error">
+            {run.error_message ? `${run.error_message}。` : "执行失败。"}
+            重试会从失败的阶段继续，已成功的构建、版本和部署不会重复执行。
+          </InlineAlert>
+          <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onRetry()}>
+            {busy ? "重试中…" : "从失败处重试"}
+          </button>
+        </div>
+      ) : run.error_message ? (
+        <InlineAlert tone="error">{run.error_message}</InlineAlert>
+      ) : null}
 
       {run.status === "paused" ? (
         <div className="wf-run-live-paused">

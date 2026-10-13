@@ -137,6 +137,7 @@ func (s *Scheduler) handleBuildCompletedLocked(
 		return nil
 	}
 	if status != string(buildmodel.BuildStatusSuccess) {
+		s.refreshJobStatuses(run)
 		if job, ok := jobByName(wf, jobName); ok {
 			s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed)
 		}
@@ -224,6 +225,7 @@ func (s *Scheduler) handleDeployCompletedLocked(
 		return nil
 	}
 	if status != string(deployrunmodel.StatusSucceeded) {
+		s.refreshJobStatuses(run)
 		return s.failRun(ctx, run, "deployment failed")
 	}
 	if failed, msg := s.refreshJobStatuses(run); failed {
@@ -674,9 +676,11 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 		}
 		switch job.Type {
 		case model.JobTypeSparkopsBuild:
-			hasAsync = true
 			if err := s.builds.RunJob(ctx, run, run.CurrentStage, ji, job); err != nil {
 				return s.failRun(ctx, run, jobRun.ErrorMessage)
+			}
+			if jobRun.Status == model.JobRunStatusRunning {
+				hasAsync = true
 			}
 			s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventCreated)
 		case model.JobTypeSparkopsCreateVersion:
@@ -689,7 +693,6 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 				return s.failRun(ctx, run, jobRun.ErrorMessage)
 			}
 		case model.JobTypeSparkopsDeploy, model.JobTypeSparkopsDeployVersion:
-			hasAsync = true
 			if s.deploys == nil {
 				jobRun.Status = model.JobRunStatusFailed
 				jobRun.ErrorMessage = "deploy executor unavailable"
@@ -697,6 +700,9 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 			}
 			if err := s.deploys.RunJob(ctx, wf, run, run.CurrentStage, ji, job); err != nil {
 				return s.failRun(ctx, run, jobRun.ErrorMessage)
+			}
+			if jobRun.Status == model.JobRunStatusRunning {
+				hasAsync = true
 			}
 		case model.JobTypeSparkopsApproval:
 			hasAsync = true

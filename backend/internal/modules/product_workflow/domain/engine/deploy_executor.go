@@ -96,11 +96,16 @@ func (e *DeployExecutor) runBuildDeploy(
 		return fmt.Errorf("no build outputs")
 	}
 
+	prior := reusableDeploys(jobRun.Deploys)
 	jobRun.Deploys = make([]model.ProjectDeployRun, 0, len(targets))
 	jobRun.Status = model.JobRunStatusRunning
 	run.StageRuns[stageIndex].Status = model.JobRunStatusRunning
 
 	for _, target := range targets {
+		if kept, ok := prior[target.ProjectID]; ok {
+			jobRun.Deploys = append(jobRun.Deploys, kept)
+			continue
+		}
 		projectID, parseErr := kernel.ParseProjectID(target.ProjectID)
 		if parseErr != nil {
 			return parseErr
@@ -135,6 +140,9 @@ func (e *DeployExecutor) runBuildDeploy(
 		}); err != nil {
 			return err
 		}
+	}
+	if !anyDeployRunning(jobRun.Deploys) {
+		jobRun.Status = model.JobRunStatusSuccess
 	}
 	return nil
 }
@@ -227,8 +235,13 @@ func (e *DeployExecutor) runVersionDeployFromBuild(
 		jobRun.ErrorMessage = "no successful builds from job " + refJobName
 		return fmt.Errorf("no build outputs")
 	}
+	prior := reusableVersions(jobRun.Versions)
 	targets := make([]model.ProjectVersionRun, 0, len(builds))
 	for _, target := range builds {
+		if kept, ok := prior[target.ProjectID]; ok {
+			targets = append(targets, kept)
+			continue
+		}
 		projectID, err := kernel.ParseProjectID(target.ProjectID)
 		if err != nil {
 			return err
@@ -269,11 +282,16 @@ func (e *DeployExecutor) deployVersionTargets(
 	targets []model.ProjectVersionRun,
 ) error {
 	jobRun := &run.StageRuns[stageIndex].Jobs[jobIndex]
+	prior := reusableDeploys(jobRun.Deploys)
 	jobRun.Deploys = make([]model.ProjectDeployRun, 0, len(targets))
 	jobRun.Status = model.JobRunStatusRunning
 	run.StageRuns[stageIndex].Status = model.JobRunStatusRunning
 
 	for _, target := range targets {
+		if kept, ok := prior[target.ProjectID]; ok {
+			jobRun.Deploys = append(jobRun.Deploys, kept)
+			continue
+		}
 		projectID, parseErr := kernel.ParseProjectID(target.ProjectID)
 		if parseErr != nil {
 			return parseErr
@@ -324,6 +342,9 @@ func (e *DeployExecutor) deployVersionTargets(
 		}); err != nil {
 			return err
 		}
+	}
+	if !anyDeployRunning(jobRun.Deploys) {
+		jobRun.Status = model.JobRunStatusSuccess
 	}
 	return nil
 }

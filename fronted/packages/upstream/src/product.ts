@@ -577,6 +577,13 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async retryProductWorkflowRun(workspaceId: string, productId: string, workflowId: string, runId: string) {
+      return upstreamFetch<ProductWorkflowRunVM>(
+        `/api/v1/products/${productId}/workflows/${workflowId}/runs/${runId}/retry`,
+        { method: "POST", body: "{}", options: { ...options, workspaceId } },
+      );
+    },
+
     async listEnvironments(workspaceId: string, productId: string) {
       return upstreamFetch<{ items: import("@sparkops/contracts/product").EnvironmentVM[] }>(
         `/api/v1/products/${productId}/environments`,

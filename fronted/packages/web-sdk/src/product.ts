@@ -628,6 +628,13 @@ export function cancelProductWorkflowRun(
   );
 }
 
+export function retryProductWorkflowRun(workspaceId: string, productId: string, workflowId: string, runId: string) {
+  return bffFetch<import("@sparkops/contracts/product").ProductWorkflowRunVM>(
+    `/workspaces/${workspaceId}/products/${productId}/workflows/${workflowId}/runs/${runId}/retry`,
+    { method: "POST", body: "{}", workspaceId },
+  );
+}
+
 export async function listEnvironments(workspaceId: string, productId: string) {
   const data = await bffFetch<{ items: import("@sparkops/contracts/product").EnvironmentVM[] }>(
     `/workspaces/${workspaceId}/products/${productId}/environments`,

@@ -42,6 +42,7 @@ func (e *BuildExecutor) RunJob(
 		jobRun.ErrorMessage = "sparkops-build requires project_builds"
 		return fmt.Errorf("missing project_builds")
 	}
+	prior := reusableBuilds(jobRun.Builds)
 	jobRun.Builds = make([]model.ProjectBuildRun, 0, len(builds))
 	jobRun.Status = model.JobRunStatusRunning
 	run.StageRuns[stageIndex].Status = model.JobRunStatusRunning
@@ -54,6 +55,10 @@ func (e *BuildExecutor) RunJob(
 	}
 
 	for _, spec := range builds {
+		if kept, ok := prior[spec.ProjectID]; ok {
+			jobRun.Builds = append(jobRun.Builds, kept)
+			continue
+		}
 		projectID, err := kernel.ParseProjectID(spec.ProjectID)
 		if err != nil {
 			return err
@@ -98,6 +103,9 @@ func (e *BuildExecutor) RunJob(
 		}); err != nil {
 			return err
 		}
+	}
+	if !anyBuildRunning(jobRun.Builds) {
+		jobRun.Status = model.JobRunStatusSuccess
 	}
 	return nil
 }
