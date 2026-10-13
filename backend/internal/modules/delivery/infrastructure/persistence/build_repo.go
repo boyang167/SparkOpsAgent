@@ -90,6 +90,7 @@ func (r *BuildRepository) ListByProject(ctx context.Context, projectID kernel.Pr
 	}
 	var rows []buildModel
 	err := r.db.WithContext(ctx).
+		Omit("console_log").
 		Where("project_id = ?", projectID.String()).
 		Order("started_at desc").
 		Limit(limit).

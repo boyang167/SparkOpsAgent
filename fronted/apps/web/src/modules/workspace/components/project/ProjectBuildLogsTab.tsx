@@ -103,14 +103,32 @@ export function ProjectBuildLogsTab({ workspaceId, project, active }: ProjectBui
     };
   }, [selectedId, workspaceId]);
 
+  const runningId = selectedBuild?.status === "running" ? selectedBuild.id : null;
+
+  const refreshSelected = useCallback(
+    (id: string) => {
+      void delivery
+        .getBuild(id, workspaceId)
+        .then((build) => setSelectedBuild((current) => (current?.id === id ? build : current)))
+        .catch(() => undefined);
+    },
+    [workspaceId],
+  );
+
   useEffect(() => {
-    if (!active || !selectedBuild || selectedBuild.status !== "running") return;
+    if (!active || !runningId) return;
     const timer = window.setInterval(() => {
-      void delivery.getBuild(selectedBuild.id, workspaceId).then(setSelectedBuild);
-      void loadBuilds();
+      void delivery
+        .listBuilds(project.id, workspaceId)
+        .then((items) => {
+          setBuilds(items);
+          const latest = items.find((item) => item.id === runningId);
+          if (latest && latest.status !== "running") refreshSelected(runningId);
+        })
+        .catch(() => undefined);
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [active, selectedBuild, workspaceId, loadBuilds]);
+  }, [active, runningId, project.id, workspaceId, refreshSelected]);
 
   async function handleAbort() {
     if (!selectedBuild || selectedBuild.status !== "running") return;
@@ -207,7 +225,7 @@ export function ProjectBuildLogsTab({ workspaceId, project, active }: ProjectBui
               initialLog={selectedBuild.console_log}
               active={isRunning}
               onDone={() => {
-                void delivery.getBuild(selectedBuild.id, workspaceId).then(setSelectedBuild);
+                refreshSelected(selectedBuild.id);
                 void loadBuilds();
               }}
             />

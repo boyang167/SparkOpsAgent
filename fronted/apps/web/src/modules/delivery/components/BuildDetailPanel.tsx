@@ -7,8 +7,7 @@ import { delivery } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { BuildVM } from "@sparkops/contracts/delivery";
 import { InlineAlert } from "@/components/ui/InlineAlert";
-import { BuildLogStream } from "./BuildLogStream";
-import { countLogLines } from "./console-log";
+import { BuildLogStream, type BuildLogStats } from "./BuildLogStream";
 
 interface BuildDetailPanelProps {
   workspaceId: string;
@@ -47,13 +46,13 @@ export function BuildDetailPanel({ workspaceId, initialBuild }: BuildDetailPanel
   const [build, setBuild] = useState(initialBuild);
   const [loading, setLoading] = useState<"abort" | "rollback" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [logText, setLogText] = useState("");
+  const [logStats, setLogStats] = useState<BuildLogStats | null>(null);
   const [copied, setCopied] = useState(false);
 
   const isRunning = build.status === "running";
   const canRollback = build.status === "success";
   const status = STATUS_META[build.status] ?? { label: build.status, tone: "neutral" };
-  const lineCount = countLogLines(logText);
+  const lineCount = logStats?.lines ?? 0;
 
   const refreshBuild = useCallback(async () => {
     try {
@@ -92,9 +91,10 @@ export function BuildDetailPanel({ workspaceId, initialBuild }: BuildDetailPanel
   }
 
   async function onCopy() {
-    if (!logText) return;
+    const text = logStats?.getText() ?? "";
+    if (!text) return;
     try {
-      await navigator.clipboard.writeText(logText);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -158,7 +158,7 @@ export function BuildDetailPanel({ workspaceId, initialBuild }: BuildDetailPanel
         <header className="build-log-head">
           <div className="build-log-title-row">
             <h2 className="build-log-title">控制台日志</h2>
-            {lineCount > 0 ? <span className="build-log-count">{lineCount} 行</span> : null}
+            {lineCount > 0 ? <span className="build-log-count">{lineCount.toLocaleString()} 行</span> : null}
             {isRunning ? (
               <span className="build-log-live">
                 <span className="build-log-live-dot" aria-hidden />
@@ -166,7 +166,7 @@ export function BuildDetailPanel({ workspaceId, initialBuild }: BuildDetailPanel
               </span>
             ) : null}
           </div>
-          <button type="button" className="build-log-tool" disabled={!logText} onClick={() => void onCopy()}>
+          <button type="button" className="build-log-tool" disabled={lineCount === 0} onClick={() => void onCopy()}>
             {copied ? "已复制" : "复制"}
           </button>
         </header>
@@ -177,7 +177,7 @@ export function BuildDetailPanel({ workspaceId, initialBuild }: BuildDetailPanel
           className="build-log-body"
           emptyText={isRunning ? "等待日志输出…" : "暂无日志"}
           onDone={() => void refreshBuild()}
-          onTextChange={setLogText}
+          onStatsChange={setLogStats}
         />
       </section>
     </div>
