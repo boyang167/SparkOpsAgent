@@ -44,7 +44,7 @@ export default async function BuildDetailPage({ params }: BuildDetailPageProps) 
       <PageHeader
         eyebrow="Build"
         title={`构建 #${build.build_number}`}
-        description={`${build.branch} · ${build.jenkins_job ?? "jenkins"}`}
+        description={[build.jenkins_job, build.branch].filter(Boolean).join(" · ")}
       />
 
       <BuildDetailPanel workspaceId={workspaceId} initialBuild={build} />

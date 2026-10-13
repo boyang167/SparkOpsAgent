@@ -28017,6 +28017,212 @@ textarea.input {
   white-space: nowrap;
 }
 
+/* Build detail */
+.build-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.build-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  padding: 1rem 1.25rem;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.build-summary-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.75rem;
+  min-width: 0;
+}
+
+.build-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4375rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.build-status-dot {
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.build-status.is-success .build-status-dot {
+  background: var(--success);
+}
+
+.build-status.is-danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.build-status.is-danger .build-status-dot {
+  background: var(--danger);
+}
+
+.build-status.is-running .build-status-dot {
+  background: var(--warning);
+  animation: build-live-pulse 1.6s var(--motion-ease) infinite;
+}
+
+.build-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.75rem;
+  margin: 0;
+}
+
+.build-summary-meta > div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.build-summary-meta dt {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.build-summary-meta dd {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.build-summary-link {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+}
+
+.build-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.build-log {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.build-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.875rem 1.25rem;
+}
+
+.build-log-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.build-log-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.build-log-count {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.build-log-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.build-log-live-dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  background: var(--success);
+  animation: build-live-pulse 1.6s var(--motion-ease) infinite;
+}
+
+@keyframes build-live-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .build-log-live-dot,
+  .build-status.is-running .build-status-dot {
+    animation: none;
+  }
+}
+
+.build-log-tool {
+  padding: 0.3125rem 0.625rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.build-log-tool:hover:not(:disabled) {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.build-log-tool:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.build-log-body {
+  margin: 0;
+  min-height: 16rem;
+  max-height: calc(100vh - 22rem);
+  padding: 1rem 1.25rem 1.25rem;
+  overflow: auto;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Notifications */
 .notif-bell {
   position: relative;
