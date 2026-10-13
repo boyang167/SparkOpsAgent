@@ -64,7 +64,7 @@ export function ProjectDeploymentConsolePanel({
   const { confirm, ConfirmDialog } = useConfirmDialog();
   const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null);
   const [run, setRun] = useState<DeploymentRunVM | null>(null);
-  const [builds, setBuilds] = useState<BuildVM[]>([]);
+  const [selectedBuild, setSelectedBuild] = useState<BuildVM | null>(null);
   const [streamOutput, setStreamOutput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [aborting, setAborting] = useState(false);
@@ -83,21 +83,27 @@ export function ProjectDeploymentConsolePanel({
     });
   }, [active, runs, selectedRunId]);
 
+  const runBuildId = run?.build_id ?? null;
+  const runBuilding = run?.status === "building";
+
   useEffect(() => {
-    if (!active) return;
+    if (!active || !runBuildId) {
+      setSelectedBuild(null);
+      return;
+    }
     let cancelled = false;
     void delivery
-      .listBuilds(project.id, workspaceId)
-      .then((items) => {
-        if (!cancelled) setBuilds(items);
+      .getBuild(runBuildId, workspaceId)
+      .then((build) => {
+        if (!cancelled) setSelectedBuild(build);
       })
       .catch(() => {
-        if (!cancelled) setBuilds([]);
+        if (!cancelled) setSelectedBuild(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [active, project.id, workspaceId, runs.length]);
+  }, [active, runBuildId, runBuilding, workspaceId]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -170,11 +176,6 @@ export function ProjectDeploymentConsolePanel({
       stopStream?.();
     };
   }, [active, run?.id, run?.status, run?.cross_cluster, workspaceId, onRunChanged]);
-
-  const selectedBuild = useMemo(() => {
-    if (!run?.build_id) return null;
-    return builds.find((item) => item.id === run.build_id) ?? null;
-  }, [builds, run?.build_id]);
 
   async function handleAbort() {
     if (!run || !isActiveDeploymentRun(run)) return;
