@@ -32,7 +32,7 @@ export default async function NotificationsPage() {
       <PageHeader
         eyebrow="Notification"
         title="站内信"
-        description="Agent 运行完成等事件通知"
+        description="构建、工作流与 Agent 运行完成时的提醒"
       />
       <NotificationPanel
         workspaceId={workspaceId}
