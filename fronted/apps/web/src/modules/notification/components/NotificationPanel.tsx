@@ -6,6 +6,7 @@ import { notification } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type { NotificationVM } from "@sparkops/contracts/notification";
 import { InlineAlert } from "@/components/ui/InlineAlert";
+import { emitNotificationsChanged } from "./notification-events";
 import {
   groupNotificationsByDay,
   notificationKind,
@@ -92,6 +93,7 @@ export function NotificationPanel({ workspaceId, items, unreadCount }: Notificat
       setReadIds((prev) => new Set(prev).add(item.id));
       try {
         await notification.markRead(item.id, workspaceId);
+        emitNotificationsChanged();
         router.refresh();
       } catch (err) {
         setReadIds((prev) => {
@@ -112,6 +114,7 @@ export function NotificationPanel({ workspaceId, items, unreadCount }: Notificat
     try {
       await notification.markAllRead(workspaceId);
       setAllRead(true);
+      emitNotificationsChanged(0);
       router.refresh();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "操作失败");

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { unreadBadgeText } from "./notification-events";
 import {
   groupNotificationsByDay,
   notificationDayLabel,
@@ -46,6 +47,14 @@ describe("notification time helpers", () => {
       ["今天", 2],
       ["10月11日", 1],
     ]);
+  });
+});
+
+describe("unreadBadgeText", () => {
+  it("hides zero and caps large counts", () => {
+    expect(unreadBadgeText(0)).toBe("");
+    expect(unreadBadgeText(21)).toBe("21");
+    expect(unreadBadgeText(120)).toBe("99+");
   });
 });
 
