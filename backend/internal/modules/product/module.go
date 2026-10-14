@@ -97,7 +97,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewArchiveSprintHandler(repo, sprintRepo),
 		command.NewCreateWorkItemHandler(repo, sprintRepo, boardNotifier),
 		command.NewUpdateWorkItemHandler(repo, sprintRepo),
-		command.NewMoveWorkItemHandler(repo, sprintRepo, boardNotifier),
+		command.NewMoveWorkItemHandler(repo, sprintRepo, sprintWorkItemExecutor, boardNotifier),
 		command.NewDeleteWorkItemHandler(repo, sprintRepo, boardNotifier),
 		command.NewExecuteWorkItemHandler(repo, sprintRepo, sprintWorkItemExecutor, boardNotifier),
 		query.NewListSprintsHandler(repo, sprintRepo),

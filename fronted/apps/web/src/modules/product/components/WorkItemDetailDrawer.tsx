@@ -18,6 +18,7 @@ import { Drawer } from "@/components/ui/Drawer";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { WorkItemAssigneeField } from "./WorkItemAssigneeField";
 import { WorkItemAttributeFields } from "./WorkItemAttributeFields";
+import { moveWorkItemErrorMessage } from "./WorkItemCardMenu";
 import { WorkItemPmChip } from "./WorkItemPmChip";
 import { WorkItemPmLinkModal } from "./WorkItemPmLinkModal";
 
@@ -224,7 +225,7 @@ export function WorkItemDetailDrawer({
       await load();
       onChanged();
     } catch (err) {
-      setError(err instanceof BffError ? err.message : "移动工作项失败");
+      setError(moveWorkItemErrorMessage(err));
     } finally {
       setBusy(false);
     }

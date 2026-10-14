@@ -108,7 +108,7 @@ func ApplyStageWorkflowBindings(current, next []SprintStage) ([]SprintStage, boo
 		if !reflect.DeepEqual(a, b) {
 			return nil, false
 		}
-		cur.Workflows = append([]StageWorkflowBinding(nil), nxt.Workflows...)
+		cur.Workflows = NormalizeStageWorkflowBindings(nxt.Workflows)
 		out[i] = cur
 	}
 	return out, true

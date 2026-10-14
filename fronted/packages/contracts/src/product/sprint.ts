@@ -16,7 +16,7 @@ export type WorkItemPriority = z.infer<typeof WorkItemPrioritySchema>;
 export const WorkItemStatusSchema = z.enum(["open", "in_progress", "blocked", "done", "cancelled"]);
 export type WorkItemStatus = z.infer<typeof WorkItemStatusSchema>;
 
-export const StageWorkflowTriggerModeSchema = z.enum(["manual", "auto_on_enter", "auto_on_exit"]);
+export const StageWorkflowTriggerModeSchema = z.enum(["manual", "auto_on_enter"]);
 export type StageWorkflowTriggerMode = z.infer<typeof StageWorkflowTriggerModeSchema>;
 
 export const PmProviderSchema = z.enum(["jira", "tapd", "pingcode", "feishu"]);

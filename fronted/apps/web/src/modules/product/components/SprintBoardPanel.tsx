@@ -13,6 +13,7 @@ import type {
   SprintSummaryVM,
   WorkspaceSprintProcessTemplateVM,
   SprintStage,
+  StageWorkflowBinding,
   WorkItemCardVM,
   WorkItemPriority,
   WorkItemType,
@@ -91,6 +92,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   const [createTemplatesLoading, setCreateTemplatesLoading] = useState(false);
   const [stagesEditOpen, setStagesEditOpen] = useState(false);
   const [editStages, setEditStages] = useState<SprintStage[]>([]);
+  const [editFocus, setEditFocus] = useState<{ session: number; stageId?: string }>({ session: 0 });
   const [itemOpen, setItemOpen] = useState(false);
   const [itemTitle, setItemTitle] = useState("");
   const [itemStageId, setItemStageId] = useState("");
@@ -335,19 +337,39 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     }
   }
 
-  function openEditStages() {
-    const sourceStages =
-      board?.sprint.stages && board.sprint.stages.length > 0
-        ? board.sprint.stages
-        : board?.columns.map((column) => column.stage) ?? [];
-    if (sourceStages.length === 0) return;
+  function openEditStages(focusStageId?: string) {
+    if (boardStages.length === 0) return;
     setError(null);
-    setEditStages(sourceStages.map((stage) => ({ ...stage })));
+    setEditStages(boardStages.map((stage) => ({ ...stage })));
+    setEditFocus((prev) => ({ session: prev.session + 1, stageId: focusStageId }));
     setStagesEditOpen(true);
+  }
+
+  async function onSaveStageWorkflows() {
+    if (!selectedId) return;
+    const stages = boardStages.map((stage) => ({
+      ...stage,
+      workflows: editStages.find((edited) => edited.id === stage.id)?.workflows ?? [],
+    }));
+    setBusy(true);
+    setError(null);
+    try {
+      await product.updateSprint(workspaceId, productId, selectedId, { stages });
+      setStagesEditOpen(false);
+      await loadBoard();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "保存工作流绑定失败");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onSaveSprintStages() {
     if (!selectedId || !board) return;
+    if (board.sprint.status === "active") {
+      await onSaveStageWorkflows();
+      return;
+    }
     const normalizedStages = withSortOrder(editStages.map((stage, index) => normalizeStageForSave(stage, index)));
     const invalidStage = normalizedStages.find((stage) => !stage.name || !isValidStageKey(stage.key));
     if (invalidStage) {
@@ -438,26 +460,15 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     }
   }
 
-  async function bindStageWorkflow(stageId: string, workflowId: string) {
-    if (!board || !selectedId) return;
-    const stages: SprintStage[] = board.sprint.stages.map((stage) => {
-      if (stage.id !== stageId) return stage;
-      return {
-        ...stage,
-        workflows: workflowId
-          ? [{ workflow_id: workflowId, trigger_mode: "manual" as const, default_parameters: {}, required_for_exit: false }]
-          : [],
-      };
-    });
-    setBusy(true);
-    try {
-      await product.updateSprint(workspaceId, productId, selectedId, { stages });
-      await loadBoard();
-    } catch (err) {
-      setError(err instanceof BffError ? err.message : "绑定工作流失败");
-    } finally {
-      setBusy(false);
-    }
+  function workflowName(binding?: StageWorkflowBinding) {
+    if (!binding) return "";
+    return binding.workflow_name || workflows.find((wf) => wf.id === binding.workflow_id)?.name || "工作流";
+  }
+
+  function stageWorkflowTitle(binding: StageWorkflowBinding) {
+    const parts = [binding.trigger_mode === "auto_on_enter" ? "工作项进入此列时自动执行" : "手动执行"];
+    if (binding.required_for_exit) parts.push("执行成功后才能移到后面的列");
+    return `${workflowName(binding)}：${parts.join("；")}`;
   }
 
   function openWorkItemDetail(item: WorkItemCardVM) {
@@ -523,6 +534,15 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     const metaParts = workItemMetaParts(item);
     const canManageCard =
       board?.sprint.status !== "archived" && board?.sprint.status !== "completed";
+    const itemStage = boardStages.find((stage) => stage.id === item.stage_id);
+    const itemBinding = itemStage?.workflows?.[0];
+    const execute =
+      board?.sprint.status === "active" && itemStage && itemBinding && runStatus !== "running"
+        ? {
+            label: `执行「${workflowName(itemBinding)}」`,
+            onSelect: () => openExecuteWorkflow(item, itemStage, itemBinding.workflow_id),
+          }
+        : undefined;
     return (
       <article key={item.id} className="sprint-board-card">
         <div className="sprint-board-card-top">
@@ -545,6 +565,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
               onToggle={() => setCardMenuOpenId((prev) => (prev === item.id ? null : item.id))}
               onClose={() => setCardMenuOpenId(null)}
               onLinkPm={item.external?.issue_key ? undefined : () => setPmLinkTarget(item)}
+              execute={execute}
               onChanged={() => {
                 void loadBoard();
                 void loadSprints();
@@ -661,7 +682,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                   ) : null}
                   {sprint.status === "planning" ? (
                     <>
-                      <button type="button" className="btn-secondary text-sm" disabled={busy} onClick={openEditStages}>
+                      <button type="button" className="btn-secondary text-sm" disabled={busy} onClick={() => openEditStages()}>
                         编辑看板列
                       </button>
                       <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onStartSprint()}>
@@ -769,34 +790,43 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                           </span>
                         </div>
                         {column.wip_limit_exceeded ? <span className="sprint-board-column-warn">超出 WIP 上限</span> : null}
-                        {sprint.status === "planning" || sprint.status === "active" ? (
-                          <label
-                            className={`sprint-board-column-wf${column.stage.workflows?.[0]?.workflow_id ? " is-bound" : " is-unbound"}`}
-                          >
-                            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden>
-                              <path
-                                d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8l1-5.5Z"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="1.3"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                            <select
-                              value={column.stage.workflows?.[0]?.workflow_id ?? ""}
+                        {(() => {
+                          const binding = column.stage.workflows?.[0];
+                          const editable = sprint.status === "planning" || sprint.status === "active";
+                          if (!binding && !editable) return null;
+                          const content = (
+                            <>
+                              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden>
+                                <path
+                                  d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8l1-5.5Z"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.3"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                              <span className="sprint-board-column-wf-name">{binding ? workflowName(binding) : "绑定工作流"}</span>
+                              {binding?.trigger_mode === "auto_on_enter" ? <span className="sprint-board-column-wf-tag">自动</span> : null}
+                              {binding?.required_for_exit ? <span className="sprint-board-column-wf-tag">必须成功</span> : null}
+                            </>
+                          );
+                          const className = `sprint-board-column-wf${binding ? " is-bound" : " is-unbound"}`;
+                          return editable ? (
+                            <button
+                              type="button"
+                              className={className}
                               disabled={busy}
-                              onChange={(e) => void bindStageWorkflow(column.stage.id, e.target.value)}
-                              aria-label={`${column.stage.name} 绑定工作流`}
+                              title={binding ? stageWorkflowTitle(binding) : `为「${column.stage.name}」绑定工作流`}
+                              onClick={() => openEditStages(column.stage.id)}
                             >
-                              <option value="">{column.stage.workflows?.[0]?.workflow_id ? "解除绑定" : "绑定工作流"}</option>
-                              {workflows.map((wf) => (
-                                <option key={wf.id} value={wf.id}>
-                                  {wf.name}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        ) : null}
+                              {content}
+                            </button>
+                          ) : (
+                            <span className={className} title={binding ? stageWorkflowTitle(binding) : undefined}>
+                              {content}
+                            </span>
+                          );
+                        })()}
                       </header>
                       <div className="sprint-board-column-body">
                         {column.work_items.map((item) => renderCard(item, board.columns))}
@@ -919,8 +949,12 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
       <Modal
         open={stagesEditOpen}
         onClose={() => setStagesEditOpen(false)}
-        title="编辑看板列"
-        description="调整列名称、顺序与颜色。删除有卡片的列时，工作项会迁到第一列。"
+        title={sprint?.status === "active" ? "工作流绑定" : "编辑看板列"}
+        description={
+          sprint?.status === "active"
+            ? "为各列配置工作流：手动执行或进入时自动执行，可要求执行成功后才能移到后面的列。"
+            : "调整列名称、顺序、颜色与绑定的工作流。删除有卡片的列时，工作项会迁到第一列。"
+        }
         size="lg"
         panelClassName="sprint-stage-edit-modal"
         footer={
@@ -932,7 +966,15 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
           </>
         }
       >
-        <SprintStageEditor variant="board" stages={editStages} workflows={workflows} onChange={setEditStages} />
+        <SprintStageEditor
+          key={editFocus.session}
+          variant="board"
+          stages={editStages}
+          workflows={workflows}
+          onChange={setEditStages}
+          structureLocked={sprint?.status === "active"}
+          initialExpandedIds={editFocus.stageId ? [editFocus.stageId] : undefined}
+        />
       </Modal>
 
       <Modal

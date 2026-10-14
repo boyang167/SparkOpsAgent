@@ -733,7 +733,8 @@ components:
 
     StageWorkflowTriggerMode:
       type: string
-      enum: [manual, auto_on_enter, auto_on_exit]
+      enum: [manual, auto_on_enter]
+      description: auto_on_enter starts the workflow when a work item is moved into the stage.
 
     StageWorkflowBinding:
       type: object
@@ -752,6 +753,7 @@ components:
             type: string
         required_for_exit:
           type: boolean
+          description: Work items cannot move forward out of the stage until this workflow succeeded in it.
           default: false
 
     StageGatePolicy:

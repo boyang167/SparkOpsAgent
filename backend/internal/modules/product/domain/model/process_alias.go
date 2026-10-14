@@ -13,8 +13,14 @@ type (
 	WorkspaceSprintProcessTemplate = spmodel.WorkspaceSprintProcessTemplate
 )
 
+const StageTriggerAuto = spmodel.TriggerModeAuto
+
 func NormalizeSprintStages(stages []SprintStage) ([]SprintStage, error) {
 	return spmodel.NormalizeSprintStages(stages)
+}
+
+func NormalizeStageWorkflowBindings(in []StageWorkflowBinding) []StageWorkflowBinding {
+	return spmodel.NormalizeStageWorkflowBindings(in)
 }
 
 func DefaultSprintStages() []SprintStage {

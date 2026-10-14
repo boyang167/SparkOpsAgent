@@ -56,6 +56,35 @@ func CheckStageEntry(
 	return nil
 }
 
+// CheckStageExit enforces required_for_exit bindings of the item's current stage.
+// Moving backwards (rework) is never blocked.
+func CheckStageExit(sprint *Sprint, item *WorkItem, targetStageID string, executions []*WorkItemExecution) error {
+	current := sprint.StageByID(item.StageID)
+	target := sprint.StageByID(targetStageID)
+	if current == nil || target == nil || target.SortOrder <= current.SortOrder {
+		return nil
+	}
+	for _, binding := range current.Workflows {
+		if binding.RequiredForExit && !hasSuccessfulStageExecution(executions, current.ID, binding.WorkflowID) {
+			return domain.ErrStageExitDenied
+		}
+	}
+	return nil
+}
+
+func hasSuccessfulStageExecution(execs []*WorkItemExecution, stageID, workflowID string) bool {
+	wfID, err := kernel.ParseProductWorkflowID(workflowID)
+	if err != nil {
+		return false
+	}
+	for _, exec := range execs {
+		if exec.StageID == stageID && exec.WorkflowID == wfID && exec.Status == WorkItemExecutionSuccess {
+			return true
+		}
+	}
+	return false
+}
+
 func hasSuccessfulWorkflowExecution(execs []*WorkItemExecution, workflowID string) bool {
 	wfID, err := kernel.ParseProductWorkflowID(workflowID)
 	if err != nil {

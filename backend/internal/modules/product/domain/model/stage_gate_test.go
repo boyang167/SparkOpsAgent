@@ -33,3 +33,24 @@ func TestCheckStageEntryRequireBranch(t *testing.T) {
 	item.Delivery["branch"] = "main"
 	require.NoError(t, CheckStageEntry(sprint, item, stageID, nil, nil))
 }
+
+func TestCheckStageExitRequiredWorkflow(t *testing.T) {
+	wfID := kernel.NewProductWorkflowID()
+	sprint := &Sprint{
+		Stages: []SprintStage{
+			{ID: "todo", SortOrder: 0},
+			{ID: "dev", SortOrder: 1, Workflows: []StageWorkflowBinding{{WorkflowID: wfID.String(), RequiredForExit: true}}},
+			{ID: "done", SortOrder: 2},
+		},
+	}
+	item := &WorkItem{StageID: "dev"}
+
+	require.ErrorIs(t, CheckStageExit(sprint, item, "done", nil), domain.ErrStageExitDenied)
+	require.NoError(t, CheckStageExit(sprint, item, "todo", nil), "moving back is allowed")
+
+	otherStage := []*WorkItemExecution{{StageID: "todo", WorkflowID: wfID, Status: WorkItemExecutionSuccess}}
+	require.ErrorIs(t, CheckStageExit(sprint, item, "done", otherStage), domain.ErrStageExitDenied)
+
+	ok := []*WorkItemExecution{{StageID: "dev", WorkflowID: wfID, Status: WorkItemExecutionSuccess}}
+	require.NoError(t, CheckStageExit(sprint, item, "done", ok))
+}

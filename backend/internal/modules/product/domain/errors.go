@@ -38,6 +38,7 @@ var (
 	ErrJiraIssueAlreadyLinked            = kernel.NewDomainError("JIRA_ISSUE_ALREADY_LINKED", "jira issue is already linked in this sprint")
 	ErrInvalidWorkItemInput              = kernel.NewDomainError("WORK_ITEM_INVALID_INPUT", "invalid work item input")
 	ErrStageGateDenied                   = kernel.NewDomainError("STAGE_GATE_DENIED", "stage entry policy not satisfied")
+	ErrStageExitDenied                   = kernel.NewDomainError("STAGE_EXIT_DENIED", "required stage workflow has not succeeded")
 	ErrPmNotConfigured                   = kernel.NewDomainError("PM_NOT_CONFIGURED", "workspace pm integration is not configured")
 	ErrPmInvalidRequest                  = kernel.NewDomainError("PM_INVALID_REQUEST", "invalid pm integration request")
 	ErrPmIssueAlreadyLinked              = kernel.NewDomainError("PM_ISSUE_ALREADY_LINKED", "pm issue is already linked in this sprint")

@@ -21,12 +21,13 @@ interface WorkItemCardMenuProps {
   onClose: () => void;
   onChanged: () => void;
   onLinkPm?: () => void;
+  execute?: { label: string; onSelect: () => void };
 }
 
 type DialogKind = "move" | "assignee" | "delete" | null;
 
 const MENU_WIDTH = 168;
-const MENU_HEIGHT = 172;
+const MENU_HEIGHT = 212;
 const GAP = 6;
 
 function placeMenu(anchor: HTMLElement): CSSProperties {
@@ -53,6 +54,20 @@ function placeMenu(anchor: HTMLElement): CSSProperties {
   };
 }
 
+export function moveWorkItemErrorMessage(err: unknown): string {
+  if (!(err instanceof BffError)) return "移动工作项失败";
+  switch (err.code) {
+    case "STAGE_GATE_DENIED":
+      return "目标列准入条件未满足（WIP 已满、缺少分支或工作流未成功等）";
+    case "STAGE_EXIT_DENIED":
+      return "当前列绑定的工作流需执行成功后，才能移到后面的列";
+    case "WORK_ITEM_VERSION_CONFLICT":
+      return "工作项已被他人修改，请刷新后重试";
+    default:
+      return err.message;
+  }
+}
+
 function IconMore() {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
@@ -75,6 +90,7 @@ export function WorkItemCardMenu({
   onClose,
   onChanged,
   onLinkPm,
+  execute,
 }: WorkItemCardMenuProps) {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const [style, setStyle] = useState<CSSProperties | null>(null);
@@ -144,15 +160,7 @@ export function WorkItemCardMenu({
       setDialog(null);
       onChanged();
     } catch (err) {
-      const msg =
-        err instanceof BffError && err.code === "STAGE_GATE_DENIED"
-          ? "阶段准入未满足（WIP 已满、缺少分支或工作流未成功等）"
-          : err instanceof BffError && err.code === "WORK_ITEM_VERSION_CONFLICT"
-            ? "工作项已被他人修改，请刷新后重试"
-            : err instanceof BffError
-              ? err.message
-              : "移动工作项失败";
-      setError(msg);
+      setError(moveWorkItemErrorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -222,6 +230,21 @@ export function WorkItemCardMenu({
                 style={style}
                 onClick={(event) => event.stopPropagation()}
               >
+                {execute ? (
+                  <button
+                    type="button"
+                    className="wf-list-menu-item"
+                    role="menuitem"
+                    disabled={disabled}
+                    title={execute.label}
+                    onClick={() => {
+                      onClose();
+                      execute.onSelect();
+                    }}
+                  >
+                    {execute.label}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="wf-list-menu-item"

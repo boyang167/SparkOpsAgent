@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type CSSProperties } from "react";
-import type { ProductWorkflowVM, SprintStage } from "@sparkops/contracts/product";
+import type { ProductWorkflowVM, SprintStage, StageWorkflowBinding } from "@sparkops/contracts/product";
 import { isValidStageKey, nextStageColor, slugifyStageKey, withSortOrder } from "./sprint-process-templates";
 
 interface SprintStageEditorProps {
@@ -12,6 +12,9 @@ interface SprintStageEditorProps {
   maxStages?: number;
   /** board：看板列编辑（简洁）；full：流程设置（完整字段） */
   variant?: "board" | "full";
+  /** 进行中的迭代：列结构锁定，只能调整工作流绑定 */
+  structureLocked?: boolean;
+  initialExpandedIds?: string[];
 }
 
 export function SprintStageEditor({
@@ -21,8 +24,10 @@ export function SprintStageEditor({
   minStages = 2,
   maxStages = 12,
   variant = "full",
+  structureLocked = false,
+  initialExpandedIds,
 }: SprintStageEditorProps) {
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set(initialExpandedIds));
 
   function toggleExpanded(stageId: string) {
     setExpandedIds((prev) => {
@@ -77,19 +82,34 @@ export function SprintStageEditor({
     onChange(withSortOrder(stages.map((stage) => (stage.id === stageId ? { ...stage, ...patch } : stage))));
   }
 
-  function bindWorkflow(stageId: string, workflowId: string) {
-    onChange(
-      withSortOrder(
-        stages.map((stage) => {
-          if (stage.id !== stageId) return stage;
-          if (!workflowId) return { ...stage, workflows: [] };
-          const wf = workflows.find((item) => item.id === workflowId);
-          return {
-            ...stage,
-            workflows: [{ workflow_id: workflowId, workflow_name: wf?.name, trigger_mode: "manual" as const }],
-          };
-        }),
-      ),
+  function setStageWorkflows(stageId: string, bindings: StageWorkflowBinding[]) {
+    onChange(stages.map((stage) => (stage.id === stageId ? { ...stage, workflows: bindings } : stage)));
+  }
+
+  if (structureLocked) {
+    return (
+      <div className="stage-lock">
+        <p className="stage-lock-hint">迭代进行中，看板列结构已锁定，只能调整各列绑定的工作流。</p>
+        {workflows.length === 0 ? (
+          <p className="stage-lock-hint">产品暂无工作流，请先在「工作流」中创建。</p>
+        ) : (
+          <ul className="stage-lock-list">
+            {stages.map((stage) => (
+              <li key={stage.id} className="stage-lock-row">
+                <div className="stage-lock-name">
+                  <span className="stage-lock-dot" style={{ background: stage.color || "var(--muted)" }} aria-hidden />
+                  {stage.name}
+                </div>
+                <StageWorkflowFields
+                  stage={stage}
+                  workflows={workflows}
+                  onChange={(bindings) => setStageWorkflows(stage.id, bindings)}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     );
   }
 
@@ -164,19 +184,11 @@ export function SprintStageEditor({
                       />
                     </label>
                     {workflows.length > 0 ? (
-                      <label>
-                        <span>默认工作流</span>
-                        <select
-                          className="input"
-                          value={stage.workflows?.[0]?.workflow_id ?? ""}
-                          onChange={(e) => bindWorkflow(stage.id, e.target.value)}
-                        >
-                          <option value="">不绑定</option>
-                          {workflows.map((wf) => (
-                            <option key={wf.id} value={wf.id}>{wf.name}</option>
-                          ))}
-                        </select>
-                      </label>
+                      <StageWorkflowFields
+                        stage={stage}
+                        workflows={workflows}
+                        onChange={(bindings) => setStageWorkflows(stage.id, bindings)}
+                      />
                     ) : null}
                   </div>
                 ) : (
@@ -307,19 +319,92 @@ export function SprintStageEditor({
                   placeholder="不限"
                 />
               </label>
-              <label className="stack-xs md:col-span-2">
-                <span className="text-sm">默认绑定工作流</span>
-                <select className="input" value={stage.workflows?.[0]?.workflow_id ?? ""} onChange={(e) => bindWorkflow(stage.id, e.target.value)}>
-                  <option value="">不绑定</option>
-                  {workflows.map((wf) => (
-                    <option key={wf.id} value={wf.id}>{wf.name}</option>
-                  ))}
-                </select>
-              </label>
+              <div className="md:col-span-2">
+                <StageWorkflowFields
+                  stage={stage}
+                  workflows={workflows}
+                  onChange={(bindings) => setStageWorkflows(stage.id, bindings)}
+                />
+              </div>
             </div>
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function StageWorkflowFields({
+  stage,
+  workflows,
+  onChange,
+}: {
+  stage: SprintStage;
+  workflows: ProductWorkflowVM[];
+  onChange: (bindings: StageWorkflowBinding[]) => void;
+}) {
+  const binding = stage.workflows?.[0];
+
+  function patch(next: Partial<StageWorkflowBinding>) {
+    if (!binding) return;
+    onChange([{ ...binding, ...next }]);
+  }
+
+  return (
+    <div className="stage-wf-fields">
+      <label className="stage-wf-field">
+        <span>工作流</span>
+        <select
+          className="input"
+          value={binding?.workflow_id ?? ""}
+          onChange={(e) => {
+            const id = e.target.value;
+            if (!id) {
+              onChange([]);
+              return;
+            }
+            onChange([
+              {
+                workflow_id: id,
+                workflow_name: workflows.find((wf) => wf.id === id)?.name,
+                trigger_mode: binding?.trigger_mode ?? "manual",
+                default_parameters: binding?.default_parameters ?? {},
+                required_for_exit: binding?.required_for_exit ?? false,
+              },
+            ]);
+          }}
+        >
+          <option value="">不绑定</option>
+          {workflows.map((wf) => (
+            <option key={wf.id} value={wf.id}>
+              {wf.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {binding ? (
+        <>
+          <label className="stage-wf-field">
+            <span>触发方式</span>
+            <select
+              className="input"
+              value={binding.trigger_mode}
+              onChange={(e) => patch({ trigger_mode: e.target.value as StageWorkflowBinding["trigger_mode"] })}
+            >
+              <option value="manual">手动执行</option>
+              <option value="auto_on_enter">工作项进入此列时自动执行</option>
+            </select>
+          </label>
+          <label className="stage-wf-check">
+            <input
+              type="checkbox"
+              checked={binding.required_for_exit}
+              onChange={(e) => patch({ required_for_exit: e.target.checked })}
+            />
+            <span>执行成功后才能移到后面的列</span>
+          </label>
+        </>
+      ) : null}
     </div>
   );
 }

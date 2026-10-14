@@ -52,10 +52,7 @@ func NormalizeSprintStages(stages []SprintStage) ([]SprintStage, error) {
 		if wip < 0 {
 			wip = 0
 		}
-		workflows := stage.Workflows
-		if workflows == nil {
-			workflows = []StageWorkflowBinding{}
-		}
+		workflows := NormalizeStageWorkflowBindings(stage.Workflows)
 		out = append(out, SprintStage{
 			ID: id, Key: key, Name: name, SortOrder: i,
 			Color: strings.TrimSpace(stage.Color), WipLimit: wip,

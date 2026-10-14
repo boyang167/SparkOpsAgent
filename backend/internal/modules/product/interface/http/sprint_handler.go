@@ -414,6 +414,10 @@ type moveWorkItemRequest struct {
 }
 
 func (h *Handler) MoveWorkItem(c *gin.Context) {
+	_, memberID, ok := memberAndWorkspace(c)
+	if !ok {
+		return
+	}
 	productID, workItemID, ok := parseProductWorkItemIDs(c)
 	if !ok {
 		return
@@ -424,7 +428,7 @@ func (h *Handler) MoveWorkItem(c *gin.Context) {
 		return
 	}
 	item, err := h.sprints.moveWorkItem.Handle(c.Request.Context(), productID, workItemID, command.MoveWorkItemInput{
-		StageID: req.StageID, SortOrder: req.SortOrder, Version: req.Version,
+		StageID: req.StageID, SortOrder: req.SortOrder, Version: req.Version, Actor: memberID,
 	})
 	if err != nil {
 		httpx.HandleError(c, err)

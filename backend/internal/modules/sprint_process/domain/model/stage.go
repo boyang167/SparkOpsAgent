@@ -1,5 +1,12 @@
 package model
 
+import "strings"
+
+const (
+	TriggerModeManual = "manual"
+	TriggerModeAuto   = "auto_on_enter"
+)
+
 type StageWorkflowBinding struct {
 	WorkflowID        string            `json:"workflow_id"`
 	WorkflowName      string            `json:"workflow_name,omitempty"`
@@ -25,4 +32,20 @@ type SprintStage struct {
 	WipLimit    int                    `json:"wip_limit,omitempty"`
 	EntryPolicy *StageGatePolicy       `json:"entry_policy,omitempty"`
 	Workflows   []StageWorkflowBinding `json:"workflows,omitempty"`
+}
+
+// NormalizeStageWorkflowBindings drops empty bindings and coerces unknown trigger modes to manual.
+func NormalizeStageWorkflowBindings(in []StageWorkflowBinding) []StageWorkflowBinding {
+	out := make([]StageWorkflowBinding, 0, len(in))
+	for _, b := range in {
+		b.WorkflowID = strings.TrimSpace(b.WorkflowID)
+		if b.WorkflowID == "" {
+			continue
+		}
+		if b.TriggerMode != TriggerModeAuto {
+			b.TriggerMode = TriggerModeManual
+		}
+		out = append(out, b)
+	}
+	return out
 }

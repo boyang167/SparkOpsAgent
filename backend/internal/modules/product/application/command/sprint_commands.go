@@ -355,16 +355,23 @@ type MoveWorkItemInput struct {
 	StageID   string
 	SortOrder int
 	Version   int
+	Actor     kernel.MemberID
 }
 
 type MoveWorkItemHandler struct {
 	products repository.ProductRepository
 	sprints  repository.SprintRepository
+	executor *service.SprintWorkItemExecutor
 	board    *service.SprintBoardNotifier
 }
 
-func NewMoveWorkItemHandler(products repository.ProductRepository, sprints repository.SprintRepository, board *service.SprintBoardNotifier) *MoveWorkItemHandler {
-	return &MoveWorkItemHandler{products: products, sprints: sprints, board: board}
+func NewMoveWorkItemHandler(
+	products repository.ProductRepository,
+	sprints repository.SprintRepository,
+	executor *service.SprintWorkItemExecutor,
+	board *service.SprintBoardNotifier,
+) *MoveWorkItemHandler {
+	return &MoveWorkItemHandler{products: products, sprints: sprints, executor: executor, board: board}
 }
 
 func (h *MoveWorkItemHandler) Handle(ctx context.Context, productID kernel.ProductID, workItemID kernel.WorkItemID, input MoveWorkItemInput) (*model.WorkItem, error) {
@@ -381,13 +388,17 @@ func (h *MoveWorkItemHandler) Handle(ctx context.Context, productID kernel.Produ
 	if !sprint.HasStage(input.StageID) {
 		return nil, domain.ErrInvalidStage
 	}
-	if item.StageID != input.StageID {
+	entered := item.StageID != input.StageID
+	if entered {
 		allItems, err := h.sprints.ListWorkItemsBySprint(ctx, sprint.ID)
 		if err != nil {
 			return nil, err
 		}
 		execs, err := h.sprints.ListExecutionsByWorkItem(ctx, item.ID)
 		if err != nil {
+			return nil, err
+		}
+		if err := model.CheckStageExit(sprint, item, input.StageID, execs); err != nil {
 			return nil, err
 		}
 		if err := model.CheckStageEntry(sprint, item, input.StageID, allItems, execs); err != nil {
@@ -400,10 +411,40 @@ func (h *MoveWorkItemHandler) Handle(ctx context.Context, productID kernel.Produ
 	if err := h.sprints.UpdateWorkItem(ctx, item); err != nil {
 		return nil, err
 	}
+	if entered {
+		h.triggerAutoWorkflows(ctx, sprint, item, input.Actor)
+	}
 	if h.board != nil {
 		h.board.BoardChanged(sprint.ID, "moved")
 	}
 	return item, nil
+}
+
+// triggerAutoWorkflows starts the stage's auto bindings. A failed start must not undo the move,
+// so it is recorded on the card instead of being returned.
+func (h *MoveWorkItemHandler) triggerAutoWorkflows(ctx context.Context, sprint *model.Sprint, item *model.WorkItem, actor kernel.MemberID) {
+	stage := sprint.StageByID(item.StageID)
+	if h.executor == nil || stage == nil {
+		return
+	}
+	for _, binding := range stage.Workflows {
+		if binding.TriggerMode != model.StageTriggerAuto {
+			continue
+		}
+		runInput := map[string]any{}
+		if branch, _ := item.Delivery["branch"].(string); branch != "" {
+			runInput["branch"] = branch
+		}
+		if _, err := h.executor.Execute(ctx, sprint, item, stage.ID, binding.WorkflowID, actor, runInput); err != nil {
+			if item.Delivery == nil {
+				item.Delivery = map[string]any{}
+			}
+			item.Delivery["last_workflow_id"] = binding.WorkflowID
+			item.Delivery["last_workflow_status"] = "failed"
+			item.Delivery["last_workflow_error"] = err.Error()
+			_ = h.sprints.UpdateWorkItem(ctx, item)
+		}
+	}
 }
 
 type DeleteWorkItemHandler struct {
