@@ -2,17 +2,22 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { EnvironmentVM, ProductProjectVM, ProductWorkflowVM } from "@sparkops/contracts/product";
+import { product } from "@sparkops/web-sdk";
+import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { ReleasePlanModalFooter } from "./ReleasePlanModalFooter";
 import { ReleasePlanProjectSelector } from "./ReleasePlanProjectSelector";
 import {
   defaultBranchForWorkflow,
   defaultEnvironmentIdForWorkflow,
+  resolveWorkflowDetails,
   workflowHasBuildJobs,
   workflowProjectIds,
 } from "./release-plan-workflow-params";
 
 interface ReleasePlanAddWorkflowModalProps {
+  workspaceId: string;
+  productId: string;
   open: boolean;
   workflows: ProductWorkflowVM[];
   environments: EnvironmentVM[];
@@ -32,6 +37,8 @@ function workflowHasDeployJobs(workflow: ProductWorkflowVM | null) {
 }
 
 export function ReleasePlanAddWorkflowModal({
+  workspaceId,
+  productId,
   open,
   workflows,
   environments,
@@ -44,8 +51,15 @@ export function ReleasePlanAddWorkflowModal({
   const [environmentId, setEnvironmentId] = useState("");
   const [branch, setBranch] = useState("main");
   const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [workflowDetail, setWorkflowDetail] = useState<ProductWorkflowVM | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
-  const workflow = useMemo(() => workflows.find((item) => item.id === workflowId) ?? null, [workflows, workflowId]);
+  const workflowSummary = useMemo(
+    () => workflows.find((item) => item.id === workflowId) ?? null,
+    [workflows, workflowId],
+  );
+  const workflow = workflowDetail?.id === workflowId ? workflowDetail : workflowSummary;
   const needsEnvironment = workflowHasDeployJobs(workflow);
   const needsBranch = workflowHasBuildJobs(workflow);
   const candidateProjectIds = useMemo(() => workflowProjectIds(workflow), [workflow]);
@@ -55,6 +69,27 @@ export function ReleasePlanAddWorkflowModal({
   }, [open, workflows]);
 
   useEffect(() => {
+    if (!open || !workflowSummary) return;
+    let cancelled = false;
+    setWorkflowDetail(null);
+    setDetailError(null);
+    setDetailLoading(true);
+    void resolveWorkflowDetails(workflowSummary, (id) => product.getProductWorkflow(workspaceId, productId, id))
+      .then((detail) => {
+        if (!cancelled) setWorkflowDetail(detail);
+      })
+      .catch(() => {
+        if (!cancelled) setDetailError("工作流详情加载失败，请重试。");
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, workflowSummary, workspaceId, productId]);
+
+  useEffect(() => {
     setEnvironmentId(defaultEnvironmentIdForWorkflow(workflow, environments));
     setBranch(defaultBranchForWorkflow(workflow));
     setProjectIds(candidateProjectIds);
@@ -62,6 +97,8 @@ export function ReleasePlanAddWorkflowModal({
 
   const canSubmit =
     Boolean(workflowId) &&
+    !detailLoading &&
+    !detailError &&
     (!needsEnvironment || Boolean(environmentId)) &&
     (candidateProjectIds.length === 0 || projectIds.length > 0);
 
@@ -89,6 +126,7 @@ export function ReleasePlanAddWorkflowModal({
       }
     >
       <div className="stack-sm">
+        {detailError ? <InlineAlert tone="error">{detailError}</InlineAlert> : null}
         <label className="form-field stack-xs">
           <span className="form-label">工作流</span>
           <select className="input" value={workflowId} onChange={(e) => setWorkflowId(e.target.value)}>
@@ -99,6 +137,7 @@ export function ReleasePlanAddWorkflowModal({
             ))}
           </select>
         </label>
+        {detailLoading ? <span className="text-sm text-muted-foreground" role="status">正在加载工作流配置…</span> : null}
         {needsEnvironment ? (
           <label className="form-field stack-xs">
             <span className="form-label">部署环境</span>

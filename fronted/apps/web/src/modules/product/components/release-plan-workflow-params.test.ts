@@ -8,6 +8,7 @@ import {
   parseWorkflowJobBranch,
   parseWorkflowJobEnvironmentId,
   parseWorkflowJobProjectIds,
+  resolveWorkflowDetails,
   workflowHasBuildJobs,
   workflowProjectIds,
 } from "./release-plan-workflow-params";
@@ -83,5 +84,18 @@ describe("release-plan-workflow-params", () => {
 
     const merged = mergeWorkflowJobParameters(params, workflow, { projectIds: ["project-1"] });
     expect(parseWorkflowJobProjectIds(merged)).toEqual(["project-1"]);
+  });
+
+  it("loads workflow details when the list item omits stages", async () => {
+    const summary: ProductWorkflowVM = { ...workflow, stages: undefined };
+    const loadedIds: string[] = [];
+
+    const resolved = await resolveWorkflowDetails(summary, async (workflowId) => {
+      loadedIds.push(workflowId);
+      return workflow;
+    });
+
+    expect(loadedIds).toEqual(["wf-1"]);
+    expect(workflowProjectIds(resolved)).toEqual(["project-1", "project-2"]);
   });
 });

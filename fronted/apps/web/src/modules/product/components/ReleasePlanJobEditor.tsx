@@ -28,6 +28,7 @@ import {
   parseWorkflowJobBranch,
   parseWorkflowJobEnvironmentId,
   parseWorkflowJobProjectIds,
+  resolveWorkflowDetails,
   workflowHasBuildJobs,
   workflowProjectIds,
   type WorkflowJobParamsPatch,
@@ -116,7 +117,10 @@ export function ReleasePlanJobEditor({
   const [dropJobId, setDropJobId] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [projects, setProjects] = useState<ProductProjectVM[]>([]);
+  const [workflowDetails, setWorkflowDetails] = useState<Record<string, ProductWorkflowVM>>({});
+  const [workflowDetailErrors, setWorkflowDetailErrors] = useState<Set<string>>(() => new Set());
   const debounceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const loadingWorkflowIds = useRef<Set<string>>(new Set());
   const prevJobCount = useRef(0);
 
   const jobs = useMemo(
@@ -124,6 +128,15 @@ export function ReleasePlanJobEditor({
     [plan.jobs],
   );
   const canImport = Boolean(canEdit && onImportWorkItems && plan.sprint);
+  const resolvedWorkflows = useMemo(
+    () => workflows.map((workflow) => workflowDetails[workflow.id] ?? workflow),
+    [workflows, workflowDetails],
+  );
+  const referencedWorkflowIds = useMemo(
+    () =>
+      [...new Set((plan.jobs ?? []).map((job) => job.workflow_ref?.workflow_id).filter((id): id is string => Boolean(id)))],
+    [plan.jobs],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -139,6 +152,42 @@ export function ReleasePlanJobEditor({
       cancelled = true;
     };
   }, [workspaceId, productId]);
+
+  useEffect(() => {
+    setWorkflowDetails({});
+    setWorkflowDetailErrors(new Set());
+    loadingWorkflowIds.current.clear();
+  }, [workspaceId, productId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    for (const workflowId of referencedWorkflowIds) {
+      const summary = workflows.find((workflow) => workflow.id === workflowId);
+      if (
+        !summary ||
+        summary.stages !== undefined ||
+        workflowDetails[workflowId] ||
+        workflowDetailErrors.has(workflowId) ||
+        loadingWorkflowIds.current.has(workflowId)
+      ) {
+        continue;
+      }
+      loadingWorkflowIds.current.add(workflowId);
+      void resolveWorkflowDetails(summary, (id) => product.getProductWorkflow(workspaceId, productId, id))
+        .then((detail) => {
+          if (!cancelled) setWorkflowDetails((current) => ({ ...current, [detail.id]: detail }));
+        })
+        .catch(() => {
+          if (!cancelled) setWorkflowDetailErrors((current) => new Set([...current, workflowId]));
+        })
+        .finally(() => {
+          loadingWorkflowIds.current.delete(workflowId);
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [referencedWorkflowIds, workflows, workflowDetails, workflowDetailErrors, workspaceId, productId]);
 
   useEffect(() => {
     const sorted = [...(plan.jobs ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
@@ -361,8 +410,8 @@ export function ReleasePlanJobEditor({
             const workflowId = job.workflow_ref?.workflow_id;
             const workflowLocked = job.workflow_ref?.mode === "snapshot";
             const canEditJob = canEdit && !workflowLocked;
-            const wfLabel = workflowName(workflows, workflowId);
-            const jobWorkflow = workflows.find((item) => item.id === workflowId) ?? null;
+            const wfLabel = workflowName(resolvedWorkflows, workflowId);
+            const jobWorkflow = resolvedWorkflows.find((item) => item.id === workflowId) ?? null;
             const jobHasDeploy = (jobWorkflow?.stages ?? []).some((stage) =>
               (stage.jobs ?? []).some(
                 (stageJob) =>
@@ -508,6 +557,9 @@ export function ReleasePlanJobEditor({
 
                     {job.type === "workflow" && workflowId ? (
                       <div className="release-plan-job-workflow-meta stack-xs">
+                        {workflowDetailErrors.has(workflowId) ? (
+                          <InlineAlert tone="error">工作流配置加载失败，请刷新后重试。</InlineAlert>
+                        ) : null}
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-xs text-muted-foreground">关联工作流 · {wfLabel}</p>
                           {workflowLocked ? <span className="badge badge-neutral text-[10px]">工作流已锁定</span> : null}
@@ -617,8 +669,10 @@ export function ReleasePlanJobEditor({
       )}
 
       <ReleasePlanAddWorkflowModal
+        workspaceId={workspaceId}
+        productId={productId}
         open={addWorkflowOpen}
-        workflows={workflows}
+        workflows={resolvedWorkflows}
         environments={environments}
         projects={projects}
         busy={busy}

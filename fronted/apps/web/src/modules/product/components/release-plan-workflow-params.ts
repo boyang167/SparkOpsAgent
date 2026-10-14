@@ -4,6 +4,14 @@ import { defaultDeployEnvironmentId } from "./workflow-run-form";
 const ENV_OVERRIDES_KEY = "_environment_overrides";
 const PROJECT_IDS_KEY = "_project_ids";
 
+export async function resolveWorkflowDetails(
+  workflow: ProductWorkflowVM,
+  loadWorkflow: (workflowId: string) => Promise<ProductWorkflowVM>,
+): Promise<ProductWorkflowVM> {
+  if (workflow.stages !== undefined) return workflow;
+  return loadWorkflow(workflow.id);
+}
+
 export function workflowProjectIds(workflow: ProductWorkflowVM | null | undefined): string[] {
   const seen = new Set<string>();
   for (const stage of workflow?.stages ?? []) {
