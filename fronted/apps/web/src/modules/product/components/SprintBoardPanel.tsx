@@ -116,17 +116,20 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   const [cardMenuOpenId, setCardMenuOpenId] = useState<string | null>(null);
   const [blockingPlans, setBlockingPlans] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [activeReleasePlanCount, setActiveReleasePlanCount] = useState(0);
+  const [linkedReleasePlanCount, setLinkedReleasePlanCount] = useState(0);
   const [showArchived, setShowArchived] = useState(false);
   const [sprintAction, setSprintAction] = useState<{ kind: "delete" | "archive"; id: string; name: string } | null>(null);
   const [sprintActionError, setSprintActionError] = useState<string | null>(null);
 
   const loadReleasePlansMeta = useCallback(
     async (sprintId: string) => {
+      setLinkedReleasePlanCount(0);
       try {
         const plans = await product.listReleasePlans(workspaceId, productId, sprintId);
         setActiveReleasePlanCount(
           plans.filter((p) => ["planning", "wait_for_approval", "executing"].includes(p.status)).length,
         );
+        setLinkedReleasePlanCount(plans.length);
         setBlockingPlans(
           plans
             .filter((p) => ["executing", "wait_for_approval"].includes(p.status))
@@ -134,6 +137,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
         );
       } catch {
         setActiveReleasePlanCount(0);
+        setLinkedReleasePlanCount(0);
         setBlockingPlans([]);
       }
     },
@@ -299,21 +303,18 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   function sprintListActions(item: ProductMasterListItem): ProductMasterItemAction[] {
     const status = sprintStatusById.get(item.id);
     const target = { id: item.id, name: item.title };
+    const blockedByPlans = item.id === selectedId && linkedReleasePlanCount > 0;
+    const remove: ProductMasterItemAction = {
+      label: "删除",
+      danger: true,
+      disabled: blockedByPlans,
+      title: blockedByPlans ? "该迭代下还有关联的发布计划，请先删除这些计划" : undefined,
+      onSelect: () => openSprintAction("delete", target),
+    };
     if (status === "completed") {
-      return [{ label: "归档", onSelect: () => openSprintAction("archive", target) }];
+      return [{ label: "归档", onSelect: () => openSprintAction("archive", target) }, remove];
     }
-    if (status === "planning" || status === "active") {
-      return [
-        {
-          label: "删除",
-          danger: true,
-          disabled: status === "active",
-          title: status === "active" ? "进行中的迭代需先完成，完成后可归档" : undefined,
-          onSelect: () => openSprintAction("delete", target),
-        },
-      ];
-    }
-    return [];
+    return [remove];
   }
 
   function openSprintAction(kind: "delete" | "archive", target: { id: string; name: string }) {
@@ -339,9 +340,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
       setSprintActionError(
         err instanceof BffError && err.code === "SPRINT_HAS_RELEASE_PLANS"
           ? "该迭代下还有关联的发布计划，请先删除这些计划后再删除迭代"
-          : err instanceof BffError && err.code === "SPRINT_NOT_DELETABLE"
-            ? "只有待启动的迭代可以删除"
-            : err instanceof BffError
+          : err instanceof BffError
               ? err.message
               : kind === "delete"
                 ? "删除迭代失败"

@@ -27,7 +27,6 @@ var (
 	ErrSprintNotFound                    = kernel.NewDomainError("SPRINT_NOT_FOUND", "sprint not found")
 	ErrSprintNameDuplicate               = kernel.NewDomainError("SPRINT_NAME_DUPLICATE", "sprint name already exists")
 	ErrInvalidSprintTransition           = kernel.NewDomainError("SPRINT_INVALID_TRANSITION", "invalid sprint status transition")
-	ErrSprintNotDeletable                = kernel.NewDomainError("SPRINT_NOT_DELETABLE", "only planning sprints can be deleted")
 	ErrSprintHasReleasePlans             = kernel.NewDomainError("SPRINT_HAS_RELEASE_PLANS", "sprint still has linked release plans")
 	ErrWorkItemNotFound                  = kernel.NewDomainError("WORK_ITEM_NOT_FOUND", "work item not found")
 	ErrWorkItemVersionConflict           = kernel.NewDomainError("WORK_ITEM_VERSION_CONFLICT", "work item was modified by another user")

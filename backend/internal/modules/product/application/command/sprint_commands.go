@@ -247,12 +247,8 @@ func NewDeleteSprintHandler(products repository.ProductRepository, sprints repos
 }
 
 func (h *DeleteSprintHandler) Handle(ctx context.Context, productID kernel.ProductID, sprintID kernel.SprintID) error {
-	sprint, err := loadSprint(ctx, h.products, h.sprints, productID, sprintID)
-	if err != nil {
+	if _, err := loadSprint(ctx, h.products, h.sprints, productID, sprintID); err != nil {
 		return err
-	}
-	if sprint.Status != model.SprintStatusPlanning {
-		return domain.ErrSprintNotDeletable
 	}
 	plans, err := h.plans.ListPlansByProductAndSprint(ctx, productID, sprintID)
 	if err != nil {
