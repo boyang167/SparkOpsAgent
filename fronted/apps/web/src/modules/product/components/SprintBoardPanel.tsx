@@ -788,7 +788,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                           </span>
                         </div>
                         {column.wip_limit_exceeded ? <span className="sprint-board-column-warn">超出 WIP 上限</span> : null}
-                        {sprint.status !== "archived" ? (
+                        {sprint.status === "planning" || sprint.status === "active" ? (
                           <label
                             className={`sprint-board-column-wf${column.stage.workflows?.[0]?.workflow_id ? " is-bound" : ""}`}
                           >

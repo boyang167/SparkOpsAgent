@@ -118,10 +118,16 @@ func (h *UpdateSprintHandler) Handle(ctx context.Context, productID kernel.Produ
 	if input.OwnerID != nil {
 		sprint.OwnerID = input.OwnerID
 	}
-	if len(input.Stages) > 0 {
-		if sprint.Status != model.SprintStatusPlanning {
+	if len(input.Stages) > 0 && sprint.Status != model.SprintStatusPlanning {
+		if sprint.Status != model.SprintStatusActive {
 			return nil, domain.ErrInvalidSprintTransition
 		}
+		stages, ok := model.ApplyStageWorkflowBindings(sprint.Stages, input.Stages)
+		if !ok {
+			return nil, domain.ErrInvalidSprintTransition
+		}
+		sprint.Stages = stages
+	} else if len(input.Stages) > 0 {
 		items, err := h.sprints.ListWorkItemsBySprint(ctx, sprint.ID)
 		if err != nil {
 			return nil, err

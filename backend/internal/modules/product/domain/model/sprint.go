@@ -1,6 +1,7 @@
 package model
 
 import (
+	"reflect"
 	"strings"
 	"time"
 
@@ -84,6 +85,33 @@ func (s *Sprint) Archive(now time.Time) error {
 	s.Status = SprintStatusArchived
 	s.UpdatedAt = now
 	return nil
+}
+
+// ApplyStageWorkflowBindings returns current stages with workflow bindings taken from next.
+// ok is false when next changes anything other than workflow bindings.
+func ApplyStageWorkflowBindings(current, next []SprintStage) ([]SprintStage, bool) {
+	if len(current) != len(next) {
+		return nil, false
+	}
+	byID := make(map[string]SprintStage, len(next))
+	for _, st := range next {
+		byID[st.ID] = st
+	}
+	out := make([]SprintStage, len(current))
+	for i, cur := range current {
+		nxt, found := byID[cur.ID]
+		if !found {
+			return nil, false
+		}
+		a, b := cur, nxt
+		a.Workflows, b.Workflows = nil, nil
+		if !reflect.DeepEqual(a, b) {
+			return nil, false
+		}
+		cur.Workflows = append([]StageWorkflowBinding(nil), nxt.Workflows...)
+		out[i] = cur
+	}
+	return out, true
 }
 
 func (s *Sprint) FirstStageID() string {
