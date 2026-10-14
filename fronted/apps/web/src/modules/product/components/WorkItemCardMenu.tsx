@@ -20,12 +20,13 @@ interface WorkItemCardMenuProps {
   onToggle: () => void;
   onClose: () => void;
   onChanged: () => void;
+  onLinkPm?: () => void;
 }
 
 type DialogKind = "move" | "assignee" | "delete" | null;
 
 const MENU_WIDTH = 168;
-const MENU_HEIGHT = 132;
+const MENU_HEIGHT = 172;
 const GAP = 6;
 
 function placeMenu(anchor: HTMLElement): CSSProperties {
@@ -52,10 +53,12 @@ function placeMenu(anchor: HTMLElement): CSSProperties {
   };
 }
 
-function IconMenuLines() {
+function IconMore() {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-      <path d="M5 7h14M5 12h14M5 17h14" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+      <circle cx="6" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="18" cy="12" r="1.5" fill="currentColor" />
     </svg>
   );
 }
@@ -71,6 +74,7 @@ export function WorkItemCardMenu({
   onToggle,
   onClose,
   onChanged,
+  onLinkPm,
 }: WorkItemCardMenuProps) {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const [style, setStyle] = useState<CSSProperties | null>(null);
@@ -208,7 +212,7 @@ export function WorkItemCardMenu({
             onToggle();
           }}
         >
-          <IconMenuLines />
+          <IconMore />
         </button>
         {open && style
           ? createPortal(
@@ -236,6 +240,20 @@ export function WorkItemCardMenu({
                 >
                   更改负责人
                 </button>
+                {onLinkPm ? (
+                  <button
+                    type="button"
+                    className="wf-list-menu-item"
+                    role="menuitem"
+                    disabled={disabled}
+                    onClick={() => {
+                      onClose();
+                      onLinkPm();
+                    }}
+                  >
+                    关联 PM…
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="wf-list-menu-item is-danger"

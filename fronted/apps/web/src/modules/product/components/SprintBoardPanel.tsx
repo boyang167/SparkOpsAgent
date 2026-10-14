@@ -70,11 +70,6 @@ function runStatusClass(status?: string) {
   }
 }
 
-function sprintProgressPercent(done?: number, total?: number) {
-  if (!total || !done) return 0;
-  return Math.min(100, Math.round((done / total) * 100));
-}
-
 export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelProps) {
   const [sprints, setSprints] = useState<SprintSummaryVM[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -296,7 +291,6 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
         id: row.id,
         title: row.name,
         meta: STATUS_LABEL[row.status] ?? row.status,
-        subtitle: row.goal,
       })),
     [filteredSprints],
   );
@@ -550,6 +544,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
               open={cardMenuOpenId === item.id}
               onToggle={() => setCardMenuOpenId((prev) => (prev === item.id ? null : item.id))}
               onClose={() => setCardMenuOpenId(null)}
+              onLinkPm={item.external?.issue_key ? undefined : () => setPmLinkTarget(item)}
               onChanged={() => {
                 void loadBoard();
                 void loadSprints();
@@ -569,14 +564,8 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
             ) : null}
           </div>
         ) : null}
-        {canManageCard || item.external?.issue_key ? (
-          <WorkItemPmChip
-            external={item.external}
-            disabled={busy}
-            compact
-            onManage={() => setPmLinkTarget(item)}
-            onLink={canManageCard ? () => setPmLinkTarget(item) : undefined}
-          />
+        {item.external?.issue_key ? (
+          <WorkItemPmChip external={item.external} disabled={busy} compact onManage={() => setPmLinkTarget(item)} />
         ) : null}
       </article>
     );
@@ -656,6 +645,11 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                       <span className="sprint-status-dot" aria-hidden />
                       {STATUS_LABEL[sprint.status] ?? sprint.status}
                     </span>
+                    {sprint.work_item_count ? (
+                      <span className="sprint-head-progress">
+                        已完成 {sprint.done_work_item_count ?? 0} / {sprint.work_item_count}
+                      </span>
+                    ) : null}
                   </div>
                   {sprint.goal ? <p className="sprint-head-goal">{sprint.goal}</p> : null}
                 </div>
@@ -683,39 +677,26 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                 </div>
               </div>
 
-              <div className="sprint-head-bar">
-                <div className="segmented-control sprint-head-tabs" role="tablist" aria-label="迭代视图">
-                  {(
-                    [
-                      { id: "board", label: "看板" },
-                      { id: "release", label: "发布计划", count: activeReleasePlanCount },
-                      { id: "metrics", label: "度量" },
-                    ] as const
-                  ).map((tab) => (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={viewTab === tab.id}
-                      className={`segmented-item${viewTab === tab.id ? " segmented-item-active" : ""}`}
-                      onClick={() => setViewTab(tab.id)}
-                    >
-                      {tab.label}
-                      {"count" in tab && tab.count > 0 ? <span className="sprint-head-tab-count">{tab.count}</span> : null}
-                    </button>
-                  ))}
-                </div>
-                <div className="sprint-progress" aria-label="迭代进度">
-                  <span className="sprint-progress-track">
-                    <span
-                      className="sprint-progress-fill"
-                      style={{ width: `${sprintProgressPercent(sprint.done_work_item_count, sprint.work_item_count)}%` }}
-                    />
-                  </span>
-                  <span className="sprint-progress-text">
-                    已完成 {sprint.done_work_item_count ?? 0} / {sprint.work_item_count ?? 0}
-                  </span>
-                </div>
+              <div className="release-plan-tabs" role="tablist" aria-label="迭代视图">
+                {(
+                  [
+                    { id: "board", label: "看板" },
+                    { id: "release", label: "发布计划", count: activeReleasePlanCount },
+                    { id: "metrics", label: "度量" },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={viewTab === tab.id}
+                    className={`release-plan-tab${viewTab === tab.id ? " is-active" : ""}`}
+                    onClick={() => setViewTab(tab.id)}
+                  >
+                    {tab.label}
+                    {"count" in tab && tab.count > 0 ? <span className="release-plan-tab-count">{tab.count}</span> : null}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -790,7 +771,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                         {column.wip_limit_exceeded ? <span className="sprint-board-column-warn">超出 WIP 上限</span> : null}
                         {sprint.status === "planning" || sprint.status === "active" ? (
                           <label
-                            className={`sprint-board-column-wf${column.stage.workflows?.[0]?.workflow_id ? " is-bound" : ""}`}
+                            className={`sprint-board-column-wf${column.stage.workflows?.[0]?.workflow_id ? " is-bound" : " is-unbound"}`}
                           >
                             <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden>
                               <path
@@ -807,7 +788,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                               onChange={(e) => void bindStageWorkflow(column.stage.id, e.target.value)}
                               aria-label={`${column.stage.name} 绑定工作流`}
                             >
-                              <option value="">未绑定工作流</option>
+                              <option value="">{column.stage.workflows?.[0]?.workflow_id ? "解除绑定" : "绑定工作流"}</option>
                               {workflows.map((wf) => (
                                 <option key={wf.id} value={wf.id}>
                                   {wf.name}
@@ -818,11 +799,10 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                         ) : null}
                       </header>
                       <div className="sprint-board-column-body">
-                        {column.work_items.length === 0 ? (
+                        {column.work_items.map((item) => renderCard(item, board.columns))}
+                        {sprint.status !== "planning" && sprint.status !== "active" && column.work_items.length === 0 ? (
                           <p className="sprint-board-column-empty">暂无工作项</p>
-                        ) : (
-                          column.work_items.map((item) => renderCard(item, board.columns))
-                        )}
+                        ) : null}
                         {sprint.status === "planning" || sprint.status === "active" ? (
                           <button
                             type="button"

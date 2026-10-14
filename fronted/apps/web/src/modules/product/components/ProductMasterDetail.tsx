@@ -178,21 +178,18 @@ export function ProductMasterDetail({
   return (
     <div className="product-master-detail">
       <aside className="product-master-list" aria-label={sidebarTitle}>
-        <div className="product-master-list-head">{sidebarTitle}</div>
-
-        <div className="product-master-toolbar">
-          <button type="button" className="product-master-tool is-active" aria-label="列表视图" title="列表视图">
-            {productDetailTabIcons.iterations}
-          </button>
-          <button type="button" className="product-master-tool" aria-label="排序" title="排序">
-            {productDetailTabIcons.sort}
-          </button>
-          {onAdd ? (
-            <button type="button" className="product-master-tool is-accent" aria-label={addAriaLabel} title={addAriaLabel} onClick={onAdd}>
-              {productDetailTabIcons.plus}
-            </button>
+        <div className="product-master-list-head">
+          <span>{sidebarTitle}</span>
+          {onAdd || toolbarExtra ? (
+            <div className="product-master-toolbar">
+              {onAdd ? (
+                <button type="button" className="product-master-tool is-accent" aria-label={addAriaLabel} title={addAriaLabel} onClick={onAdd}>
+                  {productDetailTabIcons.plus}
+                </button>
+              ) : null}
+              {toolbarExtra}
+            </div>
           ) : null}
-          {toolbarExtra}
         </div>
 
         <div className="product-master-items" role="listbox" aria-label={`${sidebarTitle}列表`}>
