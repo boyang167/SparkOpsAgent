@@ -33,6 +33,8 @@ import { WorkItemAttributeFields } from "./WorkItemAttributeFields";
 import {
   DEFAULT_WORK_ITEM_PRIORITY,
   DEFAULT_WORK_ITEM_TYPE,
+  WORK_ITEM_PRIORITY_OPTIONS,
+  WORK_ITEM_TYPE_OPTIONS,
   workItemMetaParts,
 } from "./work-item-attributes";
 import { WorkItemCardMenu } from "./WorkItemCardMenu";
@@ -71,6 +73,26 @@ function runStatusClass(status?: string) {
   }
 }
 
+type BoardItemSortKey = "manual" | "type" | "priority";
+
+const TYPE_RANK = new Map(WORK_ITEM_TYPE_OPTIONS.map((option, index) => [option.value, index]));
+const PRIORITY_RANK = new Map(WORK_ITEM_PRIORITY_OPTIONS.map((option, index) => [option.value, index]));
+
+function compareBoardItems(
+  a: WorkItemCardVM,
+  b: WorkItemCardVM,
+  key: BoardItemSortKey,
+  direction: "asc" | "desc",
+) {
+  if (key !== "manual") {
+    const left = key === "type" ? TYPE_RANK.get(a.type) : PRIORITY_RANK.get(a.priority);
+    const right = key === "type" ? TYPE_RANK.get(b.type) : PRIORITY_RANK.get(b.priority);
+    const delta = (left ?? Number.MAX_SAFE_INTEGER) - (right ?? Number.MAX_SAFE_INTEGER);
+    if (delta !== 0) return direction === "asc" ? delta : -delta;
+  }
+  return a.sort_order - b.sort_order;
+}
+
 export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelProps) {
   const [sprints, setSprints] = useState<SprintSummaryVM[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -81,6 +103,10 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewTab, setViewTab] = useState<"board" | "release" | "metrics">("board");
+  const [itemSort, setItemSort] = useState<{ key: BoardItemSortKey; direction: "asc" | "desc" }>({
+    key: "manual",
+    direction: "asc",
+  });
   const [metrics, setMetrics] = useState<SprintMetricsVM | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -845,8 +871,46 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
               </div>
             ) : (
               <div className="product-master-main-inner sprint-board-wrap">
+                {board.columns.some((column) => column.work_items.length > 0) ? (
+                  <div className="sprint-board-sort" role="group" aria-label="工作项排序">
+                    <span>排序</span>
+                    {(
+                      [
+                        { key: "manual", label: "默认" },
+                        { key: "type", label: "类型" },
+                        { key: "priority", label: "优先级" },
+                      ] as const
+                    ).map((option) => {
+                      const active = itemSort.key === option.key;
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          className={active ? "is-active" : undefined}
+                          aria-pressed={active}
+                          onClick={() =>
+                            setItemSort((prev) =>
+                              option.key === "manual"
+                                ? { key: "manual", direction: "asc" }
+                                : prev.key === option.key
+                                  ? { key: option.key, direction: prev.direction === "asc" ? "desc" : "asc" }
+                                  : { key: option.key, direction: "asc" },
+                            )
+                          }
+                        >
+                          {option.label}
+                          {active && option.key !== "manual" ? (itemSort.direction === "asc" ? " ↑" : " ↓") : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
                 <div className="sprint-board" role="region" aria-label="迭代看板">
-                  {board.columns.map((column) => (
+                  {board.columns.map((column) => {
+                    const items = [...column.work_items].sort((a, b) =>
+                      compareBoardItems(a, b, itemSort.key, itemSort.direction),
+                    );
+                    return (
                     <section key={column.stage.id} className="sprint-board-column">
                       <header className="sprint-board-column-head">
                         <div className="sprint-board-column-title-row">
@@ -901,8 +965,8 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                         })()}
                       </header>
                       <div className="sprint-board-column-body">
-                        {column.work_items.map((item) => renderCard(item, board.columns))}
-                        {sprint.status !== "planning" && sprint.status !== "active" && column.work_items.length === 0 ? (
+                        {items.map((item) => renderCard(item, board.columns))}
+                        {sprint.status !== "planning" && sprint.status !== "active" && items.length === 0 ? (
                           <p className="sprint-board-column-empty">暂无工作项</p>
                         ) : null}
                         {sprint.status === "planning" || sprint.status === "active" ? (
@@ -917,7 +981,8 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                         ) : null}
                       </div>
                     </section>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
