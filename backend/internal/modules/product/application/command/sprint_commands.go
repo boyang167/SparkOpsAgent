@@ -403,7 +403,7 @@ func (h *MoveWorkItemHandler) Handle(ctx context.Context, productID kernel.Produ
 	if err != nil {
 		return nil, err
 	}
-	if sprint.Status != model.SprintStatusActive {
+	if sprint.Status != model.SprintStatusPlanning && sprint.Status != model.SprintStatusActive {
 		return nil, domain.ErrSprintNotActive
 	}
 	if item.Version != input.Version {
@@ -413,7 +413,8 @@ func (h *MoveWorkItemHandler) Handle(ctx context.Context, productID kernel.Produ
 		return nil, domain.ErrInvalidStage
 	}
 	entered := item.StageID != input.StageID
-	if entered {
+	// 规划中只调整位置；准入、退出门禁和自动执行都在迭代进行中才生效。
+	if entered && sprint.Status == model.SprintStatusActive {
 		allItems, err := h.sprints.ListWorkItemsBySprint(ctx, sprint.ID)
 		if err != nil {
 			return nil, err
@@ -435,7 +436,7 @@ func (h *MoveWorkItemHandler) Handle(ctx context.Context, productID kernel.Produ
 	if err := h.sprints.UpdateWorkItem(ctx, item); err != nil {
 		return nil, err
 	}
-	if entered {
+	if entered && sprint.Status == model.SprintStatusActive {
 		h.triggerAutoWorkflows(ctx, sprint, item, input.Actor)
 	}
 	if h.board != nil {

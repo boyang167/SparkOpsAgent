@@ -424,7 +424,7 @@ func (h *Handler) UpdateWorkItem(c *gin.Context) {
 type moveWorkItemRequest struct {
 	StageID   string `json:"stage_id" binding:"required"`
 	SortOrder int    `json:"sort_order"`
-	Version   int    `json:"version" binding:"required"`
+	Version   int    `json:"version"`
 }
 
 func (h *Handler) MoveWorkItem(c *gin.Context) {

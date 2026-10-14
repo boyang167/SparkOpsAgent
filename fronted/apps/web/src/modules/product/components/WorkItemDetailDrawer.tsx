@@ -273,7 +273,7 @@ export function WorkItemDetailDrawer({
               <select
                 className="input text-sm"
                 value={view?.stage_id ?? ""}
-                disabled={busy || !view || sprintStatus !== "active"}
+                disabled={busy || !view || (sprintStatus !== "planning" && sprintStatus !== "active")}
                 onChange={(e) => void onMove(e.target.value)}
               >
                 {stages.map((stage) => (

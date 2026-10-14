@@ -37,7 +37,7 @@ import {
   WORK_ITEM_TYPE_OPTIONS,
   workItemMetaParts,
 } from "./work-item-attributes";
-import { WorkItemCardMenu } from "./WorkItemCardMenu";
+import { moveWorkItemErrorMessage, WorkItemCardMenu } from "./WorkItemCardMenu";
 import { WorkItemDetailDrawer } from "./WorkItemDetailDrawer";
 import { WorkItemPmChip } from "./WorkItemPmChip";
 import { WorkItemPmLinkModal } from "./WorkItemPmLinkModal";
@@ -140,6 +140,8 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     workflowId: string;
   } | null>(null);
   const [cardMenuOpenId, setCardMenuOpenId] = useState<string | null>(null);
+  const [dragItemId, setDragItemId] = useState<string | null>(null);
+  const [dropStageId, setDropStageId] = useState<string | null>(null);
   const [blockingPlans, setBlockingPlans] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [activeReleasePlanCount, setActiveReleasePlanCount] = useState(0);
   const [linkedReleasePlanCount, setLinkedReleasePlanCount] = useState(0);
@@ -619,6 +621,28 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     }
   }
 
+  async function onDropWorkItem(targetStageId: string, workItemId: string) {
+    const item = board?.columns.flatMap((column) => column.work_items).find((row) => row.id === workItemId);
+    if (!item || item.stage_id === targetStageId) return;
+    const target = board?.columns.find((column) => column.stage.id === targetStageId);
+    const sortOrder = (target?.work_items ?? []).reduce((max, row) => Math.max(max, row.sort_order), -1) + 1;
+    setBusy(true);
+    setError(null);
+    try {
+      await product.moveWorkItem(workspaceId, productId, item.id, {
+        stage_id: targetStageId,
+        sort_order: sortOrder,
+        version: item.version ?? 0,
+      });
+      await loadBoard();
+      await loadSprints();
+    } catch (err) {
+      setError(moveWorkItemErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function renderCard(item: WorkItemCardVM, _columns: SprintBoardColumnVM[]) {
     const runStatus = item.delivery?.last_workflow_status;
     const metaParts = workItemMetaParts(item);
@@ -633,8 +657,27 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
             onSelect: () => openExecuteWorkflow(item, itemStage, itemBinding.workflow_id),
           }
         : undefined;
+    const canDrag = canManageCard && !busy;
     return (
-      <article key={item.id} className="sprint-board-card">
+      <article
+        key={item.id}
+        className={`sprint-board-card${dragItemId === item.id ? " is-dragging" : ""}`}
+        draggable={canDrag}
+        onDragStart={(event) => {
+          const target = event.target;
+          if (target instanceof Element && target.closest(".sprint-board-card-menu-wrap, .work-item-pm-chip")) {
+            event.preventDefault();
+            return;
+          }
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", item.id);
+          setDragItemId(item.id);
+        }}
+        onDragEnd={() => {
+          setDragItemId(null);
+          setDropStageId(null);
+        }}
+      >
         <div className="sprint-board-card-top">
           <button
             type="button"
@@ -649,7 +692,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
               stages={boardStages}
               workspaceId={workspaceId}
               productId={productId}
-              sprintActive={board?.sprint.status === "active"}
+              sprintActive={board?.sprint.status === "planning" || board?.sprint.status === "active"}
               disabled={busy}
               open={cardMenuOpenId === item.id}
               onToggle={() => setCardMenuOpenId((prev) => (prev === item.id ? null : item.id))}
@@ -910,8 +953,30 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                     const items = [...column.work_items].sort((a, b) =>
                       compareBoardItems(a, b, itemSort.key, itemSort.direction),
                     );
+                    const canDrop = sprint.status === "planning" || sprint.status === "active";
                     return (
-                    <section key={column.stage.id} className="sprint-board-column">
+                    <section
+                      key={column.stage.id}
+                      className={`sprint-board-column${dropStageId === column.stage.id ? " is-drop-target" : ""}`}
+                      onDragOver={(event) => {
+                        if (!canDrop || !dragItemId) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                        if (dropStageId !== column.stage.id) setDropStageId(column.stage.id);
+                      }}
+                      onDragLeave={(event) => {
+                        const next = event.relatedTarget;
+                        if (next instanceof Node && event.currentTarget.contains(next)) return;
+                        if (dropStageId === column.stage.id) setDropStageId(null);
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        const workItemId = event.dataTransfer.getData("text/plain") || dragItemId;
+                        setDragItemId(null);
+                        setDropStageId(null);
+                        if (workItemId) void onDropWorkItem(column.stage.id, workItemId);
+                      }}
+                    >
                       <header className="sprint-board-column-head">
                         <div className="sprint-board-column-title-row">
                           <span
