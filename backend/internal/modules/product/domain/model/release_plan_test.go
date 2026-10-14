@@ -45,6 +45,7 @@ func TestWorkflowRefSpecToRunInput(t *testing.T) {
 		Parameters: map[string]string{
 			"branch":                 "main",
 			"_environment_overrides": `{"deploy-dev":"env-1","deploy-prod":"env-2"}`,
+			"_project_ids":           `["project-1","project-2"]`,
 			"release_note":           "v2.4",
 		},
 	}
@@ -56,6 +57,7 @@ func TestWorkflowRefSpecToRunInput(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "env-1", envOverrides["deploy-dev"])
 	require.Equal(t, "env-2", envOverrides["deploy-prod"])
+	require.Equal(t, []any{"project-1", "project-2"}, input["project_ids"])
 
 	variables, ok := input["variables"].(map[string]any)
 	require.True(t, ok)

@@ -2,6 +2,31 @@ import type { EnvironmentVM, ProductWorkflowVM } from "@sparkops/contracts/produ
 import { defaultDeployEnvironmentId } from "./workflow-run-form";
 
 const ENV_OVERRIDES_KEY = "_environment_overrides";
+const PROJECT_IDS_KEY = "_project_ids";
+
+export function workflowProjectIds(workflow: ProductWorkflowVM | null | undefined): string[] {
+  const seen = new Set<string>();
+  for (const stage of workflow?.stages ?? []) {
+    for (const job of stage.jobs ?? []) {
+      const spec = job.spec as Record<string, unknown> | undefined;
+      const builds = spec?.project_builds;
+      if (Array.isArray(builds)) {
+        for (const raw of builds) {
+          if (!raw || typeof raw !== "object") continue;
+          const projectId = (raw as { project_id?: unknown }).project_id;
+          if (typeof projectId === "string" && projectId.trim()) seen.add(projectId.trim());
+        }
+      }
+      const projectIds = spec?.project_ids;
+      if (Array.isArray(projectIds)) {
+        for (const projectId of projectIds) {
+          if (typeof projectId === "string" && projectId.trim()) seen.add(projectId.trim());
+        }
+      }
+    }
+  }
+  return [...seen];
+}
 
 export function deployJobNames(workflow: ProductWorkflowVM | null | undefined): string[] {
   const names: string[] = [];
@@ -61,6 +86,7 @@ export function buildWorkflowJobParameters(
   workflow: ProductWorkflowVM | null | undefined,
   environmentId?: string,
   branch?: string,
+  projectIds?: string[],
 ): Record<string, string> {
   const params: Record<string, string> = {};
   const env = environmentId?.trim() ?? "";
@@ -73,6 +99,7 @@ export function buildWorkflowJobParameters(
     }
   }
   if (ref) params.branch = ref;
+  if (projectIds) params[PROJECT_IDS_KEY] = JSON.stringify(projectIds);
   return params;
 }
 
@@ -82,6 +109,19 @@ export function parseWorkflowJobEnvironmentId(parameters?: Record<string, string
 
 export function parseWorkflowJobBranch(parameters?: Record<string, string>): string {
   return parameters?.branch?.trim() ?? "";
+}
+
+export function parseWorkflowJobProjectIds(parameters?: Record<string, string>): string[] {
+  const raw = parameters?.[PROJECT_IDS_KEY];
+  if (!raw) return [];
+  try {
+    const values: unknown = JSON.parse(raw);
+    return Array.isArray(values)
+      ? values.filter((value): value is string => typeof value === "string" && Boolean(value.trim())).map((value) => value.trim())
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 export function defaultEnvironmentIdForWorkflow(
@@ -106,6 +146,7 @@ export function environmentLabel(environments: EnvironmentVM[], environmentId?: 
 export interface WorkflowJobParamsPatch {
   environmentId?: string;
   branch?: string | null;
+  projectIds?: string[];
 }
 
 export function mergeWorkflowJobParameters(
@@ -129,6 +170,9 @@ export function mergeWorkflowJobParameters(
   if (patch.branch !== undefined) {
     if (branch) merged.branch = branch;
     else delete merged.branch;
+  }
+  if (patch.projectIds !== undefined) {
+    merged[PROJECT_IDS_KEY] = JSON.stringify(patch.projectIds);
   }
 
   return merged;

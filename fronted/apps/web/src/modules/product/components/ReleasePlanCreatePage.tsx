@@ -241,7 +241,7 @@ export function ReleasePlanCreatePage({
 
   async function onAddWorkflowJob(
     workflowId: string,
-    options?: { environmentId?: string; branch?: string },
+    options?: { environmentId?: string; branch?: string; projectIds?: string[] },
   ) {
     const current = await ensurePlanCreated();
     if (!current || !workflowId) return;
@@ -250,10 +250,9 @@ export function ReleasePlanCreatePage({
     setError(null);
     try {
       const wf = (await resolveWorkflow(workflowId)) ?? workflows.find((w) => w.id === workflowId);
-      const parameters =
-        options?.environmentId || options?.branch
-          ? buildWorkflowJobParameters(wf, options.environmentId, options.branch)
-          : undefined;
+      const parameters = options
+        ? buildWorkflowJobParameters(wf, options.environmentId, options.branch, options.projectIds)
+        : undefined;
       await product.addReleasePlanJob(workspaceId, productId, current.id, {
         name: wf?.name ?? "工作流发布",
         type: "workflow",

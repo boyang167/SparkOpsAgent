@@ -3843,6 +3843,53 @@ textarea.input {
   padding-top: 0.125rem;
 }
 
+.release-plan-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.release-plan-projects-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.release-plan-project-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color var(--motion-duration) var(--motion-ease);
+}
+
+.release-plan-project-option:hover {
+  border-color: var(--border-strong);
+}
+
+.release-plan-project-option input {
+  accent-color: var(--primary);
+}
+
+.release-plan-projects:disabled .release-plan-project-option {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.release-plan-projects-count {
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
 .product-master-item-meta.product-master-item-badge {
   display: inline-flex;
   width: fit-content;

@@ -7,20 +7,39 @@ import {
   mergeWorkflowJobParameters,
   parseWorkflowJobBranch,
   parseWorkflowJobEnvironmentId,
+  parseWorkflowJobProjectIds,
   workflowHasBuildJobs,
+  workflowProjectIds,
 } from "./release-plan-workflow-params";
 
 const workflow: ProductWorkflowVM = {
   id: "wf-1",
   product_id: "p-1",
   name: "发布流水线",
+  key: "release",
   status: "active",
+  stage_count: 1,
+  notifications: [],
+  variables: [],
+  triggers: [],
   stages: [
     {
       name: "部署",
+      parallel: false,
+      exec_mode: "auto",
       jobs: [
         { name: "deploy-dev", type: "sparkops-deploy", spec: { environment_id: "env-old" } },
-        { name: "lint", type: "sparkops-build", spec: { branch: "develop" } },
+        {
+          name: "lint",
+          type: "sparkops-build",
+          spec: {
+            branch: "develop",
+            project_builds: [
+              { project_id: "project-1", branch: "develop" },
+              { project_id: "project-2", branch: "main" },
+            ],
+          },
+        },
       ],
     },
   ],
@@ -54,5 +73,15 @@ describe("release-plan-workflow-params", () => {
 
     const cleared = mergeWorkflowJobParameters(merged, workflow, { branch: null });
     expect(cleared.branch).toBeUndefined();
+  });
+
+  it("extracts projects and stores the selected project ids", () => {
+    expect(workflowProjectIds(workflow)).toEqual(["project-1", "project-2"]);
+
+    const params = buildWorkflowJobParameters(workflow, "env-new", "main", ["project-2"]);
+    expect(parseWorkflowJobProjectIds(params)).toEqual(["project-2"]);
+
+    const merged = mergeWorkflowJobParameters(params, workflow, { projectIds: ["project-1"] });
+    expect(parseWorkflowJobProjectIds(merged)).toEqual(["project-1"]);
   });
 });

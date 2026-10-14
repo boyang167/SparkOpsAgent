@@ -1,22 +1,28 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { EnvironmentVM, ProductWorkflowVM } from "@sparkops/contracts/product";
+import type { EnvironmentVM, ProductProjectVM, ProductWorkflowVM } from "@sparkops/contracts/product";
 import { Modal } from "@/components/ui/Modal";
 import { ReleasePlanModalFooter } from "./ReleasePlanModalFooter";
+import { ReleasePlanProjectSelector } from "./ReleasePlanProjectSelector";
 import {
   defaultBranchForWorkflow,
   defaultEnvironmentIdForWorkflow,
   workflowHasBuildJobs,
+  workflowProjectIds,
 } from "./release-plan-workflow-params";
 
 interface ReleasePlanAddWorkflowModalProps {
   open: boolean;
   workflows: ProductWorkflowVM[];
   environments: EnvironmentVM[];
+  projects: ProductProjectVM[];
   busy?: boolean;
   onClose: () => void;
-  onSubmit: (workflowId: string, options: { environmentId?: string; branch?: string }) => void | Promise<void>;
+  onSubmit: (
+    workflowId: string,
+    options: { environmentId?: string; branch?: string; projectIds?: string[] },
+  ) => void | Promise<void>;
 }
 
 function workflowHasDeployJobs(workflow: ProductWorkflowVM | null) {
@@ -29,6 +35,7 @@ export function ReleasePlanAddWorkflowModal({
   open,
   workflows,
   environments,
+  projects,
   busy,
   onClose,
   onSubmit,
@@ -36,10 +43,12 @@ export function ReleasePlanAddWorkflowModal({
   const [workflowId, setWorkflowId] = useState("");
   const [environmentId, setEnvironmentId] = useState("");
   const [branch, setBranch] = useState("main");
+  const [projectIds, setProjectIds] = useState<string[]>([]);
 
   const workflow = useMemo(() => workflows.find((item) => item.id === workflowId) ?? null, [workflows, workflowId]);
   const needsEnvironment = workflowHasDeployJobs(workflow);
   const needsBranch = workflowHasBuildJobs(workflow);
+  const candidateProjectIds = useMemo(() => workflowProjectIds(workflow), [workflow]);
 
   useEffect(() => {
     if (open) setWorkflowId((current) => current || workflows[0]?.id || "");
@@ -48,9 +57,13 @@ export function ReleasePlanAddWorkflowModal({
   useEffect(() => {
     setEnvironmentId(defaultEnvironmentIdForWorkflow(workflow, environments));
     setBranch(defaultBranchForWorkflow(workflow));
-  }, [workflow, environments]);
+    setProjectIds(candidateProjectIds);
+  }, [workflow, environments, candidateProjectIds]);
 
-  const canSubmit = Boolean(workflowId) && (!needsEnvironment || Boolean(environmentId));
+  const canSubmit =
+    Boolean(workflowId) &&
+    (!needsEnvironment || Boolean(environmentId)) &&
+    (candidateProjectIds.length === 0 || projectIds.length > 0);
 
   return (
     <Modal
@@ -69,6 +82,7 @@ export function ReleasePlanAddWorkflowModal({
             void onSubmit(workflowId, {
               ...(needsEnvironment ? { environmentId } : {}),
               ...(needsBranch ? { branch: branch.trim() || "main" } : {}),
+              ...(candidateProjectIds.length > 0 ? { projectIds } : {}),
             })
           }
         />
@@ -107,6 +121,13 @@ export function ReleasePlanAddWorkflowModal({
             <input className="input" value={branch} placeholder="main" onChange={(e) => setBranch(e.target.value)} />
           </label>
         ) : null}
+        <ReleasePlanProjectSelector
+          projectIds={candidateProjectIds}
+          projects={projects}
+          selectedIds={projectIds}
+          disabled={busy}
+          onChange={setProjectIds}
+        />
       </div>
     </Modal>
   );

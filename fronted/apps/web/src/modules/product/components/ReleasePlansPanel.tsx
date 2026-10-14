@@ -322,16 +322,15 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
 
   async function onAddWorkflowJob(
     workflowId: string,
-    options?: { environmentId?: string; branch?: string },
+    options?: { environmentId?: string; branch?: string; projectIds?: string[] },
   ) {
     if (!selected || !workflowId) return;
     setBusy(true);
     try {
       const wf = (await resolveWorkflow(workflowId)) ?? workflows.find((w) => w.id === workflowId);
-      const parameters =
-        options?.environmentId || options?.branch
-          ? buildWorkflowJobParameters(wf, options.environmentId, options.branch)
-          : undefined;
+      const parameters = options
+        ? buildWorkflowJobParameters(wf, options.environmentId, options.branch, options.projectIds)
+        : undefined;
       await product.addReleasePlanJob(workspaceId, productId, selected.id, {
         name: wf?.name ?? "工作流发布",
         type: "workflow",

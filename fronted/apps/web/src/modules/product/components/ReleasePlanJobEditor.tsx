@@ -2,13 +2,21 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { EnvironmentVM, ProductWorkflowVM, ReleasePlanJobVM, ReleasePlanVM } from "@sparkops/contracts/product";
+import { product } from "@sparkops/web-sdk";
+import type {
+  EnvironmentVM,
+  ProductProjectVM,
+  ProductWorkflowVM,
+  ReleasePlanJobVM,
+  ReleasePlanVM,
+} from "@sparkops/contracts/product";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { ActionMenu } from "./ActionMenu";
 import { MemberNameLabel } from "./MemberNameLabel";
 import { ReleasePlanAddWorkflowModal } from "./ReleasePlanAddWorkflowModal";
 import { ReleasePlanModalFooter } from "./ReleasePlanModalFooter";
+import { ReleasePlanProjectSelector } from "./ReleasePlanProjectSelector";
 import { SprintWorkItemsImportModal } from "./SprintWorkItemsImportModal";
 import { productDetailTabIcons } from "./product-detail-icons";
 import { RichTextField } from "./RichTextField";
@@ -19,7 +27,9 @@ import {
   environmentLabel,
   parseWorkflowJobBranch,
   parseWorkflowJobEnvironmentId,
+  parseWorkflowJobProjectIds,
   workflowHasBuildJobs,
+  workflowProjectIds,
   type WorkflowJobParamsPatch,
 } from "./release-plan-workflow-params";
 import { releasePlanStatusBadgeClass, releasePlanStatusLabel } from "./release-plan-utils";
@@ -48,7 +58,7 @@ interface ReleasePlanJobEditorProps {
   onAddText: () => void | Promise<void>;
   onAddWorkflow: (
     workflowId: string,
-    options?: { environmentId?: string; branch?: string },
+    options?: { environmentId?: string; branch?: string; projectIds?: string[] },
   ) => void | Promise<void>;
   onWorkflowParamsChange: (
     jobId: string,
@@ -105,6 +115,7 @@ export function ReleasePlanJobEditor({
   const [dragJobId, setDragJobId] = useState<string | null>(null);
   const [dropJobId, setDropJobId] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const [projects, setProjects] = useState<ProductProjectVM[]>([]);
   const debounceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const prevJobCount = useRef(0);
 
@@ -113,6 +124,21 @@ export function ReleasePlanJobEditor({
     [plan.jobs],
   );
   const canImport = Boolean(canEdit && onImportWorkItems && plan.sprint);
+
+  useEffect(() => {
+    let cancelled = false;
+    void product
+      .listProductProjects(workspaceId, productId)
+      .then((items) => {
+        if (!cancelled) setProjects(items);
+      })
+      .catch(() => {
+        if (!cancelled) setProjects([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, productId]);
 
   useEffect(() => {
     const sorted = [...(plan.jobs ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
@@ -225,7 +251,10 @@ export function ReleasePlanJobEditor({
     canImport ? { label: "从迭代需求导入…", separatorBefore: true, onSelect: () => setImportOpen(true) } : null,
   ];
 
-  async function submitAddWorkflow(workflowId: string, options: { environmentId?: string; branch?: string }) {
+  async function submitAddWorkflow(
+    workflowId: string,
+    options: { environmentId?: string; branch?: string; projectIds?: string[] },
+  ) {
     await onAddWorkflow(workflowId, options);
     setAddWorkflowOpen(false);
   }
@@ -342,6 +371,10 @@ export function ReleasePlanJobEditor({
             );
             const jobEnvironmentId = parseWorkflowJobEnvironmentId(job.workflow_ref?.parameters);
             const jobBranch = parseWorkflowJobBranch(job.workflow_ref?.parameters);
+            const candidateProjectIds = workflowProjectIds(jobWorkflow);
+            const storedProjectIds = parseWorkflowJobProjectIds(job.workflow_ref?.parameters);
+            const availableProjectIds = [...new Set([...candidateProjectIds, ...storedProjectIds])];
+            const selectedProjectIds = storedProjectIds.length > 0 ? storedProjectIds : candidateProjectIds;
             const jobHasBuild = workflowHasBuildJobs(jobWorkflow);
 
             const isDragging = dragJobId === job.id;
@@ -399,6 +432,9 @@ export function ReleasePlanJobEditor({
                                 wfLabel,
                                 jobEnvironmentId ? environmentLabel(environments, jobEnvironmentId) : null,
                                 jobBranch ? `分支 ${jobBranch}` : null,
+                                availableProjectIds.length > 0
+                                  ? `项目 ${selectedProjectIds.length}/${availableProjectIds.length}`
+                                  : null,
                               ]
                                 .filter(Boolean)
                                 .join(" · ")
@@ -521,6 +557,20 @@ export function ReleasePlanJobEditor({
                             )}
                           </label>
                         ) : null}
+                        <ReleasePlanProjectSelector
+                          projectIds={availableProjectIds}
+                          projects={projects}
+                          selectedIds={selectedProjectIds}
+                          disabled={!canEditJob || busy}
+                          onChange={
+                            canEditJob
+                              ? (projectIds) => {
+                                  if (projectIds.length === 0) return;
+                                  void onWorkflowParamsChange(job.id, workflowId, { projectIds });
+                                }
+                              : undefined
+                          }
+                        />
                       </div>
                     ) : null}
 
@@ -570,6 +620,7 @@ export function ReleasePlanJobEditor({
         open={addWorkflowOpen}
         workflows={workflows}
         environments={environments}
+        projects={projects}
         busy={busy}
         onClose={() => setAddWorkflowOpen(false)}
         onSubmit={submitAddWorkflow}

@@ -328,6 +328,18 @@ func (spec WorkflowRefSpec) ToRunInput() map[string]any {
 			}
 		}
 	}
+	if raw := strings.TrimSpace(spec.Parameters["_project_ids"]); raw != "" {
+		var projectIDs []string
+		if err := json.Unmarshal([]byte(raw), &projectIDs); err == nil {
+			items := make([]any, 0, len(projectIDs))
+			for _, projectID := range projectIDs {
+				if id := strings.TrimSpace(projectID); id != "" {
+					items = append(items, id)
+				}
+			}
+			input["project_ids"] = items
+		}
+	}
 	variables := map[string]any{}
 	for key, value := range spec.Parameters {
 		if key == "branch" || key == "environment_id" || key == "_environment_overrides" || strings.HasPrefix(key, "_") {

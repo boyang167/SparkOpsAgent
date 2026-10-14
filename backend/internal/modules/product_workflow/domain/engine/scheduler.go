@@ -984,6 +984,7 @@ func ApplyRunInput(stages []model.WorkflowStage, input map[string]any) []model.W
 	out := cloneStages(stages)
 	branch, _ := input["branch"].(string)
 	envOverrides, _ := input["environment_overrides"].(map[string]any)
+	projectIDs, hasProjectFilter := projectIDSet(input["project_ids"])
 	for si := range out {
 		for ji := range out[si].Jobs {
 			job := &out[si].Jobs[ji]
@@ -1004,6 +1005,9 @@ func ApplyRunInput(stages []model.WorkflowStage, input map[string]any) []model.W
 			}
 			if job.Type == model.JobTypeSparkopsBuild {
 				applyBranchOverrides(job, stringMap(input["branch_overrides"]), stringMap(input["ref_type_overrides"]))
+			}
+			if hasProjectFilter {
+				filterJobProjects(job, projectIDs)
 			}
 			if (job.Type == model.JobTypeSparkopsDeploy || job.Type == model.JobTypeSparkopsDeployVersion) && len(envOverrides) > 0 {
 				if envID, ok := envOverrides[job.Name].(string); ok && envID != "" {
@@ -1028,6 +1032,67 @@ func ApplyRunInput(stages []model.WorkflowStage, input map[string]any) []model.W
 		}
 	}
 	return out
+}
+
+func projectIDSet(raw any) (map[string]struct{}, bool) {
+	if raw == nil {
+		return nil, false
+	}
+	out := map[string]struct{}{}
+	add := func(value string) {
+		if id := strings.TrimSpace(value); id != "" {
+			out[id] = struct{}{}
+		}
+	}
+	switch values := raw.(type) {
+	case []any:
+		for _, value := range values {
+			if id, ok := value.(string); ok {
+				add(id)
+			}
+		}
+	case []string:
+		for _, value := range values {
+			add(value)
+		}
+	default:
+		return nil, false
+	}
+	return out, true
+}
+
+func filterJobProjects(job *model.WorkflowJob, allowed map[string]struct{}) {
+	if rows, ok := job.Spec["project_builds"].([]any); ok {
+		filtered := make([]any, 0, len(rows))
+		for _, raw := range rows {
+			row, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			projectID, _ := row["project_id"].(string)
+			if _, keep := allowed[projectID]; keep {
+				filtered = append(filtered, row)
+			}
+		}
+		job.Spec["project_builds"] = filtered
+	}
+	if job.Type == model.JobTypeSparkopsCreateVersion {
+		projectIDs := make([]any, 0, len(allowed))
+		if configured, ok := job.Spec["project_ids"].([]any); ok {
+			for _, raw := range configured {
+				if projectID, ok := raw.(string); ok {
+					if _, keep := allowed[projectID]; keep {
+						projectIDs = append(projectIDs, projectID)
+					}
+				}
+			}
+		} else {
+			for projectID := range allowed {
+				projectIDs = append(projectIDs, projectID)
+			}
+		}
+		job.Spec["project_ids"] = projectIDs
+	}
 }
 
 func applyBranchOverrides(job *model.WorkflowJob, overrides, refTypes map[string]string) {
