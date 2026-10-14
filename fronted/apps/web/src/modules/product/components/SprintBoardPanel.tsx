@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { product } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import type {
@@ -53,6 +53,8 @@ const STATUS_LABEL: Record<string, string> = {
   completed: "已完成",
   archived: "已归档",
 };
+
+const COLUMN_PAGE_SIZE = 40;
 
 const RUN_STATUS_LABEL: Record<string, string> = {
   running: "运行中",
@@ -142,6 +144,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   const [cardMenuOpenId, setCardMenuOpenId] = useState<string | null>(null);
   const [dragItemId, setDragItemId] = useState<string | null>(null);
   const [dropStageId, setDropStageId] = useState<string | null>(null);
+  const [columnLimit, setColumnLimit] = useState<Record<string, number>>({});
   const [blockingPlans, setBlockingPlans] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [activeReleasePlanCount, setActiveReleasePlanCount] = useState(0);
   const [linkedReleasePlanCount, setLinkedReleasePlanCount] = useState(0);
@@ -153,7 +156,8 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     async (sprintId: string) => {
       setLinkedReleasePlanCount(0);
       try {
-        const plans = await product.listReleasePlans(workspaceId, productId, sprintId);
+        const page = await product.listReleasePlansPage(workspaceId, productId, { sprintId, limit: 200 });
+        const plans = page.items;
         setActiveReleasePlanCount(
           plans.filter((p) => ["planning", "wait_for_approval", "executing"].includes(p.status)).length,
         );
@@ -189,20 +193,35 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     }
   }, [workspaceId, productId]);
 
+  const shownSprintRef = useRef<string | null>(null);
+  const boardRequestRef = useRef(0);
+
   const loadBoard = useCallback(async () => {
+    const requestId = ++boardRequestRef.current;
     if (!selectedId) {
+      shownSprintRef.current = null;
       setBoard(null);
       return;
     }
-    setBoardLoading(true);
-    setError(null);
+    const switching = shownSprintRef.current !== selectedId;
+    if (switching) {
+      setBoardLoading(true);
+      setError(null);
+    }
     try {
-      setBoard(await product.getSprintBoard(workspaceId, productId, selectedId));
+      const next = await product.getSprintBoard(workspaceId, productId, selectedId);
+      if (boardRequestRef.current !== requestId) return;
+      shownSprintRef.current = selectedId;
+      setBoard(next);
     } catch (err) {
+      if (boardRequestRef.current !== requestId) return;
       setError(err instanceof BffError ? err.message : "加载看板失败");
-      setBoard(null);
+      if (switching) {
+        shownSprintRef.current = null;
+        setBoard(null);
+      }
     } finally {
-      setBoardLoading(false);
+      if (boardRequestRef.current === requestId && switching) setBoardLoading(false);
     }
   }, [workspaceId, productId, selectedId]);
 
@@ -228,6 +247,7 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   useEffect(() => {
     setViewTab("board");
     setMetrics(null);
+    setColumnLimit({});
     if (selectedId) void loadReleasePlansMeta(selectedId);
   }, [selectedId, loadReleasePlansMeta]);
 
@@ -312,8 +332,9 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   useEffect(() => {
     if (!hasRunningItems || !selectedId || workItemDrawerOpen || executeModalOpen) return;
     const timer = window.setInterval(() => {
+      if (document.hidden) return;
       void loadBoard();
-    }, 4000);
+    }, 15000);
     return () => window.clearInterval(timer);
   }, [hasRunningItems, selectedId, loadBoard, workItemDrawerOpen, executeModalOpen]);
 
@@ -953,6 +974,8 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                     const items = [...column.work_items].sort((a, b) =>
                       compareBoardItems(a, b, itemSort.key, itemSort.direction),
                     );
+                    const visibleCount = columnLimit[column.stage.id] ?? COLUMN_PAGE_SIZE;
+                    const visibleItems = items.slice(0, visibleCount);
                     const canDrop = sprint.status === "planning" || sprint.status === "active";
                     return (
                     <section
@@ -1030,7 +1053,21 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
                         })()}
                       </header>
                       <div className="sprint-board-column-body">
-                        {items.map((item) => renderCard(item, board.columns))}
+                        {visibleItems.map((item) => renderCard(item, board.columns))}
+                        {items.length > visibleItems.length ? (
+                          <button
+                            type="button"
+                            className="sprint-board-column-more"
+                            onClick={() =>
+                              setColumnLimit((prev) => ({
+                                ...prev,
+                                [column.stage.id]: (prev[column.stage.id] ?? COLUMN_PAGE_SIZE) + COLUMN_PAGE_SIZE,
+                              }))
+                            }
+                          >
+                            还有 {items.length - visibleItems.length} 个
+                          </button>
+                        ) : null}
                         {sprint.status !== "planning" && sprint.status !== "active" && items.length === 0 ? (
                           <p className="sprint-board-column-empty">暂无工作项</p>
                         ) : null}

@@ -22039,6 +22039,21 @@ button.sprint-board-column-wf:hover:not(:disabled) {
   color: var(--muted);
 }
 
+.sprint-board-column-more {
+  align-self: center;
+  margin: 0.25rem 0 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.sprint-board-column-more:hover {
+  color: var(--text);
+}
+
 .sprint-board-column-add {
   display: flex;
   align-items: center;

@@ -13,6 +13,8 @@ type SprintRepository interface {
 	FindSprintByID(ctx context.Context, id kernel.SprintID) (*model.Sprint, error)
 	FindSprintByLegacyPlanID(ctx context.Context, planID kernel.ProductPlanID) (*model.Sprint, error)
 	ListSprintsByProduct(ctx context.Context, productID kernel.ProductID, status string) ([]*model.Sprint, error)
+	// CountWorkItemsByProduct returns total and done counts keyed by sprint id.
+	CountWorkItemsByProduct(ctx context.Context, productID kernel.ProductID) (map[string][2]int, error)
 	ListActiveSprintsByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) ([]*model.Sprint, error)
 	SprintNameExists(ctx context.Context, productID kernel.ProductID, name string, excludeID kernel.SprintID) (bool, error)
 	// DeleteSprint soft-deletes the sprint together with its work items.
@@ -23,6 +25,8 @@ type SprintRepository interface {
 	DeleteWorkItem(ctx context.Context, id kernel.WorkItemID) error
 	FindWorkItemByID(ctx context.Context, id kernel.WorkItemID) (*model.WorkItem, error)
 	ListWorkItemsBySprint(ctx context.Context, sprintID kernel.SprintID) ([]*model.WorkItem, error)
+	// ListWorkItemCardsBySprint omits description, which the board does not render.
+	ListWorkItemCardsBySprint(ctx context.Context, sprintID kernel.SprintID) ([]*model.WorkItem, error)
 	CountWorkItemsBySprint(ctx context.Context, sprintID kernel.SprintID) (total, done int, err error)
 
 	SaveExecution(ctx context.Context, exec *model.WorkItemExecution) error

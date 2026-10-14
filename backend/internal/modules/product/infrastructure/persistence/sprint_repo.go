@@ -161,8 +161,12 @@ func (r *SprintRepository) ListActiveSprintsByWorkspace(ctx context.Context, wsI
 	return out, nil
 }
 
+const sprintListColumns = "id, product_id, process_id, process_version, name, goal, status, planned_start, planned_end, actual_start, actual_end, owner_id, created_by, created_at, updated_at"
+
+const workItemCardColumns = "id, sprint_id, stage_id, parent_id, sort_order, type, title, priority, status, assignee_id, project_ids, labels, external_ref, delivery, blocked_reason, version, created_by, created_at, updated_at"
+
 func (r *SprintRepository) ListSprintsByProduct(ctx context.Context, productID kernel.ProductID, status string) ([]*model.Sprint, error) {
-	q := r.db.WithContext(ctx).Where("product_id = ?", productID.String()).Order("created_at DESC")
+	q := r.db.WithContext(ctx).Select(sprintListColumns).Where("product_id = ?", productID.String()).Order("created_at DESC")
 	if status != "" {
 		q = q.Where("status = ?", status)
 	}
@@ -256,6 +260,53 @@ func (r *SprintRepository) FindWorkItemByID(ctx context.Context, id kernel.WorkI
 func (r *SprintRepository) ListWorkItemsBySprint(ctx context.Context, sprintID kernel.SprintID) ([]*model.WorkItem, error) {
 	var rows []workItemModel
 	if err := r.db.WithContext(ctx).
+		Where("sprint_id = ?", sprintID.String()).
+		Order("stage_id ASC, sort_order ASC, created_at ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*model.WorkItem, 0, len(rows))
+	for _, row := range rows {
+		item, err := rowToWorkItem(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+type sprintWorkItemCountRow struct {
+	SprintID string
+	Total    int
+	Done     int
+}
+
+func (r *SprintRepository) CountWorkItemsByProduct(ctx context.Context, productID kernel.ProductID) (map[string][2]int, error) {
+	var rows []sprintWorkItemCountRow
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT w.sprint_id AS sprint_id,
+		       COUNT(*) AS total,
+		       COUNT(*) FILTER (WHERE w.status = ?) AS done
+		FROM product.work_items AS w
+		INNER JOIN product.sprints AS s ON s.id = w.sprint_id AND s.deleted_at IS NULL
+		WHERE s.product_id = ? AND w.deleted_at IS NULL
+		GROUP BY w.sprint_id
+	`, model.WorkItemStatusDone, productID.String()).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][2]int, len(rows))
+	for _, row := range rows {
+		out[row.SprintID] = [2]int{row.Total, row.Done}
+	}
+	return out, nil
+}
+
+func (r *SprintRepository) ListWorkItemCardsBySprint(ctx context.Context, sprintID kernel.SprintID) ([]*model.WorkItem, error) {
+	var rows []workItemModel
+	if err := r.db.WithContext(ctx).
+		Select(workItemCardColumns).
 		Where("sprint_id = ?", sprintID.String()).
 		Order("stage_id ASC, sort_order ASC, created_at ASC").
 		Find(&rows).Error; err != nil {

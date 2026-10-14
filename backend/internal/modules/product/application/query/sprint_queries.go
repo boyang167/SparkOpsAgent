@@ -28,10 +28,14 @@ func (h *ListSprintsHandler) Handle(ctx context.Context, productID kernel.Produc
 	if err != nil {
 		return nil, err
 	}
+	counts, err := h.sprints.CountWorkItemsByProduct(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		total, done, _ := h.sprints.CountWorkItemsBySprint(ctx, item.ID)
-		out = append(out, sprintSummary(item, total, done))
+		count := counts[item.ID.String()]
+		out = append(out, sprintSummary(item, count[0], count[1]))
 	}
 	return out, nil
 }
@@ -80,13 +84,17 @@ func (h *GetSprintBoardHandler) Handle(ctx context.Context, productID kernel.Pro
 	if sprint.ProductID != productID {
 		return nil, domain.ErrSprintNotFound
 	}
-	items, err := h.sprints.ListWorkItemsBySprint(ctx, sprintID)
+	items, err := h.sprints.ListWorkItemCardsBySprint(ctx, sprintID)
 	if err != nil {
 		return nil, err
 	}
-	total, done, _ := h.sprints.CountWorkItemsBySprint(ctx, sprint.ID)
+	total, done := 0, 0
 	byStage := map[string][]*model.WorkItem{}
 	for _, item := range items {
+		total++
+		if item.Status == model.WorkItemStatusDone {
+			done++
+		}
 		byStage[item.StageID] = append(byStage[item.StageID], item)
 	}
 	stages := append([]model.SprintStage(nil), sprint.Stages...)
