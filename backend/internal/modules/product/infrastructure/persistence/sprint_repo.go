@@ -194,6 +194,15 @@ func (r *SprintRepository) SprintNameExists(ctx context.Context, productID kerne
 	return count > 0, nil
 }
 
+func (r *SprintRepository) DeleteSprint(ctx context.Context, id kernel.SprintID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("sprint_id = ?", id.String()).Delete(&workItemModel{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&sprintModel{}, "id = ?", id.String()).Error
+	})
+}
+
 func (r *SprintRepository) SaveWorkItem(ctx context.Context, item *model.WorkItem) error {
 	row, err := toWorkItemModel(item)
 	if err != nil {

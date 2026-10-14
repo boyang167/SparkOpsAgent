@@ -786,6 +786,20 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async archiveSprint(workspaceId: string, productId: string, sprintId: string) {
+      return upstreamFetch<{ id: string; status: string }>(
+        `/api/v1/products/${productId}/sprints/${sprintId}/archive`,
+        { method: "POST", options: { ...options, workspaceId } },
+      );
+    },
+
+    async deleteSprint(workspaceId: string, productId: string, sprintId: string) {
+      return upstreamFetch<{ deleted: boolean }>(
+        `/api/v1/products/${productId}/sprints/${sprintId}`,
+        { method: "DELETE", options: { ...options, workspaceId } },
+      );
+    },
+
     async createWorkItem(
       workspaceId: string,
       productId: string,

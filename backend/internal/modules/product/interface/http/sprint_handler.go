@@ -20,6 +20,7 @@ type SprintHandlers struct {
 	startSprint      *command.StartSprintHandler
 	completeSprint   *command.CompleteSprintHandler
 	archiveSprint    *command.ArchiveSprintHandler
+	deleteSprint     *command.DeleteSprintHandler
 	createWorkItem   *command.CreateWorkItemHandler
 	updateWorkItem   *command.UpdateWorkItemHandler
 	moveWorkItem     *command.MoveWorkItemHandler
@@ -43,6 +44,7 @@ func NewSprintHandlers(
 	startSprint *command.StartSprintHandler,
 	completeSprint *command.CompleteSprintHandler,
 	archiveSprint *command.ArchiveSprintHandler,
+	deleteSprint *command.DeleteSprintHandler,
 	createWorkItem *command.CreateWorkItemHandler,
 	updateWorkItem *command.UpdateWorkItemHandler,
 	moveWorkItem *command.MoveWorkItemHandler,
@@ -61,7 +63,7 @@ func NewSprintHandlers(
 ) SprintHandlers {
 	return SprintHandlers{
 		createSprint: createSprint, updateSprint: updateSprint,
-		startSprint: startSprint, completeSprint: completeSprint, archiveSprint: archiveSprint,
+		startSprint: startSprint, completeSprint: completeSprint, archiveSprint: archiveSprint, deleteSprint: deleteSprint,
 		createWorkItem: createWorkItem, updateWorkItem: updateWorkItem,
 		moveWorkItem: moveWorkItem, deleteWorkItem: deleteWorkItem, executeWorkItem: executeWorkItem,
 		listSprints: listSprints, getSprint: getSprint, getBoard: getBoard, getWorkItem: getWorkItem,
@@ -301,6 +303,18 @@ func (h *Handler) ArchiveSprint(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"id": sprint.ID.String(), "status": sprint.Status})
+}
+
+func (h *Handler) DeleteSprint(c *gin.Context) {
+	productID, sprintID, ok := parseProductSprintIDs(c)
+	if !ok {
+		return
+	}
+	if err := h.sprints.deleteSprint.Handle(c.Request.Context(), productID, sprintID); err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"deleted": true})
 }
 
 type createWorkItemRequest struct {

@@ -22,7 +22,7 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { useSprintBoardSync } from "@/modules/product/hooks/useSprintBoardSync";
 import { ProductDetailEmptyState } from "./ProductDetailEmptyState";
-import { ProductMasterDetail } from "./ProductMasterDetail";
+import { ProductMasterDetail, type ProductMasterItemAction, type ProductMasterListItem } from "./ProductMasterDetail";
 import { ReleasePlansPanel } from "./ReleasePlansPanel";
 import { SprintStageEditor } from "./SprintStageEditor";
 import { buildStageMigrations } from "./sprint-stage-migrations";
@@ -116,6 +116,9 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
   const [cardMenuOpenId, setCardMenuOpenId] = useState<string | null>(null);
   const [blockingPlans, setBlockingPlans] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [activeReleasePlanCount, setActiveReleasePlanCount] = useState(0);
+  const [showArchived, setShowArchived] = useState(false);
+  const [sprintAction, setSprintAction] = useState<{ kind: "delete" | "archive"; id: string; name: string } | null>(null);
+  const [sprintActionError, setSprintActionError] = useState<string | null>(null);
 
   const loadReleasePlansMeta = useCallback(
     async (sprintId: string) => {
@@ -143,9 +146,10 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     try {
       const items = await product.listSprints(workspaceId, productId);
       setSprints(items);
-      if (items.length > 0) {
-        setSelectedId((prev) => prev ?? items[0].id);
-      }
+      setSelectedId((prev) => {
+        if (prev && items.some((row) => row.id === prev)) return prev;
+        return (items.find((row) => row.status !== "archived") ?? items[0])?.id ?? null;
+      });
     } catch (err) {
       setError(err instanceof BffError ? err.message : "加载迭代列表失败");
     } finally {
@@ -281,11 +285,72 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
     return () => window.clearInterval(timer);
   }, [hasRunningItems, selectedId, loadBoard, workItemDrawerOpen, executeModalOpen]);
 
+  const archivedCount = useMemo(() => sprints.filter((s) => s.status === "archived").length, [sprints]);
+
   const filteredSprints = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return sprints;
-    return sprints.filter((s) => s.name.toLowerCase().includes(q));
-  }, [sprints, searchQuery]);
+    return sprints.filter(
+      (s) => (showArchived || s.status !== "archived") && (!q || s.name.toLowerCase().includes(q)),
+    );
+  }, [sprints, searchQuery, showArchived]);
+
+  const sprintStatusById = useMemo(() => new Map(sprints.map((s) => [s.id, s.status])), [sprints]);
+
+  function sprintListActions(item: ProductMasterListItem): ProductMasterItemAction[] {
+    const status = sprintStatusById.get(item.id);
+    const target = { id: item.id, name: item.title };
+    if (status === "completed") {
+      return [{ label: "归档", onSelect: () => openSprintAction("archive", target) }];
+    }
+    if (status === "planning" || status === "active") {
+      return [
+        {
+          label: "删除",
+          danger: true,
+          disabled: status === "active",
+          title: status === "active" ? "进行中的迭代需先完成，完成后可归档" : undefined,
+          onSelect: () => openSprintAction("delete", target),
+        },
+      ];
+    }
+    return [];
+  }
+
+  function openSprintAction(kind: "delete" | "archive", target: { id: string; name: string }) {
+    setSprintActionError(null);
+    setSprintAction({ kind, ...target });
+  }
+
+  async function onConfirmSprintAction() {
+    if (!sprintAction) return;
+    const { kind, id } = sprintAction;
+    setBusy(true);
+    setSprintActionError(null);
+    try {
+      if (kind === "delete") {
+        await product.deleteSprint(workspaceId, productId, id);
+      } else {
+        await product.archiveSprint(workspaceId, productId, id);
+      }
+      setSprintAction(null);
+      if (selectedId === id && (kind === "delete" || !showArchived)) setSelectedId(null);
+      await loadSprints();
+    } catch (err) {
+      setSprintActionError(
+        err instanceof BffError && err.code === "SPRINT_HAS_RELEASE_PLANS"
+          ? "该迭代下还有关联的发布计划，请先删除这些计划后再删除迭代"
+          : err instanceof BffError && err.code === "SPRINT_NOT_DELETABLE"
+            ? "只有待启动的迭代可以删除"
+            : err instanceof BffError
+              ? err.message
+              : kind === "delete"
+                ? "删除迭代失败"
+                : "归档迭代失败",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const listItems = useMemo(
     () =>
@@ -635,6 +700,14 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
         onSelect={setSelectedId}
         onAdd={() => setCreateOpen(true)}
         addAriaLabel="新建迭代"
+        itemActions={sprintListActions}
+        listFooter={
+          archivedCount > 0 ? (
+            <button type="button" className="product-master-load-more" onClick={() => setShowArchived((prev) => !prev)}>
+              {showArchived ? "隐藏已归档" : `显示已归档（${archivedCount}）`}
+            </button>
+          ) : null
+        }
         loading={loading}
         showMain={Boolean(selectedId)}
         emptyMain={
@@ -944,6 +1017,40 @@ export function SprintBoardPanel({ workspaceId, productId }: SprintBoardPanelPro
             )}
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(sprintAction)}
+        onClose={() => !busy && setSprintAction(null)}
+        title={sprintAction?.kind === "delete" ? "删除迭代" : "归档迭代"}
+        description={
+          sprintAction?.kind === "delete"
+            ? "迭代及其工作项将被删除，此操作不可撤销。"
+            : "归档后迭代不再出现在列表中，可通过「显示已归档」查看，数据与度量完整保留。"
+        }
+        size="sm"
+        footer={
+          <div className="modal-footer-actions">
+            <button type="button" className="btn-secondary text-sm" disabled={busy} onClick={() => setSprintAction(null)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className={`btn-primary text-sm${sprintAction?.kind === "delete" ? " project-service-danger" : ""}`}
+              disabled={busy}
+              onClick={() => void onConfirmSprintAction()}
+            >
+              {busy ? "处理中…" : sprintAction?.kind === "delete" ? "确认删除" : "确认归档"}
+            </button>
+          </div>
+        }
+      >
+        <div className="stack-sm">
+          {sprintActionError ? <InlineAlert tone="error">{sprintActionError}</InlineAlert> : null}
+          <p className="text-sm text-muted-foreground">
+            确定要{sprintAction?.kind === "delete" ? "删除" : "归档"}「{sprintAction?.name}」吗？
+          </p>
+        </div>
       </Modal>
 
       <Modal

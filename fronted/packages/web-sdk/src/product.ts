@@ -841,6 +841,20 @@ export function completeSprint(workspaceId: string, productId: string, sprintId:
   );
 }
 
+export function archiveSprint(workspaceId: string, productId: string, sprintId: string) {
+  return bffFetch<{ id: string; status: string }>(
+    `/workspaces/${workspaceId}/products/${productId}/sprints/${sprintId}/archive`,
+    { method: "POST", workspaceId },
+  );
+}
+
+export function deleteSprint(workspaceId: string, productId: string, sprintId: string) {
+  return bffFetch<{ deleted: boolean }>(`/workspaces/${workspaceId}/products/${productId}/sprints/${sprintId}`, {
+    method: "DELETE",
+    workspaceId,
+  });
+}
+
 export function createWorkItem(
   workspaceId: string,
   productId: string,

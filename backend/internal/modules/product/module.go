@@ -95,6 +95,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewStartSprintHandler(repo, sprintRepo),
 		command.NewCompleteSprintHandler(repo, sprintRepo, releasePlanRepo),
 		command.NewArchiveSprintHandler(repo, sprintRepo),
+		command.NewDeleteSprintHandler(repo, sprintRepo, releasePlanRepo),
 		command.NewCreateWorkItemHandler(repo, sprintRepo, boardNotifier),
 		command.NewUpdateWorkItemHandler(repo, sprintRepo),
 		command.NewMoveWorkItemHandler(repo, sprintRepo, sprintWorkItemExecutor, boardNotifier),
@@ -281,6 +282,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetSprint)
 	c.Engine.PATCH("/api/v1/products/:productId/sprints/:sprintId",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.UpdateSprint)
+	c.Engine.DELETE("/api/v1/products/:productId/sprints/:sprintId",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.DeleteSprint)
 	c.Engine.GET("/api/v1/products/:productId/sprints/:sprintId/board",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetSprintBoard)
 	c.Engine.GET("/api/v1/products/:productId/sprints/:sprintId/metrics",

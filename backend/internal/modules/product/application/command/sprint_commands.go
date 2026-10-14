@@ -236,6 +236,34 @@ func (h *ArchiveSprintHandler) Handle(ctx context.Context, productID kernel.Prod
 	return sprint, nil
 }
 
+type DeleteSprintHandler struct {
+	products repository.ProductRepository
+	sprints  repository.SprintRepository
+	plans    repository.ReleasePlanRepository
+}
+
+func NewDeleteSprintHandler(products repository.ProductRepository, sprints repository.SprintRepository, plans repository.ReleasePlanRepository) *DeleteSprintHandler {
+	return &DeleteSprintHandler{products: products, sprints: sprints, plans: plans}
+}
+
+func (h *DeleteSprintHandler) Handle(ctx context.Context, productID kernel.ProductID, sprintID kernel.SprintID) error {
+	sprint, err := loadSprint(ctx, h.products, h.sprints, productID, sprintID)
+	if err != nil {
+		return err
+	}
+	if sprint.Status != model.SprintStatusPlanning {
+		return domain.ErrSprintNotDeletable
+	}
+	plans, err := h.plans.ListPlansByProductAndSprint(ctx, productID, sprintID)
+	if err != nil {
+		return err
+	}
+	if len(plans) > 0 {
+		return domain.ErrSprintHasReleasePlans
+	}
+	return h.sprints.DeleteSprint(ctx, sprintID)
+}
+
 type CreateWorkItemInput struct {
 	StageID     string
 	Type        model.WorkItemType

@@ -15,6 +15,8 @@ type SprintRepository interface {
 	ListSprintsByProduct(ctx context.Context, productID kernel.ProductID, status string) ([]*model.Sprint, error)
 	ListActiveSprintsByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) ([]*model.Sprint, error)
 	SprintNameExists(ctx context.Context, productID kernel.ProductID, name string, excludeID kernel.SprintID) (bool, error)
+	// DeleteSprint soft-deletes the sprint together with its work items.
+	DeleteSprint(ctx context.Context, id kernel.SprintID) error
 
 	SaveWorkItem(ctx context.Context, item *model.WorkItem) error
 	UpdateWorkItem(ctx context.Context, item *model.WorkItem) error

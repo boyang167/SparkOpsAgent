@@ -628,6 +628,14 @@ export function completeSprint(ctx: BffContext, workspaceId: string, productId: 
   return ctx.upstream.product.completeSprint(workspaceId, productId, sprintId);
 }
 
+export function archiveSprint(ctx: BffContext, workspaceId: string, productId: string, sprintId: string) {
+  return ctx.upstream.product.archiveSprint(workspaceId, productId, sprintId);
+}
+
+export function deleteSprint(ctx: BffContext, workspaceId: string, productId: string, sprintId: string) {
+  return ctx.upstream.product.deleteSprint(workspaceId, productId, sprintId);
+}
+
 export function createWorkItem(
   ctx: BffContext,
   workspaceId: string,
