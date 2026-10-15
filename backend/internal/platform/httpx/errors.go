@@ -63,6 +63,8 @@ func HandleError(c *gin.Context, err error) {
 			status = http.StatusNotFound
 		case "DELIVERY_DEPLOYMENT_CLUSTER_NOT_AUTHORIZED", "DELIVERY_KUBECONFIG_MISSING", "DELIVERY_DEPLOYMENT_BINDING_MISSING", "DELIVERY_PROJECT_NOT_APPROVED", "DELIVERY_DEPLOYMENT_CLUSTER_NOT_FOUND":
 			status = http.StatusBadRequest
+		case "RELEASE_PLAN_MISSING_INPUTS":
+			status = http.StatusUnprocessableEntity
 		case "PRODUCT_WORKFLOW_VARIABLE_REQUIRED":
 			status = http.StatusBadRequest
 		case "K8S_POD_NOT_FOUND":

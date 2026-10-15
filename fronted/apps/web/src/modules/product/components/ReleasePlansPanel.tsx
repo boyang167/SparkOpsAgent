@@ -32,7 +32,10 @@ import {
   buildWorkflowJobParameters,
   mergeWorkflowJobParameters,
   type WorkflowJobOptions,
+  type WorkflowJobParamsPatch,
 } from "./release-plan-workflow-params";
+import { formatMissingInputs, planMissingInputs } from "./release-plan-runtime-inputs";
+import { ReleasePlanParametersSection } from "./ReleasePlanParametersSection";
 import {
   formatReleaseWindow,
   releasePlanCanDelete,
@@ -107,6 +110,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [missingFocus, setMissingFocus] = useState<string[]>([]);
 
   const itemsRef = useRef<ReleasePlanVM[]>([]);
 
@@ -362,7 +366,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
   async function onWorkflowParamsChange(
     jobId: string,
     workflowId: string,
-    patch: { environmentId?: string; branch?: string | null },
+    patch: WorkflowJobParamsPatch,
   ) {
     if (!selected) return;
     setBusy(true);
@@ -372,7 +376,7 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
       const parameters = mergeWorkflowJobParameters(job?.workflow_ref?.parameters, wf, patch);
       await product.updateReleasePlanJob(workspaceId, productId, selected.id, jobId, {
         workflow_ref: {
-          mode: "reference",
+          mode: job?.workflow_ref?.mode ?? "reference",
           workflow_id: workflowId,
           parameters,
         },
@@ -433,12 +437,32 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
 
   async function onFinishPlanning() {
     if (!selected) return;
+    const missing = planMissingInputs(selected);
+    if (missing.length > 0) {
+      setError(formatMissingInputs(missing));
+      setDetailTab("jobs");
+      setMissingFocus(missing.map((item) => item.jobId));
+      return;
+    }
     setBusy(true);
     try {
       await product.finishReleasePlanPlanning(workspaceId, productId, selected.id);
       await refreshDetail();
     } catch (err) {
       setError(err instanceof BffError ? err.message : "完成规划失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onPlanParametersChange(parameters: Record<string, string>) {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await product.updateReleasePlan(workspaceId, productId, selected.id, { parameters });
+      await refreshDetail();
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "保存发布参数失败");
     } finally {
       setBusy(false);
     }
@@ -941,6 +965,13 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
               </div>
 
             {detailTab === "jobs" ? (
+              <>
+              <ReleasePlanParametersSection
+                plan={selected}
+                editable={selected.status === "planning"}
+                busy={busy}
+                onChange={onPlanParametersChange}
+              />
               <ReleasePlanJobEditor
                 workspaceId={workspaceId}
                 productId={productId}
@@ -982,7 +1013,9 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                 renderJobActions={renderJobActions}
                 memberName={memberName}
                 onImportWorkItems={onGenerateFromWorkItems}
+                focusJobIds={missingFocus}
               />
+              </>
             ) : detailTab === "audit" ? (
               <ReleasePlanAuditList
                 logs={(selected.audit_logs ?? []) as ReleasePlanAuditLogEntry[]}

@@ -1,6 +1,11 @@
 package domain
 
-import "github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
+)
 
 var (
 	ErrInvalidProductName       = kernel.NewDomainError("PRODUCT_INVALID_NAME", "invalid product name")
@@ -44,3 +49,11 @@ var (
 	ErrPmInvalidRequest                  = kernel.NewDomainError("PM_INVALID_REQUEST", "invalid pm integration request")
 	ErrPmIssueAlreadyLinked              = kernel.NewDomainError("PM_ISSUE_ALREADY_LINKED", "pm issue is already linked in this sprint")
 )
+
+func NewReleasePlanMissingInputsError(problems []string) error {
+	return kernel.NewDomainError("RELEASE_PLAN_MISSING_INPUTS", "发布项缺少运行参数："+strings.Join(problems, "；"))
+}
+
+func NewReleasePlanWorkflowMissingError(jobName string) error {
+	return kernel.NewDomainError("RELEASE_PLAN_INVALID_WORKFLOW_REF", fmt.Sprintf("发布项「%s」关联的工作流不存在", jobName))
+}

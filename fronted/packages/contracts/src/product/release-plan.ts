@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { WorkflowRuntimeInputSchema } from "./product-workflow";
 
 export const WorkflowRefSpecSchema = z.object({
   mode: z.string().optional(),
@@ -81,6 +82,7 @@ export const ReleasePlanJobVMSchema = z.object({
   text_checked: z.boolean().optional(),
   workflow_ref: WorkflowRefSpecSchema.optional(),
   execution_ref: ExecutionRefSchema.optional(),
+  runtime_inputs: z.array(WorkflowRuntimeInputSchema).optional(),
 });
 
 export type ReleasePlanJobVM = z.infer<typeof ReleasePlanJobVMSchema>;
@@ -172,6 +174,7 @@ export const ReleasePlanVMSchema = z.object({
   approval_config: ApprovalConfigSchema.optional(),
   hook_settings: ReleasePlanHookSettingsSchema.optional(),
   hook_state: ReleasePlanHookStateSchema.optional(),
+  parameters: z.record(z.string()).optional(),
   schedule_execute_time: z.string().optional(),
   created_at: z.string().optional(),
   manager_id: z.string().optional(),
@@ -223,6 +226,7 @@ export const UpdateReleasePlanCommandSchema = z.object({
   approval_enabled: z.boolean().optional(),
   approval_config: ApprovalConfigSchema.optional(),
   hook_settings: ReleasePlanHookSettingsSchema.optional(),
+  parameters: z.record(z.string()).optional(),
   schedule_execute_time: z.string().optional(),
   clear_schedule_time: z.boolean().optional(),
   sprint_id: z.string().optional(),

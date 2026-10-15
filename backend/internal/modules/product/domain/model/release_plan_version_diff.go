@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 )
@@ -110,7 +111,45 @@ func diffReleasePlanMetadata(before, after ReleasePlanVersionSnapshot) []Release
 	appendField("release_window_start", releasePlanVersionFieldLabels["release_window_start"], formatDiffTime(before.ReleaseWindowStart), formatDiffTime(after.ReleaseWindowStart))
 	appendField("release_window_end", releasePlanVersionFieldLabels["release_window_end"], formatDiffTime(before.ReleaseWindowEnd), formatDiffTime(after.ReleaseWindowEnd))
 	appendField("schedule_execute_time", releasePlanVersionFieldLabels["schedule_execute_time"], formatDiffTimePtr(before.ScheduleExecuteTime), formatDiffTimePtr(after.ScheduleExecuteTime))
+	for _, key := range unionParameterKeys(before.Parameters, after.Parameters) {
+		b, a := before.Parameters[key], after.Parameters[key]
+		if b == a {
+			continue
+		}
+		changes = append(changes, ReleasePlanVersionDiffChange{
+			ChangeType: "field_changed", Path: "parameters." + key, Label: "发布参数 · " + key,
+			Before: parameterPresence(b, ""), After: parameterPresence(a, b),
+		})
+	}
 	return changes
+}
+
+func unionParameterKeys(a, b map[string]string) []string {
+	seen := map[string]struct{}{}
+	keys := []string{}
+	for _, m := range []map[string]string{a, b} {
+		for key := range m {
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// parameterPresence describes a parameter value without exposing it in version history.
+func parameterPresence(value, previous string) string {
+	switch {
+	case value == "":
+		return "未填写"
+	case previous != "":
+		return "已修改"
+	default:
+		return "已填写"
+	}
 }
 
 func diffReleasePlanApproval(before, after ApprovalConfig) []ReleasePlanVersionDiffChange {

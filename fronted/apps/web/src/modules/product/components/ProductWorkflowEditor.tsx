@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { EnvironmentVM, ProductProjectVM, WorkflowAdvancedVM, WorkflowNotificationVM, WorkflowTriggerVM, WorkflowVariableVM } from "@sparkops/contracts/product";
+import type { EnvironmentVM, ProductProjectVM, WorkflowAdvancedVM, WorkflowNotificationVM, WorkflowRuntimeInput, WorkflowTriggerVM, WorkflowVariableVM } from "@sparkops/contracts/product";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Drawer } from "@/components/ui/Drawer";
 import { Modal } from "@/components/ui/Modal";
@@ -23,6 +23,7 @@ import {
 import { fromNotifyItems, toNotifyItems } from "./workflow-notify";
 import { WorkflowEditorFlowCanvas } from "./WorkflowEditorFlowCanvas";
 import { WorkflowAdvancedPanel, WorkflowTriggersPanel, WorkflowVariablesPanel } from "./WorkflowSidePanels";
+import { emptyVariable } from "./workflow-settings";
 
 interface ProductWorkflowEditorProps {
   workspaceId: string;
@@ -35,6 +36,8 @@ interface ProductWorkflowEditorProps {
   stages: EditorStage[];
   notifications: WorkflowNotificationVM[];
   variables: WorkflowVariableVM[];
+  /** 已保存版本中未声明为变量的占位符 */
+  undeclaredInputs?: WorkflowRuntimeInput[];
   triggers: WorkflowTriggerVM[];
   advanced: WorkflowAdvancedVM;
   projects: ProductProjectVM[];
@@ -81,6 +84,7 @@ export function ProductWorkflowEditor({
   stages,
   notifications,
   variables,
+  undeclaredInputs,
   triggers,
   advanced,
   projects,
@@ -639,7 +643,14 @@ export function ProductWorkflowEditor({
         }
         panelClassName={sidePanel === "advanced" ? undefined : "drawer-panel-wide"}
       >
-        {sidePanel === "variables" ? <WorkflowVariablesPanel variables={variables} onChange={onVariablesChange} /> : null}
+        {sidePanel === "variables" ? (
+          <WorkflowVariablesPanel
+            variables={variables}
+            onChange={onVariablesChange}
+            undeclared={undeclaredInputs}
+            onDeclare={(key) => onVariablesChange([...variables, { ...emptyVariable(), key, runtime_input: true }])}
+          />
+        ) : null}
         {sidePanel === "triggers" ? (
           <WorkflowTriggersPanel
             productId={productId}

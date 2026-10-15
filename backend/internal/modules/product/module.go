@@ -81,6 +81,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	releasePlanCollabHub := service.NewReleasePlanCollabHub()
 	releasePlanHookNotifier := service.NewReleasePlanHookNotifier(c.Config.PublicBaseURL())
 	releasePlanExecutor := service.NewReleasePlanExecutor(releasePlanRepo, c.WorkflowRunTrigger, releasePlanHookNotifier)
+	releasePlanExecutor.UseRuntimeInputs(c.WorkflowRuntimeInputs)
 	releasePlanNotifier := service.NewReleasePlanApprovalNotifier(c.Config.PublicBaseURL())
 	workflowSnapshotReader := acl.NewWorkflowSnapshotReader(c.DB)
 	releasePlanTemplateRepo := persistence.NewReleasePlanTemplateRepository(c.DB)
@@ -115,6 +116,10 @@ func (m *Module) Register(c *appctx.Container) error {
 	sprintBoardWS := producthttp.NewSprintBoardWSHandler(boardHub)
 	releasePlanCollabWS := producthttp.NewReleasePlanCollabWSHandler(releasePlanCollabHub)
 
+	finishPlanning := command.NewFinishReleasePlanPlanningHandler(repo, releasePlanRepo, releasePlanExecutor, releasePlanNotifier, releasePlanHookNotifier, workflowSnapshotReader)
+	finishPlanning.UseRuntimeInputs(c.WorkflowRuntimeInputs)
+	getReleasePlan := query.NewGetReleasePlanHandlerWithSprint(repo, releasePlanRepo, sprintRepo)
+	getReleasePlan.UseRuntimeInputs(c.WorkflowRuntimeInputs)
 	releasePlanHandlers := producthttp.NewReleasePlanHandlers(
 		command.NewCreateReleasePlanHandler(repo, releasePlanRepo, sprintRepo),
 		command.NewUpdateReleasePlanHandler(repo, releasePlanRepo, sprintRepo),
@@ -126,7 +131,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewUpdateReleasePlanJobHandler(repo, releasePlanRepo),
 		command.NewDeleteReleasePlanJobHandler(repo, releasePlanRepo),
 		command.NewReorderReleasePlanJobsHandler(repo, releasePlanRepo),
-		command.NewFinishReleasePlanPlanningHandler(repo, releasePlanRepo, releasePlanExecutor, releasePlanNotifier, releasePlanHookNotifier, workflowSnapshotReader),
+		finishPlanning,
 		command.NewApproveReleasePlanHandler(repo, releasePlanRepo, releasePlanExecutor, releasePlanHookNotifier),
 		command.NewRejectReleasePlanHandler(repo, releasePlanRepo),
 		command.NewMarkReleasePlanJobDoneHandler(repo, releasePlanRepo, releasePlanExecutor),
@@ -143,7 +148,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewReleasePlanHookCallbackHandler(releasePlanRepo, releasePlanExecutor, releasePlanNotifier, releasePlanHookNotifier),
 		query.NewListReleasePlansHandler(repo, releasePlanRepo),
 		query.NewListWorkspaceReleasePlansHandler(repo, releasePlanRepo, sprintRepo),
-		query.NewGetReleasePlanHandlerWithSprint(repo, releasePlanRepo, sprintRepo),
+		getReleasePlan,
 		query.NewListReleasePlanVersionsHandler(repo, releasePlanRepo),
 		query.NewGetReleasePlanVersionDiffHandler(repo, releasePlanRepo),
 		query.NewListBlockingReleasePlansHandler(releasePlanRepo),

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -44,10 +46,15 @@ func (h *ListReleasePlansHandler) Handle(ctx context.Context, productID kernel.P
 type GetReleasePlanHandler struct {
 	products repository.ProductRepository
 	plans    repository.ReleasePlanRepository
+	inputs   appctx.WorkflowRuntimeInputReader
 }
 
 func NewGetReleasePlanHandler(products repository.ProductRepository, plans repository.ReleasePlanRepository) *GetReleasePlanHandler {
 	return &GetReleasePlanHandler{products: products, plans: plans}
+}
+
+func (h *GetReleasePlanHandler) UseRuntimeInputs(reader appctx.WorkflowRuntimeInputReader) {
+	h.inputs = reader
 }
 
 func (h *GetReleasePlanHandler) Handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID) (map[string]any, error) {
@@ -63,6 +70,7 @@ func (h *GetReleasePlanHandler) Handle(ctx context.Context, productID kernel.Pro
 	}
 	logs, _ := h.plans.ListAuditLogs(ctx, planID, 20)
 	out := releasePlanDetail(plan)
+	h.attachRuntimeInputs(ctx, plan, out)
 	auditItems := make([]map[string]any, 0, len(logs))
 	for _, log := range logs {
 		var detail any
@@ -143,5 +151,53 @@ func releasePlanDetail(plan *model.ReleasePlan) map[string]any {
 		jobs = append(jobs, item)
 	}
 	out["jobs"] = jobs
+	out["parameters"] = plan.Parameters
+	if plan.Parameters == nil {
+		out["parameters"] = map[string]string{}
+	}
 	return out
+}
+
+func (h *GetReleasePlanHandler) attachRuntimeInputs(ctx context.Context, plan *model.ReleasePlan, out map[string]any) {
+	if h.inputs == nil {
+		return
+	}
+	jobs, _ := out["jobs"].([]map[string]any)
+	secret := map[string]struct{}{}
+	for i := range plan.Jobs {
+		job := &plan.Jobs[i]
+		if job.Type != model.ReleasePlanJobTypeWorkflow || i >= len(jobs) {
+			continue
+		}
+		_, inputs, err := service.ReleasePlanJobInputs(ctx, plan, job, h.inputs)
+		if err != nil {
+			continue
+		}
+		jobs[i]["runtime_inputs"] = inputs
+		jobSecret := map[string]struct{}{}
+		for _, input := range inputs {
+			if input.Secret {
+				secret[input.Key] = struct{}{}
+				jobSecret[input.Key] = struct{}{}
+			}
+		}
+		maskJobParameters(jobs[i], jobSecret)
+	}
+	out["parameters"] = model.MaskParameters(plan.Parameters, secret)
+}
+
+func maskJobParameters(item map[string]any, secret map[string]struct{}) {
+	ref, ok := item["workflow_ref"].(map[string]any)
+	if !ok {
+		return
+	}
+	params, ok := ref["parameters"].(map[string]any)
+	if !ok {
+		return
+	}
+	for key := range secret {
+		if value, ok := params[key].(string); ok && value != "" {
+			params[key] = model.MaskedParameterValue
+		}
+	}
 }

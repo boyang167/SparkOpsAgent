@@ -51,6 +51,7 @@ type Container struct {
 	VersionCreator             VersionCreator
 	ProjectVersionReader       ProjectVersionReader
 	WorkflowRunTrigger         WorkflowRunTrigger
+	WorkflowRuntimeInputs      WorkflowRuntimeInputReader
 	SprintProcessPort          SprintProcessPort
 	ManifestDeployer           runtimeport.ManifestDeployer
 	APIPolicyChecker           authz.WorkspaceAPIPolicyChecker

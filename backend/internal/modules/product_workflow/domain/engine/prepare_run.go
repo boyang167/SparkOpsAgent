@@ -38,6 +38,9 @@ func PrepareRun(wf *model.ProductWorkflow, runID, source string, input map[strin
 			return nil, nil, nil, err
 		}
 	}
+	if missing := UnresolvedPlaceholders(stages); len(missing) > 0 {
+		return nil, nil, nil, model.FormatMissingVariables(missing)
+	}
 	stored := map[string]any{}
 	for key, value := range input {
 		if key == "variables" {

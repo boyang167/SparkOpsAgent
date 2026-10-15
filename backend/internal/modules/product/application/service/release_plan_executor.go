@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,10 +19,28 @@ type ReleasePlanExecutor struct {
 	plans   repository.ReleasePlanRepository
 	trigger appctx.WorkflowRunTrigger
 	hooks   *ReleasePlanHookNotifier
+	inputs  appctx.WorkflowRuntimeInputReader
 }
 
 func NewReleasePlanExecutor(plans repository.ReleasePlanRepository, trigger appctx.WorkflowRunTrigger, hooks *ReleasePlanHookNotifier) *ReleasePlanExecutor {
 	return &ReleasePlanExecutor{plans: plans, trigger: trigger, hooks: hooks}
+}
+
+func (e *ReleasePlanExecutor) UseRuntimeInputs(reader appctx.WorkflowRuntimeInputReader) {
+	e.inputs = reader
+}
+
+func (e *ReleasePlanExecutor) failJobStart(ctx context.Context, plan *model.ReleasePlan, job *model.ReleasePlanJob, actor kernel.MemberID, msg string) error {
+	if err := plan.FailWorkflowJobStart(job.ID, msg); err != nil {
+		return err
+	}
+	if err := e.plans.UpdateJob(ctx, job); err != nil {
+		return err
+	}
+	if err := e.plans.UpdatePlan(ctx, plan); err != nil {
+		return err
+	}
+	return e.audit(ctx, plan.ID, actor, "job_failed", map[string]any{"job_id": job.ID.String(), "error_message": msg})
 }
 
 func (e *ReleasePlanExecutor) Advance(ctx context.Context, plan *model.ReleasePlan, actor kernel.MemberID) error {
@@ -58,7 +77,10 @@ func (e *ReleasePlanExecutor) Advance(ctx context.Context, plan *model.ReleasePl
 	if e.trigger == nil {
 		return domain.ErrInvalidWorkflowRef
 	}
-	spec, err := plan.ParseWorkflowRef(job)
+	spec, inputs, err := ReleasePlanJobInputs(ctx, plan, job, e.inputs)
+	if errors.Is(err, appctx.ErrWorkflowNotFound) {
+		return e.failJobStart(ctx, plan, job, actor, domain.NewReleasePlanWorkflowMissingError(job.Name).Error())
+	}
 	if err != nil {
 		return err
 	}
@@ -66,7 +88,7 @@ func (e *ReleasePlanExecutor) Advance(ctx context.Context, plan *model.ReleasePl
 	if err != nil {
 		return domain.ErrInvalidWorkflowRef
 	}
-	runInput := spec.ToRunInput()
+	runInput := spec.ToRunInput(plan.Parameters, RuntimeInputKeys(inputs))
 	var runID kernel.ProductWorkflowRunID
 	if len(runInput) == 0 {
 		runID, err = e.trigger.StartForProduct(ctx, plan.ProductID, workflowID)
@@ -74,6 +96,9 @@ func (e *ReleasePlanExecutor) Advance(ctx context.Context, plan *model.ReleasePl
 		runID, err = e.trigger.StartForProductWithInput(ctx, plan.ProductID, workflowID, actor, runInput)
 	}
 	if err != nil {
+		if _, ok := kernel.IsDomainError(err); ok {
+			return e.failJobStart(ctx, plan, job, actor, err.Error())
+		}
 		return err
 	}
 	if err := plan.MarkWorkflowJobRunning(job.ID, runID); err != nil {

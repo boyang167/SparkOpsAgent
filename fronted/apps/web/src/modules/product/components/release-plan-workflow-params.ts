@@ -263,6 +263,8 @@ export interface WorkflowJobParamsPatch {
   projectIds?: string[];
   /** 传入即整体替换 */
   refOverrides?: ProjectRefOverrides;
+  /** 发布项单独填写的运行参数；值为 null 或空表示恢复继承 */
+  variables?: Record<string, string | null>;
 }
 
 export function mergeWorkflowJobParameters(
@@ -299,6 +301,13 @@ export function mergeWorkflowJobParameters(
         projectIds.length > 0 ? projectIds : undefined,
       ),
     );
+  }
+  if (patch.variables) {
+    for (const [key, value] of Object.entries(patch.variables)) {
+      const trimmed = value?.trim() ?? "";
+      if (trimmed) merged[key] = trimmed;
+      else delete merged[key];
+    }
   }
 
   return merged;

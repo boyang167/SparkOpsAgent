@@ -33,6 +33,7 @@ type releasePlanModel struct {
 	ApprovalConfig      string `gorm:"type:jsonb"`
 	HookSettings        string `gorm:"type:jsonb"`
 	HookState           *string `gorm:"type:jsonb"`
+	Parameters          string  `gorm:"type:jsonb;not null;default:'{}'"`
 	CreatedBy           string
 	Version             int
 	postgres.AuditColumns
@@ -116,7 +117,7 @@ func (r *ReleasePlanRepository) UpdatePlan(ctx context.Context, plan *model.Rele
 		"approver_id": row.ApproverID, "status": row.Status, "sprint_id": row.SprintID,
 		"release_window_start": row.ReleaseWindowStart, "release_window_end": row.ReleaseWindowEnd,
 		"schedule_execute_time": row.ScheduleExecuteTime, "approval_config": row.ApprovalConfig,
-		"hook_settings": row.HookSettings, "hook_state": row.HookState,
+		"hook_settings": row.HookSettings, "hook_state": row.HookState, "parameters": row.Parameters,
 		"version": row.Version, "updated_at": time.Now().UTC(),
 	}
 	return r.db.WithContext(ctx).Model(&releasePlanModel{}).Where("id = ?", row.ID).Updates(updates).Error
@@ -566,12 +567,20 @@ func toReleasePlanModel(plan *model.ReleasePlan) (releasePlanModel, error) {
 	if err != nil {
 		return releasePlanModel{}, err
 	}
+	params := plan.Parameters
+	if params == nil {
+		params = map[string]string{}
+	}
+	parameters, err := json.Marshal(params)
+	if err != nil {
+		return releasePlanModel{}, err
+	}
 	row := releasePlanModel{
 		ID: plan.ID.String(), ProductID: plan.ProductID.String(), Name: plan.Name,
 		Description: plan.Description, ManagerID: plan.ManagerID.String(), Status: string(plan.Status),
 		ReleaseWindowStart: plan.ReleaseWindowStart, ReleaseWindowEnd: plan.ReleaseWindowEnd,
 		ScheduleExecuteTime: plan.ScheduleExecuteTime, ApprovalConfig: string(approval),
-		HookSettings: string(hookSettings),
+		HookSettings: string(hookSettings), Parameters: string(parameters),
 		CreatedBy: plan.CreatedBy.String(), Version: plan.Version,
 		AuditColumns: postgres.AuditColumns{CreatedAt: plan.CreatedAt, UpdatedAt: plan.UpdatedAt},
 	}
@@ -632,6 +641,9 @@ func rowToReleasePlan(row releasePlanModel) (*model.ReleasePlan, error) {
 		HookSettings: hookSettings,
 		CreatedBy: createdBy, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		Version: row.Version,
+	}
+	if row.Parameters != "" {
+		_ = json.Unmarshal([]byte(row.Parameters), &plan.Parameters)
 	}
 	if row.HookState != nil && *row.HookState != "" {
 		var hookState model.ReleasePlanHookState

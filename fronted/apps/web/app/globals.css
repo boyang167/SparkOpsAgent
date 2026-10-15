@@ -3526,6 +3526,140 @@ textarea.input {
   color: var(--muted);
 }
 
+.release-plan-params {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  padding: 1rem 1.125rem;
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.release-plan-params-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.release-plan-params-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.release-plan-params-desc {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.release-plan-params-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.release-plan-param-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem);
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0;
+}
+
+.release-plan-param-row + .release-plan-param-row {
+  border-top: 1px solid var(--border);
+}
+
+.release-plan-param-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+}
+
+.release-plan-param-key,
+.release-plan-job-input-key {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.8125rem;
+  color: var(--text);
+}
+
+.release-plan-param-label {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.release-plan-param-usage {
+  flex-basis: 100%;
+  overflow: hidden;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.release-plan-param-value {
+  font-size: 0.8125rem;
+  color: var(--text);
+}
+
+.release-plan-param-row.is-missing .release-plan-param-key,
+.release-plan-param-row.is-missing .release-plan-param-value {
+  color: var(--warning);
+}
+
+.release-plan-param-row.is-missing .release-plan-param-input {
+  border-color: var(--warning-border);
+}
+
+.release-plan-job-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.release-plan-job-input {
+  display: grid;
+  grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.release-plan-job-input-value {
+  overflow: hidden;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.release-plan-job-input.is-missing .release-plan-job-input-value {
+  color: var(--warning);
+}
+
+.release-plan-job-input-action {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.75rem;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--motion-fast, 120ms) var(--motion-ease, ease);
+}
+
+.release-plan-job-input-action:hover:not(:disabled) {
+  color: var(--text);
+}
+
 @media (max-width: 640px) {
   .release-plan-job-card-body {
     padding-left: 1rem;
@@ -25405,6 +25539,32 @@ button.sprint-board-column-wf:hover:not(:disabled) {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+}
+.pwf-undeclared {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  background: var(--warning-bg);
+}
+.pwf-undeclared-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+.pwf-undeclared-key {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.8125rem;
+  color: var(--warning);
+}
+.pwf-undeclared-refs {
+  overflow: hidden;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .pwf-yaml-panel {
   border: 1px solid var(--border);

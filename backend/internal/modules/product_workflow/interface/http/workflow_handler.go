@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/application/query"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/engine"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -159,6 +160,7 @@ func workflowPayload(wf *model.ProductWorkflow) gin.H {
 	return gin.H{
 		"id": wf.ID.String(), "name": wf.Name, "key": wf.Key, "status": wf.Status,
 		"stages": wf.Stages, "notifications": notes, "variables": variables, "triggers": triggers, "advanced": advanced,
+		"runtime_inputs": engine.RuntimeInputs(wf, nil),
 	}
 }
 

@@ -2,24 +2,26 @@ package engine
 
 import (
 	"encoding/json"
-	"regexp"
 	"strings"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 )
 
-var interpolatePattern = regexp.MustCompile(`\{\{\.([A-Za-z][A-Za-z0-9_]*)\}\}`)
-
 func Interpolate(value string, vars map[string]string) string {
-	if value == "" || !strings.Contains(value, "{{.") {
+	return interpolate(value, vars, true)
+}
+
+// interpolate replaces {{.key}} always and {{key}} only when bare is true.
+func interpolate(value string, vars map[string]string, bare bool) string {
+	if value == "" || !strings.Contains(value, "{{") {
 		return value
 	}
-	return interpolatePattern.ReplaceAllStringFunc(value, func(match string) string {
-		parts := interpolatePattern.FindStringSubmatch(match)
-		if len(parts) != 2 {
+	return placeholderPattern.ReplaceAllStringFunc(value, func(match string) string {
+		parts := placeholderPattern.FindStringSubmatch(match)
+		if len(parts) != 3 || (parts[1] == "" && !bare) {
 			return match
 		}
-		if replacement, ok := vars[parts[1]]; ok {
+		if replacement, ok := vars[parts[2]]; ok {
 			return replacement
 		}
 		return match
@@ -40,7 +42,7 @@ func InterpolateStages(stages []model.WorkflowStage, vars map[string]string) []m
 	}
 	walked := generic
 	for i := 0; i < 3; i++ {
-		walked = interpolateValue(walked, vars)
+		walked = interpolateValue(walked, vars, true)
 	}
 	outRaw, err := json.Marshal(walked)
 	if err != nil {
@@ -53,18 +55,18 @@ func InterpolateStages(stages []model.WorkflowStage, vars map[string]string) []m
 	return out
 }
 
-func interpolateValue(value any, vars map[string]string) any {
+func interpolateValue(value any, vars map[string]string, bare bool) any {
 	switch typed := value.(type) {
 	case string:
-		return Interpolate(typed, vars)
+		return interpolate(typed, vars, bare)
 	case []any:
 		for i, item := range typed {
-			typed[i] = interpolateValue(item, vars)
+			typed[i] = interpolateValue(item, vars, bare)
 		}
 		return typed
 	case map[string]any:
 		for key, item := range typed {
-			typed[key] = interpolateValue(item, vars)
+			typed[key] = interpolateValue(item, vars, bare && !isRawContentKey(key))
 		}
 		return typed
 	default:

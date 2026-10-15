@@ -2,6 +2,7 @@ package appctx
 
 import (
 	"context"
+	"errors"
 
 	spmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/sprint_process/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -109,6 +110,28 @@ type WorkflowRunTrigger interface {
 		actor kernel.MemberID,
 		input map[string]any,
 	) (kernel.ProductWorkflowRunID, error)
+}
+
+var ErrWorkflowNotFound = errors.New("workflow not found")
+
+type WorkflowRuntimeInputRef struct {
+	StageIndex int    `json:"stage_index"`
+	StageName  string `json:"stage_name"`
+	JobName    string `json:"job_name"`
+	JobType    string `json:"job_type"`
+	Field      string `json:"field"`
+}
+
+type WorkflowRuntimeInput struct {
+	Key      string                    `json:"key"`
+	Label    string                    `json:"label"`
+	Declared bool                      `json:"declared"`
+	Secret   bool                      `json:"secret,omitempty"`
+	Refs     []WorkflowRuntimeInputRef `json:"refs,omitempty"`
+}
+
+type WorkflowRuntimeInputReader interface {
+	RuntimeInputs(ctx context.Context, productID kernel.ProductID, workflowID kernel.ProductWorkflowID, input map[string]any) ([]WorkflowRuntimeInput, error)
 }
 
 type SprintProcessPort interface {

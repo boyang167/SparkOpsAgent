@@ -2,6 +2,7 @@ package product_workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -9,8 +10,10 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/application/subscriber"
+	pwfdomain "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/engine"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/port"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/gitlabapi"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/persistence"
@@ -186,6 +189,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.EventBus.Subscribe(deliveryevent.DeployCompletedName, subscriber.NewOnDeployCompleted(scheduler).Handle)
 
 	c.WorkflowRunTrigger = &workflowRunTriggerPort{start: startRun, products: productChecker}
+	c.WorkflowRuntimeInputs = &workflowRuntimeInputPort{workflows: workflowRepo}
 
 	c.Engine.POST("/api/v1/products/:productId/workflows/:workflowId/runs/:runId/jobs/:jobName/approve",
 		auth, ws, wsMember, writePerm, handler.ApproveWorkflowJob)
@@ -220,4 +224,38 @@ func (p *workflowRunTriggerPort) StartForProductWithInput(
 		return kernel.ProductWorkflowRunID{}, err
 	}
 	return run.ID, nil
+}
+
+type workflowRuntimeInputPort struct {
+	workflows repository.ProductWorkflowRepository
+}
+
+func (p *workflowRuntimeInputPort) RuntimeInputs(
+	ctx context.Context,
+	productID kernel.ProductID,
+	workflowID kernel.ProductWorkflowID,
+	input map[string]any,
+) ([]appctx.WorkflowRuntimeInput, error) {
+	wf, err := p.workflows.FindWorkflowByID(ctx, workflowID)
+	if errors.Is(err, pwfdomain.ErrProductWorkflowNotFound) {
+		return nil, appctx.ErrWorkflowNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if wf.ProductID != productID {
+		return nil, appctx.ErrWorkflowNotFound
+	}
+	items := engine.RuntimeInputs(wf, input)
+	out := make([]appctx.WorkflowRuntimeInput, 0, len(items))
+	for _, item := range items {
+		refs := make([]appctx.WorkflowRuntimeInputRef, 0, len(item.Refs))
+		for _, ref := range item.Refs {
+			refs = append(refs, appctx.WorkflowRuntimeInputRef(ref))
+		}
+		out = append(out, appctx.WorkflowRuntimeInput{
+			Key: item.Key, Label: item.Label, Declared: item.Declared, Secret: item.Secret, Refs: refs,
+		})
+	}
+	return out, nil
 }

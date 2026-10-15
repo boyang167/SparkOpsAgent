@@ -8,6 +8,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -147,6 +148,10 @@ func NewGetReleasePlanHandlerWithSprint(products repository.ProductRepository, p
 		products: products, plans: plans, sprints: sprints,
 		base: NewGetReleasePlanHandler(products, plans),
 	}
+}
+
+func (h *GetReleasePlanHandlerWithSprint) UseRuntimeInputs(reader appctx.WorkflowRuntimeInputReader) {
+	h.base.UseRuntimeInputs(reader)
 }
 
 func (h *GetReleasePlanHandlerWithSprint) Handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID) (map[string]any, error) {

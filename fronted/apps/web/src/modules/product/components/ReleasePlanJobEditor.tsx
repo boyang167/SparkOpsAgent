@@ -15,6 +15,7 @@ import { Modal } from "@/components/ui/Modal";
 import { ActionMenu } from "./ActionMenu";
 import { MemberNameLabel } from "./MemberNameLabel";
 import { ReleasePlanAddWorkflowModal } from "./ReleasePlanAddWorkflowModal";
+import { ReleasePlanJobInputs } from "./ReleasePlanJobInputs";
 import { ReleasePlanModalFooter } from "./ReleasePlanModalFooter";
 import { ReleasePlanProjectBranches } from "./ReleasePlanProjectBranches";
 import { SprintWorkItemsImportModal } from "./SprintWorkItemsImportModal";
@@ -37,6 +38,7 @@ import {
   type WorkflowJobParamsPatch,
 } from "./release-plan-workflow-params";
 import { releasePlanStatusBadgeClass, releasePlanStatusLabel } from "./release-plan-utils";
+import { jobInputStates } from "./release-plan-runtime-inputs";
 
 interface ReleasePlanJobEditorProps {
   workspaceId: string;
@@ -73,6 +75,8 @@ interface ReleasePlanJobEditorProps {
   memberName?: (memberId?: string | null) => string;
   /** 计划关联了迭代时提供，用于从迭代需求批量生成检查项 */
   onImportWorkItems?: (workItemIds: string[]) => void | Promise<void>;
+  /** 需要展开并滚动到的发布项（如完成规划预检发现缺参） */
+  focusJobIds?: string[];
 }
 
 function jobTypeLabel(type: string) {
@@ -121,6 +125,7 @@ export function ReleasePlanJobEditor({
   renderJobActions,
   memberName,
   onImportWorkItems,
+  focusJobIds,
 }: ReleasePlanJobEditorProps) {
   const [addWorkflowOpen, setAddWorkflowOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -210,6 +215,16 @@ export function ReleasePlanJobEditor({
     setExpandedIds(firstOpen ? new Set([firstOpen.id]) : new Set());
     prevJobCount.current = sorted.length;
   }, [plan.id]);
+
+  useEffect(() => {
+    if (!focusJobIds?.length) return;
+    setExpandedIds((prev) => new Set([...prev, ...focusJobIds]));
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById(`release-plan-job-${focusJobIds[0]}`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }, [focusJobIds]);
 
   const jobCount = (plan.jobs ?? []).length;
   useEffect(() => {
@@ -441,6 +456,9 @@ export function ReleasePlanJobEditor({
             const projectSources = workflowProjectSources(jobWorkflow);
             const workflowDefaultBranch = defaultBranchForWorkflow(jobWorkflow);
             const jobHasBuild = workflowHasBuildJobs(jobWorkflow);
+            const jobInputs = jobInputStates(job, plan.parameters);
+            const canEditInputs =
+              canEditJob || (plan.status === "executing" && job.type === "workflow" && job.status === "failed");
 
             const isDragging = dragJobId === job.id;
             const isDropTarget = dropJobId === job.id && dragJobId !== job.id;
@@ -498,6 +516,7 @@ export function ReleasePlanJobEditor({
                                 jobEnvironmentId ? environmentLabel(environments, jobEnvironmentId) : null,
                                 jobBranch ? `分支 ${jobBranch}` : null,
                                 selectedProjectIds.length > 0 ? `${selectedProjectIds.length} 个项目` : null,
+                                jobInputs.some((state) => state.source === "missing") ? "缺少运行参数" : null,
                               ]
                                 .filter(Boolean)
                                 .join(" · ")
@@ -672,6 +691,18 @@ export function ReleasePlanJobEditor({
                               editable={canEditJob && !busy}
                               onChange={({ projectIds, refOverrides }) =>
                                 void onWorkflowParamsChange(job.id, workflowId, { projectIds, refOverrides })
+                              }
+                            />
+                          </JobField>
+                        ) : null}
+                        {jobInputs.length > 0 ? (
+                          <JobField label="运行参数" alignTop>
+                            <ReleasePlanJobInputs
+                              states={jobInputs}
+                              editable={canEditInputs}
+                              busy={busy}
+                              onChange={(key, value) =>
+                                void onWorkflowParamsChange(job.id, workflowId, { variables: { [key]: value } })
                               }
                             />
                           </JobField>

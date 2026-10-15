@@ -63,6 +63,26 @@ export const WorkflowAdvancedVMSchema = z.object({
 
 export type WorkflowAdvancedVM = z.infer<typeof WorkflowAdvancedVMSchema>;
 
+export const WorkflowRuntimeInputRefSchema = z.object({
+  stage_index: z.number().int(),
+  stage_name: z.string(),
+  job_name: z.string(),
+  job_type: z.string(),
+  field: z.string(),
+});
+
+export type WorkflowRuntimeInputRef = z.infer<typeof WorkflowRuntimeInputRefSchema>;
+
+export const WorkflowRuntimeInputSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  declared: z.boolean(),
+  secret: z.boolean().optional(),
+  refs: z.array(WorkflowRuntimeInputRefSchema).optional(),
+});
+
+export type WorkflowRuntimeInput = z.infer<typeof WorkflowRuntimeInputSchema>;
+
 export const ProductWorkflowVMSchema = z.object({
   id: z.string(),
   product_id: z.string(),
@@ -76,6 +96,7 @@ export const ProductWorkflowVMSchema = z.object({
   variables: z.array(WorkflowVariableVMSchema).optional().default([]),
   triggers: z.array(WorkflowTriggerVMSchema).optional().default([]),
   advanced: WorkflowAdvancedVMSchema.optional(),
+  runtime_inputs: z.array(WorkflowRuntimeInputSchema).optional(),
   created_at: z.string().optional(),
   updated_at: z.string().optional(),
 });

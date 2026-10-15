@@ -117,7 +117,8 @@ func (h *GetProductWorkflowHandler) Handle(ctx context.Context, wsID kernel.Work
 		"name": wf.Name, "key": wf.Key, "description": wf.Description, "status": wf.Status,
 		"stages": wf.Stages, "notifications": wf.Notifications, "stage_count": len(wf.Stages),
 		"variables": model.MaskSecretVariables(wf.Variables), "triggers": wf.Triggers, "advanced": wf.Advanced,
-		"created_at": wf.CreatedAt.Format(time.RFC3339), "updated_at": wf.UpdatedAt.Format(time.RFC3339),
+		"runtime_inputs": engine.RuntimeInputs(wf, nil),
+		"created_at":     wf.CreatedAt.Format(time.RFC3339), "updated_at": wf.UpdatedAt.Format(time.RFC3339),
 	}, nil
 }
 

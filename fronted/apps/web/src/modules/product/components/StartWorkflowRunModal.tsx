@@ -15,6 +15,7 @@ import { runtimeVersionTag } from "./create-version-job-spec";
 import { DeployYamlCompareModal } from "./DeployYamlCompareModal";
 import { deployImageRef, imageTagFromRef } from "./deploy-job-spec";
 import { RunBranchField } from "./RunBranchField";
+import { runModalExtraInputs } from "./release-plan-runtime-inputs";
 import {
   buildWorkflowRunForm,
   defaultDeployEnvironmentId,
@@ -70,10 +71,21 @@ export function StartWorkflowRunModal({
     () => buildWorkflowRunForm(workflow?.stages, projects, gitProjects),
     [workflow?.stages, projects, gitProjects],
   );
-  const runtimeVariables = useMemo(
-    () => (workflow?.variables ?? []).filter((item) => item.runtime_input && item.key.trim()),
-    [workflow],
-  );
+  const runtimeVariables = useMemo(() => {
+    const declared = (workflow?.variables ?? []).filter((item) => item.runtime_input && item.key.trim());
+    const extra = runModalExtraInputs(workflow?.runtime_inputs)
+      .filter((input) => !declared.some((item) => item.key === input.key))
+      .map((input) => ({
+        id: `runtime-input-${input.key}`,
+        key: input.key,
+        value: "",
+        description: input.label,
+        runtime_input: true,
+        secret: false,
+        vault_path: "",
+      }));
+    return [...declared, ...extra];
+  }, [workflow]);
   const [branches, setBranches] = useState<Record<string, string>>({});
   const [refTypes, setRefTypes] = useState<Record<string, "branch" | "tag" | "pr">>({});
   const [environmentId, setEnvironmentId] = useState("");

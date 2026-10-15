@@ -10,6 +10,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -35,6 +36,7 @@ type UpdateReleasePlanInput struct {
 	ApprovalEnabled     *bool
 	ApprovalConfig      *model.ApprovalConfig
 	HookSettings        *model.ReleasePlanHookSettings
+	Parameters          *map[string]string
 	ScheduleExecuteTime *time.Time
 	ClearScheduleTime   bool
 	SprintID            *kernel.SprintID
@@ -137,6 +139,11 @@ type FinishReleasePlanPlanningHandler struct {
 	notifier   *service.ReleasePlanApprovalNotifier
 	hooks      *service.ReleasePlanHookNotifier
 	snapshots  port.WorkflowSnapshotReader
+	inputs     appctx.WorkflowRuntimeInputReader
+}
+
+func (h *FinishReleasePlanPlanningHandler) UseRuntimeInputs(reader appctx.WorkflowRuntimeInputReader) {
+	h.inputs = reader
 }
 
 func NewFinishReleasePlanPlanningHandler(
@@ -160,6 +167,9 @@ func (h *FinishReleasePlanPlanningHandler) Handle(ctx context.Context, productID
 	}
 	if plan.Status != model.ReleasePlanStatusPlanning {
 		return nil, domain.ErrInvalidReleasePlanTransition
+	}
+	if err := service.CheckReleasePlanInputs(ctx, plan, h.inputs); err != nil {
+		return nil, err
 	}
 	if err := service.MaterializeWorkflowSnapshots(ctx, plan, h.snapshots); err != nil {
 		return nil, err
@@ -498,6 +508,9 @@ func (h *UpdateReleasePlanHandler) Handle(ctx context.Context, productID kernel.
 	if input.HookSettings != nil {
 		plan.HookSettings = *input.HookSettings
 	}
+	if input.Parameters != nil {
+		plan.Parameters = model.NormalizeParameters(model.RestoreMaskedParameters(*input.Parameters, plan.Parameters))
+	}
 	if input.ClearScheduleTime {
 		plan.ScheduleExecuteTime = nil
 	} else if input.ScheduleExecuteTime != nil {
@@ -661,9 +674,6 @@ func (h *UpdateReleasePlanJobHandler) Handle(ctx context.Context, productID kern
 	if err != nil {
 		return nil, err
 	}
-	if plan.Status != model.ReleasePlanStatusPlanning {
-		return nil, domain.ErrInvalidReleasePlanTransition
-	}
 	var job *model.ReleasePlanJob
 	for i := range plan.Jobs {
 		if plan.Jobs[i].ID == jobID {
@@ -673,6 +683,11 @@ func (h *UpdateReleasePlanJobHandler) Handle(ctx context.Context, productID kern
 	}
 	if job == nil {
 		return nil, domain.ErrReleasePlanJobNotFound
+	}
+	workflowRefOnly := input.HasWorkflow && input.Name == nil && input.OwnerID == nil &&
+		input.TextContent == nil && input.TextFormat == nil && input.SortOrder == nil
+	if err := plan.EnsureJobEditable(jobID, workflowRefOnly); err != nil {
+		return nil, err
 	}
 	if input.Name != nil {
 		job.Name = *input.Name
@@ -690,7 +705,11 @@ func (h *UpdateReleasePlanJobHandler) Handle(ctx context.Context, productID kern
 		job.SortOrder = *input.SortOrder
 	}
 	if input.HasWorkflow {
-		job.WorkflowRef = input.WorkflowRef
+		ref, err := mergeWorkflowRefUpdate(plan, job, input.WorkflowRef)
+		if err != nil {
+			return nil, err
+		}
+		job.WorkflowRef = ref
 	}
 	job.UpdatedAt = time.Now().UTC()
 	if err := h.plans.UpdateJob(ctx, job); err != nil {
@@ -792,4 +811,31 @@ func (h *AddReleasePlanJobsFromWorkItemsHandler) Handle(ctx context.Context, pro
 	_ = auditReleasePlan(ctx, h.plans, plan.ID, actor, "add_jobs_from_work_items", map[string]any{"count": len(input.WorkItemIDs)})
 	_ = recordPlanVersionAfterReload(ctx, h.plans, plan.ID, actor, "add_jobs_from_work_items")
 	return h.plans.FindPlanByID(ctx, planID)
+}
+
+// mergeWorkflowRefUpdate restores masked secret parameters and, outside planning,
+// keeps the job on its workflow and its materialized snapshot.
+func mergeWorkflowRefUpdate(plan *model.ReleasePlan, job *model.ReleasePlanJob, raw json.RawMessage) (json.RawMessage, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return raw, nil
+	}
+	var next model.WorkflowRefSpec
+	if err := json.Unmarshal(raw, &next); err != nil {
+		return nil, domain.ErrInvalidWorkflowRef
+	}
+	var prev model.WorkflowRefSpec
+	if len(job.WorkflowRef) > 0 {
+		_ = json.Unmarshal(job.WorkflowRef, &prev)
+	}
+	if plan.Status != model.ReleasePlanStatusPlanning {
+		if next.WorkflowID != prev.WorkflowID {
+			return nil, domain.ErrInvalidReleasePlanTransition
+		}
+		next.Mode = prev.Mode
+		if len(next.WorkflowSnapshot) == 0 {
+			next.WorkflowSnapshot = prev.WorkflowSnapshot
+		}
+	}
+	next.Parameters = model.RestoreMaskedParameters(next.Parameters, prev.Parameters)
+	return json.Marshal(next)
 }

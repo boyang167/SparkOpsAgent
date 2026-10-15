@@ -1,7 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import type { ProductProjectVM, WorkflowAdvancedVM, WorkflowTriggerVM, WorkflowVariableVM } from "@sparkops/contracts/product";
+import type {
+  ProductProjectVM,
+  WorkflowAdvancedVM,
+  WorkflowRuntimeInput,
+  WorkflowTriggerVM,
+  WorkflowVariableVM,
+} from "@sparkops/contracts/product";
+import { formatInputRef } from "./release-plan-runtime-inputs";
 import {
   GIT_TRIGGER_EVENTS,
   SYSTEM_WORKFLOW_VARIABLES,
@@ -31,9 +38,13 @@ function CopyButton({ value }: { value: string }) {
 export function WorkflowVariablesPanel({
   variables,
   onChange,
+  undeclared = [],
+  onDeclare,
 }: {
   variables: WorkflowVariableVM[];
   onChange: (variables: WorkflowVariableVM[]) => void;
+  undeclared?: WorkflowRuntimeInput[];
+  onDeclare?: (key: string) => void;
 }) {
   function patch(index: number, next: Partial<WorkflowVariableVM>) {
     onChange(variables.map((item, i) => (i === index ? { ...item, ...next } : item)));
@@ -44,6 +55,23 @@ export function WorkflowVariablesPanel({
       <p className="text-sm text-muted">
         任务字段可写 {"{{.变量名}}"}。构建时会额外传入 Jenkins 参数 SPARKOPS_VAR_变量名，以及 JSON 参数 SPARKOPS_VARS。
       </p>
+      {undeclared.length > 0 ? (
+        <div className="pwf-undeclared">
+          <p className="text-sm font-medium">未声明的占位符</p>
+          <p className="text-xs text-muted">以下占位符没有声明为变量，运行时将作为必填参数。</p>
+          {undeclared.map((item) => (
+            <div key={item.key} className="pwf-undeclared-row">
+              <span className="pwf-undeclared-key">{item.key}</span>
+              <span className="pwf-undeclared-refs">{(item.refs ?? []).map(formatInputRef).join("、")}</span>
+              {onDeclare ? (
+                <button type="button" className="btn btn-ghost text-sm" onClick={() => onDeclare(item.key)}>
+                  声明为变量
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
       {variables.length === 0 ? <p className="text-sm text-muted">还没有自定义变量。</p> : null}
       {variables.map((item, index) => {
         const error = item.key.trim() ? variableKeyError(item.key) : null;

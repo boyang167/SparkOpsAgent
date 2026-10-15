@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"maps"
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -11,6 +12,7 @@ type ReleasePlanTemplateSnapshot struct {
 	Description         string         `json:"description,omitempty"`
 	ApprovalConfig      ApprovalConfig `json:"approval_config"`
 	ScheduleExecuteTime *time.Time     `json:"schedule_execute_time,omitempty"`
+	Parameters          map[string]string `json:"parameters,omitempty"`
 	Jobs                []ReleasePlanTemplateJobSnapshot `json:"jobs"`
 }
 
@@ -49,6 +51,7 @@ func SnapshotFromPlan(plan *ReleasePlan) ReleasePlanTemplateSnapshot {
 	snap := ReleasePlanTemplateSnapshot{
 		Description: plan.Description, ApprovalConfig: cfg,
 		ScheduleExecuteTime: plan.ScheduleExecuteTime,
+		Parameters:          maps.Clone(plan.Parameters),
 		Jobs:                make([]ReleasePlanTemplateJobSnapshot, 0, len(plan.Jobs)),
 	}
 	for _, job := range plan.sortedJobs() {

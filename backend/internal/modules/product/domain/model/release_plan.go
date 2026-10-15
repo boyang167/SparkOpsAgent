@@ -111,6 +111,7 @@ type ReleasePlan struct {
 	ApprovalConfig      ApprovalConfig
 	HookSettings        ReleasePlanHookSettings
 	HookState           *ReleasePlanHookState
+	Parameters          map[string]string
 	CreatedBy           kernel.MemberID
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
@@ -306,15 +307,15 @@ func (p *ReleasePlan) ParseWorkflowRef(job *ReleasePlanJob) (WorkflowRefSpec, er
 	}
 }
 
-func (spec WorkflowRefSpec) ToRunInput() map[string]any {
+// ToRunInput builds the workflow run input; required lists the inputs the workflow needs,
+// which are filled from planParams when the job does not override them.
+func (spec WorkflowRefSpec) ToRunInput(planParams map[string]string, required []string) map[string]any {
 	input := map[string]any{}
-	if len(spec.Parameters) == 0 {
-		return input
-	}
-	if branch := strings.TrimSpace(spec.Parameters["branch"]); branch != "" {
+	params := spec.Parameters
+	if branch := strings.TrimSpace(params["branch"]); branch != "" {
 		input["branch"] = branch
 	}
-	if raw := strings.TrimSpace(spec.Parameters["_environment_overrides"]); raw != "" {
+	if raw := strings.TrimSpace(params["_environment_overrides"]); raw != "" {
 		var overrides map[string]string
 		if err := json.Unmarshal([]byte(raw), &overrides); err == nil && len(overrides) > 0 {
 			envMap := make(map[string]any, len(overrides))
@@ -328,7 +329,7 @@ func (spec WorkflowRefSpec) ToRunInput() map[string]any {
 			}
 		}
 	}
-	if raw := strings.TrimSpace(spec.Parameters["_project_ids"]); raw != "" {
+	if raw := strings.TrimSpace(params["_project_ids"]); raw != "" {
 		var projectIDs []string
 		if err := json.Unmarshal([]byte(raw), &projectIDs); err == nil {
 			items := make([]any, 0, len(projectIDs))
@@ -340,19 +341,27 @@ func (spec WorkflowRefSpec) ToRunInput() map[string]any {
 			input["project_ids"] = items
 		}
 	}
-	if overrides := parseStringMapParam(spec.Parameters["_branch_overrides"]); len(overrides) > 0 {
+	if overrides := parseStringMapParam(params["_branch_overrides"]); len(overrides) > 0 {
 		input["branch_overrides"] = overrides
 	}
-	if overrides := parseStringMapParam(spec.Parameters["_ref_type_overrides"]); len(overrides) > 0 {
+	if overrides := parseStringMapParam(params["_ref_type_overrides"]); len(overrides) > 0 {
 		input["ref_type_overrides"] = overrides
 	}
 	variables := map[string]any{}
-	for key, value := range spec.Parameters {
-		if key == "branch" || key == "environment_id" || key == "_environment_overrides" || strings.HasPrefix(key, "_") {
+	for key, value := range params {
+		if !IsJobInputOverrideKey(key) {
 			continue
 		}
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			variables[key] = trimmed
+		}
+	}
+	for _, key := range required {
+		if _, ok := variables[key]; ok {
+			continue
+		}
+		if value := strings.TrimSpace(planParams[key]); value != "" {
+			variables[key] = value
 		}
 	}
 	if len(variables) > 0 {
@@ -452,6 +461,47 @@ func (p *ReleasePlan) RetryWorkflowJob(jobID kernel.ReleasePlanJobID) error {
 	job.UpdatedAt = time.Now().UTC()
 	p.UpdatedAt = time.Now().UTC()
 	return nil
+}
+
+// FailWorkflowJobStart records that the current workflow job could not start, so it can be fixed and retried.
+func (p *ReleasePlan) FailWorkflowJobStart(jobID kernel.ReleasePlanJobID, errMsg string) error {
+	idx := p.jobIndexByID(jobID)
+	if idx < 0 {
+		return domain.ErrReleasePlanJobNotFound
+	}
+	if err := p.ensureCurrentJob(jobID); err != nil {
+		return err
+	}
+	job := &p.Jobs[idx]
+	if job.Type != ReleasePlanJobTypeWorkflow || job.Status != ReleasePlanJobStatusTodo {
+		return domain.ErrInvalidReleasePlanJobTransition
+	}
+	ref, _ := json.Marshal(ExecutionRef{ErrorMessage: errMsg})
+	job.ExecutionRef = ref
+	job.Status = ReleasePlanJobStatusFailed
+	now := time.Now().UTC()
+	job.UpdatedAt = now
+	p.UpdatedAt = now
+	return nil
+}
+
+// EnsureJobEditable allows any edit while planning; once executing, only a failed
+// workflow job's workflow reference (its run inputs) may change.
+func (p *ReleasePlan) EnsureJobEditable(jobID kernel.ReleasePlanJobID, workflowRefOnly bool) error {
+	idx := p.jobIndexByID(jobID)
+	if idx < 0 {
+		return domain.ErrReleasePlanJobNotFound
+	}
+	switch p.Status {
+	case ReleasePlanStatusPlanning:
+		return nil
+	case ReleasePlanStatusExecuting:
+		job := p.Jobs[idx]
+		if workflowRefOnly && job.Type == ReleasePlanJobTypeWorkflow && job.Status == ReleasePlanJobStatusFailed {
+			return nil
+		}
+	}
+	return domain.ErrInvalidReleasePlanTransition
 }
 
 func (p *ReleasePlan) InitApprovalInstance(token string, now time.Time) {

@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"maps"
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -17,6 +18,7 @@ type ReleasePlanVersionSnapshot struct {
 	ReleaseWindowEnd    time.Time      `json:"release_window_end"`
 	ScheduleExecuteTime *time.Time     `json:"schedule_execute_time,omitempty"`
 	ApprovalConfig      ApprovalConfig `json:"approval_config"`
+	Parameters          map[string]string `json:"parameters,omitempty"`
 	Jobs                []ReleasePlanVersionJobSnapshot `json:"jobs"`
 }
 
@@ -51,6 +53,7 @@ func VersionSnapshotFromPlan(plan *ReleasePlan) ReleasePlanVersionSnapshot {
 		ManagerID: plan.ManagerID.String(), Status: plan.Status,
 		ReleaseWindowStart: plan.ReleaseWindowStart, ReleaseWindowEnd: plan.ReleaseWindowEnd,
 		ScheduleExecuteTime: plan.ScheduleExecuteTime, ApprovalConfig: cfg,
+		Parameters: maps.Clone(plan.Parameters),
 		Jobs: make([]ReleasePlanVersionJobSnapshot, 0, len(plan.Jobs)),
 	}
 	if plan.SprintID != nil {

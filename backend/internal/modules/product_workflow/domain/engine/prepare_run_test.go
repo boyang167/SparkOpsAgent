@@ -157,3 +157,63 @@ func TestParseGitLabPush(t *testing.T) {
 	require.Equal(t, "branch", hook.RefType)
 	require.Equal(t, "abc", hook.Commit)
 }
+
+func versionWorkflow() *model.ProductWorkflow {
+	return &model.ProductWorkflow{Stages: []model.WorkflowStage{
+		{Name: "构建", Jobs: []model.WorkflowJob{{Name: "build-1", Type: model.JobTypeSparkopsBuild}}},
+		{Name: "版本", Jobs: []model.WorkflowJob{{
+			Name: "archive", Type: model.JobTypeSparkopsCreateVersion,
+			Spec: map[string]any{"version_tag": "{{version}}"},
+		}}},
+	}}
+}
+
+func TestInterpolateReplacesBothSyntaxes(t *testing.T) {
+	got := Interpolate("{{.TAG}}/{{version}}/{{missing}}", map[string]string{"TAG": "v1", "version": "1.2.0"})
+	require.Equal(t, "v1/1.2.0/{{missing}}", got)
+}
+
+func TestInterpolateStagesKeepsBarePlaceholdersInRawContent(t *testing.T) {
+	stages := []model.WorkflowStage{{
+		Name: "部署",
+		Jobs: []model.WorkflowJob{{
+			Name: "deploy", Type: model.JobTypeSparkopsDeploy,
+			Spec: map[string]any{
+				"config_resources": []any{map[string]any{"yaml": "name: {{name}}\ntag: {{.TAG}}"}},
+			},
+		}},
+	}}
+	out := InterpolateStages(stages, map[string]string{"name": "x", "TAG": "v1"})
+	row := out[0].Jobs[0].Spec["config_resources"].([]any)[0].(map[string]any)
+	require.Equal(t, "name: {{name}}\ntag: v1", row["yaml"])
+}
+
+func TestPrepareRunReplacesTemplatePlaceholderFromVariables(t *testing.T) {
+	stages, _, _, err := PrepareRun(versionWorkflow(), "run-1", "manual", map[string]any{
+		"variables": map[string]any{"version": "1.2.0"},
+	}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "1.2.0", stages[1].Jobs[0].Spec["version_tag"])
+}
+
+func TestPrepareRunRejectsUnresolvedPlaceholders(t *testing.T) {
+	_, _, _, err := PrepareRun(versionWorkflow(), "run-1", "manual", nil, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "version")
+}
+
+func TestPrepareRunAcceptsVersionTagOverride(t *testing.T) {
+	stages, _, _, err := PrepareRun(versionWorkflow(), "run-1", "manual", map[string]any{
+		"version_tag_overrides": map[string]any{"archive": "v1.0.0"},
+	}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "v1.0.0", stages[1].Jobs[0].Spec["version_tag"])
+}
+
+func TestPrepareRunIgnoresPlaceholdersInSkippedStages(t *testing.T) {
+	stages, _, _, err := PrepareRun(versionWorkflow(), "run-1", "manual", map[string]any{
+		"stage_indices": []any{float64(0)},
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, stages, 1)
+}

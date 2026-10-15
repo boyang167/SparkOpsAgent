@@ -52,7 +52,7 @@ func TestWorkflowRefSpecToRunInput(t *testing.T) {
 		},
 	}
 
-	input := spec.ToRunInput()
+	input := spec.ToRunInput(nil, nil)
 	require.Equal(t, "main", input["branch"])
 	require.Equal(t, map[string]any{"project-2": "release/1.0"}, input["branch_overrides"])
 	require.Equal(t, map[string]any{"project-2": "tag"}, input["ref_type_overrides"])

@@ -69,7 +69,7 @@ func createProductV2TestTables(t *testing.T, db *gorm.DB) {
 			id TEXT PRIMARY KEY, product_id TEXT, product_plan_id TEXT, sprint_id TEXT, name TEXT,
 			description TEXT, manager_id TEXT, approver_id TEXT, status TEXT,
 			release_window_start DATETIME, release_window_end DATETIME,
-			schedule_execute_time DATETIME, approval_config TEXT, hook_settings TEXT, hook_state TEXT,
+			schedule_execute_time DATETIME, approval_config TEXT, hook_settings TEXT, hook_state TEXT, parameters TEXT DEFAULT '{}',
 			version INTEGER DEFAULT 1, created_by TEXT,
 			created_at DATETIME, updated_at DATETIME, deleted_at DATETIME)`,
 		`CREATE TABLE product.release_plan_jobs (

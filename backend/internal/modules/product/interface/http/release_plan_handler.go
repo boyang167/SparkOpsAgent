@@ -518,6 +518,7 @@ type updateReleasePlanRequest struct {
 	ApprovalEnabled     *bool                  `json:"approval_enabled"`
 	ApprovalConfig      *approvalConfigRequest `json:"approval_config"`
 	HookSettings        *hookSettingsRequest   `json:"hook_settings"`
+	Parameters          *map[string]string     `json:"parameters"`
 	ScheduleExecuteTime *string                `json:"schedule_execute_time"`
 	ClearScheduleTime   bool                   `json:"clear_schedule_time"`
 	SprintID            *string                `json:"sprint_id"`
@@ -542,6 +543,7 @@ func (h *Handler) UpdateReleasePlan(c *gin.Context) {
 		Name: req.Name, Description: req.Description, ApprovalEnabled: req.ApprovalEnabled,
 		ApprovalConfig: parseApprovalConfigRequest(req.ApprovalConfig),
 		HookSettings:   parseHookSettingsRequest(req.HookSettings),
+		Parameters:     req.Parameters,
 		ClearSprintID: req.ClearSprintID, ClearScheduleTime: req.ClearScheduleTime,
 	}
 	if req.ScheduleExecuteTime != nil && *req.ScheduleExecuteTime != "" {

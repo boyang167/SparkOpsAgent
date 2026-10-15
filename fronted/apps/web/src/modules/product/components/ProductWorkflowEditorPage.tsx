@@ -9,6 +9,7 @@ import type {
   ProductProjectVM,
   WorkflowAdvancedVM,
   WorkflowNotificationVM,
+  WorkflowRuntimeInput,
   WorkflowTriggerVM,
   WorkflowVariableVM,
 } from "@sparkops/contracts/product";
@@ -35,6 +36,7 @@ export function ProductWorkflowEditorPage({
   const [stages, setStages] = useState<WorkflowStageVM[]>([emptyStage(1)]);
   const [notifications, setNotifications] = useState<WorkflowNotificationVM[]>([]);
   const [variables, setVariables] = useState<WorkflowVariableVM[]>([]);
+  const [runtimeInputs, setRuntimeInputs] = useState<WorkflowRuntimeInput[]>([]);
   const [triggers, setTriggers] = useState<WorkflowTriggerVM[]>([]);
   const [advanced, setAdvanced] = useState<WorkflowAdvancedVM>({ concurrency: 1, timeout_minutes: 0 });
   const [projects, setProjects] = useState<ProductProjectVM[]>([]);
@@ -59,6 +61,7 @@ export function ProductWorkflowEditorPage({
       setStages(wf.stages?.length ? wf.stages : [emptyStage(1)]);
       setNotifications(wf.notifications ?? []);
       setVariables(wf.variables ?? []);
+      setRuntimeInputs(wf.runtime_inputs ?? []);
       setTriggers(wf.triggers ?? []);
       setAdvanced(wf.advanced ?? { concurrency: 1, timeout_minutes: 0 });
       setProjects(projectItems);
@@ -97,6 +100,7 @@ export function ProductWorkflowEditorPage({
       setStages(saved.stages?.length ? saved.stages : stages);
       setNotifications(saved.notifications ?? notifications);
       setVariables(saved.variables ?? variables);
+      setRuntimeInputs(saved.runtime_inputs ?? runtimeInputs);
       setTriggers(saved.triggers ?? triggers);
       setAdvanced(saved.advanced ?? advanced);
       if (activate) {
@@ -129,6 +133,9 @@ export function ProductWorkflowEditorPage({
       stages={stages}
       notifications={notifications}
       variables={variables}
+      undeclaredInputs={runtimeInputs.filter(
+        (input) => !input.declared && !variables.some((item) => item.key.trim() === input.key),
+      )}
       triggers={triggers}
       advanced={advanced}
       projects={projects}

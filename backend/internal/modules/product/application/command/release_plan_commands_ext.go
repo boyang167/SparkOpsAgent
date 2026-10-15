@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -42,6 +43,7 @@ func (h *CopyReleasePlanHandler) Handle(ctx context.Context, productID kernel.Pr
 	cfg.Instance = nil
 	clone := model.NewReleasePlan(productID, name, src.Description, src.ManagerID, actor, src.ReleaseWindowStart, src.ReleaseWindowEnd, cfg)
 	clone.ScheduleExecuteTime = src.ScheduleExecuteTime
+	clone.Parameters = maps.Clone(src.Parameters)
 	if src.ApproverID != nil {
 		approver := *src.ApproverID
 		clone.ApproverID = &approver
@@ -198,6 +200,7 @@ func (h *CreateReleasePlanFromTemplateHandler) Handle(
 		plan.ScheduleExecuteTime = tpl.Snapshot.ScheduleExecuteTime
 	}
 	plan.SprintID = input.SprintID
+	plan.Parameters = maps.Clone(tpl.Snapshot.Parameters)
 	if err := h.plans.SavePlan(ctx, plan); err != nil {
 		return nil, err
 	}

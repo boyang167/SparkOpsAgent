@@ -99,3 +99,18 @@ describe("release-plan-workflow-params", () => {
     expect(workflowProjectIds(resolved)).toEqual(["project-1", "project-2"]);
   });
 });
+
+describe("mergeWorkflowJobParameters variables", () => {
+  it("writes and clears per-job input overrides", () => {
+    const merged = mergeWorkflowJobParameters(
+      { branch: "main", version: "1.0.0" },
+      null,
+      { variables: { version: " 2.0.0 ", ticket: "OPS-1" } },
+    );
+    expect(merged).toEqual({ branch: "main", version: "2.0.0", ticket: "OPS-1" });
+    expect(mergeWorkflowJobParameters(merged, null, { variables: { ticket: null } })).toEqual({
+      branch: "main",
+      version: "2.0.0",
+    });
+  });
+});
