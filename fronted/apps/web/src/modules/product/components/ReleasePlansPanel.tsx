@@ -28,7 +28,11 @@ import { ReleasePlanStatusSteps } from "./ReleasePlanStatusSteps";
 import { ReleasePlanModalFooter } from "./ReleasePlanModalFooter";
 import { ActionMenu } from "./ActionMenu";
 import { productDetailTabIcons } from "./product-detail-icons";
-import { buildWorkflowJobParameters, mergeWorkflowJobParameters } from "./release-plan-workflow-params";
+import {
+  buildWorkflowJobParameters,
+  mergeWorkflowJobParameters,
+  type WorkflowJobOptions,
+} from "./release-plan-workflow-params";
 import {
   formatReleaseWindow,
   releasePlanCanDelete,
@@ -322,14 +326,20 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
 
   async function onAddWorkflowJob(
     workflowId: string,
-    options?: { environmentId?: string; branch?: string; projectIds?: string[] },
+    options?: WorkflowJobOptions,
   ) {
     if (!selected || !workflowId) return;
     setBusy(true);
     try {
       const wf = (await resolveWorkflow(workflowId)) ?? workflows.find((w) => w.id === workflowId);
       const parameters = options
-        ? buildWorkflowJobParameters(wf, options.environmentId, options.branch, options.projectIds)
+        ? buildWorkflowJobParameters(
+            wf,
+            options.environmentId,
+            options.branch,
+            options.projectIds,
+            options.refOverrides,
+          )
         : undefined;
       await product.addReleasePlanJob(workspaceId, productId, selected.id, {
         name: wf?.name ?? "工作流发布",
@@ -575,6 +585,36 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
       setBusy(false);
     }
   }
+
+  const executionStep = (() => {
+    if (selected?.status !== "executing") return null;
+    const scheduledAt = selected.schedule_execute_time ? new Date(selected.schedule_execute_time) : null;
+    if (scheduledAt && scheduledAt.getTime() > Date.now()) {
+      return {
+        label: "等待定时执行",
+        hint: `将于 ${scheduledAt.toLocaleString("zh-CN", { hour12: false })} 自动开始`,
+        onRun: null,
+      };
+    }
+    const current = [...(selected.jobs ?? [])]
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .find((job) => job.status !== "done" && job.status !== "skipped");
+    if (!current) return { label: "收尾中", hint: "所有发布项已完成，等待收尾回调", onRun: null };
+    if (current.type === "text") {
+      return {
+        label: "确认完成",
+        hint: `当前步骤「${current.name}」需要人工确认`,
+        onRun: () => setJobDoneTarget(current.id),
+      };
+    }
+    if (current.status === "running") {
+      return { label: "执行中…", hint: `「${current.name}」正在运行，完成后自动进入下一步`, onRun: null };
+    }
+    if (current.status === "failed") {
+      return { label: "重试", hint: `「${current.name}」执行失败`, onRun: () => void onJobRetry(current.id) };
+    }
+    return { label: "开始执行", hint: `下一步：运行工作流「${current.name}」`, onRun: () => void onExecute() };
+  })();
 
   function renderJobActions(job: ReleasePlanJobVM) {
     if (selected?.status !== "executing") return null;
@@ -825,10 +865,18 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                   {selected.status === "wait_for_approval" && usesExternalApproval ? (
                     <span className="release-plan-detail-flash">等待飞书/钉钉审批回调</span>
                   ) : null}
-                  {selected.status === "executing" ? (
-                    <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onExecute()}>
-                      继续执行
-                    </button>
+                  {executionStep ? (
+                    <>
+                      <span className="release-plan-detail-flash">{executionStep.hint}</span>
+                      <button
+                        type="button"
+                        className="btn btn-primary text-sm"
+                        disabled={busy || !executionStep.onRun}
+                        onClick={() => executionStep.onRun?.()}
+                      >
+                        {executionStep.label}
+                      </button>
+                    </>
                   ) : null}
                   {selected.status === "denied" ? (
                     <button type="button" className="btn btn-primary text-sm" disabled={busy} onClick={() => void onReopen()}>

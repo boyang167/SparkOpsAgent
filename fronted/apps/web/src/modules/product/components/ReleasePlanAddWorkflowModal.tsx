@@ -6,13 +6,16 @@ import { product } from "@sparkops/web-sdk";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { ReleasePlanModalFooter } from "./ReleasePlanModalFooter";
-import { ReleasePlanProjectSelector } from "./ReleasePlanProjectSelector";
+import { ReleasePlanProjectBranches } from "./ReleasePlanProjectBranches";
 import {
   defaultBranchForWorkflow,
   defaultEnvironmentIdForWorkflow,
   resolveWorkflowDetails,
   workflowHasBuildJobs,
   workflowProjectIds,
+  workflowProjectSources,
+  type ProjectRefOverrides,
+  type WorkflowJobOptions,
 } from "./release-plan-workflow-params";
 
 interface ReleasePlanAddWorkflowModalProps {
@@ -26,7 +29,7 @@ interface ReleasePlanAddWorkflowModalProps {
   onClose: () => void;
   onSubmit: (
     workflowId: string,
-    options: { environmentId?: string; branch?: string; projectIds?: string[] },
+    options: WorkflowJobOptions,
   ) => void | Promise<void>;
 }
 
@@ -51,6 +54,7 @@ export function ReleasePlanAddWorkflowModal({
   const [environmentId, setEnvironmentId] = useState("");
   const [branch, setBranch] = useState("main");
   const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [refOverrides, setRefOverrides] = useState<ProjectRefOverrides>({});
   const [workflowDetail, setWorkflowDetail] = useState<ProductWorkflowVM | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -90,21 +94,33 @@ export function ReleasePlanAddWorkflowModal({
   }, [open, workflowSummary, workspaceId, productId]);
 
   useEffect(() => {
+    const defaultBranch = defaultBranchForWorkflow(workflow);
     setEnvironmentId(defaultEnvironmentIdForWorkflow(workflow, environments));
-    setBranch(defaultBranchForWorkflow(workflow));
+    setBranch(defaultBranch);
     setProjectIds(candidateProjectIds);
+    // 默认分支会覆盖所有项目，工作流里与之不同的项目分支 / Tag 需保留为单独指定
+    const overrides: ProjectRefOverrides = {};
+    for (const [projectId, source] of Object.entries(workflowProjectSources(workflow))) {
+      if (source.ref && (source.ref.ref !== defaultBranch || source.ref.type !== "branch")) {
+        overrides[projectId] = source.ref;
+      }
+    }
+    setRefOverrides(overrides);
   }, [workflow, environments, candidateProjectIds]);
+
+  const projectSources = useMemo(() => workflowProjectSources(workflow), [workflow]);
 
   const canSubmit =
     Boolean(workflowId) &&
     !detailLoading &&
     !detailError &&
     (!needsEnvironment || Boolean(environmentId)) &&
-    (candidateProjectIds.length === 0 || projectIds.length > 0);
+    (projectIds.length > 0 || (!needsBranch && candidateProjectIds.length === 0));
 
   return (
     <Modal
       open={open}
+      size={needsBranch ? "lg" : "md"}
       onClose={onClose}
       title="添加工作流"
       description="选择要在此步骤执行的工作流，并指定本次发布的参数。"
@@ -119,7 +135,8 @@ export function ReleasePlanAddWorkflowModal({
             void onSubmit(workflowId, {
               ...(needsEnvironment ? { environmentId } : {}),
               ...(needsBranch ? { branch: branch.trim() || "main" } : {}),
-              ...(candidateProjectIds.length > 0 ? { projectIds } : {}),
+              ...(projectIds.length > 0 ? { projectIds } : {}),
+              ...(needsBranch ? { refOverrides } : {}),
             })
           }
         />
@@ -156,17 +173,37 @@ export function ReleasePlanAddWorkflowModal({
         ) : null}
         {needsBranch ? (
           <label className="form-field stack-xs">
-            <span className="form-label">构建分支</span>
-            <input className="input" value={branch} placeholder="main" onChange={(e) => setBranch(e.target.value)} />
+            <span className="form-label">默认分支</span>
+            <input
+              className="input font-mono"
+              value={branch}
+              placeholder="main"
+              spellCheck={false}
+              onChange={(e) => setBranch(e.target.value)}
+            />
+            <span className="text-xs text-muted-foreground">未单独指定分支的项目都使用此分支。</span>
           </label>
         ) : null}
-        <ReleasePlanProjectSelector
-          projectIds={candidateProjectIds}
-          projects={projects}
-          selectedIds={projectIds}
-          disabled={busy}
-          onChange={setProjectIds}
-        />
+        {projectIds.length > 0 || (needsBranch && projects.length > 0) ? (
+          <div className="form-field stack-xs">
+            <span className="form-label">执行项目</span>
+            <ReleasePlanProjectBranches
+              nested
+              workspaceId={workspaceId}
+              projects={projects}
+              selectedIds={projectIds}
+              refOverrides={refOverrides}
+              defaultRefFor={() => ({ ref: branch.trim() || "main", type: "branch" })}
+              workflowSourceFor={(projectId) => projectSources[projectId]}
+              buildable={needsBranch}
+              editable={!busy}
+              onChange={(value) => {
+                setProjectIds(value.projectIds);
+                setRefOverrides(value.refOverrides);
+              }}
+            />
+          </div>
+        ) : null}
       </div>
     </Modal>
   );

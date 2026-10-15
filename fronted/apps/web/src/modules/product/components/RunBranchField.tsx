@@ -19,6 +19,8 @@ interface RunBranchFieldProps {
   value: string;
   refType: RefKind;
   label: string;
+  /** 紧凑行内样式：不显示「手动输入」切换，改为在菜单底部直接使用输入值 */
+  compact?: boolean;
   onChange: (value: string, refType: RefKind) => void;
 }
 
@@ -49,6 +51,28 @@ function mapRefItems(items: { name: string; title?: string }[]): RefOption[] {
   return items.filter((item) => item.name).map((item) => ({ name: item.name, title: item.title }));
 }
 
+type GitRefItems = Awaited<ReturnType<typeof workspace.listGitRefs>>;
+
+const coreRefsCache = new Map<string, Promise<PromiseSettledResult<GitRefItems>[]>>();
+
+/** 同一仓库的分支 / Tag 在多行间共享，失败后允许重试 */
+function loadCoreRefs(workspaceId: string, gitUrl: string, secretId: string) {
+  const key = `${workspaceId}|${gitUrl}|${secretId}`;
+  let pending = coreRefsCache.get(key);
+  if (!pending) {
+    const payload = { git_url: gitUrl, secret_id: secretId };
+    pending = Promise.allSettled([
+      workspace.listGitRefs(workspaceId, { ...payload, ref_type: "branch" }),
+      workspace.listGitRefs(workspaceId, { ...payload, ref_type: "tag" }),
+    ]).then((results) => {
+      if (results.some((result) => result.status === "rejected")) coreRefsCache.delete(key);
+      return results;
+    });
+    coreRefsCache.set(key, pending);
+  }
+  return pending;
+}
+
 export function RunBranchField({
   workspaceId,
   gitUrl,
@@ -56,6 +80,7 @@ export function RunBranchField({
   value,
   refType,
   label,
+  compact,
   onChange,
 }: RunBranchFieldProps) {
   const [mode, setMode] = useState<"select" | "manual">("select");
@@ -70,6 +95,7 @@ export function RunBranchField({
   const [tagError, setTagError] = useState<string | null>(null);
   const [prError, setPrError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [activated, setActivated] = useState(!compact);
   const [pendingOpen, setPendingOpen] = useState(false);
   const [query, setQuery] = useState(value);
   const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(
@@ -115,6 +141,7 @@ export function RunBranchField({
       setPrError(null);
       return;
     }
+    if (!activated) return;
     let cancelled = false;
     setLoadingCore(true);
     setBranchError(null);
@@ -122,11 +149,7 @@ export function RunBranchField({
     setPrError(null);
     setPullRequests([]);
     setPrLoaded(false);
-    const payload = { git_url: gitUrl.trim(), secret_id: secretId.trim() };
-    void Promise.allSettled([
-      workspace.listGitRefs(workspaceId, { ...payload, ref_type: "branch" }),
-      workspace.listGitRefs(workspaceId, { ...payload, ref_type: "tag" }),
-    ])
+    void loadCoreRefs(workspaceId, gitUrl.trim(), secretId.trim())
       .then((results) => {
         if (cancelled) return;
         const [branchResult, tagResult] = results;
@@ -161,12 +184,12 @@ export function RunBranchField({
     return () => {
       cancelled = true;
     };
-  }, [canLoad, workspaceId, gitUrl, secretId]);
+  }, [activated, canLoad, workspaceId, gitUrl, secretId]);
 
   useEffect(() => {
-    if (!canLoad || tab !== "pr" && refType !== "pr") return;
+    if (!activated || !canLoad || prLoaded || prError || (tab !== "pr" && refType !== "pr")) return;
     void loadPullRequests();
-  }, [canLoad, tab, refType, loadPullRequests]);
+  }, [activated, canLoad, prLoaded, prError, tab, refType, loadPullRequests]);
 
   const options = tab === "tag" ? tags : tab === "pr" ? pullRequests : branches;
   const items = useMemo(() => {
@@ -202,6 +225,7 @@ export function RunBranchField({
   useLayoutEffect(() => {
     if (!open) return;
     placeMenu();
+    setActivated(true);
   }, [open]);
 
   useLayoutEffect(() => {
@@ -278,9 +302,17 @@ export function RunBranchField({
   const tabLoading = tab === "pr" ? loadingPr : loadingCore;
   const emptyLabel =
     tab === "tag" ? "没有匹配的 Tag" : tab === "pr" ? "没有匹配的 PR" : "没有匹配的分支";
+  const typed = query.trim();
+  const canUseTyped = Boolean(compact && typed && !options.some((item) => item.name === typed));
+
+  function commit(next: string) {
+    onChange(next, tab);
+    setQuery(next);
+    setOpen(false);
+  }
 
   return (
-    <div className="wf-run-branch-field">
+    <div className={`wf-run-branch-field${compact ? " is-compact" : ""}`}>
       <div className="pwf-combo wf-run-combo" ref={rootRef}>
         <input
           className="input wf-run-branch"
@@ -304,11 +336,9 @@ export function RunBranchField({
             }
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && items[0]) {
+            if (event.key === "Enter" && (items[0] || canUseTyped)) {
               event.preventDefault();
-              onChange(items[0].name, tab);
-              setQuery(items[0].name);
-              setOpen(false);
+              commit(items[0]?.name ?? typed);
             }
             if (event.key === "Escape") {
               setOpen(false);
@@ -383,14 +413,26 @@ export function RunBranchField({
                     ))
                   )}
                 </ul>
+                {canUseTyped ? (
+                  <button
+                    type="button"
+                    className="wf-run-ref-use-typed"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => commit(typed)}
+                  >
+                    使用「{tab === "pr" ? `#${typed}` : typed}」
+                  </button>
+                ) : null}
               </div>,
               document.body,
             )
           : null}
       </div>
-      <button type="button" className="wf-run-branch-mode" onClick={enterManualMode}>
-        手动输入
-      </button>
+      {compact ? null : (
+        <button type="button" className="wf-run-branch-mode" onClick={enterManualMode}>
+          手动输入
+        </button>
+      )}
     </div>
   );
 }

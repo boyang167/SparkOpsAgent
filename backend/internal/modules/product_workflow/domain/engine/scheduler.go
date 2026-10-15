@@ -984,7 +984,11 @@ func ApplyRunInput(stages []model.WorkflowStage, input map[string]any) []model.W
 	out := cloneStages(stages)
 	branch, _ := input["branch"].(string)
 	envOverrides, _ := input["environment_overrides"].(map[string]any)
-	projectIDs, hasProjectFilter := projectIDSet(input["project_ids"])
+	projectOrder, hasProjectFilter := projectIDList(input["project_ids"])
+	projectIDs := make(map[string]struct{}, len(projectOrder))
+	for _, id := range projectOrder {
+		projectIDs[id] = struct{}{}
+	}
 	for si := range out {
 		for ji := range out[si].Jobs {
 			job := &out[si].Jobs[ji]
@@ -1003,11 +1007,17 @@ func ApplyRunInput(stages []model.WorkflowStage, input map[string]any) []model.W
 					job.Spec["project_builds"] = builds
 				}
 			}
-			if job.Type == model.JobTypeSparkopsBuild {
-				applyBranchOverrides(job, stringMap(input["branch_overrides"]), stringMap(input["ref_type_overrides"]))
-			}
 			if hasProjectFilter {
 				filterJobProjects(job, projectIDs)
+				if job.Type == model.JobTypeSparkopsBuild {
+					appendMissingProjectBuilds(job, projectOrder, branch)
+				}
+				if job.Type == model.JobTypeSparkopsCreateVersion {
+					job.Spec["project_ids"] = stringsToAny(projectOrder)
+				}
+			}
+			if job.Type == model.JobTypeSparkopsBuild {
+				applyBranchOverrides(job, stringMap(input["branch_overrides"]), stringMap(input["ref_type_overrides"]))
 			}
 			if (job.Type == model.JobTypeSparkopsDeploy || job.Type == model.JobTypeSparkopsDeployVersion) && len(envOverrides) > 0 {
 				if envID, ok := envOverrides[job.Name].(string); ok && envID != "" {
@@ -1034,15 +1044,23 @@ func ApplyRunInput(stages []model.WorkflowStage, input map[string]any) []model.W
 	return out
 }
 
-func projectIDSet(raw any) (map[string]struct{}, bool) {
+// projectIDList returns the requested project ids in order, de-duplicated.
+func projectIDList(raw any) ([]string, bool) {
 	if raw == nil {
 		return nil, false
 	}
-	out := map[string]struct{}{}
+	out := []string{}
+	seen := map[string]struct{}{}
 	add := func(value string) {
-		if id := strings.TrimSpace(value); id != "" {
-			out[id] = struct{}{}
+		id := strings.TrimSpace(value)
+		if id == "" {
+			return
 		}
+		if _, dup := seen[id]; dup {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
 	}
 	switch values := raw.(type) {
 	case []any:
@@ -1076,23 +1094,46 @@ func filterJobProjects(job *model.WorkflowJob, allowed map[string]struct{}) {
 		}
 		job.Spec["project_builds"] = filtered
 	}
-	if job.Type == model.JobTypeSparkopsCreateVersion {
-		projectIDs := make([]any, 0, len(allowed))
-		if configured, ok := job.Spec["project_ids"].([]any); ok {
-			for _, raw := range configured {
-				if projectID, ok := raw.(string); ok {
-					if _, keep := allowed[projectID]; keep {
-						projectIDs = append(projectIDs, projectID)
-					}
-				}
-			}
-		} else {
-			for projectID := range allowed {
-				projectIDs = append(projectIDs, projectID)
+}
+
+// appendMissingProjectBuilds adds build rows for requested projects that the
+// workflow definition does not configure, so a run can include extra projects.
+func appendMissingProjectBuilds(job *model.WorkflowJob, projectIDs []string, branch string) {
+	rows, _ := job.Spec["project_builds"].([]any)
+	present := make(map[string]struct{}, len(rows))
+	for _, raw := range rows {
+		if row, ok := raw.(map[string]any); ok {
+			if id, _ := row["project_id"].(string); id != "" {
+				present[id] = struct{}{}
 			}
 		}
-		job.Spec["project_ids"] = projectIDs
 	}
+	if branch == "" {
+		branch, _ = job.Spec["branch"].(string)
+	}
+	if branch == "" && len(rows) > 0 {
+		if row, ok := rows[0].(map[string]any); ok {
+			branch, _ = row["branch"].(string)
+		}
+	}
+	if branch == "" {
+		branch = "main"
+	}
+	for _, id := range projectIDs {
+		if _, ok := present[id]; ok {
+			continue
+		}
+		rows = append(rows, map[string]any{"project_id": id, "branch": branch})
+	}
+	job.Spec["project_builds"] = rows
+}
+
+func stringsToAny(values []string) []any {
+	out := make([]any, 0, len(values))
+	for _, value := range values {
+		out = append(out, value)
+	}
+	return out
 }
 
 func applyBranchOverrides(job *model.WorkflowJob, overrides, refTypes map[string]string) {

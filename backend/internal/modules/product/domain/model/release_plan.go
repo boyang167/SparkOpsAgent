@@ -340,6 +340,12 @@ func (spec WorkflowRefSpec) ToRunInput() map[string]any {
 			input["project_ids"] = items
 		}
 	}
+	if overrides := parseStringMapParam(spec.Parameters["_branch_overrides"]); len(overrides) > 0 {
+		input["branch_overrides"] = overrides
+	}
+	if overrides := parseStringMapParam(spec.Parameters["_ref_type_overrides"]); len(overrides) > 0 {
+		input["ref_type_overrides"] = overrides
+	}
 	variables := map[string]any{}
 	for key, value := range spec.Parameters {
 		if key == "branch" || key == "environment_id" || key == "_environment_overrides" || strings.HasPrefix(key, "_") {
@@ -353,6 +359,25 @@ func (spec WorkflowRefSpec) ToRunInput() map[string]any {
 		input["variables"] = variables
 	}
 	return input
+}
+
+// parseStringMapParam decodes a JSON object parameter, dropping blank keys and values.
+func parseStringMapParam(raw string) map[string]any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var values map[string]string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil
+	}
+	out := make(map[string]any, len(values))
+	for key, value := range values {
+		if k, v := strings.TrimSpace(key), strings.TrimSpace(value); k != "" && v != "" {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 func (p *ReleasePlan) MarkWorkflowJobRunning(jobID kernel.ReleasePlanJobID, runID kernel.ProductWorkflowRunID) error {

@@ -3,6 +3,8 @@ import { defaultDeployEnvironmentId } from "./workflow-run-form";
 
 const ENV_OVERRIDES_KEY = "_environment_overrides";
 const PROJECT_IDS_KEY = "_project_ids";
+const BRANCH_OVERRIDES_KEY = "_branch_overrides";
+const REF_TYPE_OVERRIDES_KEY = "_ref_type_overrides";
 
 export async function resolveWorkflowDetails(
   workflow: ProductWorkflowVM,
@@ -34,6 +36,57 @@ export function workflowProjectIds(workflow: ProductWorkflowVM | null | undefine
     }
   }
   return [...seen];
+}
+
+export type GitRefKind = "branch" | "tag" | "pr";
+
+export interface ProjectRef {
+  ref: string;
+  type: GitRefKind;
+}
+
+/** project_id → 本次发布单独指定的分支 / Tag / PR */
+export type ProjectRefOverrides = Record<string, ProjectRef>;
+
+export interface WorkflowProjectSource {
+  ref?: ProjectRef;
+  gitUrl: string;
+  secretId: string;
+}
+
+function asRefKind(value: unknown): GitRefKind {
+  return value === "tag" || value === "pr" ? value : "branch";
+}
+
+function asText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** 工作流构建任务里各项目配置的分支与仓库信息（以首次出现为准） */
+export function workflowProjectSources(
+  workflow: ProductWorkflowVM | null | undefined,
+): Record<string, WorkflowProjectSource> {
+  const out: Record<string, WorkflowProjectSource> = {};
+  for (const stage of workflow?.stages ?? []) {
+    for (const job of stage.jobs ?? []) {
+      if (job.type !== "sparkops-build") continue;
+      const builds = (job.spec as Record<string, unknown> | undefined)?.project_builds;
+      if (!Array.isArray(builds)) continue;
+      for (const raw of builds) {
+        if (!raw || typeof raw !== "object") continue;
+        const row = raw as Record<string, unknown>;
+        const projectId = asText(row.project_id);
+        if (!projectId || out[projectId]) continue;
+        const branch = asText(row.branch);
+        out[projectId] = {
+          ref: branch ? { ref: branch, type: asRefKind(row.git_ref_type) } : undefined,
+          gitUrl: asText(row.git_url),
+          secretId: asText(row.secret_id),
+        };
+      }
+    }
+  }
+  return out;
 }
 
 export function deployJobNames(workflow: ProductWorkflowVM | null | undefined): string[] {
@@ -95,6 +148,7 @@ export function buildWorkflowJobParameters(
   environmentId?: string,
   branch?: string,
   projectIds?: string[],
+  refOverrides?: ProjectRefOverrides,
 ): Record<string, string> {
   const params: Record<string, string> = {};
   const env = environmentId?.trim() ?? "";
@@ -108,7 +162,52 @@ export function buildWorkflowJobParameters(
   }
   if (ref) params.branch = ref;
   if (projectIds) params[PROJECT_IDS_KEY] = JSON.stringify(projectIds);
+  writeRefOverrides(params, compactRefOverrides(refOverrides, projectIds));
   return params;
+}
+
+function compactRefOverrides(overrides: ProjectRefOverrides | undefined, projectIds?: string[]): ProjectRefOverrides {
+  const keep = projectIds ? new Set(projectIds) : null;
+  const out: ProjectRefOverrides = {};
+  for (const [projectId, item] of Object.entries(overrides ?? {})) {
+    const ref = item.ref.trim();
+    if (ref && (!keep || keep.has(projectId))) out[projectId] = { ref, type: asRefKind(item.type) };
+  }
+  return out;
+}
+
+function writeRefOverrides(params: Record<string, string>, overrides: ProjectRefOverrides) {
+  const entries = Object.entries(overrides);
+  if (entries.length === 0) {
+    delete params[BRANCH_OVERRIDES_KEY];
+    delete params[REF_TYPE_OVERRIDES_KEY];
+    return;
+  }
+  params[BRANCH_OVERRIDES_KEY] = JSON.stringify(Object.fromEntries(entries.map(([id, item]) => [id, item.ref])));
+  params[REF_TYPE_OVERRIDES_KEY] = JSON.stringify(Object.fromEntries(entries.map(([id, item]) => [id, item.type])));
+}
+
+function parseJsonStringMap(raw: string | undefined): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+export function parseWorkflowJobRefOverrides(parameters?: Record<string, string>): ProjectRefOverrides {
+  const refs = parseJsonStringMap(parameters?.[BRANCH_OVERRIDES_KEY]);
+  const types = parseJsonStringMap(parameters?.[REF_TYPE_OVERRIDES_KEY]);
+  return compactRefOverrides(
+    Object.fromEntries(Object.entries(refs).map(([id, ref]) => [id, { ref, type: asRefKind(types[id]) }])),
+  );
 }
 
 export function parseWorkflowJobEnvironmentId(parameters?: Record<string, string>): string {
@@ -151,10 +250,19 @@ export function environmentLabel(environments: EnvironmentVM[], environmentId?: 
   return match.name;
 }
 
+export interface WorkflowJobOptions {
+  environmentId?: string;
+  branch?: string;
+  projectIds?: string[];
+  refOverrides?: ProjectRefOverrides;
+}
+
 export interface WorkflowJobParamsPatch {
   environmentId?: string;
   branch?: string | null;
   projectIds?: string[];
+  /** 传入即整体替换 */
+  refOverrides?: ProjectRefOverrides;
 }
 
 export function mergeWorkflowJobParameters(
@@ -181,6 +289,16 @@ export function mergeWorkflowJobParameters(
   }
   if (patch.projectIds !== undefined) {
     merged[PROJECT_IDS_KEY] = JSON.stringify(patch.projectIds);
+  }
+  if (patch.projectIds !== undefined || patch.refOverrides !== undefined) {
+    const projectIds = patch.projectIds ?? parseWorkflowJobProjectIds(merged);
+    writeRefOverrides(
+      merged,
+      compactRefOverrides(
+        patch.refOverrides ?? parseWorkflowJobRefOverrides(merged),
+        projectIds.length > 0 ? projectIds : undefined,
+      ),
+    );
   }
 
   return merged;

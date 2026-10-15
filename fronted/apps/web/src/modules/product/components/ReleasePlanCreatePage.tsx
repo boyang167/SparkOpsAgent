@@ -17,7 +17,11 @@ import {
 } from "./ReleasePlanForm";
 import { ReleasePlanFormFields } from "./ReleasePlanFormFields";
 import { ReleasePlanJobEditor } from "./ReleasePlanJobEditor";
-import { buildWorkflowJobParameters, mergeWorkflowJobParameters } from "./release-plan-workflow-params";
+import {
+  buildWorkflowJobParameters,
+  mergeWorkflowJobParameters,
+  type WorkflowJobOptions,
+} from "./release-plan-workflow-params";
 import { fromDatetimeLocalValue } from "./release-plan-utils";
 
 interface ReleasePlanCreatePageProps {
@@ -241,7 +245,7 @@ export function ReleasePlanCreatePage({
 
   async function onAddWorkflowJob(
     workflowId: string,
-    options?: { environmentId?: string; branch?: string; projectIds?: string[] },
+    options?: WorkflowJobOptions,
   ) {
     const current = await ensurePlanCreated();
     if (!current || !workflowId) return;
@@ -251,7 +255,13 @@ export function ReleasePlanCreatePage({
     try {
       const wf = (await resolveWorkflow(workflowId)) ?? workflows.find((w) => w.id === workflowId);
       const parameters = options
-        ? buildWorkflowJobParameters(wf, options.environmentId, options.branch, options.projectIds)
+        ? buildWorkflowJobParameters(
+            wf,
+            options.environmentId,
+            options.branch,
+            options.projectIds,
+            options.refOverrides,
+          )
         : undefined;
       await product.addReleasePlanJob(workspaceId, productId, current.id, {
         name: wf?.name ?? "工作流发布",

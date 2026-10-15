@@ -16,7 +16,7 @@ import { ActionMenu } from "./ActionMenu";
 import { MemberNameLabel } from "./MemberNameLabel";
 import { ReleasePlanAddWorkflowModal } from "./ReleasePlanAddWorkflowModal";
 import { ReleasePlanModalFooter } from "./ReleasePlanModalFooter";
-import { ReleasePlanProjectSelector } from "./ReleasePlanProjectSelector";
+import { ReleasePlanProjectBranches } from "./ReleasePlanProjectBranches";
 import { SprintWorkItemsImportModal } from "./SprintWorkItemsImportModal";
 import { productDetailTabIcons } from "./product-detail-icons";
 import { RichTextField } from "./RichTextField";
@@ -28,9 +28,12 @@ import {
   parseWorkflowJobBranch,
   parseWorkflowJobEnvironmentId,
   parseWorkflowJobProjectIds,
+  parseWorkflowJobRefOverrides,
   resolveWorkflowDetails,
   workflowHasBuildJobs,
+  workflowProjectSources,
   workflowProjectIds,
+  type WorkflowJobOptions,
   type WorkflowJobParamsPatch,
 } from "./release-plan-workflow-params";
 import { releasePlanStatusBadgeClass, releasePlanStatusLabel } from "./release-plan-utils";
@@ -59,7 +62,7 @@ interface ReleasePlanJobEditorProps {
   onAddText: () => void | Promise<void>;
   onAddWorkflow: (
     workflowId: string,
-    options?: { environmentId?: string; branch?: string; projectIds?: string[] },
+    options?: WorkflowJobOptions,
   ) => void | Promise<void>;
   onWorkflowParamsChange: (
     jobId: string,
@@ -83,6 +86,15 @@ function textPreview(html: string, maxLength = 72): string {
     .trim();
   if (!text) return "";
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
+function JobField({ label, alignTop, children }: { label: string; alignTop?: boolean; children: ReactNode }) {
+  return (
+    <div className="release-plan-job-field">
+      <span className={`release-plan-job-field-label${alignTop ? " is-top" : ""}`}>{label}</span>
+      <div className="release-plan-job-field-value">{children}</div>
+    </div>
+  );
 }
 
 function workflowName(workflows: ProductWorkflowVM[], workflowId?: string): string {
@@ -121,6 +133,7 @@ export function ReleasePlanJobEditor({
   const [workflowDetailErrors, setWorkflowDetailErrors] = useState<Set<string>>(() => new Set());
   const debounceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const loadingWorkflowIds = useRef<Set<string>>(new Set());
+  const detailScope = useRef(`${workspaceId}:${productId}`);
   const prevJobCount = useRef(0);
 
   const jobs = useMemo(
@@ -154,13 +167,15 @@ export function ReleasePlanJobEditor({
   }, [workspaceId, productId]);
 
   useEffect(() => {
+    detailScope.current = `${workspaceId}:${productId}`;
     setWorkflowDetails({});
     setWorkflowDetailErrors(new Set());
     loadingWorkflowIds.current.clear();
   }, [workspaceId, productId]);
 
+  // 请求由 loadingWorkflowIds 跨 effect 重跑去重，不能随单次 effect 取消，只在切换产品后丢弃结果
   useEffect(() => {
-    let cancelled = false;
+    const scope = `${workspaceId}:${productId}`;
     for (const workflowId of referencedWorkflowIds) {
       const summary = workflows.find((workflow) => workflow.id === workflowId);
       if (
@@ -175,18 +190,17 @@ export function ReleasePlanJobEditor({
       loadingWorkflowIds.current.add(workflowId);
       void resolveWorkflowDetails(summary, (id) => product.getProductWorkflow(workspaceId, productId, id))
         .then((detail) => {
-          if (!cancelled) setWorkflowDetails((current) => ({ ...current, [detail.id]: detail }));
+          if (detailScope.current === scope) setWorkflowDetails((current) => ({ ...current, [detail.id]: detail }));
         })
         .catch(() => {
-          if (!cancelled) setWorkflowDetailErrors((current) => new Set([...current, workflowId]));
+          if (detailScope.current === scope) {
+            setWorkflowDetailErrors((current) => new Set([...current, workflowId]));
+          }
         })
         .finally(() => {
-          loadingWorkflowIds.current.delete(workflowId);
+          if (detailScope.current === scope) loadingWorkflowIds.current.delete(workflowId);
         });
     }
-    return () => {
-      cancelled = true;
-    };
   }, [referencedWorkflowIds, workflows, workflowDetails, workflowDetailErrors, workspaceId, productId]);
 
   useEffect(() => {
@@ -302,7 +316,7 @@ export function ReleasePlanJobEditor({
 
   async function submitAddWorkflow(
     workflowId: string,
-    options: { environmentId?: string; branch?: string; projectIds?: string[] },
+    options: WorkflowJobOptions,
   ) {
     await onAddWorkflow(workflowId, options);
     setAddWorkflowOpen(false);
@@ -330,7 +344,7 @@ export function ReleasePlanJobEditor({
     }
     return (
       <select
-        className="input text-xs"
+        className="input text-xs release-plan-job-field-control"
         value={value}
         disabled={disabled || busy}
         aria-label={ariaLabel}
@@ -422,8 +436,10 @@ export function ReleasePlanJobEditor({
             const jobBranch = parseWorkflowJobBranch(job.workflow_ref?.parameters);
             const candidateProjectIds = workflowProjectIds(jobWorkflow);
             const storedProjectIds = parseWorkflowJobProjectIds(job.workflow_ref?.parameters);
-            const availableProjectIds = [...new Set([...candidateProjectIds, ...storedProjectIds])];
             const selectedProjectIds = storedProjectIds.length > 0 ? storedProjectIds : candidateProjectIds;
+            const jobRefOverrides = parseWorkflowJobRefOverrides(job.workflow_ref?.parameters);
+            const projectSources = workflowProjectSources(jobWorkflow);
+            const workflowDefaultBranch = defaultBranchForWorkflow(jobWorkflow);
             const jobHasBuild = workflowHasBuildJobs(jobWorkflow);
 
             const isDragging = dragJobId === job.id;
@@ -481,9 +497,7 @@ export function ReleasePlanJobEditor({
                                 wfLabel,
                                 jobEnvironmentId ? environmentLabel(environments, jobEnvironmentId) : null,
                                 jobBranch ? `分支 ${jobBranch}` : null,
-                                availableProjectIds.length > 0
-                                  ? `项目 ${selectedProjectIds.length}/${availableProjectIds.length}`
-                                  : null,
+                                selectedProjectIds.length > 0 ? `${selectedProjectIds.length} 个项目` : null,
                               ]
                                 .filter(Boolean)
                                 .join(" · ")
@@ -527,16 +541,28 @@ export function ReleasePlanJobEditor({
                   <div className="release-plan-job-card-body">
                     {canEdit ? (
                       <input
-                        className="input text-sm font-medium"
+                        key={`${job.id}-${job.name}`}
+                        className="release-plan-job-title-input"
                         defaultValue={job.name}
+                        aria-label="发布项名称"
+                        placeholder="发布项名称"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") e.currentTarget.blur();
+                          if (e.key === "Escape") {
+                            e.currentTarget.value = job.name;
+                            e.currentTarget.blur();
+                          }
+                        }}
                         onBlur={(e) => {
                           const v = e.target.value.trim();
-                          if (v && v !== job.name) void onUpdate(job.id, { name: v });
+                          if (!v) {
+                            e.target.value = job.name;
+                            return;
+                          }
+                          if (v !== job.name) void onUpdate(job.id, { name: v });
                         }}
                       />
-                    ) : (
-                      <h4 className="release-plan-job-name">{job.name}</h4>
-                    )}
+                    ) : null}
 
                     {job.type === "text" ? (
                       canEdit ? (
@@ -555,18 +581,38 @@ export function ReleasePlanJobEditor({
                       ) : null
                     ) : null}
 
+                    {job.type === "workflow" && workflowId && workflowDetailErrors.has(workflowId) ? (
+                      <InlineAlert tone="error">工作流配置加载失败，请刷新后重试。</InlineAlert>
+                    ) : null}
+
+                    {job.execution_ref?.error_message ? (
+                      <InlineAlert tone="error">{job.execution_ref.error_message}</InlineAlert>
+                    ) : null}
+
+                    <div className="release-plan-job-fields">
                     {job.type === "workflow" && workflowId ? (
-                      <div className="release-plan-job-workflow-meta stack-xs">
-                        {workflowDetailErrors.has(workflowId) ? (
-                          <InlineAlert tone="error">工作流配置加载失败，请刷新后重试。</InlineAlert>
-                        ) : null}
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-xs text-muted-foreground">关联工作流 · {wfLabel}</p>
-                          {workflowLocked ? <span className="badge badge-neutral text-[10px]">工作流已锁定</span> : null}
-                        </div>
+                      <>
+                        <JobField label="工作流">
+                          <span className="release-plan-job-field-inline">
+                            <Link
+                              href={`/products/${productId}/workflows/${workflowId}`}
+                              className="release-plan-job-field-link"
+                            >
+                              {wfLabel}
+                            </Link>
+                            {workflowLocked ? <span className="release-plan-job-field-hint">已锁定</span> : null}
+                            {job.execution_ref?.workflow_run_id ? (
+                              <Link
+                                href={`/products/${productId}/workflows/${workflowId}/runs/${job.execution_ref.workflow_run_id}`}
+                                className="release-plan-job-field-link is-subtle"
+                              >
+                                查看运行记录
+                              </Link>
+                            ) : null}
+                          </span>
+                        </JobField>
                         {jobHasDeploy ? (
-                          <label className="release-plan-job-env">
-                            <span className="release-plan-job-owner-label">部署环境</span>
+                          <JobField label="部署环境">
                             {canEditJob ? (
                               renderEnvironmentSelect(
                                 jobEnvironmentId || defaultEnvironmentIdForWorkflow(jobWorkflow, environments),
@@ -577,21 +623,21 @@ export function ReleasePlanJobEditor({
                                 "部署环境",
                               )
                             ) : (
-                              <span className="text-sm text-muted-foreground">
+                              <span className="release-plan-job-field-text">
                                 {environmentLabel(environments, jobEnvironmentId)}
                               </span>
                             )}
-                          </label>
+                          </JobField>
                         ) : null}
                         {jobHasBuild ? (
-                          <label className="release-plan-job-env">
-                            <span className="release-plan-job-owner-label">构建分支</span>
+                          <JobField label="默认分支">
                             {canEditJob ? (
                               <input
-                                className="input text-xs"
+                                key={`${job.id}-${jobBranch}`}
+                                className="input text-xs release-plan-job-field-control"
                                 defaultValue={jobBranch || defaultBranchForWorkflow(jobWorkflow)}
                                 disabled={busy}
-                                aria-label="构建分支"
+                                aria-label="默认构建分支"
                                 placeholder="main"
                                 onBlur={(e) => {
                                   const value = e.target.value.trim();
@@ -603,63 +649,61 @@ export function ReleasePlanJobEditor({
                                 }}
                               />
                             ) : (
-                              <span className="text-sm text-muted-foreground">
+                              <span className="release-plan-job-field-text font-mono">
                                 {jobBranch || defaultBranchForWorkflow(jobWorkflow)}
                               </span>
                             )}
-                          </label>
+                          </JobField>
                         ) : null}
-                        <ReleasePlanProjectSelector
-                          projectIds={availableProjectIds}
-                          projects={projects}
-                          selectedIds={selectedProjectIds}
-                          disabled={!canEditJob || busy}
-                          onChange={
-                            canEditJob
-                              ? (projectIds) => {
-                                  if (projectIds.length === 0) return;
-                                  void onWorkflowParamsChange(job.id, workflowId, { projectIds });
-                                }
-                              : undefined
-                          }
-                        />
-                      </div>
-                    ) : null}
-
-                    {job.execution_ref?.workflow_run_id && workflowId ? (
-                      <Link
-                        href={`/products/${productId}/workflows/${workflowId}/runs/${job.execution_ref.workflow_run_id}`}
-                        className="text-xs text-primary hover:underline font-mono w-fit"
-                      >
-                        查看 Run {job.execution_ref.workflow_run_id.slice(0, 8)}…
-                      </Link>
-                    ) : null}
-
-                    {job.execution_ref?.error_message ? (
-                      <InlineAlert tone="error">{job.execution_ref.error_message}</InlineAlert>
+                        {selectedProjectIds.length > 0 || (jobHasBuild && canEditJob && projects.length > 0) ? (
+                          <JobField label="执行项目" alignTop>
+                            <ReleasePlanProjectBranches
+                              workspaceId={workspaceId}
+                              projects={projects}
+                              selectedIds={selectedProjectIds}
+                              refOverrides={jobRefOverrides}
+                              defaultRefFor={(projectId) =>
+                                jobBranch
+                                  ? { ref: jobBranch, type: "branch" }
+                                  : (projectSources[projectId]?.ref ?? { ref: workflowDefaultBranch, type: "branch" })
+                              }
+                              workflowSourceFor={(projectId) => projectSources[projectId]}
+                              buildable={jobHasBuild}
+                              editable={canEditJob && !busy}
+                              onChange={({ projectIds, refOverrides }) =>
+                                void onWorkflowParamsChange(job.id, workflowId, { projectIds, refOverrides })
+                              }
+                            />
+                          </JobField>
+                        ) : null}
+                      </>
                     ) : null}
 
                     {canEdit || job.owner_id ? (
-                      <label className="release-plan-job-owner">
-                        <span className="release-plan-job-owner-label">执行人</span>
+                      <JobField label="执行人">
                         {canEdit ? (
-                          <WorkItemAssigneeField
-                            workspaceId={workspaceId}
-                            assigneeId={job.owner_id}
-                            onSelect={(id) => {
-                              if (id) void onUpdate(job.id, { owner_id: id });
-                            }}
-                          />
+                          <div className="release-plan-job-field-control">
+                            <WorkItemAssigneeField
+                              workspaceId={workspaceId}
+                              assigneeId={job.owner_id}
+                              assigneeName={job.owner_id ? memberName?.(job.owner_id) : undefined}
+                              disabled={busy}
+                              onSelect={(id) => {
+                                if (id) void onUpdate(job.id, { owner_id: id });
+                              }}
+                            />
+                          </div>
                         ) : (
                           <MemberNameLabel
                             workspaceId={workspaceId}
                             memberId={job.owner_id}
                             memberName={memberName}
-                            className="text-sm text-muted-foreground"
+                            className="release-plan-job-field-text"
                           />
                         )}
-                      </label>
+                      </JobField>
                     ) : null}
+                    </div>
                   </div>
                 ) : null}
               </li>
