@@ -2,12 +2,15 @@ package command
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -25,14 +28,20 @@ type ArchiveProjectHandler struct {
 	repo        repository.ProjectRepository
 	wsChecker   port.WorkspaceChecker
 	coordinator *ArchiveCoordinator
+	tx          postgres.Transactor
 }
 
 func NewArchiveProjectHandler(
 	repo repository.ProjectRepository,
 	wsChecker port.WorkspaceChecker,
 	coordinator *ArchiveCoordinator,
+	transactors ...postgres.Transactor,
 ) *ArchiveProjectHandler {
-	return &ArchiveProjectHandler{repo: repo, wsChecker: wsChecker, coordinator: coordinator}
+	handler := &ArchiveProjectHandler{repo: repo, wsChecker: wsChecker, coordinator: coordinator}
+	if len(transactors) > 0 {
+		handler.tx = transactors[0]
+	}
+	return handler
 }
 
 func (h *ArchiveProjectHandler) Handle(
@@ -49,7 +58,7 @@ func (h *ArchiveProjectHandler) Handle(
 	if strings.TrimSpace(input.ConfirmName) != project.Name.String() {
 		return ArchiveResult{}, domain.ErrConfirmNameMismatch
 	}
-	return h.archive(ctx, project, memberID, input.Teardown)
+	return h.archiveInTransaction(ctx, project, memberID, input.Teardown)
 }
 
 // HandleLegacy serves DELETE /projects/:id, which never tears environments down.
@@ -63,8 +72,33 @@ func (h *ArchiveProjectHandler) HandleLegacy(
 	if err != nil {
 		return err
 	}
-	_, err = h.archive(ctx, project, memberID, false)
+	_, err = h.archiveInTransaction(ctx, project, memberID, false)
 	return err
+}
+
+func (h *ArchiveProjectHandler) archiveInTransaction(
+	ctx context.Context,
+	project *model.Project,
+	memberID kernel.MemberID,
+	withTeardown bool,
+) (ArchiveResult, error) {
+	if h.coordinator.operations == nil {
+		return h.archive(ctx, project, memberID, withTeardown)
+	}
+	if h.tx == nil {
+		return ArchiveResult{}, errors.New("archive operation requires transaction")
+	}
+	var result ArchiveResult
+	err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		txCtx = events.WithMetadata(txCtx, events.Metadata{
+			EventID:    "workspace-archive-" + project.ID.String(),
+			Subscriber: "workspace-app.archive-project",
+		})
+		var err error
+		result, err = h.archive(txCtx, project, memberID, withTeardown)
+		return err
+	})
+	return result, err
 }
 
 func (h *ArchiveProjectHandler) load(
@@ -121,6 +155,18 @@ func (h *ArchiveProjectHandler) archive(
 		return ArchiveResult{}, err
 	}
 	if len(online) == 0 {
+		if h.coordinator.operations != nil {
+			if err := project.BeginArchiving(); err != nil {
+				return ArchiveResult{}, err
+			}
+			if err := h.repo.Update(ctx, project); err != nil {
+				return ArchiveResult{}, err
+			}
+			if err := h.coordinator.finish(ctx, teardown, project); err != nil {
+				return ArchiveResult{}, err
+			}
+			return ArchiveResult{Status: string(model.ProjectStatusArchiving), PendingClusters: []string{}}, nil
+		}
 		if err := h.coordinator.finish(ctx, teardown, project); err != nil {
 			return ArchiveResult{}, err
 		}

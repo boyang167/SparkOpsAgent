@@ -14,6 +14,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -39,6 +40,13 @@ type Scheduler struct {
 	locker         runLocker
 	status         ExternalStatusReader
 	tx             postgres.Transactor
+	operations     messaging.OperationWriter
+}
+
+func (s *Scheduler) SetOperationWriter(writer messaging.OperationWriter) {
+	if s != nil {
+		s.operations = writer
+	}
 }
 
 func (s *Scheduler) SetGitReporter(reporter GitReporter) {
@@ -85,7 +93,9 @@ func (s *Scheduler) StartRun(ctx context.Context, wf *model.ProductWorkflow, run
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
 		return err
 	}
-	s.emitNotification(ctx, wf, run, model.NotifyEventCreated)
+	if err := s.emitNotification(ctx, wf, run, model.NotifyEventCreated); err != nil {
+		return err
+	}
 	s.reportGit(ctx, run)
 	return s.executeCurrentStage(ctx, wf, run)
 }
@@ -182,7 +192,9 @@ func (s *Scheduler) handleBuildCompletedAttempt(
 		}
 		if changed {
 			if job, ok := jobByName(wf, jobName); ok {
-				s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed)
+				if err := s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -193,7 +205,9 @@ func (s *Scheduler) handleBuildCompletedAttempt(
 		}
 		if changed {
 			if job, ok := jobByName(wf, jobName); ok {
-				s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed)
+				if err := s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -203,7 +217,9 @@ func (s *Scheduler) handleBuildCompletedAttempt(
 			return err
 		}
 		if job, ok := jobByName(wf, jobName); ok {
-			s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventPassed)
+			if err := s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventPassed); err != nil {
+				return err
+			}
 		}
 	}
 	if !runAllowsProgress(run) {
@@ -621,7 +637,9 @@ func (s *Scheduler) ApproveJob(ctx context.Context, runID kernel.ProductWorkflow
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
 		return err
 	}
-	s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventPassed)
+	if err := s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventPassed); err != nil {
+		return err
+	}
 	stages := WorkflowStagesForRun(wf, run)
 	if s.stageComplete(run, run.CurrentStage) {
 		return s.advanceStage(ctx, wf, run)
@@ -741,8 +759,7 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 		if err := s.repo.UpdateRun(ctx, run); err != nil {
 			return err
 		}
-		s.emitNotification(ctx, wf, run, model.NotifyEventManual)
-		return nil
+		return s.emitNotification(ctx, wf, run, model.NotifyEventManual)
 	}
 	stageRun.Status = model.JobRunStatusRunning
 	if run.Status == model.RunStatusPaused {
@@ -770,7 +787,9 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 			if jobRun.Status == model.JobRunStatusRunning {
 				hasAsync = true
 			}
-			s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventCreated)
+			if err := s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventCreated); err != nil {
+				return err
+			}
 		case model.JobTypeSparkopsCreateVersion:
 			if s.createVersions == nil {
 				jobRun.Status = model.JobRunStatusFailed
@@ -795,7 +814,9 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 		case model.JobTypeSparkopsApproval:
 			hasAsync = true
 			StartApprovalJob(jobRun, job)
-			s.emitNotification(ctx, wf, run, model.NotifyEventWaiting)
+			if err := s.emitNotification(ctx, wf, run, model.NotifyEventWaiting); err != nil {
+				return err
+			}
 		case model.JobTypeFreestyle:
 			RunFreestyleJob(jobRun, job)
 		case model.JobTypeNotify:
@@ -988,7 +1009,9 @@ func (s *Scheduler) completeRun(ctx context.Context, run *model.ProductWorkflowR
 	if err := s.persistTerminalRun(ctx, run); err != nil {
 		return err
 	}
-	s.emitNotification(ctx, nil, run, model.NotifyEventPassed)
+	if err := s.emitNotification(ctx, nil, run, model.NotifyEventPassed); err != nil {
+		return err
+	}
 	s.reportGit(ctx, run)
 	return nil
 }
@@ -1007,7 +1030,9 @@ func (s *Scheduler) failRunEvent(ctx context.Context, run *model.ProductWorkflow
 	if err := s.persistTerminalRun(ctx, run); err != nil {
 		return err
 	}
-	s.emitNotification(ctx, nil, run, event)
+	if err := s.emitNotification(ctx, nil, run, event); err != nil {
+		return err
+	}
 	s.reportGit(ctx, run)
 	return nil
 }

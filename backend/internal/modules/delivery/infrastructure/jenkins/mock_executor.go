@@ -86,5 +86,9 @@ func (e *MockExecutor) DisableJob(_ context.Context, folder, job string) error {
 	return nil
 }
 
+func (e *MockExecutor) IsJobDisabled(_ context.Context, folder, job string) (bool, error) {
+	return e.LastDisabledJob == folder+"/"+job, nil
+}
+
 var _ port.JenkinsExecutor = (*MockExecutor)(nil)
 var _ port.JenkinsJobDisabler = (*MockExecutor)(nil)

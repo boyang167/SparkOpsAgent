@@ -185,7 +185,9 @@ func (h *FinishReleasePlanPlanningHandler) Handle(ctx context.Context, productID
 		}
 		_ = h.audit(ctx, plan.ID, actor, "finish_planning", map[string]any{"status": plan.Status, "hook": "finish_planning"})
 		_ = recordPlanVersionAfterReload(ctx, h.plans, plan.ID, actor, "finish_planning")
-		flow.sendHook(ctx, plan, model.ReleasePlanHookEventFinishPlanning)
+		if err := flow.sendHook(ctx, plan, model.ReleasePlanHookEventFinishPlanning); err != nil {
+			return nil, err
+		}
 		return h.plans.FindPlanByID(ctx, planID)
 	}
 	if err := plan.FinishPlanning(); err != nil {
@@ -230,7 +232,9 @@ func (h *ApproveReleasePlanHandler) Handle(ctx context.Context, productID kernel
 			return nil, err
 		}
 		_ = h.audit(ctx, plan.ID, actor, "approve", map[string]any{"hook": "before_execute"})
-		flow.sendHook(ctx, plan, model.ReleasePlanHookEventBeforeExecute)
+		if err := flow.sendHook(ctx, plan, model.ReleasePlanHookEventBeforeExecute); err != nil {
+			return nil, err
+		}
 		return h.plans.FindPlanByID(ctx, planID)
 	}
 	if err := h.plans.UpdatePlan(ctx, plan); err != nil {

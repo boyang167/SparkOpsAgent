@@ -2,6 +2,7 @@ package modules_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -28,6 +29,12 @@ import (
 
 type subscriberTestTransport struct {
 	retries int
+}
+
+type failingSubscriberOperationWriter struct{}
+
+func (failingSubscriberOperationWriter) Schedule(context.Context, messaging.OperationRequest) error {
+	return errors.New("operation outbox unavailable")
 }
 
 func (*subscriberTestTransport) Declare(context.Context, []messaging.Subscription) error { return nil }
@@ -94,6 +101,42 @@ func TestGovernanceInboxCommitsDatabaseAndPolicyOperationAtomically(t *testing.T
 	assertCount(t, db, "governance.roles", int64(len(authz.DefaultWorkspaceRoles)))
 	assertCount(t, db, "governance.role_bindings", 1)
 	assertCount(t, db, "operation_outbox", 1)
+}
+
+func TestOperationScheduleFailureRollsBackLocalDatabaseAndInbox(t *testing.T) {
+	db := openSubscriberDB(t)
+	require.NoError(t, db.Exec("CREATE TABLE product.rollback_probe (id TEXT PRIMARY KEY)").Error)
+	registry := events.NewRegistry()
+	require.NoError(t, integration.RegisterWorkspaceCreated(registry))
+	transport := &subscriberTestTransport{}
+	consumer := messaging.NewInboxConsumer(
+		postgres.NewTransactor(db),
+		messagingpersistence.NewInboxStore(db),
+		registry,
+		transport,
+		nil,
+		nil,
+	)
+	event := integration.NewWorkspaceCreated(kernel.NewWorkspaceID(), kernel.NewOrgID(), kernel.NewMemberID())
+	envelope, err := registry.Encode(context.Background(), event)
+	require.NoError(t, err)
+	subscription := messaging.Subscription{
+		EventName: event.EventName(), Version: 1, Subscriber: "task10.rollback-proof",
+		Handler: func(ctx context.Context, _ events.Event) error {
+			if err := postgres.DB(ctx, db).Exec("INSERT INTO product.rollback_probe (id) VALUES (?)", "local-change").Error; err != nil {
+				return err
+			}
+			return failingSubscriberOperationWriter{}.Schedule(ctx, messaging.OperationRequest{
+				Owner: "task10.rollback-proof", OperationType: "task10.proof.v1", IdempotencyKey: "event:subscriber:type:target",
+			})
+		},
+	}
+
+	require.NoError(t, consumer.Handle(context.Background(), subscription, envelope, 0))
+
+	require.Equal(t, 1, transport.retries)
+	assertCount(t, db, "product.rollback_probe", 0)
+	assertCount(t, db, "platform.event_inbox", 0)
 }
 
 func TestPureDatabaseSubscribersSkipDuplicateDeliveries(t *testing.T) {

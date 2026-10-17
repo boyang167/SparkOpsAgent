@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
 	deployport "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/port"
 	harborinfra "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/harbor"
-	jenkinsinfra "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/jenkins"
 	deliveryport "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/port"
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
+	jenkinsinfra "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/jenkins"
 )
 
 type HarborProjectEnsurer func(ctx context.Context, secret deployport.DeploymentSecret, projectName string) error
@@ -60,7 +60,7 @@ func (s *PrepareService) Run(ctx context.Context, project deployport.ProjectDepl
 		GitRefValue:          input.GitRefValue,
 		ImageTag:             input.ImageTag,
 		ImageRepository:      input.ImageRepository,
-		GitCredentialID:        JenkinsCredentialID(project.Git, project.Namespace),
+		GitCredentialID:      JenkinsCredentialID(project.Git, project.Namespace),
 		RegistryCredentialID: JenkinsCredentialID(project.Harbor, project.Namespace),
 		GitURLOverride:       ResolveCheckoutGitURL(project),
 	})
@@ -96,6 +96,18 @@ func (s *PrepareService) DisableJob(ctx context.Context, project deployport.Proj
 		return nil
 	}
 	return disabler.DisableJob(ctx, strings.TrimSpace(project.Namespace), strings.TrimSpace(project.Name))
+}
+
+func (s *PrepareService) PipelineDisabled(ctx context.Context, project deployport.ProjectDeploymentContext) (bool, error) {
+	executor, err := s.resolveJenkins(project.Jenkins)
+	if err != nil {
+		return false, fmt.Errorf("resolve project jenkins: %w", err)
+	}
+	disabler, ok := executor.(deliveryport.JenkinsJobDisabler)
+	if !ok {
+		return true, nil
+	}
+	return disabler.IsJobDisabled(ctx, strings.TrimSpace(project.Namespace), strings.TrimSpace(project.Name))
 }
 
 func (s *PrepareService) ensureHarborProject(ctx context.Context, project deployport.ProjectDeploymentContext) error {

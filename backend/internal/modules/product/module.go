@@ -97,7 +97,9 @@ func (m *Module) Register(c *appctx.Container) error {
 			return fmt.Errorf("product module requires operation outbox")
 		}
 		operationWriter = c.OperationWriter
-		handler := productoutbound.NewWorkflowCompletionOperation(func(ctx context.Context, runID kernel.ProductWorkflowRunID, success bool, message string) error {
+		releasePlanExecutor.UseOperationWriter(operationWriter)
+		sprintWorkItemExecutor.UseOperationWriter(operationWriter)
+		handler := productoutbound.NewWorkflowCompletionOperation(c.Transactor, func(ctx context.Context, runID kernel.ProductWorkflowRunID, success bool, message string) error {
 			if err := releasePlanExecutor.OnWorkflowRunCompleted(ctx, runID, success, message, kernel.MemberID{}); err != nil {
 				return err
 			}
@@ -118,7 +120,10 @@ func (m *Module) Register(c *appctx.Container) error {
 					return fmt.Errorf("pm connector %q unavailable", payload.Provider)
 				}
 				issue, err := connector.GetIssue(ctx, workspaceID, payload.PMWorkspaceID, payload.IssueKey)
-				if err == nil && issue != nil && issue.Status == payload.Status {
+				if err != nil {
+					return err
+				}
+				if issue != nil && issue.Status == payload.Status {
 					return nil
 				}
 				return connector.TransitionIssue(ctx, workspaceID, payload.PMWorkspaceID, payload.IssueKey, payload.Status)
@@ -128,12 +133,12 @@ func (m *Module) Register(c *appctx.Container) error {
 		}
 		if err := c.OperationRegistry.Register(
 			productoutbound.OperationTypeReleasePlanWebhookSend,
-			productoutbound.NewReleasePlanWebhookOperation(func(ctx context.Context, planID kernel.ReleasePlanID, event string) error {
+			productoutbound.NewReleasePlanWebhookOperation(func(ctx context.Context, planID kernel.ReleasePlanID, event, idempotencyKey string) error {
 				plan, err := releasePlanRepo.FindPlanByID(ctx, planID)
 				if err != nil {
 					return err
 				}
-				return releasePlanHookNotifier.Send(ctx, plan, productmodel.ReleasePlanHookEvent(event))
+				return releasePlanHookNotifier.SendWithIdempotency(ctx, plan, productmodel.ReleasePlanHookEvent(event), idempotencyKey)
 			}),
 		); err != nil {
 			return fmt.Errorf("register product release plan webhook operation: %w", err)

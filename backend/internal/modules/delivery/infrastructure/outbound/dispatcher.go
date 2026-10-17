@@ -50,7 +50,7 @@ func (d *Dispatcher) Handle(ctx context.Context, e events.Event) error {
 		if d.logger != nil {
 			d.logger.Warn("list webhooks failed", zap.Error(err))
 		}
-		return nil
+		return fmt.Errorf("list enabled webhooks: %w", err)
 	}
 	for i := range hooks {
 		hook := hooks[i]
@@ -67,54 +67,57 @@ func (d *Dispatcher) Handle(ctx context.Context, e events.Event) error {
 				OperationType:  OperationTypeWebhookSend,
 				IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + OperationTypeWebhookSend + ":" + hook.ID.String(),
 				Payload: WebhookPayload{
-					EventID: metadata.EventID, WebhookID: hook.ID.String(), URL: hook.URL,
-					Token: hook.Token, Body: payload, Timeout: 5 * time.Second,
+					EventID: metadata.EventID, WebhookID: hook.ID.String(),
+					Body: payload, Timeout: 5 * time.Second,
 				},
 			}); err != nil {
 				return err
 			}
 			continue
 		}
-		d.dispatch(hook, payload)
+		if err := d.dispatch(ctx, hook, payload); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func (d *Dispatcher) dispatch(hook persistence.WebhookRecord, payload map[string]any) {
-	run := func() {
-		body, err := json.Marshal(payload)
-		if err != nil {
-			return
-		}
-		req, err := http.NewRequest(http.MethodPost, hook.URL, bytes.NewReader(body))
-		if err != nil {
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if hook.Token != "" {
-			req.Header.Set("X-SparkOps-Token", hook.Token)
-		}
-		resp, err := d.client.Do(req)
-		if err != nil {
-			if d.logger != nil {
-				d.logger.Warn("webhook post failed",
-					zap.String("webhook_id", hook.ID.String()),
-					zap.String("url", hook.URL),
-					zap.Error(err),
-				)
-			}
-			return
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode >= 300 && d.logger != nil {
-			d.logger.Warn("webhook post rejected",
+func (d *Dispatcher) dispatch(ctx context.Context, hook persistence.WebhookRecord, payload map[string]any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, hook.URL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if hook.Token != "" {
+		req.Header.Set("X-SparkOps-Token", hook.Token)
+	}
+	resp, err := d.client.Do(req)
+	if err != nil {
+		if d.logger != nil {
+			d.logger.Warn("webhook post failed",
 				zap.String("webhook_id", hook.ID.String()),
 				zap.String("url", hook.URL),
-				zap.Int("status", resp.StatusCode),
+				zap.Error(err),
 			)
 		}
+		return err
 	}
-	run()
+	_ = resp.Body.Close()
+	if resp.StatusCode >= 300 && d.logger != nil {
+		d.logger.Warn("webhook post rejected",
+			zap.String("webhook_id", hook.ID.String()),
+			zap.String("url", hook.URL),
+			zap.Int("status", resp.StatusCode),
+		)
+	}
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("webhook rejected with status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func payloadFromEvent(e events.Event) (map[string]any, string, kernel.ProjectID, bool) {

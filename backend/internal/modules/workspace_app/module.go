@@ -113,7 +113,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	if operationWriter != nil {
 		if err := c.OperationRegistry.Register(
 			workspaceoutbound.OperationTypeProjectUndeploy,
-			workspaceoutbound.NewProjectUndeployHandler(repo, archiveCoordinator),
+			workspaceoutbound.NewProjectUndeployHandler(repo, archiveCoordinator, c.Transactor),
 		); err != nil {
 			return fmt.Errorf("register workspace archive operation: %w", err)
 		}
@@ -121,7 +121,7 @@ func (m *Module) Register(c *appctx.Container) error {
 			workspaceoutbound.OperationTypePipelineDisable,
 			workspaceoutbound.NewPipelineDisableHandler(func() workspaceoutbound.PipelineDisabler {
 				return c.ProjectTeardown
-			}),
+			}, repo, c.Transactor),
 		); err != nil {
 			return fmt.Errorf("register workspace pipeline operation: %w", err)
 		}
@@ -140,7 +140,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	handler := wshttp.NewHandler(
 		command.NewCreateProjectHandler(repo, memberRepo, wsChecker, clusterChecker, productChecker, c.PolicyEngine, c.EventBus, c.Transactor),
 		command.NewUpdateProjectHandler(repo, wsChecker, clusterChecker, productChecker),
-		command.NewArchiveProjectHandler(repo, wsChecker, archiveCoordinator),
+		command.NewArchiveProjectHandler(repo, wsChecker, archiveCoordinator, c.Transactor),
 		query.NewListProjectsHandler(repo, memberRepo, wsChecker, c.PermissionChecker, memberLookup),
 		query.NewGetProjectHandler(repo, memberRepo, wsChecker, c.PermissionChecker, memberLookup),
 		command.NewCreateTemplateHandler(templateRepo, wsChecker),
@@ -239,7 +239,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.POST("/api/v1/workspaces/:wsId/git/file",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetGitFileContent)
 
-	startArchiveResumer(c, archiveCoordinator)
+	if operationWriter == nil {
+		startArchiveResumer(c, archiveCoordinator)
+	}
 	return nil
 }
 

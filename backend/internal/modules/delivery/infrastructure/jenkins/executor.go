@@ -139,6 +139,35 @@ func (e *Executor) DisableJob(ctx context.Context, folder, job string) error {
 	return nil
 }
 
+// IsJobDisabled treats a missing job as already disabled.
+func (e *Executor) IsJobDisabled(ctx context.Context, folder, job string) (bool, error) {
+	folder = strings.TrimSpace(folder)
+	job = strings.TrimSpace(job)
+	if folder == "" || job == "" {
+		return false, errors.New("jenkins folder and job are required")
+	}
+	jobBase := "/job/" + url.PathEscape(folder) + "/job/" + url.PathEscape(job)
+	status, err := e.resourceStatus(ctx, jobBase)
+	if err != nil {
+		return false, fmt.Errorf("get jenkins job: %w", err)
+	}
+	if status == http.StatusNotFound {
+		return true, nil
+	}
+	if status != http.StatusOK {
+		return false, fmt.Errorf("get jenkins job: unexpected status %d", status)
+	}
+	target, err := e.client.GetJob(ctx, job, folder)
+	if err != nil {
+		return false, fmt.Errorf("get jenkins job: %w", err)
+	}
+	details := target.GetDetails()
+	if details == nil {
+		return false, fmt.Errorf("query jenkins job state: empty response")
+	}
+	return !details.Buildable, nil
+}
+
 var _ port.JenkinsJobDisabler = (*Executor)(nil)
 
 func (e *Executor) SyncCredentials(ctx context.Context, folder string, credentials []port.JenkinsCredential) error {

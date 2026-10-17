@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,8 +12,10 @@ import (
 
 	deploymodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	deployrepo "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
+	"gorm.io/gorm"
 )
 
 const (
@@ -24,8 +27,6 @@ const (
 type WebhookPayload struct {
 	EventID   string         `json:"event_id"`
 	WebhookID string         `json:"webhook_id"`
-	URL       string         `json:"url"`
-	Token     string         `json:"token,omitempty"`
 	Body      map[string]any `json:"body"`
 	Timeout   time.Duration  `json:"timeout"`
 }
@@ -102,20 +103,39 @@ func NewCredentialSyncHandler(syncer CredentialSyncer) messaging.OperationHandle
 }
 
 type WebhookHandler struct {
+	hooks  WebhookLookup
 	client *http.Client
 }
 
-func NewWebhookHandler(client *http.Client) *WebhookHandler {
+type WebhookLookup interface {
+	Get(context.Context, kernel.WebhookID) (*persistence.WebhookRecord, error)
+}
+
+func NewWebhookHandler(hooks WebhookLookup, client *http.Client) *WebhookHandler {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
-	return &WebhookHandler{client: client}
+	return &WebhookHandler{hooks: hooks, client: client}
 }
 
 func (h *WebhookHandler) Handle(ctx context.Context, operation messaging.Operation) error {
 	var payload WebhookPayload
 	if err := json.Unmarshal(operation.Payload, &payload); err != nil {
 		return messaging.Permanent(fmt.Errorf("decode webhook operation: %w", err))
+	}
+	hookID, err := kernel.ParseWebhookID(payload.WebhookID)
+	if err != nil {
+		return messaging.Permanent(err)
+	}
+	hook, err := h.hooks.Get(ctx, hookID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load webhook: %w", err)
+	}
+	if !hook.Enabled {
+		return nil
 	}
 	body, err := json.Marshal(payload.Body)
 	if err != nil {
@@ -127,15 +147,15 @@ func (h *WebhookHandler) Handle(ctx context.Context, operation messaging.Operati
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(sendCtx, http.MethodPost, payload.URL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(sendCtx, http.MethodPost, hook.URL, bytes.NewReader(body))
 	if err != nil {
 		return messaging.Permanent(fmt.Errorf("create webhook request: %w", err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-SparkOps-Event-ID", payload.EventID)
 	req.Header.Set("X-SparkOps-Idempotency-Key", operation.IdempotencyKey)
-	if payload.Token != "" {
-		req.Header.Set("X-SparkOps-Token", payload.Token)
+	if hook.Token != "" {
+		req.Header.Set("X-SparkOps-Token", hook.Token)
 	}
 	resp, err := h.client.Do(req)
 	if err != nil {
@@ -143,7 +163,10 @@ func (h *WebhookHandler) Handle(ctx context.Context, operation messaging.Operati
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
-	if resp.StatusCode >= http.StatusBadRequest && resp.StatusCode != http.StatusTooManyRequests {
+	if resp.StatusCode >= http.StatusBadRequest &&
+		resp.StatusCode != http.StatusRequestTimeout &&
+		resp.StatusCode != http.StatusTooManyRequests &&
+		resp.StatusCode < http.StatusInternalServerError {
 		return messaging.Permanent(fmt.Errorf("webhook rejected with status %d", resp.StatusCode))
 	}
 	if resp.StatusCode >= http.StatusMultipleChoices {

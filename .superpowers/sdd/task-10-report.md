@@ -28,11 +28,11 @@ Stable keys use `<eventID>:<subscriber>:<operationType>:<target>`. Command-creat
 
 - Delivery: webhook send, Jenkins credential sync, deploy queue publish.
 - Workspace App: project undeploy, pipeline disable.
-- Product Workflow: build completion/trigger, deploy completion/trigger, webhook send.
+- Product Workflow: build completion/trigger, deploy completion/trigger, webhook send, SMTP send, Feishu-user send.
 - Product: workflow completion/trigger, Jira transition, release-plan webhook send.
 - Governance: Casbin member-role sync.
 
-Registration is guarded by `OperationRegistry.Register`; duplicate types fail startup. A production-source completeness test requires every Task 10 type exactly once (the two module-owned webhook constants occur once per owner).
+Registration is guarded by `OperationRegistry.Register`; duplicate types fail startup. A runtime registry test registers all 14 production handler constructors, resolves every scheduled type, and proves duplicate registration fails.
 
 ## Idempotency and reconciliation
 
@@ -66,6 +66,35 @@ GREEN:
 - RabbitMQ task queue publication can repeat after publish success but before Operation completion persistence; deployment-run and consumer state guards are the second line of defense.
 - External systems cannot participate in the PostgreSQL transaction. Correctness depends on the documented state queries/upserts and Operation retries.
 - The local `inmemory` driver remains synchronous and non-durable; production reliability still requires AMQP/outbox enablement in Task 11.
+
+## Task 10 review-fix evidence
+
+### Corrected external-operation matrix
+
+| Path | Operation type | Owner / target | Idempotency and reconciliation |
+| --- | --- | --- | --- |
+| Product-workflow webhook notification | `product-workflow.webhook.send.v1` | original completion subscriber / notification ID | Stable event key and outbound idempotency header; 408/429/5xx retry |
+| Product-workflow SMTP notification | `product-workflow.mail.send.v1` | original completion subscriber / notification ID | Stable event key forwarded as SMTP `Message-ID`; send errors retry |
+| Product-workflow Feishu-user notification | `product-workflow.feishu-user.send.v1` | original completion subscriber / notification ID | Stable event key forwarded to the HTTP protocol; 408/429/5xx retry |
+| Product Jira transition | `product.jira.transition.v1` | `product.workflow-run-completed` / provider + issue | Query current issue status before transition; an already-converged issue is success |
+| Product release-plan hook | `product.release-plan.webhook.send.v1` | `product.workflow-run-completed` / plan ID | Reload current plan at execution and forward `Idempotency-Key`; HTTP failures are observable |
+| Workspace archive pipeline disable | `workspace-app.pipeline.disable.v1` | archive subscriber or command / project ID | Query Jenkins job state before disable and again before archive; archived replay is a no-op |
+| Delivery build webhook | `delivery.webhook.send.v1` | `delivery.build-completed.webhook` / webhook ID | Payload stores webhook ID only; handler reloads latest URL/token; 408/429/5xx retry |
+| Delivery deploy webhook | `delivery.webhook.send.v1` | `delivery.deploy-completed.webhook` / webhook ID | Same protected lookup and retry policy as build webhook |
+
+### RED / GREEN
+
+- RED: workflow notification tests did not compile because mail/Feishu operation types and scheduler writer support were absent. GREEN: three target-specific rows are persisted and duplicate scheduling remains one row per target.
+- RED: archive tests showed Jenkins disable failure still returned success and archived the project. GREEN: failed disable leaves `archiving`; the operation queries state, disables, confirms, then archives transactionally.
+- RED: delivery webhook constructor lacked runtime lookup and payload assertions exposed URL/token persistence. GREEN: payload contains webhook ID plus non-sensitive event data only and the handler reloads current credentials.
+- RED: 408 tests were classified permanent. GREEN: 408, 429 and 5xx are temporary for delivery and product-workflow webhook handlers.
+- RED: runtime production-chain coverage relied on source counting. GREEN: actual handler constructors are registered in a real registry; SQLite transaction tests persist Jira, release-plan, notification, archive and delivery webhook rows and prove stable-key deduplication.
+- Operation-writer failure test proves local DB and Inbox rows roll back together and the delivery is retried.
+
+### Remaining risk
+
+- SMTP and third-party webhook protocols cannot atomically share PostgreSQL completion state. Stable protocol idempotency metadata plus query-before-write reconciliation reduce the external-success/`MarkCompleted` retry window; receivers that ignore idempotency metadata remain at-least-once.
+
 # Task 10 Report: Prometheus named-template metrics
 
 ## Summary

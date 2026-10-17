@@ -192,7 +192,7 @@ func (m *Module) Register(c *appctx.Container) error {
 			return fmt.Errorf("delivery module requires operation outbox")
 		}
 		for operationType, handler := range map[string]messaging.OperationHandler{
-			outbound.OperationTypeWebhookSend:           outbound.NewWebhookHandler(nil).Handle,
+			outbound.OperationTypeWebhookSend:           outbound.NewWebhookHandler(hookRepo, nil).Handle,
 			outbound.OperationTypeJenkinsCredentialSync: outbound.NewCredentialSyncHandler(credentialSync),
 			outbound.OperationTypeDeployQueuePublish:    outbound.NewDeployQueueHandler(deployRepo, c.MessageQueue),
 		} {

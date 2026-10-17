@@ -108,14 +108,21 @@ func (m *Module) Register(c *appctx.Container) error {
 			return fmt.Errorf("product_workflow module requires operation outbox")
 		}
 		operationWriter = c.OperationWriter
-		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeBuildTrigger, workflowoutbound.NewBuildCompletionHandler(scheduler)); err != nil {
+		scheduler.SetOperationWriter(operationWriter)
+		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeBuildTrigger, workflowoutbound.NewBuildCompletionHandler(c.Transactor, scheduler)); err != nil {
 			return fmt.Errorf("register product workflow build operation: %w", err)
 		}
-		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeDeployTrigger, workflowoutbound.NewDeployCompletionHandler(scheduler)); err != nil {
+		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeDeployTrigger, workflowoutbound.NewDeployCompletionHandler(c.Transactor, scheduler)); err != nil {
 			return fmt.Errorf("register product workflow deploy operation: %w", err)
 		}
 		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeWebhookSend, workflowoutbound.NewWebhookHandler(nil)); err != nil {
 			return fmt.Errorf("register product workflow webhook operation: %w", err)
+		}
+		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeMailSend, workflowoutbound.NewNotificationHandler(engine.SendMailOperation)); err != nil {
+			return fmt.Errorf("register product workflow mail operation: %w", err)
+		}
+		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeFeishuUserSend, workflowoutbound.NewNotificationHandler(engine.SendFeishuUserOperation)); err != nil {
+			return fmt.Errorf("register product workflow feishu operation: %w", err)
 		}
 	}
 	trigger.NewScheduler(workflowRepo, startRun, c.Logger).Start(context.Background())

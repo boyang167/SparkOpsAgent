@@ -3,21 +3,29 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
+	productoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type SprintWorkItemExecutor struct {
-	products repository.ProductRepository
-	sprints  repository.SprintRepository
-	trigger  appctx.WorkflowRunTrigger
-	pm       *port.PmConnectorRouter
-	board    *SprintBoardNotifier
+	products   repository.ProductRepository
+	sprints    repository.SprintRepository
+	trigger    appctx.WorkflowRunTrigger
+	pm         *port.PmConnectorRouter
+	board      *SprintBoardNotifier
+	operations messaging.OperationWriter
+}
+
+func (e *SprintWorkItemExecutor) UseOperationWriter(writer messaging.OperationWriter) {
+	e.operations = writer
 }
 
 func NewSprintWorkItemExecutor(
@@ -133,18 +141,36 @@ func (e *SprintWorkItemExecutor) OnWorkflowRunCompleted(
 	if err := e.sprints.UpdateWorkItem(ctx, item); err != nil {
 		return err
 	}
-	if success && e.pm != nil && model.WorkItemJiraSyncMode(item) == "bidirectional" {
+	if success && model.WorkItemJiraSyncMode(item) == "bidirectional" {
 		issueKey := model.WorkItemPmIssueKey(item)
 		provider := model.WorkItemPmProvider(item)
 		pmWorkspaceID := model.WorkItemPmWorkspaceID(item)
 		if issueKey != "" && e.products != nil {
-			if connector := e.pm.Get(provider); connector != nil {
-				sprint, sErr := e.sprints.FindSprintByID(ctx, item.SprintID)
-				if sErr == nil {
-					product, pErr := e.products.FindProductByID(ctx, sprint.ProductID)
-					if pErr == nil {
-						_ = connector.TransitionIssue(ctx, product.WorkspaceID, pmWorkspaceID, issueKey, "Done")
-					}
+			sprint, err := e.sprints.FindSprintByID(ctx, item.SprintID)
+			if err != nil {
+				return err
+			}
+			product, err := e.products.FindProductByID(ctx, sprint.ProductID)
+			if err != nil {
+				return err
+			}
+			if e.operations != nil {
+				if err := scheduleJiraTransition(ctx, e.operations, productoutbound.JiraTransitionPayload{
+					WorkspaceID: product.WorkspaceID.String(), PMWorkspaceID: pmWorkspaceID,
+					Provider: provider, IssueKey: issueKey, Status: "Done",
+				}); err != nil {
+					return err
+				}
+			} else {
+				if e.pm == nil {
+					return fmt.Errorf("pm connector router unavailable")
+				}
+				connector := e.pm.Get(provider)
+				if connector == nil {
+					return fmt.Errorf("pm connector %q unavailable", provider)
+				}
+				if err := connector.TransitionIssue(ctx, product.WorkspaceID, pmWorkspaceID, issueKey, "Done"); err != nil {
+					return err
 				}
 			}
 		}

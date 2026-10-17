@@ -11,15 +11,18 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
+	productoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type ReleasePlanExecutor struct {
-	plans   repository.ReleasePlanRepository
-	trigger appctx.WorkflowRunTrigger
-	hooks   *ReleasePlanHookNotifier
-	inputs  appctx.WorkflowRuntimeInputReader
+	plans      repository.ReleasePlanRepository
+	trigger    appctx.WorkflowRunTrigger
+	hooks      *ReleasePlanHookNotifier
+	inputs     appctx.WorkflowRuntimeInputReader
+	operations messaging.OperationWriter
 }
 
 func NewReleasePlanExecutor(plans repository.ReleasePlanRepository, trigger appctx.WorkflowRunTrigger, hooks *ReleasePlanHookNotifier) *ReleasePlanExecutor {
@@ -28,6 +31,10 @@ func NewReleasePlanExecutor(plans repository.ReleasePlanRepository, trigger appc
 
 func (e *ReleasePlanExecutor) UseRuntimeInputs(reader appctx.WorkflowRuntimeInputReader) {
 	e.inputs = reader
+}
+
+func (e *ReleasePlanExecutor) UseOperationWriter(writer messaging.OperationWriter) {
+	e.operations = writer
 }
 
 func (e *ReleasePlanExecutor) failJobStart(ctx context.Context, plan *model.ReleasePlan, job *model.ReleasePlanJob, actor kernel.MemberID, msg string) error {
@@ -170,11 +177,18 @@ func (e *ReleasePlanExecutor) beginAllDoneHook(ctx context.Context, plan *model.
 	if err := e.plans.UpdatePlan(ctx, plan); err != nil {
 		return err
 	}
-	_ = e.audit(ctx, plan.ID, actor, "wait_all_done_hook", nil)
+	if err := e.audit(ctx, plan.ID, actor, "wait_all_done_hook", nil); err != nil {
+		return err
+	}
+	if e.operations != nil {
+		return scheduleReleasePlanWebhook(ctx, e.operations, productoutbound.ReleasePlanWebhookPayload{
+			PlanID: plan.ID.String(), Event: string(model.ReleasePlanHookEventAllDone),
+		})
+	}
 	if e.hooks != nil {
 		hookCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		_ = e.hooks.Send(hookCtx, plan, model.ReleasePlanHookEventAllDone)
+		return e.hooks.Send(hookCtx, plan, model.ReleasePlanHookEventAllDone)
 	}
 	return nil
 }

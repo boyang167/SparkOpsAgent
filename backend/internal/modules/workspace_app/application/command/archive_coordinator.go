@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
@@ -84,8 +85,35 @@ func (c *ArchiveCoordinator) Advance(ctx context.Context, project *model.Project
 }
 
 func (c *ArchiveCoordinator) finish(ctx context.Context, teardown appctx.ProjectTeardown, project *model.Project) error {
-	if err := teardown.DisablePipeline(ctx, project.WorkspaceID, project.ID); err != nil {
-		c.warn("disable jenkins job failed during archive", err)
+	if c.operations != nil {
+		metadata, ok := events.MetadataFromContext(ctx)
+		if !ok {
+			return errors.New("pipeline disable operation requires event metadata")
+		}
+		return c.operations.Schedule(ctx, messaging.OperationRequest{
+			Owner:          metadata.Subscriber,
+			OperationType:  workspaceoutbound.OperationTypePipelineDisable,
+			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypePipelineDisable + ":" + project.ID.String(),
+			Payload: workspaceoutbound.PipelineDisablePayload{
+				EventID: metadata.EventID, WorkspaceID: project.WorkspaceID.String(), ProjectID: project.ID.String(),
+			},
+		})
+	}
+	disabled, err := teardown.PipelineDisabled(ctx, project.WorkspaceID, project.ID)
+	if err != nil {
+		return err
+	}
+	if !disabled {
+		if err := teardown.DisablePipeline(ctx, project.WorkspaceID, project.ID); err != nil {
+			return err
+		}
+		disabled, err = teardown.PipelineDisabled(ctx, project.WorkspaceID, project.ID)
+		if err != nil {
+			return err
+		}
+	}
+	if !disabled {
+		return fmt.Errorf("pipeline remains enabled after disable")
 	}
 	if err := project.Archive(); err != nil {
 		return err

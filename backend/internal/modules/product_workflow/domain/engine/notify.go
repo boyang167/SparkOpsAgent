@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
+	workflowoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/outbound"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
 type ChannelConfig struct {
@@ -43,27 +46,27 @@ func currentChannels() ChannelConfig {
 	return channels
 }
 
-func (s *Scheduler) emitNotification(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun, event string) {
+func (s *Scheduler) emitNotification(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun, event string) error {
 	if wf == nil && run != nil {
 		loaded, err := s.repo.FindWorkflowByID(ctx, run.WorkflowID)
 		if err != nil || loaded == nil {
-			return
+			return err
 		}
 		wf = loaded
 	}
 	if wf == nil {
-		return
+		return nil
 	}
-	s.emitNotes(ctx, wf, run, wf.Notifications, event)
+	return s.emitNotes(ctx, wf, run, wf.Notifications, event)
 }
 
-func (s *Scheduler) emitJobNotification(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun, spec map[string]any, event string) {
-	s.emitNotes(ctx, wf, run, notificationsFromJobSpec(spec), event)
+func (s *Scheduler) emitJobNotification(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun, spec map[string]any, event string) error {
+	return s.emitNotes(ctx, wf, run, notificationsFromJobSpec(spec), event)
 }
 
-func (s *Scheduler) emitNotes(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun, notes []model.WorkflowNotification, event string) {
+func (s *Scheduler) emitNotes(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun, notes []model.WorkflowNotification, event string) error {
 	if run == nil || strings.TrimSpace(event) == "" || !notificationMatches(notes, event) {
-		return
+		return nil
 	}
 	copied := append([]model.WorkflowNotification(nil), notes...)
 	if vars := VariablesFromRun(run); len(vars) > 0 {
@@ -79,9 +82,43 @@ func (s *Scheduler) emitNotes(ctx context.Context, wf *model.ProductWorkflow, ru
 	runID := run.ID.String()
 	status := string(run.Status)
 	message := run.ErrorMessage
+	if s.operations != nil {
+		metadata, ok := events.MetadataFromContext(ctx)
+		if ok {
+			for _, note := range copied {
+				if !note.Active() || !containsEvent(note.Events, event) {
+					continue
+				}
+				operationType := workflowoutbound.OperationTypeWebhookSend
+				switch note.Channel {
+				case model.NotifyChannelMail:
+					operationType = workflowoutbound.OperationTypeMailSend
+				case model.NotifyChannelFeishuUser:
+					operationType = workflowoutbound.OperationTypeFeishuUserSend
+				}
+				body, err := notificationBody(note.Channel, notificationText(name, runID, status, message, event), event, name, runID, status)
+				if err != nil {
+					return err
+				}
+				if err := s.operations.Schedule(ctx, messaging.OperationRequest{
+					Owner: metadata.Subscriber, OperationType: operationType,
+					IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + operationType + ":" + note.ID,
+					Payload: workflowoutbound.NotificationPayload{
+						EventID: metadata.EventID, Target: note.ID, Channel: note.Channel,
+						URL: note.WebhookURL, Targets: note.Targets, WorkflowName: name,
+						RunID: runID, Status: status, ErrorMessage: message, Event: event,
+						Body: body, Timeout: 8 * time.Second,
+					},
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
 	sendCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	dispatchNotifications(sendCtx, copied, name, runID, status, message, event)
+	return dispatchNotifications(sendCtx, copied, name, runID, status, message, event)
 }
 
 func notificationsFromJobSpec(spec map[string]any) []model.WorkflowNotification {
@@ -163,7 +200,7 @@ func notificationMatches(notes []model.WorkflowNotification, event string) bool 
 	return false
 }
 
-func dispatchNotifications(ctx context.Context, notes []model.WorkflowNotification, workflowName, runID, status, errMessage, event string) {
+func dispatchNotifications(ctx context.Context, notes []model.WorkflowNotification, workflowName, runID, status, errMessage, event string) error {
 	client := &http.Client{Timeout: 6 * time.Second}
 	text := notificationText(workflowName, runID, status, errMessage, event)
 	for _, note := range notes {
@@ -173,10 +210,14 @@ func dispatchNotifications(ctx context.Context, notes []model.WorkflowNotificati
 		endpoint := strings.TrimSpace(note.WebhookURL)
 		switch note.Channel {
 		case model.NotifyChannelMail:
-			_ = sendMail(currentChannels(), note.Targets, workflowName, text)
+			if err := sendMail(currentChannels(), note.Targets, workflowName, text, ""); err != nil {
+				return err
+			}
 			continue
 		case model.NotifyChannelFeishuUser:
-			_ = sendFeishuUsers(ctx, currentChannels(), note.Targets, text)
+			if err := sendFeishuUsers(ctx, currentChannels(), note.Targets, text, ""); err != nil {
+				return err
+			}
 			continue
 		}
 		if !webhookChannel(note.Channel) || !allowedWebhook(endpoint) {
@@ -184,20 +225,47 @@ func dispatchNotifications(ctx context.Context, notes []model.WorkflowNotificati
 		}
 		body, err := notificationBody(note.Channel, text, event, workflowName, runID, status)
 		if err != nil {
-			continue
+			return err
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
-			continue
+			return err
 		}
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
 		if err != nil {
-			continue
+			return err
 		}
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
+		if err := classifyNotificationHTTP(resp.StatusCode); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+func classifyNotificationHTTP(status int) error {
+	if status < http.StatusMultipleChoices {
+		return nil
+	}
+	err := fmt.Errorf("notification endpoint returned status %d", status)
+	if status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= http.StatusInternalServerError {
+		return err
+	}
+	return messaging.Permanent(err)
+}
+
+func SendMailOperation(_ context.Context, payload workflowoutbound.NotificationPayload) error {
+	return sendMail(currentChannels(), payload.Targets, payload.WorkflowName,
+		notificationText(payload.WorkflowName, payload.RunID, payload.Status, payload.ErrorMessage, payload.Event),
+		payload.IdempotencyKey)
+}
+
+func SendFeishuUserOperation(ctx context.Context, payload workflowoutbound.NotificationPayload) error {
+	return sendFeishuUsers(ctx, currentChannels(), payload.Targets,
+		notificationText(payload.WorkflowName, payload.RunID, payload.Status, payload.ErrorMessage, payload.Event),
+		payload.IdempotencyKey)
 }
 
 func containsEvent(events []string, event string) bool {
@@ -284,7 +352,7 @@ func splitTargets(raw string) []string {
 	return out
 }
 
-func sendMail(cfg ChannelConfig, targets, subject, body string) error {
+func sendMail(cfg ChannelConfig, targets, subject, body, idempotencyKey string) error {
 	host := strings.TrimSpace(cfg.SMTPHost)
 	recipients := splitTargets(targets)
 	if host == "" || len(recipients) == 0 {
@@ -298,7 +366,11 @@ func sendMail(cfg ChannelConfig, targets, subject, body string) error {
 	if from == "" {
 		from = cfg.SMTPUser
 	}
-	msg := []byte("From: " + from + "\r\nTo: " + strings.Join(recipients, ",") + "\r\nSubject: " + subject + "\r\n\r\n" + body)
+	messageID := ""
+	if idempotencyKey != "" {
+		messageID = "Message-ID: <" + url.QueryEscape(idempotencyKey) + "@sparkops>\r\n"
+	}
+	msg := []byte("From: " + from + "\r\nTo: " + strings.Join(recipients, ",") + "\r\nSubject: " + subject + "\r\n" + messageID + "\r\n" + body)
 	addr := fmt.Sprintf("%s:%d", host, port)
 	var auth smtp.Auth
 	if cfg.SMTPUser != "" {
@@ -307,7 +379,7 @@ func sendMail(cfg ChannelConfig, targets, subject, body string) error {
 	return smtp.SendMail(addr, auth, from, recipients, msg)
 }
 
-func sendFeishuUsers(ctx context.Context, cfg ChannelConfig, targets, text string) error {
+func sendFeishuUsers(ctx context.Context, cfg ChannelConfig, targets, text, idempotencyKey string) error {
 	if strings.TrimSpace(cfg.FeishuAppID) == "" || strings.TrimSpace(cfg.FeishuSecret) == "" {
 		return nil
 	}
@@ -336,12 +408,18 @@ func sendFeishuUsers(ctx context.Context, cfg ChannelConfig, targets, text strin
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
+		if idempotencyKey != "" {
+			req.Header.Set("X-SparkOps-Idempotency-Key", idempotencyKey)
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			return err
 		}
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
+		if err := classifyNotificationHTTP(resp.StatusCode); err != nil {
+			return err
+		}
 	}
 	return nil
 }

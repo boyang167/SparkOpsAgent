@@ -49,3 +49,25 @@ func TestExecutorDisableJobTreatsMissingJobAsDisabled(t *testing.T) {
 
 	require.NoError(t, executor.DisableJob(context.Background(), "team-a", "orders"))
 }
+
+func TestExecutorReportsDisabledJobState(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimSuffix(r.URL.Path, "/")
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(path, "/crumbIssuer"):
+			http.NotFound(w, r)
+		case r.Method == http.MethodGet && path == "/job/team-a/job/orders/api/json":
+			_, _ = io.WriteString(w, `{"name":"orders","url":"`+server.URL+`/job/team-a/job/orders/","buildable":false}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	executor := &Executor{client: gjenkins.CreateJenkins(server.Client(), server.URL)}
+
+	disabled, err := executor.IsJobDisabled(context.Background(), "team-a", "orders")
+
+	require.NoError(t, err)
+	require.True(t, disabled)
+}

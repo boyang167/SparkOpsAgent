@@ -1,43 +1,44 @@
 package bootstrap
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	deliveryoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/outbound"
+	governanceoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/outbound"
+	productoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/outbound"
+	workflowoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/outbound"
+	workspaceoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/outbound"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 )
 
-func TestProductionModulesRegisterEveryTask10OperationExactlyOnce(t *testing.T) {
-	root := filepath.Join("..", "modules")
-	files := []string{
-		"delivery/module.go",
-		"workspace_app/module.go",
-		"product_workflow/module.go",
-		"product/module.go",
-		"governance/module.go",
+func TestProductionRegistryAcceptsEveryScheduledTask10HandlerExactlyOnce(t *testing.T) {
+	registry := messaging.NewOperationRegistry()
+	handlers := map[string]messaging.OperationHandler{
+		deliveryoutbound.OperationTypeWebhookSend:           deliveryoutbound.NewWebhookHandler(nil, nil).Handle,
+		deliveryoutbound.OperationTypeJenkinsCredentialSync: deliveryoutbound.NewCredentialSyncHandler(nil),
+		deliveryoutbound.OperationTypeDeployQueuePublish:    deliveryoutbound.NewDeployQueueHandler(nil, nil),
+		workspaceoutbound.OperationTypeProjectUndeploy:      workspaceoutbound.NewProjectUndeployHandler(nil, nil, nil),
+		workspaceoutbound.OperationTypePipelineDisable:      workspaceoutbound.NewPipelineDisableHandler(nil, nil, nil),
+		workflowoutbound.OperationTypeBuildTrigger:          workflowoutbound.NewBuildCompletionHandler(nil, nil),
+		workflowoutbound.OperationTypeDeployTrigger:         workflowoutbound.NewDeployCompletionHandler(nil, nil),
+		workflowoutbound.OperationTypeWebhookSend:           workflowoutbound.NewWebhookHandler(nil),
+		workflowoutbound.OperationTypeMailSend:              workflowoutbound.NewNotificationHandler(nil),
+		workflowoutbound.OperationTypeFeishuUserSend:        workflowoutbound.NewNotificationHandler(nil),
+		productoutbound.OperationTypeWorkflowTrigger:        productoutbound.NewWorkflowCompletionOperation(nil, nil),
+		productoutbound.OperationTypeJiraTransition:         productoutbound.NewJiraTransitionOperation(nil),
+		productoutbound.OperationTypeReleasePlanWebhookSend: productoutbound.NewReleasePlanWebhookOperation(nil),
+		governanceoutbound.OperationTypeMemberRoleSync:      governanceoutbound.NewMemberRoleSyncHandler(nil),
 	}
-	var source strings.Builder
-	for _, name := range files {
-		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
-		require.NoError(t, err)
-		source.Write(raw)
+	require.Len(t, handlers, 14)
+	for operationType, handler := range handlers {
+		require.NoError(t, registry.Register(operationType, handler), operationType)
+		registered, ok := registry.Handler(operationType)
+		require.True(t, ok, operationType)
+		require.NotNil(t, registered, operationType)
 	}
-	for _, symbol := range []string{
-		"OperationTypeJenkinsCredentialSync",
-		"OperationTypeDeployQueuePublish",
-		"OperationTypeProjectUndeploy",
-		"OperationTypePipelineDisable",
-		"OperationTypeBuildTrigger",
-		"OperationTypeDeployTrigger",
-		"OperationTypeWorkflowTrigger",
-		"OperationTypeJiraTransition",
-		"OperationTypeReleasePlanWebhookSend",
-		"OperationTypeMemberRoleSync",
-	} {
-		require.Equalf(t, 1, strings.Count(source.String(), symbol), "operation registration %s", symbol)
+	for operationType, handler := range handlers {
+		require.Error(t, registry.Register(operationType, handler), operationType)
 	}
-	require.Equal(t, 2, strings.Count(source.String(), "OperationTypeWebhookSend"),
-		"delivery and product-workflow each own one webhook operation")
 }

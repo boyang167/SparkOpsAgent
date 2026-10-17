@@ -73,6 +73,7 @@ type JenkinsExecutor interface {
 
 type JenkinsJobDisabler interface {
 	DisableJob(ctx context.Context, folder, job string) error
+	IsJobDisabled(ctx context.Context, folder, job string) (bool, error)
 }
 
 // JenkinsExecutorProvider resolves a Jenkins client from project-bound secrets.

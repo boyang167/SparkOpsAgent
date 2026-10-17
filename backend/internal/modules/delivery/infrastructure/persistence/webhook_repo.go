@@ -63,7 +63,7 @@ func (r *WebhookRepository) Save(ctx context.Context, hook *WebhookRecord) error
 
 func (r *WebhookRepository) Get(ctx context.Context, id kernel.WebhookID) (*WebhookRecord, error) {
 	var row webhookModel
-	if err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error; err != nil {
+	if err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error; err != nil {
 		return nil, err
 	}
 	return rowToWebhook(row)
@@ -79,7 +79,7 @@ func (r *WebhookRepository) ListByProject(ctx context.Context, projectID kernel.
 
 func (r *WebhookRepository) ListEnabledByProject(ctx context.Context, projectID kernel.ProjectID) ([]WebhookRecord, error) {
 	var rows []webhookModel
-	if err := r.db.WithContext(ctx).Where("project_id = ? AND enabled = ?", projectID.String(), true).Find(&rows).Error; err != nil {
+	if err := postgres.DB(ctx, r.db).Where("project_id = ? AND enabled = ?", projectID.String(), true).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rowsToWebhooks(rows)

@@ -59,4 +59,12 @@ func (p *teardownPort) DisablePipeline(ctx context.Context, wsID kernel.Workspac
 	return p.prepare.DisableJob(ctx, project)
 }
 
+func (p *teardownPort) PipelineDisabled(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) (bool, error) {
+	project, err := p.reader.Load(ctx, wsID, projectID, kernel.ClusterInfoID{})
+	if err != nil {
+		return false, err
+	}
+	return p.prepare.PipelineDisabled(ctx, project)
+}
+
 var _ appctx.ProjectTeardown = (*teardownPort)(nil)

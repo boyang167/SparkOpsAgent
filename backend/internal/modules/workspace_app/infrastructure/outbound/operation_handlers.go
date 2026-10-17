@@ -8,6 +8,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -30,9 +32,14 @@ type PipelineDisablePayload struct {
 
 type PipelineDisabler interface {
 	DisablePipeline(context.Context, kernel.WorkspaceID, kernel.ProjectID) error
+	PipelineDisabled(context.Context, kernel.WorkspaceID, kernel.ProjectID) (bool, error)
 }
 
-func NewPipelineDisableHandler(disabler func() PipelineDisabler) messaging.OperationHandler {
+func NewPipelineDisableHandler(
+	disabler func() PipelineDisabler,
+	repo repository.ProjectRepository,
+	tx postgres.Transactor,
+) messaging.OperationHandler {
 	return func(ctx context.Context, operation messaging.Operation) error {
 		var payload PipelineDisablePayload
 		if err := json.Unmarshal(operation.Payload, &payload); err != nil {
@@ -50,7 +57,42 @@ func NewPipelineDisableHandler(disabler func() PipelineDisabler) messaging.Opera
 		if target == nil {
 			return fmt.Errorf("project teardown unavailable")
 		}
-		return target.DisablePipeline(ctx, workspaceID, projectID)
+		project, err := repo.FindByID(ctx, projectID)
+		if err != nil {
+			return err
+		}
+		if project.Status == model.ProjectStatusArchived || !project.IsArchiving() {
+			return nil
+		}
+		disabled, err := target.PipelineDisabled(ctx, workspaceID, projectID)
+		if err != nil {
+			return err
+		}
+		if !disabled {
+			if err := target.DisablePipeline(ctx, workspaceID, projectID); err != nil {
+				return err
+			}
+			disabled, err = target.PipelineDisabled(ctx, workspaceID, projectID)
+			if err != nil {
+				return err
+			}
+		}
+		if !disabled {
+			return fmt.Errorf("pipeline remains enabled after disable")
+		}
+		return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+			current, err := repo.FindByID(txCtx, projectID)
+			if err != nil {
+				return err
+			}
+			if current.Status == model.ProjectStatusArchived || !current.IsArchiving() {
+				return nil
+			}
+			if err := current.Archive(); err != nil {
+				return err
+			}
+			return repo.Update(txCtx, current)
+		})
 	}
 }
 
@@ -58,7 +100,7 @@ type ArchiveAdvancer interface {
 	Advance(context.Context, *model.Project, kernel.MemberID) error
 }
 
-func NewProjectUndeployHandler(repo repository.ProjectRepository, coordinator ArchiveAdvancer) messaging.OperationHandler {
+func NewProjectUndeployHandler(repo repository.ProjectRepository, coordinator ArchiveAdvancer, tx postgres.Transactor) messaging.OperationHandler {
 	return func(ctx context.Context, operation messaging.Operation) error {
 		var payload ProjectUndeployPayload
 		if err := json.Unmarshal(operation.Payload, &payload); err != nil {
@@ -72,10 +114,13 @@ func NewProjectUndeployHandler(repo repository.ProjectRepository, coordinator Ar
 		if err != nil {
 			return messaging.Permanent(err)
 		}
-		project, err := repo.FindByID(ctx, projectID)
-		if err != nil || !project.IsArchiving() {
-			return err
-		}
-		return coordinator.Advance(ctx, project, memberID)
+		return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+			txCtx = events.WithMetadata(txCtx, events.Metadata{EventID: operation.EventID, Subscriber: operation.Owner})
+			project, err := repo.FindByID(txCtx, projectID)
+			if err != nil || !project.IsArchiving() {
+				return err
+			}
+			return coordinator.Advance(txCtx, project, memberID)
+		})
 	}
 }

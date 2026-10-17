@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -39,7 +41,7 @@ type ReleasePlanWebhookPayload struct {
 
 type WorkflowCompletionHandler func(context.Context, kernel.ProductWorkflowRunID, bool, string) error
 
-func NewWorkflowCompletionOperation(handler WorkflowCompletionHandler) messaging.OperationHandler {
+func NewWorkflowCompletionOperation(tx postgres.Transactor, handler WorkflowCompletionHandler) messaging.OperationHandler {
 	return func(ctx context.Context, operation messaging.Operation) error {
 		var payload WorkflowCompletionPayload
 		if err := json.Unmarshal(operation.Payload, &payload); err != nil {
@@ -49,7 +51,10 @@ func NewWorkflowCompletionOperation(handler WorkflowCompletionHandler) messaging
 		if err != nil {
 			return messaging.Permanent(err)
 		}
-		return handler(ctx, runID, payload.Status == "success", payload.ErrorMessage)
+		return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+			txCtx = events.WithMetadata(txCtx, events.Metadata{EventID: operation.EventID, Subscriber: operation.Owner})
+			return handler(txCtx, runID, payload.Status == "success", payload.ErrorMessage)
+		})
 	}
 }
 
@@ -68,7 +73,7 @@ func NewJiraTransitionOperation(handler JiraTransitionHandler) messaging.Operati
 	}
 }
 
-type ReleasePlanWebhookHandler func(context.Context, kernel.ReleasePlanID, string) error
+type ReleasePlanWebhookHandler func(context.Context, kernel.ReleasePlanID, string, string) error
 
 func NewReleasePlanWebhookOperation(handler ReleasePlanWebhookHandler) messaging.OperationHandler {
 	return func(ctx context.Context, operation messaging.Operation) error {
@@ -80,6 +85,6 @@ func NewReleasePlanWebhookOperation(handler ReleasePlanWebhookHandler) messaging
 		if err != nil {
 			return messaging.Permanent(err)
 		}
-		return handler(ctx, planID, payload.Event)
+		return handler(ctx, planID, payload.Event, operation.IdempotencyKey)
 	}
 }

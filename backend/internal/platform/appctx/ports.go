@@ -99,6 +99,7 @@ type ProjectTeardown interface {
 	HasActiveRun(ctx context.Context, projectID kernel.ProjectID) (bool, error)
 	StartUndeploy(ctx context.Context, req UndeployRequest) (kernel.DeploymentRunID, error)
 	DisablePipeline(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) error
+	PipelineDisabled(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) (bool, error)
 }
 
 type WorkflowRunTrigger interface {

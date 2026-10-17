@@ -5,13 +5,21 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
+	workspaceoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	messagingpersistence "github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -59,12 +67,23 @@ func (r *archiveProjectRepo) ListByStatus(_ context.Context, status model.Projec
 }
 
 type fakeTeardown struct {
-	online     []kernel.ClusterInfoID
-	active     bool
-	started    []kernel.ClusterInfoID
-	disabled   int
-	disableErr error
-	startErr   error
+	online        []kernel.ClusterInfoID
+	active        bool
+	started       []kernel.ClusterInfoID
+	disabled      int
+	disableErr    error
+	startErr      error
+	disabledState bool
+	statusChecks  int
+}
+
+type archiveOperationWriter struct {
+	requests []messaging.OperationRequest
+}
+
+func (w *archiveOperationWriter) Schedule(_ context.Context, request messaging.OperationRequest) error {
+	w.requests = append(w.requests, request)
+	return nil
 }
 
 func (f *fakeTeardown) OnlineClusters(context.Context, kernel.WorkspaceID, kernel.ProjectID) ([]kernel.ClusterInfoID, error) {
@@ -82,7 +101,14 @@ func (f *fakeTeardown) StartUndeploy(_ context.Context, req appctx.UndeployReque
 }
 func (f *fakeTeardown) DisablePipeline(context.Context, kernel.WorkspaceID, kernel.ProjectID) error {
 	f.disabled++
+	if f.disableErr == nil {
+		f.disabledState = true
+	}
 	return f.disableErr
+}
+func (f *fakeTeardown) PipelineDisabled(context.Context, kernel.WorkspaceID, kernel.ProjectID) (bool, error) {
+	f.statusChecks++
+	return f.disabledState, nil
 }
 
 func archiveFixture(t *testing.T, online ...kernel.ClusterInfoID) (*command.ArchiveProjectHandler, *command.ArchiveCoordinator, *fakeTeardown, *model.Project) {
@@ -236,14 +262,104 @@ func TestCoordinatorAbortsArchivingOnUndeployFailure(t *testing.T) {
 	require.Equal(t, model.ProjectStatusActive, project.Status)
 }
 
-func TestCoordinatorArchivesEvenWhenDisableFails(t *testing.T) {
-	handler, _, teardown, project := archiveFixture(t)
+func TestCoordinatorDoesNotArchiveWhenDisableFails(t *testing.T) {
+	_, coordinator, teardown, project := archiveFixture(t)
+	require.NoError(t, project.BeginArchiving())
 	teardown.disableErr = errors.New("jenkins down")
+
+	err := coordinator.Advance(context.Background(), project, kernel.NewMemberID())
+
+	require.Error(t, err)
+	require.Equal(t, model.ProjectStatusArchiving, project.Status)
+
+	teardown.disableErr = nil
+	require.NoError(t, coordinator.Advance(context.Background(), project, kernel.NewMemberID()))
+	require.Equal(t, model.ProjectStatusArchived, project.Status)
+}
+
+func TestCoordinatorSchedulesPipelineDisableBeforeArchive(t *testing.T) {
+	_, _, teardown, project := archiveFixture(t)
+	require.NoError(t, project.BeginArchiving())
+	repo := &archiveProjectRepo{projects: map[kernel.ProjectID]*model.Project{project.ID: project}}
+	writer := &archiveOperationWriter{}
+	coordinator := command.NewArchiveCoordinator(repo, func() appctx.ProjectTeardown { return teardown }, nil, writer)
+	ctx := events.WithMetadata(context.Background(), events.Metadata{EventID: "event-1", Subscriber: "workspace-app.archive"})
+
+	require.NoError(t, coordinator.Advance(ctx, project, kernel.NewMemberID()))
+
+	require.Equal(t, model.ProjectStatusArchiving, project.Status)
+	require.Zero(t, teardown.disabled)
+	require.Len(t, writer.requests, 1)
+	require.Equal(t, workspaceoutbound.OperationTypePipelineDisable, writer.requests[0].OperationType)
+	require.Equal(
+		t,
+		"event-1:workspace-app.archive:workspace-app.pipeline.disable.v1:"+project.ID.String(),
+		writer.requests[0].IdempotencyKey,
+	)
+}
+
+func TestArchiveCommandSchedulesPipelineDisable(t *testing.T) {
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	repo := &archiveProjectRepo{projects: map[kernel.ProjectID]*model.Project{project.ID: project}}
+	teardown := &fakeTeardown{}
+	writer := &archiveOperationWriter{}
+	coordinator := command.NewArchiveCoordinator(repo, func() appctx.ProjectTeardown { return teardown }, nil, writer)
+	handler := command.NewArchiveProjectHandler(repo, updateWorkspaceChecker{}, coordinator, postgres.NewDirectTransactor())
 
 	result, err := handler.Handle(context.Background(), project.WorkspaceID, kernel.NewMemberID(), project.ID, command.ArchiveInput{ConfirmName: "orders"})
 
 	require.NoError(t, err)
-	require.Equal(t, "archived", result.Status)
+	require.Equal(t, string(model.ProjectStatusArchiving), result.Status)
+	require.Equal(t, model.ProjectStatusArchiving, project.Status)
+	require.Zero(t, teardown.disabled)
+	require.Len(t, writer.requests, 1)
+	require.Equal(t, workspaceoutbound.OperationTypePipelineDisable, writer.requests[0].OperationType)
+}
+
+func TestArchiveCommandPersistsPipelineDisableOperation(t *testing.T) {
+	db := openArchiveOperationDB(t)
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	repo := &archiveProjectRepo{projects: map[kernel.ProjectID]*model.Project{project.ID: project}}
+	teardown := &fakeTeardown{}
+	writer := messaging.NewOperationWriter(messagingpersistence.NewOperationStore(db), nil)
+	tx := postgres.NewTransactor(db)
+	coordinator := command.NewArchiveCoordinator(repo, func() appctx.ProjectTeardown { return teardown }, nil, writer)
+	handler := command.NewArchiveProjectHandler(repo, updateWorkspaceChecker{}, coordinator, tx)
+
+	result, err := handler.Handle(context.Background(), project.WorkspaceID, kernel.NewMemberID(), project.ID, command.ArchiveInput{ConfirmName: "orders"})
+
+	require.NoError(t, err)
+	require.Equal(t, string(model.ProjectStatusArchiving), result.Status)
+	var operationType string
+	require.NoError(t, db.Table("platform.operation_outbox").Select("operation_type").Scan(&operationType).Error)
+	require.Equal(t, workspaceoutbound.OperationTypePipelineDisable, operationType)
+}
+
+func openArchiveOperationDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+	require.NoError(t, db.Exec(`
+		CREATE TABLE platform.operation_outbox (
+			id TEXT PRIMARY KEY, event_id TEXT NOT NULL, subscriber TEXT NOT NULL,
+			operation_type TEXT NOT NULL, idempotency_key TEXT NOT NULL UNIQUE, payload BLOB NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+			next_attempt_at DATETIME NOT NULL, locked_at DATETIME, locked_by TEXT NOT NULL DEFAULT '',
+			completed_at DATETIME, last_error TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL
+		)
+	`).Error)
+	return db
 }
 
 func TestLegacyArchiveRejectsOnlineProject(t *testing.T) {

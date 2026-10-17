@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 )
 
 type ReleasePlanHookNotifier struct {
@@ -28,6 +29,10 @@ func NewReleasePlanHookNotifier(publicBase string) *ReleasePlanHookNotifier {
 }
 
 func (n *ReleasePlanHookNotifier) Send(ctx context.Context, plan *model.ReleasePlan, event model.ReleasePlanHookEvent) error {
+	return n.SendWithIdempotency(ctx, plan, event, "")
+}
+
+func (n *ReleasePlanHookNotifier) SendWithIdempotency(ctx context.Context, plan *model.ReleasePlan, event model.ReleasePlanHookEvent, idempotencyKey string) error {
 	if n == nil || plan == nil || plan.HookState == nil {
 		return nil
 	}
@@ -55,6 +60,9 @@ func (n *ReleasePlanHookNotifier) Send(ctx context.Context, plan *model.ReleaseP
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if idempotencyKey != "" {
+		req.Header.Set("Idempotency-Key", idempotencyKey)
+	}
 	resp, err := n.client.Do(req)
 	if err != nil {
 		return err
@@ -62,7 +70,11 @@ func (n *ReleasePlanHookNotifier) Send(ctx context.Context, plan *model.ReleaseP
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("hook webhook status %d", resp.StatusCode)
+		err := fmt.Errorf("hook webhook status %d", resp.StatusCode)
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests {
+			return messaging.Permanent(err)
+		}
+		return err
 	}
 	return nil
 }

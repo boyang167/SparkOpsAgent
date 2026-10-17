@@ -28,13 +28,13 @@ func (d releasePlanFlowDeps) persistJobs(ctx context.Context, plan *model.Releas
 	return nil
 }
 
-func (d releasePlanFlowDeps) sendHook(ctx context.Context, plan *model.ReleasePlan, event model.ReleasePlanHookEvent) {
+func (d releasePlanFlowDeps) sendHook(ctx context.Context, plan *model.ReleasePlan, event model.ReleasePlanHookEvent) error {
 	if d.hooks == nil {
-		return
+		return nil
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	_ = d.hooks.Send(sendCtx, plan, event)
+	return d.hooks.Send(sendCtx, plan, event)
 }
 
 func (d releasePlanFlowDeps) beginHookWait(plan *model.ReleasePlan, event model.ReleasePlanHookEvent) {
@@ -57,7 +57,9 @@ func (d releasePlanFlowDeps) afterPlanningComplete(ctx context.Context, plan *mo
 		if err := d.plans.UpdatePlan(ctx, plan); err != nil {
 			return err
 		}
-		d.sendHook(ctx, plan, model.ReleasePlanHookEventBeforeExecute)
+		if err := d.sendHook(ctx, plan, model.ReleasePlanHookEventBeforeExecute); err != nil {
+			return err
+		}
 	case model.ReleasePlanStatusExecuting:
 		if err := d.plans.UpdatePlan(ctx, plan); err != nil {
 			return err
@@ -99,6 +101,5 @@ func (d releasePlanFlowDeps) beginAllDoneHook(ctx context.Context, plan *model.R
 		return err
 	}
 	_ = auditReleasePlan(ctx, d.plans, plan.ID, actor, "wait_all_done_hook", nil)
-	d.sendHook(ctx, plan, model.ReleasePlanHookEventAllDone)
-	return nil
+	return d.sendHook(ctx, plan, model.ReleasePlanHookEventAllDone)
 }
