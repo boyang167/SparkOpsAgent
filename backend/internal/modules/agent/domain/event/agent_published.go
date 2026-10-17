@@ -24,3 +24,14 @@ func NewAgentPublished(agentID kernel.AgentID, projectID kernel.ProjectID, versi
 		Version:   version,
 	}
 }
+
+func Register(registry *events.Registry) error {
+	return events.RegisterJSON[AgentPublished](
+		registry,
+		AgentPublishedName,
+		1,
+		func(ev AgentPublished) events.AggregateRef {
+			return events.AggregateRef{Type: "agent", ID: ev.AgentID.String()}
+		},
+	)
+}
