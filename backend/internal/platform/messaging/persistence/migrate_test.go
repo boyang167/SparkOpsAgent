@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -18,17 +19,67 @@ func TestAutoMigrateCreatesTransactionalEventSchema(t *testing.T) {
 		requireSQLiteObject(t, db, "table", table)
 	}
 
-	requireSQLiteColumns(t, db, "event_outbox",
-		"id", "event_type", "event_version", "payload", "status",
-		"next_attempt_at", "locked_at", "locked_by", "created_at",
-	)
-	requireSQLiteColumns(t, db, "event_inbox",
-		"event_id", "subscriber", "event_type", "processed_at", "created_at",
-	)
-	requireSQLiteColumns(t, db, "operation_outbox",
-		"id", "event_id", "subscriber", "operation_type", "idempotency_key",
-		"payload", "status", "next_attempt_at", "created_at",
-	)
+	requireSQLiteColumns(t, db, "event_outbox", map[string]expectedSQLiteColumn{
+		"id":                {Type: "uuid", NotNull: true},
+		"event_type":        {Type: "text", NotNull: true},
+		"event_version":     {Type: "integer", NotNull: true},
+		"aggregate_type":    {Type: "text", NotNull: true, Default: defaultValue("")},
+		"aggregate_id":      {Type: "text", NotNull: true, Default: defaultValue("")},
+		"aggregate_version": {Type: "integer"},
+		"payload":           {Type: "jsonb", NotNull: true},
+		"occurred_at":       {Type: "datetime", NotNull: true},
+		"correlation_id":    {Type: "uuid"},
+		"causation_id":      {Type: "uuid"},
+		"status":            {Type: "text", NotNull: true, Default: defaultValue("pending")},
+		"attempts":          {Type: "integer", NotNull: true, Default: defaultValue("0")},
+		"next_attempt_at":   {Type: "datetime", NotNull: true, Default: defaultValue("CURRENT_TIMESTAMP")},
+		"locked_at":         {Type: "datetime"},
+		"locked_by":         {Type: "text", NotNull: true, Default: defaultValue("")},
+		"published_at":      {Type: "datetime"},
+		"last_error":        {Type: "text", NotNull: true, Default: defaultValue("")},
+		"created_at":        {Type: "datetime", NotNull: true, Default: defaultValue("CURRENT_TIMESTAMP")},
+	})
+	requireSQLiteColumns(t, db, "event_inbox", map[string]expectedSQLiteColumn{
+		"event_id":     {Type: "uuid", NotNull: true},
+		"subscriber":   {Type: "text", NotNull: true},
+		"event_type":   {Type: "text", NotNull: true},
+		"processed_at": {Type: "datetime", NotNull: true, Default: defaultValue("CURRENT_TIMESTAMP")},
+		"created_at":   {Type: "datetime", NotNull: true, Default: defaultValue("CURRENT_TIMESTAMP")},
+	})
+	requireSQLiteColumns(t, db, "operation_outbox", map[string]expectedSQLiteColumn{
+		"id":              {Type: "uuid", NotNull: true},
+		"event_id":        {Type: "uuid", NotNull: true},
+		"subscriber":      {Type: "text", NotNull: true},
+		"operation_type":  {Type: "text", NotNull: true},
+		"idempotency_key": {Type: "text", NotNull: true},
+		"payload":         {Type: "jsonb", NotNull: true},
+		"status":          {Type: "text", NotNull: true, Default: defaultValue("pending")},
+		"attempts":        {Type: "integer", NotNull: true, Default: defaultValue("0")},
+		"next_attempt_at": {Type: "datetime", NotNull: true, Default: defaultValue("CURRENT_TIMESTAMP")},
+		"locked_at":       {Type: "datetime"},
+		"locked_by":       {Type: "text", NotNull: true, Default: defaultValue("")},
+		"completed_at":    {Type: "datetime"},
+		"last_error":      {Type: "text", NotNull: true, Default: defaultValue("")},
+		"created_at":      {Type: "datetime", NotNull: true, Default: defaultValue("CURRENT_TIMESTAMP")},
+	})
+	requireGORMFields(t, db, &EventOutbox{}, map[string]expectedGORMField{
+		"EventType":     {DataType: "string", Size: 160},
+		"AggregateType": {DataType: "string", Size: 120},
+		"AggregateID":   {DataType: "string", Size: 160},
+		"Status":        {DataType: "string", Size: 16},
+		"LockedBy":      {DataType: "string", Size: 160},
+	})
+	requireGORMFields(t, db, &EventInbox{}, map[string]expectedGORMField{
+		"Subscriber": {DataType: "string", Size: 200},
+		"EventType":  {DataType: "string", Size: 160},
+	})
+	requireGORMFields(t, db, &OperationOutbox{}, map[string]expectedGORMField{
+		"Subscriber":     {DataType: "string", Size: 200},
+		"OperationType":  {DataType: "string", Size: 160},
+		"IdempotencyKey": {DataType: "string", Size: 240},
+		"Status":         {DataType: "string", Size: 16},
+		"LockedBy":       {DataType: "string", Size: 160},
+	})
 
 	require.Equal(t, map[string]int{"event_id": 1, "subscriber": 2}, sqlitePrimaryKey(t, db, "event_inbox"))
 	requireSQLiteIndex(t, db, "event_outbox", "ix_event_outbox_claim", false,
@@ -37,6 +88,28 @@ func TestAutoMigrateCreatesTransactionalEventSchema(t *testing.T) {
 	requireSQLiteIndex(t, db, "operation_outbox", "ux_operation_outbox_idempotency_key", true,
 		"idempotency_key",
 	)
+	requireSQLiteIndex(t, db, "operation_outbox", "ix_operation_outbox_claim", false,
+		"status", "next_attempt_at", "created_at",
+	)
+}
+
+func TestAutoMigrateRejectsInvalidOutboxStatuses(t *testing.T) {
+	db := openAttachedPlatformSQLite(t, sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"))
+	require.NoError(t, AutoMigrate(db))
+
+	eventErr := db.Exec(`
+		INSERT INTO platform.event_outbox
+			(id, event_type, event_version, payload, occurred_at, status)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "event-1", "test.event", 1, `{}`, "2026-10-17T00:00:00Z", "invalid").Error
+	require.ErrorContains(t, eventErr, "event_outbox_status_check")
+
+	operationErr := db.Exec(`
+		INSERT INTO platform.operation_outbox
+			(id, event_id, subscriber, operation_type, idempotency_key, payload, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, "operation-1", "event-1", "test-subscriber", "test.operation", "key-1", `{}`, "invalid").Error
+	require.ErrorContains(t, operationErr, "operation_outbox_status_check")
 }
 
 func TestAutoMigrateSkipsWhenSQLMigrationsApplied(t *testing.T) {
@@ -85,18 +158,60 @@ func requireSQLiteObject(t *testing.T, db *gorm.DB, objectType, name string) {
 	require.Equal(t, int64(1), count)
 }
 
-func requireSQLiteColumns(t *testing.T, db *gorm.DB, table string, expected ...string) {
+type expectedSQLiteColumn struct {
+	Type    string
+	NotNull bool
+	Default *string
+}
+
+func defaultValue(value string) *string {
+	return &value
+}
+
+func requireSQLiteColumns(t *testing.T, db *gorm.DB, table string, expected map[string]expectedSQLiteColumn) {
 	t.Helper()
 	type column struct {
-		Name string
+		Name         string
+		Type         string
+		NotNull      int     `gorm:"column:notnull"`
+		DefaultValue *string `gorm:"column:dflt_value"`
 	}
 	var columns []column
 	require.NoError(t, db.Raw(fmt.Sprintf("PRAGMA platform.table_info(%q)", table)).Scan(&columns).Error)
-	names := make([]string, 0, len(columns))
+	require.Len(t, columns, len(expected))
 	for _, column := range columns {
-		names = append(names, column.Name)
+		want, ok := expected[column.Name]
+		require.Truef(t, ok, "unexpected column %s.%s", table, column.Name)
+		require.Equal(t, want.Type, strings.ToLower(column.Type), "%s.%s type", table, column.Name)
+		require.Equal(t, want.NotNull, column.NotNull == 1, "%s.%s NOT NULL", table, column.Name)
+		require.Equal(t, normalizedDefault(want.Default), normalizedDefault(column.DefaultValue), "%s.%s default", table, column.Name)
 	}
-	require.Subset(t, names, expected)
+}
+
+func normalizedDefault(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	normalized := strings.TrimSpace(*value)
+	normalized = strings.Trim(normalized, "'\"")
+	return &normalized
+}
+
+type expectedGORMField struct {
+	DataType string
+	Size     int
+}
+
+func requireGORMFields(t *testing.T, db *gorm.DB, model any, expected map[string]expectedGORMField) {
+	t.Helper()
+	statement := &gorm.Statement{DB: db}
+	require.NoError(t, statement.Parse(model))
+	for name, want := range expected {
+		field := statement.Schema.LookUpField(name)
+		require.NotNilf(t, field, "missing GORM field %s", name)
+		require.Equal(t, want.DataType, string(field.DataType), "%s data type", name)
+		require.Equal(t, want.Size, field.Size, "%s size", name)
+	}
 }
 
 func sqlitePrimaryKey(t *testing.T, db *gorm.DB, table string) map[string]int {

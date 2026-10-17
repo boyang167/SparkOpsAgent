@@ -6,7 +6,7 @@ import (
 )
 
 type EventOutbox struct {
-	ID               string          `gorm:"column:id;type:uuid;primaryKey"`
+	ID               string          `gorm:"column:id;type:uuid;not null;primaryKey"`
 	EventType        string          `gorm:"column:event_type;size:160;not null"`
 	EventVersion     int             `gorm:"column:event_version;type:int;not null"`
 	AggregateType    string          `gorm:"column:aggregate_type;size:120;not null;default:''"`
@@ -29,8 +29,8 @@ type EventOutbox struct {
 func (EventOutbox) TableName() string { return "platform.event_outbox" }
 
 type EventInbox struct {
-	EventID     string    `gorm:"column:event_id;type:uuid;primaryKey"`
-	Subscriber  string    `gorm:"column:subscriber;size:200;primaryKey"`
+	EventID     string    `gorm:"column:event_id;type:uuid;not null;primaryKey"`
+	Subscriber  string    `gorm:"column:subscriber;size:200;not null;primaryKey"`
 	EventType   string    `gorm:"column:event_type;size:160;not null"`
 	ProcessedAt time.Time `gorm:"column:processed_at;not null;default:CURRENT_TIMESTAMP"`
 	CreatedAt   time.Time `gorm:"column:created_at;not null;default:CURRENT_TIMESTAMP"`
@@ -39,7 +39,7 @@ type EventInbox struct {
 func (EventInbox) TableName() string { return "platform.event_inbox" }
 
 type OperationOutbox struct {
-	ID             string          `gorm:"column:id;type:uuid;primaryKey"`
+	ID             string          `gorm:"column:id;type:uuid;not null;primaryKey"`
 	EventID        string          `gorm:"column:event_id;type:uuid;not null"`
 	Subscriber     string          `gorm:"column:subscriber;size:200;not null"`
 	OperationType  string          `gorm:"column:operation_type;size:160;not null"`
