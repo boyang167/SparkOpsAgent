@@ -23,8 +23,8 @@ type OutboxRecord struct {
 type OutboxStore interface {
 	Insert(ctx context.Context, envelope events.Envelope) error
 	Claim(ctx context.Context, owner string, limit int, now time.Time, lease time.Duration) ([]OutboxRecord, error)
-	MarkPublished(ctx context.Context, id string, at time.Time) error
-	Reschedule(ctx context.Context, id, reason string, next time.Time) error
+	MarkPublished(ctx context.Context, id, owner string, at time.Time) error
+	Reschedule(ctx context.Context, id, owner, reason string, next time.Time) error
 }
 
 type outboxStore struct {
@@ -103,24 +103,30 @@ func (s *outboxStore) Claim(
 	return records, nil
 }
 
-func (s *outboxStore) MarkPublished(ctx context.Context, id string, at time.Time) error {
-	return s.db.WithContext(ctx).Model(&EventOutbox{}).Where("id = ?", id).Updates(map[string]any{
-		"status":       "published",
-		"published_at": at,
-		"locked_at":    nil,
-		"locked_by":    "",
-		"last_error":   "",
-	}).Error
+func (s *outboxStore) MarkPublished(ctx context.Context, id, owner string, at time.Time) error {
+	result := s.db.WithContext(ctx).Model(&EventOutbox{}).
+		Where("id = ? AND status = ? AND locked_by = ?", id, "publishing", owner).
+		Updates(map[string]any{
+			"status":       "published",
+			"published_at": at,
+			"locked_at":    nil,
+			"locked_by":    "",
+			"last_error":   "",
+		})
+	return requireLeaseUpdate(result)
 }
 
-func (s *outboxStore) Reschedule(ctx context.Context, id, reason string, next time.Time) error {
-	return s.db.WithContext(ctx).Model(&EventOutbox{}).Where("id = ?", id).Updates(map[string]any{
-		"status":          "pending",
-		"next_attempt_at": next,
-		"locked_at":       nil,
-		"locked_by":       "",
-		"last_error":      reason,
-	}).Error
+func (s *outboxStore) Reschedule(ctx context.Context, id, owner, reason string, next time.Time) error {
+	result := s.db.WithContext(ctx).Model(&EventOutbox{}).
+		Where("id = ? AND status = ? AND locked_by = ?", id, "publishing", owner).
+		Updates(map[string]any{
+			"status":          "pending",
+			"next_attempt_at": next,
+			"locked_at":       nil,
+			"locked_by":       "",
+			"last_error":      reason,
+		})
+	return requireLeaseUpdate(result)
 }
 
 func outboxClaimable(status string, nextAttemptAt time.Time, lockedAt *time.Time, now time.Time, lease time.Duration) bool {

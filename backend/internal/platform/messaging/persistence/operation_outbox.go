@@ -29,9 +29,9 @@ type OperationRecord struct {
 type OperationStore interface {
 	Insert(ctx context.Context, operation OperationRecord) error
 	Claim(ctx context.Context, owner string, limit int, now time.Time, lease time.Duration) ([]OperationRecord, error)
-	MarkCompleted(ctx context.Context, id string, at time.Time) error
-	MarkFailed(ctx context.Context, id, reason string, at time.Time) error
-	Reschedule(ctx context.Context, id, reason string, next time.Time) error
+	MarkCompleted(ctx context.Context, id, owner string, at time.Time) error
+	MarkFailed(ctx context.Context, id, owner, reason string, at time.Time) error
+	Reschedule(ctx context.Context, id, owner, reason string, next time.Time) error
 }
 
 type operationStore struct {
@@ -108,35 +108,44 @@ func (s *operationStore) Claim(
 	return records, nil
 }
 
-func (s *operationStore) MarkCompleted(ctx context.Context, id string, at time.Time) error {
-	return s.db.WithContext(ctx).Model(&OperationOutbox{}).Where("id = ?", id).Updates(map[string]any{
-		"status":       "completed",
-		"completed_at": at,
-		"locked_at":    nil,
-		"locked_by":    "",
-		"last_error":   "",
-	}).Error
+func (s *operationStore) MarkCompleted(ctx context.Context, id, owner string, at time.Time) error {
+	result := s.db.WithContext(ctx).Model(&OperationOutbox{}).
+		Where("id = ? AND status = ? AND locked_by = ?", id, "executing", owner).
+		Updates(map[string]any{
+			"status":       "completed",
+			"completed_at": at,
+			"locked_at":    nil,
+			"locked_by":    "",
+			"last_error":   "",
+		})
+	return requireLeaseUpdate(result)
 }
 
-func (s *operationStore) MarkFailed(ctx context.Context, id, reason string, at time.Time) error {
-	return s.db.WithContext(ctx).Model(&OperationOutbox{}).Where("id = ?", id).Updates(map[string]any{
-		"status":       "failed",
-		"completed_at": at,
-		"locked_at":    nil,
-		"locked_by":    "",
-		"last_error":   reason,
-	}).Error
+func (s *operationStore) MarkFailed(ctx context.Context, id, owner, reason string, at time.Time) error {
+	result := s.db.WithContext(ctx).Model(&OperationOutbox{}).
+		Where("id = ? AND status = ? AND locked_by = ?", id, "executing", owner).
+		Updates(map[string]any{
+			"status":       "failed",
+			"completed_at": at,
+			"locked_at":    nil,
+			"locked_by":    "",
+			"last_error":   reason,
+		})
+	return requireLeaseUpdate(result)
 }
 
-func (s *operationStore) Reschedule(ctx context.Context, id, reason string, next time.Time) error {
-	return s.db.WithContext(ctx).Model(&OperationOutbox{}).Where("id = ?", id).Updates(map[string]any{
-		"status":          "pending",
-		"next_attempt_at": next,
-		"locked_at":       nil,
-		"locked_by":       "",
-		"completed_at":    nil,
-		"last_error":      reason,
-	}).Error
+func (s *operationStore) Reschedule(ctx context.Context, id, owner, reason string, next time.Time) error {
+	result := s.db.WithContext(ctx).Model(&OperationOutbox{}).
+		Where("id = ? AND status = ? AND locked_by = ?", id, "executing", owner).
+		Updates(map[string]any{
+			"status":          "pending",
+			"next_attempt_at": next,
+			"locked_at":       nil,
+			"locked_by":       "",
+			"completed_at":    nil,
+			"last_error":      reason,
+		})
+	return requireLeaseUpdate(result)
 }
 
 func operationClaimable(status string, nextAttemptAt time.Time, lockedAt *time.Time, now time.Time, lease time.Duration) bool {

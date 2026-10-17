@@ -51,21 +51,68 @@ func TestOutboxLifecycle(t *testing.T) {
 		return store.Insert(ctx, envelope)
 	}))
 
+	const owner = "worker-a"
+	setOutboxLease(t, db, envelope.ID, owner)
 	next := envelope.OccurredAt.Add(time.Minute)
-	require.NoError(t, store.Reschedule(context.Background(), envelope.ID, "temporary", next))
+	require.NoError(t, store.Reschedule(context.Background(), envelope.ID, owner, "temporary", next))
 	var row EventOutbox
 	require.NoError(t, db.First(&row, "id = ?", envelope.ID).Error)
 	require.Equal(t, "pending", row.Status)
 	require.Equal(t, "temporary", row.LastError)
 	require.WithinDuration(t, next, row.NextAttemptAt, time.Millisecond)
 
+	setOutboxLease(t, db, envelope.ID, owner)
 	publishedAt := next.Add(time.Minute)
-	require.NoError(t, store.MarkPublished(context.Background(), envelope.ID, publishedAt))
+	require.NoError(t, store.MarkPublished(context.Background(), envelope.ID, owner, publishedAt))
 	require.NoError(t, db.First(&row, "id = ?", envelope.ID).Error)
 	require.Equal(t, "published", row.Status)
 	require.Empty(t, row.LastError)
 	require.NotNil(t, row.PublishedAt)
 	require.WithinDuration(t, publishedAt, *row.PublishedAt, time.Millisecond)
+}
+
+func TestOutboxCompletionRejectsLostLease(t *testing.T) {
+	db := openStoreSQLite(t)
+	store := NewOutboxStore(db)
+	transactor := postgres.NewTransactor(db)
+	envelope := testEnvelope(time.Now().UTC())
+	require.NoError(t, transactor.WithinTransaction(context.Background(), func(ctx context.Context) error {
+		return store.Insert(ctx, envelope)
+	}))
+	setOutboxLease(t, db, envelope.ID, "new-owner")
+
+	err := store.MarkPublished(context.Background(), envelope.ID, "old-owner", time.Now().UTC())
+
+	require.ErrorIs(t, err, ErrLeaseLost)
+	var row EventOutbox
+	require.NoError(t, db.First(&row, "id = ?", envelope.ID).Error)
+	require.Equal(t, "publishing", row.Status)
+	require.Equal(t, "new-owner", row.LockedBy)
+}
+
+func TestOutboxUpdatesRejectMissingOrWrongState(t *testing.T) {
+	db := openStoreSQLite(t)
+	store := NewOutboxStore(db)
+	missingID := uuid.NewString()
+
+	require.ErrorIs(t,
+		store.MarkPublished(context.Background(), missingID, "worker-a", time.Now().UTC()),
+		ErrLeaseLost,
+	)
+	require.ErrorIs(t,
+		store.Reschedule(context.Background(), missingID, "worker-a", "temporary", time.Now().UTC()),
+		ErrLeaseLost,
+	)
+
+	envelope := testEnvelope(time.Now().UTC())
+	transactor := postgres.NewTransactor(db)
+	require.NoError(t, transactor.WithinTransaction(context.Background(), func(ctx context.Context) error {
+		return store.Insert(ctx, envelope)
+	}))
+	require.ErrorIs(t,
+		store.Reschedule(context.Background(), envelope.ID, "worker-a", "temporary", time.Now().UTC()),
+		ErrLeaseLost,
+	)
 }
 
 func TestOutboxClaimEligibility(t *testing.T) {
@@ -120,4 +167,13 @@ func testEnvelope(now time.Time) events.Envelope {
 		OccurredAt:    now,
 		Payload:       []byte(`{"result":"succeeded"}`),
 	}
+}
+
+func setOutboxLease(t *testing.T, db *gorm.DB, id, owner string) {
+	t.Helper()
+	require.NoError(t, db.Model(&EventOutbox{}).Where("id = ?", id).Updates(map[string]any{
+		"status":    "publishing",
+		"locked_by": owner,
+		"locked_at": time.Now().UTC(),
+	}).Error)
 }

@@ -81,6 +81,72 @@ func TestOutboxClaimRecoversOnlyExpiredPublishingLeasePostgres(t *testing.T) {
 	require.Contains(t, recordIDs(expired), ids[0])
 }
 
+func TestOutboxOldOwnerCannotOverwriteRecoveredLeasePostgres(t *testing.T) {
+	db := openStorePostgres(t)
+	store := NewOutboxStore(db)
+	ids := insertOutboxRecords(t, db, store, time.Now().UTC(), 1)
+	now := time.Now().UTC()
+
+	first, err := store.Claim(context.Background(), "worker-a", 1, now, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	recovered, err := store.Claim(context.Background(), "worker-b", 1, now.Add(time.Minute), time.Minute)
+	require.NoError(t, err)
+	require.Len(t, recovered, 1)
+
+	require.ErrorIs(t,
+		store.MarkPublished(context.Background(), ids[0], "worker-a", now.Add(time.Minute)),
+		ErrLeaseLost,
+	)
+	require.ErrorIs(t,
+		store.Reschedule(context.Background(), ids[0], "worker-a", "stale", now.Add(2*time.Minute)),
+		ErrLeaseLost,
+	)
+	require.NoError(t,
+		store.MarkPublished(context.Background(), ids[0], "worker-b", now.Add(time.Minute)),
+	)
+}
+
+func TestOperationConcurrentClaimsAreDisjointPostgres(t *testing.T) {
+	db := openStorePostgres(t)
+	store := NewOperationStore(db)
+	insertOperationRecords(t, db, store, time.Now().UTC(), 4)
+	now := time.Now().UTC()
+
+	start := make(chan struct{})
+	results := make(chan []OperationRecord, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, owner := range []string{"worker-a", "worker-b"} {
+		wg.Add(1)
+		go func(owner string) {
+			defer wg.Done()
+			<-start
+			records, err := store.Claim(context.Background(), owner, 2, now, time.Minute)
+			results <- records
+			errs <- err
+		}(owner)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	var claims [][]OperationRecord
+	for records := range results {
+		require.Len(t, records, 2)
+		claims = append(claims, records)
+	}
+	require.Len(t, claims, 2)
+	first := operationRecordIDs(claims[0])
+	for _, record := range claims[1] {
+		require.NotContains(t, first, record.ID)
+	}
+}
+
 func TestOperationClaimRecoversOnlyExpiredExecutingLeasePostgres(t *testing.T) {
 	db := openStorePostgres(t)
 	store := NewOperationStore(db)
@@ -107,6 +173,36 @@ func TestOperationClaimRecoversOnlyExpiredExecutingLeasePostgres(t *testing.T) {
 	expired, err := store.Claim(context.Background(), "worker-b", 10, now.Add(time.Minute), time.Minute)
 	require.NoError(t, err)
 	require.Contains(t, operationRecordIDs(expired), operation.ID)
+}
+
+func TestOperationOldOwnerCannotOverwriteRecoveredLeasePostgres(t *testing.T) {
+	db := openStorePostgres(t)
+	store := NewOperationStore(db)
+	operations := insertOperationRecords(t, db, store, time.Now().UTC(), 1)
+	now := time.Now().UTC()
+
+	first, err := store.Claim(context.Background(), "worker-a", 1, now, time.Minute)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	recovered, err := store.Claim(context.Background(), "worker-b", 1, now.Add(time.Minute), time.Minute)
+	require.NoError(t, err)
+	require.Len(t, recovered, 1)
+
+	require.ErrorIs(t,
+		store.MarkCompleted(context.Background(), operations[0].ID, "worker-a", now.Add(time.Minute)),
+		ErrLeaseLost,
+	)
+	require.ErrorIs(t,
+		store.MarkFailed(context.Background(), operations[0].ID, "worker-a", "stale", now.Add(time.Minute)),
+		ErrLeaseLost,
+	)
+	require.ErrorIs(t,
+		store.Reschedule(context.Background(), operations[0].ID, "worker-a", "stale", now.Add(2*time.Minute)),
+		ErrLeaseLost,
+	)
+	require.NoError(t,
+		store.MarkCompleted(context.Background(), operations[0].ID, "worker-b", now.Add(time.Minute)),
+	)
 }
 
 func openStorePostgres(t *testing.T) *gorm.DB {
@@ -182,6 +278,36 @@ func insertOutboxRecords(t *testing.T, db *gorm.DB, store OutboxStore, now time.
 		db.Exec("DELETE FROM platform.event_outbox WHERE id IN ?", ids)
 	})
 	return ids
+}
+
+func insertOperationRecords(
+	t *testing.T,
+	db *gorm.DB,
+	store OperationStore,
+	now time.Time,
+	count int,
+) []OperationRecord {
+	t.Helper()
+	operations := make([]OperationRecord, 0, count)
+	transactor := postgres.NewTransactor(db)
+	require.NoError(t, transactor.WithinTransaction(context.Background(), func(ctx context.Context) error {
+		for range count {
+			operation := testOperation(now)
+			operations = append(operations, operation)
+			if err := store.Insert(ctx, operation); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	t.Cleanup(func() {
+		ids := make([]string, 0, len(operations))
+		for _, operation := range operations {
+			ids = append(ids, operation.ID)
+		}
+		db.Exec("DELETE FROM platform.operation_outbox WHERE id IN ?", ids)
+	})
+	return operations
 }
 
 func recordIDs(records []OutboxRecord) map[string]struct{} {
