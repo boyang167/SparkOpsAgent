@@ -134,6 +134,48 @@ func TestEventTransportIgnoresLateReturnForDifferentMessageID(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestEventTransportIgnoresLateReturnFromEarlierAttemptWithSameMessageID(t *testing.T) {
+	envelope := eventTransportTestEnvelope()
+	returns := make(chan amqp.Return, 1)
+	previousConfirmation := &stubEventConfirmation{done: make(chan struct{})}
+	previousContext, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	previousHeaders := amqp.Table{"x-sparkops-publish-attempt": "attempt-1"}
+
+	err := publishEventConfirmed(
+		previousContext,
+		&stubEventPublishChannel{confirmation: previousConfirmation},
+		returns,
+		make(chan *amqp.Error, 1),
+		eventExchangeName,
+		"delivery.BuildCompleted.v1",
+		envelope,
+		previousHeaders,
+	)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	returns <- amqp.Return{
+		ReplyCode: 312,
+		ReplyText: "NO_ROUTE",
+		MessageId: envelope.ID,
+		Headers:   previousHeaders,
+	}
+	currentConfirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
+	close(currentConfirmation.done)
+	err = publishEventConfirmed(
+		context.Background(),
+		&stubEventPublishChannel{confirmation: currentConfirmation},
+		returns,
+		make(chan *amqp.Error, 1),
+		eventExchangeName,
+		"delivery.BuildCompleted.v1",
+		envelope,
+		amqp.Table{"x-sparkops-publish-attempt": "attempt-2"},
+	)
+
+	require.NoError(t, err)
+}
+
 func TestEventTransportTreatsChannelCloseAsFailure(t *testing.T) {
 	closed := make(chan *amqp.Error, 1)
 	closed <- &amqp.Error{Code: 504, Reason: "channel closed"}
@@ -322,26 +364,92 @@ func TestEventTransportReusesHealthyPublisherAfterMessageFailures(t *testing.T) 
 	require.Equal(t, 1, channel.closeListenerCalls)
 }
 
-func TestEventTransportReusesHealthyPublisherAfterReturnAndTimeout(t *testing.T) {
+func TestEventTransportReusesHealthyPublisherAfterMandatoryReturns(t *testing.T) {
 	pendingConfirmation := &stubEventConfirmation{done: make(chan struct{})}
 	channel := newStubEventChannel(pendingConfirmation)
 	connection := &stubEventConnection{channels: []eventChannel{channel}}
 	transport := newAMQPEventTransport(connection)
 	envelope := eventTransportTestEnvelope()
+	channel.onPublish = func(message amqp.Publishing) {
+		channel.returns <- amqp.Return{
+			ReplyCode: 312,
+			ReplyText: "NO_ROUTE",
+			MessageId: message.MessageId,
+			Headers:   message.Headers,
+		}
+	}
 
 	for range 3 {
-		channel.returns <- amqp.Return{ReplyCode: 312, ReplyText: "NO_ROUTE", MessageId: envelope.ID}
 		require.ErrorContains(t, transport.Publish(context.Background(), envelope), "returned")
-	}
-	for range 3 {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
-		require.ErrorIs(t, transport.Publish(ctx, envelope), context.DeadlineExceeded)
-		cancel()
 	}
 
 	require.Equal(t, 1, connection.channelCalls)
 	require.Equal(t, 1, channel.returnListenerCalls)
 	require.Equal(t, 1, channel.closeListenerCalls)
+}
+
+func TestEventTransportRetiresConfirmationSessionsAfterTimeout(t *testing.T) {
+	pendingConfirmations := make([]*stubEventConfirmation, 3)
+	connections := make([]*stubEventConnection, 0, len(pendingConfirmations)+1)
+	for index := range pendingConfirmations {
+		pendingConfirmations[index] = &stubEventConfirmation{done: make(chan struct{})}
+		connections = append(connections, &stubEventConnection{
+			channels: []eventChannel{newStubEventChannel(pendingConfirmations[index])},
+		})
+	}
+	finalConfirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
+	close(finalConfirmation.done)
+	connections = append(connections, &stubEventConnection{
+		channels: []eventChannel{newStubEventChannel(finalConfirmation)},
+	})
+
+	nextConnection := 1
+	transport := newAMQPEventTransportWithFactory(connections[0], func() (eventConnection, error) {
+		connection := connections[nextConnection]
+		nextConnection++
+		return connection, nil
+	})
+
+	for range pendingConfirmations {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+		require.ErrorIs(t, transport.Publish(ctx, eventTransportTestEnvelope()), context.DeadlineExceeded)
+		cancel()
+	}
+	require.NoError(t, transport.Publish(context.Background(), eventTransportTestEnvelope()))
+
+	for _, connection := range connections[:len(connections)-1] {
+		require.Equal(t, 1, connection.channelCalls)
+		require.Equal(t, 1, connection.closeDeadlineCalls)
+	}
+	require.Equal(t, 1, connections[len(connections)-1].channelCalls)
+	require.Equal(t, len(pendingConfirmations), nextConnection-1)
+}
+
+func TestEventTransportKeepsEventIDAndGeneratesUniqueAttemptHeaders(t *testing.T) {
+	confirmation := &stubEventConfirmation{done: make(chan struct{})}
+	channel := newStubEventChannel(confirmation)
+	connection := &stubEventConnection{channels: []eventChannel{channel}}
+	transport := newAMQPEventTransport(connection)
+	envelope := eventTransportTestEnvelope()
+	channel.onPublish = func(message amqp.Publishing) {
+		channel.returns <- amqp.Return{
+			ReplyCode: 312,
+			ReplyText: "NO_ROUTE",
+			MessageId: message.MessageId,
+			Headers:   message.Headers,
+		}
+	}
+
+	require.ErrorContains(t, transport.Publish(context.Background(), envelope), "returned")
+	require.ErrorContains(t, transport.Publish(context.Background(), envelope), "returned")
+	require.Len(t, channel.published, 2)
+	require.Equal(t, envelope.ID, channel.published[0].MessageId)
+	require.Equal(t, envelope.ID, channel.published[1].MessageId)
+	require.NotEqual(
+		t,
+		channel.published[0].Headers[eventPublishAttemptHeader],
+		channel.published[1].Headers[eventPublishAttemptHeader],
+	)
 }
 
 func TestEventTransportReusesHealthyPublisherAfterPublishError(t *testing.T) {
@@ -448,6 +556,8 @@ type stubEventChannel struct {
 	closeListenerCalls        int
 	isClosed                  bool
 	publishError              error
+	onPublish                 func(amqp.Publishing)
+	published                 []amqp.Publishing
 }
 
 func newStubEventChannel(confirmation eventConfirmation) *stubEventChannel {
@@ -460,12 +570,12 @@ func newStubEventChannel(confirmation eventConfirmation) *stubEventChannel {
 }
 
 func (c *stubEventChannel) PublishWithDeferredConfirmWithContext(
-	context.Context,
-	string,
-	string,
-	bool,
-	bool,
-	amqp.Publishing,
+	_ context.Context,
+	_ string,
+	_ string,
+	_ bool,
+	_ bool,
+	message amqp.Publishing,
 ) (eventConfirmation, error) {
 	if c.publishCalls == 0 {
 		close(c.publishStarted)
@@ -473,6 +583,10 @@ func (c *stubEventChannel) PublishWithDeferredConfirmWithContext(
 	if c.publishError != nil {
 		c.publishCalls++
 		return nil, c.publishError
+	}
+	c.published = append(c.published, message)
+	if c.onPublish != nil {
+		c.onPublish(message)
 	}
 	confirmation := c.confirmation
 	if c.publishCalls < len(c.confirmations) {

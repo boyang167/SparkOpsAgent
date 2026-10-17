@@ -93,6 +93,43 @@ go test ./internal/platform/messaging -run 'EventTopology|EventTransport' -count
 PASS
 ```
 
+## 终审修订：attempt 关联与超时确认收敛
+
+终审反馈经代码与 amqp091-go 语义验证后确认：
+
+- 稳定的 Outbox `envelope.ID` 会在重试中复用为 `MessageId`，仅以该值关联 `basic.return` 会将旧 attempt 的迟到 return 错误归属给新 attempt；
+- `PublishWithDeferredConfirmWithContext` 在已经交付 deferred confirmation 后，调用方的 context 超时只停止本层等待，不能取消库内 confirmation。因此继续复用同一 connection 会累积未决 confirmation。
+
+### TDD RED/GREEN
+
+新增 `TestEventTransportIgnoresLateReturnFromEarlierAttemptWithSameMessageID`：同一 `MessageId` 的 attempt-1 超时后，向共享 return stream 注入其迟到 return；attempt-2 已 ACK。修复前得到真实 RED：
+
+```text
+publish event returned: code=312 text=NO_ROUTE
+```
+
+修复后，每次 transport 发布都保留稳定 `MessageId=envelope.ID`，同时添加唯一 `x-sparkops-publish-attempt` header。return 必须同时匹配 `MessageId` 与该 attempt header；不匹配的迟到 return 在等待及 ACK 后 drain 时都会被忽略。
+
+对于确认超时/取消，`publishEventConfirmed` 标记 confirmation 已被放弃；transport 从状态中摘除 publisher 和当前 connection，并同步调用 `Connection.CloseDeadline(now + 1s)`。这有界地关闭该 connection 的全部 channels、Notify listeners 与 amqp091-go 内部 deferred confirmations，且不调用可能在网络分区下阻塞的 `Channel.Close`。生产 constructor 保存 dial factory，下一次发布透明地建立新的 connection 和确认 channel。
+
+### 设计权衡
+
+一次确认超时会退休整个 transport connection，而不是尝试取消单个 deferred confirmation（amqp091-go 未提供该能力）。因此后续发布会重连并可继续；该 connection 上已注册的消费者会随 connection 关闭，需要其上层生命周期负责重新订阅。该选择避免了无法证明有界的 deferred confirmation 与 listener 累积，也不引入无限后台关闭 goroutine。
+
+新增并通过：
+
+- `TestEventTransportRetiresConfirmationSessionsAfterTimeout`：连续三次超时均恰好对旧 session 调用一次 `CloseDeadline`，随后新 session 发布成功；
+- `TestEventTransportKeepsEventIDAndGeneratesUniqueAttemptHeaders`：相同事件 UUID 的两次发布保持相同 `MessageId`、但 attempt header 不同；
+- `TestEventTransportIgnoresLateReturnFromEarlierAttemptWithSameMessageID`：旧 attempt return 不污染新 attempt。
+
+```text
+go test ./internal/platform/messaging -run 'EventTransport|Close|Publish' -count=1
+PASS
+
+go test ./internal/platform/messaging -run 'EventTopology|EventTransport' -count=1
+PASS
+```
+
 ## P1 最终修订：消息级失败的资源上界
 
 复审发现上一版把每个发布错误都传给 `invalidatePublisher`。由于为避免同步 `Channel.Close` 阻塞而只脱离本地引用，连续 NACK、mandatory return 或 context timeout 会留下健康旧 channel 及其 Notify listeners，并为下一次发布创建新 channel，形成无界累积。

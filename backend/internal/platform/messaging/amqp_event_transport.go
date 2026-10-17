@@ -8,16 +8,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
 const (
-	eventAttemptsHeader = "x-sparkops-attempts"
-	eventCloseTimeout   = time.Second
+	eventAttemptsHeader       = "x-sparkops-attempts"
+	eventPublishAttemptHeader = "x-sparkops-publish-attempt"
+	eventCloseTimeout         = time.Second
 )
 
-var errEventPublisherClosed = errors.New("event publisher channel closed")
+var (
+	errEventPublisherClosed                = errors.New("event publisher channel closed")
+	errEventPublisherConfirmationAbandoned = errors.New("event publisher confirmation abandoned")
+)
 
 type RetryDelay time.Duration
 
@@ -66,6 +71,8 @@ type eventConnection interface {
 	Channel() (eventChannel, error)
 	CloseDeadline(time.Time) error
 }
+
+type eventConnectionFactory func() (eventConnection, error)
 
 type realEventConnection struct {
 	connection *amqp.Connection
@@ -175,33 +182,49 @@ func (c *realEventChannel) Close() error {
 }
 
 type amqpEventTransport struct {
-	mu               sync.Mutex
-	publishMu        sync.Mutex
-	connection       eventConnection
-	publisher        eventChannel
-	publisherReturns <-chan amqp.Return
-	publisherClosed  <-chan *amqp.Error
-	consumers        map[eventChannel]string
-	closing          chan struct{}
-	closed           bool
+	mu                sync.Mutex
+	publishMu         sync.Mutex
+	connection        eventConnection
+	connectionFactory eventConnectionFactory
+	publisher         eventChannel
+	publisherReturns  <-chan amqp.Return
+	publisherClosed   <-chan *amqp.Error
+	consumers         map[eventChannel]string
+	closing           chan struct{}
+	closed            bool
 }
 
 func NewAMQPEventTransport(url string) (EventTransport, error) {
 	if url == "" {
 		return nil, fmt.Errorf("amqp url is required")
 	}
-	connection, err := amqp.Dial(url)
+	factory := func() (eventConnection, error) {
+		connection, err := amqp.Dial(url)
+		if err != nil {
+			return nil, err
+		}
+		return &realEventConnection{connection: connection}, nil
+	}
+	connection, err := factory()
 	if err != nil {
 		return nil, fmt.Errorf("amqp event dial: %w", err)
 	}
-	return newAMQPEventTransport(&realEventConnection{connection: connection}), nil
+	return newAMQPEventTransportWithFactory(connection, factory), nil
 }
 
 func newAMQPEventTransport(connection eventConnection) *amqpEventTransport {
+	return newAMQPEventTransportWithFactory(connection, nil)
+}
+
+func newAMQPEventTransportWithFactory(
+	connection eventConnection,
+	factory eventConnectionFactory,
+) *amqpEventTransport {
 	return &amqpEventTransport{
-		connection: connection,
-		consumers:  make(map[eventChannel]string),
-		closing:    make(chan struct{}),
+		connection:        connection,
+		connectionFactory: factory,
+		consumers:         make(map[eventChannel]string),
+		closing:           make(chan struct{}),
 	}
 }
 
@@ -338,6 +361,7 @@ func (t *amqpEventTransport) publish(
 	if err != nil {
 		return err
 	}
+	headers = withPublishAttempt(headers)
 	err = publishEventConfirmed(
 		ctx,
 		channel,
@@ -349,10 +373,23 @@ func (t *amqpEventTransport) publish(
 		headers,
 		closing,
 	)
-	if shouldInvalidatePublisher(err, channel) {
+	if errors.Is(err, errEventPublisherConfirmationAbandoned) {
+		if closeErr := t.retirePublisherConnection(channel); closeErr != nil {
+			return errors.Join(err, closeErr)
+		}
+	} else if shouldInvalidatePublisher(err, channel) {
 		t.invalidatePublisher(channel)
 	}
 	return err
+}
+
+func withPublishAttempt(headers amqp.Table) amqp.Table {
+	withAttempt := make(amqp.Table, len(headers)+1)
+	for key, value := range headers {
+		withAttempt[key] = value
+	}
+	withAttempt[eventPublishAttemptHeader] = uuid.NewString()
+	return withAttempt
 }
 
 func shouldInvalidatePublisher(err error, channel eventChannel) bool {
@@ -406,7 +443,7 @@ func publishEventConfirmed(
 			if !ok {
 				return fmt.Errorf("publish event: return listener closed")
 			}
-			if returned.MessageId != envelope.ID {
+			if !returnMatchesPublishAttempt(returned, envelope.ID, headers) {
 				continue
 			}
 			return fmt.Errorf(
@@ -429,7 +466,7 @@ func publishEventConfirmed(
 					if !ok {
 						return fmt.Errorf("publish event: return listener closed")
 					}
-					if returned.MessageId != envelope.ID {
+					if !returnMatchesPublishAttempt(returned, envelope.ID, headers) {
 						continue
 					}
 					return fmt.Errorf(
@@ -442,11 +479,24 @@ func publishEventConfirmed(
 				}
 			}
 		case <-ctx.Done():
-			return fmt.Errorf("publish event confirmation: %w", ctx.Err())
+			return fmt.Errorf("%w: publish event confirmation: %w", errEventPublisherConfirmationAbandoned, ctx.Err())
 		case <-stop:
 			return fmt.Errorf("publish event: transport closed")
 		}
 	}
+}
+
+func returnMatchesPublishAttempt(returned amqp.Return, messageID string, headers amqp.Table) bool {
+	if returned.MessageId != messageID {
+		return false
+	}
+	expectedAttempt, expected := headers[eventPublishAttemptHeader]
+	if !expected {
+		_, returnedHasAttempt := returned.Headers[eventPublishAttemptHeader]
+		return !returnedHasAttempt
+	}
+	returnedAttempt, returnedHasAttempt := returned.Headers[eventPublishAttemptHeader]
+	return returnedHasAttempt && returnedAttempt == expectedAttempt
 }
 
 func (t *amqpEventTransport) publisherChannel() (
@@ -456,43 +506,68 @@ func (t *amqpEventTransport) publisherChannel() (
 	<-chan struct{},
 	error,
 ) {
-	t.mu.Lock()
-	if t.closed || t.connection == nil {
-		t.mu.Unlock()
-		return nil, nil, nil, nil, fmt.Errorf("amqp event transport is closed")
-	}
-	if t.publisher != nil && !t.publisher.IsClosed() {
-		channel := t.publisher
-		returns := t.publisherReturns
-		closed := t.publisherClosed
+	for {
+		t.mu.Lock()
+		if t.closed {
+			t.mu.Unlock()
+			return nil, nil, nil, nil, fmt.Errorf("amqp event transport is closed")
+		}
+		if t.publisher != nil && !t.publisher.IsClosed() {
+			channel := t.publisher
+			returns := t.publisherReturns
+			closed := t.publisherClosed
+			closing := t.closing
+			t.mu.Unlock()
+			return channel, returns, closed, closing, nil
+		}
+		t.invalidatePublisherLocked()
+		connection := t.connection
+		factory := t.connectionFactory
 		closing := t.closing
+		t.mu.Unlock()
+
+		if connection == nil {
+			if factory == nil {
+				return nil, nil, nil, nil, fmt.Errorf("amqp event transport connection is unavailable")
+			}
+			reconnected, err := factory()
+			if err != nil {
+				return nil, nil, nil, nil, fmt.Errorf("reconnect event transport: %w", err)
+			}
+			t.mu.Lock()
+			if t.closed {
+				t.mu.Unlock()
+				_ = reconnected.CloseDeadline(time.Now().Add(eventCloseTimeout))
+				return nil, nil, nil, nil, fmt.Errorf("amqp event transport is closed")
+			}
+			if t.connection == nil {
+				t.connection = reconnected
+			}
+			t.mu.Unlock()
+			continue
+		}
+
+		channel, err := connection.Channel()
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("open event publisher channel: %w", err)
+		}
+		if err := channel.Confirm(false); err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("enable event publisher confirms: %w", err)
+		}
+		returns := channel.NotifyReturn(make(chan amqp.Return, 1))
+		closed := channel.NotifyClose(make(chan *amqp.Error, 1))
+
+		t.mu.Lock()
+		if t.closed || t.connection != connection {
+			t.mu.Unlock()
+			return nil, nil, nil, nil, fmt.Errorf("amqp event transport is closed")
+		}
+		t.publisher = channel
+		t.publisherReturns = returns
+		t.publisherClosed = closed
 		t.mu.Unlock()
 		return channel, returns, closed, closing, nil
 	}
-	t.invalidatePublisherLocked()
-	connection := t.connection
-	closing := t.closing
-	t.mu.Unlock()
-
-	channel, err := connection.Channel()
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("open event publisher channel: %w", err)
-	}
-	if err := channel.Confirm(false); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("enable event publisher confirms: %w", err)
-	}
-	returns := channel.NotifyReturn(make(chan amqp.Return, 1))
-	closed := channel.NotifyClose(make(chan *amqp.Error, 1))
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.closed || t.connection != connection {
-		return nil, nil, nil, nil, fmt.Errorf("amqp event transport is closed")
-	}
-	t.publisher = channel
-	t.publisherReturns = returns
-	t.publisherClosed = closed
-	return channel, returns, closed, closing, nil
 }
 
 func (t *amqpEventTransport) invalidatePublisher(channel eventChannel) {
@@ -508,6 +583,24 @@ func (t *amqpEventTransport) invalidatePublisherLocked() {
 	t.publisher = nil
 	t.publisherReturns = nil
 	t.publisherClosed = nil
+}
+
+func (t *amqpEventTransport) retirePublisherConnection(channel eventChannel) error {
+	t.mu.Lock()
+	if t.publisher != channel {
+		t.mu.Unlock()
+		return nil
+	}
+	connection := t.connection
+	t.invalidatePublisherLocked()
+	t.connection = nil
+	t.consumers = make(map[eventChannel]string)
+	t.mu.Unlock()
+
+	if connection != nil {
+		return connection.CloseDeadline(time.Now().Add(eventCloseTimeout))
+	}
+	return nil
 }
 
 func (t *amqpEventTransport) Consume(
