@@ -490,8 +490,8 @@ git commit -m "feat(messaging): define versioned named event contracts"
 type OutboxStore interface {
     Insert(ctx context.Context, envelope events.Envelope) error
     Claim(ctx context.Context, owner string, limit int, now time.Time, lease time.Duration) ([]OutboxRecord, error)
-    MarkPublished(ctx context.Context, id string, at time.Time) error
-    Reschedule(ctx context.Context, id, reason string, next time.Time) error
+    MarkPublished(ctx context.Context, id, owner string, at time.Time) error
+    Reschedule(ctx context.Context, id, owner, reason string, next time.Time) error
 }
 
 type InboxStore interface {
@@ -501,9 +501,9 @@ type InboxStore interface {
 type OperationStore interface {
     Insert(ctx context.Context, operation OperationRecord) error
     Claim(ctx context.Context, owner string, limit int, now time.Time, lease time.Duration) ([]OperationRecord, error)
-    MarkCompleted(ctx context.Context, id string, at time.Time) error
-    MarkFailed(ctx context.Context, id, reason string, at time.Time) error
-    Reschedule(ctx context.Context, id, reason string, next time.Time) error
+    MarkCompleted(ctx context.Context, id, owner string, at time.Time) error
+    MarkFailed(ctx context.Context, id, owner, reason string, at time.Time) error
+    Reschedule(ctx context.Context, id, owner, reason string, next time.Time) error
 }
 ```
 
@@ -538,7 +538,7 @@ VALUES (?, ?, ?, ?, ?)
 ON CONFLICT (event_id, subscriber) DO NOTHING
 ```
 
-Claim uses one transaction with `FOR UPDATE SKIP LOCKED`, then updates claimed rows to `publishing`/`executing`, sets lease metadata, and increments attempts. Inserts call `postgres.RequireTx(ctx)` so AMQP publishing and operation scheduling cannot escape the surrounding business transaction.
+Claim uses one transaction with `FOR UPDATE SKIP LOCKED`, then updates claimed rows to `publishing`/`executing`, sets lease metadata, and increments attempts. Inserts call `postgres.RequireTx(ctx)` so AMQP publishing and operation scheduling cannot escape the surrounding business transaction. Every completion, failure, and reschedule update requires `id + owner + current claimed status`, checks `RowsAffected == 1`, and returns `ErrLeaseLost` for a stale or missing lease.
 
 - [ ] **Step 4: Verify rollback semantics**
 
