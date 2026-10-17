@@ -727,6 +727,131 @@ func TestOperationDispatcherParentCancelAndRepeatedClose(t *testing.T) {
 	require.NoError(t, store.markContextErr[0])
 }
 
+func TestOperationDispatcherCloseCancelsBlockedClaim(t *testing.T) {
+	store := &blockingClaimOperationStore{
+		operationStoreFake: operationStoreFake{},
+		entered:            make(chan struct{}),
+		forceRelease:       make(chan struct{}),
+	}
+	registry := NewOperationRegistry()
+	var handlerCalls atomic.Int32
+	require.NoError(t, registry.Register(
+		"delivery.webhook.send.v1",
+		func(context.Context, Operation) error {
+			handlerCalls.Add(1)
+			return nil
+		},
+	))
+	dispatcher := NewOperationDispatcher(
+		store,
+		registry,
+		OperationDispatcherConfig{
+			Owner: "instance-a", Workers: 1, PollInterval: time.Hour,
+		},
+		fixedClock{now: time.Now().UTC()},
+		newDispatcherTestMetrics(t),
+	)
+	require.NoError(t, dispatcher.Start(context.Background()))
+	<-store.entered
+
+	closed := make(chan error, 1)
+	go func() { closed <- dispatcher.Close() }()
+	var closeErr error
+	returned := false
+	select {
+	case closeErr = <-closed:
+		returned = true
+	case <-time.After(100 * time.Millisecond):
+		close(store.forceRelease)
+		closeErr = <-closed
+	}
+
+	require.True(t, returned, "Close must cancel a blocked Claim")
+	require.NoError(t, closeErr)
+	require.Zero(t, handlerCalls.Load())
+}
+
+func TestOperationDispatcherParentCancelCancelsBlockedClaim(t *testing.T) {
+	store := &blockingClaimOperationStore{
+		operationStoreFake: operationStoreFake{},
+		entered:            make(chan struct{}),
+		forceRelease:       make(chan struct{}),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	dispatcher := NewOperationDispatcher(
+		store,
+		NewOperationRegistry(),
+		OperationDispatcherConfig{
+			Owner: "instance-a", Workers: 1, PollInterval: time.Hour,
+		},
+		fixedClock{now: time.Now().UTC()},
+		newDispatcherTestMetrics(t),
+	)
+	require.NoError(t, dispatcher.Start(ctx))
+	<-store.entered
+
+	cancel()
+	closed := make(chan error, 1)
+	go func() { closed <- dispatcher.Close() }()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		close(store.forceRelease)
+		t.Fatal("parent cancellation did not interrupt blocked Claim")
+	}
+}
+
+func TestOperationDispatcherCloseDuringStatsDoesNotStartClaim(t *testing.T) {
+	now := time.Now().UTC()
+	store := &blockingStatsOperationStore{
+		operationStoreFake: operationStoreFake{
+			records: []persistence.OperationRecord{
+				operationRecordForTest("operation-1", 1, now),
+			},
+		},
+		entered:      make(chan struct{}),
+		forceRelease: make(chan struct{}),
+	}
+	registry := NewOperationRegistry()
+	var handlerCalls atomic.Int32
+	require.NoError(t, registry.Register(
+		"delivery.webhook.send.v1",
+		func(context.Context, Operation) error {
+			handlerCalls.Add(1)
+			return nil
+		},
+	))
+	dispatcher := NewOperationDispatcher(
+		store,
+		registry,
+		OperationDispatcherConfig{
+			Owner: "instance-a", Workers: 1, PollInterval: time.Hour,
+		},
+		fixedClock{now: now},
+		newDispatcherTestMetrics(t),
+	)
+	require.NoError(t, dispatcher.Start(context.Background()))
+	<-store.entered
+
+	closed := make(chan error, 1)
+	go func() { closed <- dispatcher.Close() }()
+	var closeErr error
+	returned := false
+	select {
+	case closeErr = <-closed:
+		returned = true
+	case <-time.After(100 * time.Millisecond):
+		close(store.forceRelease)
+		closeErr = <-closed
+	}
+
+	require.True(t, returned, "Close must cancel blocked Stats")
+	require.NoError(t, closeErr)
+	require.Zero(t, store.claimCalls.Load())
+	require.Zero(t, handlerCalls.Load())
+}
+
 func TestOperationDispatcherRecordsBoundedErrorStagesOnce(t *testing.T) {
 	now := time.Now().UTC()
 	record := operationRecordForTest("operation-1", 1, now)
@@ -843,6 +968,67 @@ type reclaimingOperationStore struct {
 	operationStoreFake
 	claimCalls   int
 	allowReclaim <-chan struct{}
+}
+
+type blockingClaimOperationStore struct {
+	operationStoreFake
+	entered      chan struct{}
+	forceRelease chan struct{}
+	once         sync.Once
+}
+
+func (s *blockingClaimOperationStore) Claim(
+	ctx context.Context,
+	_ string,
+	_ int,
+	_ time.Time,
+	_ time.Duration,
+) ([]persistence.OperationRecord, error) {
+	s.once.Do(func() { close(s.entered) })
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.forceRelease:
+		return nil, nil
+	}
+}
+
+type blockingStatsOperationStore struct {
+	operationStoreFake
+	entered      chan struct{}
+	forceRelease chan struct{}
+	once         sync.Once
+	claimCalls   atomic.Int32
+}
+
+func (s *blockingStatsOperationStore) Stats(
+	ctx context.Context,
+	_ time.Time,
+) (persistence.OperationStats, error) {
+	s.once.Do(func() { close(s.entered) })
+	select {
+	case <-ctx.Done():
+		return persistence.OperationStats{}, ctx.Err()
+	case <-s.forceRelease:
+		return persistence.OperationStats{}, errors.New("forced stats release")
+	}
+}
+
+func (s *blockingStatsOperationStore) Claim(
+	_ context.Context,
+	owner string,
+	limit int,
+	now time.Time,
+	lease time.Duration,
+) ([]persistence.OperationRecord, error) {
+	s.claimCalls.Add(1)
+	return s.operationStoreFake.Claim(
+		context.Background(),
+		owner,
+		limit,
+		now,
+		lease,
+	)
 }
 
 func (s *reclaimingOperationStore) Claim(

@@ -31,11 +31,12 @@ type OperationDispatcher struct {
 	metrics   *Metrics
 	runtimeID string
 
-	mu      sync.Mutex
-	started bool
-	closed  bool
-	stop    chan struct{}
-	done    chan struct{}
+	mu          sync.Mutex
+	started     bool
+	closed      bool
+	stop        chan struct{}
+	done        chan struct{}
+	claimCancel context.CancelFunc
 }
 
 func NewOperationDispatcher(
@@ -86,6 +87,10 @@ func (d *OperationDispatcher) dispatchOnce(
 	if err := d.refreshBacklogMetrics(ctx); err != nil {
 		d.recordOperationError("stats", err)
 		dispatchErrors = append(dispatchErrors, fmt.Errorf("read operation outbox stats: %w", err))
+	}
+	if err := ctx.Err(); err != nil {
+		dispatchErrors = append(dispatchErrors, err)
+		return errors.Join(dispatchErrors...)
 	}
 	records, err := d.store.Claim(
 		ctx,
@@ -206,7 +211,9 @@ func (d *OperationDispatcher) Start(ctx context.Context) error {
 	d.started = true
 	d.stop = make(chan struct{})
 	d.done = make(chan struct{})
-	go d.runWorkers(ctx, d.stop, d.done)
+	claimCtx, claimCancel := context.WithCancel(ctx)
+	d.claimCancel = claimCancel
+	go d.runWorkers(claimCtx, d.stop, d.done)
 	return nil
 }
 
@@ -297,6 +304,10 @@ func (d *OperationDispatcher) Close() error {
 	d.mu.Lock()
 	if !d.closed {
 		d.closed = true
+		if d.claimCancel != nil {
+			d.claimCancel()
+			d.claimCancel = nil
+		}
 		if d.stop != nil {
 			close(d.stop)
 		}

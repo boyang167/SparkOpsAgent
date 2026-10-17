@@ -53,7 +53,7 @@ go test ./internal/platform/messaging/... -run Operation -count=1
 - writer 拒绝事务外 schedule；
 - 重复幂等键视为成功；
 - 事件驱动 owner 必须与 subscriber 一致，event ID 来自事件元数据；
-- 命令驱动使用幂等键首段的稳定命令 ID 作为 trace event ID；
+- 命令驱动使用生成的 operation UUID 作为 trace event ID；幂等键首段仅保留稳定 command 标识；
 - registry 重复注册失败，未知类型永久失败；
 - JSON 损坏和显式永久错误标记 `failed`，保留 `last_error`；
 - 临时错误按固定层级 reschedule；
@@ -145,6 +145,29 @@ PostgreSQL integration 编译通过：
 
 ```text
 go test -tags=integration ./internal/platform/messaging/persistence -run '^$' -count=1
+```
+
+## 第三轮复审修复
+
+基于 commit `ebbfb79bd057581b9ea7e0989b9adfb4975b9c9b` 增加确定性阻塞测试：
+
+- RED：store 的 `Claim` 阻塞等待 `ctx.Done()` 时，`Close` 仅关闭 stop channel，100ms 内不能返回；
+- RED：store 的 `Stats` 阻塞时，`Close` 不能取消它；强制释放后还会继续进入 Claim，暴露 Close race window。
+
+GREEN：
+
+- `Start` 创建继承 parent values/deadline 的独立 claim lifecycle context；
+- parent cancel 或 `Close` 首先取消 claim context，以中断 Stats/Claim，再等待 workers；
+- cancel func 只在互斥区内获取和清空，重复/并发 Close 不会 nil 调用或 double-close；
+- Stats 返回后在 Claim 前再次检查 claim context，Close 已开始时不再领取；
+- Claim 已成功返回的 records 使用 `context.WithoutCancel` 派生 drain context，handler 与 Mark/Reschedule 不受 parent cancel/Close 中断。
+
+目标生命周期测试：
+
+```text
+go test ./internal/platform/messaging \
+  -run 'TestOperationDispatcher(CloseCancelsBlockedClaim|ParentCancelCancelsBlockedClaim|CloseDuringStatsDoesNotStartClaim|ParentCancelAndRepeatedClose)' \
+  -count=50
 ```
 
 ## 验证
