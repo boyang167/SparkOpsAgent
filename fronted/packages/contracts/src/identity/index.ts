@@ -64,6 +64,8 @@ export type AuthProvidersVM = z.infer<typeof AuthProvidersVMSchema>;
 
 export const SSOProviderSchema = z.enum(["oidc", "ldap"]);
 
+export type SSOProvider = z.infer<typeof SSOProviderSchema>;
+
 export const SSOLoginUISettingsSchema = z.object({
   enabled: z.boolean(),
   provider: SSOProviderSchema,
