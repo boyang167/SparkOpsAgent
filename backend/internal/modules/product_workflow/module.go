@@ -12,6 +12,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/application/subscriber"
 	pwfdomain "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/engine"
+	pwfevent "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/acl"
@@ -42,6 +43,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	if c.DB == nil {
 		return fmt.Errorf("product_workflow module requires database")
 	}
+	if err := pwfevent.Register(c.EventRegistry); err != nil {
+		return fmt.Errorf("product_workflow event codecs: %w", err)
+	}
 	if c.PermissionChecker == nil {
 		return fmt.Errorf("product_workflow module requires permission checker")
 	}
@@ -68,7 +72,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	buildExecutor := engine.NewBuildExecutor(c.BuildTrigger, workflowRepo, acl.NewRegistryResolver(c.DB))
 	createVersionExecutor := engine.NewCreateVersionExecutor(c.VersionCreator)
 	deployExecutor := engine.NewDeployExecutor(c.DeploymentTrigger, c.VersionCreator, c.ProjectVersionReader, workflowRepo)
-	scheduler := engine.NewScheduler(workflowRepo, buildExecutor, createVersionExecutor, deployExecutor, c.EventBus)
+	scheduler := engine.NewScheduler(workflowRepo, buildExecutor, createVersionExecutor, deployExecutor, c.EventBus, c.Transactor)
 	box, err := crypto.NewSecretBoxFromConfig(c.Config)
 	if err != nil {
 		log.Printf("product_workflow: variable cipher unavailable: %v", err)
@@ -81,7 +85,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		engine.ConfigureChannels(engine.ChannelConfig{
 			SMTPHost: c.Config.Notify.SMTP.Host, SMTPPort: c.Config.Notify.SMTP.Port,
 			SMTPUser: c.Config.Notify.SMTP.Username, SMTPPassword: c.Config.Notify.SMTP.Password,
-			SMTPFrom: c.Config.Notify.SMTP.From,
+			SMTPFrom:    c.Config.Notify.SMTP.From,
 			FeishuAppID: c.Config.Notify.Feishu.AppID, FeishuSecret: c.Config.Notify.Feishu.AppSecret,
 		})
 	}

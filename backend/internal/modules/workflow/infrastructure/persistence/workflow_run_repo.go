@@ -39,11 +39,11 @@ func NewWorkflowRunRepository(db *gorm.DB) repository.WorkflowRunRepository {
 func (r *WorkflowRunRepository) Save(ctx context.Context, run *model.WorkflowRun) error {
 	row := runToRow(run)
 	row.AuditColumns = postgres.AuditColumns{CreatedAt: run.StartedAt, UpdatedAt: run.StartedAt}
-	return r.db.WithContext(ctx).Create(&row).Error
+	return postgres.DB(ctx, r.db).Create(&row).Error
 }
 
 func (r *WorkflowRunRepository) Update(ctx context.Context, run *model.WorkflowRun) error {
-	return r.db.WithContext(ctx).Model(&workflowRunModel{}).Where("id = ?", run.ID.String()).Updates(map[string]any{
+	return postgres.DB(ctx, r.db).Model(&workflowRunModel{}).Where("id = ?", run.ID.String()).Updates(map[string]any{
 		"status":       string(run.Status),
 		"output":       run.Output,
 		"error":        run.Error,

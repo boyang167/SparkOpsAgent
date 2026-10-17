@@ -4,20 +4,20 @@ import (
 	"fmt"
 
 	agentquery "github.com/sparkops/sparkops-agent/backend/internal/modules/agent/application/query"
-	agentpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/agent/infrastructure/persistence"
 	agentacl "github.com/sparkops/sparkops-agent/backend/internal/modules/agent/infrastructure/acl"
+	agentpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/agent/infrastructure/persistence"
 	runtimecommand "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/application/command"
 	runtimeacl "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/infrastructure/acl"
 	runtimepersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/infrastructure/persistence"
 	runtimestream "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/infrastructure/stream"
 	knowledgequery "github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge/application/query"
-	knowledgepersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge/infrastructure/persistence"
 	knowledgeacl "github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge/infrastructure/acl"
+	knowledgepersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/mcp/application"
 	mcphttp "github.com/sparkops/sparkops-agent/backend/internal/modules/mcp/interface/http"
 	workspacequery "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/query"
-	workspacepersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/persistence"
 	workspaceacl "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/acl"
+	workspacepersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
@@ -70,7 +70,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		knowledgequery.NewSearchDocumentsHandler(kbRepo, kbWsChecker),
 		agentquery.NewListAgentsHandler(agentRepo, projectChecker),
 		runtimecommand.NewStartChatHandler(
-			conversations, messages, runs, agents, knowledge, c.LLMClient, hub, c.EventBus, c.Logger,
+			conversations, messages, runs, agents, knowledge, c.LLMClient, hub, c.EventBus, c.Transactor, c.Logger,
 		),
 		runs,
 	)

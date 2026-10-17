@@ -5,6 +5,7 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/application/query"
+	workflowevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/infrastructure/persistence"
 	workflowhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/interface/http"
@@ -28,6 +29,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	if c.DB == nil {
 		return fmt.Errorf("workflow module requires database")
 	}
+	if err := workflowevent.Register(c.EventRegistry); err != nil {
+		return fmt.Errorf("workflow event codecs: %w", err)
+	}
 	if c.PermissionChecker == nil {
 		return fmt.Errorf("workflow module requires permission checker")
 	}
@@ -44,7 +48,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewUpdateWorkflowHandler(repo, projectChecker),
 		command.NewActivateWorkflowHandler(repo, projectChecker),
 		command.NewArchiveWorkflowHandler(repo, projectChecker),
-		command.NewStartWorkflowRunHandler(repo, runRepo, projectChecker, c.EventBus),
+		command.NewStartWorkflowRunHandler(repo, runRepo, projectChecker, c.EventBus, c.Transactor),
 		query.NewListWorkflowsHandler(repo, projectChecker),
 		query.NewGetWorkflowHandler(repo, projectChecker),
 		query.NewListWorkflowRunsHandler(repo, runRepo, projectChecker),

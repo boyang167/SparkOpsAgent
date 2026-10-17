@@ -106,7 +106,7 @@ func (r *ProductWorkflowRepository) DeleteWorkflow(ctx context.Context, id kerne
 
 func (r *ProductWorkflowRepository) FindWorkflowByID(ctx context.Context, id kernel.ProductWorkflowID) (*model.ProductWorkflow, error) {
 	var row productWorkflowModel
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrProductWorkflowNotFound
 	}
@@ -210,7 +210,7 @@ func (r *ProductWorkflowRepository) UpdateRun(ctx context.Context, run *model.Pr
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Model(&productWorkflowRunModel{}).Where("id = ?", row.ID).Updates(map[string]any{
+	return postgres.DB(ctx, r.db).Model(&productWorkflowRunModel{}).Where("id = ?", row.ID).Updates(map[string]any{
 		"status": row.Status, "stage_runs": row.StageRuns, "current_stage": row.CurrentStage,
 		"error_message": row.ErrorMessage, "started_at": row.StartedAt, "completed_at": row.CompletedAt,
 	}).Error
@@ -403,11 +403,11 @@ func parseWorkflowDocument(raw string) ([]model.WorkflowStage, []model.WorkflowN
 		return stages, []model.WorkflowNotification{}, []model.WorkflowVariable{}, []model.WorkflowTrigger{}, advanced
 	}
 	var doc struct {
-		Stages        []model.WorkflowStage         `json:"stages"`
-		Notifications []model.WorkflowNotification  `json:"notifications"`
-		Variables     []model.WorkflowVariable      `json:"variables"`
-		Triggers      []model.WorkflowTrigger       `json:"triggers"`
-		Advanced      *model.WorkflowAdvanced       `json:"advanced"`
+		Stages        []model.WorkflowStage        `json:"stages"`
+		Notifications []model.WorkflowNotification `json:"notifications"`
+		Variables     []model.WorkflowVariable     `json:"variables"`
+		Triggers      []model.WorkflowTrigger      `json:"triggers"`
+		Advanced      *model.WorkflowAdvanced      `json:"advanced"`
 	}
 	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 		return nil, []model.WorkflowNotification{}, []model.WorkflowVariable{}, []model.WorkflowTrigger{}, advanced

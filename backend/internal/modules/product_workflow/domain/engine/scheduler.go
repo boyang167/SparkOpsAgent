@@ -13,6 +13,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -29,11 +30,12 @@ type Scheduler struct {
 	repo           repository.ProductWorkflowRepository
 	builds         *BuildExecutor
 	createVersions *CreateVersionExecutor
-	deploys *DeployExecutor
-	bus     eventbus.Bus
+	deploys        *DeployExecutor
+	bus            eventbus.Bus
 	git            GitReporter
 	locker         runLocker
 	status         ExternalStatusReader
+	tx             postgres.Transactor
 }
 
 func (s *Scheduler) SetGitReporter(reporter GitReporter) {
@@ -61,10 +63,15 @@ func NewScheduler(
 	createVersions *CreateVersionExecutor,
 	deploys *DeployExecutor,
 	bus eventbus.Bus,
+	transactors ...postgres.Transactor,
 ) *Scheduler {
+	tx := postgres.NewDirectTransactor()
+	if len(transactors) > 0 && transactors[0] != nil {
+		tx = transactors[0]
+	}
 	return &Scheduler{
 		repo: repo, builds: builds, createVersions: createVersions,
-		deploys: deploys, bus: bus,
+		deploys: deploys, bus: bus, tx: tx,
 	}
 }
 
@@ -897,12 +904,12 @@ func (s *Scheduler) completeRun(ctx context.Context, run *model.ProductWorkflowR
 	now := time.Now().UTC()
 	run.Status = model.RunStatusSuccess
 	run.CompletedAt = &now
-	if err := s.repo.UpdateRun(ctx, run); err != nil {
+	if err := s.persistTerminalRun(ctx, run); err != nil {
 		return err
 	}
 	s.emitNotification(ctx, nil, run, model.NotifyEventPassed)
 	s.reportGit(ctx, run)
-	return s.publishRunCompleted(ctx, run)
+	return nil
 }
 
 func (s *Scheduler) failRun(ctx context.Context, run *model.ProductWorkflowRun, message string) error {
@@ -916,12 +923,12 @@ func (s *Scheduler) failRunEvent(ctx context.Context, run *model.ProductWorkflow
 		run.ErrorMessage = message
 	}
 	run.CompletedAt = &now
-	if err := s.repo.UpdateRun(ctx, run); err != nil {
+	if err := s.persistTerminalRun(ctx, run); err != nil {
 		return err
 	}
 	s.emitNotification(ctx, nil, run, event)
 	s.reportGit(ctx, run)
-	return s.publishRunCompleted(ctx, run)
+	return nil
 }
 
 func (s *Scheduler) ExpireRun(ctx context.Context, run *model.ProductWorkflowRun) error {
@@ -937,11 +944,20 @@ func (s *Scheduler) publishRunCompleted(ctx context.Context, run *model.ProductW
 	}
 	wf, err := s.repo.FindWorkflowByID(ctx, run.WorkflowID)
 	if err != nil {
-		return nil
+		return err
 	}
 	return s.bus.Publish(ctx, pwfevent.NewWorkflowRunCompleted(
 		run.ID, run.WorkflowID, run.ProductID, wf.WorkspaceID, string(run.Status), run.ErrorMessage,
 	))
+}
+
+func (s *Scheduler) persistTerminalRun(ctx context.Context, run *model.ProductWorkflowRun) error {
+	return s.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := s.repo.UpdateRun(txCtx, run); err != nil {
+			return err
+		}
+		return s.publishRunCompleted(txCtx, run)
+	})
 }
 
 func ParseStagesFromDefinition(def json.RawMessage) ([]model.WorkflowStage, error) {

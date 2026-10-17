@@ -5,6 +5,7 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/application/query"
+	runtimeevent "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/infrastructure/stream"
@@ -29,6 +30,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	if c.DB == nil {
 		return fmt.Errorf("agent_runtime module requires database")
 	}
+	if err := runtimeevent.Register(c.EventRegistry); err != nil {
+		return fmt.Errorf("agent_runtime event codecs: %w", err)
+	}
 	if c.LLMClient == nil {
 		return fmt.Errorf("agent_runtime module requires LLM client")
 	}
@@ -48,7 +52,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	hub := stream.NewHub()
 
 	handler := runtimehttp.NewHandler(
-		command.NewStartChatHandler(conversations, messages, runs, agents, knowledge, c.LLMClient, hub, c.EventBus, c.Logger),
+		command.NewStartChatHandler(conversations, messages, runs, agents, knowledge, c.LLMClient, hub, c.EventBus, c.Transactor, c.Logger),
 		query.NewGetConversationHandler(conversations, messages),
 		query.NewListAgentConversationsHandler(conversations, messages),
 		query.NewStreamRunHandler(conversations, runs, hub),

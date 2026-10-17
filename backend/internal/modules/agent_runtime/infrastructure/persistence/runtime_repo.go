@@ -135,11 +135,11 @@ func (s *Store) SaveMessage(ctx context.Context, m *model.Message) error {
 		Role: string(m.Role), Content: m.Content,
 		AuditColumns: postgres.AuditColumns{CreatedAt: m.CreatedAt, UpdatedAt: m.CreatedAt},
 	}
-	if err := s.db.WithContext(ctx).Save(&row).Error; err != nil {
+	if err := postgres.DB(ctx, s.db).Save(&row).Error; err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	return s.db.WithContext(ctx).Model(&conversationModel{}).
+	return postgres.DB(ctx, s.db).Model(&conversationModel{}).
 		Where("id = ?", m.ConversationID.String()).
 		Update("updated_at", now).Error
 }
@@ -160,7 +160,7 @@ func (s *Store) ListMessagesByConversation(ctx context.Context, conversationID k
 
 func (s *Store) SaveRun(ctx context.Context, run *model.Run) error {
 	row := runToModel(run)
-	return s.db.WithContext(ctx).Save(&row).Error
+	return postgres.DB(ctx, s.db).Save(&row).Error
 }
 
 func (s *Store) FindRunByID(ctx context.Context, id kernel.RunID) (*model.Run, error) {
@@ -223,8 +223,10 @@ type runRepo struct{ store *Store }
 func NewConversationRepository(store *Store) repository.ConversationRepository {
 	return &conversationRepo{store: store}
 }
-func NewMessageRepository(store *Store) repository.MessageRepository { return &messageRepo{store: store} }
-func NewRunRepository(store *Store) repository.RunRepository         { return &runRepo{store: store} }
+func NewMessageRepository(store *Store) repository.MessageRepository {
+	return &messageRepo{store: store}
+}
+func NewRunRepository(store *Store) repository.RunRepository { return &runRepo{store: store} }
 
 func (r *conversationRepo) Save(ctx context.Context, c *model.Conversation) error {
 	return r.store.SaveConversation(ctx, c)
@@ -240,7 +242,9 @@ func (r *conversationRepo) ListByAgent(
 ) ([]*model.Conversation, error) {
 	return r.store.ListConversationsByAgent(ctx, agentID, memberID, wsID)
 }
-func (r *messageRepo) Save(ctx context.Context, m *model.Message) error { return r.store.SaveMessage(ctx, m) }
+func (r *messageRepo) Save(ctx context.Context, m *model.Message) error {
+	return r.store.SaveMessage(ctx, m)
+}
 func (r *messageRepo) ListByConversation(ctx context.Context, id kernel.ConversationID) ([]*model.Message, error) {
 	return r.store.ListMessagesByConversation(ctx, id)
 }

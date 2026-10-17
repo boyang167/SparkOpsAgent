@@ -3,7 +3,6 @@ package command
 import (
 	"context"
 
-	integrationport "github.com/sparkops/sparkops-agent/backend/internal/modules/integration/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/domain/model"
@@ -11,7 +10,9 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/infrastructure/stream"
+	integrationport "github.com/sparkops/sparkops-agent/backend/internal/modules/integration/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"go.uber.org/zap"
 )
@@ -30,6 +31,7 @@ type StartChatHandler struct {
 	llm           integrationport.LLMClient
 	hub           *stream.Hub
 	bus           eventbus.Bus
+	tx            postgres.Transactor
 	logger        *zap.Logger
 }
 
@@ -42,11 +44,12 @@ func NewStartChatHandler(
 	llm integrationport.LLMClient,
 	hub *stream.Hub,
 	bus eventbus.Bus,
+	tx postgres.Transactor,
 	logger *zap.Logger,
 ) *StartChatHandler {
 	return &StartChatHandler{
 		conversations: conversations, messages: messages, runs: runs,
-		agents: agents, knowledge: knowledge, llm: llm, hub: hub, bus: bus, logger: logger,
+		agents: agents, knowledge: knowledge, llm: llm, hub: hub, bus: bus, tx: tx, logger: logger,
 	}
 }
 
@@ -155,20 +158,25 @@ func (h *StartChatHandler) executeRun(
 	}
 
 	run.Complete(run.Output)
-	if err := h.runs.Save(ctx, run); err != nil {
-		h.logger.Error("save run failed", zap.Error(err))
-	}
 	assistant := model.NewMessage(conversation.ID, model.MessageRoleAssistant, run.Output)
-	if err := h.messages.Save(ctx, assistant); err != nil {
-		h.logger.Error("save assistant message failed", zap.Error(err))
+	if err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := h.runs.Save(txCtx, run); err != nil {
+			return err
+		}
+		if err := h.messages.Save(txCtx, assistant); err != nil {
+			return err
+		}
+		return h.bus.Publish(txCtx, event.NewRunCompleted(
+			run.ID,
+			conversation.ID,
+			conversation.AgentID,
+			version.ProjectID,
+			conversation.MemberID,
+			conversation.WorkspaceID,
+		))
+	}); err != nil {
+		h.logger.Error("persist completed run failed", zap.Error(err))
+		return
 	}
 	h.hub.Complete(run.ID, run.Output)
-	_ = h.bus.Publish(ctx, event.NewRunCompleted(
-		run.ID,
-		conversation.ID,
-		conversation.AgentID,
-		version.ProjectID,
-		conversation.MemberID,
-		conversation.WorkspaceID,
-	))
 }
