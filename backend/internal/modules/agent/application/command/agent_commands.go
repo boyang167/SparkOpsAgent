@@ -76,6 +76,9 @@ func (h *CreateAgentHandler) Handle(
 		if err := h.repo.Save(txCtx, agent); err != nil {
 			return err
 		}
+		if len(domainEvents) == 0 {
+			return nil
+		}
 		return h.bus.Publish(txCtx, domainEvents...)
 	})
 	if err != nil {

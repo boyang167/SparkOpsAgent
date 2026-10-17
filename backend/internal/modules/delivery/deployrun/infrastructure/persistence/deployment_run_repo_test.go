@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -153,6 +154,64 @@ func TestTerminalUpdateAndDeployCompletedOutboxAreAtomic(t *testing.T) {
 	var outboxCount int64
 	require.NoError(t, db.Table("platform.event_outbox").Count(&outboxCount).Error)
 	require.Zero(t, outboxCount)
+}
+
+func TestTerminalUpdateAndDeployCompletedOutboxCommitTogether(t *testing.T) {
+	repo, db := newRunRepo(t)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+	require.NoError(t, messagingpersistence.AutoMigrate(db))
+
+	run := newRun(kernel.NewProjectID())
+	environmentID := kernel.NewEnvironmentID()
+	run.EnvironmentID = &environmentID
+	run.ImageTag = "release-2026.10"
+	require.NoError(t, repo.Create(context.Background(), run))
+	run.Fail("rollout failed", run.CreatedAt.Add(time.Minute))
+
+	registry := sharedevents.NewRegistry()
+	require.NoError(t, deliveryevent.Register(registry))
+	bus := messaging.NewReliableBus(
+		registry,
+		messagingpersistence.NewOutboxStore(db),
+		nil, nil, nil,
+	)
+	repo.SetTerminalCallback(func(ctx context.Context, terminal *model.DeploymentRun) error {
+		completed := deliveryevent.NewDeployCompleted(
+			terminal.ID, terminal.ProjectID, terminal.WorkspaceID, terminal.EnvironmentID,
+			"sparkops", string(terminal.Status), string(terminal.RunType), terminal.ImageTag,
+		)
+		completed.CreatedBy = terminal.CreatedBy
+		return bus.Publish(ctx, completed)
+	})
+
+	require.NoError(t, repo.Update(context.Background(), run))
+
+	stored, err := repo.FindByID(context.Background(), run.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.StatusFailed, stored.Status)
+	deploymentEvents, err := repo.ListEvents(context.Background(), run.ID)
+	require.NoError(t, err)
+	require.Len(t, deploymentEvents, 2)
+	require.Equal(t, model.StatusFailed, deploymentEvents[1].Status)
+
+	var rows []messagingpersistence.EventOutbox
+	require.NoError(t, db.Find(&rows).Error)
+	require.Len(t, rows, 1)
+	require.Equal(t, deliveryevent.DeployCompletedName, rows[0].EventType)
+	require.Equal(t, "deployment_run", rows[0].AggregateType)
+	require.Equal(t, run.ID.String(), rows[0].AggregateID)
+
+	var payload deliveryevent.DeployCompleted
+	require.NoError(t, json.Unmarshal(rows[0].Payload, &payload))
+	require.Equal(t, run.ID, payload.RunID)
+	require.Equal(t, run.ProjectID, payload.ProjectID)
+	require.Equal(t, run.WorkspaceID, payload.WorkspaceID)
+	require.Equal(t, run.EnvironmentID, payload.EnvironmentID)
+	require.Equal(t, "sparkops", payload.ProjectName)
+	require.Equal(t, string(model.StatusFailed), payload.Status)
+	require.Equal(t, string(run.RunType), payload.RunType)
+	require.Equal(t, run.ImageTag, payload.ImageTag)
+	require.Equal(t, run.CreatedBy, payload.CreatedBy)
 }
 
 func TestRepositoryPublishesOnlyCommittedCreateAndUpdateEvents(t *testing.T) {

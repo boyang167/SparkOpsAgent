@@ -134,66 +134,16 @@ owner module 在暴露 handler / route 前注册 codec，并传播重复或非�
 - product-workflow 的通知和 Git 状态报告保持提交后语义，避免事务内网络 I/O。
 - workspace / project / secret 测试使用 SQLite 上的事务感知 GORM repository adapter
   隔离无关 schema；其余路径直接使用生产 persistence repository。
-# Task 8 Report
 
-## Status
+## 审查修复补充
 
-Implemented current-workspace authorized Kubernetes cluster listing and per-cluster `plugin_kubernetes.cluster_settings` GET/PUT behavior.
+- Agent `CreateAgent` 只在存在领域事件时调用 `Publish`；无事件且未配置 Bus 时仍可在事务内成功保存。
+- 保留既有构造约束：存在待发布事件时必须配置 Bus；测试覆盖 nil Bus 的该约束。既有真实 SQLite 测试继续证明发布失败会回滚 Agent 状态。
+- Deployment 成功链测试注册真实 delivery codec，证明 terminal run、deployment event 与恰好一条 `delivery.DeployCompleted` Outbox 同时提交，并校验 aggregate 与关键 payload；原失败回滚测试保留。
 
-## Key Changes
+### 本轮 RED / GREEN
 
-- Added neutral `platform/plugin.WriteAuthorizer` and injected a bootstrap adapter backed by `authz.PermissionChecker.HasPermission(..., authz.PermGovernanceAdmin)`.
-- Added `GET /api/v1/plugins/kubernetes/clusters` to list only `Clusters.ListMeta(wsID)` authorized clusters and merge settings by `cluster_id`.
-- Added `PUT /api/v1/plugins/kubernetes/clusters/:clusterId/settings` with workspace/member context lookup, governance-admin write guard, authorized cluster confirmation, URL validation, and settings upsert.
-- Masked non-empty `PrometheusPassword`, `VelauxPassword`, and `LLMAPIKey` as `***` in responses; empty secrets remain empty.
-- Treated request secret value `***` as a reserved placeholder that preserves the stored secret; empty string clears it.
-- Added explicit 503 responses for missing plugin context dependencies instead of panics.
-
-## TDD
-
-RED:
-
-- `go test ./internal/plugins/kubernetes/http/ -count=1`
-- Expected failure observed: missing `PluginContext.Writer` and context-aware `RegisterRoutes` signature.
-
-GREEN:
-
-- Implemented platform context, bootstrap writer adapter, router/context wiring, and HTTP settings handlers.
-- Fixed local error mapping so unauthorized cluster settings return 403 `PLUGIN_CLUSTER_FORBIDDEN`.
-
-## Verification
-
-- `go test ./internal/plugins/kubernetes/http/ -count=1`: pass.
-- `go test ./internal/platform/plugin ./internal/bootstrap ./internal/plugins/kubernetes/schema -count=1`: pass.
-- `go test ./internal/plugins/kubernetes -count=1`: pass.
-- IDE lint on edited Go files: no diagnostics.
-
-## Notes
-
-- Kubernetes plugin HTTP code imports only platform/shared packages and its own schema; it does not import governance domain or infrastructure.
-- Manifest metrics `read_only` entries were not changed.
-- Full deployment SQLite failures were intentionally not chased.
-
-## Review Fix Follow-up
-
-Status: fixed all reported Critical/Important items and split the heavy HTTP file.
-
-Changes:
-
-- Added neutral `platform/plugin.WorkspaceMemberAuthorizer` and `PluginContext.Members`; bootstrap injects `c.WorkspaceMemberChecker`.
-- Kubernetes plugin routes now install `httpx.RequireWorkspace()` and neutral membership middleware at the plugin group level, covering ready, current clusters/settings routes, and future routes under the same group.
-- Missing `Members` returns 503; non-members return 403 `TENANT_NOT_WORKSPACE_MEMBER`; tests exercise the production middleware chain without externally adding `RequireWorkspace`.
-- URL validation now rejects embedded userinfo, keeps the error message fixed without echoing the submitted URL, and still allows private/localhost hosts for trusted admin-configured internal service endpoints.
-- Settings upsert moved into `settings_store.go`; PUT uses a DB transaction and `clause.Locking{Strength:"UPDATE"}` for existing rows before preserving `***` secrets.
-- `clusters.go` now contains only handlers and view mapping; request merge/URL validation moved to `settings.go`, and DB access moved to `settings_store.go`.
-
-TDD RED:
-
-- `go test ./internal/plugins/kubernetes/http/ -count=1`
-- Expected failure observed: `PluginContext` lacked `Members` for new production-chain tests.
-
-GREEN / Verification:
-
-- `go test ./internal/plugins/kubernetes/http/ -count=1`: pass.
-- `go test ./internal/plugins/kubernetes/http/ ./internal/platform/plugin/ ./internal/bootstrap/ ./internal/plugins/kubernetes/ -count=1`: pass.
-- IDE lint on edited Go files: no diagnostics.
+- RED：`TestCreateAgentWithNoDomainEventsDoesNotRequireBus` 在无事件时因 nil Bus 解引用 panic。
+- GREEN：增加空事件短路后，Agent command 测试通过。
+- RED：Deployment 成功链在未注册 codec 时返回 `event descriptor not registered for "delivery.DeployCompleted"`。
+- GREEN：通过 `deliveryevent.Register` 注册真实 codec 后，成功提交测试及原失败回滚测试通过。
