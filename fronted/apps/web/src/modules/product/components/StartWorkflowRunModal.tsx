@@ -130,7 +130,7 @@ export function StartWorkflowRunModal({
   useEffect(() => {
     if (!active || !workflow) return;
     const nextBranches: Record<string, string> = {};
-    const nextTypes: Record<string, "branch" | "tag"> = {};
+    const nextTypes: Record<string, "branch" | "tag" | "pr"> = {};
     for (const stage of form.stages) {
       for (const row of stage.buildRows) {
         nextBranches[row.key] = row.branch || "main";
@@ -620,7 +620,7 @@ export function StartWorkflowRunModal({
           <header className="wf-run-page-head">
             <div className="wf-run-page-head-main">
               <h1 className="wf-run-page-title">执行工作流</h1>
-              <p className="wf-run-page-desc">{workflow.name}</p>
+              <p className="wf-run-page-desc">{workflow?.name ?? workflowName}</p>
             </div>
           </header>
           <section className="wf-run-page-card">

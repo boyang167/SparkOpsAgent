@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { WorkflowStageVM } from "@sparkops/contracts/product";
 import { buildWorkflowRunForm, defaultDeployEnvironmentId, defaultRunBranch, repoLabelFromGitUrl } from "./workflow-run-form";
 
 describe("workflow-run-form", () => {
@@ -12,6 +13,8 @@ describe("workflow-run-form", () => {
       [
         {
           name: "构建",
+          parallel: false,
+          exec_mode: "auto",
           jobs: [
             {
               name: "build-services",
@@ -27,6 +30,8 @@ describe("workflow-run-form", () => {
         },
         {
           name: "部署",
+          parallel: false,
+          exec_mode: "auto",
           jobs: [
             {
               name: "deploy-dev",
@@ -37,6 +42,8 @@ describe("workflow-run-form", () => {
         },
         {
           name: "审批",
+          parallel: false,
+          exec_mode: "auto",
           jobs: [{ name: "gate", type: "sparkops-approval", spec: {} }],
         },
       ],
@@ -57,13 +64,17 @@ describe("workflow-run-form", () => {
   });
 
   it("defaults branch and environment from specs", () => {
-    const stages = [
+    const stages: WorkflowStageVM[] = [
       {
         name: "构建",
+        parallel: false,
+        exec_mode: "auto",
         jobs: [{ name: "b", type: "sparkops-build", spec: { project_builds: [{ project_id: "p1", branch: "release" }] } }],
       },
       {
         name: "部署",
+        parallel: false,
+        exec_mode: "auto",
         jobs: [{ name: "d", type: "sparkops-deploy", spec: { environment_id: "env-9" } }],
       },
     ];
@@ -72,7 +83,7 @@ describe("workflow-run-form", () => {
   });
 
   it("skips empty stages", () => {
-    expect(buildWorkflowRunForm([{ name: "空", jobs: [] }]).pills).toEqual([]);
+    expect(buildWorkflowRunForm([{ name: "空", parallel: false, exec_mode: "auto", jobs: [] }]).pills).toEqual([]);
   });
 
   it("fills git url and secret from workspace project when job spec omits them", () => {
@@ -80,6 +91,8 @@ describe("workflow-run-form", () => {
       [
         {
           name: "构建",
+          parallel: false,
+          exec_mode: "auto",
           jobs: [
             {
               name: "build-1",

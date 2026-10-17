@@ -4,11 +4,12 @@ interface K8sStatusBadgeProps {
   tone?: K8sStatusTone;
   children: React.ReactNode;
   dot?: boolean;
+  title?: string;
 }
 
-export function K8sStatusBadge({ tone = "neutral", children, dot = false }: K8sStatusBadgeProps) {
+export function K8sStatusBadge({ tone = "neutral", children, dot = false, title }: K8sStatusBadgeProps) {
   return (
-    <span className={`k8s-status-badge is-${tone}${dot ? " has-dot" : ""}`}>
+    <span className={`k8s-status-badge is-${tone}${dot ? " has-dot" : ""}`} title={title}>
       {dot ? <span className="k8s-status-dot" aria-hidden /> : null}
       {children}
     </span>

@@ -3,9 +3,9 @@ import type { EditorStage } from "./workflow-editor-utils";
 import { applyWorkflowDrop, moveJob, reorderStages } from "./workflow-editor-dnd";
 
 const stages: EditorStage[] = [
-  { name: "build", jobs: [{ name: "build-1", type: "sparkops-build", spec: {} }] },
-  { name: "deploy", jobs: [{ name: "deploy-1", type: "sparkops-deploy", spec: {} }] },
-  { name: "approval", jobs: [{ name: "approval-1", type: "sparkops-approval", spec: {} }] },
+  { name: "build", parallel: false, exec_mode: "auto", jobs: [{ name: "build-1", type: "sparkops-build", spec: {} }] },
+  { name: "deploy", parallel: false, exec_mode: "auto", jobs: [{ name: "deploy-1", type: "sparkops-deploy", spec: {} }] },
+  { name: "approval", parallel: false, exec_mode: "auto", jobs: [{ name: "approval-1", type: "sparkops-approval", spec: {} }] },
 ];
 
 describe("workflow editor dnd", () => {
@@ -24,6 +24,8 @@ describe("workflow editor dnd", () => {
     const local: EditorStage[] = [
       {
         name: "build",
+        parallel: false,
+        exec_mode: "auto",
         jobs: [
           { name: "a", type: "sparkops-build", spec: {} },
           { name: "b", type: "sparkops-build", spec: {} },

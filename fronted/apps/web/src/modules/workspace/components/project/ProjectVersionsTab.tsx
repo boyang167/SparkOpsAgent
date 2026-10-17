@@ -90,7 +90,7 @@ export function ProjectVersionsTab({ workspaceId, projectId, active }: ProjectVe
         open={detail != null || detailLoading}
         title={detail ? `版本 ${detail.version_tag}` : "版本详情"}
         onClose={() => setDetail(null)}
-        width={720}
+        panelClassName="project-versions-drawer"
       >
         {detailLoading && !detail ? <p>加载中…</p> : null}
         {detail ? (

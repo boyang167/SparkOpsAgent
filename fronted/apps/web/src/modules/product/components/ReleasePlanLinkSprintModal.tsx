@@ -162,8 +162,8 @@ export function ReleasePlanLinkSprintModal({
       });
       const option: ReleasePlanSprintOption = {
         id: created.id,
-        name: created.name,
-        external: created.external,
+        name: sprintName,
+        external,
       };
       onSprintCreated?.(option);
       onConfirm(created.id);

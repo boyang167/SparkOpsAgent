@@ -14563,6 +14563,10 @@ textarea.input {
   gap: 12px;
 }
 
+.project-versions-drawer {
+  width: min(100%, 45rem);
+}
+
 .project-versions-muted {
   color: var(--muted);
   font-size: 13px;

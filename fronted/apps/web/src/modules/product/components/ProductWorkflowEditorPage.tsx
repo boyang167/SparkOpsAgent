@@ -10,6 +10,7 @@ import type {
   WorkflowAdvancedVM,
   WorkflowNotificationVM,
   WorkflowRuntimeInput,
+  WorkflowStageVM,
   WorkflowTriggerVM,
   WorkflowVariableVM,
 } from "@sparkops/contracts/product";
@@ -38,7 +39,11 @@ export function ProductWorkflowEditorPage({
   const [variables, setVariables] = useState<WorkflowVariableVM[]>([]);
   const [runtimeInputs, setRuntimeInputs] = useState<WorkflowRuntimeInput[]>([]);
   const [triggers, setTriggers] = useState<WorkflowTriggerVM[]>([]);
-  const [advanced, setAdvanced] = useState<WorkflowAdvancedVM>({ concurrency: 1, timeout_minutes: 0 });
+  const [advanced, setAdvanced] = useState<WorkflowAdvancedVM>({
+    concurrency: 1,
+    timeout_minutes: 0,
+    debug: false,
+  });
   const [projects, setProjects] = useState<ProductProjectVM[]>([]);
   const [environments, setEnvironments] = useState<EnvironmentVM[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,7 +68,7 @@ export function ProductWorkflowEditorPage({
       setVariables(wf.variables ?? []);
       setRuntimeInputs(wf.runtime_inputs ?? []);
       setTriggers(wf.triggers ?? []);
-      setAdvanced(wf.advanced ?? { concurrency: 1, timeout_minutes: 0 });
+      setAdvanced(wf.advanced ?? { concurrency: 1, timeout_minutes: 0, debug: false });
       setProjects(projectItems);
       setEnvironments(envItems);
     } catch (err) {

@@ -192,7 +192,7 @@ export async function loadClusterResources(project: ProjectVM): Promise<ProductK
       // 只保留与项目相关的资源，避免把命名空间里无关 ConfigMap/默认账号整页灌进来
       const matched = objects.filter((item) => belongsToProject(item, project.name));
       return matched
-        .map((item) => {
+        .map((item): ProductK8sResource | null => {
           const name = item.metadata?.name?.trim();
           if (!name) return null;
           let yaml = "";
@@ -214,7 +214,7 @@ export async function loadClusterResources(project: ProjectVM): Promise<ProductK
             namespace: item.metadata?.namespace || namespace,
           };
         })
-        .filter((item): item is ProductK8sResource => Boolean(item));
+        .filter((item): item is ProductK8sResource => item !== null);
     }),
   ).then((settled) => settled.flatMap((result) => (result.status === "fulfilled" ? result.value : [])));
 

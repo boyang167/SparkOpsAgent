@@ -543,10 +543,10 @@ ${scanStage}
               set -e
               REG_HOST="\\$REGISTRY_HOST"
               if [ "\${env.REGISTRY_INSECURE}" = "true" ] && command -v openssl >/dev/null 2>&1; then
-                CERT_DIR="/etc/docker/certs.d/\\${REG_HOST}"
+                CERT_DIR="/etc/docker/certs.d/\\\${REG_HOST}"
                 if mkdir -p "\\$CERT_DIR" 2>/dev/null; then
                   if [ ! -s "\\$CERT_DIR/ca.crt" ]; then
-                    echo | openssl s_client -connect "\\${REG_HOST}:443" -servername "\\${REG_HOST}" 2>/dev/null \\\\
+                    echo | openssl s_client -connect "\\\${REG_HOST}:443" -servername "\\\${REG_HOST}" 2>/dev/null \\\\
                       | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > "\\$CERT_DIR/ca.crt" || true
                   fi
                 fi

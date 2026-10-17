@@ -12,8 +12,8 @@ describe("workflow-list-utils", () => {
   it("builds stage path labels from first job type", () => {
     expect(
       stagePathLabels([
-        { name: "阶段1", jobs: [{ name: "build-1", type: "sparkops-build", spec: {} }] },
-        { name: "阶段2", jobs: [{ name: "deploy-1", type: "sparkops-deploy", spec: {} }] },
+        { name: "阶段1", parallel: false, exec_mode: "auto", jobs: [{ name: "build-1", type: "sparkops-build", spec: {} }] },
+        { name: "阶段2", parallel: false, exec_mode: "auto", jobs: [{ name: "deploy-1", type: "sparkops-deploy", spec: {} }] },
       ]),
     ).toEqual(["构建", "部署"]);
   });

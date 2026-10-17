@@ -40,6 +40,8 @@ describe("deploymentRunTitle", () => {
         git_ref_type: "branch",
         git_ref_value: "master",
         image_tag: "v1.0.1",
+        cross_cluster: false,
+        run_type: "normal",
         status: "failed",
         error_message: "",
         current_stage: "",

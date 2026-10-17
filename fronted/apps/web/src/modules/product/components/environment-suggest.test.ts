@@ -24,6 +24,7 @@ function project(partial: Partial<ProjectVM> & { id: string; name: string }): Pr
     can_submit_review: false,
     can_review: false,
     ...partial,
+    review_comment: partial.review_comment ?? "",
   };
 }
 

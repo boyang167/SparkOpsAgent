@@ -119,8 +119,7 @@ function buildRowsForJob(
       gitUrl,
       secretId,
       branch: row.branch || "main",
-      refType:
-        row.git_ref_type === "tag" ? "tag" : row.git_ref_type === "pr" ? "pr" : "branch",
+      refType: row.git_ref_type === "tag" ? "tag" : "branch",
     };
   });
 }
