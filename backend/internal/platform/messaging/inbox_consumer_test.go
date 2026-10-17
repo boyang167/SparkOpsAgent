@@ -66,6 +66,7 @@ func TestInboxConsumerCommitsHandlerAndInboxTogether(t *testing.T) {
 	consumer, tx, inbox, transport, envelope := newInboxTestConsumer(t)
 	sideEffect := false
 	subscription := inboxSubscription(func(ctx context.Context, _ events.Event) error {
+		require.True(t, IsInboxConsumerContext(ctx))
 		transaction := ctx.Value(transactionStateKey{}).(*fakeTransaction)
 		transaction.commit = append(transaction.commit, func() { sideEffect = true })
 		return nil

@@ -49,11 +49,11 @@ func NewNotificationRepository(db *gorm.DB) repository.NotificationRepository {
 func (r *NotificationRepository) Save(ctx context.Context, n *model.Notification) error {
 	row := toRow(n)
 	row.AuditColumns = postgres.AuditColumns{CreatedAt: n.CreatedAt, UpdatedAt: n.CreatedAt}
-	return r.db.WithContext(ctx).Create(&row).Error
+	return postgres.DB(ctx, r.db).Create(&row).Error
 }
 
 func (r *NotificationRepository) Update(ctx context.Context, n *model.Notification) error {
-	return r.db.WithContext(ctx).Model(&notificationModel{}).Where("id = ?", n.ID.String()).Updates(map[string]any{
+	return postgres.DB(ctx, r.db).Model(&notificationModel{}).Where("id = ?", n.ID.String()).Updates(map[string]any{
 		"read_at":    n.ReadAt,
 		"updated_at": time.Now().UTC(),
 	}).Error
@@ -61,7 +61,7 @@ func (r *NotificationRepository) Update(ctx context.Context, n *model.Notificati
 
 func (r *NotificationRepository) FindByID(ctx context.Context, id kernel.NotificationID) (*model.Notification, error) {
 	var row notificationModel
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrNotificationNotFound
 	}
@@ -81,7 +81,7 @@ func (r *NotificationRepository) ListByMember(
 		limit = 50
 	}
 	var rows []notificationModel
-	err := r.db.WithContext(ctx).
+	err := postgres.DB(ctx, r.db).
 		Where("member_id = ? AND workspace_id = ?", memberID.String(), wsID.String()).
 		Order("created_at desc").
 		Limit(limit).
@@ -102,7 +102,7 @@ func (r *NotificationRepository) ListByMember(
 
 func (r *NotificationRepository) CountUnread(ctx context.Context, memberID kernel.MemberID, wsID kernel.WorkspaceID) (int, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&notificationModel{}).
+	err := postgres.DB(ctx, r.db).Model(&notificationModel{}).
 		Where("member_id = ? AND workspace_id = ? AND read_at IS NULL", memberID.String(), wsID.String()).
 		Count(&count).Error
 	return int(count), err
@@ -110,7 +110,7 @@ func (r *NotificationRepository) CountUnread(ctx context.Context, memberID kerne
 
 func (r *NotificationRepository) MarkAllRead(ctx context.Context, memberID kernel.MemberID, wsID kernel.WorkspaceID) (int, error) {
 	now := time.Now().UTC()
-	result := r.db.WithContext(ctx).Model(&notificationModel{}).
+	result := postgres.DB(ctx, r.db).Model(&notificationModel{}).
 		Where("member_id = ? AND workspace_id = ? AND read_at IS NULL", memberID.String(), wsID.String()).
 		Updates(map[string]any{"read_at": now, "updated_at": now})
 	return int(result.RowsAffected), result.Error

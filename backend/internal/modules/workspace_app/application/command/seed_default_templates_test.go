@@ -2,6 +2,7 @@ package command_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/query"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 )
 
 type seedTestWorkspace struct {
@@ -105,5 +107,29 @@ func TestSeedDefaultTemplatesIsIdempotentAndKeepsDeletions(t *testing.T) {
 	}
 	if got := len(listSeedTemplates(t, db, wsID)); got != want {
 		t.Fatalf("reseed should neither duplicate nor revive deleted defaults; want %d, got %d", want, got)
+	}
+}
+
+func TestSeedWorkspaceDefaultTemplatesUsesContextTransaction(t *testing.T) {
+	db := openSeedTestDB(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(2)
+	wsID := "99999999-9999-4999-8999-999999999999"
+	rollback := errors.New("force rollback")
+
+	err = postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+		if err := command.SeedWorkspaceDefaultTemplates(ctx, db, wsID, wsID); err != nil {
+			return err
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatalf("want forced rollback, got %v", err)
+	}
+	if got := len(listSeedTemplates(t, db, wsID)); got != 0 {
+		t.Fatalf("templates must roll back with Inbox transaction, got %d", got)
 	}
 }

@@ -39,11 +39,11 @@ func NewTemplateRepository(db *gorm.DB) repository.TemplateRepository {
 func (r *TemplateRepository) Save(ctx context.Context, t *model.Template) error {
 	row := templateToRow(t)
 	row.AuditColumns = postgres.AuditColumns{CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt}
-	return r.db.WithContext(ctx).Create(&row).Error
+	return postgres.DB(ctx, r.db).Create(&row).Error
 }
 
 func (r *TemplateRepository) Update(ctx context.Context, t *model.Template) error {
-	return r.db.WithContext(ctx).Model(&templateModel{}).
+	return postgres.DB(ctx, r.db).Model(&templateModel{}).
 		Where("id = ? AND workspace_id = ?", t.ID.String(), t.WorkspaceID.String()).
 		Updates(map[string]any{
 			"name": t.Name.String(), "kind": t.Kind, "language": t.Language,
@@ -53,12 +53,12 @@ func (r *TemplateRepository) Update(ctx context.Context, t *model.Template) erro
 }
 
 func (r *TemplateRepository) Delete(ctx context.Context, id kernel.TemplateID) error {
-	return r.db.WithContext(ctx).Where("id = ?", id.String()).Delete(&templateModel{}).Error
+	return postgres.DB(ctx, r.db).Where("id = ?", id.String()).Delete(&templateModel{}).Error
 }
 
 func (r *TemplateRepository) FindByID(ctx context.Context, wsID kernel.WorkspaceID, id kernel.TemplateID) (*model.Template, error) {
 	var row templateModel
-	err := r.db.WithContext(ctx).
+	err := postgres.DB(ctx, r.db).
 		Where("id = ? AND workspace_id = ?", id.String(), wsID.String()).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -72,7 +72,7 @@ func (r *TemplateRepository) FindByID(ctx context.Context, wsID kernel.Workspace
 
 func (r *TemplateRepository) ListByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) ([]*model.Template, error) {
 	var rows []templateModel
-	if err := r.db.WithContext(ctx).
+	if err := postgres.DB(ctx, r.db).
 		Where("workspace_id = ?", wsID.String()).
 		Order("created_at DESC").
 		Find(&rows).Error; err != nil {
@@ -111,7 +111,7 @@ func (r *TemplateRepository) ListAccessible(ctx context.Context, wsID kernel.Wor
 	}
 
 	var rows []templateModel
-	err = r.db.WithContext(ctx).
+	err = postgres.DB(ctx, r.db).
 		Where("workspace_id = ?", wsID.String()).
 		Or("is_public = ? AND workspace_id IN ?", true, orgWorkspaceIDs).
 		Order("created_at DESC").
@@ -141,7 +141,7 @@ func (r *TemplateRepository) ListAccessible(ctx context.Context, wsID kernel.Wor
 
 func (r *TemplateRepository) FindAccessible(ctx context.Context, wsID kernel.WorkspaceID, orgID kernel.OrgID, id kernel.TemplateID) (*model.TemplateView, error) {
 	var row templateModel
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrTemplateNotFound
 	}
@@ -162,7 +162,7 @@ func (r *TemplateRepository) FindAccessible(ctx context.Context, wsID kernel.Wor
 		return nil, domain.ErrTemplateNotFound
 	}
 	var count int64
-	err = r.db.WithContext(ctx).Table("tenant.workspaces").
+	err = postgres.DB(ctx, r.db).Table("tenant.workspaces").
 		Where("id = ? AND org_id = ? AND deleted_at IS NULL", t.WorkspaceID.String(), orgID.String()).
 		Count(&count).Error
 	if err != nil {
@@ -183,7 +183,7 @@ func (r *TemplateRepository) FindAccessible(ctx context.Context, wsID kernel.Wor
 
 func (r *TemplateRepository) listWorkspaceIDsByOrg(ctx context.Context, orgID kernel.OrgID) ([]string, error) {
 	var ids []string
-	err := r.db.WithContext(ctx).Table("tenant.workspaces").
+	err := postgres.DB(ctx, r.db).Table("tenant.workspaces").
 		Where("org_id = ? AND deleted_at IS NULL", orgID.String()).
 		Pluck("id", &ids).Error
 	return ids, err
@@ -198,7 +198,7 @@ func (r *TemplateRepository) workspaceNames(ctx context.Context, workspaceIDs []
 		ID   string
 		Name string
 	}
-	err := r.db.WithContext(ctx).Table("tenant.workspaces").
+	err := postgres.DB(ctx, r.db).Table("tenant.workspaces").
 		Select("id, name").
 		Where("id IN ?", workspaceIDs).
 		Find(&rows).Error

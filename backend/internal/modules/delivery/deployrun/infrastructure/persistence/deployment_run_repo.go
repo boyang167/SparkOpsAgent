@@ -125,7 +125,8 @@ func (r *DeploymentRunRepository) Create(ctx context.Context, run *model.Deploym
 		RunID: run.ID.String(), At: run.CreatedAt, Status: string(run.Status),
 		Stage: string(run.CurrentStage), Message: message,
 	}
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := postgres.NewTransactor(r.db).WithinTransaction(ctx, func(txCtx context.Context) error {
+		tx := postgres.DB(txCtx, r.db)
 		if err := tx.Create(toRunRow(run)).Error; err != nil {
 			return err
 		}
@@ -195,7 +196,7 @@ func isTerminalStatus(status model.Status) bool {
 
 func (r *DeploymentRunRepository) FindByID(ctx context.Context, id kernel.DeploymentRunID) (*model.DeploymentRun, error) {
 	var row deploymentRunRow
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrDeploymentRunNotFound
 	}
@@ -207,7 +208,7 @@ func (r *DeploymentRunRepository) FindByID(ctx context.Context, id kernel.Deploy
 
 func (r *DeploymentRunRepository) FindByBuildID(ctx context.Context, id kernel.BuildID) (*model.DeploymentRun, error) {
 	var row deploymentRunRow
-	err := r.db.WithContext(ctx).Where("build_id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("build_id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrDeploymentRunNotFound
 	}

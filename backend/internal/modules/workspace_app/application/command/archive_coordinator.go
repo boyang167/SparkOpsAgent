@@ -8,6 +8,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -89,6 +90,9 @@ func (c *ArchiveCoordinator) HandleDeployCompleted(ctx context.Context, e events
 	ev, ok := e.(deliveryevent.DeployCompleted)
 	if !ok || ev.RunType != undeployRunType {
 		return nil
+	}
+	if messaging.IsInboxConsumerContext(ctx) {
+		return messaging.ErrOperationOutboxRequired
 	}
 	project, err := c.repo.FindByID(ctx, ev.ProjectID)
 	if err != nil || !project.IsArchiving() {

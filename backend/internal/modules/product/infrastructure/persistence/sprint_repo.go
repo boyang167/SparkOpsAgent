@@ -13,6 +13,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -128,7 +129,7 @@ func (r *SprintRepository) UpdateSprint(ctx context.Context, sprint *model.Sprin
 
 func (r *SprintRepository) FindSprintByID(ctx context.Context, id kernel.SprintID) (*model.Sprint, error) {
 	var row sprintModel
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrSprintNotFound
 	}
@@ -220,7 +221,7 @@ func (r *SprintRepository) UpdateWorkItem(ctx context.Context, item *model.WorkI
 	if err != nil {
 		return err
 	}
-	result := r.db.WithContext(ctx).Model(&workItemModel{}).
+	result := postgres.DB(ctx, r.db).Model(&workItemModel{}).
 		Where("id = ? AND version = ?", row.ID, item.Version).
 		Updates(map[string]any{
 			"stage_id": row.StageID, "sort_order": row.SortOrder, "type": row.Type,
@@ -247,7 +248,7 @@ func (r *SprintRepository) DeleteWorkItem(ctx context.Context, id kernel.WorkIte
 
 func (r *SprintRepository) FindWorkItemByID(ctx context.Context, id kernel.WorkItemID) (*model.WorkItem, error) {
 	var row workItemModel
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrWorkItemNotFound
 	}
@@ -499,7 +500,7 @@ func (r *SprintRepository) SaveExecution(ctx context.Context, exec *model.WorkIt
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Create(&row).Error
+	return postgres.DB(ctx, r.db).Create(&row).Error
 }
 
 func (r *SprintRepository) UpdateExecution(ctx context.Context, exec *model.WorkItemExecution) error {
@@ -507,7 +508,7 @@ func (r *SprintRepository) UpdateExecution(ctx context.Context, exec *model.Work
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Model(&workItemExecutionModel{}).Where("id = ?", row.ID).Updates(map[string]any{
+	return postgres.DB(ctx, r.db).Model(&workItemExecutionModel{}).Where("id = ?", row.ID).Updates(map[string]any{
 		"status": row.Status, "artifacts": row.Artifacts, "error_message": row.ErrorMessage,
 		"finished_at": row.FinishedAt,
 	}).Error
@@ -515,7 +516,7 @@ func (r *SprintRepository) UpdateExecution(ctx context.Context, exec *model.Work
 
 func (r *SprintRepository) FindExecutionByWorkflowRunID(ctx context.Context, runID kernel.ProductWorkflowRunID) (*model.WorkItemExecution, error) {
 	var row workItemExecutionModel
-	err := r.db.WithContext(ctx).Where("workflow_run_id = ?", runID.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("workflow_run_id = ?", runID.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrWorkItemExecutionNotFound
 	}

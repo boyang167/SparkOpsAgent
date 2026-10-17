@@ -13,6 +13,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/query"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/subscriber"
 	workspaceevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/persistence"
@@ -24,7 +25,6 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/policy"
-	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 )
 
@@ -64,13 +64,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		if err := c.EventBus.Subscribe(
 			integration.EventWorkspaceCreated,
 			"workspace-app.workspace-created.seed-default-templates",
-			func(ctx context.Context, e events.Event) error {
-				ev, ok := e.(integration.WorkspaceCreated)
-				if !ok {
-					return nil
-				}
-				return command.SeedWorkspaceDefaultTemplates(ctx, c.DB, ev.WorkspaceID.String(), ev.OwnerID.String())
-			},
+			subscriber.NewOnWorkspaceCreated(c.DB).Handle,
 		); err != nil {
 			return fmt.Errorf("subscribe workspace template seed: %w", err)
 		}

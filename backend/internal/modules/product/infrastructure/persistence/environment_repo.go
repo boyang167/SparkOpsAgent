@@ -12,6 +12,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -59,12 +60,12 @@ func (r *EnvironmentRepository) SaveEnvironment(ctx context.Context, env *model.
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Save(row).Error
+	return postgres.DB(ctx, r.db).Save(row).Error
 }
 
 func (r *EnvironmentRepository) FindEnvironmentByID(ctx context.Context, id kernel.EnvironmentID) (*model.Environment, error) {
 	var row environmentModel
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrEnvironmentNotFound
 	}
@@ -76,7 +77,7 @@ func (r *EnvironmentRepository) FindEnvironmentByID(ctx context.Context, id kern
 
 func (r *EnvironmentRepository) ListEnvironmentsByProduct(ctx context.Context, productID kernel.ProductID) ([]*model.Environment, error) {
 	var rows []environmentModel
-	if err := r.db.WithContext(ctx).Where("product_id = ?", productID.String()).
+	if err := postgres.DB(ctx, r.db).Where("product_id = ?", productID.String()).
 		Order("name ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -92,7 +93,7 @@ func (r *EnvironmentRepository) ListEnvironmentsByProduct(ctx context.Context, p
 }
 
 func (r *EnvironmentRepository) DeleteEnvironment(ctx context.Context, id kernel.EnvironmentID) error {
-	result := r.db.WithContext(ctx).Where("id = ?", id.String()).Delete(&environmentModel{})
+	result := postgres.DB(ctx, r.db).Where("id = ?", id.String()).Delete(&environmentModel{})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -104,7 +105,7 @@ func (r *EnvironmentRepository) DeleteEnvironment(ctx context.Context, id kernel
 
 func (r *EnvironmentRepository) CountEnvironmentsByProduct(ctx context.Context, productID kernel.ProductID) (int, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&environmentModel{}).
+	err := postgres.DB(ctx, r.db).Model(&environmentModel{}).
 		Where("product_id = ?", productID.String()).Count(&count).Error
 	return int(count), err
 }
@@ -119,12 +120,12 @@ func (r *EnvironmentRepository) SaveEnvironmentProject(ctx context.Context, row 
 		v := row.CurrentDeploymentRunID.String()
 		m.CurrentDeploymentRunID = &v
 	}
-	return r.db.WithContext(ctx).Save(&m).Error
+	return postgres.DB(ctx, r.db).Save(&m).Error
 }
 
 func (r *EnvironmentRepository) ListEnvironmentProjects(ctx context.Context, envID kernel.EnvironmentID) ([]*model.EnvironmentProject, error) {
 	var rows []environmentProjectModel
-	if err := r.db.WithContext(ctx).Where("environment_id = ?", envID.String()).Find(&rows).Error; err != nil {
+	if err := postgres.DB(ctx, r.db).Where("environment_id = ?", envID.String()).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*model.EnvironmentProject, 0, len(rows))
@@ -141,7 +142,7 @@ func (r *EnvironmentRepository) ListEnvironmentProjects(ctx context.Context, env
 func (r *EnvironmentRepository) EnsureEnvironmentProjects(ctx context.Context, envID kernel.EnvironmentID, projectIDs []kernel.ProjectID) error {
 	for _, pid := range projectIDs {
 		var count int64
-		if err := r.db.WithContext(ctx).Model(&environmentProjectModel{}).
+		if err := postgres.DB(ctx, r.db).Model(&environmentProjectModel{}).
 			Where("environment_id = ? AND project_id = ?", envID.String(), pid.String()).
 			Count(&count).Error; err != nil {
 			return err
@@ -149,7 +150,7 @@ func (r *EnvironmentRepository) EnsureEnvironmentProjects(ctx context.Context, e
 		if count > 0 {
 			continue
 		}
-		if err := r.db.WithContext(ctx).Create(&environmentProjectModel{
+		if err := postgres.DB(ctx, r.db).Create(&environmentProjectModel{
 			EnvironmentID: envID.String(), ProjectID: pid.String(), Enabled: true,
 		}).Error; err != nil {
 			return err
@@ -160,7 +161,7 @@ func (r *EnvironmentRepository) EnsureEnvironmentProjects(ctx context.Context, e
 
 func (r *EnvironmentRepository) FindEnvironmentProject(ctx context.Context, envID kernel.EnvironmentID, projectID kernel.ProjectID) (*model.EnvironmentProject, error) {
 	var row environmentProjectModel
-	err := r.db.WithContext(ctx).
+	err := postgres.DB(ctx, r.db).
 		Where("environment_id = ? AND project_id = ?", envID.String(), projectID.String()).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

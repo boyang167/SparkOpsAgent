@@ -10,6 +10,7 @@ import (
 	deployrepo "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/repository"
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	buildmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
@@ -34,6 +35,9 @@ func (s *OnBuildCompleted) Handle(ctx context.Context, event events.Event) error
 	completed, ok := event.(deliveryevent.BuildCompleted)
 	if !ok {
 		return nil
+	}
+	if messaging.IsInboxConsumerContext(ctx) {
+		return messaging.ErrOperationOutboxRequired
 	}
 	run, err := s.repo.FindByBuildID(ctx, completed.BuildID)
 	if errors.Is(err, domain.ErrDeploymentRunNotFound) {

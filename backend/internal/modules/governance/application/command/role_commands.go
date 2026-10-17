@@ -10,6 +10,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -272,7 +273,7 @@ func (h *BootstrapWorkspaceHandler) Handle(ctx context.Context, workspaceID kern
 			return err
 		}
 	}
-	if h.sync != nil {
+	if h.sync != nil && !messaging.IsInboxConsumerContext(ctx) {
 		return h.sync.SyncMemberRole(ctx, workspaceID, admin.ID, ownerID, true)
 	}
 	return nil

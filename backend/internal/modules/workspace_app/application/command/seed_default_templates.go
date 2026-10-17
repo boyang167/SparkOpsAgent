@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/query"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 )
 
 //go:embed default_templates/*.yaml
@@ -59,6 +60,7 @@ func SeedDefaultTemplates(ctx context.Context, db *gorm.DB) error {
 	if db == nil {
 		return nil
 	}
+	db = postgres.DB(ctx, db)
 	var workspaceIDs []string
 	if err := db.WithContext(ctx).
 		Table("tenant.workspaces").
@@ -80,6 +82,7 @@ func SeedWorkspaceDefaultTemplates(ctx context.Context, db *gorm.DB, workspaceID
 	if db == nil || strings.TrimSpace(workspaceID) == "" {
 		return nil
 	}
+	db = postgres.DB(ctx, db)
 	if strings.TrimSpace(createdBy) == "" {
 		createdBy = defaultTemplateCreator
 	}

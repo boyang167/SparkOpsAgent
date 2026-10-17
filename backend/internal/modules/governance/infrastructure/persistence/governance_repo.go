@@ -76,12 +76,12 @@ func (s *Store) SaveRole(ctx context.Context, role *model.Role) error {
 	if row.CreatedAt.IsZero() {
 		row.CreatedAt = row.UpdatedAt
 	}
-	return s.db.WithContext(ctx).Save(&row).Error
+	return postgres.DB(ctx, s.db).Save(&row).Error
 }
 
 func (s *Store) FindRoleByID(ctx context.Context, id kernel.RoleID) (*model.Role, error) {
 	var row roleModel
-	err := s.db.WithContext(ctx).Where(postgres.UUIDEq("id"), id.String()).First(&row).Error
+	err := postgres.DB(ctx, s.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrRoleNotFound
 	}
@@ -93,7 +93,7 @@ func (s *Store) FindRoleByID(ctx context.Context, id kernel.RoleID) (*model.Role
 
 func (s *Store) ListRolesByWorkspace(ctx context.Context, workspaceID kernel.WorkspaceID) ([]*model.Role, error) {
 	var rows []roleModel
-	err := s.db.WithContext(ctx).Where(postgres.UUIDEq("workspace_id"), workspaceID.String()).Find(&rows).Error
+	err := postgres.DB(ctx, s.db).Where("workspace_id = ?", workspaceID.String()).Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ func (s *Store) ListRolesByWorkspace(ctx context.Context, workspaceID kernel.Wor
 
 func (s *Store) ListRolesByName(ctx context.Context, name string) ([]*model.Role, error) {
 	var rows []roleModel
-	err := s.db.WithContext(ctx).Where("name = ?", name).Find(&rows).Error
+	err := postgres.DB(ctx, s.db).Where("name = ?", name).Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -127,8 +127,8 @@ func (s *Store) ListRolesByName(ctx context.Context, name string) ([]*model.Role
 
 func (s *Store) ExistsRoleByName(ctx context.Context, workspaceID kernel.WorkspaceID, name string) (bool, error) {
 	var count int64
-	err := s.db.WithContext(ctx).Model(&roleModel{}).
-		Where(postgres.UUIDEq("workspace_id")+" AND name = ?", workspaceID.String(), name).Count(&count).Error
+	err := postgres.DB(ctx, s.db).Model(&roleModel{}).
+		Where("workspace_id = ? AND name = ?", workspaceID.String(), name).Count(&count).Error
 	return count > 0, err
 }
 
@@ -138,20 +138,20 @@ func (s *Store) SaveBinding(ctx context.Context, binding *model.RoleBinding) err
 		MemberID:     binding.MemberID.String(),
 		AuditColumns: postgres.AuditColumns{CreatedAt: binding.CreatedAt, UpdatedAt: binding.CreatedAt},
 	}
-	return s.db.WithContext(ctx).Save(&row).Error
+	return postgres.DB(ctx, s.db).Save(&row).Error
 }
 
 func (s *Store) ExistsBinding(ctx context.Context, roleID kernel.RoleID, memberID kernel.MemberID) (bool, error) {
 	var count int64
-	err := s.db.WithContext(ctx).Model(&bindingModel{}).
-		Where(postgres.UUIDEq("role_id")+" AND "+postgres.UUIDEq("member_id"), roleID.String(), memberID.String()).Count(&count).Error
+	err := postgres.DB(ctx, s.db).Model(&bindingModel{}).
+		Where("role_id = ? AND member_id = ?", roleID.String(), memberID.String()).Count(&count).Error
 	return count > 0, err
 }
 
 func (s *Store) DeleteBinding(ctx context.Context, roleID kernel.RoleID, memberID kernel.MemberID) error {
 	// Bindings are association rows: hard-delete so list queries and UNIQUE(role_id, member_id) stay consistent.
-	result := s.db.WithContext(ctx).Unscoped().
-		Where(postgres.UUIDEq("role_id")+" AND "+postgres.UUIDEq("member_id"), roleID.String(), memberID.String()).
+	result := postgres.DB(ctx, s.db).Unscoped().
+		Where("role_id = ? AND member_id = ?", roleID.String(), memberID.String()).
 		Delete(&bindingModel{})
 	if result.Error != nil {
 		return result.Error
@@ -164,9 +164,9 @@ func (s *Store) DeleteBinding(ctx context.Context, roleID kernel.RoleID, memberI
 
 func (s *Store) ListRolesForMember(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID) ([]*model.Role, error) {
 	var rows []roleModel
-	err := s.db.WithContext(ctx).Model(&roleModel{}).
+	err := postgres.DB(ctx, s.db).Model(&roleModel{}).
 		Joins("JOIN governance.role_bindings b ON b.role_id::uuid = governance.roles.id::uuid AND b.deleted_at IS NULL").
-		Where(postgres.UUIDEq("governance.roles.workspace_id")+" AND "+postgres.UUIDEq("b.member_id"), workspaceID.String(), memberID.String()).
+		Where("governance.roles.workspace_id = ? AND b.member_id = ?", workspaceID.String(), memberID.String()).
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
@@ -183,7 +183,7 @@ func (s *Store) ListRolesForMember(ctx context.Context, workspaceID kernel.Works
 }
 
 func (s *Store) DeleteRole(ctx context.Context, id kernel.RoleID) error {
-	result := s.db.WithContext(ctx).Where(postgres.UUIDEq("id"), id.String()).Delete(&roleModel{})
+	result := postgres.DB(ctx, s.db).Where("id = ?", id.String()).Delete(&roleModel{})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -194,15 +194,15 @@ func (s *Store) DeleteRole(ctx context.Context, id kernel.RoleID) error {
 }
 
 func (s *Store) DeleteBindingsByRoleID(ctx context.Context, roleID kernel.RoleID) error {
-	return s.db.WithContext(ctx).Unscoped().
-		Where(postgres.UUIDEq("role_id"), roleID.String()).
+	return postgres.DB(ctx, s.db).Unscoped().
+		Where("role_id = ?", roleID.String()).
 		Delete(&bindingModel{}).Error
 }
 
 func (s *Store) CountRoleChildren(ctx context.Context, id kernel.RoleID) (int, error) {
 	var count int64
-	err := s.db.WithContext(ctx).Model(&roleModel{}).
-		Where(postgres.UUIDEq("parent_id"), id.String()).Count(&count).Error
+	err := postgres.DB(ctx, s.db).Model(&roleModel{}).
+		Where("parent_id = ?", id.String()).Count(&count).Error
 	return int(count), err
 }
 
@@ -249,7 +249,7 @@ func (r *roleRepo) ListByName(ctx context.Context, name string) ([]*model.Role, 
 }
 func (r *roleRepo) ListWorkspaceIDs(ctx context.Context) ([]kernel.WorkspaceID, error) {
 	var rows []string
-	if err := r.store.db.WithContext(ctx).
+	if err := postgres.DB(ctx, r.store.db).
 		Table("tenant.workspaces").
 		Where("deleted_at IS NULL").
 		Pluck("id", &rows).Error; err != nil {

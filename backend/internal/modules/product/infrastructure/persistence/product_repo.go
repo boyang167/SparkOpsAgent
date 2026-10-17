@@ -66,18 +66,18 @@ type productPlanModel struct {
 func (productPlanModel) TableName() string { return "product.product_plans" }
 
 type productRequirementModel struct {
-	ID                  string `gorm:"column:id;primaryKey"`
-	ProductID           string
-	ProductPlanID       string
-	ProjectID           string
-	ProjectName         string
-	ProjectTag          string
-	BuildID             string
-	Description         string `gorm:"type:text"`
-	Status              string
-	MulticlusterStatus  string
-	Operator            string
-	OtherInfo           string `gorm:"type:jsonb"`
+	ID                 string `gorm:"column:id;primaryKey"`
+	ProductID          string
+	ProductPlanID      string
+	ProjectID          string
+	ProjectName        string
+	ProjectTag         string
+	BuildID            string
+	Description        string `gorm:"type:text"`
+	Status             string
+	MulticlusterStatus string
+	Operator           string
+	OtherInfo          string `gorm:"type:jsonb"`
 	postgres.AuditColumns
 }
 
@@ -96,11 +96,11 @@ func (r *ProductRepository) SaveProduct(ctx context.Context, p *model.Product) e
 		Version: p.Version, NextVersion: p.NextVersion, CreatedBy: p.CreatedBy.String(),
 		AuditColumns: postgres.AuditColumns{CreatedAt: p.CreatedAt, UpdatedAt: p.CreatedAt},
 	}
-	return r.db.WithContext(ctx).Create(&row).Error
+	return postgres.DB(ctx, r.db).Create(&row).Error
 }
 
 func (r *ProductRepository) UpdateProduct(ctx context.Context, p *model.Product) error {
-	return r.db.WithContext(ctx).Model(&productModel{}).Where("id = ?", p.ID.String()).Updates(map[string]any{
+	return postgres.DB(ctx, r.db).Model(&productModel{}).Where("id = ?", p.ID.String()).Updates(map[string]any{
 		"display_name": p.DisplayName, "description": p.Description,
 		"version": p.Version, "next_version": p.NextVersion, "updated_at": time.Now().UTC(),
 	}).Error
@@ -108,7 +108,7 @@ func (r *ProductRepository) UpdateProduct(ctx context.Context, p *model.Product)
 
 func (r *ProductRepository) FindProductByID(ctx context.Context, id kernel.ProductID) (*model.Product, error) {
 	var row productModel
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrProductNotFound
 	}
@@ -120,7 +120,7 @@ func (r *ProductRepository) FindProductByID(ctx context.Context, id kernel.Produ
 
 func (r *ProductRepository) ListProductsByWorkspace(ctx context.Context, wsID kernel.WorkspaceID) ([]*model.Product, error) {
 	var rows []productModel
-	if err := r.db.WithContext(ctx).Where("workspace_id = ?", wsID.String()).Find(&rows).Error; err != nil {
+	if err := postgres.DB(ctx, r.db).Where("workspace_id = ?", wsID.String()).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*model.Product, 0, len(rows))
@@ -142,12 +142,12 @@ func (r *ProductRepository) SavePlan(ctx context.Context, plan *model.ProductPla
 		Submitted: plan.Submitted, OtherInfo: string(otherInfo),
 		AuditColumns: postgres.AuditColumns{CreatedAt: plan.CreatedAt, UpdatedAt: plan.CreatedAt},
 	}
-	return r.db.WithContext(ctx).Create(&row).Error
+	return postgres.DB(ctx, r.db).Create(&row).Error
 }
 
 func (r *ProductRepository) ListPlansByProduct(ctx context.Context, productID kernel.ProductID) ([]*model.ProductPlan, error) {
 	var rows []productPlanModel
-	if err := r.db.WithContext(ctx).Where("product_id = ?", productID.String()).Find(&rows).Error; err != nil {
+	if err := postgres.DB(ctx, r.db).Where("product_id = ?", productID.String()).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*model.ProductPlan, 0, len(rows))
@@ -170,12 +170,12 @@ func (r *ProductRepository) SaveRequirement(ctx context.Context, req *model.Prod
 		MulticlusterStatus: req.MulticlusterStatus, Operator: req.Operator, OtherInfo: string(otherInfo),
 		AuditColumns: postgres.AuditColumns{CreatedAt: req.CreatedAt, UpdatedAt: req.CreatedAt},
 	}
-	return r.db.WithContext(ctx).Create(&row).Error
+	return postgres.DB(ctx, r.db).Create(&row).Error
 }
 
 func (r *ProductRepository) FindRequirementByID(ctx context.Context, id kernel.ProductRequirementID) (*model.ProductRequirement, error) {
 	var row productRequirementModel
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrProductRequirementNotFound
 	}
@@ -190,7 +190,7 @@ func (r *ProductRepository) FindRequirementByBuildID(ctx context.Context, buildI
 		return nil, domain.ErrProductRequirementNotFound
 	}
 	var row productRequirementModel
-	err := r.db.WithContext(ctx).Where("build_id = ?", buildID.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("build_id = ?", buildID.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrProductRequirementNotFound
 	}
@@ -202,7 +202,7 @@ func (r *ProductRepository) FindRequirementByBuildID(ctx context.Context, buildI
 
 func (r *ProductRepository) UpdateRequirement(ctx context.Context, req *model.ProductRequirement) error {
 	otherInfo, _ := json.Marshal(req.OtherInfo)
-	return r.db.WithContext(ctx).Model(&productRequirementModel{}).Where("id = ?", req.ID.String()).Updates(map[string]any{
+	return postgres.DB(ctx, r.db).Model(&productRequirementModel{}).Where("id = ?", req.ID.String()).Updates(map[string]any{
 		"project_id": req.ProjectID.String(), "project_name": req.ProjectName, "project_tag": req.ProjectTag,
 		"build_id": req.BuildID.String(), "description": req.Description, "status": string(req.Status),
 		"multicluster_status": req.MulticlusterStatus, "operator": req.Operator,
@@ -212,7 +212,7 @@ func (r *ProductRepository) UpdateRequirement(ctx context.Context, req *model.Pr
 
 func (r *ProductRepository) ListRequirementsByProduct(ctx context.Context, productID kernel.ProductID) ([]*model.ProductRequirement, error) {
 	var rows []productRequirementModel
-	if err := r.db.WithContext(ctx).Where("product_id = ?", productID.String()).Find(&rows).Error; err != nil {
+	if err := postgres.DB(ctx, r.db).Where("product_id = ?", productID.String()).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*model.ProductRequirement, 0, len(rows))

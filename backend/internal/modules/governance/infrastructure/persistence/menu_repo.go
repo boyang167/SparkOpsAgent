@@ -99,7 +99,7 @@ func (s *MenuStore) AutoMigrate() error {
 
 func (s *MenuStore) CountByWorkspace(ctx context.Context, workspaceID kernel.WorkspaceID) (int64, error) {
 	var count int64
-	err := s.db.WithContext(ctx).Model(&menuModel{}).
+	err := postgres.DB(ctx, s.db).Model(&menuModel{}).
 		Where("workspace_id = ? AND deleted_at IS NULL", workspaceID.String()).
 		Count(&count).Error
 	return count, err
@@ -123,7 +123,7 @@ func (s *MenuStore) Save(ctx context.Context, menu *model.Menu) error {
 		TransitionAnimation: defaultTransition(menu.TransitionAnimation),
 		AuditColumns:        postgres.AuditColumns{CreatedAt: menu.CreatedAt, UpdatedAt: menu.UpdatedAt},
 	}
-	return s.db.WithContext(ctx).Save(&row).Error
+	return postgres.DB(ctx, s.db).Save(&row).Error
 }
 
 func defaultTransition(v string) string {
@@ -154,7 +154,7 @@ func (s *MenuStore) FindByPath(ctx context.Context, workspaceID kernel.Workspace
 		return nil, domain.ErrMenuNotFound
 	}
 	var row menuModel
-	err := s.db.WithContext(ctx).
+	err := postgres.DB(ctx, s.db).
 		Where("workspace_id = ? AND path = ? AND deleted_at IS NULL", workspaceID.String(), path).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -678,7 +678,7 @@ func collectMenuSubtreeIDs(tx *gorm.DB, workspaceID kernel.WorkspaceID, menuID s
 
 func (s *MenuStore) ListRoleIDs(ctx context.Context, menuID string) ([]string, error) {
 	var rows []roleMenuModel
-	if err := s.db.WithContext(ctx).Where("menu_id = ?", menuID).Find(&rows).Error; err != nil {
+	if err := postgres.DB(ctx, s.db).Where("menu_id = ?", menuID).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]string, 0, len(rows))
@@ -689,7 +689,7 @@ func (s *MenuStore) ListRoleIDs(ctx context.Context, menuID string) ([]string, e
 }
 
 func (s *MenuStore) SetRoleIDs(ctx context.Context, menuID string, roleIDs []string) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return postgres.DB(ctx, s.db).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("menu_id = ?", menuID).Delete(&roleMenuModel{}).Error; err != nil {
 			return err
 		}

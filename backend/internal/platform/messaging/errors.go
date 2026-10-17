@@ -6,6 +6,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
+var ErrOperationOutboxRequired = errors.New("external event side effect requires operation outbox")
+
 func Permanent(err error) error {
 	if err == nil || IsPermanent(err) {
 		return err

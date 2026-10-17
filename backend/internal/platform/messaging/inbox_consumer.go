@@ -23,6 +23,13 @@ type InboxConsumer struct {
 	active      sync.WaitGroup
 }
 
+type inboxConsumerContextKey struct{}
+
+func IsInboxConsumerContext(ctx context.Context) bool {
+	inbox, _ := ctx.Value(inboxConsumerContextKey{}).(bool)
+	return inbox
+}
+
 func NewInboxConsumer(
 	transactor postgres.Transactor,
 	inbox persistence.InboxStore,
@@ -89,6 +96,7 @@ func (c *InboxConsumer) Handle(
 			Subscriber:    subscription.Subscriber,
 			CorrelationID: envelope.CorrelationID,
 		})
+		handlerCtx = context.WithValue(handlerCtx, inboxConsumerContextKey{}, true)
 		return subscription.Handler(handlerCtx, event)
 	})
 	if err == nil {

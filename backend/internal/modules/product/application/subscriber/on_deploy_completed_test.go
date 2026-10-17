@@ -43,3 +43,21 @@ func TestOnDeployCompletedClearsCurrentVersionOnUndeploy(t *testing.T) {
 	require.Equal(t, "", repo.saved.CurrentImageTag)
 	require.Nil(t, repo.saved.CurrentDeploymentRunID)
 }
+
+func TestOnDeployCompletedDoesNotOverwriteNewerDeploymentState(t *testing.T) {
+	envID := kernel.NewEnvironmentID()
+	currentRunID := kernel.NewDeploymentRunID()
+	deployedAt := time.Now().UTC().Add(time.Minute)
+	repo := &envProjectRepo{row: &model.EnvironmentProject{
+		EnvironmentID: envID, Enabled: true, CurrentImageTag: "new",
+		CurrentDeploymentRunID: &currentRunID, LastDeployedAt: &deployedAt,
+	}}
+	ev := deliveryevent.NewDeployCompleted(
+		kernel.NewDeploymentRunID(), kernel.NewProjectID(), kernel.NewWorkspaceID(),
+		&envID, "", "succeeded", "normal", "old",
+	)
+
+	require.NoError(t, NewOnDeployCompleted(repo).Handle(context.Background(), ev))
+
+	require.Nil(t, repo.saved, "an older event must not overwrite current deployment state")
+}

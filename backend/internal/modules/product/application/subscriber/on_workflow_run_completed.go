@@ -3,8 +3,9 @@ package subscriber
 import (
 	"context"
 
-	pwfevent "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/service"
+	pwfevent "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/event"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -25,6 +26,9 @@ func (h *OnWorkflowRunCompleted) Handle(ctx context.Context, e events.Event) err
 	ev, ok := e.(pwfevent.WorkflowRunCompleted)
 	if !ok {
 		return nil
+	}
+	if messaging.IsInboxConsumerContext(ctx) {
+		return messaging.ErrOperationOutboxRequired
 	}
 	success := ev.Status == "success"
 	if h.releasePlans != nil {

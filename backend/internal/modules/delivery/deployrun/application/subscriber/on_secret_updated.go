@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -31,6 +32,9 @@ func (s *OnSecretUpdated) Handle(ctx context.Context, event events.Event) error 
 	updated, ok := event.(integration.SecretUpdated)
 	if !ok {
 		return nil
+	}
+	if messaging.IsInboxConsumerContext(ctx) {
+		return messaging.ErrOperationOutboxRequired
 	}
 	go func() {
 		syncCtx, cancel := context.WithTimeout(context.Background(), s.timeout)

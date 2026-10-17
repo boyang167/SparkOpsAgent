@@ -120,7 +120,7 @@ func (r *ReleasePlanRepository) UpdatePlan(ctx context.Context, plan *model.Rele
 		"hook_settings": row.HookSettings, "hook_state": row.HookState, "parameters": row.Parameters,
 		"version": row.Version, "updated_at": time.Now().UTC(),
 	}
-	return r.db.WithContext(ctx).Model(&releasePlanModel{}).Where("id = ?", row.ID).Updates(updates).Error
+	return postgres.DB(ctx, r.db).Model(&releasePlanModel{}).Where("id = ?", row.ID).Updates(updates).Error
 }
 
 func (r *ReleasePlanRepository) DeletePlan(ctx context.Context, planID kernel.ReleasePlanID) error {
@@ -138,7 +138,7 @@ func (r *ReleasePlanRepository) DeletePlan(ctx context.Context, planID kernel.Re
 
 func (r *ReleasePlanRepository) FindPlanByID(ctx context.Context, id kernel.ReleasePlanID) (*model.ReleasePlan, error) {
 	var row releasePlanModel
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrReleasePlanNotFound
 	}
@@ -305,7 +305,7 @@ func (r *ReleasePlanRepository) UpdateJob(ctx context.Context, job *model.Releas
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Model(&releasePlanJobModel{}).Where("id = ?", row.ID).Updates(map[string]any{
+	return postgres.DB(ctx, r.db).Model(&releasePlanJobModel{}).Where("id = ?", row.ID).Updates(map[string]any{
 		"sort_order": row.SortOrder, "name": row.Name, "type": row.Type, "owner_id": row.OwnerID,
 		"status": row.Status, "text_content": row.TextContent, "text_format": row.TextFormat, "text_checked": row.TextChecked,
 		"workflow_ref": row.WorkflowRef, "execution_ref": row.ExecutionRef, "updated_at": time.Now().UTC(),
@@ -318,7 +318,7 @@ func (r *ReleasePlanRepository) DeleteJob(ctx context.Context, jobID kernel.Rele
 
 func (r *ReleasePlanRepository) ListJobsByPlan(ctx context.Context, planID kernel.ReleasePlanID) ([]model.ReleasePlanJob, error) {
 	var rows []releasePlanJobModel
-	err := r.db.WithContext(ctx).Where("release_plan_id = ?", planID.String()).Order("sort_order ASC, created_at ASC").Find(&rows).Error
+	err := postgres.DB(ctx, r.db).Where("release_plan_id = ?", planID.String()).Order("sort_order ASC, created_at ASC").Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -343,12 +343,12 @@ func (r *ReleasePlanRepository) SaveAuditLog(ctx context.Context, log *model.Rel
 		ActorID: log.ActorID.String(), Action: log.Action, Detail: detail,
 		CreatedAt: log.CreatedAt,
 	}
-	return r.db.WithContext(ctx).Create(&row).Error
+	return postgres.DB(ctx, r.db).Create(&row).Error
 }
 
 func (r *ReleasePlanRepository) FindJobByWorkflowRunID(ctx context.Context, runID kernel.ProductWorkflowRunID) (*model.ReleasePlanJob, *model.ReleasePlan, error) {
 	var row releasePlanJobModel
-	err := r.db.WithContext(ctx).
+	err := postgres.DB(ctx, r.db).
 		Where("execution_ref->>'workflow_run_id' = ?", runID.String()).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

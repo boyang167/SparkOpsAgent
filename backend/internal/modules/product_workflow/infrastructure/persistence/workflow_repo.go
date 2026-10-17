@@ -86,7 +86,7 @@ func (r *ProductWorkflowRepository) SaveWorkflow(ctx context.Context, wf *model.
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Create(&row).Error
+	return postgres.DB(ctx, r.db).Create(&row).Error
 }
 
 func (r *ProductWorkflowRepository) UpdateWorkflow(ctx context.Context, wf *model.ProductWorkflow) error {
@@ -94,14 +94,14 @@ func (r *ProductWorkflowRepository) UpdateWorkflow(ctx context.Context, wf *mode
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Model(&productWorkflowModel{}).Where("id = ?", wf.ID.String()).Updates(map[string]any{
+	return postgres.DB(ctx, r.db).Model(&productWorkflowModel{}).Where("id = ?", wf.ID.String()).Updates(map[string]any{
 		"name": wf.Name, "description": wf.Description, "status": wf.Status,
 		"stages": stages, "updated_at": time.Now().UTC(),
 	}).Error
 }
 
 func (r *ProductWorkflowRepository) DeleteWorkflow(ctx context.Context, id kernel.ProductWorkflowID) error {
-	return r.db.WithContext(ctx).Where("id = ?", id.String()).Delete(&productWorkflowModel{}).Error
+	return postgres.DB(ctx, r.db).Where("id = ?", id.String()).Delete(&productWorkflowModel{}).Error
 }
 
 func (r *ProductWorkflowRepository) FindWorkflowByID(ctx context.Context, id kernel.ProductWorkflowID) (*model.ProductWorkflow, error) {
@@ -202,7 +202,7 @@ func (r *ProductWorkflowRepository) SaveRun(ctx context.Context, run *model.Prod
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Create(&row).Error
+	return postgres.DB(ctx, r.db).Create(&row).Error
 }
 
 func (r *ProductWorkflowRepository) UpdateRun(ctx context.Context, run *model.ProductWorkflowRun) error {
@@ -218,7 +218,7 @@ func (r *ProductWorkflowRepository) UpdateRun(ctx context.Context, run *model.Pr
 
 func (r *ProductWorkflowRepository) FindRunByID(ctx context.Context, id kernel.ProductWorkflowRunID) (*model.ProductWorkflowRun, error) {
 	var row productWorkflowRunModel
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrProductWorkflowRunNotFound
 	}
@@ -255,7 +255,7 @@ func (r *ProductWorkflowRepository) ListRunsByWorkflow(ctx context.Context, work
 }
 
 func (r *ProductWorkflowRepository) SaveBuildRef(ctx context.Context, ref *model.WorkflowBuildRef) error {
-	return r.db.WithContext(ctx).Create(&workflowBuildRefModel{
+	return postgres.DB(ctx, r.db).Create(&workflowBuildRefModel{
 		BuildID: ref.BuildID.String(), RunID: ref.RunID.String(),
 		JobName: ref.JobName, ProjectID: ref.ProjectID.String(), CreatedAt: time.Now().UTC(),
 	}).Error
@@ -263,7 +263,7 @@ func (r *ProductWorkflowRepository) SaveBuildRef(ctx context.Context, ref *model
 
 func (r *ProductWorkflowRepository) FindRunByBuildID(ctx context.Context, buildID kernel.BuildID) (*model.WorkflowBuildRef, error) {
 	var row workflowBuildRefModel
-	err := r.db.WithContext(ctx).Where("build_id = ?", buildID.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("build_id = ?", buildID.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrProductWorkflowRunNotFound
 	}
@@ -284,7 +284,7 @@ func (r *ProductWorkflowRepository) FindRunByBuildID(ctx context.Context, buildI
 }
 
 func (r *ProductWorkflowRepository) SaveDeployRef(ctx context.Context, ref *model.WorkflowDeployRef) error {
-	return r.db.WithContext(ctx).Create(&workflowDeployRefModel{
+	return postgres.DB(ctx, r.db).Create(&workflowDeployRefModel{
 		DeploymentRunID: ref.DeploymentRunID.String(), RunID: ref.RunID.String(),
 		JobName: ref.JobName, ProjectID: ref.ProjectID.String(), CreatedAt: time.Now().UTC(),
 	}).Error
@@ -292,7 +292,7 @@ func (r *ProductWorkflowRepository) SaveDeployRef(ctx context.Context, ref *mode
 
 func (r *ProductWorkflowRepository) FindRunByDeploymentID(ctx context.Context, deploymentID kernel.DeploymentRunID) (*model.WorkflowDeployRef, error) {
 	var row workflowDeployRefModel
-	err := r.db.WithContext(ctx).Where("deployment_run_id = ?", deploymentID.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("deployment_run_id = ?", deploymentID.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrProductWorkflowRunNotFound
 	}

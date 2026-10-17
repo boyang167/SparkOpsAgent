@@ -12,6 +12,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/application/command"
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/persistence"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -34,6 +35,9 @@ func NewDispatcher(repo *persistence.WebhookRepository, logger *zap.Logger) *Dis
 }
 
 func (d *Dispatcher) Handle(ctx context.Context, e events.Event) error {
+	if messaging.IsInboxConsumerContext(ctx) {
+		return messaging.ErrOperationOutboxRequired
+	}
 	payload, eventName, projectID, ok := payloadFromEvent(e)
 	if !ok {
 		return nil
