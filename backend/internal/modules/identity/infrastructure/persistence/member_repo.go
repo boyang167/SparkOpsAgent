@@ -7,7 +7,6 @@ import (
 
 	"gorm.io/gorm"
 
-
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain"
@@ -26,12 +25,12 @@ func NewMemberRepository(db *gorm.DB) repository.MemberRepository {
 
 func (r *MemberRepository) Save(ctx context.Context, member *model.Member) error {
 	row := toMemberModel(member)
-	return r.db.WithContext(ctx).Save(&row).Error
+	return postgres.DB(ctx, r.db).Save(&row).Error
 }
 
 func (r *MemberRepository) FindByEmail(ctx context.Context, email string) (*model.Member, error) {
 	var row memberModel
-	err := r.db.WithContext(ctx).Where("email = ?", email).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("email = ?", email).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrMemberNotFound
 	}
@@ -43,7 +42,7 @@ func (r *MemberRepository) FindByEmail(ctx context.Context, email string) (*mode
 
 func (r *MemberRepository) FindByID(ctx context.Context, id kernel.MemberID) (*model.Member, error) {
 	var row memberModel
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrMemberNotFound
 	}
@@ -55,7 +54,7 @@ func (r *MemberRepository) FindByID(ctx context.Context, id kernel.MemberID) (*m
 
 func (r *MemberRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&memberModel{}).Where("email = ?", email).Count(&count).Error
+	err := postgres.DB(ctx, r.db).Model(&memberModel{}).Where("email = ?", email).Count(&count).Error
 	return count > 0, err
 }
 

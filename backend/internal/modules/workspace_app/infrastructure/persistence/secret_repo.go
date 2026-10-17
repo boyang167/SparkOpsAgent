@@ -45,7 +45,7 @@ func (r *SecretRepository) Save(ctx context.Context, s *model.Secret) error {
 }
 
 func (r *SecretRepository) Update(ctx context.Context, s *model.Secret) error {
-	return r.db.WithContext(ctx).Model(&secretModel{}).
+	return postgres.DB(ctx, r.db).Model(&secretModel{}).
 		Where("id = ? AND workspace_id = ?", s.ID.String(), s.WorkspaceID.String()).
 		Updates(map[string]any{
 			"display_name": s.DisplayName, "description": s.Description,
@@ -61,7 +61,7 @@ func (r *SecretRepository) Delete(ctx context.Context, id kernel.SecretID) error
 
 func (r *SecretRepository) FindByID(ctx context.Context, wsID kernel.WorkspaceID, id kernel.SecretID) (*model.Secret, error) {
 	var row secretModel
-	err := r.db.WithContext(ctx).
+	err := postgres.DB(ctx, r.db).
 		Where("id = ? AND workspace_id = ?", id.String(), wsID.String()).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

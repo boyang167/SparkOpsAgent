@@ -69,7 +69,7 @@ type projectModel struct {
 	KubernetesSecretID *string `gorm:"type:uuid"`
 	Resources          []byte  `gorm:"type:jsonb"`
 	Status             string
-	ReviewStatus       string `gorm:"default:none;not null"`
+	ReviewStatus       string  `gorm:"default:none;not null"`
 	SubmittedBy        *string `gorm:"type:uuid"`
 	SubmittedAt        *time.Time
 	ReviewedBy         *string `gorm:"type:uuid"`
@@ -129,7 +129,7 @@ func (r *ProjectRepository) Save(ctx context.Context, project *model.Project) er
 		value := project.ProductID.String()
 		row.ProductID = &value
 	}
-	if err := r.db.WithContext(ctx).Save(&row).Error; err != nil {
+	if err := postgres.DB(ctx, r.db).Save(&row).Error; err != nil {
 		if isUniqueViolation(err) {
 			return domain.ErrProjectNameExists
 		}

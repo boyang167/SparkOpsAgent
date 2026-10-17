@@ -5,14 +5,15 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/application/query"
-	tenanthttp "github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/infrastructure/persistence"
+	tenanthttp "github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 )
 
 type Module struct {
@@ -28,6 +29,9 @@ func (m *Module) Name() string { return "tenant" }
 func (m *Module) Register(c *appctx.Container) error {
 	if c.DB == nil {
 		return fmt.Errorf("tenant module requires database")
+	}
+	if err := integration.RegisterWorkspaceCreated(c.EventRegistry); err != nil {
+		return fmt.Errorf("tenant event codecs: %w", err)
 	}
 	if err := persistence.AutoMigrate(c.DB); err != nil {
 		return fmt.Errorf("tenant migrate: %w", err)
@@ -51,7 +55,7 @@ func (m *Module) Register(c *appctx.Container) error {
 
 	handler := tenanthttp.NewHandler(
 		command.NewCreateOrganizationHandler(orgRepo, auditSvc),
-		command.NewCreateWorkspaceHandler(orgRepo, wsRepo, c.EventBus),
+		command.NewCreateWorkspaceHandler(orgRepo, wsRepo, c.EventBus, c.Transactor),
 		query.NewListWorkspacesHandler(wsRepo, c.SystemRoleChecker),
 		query.NewListOrganizationsHandler(orgRepo, c.SystemRoleChecker),
 		query.NewGetOrganizationHandler(orgRepo),

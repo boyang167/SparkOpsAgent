@@ -9,6 +9,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/policy"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -20,6 +21,7 @@ type CreateProjectHandler struct {
 	productChecker port.ProductChecker
 	engine         policy.Engine
 	bus            eventbus.Bus
+	tx             postgres.Transactor
 }
 
 func NewCreateProjectHandler(
@@ -30,10 +32,11 @@ func NewCreateProjectHandler(
 	productChecker port.ProductChecker,
 	engine policy.Engine,
 	bus eventbus.Bus,
+	tx postgres.Transactor,
 ) *CreateProjectHandler {
 	return &CreateProjectHandler{
 		repo: repo, memberRepo: memberRepo, wsChecker: wsChecker,
-		clusterChecker: clusterChecker, productChecker: productChecker, engine: engine, bus: bus,
+		clusterChecker: clusterChecker, productChecker: productChecker, engine: engine, bus: bus, tx: tx,
 	}
 }
 
@@ -79,17 +82,21 @@ func (h *CreateProjectHandler) Handle(ctx context.Context, wsID kernel.Workspace
 	}
 
 	project := model.NewProject(wsID, name, memberID, input)
-	if err := h.repo.Save(ctx, project); err != nil {
-		return nil, err
-	}
 	pm := model.NewProjectMember(project.ID, memberID, model.ProjectRoleLead)
-	if err := h.memberRepo.Save(ctx, pm); err != nil {
+	domainEvents := project.PullEvents()
+	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := h.repo.Save(txCtx, project); err != nil {
+			return err
+		}
+		if err := h.memberRepo.Save(txCtx, pm); err != nil {
+			return err
+		}
+		return h.bus.Publish(txCtx, domainEvents...)
+	})
+	if err != nil {
 		return nil, err
 	}
 	syncProjectMemberPolicy(h.engine, memberID, wsID, project.ID, model.ProjectRoleLead)
-	for _, e := range project.PullEvents() {
-		_ = h.bus.Publish(ctx, e)
-	}
 	return project, nil
 }
 

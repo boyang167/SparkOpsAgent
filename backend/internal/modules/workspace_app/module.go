@@ -13,6 +13,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/query"
+	workspaceevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/portadapter"
@@ -40,6 +41,12 @@ func (m *Module) Name() string { return "workspace_app" }
 func (m *Module) Register(c *appctx.Container) error {
 	if c.DB == nil {
 		return fmt.Errorf("workspace_app module requires database")
+	}
+	if err := workspaceevent.Register(c.EventRegistry); err != nil {
+		return fmt.Errorf("workspace_app event codecs: %w", err)
+	}
+	if err := integration.RegisterSecretUpdated(c.EventRegistry); err != nil {
+		return fmt.Errorf("workspace_app integration event codecs: %w", err)
 	}
 	if c.PermissionChecker == nil {
 		return fmt.Errorf("workspace_app module requires permission checker")
@@ -112,7 +119,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	listProjectVersions := query.NewListProjectVersionsHandler(versionRepo, repo, wsChecker)
 	getProjectVersion := query.NewGetProjectVersionHandler(versionRepo, repo, wsChecker)
 	handler := wshttp.NewHandler(
-		command.NewCreateProjectHandler(repo, memberRepo, wsChecker, clusterChecker, productChecker, c.PolicyEngine, c.EventBus),
+		command.NewCreateProjectHandler(repo, memberRepo, wsChecker, clusterChecker, productChecker, c.PolicyEngine, c.EventBus, c.Transactor),
 		command.NewUpdateProjectHandler(repo, wsChecker, clusterChecker, productChecker),
 		command.NewArchiveProjectHandler(repo, wsChecker, archiveCoordinator),
 		query.NewListProjectsHandler(repo, memberRepo, wsChecker, c.PermissionChecker, memberLookup),
@@ -123,7 +130,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewListTemplatesHandler(templateRepo, wsChecker, memberLookup),
 		query.NewGetTemplateHandler(templateRepo, wsChecker, memberLookup),
 		command.NewCreateSecretHandler(secretRepo, wsChecker, secretCrypto),
-		command.NewUpdateSecretHandler(secretRepo, wsChecker, secretCrypto, c.EventBus),
+		command.NewUpdateSecretHandler(secretRepo, wsChecker, secretCrypto, c.EventBus, c.Transactor),
 		command.NewDeleteSecretHandler(secretRepo, wsChecker),
 		query.NewListSecretsHandler(secretRepo, wsChecker, memberLookup, secretCrypto),
 		query.NewGetSecretHandler(secretRepo, wsChecker, memberLookup, secretCrypto),

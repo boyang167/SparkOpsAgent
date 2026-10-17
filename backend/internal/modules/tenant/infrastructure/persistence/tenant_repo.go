@@ -109,7 +109,7 @@ func (workspaceMemberModel) TableName() string { return "tenant.workspace_member
 func (s *TenantStore) SaveOrganization(ctx context.Context, org *model.Organization) error {
 	row := organizationModel{
 		ID: org.ID.String(), Name: org.Name, Slug: org.Slug,
-		Status: org.Status,
+		Status:        org.Status,
 		MaxWorkspaces: org.Quota.MaxWorkspaces, MaxAgents: org.Quota.MaxAgents,
 		MaxProjects: org.Quota.MaxProjects, TokenBudget: org.Quota.TokenBudget,
 		AuditColumns: postgres.AuditColumns{CreatedAt: org.CreatedAt, UpdatedAt: org.CreatedAt},
@@ -119,7 +119,7 @@ func (s *TenantStore) SaveOrganization(ctx context.Context, org *model.Organizat
 
 func (s *TenantStore) FindOrganizationByID(ctx context.Context, id kernel.OrgID) (*model.Organization, error) {
 	var row organizationModel
-	err := s.db.WithContext(ctx).Where("id = ?::uuid AND deleted_at IS NULL", id.String()).First(&row).Error
+	err := postgres.DB(ctx, s.db).Where("id = ?::uuid AND deleted_at IS NULL", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrOrganizationNotFound
 	}
@@ -243,7 +243,7 @@ func (s *TenantStore) ExistsOrganizationBySlug(ctx context.Context, slug string)
 
 func (s *TenantStore) AddOrganizationMember(ctx context.Context, orgID kernel.OrgID, memberID kernel.MemberID, role string) error {
 	var existing int64
-	err := s.db.WithContext(ctx).Model(&organizationMemberModel{}).
+	err := postgres.DB(ctx, s.db).Model(&organizationMemberModel{}).
 		Where("org_id = ?::uuid AND member_id = ?::uuid", orgID.String(), memberID.String()).
 		Count(&existing).Error
 	if err != nil {
@@ -254,13 +254,13 @@ func (s *TenantStore) AddOrganizationMember(ctx context.Context, orgID kernel.Or
 	}
 	now := time.Now().UTC()
 	row := organizationMemberModel{
-		OrgID:    orgID.String(),
-		MemberID: memberID.String(),
-		Role:     role,
-		JoinedAt: now,
+		OrgID:        orgID.String(),
+		MemberID:     memberID.String(),
+		Role:         role,
+		JoinedAt:     now,
 		AuditColumns: postgres.AuditColumns{CreatedAt: now, UpdatedAt: now},
 	}
-	return s.db.WithContext(ctx).Create(&row).Error
+	return postgres.DB(ctx, s.db).Create(&row).Error
 }
 
 func (s *TenantStore) IsWorkspaceMember(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID) (bool, error) {
@@ -445,7 +445,7 @@ func (s *TenantStore) SaveWorkspace(ctx context.Context, ws *model.Workspace) er
 		Status: ws.Status, MaxAgents: ws.Quota.MaxAgents, MaxProjects: ws.Quota.MaxProjects,
 		AuditColumns: postgres.AuditColumns{CreatedAt: ws.CreatedAt, UpdatedAt: ws.CreatedAt},
 	}
-	return s.db.WithContext(ctx).Save(&row).Error
+	return postgres.DB(ctx, s.db).Save(&row).Error
 }
 
 func (s *TenantStore) FindWorkspaceByID(ctx context.Context, id kernel.WorkspaceID) (*model.Workspace, error) {
@@ -500,7 +500,7 @@ func (s *TenantStore) ListAllWorkspacesWithMembership(ctx context.Context, membe
 			Workspace: &model.Workspace{
 				ID: wsID, OrgID: orgID,
 				Name: row.Name, Slug: row.Slug, Status: row.Status,
-				Quota: model.WorkspaceQuota{MaxAgents: row.MaxAgents, MaxProjects: row.MaxProjects},
+				Quota:     model.WorkspaceQuota{MaxAgents: row.MaxAgents, MaxProjects: row.MaxProjects},
 				CreatedAt: row.CreatedAt,
 			},
 			IsMember: row.IsMember,
@@ -531,7 +531,7 @@ func (s *TenantStore) ListWorkspacesByMember(ctx context.Context, memberID kerne
 
 func (s *TenantStore) ExistsWorkspaceByOrgSlug(ctx context.Context, orgID kernel.OrgID, slug string) (bool, error) {
 	var count int64
-	err := s.db.WithContext(ctx).Model(&workspaceModel{}).
+	err := postgres.DB(ctx, s.db).Model(&workspaceModel{}).
 		Where("org_id = ?::uuid AND slug = ?", orgID.String(), slug).Count(&count).Error
 	return count > 0, err
 }
@@ -539,13 +539,13 @@ func (s *TenantStore) ExistsWorkspaceByOrgSlug(ctx context.Context, orgID kernel
 func (s *TenantStore) AddWorkspaceMember(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID, role string) error {
 	now := time.Now().UTC()
 	row := workspaceMemberModel{
-		WorkspaceID: workspaceID.String(),
-		MemberID:    memberID.String(),
-		Role:        role,
-		JoinedAt:    now,
+		WorkspaceID:  workspaceID.String(),
+		MemberID:     memberID.String(),
+		Role:         role,
+		JoinedAt:     now,
 		AuditColumns: postgres.AuditColumns{CreatedAt: now, UpdatedAt: now},
 	}
-	return s.db.WithContext(ctx).Save(&row).Error
+	return postgres.DB(ctx, s.db).Save(&row).Error
 }
 
 func rowToWorkspace(row workspaceModel) *model.Workspace {
@@ -554,7 +554,7 @@ func rowToWorkspace(row workspaceModel) *model.Workspace {
 	return &model.Workspace{
 		ID: wsID, OrgID: orgID,
 		Name: row.Name, Slug: row.Slug, Status: row.Status,
-		Quota: model.WorkspaceQuota{MaxAgents: row.MaxAgents, MaxProjects: row.MaxProjects},
+		Quota:     model.WorkspaceQuota{MaxAgents: row.MaxAgents, MaxProjects: row.MaxProjects},
 		CreatedAt: row.CreatedAt,
 	}
 }
@@ -643,7 +643,7 @@ func (s *TenantStore) UpdateOrganizationQuota(ctx context.Context, orgID kernel.
 
 func (s *TenantStore) CountWorkspacesByOrg(ctx context.Context, orgID kernel.OrgID) (int, error) {
 	var count int64
-	err := s.db.WithContext(ctx).Model(&workspaceModel{}).
+	err := postgres.DB(ctx, s.db).Model(&workspaceModel{}).
 		Where("org_id = ?::uuid AND deleted_at IS NULL", orgID.String()).
 		Count(&count).Error
 	return int(count), err
@@ -655,7 +655,7 @@ func (s *TenantStore) GetOrganizationUsage(ctx context.Context, orgID kernel.Org
 		return nil, err
 	}
 	var agentCount int64
-	err = s.db.WithContext(ctx).Raw(`
+	err = postgres.DB(ctx, s.db).Raw(`
 		SELECT COUNT(*) FROM agent.agents a
 		JOIN workspace_app.projects p ON p.id = a.project_id
 		JOIN tenant.workspaces w ON w.id = p.workspace_id
@@ -665,7 +665,7 @@ func (s *TenantStore) GetOrganizationUsage(ctx context.Context, orgID kernel.Org
 		return nil, err
 	}
 	var projectCount int64
-	err = s.db.WithContext(ctx).Raw(`
+	err = postgres.DB(ctx, s.db).Raw(`
 		SELECT COUNT(*) FROM workspace_app.projects p
 		JOIN tenant.workspaces w ON w.id = p.workspace_id
 		WHERE w.org_id = ? AND p.status = 'active' AND p.deleted_at IS NULL

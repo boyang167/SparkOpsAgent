@@ -33,13 +33,13 @@ func NewProjectMemberRepository(db *gorm.DB) repository.ProjectMemberRepository 
 func (r *ProjectMemberRepository) Save(ctx context.Context, member *model.ProjectMember) error {
 	now := time.Now().UTC()
 	row := projectMemberModel{
-		ProjectID: member.ProjectID.String(),
-		MemberID:  member.MemberID.String(),
-		Role:      member.Role,
-		JoinedAt:  member.JoinedAt,
+		ProjectID:    member.ProjectID.String(),
+		MemberID:     member.MemberID.String(),
+		Role:         member.Role,
+		JoinedAt:     member.JoinedAt,
 		AuditColumns: postgres.AuditColumns{CreatedAt: now, UpdatedAt: now},
 	}
-	return r.db.WithContext(ctx).Save(&row).Error
+	return postgres.DB(ctx, r.db).Save(&row).Error
 }
 
 func (r *ProjectMemberRepository) Find(ctx context.Context, projectID kernel.ProjectID, memberID kernel.MemberID) (*model.ProjectMember, error) {

@@ -9,6 +9,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -27,13 +28,15 @@ type RegisterMemberHandler struct {
 	repo     repository.MemberRepository
 	hasher   model.PasswordHasher
 	eventBus eventbus.Bus
+	tx       postgres.Transactor
 }
 
-func NewRegisterMemberHandler(repo repository.MemberRepository, bus eventbus.Bus) *RegisterMemberHandler {
+func NewRegisterMemberHandler(repo repository.MemberRepository, bus eventbus.Bus, tx postgres.Transactor) *RegisterMemberHandler {
 	return &RegisterMemberHandler{
 		repo:     repo,
 		hasher:   model.BcryptHasher{},
 		eventBus: bus,
+		tx:       tx,
 	}
 }
 
@@ -54,9 +57,16 @@ func (h *RegisterMemberHandler) Handle(ctx context.Context, in RegisterMemberInp
 		return nil, err
 	}
 	member := model.NewMember(email, strings.TrimSpace(in.DisplayName), hash)
-	if err := h.repo.Save(ctx, member); err != nil {
-		return nil, err
-	}
-	_ = h.eventBus.Publish(ctx, event.NewMemberRegistered(member.ID, member.Email))
-	return &RegisterMemberResult{MemberID: member.ID, Email: member.Email}, nil
+	var result *RegisterMemberResult
+	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := h.repo.Save(txCtx, member); err != nil {
+			return err
+		}
+		if err := h.eventBus.Publish(txCtx, event.NewMemberRegistered(member.ID, member.Email)); err != nil {
+			return err
+		}
+		result = &RegisterMemberResult{MemberID: member.ID, Email: member.Email}
+		return nil
+	})
+	return result, err
 }

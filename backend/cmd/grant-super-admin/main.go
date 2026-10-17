@@ -11,8 +11,8 @@ import (
 	identitycommand "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/application/command"
 	identityquery "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain"
-	identitypersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain/model"
+	identitypersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
@@ -68,7 +68,7 @@ func main() {
 			if name == "" {
 				name = strings.Split(normalizedEmail, "@")[0]
 			}
-			registerHandler := identitycommand.NewRegisterMemberHandler(memberRepo, eventbus.NewInMemory())
+			registerHandler := identitycommand.NewRegisterMemberHandler(memberRepo, eventbus.NewInMemory(), postgres.NewTransactor(db))
 			res, regErr := registerHandler.Handle(ctx, identitycommand.RegisterMemberInput{
 				Email: normalizedEmail, Password: *password, DisplayName: name,
 			})

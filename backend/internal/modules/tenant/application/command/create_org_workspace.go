@@ -8,6 +8,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -46,14 +47,16 @@ type CreateWorkspaceHandler struct {
 	orgRepo repository.OrganizationRepository
 	wsRepo  repository.WorkspaceRepository
 	bus     eventbus.Bus
+	tx      postgres.Transactor
 }
 
 func NewCreateWorkspaceHandler(
 	orgRepo repository.OrganizationRepository,
 	wsRepo repository.WorkspaceRepository,
 	bus eventbus.Bus,
+	tx postgres.Transactor,
 ) *CreateWorkspaceHandler {
-	return &CreateWorkspaceHandler{orgRepo: orgRepo, wsRepo: wsRepo, bus: bus}
+	return &CreateWorkspaceHandler{orgRepo: orgRepo, wsRepo: wsRepo, bus: bus, tx: tx}
 }
 
 func (h *CreateWorkspaceHandler) Handle(ctx context.Context, orgID kernel.OrgID, ownerID kernel.MemberID, name, slug string) (*model.Workspace, error) {
@@ -76,13 +79,20 @@ func (h *CreateWorkspaceHandler) Handle(ctx context.Context, orgID kernel.OrgID,
 	if exists {
 		return nil, domain.ErrSlugAlreadyExists
 	}
-	if err := h.wsRepo.Save(ctx, ws); err != nil {
+	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := h.wsRepo.Save(txCtx, ws); err != nil {
+			return err
+		}
+		if err := h.wsRepo.AddMember(txCtx, ws.ID, ownerID, "owner"); err != nil {
+			return err
+		}
+		if err := h.orgRepo.AddMember(txCtx, orgID, ownerID, domain.OrgRoleOwner); err != nil {
+			return err
+		}
+		return h.bus.Publish(txCtx, integration.NewWorkspaceCreated(ws.ID, orgID, ownerID))
+	})
+	if err != nil {
 		return nil, err
 	}
-	if err := h.wsRepo.AddMember(ctx, ws.ID, ownerID, "owner"); err != nil {
-		return nil, err
-	}
-	_ = h.orgRepo.AddMember(ctx, orgID, ownerID, domain.OrgRoleOwner)
-	_ = h.bus.Publish(ctx, integration.NewWorkspaceCreated(ws.ID, orgID, ownerID))
 	return ws, nil
 }

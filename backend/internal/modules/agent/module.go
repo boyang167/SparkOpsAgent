@@ -5,6 +5,7 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent/application/query"
+	agentevent "github.com/sparkops/sparkops-agent/backend/internal/modules/agent/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent/infrastructure/persistence"
 	agenthttp "github.com/sparkops/sparkops-agent/backend/internal/modules/agent/interface/http"
@@ -29,6 +30,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	if c.DB == nil {
 		return fmt.Errorf("agent module requires database")
 	}
+	if err := agentevent.Register(c.EventRegistry); err != nil {
+		return fmt.Errorf("agent event codecs: %w", err)
+	}
 	if c.PermissionChecker == nil {
 		return fmt.Errorf("agent module requires permission checker")
 	}
@@ -44,11 +48,11 @@ func (m *Module) Register(c *appctx.Container) error {
 	quotaChecker := acl.NewTenantACL(c.DB)
 
 	handler := agenthttp.NewHandler(
-		command.NewCreateAgentHandler(repo, projectChecker, quotaChecker, c.EventBus),
+		command.NewCreateAgentHandler(repo, projectChecker, quotaChecker, c.EventBus, c.Transactor),
 		command.NewUpdateAgentHandler(repo, projectChecker),
 		command.NewArchiveAgentHandler(repo, projectChecker),
 		command.NewAddVersionHandler(repo, projectChecker),
-		command.NewPublishAgentHandler(repo, projectChecker, c.EventBus),
+		command.NewPublishAgentHandler(repo, projectChecker, c.EventBus, c.Transactor),
 		query.NewListAgentsHandler(repo, projectChecker),
 		query.NewGetAgentHandler(repo, projectChecker),
 	)

@@ -87,7 +87,7 @@ func main() {
 	}
 
 	memberRepo := identitypersistence.NewMemberRepository(db)
-	register := identitycommand.NewRegisterMemberHandler(memberRepo, bus)
+	register := identitycommand.NewRegisterMemberHandler(memberRepo, bus, postgres.NewTransactor(db))
 	login := identitycommand.NewLoginHandler(memberRepo, tokens)
 
 	memberID, err := ensureMember(ctx, db, register, seedEmail, seedPassword, "Demo User")
@@ -108,7 +108,7 @@ func main() {
 	orgRepo := tenantpersistence.NewOrganizationRepository(tenantStore)
 	wsRepo := tenantpersistence.NewWorkspaceRepository(tenantStore)
 	createOrg := tenantcommand.NewCreateOrganizationHandler(orgRepo, nil)
-	createWs := tenantcommand.NewCreateWorkspaceHandler(orgRepo, wsRepo, bus)
+	createWs := tenantcommand.NewCreateWorkspaceHandler(orgRepo, wsRepo, bus, postgres.NewTransactor(db))
 
 	org, err := ensureOrganization(ctx, orgRepo, createOrg, memberID)
 	if err != nil {
@@ -123,6 +123,7 @@ func main() {
 	projectMemberRepo := wspersistence.NewProjectMemberRepository(db)
 	createProject := wscommand.NewCreateProjectHandler(
 		projectRepo, projectMemberRepo, wsacl.NewTenantACL(db), wsacl.NewWorkspaceClusterACL(db), nil, nil, bus,
+		postgres.NewTransactor(db),
 	)
 	project, err := ensureProject(ctx, projectRepo, createProject, ws.ID, memberID)
 	if err != nil {
@@ -158,8 +159,8 @@ func main() {
 	agentRepo := agentpersistence.NewAgentRepository(db)
 	projectChecker := agentacl.NewWorkspaceAppACL(db)
 	quotaChecker := agentacl.NewTenantACL(db)
-	createAgent := agentcommand.NewCreateAgentHandler(agentRepo, projectChecker, quotaChecker, bus)
-	publishAgent := agentcommand.NewPublishAgentHandler(agentRepo, projectChecker, bus)
+	createAgent := agentcommand.NewCreateAgentHandler(agentRepo, projectChecker, quotaChecker, bus, postgres.NewTransactor(db))
+	publishAgent := agentcommand.NewPublishAgentHandler(agentRepo, projectChecker, bus, postgres.NewTransactor(db))
 
 	var agentID kernel.AgentID
 	agent, err := createAgent.Handle(ctx, ws.ID, project.ID, "Demo Agent", "You are a helpful assistant.", "mock-gpt")

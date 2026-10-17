@@ -22,6 +22,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/observability"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 )
 
 const (
@@ -41,7 +42,7 @@ func main() {
 	tokens := authn.NewTokenProvider(cfg.JWT)
 
 	repo := devmemory.NewMemberRepository()
-	register := command.NewRegisterMemberHandler(repo, bus)
+	register := command.NewRegisterMemberHandler(repo, bus, postgres.NewDirectTransactor())
 	login := command.NewLoginHandler(repo, tokens)
 	me := query.NewGetCurrentMemberHandler(repo, nil)
 	hasher := model.BcryptHasher{}

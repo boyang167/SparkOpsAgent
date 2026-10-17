@@ -9,6 +9,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 )
@@ -70,7 +71,7 @@ func TestCreateProjectRejectsUnauthorizedDefaultClusterBeforeSave(t *testing.T) 
 	repo := &createProjectRepo{}
 	handler := command.NewCreateProjectHandler(
 		repo, createProjectMemberRepo{}, updateWorkspaceChecker{}, clusterGrantChecker{},
-		nil, nil, eventbus.NewInMemory(),
+		nil, nil, eventbus.NewInMemory(), postgres.NewDirectTransactor(),
 	)
 
 	_, err := handler.Handle(
@@ -86,7 +87,7 @@ func TestCreateProjectRejectsInvalidDefaultClusterIDBeforeSave(t *testing.T) {
 	repo := &createProjectRepo{}
 	handler := command.NewCreateProjectHandler(
 		repo, createProjectMemberRepo{}, updateWorkspaceChecker{}, clusterGrantChecker{granted: true},
-		nil, nil, eventbus.NewInMemory(),
+		nil, nil, eventbus.NewInMemory(), postgres.NewDirectTransactor(),
 	)
 
 	_, err := handler.Handle(

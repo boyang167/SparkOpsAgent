@@ -9,6 +9,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -21,9 +22,9 @@ type CreateSecretInput struct {
 }
 
 type CreateSecretHandler struct {
-	repo         repository.SecretRepository
-	wsChecker    port.WorkspaceChecker
-	crypto       *application.SecretCrypto
+	repo      repository.SecretRepository
+	wsChecker port.WorkspaceChecker
+	crypto    *application.SecretCrypto
 }
 
 func NewCreateSecretHandler(
@@ -70,6 +71,7 @@ type UpdateSecretHandler struct {
 	wsChecker port.WorkspaceChecker
 	crypto    *application.SecretCrypto
 	bus       eventbus.Bus
+	tx        postgres.Transactor
 }
 
 func NewUpdateSecretHandler(
@@ -77,8 +79,9 @@ func NewUpdateSecretHandler(
 	wsChecker port.WorkspaceChecker,
 	crypto *application.SecretCrypto,
 	bus eventbus.Bus,
+	tx postgres.Transactor,
 ) *UpdateSecretHandler {
-	return &UpdateSecretHandler{repo: repo, wsChecker: wsChecker, crypto: crypto, bus: bus}
+	return &UpdateSecretHandler{repo: repo, wsChecker: wsChecker, crypto: crypto, bus: bus, tx: tx}
 }
 
 func (h *UpdateSecretHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID, secretID kernel.SecretID, in UpdateSecretInput) (*model.Secret, error) {
@@ -111,11 +114,17 @@ func (h *UpdateSecretHandler) Handle(ctx context.Context, wsID kernel.WorkspaceI
 		}
 	}
 	s.Update(in.DisplayName, in.Description, in.ServiceType, in.ServiceURL, in.Username, blob, in.Status, in.IsDefault, in.IsShared)
-	if err := h.repo.Update(ctx, s); err != nil {
+	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := h.repo.Update(txCtx, s); err != nil {
+			return err
+		}
+		if credentialsPatchProvided(in) && h.bus != nil {
+			return h.bus.Publish(txCtx, integration.NewSecretUpdated(wsID, secretID, s.ServiceType))
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
-	}
-	if credentialsPatchProvided(in) && h.bus != nil {
-		_ = h.bus.Publish(ctx, integration.NewSecretUpdated(wsID, secretID, s.ServiceType))
 	}
 	return s, nil
 }

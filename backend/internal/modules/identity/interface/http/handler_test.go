@@ -18,6 +18,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 )
@@ -107,7 +108,7 @@ func setupIdentityRouter(t *testing.T) *gin.Engine {
 	tokens := authn.NewTokenProvider(config.JWTConfig{Secret: "test-secret", ExpireHour: 1})
 
 	handler := identityhttp.NewHandler(
-		command.NewRegisterMemberHandler(repo, bus),
+		command.NewRegisterMemberHandler(repo, bus, postgres.NewDirectTransactor()),
 		command.NewLoginHandler(repo, tokens),
 		query.NewGetCurrentMemberHandler(repo, nil),
 		command.NewUpdateProfileHandler(repo),

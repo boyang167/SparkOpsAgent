@@ -8,6 +8,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -16,6 +17,7 @@ type CreateAgentHandler struct {
 	projectChecker port.ProjectChecker
 	quotaChecker   port.QuotaChecker
 	bus            eventbus.Bus
+	tx             postgres.Transactor
 }
 
 func NewCreateAgentHandler(
@@ -23,8 +25,9 @@ func NewCreateAgentHandler(
 	projectChecker port.ProjectChecker,
 	quotaChecker port.QuotaChecker,
 	bus eventbus.Bus,
+	tx postgres.Transactor,
 ) *CreateAgentHandler {
-	return &CreateAgentHandler{repo: repo, projectChecker: projectChecker, quotaChecker: quotaChecker, bus: bus}
+	return &CreateAgentHandler{repo: repo, projectChecker: projectChecker, quotaChecker: quotaChecker, bus: bus, tx: tx}
 }
 
 func (h *CreateAgentHandler) Handle(
@@ -68,11 +71,15 @@ func (h *CreateAgentHandler) Handle(
 	if _, err := agent.AddVersion(prompt, modelName, model.DefaultModelConfig(), nil, nil); err != nil {
 		return nil, err
 	}
-	if err := h.repo.Save(ctx, agent); err != nil {
+	domainEvents := agent.PullEvents()
+	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := h.repo.Save(txCtx, agent); err != nil {
+			return err
+		}
+		return h.bus.Publish(txCtx, domainEvents...)
+	})
+	if err != nil {
 		return nil, err
-	}
-	for _, e := range agent.PullEvents() {
-		_ = h.bus.Publish(ctx, e)
 	}
 	return agent, nil
 }
@@ -119,10 +126,11 @@ type PublishAgentHandler struct {
 	repo           repository.AgentRepository
 	projectChecker port.ProjectChecker
 	bus            eventbus.Bus
+	tx             postgres.Transactor
 }
 
-func NewPublishAgentHandler(repo repository.AgentRepository, projectChecker port.ProjectChecker, bus eventbus.Bus) *PublishAgentHandler {
-	return &PublishAgentHandler{repo: repo, projectChecker: projectChecker, bus: bus}
+func NewPublishAgentHandler(repo repository.AgentRepository, projectChecker port.ProjectChecker, bus eventbus.Bus, tx postgres.Transactor) *PublishAgentHandler {
+	return &PublishAgentHandler{repo: repo, projectChecker: projectChecker, bus: bus, tx: tx}
 }
 
 func (h *PublishAgentHandler) Handle(ctx context.Context, wsID kernel.WorkspaceID, agentID kernel.AgentID, versionID kernel.AgentVersionID) error {
@@ -141,10 +149,12 @@ func (h *PublishAgentHandler) Handle(ctx context.Context, wsID kernel.WorkspaceI
 	if err != nil {
 		return err
 	}
-	if err := h.repo.Save(ctx, agent); err != nil {
-		return err
-	}
-	return h.bus.Publish(ctx, ev)
+	return h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := h.repo.Save(txCtx, agent); err != nil {
+			return err
+		}
+		return h.bus.Publish(txCtx, ev)
+	})
 }
 
 type UpdateAgentHandler struct {

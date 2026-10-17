@@ -10,6 +10,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -30,11 +31,12 @@ func NewCreatePlatformMemberHandler(
 	repo repository.MemberRepository,
 	systemRoles *persistence.SystemRoleStore,
 	bus eventbus.Bus,
+	tx postgres.Transactor,
 ) *CreatePlatformMemberHandler {
 	return &CreatePlatformMemberHandler{
 		repo:        repo,
 		systemRoles: systemRoles,
-		register:    NewRegisterMemberHandler(repo, bus),
+		register:    NewRegisterMemberHandler(repo, bus, tx),
 	}
 }
 

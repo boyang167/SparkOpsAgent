@@ -59,7 +59,8 @@ func NewAgentRepository(db *gorm.DB) repository.AgentRepository {
 }
 
 func (r *AgentRepository) Save(ctx context.Context, agent *model.Agent) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return postgres.NewTransactor(r.db).WithinTransaction(ctx, func(txCtx context.Context) error {
+		tx := postgres.DB(txCtx, r.db)
 		var current *string
 		if agent.CurrentVersionID != nil {
 			s := agent.CurrentVersionID.String()
@@ -69,7 +70,7 @@ func (r *AgentRepository) Save(ctx context.Context, agent *model.Agent) error {
 			ID: agent.ID.String(), ProjectID: agent.ProjectID.String(),
 			Name: agent.Name.String(), Status: string(agent.Status),
 			CurrentVersionID: current,
-			AuditColumns: postgres.AuditColumns{CreatedAt: agent.CreatedAt, UpdatedAt: time.Now().UTC()},
+			AuditColumns:     postgres.AuditColumns{CreatedAt: agent.CreatedAt, UpdatedAt: time.Now().UTC()},
 		}
 		if err := tx.Save(&row).Error; err != nil {
 			return err
@@ -119,7 +120,7 @@ func (r *AgentRepository) Update(ctx context.Context, agent *model.Agent) error 
 		s := agent.CurrentVersionID.String()
 		current = &s
 	}
-	return r.db.WithContext(ctx).Model(&agentModel{}).Where("id = ?", agent.ID.String()).Updates(map[string]any{
+	return postgres.DB(ctx, r.db).Model(&agentModel{}).Where("id = ?", agent.ID.String()).Updates(map[string]any{
 		"name":               agent.Name.String(),
 		"status":             string(agent.Status),
 		"current_version_id": current,
@@ -129,7 +130,7 @@ func (r *AgentRepository) Update(ctx context.Context, agent *model.Agent) error 
 
 func (r *AgentRepository) FindByID(ctx context.Context, id kernel.AgentID) (*model.Agent, error) {
 	var row agentModel
-	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("id = ?", id.String()).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrAgentNotFound
 	}
@@ -198,7 +199,7 @@ func (r *AgentRepository) loadAggregate(ctx context.Context, row agentModel) (*m
 	}
 
 	var vrows []versionModel
-	if err := r.db.WithContext(ctx).Where("agent_id = ?", row.ID).Order("version asc").Find(&vrows).Error; err != nil {
+	if err := postgres.DB(ctx, r.db).Where("agent_id = ?", row.ID).Order("version asc").Find(&vrows).Error; err != nil {
 		return nil, err
 	}
 	versions := make([]*model.AgentVersion, 0, len(vrows))
