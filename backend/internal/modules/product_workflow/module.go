@@ -185,20 +185,8 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.POST("/api/v1/products/:productId/workflows/:workflowId/hooks/:token", handler.WorkflowWebhook)
 	c.Engine.POST("/api/v1/public/workflows/gitlab", handler.GitLabWorkflowHook)
 
-	if err := c.EventBus.Subscribe(
-		deliveryevent.BuildCompletedName,
-		"product-workflow.build-completed",
-		subscriber.NewOnBuildCompleted(scheduler).Handle,
-	); err != nil {
-		return fmt.Errorf("subscribe product workflow build completed: %w", err)
-	}
-	if err := c.EventBus.Subscribe(
-		deliveryevent.DeployCompletedName,
-		"product-workflow.deploy-completed",
-		subscriber.NewOnDeployCompleted(scheduler).Handle,
-	); err != nil {
-		return fmt.Errorf("subscribe product workflow deploy completed: %w", err)
-	}
+	c.EventBus.Subscribe(deliveryevent.BuildCompletedName, subscriber.NewOnBuildCompleted(scheduler).Handle)
+	c.EventBus.Subscribe(deliveryevent.DeployCompletedName, subscriber.NewOnDeployCompleted(scheduler).Handle)
 
 	c.WorkflowRunTrigger = &workflowRunTriggerPort{start: startRun, products: productChecker}
 	c.WorkflowRuntimeInputs = &workflowRuntimeInputPort{workflows: workflowRepo}

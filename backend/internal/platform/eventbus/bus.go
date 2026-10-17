@@ -9,12 +9,8 @@ type Handler = messaging.Handler
 
 type Bus = messaging.Bus
 
-type Subscription = messaging.Subscription
-
-type Lifecycle = messaging.Lifecycle
-
-func NewInMemory(registries ...*events.Registry) Bus {
-	return messaging.NewInMemoryBus(registries...)
+func NewInMemory() Bus {
+	return messaging.NewInMemoryBus()
 }
 
 // Event is re-exported for handlers that reference events.Event via eventbus package.

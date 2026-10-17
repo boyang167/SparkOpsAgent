@@ -35,14 +35,3 @@ func NewRunCompleted(
 		WorkspaceID:    wsID,
 	}
 }
-
-func Register(registry *events.Registry) error {
-	return events.RegisterJSON[RunCompleted](
-		registry,
-		RunCompletedName,
-		1,
-		func(ev RunCompleted) events.AggregateRef {
-			return events.AggregateRef{Type: "run", ID: ev.RunID.String()}
-		},
-	)
-}

@@ -54,19 +54,13 @@ func (m *Module) Register(c *appctx.Container) error {
 		log.Printf("workspace_app: seed default templates: %v", err)
 	}
 	if c.EventBus != nil {
-		if err := c.EventBus.Subscribe(
-			integration.EventWorkspaceCreated,
-			"workspace-app.workspace-created.seed-default-templates",
-			func(ctx context.Context, e events.Event) error {
-				ev, ok := e.(integration.WorkspaceCreated)
-				if !ok {
-					return nil
-				}
-				return command.SeedWorkspaceDefaultTemplates(ctx, c.DB, ev.WorkspaceID.String(), ev.OwnerID.String())
-			},
-		); err != nil {
-			return fmt.Errorf("subscribe workspace template seed: %w", err)
-		}
+		c.EventBus.Subscribe(integration.EventWorkspaceCreated, func(ctx context.Context, e events.Event) error {
+			ev, ok := e.(integration.WorkspaceCreated)
+			if !ok {
+				return nil
+			}
+			return command.SeedWorkspaceDefaultTemplates(ctx, c.DB, ev.WorkspaceID.String(), ev.OwnerID.String())
+		})
 	}
 
 	repo := persistence.NewProjectRepository(c.DB)
@@ -101,13 +95,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		}
 	})
 	if c.EventBus != nil {
-		if err := c.EventBus.Subscribe(
-			deliveryevent.DeployCompletedName,
-			"workspace-app.deploy-completed.archive-coordinator",
-			archiveCoordinator.HandleDeployCompleted,
-		); err != nil {
-			return fmt.Errorf("subscribe workspace archive coordinator: %w", err)
-		}
+		c.EventBus.Subscribe(deliveryevent.DeployCompletedName, archiveCoordinator.HandleDeployCompleted)
 	}
 	listProjectVersions := query.NewListProjectVersionsHandler(versionRepo, repo, wsChecker)
 	getProjectVersion := query.NewGetProjectVersionHandler(versionRepo, repo, wsChecker)

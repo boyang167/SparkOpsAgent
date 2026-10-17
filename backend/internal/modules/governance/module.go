@@ -108,13 +108,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	if err := menuPolicies.HandleAllWorkspaces(context.Background(), command.ApplyMenuRolePoliciesOptions{SkipIfConfigured: true}); err != nil {
 		return fmt.Errorf("apply menu role policies: %w", err)
 	}
-	if err := c.EventBus.Subscribe(
-		integration.EventWorkspaceCreated,
-		"governance.workspace-created.bootstrap",
-		subscriber.NewOnWorkspaceCreated(bootstrap, menuPolicies).Handle,
-	); err != nil {
-		return fmt.Errorf("subscribe governance workspace bootstrap: %w", err)
-	}
+	c.EventBus.Subscribe(integration.EventWorkspaceCreated, subscriber.NewOnWorkspaceCreated(bootstrap, menuPolicies).Handle)
 
 	handler := govhttp.NewHandler(
 		createRole, updateRole, deleteRole, copyRole, assignRole, inviteMember, removeBinding,

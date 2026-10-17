@@ -68,7 +68,7 @@ func runRealQueueClosure(t *testing.T, status buildmodel.BuildStatus) *orchestra
 	require.NoError(t, err)
 	require.NoError(t, deployConsumer.Register(context.Background(), queue))
 	completed := subscriber.NewOnBuildCompleted(f.repo, publisher)
-	require.NoError(t, bus.Subscribe(deliveryevent.BuildCompletedName, "test.orchestrator.build-completed", completed.Handle))
+	bus.Subscribe(deliveryevent.BuildCompletedName, completed.Handle)
 
 	require.NoError(t, publisher.PublishRun(context.Background(), f.run))
 	return f

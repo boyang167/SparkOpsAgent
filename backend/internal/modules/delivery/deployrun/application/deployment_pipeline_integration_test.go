@@ -294,11 +294,7 @@ func newPipelineFixture(t *testing.T, mode pipelineMode) *pipelineFixture {
 	require.NoError(t, err)
 	require.NoError(t, deployConsumer.Register(ctx, queue))
 	if mode != pipelineModeReconcile {
-		require.NoError(t, bus.Subscribe(
-			deliveryevent.BuildCompletedName,
-			"test.deployment-pipeline.build-completed",
-			subscriber.NewOnBuildCompleted(repo, publisher).Handle,
-		))
+		bus.Subscribe(deliveryevent.BuildCompletedName, subscriber.NewOnBuildCompleted(repo, publisher).Handle)
 	}
 	return &pipelineFixture{
 		ctx: ctx, cancel: cancel, wsID: wsID, memberID: memberID, projectID: projectID,

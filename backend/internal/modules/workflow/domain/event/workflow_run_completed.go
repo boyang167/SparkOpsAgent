@@ -38,14 +38,3 @@ func NewWorkflowRunCompleted(
 		Status:       status,
 	}
 }
-
-func Register(registry *events.Registry) error {
-	return events.RegisterJSON[WorkflowRunCompleted](
-		registry,
-		WorkflowRunCompletedName,
-		1,
-		func(ev WorkflowRunCompleted) events.AggregateRef {
-			return events.AggregateRef{Type: "workflow_run", ID: ev.RunID.String()}
-		},
-	)
-}

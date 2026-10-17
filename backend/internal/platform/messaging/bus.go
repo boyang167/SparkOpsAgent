@@ -11,19 +11,7 @@ type Handler func(ctx context.Context, event events.Event) error
 // Bus publishes domain events to in-process subscribers.
 type Bus interface {
 	Publish(ctx context.Context, ev ...events.Event) error
-	Subscribe(eventName, subscriber string, h Handler) error
-}
-
-type Subscription struct {
-	EventName  string
-	Version    int
-	Subscriber string
-	Handler    Handler
-}
-
-type Lifecycle interface {
-	Start(ctx context.Context) error
-	Close() error
+	Subscribe(eventName string, h Handler)
 }
 
 // Queue publishes async job messages to external brokers (AMQP).

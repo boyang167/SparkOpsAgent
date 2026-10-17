@@ -161,41 +161,17 @@ func (m *Module) Register(c *appctx.Container) error {
 		return fmt.Errorf("delivery deployment consumer: %w", err)
 	}
 	onBuildCompleted := deploysubscriber.NewOnBuildCompleted(deployRepo, deployPublisher)
-	if err := c.EventBus.Subscribe(
-		deliveryevent.BuildCompletedName,
-		"delivery.build-completed.deployrun",
-		onBuildCompleted.Handle,
-	); err != nil {
-		return fmt.Errorf("subscribe delivery build completed deployrun: %w", err)
-	}
+	c.EventBus.Subscribe(deliveryevent.BuildCompletedName, onBuildCompleted.Handle)
 	hookDispatcher := outbound.NewDispatcher(hookRepo, c.Logger)
-	if err := c.EventBus.Subscribe(
-		deliveryevent.BuildCompletedName,
-		"delivery.build-completed.webhook",
-		hookDispatcher.Handle,
-	); err != nil {
-		return fmt.Errorf("subscribe delivery build completed webhook: %w", err)
-	}
-	if err := c.EventBus.Subscribe(
-		deliveryevent.DeployCompletedName,
-		"delivery.deploy-completed.webhook",
-		hookDispatcher.Handle,
-	); err != nil {
-		return fmt.Errorf("subscribe delivery deploy completed webhook: %w", err)
-	}
+	c.EventBus.Subscribe(deliveryevent.BuildCompletedName, hookDispatcher.Handle)
+	c.EventBus.Subscribe(deliveryevent.DeployCompletedName, hookDispatcher.Handle)
 	credentialSync := deployservice.NewCredentialSyncService(
 		deployReader,
 		jenkinsProvider,
 		c.Config.Deploy.JenkinsTimeout,
 		c.Logger,
 	)
-	if err := c.EventBus.Subscribe(
-		integration.EventSecretUpdated,
-		"delivery.secret-updated.credential-sync",
-		deploysubscriber.NewOnSecretUpdated(credentialSync, c.Logger, c.Config.Deploy.JenkinsTimeout).Handle,
-	); err != nil {
-		return fmt.Errorf("subscribe delivery secret updated credential sync: %w", err)
-	}
+	c.EventBus.Subscribe(integration.EventSecretUpdated, deploysubscriber.NewOnSecretUpdated(credentialSync, c.Logger, c.Config.Deploy.JenkinsTimeout).Handle)
 	deployservice.NewReconciler(deployRepo, deployPublisher, func(err error) {
 		if c.Logger != nil {
 			c.Logger.Error("deployment reconciliation failed", zap.Error(err))
