@@ -10,6 +10,7 @@ import (
 	deployrepo "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/repository"
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	buildmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
@@ -19,25 +20,27 @@ type runPublisher interface {
 }
 
 type OnBuildCompleted struct {
-	repo      deployrepo.DeploymentRunRepository
-	publisher runPublisher
-	clock     func() time.Time
+	repo       deployrepo.DeploymentRunRepository
+	publisher  runPublisher
+	clock      func() time.Time
+	operations messaging.OperationWriter
 }
 
-func NewOnBuildCompleted(repo deployrepo.DeploymentRunRepository, publisher runPublisher) *OnBuildCompleted {
-	return &OnBuildCompleted{
+func NewOnBuildCompleted(repo deployrepo.DeploymentRunRepository, publisher runPublisher, writers ...messaging.OperationWriter) *OnBuildCompleted {
+	handler := &OnBuildCompleted{
 		repo: repo, publisher: publisher,
 		clock: func() time.Time { return time.Now().UTC() },
 	}
+	if len(writers) > 0 {
+		handler.operations = writers[0]
+	}
+	return handler
 }
 
 func (s *OnBuildCompleted) Handle(ctx context.Context, event events.Event) error {
 	completed, ok := event.(deliveryevent.BuildCompleted)
 	if !ok {
 		return nil
-	}
-	if messaging.IsInboxConsumerContext(ctx) {
-		return messaging.ErrOperationOutboxRequired
 	}
 	run, err := s.repo.FindByBuildID(ctx, completed.BuildID)
 	if errors.Is(err, domain.ErrDeploymentRunNotFound) {
@@ -79,6 +82,19 @@ func (s *OnBuildCompleted) Handle(ctx context.Context, event events.Event) error
 	}
 	if err := s.repo.Update(ctx, run); err != nil {
 		return s.resolveConcurrent(ctx, run, err)
+	}
+	if s.operations != nil {
+		metadata, ok := events.MetadataFromContext(ctx)
+		if !ok {
+			return errors.New("deploy queue operation requires event metadata")
+		}
+		return s.operations.Schedule(ctx, messaging.OperationRequest{
+			Owner: metadata.Subscriber, OperationType: outbound.OperationTypeDeployQueuePublish,
+			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + outbound.OperationTypeDeployQueuePublish + ":" + run.ID.String(),
+			Payload: outbound.DeployQueuePayload{
+				EventID: metadata.EventID, RunID: run.ID.String(), WorkspaceID: run.WorkspaceID.String(),
+			},
+		})
 	}
 	return s.publishWithBudget(ctx, run)
 }

@@ -290,7 +290,7 @@ func (h *ApproveReleasePlanByTokenHandler) Handle(ctx context.Context, token str
 			return nil, err
 		}
 		_ = auditReleasePlan(ctx, h.plans, plan.ID, kernel.MemberID{}, "approve_by_token", map[string]any{"note": input.Note, "hook": "before_execute"})
-		flow.sendHookAsync(plan, model.ReleasePlanHookEventBeforeExecute)
+		flow.sendHook(ctx, plan, model.ReleasePlanHookEventBeforeExecute)
 		return h.plans.FindPlanByID(ctx, plan.ID)
 	}
 	if err := h.plans.UpdatePlan(ctx, plan); err != nil {

@@ -35,6 +35,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"go.uber.org/zap"
@@ -125,6 +126,11 @@ func (m *Module) Register(c *appctx.Container) error {
 		return fmt.Errorf("delivery module requires manifest deployer")
 	}
 	deployPublisher := deployconsumer.NewPublisher(c.MessageQueue)
+	useOperations := c.Config != nil && c.Config.Messaging.Driver == "amqp"
+	var operationWriter messaging.OperationWriter
+	if useOperations {
+		operationWriter = c.OperationWriter
+	}
 	deployOperations := runner.NewRegistry()
 	prepareService := deployservice.NewPrepareService(c.Config.Jenkins.JobSuffix, deployacl.NewWorkspacePipelineRenderer(c.DB))
 	deployOrchestrator := deployservice.NewOrchestrator(
@@ -152,7 +158,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	if err := deployConsumer.Register(c.Context, c.MessageQueue); err != nil {
 		return fmt.Errorf("delivery deployment consumer: %w", err)
 	}
-	onBuildCompleted := deploysubscriber.NewOnBuildCompleted(deployRepo, deployPublisher)
+	onBuildCompleted := deploysubscriber.NewOnBuildCompleted(deployRepo, deployPublisher, operationWriter)
 	if err := c.EventBus.Subscribe(
 		deliveryevent.BuildCompletedName,
 		"delivery.build-completed.deployrun",
@@ -160,7 +166,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	); err != nil {
 		return fmt.Errorf("subscribe delivery build completed deployrun: %w", err)
 	}
-	hookDispatcher := outbound.NewDispatcher(hookRepo, c.Logger)
+	hookDispatcher := outbound.NewDispatcher(hookRepo, c.Logger, operationWriter)
 	if err := c.EventBus.Subscribe(
 		deliveryevent.BuildCompletedName,
 		"delivery.build-completed.webhook",
@@ -181,10 +187,24 @@ func (m *Module) Register(c *appctx.Container) error {
 		c.Config.Deploy.JenkinsTimeout,
 		c.Logger,
 	)
+	if useOperations {
+		if c.OperationRegistry == nil || c.OperationWriter == nil {
+			return fmt.Errorf("delivery module requires operation outbox")
+		}
+		for operationType, handler := range map[string]messaging.OperationHandler{
+			outbound.OperationTypeWebhookSend:           outbound.NewWebhookHandler(nil).Handle,
+			outbound.OperationTypeJenkinsCredentialSync: outbound.NewCredentialSyncHandler(credentialSync),
+			outbound.OperationTypeDeployQueuePublish:    outbound.NewDeployQueueHandler(deployRepo, c.MessageQueue),
+		} {
+			if err := c.OperationRegistry.Register(operationType, handler); err != nil {
+				return fmt.Errorf("register delivery operation %s: %w", operationType, err)
+			}
+		}
+	}
 	if err := c.EventBus.Subscribe(
 		integration.EventSecretUpdated,
 		"delivery.secret-updated.credential-sync",
-		deploysubscriber.NewOnSecretUpdated(credentialSync, c.Logger, c.Config.Deploy.JenkinsTimeout).Handle,
+		deploysubscriber.NewOnSecretUpdated(credentialSync, c.Logger, c.Config.Deploy.JenkinsTimeout, operationWriter).Handle,
 	); err != nil {
 		return fmt.Errorf("subscribe delivery secret updated credential sync: %w", err)
 	}
@@ -199,6 +219,11 @@ func (m *Module) Register(c *appctx.Container) error {
 	rollbackDeployment := deploycommand.NewRollbackDeploymentHandler(deployRepo, c.MessageQueue, nil)
 	rollbackDeployment.SetProjectLifecycleReader(deployReader)
 	undeploy := deploycommand.NewUndeployHandler(deployRepo, deployReader, c.MessageQueue, nil)
+	if useOperations {
+		createDeployment.UseOperationOutbox(operationWriter, c.Transactor)
+		rollbackDeployment.UseOperationOutbox(operationWriter, c.Transactor)
+		undeploy.UseOperationOutbox(operationWriter, c.Transactor)
+	}
 	deployHandler := deployhttp.NewHandler(
 		createDeployment,
 		rollbackDeployment,

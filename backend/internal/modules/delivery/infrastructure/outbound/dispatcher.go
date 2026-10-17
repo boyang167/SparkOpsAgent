@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -18,26 +19,28 @@ import (
 )
 
 type Dispatcher struct {
-	repo   *persistence.WebhookRepository
-	client *http.Client
-	logger *zap.Logger
-	sync   bool
+	repo       *persistence.WebhookRepository
+	client     *http.Client
+	logger     *zap.Logger
+	operations messaging.OperationWriter
+	sync       bool
 }
 
-func NewDispatcher(repo *persistence.WebhookRepository, logger *zap.Logger) *Dispatcher {
-	return &Dispatcher{
+func NewDispatcher(repo *persistence.WebhookRepository, logger *zap.Logger, writers ...messaging.OperationWriter) *Dispatcher {
+	dispatcher := &Dispatcher{
 		repo: repo,
 		client: &http.Client{
 			Timeout: 5 * time.Second,
 		},
 		logger: logger,
 	}
+	if len(writers) > 0 {
+		dispatcher.operations = writers[0]
+	}
+	return dispatcher
 }
 
 func (d *Dispatcher) Handle(ctx context.Context, e events.Event) error {
-	if messaging.IsInboxConsumerContext(ctx) {
-		return messaging.ErrOperationOutboxRequired
-	}
 	payload, eventName, projectID, ok := payloadFromEvent(e)
 	if !ok {
 		return nil
@@ -52,6 +55,24 @@ func (d *Dispatcher) Handle(ctx context.Context, e events.Event) error {
 	for i := range hooks {
 		hook := hooks[i]
 		if !command.HookSubscribes(hook.Events, eventName) {
+			continue
+		}
+		if d.operations != nil {
+			metadata, ok := events.MetadataFromContext(ctx)
+			if !ok {
+				return fmt.Errorf("webhook operation requires event metadata")
+			}
+			if err := d.operations.Schedule(ctx, messaging.OperationRequest{
+				Owner:          metadata.Subscriber,
+				OperationType:  OperationTypeWebhookSend,
+				IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + OperationTypeWebhookSend + ":" + hook.ID.String(),
+				Payload: WebhookPayload{
+					EventID: metadata.EventID, WebhookID: hook.ID.String(), URL: hook.URL,
+					Token: hook.Token, Body: payload, Timeout: 5 * time.Second,
+				},
+			}); err != nil {
+				return err
+			}
 			continue
 		}
 		d.dispatch(hook, payload)
@@ -93,11 +114,7 @@ func (d *Dispatcher) dispatch(hook persistence.WebhookRecord, payload map[string
 			)
 		}
 	}
-	if d.sync {
-		run()
-		return
-	}
-	go run()
+	run()
 }
 
 func payloadFromEvent(e events.Event) (map[string]any, string, kernel.ProjectID, bool) {

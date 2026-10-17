@@ -133,13 +133,13 @@ func (h *AddReleasePlanJobHandler) Handle(ctx context.Context, productID kernel.
 }
 
 type FinishReleasePlanPlanningHandler struct {
-	products   repository.ProductRepository
-	plans      repository.ReleasePlanRepository
-	executor   *service.ReleasePlanExecutor
-	notifier   *service.ReleasePlanApprovalNotifier
-	hooks      *service.ReleasePlanHookNotifier
-	snapshots  port.WorkflowSnapshotReader
-	inputs     appctx.WorkflowRuntimeInputReader
+	products  repository.ProductRepository
+	plans     repository.ReleasePlanRepository
+	executor  *service.ReleasePlanExecutor
+	notifier  *service.ReleasePlanApprovalNotifier
+	hooks     *service.ReleasePlanHookNotifier
+	snapshots port.WorkflowSnapshotReader
+	inputs    appctx.WorkflowRuntimeInputReader
 }
 
 func (h *FinishReleasePlanPlanningHandler) UseRuntimeInputs(reader appctx.WorkflowRuntimeInputReader) {
@@ -185,7 +185,7 @@ func (h *FinishReleasePlanPlanningHandler) Handle(ctx context.Context, productID
 		}
 		_ = h.audit(ctx, plan.ID, actor, "finish_planning", map[string]any{"status": plan.Status, "hook": "finish_planning"})
 		_ = recordPlanVersionAfterReload(ctx, h.plans, plan.ID, actor, "finish_planning")
-		flow.sendHookAsync(plan, model.ReleasePlanHookEventFinishPlanning)
+		flow.sendHook(ctx, plan, model.ReleasePlanHookEventFinishPlanning)
 		return h.plans.FindPlanByID(ctx, planID)
 	}
 	if err := plan.FinishPlanning(); err != nil {
@@ -230,7 +230,7 @@ func (h *ApproveReleasePlanHandler) Handle(ctx context.Context, productID kernel
 			return nil, err
 		}
 		_ = h.audit(ctx, plan.ID, actor, "approve", map[string]any{"hook": "before_execute"})
-		flow.sendHookAsync(plan, model.ReleasePlanHookEventBeforeExecute)
+		flow.sendHook(ctx, plan, model.ReleasePlanHookEventBeforeExecute)
 		return h.plans.FindPlanByID(ctx, planID)
 	}
 	if err := h.plans.UpdatePlan(ctx, plan); err != nil {

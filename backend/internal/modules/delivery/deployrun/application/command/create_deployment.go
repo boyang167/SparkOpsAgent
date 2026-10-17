@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
-	deliverydomain "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/consumer"
+	deliverydomain "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"gopkg.in/yaml.v3"
 )
@@ -39,10 +40,15 @@ type CreateDeploymentHandler struct {
 	queue        messaging.Queue
 	clock        func() time.Time
 	lifecycle    port.ProjectLifecycleReader
+	operations   deploymentOperationPublisher
 }
 
 func (h *CreateDeploymentHandler) SetProjectLifecycleReader(reader port.ProjectLifecycleReader) {
 	h.lifecycle = reader
+}
+
+func (h *CreateDeploymentHandler) UseOperationOutbox(writer messaging.OperationWriter, tx postgres.Transactor) {
+	h.operations = deploymentOperationPublisher{writer: writer, tx: tx, owner: "delivery.command.create-deployment"}
 }
 
 func NewCreateDeploymentHandler(
@@ -63,6 +69,25 @@ func NewCreateDeploymentHandler(
 }
 
 func (h *CreateDeploymentHandler) Handle(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	memberID kernel.MemberID,
+	projectID kernel.ProjectID,
+	input CreateInput,
+) (*model.DeploymentRun, error) {
+	if h.operations.enabled() {
+		var result *model.DeploymentRun
+		err := h.operations.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+			var err error
+			result, err = h.handle(txCtx, wsID, memberID, projectID, input)
+			return err
+		})
+		return result, err
+	}
+	return h.handle(ctx, wsID, memberID, projectID, input)
+}
+
+func (h *CreateDeploymentHandler) handle(
 	ctx context.Context,
 	wsID kernel.WorkspaceID,
 	memberID kernel.MemberID,
@@ -186,6 +211,12 @@ func (h *CreateDeploymentHandler) Handle(
 	run.CreatedAt = h.clock().UTC()
 	if err := h.repo.Create(ctx, run); err != nil {
 		return nil, err
+	}
+	if h.operations.enabled() {
+		if err := h.operations.schedule(ctx, run); err != nil {
+			return nil, err
+		}
+		return run, nil
 	}
 	payload, err := json.Marshal(consumer.Message{RunID: run.ID.String(), WorkspaceID: wsID.String()})
 	if err != nil {

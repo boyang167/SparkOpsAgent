@@ -10,8 +10,10 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/subscriber"
+	productmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/acl"
+	productoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/persistence"
 	producthttp "github.com/sparkops/sparkops-agent/backend/internal/modules/product/interface/http"
 	pwfevent "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/event"
@@ -21,6 +23,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type Module struct {
@@ -87,6 +91,54 @@ func (m *Module) Register(c *appctx.Container) error {
 	releasePlanTemplateRepo := persistence.NewReleasePlanTemplateRepository(c.DB)
 	service.NewReleasePlanScheduler(releasePlanRepo, releasePlanExecutor, c.Logger).Start(c.Context)
 	sprintWorkItemExecutor := service.NewSprintWorkItemExecutor(repo, sprintRepo, c.WorkflowRunTrigger, pmRouter, boardNotifier)
+	var operationWriter messaging.OperationWriter
+	if c.Config != nil && c.Config.Messaging.Driver == "amqp" {
+		if c.OperationRegistry == nil || c.OperationWriter == nil {
+			return fmt.Errorf("product module requires operation outbox")
+		}
+		operationWriter = c.OperationWriter
+		handler := productoutbound.NewWorkflowCompletionOperation(func(ctx context.Context, runID kernel.ProductWorkflowRunID, success bool, message string) error {
+			if err := releasePlanExecutor.OnWorkflowRunCompleted(ctx, runID, success, message, kernel.MemberID{}); err != nil {
+				return err
+			}
+			return sprintWorkItemExecutor.OnWorkflowRunCompleted(ctx, runID, success, message)
+		})
+		if err := c.OperationRegistry.Register(productoutbound.OperationTypeWorkflowTrigger, handler); err != nil {
+			return fmt.Errorf("register product workflow completion operation: %w", err)
+		}
+		if err := c.OperationRegistry.Register(
+			productoutbound.OperationTypeJiraTransition,
+			productoutbound.NewJiraTransitionOperation(func(ctx context.Context, payload productoutbound.JiraTransitionPayload) error {
+				workspaceID, err := kernel.ParseWorkspaceID(payload.WorkspaceID)
+				if err != nil {
+					return err
+				}
+				connector := pmRouter.Get(payload.Provider)
+				if connector == nil {
+					return fmt.Errorf("pm connector %q unavailable", payload.Provider)
+				}
+				issue, err := connector.GetIssue(ctx, workspaceID, payload.PMWorkspaceID, payload.IssueKey)
+				if err == nil && issue != nil && issue.Status == payload.Status {
+					return nil
+				}
+				return connector.TransitionIssue(ctx, workspaceID, payload.PMWorkspaceID, payload.IssueKey, payload.Status)
+			}),
+		); err != nil {
+			return fmt.Errorf("register product jira operation: %w", err)
+		}
+		if err := c.OperationRegistry.Register(
+			productoutbound.OperationTypeReleasePlanWebhookSend,
+			productoutbound.NewReleasePlanWebhookOperation(func(ctx context.Context, planID kernel.ReleasePlanID, event string) error {
+				plan, err := releasePlanRepo.FindPlanByID(ctx, planID)
+				if err != nil {
+					return err
+				}
+				return releasePlanHookNotifier.Send(ctx, plan, productmodel.ReleasePlanHookEvent(event))
+			}),
+		); err != nil {
+			return fmt.Errorf("register product release plan webhook operation: %w", err)
+		}
+	}
 	if c.SprintProcessPort == nil {
 		return fmt.Errorf("product module requires sprint process port")
 	}
@@ -288,7 +340,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	if err := c.EventBus.Subscribe(
 		pwfevent.WorkflowRunCompletedName,
 		"product.workflow-run-completed",
-		subscriber.NewOnWorkflowRunCompleted(releasePlanExecutor, sprintWorkItemExecutor).Handle,
+		subscriber.NewOnWorkflowRunCompleted(releasePlanExecutor, sprintWorkItemExecutor, operationWriter).Handle,
 	); err != nil {
 		return fmt.Errorf("subscribe product workflow run completed: %w", err)
 	}

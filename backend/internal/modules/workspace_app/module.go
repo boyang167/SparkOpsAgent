@@ -16,6 +16,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/subscriber"
 	workspaceevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/acl"
+	workspaceoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/portadapter"
 	wshttp "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/interface/http"
@@ -24,6 +25,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/policy"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 )
@@ -96,11 +98,34 @@ func (m *Module) Register(c *appctx.Container) error {
 	createProjectVersion := command.NewCreateProjectVersionHandler(repo, versionRepo, generateTemplates)
 	c.VersionCreator = portadapter.NewVersionCreatorPort(createProjectVersion)
 	c.ProjectVersionReader = portadapter.NewProjectVersionReaderPort(versionRepo)
+	var operationWriter messaging.OperationWriter
+	if c.Config != nil && c.Config.Messaging.Driver == "amqp" {
+		if c.OperationRegistry == nil || c.OperationWriter == nil {
+			return fmt.Errorf("workspace_app module requires operation outbox")
+		}
+		operationWriter = c.OperationWriter
+	}
 	archiveCoordinator := command.NewArchiveCoordinator(repo, func() appctx.ProjectTeardown { return c.ProjectTeardown }, func(msg string, err error) {
 		if c.Logger != nil {
 			c.Logger.Warn(msg, zap.Error(err))
 		}
-	})
+	}, operationWriter)
+	if operationWriter != nil {
+		if err := c.OperationRegistry.Register(
+			workspaceoutbound.OperationTypeProjectUndeploy,
+			workspaceoutbound.NewProjectUndeployHandler(repo, archiveCoordinator),
+		); err != nil {
+			return fmt.Errorf("register workspace archive operation: %w", err)
+		}
+		if err := c.OperationRegistry.Register(
+			workspaceoutbound.OperationTypePipelineDisable,
+			workspaceoutbound.NewPipelineDisableHandler(func() workspaceoutbound.PipelineDisabler {
+				return c.ProjectTeardown
+			}),
+		); err != nil {
+			return fmt.Errorf("register workspace pipeline operation: %w", err)
+		}
+	}
 	if c.EventBus != nil {
 		if err := c.EventBus.Subscribe(
 			deliveryevent.DeployCompletedName,

@@ -14,6 +14,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/consumer"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -22,14 +23,19 @@ type RollbackInput struct {
 }
 
 type RollbackDeploymentHandler struct {
-	repo      repository.DeploymentRunRepository
-	queue     messaging.Queue
-	clock     func() time.Time
-	lifecycle port.ProjectLifecycleReader
+	repo       repository.DeploymentRunRepository
+	queue      messaging.Queue
+	clock      func() time.Time
+	lifecycle  port.ProjectLifecycleReader
+	operations deploymentOperationPublisher
 }
 
 func (h *RollbackDeploymentHandler) SetProjectLifecycleReader(reader port.ProjectLifecycleReader) {
 	h.lifecycle = reader
+}
+
+func (h *RollbackDeploymentHandler) UseOperationOutbox(writer messaging.OperationWriter, tx postgres.Transactor) {
+	h.operations = deploymentOperationPublisher{writer: writer, tx: tx, owner: "delivery.command.rollback-deployment"}
 }
 
 func NewRollbackDeploymentHandler(
@@ -44,6 +50,25 @@ func NewRollbackDeploymentHandler(
 }
 
 func (h *RollbackDeploymentHandler) Handle(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	memberID kernel.MemberID,
+	projectID kernel.ProjectID,
+	input RollbackInput,
+) (*model.DeploymentRun, error) {
+	if h.operations.enabled() {
+		var result *model.DeploymentRun
+		err := h.operations.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+			var err error
+			result, err = h.handle(txCtx, wsID, memberID, projectID, input)
+			return err
+		})
+		return result, err
+	}
+	return h.handle(ctx, wsID, memberID, projectID, input)
+}
+
+func (h *RollbackDeploymentHandler) handle(
 	ctx context.Context,
 	wsID kernel.WorkspaceID,
 	memberID kernel.MemberID,
@@ -75,6 +100,12 @@ func (h *RollbackDeploymentHandler) Handle(
 	run.CreatedAt = h.clock().UTC()
 	if err := h.repo.Create(ctx, run); err != nil {
 		return nil, err
+	}
+	if h.operations.enabled() {
+		if err := h.operations.schedule(ctx, run); err != nil {
+			return nil, err
+		}
+		return run, nil
 	}
 	payload, err := json.Marshal(consumer.Message{RunID: run.ID.String(), WorkspaceID: wsID.String()})
 	if err != nil {

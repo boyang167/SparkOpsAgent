@@ -54,54 +54,43 @@ func TestProductionNamedSubscriptionsAreCompleteAndUnique(t *testing.T) {
 	require.Equal(t, expected, actual)
 }
 
-func TestDeferredExternalSubscribersReturnSentinelBeforeSideEffects(t *testing.T) {
-	guard := regexp.MustCompile(
-		`if\s+messaging\.IsInboxConsumerContext\(ctx\)\s*\{\s*return\s+messaging\.ErrOperationOutboxRequired\s*\}`,
-	)
+func TestExternalSubscribersScheduleOperationsWithoutSentinels(t *testing.T) {
 	cases := []struct {
-		subscriber      string
-		handlerFile     string
-		firstSideEffect string
+		subscriber  string
+		handlerFile string
+		operation   string
 	}{
 		{
-			subscriber:      "product.workflow-run-completed",
-			handlerFile:     "../modules/product/application/subscriber/on_workflow_run_completed.go",
-			firstSideEffect: "h.releasePlans.OnWorkflowRunCompleted",
+			subscriber: "product.workflow-run-completed", handlerFile: "../modules/product/application/subscriber/on_workflow_run_completed.go",
+			operation: "OperationTypeWorkflowTrigger",
 		},
 		{
-			subscriber:      "product-workflow.build-completed",
-			handlerFile:     "../modules/product_workflow/application/subscriber/on_build_completed.go",
-			firstSideEffect: "s.scheduler.HandleBuildCompleted",
+			subscriber: "product-workflow.build-completed", handlerFile: "../modules/product_workflow/application/subscriber/on_build_completed.go",
+			operation: "OperationTypeBuildTrigger",
 		},
 		{
-			subscriber:      "product-workflow.deploy-completed",
-			handlerFile:     "../modules/product_workflow/application/subscriber/on_deploy_completed.go",
-			firstSideEffect: "s.scheduler.HandleDeployCompleted",
+			subscriber: "product-workflow.deploy-completed", handlerFile: "../modules/product_workflow/application/subscriber/on_deploy_completed.go",
+			operation: "OperationTypeDeployTrigger",
 		},
 		{
-			subscriber:      "workspace-app.deploy-completed.archive-coordinator",
-			handlerFile:     "../modules/workspace_app/application/command/archive_coordinator.go",
-			firstSideEffect: "c.repo.FindByID",
+			subscriber: "workspace-app.deploy-completed.archive-coordinator", handlerFile: "../modules/workspace_app/application/command/archive_coordinator.go",
+			operation: "OperationTypeProjectUndeploy",
 		},
 		{
-			subscriber:      "delivery.build-completed.deployrun",
-			handlerFile:     "../modules/delivery/deployrun/application/subscriber/on_build_completed.go",
-			firstSideEffect: "s.repo.FindByBuildID",
+			subscriber: "delivery.build-completed.deployrun", handlerFile: "../modules/delivery/deployrun/application/subscriber/on_build_completed.go",
+			operation: "OperationTypeDeployQueuePublish",
 		},
 		{
-			subscriber:      "delivery.build-completed.webhook",
-			handlerFile:     "../modules/delivery/infrastructure/outbound/dispatcher.go",
-			firstSideEffect: "payloadFromEvent(e)",
+			subscriber: "delivery.build-completed.webhook", handlerFile: "../modules/delivery/infrastructure/outbound/dispatcher.go",
+			operation: "OperationTypeWebhookSend",
 		},
 		{
-			subscriber:      "delivery.deploy-completed.webhook",
-			handlerFile:     "../modules/delivery/infrastructure/outbound/dispatcher.go",
-			firstSideEffect: "payloadFromEvent(e)",
+			subscriber: "delivery.deploy-completed.webhook", handlerFile: "../modules/delivery/infrastructure/outbound/dispatcher.go",
+			operation: "OperationTypeWebhookSend",
 		},
 		{
-			subscriber:      "delivery.secret-updated.credential-sync",
-			handlerFile:     "../modules/delivery/deployrun/application/subscriber/on_secret_updated.go",
-			firstSideEffect: "go func()",
+			subscriber: "delivery.secret-updated.credential-sync", handlerFile: "../modules/delivery/deployrun/application/subscriber/on_secret_updated.go",
+			operation: "OperationTypeJenkinsCredentialSync",
 		},
 	}
 
@@ -110,11 +99,9 @@ func TestDeferredExternalSubscribersReturnSentinelBeforeSideEffects(t *testing.T
 			raw, err := os.ReadFile(filepath.Clean(tt.handlerFile))
 			require.NoError(t, err)
 			source := string(raw)
-			guardLocation := guard.FindStringIndex(source)
-			require.NotNil(t, guardLocation, "Inbox path must return the retry sentinel")
-			sideEffectLocation := strings.Index(source, tt.firstSideEffect)
-			require.GreaterOrEqual(t, sideEffectLocation, 0, "expected side-effect marker not found")
-			require.Less(t, guardLocation[1], sideEffectLocation, "Inbox guard must precede the first side effect")
+			require.NotContains(t, source, "ErrOperationOutboxRequired")
+			require.Contains(t, source, tt.operation)
+			require.Contains(t, source, ".Schedule(ctx, messaging.OperationRequest{")
 		})
 	}
 }

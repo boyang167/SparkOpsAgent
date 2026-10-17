@@ -14,6 +14,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/consumer"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -31,10 +32,15 @@ type UndeployInput struct {
 }
 
 type UndeployHandler struct {
-	repo      repository.DeploymentRunRepository
-	lifecycle port.ProjectLifecycleReader
-	queue     messaging.Queue
-	clock     func() time.Time
+	repo       repository.DeploymentRunRepository
+	lifecycle  port.ProjectLifecycleReader
+	queue      messaging.Queue
+	clock      func() time.Time
+	operations deploymentOperationPublisher
+}
+
+func (h *UndeployHandler) UseOperationOutbox(writer messaging.OperationWriter, tx postgres.Transactor) {
+	h.operations = deploymentOperationPublisher{writer: writer, tx: tx, owner: "delivery.command.undeploy"}
 }
 
 func NewUndeployHandler(
@@ -50,6 +56,25 @@ func NewUndeployHandler(
 }
 
 func (h *UndeployHandler) Handle(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	memberID kernel.MemberID,
+	projectID kernel.ProjectID,
+	input UndeployInput,
+) (*model.DeploymentRun, error) {
+	if h.operations.enabled() {
+		var result *model.DeploymentRun
+		err := h.operations.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+			var err error
+			result, err = h.handle(txCtx, wsID, memberID, projectID, input)
+			return err
+		})
+		return result, err
+	}
+	return h.handle(ctx, wsID, memberID, projectID, input)
+}
+
+func (h *UndeployHandler) handle(
 	ctx context.Context,
 	wsID kernel.WorkspaceID,
 	memberID kernel.MemberID,
@@ -81,6 +106,25 @@ func (h *UndeployHandler) Handle(
 // StartForArchive is used by the archive flow, which has already confirmed the
 // project name and moved the project into the archiving status.
 func (h *UndeployHandler) StartForArchive(
+	ctx context.Context,
+	wsID kernel.WorkspaceID,
+	memberID kernel.MemberID,
+	projectID kernel.ProjectID,
+	clusterID kernel.ClusterInfoID,
+) (*model.DeploymentRun, error) {
+	if h.operations.enabled() {
+		var result *model.DeploymentRun
+		err := h.operations.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+			var err error
+			result, err = h.startForArchive(txCtx, wsID, memberID, projectID, clusterID)
+			return err
+		})
+		return result, err
+	}
+	return h.startForArchive(ctx, wsID, memberID, projectID, clusterID)
+}
+
+func (h *UndeployHandler) startForArchive(
 	ctx context.Context,
 	wsID kernel.WorkspaceID,
 	memberID kernel.MemberID,
@@ -124,6 +168,12 @@ func (h *UndeployHandler) start(
 	run.CreatedAt = h.clock().UTC()
 	if err := h.repo.Create(ctx, run); err != nil {
 		return nil, err
+	}
+	if h.operations.enabled() {
+		if err := h.operations.schedule(ctx, run); err != nil {
+			return nil, err
+		}
+		return run, nil
 	}
 	payload, err := json.Marshal(consumer.Message{RunID: run.ID.String(), WorkspaceID: wsID.String()})
 	if err != nil {

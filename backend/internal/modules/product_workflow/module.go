@@ -17,6 +17,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/gitlabapi"
+	workflowoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/trigger"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/vault"
@@ -26,6 +27,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -100,6 +102,22 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 	scheduler.SetGitReporter(gitlabapi.Reporter{Lookup: lookup, Logger: c.Logger})
 	scheduler.SetStatusReader(acl.NewDeliveryStatusReader(c.DB))
+	var operationWriter messaging.OperationWriter
+	if c.Config != nil && c.Config.Messaging.Driver == "amqp" {
+		if c.OperationRegistry == nil || c.OperationWriter == nil {
+			return fmt.Errorf("product_workflow module requires operation outbox")
+		}
+		operationWriter = c.OperationWriter
+		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeBuildTrigger, workflowoutbound.NewBuildCompletionHandler(scheduler)); err != nil {
+			return fmt.Errorf("register product workflow build operation: %w", err)
+		}
+		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeDeployTrigger, workflowoutbound.NewDeployCompletionHandler(scheduler)); err != nil {
+			return fmt.Errorf("register product workflow deploy operation: %w", err)
+		}
+		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeWebhookSend, workflowoutbound.NewWebhookHandler(nil)); err != nil {
+			return fmt.Errorf("register product workflow webhook operation: %w", err)
+		}
+	}
 	trigger.NewScheduler(workflowRepo, startRun, c.Logger).Start(context.Background())
 	updateWorkflow := command.NewUpdateWorkflowHandler(workflowRepo, productChecker)
 	if box != nil {
@@ -192,14 +210,14 @@ func (m *Module) Register(c *appctx.Container) error {
 	if err := c.EventBus.Subscribe(
 		deliveryevent.BuildCompletedName,
 		"product-workflow.build-completed",
-		subscriber.NewOnBuildCompleted(scheduler).Handle,
+		subscriber.NewOnBuildCompleted(scheduler, operationWriter).Handle,
 	); err != nil {
 		return fmt.Errorf("subscribe product workflow build completed: %w", err)
 	}
 	if err := c.EventBus.Subscribe(
 		deliveryevent.DeployCompletedName,
 		"product-workflow.deploy-completed",
-		subscriber.NewOnDeployCompleted(scheduler).Handle,
+		subscriber.NewOnDeployCompleted(scheduler, operationWriter).Handle,
 	); err != nil {
 		return fmt.Errorf("subscribe product workflow deploy completed: %w", err)
 	}

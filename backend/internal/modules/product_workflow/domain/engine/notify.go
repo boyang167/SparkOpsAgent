@@ -79,11 +79,9 @@ func (s *Scheduler) emitNotes(ctx context.Context, wf *model.ProductWorkflow, ru
 	runID := run.ID.String()
 	status := string(run.Status)
 	message := run.ErrorMessage
-	go func() {
-		sendCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		defer cancel()
-		dispatchNotifications(sendCtx, copied, name, runID, status, message, event)
-	}()
+	sendCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	dispatchNotifications(sendCtx, copied, name, runID, status, message, event)
 }
 
 func notificationsFromJobSpec(spec map[string]any) []model.WorkflowNotification {

@@ -7,6 +7,7 @@ import (
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/repository"
+	workspaceoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
@@ -24,20 +25,26 @@ var errTeardownUnavailable = errors.New("project teardown is not configured")
 // ArchiveCoordinator takes an archiving project offline one cluster at a time,
 // because delivery allows only one active run per project.
 type ArchiveCoordinator struct {
-	repo     repository.ProjectRepository
-	teardown func() appctx.ProjectTeardown
-	warn     func(string, error)
+	repo       repository.ProjectRepository
+	teardown   func() appctx.ProjectTeardown
+	warn       func(string, error)
+	operations messaging.OperationWriter
 }
 
 func NewArchiveCoordinator(
 	repo repository.ProjectRepository,
 	teardown func() appctx.ProjectTeardown,
 	warn func(string, error),
+	writers ...messaging.OperationWriter,
 ) *ArchiveCoordinator {
 	if warn == nil {
 		warn = func(string, error) {}
 	}
-	return &ArchiveCoordinator{repo: repo, teardown: teardown, warn: warn}
+	coordinator := &ArchiveCoordinator{repo: repo, teardown: teardown, warn: warn}
+	if len(writers) > 0 {
+		coordinator.operations = writers[0]
+	}
+	return coordinator
 }
 
 func (c *ArchiveCoordinator) port() (appctx.ProjectTeardown, error) {
@@ -91,9 +98,6 @@ func (c *ArchiveCoordinator) HandleDeployCompleted(ctx context.Context, e events
 	if !ok || ev.RunType != undeployRunType {
 		return nil
 	}
-	if messaging.IsInboxConsumerContext(ctx) {
-		return messaging.ErrOperationOutboxRequired
-	}
 	project, err := c.repo.FindByID(ctx, ev.ProjectID)
 	if err != nil || !project.IsArchiving() {
 		return nil
@@ -104,6 +108,19 @@ func (c *ArchiveCoordinator) HandleDeployCompleted(ctx context.Context, e events
 		}
 		c.warn("archive aborted: undeploy "+ev.RunID.String()+" "+ev.Status, nil)
 		return c.repo.Update(ctx, project)
+	}
+	if c.operations != nil {
+		metadata, ok := events.MetadataFromContext(ctx)
+		if !ok {
+			return errors.New("archive operation requires event metadata")
+		}
+		return c.operations.Schedule(ctx, messaging.OperationRequest{
+			Owner: metadata.Subscriber, OperationType: workspaceoutbound.OperationTypeProjectUndeploy,
+			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + project.ID.String(),
+			Payload: workspaceoutbound.ProjectUndeployPayload{
+				EventID: metadata.EventID, ProjectID: project.ID.String(), MemberID: ev.CreatedBy.String(),
+			},
+		})
 	}
 	if err := c.Advance(ctx, project, ev.CreatedBy); err != nil {
 		c.warn("advance archive failed", err)

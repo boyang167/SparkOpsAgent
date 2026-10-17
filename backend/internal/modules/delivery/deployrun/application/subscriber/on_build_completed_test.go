@@ -11,6 +11,9 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	buildmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/outbound"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 )
@@ -103,6 +106,15 @@ type subscriberPublisher struct {
 	mu    sync.Mutex
 }
 
+type buildOperationWriter struct {
+	requests []messaging.OperationRequest
+}
+
+func (w *buildOperationWriter) Schedule(_ context.Context, request messaging.OperationRequest) error {
+	w.requests = append(w.requests, request)
+	return nil
+}
+
 func (p *subscriberPublisher) PublishRun(context.Context, *model.DeploymentRun) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -137,6 +149,27 @@ func TestBuildCompletedAbortedAbortsRun(t *testing.T) {
 	require.NoError(t, handler.Handle(context.Background(), buildEvent(run, buildID, buildmodel.BuildStatusAborted)))
 	require.Equal(t, model.StatusAborted, run.Status)
 	require.Zero(t, publisher.calls)
+}
+
+func TestBuildCompletedSchedulesDeployQueueOperationWithoutPublishing(t *testing.T) {
+	run, buildID, repo, publisher, _ := newCompletedFixture()
+	writer := &buildOperationWriter{}
+	handler := NewOnBuildCompleted(repo, publisher, writer)
+	eventID := "event-build-1"
+	ctx := events.WithMetadata(context.Background(), events.Metadata{
+		EventID: eventID, Subscriber: "delivery.build-completed.deployrun",
+	})
+
+	require.NoError(t, handler.Handle(ctx, buildEvent(run, buildID, buildmodel.BuildStatusSuccess)))
+
+	require.Zero(t, publisher.calls)
+	require.Equal(t, model.StatusDeploying, repo.run.Status)
+	require.Len(t, writer.requests, 1)
+	require.Equal(t, outbound.OperationTypeDeployQueuePublish, writer.requests[0].OperationType)
+	require.Equal(t,
+		eventID+":delivery.build-completed.deployrun:"+outbound.OperationTypeDeployQueuePublish+":"+run.ID.String(),
+		writer.requests[0].IdempotencyKey,
+	)
 }
 
 func TestBuildCompletedSuccessPersistsDeployingBeforePublish(t *testing.T) {

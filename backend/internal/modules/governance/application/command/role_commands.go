@@ -2,15 +2,18 @@ package command
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/repository"
+	governanceoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -218,17 +221,23 @@ func (h *DeleteRoleHandler) Handle(ctx context.Context, workspaceID kernel.Works
 }
 
 type BootstrapWorkspaceHandler struct {
-	roles    repository.RoleRepository
-	bindings repository.BindingRepository
-	sync     *service.APIPolicySync
+	roles      repository.RoleRepository
+	bindings   repository.BindingRepository
+	sync       *service.APIPolicySync
+	operations messaging.OperationWriter
 }
 
 func NewBootstrapWorkspaceHandler(
 	roles repository.RoleRepository,
 	bindings repository.BindingRepository,
 	sync *service.APIPolicySync,
+	writers ...messaging.OperationWriter,
 ) *BootstrapWorkspaceHandler {
-	return &BootstrapWorkspaceHandler{roles: roles, bindings: bindings, sync: sync}
+	handler := &BootstrapWorkspaceHandler{roles: roles, bindings: bindings, sync: sync}
+	if len(writers) > 0 {
+		handler.operations = writers[0]
+	}
+	return handler
 }
 
 func (h *BootstrapWorkspaceHandler) Handle(ctx context.Context, workspaceID kernel.WorkspaceID, ownerID kernel.MemberID, permissions []string) error {
@@ -274,7 +283,18 @@ func (h *BootstrapWorkspaceHandler) Handle(ctx context.Context, workspaceID kern
 		}
 	}
 	if messaging.IsInboxConsumerContext(ctx) {
-		return messaging.ErrOperationOutboxRequired
+		metadata, ok := events.MetadataFromContext(ctx)
+		if !ok || h.operations == nil {
+			return errors.New("governance policy operation writer is required")
+		}
+		return h.operations.Schedule(ctx, messaging.OperationRequest{
+			Owner: metadata.Subscriber, OperationType: governanceoutbound.OperationTypeMemberRoleSync,
+			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + governanceoutbound.OperationTypeMemberRoleSync + ":" + ownerID.String(),
+			Payload: governanceoutbound.MemberRoleSyncPayload{
+				EventID: metadata.EventID, WorkspaceID: workspaceID.String(), RoleID: admin.ID.String(),
+				MemberID: ownerID.String(), Add: true,
+			},
+		})
 	}
 	if h.sync != nil {
 		return h.sync.SyncMemberRole(ctx, workspaceID, admin.ID, ownerID, true)

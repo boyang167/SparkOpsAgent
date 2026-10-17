@@ -172,11 +172,9 @@ func (e *ReleasePlanExecutor) beginAllDoneHook(ctx context.Context, plan *model.
 	}
 	_ = e.audit(ctx, plan.ID, actor, "wait_all_done_hook", nil)
 	if e.hooks != nil {
-		go func() {
-			hookCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			_ = e.hooks.Send(hookCtx, plan, model.ReleasePlanHookEventAllDone)
-		}()
+		hookCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		_ = e.hooks.Send(hookCtx, plan, model.ReleasePlanHookEventAllDone)
 	}
 	return nil
 }

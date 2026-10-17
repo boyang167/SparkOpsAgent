@@ -9,6 +9,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/subscriber"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/acl"
+	governanceoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/persistence"
 	govhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/interface/http"
 	identitycommand "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/application/command"
@@ -17,6 +18,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/policy"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 )
@@ -91,7 +93,20 @@ func (m *Module) Register(c *appctx.Container) error {
 	listMembers := query.NewListWorkspaceMembersHandler(acl.NewMemberACL(c.DB), bindingRepo)
 	listMemberRoles := query.NewListMemberRolesHandler(bindingRepo)
 	searchCandidates := query.NewSearchMemberCandidatesHandler(identityACL)
-	bootstrap := command.NewBootstrapWorkspaceHandler(roleRepo, bindingRepo, apiPolicySync)
+	var operationWriter messaging.OperationWriter
+	if c.Config != nil && c.Config.Messaging.Driver == "amqp" {
+		if c.OperationRegistry == nil || c.OperationWriter == nil {
+			return fmt.Errorf("governance module requires operation outbox")
+		}
+		operationWriter = c.OperationWriter
+		if err := c.OperationRegistry.Register(
+			governanceoutbound.OperationTypeMemberRoleSync,
+			governanceoutbound.NewMemberRoleSyncHandler(apiPolicySync),
+		); err != nil {
+			return fmt.Errorf("register governance policy operation: %w", err)
+		}
+	}
+	bootstrap := command.NewBootstrapWorkspaceHandler(roleRepo, bindingRepo, apiPolicySync, operationWriter)
 	ensureDefaultRoles := command.NewEnsureDefaultWorkspaceRolesHandler(roleRepo)
 	if err := ensureDefaultRoles.Handle(context.Background()); err != nil {
 		return fmt.Errorf("ensure default workspace roles: %w", err)

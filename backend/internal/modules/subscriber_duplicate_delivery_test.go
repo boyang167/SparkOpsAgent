@@ -17,6 +17,7 @@ import (
 	productsubscriber "github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/subscriber"
 	productpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/persistence"
 	workspacesubscriber "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/subscriber"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	messagingpersistence "github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
@@ -43,7 +44,7 @@ func (*subscriberTestTransport) PublishDeadLetter(context.Context, messaging.Sub
 }
 func (*subscriberTestTransport) Close() error { return nil }
 
-func TestGovernanceInboxRollsBackDatabaseUntilPolicySyncCanBeScheduled(t *testing.T) {
+func TestGovernanceInboxCommitsDatabaseAndPolicyOperationAtomically(t *testing.T) {
 	db := openSubscriberDB(t)
 	registry := events.NewRegistry()
 	require.NoError(t, integration.RegisterWorkspaceCreated(registry))
@@ -57,11 +58,13 @@ func TestGovernanceInboxRollsBackDatabaseUntilPolicySyncCanBeScheduled(t *testin
 		nil,
 	)
 	store := governancepersistence.NewStore(db)
+	operationWriter := messaging.NewOperationWriter(messagingpersistence.NewOperationStore(db), nil)
 	handler := governancesubscriber.NewOnWorkspaceCreated(
 		governancecommand.NewBootstrapWorkspaceHandler(
 			governancepersistence.NewRoleRepository(store),
 			governancepersistence.NewBindingRepository(store),
 			&governanceservice.APIPolicySync{},
+			operationWriter,
 		),
 		nil,
 	)
@@ -85,11 +88,12 @@ func TestGovernanceInboxRollsBackDatabaseUntilPolicySyncCanBeScheduled(t *testin
 
 	require.NoError(t, consumer.Handle(context.Background(), subscription, envelope, 0))
 
-	require.ErrorIs(t, handlerErr, messaging.ErrOperationOutboxRequired)
-	require.Equal(t, 1, transport.retries)
-	assertCount(t, db, "platform.event_inbox", 0)
-	assertCount(t, db, "governance.roles", 0)
-	assertCount(t, db, "governance.role_bindings", 0)
+	require.NoError(t, handlerErr)
+	require.Zero(t, transport.retries)
+	assertCount(t, db, "platform.event_inbox", 1)
+	assertCount(t, db, "governance.roles", int64(len(authz.DefaultWorkspaceRoles)))
+	assertCount(t, db, "governance.role_bindings", 1)
+	assertCount(t, db, "operation_outbox", 1)
 }
 
 func TestPureDatabaseSubscribersSkipDuplicateDeliveries(t *testing.T) {
@@ -197,6 +201,13 @@ func openSubscriberDB(t *testing.T) *gorm.DB {
 			event_id TEXT NOT NULL, subscriber TEXT NOT NULL, event_type TEXT NOT NULL,
 			processed_at DATETIME NOT NULL, created_at DATETIME NOT NULL,
 			PRIMARY KEY(event_id, subscriber)
+		);
+		CREATE TABLE operation_outbox (
+			id TEXT PRIMARY KEY, event_id TEXT NOT NULL, subscriber TEXT NOT NULL,
+			operation_type TEXT NOT NULL, idempotency_key TEXT NOT NULL UNIQUE, payload BLOB NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+			next_attempt_at DATETIME NOT NULL, locked_at DATETIME, locked_by TEXT NOT NULL DEFAULT '',
+			completed_at DATETIME, last_error TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL
 		);
 		CREATE TABLE governance.roles (
 			id TEXT PRIMARY KEY, workspace_id TEXT, parent_id TEXT, name TEXT, permissions BLOB,
