@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 )
 
@@ -23,11 +24,12 @@ type OperationDispatcherConfig struct {
 }
 
 type OperationDispatcher struct {
-	store    persistence.OperationStore
-	registry OperationRegistry
-	config   OperationDispatcherConfig
-	clock    Clock
-	metrics  *Metrics
+	store     persistence.OperationStore
+	registry  OperationRegistry
+	config    OperationDispatcherConfig
+	clock     Clock
+	metrics   *Metrics
+	runtimeID string
 
 	mu      sync.Mutex
 	started bool
@@ -60,6 +62,7 @@ func NewOperationDispatcher(
 	}
 	return &OperationDispatcher{
 		store: store, registry: registry, config: config, clock: clock, metrics: metrics,
+		runtimeID: uuid.NewString(),
 	}
 }
 
@@ -96,8 +99,9 @@ func (d *OperationDispatcher) dispatchOnce(
 		dispatchErrors = append(dispatchErrors, fmt.Errorf("claim operation outbox: %w", err))
 		return errors.Join(dispatchErrors...)
 	}
+	executionCtx := context.WithoutCancel(ctx)
 	for _, record := range records {
-		if err := d.dispatch(ctx, owner, record); err != nil {
+		if err := d.dispatch(executionCtx, owner, record); err != nil {
 			dispatchErrors = append(dispatchErrors, err)
 		}
 	}
@@ -230,7 +234,7 @@ func (d *OperationDispatcher) runWorkers(
 	var workers sync.WaitGroup
 	workers.Add(d.config.Workers)
 	for workerIndex := range d.config.Workers {
-		owner := operationWorkerOwner(d.config.Owner, workerIndex)
+		owner := operationWorkerOwner(d.config.Owner, d.runtimeID, workerIndex)
 		go func() {
 			defer workers.Done()
 			d.runWorker(ctx, stop, owner)
@@ -269,16 +273,24 @@ func (d *OperationDispatcher) runWorker(
 	}
 }
 
-func operationWorkerOwner(instanceOwner string, workerIndex int) string {
-	suffix := fmt.Sprintf(".worker-%d", workerIndex+1)
-	if len([]rune(instanceOwner))+len([]rune(suffix)) <= operationOwnerMaxLength {
-		return instanceOwner + suffix
+func operationWorkerOwner(instanceOwner, runtimeID string, workerIndex int) string {
+	fullOwner := fmt.Sprintf(
+		"%s.%s.worker-%d",
+		instanceOwner,
+		runtimeID,
+		workerIndex+1,
+	)
+	if len([]rune(fullOwner)) <= operationOwnerMaxLength {
+		return fullOwner
 	}
-	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(instanceOwner)))[:12]
-	reserved := len([]rune(suffix)) + len(digest) + 1
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(fullOwner)))[:16]
+	suffix := fmt.Sprintf(".%s.worker-%d", digest, workerIndex+1)
 	runes := []rune(instanceOwner)
-	runes = runes[:operationOwnerMaxLength-reserved]
-	return string(runes) + "-" + digest + suffix
+	available := operationOwnerMaxLength - len([]rune(suffix))
+	if len(runes) > available {
+		runes = runes[:available]
+	}
+	return string(runes) + suffix
 }
 
 func (d *OperationDispatcher) Close() error {

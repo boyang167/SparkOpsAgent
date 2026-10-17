@@ -68,7 +68,7 @@ go test ./internal/platform/messaging/... -run Operation -count=1
 - Task 3 的 `OperationStore` 已经强制所有状态更新匹配 `id + owner + executing` 并检查 `RowsAffected == 1`；dispatcher 复用该边界，不复制租约逻辑。
 - handler 接收原始 JSON 和稳定 `IdempotencyKey`。支持原生幂等的外部 API 应直接透传该键；不支持幂等的 API 仍需由 Task 10 handler 在调用前查询状态并对账。
 - 事件驱动幂等键严格校验为 `<event-id>:<subscriber>:<operation-type>:<target-id>`。
-- 命令驱动与事件驱动都严格校验四段幂等键；命令使用调用方稳定命令 ID 作为 event ID，operation row ID 仍独立随机生成。
+- 命令驱动与事件驱动都严格校验幂等键前三段，第四段保留完整 target；命令使用本次 operation UUID 作为 trace event ID，稳定 command 标识只保留在幂等键中。
 - 指标采集错误会由 `DispatchOnce` 返回用于诊断，但不会跳过 claim 或 handler 执行。
 
 ## 审查修复：RED/GREEN
@@ -86,10 +86,10 @@ RED 证据：
 
 GREEN 修复：
 
-1. runtime 为每个 worker 派生稳定、有界且唯一的 `<instance-owner>.worker-N`；owner 过长时保留 worker 后缀并加入 instance owner 哈希。claim 与后续状态更新全程使用同一 worker owner。
+1. runtime 为每个 worker 派生稳定、有界且唯一的 `<instance-owner>.<runtime-uuid>.worker-N`；owner 过长时对完整三元组哈希。claim 与后续状态更新全程使用同一 worker owner。
 2. runtime worker 固定单次 claim 1 条；`DispatchOnce` 继续保留显式批处理测试接口。
-3. `Insert` 在 `ON CONFLICT DO NOTHING` 后读取既有记录，仅当 event ID、owner、operation type 和 JSON payload 语义相同时返回成功，否则返回 `ErrOperationIdempotencyConflict`。Writer 不再吞掉冲突。
-4. 所有 operation key 严格要求四段非空，并校验 owner/type；事件模式额外校验 metadata event ID，命令模式使用稳定 key event ID。
+3. `Insert` 在 `ON CONFLICT DO NOTHING` 后读取既有记录，仅当稳定 event identity、owner、operation type 和 JSON payload 语义相同时返回成功，否则返回 `ErrOperationIdempotencyConflict`。命令随机 trace UUID 不参与稳定 identity 比较。
+4. operation key 使用 `SplitN(..., 4)`，前三段非空并校验 owner/type，第四段 target 非空且允许 URI 冒号；事件模式额外校验 metadata event ID。
 5. 新增 `sparkops_operation_dispatcher_error_total{stage}`，stage 仅限 `stats/claim/handler/mark/reschedule/lease_lost`。错误在来源处只记录一次，stats 失败不阻断 claim/执行。
 6. 增加 parent cancel 与并发、重复 `Close` 覆盖。
 
@@ -110,6 +110,42 @@ go test ./internal/platform/messaging/persistence \
 ```
 
 PostgreSQL build-tag 用例已新增；本机未设置 `DATABASE_DSN`，运行时明确 SKIP，未伪报为真实 PostgreSQL PASS。
+
+## 第二轮复审修复
+
+基于 commit `f16dd4b51db919ff9bc75c900cf6fadee8b683be` 补测试后，RED 明确复现：
+
+- command `event_id` 实际为非 UUID 的 key 首段；
+- URI target 因全量 `Split` 被拒绝；
+- 两个同 `config.Owner` dispatcher 生成相同 worker owner，旧实例可覆盖新 lease；
+- parent cancel 直接取消在途 handler；
+- `float64` 将 `9007199254740992` 与 `9007199254740993` 误判相等。
+
+GREEN 实现：
+
+- 每个 dispatcher 构造时生成随机 runtime UUID；worker owner 哈希输入包含完整 instance owner、runtime UUID、worker index，最终不超过 160 字符；
+- claim 使用 lifecycle context；claim 成功后使用 `context.WithoutCancel` 执行 handler 和 Mark/Reschedule，保留 values 并允许 drain；
+- command operation row ID 与 trace event ID 使用同一随机 UUID；稳定 command ID 只在 idempotency key 首段；
+- payload decoder 启用 `UseNumber`，递归结构比较通过 `big.Rat` 精确比较 JSON 数值；
+- command 重试的随机 trace UUID 不作为稳定冲突字段；事件模式仍严格比较 event ID。
+
+新增关键测试连续 50 次通过：
+
+```text
+go test ./internal/platform/messaging \
+  -run 'TestOperation(WriterCommandUsesOperationUUIDAsTraceEventID|WriterAllowsColonInTargetID|DispatcherInstancesWithSameConfigUseDifferentWorkerOwners|DispatcherOldInstanceCannotOverwriteRecoveredLease|DispatcherParentCancelAndRepeatedClose)' \
+  -count=50
+
+go test ./internal/platform/messaging/persistence \
+  -run 'TestOperation(InsertTreatsDuplicateIdempotencyKeyAsSuccess|InsertRejectsIdempotencyKeyForDifferentIntent|PayloadComparisonUsesExactJSONNumberSemantics)' \
+  -count=50
+```
+
+PostgreSQL integration 编译通过：
+
+```text
+go test -tags=integration ./internal/platform/messaging/persistence -run '^$' -count=1
+```
 
 ## 验证
 

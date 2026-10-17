@@ -7,7 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
+	"math/big"
+	"strings"
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
@@ -87,7 +88,11 @@ func (s *operationStore) Insert(ctx context.Context, operation OperationRecord) 
 	).Take(&existing).Error; err != nil {
 		return fmt.Errorf("read duplicate operation intent: %w", err)
 	}
-	if existing.EventID == operation.EventID &&
+	if operationEventIdentityEqual(
+		operation.IdempotencyKey,
+		existing.EventID,
+		operation.EventID,
+	) &&
 		existing.Subscriber == operation.Subscriber &&
 		existing.OperationType == operation.OperationType &&
 		jsonPayloadEqual(existing.Payload, operation.Payload) {
@@ -100,14 +105,82 @@ func (s *operationStore) Insert(ctx context.Context, operation OperationRecord) 
 	)
 }
 
+func operationEventIdentityEqual(key, leftEventID, rightEventID string) bool {
+	stableID, _, _ := strings.Cut(key, ":")
+	leftIsEvent := leftEventID == stableID
+	rightIsEvent := rightEventID == stableID
+	if leftIsEvent != rightIsEvent {
+		return false
+	}
+	return !leftIsEvent || leftEventID == rightEventID
+}
+
 func jsonPayloadEqual(left, right json.RawMessage) bool {
-	var leftValue any
-	var rightValue any
-	if json.Unmarshal(left, &leftValue) == nil &&
-		json.Unmarshal(right, &rightValue) == nil {
-		return reflect.DeepEqual(leftValue, rightValue)
+	leftValue, leftErr := decodeExactJSON(left)
+	rightValue, rightErr := decodeExactJSON(right)
+	if leftErr == nil && rightErr == nil {
+		return exactJSONEqual(leftValue, rightValue)
 	}
 	return bytes.Equal(left, right)
+}
+
+func decodeExactJSON(payload json.RawMessage) (any, error) {
+	if !json.Valid(payload) {
+		return nil, fmt.Errorf("invalid JSON payload")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	return value, nil
+}
+
+func exactJSONEqual(left, right any) bool {
+	switch leftValue := left.(type) {
+	case nil:
+		return right == nil
+	case bool:
+		rightValue, ok := right.(bool)
+		return ok && leftValue == rightValue
+	case string:
+		rightValue, ok := right.(string)
+		return ok && leftValue == rightValue
+	case json.Number:
+		rightValue, ok := right.(json.Number)
+		if !ok {
+			return false
+		}
+		leftNumber, leftOK := new(big.Rat).SetString(leftValue.String())
+		rightNumber, rightOK := new(big.Rat).SetString(rightValue.String())
+		return leftOK && rightOK && leftNumber.Cmp(rightNumber) == 0
+	case []any:
+		rightValue, ok := right.([]any)
+		if !ok || len(leftValue) != len(rightValue) {
+			return false
+		}
+		for index := range leftValue {
+			if !exactJSONEqual(leftValue[index], rightValue[index]) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		rightValue, ok := right.(map[string]any)
+		if !ok || len(leftValue) != len(rightValue) {
+			return false
+		}
+		for key, value := range leftValue {
+			rightItem, exists := rightValue[key]
+			if !exists || !exactJSONEqual(value, rightItem) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *operationStore) Claim(

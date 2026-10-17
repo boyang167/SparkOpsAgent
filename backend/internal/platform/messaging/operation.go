@@ -71,7 +71,7 @@ func (w *operationWriter) Schedule(ctx context.Context, request OperationRequest
 	if owner == "" {
 		return fmt.Errorf("operation owner is required")
 	}
-	eventID, err := validateOperationIdempotencyKey(
+	keyEventID, err := validateOperationIdempotencyKey(
 		request.IdempotencyKey,
 		owner,
 		request.OperationType,
@@ -79,6 +79,8 @@ func (w *operationWriter) Schedule(ctx context.Context, request OperationRequest
 	if err != nil {
 		return err
 	}
+	operationID := uuid.NewString()
+	eventID := operationID
 	if metadata, ok := events.MetadataFromContext(ctx); ok {
 		if metadata.EventID == "" || metadata.Subscriber == "" {
 			return fmt.Errorf("event metadata requires event id and subscriber")
@@ -90,9 +92,10 @@ func (w *operationWriter) Schedule(ctx context.Context, request OperationRequest
 				metadata.Subscriber,
 			)
 		}
-		if eventID != metadata.EventID {
+		if keyEventID != metadata.EventID {
 			return fmt.Errorf("operation idempotency key event id does not match event metadata")
 		}
+		eventID = metadata.EventID
 	}
 
 	payload, err := json.Marshal(request.Payload)
@@ -101,7 +104,7 @@ func (w *operationWriter) Schedule(ctx context.Context, request OperationRequest
 	}
 	now := w.clock.Now()
 	err = w.store.Insert(ctx, persistence.OperationRecord{
-		ID:             uuid.NewString(),
+		ID:             operationID,
 		EventID:        eventID,
 		Subscriber:     owner,
 		OperationType:  request.OperationType,
@@ -121,7 +124,7 @@ func validateOperationIdempotencyKey(
 	owner string,
 	operationType string,
 ) (string, error) {
-	parts := strings.Split(key, ":")
+	parts := strings.SplitN(key, ":", 4)
 	if len(parts) != 4 {
 		return "", fmt.Errorf(
 			"operation idempotency key must contain event id, owner, operation type, and target id",

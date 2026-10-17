@@ -24,10 +24,10 @@ func TestOperationInsertTreatsDuplicateIdempotencyKeyAsSuccess(t *testing.T) {
 	db := openStoreSQLite(t)
 	store := NewOperationStore(db)
 	first := testOperation(time.Now().UTC())
+	first.IdempotencyKey = "command-1:" + first.Subscriber + ":" + first.OperationType + ":target-1"
 	insertTestOperation(t, db, store, first)
 	duplicate := testOperation(time.Now().UTC())
 	duplicate.IdempotencyKey = first.IdempotencyKey
-	duplicate.EventID = first.EventID
 	duplicate.Subscriber = first.Subscriber
 	duplicate.OperationType = first.OperationType
 	duplicate.Payload = append([]byte(nil), first.Payload...)
@@ -84,6 +84,8 @@ func TestOperationInsertRejectsIdempotencyKeyForDifferentIntent(t *testing.T) {
 			db := openStoreSQLite(t)
 			store := NewOperationStore(db)
 			first := testOperation(time.Now().UTC())
+			first.IdempotencyKey = first.EventID + ":" +
+				first.Subscriber + ":" + first.OperationType + ":target-1"
 			insertTestOperation(t, db, store, first)
 			conflict := first
 			conflict.ID = uuid.NewString()
@@ -97,6 +99,49 @@ func TestOperationInsertRejectsIdempotencyKeyForDifferentIntent(t *testing.T) {
 			)
 
 			require.ErrorIs(t, err, ErrOperationIdempotencyConflict)
+		})
+	}
+}
+
+func TestOperationPayloadComparisonUsesExactJSONNumberSemantics(t *testing.T) {
+	tests := []struct {
+		name  string
+		left  string
+		right string
+		equal bool
+	}{
+		{
+			name:  "object order and whitespace",
+			left:  `{"count": 1, "nested": {"enabled": true}}`,
+			right: `{"nested":{"enabled":true},"count":1}`,
+			equal: true,
+		},
+		{
+			name:  "equivalent number formats",
+			left:  `{"values":[1,1.0,1e0]}`,
+			right: `{"values":[1.00,1e+0,10e-1]}`,
+			equal: true,
+		},
+		{
+			name:  "adjacent integers above float precision",
+			left:  `{"target":9007199254740992}`,
+			right: `{"target":9007199254740993}`,
+			equal: false,
+		},
+		{
+			name:  "nested large integer mismatch",
+			left:  `{"items":[{"id":123456789012345678901234567890}]}`,
+			right: `{"items":[{"id":123456789012345678901234567891}]}`,
+			equal: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(
+				t,
+				tt.equal,
+				jsonPayloadEqual([]byte(tt.left), []byte(tt.right)),
+			)
 		})
 	}
 }

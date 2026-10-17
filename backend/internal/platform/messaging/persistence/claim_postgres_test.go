@@ -209,10 +209,12 @@ func TestOperationIdempotencyIntentComparisonPostgres(t *testing.T) {
 	db := openStorePostgres(t)
 	store := NewOperationStore(db)
 	first := testOperation(time.Now().UTC())
+	first.IdempotencyKey = "command-1:" + first.Subscriber + ":" + first.OperationType + ":target-1"
 	insertTestOperation(t, db, store, first)
 
 	same := first
 	same.ID = uuid.NewString()
+	same.EventID = uuid.NewString()
 	require.NoError(t, postgres.NewTransactor(db).WithinTransaction(
 		context.Background(),
 		func(ctx context.Context) error {
@@ -236,6 +238,23 @@ func TestOperationIdempotencyIntentComparisonPostgres(t *testing.T) {
 		Where("idempotency_key = ?", first.IdempotencyKey).
 		Count(&count).Error)
 	require.Equal(t, int64(1), count)
+}
+
+func TestOperationEventIDRequiresUUIDPostgres(t *testing.T) {
+	db := openStorePostgres(t)
+	store := NewOperationStore(db)
+	operation := testOperation(time.Now().UTC())
+	operation.EventID = "stable-command-name"
+
+	err := postgres.NewTransactor(db).WithinTransaction(
+		context.Background(),
+		func(ctx context.Context) error {
+			return store.Insert(ctx, operation)
+		},
+	)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "invalid input syntax for type uuid")
 }
 
 func openStorePostgres(t *testing.T) *gorm.DB {

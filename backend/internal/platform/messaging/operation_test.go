@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
@@ -22,6 +23,8 @@ import (
 type operationPayload struct {
 	Target string `json:"target"`
 }
+
+type operationContextTestKey struct{}
 
 type operationStoreFake struct {
 	mu             sync.Mutex
@@ -43,6 +46,7 @@ type operationStoreFake struct {
 	claimOwners    []string
 	claimLimits    []int
 	completedOwner []string
+	markContextErr []error
 }
 
 func (s *operationStoreFake) Insert(_ context.Context, operation persistence.OperationRecord) error {
@@ -82,7 +86,7 @@ func (s *operationStoreFake) Claim(_ context.Context, owner string, limit int, _
 	return result, nil
 }
 
-func (s *operationStoreFake) MarkCompleted(_ context.Context, id, owner string, _ time.Time) error {
+func (s *operationStoreFake) MarkCompleted(ctx context.Context, id, owner string, _ time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.claimed[id] != owner {
@@ -93,6 +97,7 @@ func (s *operationStoreFake) MarkCompleted(_ context.Context, id, owner string, 
 	}
 	s.completed = append(s.completed, id)
 	s.completedOwner = append(s.completedOwner, owner)
+	s.markContextErr = append(s.markContextErr, ctx.Err())
 	return nil
 }
 
@@ -194,7 +199,7 @@ func TestOperationWriterDerivesEventMetadataAndValidatesOwner(t *testing.T) {
 	require.ErrorContains(t, err, "owner")
 }
 
-func TestOperationWriterCommandUsesStableKeyEventID(t *testing.T) {
+func TestOperationWriterCommandUsesOperationUUIDAsTraceEventID(t *testing.T) {
 	store := &operationStoreFake{}
 	writer := NewOperationWriter(store, fixedClock{now: time.Now().UTC()})
 	key := "command-1:delivery.command:delivery.queue.publish.v1:run-1"
@@ -207,7 +212,9 @@ func TestOperationWriterCommandUsesStableKeyEventID(t *testing.T) {
 	}))
 
 	require.Len(t, store.inserted, 1)
-	require.Equal(t, "command-1", store.inserted[0].EventID)
+	require.Equal(t, store.inserted[0].ID, store.inserted[0].EventID)
+	_, err := uuid.Parse(store.inserted[0].EventID)
+	require.NoError(t, err)
 	require.Equal(t, key, store.inserted[0].IdempotencyKey)
 }
 
@@ -223,7 +230,6 @@ func TestOperationWriterValidatesCommandIdempotencyKey(t *testing.T) {
 		{name: "wrong type", key: "command-1:delivery.command:other.operation:run-1"},
 		{name: "empty target", key: "command-1:delivery.command:delivery.queue.publish.v1:"},
 		{name: "too few segments", key: "command-1:delivery.command:delivery.queue.publish.v1"},
-		{name: "too many segments", key: "command-1:delivery.command:delivery.queue.publish.v1:run-1:extra"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -239,6 +245,21 @@ func TestOperationWriterValidatesCommandIdempotencyKey(t *testing.T) {
 			require.Empty(t, store.inserted)
 		})
 	}
+}
+
+func TestOperationWriterAllowsColonInTargetID(t *testing.T) {
+	store := &operationStoreFake{}
+	writer := NewOperationWriter(store, fixedClock{now: time.Now().UTC()})
+	key := "command-1:delivery.command:delivery.queue.publish.v1:https://cluster:6443/api"
+
+	require.NoError(t, withinTestTransaction(t, func(ctx context.Context) error {
+		return writer.Schedule(ctx, OperationRequest{
+			Owner: "delivery.command", OperationType: "delivery.queue.publish.v1",
+			IdempotencyKey: key, Payload: operationPayload{Target: "https://cluster:6443/api"},
+		})
+	}))
+	require.Len(t, store.inserted, 1)
+	require.Equal(t, key, store.inserted[0].IdempotencyKey)
 }
 
 func TestOperationRegistryRejectsDuplicates(t *testing.T) {
@@ -514,6 +535,101 @@ func TestOperationDispatcherWorkersUseUniqueBoundedOwnersAndFenceExpiredLease(t 
 	require.Equal(t, store.claimOwners[1], store.completedOwner[0])
 }
 
+func TestOperationDispatcherInstancesWithSameConfigUseDifferentWorkerOwners(t *testing.T) {
+	now := time.Now().UTC()
+	store := &operationStoreFake{records: []persistence.OperationRecord{
+		operationRecordForTest("operation-1", 1, now),
+		operationRecordForTest("operation-2", 1, now),
+	}}
+	registry := NewOperationRegistry()
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	require.NoError(t, registry.Register("delivery.webhook.send.v1", func(context.Context, Operation) error {
+		started <- struct{}{}
+		<-release
+		return nil
+	}))
+	config := OperationDispatcherConfig{
+		Owner: "instance-a", Workers: 1, PollInterval: time.Hour,
+	}
+	first := NewOperationDispatcher(
+		store, registry, config, fixedClock{now: now}, newDispatcherTestMetrics(t),
+	)
+	second := NewOperationDispatcher(
+		store, registry, config, fixedClock{now: now}, newDispatcherTestMetrics(t),
+	)
+	_, err := uuid.Parse(first.runtimeID)
+	require.NoError(t, err)
+	_, err = uuid.Parse(second.runtimeID)
+	require.NoError(t, err)
+	require.NotEqual(t, first.runtimeID, second.runtimeID)
+	require.NoError(t, first.Start(context.Background()))
+	require.NoError(t, second.Start(context.Background()))
+	<-started
+	<-started
+
+	store.mu.Lock()
+	require.Len(t, store.claimOwners, 2)
+	require.NotEqual(t, store.claimOwners[0], store.claimOwners[1])
+	store.mu.Unlock()
+	close(release)
+	require.NoError(t, first.Close())
+	require.NoError(t, second.Close())
+}
+
+func TestOperationDispatcherOldInstanceCannotOverwriteRecoveredLease(t *testing.T) {
+	now := time.Now().UTC()
+	record := operationRecordForTest("operation-1", 1, now)
+	firstStarted := make(chan struct{})
+	store := &reclaimingOperationStore{
+		operationStoreFake: operationStoreFake{records: []persistence.OperationRecord{record}},
+		allowReclaim:       firstStarted,
+	}
+	registry := NewOperationRegistry()
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	require.NoError(t, registry.Register(record.OperationType, func(context.Context, Operation) error {
+		if calls.Add(1) == 1 {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		return nil
+	}))
+	config := OperationDispatcherConfig{
+		Owner: "instance-a", Workers: 1, PollInterval: time.Hour,
+	}
+	firstMetrics := newDispatcherTestMetrics(t)
+	first := NewOperationDispatcher(
+		store, registry, config, fixedClock{now: now}, firstMetrics,
+	)
+	second := NewOperationDispatcher(
+		store, registry, config, fixedClock{now: now}, newDispatcherTestMetrics(t),
+	)
+	require.NoError(t, first.Start(context.Background()))
+	<-firstStarted
+	require.NoError(t, second.Start(context.Background()))
+	require.Eventually(t, func() bool {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		return len(store.completed) == 1
+	}, time.Second, time.Millisecond)
+	close(releaseFirst)
+	require.Eventually(t, func() bool {
+		return prometheusMetricValue(
+			t,
+			firstMetrics.OperationDispatcherError.WithLabelValues("lease_lost"),
+		) == 1
+	}, time.Second, time.Millisecond)
+	require.NoError(t, first.Close())
+	require.NoError(t, second.Close())
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.Len(t, store.completed, 1)
+	require.Len(t, store.claimOwners, 2)
+	require.NotEqual(t, store.claimOwners[0], store.claimOwners[1])
+}
+
 func TestOperationDispatcherRuntimeWorkersClaimOnlyOneRecord(t *testing.T) {
 	now := time.Now().UTC()
 	store := &operationStoreFake{records: []persistence.OperationRecord{
@@ -555,16 +671,26 @@ func TestOperationDispatcherRuntimeWorkersClaimOnlyOneRecord(t *testing.T) {
 }
 
 func TestOperationDispatcherParentCancelAndRepeatedClose(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	parent := context.WithValue(
+		context.Background(),
+		operationContextTestKey{},
+		"retained-value",
+	)
+	ctx, cancel := context.WithCancel(parent)
 	now := time.Now().UTC()
 	record := operationRecordForTest("operation-1", 1, now)
 	store := &operationStoreFake{records: []persistence.OperationRecord{record}}
 	registry := NewOperationRegistry()
 	started := make(chan struct{})
+	release := make(chan struct{})
+	handlerContextErr := make(chan error, 1)
+	handlerContextValue := make(chan any, 1)
 	require.NoError(t, registry.Register(record.OperationType, func(ctx context.Context, _ Operation) error {
 		close(started)
-		<-ctx.Done()
-		return ctx.Err()
+		<-release
+		handlerContextErr <- ctx.Err()
+		handlerContextValue <- ctx.Value(operationContextTestKey{})
+		return nil
 	}))
 	dispatcher := NewOperationDispatcher(
 		store,
@@ -583,9 +709,22 @@ func TestOperationDispatcherParentCancelAndRepeatedClose(t *testing.T) {
 	second := make(chan error, 1)
 	go func() { first <- dispatcher.Close() }()
 	go func() { second <- dispatcher.Close() }()
+	select {
+	case <-first:
+		t.Fatal("Close returned before in-flight handler completed")
+	case <-second:
+		t.Fatal("repeated Close returned before in-flight handler completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	require.NoError(t, <-handlerContextErr)
+	require.Equal(t, "retained-value", <-handlerContextValue)
 	require.NoError(t, <-first)
 	require.NoError(t, <-second)
 	require.NoError(t, dispatcher.Close())
+	require.Equal(t, []string{record.ID}, store.completed)
+	require.Len(t, store.markContextErr, 1)
+	require.NoError(t, store.markContextErr[0])
 }
 
 func TestOperationDispatcherRecordsBoundedErrorStagesOnce(t *testing.T) {
