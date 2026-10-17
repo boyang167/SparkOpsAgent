@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 type SSOProvider string
@@ -51,6 +52,8 @@ type SSOConfiguration struct {
 	LDAP                  LDAPSettings
 	OIDCTestedFingerprint string
 	LDAPTestedFingerprint string
+	OIDCTestedAt          *time.Time
+	LDAPTestedAt          *time.Time
 	Version               int64
 }
 
