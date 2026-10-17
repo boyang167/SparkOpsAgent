@@ -30,10 +30,11 @@ type ProjectUndeployPayload struct {
 }
 
 type PipelineDisablePayload struct {
-	EventID     string `json:"event_id"`
-	WorkspaceID string `json:"workspace_id"`
-	ProjectID   string `json:"project_id"`
-	Generation  string `json:"generation"`
+	EventID       string `json:"event_id"`
+	WorkspaceID   string `json:"workspace_id"`
+	ProjectID     string `json:"project_id"`
+	Generation    string `json:"generation"`
+	AllowUndeploy *bool  `json:"allow_undeploy,omitempty"`
 }
 
 type PipelineDisabler interface {
@@ -135,21 +136,23 @@ func NewProjectUndeployHandler(
 		if err != nil {
 			return messaging.Permanent(err)
 		}
-		allowUndeploy := true
-		if payload.AllowUndeploy != nil {
-			allowUndeploy = *payload.AllowUndeploy
+		allowUndeploy, current, err := currentArchiveIntent(
+			ctx, tx, repo, projectID, payload.Generation,
+		)
+		if err != nil || !current {
+			return err
 		}
 		if !allowUndeploy {
-			return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-				return transitionProjectTerminal(
-					txCtx, repo, projectID, payload.Generation,
-					model.ArchivePhasePending, model.ProjectStatusActive,
-				)
-			})
+			return handleArchiveWithoutUndeploy(
+				ctx, operation, repo, teardown, operations, tx, projectID, payload.Generation,
+			)
 		}
 		project, proceed, err := claimUndeploy(ctx, tx, repo, projectID, payload.Generation)
 		if err != nil || !proceed {
 			return err
+		}
+		if project.ArchiveAllowUndeploy == nil || !*project.ArchiveAllowUndeploy {
+			return nil
 		}
 		target := teardown()
 		if target == nil {
@@ -159,7 +162,7 @@ func NewProjectUndeployHandler(
 		if err != nil {
 			return err
 		}
-		current, err := projectPhaseOneOf(
+		current, err = projectPhaseOneOf(
 			ctx, tx, repo, projectID, payload.Generation,
 			model.ArchivePhaseUndeployClaimed, model.ArchivePhaseUndeploying,
 		)
@@ -229,11 +232,144 @@ func NewProjectUndeployHandler(
 				IdempotencyKey: operation.EventID + ":" + operation.Owner + ":" + OperationTypePipelineDisable + ":" + projectID.String() + "/" + payload.Generation,
 				Payload: PipelineDisablePayload{
 					EventID: operation.EventID, WorkspaceID: current.WorkspaceID.String(), ProjectID: current.ID.String(),
-					Generation: payload.Generation,
+					Generation: payload.Generation, AllowUndeploy: current.ArchiveAllowUndeploy,
 				},
 			})
 		})
 	}
+}
+
+func handleArchiveWithoutUndeploy(
+	ctx context.Context,
+	operation messaging.Operation,
+	repo repository.ProjectTerminalRepository,
+	teardown func() appctx.ProjectTeardown,
+	operations messaging.OperationWriter,
+	tx postgres.Transactor,
+	projectID kernel.ProjectID,
+	generation string,
+) error {
+	project, current, err := projectPendingIntent(ctx, tx, repo, projectID, generation, false)
+	if err != nil || !current {
+		return err
+	}
+	target := teardown()
+	if target == nil {
+		return fmt.Errorf("project teardown unavailable")
+	}
+	online, err := target.OnlineClusters(ctx, project.WorkspaceID, project.ID)
+	if err != nil {
+		return err
+	}
+	_, current, err = projectPendingIntent(ctx, tx, repo, projectID, generation, false)
+	if err != nil || !current {
+		return err
+	}
+	active, err := target.HasActiveRun(ctx, project.ID)
+	if err != nil {
+		return err
+	}
+	_, current, err = projectPendingIntent(ctx, tx, repo, projectID, generation, false)
+	if err != nil || !current {
+		return err
+	}
+	if len(online) > 0 || active {
+		return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+			return transitionProjectTerminal(
+				txCtx, repo, projectID, generation,
+				model.ArchivePhasePending, model.ProjectStatusActive,
+			)
+		})
+	}
+	return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		currentProject, err := repo.FindByID(txCtx, projectID)
+		if err != nil {
+			return err
+		}
+		if !archiveIntentMatches(currentProject, generation, model.ArchivePhasePending, false) {
+			return nil
+		}
+		advanced, err := repo.TransitionArchivePhase(
+			txCtx, projectID, generation, model.ArchivePhasePending, model.ArchivePhasePipelinePending,
+		)
+		if err != nil {
+			return err
+		}
+		if !advanced {
+			return errors.New("archive phase transition to pipeline pending conflicted")
+		}
+		return operations.Schedule(txCtx, messaging.OperationRequest{
+			Owner:          operation.Owner,
+			OperationType:  OperationTypePipelineDisable,
+			IdempotencyKey: operation.EventID + ":" + operation.Owner + ":" + OperationTypePipelineDisable + ":" + projectID.String() + "/" + generation,
+			Payload: PipelineDisablePayload{
+				EventID: operation.EventID, WorkspaceID: currentProject.WorkspaceID.String(),
+				ProjectID: projectID.String(), Generation: generation,
+				AllowUndeploy: currentProject.ArchiveAllowUndeploy,
+			},
+		})
+	})
+}
+
+func projectPendingIntent(
+	ctx context.Context,
+	tx postgres.Transactor,
+	repo repository.ProjectTerminalRepository,
+	projectID kernel.ProjectID,
+	generation string,
+	allowUndeploy bool,
+) (*model.Project, bool, error) {
+	var project *model.Project
+	var current bool
+	err := tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		var err error
+		project, err = repo.FindByID(txCtx, projectID)
+		if err != nil {
+			return err
+		}
+		current = archiveIntentMatches(project, generation, model.ArchivePhasePending, allowUndeploy)
+		return nil
+	})
+	return project, current, err
+}
+
+func currentArchiveIntent(
+	ctx context.Context,
+	tx postgres.Transactor,
+	repo repository.ProjectTerminalRepository,
+	projectID kernel.ProjectID,
+	generation string,
+) (bool, bool, error) {
+	var allowUndeploy bool
+	var current bool
+	err := tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		project, err := repo.FindByID(txCtx, projectID)
+		if err != nil {
+			return err
+		}
+		if !project.IsArchiving() ||
+			project.ArchiveGeneration != generation ||
+			project.ArchiveAllowUndeploy == nil {
+			return nil
+		}
+		allowUndeploy = *project.ArchiveAllowUndeploy
+		current = true
+		return nil
+	})
+	return allowUndeploy, current, err
+}
+
+func archiveIntentMatches(
+	project *model.Project,
+	generation string,
+	phase model.ArchivePhase,
+	allowUndeploy bool,
+) bool {
+	return project.IsArchiving() &&
+		project.ArchiveGeneration == generation &&
+		project.ArchivePhase == phase &&
+		project.ArchiveAllowUndeploy != nil &&
+		*project.ArchiveAllowUndeploy == allowUndeploy
 }
 
 func claimUndeploy(

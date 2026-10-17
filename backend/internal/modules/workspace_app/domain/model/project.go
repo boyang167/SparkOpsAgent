@@ -100,35 +100,36 @@ type ProjectResources struct {
 }
 
 type Project struct {
-	ID                 kernel.ProjectID
-	WorkspaceID        kernel.WorkspaceID
-	ProductID          *kernel.ProductID
-	Name               ProjectName
-	DisplayName        string
-	Description        string
-	Namespace          string
-	Language           string
-	GitURL             string
-	SecretID           string
-	GitRefType         string
-	GitRefValue        string
-	DockerfilePath     string
-	TemplateID         string
-	DefaultClusterID   string
-	JenkinsSecretID    string
-	KubernetesSecretID string
-	Resources          ProjectResources
-	Status             ProjectStatus
-	ArchiveGeneration  string
-	ArchivePhase       ArchivePhase
-	ReviewStatus       ProjectReviewStatus
-	SubmittedBy        *kernel.MemberID
-	SubmittedAt        *time.Time
-	ReviewedBy         *kernel.MemberID
-	ReviewedAt         *time.Time
-	ReviewComment      string
-	CreatedBy          kernel.MemberID
-	CreatedAt          time.Time
+	ID                   kernel.ProjectID
+	WorkspaceID          kernel.WorkspaceID
+	ProductID            *kernel.ProductID
+	Name                 ProjectName
+	DisplayName          string
+	Description          string
+	Namespace            string
+	Language             string
+	GitURL               string
+	SecretID             string
+	GitRefType           string
+	GitRefValue          string
+	DockerfilePath       string
+	TemplateID           string
+	DefaultClusterID     string
+	JenkinsSecretID      string
+	KubernetesSecretID   string
+	Resources            ProjectResources
+	Status               ProjectStatus
+	ArchiveGeneration    string
+	ArchivePhase         ArchivePhase
+	ArchiveAllowUndeploy *bool
+	ReviewStatus         ProjectReviewStatus
+	SubmittedBy          *kernel.MemberID
+	SubmittedAt          *time.Time
+	ReviewedBy           *kernel.MemberID
+	ReviewedAt           *time.Time
+	ReviewComment        string
+	CreatedBy            kernel.MemberID
+	CreatedAt            time.Time
 
 	events []events.Event
 }
@@ -216,12 +217,17 @@ func NewProject(wsID kernel.WorkspaceID, name ProjectName, createdBy kernel.Memb
 }
 
 func (p *Project) BeginArchiving() error {
+	return p.BeginArchivingWithIntent(true)
+}
+
+func (p *Project) BeginArchivingWithIntent(allowUndeploy bool) error {
 	if p.Status != ProjectStatusActive {
 		return domain.ErrProjectNotActive
 	}
 	p.Status = ProjectStatusArchiving
 	p.ArchiveGeneration = uuid.NewString()
 	p.ArchivePhase = ArchivePhasePending
+	p.ArchiveAllowUndeploy = &allowUndeploy
 	return nil
 }
 
@@ -232,6 +238,7 @@ func (p *Project) AbortArchiving() error {
 	p.Status = ProjectStatusActive
 	p.ArchiveGeneration = ""
 	p.ArchivePhase = ArchivePhaseNone
+	p.ArchiveAllowUndeploy = nil
 	return nil
 }
 
@@ -243,6 +250,7 @@ func (p *Project) Archive() error {
 	}
 	p.Status = ProjectStatusArchived
 	p.ArchivePhase = ArchivePhaseNone
+	p.ArchiveAllowUndeploy = nil
 	return nil
 }
 

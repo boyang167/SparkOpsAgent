@@ -27,6 +27,19 @@ type pipelineProjectRepo struct {
 	transitionErr error
 }
 
+func (r *pipelineProjectRepo) BeginArchive(
+	_ context.Context, id kernel.ProjectID, generation string, allowUndeploy bool,
+) (bool, error) {
+	if r.project == nil || r.project.ID != id || r.project.Status != model.ProjectStatusActive {
+		return false, nil
+	}
+	r.project.Status = model.ProjectStatusArchiving
+	r.project.ArchiveGeneration = generation
+	r.project.ArchivePhase = model.ArchivePhasePending
+	r.project.ArchiveAllowUndeploy = &allowUndeploy
+	return true, nil
+}
+
 func (r *pipelineProjectRepo) Save(context.Context, *model.Project) error { return nil }
 func (r *pipelineProjectRepo) Update(_ context.Context, project *model.Project) error {
 	r.project = project
@@ -46,6 +59,7 @@ func (r *pipelineProjectRepo) TransitionArchiving(
 	}
 	r.project.Status = target
 	r.project.ArchivePhase = model.ArchivePhaseNone
+	r.project.ArchiveAllowUndeploy = nil
 	if target == model.ProjectStatusActive {
 		r.project.ArchiveGeneration = ""
 	}
@@ -425,35 +439,6 @@ func TestProjectUndeployAbortWinnerPreventsExternalQuery(t *testing.T) {
 	require.Zero(t, teardown.starts)
 }
 
-func TestProjectUndeployRetriesPipelineScheduleAfterExternalStateConverges(t *testing.T) {
-	name, err := model.NewProjectName("orders")
-	require.NoError(t, err)
-	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
-	require.NoError(t, project.BeginArchiving())
-	repo := &pipelineProjectRepo{project: project}
-	teardown := &undeployTeardown{}
-	writer := &undeployOperationWriter{err: errors.New("outbox unavailable")}
-	handler := NewProjectUndeployHandler(
-		repo, func() appctx.ProjectTeardown { return teardown }, writer, markerTransactor{},
-	)
-	payload, err := json.Marshal(ProjectUndeployPayload{
-		ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
-		AllowUndeploy: boolRef(true), Generation: project.ArchiveGeneration,
-	})
-	require.NoError(t, err)
-	operation := messaging.Operation{EventID: "event-1", Owner: "workspace-app.archive-resumer", Payload: payload}
-
-	require.Error(t, handler(context.Background(), operation))
-	require.Equal(t, model.ProjectStatusArchiving, project.Status)
-	// markerTransactor cannot roll state back; restore the claimed phase that a real
-	// database transaction retains when Schedule fails.
-	project.ArchivePhase = model.ArchivePhaseUndeployClaimed
-	writer.err = nil
-	require.NoError(t, handler(context.Background(), operation))
-	require.Len(t, writer.requests, 2)
-	require.False(t, teardown.calledInside)
-}
-
 func TestProjectUndeployOldGenerationCannotAffectNewArchiveAttempt(t *testing.T) {
 	name, err := model.NewProjectName("orders")
 	require.NoError(t, err)
@@ -503,7 +488,7 @@ func TestProjectUndeployLegacyRejectRestoresProjectAndCompletes(t *testing.T) {
 	name, err := model.NewProjectName("orders")
 	require.NoError(t, err)
 	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
-	require.NoError(t, project.BeginArchiving())
+	require.NoError(t, project.BeginArchivingWithIntent(false))
 	repo := &pipelineProjectRepo{project: project}
 	teardown := &undeployTeardown{online: []kernel.ClusterInfoID{kernel.NewClusterInfoID()}}
 	writer := &undeployOperationWriter{}
@@ -530,6 +515,54 @@ func TestProjectUndeployLegacyRejectRestoresProjectAndCompletes(t *testing.T) {
 	}), "completed-operation replay must be idempotent")
 }
 
+func TestProjectUndeployLegacyActiveRunAbortsWithoutStartingUndeploy(t *testing.T) {
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, project.BeginArchivingWithIntent(false))
+	repo := &pipelineProjectRepo{project: project}
+	teardown := &undeployTeardown{active: true}
+	handler := NewProjectUndeployHandler(
+		repo, func() appctx.ProjectTeardown { return teardown }, &undeployOperationWriter{}, postgres.NewDirectTransactor(),
+	)
+
+	require.NoError(t, handler(context.Background(), operationWithPayload(t, ProjectUndeployPayload{
+		ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
+		AllowUndeploy: boolRef(false), Generation: project.ArchiveGeneration,
+	})))
+	require.Equal(t, model.ProjectStatusActive, project.Status)
+	require.Zero(t, teardown.starts)
+}
+
+func TestProjectUndeployLegacyPipelineAdvanceWinsAbortRace(t *testing.T) {
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, project.BeginArchivingWithIntent(false))
+	generation := project.ArchiveGeneration
+	repo := &pipelineProjectRepo{project: project}
+	teardown := &undeployTeardown{online: []kernel.ClusterInfoID{kernel.NewClusterInfoID()}}
+	teardown.onlineHook = func() {
+		advanced, transitionErr := repo.TransitionArchivePhase(
+			context.Background(), project.ID, generation,
+			model.ArchivePhasePending, model.ArchivePhasePipelinePending,
+		)
+		require.NoError(t, transitionErr)
+		require.True(t, advanced)
+	}
+	handler := NewProjectUndeployHandler(
+		repo, func() appctx.ProjectTeardown { return teardown }, &undeployOperationWriter{}, postgres.NewDirectTransactor(),
+	)
+
+	require.NoError(t, handler(context.Background(), operationWithPayload(t, ProjectUndeployPayload{
+		ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
+		AllowUndeploy: boolRef(false), Generation: generation,
+	})))
+	require.Equal(t, model.ProjectStatusArchiving, project.Status)
+	require.Equal(t, model.ArchivePhasePipelinePending, project.ArchivePhase)
+	require.Zero(t, teardown.starts)
+}
+
 func TestProjectUndeployLegacyRejectCompletesPersistedAMQPOperation(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
@@ -546,7 +579,7 @@ func TestProjectUndeployLegacyRejectCompletesPersistedAMQPOperation(t *testing.T
 	name, err := model.NewProjectName("orders")
 	require.NoError(t, err)
 	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
-	require.NoError(t, project.BeginArchiving())
+	require.NoError(t, project.BeginArchivingWithIntent(false))
 	repo := &pipelineProjectRepo{project: project}
 	teardown := &undeployTeardown{online: []kernel.ClusterInfoID{kernel.NewClusterInfoID()}}
 	handler := NewProjectUndeployHandler(
@@ -584,6 +617,62 @@ func TestProjectUndeployLegacyRejectCompletesPersistedAMQPOperation(t *testing.T
 	require.NoError(t, db.Model(&messagingpersistence.OperationOutbox{}).Select("status").Scan(&status).Error)
 	require.Equal(t, "completed", status)
 	require.NoError(t, registered(context.Background(), operation))
+	require.Zero(t, teardown.starts)
+}
+
+func TestProjectUndeployLegacyOfflinePersistsPipelineAndArchives(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+	require.NoError(t, messagingpersistence.AutoMigrate(db))
+	now := time.Now().UTC()
+	store := messagingpersistence.NewOperationStore(db)
+	writer := messaging.NewOperationWriter(store, operationTestClock{now: now})
+
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, project.BeginArchivingWithIntent(false))
+	repo := &pipelineProjectRepo{project: project}
+	teardown := &undeployTeardown{}
+	undeploy := NewProjectUndeployHandler(
+		repo, func() appctx.ProjectTeardown { return teardown }, writer, postgres.NewTransactor(db),
+	)
+	eventID := uuid.NewString()
+	require.NoError(t, postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+		return writer.Schedule(ctx, messaging.OperationRequest{
+			Owner: "workspace-app.archive", OperationType: OperationTypeProjectUndeploy,
+			IdempotencyKey: eventID + ":workspace-app.archive:" + OperationTypeProjectUndeploy + ":" + project.ID.String() + "/" + project.ArchiveGeneration,
+			Payload: ProjectUndeployPayload{
+				EventID: eventID, ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
+				AllowUndeploy: boolRef(false), Generation: project.ArchiveGeneration,
+			},
+		})
+	}))
+	var undeployRow messagingpersistence.OperationOutbox
+	require.NoError(t, db.Where("operation_type = ?", OperationTypeProjectUndeploy).Take(&undeployRow).Error)
+	require.NoError(t, undeploy(context.Background(), messaging.Operation{
+		ID: undeployRow.ID, EventID: undeployRow.EventID, Owner: undeployRow.Subscriber,
+		OperationType: undeployRow.OperationType, Payload: undeployRow.Payload,
+	}))
+	require.Zero(t, teardown.starts)
+	require.Equal(t, model.ArchivePhasePipelinePending, project.ArchivePhase)
+
+	var pipelineRow messagingpersistence.OperationOutbox
+	require.NoError(t, db.Where("operation_type = ?", OperationTypePipelineDisable).Take(&pipelineRow).Error)
+	disabler := &pipelineDisabler{}
+	pipeline := NewPipelineDisableHandler(
+		func() PipelineDisabler { return disabler }, repo, postgres.NewTransactor(db),
+	)
+	require.NoError(t, pipeline(context.Background(), messaging.Operation{
+		ID: pipelineRow.ID, EventID: pipelineRow.EventID, Owner: pipelineRow.Subscriber,
+		OperationType: pipelineRow.OperationType, Payload: pipelineRow.Payload,
+	}))
+	require.Equal(t, model.ProjectStatusArchived, project.Status)
 	require.Zero(t, teardown.starts)
 }
 

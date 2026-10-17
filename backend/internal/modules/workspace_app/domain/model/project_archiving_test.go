@@ -17,6 +17,8 @@ func TestProject_ArchivingLifecycle(t *testing.T) {
 	require.True(t, p.IsArchiving())
 	require.NotEmpty(t, p.ArchiveGeneration)
 	require.Equal(t, model.ArchivePhasePending, p.ArchivePhase)
+	require.NotNil(t, p.ArchiveAllowUndeploy)
+	require.True(t, *p.ArchiveAllowUndeploy)
 	firstGeneration := p.ArchiveGeneration
 	require.ErrorIs(t, p.BeginArchiving(), domain.ErrProjectNotActive)
 	require.ErrorIs(t, p.Rename(mustName(t, "other")), domain.ErrProjectNotActive)
@@ -25,6 +27,7 @@ func TestProject_ArchivingLifecycle(t *testing.T) {
 	require.Equal(t, model.ProjectStatusActive, p.Status)
 	require.Empty(t, p.ArchiveGeneration)
 	require.Equal(t, model.ArchivePhaseNone, p.ArchivePhase)
+	require.Nil(t, p.ArchiveAllowUndeploy)
 	require.ErrorIs(t, p.AbortArchiving(), domain.ErrProjectNotArchiving)
 
 	require.NoError(t, p.BeginArchiving())
@@ -32,5 +35,6 @@ func TestProject_ArchivingLifecycle(t *testing.T) {
 	require.NoError(t, p.Archive())
 	require.Equal(t, model.ProjectStatusArchived, p.Status)
 	require.Equal(t, model.ArchivePhaseNone, p.ArchivePhase)
+	require.Nil(t, p.ArchiveAllowUndeploy)
 	require.ErrorIs(t, p.Archive(), domain.ErrProjectAlreadyArchived)
 }

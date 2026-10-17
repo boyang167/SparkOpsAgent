@@ -145,24 +145,20 @@ func (h *ArchiveProjectHandler) archive(
 		return ArchiveResult{}, domain.ErrProjectBoundToProduct
 	}
 	if h.coordinator.operations != nil {
-		if err := project.BeginArchiving(); err != nil {
-			return ArchiveResult{}, err
-		}
-		if err := h.repo.Update(ctx, project); err != nil {
+		if err := h.beginArchive(ctx, project, withTeardown); err != nil {
 			return ArchiveResult{}, err
 		}
 		metadata, ok := events.MetadataFromContext(ctx)
 		if !ok {
 			return ArchiveResult{}, errors.New("archive operation requires event metadata")
 		}
-		allowUndeploy := withTeardown
 		if err := h.coordinator.operations.Schedule(ctx, messaging.OperationRequest{
 			Owner:          metadata.Subscriber,
 			OperationType:  workspaceoutbound.OperationTypeProjectUndeploy,
 			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + project.ID.String() + "/" + project.ArchiveGeneration,
 			Payload: workspaceoutbound.ProjectUndeployPayload{
 				EventID: metadata.EventID, ProjectID: project.ID.String(),
-				MemberID: memberID.String(), AllowUndeploy: &allowUndeploy, Generation: project.ArchiveGeneration,
+				MemberID: memberID.String(), AllowUndeploy: project.ArchiveAllowUndeploy, Generation: project.ArchiveGeneration,
 			},
 		}); err != nil {
 			return ArchiveResult{}, err
@@ -185,10 +181,7 @@ func (h *ArchiveProjectHandler) archive(
 		return ArchiveResult{}, err
 	}
 	if len(online) == 0 {
-		if err := project.BeginArchiving(); err != nil {
-			return ArchiveResult{}, err
-		}
-		if err := h.repo.Update(ctx, project); err != nil {
+		if err := h.beginArchive(ctx, project, withTeardown); err != nil {
 			return ArchiveResult{}, err
 		}
 		if err := h.coordinator.finish(ctx, teardown, project); err != nil {
@@ -199,10 +192,7 @@ func (h *ArchiveProjectHandler) archive(
 	if !withTeardown {
 		return ArchiveResult{}, domain.ErrProjectHasOnlineEnvironments
 	}
-	if err := project.BeginArchiving(); err != nil {
-		return ArchiveResult{}, err
-	}
-	if err := h.repo.Update(ctx, project); err != nil {
+	if err := h.beginArchive(ctx, project, withTeardown); err != nil {
 		return ArchiveResult{}, err
 	}
 	if err := h.coordinator.Advance(ctx, project, memberID); err != nil {
@@ -213,4 +203,28 @@ func (h *ArchiveProjectHandler) archive(
 		pending = append(pending, id.String())
 	}
 	return ArchiveResult{Status: string(model.ProjectStatusArchiving), PendingClusters: pending}, nil
+}
+
+func (h *ArchiveProjectHandler) beginArchive(
+	ctx context.Context,
+	project *model.Project,
+	allowUndeploy bool,
+) error {
+	terminal, ok := h.repo.(repository.ProjectTerminalRepository)
+	if !ok {
+		return errors.New("archive requires lifecycle transition repository")
+	}
+	generation := uuid.NewString()
+	begun, err := terminal.BeginArchive(ctx, project.ID, generation, allowUndeploy)
+	if err != nil {
+		return err
+	}
+	if !begun {
+		return domain.ErrProjectNotActive
+	}
+	project.Status = model.ProjectStatusArchiving
+	project.ArchiveGeneration = generation
+	project.ArchivePhase = model.ArchivePhasePending
+	project.ArchiveAllowUndeploy = boolPointer(allowUndeploy)
+	return nil
 }

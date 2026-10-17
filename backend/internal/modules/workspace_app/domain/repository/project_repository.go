@@ -21,6 +21,12 @@ type ProjectRepository interface {
 
 type ProjectTerminalRepository interface {
 	ProjectRepository
+	BeginArchive(
+		ctx context.Context,
+		id kernel.ProjectID,
+		generation string,
+		allowUndeploy bool,
+	) (bool, error)
 	InitializeArchiveGeneration(ctx context.Context, id kernel.ProjectID, generation string) (bool, error)
 	TransitionArchivePhase(
 		ctx context.Context,

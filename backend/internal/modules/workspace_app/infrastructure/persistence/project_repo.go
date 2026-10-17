@@ -51,34 +51,35 @@ func AutoMigrate(db *gorm.DB) error {
 }
 
 type projectModel struct {
-	ID                 string  `gorm:"column:id;primaryKey;type:uuid"`
-	WorkspaceID        string  `gorm:"type:uuid"`
-	ProductID          *string `gorm:"type:uuid"`
-	Name               string
-	DisplayName        string
-	Description        string
-	Namespace          string
-	Language           string
-	GitURL             string
-	SecretID           *string `gorm:"type:uuid"`
-	GitRefType         string
-	GitRefValue        string
-	DockerfilePath     string
-	TemplateID         *string `gorm:"type:uuid"`
-	DefaultClusterID   *string `gorm:"type:uuid"`
-	JenkinsSecretID    *string `gorm:"type:uuid"`
-	KubernetesSecretID *string `gorm:"type:uuid"`
-	Resources          []byte  `gorm:"type:jsonb"`
-	Status             string
-	ArchiveGeneration  *string `gorm:"type:uuid"`
-	ArchivePhase       string  `gorm:"size:32;not null;default:none"`
-	ReviewStatus       string  `gorm:"default:none;not null"`
-	SubmittedBy        *string `gorm:"type:uuid"`
-	SubmittedAt        *time.Time
-	ReviewedBy         *string `gorm:"type:uuid"`
-	ReviewedAt         *time.Time
-	ReviewComment      string `gorm:"default:'';not null"`
-	CreatedBy          string `gorm:"type:uuid"`
+	ID                   string  `gorm:"column:id;primaryKey;type:uuid"`
+	WorkspaceID          string  `gorm:"type:uuid"`
+	ProductID            *string `gorm:"type:uuid"`
+	Name                 string
+	DisplayName          string
+	Description          string
+	Namespace            string
+	Language             string
+	GitURL               string
+	SecretID             *string `gorm:"type:uuid"`
+	GitRefType           string
+	GitRefValue          string
+	DockerfilePath       string
+	TemplateID           *string `gorm:"type:uuid"`
+	DefaultClusterID     *string `gorm:"type:uuid"`
+	JenkinsSecretID      *string `gorm:"type:uuid"`
+	KubernetesSecretID   *string `gorm:"type:uuid"`
+	Resources            []byte  `gorm:"type:jsonb"`
+	Status               string
+	ArchiveGeneration    *string `gorm:"type:uuid"`
+	ArchivePhase         string  `gorm:"size:32;not null;default:none"`
+	ArchiveAllowUndeploy *bool
+	ReviewStatus         string  `gorm:"default:none;not null"`
+	SubmittedBy          *string `gorm:"type:uuid"`
+	SubmittedAt          *time.Time
+	ReviewedBy           *string `gorm:"type:uuid"`
+	ReviewedAt           *time.Time
+	ReviewComment        string `gorm:"default:'';not null"`
+	CreatedBy            string `gorm:"type:uuid"`
 	postgres.AuditColumns
 }
 
@@ -101,8 +102,9 @@ func (r *ProjectRepository) Save(ctx context.Context, project *model.Project) er
 		Namespace: project.Namespace, Language: project.Language, GitURL: project.GitURL,
 		GitRefType: project.GitRefType, GitRefValue: project.GitRefValue, DockerfilePath: project.DockerfilePath,
 		Resources: resources, Status: string(project.Status), ArchivePhase: string(project.ArchivePhase),
-		CreatedBy:    project.CreatedBy.String(),
-		ReviewStatus: string(project.ReviewStatus), SubmittedAt: project.SubmittedAt,
+		ArchiveAllowUndeploy: project.ArchiveAllowUndeploy,
+		CreatedBy:            project.CreatedBy.String(),
+		ReviewStatus:         string(project.ReviewStatus), SubmittedAt: project.SubmittedAt,
 		ReviewedAt: project.ReviewedAt, ReviewComment: project.ReviewComment,
 		AuditColumns: postgres.AuditColumns{CreatedAt: project.CreatedAt, UpdatedAt: project.CreatedAt},
 	}
@@ -152,24 +154,21 @@ func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) 
 		return err
 	}
 	updates := map[string]any{
-		"name":               project.Name.String(),
-		"display_name":       project.DisplayName,
-		"description":        project.Description,
-		"namespace":          project.Namespace,
-		"language":           project.Language,
-		"git_url":            project.GitURL,
-		"git_ref_type":       project.GitRefType,
-		"git_ref_value":      project.GitRefValue,
-		"dockerfile_path":    project.DockerfilePath,
-		"resources":          resources,
-		"status":             string(project.Status),
-		"archive_generation": nil,
-		"archive_phase":      string(project.ArchivePhase),
-		"review_status":      string(project.ReviewStatus),
-		"submitted_at":       project.SubmittedAt,
-		"reviewed_at":        project.ReviewedAt,
-		"review_comment":     project.ReviewComment,
-		"updated_at":         time.Now().UTC(),
+		"name":            project.Name.String(),
+		"display_name":    project.DisplayName,
+		"description":     project.Description,
+		"namespace":       project.Namespace,
+		"language":        project.Language,
+		"git_url":         project.GitURL,
+		"git_ref_type":    project.GitRefType,
+		"git_ref_value":   project.GitRefValue,
+		"dockerfile_path": project.DockerfilePath,
+		"resources":       resources,
+		"review_status":   string(project.ReviewStatus),
+		"submitted_at":    project.SubmittedAt,
+		"reviewed_at":     project.ReviewedAt,
+		"review_comment":  project.ReviewComment,
+		"updated_at":      time.Now().UTC(),
 	}
 	if project.SubmittedBy != nil {
 		updates["submitted_by"] = project.SubmittedBy.String()
@@ -211,14 +210,38 @@ func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) 
 	} else {
 		updates["product_id"] = nil
 	}
-	if project.ArchiveGeneration != "" {
-		updates["archive_generation"] = project.ArchiveGeneration
-	}
-	err = postgres.DB(ctx, r.db).Model(&projectModel{}).Where(postgres.UUIDEq("id"), project.ID.String()).Updates(updates).Error
+	result := postgres.DB(ctx, r.db).Model(&projectModel{}).
+		Where("id = ? AND status = ?", project.ID.String(), string(project.Status)).
+		Updates(updates)
+	err = result.Error
 	if isUniqueViolation(err) {
 		return domain.ErrProjectNameExists
 	}
+	if err == nil && result.RowsAffected != 1 {
+		return fmt.Errorf("project update conflicted with current status")
+	}
 	return err
+}
+
+func (r *ProjectRepository) BeginArchive(
+	ctx context.Context,
+	id kernel.ProjectID,
+	generation string,
+	allowUndeploy bool,
+) (bool, error) {
+	result := postgres.DB(ctx, r.db).Model(&projectModel{}).
+		Where("id = ? AND status = ? AND product_id IS NULL", id.String(), model.ProjectStatusActive).
+		Updates(map[string]any{
+			"status":                 string(model.ProjectStatusArchiving),
+			"archive_generation":     generation,
+			"archive_phase":          string(model.ArchivePhasePending),
+			"archive_allow_undeploy": allowUndeploy,
+			"updated_at":             time.Now().UTC(),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
 }
 
 func (r *ProjectRepository) TransitionArchiving(
@@ -238,9 +261,10 @@ func (r *ProjectRepository) TransitionArchiving(
 		return false, fmt.Errorf("project archive finalization requires finalizing phase")
 	}
 	updates := map[string]any{
-		"status":        string(target),
-		"archive_phase": string(model.ArchivePhaseNone),
-		"updated_at":    time.Now().UTC(),
+		"status":                 string(target),
+		"archive_phase":          string(model.ArchivePhaseNone),
+		"archive_allow_undeploy": nil,
+		"updated_at":             time.Now().UTC(),
 	}
 	if target == model.ProjectStatusActive {
 		updates["archive_generation"] = nil
@@ -281,9 +305,10 @@ func (r *ProjectRepository) InitializeArchiveGeneration(
 		Where("id = ? AND status = ? AND archive_generation IS NULL",
 			id.String(), model.ProjectStatusArchiving).
 		Updates(map[string]any{
-			"archive_generation": generation,
-			"archive_phase":      string(model.ArchivePhasePending),
-			"updated_at":         time.Now().UTC(),
+			"archive_generation":     generation,
+			"archive_phase":          string(model.ArchivePhasePending),
+			"archive_allow_undeploy": false,
+			"updated_at":             time.Now().UTC(),
 		})
 	if result.Error != nil {
 		return false, result.Error
@@ -411,8 +436,9 @@ func rowToProject(row projectModel) (*model.Project, error) {
 		Namespace: row.Namespace, Language: row.Language, GitURL: row.GitURL,
 		GitRefType: row.GitRefType, GitRefValue: row.GitRefValue, DockerfilePath: row.DockerfilePath,
 		Resources: resources, Status: model.ProjectStatus(row.Status), CreatedBy: createdBy, CreatedAt: row.CreatedAt,
-		ArchivePhase: model.ArchivePhase(row.ArchivePhase),
-		ReviewStatus: model.ProjectReviewStatus(row.ReviewStatus), SubmittedAt: row.SubmittedAt,
+		ArchivePhase:         model.ArchivePhase(row.ArchivePhase),
+		ArchiveAllowUndeploy: row.ArchiveAllowUndeploy,
+		ReviewStatus:         model.ProjectReviewStatus(row.ReviewStatus), SubmittedAt: row.SubmittedAt,
 		ReviewedAt: row.ReviewedAt, ReviewComment: row.ReviewComment,
 	}
 	if row.ArchiveGeneration != nil {

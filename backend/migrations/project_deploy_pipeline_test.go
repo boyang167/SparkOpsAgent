@@ -186,6 +186,19 @@ func TestProjectArchivePhaseMigrationDefinesFenceStateMachine(t *testing.T) {
 	require.Contains(t, down, "DROP COLUMN IF EXISTS archive_phase")
 }
 
+func TestProjectArchiveIntentMigrationBackfillsConservatively(t *testing.T) {
+	up := readMigration(t, "000075_project_archive_intent.up.sql")
+	require.Contains(t, up, "ADD COLUMN IF NOT EXISTS archive_allow_undeploy BOOLEAN")
+	require.Contains(t, up, "WHERE status = 'archiving'")
+	require.Contains(t, up, "archive_allow_undeploy IS NULL")
+	require.Contains(t, up, "SET archive_allow_undeploy = FALSE")
+	require.Contains(t, up, "CHECK")
+	require.Contains(t, up, "conrelid = 'workspace_app.projects'::regclass")
+
+	down := readMigration(t, "000075_project_archive_intent.down.sql")
+	require.Contains(t, down, "DROP COLUMN IF EXISTS archive_allow_undeploy")
+}
+
 func readMigration(t *testing.T, name string) string {
 	t.Helper()
 	contents, err := os.ReadFile(name)

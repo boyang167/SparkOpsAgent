@@ -2,6 +2,7 @@ package command_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -34,18 +35,53 @@ type archiveSQLRepo struct {
 	db *gorm.DB
 }
 
+func (r *archiveProjectRepo) BeginArchive(
+	_ context.Context, id kernel.ProjectID, generation string, allowUndeploy bool,
+) (bool, error) {
+	project, ok := r.projects[id]
+	if !ok || project.Status != model.ProjectStatusActive || project.ProductID != nil {
+		return false, nil
+	}
+	project.Status = model.ProjectStatusArchiving
+	project.ArchiveGeneration = generation
+	project.ArchivePhase = model.ArchivePhasePending
+	project.ArchiveAllowUndeploy = &allowUndeploy
+	return true, nil
+}
+
+func (r *archiveSQLRepo) BeginArchive(
+	ctx context.Context, id kernel.ProjectID, generation string, allowUndeploy bool,
+) (bool, error) {
+	result := postgres.DB(ctx, r.db).Exec(
+		"UPDATE workspace_app.projects SET status = ?, archive_generation = ?, archive_phase = ?, archive_allow_undeploy = ? WHERE id = ? AND status = ? AND product_id IS NULL",
+		string(model.ProjectStatusArchiving), generation, string(model.ArchivePhasePending),
+		allowUndeploy, id.String(), string(model.ProjectStatusActive),
+	)
+	if result.Error != nil || result.RowsAffected == 0 {
+		return false, result.Error
+	}
+	project := r.projects[id]
+	project.Status = model.ProjectStatusArchiving
+	project.ArchiveGeneration = generation
+	project.ArchivePhase = model.ArchivePhasePending
+	project.ArchiveAllowUndeploy = &allowUndeploy
+	return true, nil
+}
+
 func (r *archiveSQLRepo) Save(ctx context.Context, project *model.Project) error {
 	r.projects[project.ID] = project
 	return postgres.DB(ctx, r.db).Exec(
-		"INSERT INTO workspace_app.projects (id, status, archive_generation, archive_phase) VALUES (?, ?, ?, ?)",
-		project.ID.String(), string(project.Status), nullableGeneration(project.ArchiveGeneration), string(project.ArchivePhase),
+		"INSERT INTO workspace_app.projects (id, status, archive_generation, archive_phase, archive_allow_undeploy) VALUES (?, ?, ?, ?, ?)",
+		project.ID.String(), string(project.Status), nullableGeneration(project.ArchiveGeneration),
+		string(project.ArchivePhase), project.ArchiveAllowUndeploy,
 	).Error
 }
 
 func (r *archiveSQLRepo) Update(ctx context.Context, project *model.Project) error {
 	if err := postgres.DB(ctx, r.db).Exec(
-		"UPDATE workspace_app.projects SET status = ?, archive_generation = ?, archive_phase = ? WHERE id = ?",
-		string(project.Status), nullableGeneration(project.ArchiveGeneration), string(project.ArchivePhase), project.ID.String(),
+		"UPDATE workspace_app.projects SET status = ?, archive_generation = ?, archive_phase = ?, archive_allow_undeploy = ? WHERE id = ?",
+		string(project.Status), nullableGeneration(project.ArchiveGeneration), string(project.ArchivePhase),
+		project.ArchiveAllowUndeploy, project.ID.String(),
 	).Error; err != nil {
 		return err
 	}
@@ -57,14 +93,19 @@ func (r *archiveSQLRepo) TransitionArchiving(
 	ctx context.Context, id kernel.ProjectID, generation string, expected model.ArchivePhase, target model.ProjectStatus,
 ) (bool, error) {
 	result := postgres.DB(ctx, r.db).Exec(
-		"UPDATE workspace_app.projects SET status = ?, archive_phase = ? WHERE id = ? AND status = ? AND archive_generation = ? AND archive_phase = ?",
-		string(target), string(model.ArchivePhaseNone), id.String(), string(model.ProjectStatusArchiving), generation, string(expected),
+		"UPDATE workspace_app.projects SET status = ?, archive_generation = CASE WHEN ? = 'active' THEN NULL ELSE archive_generation END, archive_phase = ?, archive_allow_undeploy = NULL WHERE id = ? AND status = ? AND archive_generation = ? AND archive_phase = ?",
+		string(target), string(target), string(model.ArchivePhaseNone), id.String(),
+		string(model.ProjectStatusArchiving), generation, string(expected),
 	)
 	if result.Error != nil || result.RowsAffected == 0 {
 		return false, result.Error
 	}
 	r.projects[id].Status = target
 	r.projects[id].ArchivePhase = model.ArchivePhaseNone
+	r.projects[id].ArchiveAllowUndeploy = nil
+	if target == model.ProjectStatusActive {
+		r.projects[id].ArchiveGeneration = ""
+	}
 	return true, nil
 }
 
@@ -86,7 +127,7 @@ func (r *archiveSQLRepo) InitializeArchiveGeneration(
 	ctx context.Context, id kernel.ProjectID, generation string,
 ) (bool, error) {
 	result := postgres.DB(ctx, r.db).Exec(
-		"UPDATE workspace_app.projects SET archive_generation = ?, archive_phase = ? WHERE id = ? AND status = ? AND archive_generation IS NULL",
+		"UPDATE workspace_app.projects SET archive_generation = ?, archive_phase = ?, archive_allow_undeploy = FALSE WHERE id = ? AND status = ? AND archive_generation IS NULL",
 		generation, string(model.ArchivePhasePending), id.String(), string(model.ProjectStatusArchiving),
 	)
 	if result.Error != nil || result.RowsAffected == 0 {
@@ -94,17 +135,20 @@ func (r *archiveSQLRepo) InitializeArchiveGeneration(
 	}
 	r.projects[id].ArchiveGeneration = generation
 	r.projects[id].ArchivePhase = model.ArchivePhasePending
+	r.projects[id].ArchiveAllowUndeploy = boolTestPointer(false)
 	return true, nil
 }
 
 func (r *archiveSQLRepo) FindByID(ctx context.Context, id kernel.ProjectID) (*model.Project, error) {
 	var row struct {
-		Status            string
-		ArchiveGeneration *string
-		ArchivePhase      string
+		Status               string
+		ArchiveGeneration    *string
+		ArchivePhase         string
+		ArchiveAllowUndeploy *bool
 	}
 	if err := postgres.DB(ctx, r.db).Table("workspace_app.projects").
-		Select("status, archive_generation, archive_phase").Where("id = ?", id.String()).Scan(&row).Error; err != nil {
+		Select("status, archive_generation, archive_phase, archive_allow_undeploy").
+		Where("id = ?", id.String()).Scan(&row).Error; err != nil {
 		return nil, err
 	}
 	project, ok := r.projects[id]
@@ -117,6 +161,7 @@ func (r *archiveSQLRepo) FindByID(ctx context.Context, id kernel.ProjectID) (*mo
 		project.ArchiveGeneration = *row.ArchiveGeneration
 	}
 	project.ArchivePhase = model.ArchivePhase(row.ArchivePhase)
+	project.ArchiveAllowUndeploy = row.ArchiveAllowUndeploy
 	return project, nil
 }
 
@@ -125,6 +170,10 @@ func nullableGeneration(generation string) any {
 		return nil
 	}
 	return generation
+}
+
+func boolTestPointer(value bool) *bool {
+	return &value
 }
 
 func (r *archiveSQLRepo) ListByStatus(ctx context.Context, status model.ProjectStatus) ([]*model.Project, error) {
@@ -159,6 +208,7 @@ func (r *archiveProjectRepo) TransitionArchiving(
 	}
 	p.Status = target
 	p.ArchivePhase = model.ArchivePhaseNone
+	p.ArchiveAllowUndeploy = nil
 	if target == model.ProjectStatusActive {
 		p.ArchiveGeneration = ""
 	}
@@ -183,6 +233,7 @@ func (r *archiveProjectRepo) InitializeArchiveGeneration(
 	}
 	p.ArchiveGeneration = generation
 	p.ArchivePhase = model.ArchivePhasePending
+	p.ArchiveAllowUndeploy = boolTestPointer(false)
 	return true, nil
 }
 func (r *archiveProjectRepo) FindByID(_ context.Context, id kernel.ProjectID) (*model.Project, error) {
@@ -233,11 +284,12 @@ type fakeTeardown struct {
 
 type archiveOperationWriter struct {
 	requests []messaging.OperationRequest
+	err      error
 }
 
 func (w *archiveOperationWriter) Schedule(_ context.Context, request messaging.OperationRequest) error {
 	w.requests = append(w.requests, request)
-	return nil
+	return w.err
 }
 
 func (f *fakeTeardown) OnlineClusters(context.Context, kernel.WorkspaceID, kernel.ProjectID) ([]kernel.ClusterInfoID, error) {
@@ -576,6 +628,87 @@ func TestArchiveCommandPersistsPipelineDisableOperation(t *testing.T) {
 	require.Equal(t, workspaceoutbound.OperationTypeProjectUndeploy, operationType)
 }
 
+func TestArchiveCommandRollsBackBeginArchiveWhenScheduleFails(t *testing.T) {
+	db := openArchiveResumeDB(t)
+	tx := postgres.NewTransactor(db)
+	repo := &archiveSQLRepo{
+		archiveProjectRepo: &archiveProjectRepo{projects: map[kernel.ProjectID]*model.Project{}},
+		db:                 db,
+	}
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, repo.Save(context.Background(), project))
+	require.NoError(t, db.Exec("DROP TABLE platform.operation_outbox").Error)
+
+	writer := messaging.NewOperationWriter(messagingpersistence.NewOperationStore(db), nil)
+	coordinator := command.NewArchiveCoordinator(repo, func() appctx.ProjectTeardown { return &fakeTeardown{} }, nil, writer)
+	handler := command.NewArchiveProjectHandler(repo, updateWorkspaceChecker{}, coordinator, tx)
+	_, err = handler.Handle(
+		context.Background(), project.WorkspaceID, kernel.NewMemberID(), project.ID,
+		command.ArchiveInput{ConfirmName: "orders"},
+	)
+	require.Error(t, err)
+
+	stored, err := repo.FindByID(context.Background(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.ProjectStatusActive, stored.Status)
+	require.Empty(t, stored.ArchiveGeneration)
+	require.Equal(t, model.ArchivePhaseNone, stored.ArchivePhase)
+	require.Nil(t, stored.ArchiveAllowUndeploy)
+}
+
+func TestProjectUndeployScheduleFailureRollsBackPhaseWithRealTransaction(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		allowUndeploy bool
+		expectedPhase model.ArchivePhase
+	}{
+		{name: "teardown intent", allowUndeploy: true, expectedPhase: model.ArchivePhaseUndeployClaimed},
+		{name: "legacy intent", allowUndeploy: false, expectedPhase: model.ArchivePhasePending},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openArchiveResumeDB(t)
+			tx := postgres.NewTransactor(db)
+			repo := &archiveSQLRepo{
+				archiveProjectRepo: &archiveProjectRepo{projects: map[kernel.ProjectID]*model.Project{}},
+				db:                 db,
+			}
+			name, err := model.NewProjectName("orders")
+			require.NoError(t, err)
+			project := model.NewProject(
+				kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"},
+			)
+			require.NoError(t, project.BeginArchivingWithIntent(tc.allowUndeploy))
+			require.NoError(t, repo.Save(context.Background(), project))
+			teardown := &fakeTeardown{}
+			writer := &archiveOperationWriter{err: errors.New("outbox unavailable")}
+			handler := workspaceoutbound.NewProjectUndeployHandler(
+				repo, func() appctx.ProjectTeardown { return teardown }, writer, tx,
+			)
+			payload, err := json.Marshal(workspaceoutbound.ProjectUndeployPayload{
+				EventID: "event-rollback", ProjectID: project.ID.String(),
+				MemberID: project.CreatedBy.String(), Generation: project.ArchiveGeneration,
+				AllowUndeploy: boolTestPointer(tc.allowUndeploy),
+			})
+			require.NoError(t, err)
+
+			require.Error(t, handler(context.Background(), messaging.Operation{
+				EventID: "event-rollback", Owner: "workspace-app.archive", Payload: payload,
+			}))
+			stored, err := repo.FindByID(context.Background(), project.ID)
+			require.NoError(t, err)
+			require.Equal(t, model.ProjectStatusArchiving, stored.Status)
+			require.Equal(t, tc.expectedPhase, stored.ArchivePhase)
+			require.Equal(t, project.ArchiveGeneration, stored.ArchiveGeneration)
+			require.Equal(t, tc.allowUndeploy, *stored.ArchiveAllowUndeploy)
+			var count int64
+			require.NoError(t, db.Table("platform.operation_outbox").Count(&count).Error)
+			require.Zero(t, count)
+		})
+	}
+}
+
 func TestArchiveCommandCreatesNewOperationForLaterRetry(t *testing.T) {
 	db := openArchiveOperationDB(t)
 	name, err := model.NewProjectName("orders")
@@ -661,6 +794,27 @@ func TestResumeAllWaitsForActiveRun(t *testing.T) {
 	require.Equal(t, model.ProjectStatusArchiving, project.Status)
 }
 
+func TestResumeAllLegacyIntentConvergesWithoutUndeploy(t *testing.T) {
+	t.Run("offline archives", func(t *testing.T) {
+		_, coordinator, teardown, project := archiveFixture(t)
+		require.NoError(t, project.BeginArchivingWithIntent(false))
+
+		require.NoError(t, coordinator.ResumeAll(context.Background()))
+
+		require.Equal(t, model.ProjectStatusArchived, project.Status)
+		require.Empty(t, teardown.started)
+	})
+	t.Run("online aborts", func(t *testing.T) {
+		_, coordinator, teardown, project := archiveFixture(t, kernel.NewClusterInfoID())
+		require.NoError(t, project.BeginArchivingWithIntent(false))
+
+		require.NoError(t, coordinator.ResumeAll(context.Background()))
+
+		require.Equal(t, model.ProjectStatusActive, project.Status)
+		require.Empty(t, teardown.started)
+	})
+}
+
 func TestResumeAllPersistsStableAdvanceThenPipelineOperationsAndArchivesOnlyAfterExecution(t *testing.T) {
 	db := openArchiveResumeDB(t)
 	tx := postgres.NewTransactor(db)
@@ -734,6 +888,50 @@ func TestResumeAllPersistsStableAdvanceThenPipelineOperationsAndArchivesOnlyAfte
 	require.Equal(t, model.ProjectStatusArchived, stored.Status)
 }
 
+func TestResumeAllReusesPersistedLegacyIntentAndNeverStartsUndeploy(t *testing.T) {
+	db := openArchiveResumeDB(t)
+	tx := postgres.NewTransactor(db)
+	repo := &archiveSQLRepo{
+		archiveProjectRepo: &archiveProjectRepo{projects: map[kernel.ProjectID]*model.Project{}},
+		db:                 db,
+	}
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, project.BeginArchivingWithIntent(false))
+	require.NoError(t, repo.Save(context.Background(), project))
+
+	teardown := &fakeTeardown{online: []kernel.ClusterInfoID{kernel.NewClusterInfoID()}}
+	writer := messaging.NewOperationWriter(messagingpersistence.NewOperationStore(db), nil)
+	coordinator := command.NewArchiveCoordinator(repo, func() appctx.ProjectTeardown { return teardown }, nil, writer)
+	coordinator.UseTransactor(tx)
+
+	require.NoError(t, coordinator.ResumeAll(context.Background()))
+	var row struct {
+		EventID    string
+		Subscriber string
+		Payload    []byte
+	}
+	require.NoError(t, db.Table("platform.operation_outbox").
+		Where("operation_type = ?", workspaceoutbound.OperationTypeProjectUndeploy).
+		Take(&row).Error)
+	var payload workspaceoutbound.ProjectUndeployPayload
+	require.NoError(t, json.Unmarshal(row.Payload, &payload))
+	require.NotNil(t, payload.AllowUndeploy)
+	require.False(t, *payload.AllowUndeploy)
+
+	handler := workspaceoutbound.NewProjectUndeployHandler(
+		repo, func() appctx.ProjectTeardown { return teardown }, writer, tx,
+	)
+	require.NoError(t, handler(context.Background(), messaging.Operation{
+		EventID: row.EventID, Owner: row.Subscriber, Payload: row.Payload,
+	}))
+	stored, err := repo.FindByID(context.Background(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.ProjectStatusActive, stored.Status)
+	require.Empty(t, teardown.started)
+}
+
 func openArchiveResumeDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{
@@ -748,8 +946,9 @@ func openArchiveResumeDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS workspace_app").Error)
 	require.NoError(t, db.Exec(`
 		CREATE TABLE workspace_app.projects (
-			id TEXT PRIMARY KEY, status TEXT, archive_generation TEXT,
-			archive_phase TEXT NOT NULL DEFAULT 'none'
+			id TEXT PRIMARY KEY, product_id TEXT, status TEXT, archive_generation TEXT,
+			archive_phase TEXT NOT NULL DEFAULT 'none',
+			archive_allow_undeploy BOOLEAN
 		);
 		CREATE TABLE platform.operation_outbox (
 			id TEXT PRIMARY KEY, event_id TEXT NOT NULL, subscriber TEXT NOT NULL,

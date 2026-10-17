@@ -86,6 +86,21 @@ func (c *ArchiveCoordinator) AdvanceWithTeardown(
 		return errors.New("archive coordinator requires phase repository")
 	}
 	if !allowUndeploy {
+		teardown, err := c.port()
+		if err != nil {
+			return err
+		}
+		online, err := teardown.OnlineClusters(ctx, project.WorkspaceID, project.ID)
+		if err != nil {
+			return err
+		}
+		active, err := teardown.HasActiveRun(ctx, project.ID)
+		if err != nil {
+			return err
+		}
+		if len(online) == 0 && !active {
+			return c.finish(ctx, teardown, project)
+		}
 		aborted, err := terminal.TransitionArchiving(
 			ctx, project.ID, project.ArchiveGeneration,
 			model.ArchivePhasePending, model.ProjectStatusActive,
@@ -96,6 +111,7 @@ func (c *ArchiveCoordinator) AdvanceWithTeardown(
 		project.Status = model.ProjectStatusActive
 		project.ArchiveGeneration = ""
 		project.ArchivePhase = model.ArchivePhaseNone
+		project.ArchiveAllowUndeploy = nil
 		return nil
 	}
 	switch project.ArchivePhase {
@@ -178,7 +194,7 @@ func (c *ArchiveCoordinator) finish(ctx context.Context, teardown appctx.Project
 			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypePipelineDisable + ":" + project.ID.String() + "/" + project.ArchiveGeneration,
 			Payload: workspaceoutbound.PipelineDisablePayload{
 				EventID: metadata.EventID, WorkspaceID: project.WorkspaceID.String(), ProjectID: project.ID.String(),
-				Generation: project.ArchiveGeneration,
+				Generation: project.ArchiveGeneration, AllowUndeploy: archiveIntentPointer(project),
 			},
 		})
 	}
@@ -231,6 +247,7 @@ func (c *ArchiveCoordinator) finish(ctx context.Context, teardown appctx.Project
 	}
 	project.Status = model.ProjectStatusArchived
 	project.ArchivePhase = model.ArchivePhaseNone
+	project.ArchiveAllowUndeploy = nil
 	return nil
 }
 
@@ -299,11 +316,11 @@ func (c *ArchiveCoordinator) HandleDeployCompleted(ctx context.Context, e events
 			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + project.ID.String() + "/" + generation,
 			Payload: workspaceoutbound.ProjectUndeployPayload{
 				EventID: metadata.EventID, ProjectID: project.ID.String(), MemberID: ev.CreatedBy.String(),
-				AllowUndeploy: boolPointer(true), Generation: generation,
+				AllowUndeploy: archiveIntentPointer(project), Generation: generation,
 			},
 		})
 	}
-	if err := c.Advance(ctx, project, ev.CreatedBy); err != nil {
+	if err := c.AdvanceWithTeardown(ctx, project, ev.CreatedBy, archiveIntent(project)); err != nil {
 		c.warn("advance archive failed", err)
 		if abortErr := c.abortGeneration(ctx, project.ID, generation); abortErr != nil {
 			return errors.Join(err, abortErr)
@@ -348,7 +365,9 @@ func (c *ArchiveCoordinator) ResumeAll(ctx context.Context) error {
 	var errs []error
 	for _, project := range projects {
 		if c.operations == nil {
-			if err := c.Advance(ctx, project, project.CreatedBy); err != nil {
+			if err := c.AdvanceWithTeardown(
+				ctx, project, project.CreatedBy, archiveIntent(project),
+			); err != nil {
 				errs = append(errs, err)
 			}
 			continue
@@ -392,7 +411,7 @@ func (c *ArchiveCoordinator) ResumeAll(ctx context.Context) error {
 				IdempotencyKey: eventID + ":workspace-app.archive-resumer:" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + current.ID.String() + "/" + current.ArchiveGeneration,
 				Payload: workspaceoutbound.ProjectUndeployPayload{
 					EventID: eventID, ProjectID: current.ID.String(), MemberID: current.CreatedBy.String(),
-					AllowUndeploy: boolPointer(true), Generation: current.ArchiveGeneration,
+					AllowUndeploy: archiveIntentPointer(current), Generation: current.ArchiveGeneration,
 				},
 			})
 		})
@@ -410,4 +429,12 @@ func isDeploymentRunning(err error) bool {
 
 func boolPointer(value bool) *bool {
 	return &value
+}
+
+func archiveIntent(project *model.Project) bool {
+	return project.ArchiveAllowUndeploy != nil && *project.ArchiveAllowUndeploy
+}
+
+func archiveIntentPointer(project *model.Project) *bool {
+	return boolPointer(archiveIntent(project))
 }
