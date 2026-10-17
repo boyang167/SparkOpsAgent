@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/stretchr/testify/require"
@@ -53,7 +55,9 @@ func TestRabbitEventTransportRoutesOneEventToEachSubscriber(t *testing.T) {
 		})
 	}
 
-	transport, err := NewAMQPEventTransport(url)
+	metrics, err := NewMetrics(prometheus.NewRegistry())
+	require.NoError(t, err)
+	transport, err := NewAMQPEventTransport(url, metrics)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = transport.Close() })
 
@@ -62,7 +66,7 @@ func TestRabbitEventTransportRoutesOneEventToEachSubscriber(t *testing.T) {
 	require.NoError(t, transport.Declare(ctx, subscriptions))
 	require.NoError(t, transport.Declare(ctx, subscriptions))
 	require.NoError(t, transport.Publish(ctx, events.Envelope{
-		ID:         suffix,
+		ID:         uuid.NewString(),
 		Type:       "delivery.BuildCompleted",
 		Version:    1,
 		OccurredAt: time.Now().UTC(),

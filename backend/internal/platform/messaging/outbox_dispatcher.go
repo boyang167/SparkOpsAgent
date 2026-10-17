@@ -75,8 +75,13 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) error {
 	if d.config.Owner == "" {
 		return fmt.Errorf("outbox dispatcher owner is required")
 	}
+	var dispatchErrors []error
 	if err := d.refreshBacklogMetrics(ctx); err != nil {
-		return fmt.Errorf("read event outbox stats: %w", err)
+		d.recordDispatcherError("stats")
+		dispatchErrors = append(
+			dispatchErrors,
+			fmt.Errorf("read event outbox stats: %w", err),
+		)
 	}
 	records, err := d.store.Claim(
 		ctx,
@@ -86,10 +91,11 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) error {
 		d.config.Lease,
 	)
 	if err != nil {
-		return fmt.Errorf("claim event outbox: %w", err)
+		d.recordDispatcherError("claim")
+		dispatchErrors = append(dispatchErrors, fmt.Errorf("claim event outbox: %w", err))
+		return errors.Join(dispatchErrors...)
 	}
 
-	var dispatchErrors []error
 	for _, record := range records {
 		if err := d.transport.Publish(ctx, record.Envelope); err != nil {
 			if d.metrics != nil {
@@ -97,6 +103,9 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) error {
 			}
 			next := d.clock.Now().Add(retryDelay(record.Attempts))
 			rescheduleErr := d.store.Reschedule(ctx, record.ID, d.config.Owner, err.Error(), next)
+			if rescheduleErr != nil {
+				d.recordDispatcherError("reschedule")
+			}
 			dispatchErrors = append(dispatchErrors, errors.Join(err, rescheduleErr))
 			continue
 		}
@@ -104,10 +113,17 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) error {
 			d.metrics.EventPublish.WithLabelValues("success").Inc()
 		}
 		if err := d.store.MarkPublished(ctx, record.ID, d.config.Owner, d.clock.Now()); err != nil {
+			d.recordDispatcherError("mark_published")
 			dispatchErrors = append(dispatchErrors, fmt.Errorf("mark event %s published: %w", record.ID, err))
 		}
 	}
 	return errors.Join(dispatchErrors...)
+}
+
+func (d *OutboxDispatcher) recordDispatcherError(stage string) {
+	if d.metrics != nil {
+		d.metrics.EventDispatcherError.WithLabelValues(stage).Inc()
+	}
 }
 
 func (d *OutboxDispatcher) refreshBacklogMetrics(ctx context.Context) error {
@@ -168,9 +184,7 @@ func (d *OutboxDispatcher) run(ctx context.Context, stop <-chan struct{}, done c
 			return
 		default:
 		}
-		if err := d.DispatchOnce(ctx); err != nil && d.metrics != nil {
-			d.metrics.EventPublish.WithLabelValues("dispatcher_error").Inc()
-		}
+		_ = d.DispatchOnce(ctx)
 		timer := time.NewTimer(d.config.PollInterval)
 		select {
 		case <-ctx.Done():

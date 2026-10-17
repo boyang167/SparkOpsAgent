@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/stretchr/testify/require"
@@ -468,10 +469,13 @@ func TestEventTransportPublisherTimeoutKeepsConsumerConnectionAlive(t *testing.T
 	require.Equal(t, 1, publisherConnection.closeDeadlineCalls)
 	require.Zero(t, consumerConnection.closeDeadlineCalls)
 
-	consumerChannel.deliveries <- amqp.Delivery{Body: []byte(`{"id":"event-123","type":"delivery.BuildCompleted","version":1}`)}
+	consumedEnvelope := eventTransportTestEnvelope()
+	consumedBody, err := json.Marshal(consumedEnvelope)
+	require.NoError(t, err)
+	consumerChannel.deliveries <- amqp.Delivery{Body: consumedBody}
 	select {
 	case envelope := <-handled:
-		require.Equal(t, "event-123", envelope.ID)
+		require.Equal(t, consumedEnvelope.ID, envelope.ID)
 	case <-time.After(time.Second):
 		t.Fatal("consumer stopped after publisher timeout")
 	}
@@ -491,6 +495,9 @@ func TestEventTransportRoutesMalformedRawDeliveryToSubscriberDLQBeforeAck(t *tes
 		&stubEventConnection{channels: []eventChannel{consumerChannel}},
 		nil,
 	)
+	metrics, err := NewMetrics(prometheus.NewRegistry())
+	require.NoError(t, err)
+	transport.metrics = metrics
 	subscription := Subscription{
 		EventName: "delivery.BuildCompleted", Version: 1, Subscriber: "poison.consumer",
 	}
@@ -532,6 +539,74 @@ func TestEventTransportRoutesMalformedRawDeliveryToSubscriberDLQBeforeAck(t *tes
 	require.Equal(t, "raw-message-id", published.message.MessageId)
 	require.Equal(t, "untrusted", published.message.Headers["source"])
 	require.Contains(t, published.message.Headers["x-sparkops-dead-letter-reason"], "cannot parse")
+	require.Equal(t, float64(1), prometheusMetricValue(
+		t,
+		metrics.EventDLQ.WithLabelValues(subscription.Subscriber),
+	))
+}
+
+func TestEventTransportRoutesStructurallyInvalidEnvelopeToSubscriberDLQ(t *testing.T) {
+	valid := eventTransportTestEnvelope()
+	valid.Payload = json.RawMessage(`{"build_id":"build-123"}`)
+	tests := []struct {
+		name   string
+		mutate func(*events.Envelope)
+	}{
+		{name: "empty id", mutate: func(envelope *events.Envelope) { envelope.ID = "" }},
+		{name: "non uuid id", mutate: func(envelope *events.Envelope) { envelope.ID = "not-a-uuid" }},
+		{name: "empty type", mutate: func(envelope *events.Envelope) { envelope.Type = "" }},
+		{name: "blank type", mutate: func(envelope *events.Envelope) { envelope.Type = "  " }},
+		{name: "zero version", mutate: func(envelope *events.Envelope) { envelope.Version = 0 }},
+		{name: "negative version", mutate: func(envelope *events.Envelope) { envelope.Version = -1 }},
+		{name: "missing occurred at", mutate: func(envelope *events.Envelope) { envelope.OccurredAt = time.Time{} }},
+		{name: "missing payload", mutate: func(envelope *events.Envelope) { envelope.Payload = nil }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			envelope := valid
+			tt.mutate(&envelope)
+			body, err := json.Marshal(envelope)
+			require.NoError(t, err)
+			confirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
+			close(confirmation.done)
+			publisherChannel := newStubEventChannel(confirmation)
+			consumerChannel := newStubEventChannel(nil)
+			consumerChannel.deliveries = make(chan amqp.Delivery, 1)
+			transport := newAMQPEventTransportWithConnections(
+				&stubEventConnection{channels: []eventChannel{publisherChannel}},
+				&stubEventConnection{channels: []eventChannel{consumerChannel}},
+				nil,
+			)
+			subscription := Subscription{
+				EventName: "delivery.BuildCompleted", Version: 1, Subscriber: "poison.consumer",
+			}
+			handlerCalled := make(chan struct{}, 1)
+			require.NoError(t, transport.Consume(context.Background(), subscription, func(
+				context.Context,
+				events.Envelope,
+				int,
+			) error {
+				handlerCalled <- struct{}{}
+				return nil
+			}))
+			acks := newRecordingAcknowledger()
+			consumerChannel.deliveries <- amqp.Delivery{
+				Acknowledger: acks,
+				DeliveryTag:  8,
+				Body:         body,
+				MessageId:    "raw-message-id",
+			}
+
+			require.Equal(t, acknowledgement{tag: 8}, <-acks.acked)
+			require.Empty(t, acks.nacked)
+			require.Empty(t, handlerCalled)
+			require.Len(t, publisherChannel.publishedRecords, 1)
+			published := publisherChannel.publishedRecords[0]
+			require.Equal(t, body, published.message.Body)
+			require.Contains(t, published.message.Headers["x-sparkops-dead-letter-reason"], "invalid event envelope")
+		})
+	}
 }
 
 func TestEventTransportNacksMalformedRawDeliveryWhenDLQConfirmFails(t *testing.T) {
@@ -871,7 +946,7 @@ func (c *stubEventChannel) Close() error {
 
 func eventTransportTestEnvelope() events.Envelope {
 	return events.Envelope{
-		ID:         "event-123",
+		ID:         "550e8400-e29b-41d4-a716-446655440000",
 		Type:       "delivery.BuildCompleted",
 		Version:    1,
 		OccurredAt: time.Date(2026, 10, 17, 6, 0, 0, 0, time.UTC),

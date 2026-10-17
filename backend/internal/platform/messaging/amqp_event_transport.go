@@ -1,10 +1,12 @@
 package messaging
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -194,11 +196,12 @@ type amqpEventTransport struct {
 	publisherClosed     <-chan *amqp.Error
 	topology            eventChannel
 	consumers           map[eventChannel]string
+	metrics             *Metrics
 	closing             chan struct{}
 	closed              bool
 }
 
-func NewAMQPEventTransport(url string) (EventTransport, error) {
+func NewAMQPEventTransport(url string, metrics *Metrics) (EventTransport, error) {
 	if url == "" {
 		return nil, fmt.Errorf("amqp url is required")
 	}
@@ -218,7 +221,13 @@ func NewAMQPEventTransport(url string) (EventTransport, error) {
 		_ = publisherConnection.CloseDeadline(time.Now().Add(eventCloseTimeout))
 		return nil, fmt.Errorf("amqp event consumer dial: %w", err)
 	}
-	return newAMQPEventTransportWithConnections(publisherConnection, consumerConnection, factory), nil
+	transport := newAMQPEventTransportWithConnections(
+		publisherConnection,
+		consumerConnection,
+		factory,
+	)
+	transport.metrics = metrics
+	return transport, nil
 }
 
 func newAMQPEventTransport(connection eventConnection) *amqpEventTransport {
@@ -799,11 +808,16 @@ func (t *amqpEventTransport) consumeDeliveries(
 			var envelope events.Envelope
 			if err := json.Unmarshal(delivery.Body, &envelope); err != nil {
 				reason := fmt.Sprintf("cannot parse event envelope: %v", err)
-				if publishErr := t.publishRawDeadLetter(ctx, subscription, delivery, reason); publishErr != nil {
-					_ = delivery.Nack(false, true)
-					continue
-				}
-				_ = delivery.Ack(false)
+				t.routeRawPoison(ctx, subscription, delivery, reason)
+				continue
+			}
+			if err := validateEventEnvelope(envelope); err != nil {
+				t.routeRawPoison(
+					ctx,
+					subscription,
+					delivery,
+					fmt.Sprintf("invalid event envelope: %v", err),
+				)
 				continue
 			}
 			attempts := eventDeliveryAttempts(delivery.Headers)
@@ -814,6 +828,42 @@ func (t *amqpEventTransport) consumeDeliveries(
 			_ = delivery.Ack(false)
 		}
 	}
+}
+
+func (t *amqpEventTransport) routeRawPoison(
+	ctx context.Context,
+	subscription Subscription,
+	delivery amqp.Delivery,
+	reason string,
+) {
+	if err := t.publishRawDeadLetter(ctx, subscription, delivery, reason); err != nil {
+		_ = delivery.Nack(false, true)
+		return
+	}
+	if t.metrics != nil {
+		t.metrics.EventDLQ.WithLabelValues(subscription.Subscriber).Inc()
+	}
+	_ = delivery.Ack(false)
+}
+
+func validateEventEnvelope(envelope events.Envelope) error {
+	if _, err := uuid.Parse(envelope.ID); err != nil {
+		return fmt.Errorf("id must be a UUID")
+	}
+	if strings.TrimSpace(envelope.Type) == "" {
+		return fmt.Errorf("type is required")
+	}
+	if envelope.Version <= 0 {
+		return fmt.Errorf("version must be positive")
+	}
+	if envelope.OccurredAt.IsZero() {
+		return fmt.Errorf("occurred_at is required")
+	}
+	payload := bytes.TrimSpace(envelope.Payload)
+	if len(payload) == 0 || bytes.Equal(payload, []byte("null")) {
+		return fmt.Errorf("payload is required")
+	}
+	return nil
 }
 
 func eventDeliveryAttempts(headers amqp.Table) int {

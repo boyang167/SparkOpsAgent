@@ -111,17 +111,14 @@ func (b *ReliableBus) Start(ctx context.Context) error {
 	b.mu.Unlock()
 
 	if err := validateEventTopologies(subscriptions); err != nil {
-		cancel()
-		return b.failStart(err)
+		return b.abortStart(cancel, err)
 	}
 	if err := b.transport.Declare(runCtx, subscriptions); err != nil {
-		cancel()
-		return b.failStart(err)
+		return b.abortStart(cancel, err)
 	}
 	for _, subscription := range subscriptions {
 		if b.consumer == nil {
-			cancel()
-			return b.failStart(fmt.Errorf("inbox consumer is required"))
+			return b.abortStart(cancel, fmt.Errorf("inbox consumer is required"))
 		}
 		current := subscription
 		if err := b.transport.Consume(runCtx, current, func(
@@ -132,25 +129,42 @@ func (b *ReliableBus) Start(ctx context.Context) error {
 			handlerCtx := context.WithoutCancel(deliveryCtx)
 			return b.consumer.Handle(handlerCtx, current, envelope, attempts)
 		}); err != nil {
-			cancel()
-			return b.failStart(err)
+			return b.abortStart(cancel, err)
 		}
 	}
 	if b.dispatcher != nil {
 		if err := b.dispatcher.Start(runCtx); err != nil {
-			cancel()
-			return b.failStart(err)
+			return b.abortStart(cancel, err)
 		}
 	}
 	return nil
 }
 
-func (b *ReliableBus) failStart(err error) error {
+func (b *ReliableBus) abortStart(cancel context.CancelFunc, startErr error) error {
 	b.mu.Lock()
-	b.started = false
+	b.closed = true
 	b.cancel = nil
 	b.mu.Unlock()
-	return err
+
+	failures := []error{startErr}
+	if b.consumer != nil {
+		b.consumer.StopAccepting()
+	}
+	cancel()
+	if b.dispatcher != nil {
+		if err := b.dispatcher.Close(); err != nil {
+			failures = append(failures, fmt.Errorf("close dispatcher after start failure: %w", err))
+		}
+	}
+	if b.consumer != nil {
+		b.consumer.Wait()
+	}
+	if b.transport != nil {
+		if err := b.transport.Close(); err != nil {
+			failures = append(failures, fmt.Errorf("close transport after start failure: %w", err))
+		}
+	}
+	return errors.Join(failures...)
 }
 
 func (b *ReliableBus) Close() error {

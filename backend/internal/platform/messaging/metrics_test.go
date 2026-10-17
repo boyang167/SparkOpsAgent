@@ -18,6 +18,7 @@ func TestMetricsRegistersRequiredCollectorsOnce(t *testing.T) {
 
 	first.OutboxPending.Set(2)
 	first.EventPublish.WithLabelValues("success").Inc()
+	first.EventDispatcherError.WithLabelValues("stats").Inc()
 	first.EventConsume.WithLabelValues("test.subscriber", "success").Inc()
 	first.EventRetry.WithLabelValues("test.subscriber", "5s").Inc()
 	first.EventDLQ.WithLabelValues("test.subscriber").Inc()
@@ -33,6 +34,7 @@ func TestMetricsRegistersRequiredCollectorsOnce(t *testing.T) {
 		"sparkops_event_outbox_pending",
 		"sparkops_event_outbox_oldest_seconds",
 		"sparkops_event_publish_total",
+		"sparkops_event_dispatcher_error_total",
 		"sparkops_event_consume_total",
 		"sparkops_event_retry_total",
 		"sparkops_event_dlq_total",

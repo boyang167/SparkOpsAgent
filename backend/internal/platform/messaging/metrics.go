@@ -11,6 +11,7 @@ type Metrics struct {
 	OutboxPending          prometheus.Gauge
 	OutboxOldestSeconds    prometheus.Gauge
 	EventPublish           *prometheus.CounterVec
+	EventDispatcherError   *prometheus.CounterVec
 	EventConsume           *prometheus.CounterVec
 	EventRetry             *prometheus.CounterVec
 	EventDLQ               *prometheus.CounterVec
@@ -47,6 +48,10 @@ func NewMetrics(registerer prometheus.Registerer) (*Metrics, error) {
 			Name: "sparkops_event_publish_total",
 			Help: "Total event publish attempts by result.",
 		}, []string{"result"}),
+		EventDispatcherError: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "sparkops_event_dispatcher_error_total",
+			Help: "Total event dispatcher non-publish errors by bounded stage.",
+		}, []string{"stage"}),
 		EventConsume: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "sparkops_event_consume_total",
 			Help: "Total event consumption outcomes.",
@@ -76,6 +81,7 @@ func NewMetrics(registerer prometheus.Registerer) (*Metrics, error) {
 		metrics.OutboxPending,
 		metrics.OutboxOldestSeconds,
 		metrics.EventPublish,
+		metrics.EventDispatcherError,
 		metrics.EventConsume,
 		metrics.EventRetry,
 		metrics.EventDLQ,

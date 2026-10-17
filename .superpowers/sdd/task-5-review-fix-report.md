@@ -107,3 +107,68 @@ Task 5 相关包通过；全量仍仅有两项已知 Kubernetes 基线失败：
 - `.superpowers/sdd/task-5-report.md` 中并行 plugin 工作追加内容
 - `logs/sparkops.log`
 - frontend 工作区修改
+
+---
+
+## 第二轮复审修复
+
+复审基线：`edb2ad8aeea984da658a4f880edab63b5dfefb33`
+
+### TDD RED
+
+1. Envelope 结构校验：
+
+```text
+go test ./internal/platform/messaging -run TestEventTransportRoutesStructurallyInvalidEnvelopeToSubscriberDLQ -count=1
+```
+
+ID 为空/非 UUID、Type 为空/空白、Version 非正数、缺少 occurred_at/payload 的全部子测试均失败：handler 被调用且没有 DLQ publish。
+
+2. Stats 观测旁路：
+
+```text
+go test ./internal/platform/messaging -run TestDispatcherStatsFailureDoesNotBlockReliablePublish -count=1
+```
+
+RED：`published` 长度为 0，证明 Stats 错误在 Claim 前中断分发。
+
+3. 部分启动失败回滚：
+
+```text
+go test ./internal/platform/messaging -run TestReliableBusStartFailureDrainsStartedHandlerAndTerminatesLifecycle -count=1
+```
+
+RED：
+
+```text
+Start returned before the active handler drained: start second consumer
+```
+
+4. 指标语义：
+
+```text
+go test ./internal/platform/messaging -run 'TestEventTransportRoutesMalformedRawDeliveryToSubscriberDLQBeforeAck|TestMetricsRegistersRequiredCollectorsOnce|TestDispatcherStatsFailureDoesNotBlockReliablePublish|TestDispatcherTracksPublishFailureAndBackgroundLoopError' -count=1
+```
+
+RED：AMQP transport 没有 metrics 注入，Metrics 没有独立 `EventDispatcherError` collector。
+
+### GREEN 实现
+
+- 在 decoded handler 前校验 envelope：ID 必须为 UUID、Type 非空白、Version 为正数、occurred_at 非零、payload 非空且非 null。结构错误与 JSON/time 解析错误共用 raw DLQ confirm 路径，保留原 body/headers。
+- Stats 错误记录 `dispatcher_error_total{stage="stats"}` 并加入返回错误，但不阻断 Claim、Publish、MarkPublished。
+- 任一 Start 失败都把 bus 置为终止状态：停止 Inbox 接收、取消本批 intake、关闭 dispatcher、等待 detached handler、关闭 transport；后续 Start 明确返回 closed，Close 不重复释放。
+- raw poison DLQ confirm 成功后递增有界 subscriber 标签的 `EventDLQ`。
+- `EventPublish{result}` 只记录实际 broker publish attempt 的 success/failure。Stats、Claim、Reschedule、MarkPublished 使用独立 `sparkops_event_dispatcher_error_total{stage}`，不再写入 publish total。
+- 固定 v1 订阅决策保持不变。
+
+### GREEN 验证
+
+```text
+go test ./internal/platform/messaging/... ./internal/platform/postgres -count=1
+```
+
+结果：PASS。
+
+关键 poison、Stats side-path、graceful close 和部分启动失败用例以 `-count=20` 重复运行：PASS。
+
+后端全量 `go test ./... -count=1` 中 Task 5 相关包通过，仅命中既有两项 Kubernetes 基线失败：bundled descriptor 缺少 `diagnosis/agent.go`，以及 exec recording 精确字符串断言不匹配。

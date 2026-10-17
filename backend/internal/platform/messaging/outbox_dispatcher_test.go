@@ -306,6 +306,33 @@ func TestDispatcherUpdatesPublishAndBacklogMetrics(t *testing.T) {
 	require.Equal(t, float64(120), prometheusMetricValue(t, metrics.OutboxOldestSeconds))
 }
 
+func TestDispatcherStatsFailureDoesNotBlockReliablePublish(t *testing.T) {
+	metrics := newDispatcherTestMetrics(t)
+	record := dispatcherRecord("event-1")
+	store := &dispatcherStore{
+		records:  []persistence.OutboxRecord{record},
+		statsErr: errors.New("stats query failed"),
+	}
+	transport := &fakeEventTransport{}
+	dispatcher := NewOutboxDispatcher(
+		store,
+		transport,
+		OutboxDispatcherConfig{Owner: "worker-a", BatchSize: 1, Lease: time.Minute},
+		fixedClock{now: record.OccurredAt},
+		metrics,
+	)
+
+	err := dispatcher.DispatchOnce(context.Background())
+
+	require.ErrorContains(t, err, "stats query failed")
+	require.Len(t, transport.published, 1)
+	require.Equal(t, []string{record.ID}, store.published)
+	require.Equal(t, float64(1), prometheusMetricValue(
+		t,
+		metrics.EventDispatcherError.WithLabelValues("stats"),
+	))
+}
+
 func TestDispatcherTracksPublishFailureAndBackgroundLoopError(t *testing.T) {
 	registry := prometheus.NewRegistry()
 	metrics, err := NewMetrics(registry)
@@ -321,6 +348,11 @@ func TestDispatcherTracksPublishFailureAndBackgroundLoopError(t *testing.T) {
 	)
 	require.Error(t, dispatcher.DispatchOnce(context.Background()))
 	require.Equal(t, float64(1), prometheusMetricValue(t, metrics.EventPublish.WithLabelValues("failure")))
+	require.Zero(t, prometheusMetricValue(t, metrics.EventPublish.WithLabelValues("success")))
+	require.Zero(t, prometheusMetricValue(
+		t,
+		metrics.EventDispatcherError.WithLabelValues("claim"),
+	))
 
 	store.claimErr = errors.New("database unavailable")
 	dispatcher = NewOutboxDispatcher(
@@ -334,9 +366,18 @@ func TestDispatcherTracksPublishFailureAndBackgroundLoopError(t *testing.T) {
 	)
 	require.NoError(t, dispatcher.Start(context.Background()))
 	require.Eventually(t, func() bool {
-		return prometheusMetricValue(t, metrics.EventPublish.WithLabelValues("dispatcher_error")) > 0
+		return prometheusMetricValue(
+			t,
+			metrics.EventDispatcherError.WithLabelValues("claim"),
+		) > 0
 	}, time.Second, time.Millisecond)
 	require.NoError(t, dispatcher.Close())
+	require.Equal(t, float64(1), prometheusMetricValue(t, metrics.EventPublish.WithLabelValues("failure")))
+	require.Zero(t, prometheusMetricValue(t, metrics.EventPublish.WithLabelValues("success")))
+	require.Zero(t, prometheusMetricValue(
+		t,
+		metrics.EventPublish.WithLabelValues("dispatcher_error"),
+	))
 }
 
 func prometheusMetricValue(t *testing.T, metric prometheus.Metric) float64 {

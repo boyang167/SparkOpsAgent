@@ -2,11 +2,13 @@ package messaging
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/glebarez/sqlite"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
@@ -221,6 +223,71 @@ func TestReliableBusClosePreservesActiveHandlerTransactionContext(t *testing.T) 
 	require.Zero(t, tx.rollbacks)
 }
 
+func TestReliableBusStartFailureDrainsStartedHandlerAndTerminatesLifecycle(t *testing.T) {
+	registry := events.NewRegistry()
+	require.NoError(t, events.RegisterJSON(registry, "test.event", 1, func(inboxTestEvent) events.AggregateRef {
+		return events.AggregateRef{}
+	}))
+	envelope, err := registry.Encode(context.Background(), inboxTestEvent{
+		BaseEvent: events.BaseEvent{Name: "test.event", At: time.Now().UTC()},
+	})
+	require.NoError(t, err)
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	transport := &partialStartTransport{
+		fakeEventTransport: fakeEventTransport{},
+		envelope:           envelope,
+		handlerStarted:     handlerStarted,
+		handlerResult:      make(chan error, 1),
+	}
+	tx := &recordingTransactor{}
+	inbox := &transactionalInbox{processed: make(map[string]bool)}
+	metrics, err := NewMetrics(prometheus.NewRegistry())
+	require.NoError(t, err)
+	consumer := NewInboxConsumer(
+		tx, inbox, registry, transport, fixedClock{now: envelope.OccurredAt}, metrics,
+	)
+	dispatcher := &fakeDispatcherLifecycle{}
+	bus := NewReliableBus(
+		registry, &transactionCheckingOutbox{}, transport, dispatcher, consumer,
+	)
+	require.NoError(t, bus.Subscribe("test.event", "first.subscriber", func(
+		context.Context,
+		events.Event,
+	) error {
+		close(handlerStarted)
+		<-releaseHandler
+		return nil
+	}))
+	require.NoError(t, bus.Subscribe("second.event", "second.subscriber", func(
+		context.Context,
+		events.Event,
+	) error {
+		return nil
+	}))
+
+	startResult := make(chan error, 1)
+	go func() { startResult <- bus.Start(context.Background()) }()
+	<-handlerStarted
+	select {
+	case err := <-startResult:
+		t.Fatalf("Start returned before the active handler drained: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseHandler)
+	require.NoError(t, <-transport.handlerResult)
+	require.ErrorContains(t, <-startResult, "start second consumer")
+	require.Equal(t, 1, transport.closed)
+	require.Equal(t, 1, dispatcher.closed)
+
+	consumeCalls := transport.consumeCalls
+	require.ErrorContains(t, bus.Start(context.Background()), "closed")
+	require.Equal(t, consumeCalls, transport.consumeCalls)
+	require.NoError(t, bus.Close())
+	require.Equal(t, 1, transport.closed)
+	require.Equal(t, 1, dispatcher.closed)
+}
+
 type orderedTransport struct {
 	fakeEventTransport
 	order []string
@@ -292,4 +359,28 @@ func (t *contextDeliveryTransport) Consume(
 
 func (t *contextDeliveryTransport) deliver() error {
 	return t.handler(t.intakeContext, t.envelope, 0)
+}
+
+type partialStartTransport struct {
+	fakeEventTransport
+	envelope       events.Envelope
+	handlerStarted <-chan struct{}
+	handlerResult  chan error
+	consumeCalls   int
+}
+
+func (t *partialStartTransport) Consume(
+	ctx context.Context,
+	subscription Subscription,
+	handler DeliveryHandler,
+) error {
+	t.consumeCalls++
+	if t.consumeCalls == 1 {
+		go func() {
+			t.handlerResult <- handler(ctx, t.envelope, 0)
+		}()
+		return nil
+	}
+	<-t.handlerStarted
+	return errors.New("start second consumer")
 }
