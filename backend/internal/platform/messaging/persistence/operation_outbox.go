@@ -1,10 +1,13 @@
 package persistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
@@ -12,7 +15,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-var ErrOperationIdempotencyConflict = errors.New("operation idempotency key already exists")
+var ErrOperationIdempotencyConflict = errors.New("operation idempotency key conflicts with existing intent")
 
 type OperationRecord struct {
 	ID             string
@@ -57,7 +60,7 @@ func (s *operationStore) Insert(ctx context.Context, operation OperationRecord) 
 	if err != nil {
 		return err
 	}
-	return tx.Clauses(clause.OnConflict{
+	result := tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "idempotency_key"}},
 		DoNothing: true,
 	}).Create(&OperationOutbox{
@@ -69,7 +72,42 @@ func (s *operationStore) Insert(ctx context.Context, operation OperationRecord) 
 		Payload:        operation.Payload,
 		NextAttemptAt:  operation.NextAttemptAt,
 		CreatedAt:      operation.CreatedAt,
-	}).Error
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 1 {
+		return nil
+	}
+
+	var existing OperationOutbox
+	if err := tx.Where(
+		"idempotency_key = ?",
+		operation.IdempotencyKey,
+	).Take(&existing).Error; err != nil {
+		return fmt.Errorf("read duplicate operation intent: %w", err)
+	}
+	if existing.EventID == operation.EventID &&
+		existing.Subscriber == operation.Subscriber &&
+		existing.OperationType == operation.OperationType &&
+		jsonPayloadEqual(existing.Payload, operation.Payload) {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: key %q",
+		ErrOperationIdempotencyConflict,
+		operation.IdempotencyKey,
+	)
+}
+
+func jsonPayloadEqual(left, right json.RawMessage) bool {
+	var leftValue any
+	var rightValue any
+	if json.Unmarshal(left, &leftValue) == nil &&
+		json.Unmarshal(right, &rightValue) == nil {
+		return reflect.DeepEqual(leftValue, rightValue)
+	}
+	return bytes.Equal(left, right)
 }
 
 func (s *operationStore) Claim(

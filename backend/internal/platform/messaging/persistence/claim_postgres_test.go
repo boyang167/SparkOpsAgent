@@ -205,6 +205,39 @@ func TestOperationOldOwnerCannotOverwriteRecoveredLeasePostgres(t *testing.T) {
 	)
 }
 
+func TestOperationIdempotencyIntentComparisonPostgres(t *testing.T) {
+	db := openStorePostgres(t)
+	store := NewOperationStore(db)
+	first := testOperation(time.Now().UTC())
+	insertTestOperation(t, db, store, first)
+
+	same := first
+	same.ID = uuid.NewString()
+	require.NoError(t, postgres.NewTransactor(db).WithinTransaction(
+		context.Background(),
+		func(ctx context.Context) error {
+			return store.Insert(ctx, same)
+		},
+	))
+
+	conflict := first
+	conflict.ID = uuid.NewString()
+	conflict.Payload = []byte(`{"channel":"slack"}`)
+	err := postgres.NewTransactor(db).WithinTransaction(
+		context.Background(),
+		func(ctx context.Context) error {
+			return store.Insert(ctx, conflict)
+		},
+	)
+	require.ErrorIs(t, err, ErrOperationIdempotencyConflict)
+
+	var count int64
+	require.NoError(t, db.Model(&OperationOutbox{}).
+		Where("idempotency_key = ?", first.IdempotencyKey).
+		Count(&count).Error)
+	require.Equal(t, int64(1), count)
+}
+
 func openStorePostgres(t *testing.T) *gorm.DB {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_DSN")

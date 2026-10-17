@@ -27,6 +27,10 @@ func TestOperationInsertTreatsDuplicateIdempotencyKeyAsSuccess(t *testing.T) {
 	insertTestOperation(t, db, store, first)
 	duplicate := testOperation(time.Now().UTC())
 	duplicate.IdempotencyKey = first.IdempotencyKey
+	duplicate.EventID = first.EventID
+	duplicate.Subscriber = first.Subscriber
+	duplicate.OperationType = first.OperationType
+	duplicate.Payload = append([]byte(nil), first.Payload...)
 	afterDuplicate := testOperation(time.Now().UTC())
 
 	err := postgres.NewTransactor(db).WithinTransaction(
@@ -43,6 +47,58 @@ func TestOperationInsertTreatsDuplicateIdempotencyKeyAsSuccess(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&OperationOutbox{}).Count(&count).Error)
 	require.Equal(t, int64(2), count)
+}
+
+func TestOperationInsertRejectsIdempotencyKeyForDifferentIntent(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*OperationRecord)
+	}{
+		{
+			name: "event identity",
+			mutate: func(operation *OperationRecord) {
+				operation.EventID = uuid.NewString()
+			},
+		},
+		{
+			name: "owner",
+			mutate: func(operation *OperationRecord) {
+				operation.Subscriber = "other.subscriber"
+			},
+		},
+		{
+			name: "operation type",
+			mutate: func(operation *OperationRecord) {
+				operation.OperationType = "other.operation"
+			},
+		},
+		{
+			name: "payload",
+			mutate: func(operation *OperationRecord) {
+				operation.Payload = []byte(`{"channel":"slack"}`)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openStoreSQLite(t)
+			store := NewOperationStore(db)
+			first := testOperation(time.Now().UTC())
+			insertTestOperation(t, db, store, first)
+			conflict := first
+			conflict.ID = uuid.NewString()
+			tt.mutate(&conflict)
+
+			err := postgres.NewTransactor(db).WithinTransaction(
+				context.Background(),
+				func(ctx context.Context) error {
+					return store.Insert(ctx, conflict)
+				},
+			)
+
+			require.ErrorIs(t, err, ErrOperationIdempotencyConflict)
+		})
+	}
 }
 
 func TestOperationStatsIncludesPendingAndExecutingBacklog(t *testing.T) {

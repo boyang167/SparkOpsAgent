@@ -3,7 +3,6 @@ package messaging
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -68,9 +67,18 @@ func (w *operationWriter) Schedule(ctx context.Context, request OperationRequest
 		return fmt.Errorf("operation idempotency key is required")
 	}
 
-	id := uuid.NewString()
-	eventID := id
 	owner := request.Owner
+	if owner == "" {
+		return fmt.Errorf("operation owner is required")
+	}
+	eventID, err := validateOperationIdempotencyKey(
+		request.IdempotencyKey,
+		owner,
+		request.OperationType,
+	)
+	if err != nil {
+		return err
+	}
 	if metadata, ok := events.MetadataFromContext(ctx); ok {
 		if metadata.EventID == "" || metadata.Subscriber == "" {
 			return fmt.Errorf("event metadata requires event id and subscriber")
@@ -82,14 +90,9 @@ func (w *operationWriter) Schedule(ctx context.Context, request OperationRequest
 				metadata.Subscriber,
 			)
 		}
-		expectedPrefix := metadata.EventID + ":" + owner + ":" + request.OperationType + ":"
-		if !strings.HasPrefix(request.IdempotencyKey, expectedPrefix) ||
-			len(request.IdempotencyKey) == len(expectedPrefix) {
-			return fmt.Errorf("operation idempotency key must match event, owner, type, and target")
+		if eventID != metadata.EventID {
+			return fmt.Errorf("operation idempotency key event id does not match event metadata")
 		}
-		eventID = metadata.EventID
-	} else if owner == "" {
-		return fmt.Errorf("operation owner is required without event metadata")
 	}
 
 	payload, err := json.Marshal(request.Payload)
@@ -98,7 +101,7 @@ func (w *operationWriter) Schedule(ctx context.Context, request OperationRequest
 	}
 	now := w.clock.Now()
 	err = w.store.Insert(ctx, persistence.OperationRecord{
-		ID:             id,
+		ID:             uuid.NewString(),
 		EventID:        eventID,
 		Subscriber:     owner,
 		OperationType:  request.OperationType,
@@ -107,13 +110,35 @@ func (w *operationWriter) Schedule(ctx context.Context, request OperationRequest
 		NextAttemptAt:  now,
 		CreatedAt:      now,
 	})
-	if errors.Is(err, persistence.ErrOperationIdempotencyConflict) {
-		return nil
-	}
 	if err != nil {
 		return fmt.Errorf("insert operation outbox: %w", err)
 	}
 	return nil
+}
+
+func validateOperationIdempotencyKey(
+	key string,
+	owner string,
+	operationType string,
+) (string, error) {
+	parts := strings.Split(key, ":")
+	if len(parts) != 4 {
+		return "", fmt.Errorf(
+			"operation idempotency key must contain event id, owner, operation type, and target id",
+		)
+	}
+	for _, part := range parts {
+		if part == "" {
+			return "", fmt.Errorf("operation idempotency key segments must be non-empty")
+		}
+	}
+	if parts[1] != owner {
+		return "", fmt.Errorf("operation idempotency key owner does not match operation owner")
+	}
+	if parts[2] != operationType {
+		return "", fmt.Errorf("operation idempotency key type does not match operation type")
+	}
+	return parts[0], nil
 }
 
 type operationRegistry struct {

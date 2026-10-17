@@ -8,16 +8,17 @@ import (
 )
 
 type Metrics struct {
-	OutboxPending          prometheus.Gauge
-	OutboxOldestSeconds    prometheus.Gauge
-	EventPublish           *prometheus.CounterVec
-	EventDispatcherError   *prometheus.CounterVec
-	EventConsume           *prometheus.CounterVec
-	EventRetry             *prometheus.CounterVec
-	EventDLQ               *prometheus.CounterVec
-	InboxDuplicate         *prometheus.CounterVec
-	OperationPending       prometheus.Gauge
-	OperationOldestSeconds prometheus.Gauge
+	OutboxPending            prometheus.Gauge
+	OutboxOldestSeconds      prometheus.Gauge
+	EventPublish             *prometheus.CounterVec
+	EventDispatcherError     *prometheus.CounterVec
+	EventConsume             *prometheus.CounterVec
+	EventRetry               *prometheus.CounterVec
+	EventDLQ                 *prometheus.CounterVec
+	InboxDuplicate           *prometheus.CounterVec
+	OperationPending         prometheus.Gauge
+	OperationOldestSeconds   prometheus.Gauge
+	OperationDispatcherError *prometheus.CounterVec
 }
 
 var metricsRegistrations = struct {
@@ -76,6 +77,10 @@ func NewMetrics(registerer prometheus.Registerer) (*Metrics, error) {
 			Name: "sparkops_operation_outbox_oldest_seconds",
 			Help: "Age in seconds of the oldest pending operation outbox record.",
 		}),
+		OperationDispatcherError: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "sparkops_operation_dispatcher_error_total",
+			Help: "Total operation dispatcher errors by bounded stage.",
+		}, []string{"stage"}),
 	}
 	collectors := []prometheus.Collector{
 		metrics.OutboxPending,
@@ -88,6 +93,7 @@ func NewMetrics(registerer prometheus.Registerer) (*Metrics, error) {
 		metrics.InboxDuplicate,
 		metrics.OperationPending,
 		metrics.OperationOldestSeconds,
+		metrics.OperationDispatcherError,
 	}
 	registered := make([]prometheus.Collector, 0, len(collectors))
 	for _, collector := range collectors {

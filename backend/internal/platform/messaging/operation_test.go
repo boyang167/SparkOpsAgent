@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -34,9 +35,14 @@ type operationStoreFake struct {
 	insertErr      error
 	claimErr       error
 	completeErr    error
+	failErr        error
+	rescheduleErr  error
 	stats          persistence.OperationStats
 	statsErr       error
 	claims         int
+	claimOwners    []string
+	claimLimits    []int
+	completedOwner []string
 }
 
 func (s *operationStoreFake) Insert(_ context.Context, operation persistence.OperationRecord) error {
@@ -53,6 +59,8 @@ func (s *operationStoreFake) Claim(_ context.Context, owner string, limit int, _
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.claims++
+	s.claimOwners = append(s.claimOwners, owner)
+	s.claimLimits = append(s.claimLimits, limit)
 	if s.claimErr != nil {
 		return nil, s.claimErr
 	}
@@ -84,6 +92,7 @@ func (s *operationStoreFake) MarkCompleted(_ context.Context, id, owner string, 
 		return s.completeErr
 	}
 	s.completed = append(s.completed, id)
+	s.completedOwner = append(s.completedOwner, owner)
 	return nil
 }
 
@@ -92,6 +101,9 @@ func (s *operationStoreFake) MarkFailed(_ context.Context, id, owner, reason str
 	defer s.mu.Unlock()
 	if s.claimed[id] != owner {
 		return persistence.ErrLeaseLost
+	}
+	if s.failErr != nil {
+		return s.failErr
 	}
 	s.failed = append(s.failed, id)
 	s.failureReasons = append(s.failureReasons, reason)
@@ -103,6 +115,9 @@ func (s *operationStoreFake) Reschedule(_ context.Context, id, owner, reason str
 	defer s.mu.Unlock()
 	if s.claimed[id] != owner {
 		return persistence.ErrLeaseLost
+	}
+	if s.rescheduleErr != nil {
+		return s.rescheduleErr
 	}
 	for _, record := range s.records {
 		if record.ID == id {
@@ -134,7 +149,7 @@ func TestOperationWriterRequiresTransaction(t *testing.T) {
 	require.Empty(t, store.inserted)
 }
 
-func TestOperationWriterTreatsDuplicateIdempotencyKeyAsSuccess(t *testing.T) {
+func TestOperationWriterDoesNotSwallowIdempotencyConflict(t *testing.T) {
 	store := &operationStoreFake{insertErr: persistence.ErrOperationIdempotencyConflict}
 	writer := NewOperationWriter(store, fixedClock{now: time.Now().UTC()})
 
@@ -146,7 +161,7 @@ func TestOperationWriterTreatsDuplicateIdempotencyKeyAsSuccess(t *testing.T) {
 		})
 	})
 
-	require.NoError(t, err)
+	require.ErrorIs(t, err, persistence.ErrOperationIdempotencyConflict)
 }
 
 func TestOperationWriterDerivesEventMetadataAndValidatesOwner(t *testing.T) {
@@ -179,7 +194,7 @@ func TestOperationWriterDerivesEventMetadataAndValidatesOwner(t *testing.T) {
 	require.ErrorContains(t, err, "owner")
 }
 
-func TestOperationWriterCommandUsesOperationIDAsTraceEventID(t *testing.T) {
+func TestOperationWriterCommandUsesStableKeyEventID(t *testing.T) {
 	store := &operationStoreFake{}
 	writer := NewOperationWriter(store, fixedClock{now: time.Now().UTC()})
 	key := "command-1:delivery.command:delivery.queue.publish.v1:run-1"
@@ -192,8 +207,38 @@ func TestOperationWriterCommandUsesOperationIDAsTraceEventID(t *testing.T) {
 	}))
 
 	require.Len(t, store.inserted, 1)
-	require.Equal(t, store.inserted[0].ID, store.inserted[0].EventID)
+	require.Equal(t, "command-1", store.inserted[0].EventID)
 	require.Equal(t, key, store.inserted[0].IdempotencyKey)
+}
+
+func TestOperationWriterValidatesCommandIdempotencyKey(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{name: "empty event id", key: ":delivery.command:delivery.queue.publish.v1:run-1"},
+		{name: "empty owner", key: "command-1::delivery.queue.publish.v1:run-1"},
+		{name: "wrong owner", key: "command-1:other.command:delivery.queue.publish.v1:run-1"},
+		{name: "empty type", key: "command-1:delivery.command::run-1"},
+		{name: "wrong type", key: "command-1:delivery.command:other.operation:run-1"},
+		{name: "empty target", key: "command-1:delivery.command:delivery.queue.publish.v1:"},
+		{name: "too few segments", key: "command-1:delivery.command:delivery.queue.publish.v1"},
+		{name: "too many segments", key: "command-1:delivery.command:delivery.queue.publish.v1:run-1:extra"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &operationStoreFake{}
+			writer := NewOperationWriter(store, fixedClock{now: time.Now().UTC()})
+			err := withinTestTransaction(t, func(ctx context.Context) error {
+				return writer.Schedule(ctx, OperationRequest{
+					Owner: "delivery.command", OperationType: "delivery.queue.publish.v1",
+					IdempotencyKey: tt.key, Payload: operationPayload{Target: "run-1"},
+				})
+			})
+			require.ErrorContains(t, err, "idempotency key")
+			require.Empty(t, store.inserted)
+		})
+	}
 }
 
 func TestOperationRegistryRejectsDuplicates(t *testing.T) {
@@ -416,6 +461,278 @@ func TestOperationDispatcherRunsConcurrentWorkersAndDrainsOnClose(t *testing.T) 
 	claimsAfterClose := store.claims
 	time.Sleep(10 * time.Millisecond)
 	require.Equal(t, claimsAfterClose, store.claims)
+}
+
+func TestOperationDispatcherWorkersUseUniqueBoundedOwnersAndFenceExpiredLease(t *testing.T) {
+	now := time.Now().UTC()
+	record := operationRecordForTest("operation-1", 1, now)
+	firstStarted := make(chan struct{})
+	store := &reclaimingOperationStore{
+		operationStoreFake: operationStoreFake{records: []persistence.OperationRecord{record}},
+		allowReclaim:       firstStarted,
+	}
+	registry := NewOperationRegistry()
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	require.NoError(t, registry.Register(record.OperationType, func(context.Context, Operation) error {
+		if calls.Add(1) == 1 {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		return nil
+	}))
+	metrics := newDispatcherTestMetrics(t)
+	dispatcher := NewOperationDispatcher(store, registry, OperationDispatcherConfig{
+		Owner:        strings.Repeat("instance-owner-", 20),
+		Workers:      2,
+		PollInterval: time.Hour,
+		Lease:        time.Millisecond,
+	}, fixedClock{now: now}, metrics)
+	require.NoError(t, dispatcher.Start(context.Background()))
+	<-firstStarted
+	require.Eventually(t, func() bool {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		return len(store.completed) == 1
+	}, time.Second, time.Millisecond)
+	close(releaseFirst)
+	require.Eventually(t, func() bool {
+		return prometheusMetricValue(
+			t,
+			metrics.OperationDispatcherError.WithLabelValues("lease_lost"),
+		) == 1
+	}, time.Second, time.Millisecond)
+	require.NoError(t, dispatcher.Close())
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.Len(t, store.claimOwners, 2)
+	require.NotEqual(t, store.claimOwners[0], store.claimOwners[1])
+	require.LessOrEqual(t, len(store.claimOwners[0]), operationOwnerMaxLength)
+	require.LessOrEqual(t, len(store.claimOwners[1]), operationOwnerMaxLength)
+	require.Len(t, store.completed, 1)
+	require.Equal(t, store.claimOwners[1], store.completedOwner[0])
+}
+
+func TestOperationDispatcherRuntimeWorkersClaimOnlyOneRecord(t *testing.T) {
+	now := time.Now().UTC()
+	store := &operationStoreFake{records: []persistence.OperationRecord{
+		operationRecordForTest("operation-1", 1, now),
+		operationRecordForTest("operation-2", 1, now),
+		operationRecordForTest("operation-3", 1, now),
+	}}
+	registry := NewOperationRegistry()
+	started := make(chan struct{}, 3)
+	release := make(chan struct{})
+	require.NoError(t, registry.Register("delivery.webhook.send.v1", func(context.Context, Operation) error {
+		started <- struct{}{}
+		<-release
+		return nil
+	}))
+	dispatcher := NewOperationDispatcher(store, registry, OperationDispatcherConfig{
+		Owner: "instance-a", Workers: 2, PollInterval: time.Hour,
+	}, fixedClock{now: now}, newDispatcherTestMetrics(t))
+	require.NoError(t, dispatcher.Start(context.Background()))
+	<-started
+	secondStarted := false
+	select {
+	case <-started:
+		secondStarted = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	require.NoError(t, dispatcher.Close())
+
+	require.True(t, secondStarted, "two workers should execute concurrently")
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.NotEmpty(t, store.claimLimits)
+	for _, limit := range store.claimLimits {
+		require.Equal(t, 1, limit)
+	}
+	require.Len(t, store.claimed, 2, "third operation must not be pre-claimed")
+	require.NotEqual(t, store.claimOwners[0], store.claimOwners[1])
+}
+
+func TestOperationDispatcherParentCancelAndRepeatedClose(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	now := time.Now().UTC()
+	record := operationRecordForTest("operation-1", 1, now)
+	store := &operationStoreFake{records: []persistence.OperationRecord{record}}
+	registry := NewOperationRegistry()
+	started := make(chan struct{})
+	require.NoError(t, registry.Register(record.OperationType, func(ctx context.Context, _ Operation) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}))
+	dispatcher := NewOperationDispatcher(
+		store,
+		registry,
+		OperationDispatcherConfig{
+			Owner: "instance-a", Workers: 2, PollInterval: time.Hour,
+		},
+		fixedClock{now: now},
+		newDispatcherTestMetrics(t),
+	)
+	require.NoError(t, dispatcher.Start(ctx))
+	<-started
+	cancel()
+
+	first := make(chan error, 1)
+	second := make(chan error, 1)
+	go func() { first <- dispatcher.Close() }()
+	go func() { second <- dispatcher.Close() }()
+	require.NoError(t, <-first)
+	require.NoError(t, <-second)
+	require.NoError(t, dispatcher.Close())
+}
+
+func TestOperationDispatcherRecordsBoundedErrorStagesOnce(t *testing.T) {
+	now := time.Now().UTC()
+	record := operationRecordForTest("operation-1", 1, now)
+	tests := []struct {
+		name       string
+		store      *operationStoreFake
+		handler    OperationHandler
+		wantStages map[string]float64
+	}{
+		{
+			name: "stats side path",
+			store: &operationStoreFake{
+				records:  []persistence.OperationRecord{record},
+				statsErr: errors.New("stats unavailable"),
+			},
+			handler:    func(context.Context, Operation) error { return nil },
+			wantStages: map[string]float64{"stats": 1},
+		},
+		{
+			name:       "claim",
+			store:      &operationStoreFake{claimErr: errors.New("claim unavailable")},
+			handler:    func(context.Context, Operation) error { return nil },
+			wantStages: map[string]float64{"claim": 1},
+		},
+		{
+			name:       "handler",
+			store:      &operationStoreFake{records: []persistence.OperationRecord{record}},
+			handler:    func(context.Context, Operation) error { return errors.New("temporary") },
+			wantStages: map[string]float64{"handler": 1},
+		},
+		{
+			name: "mark",
+			store: &operationStoreFake{
+				records:     []persistence.OperationRecord{record},
+				completeErr: errors.New("mark unavailable"),
+			},
+			handler:    func(context.Context, Operation) error { return nil },
+			wantStages: map[string]float64{"mark": 1},
+		},
+		{
+			name: "reschedule",
+			store: &operationStoreFake{
+				records:       []persistence.OperationRecord{record},
+				rescheduleErr: errors.New("reschedule unavailable"),
+			},
+			handler:    func(context.Context, Operation) error { return errors.New("temporary") },
+			wantStages: map[string]float64{"handler": 1, "reschedule": 1},
+		},
+		{
+			name: "lease lost",
+			store: &operationStoreFake{
+				records:     []persistence.OperationRecord{record},
+				completeErr: persistence.ErrLeaseLost,
+			},
+			handler:    func(context.Context, Operation) error { return nil },
+			wantStages: map[string]float64{"lease_lost": 1},
+		},
+	}
+	allStages := []string{"stats", "claim", "handler", "mark", "reschedule", "lease_lost"}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := NewOperationRegistry()
+			require.NoError(t, registry.Register(record.OperationType, tt.handler))
+			metrics := newDispatcherTestMetrics(t)
+			dispatcher := NewOperationDispatcher(
+				tt.store,
+				registry,
+				OperationDispatcherConfig{Owner: "instance-a", BatchSize: 1},
+				fixedClock{now: now},
+				metrics,
+			)
+
+			_ = dispatcher.DispatchOnce(context.Background())
+
+			for _, stage := range allStages {
+				require.Equal(
+					t,
+					tt.wantStages[stage],
+					prometheusMetricValue(
+						t,
+						metrics.OperationDispatcherError.WithLabelValues(stage),
+					),
+					stage,
+				)
+			}
+		})
+	}
+}
+
+func TestOperationDispatcherBackgroundLoopObservesDispatchErrors(t *testing.T) {
+	store := &operationStoreFake{claimErr: errors.New("database unavailable")}
+	metrics := newDispatcherTestMetrics(t)
+	dispatcher := NewOperationDispatcher(
+		store,
+		NewOperationRegistry(),
+		OperationDispatcherConfig{
+			Owner: "instance-a", Workers: 1, PollInterval: time.Millisecond,
+		},
+		fixedClock{now: time.Now().UTC()},
+		metrics,
+	)
+
+	require.NoError(t, dispatcher.Start(context.Background()))
+	require.Eventually(t, func() bool {
+		return prometheusMetricValue(
+			t,
+			metrics.OperationDispatcherError.WithLabelValues("claim"),
+		) > 0
+	}, time.Second, time.Millisecond)
+	require.NoError(t, dispatcher.Close())
+}
+
+type reclaimingOperationStore struct {
+	operationStoreFake
+	claimCalls   int
+	allowReclaim <-chan struct{}
+}
+
+func (s *reclaimingOperationStore) Claim(
+	_ context.Context,
+	owner string,
+	limit int,
+	_ time.Time,
+	_ time.Duration,
+) ([]persistence.OperationRecord, error) {
+	s.mu.Lock()
+	s.claimCalls++
+	call := s.claimCalls
+	s.claims++
+	s.mu.Unlock()
+	if call == 2 && s.allowReclaim != nil {
+		<-s.allowReclaim
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.claimOwners = append(s.claimOwners, owner)
+	s.claimLimits = append(s.claimLimits, limit)
+	if call > 2 {
+		return nil, nil
+	}
+	record := s.records[0]
+	s.claimed = map[string]string{record.ID: owner}
+	record.LockedBy = owner
+	record.Attempts = call
+	return []persistence.OperationRecord{record}, nil
 }
 
 func newOperationDispatcherForTest(

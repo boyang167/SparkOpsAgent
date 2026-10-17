@@ -53,7 +53,7 @@ go test ./internal/platform/messaging/... -run Operation -count=1
 - writer 拒绝事务外 schedule；
 - 重复幂等键视为成功；
 - 事件驱动 owner 必须与 subscriber 一致，event ID 来自事件元数据；
-- 命令驱动 operation ID 同时作为 trace event ID；
+- 命令驱动使用幂等键首段的稳定命令 ID 作为 trace event ID；
 - registry 重复注册失败，未知类型永久失败；
 - JSON 损坏和显式永久错误标记 `failed`，保留 `last_error`；
 - 临时错误按固定层级 reschedule；
@@ -68,8 +68,48 @@ go test ./internal/platform/messaging/... -run Operation -count=1
 - Task 3 的 `OperationStore` 已经强制所有状态更新匹配 `id + owner + executing` 并检查 `RowsAffected == 1`；dispatcher 复用该边界，不复制租约逻辑。
 - handler 接收原始 JSON 和稳定 `IdempotencyKey`。支持原生幂等的外部 API 应直接透传该键；不支持幂等的 API 仍需由 Task 10 handler 在调用前查询状态并对账。
 - 事件驱动幂等键严格校验为 `<event-id>:<subscriber>:<operation-type>:<target-id>`。
-- 命令驱动 operation 的 trace event ID 是新 operation UUID，但调用方幂等键必须保持业务稳定，因此不强制幂等键首段等于该新 trace ID；否则同一命令重试会生成不同键而失去去重能力。
+- 命令驱动与事件驱动都严格校验四段幂等键；命令使用调用方稳定命令 ID 作为 event ID，operation row ID 仍独立随机生成。
 - 指标采集错误会由 `DispatchOnce` 返回用于诊断，但不会跳过 claim 或 handler 执行。
+
+## 审查修复：RED/GREEN
+
+基于 commit `d7d6e5078b561e95edeabd00a6e8723e9cf1238b`，先补审查测试并运行：
+
+```text
+go test ./internal/platform/messaging/... -run 'Operation|Metrics' -count=1
+```
+
+RED 证据：
+
+- `OperationDispatcherError` collector 和 `operationOwnerMaxLength` 尚不存在，messaging 测试编译失败；
+- 四组不同意图复用同一幂等键的持久层测试均期望 `ErrOperationIdempotencyConflict`，实际得到 `nil`。
+
+GREEN 修复：
+
+1. runtime 为每个 worker 派生稳定、有界且唯一的 `<instance-owner>.worker-N`；owner 过长时保留 worker 后缀并加入 instance owner 哈希。claim 与后续状态更新全程使用同一 worker owner。
+2. runtime worker 固定单次 claim 1 条；`DispatchOnce` 继续保留显式批处理测试接口。
+3. `Insert` 在 `ON CONFLICT DO NOTHING` 后读取既有记录，仅当 event ID、owner、operation type 和 JSON payload 语义相同时返回成功，否则返回 `ErrOperationIdempotencyConflict`。Writer 不再吞掉冲突。
+4. 所有 operation key 严格要求四段非空，并校验 owner/type；事件模式额外校验 metadata event ID，命令模式使用稳定 key event ID。
+5. 新增 `sparkops_operation_dispatcher_error_total{stage}`，stage 仅限 `stats/claim/handler/mark/reschedule/lease_lost`。错误在来源处只记录一次，stats 失败不阻断 claim/执行。
+6. 增加 parent cancel 与并发、重复 `Close` 覆盖。
+
+关键并发用例连续 50 次通过：
+
+```text
+go test ./internal/platform/messaging \
+  -run 'TestOperationDispatcher(WorkersUseUniqueBoundedOwnersAndFenceExpiredLease|RuntimeWorkersClaimOnlyOneRecord|ParentCancelAndRepeatedClose|RecordsBoundedErrorStagesOnce|BackgroundLoopObservesDispatchErrors)' \
+  -count=50
+```
+
+持久层幂等与 lease 用例连续 20 次通过：
+
+```text
+go test ./internal/platform/messaging/persistence \
+  -run 'TestOperationInsert(TreatsDuplicateIdempotencyKeyAsSuccess|RejectsIdempotencyKeyForDifferentIntent)|TestOperationUpdatesRejectLostLease' \
+  -count=20
+```
+
+PostgreSQL build-tag 用例已新增；本机未设置 `DATABASE_DSN`，运行时明确 SKIP，未伪报为真实 PostgreSQL PASS。
 
 ## 验证
 
@@ -94,11 +134,14 @@ IDE lint：Task 6 修改文件无诊断。
 - `backend/internal/platform/messaging/operation.go`
 - `backend/internal/platform/messaging/operation_dispatcher.go`
 - `backend/internal/platform/messaging/operation_test.go`
+- `backend/internal/platform/messaging/metrics.go`
+- `backend/internal/platform/messaging/metrics_test.go`
 - `backend/internal/platform/messaging/persistence/operation_outbox.go`
 - `backend/internal/platform/messaging/persistence/operation_outbox_test.go`
+- `backend/internal/platform/messaging/persistence/claim_postgres_test.go`
 - `.superpowers/sdd/task-6-report.md`
 
-持久层两个文件属于 Task 6 必需增量：提供原子幂等插入以及 Operation backlog/oldest stats。未修改或暂存 frontend、`.superpowers/sdd/progress.md`、`.superpowers/sdd/task-5-report.md` 和 logs。
+持久层三个文件属于 Task 6 必需增量：提供原子幂等插入、Operation backlog/oldest stats 及 PostgreSQL 集成覆盖。未修改或暂存 frontend、`.superpowers/sdd/progress.md`、`.superpowers/sdd/task-5-report.md` 和 logs。
 
 ## 未决风险
 

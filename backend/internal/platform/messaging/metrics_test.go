@@ -19,6 +19,7 @@ func TestMetricsRegistersRequiredCollectorsOnce(t *testing.T) {
 	first.OutboxPending.Set(2)
 	first.EventPublish.WithLabelValues("success").Inc()
 	first.EventDispatcherError.WithLabelValues("stats").Inc()
+	first.OperationDispatcherError.WithLabelValues("claim").Inc()
 	first.EventConsume.WithLabelValues("test.subscriber", "success").Inc()
 	first.EventRetry.WithLabelValues("test.subscriber", "5s").Inc()
 	first.EventDLQ.WithLabelValues("test.subscriber").Inc()
@@ -41,6 +42,7 @@ func TestMetricsRegistersRequiredCollectorsOnce(t *testing.T) {
 		"sparkops_event_inbox_duplicate_total",
 		"sparkops_operation_outbox_pending",
 		"sparkops_operation_outbox_oldest_seconds",
+		"sparkops_operation_dispatcher_error_total",
 	} {
 		require.Truef(t, names[name], "metric %s was not registered", name)
 	}

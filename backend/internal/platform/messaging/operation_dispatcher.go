@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 )
+
+const operationOwnerMaxLength = 160
 
 type OperationDispatcherConfig struct {
 	Owner        string
@@ -64,44 +67,65 @@ func (d *OperationDispatcher) DispatchOnce(ctx context.Context) error {
 	if err := d.validateDependencies(false); err != nil {
 		return err
 	}
+	return d.dispatchOnce(
+		ctx,
+		d.config.Owner,
+		d.config.BatchSize,
+	)
+}
 
+func (d *OperationDispatcher) dispatchOnce(
+	ctx context.Context,
+	owner string,
+	limit int,
+) error {
 	var dispatchErrors []error
 	if err := d.refreshBacklogMetrics(ctx); err != nil {
+		d.recordOperationError("stats", err)
 		dispatchErrors = append(dispatchErrors, fmt.Errorf("read operation outbox stats: %w", err))
 	}
 	records, err := d.store.Claim(
 		ctx,
-		d.config.Owner,
-		d.config.BatchSize,
+		owner,
+		limit,
 		d.clock.Now(),
 		d.config.Lease,
 	)
 	if err != nil {
+		d.recordOperationError("claim", err)
 		dispatchErrors = append(dispatchErrors, fmt.Errorf("claim operation outbox: %w", err))
 		return errors.Join(dispatchErrors...)
 	}
 	for _, record := range records {
-		if err := d.dispatch(ctx, record); err != nil {
+		if err := d.dispatch(ctx, owner, record); err != nil {
 			dispatchErrors = append(dispatchErrors, err)
 		}
 	}
 	return errors.Join(dispatchErrors...)
 }
 
-func (d *OperationDispatcher) dispatch(ctx context.Context, record persistence.OperationRecord) error {
+func (d *OperationDispatcher) dispatch(
+	ctx context.Context,
+	owner string,
+	record persistence.OperationRecord,
+) error {
 	if !json.Valid(record.Payload) {
 		reason := "malformed operation payload"
 		markErr := d.store.MarkFailed(
-			ctx, record.ID, d.config.Owner, reason, d.clock.Now(),
+			ctx, record.ID, owner, reason, d.clock.Now(),
 		)
+		d.recordOperationError("handler", errors.New(reason))
+		d.recordOperationError("mark", markErr)
 		return errors.Join(errors.New(reason), markErr)
 	}
 	handler, ok := d.registry.Handler(record.OperationType)
 	if !ok {
 		reason := fmt.Sprintf("unknown operation type %q", record.OperationType)
 		markErr := d.store.MarkFailed(
-			ctx, record.ID, d.config.Owner, reason, d.clock.Now(),
+			ctx, record.ID, owner, reason, d.clock.Now(),
 		)
+		d.recordOperationError("handler", errors.New(reason))
+		d.recordOperationError("mark", markErr)
 		return errors.Join(errors.New(reason), markErr)
 	}
 
@@ -117,23 +141,37 @@ func (d *OperationDispatcher) dispatch(ctx context.Context, record persistence.O
 	err := handler(ctx, operation)
 	if err == nil {
 		if markErr := d.store.MarkCompleted(
-			ctx, record.ID, d.config.Owner, d.clock.Now(),
+			ctx, record.ID, owner, d.clock.Now(),
 		); markErr != nil {
+			d.recordOperationError("mark", markErr)
 			return fmt.Errorf("mark operation %s completed: %w", record.ID, markErr)
 		}
 		return nil
 	}
+	d.recordOperationError("handler", err)
 	if IsPermanent(err) {
 		markErr := d.store.MarkFailed(
-			ctx, record.ID, d.config.Owner, err.Error(), d.clock.Now(),
+			ctx, record.ID, owner, err.Error(), d.clock.Now(),
 		)
+		d.recordOperationError("mark", markErr)
 		return errors.Join(err, markErr)
 	}
 	next := d.clock.Now().Add(operationRetryDelay(record.Attempts))
 	rescheduleErr := d.store.Reschedule(
-		ctx, record.ID, d.config.Owner, err.Error(), next,
+		ctx, record.ID, owner, err.Error(), next,
 	)
+	d.recordOperationError("reschedule", rescheduleErr)
 	return errors.Join(err, rescheduleErr)
+}
+
+func (d *OperationDispatcher) recordOperationError(stage string, err error) {
+	if err == nil || d.metrics == nil {
+		return
+	}
+	if errors.Is(err, persistence.ErrLeaseLost) {
+		stage = "lease_lost"
+	}
+	d.metrics.OperationDispatcherError.WithLabelValues(stage).Inc()
 }
 
 func (d *OperationDispatcher) refreshBacklogMetrics(ctx context.Context) error {
@@ -191,17 +229,22 @@ func (d *OperationDispatcher) runWorkers(
 ) {
 	var workers sync.WaitGroup
 	workers.Add(d.config.Workers)
-	for range d.config.Workers {
+	for workerIndex := range d.config.Workers {
+		owner := operationWorkerOwner(d.config.Owner, workerIndex)
 		go func() {
 			defer workers.Done()
-			d.runWorker(ctx, stop)
+			d.runWorker(ctx, stop, owner)
 		}()
 	}
 	workers.Wait()
 	close(done)
 }
 
-func (d *OperationDispatcher) runWorker(ctx context.Context, stop <-chan struct{}) {
+func (d *OperationDispatcher) runWorker(
+	ctx context.Context,
+	stop <-chan struct{},
+	owner string,
+) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -210,7 +253,9 @@ func (d *OperationDispatcher) runWorker(ctx context.Context, stop <-chan struct{
 			return
 		default:
 		}
-		_ = d.DispatchOnce(ctx)
+		if err := d.dispatchOnce(ctx, owner, 1); err != nil && ctx.Err() != nil {
+			return
+		}
 		timer := time.NewTimer(d.config.PollInterval)
 		select {
 		case <-ctx.Done():
@@ -222,6 +267,18 @@ func (d *OperationDispatcher) runWorker(ctx context.Context, stop <-chan struct{
 		case <-timer.C:
 		}
 	}
+}
+
+func operationWorkerOwner(instanceOwner string, workerIndex int) string {
+	suffix := fmt.Sprintf(".worker-%d", workerIndex+1)
+	if len([]rune(instanceOwner))+len([]rune(suffix)) <= operationOwnerMaxLength {
+		return instanceOwner + suffix
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(instanceOwner)))[:12]
+	reserved := len([]rune(suffix)) + len(digest) + 1
+	runes := []rune(instanceOwner)
+	runes = runes[:operationOwnerMaxLength-reserved]
+	return string(runes) + "-" + digest + suffix
 }
 
 func (d *OperationDispatcher) Close() error {
