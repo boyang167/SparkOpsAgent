@@ -23,6 +23,18 @@ const (
 	ProjectStatusArchived  ProjectStatus = "archived"
 )
 
+type ArchivePhase string
+
+const (
+	ArchivePhaseNone            ArchivePhase = "none"
+	ArchivePhasePending         ArchivePhase = "pending"
+	ArchivePhaseUndeployClaimed ArchivePhase = "undeploy_claimed"
+	ArchivePhaseUndeploying     ArchivePhase = "undeploying"
+	ArchivePhasePipelinePending ArchivePhase = "pipeline_pending"
+	ArchivePhasePipelineClaimed ArchivePhase = "pipeline_claimed"
+	ArchivePhaseFinalizing      ArchivePhase = "finalizing"
+)
+
 type ProjectReviewStatus string
 
 const (
@@ -108,6 +120,7 @@ type Project struct {
 	Resources          ProjectResources
 	Status             ProjectStatus
 	ArchiveGeneration  string
+	ArchivePhase       ArchivePhase
 	ReviewStatus       ProjectReviewStatus
 	SubmittedBy        *kernel.MemberID
 	SubmittedAt        *time.Time
@@ -193,6 +206,7 @@ func NewProject(wsID kernel.WorkspaceID, name ProjectName, createdBy kernel.Memb
 		KubernetesSecretID: strings.TrimSpace(input.KubernetesSecretID),
 		Resources:          resources,
 		Status:             ProjectStatusActive,
+		ArchivePhase:       ArchivePhaseNone,
 		ReviewStatus:       ProjectReviewNone,
 		CreatedBy:          createdBy,
 		CreatedAt:          time.Now().UTC(),
@@ -207,6 +221,7 @@ func (p *Project) BeginArchiving() error {
 	}
 	p.Status = ProjectStatusArchiving
 	p.ArchiveGeneration = uuid.NewString()
+	p.ArchivePhase = ArchivePhasePending
 	return nil
 }
 
@@ -216,6 +231,7 @@ func (p *Project) AbortArchiving() error {
 	}
 	p.Status = ProjectStatusActive
 	p.ArchiveGeneration = ""
+	p.ArchivePhase = ArchivePhaseNone
 	return nil
 }
 
@@ -226,6 +242,7 @@ func (p *Project) Archive() error {
 		return domain.ErrProjectAlreadyArchived
 	}
 	p.Status = ProjectStatusArchived
+	p.ArchivePhase = ArchivePhaseNone
 	return nil
 }
 

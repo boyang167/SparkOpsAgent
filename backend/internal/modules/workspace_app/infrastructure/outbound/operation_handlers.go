@@ -62,23 +62,21 @@ func NewPipelineDisableHandler(
 		if err != nil {
 			return messaging.Permanent(err)
 		}
+		proceed, err := claimPipelineFinalizing(ctx, tx, repo, projectID, payload.Generation)
+		if err != nil || !proceed {
+			return err
+		}
 		target := disabler()
 		if target == nil {
 			return fmt.Errorf("project teardown unavailable")
-		}
-		project, err := repo.FindByID(ctx, projectID)
-		if err != nil {
-			return err
-		}
-		if project.Status == model.ProjectStatusArchived || !project.IsArchiving() ||
-			project.ArchiveGeneration != payload.Generation {
-			return nil
 		}
 		disabled, err := target.PipelineDisabled(ctx, workspaceID, projectID)
 		if err != nil {
 			return err
 		}
-		current, err := projectGenerationCurrent(ctx, tx, repo, projectID, payload.Generation)
+		current, err := projectPhaseCurrent(
+			ctx, tx, repo, projectID, payload.Generation, model.ArchivePhaseFinalizing,
+		)
 		if err != nil || !current {
 			return err
 		}
@@ -86,7 +84,9 @@ func NewPipelineDisableHandler(
 			if err := target.DisablePipeline(ctx, workspaceID, projectID); err != nil {
 				return err
 			}
-			current, err = projectGenerationCurrent(ctx, tx, repo, projectID, payload.Generation)
+			current, err = projectPhaseCurrent(
+				ctx, tx, repo, projectID, payload.Generation, model.ArchivePhaseFinalizing,
+			)
 			if err != nil || !current {
 				return err
 			}
@@ -94,7 +94,9 @@ func NewPipelineDisableHandler(
 			if err != nil {
 				return err
 			}
-			current, err = projectGenerationCurrent(ctx, tx, repo, projectID, payload.Generation)
+			current, err = projectPhaseCurrent(
+				ctx, tx, repo, projectID, payload.Generation, model.ArchivePhaseFinalizing,
+			)
 			if err != nil || !current {
 				return err
 			}
@@ -103,7 +105,10 @@ func NewPipelineDisableHandler(
 			return fmt.Errorf("pipeline remains enabled after disable")
 		}
 		return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-			return transitionProjectTerminal(txCtx, repo, projectID, payload.Generation, model.ProjectStatusArchived)
+			return transitionProjectTerminal(
+				txCtx, repo, projectID, payload.Generation,
+				model.ArchivePhaseFinalizing, model.ProjectStatusArchived,
+			)
 		})
 	}
 }
@@ -130,12 +135,21 @@ func NewProjectUndeployHandler(
 		if err != nil {
 			return messaging.Permanent(err)
 		}
-		project, err := repo.FindByID(ctx, projectID)
-		if err != nil || !project.IsArchiving() {
-			return err
+		allowUndeploy := true
+		if payload.AllowUndeploy != nil {
+			allowUndeploy = *payload.AllowUndeploy
 		}
-		if project.ArchiveGeneration != payload.Generation {
-			return nil
+		if !allowUndeploy {
+			return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+				return transitionProjectTerminal(
+					txCtx, repo, projectID, payload.Generation,
+					model.ArchivePhasePending, model.ProjectStatusActive,
+				)
+			})
+		}
+		project, proceed, err := claimUndeploy(ctx, tx, repo, projectID, payload.Generation)
+		if err != nil || !proceed {
+			return err
 		}
 		target := teardown()
 		if target == nil {
@@ -145,24 +159,21 @@ func NewProjectUndeployHandler(
 		if err != nil {
 			return err
 		}
-		current, err := projectGenerationCurrent(ctx, tx, repo, projectID, payload.Generation)
+		current, err := projectPhaseOneOf(
+			ctx, tx, repo, projectID, payload.Generation,
+			model.ArchivePhaseUndeployClaimed, model.ArchivePhaseUndeploying,
+		)
 		if err != nil || !current {
 			return err
-		}
-		allowUndeploy := true
-		if payload.AllowUndeploy != nil {
-			allowUndeploy = *payload.AllowUndeploy
-		}
-		if len(online) > 0 && !allowUndeploy {
-			return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-				return transitionProjectTerminal(txCtx, repo, projectID, payload.Generation, model.ProjectStatusActive)
-			})
 		}
 		active, err := target.HasActiveRun(ctx, project.ID)
 		if err != nil {
 			return err
 		}
-		current, err = projectGenerationCurrent(ctx, tx, repo, projectID, payload.Generation)
+		current, err = projectPhaseOneOf(
+			ctx, tx, repo, projectID, payload.Generation,
+			model.ArchivePhaseUndeployClaimed, model.ArchivePhaseUndeploying,
+		)
 		if err != nil || !current {
 			return err
 		}
@@ -182,7 +193,10 @@ func NewProjectUndeployHandler(
 				if err != nil && !(errors.As(err, &domainErr) && domainErr.Code() == "DELIVERY_DEPLOYMENT_RUNNING") {
 					return err
 				}
-				current, err = projectGenerationCurrent(ctx, tx, repo, projectID, payload.Generation)
+				current, err = projectPhaseOneOf(
+					ctx, tx, repo, projectID, payload.Generation,
+					model.ArchivePhaseUndeployClaimed, model.ArchivePhaseUndeploying,
+				)
 				if err != nil || !current {
 					return err
 				}
@@ -195,8 +209,19 @@ func NewProjectUndeployHandler(
 			if err != nil || !current.IsArchiving() {
 				return err
 			}
-			if current.ArchiveGeneration != payload.Generation {
+			if current.ArchiveGeneration != payload.Generation ||
+				(current.ArchivePhase != model.ArchivePhaseUndeployClaimed &&
+					current.ArchivePhase != model.ArchivePhaseUndeploying) {
 				return nil
+			}
+			advanced, err := repo.TransitionArchivePhase(
+				txCtx, projectID, payload.Generation, current.ArchivePhase, model.ArchivePhasePipelinePending,
+			)
+			if err != nil {
+				return err
+			}
+			if !advanced {
+				return errors.New("archive phase transition to pipeline pending conflicted")
 			}
 			return operations.Schedule(txCtx, messaging.OperationRequest{
 				Owner:          operation.Owner,
@@ -211,12 +236,119 @@ func NewProjectUndeployHandler(
 	}
 }
 
-func projectGenerationCurrent(
+func claimUndeploy(
 	ctx context.Context,
 	tx postgres.Transactor,
 	repo repository.ProjectTerminalRepository,
 	projectID kernel.ProjectID,
 	generation string,
+) (*model.Project, bool, error) {
+	var project *model.Project
+	var proceed bool
+	err := tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		current, err := repo.FindByID(txCtx, projectID)
+		if err != nil {
+			return err
+		}
+		if !current.IsArchiving() || current.ArchiveGeneration != generation {
+			return nil
+		}
+		switch current.ArchivePhase {
+		case model.ArchivePhasePending:
+			claimed, err := repo.TransitionArchivePhase(
+				txCtx, projectID, generation,
+				model.ArchivePhasePending, model.ArchivePhaseUndeployClaimed,
+			)
+			if err != nil {
+				return err
+			}
+			if !claimed {
+				_, err = repo.FindByID(txCtx, projectID)
+				if err != nil {
+					return err
+				}
+				return nil
+			}
+			current.ArchivePhase = model.ArchivePhaseUndeployClaimed
+			proceed = true
+		case model.ArchivePhaseUndeployClaimed, model.ArchivePhaseUndeploying:
+			proceed = true
+		}
+		project = current
+		return nil
+	})
+	return project, proceed, err
+}
+
+func claimPipelineFinalizing(
+	ctx context.Context,
+	tx postgres.Transactor,
+	repo repository.ProjectTerminalRepository,
+	projectID kernel.ProjectID,
+	generation string,
+) (bool, error) {
+	var proceed bool
+	err := tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		current, err := repo.FindByID(txCtx, projectID)
+		if err != nil {
+			return err
+		}
+		if !current.IsArchiving() || current.ArchiveGeneration != generation {
+			return nil
+		}
+		switch current.ArchivePhase {
+		case model.ArchivePhasePipelinePending:
+			claimed, err := repo.TransitionArchivePhase(
+				txCtx, projectID, generation,
+				model.ArchivePhasePipelinePending, model.ArchivePhasePipelineClaimed,
+			)
+			if err != nil {
+				return err
+			}
+			if !claimed {
+				_, err = repo.FindByID(txCtx, projectID)
+				return err
+			}
+			finalizing, err := repo.TransitionArchivePhase(
+				txCtx, projectID, generation,
+				model.ArchivePhasePipelineClaimed, model.ArchivePhaseFinalizing,
+			)
+			if err != nil {
+				return err
+			}
+			if !finalizing {
+				_, err = repo.FindByID(txCtx, projectID)
+				return err
+			}
+			proceed = true
+		case model.ArchivePhasePipelineClaimed:
+			finalizing, err := repo.TransitionArchivePhase(
+				txCtx, projectID, generation,
+				model.ArchivePhasePipelineClaimed, model.ArchivePhaseFinalizing,
+			)
+			if err != nil {
+				return err
+			}
+			if !finalizing {
+				_, err = repo.FindByID(txCtx, projectID)
+				return err
+			}
+			proceed = true
+		case model.ArchivePhaseFinalizing:
+			proceed = true
+		}
+		return nil
+	})
+	return proceed, err
+}
+
+func projectPhaseCurrent(
+	ctx context.Context,
+	tx postgres.Transactor,
+	repo repository.ProjectTerminalRepository,
+	projectID kernel.ProjectID,
+	generation string,
+	phase model.ArchivePhase,
 ) (bool, error) {
 	var current bool
 	err := tx.WithinTransaction(ctx, func(txCtx context.Context) error {
@@ -224,7 +356,37 @@ func projectGenerationCurrent(
 		if err != nil {
 			return err
 		}
-		current = project.IsArchiving() && project.ArchiveGeneration == generation
+		current = project.IsArchiving() &&
+			project.ArchiveGeneration == generation &&
+			project.ArchivePhase == phase
+		return nil
+	})
+	return current, err
+}
+
+func projectPhaseOneOf(
+	ctx context.Context,
+	tx postgres.Transactor,
+	repo repository.ProjectTerminalRepository,
+	projectID kernel.ProjectID,
+	generation string,
+	phases ...model.ArchivePhase,
+) (bool, error) {
+	var current bool
+	err := tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		project, err := repo.FindByID(txCtx, projectID)
+		if err != nil {
+			return err
+		}
+		if !project.IsArchiving() || project.ArchiveGeneration != generation {
+			return nil
+		}
+		for _, phase := range phases {
+			if project.ArchivePhase == phase {
+				current = true
+				break
+			}
+		}
 		return nil
 	})
 	return current, err
@@ -235,9 +397,10 @@ func transitionProjectTerminal(
 	repo repository.ProjectTerminalRepository,
 	projectID kernel.ProjectID,
 	generation string,
+	expected model.ArchivePhase,
 	target model.ProjectStatus,
 ) error {
-	updated, err := repo.TransitionArchiving(ctx, projectID, generation, target)
+	updated, err := repo.TransitionArchiving(ctx, projectID, generation, expected, target)
 	if err != nil || updated {
 		return err
 	}

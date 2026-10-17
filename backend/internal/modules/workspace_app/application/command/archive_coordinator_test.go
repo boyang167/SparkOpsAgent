@@ -37,15 +37,15 @@ type archiveSQLRepo struct {
 func (r *archiveSQLRepo) Save(ctx context.Context, project *model.Project) error {
 	r.projects[project.ID] = project
 	return postgres.DB(ctx, r.db).Exec(
-		"INSERT INTO workspace_app.projects (id, status, archive_generation) VALUES (?, ?, ?)",
-		project.ID.String(), string(project.Status), nullableGeneration(project.ArchiveGeneration),
+		"INSERT INTO workspace_app.projects (id, status, archive_generation, archive_phase) VALUES (?, ?, ?, ?)",
+		project.ID.String(), string(project.Status), nullableGeneration(project.ArchiveGeneration), string(project.ArchivePhase),
 	).Error
 }
 
 func (r *archiveSQLRepo) Update(ctx context.Context, project *model.Project) error {
 	if err := postgres.DB(ctx, r.db).Exec(
-		"UPDATE workspace_app.projects SET status = ?, archive_generation = ? WHERE id = ?",
-		string(project.Status), nullableGeneration(project.ArchiveGeneration), project.ID.String(),
+		"UPDATE workspace_app.projects SET status = ?, archive_generation = ?, archive_phase = ? WHERE id = ?",
+		string(project.Status), nullableGeneration(project.ArchiveGeneration), string(project.ArchivePhase), project.ID.String(),
 	).Error; err != nil {
 		return err
 	}
@@ -54,16 +54,31 @@ func (r *archiveSQLRepo) Update(ctx context.Context, project *model.Project) err
 }
 
 func (r *archiveSQLRepo) TransitionArchiving(
-	ctx context.Context, id kernel.ProjectID, generation string, target model.ProjectStatus,
+	ctx context.Context, id kernel.ProjectID, generation string, expected model.ArchivePhase, target model.ProjectStatus,
 ) (bool, error) {
 	result := postgres.DB(ctx, r.db).Exec(
-		"UPDATE workspace_app.projects SET status = ? WHERE id = ? AND status = ? AND archive_generation = ?",
-		string(target), id.String(), string(model.ProjectStatusArchiving), generation,
+		"UPDATE workspace_app.projects SET status = ?, archive_phase = ? WHERE id = ? AND status = ? AND archive_generation = ? AND archive_phase = ?",
+		string(target), string(model.ArchivePhaseNone), id.String(), string(model.ProjectStatusArchiving), generation, string(expected),
 	)
 	if result.Error != nil || result.RowsAffected == 0 {
 		return false, result.Error
 	}
 	r.projects[id].Status = target
+	r.projects[id].ArchivePhase = model.ArchivePhaseNone
+	return true, nil
+}
+
+func (r *archiveSQLRepo) TransitionArchivePhase(
+	ctx context.Context, id kernel.ProjectID, generation string, expected, target model.ArchivePhase,
+) (bool, error) {
+	result := postgres.DB(ctx, r.db).Exec(
+		"UPDATE workspace_app.projects SET archive_phase = ? WHERE id = ? AND status = ? AND archive_generation = ? AND archive_phase = ?",
+		string(target), id.String(), string(model.ProjectStatusArchiving), generation, string(expected),
+	)
+	if result.Error != nil || result.RowsAffected == 0 {
+		return false, result.Error
+	}
+	r.projects[id].ArchivePhase = target
 	return true, nil
 }
 
@@ -71,13 +86,14 @@ func (r *archiveSQLRepo) InitializeArchiveGeneration(
 	ctx context.Context, id kernel.ProjectID, generation string,
 ) (bool, error) {
 	result := postgres.DB(ctx, r.db).Exec(
-		"UPDATE workspace_app.projects SET archive_generation = ? WHERE id = ? AND status = ? AND archive_generation IS NULL",
-		generation, id.String(), string(model.ProjectStatusArchiving),
+		"UPDATE workspace_app.projects SET archive_generation = ?, archive_phase = ? WHERE id = ? AND status = ? AND archive_generation IS NULL",
+		generation, string(model.ArchivePhasePending), id.String(), string(model.ProjectStatusArchiving),
 	)
 	if result.Error != nil || result.RowsAffected == 0 {
 		return false, result.Error
 	}
 	r.projects[id].ArchiveGeneration = generation
+	r.projects[id].ArchivePhase = model.ArchivePhasePending
 	return true, nil
 }
 
@@ -85,9 +101,10 @@ func (r *archiveSQLRepo) FindByID(ctx context.Context, id kernel.ProjectID) (*mo
 	var row struct {
 		Status            string
 		ArchiveGeneration *string
+		ArchivePhase      string
 	}
 	if err := postgres.DB(ctx, r.db).Table("workspace_app.projects").
-		Select("status, archive_generation").Where("id = ?", id.String()).Scan(&row).Error; err != nil {
+		Select("status, archive_generation, archive_phase").Where("id = ?", id.String()).Scan(&row).Error; err != nil {
 		return nil, err
 	}
 	project, ok := r.projects[id]
@@ -99,6 +116,7 @@ func (r *archiveSQLRepo) FindByID(ctx context.Context, id kernel.ProjectID) (*mo
 	if row.ArchiveGeneration != nil {
 		project.ArchiveGeneration = *row.ArchiveGeneration
 	}
+	project.ArchivePhase = model.ArchivePhase(row.ArchivePhase)
 	return project, nil
 }
 
@@ -133,13 +151,27 @@ func (r *archiveProjectRepo) Update(_ context.Context, p *model.Project) error {
 	return nil
 }
 func (r *archiveProjectRepo) TransitionArchiving(
-	_ context.Context, id kernel.ProjectID, generation string, target model.ProjectStatus,
+	_ context.Context, id kernel.ProjectID, generation string, expected model.ArchivePhase, target model.ProjectStatus,
 ) (bool, error) {
 	p, ok := r.projects[id]
-	if !ok || !p.IsArchiving() || p.ArchiveGeneration != generation {
+	if !ok || !p.IsArchiving() || p.ArchiveGeneration != generation || p.ArchivePhase != expected {
 		return false, nil
 	}
 	p.Status = target
+	p.ArchivePhase = model.ArchivePhaseNone
+	if target == model.ProjectStatusActive {
+		p.ArchiveGeneration = ""
+	}
+	return true, nil
+}
+func (r *archiveProjectRepo) TransitionArchivePhase(
+	_ context.Context, id kernel.ProjectID, generation string, expected, target model.ArchivePhase,
+) (bool, error) {
+	p, ok := r.projects[id]
+	if !ok || !p.IsArchiving() || p.ArchiveGeneration != generation || p.ArchivePhase != expected {
+		return false, nil
+	}
+	p.ArchivePhase = target
 	return true, nil
 }
 func (r *archiveProjectRepo) InitializeArchiveGeneration(
@@ -150,6 +182,7 @@ func (r *archiveProjectRepo) InitializeArchiveGeneration(
 		return false, nil
 	}
 	p.ArchiveGeneration = generation
+	p.ArchivePhase = model.ArchivePhasePending
 	return true, nil
 }
 func (r *archiveProjectRepo) FindByID(_ context.Context, id kernel.ProjectID) (*model.Project, error) {
@@ -325,14 +358,15 @@ func TestArchiveWithTeardownStartsFirstUndeploy(t *testing.T) {
 	require.Equal(t, []kernel.ClusterInfoID{dev}, teardown.started)
 }
 
-func TestArchiveRevertsWhenFirstUndeployCannotStart(t *testing.T) {
+func TestArchiveKeepsClaimedStateWhenFirstUndeployCannotStart(t *testing.T) {
 	handler, _, teardown, project := archiveFixture(t, kernel.NewClusterInfoID())
 	teardown.startErr = errors.New("queue down")
 
 	_, err := handler.Handle(context.Background(), project.WorkspaceID, kernel.NewMemberID(), project.ID, command.ArchiveInput{ConfirmName: "orders", Teardown: true})
 
 	require.Error(t, err)
-	require.Equal(t, model.ProjectStatusActive, project.Status)
+	require.Equal(t, model.ProjectStatusArchiving, project.Status)
+	require.Equal(t, model.ArchivePhaseUndeployClaimed, project.ArchivePhase)
 }
 
 func TestArchiveRejectsProjectAlreadyArchiving(t *testing.T) {
@@ -386,14 +420,31 @@ func TestCoordinatorWaitsWhenAnotherUndeployIsAlreadyRunning(t *testing.T) {
 	require.Equal(t, model.ProjectStatusArchiving, project.Status)
 }
 
-func TestCoordinatorAbortsArchivingOnUndeployFailure(t *testing.T) {
+func TestCoordinatorKeepsClaimedArchiveOnUndeployFailure(t *testing.T) {
 	handler, coordinator, _, project := archiveFixture(t, kernel.NewClusterInfoID())
 	_, err := handler.Handle(context.Background(), project.WorkspaceID, kernel.NewMemberID(), project.ID, command.ArchiveInput{ConfirmName: "orders", Teardown: true})
 	require.NoError(t, err)
 
 	require.NoError(t, coordinator.HandleDeployCompleted(context.Background(), undeployEvent(project, "failed")))
 
-	require.Equal(t, model.ProjectStatusActive, project.Status)
+	require.Equal(t, model.ProjectStatusArchiving, project.Status)
+	require.Equal(t, model.ArchivePhaseUndeployClaimed, project.ArchivePhase)
+}
+
+func TestCoordinatorDoesNotAbortClaimedArchiveOnUndeployFailure(t *testing.T) {
+	_, coordinator, teardown, project := archiveFixture(t)
+	require.NoError(t, project.BeginArchiving())
+	project.ArchivePhase = model.ArchivePhaseUndeploying
+	runID := kernel.NewDeploymentRunID()
+	teardown.runGenerations = map[kernel.DeploymentRunID]string{runID: project.ArchiveGeneration}
+	ev := deliveryevent.NewDeployCompleted(
+		runID, project.ID, project.WorkspaceID, nil, "", "failed", "undeploy", "v1",
+	)
+
+	require.NoError(t, coordinator.HandleDeployCompleted(context.Background(), ev))
+
+	require.Equal(t, model.ProjectStatusArchiving, project.Status)
+	require.Equal(t, model.ArchivePhaseUndeploying, project.ArchivePhase)
 }
 
 func TestDelayedFailureFromPreviousArchiveGenerationCannotAbortCurrentArchive(t *testing.T) {
@@ -418,11 +469,13 @@ func TestDelayedFailureFromPreviousArchiveGenerationCannotAbortCurrentArchive(t 
 	require.Empty(t, writer.requests)
 	require.Zero(t, teardown.onlineChecks)
 
+	project.ArchivePhase = model.ArchivePhaseUndeploying
 	current := deliveryevent.NewDeployCompleted(runB, project.ID, project.WorkspaceID, nil, "", "succeeded", "undeploy", "v1")
 	current.CreatedBy = kernel.NewMemberID()
 	ctx := events.WithMetadata(context.Background(), events.Metadata{EventID: "event-b", Subscriber: "workspace-app.archive"})
 	require.NoError(t, coordinator.HandleDeployCompleted(ctx, current))
 	require.Len(t, writer.requests, 1)
+	require.Equal(t, model.ArchivePhaseUndeployClaimed, project.ArchivePhase)
 	payload := writer.requests[0].Payload.(workspaceoutbound.ProjectUndeployPayload)
 	require.Equal(t, generationB, payload.Generation)
 }
@@ -694,7 +747,10 @@ func openArchiveResumeDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS workspace_app").Error)
 	require.NoError(t, db.Exec(`
-		CREATE TABLE workspace_app.projects (id TEXT PRIMARY KEY, status TEXT, archive_generation TEXT);
+		CREATE TABLE workspace_app.projects (
+			id TEXT PRIMARY KEY, status TEXT, archive_generation TEXT,
+			archive_phase TEXT NOT NULL DEFAULT 'none'
+		);
 		CREATE TABLE platform.operation_outbox (
 			id TEXT PRIMARY KEY, event_id TEXT NOT NULL, subscriber TEXT NOT NULL,
 			operation_type TEXT NOT NULL, idempotency_key TEXT NOT NULL UNIQUE, payload BLOB NOT NULL,

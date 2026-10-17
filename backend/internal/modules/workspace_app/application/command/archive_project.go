@@ -185,17 +185,11 @@ func (h *ArchiveProjectHandler) archive(
 		return ArchiveResult{}, err
 	}
 	if len(online) == 0 {
-		if h.coordinator.operations != nil {
-			if err := project.BeginArchiving(); err != nil {
-				return ArchiveResult{}, err
-			}
-			if err := h.repo.Update(ctx, project); err != nil {
-				return ArchiveResult{}, err
-			}
-			if err := h.coordinator.finish(ctx, teardown, project); err != nil {
-				return ArchiveResult{}, err
-			}
-			return ArchiveResult{Status: string(model.ProjectStatusArchiving), PendingClusters: []string{}}, nil
+		if err := project.BeginArchiving(); err != nil {
+			return ArchiveResult{}, err
+		}
+		if err := h.repo.Update(ctx, project); err != nil {
+			return ArchiveResult{}, err
 		}
 		if err := h.coordinator.finish(ctx, teardown, project); err != nil {
 			return ArchiveResult{}, err
@@ -212,9 +206,6 @@ func (h *ArchiveProjectHandler) archive(
 		return ArchiveResult{}, err
 	}
 	if err := h.coordinator.Advance(ctx, project, memberID); err != nil {
-		if abortErr := project.AbortArchiving(); abortErr == nil {
-			_ = h.repo.Update(ctx, project)
-		}
 		return ArchiveResult{}, err
 	}
 	pending := make([]string, 0, len(online))

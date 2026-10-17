@@ -3,14 +3,17 @@ package acl
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	deploydomain "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -37,7 +40,9 @@ func newACLFixture(t *testing.T) *aclFixture {
 		`CREATE TABLE workspace_app.projects (
 			id TEXT PRIMARY KEY, workspace_id TEXT, name TEXT, namespace TEXT, git_url TEXT,
 			secret_id TEXT, review_status TEXT, resources BLOB, default_cluster_id TEXT,
-			jenkins_secret_id TEXT, kubernetes_secret_id TEXT)`,
+			jenkins_secret_id TEXT, kubernetes_secret_id TEXT,
+			status TEXT NOT NULL DEFAULT 'active', archive_generation TEXT,
+			archive_phase TEXT NOT NULL DEFAULT 'none')`,
 		`CREATE TABLE workspace_app.secrets (
 			id TEXT PRIMARY KEY, workspace_id TEXT, service_type TEXT, service_url TEXT,
 			username TEXT, credential_blob TEXT, status TEXT)`,
@@ -117,6 +122,45 @@ func (f *aclFixture) load() error {
 	_, err := NewWorkspaceAppACL(f.db, f.box).Load(
 		context.Background(), f.workspace, f.project, kernel.ClusterInfoID{})
 	return err
+}
+
+func TestProjectArchiveFenceChecksGenerationAndPhase(t *testing.T) {
+	f := newACLFixture(t)
+	generation := uuid.NewString()
+	require.NoError(t, f.db.Table("workspace_app.projects").Where("id = ?", f.project.String()).
+		Updates(map[string]any{
+			"status": "archiving", "archive_generation": generation, "archive_phase": "undeploy_claimed",
+		}).Error)
+	acl := NewWorkspaceAppACL(f.db, f.box)
+
+	lifecycle, err := acl.ProjectLifecycle(context.Background(), f.workspace, f.project)
+	require.NoError(t, err)
+	require.Equal(t, generation, lifecycle.ArchiveGeneration)
+	require.Equal(t, "undeploy_claimed", lifecycle.ArchivePhase)
+
+	rollback := errors.New("rollback")
+	require.ErrorIs(t, postgres.NewTransactor(f.db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+		advanced, err := acl.TransitionArchivePhase(
+			ctx, f.project, generation, "undeploy_claimed", "undeploying",
+		)
+		require.NoError(t, err)
+		require.True(t, advanced)
+		return rollback
+	}), rollback)
+	lifecycle, err = acl.ProjectLifecycle(context.Background(), f.workspace, f.project)
+	require.NoError(t, err)
+	require.Equal(t, "undeploy_claimed", lifecycle.ArchivePhase)
+
+	advanced, err := acl.TransitionArchivePhase(
+		context.Background(), f.project, generation, "undeploy_claimed", "undeploying",
+	)
+	require.NoError(t, err)
+	require.True(t, advanced)
+	stale, err := acl.TransitionArchivePhase(
+		context.Background(), f.project, generation, "undeploy_claimed", "undeploying",
+	)
+	require.NoError(t, err)
+	require.False(t, stale)
 }
 
 func TestLoadRejectsUnauthorizedCluster(t *testing.T) {

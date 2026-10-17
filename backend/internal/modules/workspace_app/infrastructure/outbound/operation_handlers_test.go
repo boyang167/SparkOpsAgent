@@ -22,8 +22,9 @@ import (
 )
 
 type pipelineProjectRepo struct {
-	project *model.Project
-	finds   int
+	project       *model.Project
+	finds         int
+	transitionErr error
 }
 
 func (r *pipelineProjectRepo) Save(context.Context, *model.Project) error { return nil }
@@ -32,13 +33,36 @@ func (r *pipelineProjectRepo) Update(_ context.Context, project *model.Project) 
 	return nil
 }
 func (r *pipelineProjectRepo) TransitionArchiving(
-	_ context.Context, id kernel.ProjectID, generation string, target model.ProjectStatus,
+	_ context.Context, id kernel.ProjectID, generation string, expected model.ArchivePhase, target model.ProjectStatus,
 ) (bool, error) {
+	if r.transitionErr != nil {
+		err := r.transitionErr
+		r.transitionErr = nil
+		return false, err
+	}
 	if r.project == nil || r.project.ID != id || !r.project.IsArchiving() ||
-		r.project.ArchiveGeneration != generation {
+		r.project.ArchiveGeneration != generation || r.project.ArchivePhase != expected {
 		return false, nil
 	}
 	r.project.Status = target
+	r.project.ArchivePhase = model.ArchivePhaseNone
+	if target == model.ProjectStatusActive {
+		r.project.ArchiveGeneration = ""
+	}
+	return true, nil
+}
+func (r *pipelineProjectRepo) TransitionArchivePhase(
+	_ context.Context,
+	id kernel.ProjectID,
+	generation string,
+	expected model.ArchivePhase,
+	target model.ArchivePhase,
+) (bool, error) {
+	if r.project == nil || r.project.ID != id || !r.project.IsArchiving() ||
+		r.project.ArchiveGeneration != generation || r.project.ArchivePhase != expected {
+		return false, nil
+	}
+	r.project.ArchivePhase = target
 	return true, nil
 }
 func (r *pipelineProjectRepo) InitializeArchiveGeneration(
@@ -49,6 +73,7 @@ func (r *pipelineProjectRepo) InitializeArchiveGeneration(
 		return false, nil
 	}
 	r.project.ArchiveGeneration = generation
+	r.project.ArchivePhase = model.ArchivePhasePending
 	return true, nil
 }
 func (r *pipelineProjectRepo) FindByID(_ context.Context, id kernel.ProjectID) (*model.Project, error) {
@@ -103,9 +128,11 @@ func (r *pipelineProjectRepo) ListByStatus(context.Context, model.ProjectStatus)
 }
 
 type pipelineDisabler struct {
-	disabled   bool
-	disableErr error
-	calls      int
+	disabled    bool
+	disableErr  error
+	calls       int
+	statusCalls int
+	statusHook  func()
 }
 
 func operationWithPayload(t *testing.T, value any) messaging.Operation {
@@ -116,6 +143,11 @@ func operationWithPayload(t *testing.T, value any) messaging.Operation {
 }
 
 func (d *pipelineDisabler) PipelineDisabled(context.Context, kernel.WorkspaceID, kernel.ProjectID) (bool, error) {
+	d.statusCalls++
+	if d.statusHook != nil {
+		d.statusHook()
+		d.statusHook = nil
+	}
 	return d.disabled, nil
 }
 func (d *pipelineDisabler) DisablePipeline(context.Context, kernel.WorkspaceID, kernel.ProjectID) error {
@@ -131,6 +163,7 @@ func TestPipelineDisableRetriesWithoutPrematureOrDuplicateArchive(t *testing.T) 
 	require.NoError(t, err)
 	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
 	require.NoError(t, project.BeginArchiving())
+	project.ArchivePhase = model.ArchivePhasePipelinePending
 	repo := &pipelineProjectRepo{project: project}
 	disabler := &pipelineDisabler{disableErr: errors.New("jenkins unavailable")}
 	handler := NewPipelineDisableHandler(func() PipelineDisabler { return disabler }, repo, postgres.NewDirectTransactor())
@@ -152,6 +185,80 @@ func TestPipelineDisableRetriesWithoutPrematureOrDuplicateArchive(t *testing.T) 
 	require.Equal(t, 2, disabler.calls)
 }
 
+func TestPipelineDisableRetryReconcilesExternalSuccessAfterTerminalWriteFailure(t *testing.T) {
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, project.BeginArchiving())
+	project.ArchivePhase = model.ArchivePhasePipelinePending
+	repo := &pipelineProjectRepo{project: project, transitionErr: errors.New("database unavailable")}
+	disabler := &pipelineDisabler{}
+	handler := NewPipelineDisableHandler(func() PipelineDisabler { return disabler }, repo, postgres.NewDirectTransactor())
+	operation := operationWithPayload(t, PipelineDisablePayload{
+		WorkspaceID: project.WorkspaceID.String(), ProjectID: project.ID.String(), Generation: project.ArchiveGeneration,
+	})
+
+	require.Error(t, handler(context.Background(), operation))
+	require.True(t, disabler.disabled)
+	require.Equal(t, 1, disabler.calls)
+	require.Equal(t, model.ArchivePhaseFinalizing, project.ArchivePhase)
+
+	require.NoError(t, handler(context.Background(), operation))
+	require.Equal(t, 1, disabler.calls)
+	require.Equal(t, model.ProjectStatusArchived, project.Status)
+}
+
+func TestPipelineDisableClaimsFinalizingBeforeExternalQuery(t *testing.T) {
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, project.BeginArchiving())
+	project.ArchivePhase = model.ArchivePhasePipelinePending
+	repo := &pipelineProjectRepo{project: project}
+	phaseAtExternal := model.ArchivePhaseNone
+	abortWon := false
+	disabler := &pipelineDisabler{disabled: true}
+	disabler.statusHook = func() {
+		phaseAtExternal = project.ArchivePhase
+		abortWon, err = repo.TransitionArchiving(
+			context.Background(), project.ID, project.ArchiveGeneration,
+			model.ArchivePhasePending, model.ProjectStatusActive,
+		)
+		require.NoError(t, err)
+	}
+	handler := NewPipelineDisableHandler(func() PipelineDisabler { return disabler }, repo, postgres.NewDirectTransactor())
+
+	require.NoError(t, handler(context.Background(), operationWithPayload(t, PipelineDisablePayload{
+		WorkspaceID: project.WorkspaceID.String(), ProjectID: project.ID.String(), Generation: project.ArchiveGeneration,
+	})))
+
+	require.Equal(t, model.ArchivePhaseFinalizing, phaseAtExternal)
+	require.False(t, abortWon)
+	require.Equal(t, model.ProjectStatusArchived, project.Status)
+}
+
+func TestPipelineDisableAbortWinnerPreventsExternalQuery(t *testing.T) {
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, project.BeginArchiving())
+	generation := project.ArchiveGeneration
+	repo := &pipelineProjectRepo{project: project}
+	aborted, err := repo.TransitionArchiving(
+		context.Background(), project.ID, generation, model.ArchivePhasePending, model.ProjectStatusActive,
+	)
+	require.NoError(t, err)
+	require.True(t, aborted)
+	disabler := &pipelineDisabler{}
+	handler := NewPipelineDisableHandler(func() PipelineDisabler { return disabler }, repo, postgres.NewDirectTransactor())
+
+	require.NoError(t, handler(context.Background(), operationWithPayload(t, PipelineDisablePayload{
+		WorkspaceID: project.WorkspaceID.String(), ProjectID: project.ID.String(), Generation: generation,
+	})))
+	require.Zero(t, disabler.statusCalls)
+	require.Zero(t, disabler.calls)
+}
+
 type txMarkerKey struct{}
 
 type markerTransactor struct{}
@@ -171,6 +278,8 @@ type undeployTeardown struct {
 	onlineChecks int
 	calledInside bool
 	lastRequest  appctx.UndeployRequest
+	onlineHook   func()
+	startHook    func()
 }
 
 func (t *undeployTeardown) mark(ctx context.Context) {
@@ -181,6 +290,10 @@ func (t *undeployTeardown) mark(ctx context.Context) {
 func (t *undeployTeardown) OnlineClusters(ctx context.Context, _ kernel.WorkspaceID, _ kernel.ProjectID) ([]kernel.ClusterInfoID, error) {
 	t.mark(ctx)
 	t.onlineChecks++
+	if t.onlineHook != nil {
+		t.onlineHook()
+		t.onlineHook = nil
+	}
 	return t.online, nil
 }
 func (t *undeployTeardown) HasActiveRun(ctx context.Context, _ kernel.ProjectID) (bool, error) {
@@ -189,6 +302,10 @@ func (t *undeployTeardown) HasActiveRun(ctx context.Context, _ kernel.ProjectID)
 }
 func (t *undeployTeardown) StartUndeploy(ctx context.Context, req appctx.UndeployRequest) (kernel.DeploymentRunID, error) {
 	t.mark(ctx)
+	if t.startHook != nil {
+		t.startHook()
+		t.startHook = nil
+	}
 	t.starts++
 	t.lastRequest = req
 	return kernel.NewDeploymentRunID(), nil
@@ -248,6 +365,66 @@ func TestProjectUndeployRetriesUntilOfflineThenSchedulesPipeline(t *testing.T) {
 	require.False(t, teardown.calledInside)
 }
 
+func TestProjectUndeployClaimWinsConcurrentAbortBeforeExternalQuery(t *testing.T) {
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, project.BeginArchiving())
+	repo := &pipelineProjectRepo{project: project}
+	teardown := &undeployTeardown{online: []kernel.ClusterInfoID{kernel.NewClusterInfoID()}}
+	abortWon := false
+	phaseAtExternal := model.ArchivePhaseNone
+	teardown.onlineHook = func() {
+		phaseAtExternal = project.ArchivePhase
+	}
+	teardown.startHook = func() {
+		abortWon, err = repo.TransitionArchiving(
+			context.Background(), project.ID, project.ArchiveGeneration,
+			model.ArchivePhasePending, model.ProjectStatusActive,
+		)
+		require.NoError(t, err)
+	}
+	handler := NewProjectUndeployHandler(
+		repo, func() appctx.ProjectTeardown { return teardown }, &undeployOperationWriter{}, postgres.NewDirectTransactor(),
+	)
+
+	err = handler(context.Background(), operationWithPayload(t, ProjectUndeployPayload{
+		ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
+		Generation: project.ArchiveGeneration, AllowUndeploy: boolRef(true),
+	}))
+
+	require.Error(t, err)
+	require.Equal(t, model.ArchivePhaseUndeployClaimed, phaseAtExternal)
+	require.False(t, abortWon)
+	require.Equal(t, model.ProjectStatusArchiving, project.Status)
+	require.Equal(t, 1, teardown.starts)
+}
+
+func TestProjectUndeployAbortWinnerPreventsExternalQuery(t *testing.T) {
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, project.BeginArchiving())
+	generation := project.ArchiveGeneration
+	repo := &pipelineProjectRepo{project: project}
+	aborted, err := repo.TransitionArchiving(
+		context.Background(), project.ID, generation, model.ArchivePhasePending, model.ProjectStatusActive,
+	)
+	require.NoError(t, err)
+	require.True(t, aborted)
+	teardown := &undeployTeardown{online: []kernel.ClusterInfoID{kernel.NewClusterInfoID()}}
+	handler := NewProjectUndeployHandler(
+		repo, func() appctx.ProjectTeardown { return teardown }, &undeployOperationWriter{}, postgres.NewDirectTransactor(),
+	)
+
+	require.NoError(t, handler(context.Background(), operationWithPayload(t, ProjectUndeployPayload{
+		ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
+		Generation: generation, AllowUndeploy: boolRef(true),
+	})))
+	require.Zero(t, teardown.onlineChecks)
+	require.Zero(t, teardown.starts)
+}
+
 func TestProjectUndeployRetriesPipelineScheduleAfterExternalStateConverges(t *testing.T) {
 	name, err := model.NewProjectName("orders")
 	require.NoError(t, err)
@@ -268,6 +445,9 @@ func TestProjectUndeployRetriesPipelineScheduleAfterExternalStateConverges(t *te
 
 	require.Error(t, handler(context.Background(), operation))
 	require.Equal(t, model.ProjectStatusArchiving, project.Status)
+	// markerTransactor cannot roll state back; restore the claimed phase that a real
+	// database transaction retains when Schedule fails.
+	project.ArchivePhase = model.ArchivePhaseUndeployClaimed
 	writer.err = nil
 	require.NoError(t, handler(context.Background(), operation))
 	require.Len(t, writer.requests, 2)

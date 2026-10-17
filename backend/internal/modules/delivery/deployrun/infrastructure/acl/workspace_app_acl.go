@@ -14,10 +14,11 @@ import (
 	workspacequery "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/query"
 	workspace "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
+	"gorm.io/gorm"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
-	"gorm.io/gorm"
 )
 
 type WorkspaceAppACL struct {
@@ -44,6 +45,8 @@ type deploymentProjectRow struct {
 	SecretID           *string
 	ReviewStatus       string
 	Status             string
+	ArchiveGeneration  *string
+	ArchivePhase       string
 	Resources          []byte
 	DefaultClusterID   *string
 	JenkinsSecretID    *string
@@ -53,7 +56,7 @@ type deploymentProjectRow struct {
 
 func (a *WorkspaceAppACL) loadProject(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) (deploymentProjectRow, error) {
 	var row deploymentProjectRow
-	err := a.db.WithContext(ctx).Table("workspace_app.projects").
+	err := postgres.DB(ctx, a.db).Table("workspace_app.projects").
 		Where("id = ? AND workspace_id = ?", projectID.String(), wsID.String()).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -67,7 +70,10 @@ func (a *WorkspaceAppACL) ProjectLifecycle(ctx context.Context, wsID kernel.Work
 	if err != nil {
 		return port.ProjectLifecycle{}, err
 	}
-	lifecycle := port.ProjectLifecycle{Name: row.Name, Status: row.Status}
+	lifecycle := port.ProjectLifecycle{Name: row.Name, Status: row.Status, ArchivePhase: row.ArchivePhase}
+	if row.ArchiveGeneration != nil {
+		lifecycle.ArchiveGeneration = *row.ArchiveGeneration
+	}
 	if row.ProductID != nil {
 		lifecycle.ProductID = *row.ProductID
 	}
@@ -75,6 +81,25 @@ func (a *WorkspaceAppACL) ProjectLifecycle(ctx context.Context, wsID kernel.Work
 }
 
 var _ port.ProjectLifecycleReader = (*WorkspaceAppACL)(nil)
+
+func (a *WorkspaceAppACL) TransitionArchivePhase(
+	ctx context.Context,
+	projectID kernel.ProjectID,
+	generation string,
+	expected string,
+	target string,
+) (bool, error) {
+	result := postgres.DB(ctx, a.db).Table("workspace_app.projects").
+		Where("id = ? AND status = ? AND archive_generation = ? AND archive_phase = ?",
+			projectID.String(), string(workspace.ProjectStatusArchiving), generation, expected).
+		Update("archive_phase", target)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+var _ port.ProjectArchiveFence = (*WorkspaceAppACL)(nil)
 
 func (a *WorkspaceAppACL) loadSecret(ctx context.Context, wsID kernel.WorkspaceID, secretID string, allowedTypes ...string) (port.DeploymentSecret, error) {
 	if strings.TrimSpace(secretID) == "" {
@@ -313,7 +338,7 @@ func (a *WorkspaceAppACL) Load(ctx context.Context, wsID kernel.WorkspaceID, pro
 	}
 	return port.ProjectDeploymentContext{
 		WorkspaceID: wsID, ProjectID: projectID, Name: project.Name, Namespace: project.Namespace,
-		GitURL: project.GitURL,
+		GitURL:      project.GitURL,
 		Jenkinsfile: jenkinsfile, ServiceYAML: serviceYAML, DeploymentYAML: deploymentYAML,
 		ImageRepository:  imageRepository,
 		EnableStaticScan: resources.EnableStaticScan, Cluster: cluster,

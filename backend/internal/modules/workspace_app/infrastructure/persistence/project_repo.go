@@ -71,6 +71,7 @@ type projectModel struct {
 	Resources          []byte  `gorm:"type:jsonb"`
 	Status             string
 	ArchiveGeneration  *string `gorm:"type:uuid"`
+	ArchivePhase       string  `gorm:"size:32;not null;default:none"`
 	ReviewStatus       string  `gorm:"default:none;not null"`
 	SubmittedBy        *string `gorm:"type:uuid"`
 	SubmittedAt        *time.Time
@@ -99,7 +100,8 @@ func (r *ProjectRepository) Save(ctx context.Context, project *model.Project) er
 		Name: project.Name.String(), DisplayName: project.DisplayName, Description: project.Description,
 		Namespace: project.Namespace, Language: project.Language, GitURL: project.GitURL,
 		GitRefType: project.GitRefType, GitRefValue: project.GitRefValue, DockerfilePath: project.DockerfilePath,
-		Resources: resources, Status: string(project.Status), CreatedBy: project.CreatedBy.String(),
+		Resources: resources, Status: string(project.Status), ArchivePhase: string(project.ArchivePhase),
+		CreatedBy:    project.CreatedBy.String(),
 		ReviewStatus: string(project.ReviewStatus), SubmittedAt: project.SubmittedAt,
 		ReviewedAt: project.ReviewedAt, ReviewComment: project.ReviewComment,
 		AuditColumns: postgres.AuditColumns{CreatedAt: project.CreatedAt, UpdatedAt: project.CreatedAt},
@@ -162,6 +164,7 @@ func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) 
 		"resources":          resources,
 		"status":             string(project.Status),
 		"archive_generation": nil,
+		"archive_phase":      string(project.ArchivePhase),
 		"review_status":      string(project.ReviewStatus),
 		"submitted_at":       project.SubmittedAt,
 		"reviewed_at":        project.ReviewedAt,
@@ -222,14 +225,47 @@ func (r *ProjectRepository) TransitionArchiving(
 	ctx context.Context,
 	id kernel.ProjectID,
 	generation string,
+	expected model.ArchivePhase,
 	target model.ProjectStatus,
 ) (bool, error) {
 	if target != model.ProjectStatusActive && target != model.ProjectStatusArchived {
 		return false, fmt.Errorf("invalid project terminal status %q", target)
 	}
+	if target == model.ProjectStatusActive && expected != model.ArchivePhasePending {
+		return false, fmt.Errorf("project archive abort requires pending phase")
+	}
+	if target == model.ProjectStatusArchived && expected != model.ArchivePhaseFinalizing {
+		return false, fmt.Errorf("project archive finalization requires finalizing phase")
+	}
+	updates := map[string]any{
+		"status":        string(target),
+		"archive_phase": string(model.ArchivePhaseNone),
+		"updated_at":    time.Now().UTC(),
+	}
+	if target == model.ProjectStatusActive {
+		updates["archive_generation"] = nil
+	}
 	result := postgres.DB(ctx, r.db).Model(&projectModel{}).
-		Where("id = ? AND status = ? AND archive_generation = ?", id.String(), model.ProjectStatusArchiving, generation).
-		Updates(map[string]any{"status": string(target), "updated_at": time.Now().UTC()})
+		Where("id = ? AND status = ? AND archive_generation = ? AND archive_phase = ?",
+			id.String(), model.ProjectStatusArchiving, generation, expected).
+		Updates(updates)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+func (r *ProjectRepository) TransitionArchivePhase(
+	ctx context.Context,
+	id kernel.ProjectID,
+	generation string,
+	expected model.ArchivePhase,
+	target model.ArchivePhase,
+) (bool, error) {
+	result := postgres.DB(ctx, r.db).Model(&projectModel{}).
+		Where("id = ? AND status = ? AND archive_generation = ? AND archive_phase = ?",
+			id.String(), model.ProjectStatusArchiving, generation, expected).
+		Updates(map[string]any{"archive_phase": string(target), "updated_at": time.Now().UTC()})
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -244,7 +280,11 @@ func (r *ProjectRepository) InitializeArchiveGeneration(
 	result := postgres.DB(ctx, r.db).Model(&projectModel{}).
 		Where("id = ? AND status = ? AND archive_generation IS NULL",
 			id.String(), model.ProjectStatusArchiving).
-		Updates(map[string]any{"archive_generation": generation, "updated_at": time.Now().UTC()})
+		Updates(map[string]any{
+			"archive_generation": generation,
+			"archive_phase":      string(model.ArchivePhasePending),
+			"updated_at":         time.Now().UTC(),
+		})
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -371,11 +411,15 @@ func rowToProject(row projectModel) (*model.Project, error) {
 		Namespace: row.Namespace, Language: row.Language, GitURL: row.GitURL,
 		GitRefType: row.GitRefType, GitRefValue: row.GitRefValue, DockerfilePath: row.DockerfilePath,
 		Resources: resources, Status: model.ProjectStatus(row.Status), CreatedBy: createdBy, CreatedAt: row.CreatedAt,
+		ArchivePhase: model.ArchivePhase(row.ArchivePhase),
 		ReviewStatus: model.ProjectReviewStatus(row.ReviewStatus), SubmittedAt: row.SubmittedAt,
 		ReviewedAt: row.ReviewedAt, ReviewComment: row.ReviewComment,
 	}
 	if row.ArchiveGeneration != nil {
 		p.ArchiveGeneration = *row.ArchiveGeneration
+	}
+	if p.ArchivePhase == "" {
+		p.ArchivePhase = model.ArchivePhaseNone
 	}
 	if p.ReviewStatus == "" {
 		p.ReviewStatus = model.ProjectReviewNone

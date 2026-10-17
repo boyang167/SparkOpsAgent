@@ -168,6 +168,24 @@ func TestDeploymentRunArchiveGenerationMigrationIsExistingRowSafe(t *testing.T) 
 	require.Contains(t, down, "DROP COLUMN IF EXISTS archive_generation")
 }
 
+func TestProjectArchivePhaseMigrationDefinesFenceStateMachine(t *testing.T) {
+	up := readMigration(t, "000074_project_archive_phase.up.sql")
+	require.Contains(t, up, "ADD COLUMN IF NOT EXISTS archive_phase")
+	require.Contains(t, up, "DEFAULT 'none'")
+	require.Contains(t, up, "UPDATE workspace_app.projects")
+	require.Contains(t, up, "status = 'archiving'")
+	for _, phase := range []string{
+		"none", "pending", "undeploy_claimed", "undeploying",
+		"pipeline_pending", "pipeline_claimed", "finalizing",
+	} {
+		require.Contains(t, up, "'"+phase+"'")
+	}
+	require.Contains(t, up, "CHECK (archive_phase IN")
+
+	down := readMigration(t, "000074_project_archive_phase.down.sql")
+	require.Contains(t, down, "DROP COLUMN IF EXISTS archive_phase")
+}
+
 func readMigration(t *testing.T, name string) string {
 	t.Helper()
 	contents, err := os.ReadFile(name)

@@ -81,9 +81,48 @@ func (c *ArchiveCoordinator) AdvanceWithTeardown(
 	memberID kernel.MemberID,
 	allowUndeploy bool,
 ) error {
+	terminal, ok := c.repo.(repository.ProjectTerminalRepository)
+	if !ok {
+		return errors.New("archive coordinator requires phase repository")
+	}
+	if !allowUndeploy {
+		aborted, err := terminal.TransitionArchiving(
+			ctx, project.ID, project.ArchiveGeneration,
+			model.ArchivePhasePending, model.ProjectStatusActive,
+		)
+		if err != nil || !aborted {
+			return err
+		}
+		project.Status = model.ProjectStatusActive
+		project.ArchiveGeneration = ""
+		project.ArchivePhase = model.ArchivePhaseNone
+		return nil
+	}
+	switch project.ArchivePhase {
+	case model.ArchivePhasePending:
+		claimed, err := terminal.TransitionArchivePhase(
+			ctx, project.ID, project.ArchiveGeneration,
+			model.ArchivePhasePending, model.ArchivePhaseUndeployClaimed,
+		)
+		if err != nil {
+			return err
+		}
+		if !claimed {
+			return nil
+		}
+		project.ArchivePhase = model.ArchivePhaseUndeployClaimed
+	case model.ArchivePhaseUndeployClaimed, model.ArchivePhaseUndeploying,
+		model.ArchivePhasePipelinePending, model.ArchivePhasePipelineClaimed, model.ArchivePhaseFinalizing:
+	default:
+		return nil
+	}
 	teardown, err := c.port()
 	if err != nil {
 		return err
+	}
+	switch project.ArchivePhase {
+	case model.ArchivePhasePipelinePending, model.ArchivePhasePipelineClaimed, model.ArchivePhaseFinalizing:
+		return c.finish(ctx, teardown, project)
 	}
 	online, err := teardown.OnlineClusters(ctx, project.WorkspaceID, project.ID)
 	if err != nil {
@@ -91,12 +130,6 @@ func (c *ArchiveCoordinator) AdvanceWithTeardown(
 	}
 	if len(online) == 0 {
 		return c.finish(ctx, teardown, project)
-	}
-	if !allowUndeploy {
-		if err := project.AbortArchiving(); err != nil {
-			return err
-		}
-		return c.repo.Update(ctx, project)
 	}
 	active, err := teardown.HasActiveRun(ctx, project.ID)
 	if err != nil || active {
@@ -113,6 +146,27 @@ func (c *ArchiveCoordinator) AdvanceWithTeardown(
 }
 
 func (c *ArchiveCoordinator) finish(ctx context.Context, teardown appctx.ProjectTeardown, project *model.Project) error {
+	terminal, ok := c.repo.(repository.ProjectTerminalRepository)
+	if !ok {
+		return errors.New("archive finalization requires phase repository")
+	}
+	switch project.ArchivePhase {
+	case model.ArchivePhasePending, model.ArchivePhaseUndeployClaimed, model.ArchivePhaseUndeploying:
+		advanced, err := terminal.TransitionArchivePhase(
+			ctx, project.ID, project.ArchiveGeneration,
+			project.ArchivePhase, model.ArchivePhasePipelinePending,
+		)
+		if err != nil {
+			return err
+		}
+		if !advanced {
+			return nil
+		}
+		project.ArchivePhase = model.ArchivePhasePipelinePending
+	case model.ArchivePhasePipelinePending, model.ArchivePhasePipelineClaimed, model.ArchivePhaseFinalizing:
+	default:
+		return nil
+	}
 	if c.operations != nil {
 		metadata, ok := events.MetadataFromContext(ctx)
 		if !ok {
@@ -127,6 +181,30 @@ func (c *ArchiveCoordinator) finish(ctx context.Context, teardown appctx.Project
 				Generation: project.ArchiveGeneration,
 			},
 		})
+	}
+	switch project.ArchivePhase {
+	case model.ArchivePhasePipelinePending:
+		claimed, err := terminal.TransitionArchivePhase(
+			ctx, project.ID, project.ArchiveGeneration,
+			model.ArchivePhasePipelinePending, model.ArchivePhasePipelineClaimed,
+		)
+		if err != nil || !claimed {
+			return err
+		}
+		project.ArchivePhase = model.ArchivePhasePipelineClaimed
+		fallthrough
+	case model.ArchivePhasePipelineClaimed:
+		finalizing, err := terminal.TransitionArchivePhase(
+			ctx, project.ID, project.ArchiveGeneration,
+			model.ArchivePhasePipelineClaimed, model.ArchivePhaseFinalizing,
+		)
+		if err != nil || !finalizing {
+			return err
+		}
+		project.ArchivePhase = model.ArchivePhaseFinalizing
+	case model.ArchivePhaseFinalizing:
+	default:
+		return nil
 	}
 	disabled, err := teardown.PipelineDisabled(ctx, project.WorkspaceID, project.ID)
 	if err != nil {
@@ -144,10 +222,16 @@ func (c *ArchiveCoordinator) finish(ctx context.Context, teardown appctx.Project
 	if !disabled {
 		return fmt.Errorf("pipeline remains enabled after disable")
 	}
-	if err := project.Archive(); err != nil {
+	archived, err := terminal.TransitionArchiving(
+		ctx, project.ID, project.ArchiveGeneration,
+		model.ArchivePhaseFinalizing, model.ProjectStatusArchived,
+	)
+	if err != nil || !archived {
 		return err
 	}
-	return c.repo.Update(ctx, project)
+	project.Status = model.ProjectStatusArchived
+	project.ArchivePhase = model.ArchivePhaseNone
+	return nil
 }
 
 func (c *ArchiveCoordinator) HandleDeployCompleted(ctx context.Context, e events.Event) error {
@@ -189,6 +273,27 @@ func (c *ArchiveCoordinator) HandleDeployCompleted(ctx context.Context, e events
 		if !ok {
 			return errors.New("archive operation requires event metadata")
 		}
+		terminal, ok := c.repo.(repository.ProjectTerminalRepository)
+		if !ok {
+			return errors.New("archive completion requires phase repository")
+		}
+		switch project.ArchivePhase {
+		case model.ArchivePhaseUndeploying:
+			advanced, err := terminal.TransitionArchivePhase(
+				ctx, project.ID, generation,
+				model.ArchivePhaseUndeploying, model.ArchivePhaseUndeployClaimed,
+			)
+			if err != nil {
+				return err
+			}
+			if !advanced {
+				return nil
+			}
+		case model.ArchivePhaseUndeployClaimed:
+			// Duplicate completion; scheduling is idempotent.
+		default:
+			return nil
+		}
 		return c.operations.Schedule(ctx, messaging.OperationRequest{
 			Owner: metadata.Subscriber, OperationType: workspaceoutbound.OperationTypeProjectUndeploy,
 			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + project.ID.String() + "/" + generation,
@@ -215,7 +320,9 @@ func (c *ArchiveCoordinator) abortGeneration(
 	if !ok {
 		return errors.New("archive completion requires terminal transition repository")
 	}
-	transitioned, err := terminal.TransitionArchiving(ctx, projectID, generation, model.ProjectStatusActive)
+	transitioned, err := terminal.TransitionArchiving(
+		ctx, projectID, generation, model.ArchivePhasePending, model.ProjectStatusActive,
+	)
 	if err != nil || transitioned {
 		return err
 	}
@@ -225,7 +332,8 @@ func (c *ArchiveCoordinator) abortGeneration(
 	}
 	if current.ArchiveGeneration != generation ||
 		current.Status == model.ProjectStatusActive ||
-		current.Status == model.ProjectStatusArchived {
+		current.Status == model.ProjectStatusArchived ||
+		current.ArchivePhase != model.ArchivePhasePending {
 		return nil
 	}
 	return errors.New("archive abort transition conflicted")

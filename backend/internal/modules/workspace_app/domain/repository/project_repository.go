@@ -22,5 +22,18 @@ type ProjectRepository interface {
 type ProjectTerminalRepository interface {
 	ProjectRepository
 	InitializeArchiveGeneration(ctx context.Context, id kernel.ProjectID, generation string) (bool, error)
-	TransitionArchiving(ctx context.Context, id kernel.ProjectID, generation string, target model.ProjectStatus) (bool, error)
+	TransitionArchivePhase(
+		ctx context.Context,
+		id kernel.ProjectID,
+		generation string,
+		expected model.ArchivePhase,
+		target model.ArchivePhase,
+	) (bool, error)
+	TransitionArchiving(
+		ctx context.Context,
+		id kernel.ProjectID,
+		generation string,
+		expected model.ArchivePhase,
+		target model.ProjectStatus,
+	) (bool, error)
 }

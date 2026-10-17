@@ -19,9 +19,11 @@ import (
 )
 
 const (
-	projectStatusActive    = "active"
-	projectStatusArchiving = "archiving"
-	undeployBaselineWindow = 100
+	projectStatusActive     = "active"
+	projectStatusArchiving  = "archiving"
+	archivePhaseClaimed     = "undeploy_claimed"
+	archivePhaseUndeploying = "undeploying"
+	undeployBaselineWindow  = 100
 )
 
 type UndeployInput struct {
@@ -137,8 +139,25 @@ func (h *UndeployHandler) startForArchive(
 	if err != nil {
 		return nil, err
 	}
-	if lifecycle.Status != projectStatusActive && lifecycle.Status != projectStatusArchiving {
+	if lifecycle.Status != projectStatusArchiving {
 		return nil, domain.ErrProjectNotActive
+	}
+	if lifecycle.ArchiveGeneration != archiveGeneration ||
+		(lifecycle.ArchivePhase != archivePhaseClaimed && lifecycle.ArchivePhase != archivePhaseUndeploying) {
+		return nil, fmt.Errorf("archive undeploy fence does not match current project state")
+	}
+	fence, ok := h.lifecycle.(port.ProjectArchiveFence)
+	if !ok {
+		return nil, fmt.Errorf("archive undeploy fence is unavailable")
+	}
+	advanced, err := fence.TransitionArchivePhase(
+		ctx, projectID, archiveGeneration, lifecycle.ArchivePhase, archivePhaseUndeploying,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if !advanced {
+		return nil, fmt.Errorf("archive undeploy fence conflicted")
 	}
 	return h.start(ctx, wsID, memberID, projectID, clusterID, model.UndeployOptions{}, archiveGeneration)
 }
