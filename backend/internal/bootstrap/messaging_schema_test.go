@@ -32,7 +32,7 @@ func TestValidateMessagingBootstrapRejectsOldAMQPSchema(t *testing.T) {
 		&config.Config{Messaging: config.MessagingConfig{Driver: "amqp"}},
 		db,
 	)
-	require.ErrorContains(t, err, "version 70")
+	require.ErrorContains(t, err, "version 72")
 	require.ErrorContains(t, err, "make migrate-up")
 }
 

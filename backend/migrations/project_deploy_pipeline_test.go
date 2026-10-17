@@ -143,6 +143,14 @@ func TestProductWorkflowRunVersionMigrationIsExistingRowSafe(t *testing.T) {
 	require.Contains(t, down, "DROP COLUMN IF EXISTS version")
 }
 
+func TestProjectArchiveGenerationMigrationIsExistingRowSafe(t *testing.T) {
+	up := readMigration(t, "000072_project_archive_generation.up.sql")
+	require.Contains(t, up, "ADD COLUMN IF NOT EXISTS archive_generation UUID")
+	require.NotContains(t, up, "NOT NULL")
+	down := readMigration(t, "000072_project_archive_generation.down.sql")
+	require.Contains(t, down, "DROP COLUMN IF EXISTS archive_generation")
+}
+
 func readMigration(t *testing.T, name string) string {
 	t.Helper()
 	contents, err := os.ReadFile(name)

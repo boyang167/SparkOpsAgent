@@ -116,9 +116,10 @@ func (c *ArchiveCoordinator) finish(ctx context.Context, teardown appctx.Project
 		return c.operations.Schedule(ctx, messaging.OperationRequest{
 			Owner:          metadata.Subscriber,
 			OperationType:  workspaceoutbound.OperationTypePipelineDisable,
-			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypePipelineDisable + ":" + project.ID.String(),
+			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypePipelineDisable + ":" + project.ID.String() + "/" + project.ArchiveGeneration,
 			Payload: workspaceoutbound.PipelineDisablePayload{
 				EventID: metadata.EventID, WorkspaceID: project.WorkspaceID.String(), ProjectID: project.ID.String(),
+				Generation: project.ArchiveGeneration,
 			},
 		})
 	}
@@ -167,10 +168,10 @@ func (c *ArchiveCoordinator) HandleDeployCompleted(ctx context.Context, e events
 		}
 		return c.operations.Schedule(ctx, messaging.OperationRequest{
 			Owner: metadata.Subscriber, OperationType: workspaceoutbound.OperationTypeProjectUndeploy,
-			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + project.ID.String(),
+			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + project.ID.String() + "/" + project.ArchiveGeneration,
 			Payload: workspaceoutbound.ProjectUndeployPayload{
 				EventID: metadata.EventID, ProjectID: project.ID.String(), MemberID: ev.CreatedBy.String(),
-				AllowUndeploy: boolPointer(true),
+				AllowUndeploy: boolPointer(true), Generation: project.ArchiveGeneration,
 			},
 		})
 	}
@@ -202,21 +203,42 @@ func (c *ArchiveCoordinator) ResumeAll(ctx context.Context) error {
 			errs = append(errs, errors.New("archive resumer requires transaction"))
 			continue
 		}
-		eventID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("workspace-app.archive-resumer:"+project.ID.String())).String()
 		err := c.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-			txCtx = events.WithMetadata(txCtx, events.Metadata{
-				EventID: eventID, Subscriber: "workspace-app.archive-resumer",
-			})
 			current, err := c.repo.FindByID(txCtx, project.ID)
 			if err != nil || !current.IsArchiving() {
 				return err
 			}
+			if current.ArchiveGeneration == "" {
+				terminal, ok := c.repo.(repository.ProjectTerminalRepository)
+				if !ok {
+					return errors.New("archive resumer requires generation repository")
+				}
+				generation := uuid.NewString()
+				initialized, err := terminal.InitializeArchiveGeneration(txCtx, current.ID, generation)
+				if err != nil {
+					return err
+				}
+				if initialized {
+					current.ArchiveGeneration = generation
+				} else {
+					current, err = c.repo.FindByID(txCtx, current.ID)
+					if err != nil || !current.IsArchiving() || current.ArchiveGeneration == "" {
+						return err
+					}
+				}
+			}
+			eventID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(
+				"workspace-app.archive-resumer:"+current.ID.String()+":"+current.ArchiveGeneration,
+			)).String()
+			txCtx = events.WithMetadata(txCtx, events.Metadata{
+				EventID: eventID, Subscriber: "workspace-app.archive-resumer",
+			})
 			return c.operations.Schedule(txCtx, messaging.OperationRequest{
 				Owner: "workspace-app.archive-resumer", OperationType: workspaceoutbound.OperationTypeProjectUndeploy,
-				IdempotencyKey: eventID + ":workspace-app.archive-resumer:" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + current.ID.String(),
+				IdempotencyKey: eventID + ":workspace-app.archive-resumer:" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + current.ID.String() + "/" + current.ArchiveGeneration,
 				Payload: workspaceoutbound.ProjectUndeployPayload{
 					EventID: eventID, ProjectID: current.ID.String(), MemberID: current.CreatedBy.String(),
-					AllowUndeploy: boolPointer(true),
+					AllowUndeploy: boolPointer(true), Generation: current.ArchiveGeneration,
 				},
 			})
 		})

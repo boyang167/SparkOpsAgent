@@ -287,7 +287,7 @@ func TestFactoryAMQPSchemaFailureDoesNotConstructWorkersOrConnections(t *testing
 		},
 	)
 
-	require.ErrorContains(t, err, "version 70")
+	require.ErrorContains(t, err, "version 72")
 	require.ErrorContains(t, err, "make migrate-up")
 	require.False(t, queueCreated)
 	require.False(t, transportCreated)

@@ -159,10 +159,10 @@ func (h *ArchiveProjectHandler) archive(
 		if err := h.coordinator.operations.Schedule(ctx, messaging.OperationRequest{
 			Owner:          metadata.Subscriber,
 			OperationType:  workspaceoutbound.OperationTypeProjectUndeploy,
-			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + project.ID.String(),
+			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + project.ID.String() + "/" + project.ArchiveGeneration,
 			Payload: workspaceoutbound.ProjectUndeployPayload{
 				EventID: metadata.EventID, ProjectID: project.ID.String(),
-				MemberID: memberID.String(), AllowUndeploy: &allowUndeploy,
+				MemberID: memberID.String(), AllowUndeploy: &allowUndeploy, Generation: project.ArchiveGeneration,
 			},
 		}); err != nil {
 			return ArchiveResult{}, err

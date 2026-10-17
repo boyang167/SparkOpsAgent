@@ -31,12 +31,23 @@ func (r *pipelineProjectRepo) Update(_ context.Context, project *model.Project) 
 	return nil
 }
 func (r *pipelineProjectRepo) TransitionArchiving(
-	_ context.Context, id kernel.ProjectID, target model.ProjectStatus,
+	_ context.Context, id kernel.ProjectID, generation string, target model.ProjectStatus,
 ) (bool, error) {
-	if r.project == nil || r.project.ID != id || !r.project.IsArchiving() {
+	if r.project == nil || r.project.ID != id || !r.project.IsArchiving() ||
+		r.project.ArchiveGeneration != generation {
 		return false, nil
 	}
 	r.project.Status = target
+	return true, nil
+}
+func (r *pipelineProjectRepo) InitializeArchiveGeneration(
+	_ context.Context, id kernel.ProjectID, generation string,
+) (bool, error) {
+	if r.project == nil || r.project.ID != id || !r.project.IsArchiving() ||
+		r.project.ArchiveGeneration != "" {
+		return false, nil
+	}
+	r.project.ArchiveGeneration = generation
 	return true, nil
 }
 func (r *pipelineProjectRepo) FindByID(_ context.Context, id kernel.ProjectID) (*model.Project, error) {
@@ -90,7 +101,7 @@ func TestPipelineDisableRetriesWithoutPrematureOrDuplicateArchive(t *testing.T) 
 	disabler := &pipelineDisabler{disableErr: errors.New("jenkins unavailable")}
 	handler := NewPipelineDisableHandler(func() PipelineDisabler { return disabler }, repo, postgres.NewDirectTransactor())
 	payload, err := json.Marshal(PipelineDisablePayload{
-		WorkspaceID: project.WorkspaceID.String(), ProjectID: project.ID.String(),
+		WorkspaceID: project.WorkspaceID.String(), ProjectID: project.ID.String(), Generation: project.ArchiveGeneration,
 	})
 	require.NoError(t, err)
 	operation := messaging.Operation{Payload: payload, IdempotencyKey: "event:owner:type:target"}
@@ -123,6 +134,7 @@ type undeployTeardown struct {
 	online       []kernel.ClusterInfoID
 	active       bool
 	starts       int
+	onlineChecks int
 	calledInside bool
 }
 
@@ -133,6 +145,7 @@ func (t *undeployTeardown) mark(ctx context.Context) {
 }
 func (t *undeployTeardown) OnlineClusters(ctx context.Context, _ kernel.WorkspaceID, _ kernel.ProjectID) ([]kernel.ClusterInfoID, error) {
 	t.mark(ctx)
+	t.onlineChecks++
 	return t.online, nil
 }
 func (t *undeployTeardown) HasActiveRun(ctx context.Context, _ kernel.ProjectID) (bool, error) {
@@ -175,7 +188,7 @@ func TestProjectUndeployRetriesUntilOfflineThenSchedulesPipeline(t *testing.T) {
 	)
 	payload, err := json.Marshal(ProjectUndeployPayload{
 		ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
-		AllowUndeploy: boolRef(true),
+		AllowUndeploy: boolRef(true), Generation: project.ArchiveGeneration,
 	})
 	require.NoError(t, err)
 	operation := messaging.Operation{
@@ -211,7 +224,7 @@ func TestProjectUndeployRetriesPipelineScheduleAfterExternalStateConverges(t *te
 	)
 	payload, err := json.Marshal(ProjectUndeployPayload{
 		ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
-		AllowUndeploy: boolRef(true),
+		AllowUndeploy: boolRef(true), Generation: project.ArchiveGeneration,
 	})
 	require.NoError(t, err)
 	operation := messaging.Operation{EventID: "event-1", Owner: "workspace-app.archive-resumer", Payload: payload}
@@ -222,6 +235,51 @@ func TestProjectUndeployRetriesPipelineScheduleAfterExternalStateConverges(t *te
 	require.NoError(t, handler(context.Background(), operation))
 	require.Len(t, writer.requests, 2)
 	require.False(t, teardown.calledInside)
+}
+
+func TestProjectUndeployOldGenerationCannotAffectNewArchiveAttempt(t *testing.T) {
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, project.BeginArchiving())
+	generationA := project.ArchiveGeneration
+	require.NoError(t, project.AbortArchiving())
+	require.NoError(t, project.BeginArchiving())
+	generationB := project.ArchiveGeneration
+	require.NotEqual(t, generationA, generationB)
+
+	repo := &pipelineProjectRepo{project: project}
+	teardown := &undeployTeardown{}
+	writer := &undeployOperationWriter{}
+	handler := NewProjectUndeployHandler(
+		repo, func() appctx.ProjectTeardown { return teardown }, writer, markerTransactor{},
+	)
+	payloadA, err := json.Marshal(ProjectUndeployPayload{
+		ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
+		AllowUndeploy: boolRef(true), Generation: generationA,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, handler(context.Background(), messaging.Operation{
+		EventID: "event-a", Owner: "workspace-app.archive", Payload: payloadA,
+	}))
+	require.Zero(t, teardown.onlineChecks)
+	require.Zero(t, teardown.starts)
+	require.Empty(t, writer.requests)
+	require.Equal(t, model.ProjectStatusArchiving, project.Status)
+	require.Equal(t, generationB, project.ArchiveGeneration)
+
+	payloadB, err := json.Marshal(ProjectUndeployPayload{
+		ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
+		AllowUndeploy: boolRef(true), Generation: generationB,
+	})
+	require.NoError(t, err)
+	require.NoError(t, handler(context.Background(), messaging.Operation{
+		EventID: "event-b", Owner: "workspace-app.archive", Payload: payloadB,
+	}))
+	require.Equal(t, 1, teardown.onlineChecks)
+	require.Len(t, writer.requests, 1)
+	require.Equal(t, generationB, writer.requests[0].Payload.(PipelineDisablePayload).Generation)
 }
 
 func TestProjectUndeployLegacyRejectRestoresProjectAndCompletes(t *testing.T) {
@@ -237,7 +295,7 @@ func TestProjectUndeployLegacyRejectRestoresProjectAndCompletes(t *testing.T) {
 	)
 	payload, err := json.Marshal(ProjectUndeployPayload{
 		ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
-		AllowUndeploy: boolRef(false),
+		AllowUndeploy: boolRef(false), Generation: project.ArchiveGeneration,
 	})
 	require.NoError(t, err)
 
@@ -283,10 +341,10 @@ func TestProjectUndeployLegacyRejectCompletesPersistedAMQPOperation(t *testing.T
 	require.NoError(t, postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
 		return writer.Schedule(ctx, messaging.OperationRequest{
 			Owner: "workspace-app.archive", OperationType: OperationTypeProjectUndeploy,
-			IdempotencyKey: eventID + ":workspace-app.archive:" + OperationTypeProjectUndeploy + ":" + project.ID.String(),
+			IdempotencyKey: eventID + ":workspace-app.archive:" + OperationTypeProjectUndeploy + ":" + project.ID.String() + "/" + project.ArchiveGeneration,
 			Payload: ProjectUndeployPayload{
 				EventID: eventID, ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
-				AllowUndeploy: boolRef(false),
+				AllowUndeploy: boolRef(false), Generation: project.ArchiveGeneration,
 			},
 		})
 	}))

@@ -70,6 +70,7 @@ type projectModel struct {
 	KubernetesSecretID *string `gorm:"type:uuid"`
 	Resources          []byte  `gorm:"type:jsonb"`
 	Status             string
+	ArchiveGeneration  *string `gorm:"type:uuid"`
 	ReviewStatus       string  `gorm:"default:none;not null"`
 	SubmittedBy        *string `gorm:"type:uuid"`
 	SubmittedAt        *time.Time
@@ -130,6 +131,10 @@ func (r *ProjectRepository) Save(ctx context.Context, project *model.Project) er
 		value := project.ProductID.String()
 		row.ProductID = &value
 	}
+	if project.ArchiveGeneration != "" {
+		value := project.ArchiveGeneration
+		row.ArchiveGeneration = &value
+	}
 	if err := postgres.DB(ctx, r.db).Save(&row).Error; err != nil {
 		if isUniqueViolation(err) {
 			return domain.ErrProjectNameExists
@@ -145,22 +150,23 @@ func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) 
 		return err
 	}
 	updates := map[string]any{
-		"name":            project.Name.String(),
-		"display_name":    project.DisplayName,
-		"description":     project.Description,
-		"namespace":       project.Namespace,
-		"language":        project.Language,
-		"git_url":         project.GitURL,
-		"git_ref_type":    project.GitRefType,
-		"git_ref_value":   project.GitRefValue,
-		"dockerfile_path": project.DockerfilePath,
-		"resources":       resources,
-		"status":          string(project.Status),
-		"review_status":   string(project.ReviewStatus),
-		"submitted_at":    project.SubmittedAt,
-		"reviewed_at":     project.ReviewedAt,
-		"review_comment":  project.ReviewComment,
-		"updated_at":      time.Now().UTC(),
+		"name":               project.Name.String(),
+		"display_name":       project.DisplayName,
+		"description":        project.Description,
+		"namespace":          project.Namespace,
+		"language":           project.Language,
+		"git_url":            project.GitURL,
+		"git_ref_type":       project.GitRefType,
+		"git_ref_value":      project.GitRefValue,
+		"dockerfile_path":    project.DockerfilePath,
+		"resources":          resources,
+		"status":             string(project.Status),
+		"archive_generation": nil,
+		"review_status":      string(project.ReviewStatus),
+		"submitted_at":       project.SubmittedAt,
+		"reviewed_at":        project.ReviewedAt,
+		"review_comment":     project.ReviewComment,
+		"updated_at":         time.Now().UTC(),
 	}
 	if project.SubmittedBy != nil {
 		updates["submitted_by"] = project.SubmittedBy.String()
@@ -202,6 +208,9 @@ func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) 
 	} else {
 		updates["product_id"] = nil
 	}
+	if project.ArchiveGeneration != "" {
+		updates["archive_generation"] = project.ArchiveGeneration
+	}
 	err = postgres.DB(ctx, r.db).Model(&projectModel{}).Where(postgres.UUIDEq("id"), project.ID.String()).Updates(updates).Error
 	if isUniqueViolation(err) {
 		return domain.ErrProjectNameExists
@@ -212,14 +221,30 @@ func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) 
 func (r *ProjectRepository) TransitionArchiving(
 	ctx context.Context,
 	id kernel.ProjectID,
+	generation string,
 	target model.ProjectStatus,
 ) (bool, error) {
 	if target != model.ProjectStatusActive && target != model.ProjectStatusArchived {
 		return false, fmt.Errorf("invalid project terminal status %q", target)
 	}
 	result := postgres.DB(ctx, r.db).Model(&projectModel{}).
-		Where("id = ? AND status = ?", id.String(), model.ProjectStatusArchiving).
+		Where("id = ? AND status = ? AND archive_generation = ?", id.String(), model.ProjectStatusArchiving, generation).
 		Updates(map[string]any{"status": string(target), "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+func (r *ProjectRepository) InitializeArchiveGeneration(
+	ctx context.Context,
+	id kernel.ProjectID,
+	generation string,
+) (bool, error) {
+	result := postgres.DB(ctx, r.db).Model(&projectModel{}).
+		Where("id = ? AND status = ? AND archive_generation IS NULL",
+			id.String(), model.ProjectStatusArchiving).
+		Updates(map[string]any{"archive_generation": generation, "updated_at": time.Now().UTC()})
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -348,6 +373,9 @@ func rowToProject(row projectModel) (*model.Project, error) {
 		Resources: resources, Status: model.ProjectStatus(row.Status), CreatedBy: createdBy, CreatedAt: row.CreatedAt,
 		ReviewStatus: model.ProjectReviewStatus(row.ReviewStatus), SubmittedAt: row.SubmittedAt,
 		ReviewedAt: row.ReviewedAt, ReviewComment: row.ReviewComment,
+	}
+	if row.ArchiveGeneration != nil {
+		p.ArchiveGeneration = *row.ArchiveGeneration
 	}
 	if p.ReviewStatus == "" {
 		p.ReviewStatus = model.ProjectReviewNone

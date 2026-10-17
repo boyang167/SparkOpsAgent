@@ -16,7 +16,7 @@ func AutoMigrate(db *gorm.DB) error {
 	return createIndexes(db)
 }
 
-const transactionalEventMigrationVersion = 70
+const transactionalEventMigrationVersion = 72
 
 // ValidateTransactionalEventSchema requires the official SQL migration on PostgreSQL.
 // Non-PostgreSQL databases are used only by unit tests and retain GORM AutoMigrate.
@@ -85,7 +85,7 @@ func ValidateTransactionalEventSchema(db *gorm.DB) error {
 
 func migrationRequiredError(reason string, cause error) error {
 	message := fmt.Sprintf(
-		"transactional event schema is not ready: %s; run `make migrate-up` with DATABASE_URL to apply migration 000070",
+		"transactional event schema is not ready: %s; run `make migrate-up` with DATABASE_URL to apply migration 000072",
 		reason,
 	)
 	if cause == nil {

@@ -267,3 +267,10 @@ None blocking. The Cursor shell auto-injected `git commit --trailer`, but instal
 - Project terminal transitions now use `UPDATE ... WHERE id = ? AND status = 'archiving'` and require exactly one affected row. A zero-row result is reread: either legal terminal state is a converged no-op, while nonterminal/unknown conflicts remain retryable. Two independent-transaction tests prove archive-wins and abort-wins orderings cannot overwrite each other.
 - Release-hook operation payloads persist only plan ID, hook event, and a SHA-256 token digest. The handler reloads the current raw capability token, compares event/digest against a pending state, and only then sends. Persisted-row tests reject raw token/callback capability leakage; callback-cleared and superseded generations complete as no-ops, database failures retry, and matching malformed configuration remains permanent.
 - The authoritative registration count is 16: Delivery 3, Workspace App 2, Product Workflow 6 (including GitLab status), Product 4 (including approval), and Governance 1.
+
+## Archive generation / ABA closure (2026-10-18)
+
+- Migration `000072` adds nullable `workspace_app.projects.archive_generation UUID`; nullable preserves existing active/legacy rows and the down migration removes it. The AMQP startup schema gate now requires migration version 72.
+- Every new archive attempt receives one UUID generation persisted with `archiving`. Undeploy and pipeline-disable payloads and idempotency targets carry that generation. Resume initializes a missing legacy generation exactly once in its project transaction.
+- Operation handlers reject status/generation mismatches before external access and revalidate after external calls. Archive/abort terminal CAS predicates include project ID, `archiving`, and generation, so a stale generation cannot overwrite or advance a newer archive attempt.
+- Deterministic ABA coverage performs generation A failure → abort → generation B → retry A and proves zero external calls, zero scheduled operations, and unchanged B state; B's own operation then advances normally. Independent transaction tests retain single-winner archive/abort CAS guarantees.

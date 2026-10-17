@@ -14,18 +14,18 @@ import (
 )
 
 func TestProjectTerminalCASTwoTransactionsCannotOverwriteArchiveWinner(t *testing.T) {
-	repo, tx, projectID := openProjectTerminalCASDB(t)
+	repo, tx, projectID, generation := openProjectTerminalCASDB(t)
 
 	var archived bool
 	require.NoError(t, tx.WithinTransaction(context.Background(), func(ctx context.Context) error {
 		var err error
-		archived, err = repo.TransitionArchiving(ctx, projectID, model.ProjectStatusArchived)
+		archived, err = repo.TransitionArchiving(ctx, projectID, generation, model.ProjectStatusArchived)
 		return err
 	}))
 	var activated bool
 	require.NoError(t, tx.WithinTransaction(context.Background(), func(ctx context.Context) error {
 		var err error
-		activated, err = repo.TransitionArchiving(ctx, projectID, model.ProjectStatusActive)
+		activated, err = repo.TransitionArchiving(ctx, projectID, generation, model.ProjectStatusActive)
 		return err
 	}))
 
@@ -35,18 +35,18 @@ func TestProjectTerminalCASTwoTransactionsCannotOverwriteArchiveWinner(t *testin
 }
 
 func TestProjectTerminalCASTwoTransactionsCannotOverwriteAbortWinner(t *testing.T) {
-	repo, tx, projectID := openProjectTerminalCASDB(t)
+	repo, tx, projectID, generation := openProjectTerminalCASDB(t)
 
 	var activated bool
 	require.NoError(t, tx.WithinTransaction(context.Background(), func(ctx context.Context) error {
 		var err error
-		activated, err = repo.TransitionArchiving(ctx, projectID, model.ProjectStatusActive)
+		activated, err = repo.TransitionArchiving(ctx, projectID, generation, model.ProjectStatusActive)
 		return err
 	}))
 	var archived bool
 	require.NoError(t, tx.WithinTransaction(context.Background(), func(ctx context.Context) error {
 		var err error
-		archived, err = repo.TransitionArchiving(ctx, projectID, model.ProjectStatusArchived)
+		archived, err = repo.TransitionArchiving(ctx, projectID, generation, model.ProjectStatusArchived)
 		return err
 	}))
 
@@ -55,7 +55,17 @@ func TestProjectTerminalCASTwoTransactionsCannotOverwriteAbortWinner(t *testing.
 	require.Equal(t, model.ProjectStatusActive, readProjectStatus(t, repo.db, projectID))
 }
 
-func openProjectTerminalCASDB(t *testing.T) (*ProjectRepository, postgres.Transactor, kernel.ProjectID) {
+func TestProjectModelGORMFallbackIncludesArchiveGeneration(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+
+	require.NoError(t, db.Table("projects").AutoMigrate(&projectModel{}))
+	var columns []struct{ Name string }
+	require.NoError(t, db.Raw("PRAGMA table_info(projects)").Scan(&columns).Error)
+	require.Contains(t, columns, struct{ Name string }{Name: "archive_generation"})
+}
+
+func openProjectTerminalCASDB(t *testing.T) (*ProjectRepository, postgres.Transactor, kernel.ProjectID, string) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
@@ -68,16 +78,18 @@ func openProjectTerminalCASDB(t *testing.T) (*ProjectRepository, postgres.Transa
 		CREATE TABLE workspace_app.projects (
 			id TEXT PRIMARY KEY,
 			status TEXT NOT NULL,
+			archive_generation TEXT,
 			updated_at DATETIME,
 			deleted_at DATETIME
 		)
 	`).Error)
 	projectID := kernel.NewProjectID()
+	generation := "generation-a"
 	require.NoError(t, db.Exec(
-		"INSERT INTO workspace_app.projects (id, status) VALUES (?, ?)",
-		projectID.String(), model.ProjectStatusArchiving,
+		"INSERT INTO workspace_app.projects (id, status, archive_generation) VALUES (?, ?, ?)",
+		projectID.String(), model.ProjectStatusArchiving, generation,
 	).Error)
-	return &ProjectRepository{db: db}, postgres.NewTransactor(db), projectID
+	return &ProjectRepository{db: db}, postgres.NewTransactor(db), projectID, generation
 }
 
 func readProjectStatus(t *testing.T, db *gorm.DB, projectID kernel.ProjectID) model.ProjectStatus {

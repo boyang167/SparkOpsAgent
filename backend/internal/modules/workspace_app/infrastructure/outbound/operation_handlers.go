@@ -24,6 +24,7 @@ type ProjectUndeployPayload struct {
 	EventID       string `json:"event_id"`
 	ProjectID     string `json:"project_id"`
 	MemberID      string `json:"member_id"`
+	Generation    string `json:"generation"`
 	AllowUndeploy *bool  `json:"allow_undeploy,omitempty"`
 }
 
@@ -31,6 +32,7 @@ type PipelineDisablePayload struct {
 	EventID     string `json:"event_id"`
 	WorkspaceID string `json:"workspace_id"`
 	ProjectID   string `json:"project_id"`
+	Generation  string `json:"generation"`
 }
 
 type PipelineDisabler interface {
@@ -64,19 +66,32 @@ func NewPipelineDisableHandler(
 		if err != nil {
 			return err
 		}
-		if project.Status == model.ProjectStatusArchived || !project.IsArchiving() {
+		if project.Status == model.ProjectStatusArchived || !project.IsArchiving() ||
+			project.ArchiveGeneration != payload.Generation {
 			return nil
 		}
 		disabled, err := target.PipelineDisabled(ctx, workspaceID, projectID)
 		if err != nil {
 			return err
 		}
+		current, err := projectGenerationCurrent(ctx, tx, repo, projectID, payload.Generation)
+		if err != nil || !current {
+			return err
+		}
 		if !disabled {
 			if err := target.DisablePipeline(ctx, workspaceID, projectID); err != nil {
 				return err
 			}
+			current, err = projectGenerationCurrent(ctx, tx, repo, projectID, payload.Generation)
+			if err != nil || !current {
+				return err
+			}
 			disabled, err = target.PipelineDisabled(ctx, workspaceID, projectID)
 			if err != nil {
+				return err
+			}
+			current, err = projectGenerationCurrent(ctx, tx, repo, projectID, payload.Generation)
+			if err != nil || !current {
 				return err
 			}
 		}
@@ -84,7 +99,7 @@ func NewPipelineDisableHandler(
 			return fmt.Errorf("pipeline remains enabled after disable")
 		}
 		return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-			return transitionProjectTerminal(txCtx, repo, projectID, model.ProjectStatusArchived)
+			return transitionProjectTerminal(txCtx, repo, projectID, payload.Generation, model.ProjectStatusArchived)
 		})
 	}
 }
@@ -112,6 +127,9 @@ func NewProjectUndeployHandler(
 		if err != nil || !project.IsArchiving() {
 			return err
 		}
+		if project.ArchiveGeneration != payload.Generation {
+			return nil
+		}
 		target := teardown()
 		if target == nil {
 			return fmt.Errorf("project teardown unavailable")
@@ -120,17 +138,25 @@ func NewProjectUndeployHandler(
 		if err != nil {
 			return err
 		}
+		current, err := projectGenerationCurrent(ctx, tx, repo, projectID, payload.Generation)
+		if err != nil || !current {
+			return err
+		}
 		allowUndeploy := true
 		if payload.AllowUndeploy != nil {
 			allowUndeploy = *payload.AllowUndeploy
 		}
 		if len(online) > 0 && !allowUndeploy {
 			return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-				return transitionProjectTerminal(txCtx, repo, projectID, model.ProjectStatusActive)
+				return transitionProjectTerminal(txCtx, repo, projectID, payload.Generation, model.ProjectStatusActive)
 			})
 		}
 		active, err := target.HasActiveRun(ctx, project.ID)
 		if err != nil {
+			return err
+		}
+		current, err = projectGenerationCurrent(ctx, tx, repo, projectID, payload.Generation)
+		if err != nil || !current {
 			return err
 		}
 		if active {
@@ -148,6 +174,10 @@ func NewProjectUndeployHandler(
 				if err != nil && !(errors.As(err, &domainErr) && domainErr.Code() == "DELIVERY_DEPLOYMENT_RUNNING") {
 					return err
 				}
+				current, err = projectGenerationCurrent(ctx, tx, repo, projectID, payload.Generation)
+				if err != nil || !current {
+					return err
+				}
 			}
 			return errors.New("project remains online after undeploy reconciliation")
 		}
@@ -157,25 +187,49 @@ func NewProjectUndeployHandler(
 			if err != nil || !current.IsArchiving() {
 				return err
 			}
+			if current.ArchiveGeneration != payload.Generation {
+				return nil
+			}
 			return operations.Schedule(txCtx, messaging.OperationRequest{
 				Owner:          operation.Owner,
 				OperationType:  OperationTypePipelineDisable,
-				IdempotencyKey: operation.EventID + ":" + operation.Owner + ":" + OperationTypePipelineDisable + ":" + projectID.String(),
+				IdempotencyKey: operation.EventID + ":" + operation.Owner + ":" + OperationTypePipelineDisable + ":" + projectID.String() + "/" + payload.Generation,
 				Payload: PipelineDisablePayload{
 					EventID: operation.EventID, WorkspaceID: current.WorkspaceID.String(), ProjectID: current.ID.String(),
+					Generation: payload.Generation,
 				},
 			})
 		})
 	}
 }
 
+func projectGenerationCurrent(
+	ctx context.Context,
+	tx postgres.Transactor,
+	repo repository.ProjectTerminalRepository,
+	projectID kernel.ProjectID,
+	generation string,
+) (bool, error) {
+	var current bool
+	err := tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		project, err := repo.FindByID(txCtx, projectID)
+		if err != nil {
+			return err
+		}
+		current = project.IsArchiving() && project.ArchiveGeneration == generation
+		return nil
+	})
+	return current, err
+}
+
 func transitionProjectTerminal(
 	ctx context.Context,
 	repo repository.ProjectTerminalRepository,
 	projectID kernel.ProjectID,
+	generation string,
 	target model.ProjectStatus,
 ) error {
-	updated, err := repo.TransitionArchiving(ctx, projectID, target)
+	updated, err := repo.TransitionArchiving(ctx, projectID, generation, target)
 	if err != nil || updated {
 		return err
 	}

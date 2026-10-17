@@ -37,15 +37,15 @@ type archiveSQLRepo struct {
 func (r *archiveSQLRepo) Save(ctx context.Context, project *model.Project) error {
 	r.projects[project.ID] = project
 	return postgres.DB(ctx, r.db).Exec(
-		"INSERT INTO workspace_app.projects (id, status) VALUES (?, ?)",
-		project.ID.String(), string(project.Status),
+		"INSERT INTO workspace_app.projects (id, status, archive_generation) VALUES (?, ?, ?)",
+		project.ID.String(), string(project.Status), nullableGeneration(project.ArchiveGeneration),
 	).Error
 }
 
 func (r *archiveSQLRepo) Update(ctx context.Context, project *model.Project) error {
 	if err := postgres.DB(ctx, r.db).Exec(
-		"UPDATE workspace_app.projects SET status = ? WHERE id = ?",
-		string(project.Status), project.ID.String(),
+		"UPDATE workspace_app.projects SET status = ?, archive_generation = ? WHERE id = ?",
+		string(project.Status), nullableGeneration(project.ArchiveGeneration), project.ID.String(),
 	).Error; err != nil {
 		return err
 	}
@@ -54,11 +54,11 @@ func (r *archiveSQLRepo) Update(ctx context.Context, project *model.Project) err
 }
 
 func (r *archiveSQLRepo) TransitionArchiving(
-	ctx context.Context, id kernel.ProjectID, target model.ProjectStatus,
+	ctx context.Context, id kernel.ProjectID, generation string, target model.ProjectStatus,
 ) (bool, error) {
 	result := postgres.DB(ctx, r.db).Exec(
-		"UPDATE workspace_app.projects SET status = ? WHERE id = ? AND status = ?",
-		string(target), id.String(), string(model.ProjectStatusArchiving),
+		"UPDATE workspace_app.projects SET status = ? WHERE id = ? AND status = ? AND archive_generation = ?",
+		string(target), id.String(), string(model.ProjectStatusArchiving), generation,
 	)
 	if result.Error != nil || result.RowsAffected == 0 {
 		return false, result.Error
@@ -67,18 +67,46 @@ func (r *archiveSQLRepo) TransitionArchiving(
 	return true, nil
 }
 
+func (r *archiveSQLRepo) InitializeArchiveGeneration(
+	ctx context.Context, id kernel.ProjectID, generation string,
+) (bool, error) {
+	result := postgres.DB(ctx, r.db).Exec(
+		"UPDATE workspace_app.projects SET archive_generation = ? WHERE id = ? AND status = ? AND archive_generation IS NULL",
+		generation, id.String(), string(model.ProjectStatusArchiving),
+	)
+	if result.Error != nil || result.RowsAffected == 0 {
+		return false, result.Error
+	}
+	r.projects[id].ArchiveGeneration = generation
+	return true, nil
+}
+
 func (r *archiveSQLRepo) FindByID(ctx context.Context, id kernel.ProjectID) (*model.Project, error) {
-	var status string
+	var row struct {
+		Status            string
+		ArchiveGeneration *string
+	}
 	if err := postgres.DB(ctx, r.db).Table("workspace_app.projects").
-		Select("status").Where("id = ?", id.String()).Scan(&status).Error; err != nil {
+		Select("status, archive_generation").Where("id = ?", id.String()).Scan(&row).Error; err != nil {
 		return nil, err
 	}
 	project, ok := r.projects[id]
-	if !ok || status == "" {
+	if !ok || row.Status == "" {
 		return nil, domain.ErrProjectNotFound
 	}
-	project.Status = model.ProjectStatus(status)
+	project.Status = model.ProjectStatus(row.Status)
+	project.ArchiveGeneration = ""
+	if row.ArchiveGeneration != nil {
+		project.ArchiveGeneration = *row.ArchiveGeneration
+	}
 	return project, nil
+}
+
+func nullableGeneration(generation string) any {
+	if generation == "" {
+		return nil
+	}
+	return generation
 }
 
 func (r *archiveSQLRepo) ListByStatus(ctx context.Context, status model.ProjectStatus) ([]*model.Project, error) {
@@ -365,7 +393,7 @@ func TestCoordinatorSchedulesPipelineDisableBeforeArchive(t *testing.T) {
 	require.Equal(t, workspaceoutbound.OperationTypePipelineDisable, writer.requests[0].OperationType)
 	require.Equal(
 		t,
-		"event-1:workspace-app.archive:workspace-app.pipeline.disable.v1:"+project.ID.String(),
+		"event-1:workspace-app.archive:workspace-app.pipeline.disable.v1:"+project.ID.String()+"/"+project.ArchiveGeneration,
 		writer.requests[0].IdempotencyKey,
 	)
 }
@@ -583,7 +611,7 @@ func openArchiveResumeDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS workspace_app").Error)
 	require.NoError(t, db.Exec(`
-		CREATE TABLE workspace_app.projects (id TEXT PRIMARY KEY, status TEXT);
+		CREATE TABLE workspace_app.projects (id TEXT PRIMARY KEY, status TEXT, archive_generation TEXT);
 		CREATE TABLE platform.operation_outbox (
 			id TEXT PRIMARY KEY, event_id TEXT NOT NULL, subscriber TEXT NOT NULL,
 			operation_type TEXT NOT NULL, idempotency_key TEXT NOT NULL UNIQUE, payload BLOB NOT NULL,

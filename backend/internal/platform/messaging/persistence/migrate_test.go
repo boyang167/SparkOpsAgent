@@ -122,7 +122,7 @@ func TestAutoMigrateSkipsWhenSQLMigrationsApplied(t *testing.T) {
 		"INSERT INTO information_schema.tables (table_schema, table_name) VALUES ('public', 'schema_migrations')",
 	).Error)
 	require.NoError(t, db.Exec("CREATE TABLE public.schema_migrations (version INTEGER, dirty BOOLEAN)").Error)
-	require.NoError(t, db.Exec("INSERT INTO public.schema_migrations (version, dirty) VALUES (70, false)").Error)
+	require.NoError(t, db.Exec("INSERT INTO public.schema_migrations (version, dirty) VALUES (72, false)").Error)
 
 	require.NoError(t, AutoMigrate(db))
 
@@ -175,15 +175,15 @@ func TestValidateTransactionalEventSchema(t *testing.T) {
 			name: "old migration",
 			setup: func(t *testing.T, db *gorm.DB) {
 				attachMigrationSchemas(t, db)
-				createMigrationState(t, db, 69, false)
+				createMigrationState(t, db, 71, false)
 			},
-			wantErr: "version 70",
+			wantErr: "version 72",
 		},
 		{
 			name: "dirty migration",
 			setup: func(t *testing.T, db *gorm.DB) {
 				attachMigrationSchemas(t, db)
-				createMigrationState(t, db, 70, true)
+				createMigrationState(t, db, 72, true)
 			},
 			wantErr: "dirty",
 		},
@@ -191,7 +191,7 @@ func TestValidateTransactionalEventSchema(t *testing.T) {
 			name: "current migration missing tables",
 			setup: func(t *testing.T, db *gorm.DB) {
 				attachMigrationSchemas(t, db)
-				createMigrationState(t, db, 70, false)
+				createMigrationState(t, db, 72, false)
 			},
 			wantErr: "platform tables",
 		},
@@ -199,7 +199,7 @@ func TestValidateTransactionalEventSchema(t *testing.T) {
 			name: "current migration",
 			setup: func(t *testing.T, db *gorm.DB) {
 				attachMigrationSchemas(t, db)
-				createMigrationState(t, db, 70, false)
+				createMigrationState(t, db, 72, false)
 				for _, table := range []string{"event_outbox", "event_inbox", "operation_outbox"} {
 					require.NoError(t, db.Exec(
 						"INSERT INTO information_schema.tables (table_schema, table_name) VALUES ('platform', ?)",
@@ -245,19 +245,19 @@ func TestValidateTransactionalEventSchemaRejectsMultipleMigrationRowsRegardlessO
 	}{
 		{
 			name: "clean then dirty",
-			rows: []migrationState{{version: 70}, {version: 70, dirty: true}},
+			rows: []migrationState{{version: 72}, {version: 72, dirty: true}},
 		},
 		{
 			name: "dirty then clean",
-			rows: []migrationState{{version: 70, dirty: true}, {version: 70}},
+			rows: []migrationState{{version: 72, dirty: true}, {version: 72}},
 		},
 		{
 			name: "current then old",
-			rows: []migrationState{{version: 70}, {version: 69}},
+			rows: []migrationState{{version: 72}, {version: 71}},
 		},
 		{
 			name: "old then current",
-			rows: []migrationState{{version: 69}, {version: 70}},
+			rows: []migrationState{{version: 71}, {version: 72}},
 		},
 	}
 
