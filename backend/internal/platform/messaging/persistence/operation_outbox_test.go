@@ -20,6 +20,55 @@ func TestOperationInsertRequiresTransaction(t *testing.T) {
 	require.ErrorContains(t, err, "transaction required")
 }
 
+func TestOperationInsertTreatsDuplicateIdempotencyKeyAsSuccess(t *testing.T) {
+	db := openStoreSQLite(t)
+	store := NewOperationStore(db)
+	first := testOperation(time.Now().UTC())
+	insertTestOperation(t, db, store, first)
+	duplicate := testOperation(time.Now().UTC())
+	duplicate.IdempotencyKey = first.IdempotencyKey
+	afterDuplicate := testOperation(time.Now().UTC())
+
+	err := postgres.NewTransactor(db).WithinTransaction(
+		context.Background(),
+		func(ctx context.Context) error {
+			if err := store.Insert(ctx, duplicate); err != nil {
+				return err
+			}
+			return store.Insert(ctx, afterDuplicate)
+		},
+	)
+
+	require.NoError(t, err)
+	var count int64
+	require.NoError(t, db.Model(&OperationOutbox{}).Count(&count).Error)
+	require.Equal(t, int64(2), count)
+}
+
+func TestOperationStatsIncludesPendingAndExecutingBacklog(t *testing.T) {
+	db := openStoreSQLite(t)
+	store := NewOperationStore(db)
+	now := time.Date(2026, 10, 17, 8, 0, 0, 0, time.UTC)
+	pending := testOperation(now.Add(-3 * time.Minute))
+	pending.NextAttemptAt = now
+	insertTestOperation(t, db, store, pending)
+	executing := testOperation(now.Add(-time.Minute))
+	executing.NextAttemptAt = now
+	insertTestOperation(t, db, store, executing)
+	setOperationLease(t, db, executing.ID, "worker-a")
+	completed := testOperation(now.Add(-10 * time.Minute))
+	completed.NextAttemptAt = now
+	insertTestOperation(t, db, store, completed)
+	setOperationLease(t, db, completed.ID, "worker-a")
+	require.NoError(t, store.MarkCompleted(context.Background(), completed.ID, "worker-a", now))
+
+	stats, err := store.Stats(context.Background(), now)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(2), stats.Pending)
+	require.Equal(t, 3*time.Minute, stats.OldestAge)
+}
+
 func TestOperationLifecycle(t *testing.T) {
 	db := openStoreSQLite(t)
 	store := NewOperationStore(db)

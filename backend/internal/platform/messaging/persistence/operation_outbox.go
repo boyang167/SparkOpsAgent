@@ -4,11 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+var ErrOperationIdempotencyConflict = errors.New("operation idempotency key already exists")
 
 type OperationRecord struct {
 	ID             string
@@ -32,6 +36,12 @@ type OperationStore interface {
 	MarkCompleted(ctx context.Context, id, owner string, at time.Time) error
 	MarkFailed(ctx context.Context, id, owner, reason string, at time.Time) error
 	Reschedule(ctx context.Context, id, owner, reason string, next time.Time) error
+	Stats(ctx context.Context, now time.Time) (OperationStats, error)
+}
+
+type OperationStats struct {
+	Pending   int64
+	OldestAge time.Duration
 }
 
 type operationStore struct {
@@ -47,7 +57,10 @@ func (s *operationStore) Insert(ctx context.Context, operation OperationRecord) 
 	if err != nil {
 		return err
 	}
-	return tx.Create(&OperationOutbox{
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "idempotency_key"}},
+		DoNothing: true,
+	}).Create(&OperationOutbox{
 		ID:             operation.ID,
 		EventID:        operation.EventID,
 		Subscriber:     operation.Subscriber,
@@ -146,6 +159,30 @@ func (s *operationStore) Reschedule(ctx context.Context, id, owner, reason strin
 			"last_error":      reason,
 		})
 	return requireLeaseUpdate(result)
+}
+
+func (s *operationStore) Stats(ctx context.Context, now time.Time) (OperationStats, error) {
+	query := s.db.WithContext(ctx).Model(&OperationOutbox{}).
+		Where("status IN ?", []string{"pending", "executing"})
+	var stats OperationStats
+	if err := query.Count(&stats.Pending).Error; err != nil {
+		return OperationStats{}, err
+	}
+	if stats.Pending == 0 {
+		return stats, nil
+	}
+	var oldest OperationOutbox
+	if err := query.Order("created_at ASC").Select("created_at").Take(&oldest).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return stats, nil
+		}
+		return OperationStats{}, err
+	}
+	stats.OldestAge = now.Sub(oldest.CreatedAt)
+	if stats.OldestAge < 0 {
+		stats.OldestAge = 0
+	}
+	return stats, nil
 }
 
 func operationClaimable(status string, nextAttemptAt time.Time, lockedAt *time.Time, now time.Time, lease time.Duration) bool {
