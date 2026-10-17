@@ -93,6 +93,48 @@ go test ./internal/platform/messaging -run 'EventTopology|EventTransport' -count
 PASS
 ```
 
+## 终审修订：发布/消费连接隔离
+
+终审反馈经验证成立：确认超时路径退休 `t.connection`，而 `Consume` 也从同一 connection 创建 channel。发布端能自动重拨，但已关闭的消费者没有重订阅机制，因此会静默永久消失。
+
+### TDD RED/GREEN
+
+新增 `TestEventTransportPublisherTimeoutKeepsConsumerConnectionAlive`，其场景为：先启动 consumer、让 publisher confirm 超时、确认只关闭 publisher connection、向原 consumer delivery channel 投递消息并验证 handler 仍执行，最后确认后续 publish 使用重拨的 publisher connection。首次运行得到 RED：隔离构造器不存在，说明 transport 尚不具备独立的 publisher/consumer 生命周期。
+
+同时新增 `TestEventTransportDeclareUsesConsumerConnection`，修复前得到行为 RED：
+
+```text
+publisher connection channelCalls was 1; expected 0
+```
+
+这证明 `Declare` 仍错误复用 publisher connection。
+
+修复后：
+
+- 生产构造器从同一 dial factory 建立两个连接；若 consumer connection 构造失败，使用 `CloseDeadline(1s)` 有界清理已创建的 publisher connection；
+- publisher connection 仅用于确认发布，超时退休并由 factory 在下一次发布时重拨；
+- topology 声明和 consumer channel 使用稳定的 consumer connection；声明使用独立 `topologyMu` 和可复用 topology channel；
+- 全局 `Close` 以同一个绝对 deadline 关闭两个连接；重复 Close 安全；
+- attempt header 和 `MessageId` 关联逻辑保持不变。
+
+### 设计权衡
+
+publisher 重连不会自动重连 consumer connection，因为后者不随 publisher confirm timeout 退休。只有全局 Close 才关闭消费者，因此避免了“发布恢复但消费者静默丢失”的失败模式。若 consumer connection 本身断开，现有 `Consume` 的调用方仍需按原有生命周期策略重订阅；该修订不扩展为未要求的自动消费重连框架。
+
+新增并通过：
+
+- `TestEventTransportPublisherTimeoutKeepsConsumerConnectionAlive`；
+- `TestEventTransportDeclareUsesConsumerConnection`；
+- `TestEventTransportCloseClosesPublisherAndConsumerConnections`。
+
+```text
+go test ./internal/platform/messaging -run 'EventTransport|Close|Publish' -count=1
+PASS
+
+go test ./internal/platform/messaging -run 'EventTopology|EventTransport' -count=1
+PASS
+```
+
 ## 终审修订：attempt 关联与超时确认收敛
 
 终审反馈经代码与 amqp091-go 语义验证后确认：
