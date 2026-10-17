@@ -9,37 +9,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain"
-	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/port"
 	jenkinsinfra "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/jenkins"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/runner"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/stream"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
-
-type flakyBuildCompletedBus struct{ calls int }
-
-func (b *flakyBuildCompletedBus) Publish(context.Context, ...events.Event) error {
-	b.calls++
-	if b.calls < 3 {
-		return errors.New("subscriber temporarily unavailable")
-	}
-	return nil
-}
-func (*flakyBuildCompletedBus) Subscribe(string, string, eventbus.Handler) error { return nil }
-
-func TestPublishBuildCompletedRetriesTransientSubscriberFailure(t *testing.T) {
-	bus := &flakyBuildCompletedBus{}
-	event := deliveryevent.NewBuildCompleted(
-		kernel.NewBuildID(), kernel.NewProjectID(), kernel.NewMemberID(), kernel.NewWorkspaceID(),
-		"orders", string(model.BuildStatusSuccess), 1,
-	)
-	require.NoError(t, publishBuildCompleted(context.Background(), bus, event))
-	require.Equal(t, 3, bus.calls)
-}
 
 type triggerBuildRepo struct {
 	saves     int
@@ -126,6 +105,7 @@ func newTriggerHandlerWithRepo(repo *triggerBuildRepo, executor port.JenkinsExec
 		stream.NewHub(),
 		runner.NewRegistry(),
 		context.Background(),
+		postgres.NewDirectTransactor(),
 	)
 }
 
@@ -370,7 +350,7 @@ func (b *countingEventBus) Publish(context.Context, ...events.Event) error {
 }
 func (*countingEventBus) Subscribe(string, string, eventbus.Handler) error { return nil }
 
-func TestExecuteBuildRetriesTerminalUpdateAndSuppressesEventOnFailure(t *testing.T) {
+func TestExecuteBuildReportsTerminalUpdateFailureWithoutPublishing(t *testing.T) {
 	updateErr := errors.New("build update unavailable")
 	repo := &triggerBuildRepo{updateErr: updateErr, failAfter: 1}
 	capturing := &requestCapturingJenkins{requests: make(chan port.BuildRequest, 1)}
@@ -378,7 +358,7 @@ func TestExecuteBuildRetriesTerminalUpdateAndSuppressesEventOnFailure(t *testing
 	asyncErr := make(chan error, 1)
 	handler := NewTriggerBuildHandler(
 		repo, triggerProjectChecker{namespace: "team-a"}, jenkinsinfra.NewStaticProvider(capturing), bus,
-		stream.NewHub(), runner.NewRegistry(), context.Background(), func(err error) { asyncErr <- err },
+		stream.NewHub(), runner.NewRegistry(), context.Background(), postgres.NewDirectTransactor(), func(err error) { asyncErr <- err },
 	)
 
 	build, err := handler.TriggerDeploymentAssociated(
@@ -399,37 +379,8 @@ func TestExecuteBuildRetriesTerminalUpdateAndSuppressesEventOnFailure(t *testing
 	case <-time.After(time.Second):
 		t.Fatal("terminal update failure was not observable")
 	}
-	require.Equal(t, 4, repo.updates)
-	require.Zero(t, bus.published)
-}
-
-func TestWorkerCancellationStopsTerminalUpdateRetry(t *testing.T) {
-	workerCtx, cancel := context.WithCancel(context.Background())
-	updateErr := errors.New("database unavailable")
-	repo := &triggerBuildRepo{updateErr: updateErr, failAfter: 1}
-	repo.onUpdate = func(call int) {
-		if call == 2 {
-			cancel()
-		}
-	}
-	capturing := &requestCapturingJenkins{requests: make(chan port.BuildRequest, 1)}
-	asyncErr := make(chan error, 1)
-	handler := NewTriggerBuildHandler(
-		repo, triggerProjectChecker{namespace: "team-a"}, jenkinsinfra.NewStaticProvider(capturing), &countingEventBus{},
-		stream.NewHub(), runner.NewRegistry(), workerCtx, func(err error) { asyncErr <- err },
-	)
-	_, err := handler.TriggerDeploymentAssociated(
-		context.Background(), kernel.NewWorkspaceID(), kernel.NewMemberID(), kernel.NewProjectID(),
-		port.BuildRequest{
-			Namespace: "team-a", ProjectName: "orders", Folder: "team-a", Job: "orders",
-			GitRefValue: "main", ImageTag: "tag", ImageRepository: "registry/orders",
-		},
-		func(context.Context, *model.Build) error { return nil },
-	)
-	require.NoError(t, err)
-	<-capturing.requests
-	require.ErrorIs(t, <-asyncErr, context.Canceled)
 	require.Equal(t, 2, repo.updates)
+	require.Zero(t, bus.published)
 }
 
 func TestBuildCompletedFinalPublishFailureIsReported(t *testing.T) {
@@ -439,7 +390,7 @@ func TestBuildCompletedFinalPublishFailureIsReported(t *testing.T) {
 	asyncErr := make(chan error, 1)
 	handler := NewTriggerBuildHandler(
 		repo, triggerProjectChecker{namespace: "team-a"}, jenkinsinfra.NewStaticProvider(capturing), &countingEventBus{err: publishErr},
-		stream.NewHub(), runner.NewRegistry(), context.Background(), func(err error) { asyncErr <- err },
+		stream.NewHub(), runner.NewRegistry(), context.Background(), postgres.NewDirectTransactor(), func(err error) { asyncErr <- err },
 	)
 	_, err := handler.Handle(context.Background(), kernel.NewWorkspaceID(), kernel.NewMemberID(), kernel.NewProjectID(), "main")
 	require.NoError(t, err)

@@ -59,7 +59,7 @@ func (r *BuildRepository) Save(ctx context.Context, build *model.Build) error {
 }
 
 func (r *BuildRepository) Update(ctx context.Context, build *model.Build) error {
-	return r.db.WithContext(ctx).Model(&buildModel{}).Where("id = ?", build.ID.String()).Updates(map[string]any{
+	return postgres.DB(ctx, r.db).Model(&buildModel{}).Where("id = ?", build.ID.String()).Updates(map[string]any{
 		"status":               string(build.Status),
 		"build_number":         build.BuildNumber,
 		"jenkins_job":          build.JenkinsJob,

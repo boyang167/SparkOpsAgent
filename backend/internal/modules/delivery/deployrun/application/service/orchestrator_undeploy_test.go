@@ -51,8 +51,6 @@ func TestUndeployQueuedSkipsBuildAndGoesToDeploying(t *testing.T) {
 
 func TestUndeployDeployingRemovesResourcesAndSucceeds(t *testing.T) {
 	f, remover := undeployFixture(t, model.StatusDeploying)
-	var terminal *model.DeploymentRun
-	f.o.SetTerminalHook(func(_ context.Context, run *model.DeploymentRun) { terminal = run })
 
 	require.NoError(t, f.o.Step(context.Background(), f.run.ID, f.wsID))
 
@@ -65,8 +63,7 @@ func TestUndeployDeployingRemovesResourcesAndSucceeds(t *testing.T) {
 	require.NotEmpty(t, remover.spec.Manifests)
 	require.Zero(t, f.deployer.calls)
 	require.Zero(t, f.deployer.restartCalls)
-	require.NotNil(t, terminal)
-	require.True(t, terminal.IsUndeploy())
+	require.True(t, f.run.IsUndeploy())
 }
 
 func TestUndeployRemoverFailureFailsRun(t *testing.T) {

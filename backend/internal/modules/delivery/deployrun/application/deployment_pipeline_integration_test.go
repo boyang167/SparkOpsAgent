@@ -34,6 +34,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -275,6 +276,7 @@ func newPipelineFixture(t *testing.T, mode pipelineMode) *pipelineFixture {
 	buildHub := buildstream.NewHub()
 	trigger := buildcommand.NewTriggerBuildHandler(
 		builds, project, jenkins.NewStaticProvider(jenkinsMock), bus, buildHub, buildRegistry, ctx,
+		postgres.NewDirectTransactor(),
 	)
 	runtime := &acceptanceRuntime{mock: runtimek8s.NewMockManifestDeployer()}
 	publisher := consumer.NewPublisher(queue)

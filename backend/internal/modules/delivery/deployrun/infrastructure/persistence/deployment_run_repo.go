@@ -18,34 +18,34 @@ import (
 )
 
 type deploymentRunRow struct {
-	ID              string `gorm:"column:id;primaryKey"`
-	WorkspaceID     string `gorm:"not null"`
-	ProjectID       string `gorm:"not null"`
-	ClusterID       string `gorm:"not null"`
-	GitRefType      string `gorm:"size:16;not null"`
-	GitRefValue     string `gorm:"size:255;not null"`
-	ImageTag        string `gorm:"size:255;not null"`
-	ImageRepository string `gorm:"size:512;not null;default:''"`
-	CrossCluster    bool   `gorm:"not null;default:false"`
-	SyncManifests   []byte `gorm:"column:sync_manifests;type:jsonb;not null;default:'[]'"`
-	Status          string `gorm:"size:16;not null"`
-	BuildID         *string
-	ErrorMessage    string    `gorm:"not null;default:''"`
-	CreatedBy       string    `gorm:"not null"`
-	CreatedAt       time.Time `gorm:"not null"`
-	StartedAt       *time.Time
-	FinishedAt      *time.Time
-	CurrentStage    string  `gorm:"size:16;not null;default:''"`
-	RunType         string  `gorm:"size:16;not null;default:normal"`
-	RollbackOfRunID *string `gorm:"size:36"`
-	Version         int64   `gorm:"not null;default:0"`
-	AttemptCount    int     `gorm:"not null;default:0"`
-	LeaseOwner      *string
-	LeaseExpiresAt  *time.Time
-	EnvironmentID     *string
-	ProjectVersionID  *string
-	DeployNamespace   string `gorm:"not null;default:''"`
-	UndeployOptions   []byte `gorm:"column:undeploy_options;type:jsonb"`
+	ID               string `gorm:"column:id;primaryKey"`
+	WorkspaceID      string `gorm:"not null"`
+	ProjectID        string `gorm:"not null"`
+	ClusterID        string `gorm:"not null"`
+	GitRefType       string `gorm:"size:16;not null"`
+	GitRefValue      string `gorm:"size:255;not null"`
+	ImageTag         string `gorm:"size:255;not null"`
+	ImageRepository  string `gorm:"size:512;not null;default:''"`
+	CrossCluster     bool   `gorm:"not null;default:false"`
+	SyncManifests    []byte `gorm:"column:sync_manifests;type:jsonb;not null;default:'[]'"`
+	Status           string `gorm:"size:16;not null"`
+	BuildID          *string
+	ErrorMessage     string    `gorm:"not null;default:''"`
+	CreatedBy        string    `gorm:"not null"`
+	CreatedAt        time.Time `gorm:"not null"`
+	StartedAt        *time.Time
+	FinishedAt       *time.Time
+	CurrentStage     string  `gorm:"size:16;not null;default:''"`
+	RunType          string  `gorm:"size:16;not null;default:normal"`
+	RollbackOfRunID  *string `gorm:"size:36"`
+	Version          int64   `gorm:"not null;default:0"`
+	AttemptCount     int     `gorm:"not null;default:0"`
+	LeaseOwner       *string
+	LeaseExpiresAt   *time.Time
+	EnvironmentID    *string
+	ProjectVersionID *string
+	DeployNamespace  string `gorm:"not null;default:''"`
+	UndeployOptions  []byte `gorm:"column:undeploy_options;type:jsonb"`
 }
 
 func (deploymentRunRow) TableName() string { return "delivery.deployment_runs" }
@@ -92,6 +92,7 @@ type DeploymentRunRepository struct {
 	db             *gorm.DB
 	sink           DeploymentEventSink
 	observerReport func(error)
+	onTerminal     func(context.Context, *model.DeploymentRun) error
 }
 
 type DeploymentEventSink interface {
@@ -112,6 +113,10 @@ func NewDeploymentRunRepositoryWithObserver(
 	reporter func(error),
 ) *DeploymentRunRepository {
 	return &DeploymentRunRepository{db: db, sink: sink, observerReport: reporter}
+}
+
+func (r *DeploymentRunRepository) SetTerminalCallback(callback func(context.Context, *model.DeploymentRun) error) {
+	r.onTerminal = callback
 }
 
 func (r *DeploymentRunRepository) Create(ctx context.Context, run *model.DeploymentRun) error {
@@ -151,7 +156,8 @@ func (r *DeploymentRunRepository) Update(ctx context.Context, run *model.Deploym
 		RunID: run.ID.String(), At: at, Status: string(run.Status),
 		Stage: string(run.CurrentStage), Message: message,
 	}
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := postgres.NewTransactor(r.db).WithinTransaction(ctx, func(txCtx context.Context) error {
+		tx := postgres.DB(txCtx, r.db)
 		result := tx.Model(&deploymentRunRow{}).
 			Where("id = ? AND version = ?", run.ID.String(), expectedVersion).
 			Updates(map[string]any{
@@ -168,13 +174,23 @@ func (r *DeploymentRunRepository) Update(ctx context.Context, run *model.Deploym
 		if result.RowsAffected == 0 {
 			return domain.ErrDeploymentRunConcurrentUpdate
 		}
-		return insertDeploymentEvent(tx, &eventRow).Error
+		if err := insertDeploymentEvent(tx, &eventRow).Error; err != nil {
+			return err
+		}
+		if r.onTerminal != nil && isTerminalStatus(run.Status) {
+			return r.onTerminal(txCtx, run)
+		}
+		return nil
 	})
 	if err == nil {
 		run.Version = expectedVersion + 1
 		r.publishEvent(run, eventRow)
 	}
 	return err
+}
+
+func isTerminalStatus(status model.Status) bool {
+	return status == model.StatusSucceeded || status == model.StatusFailed || status == model.StatusAborted
 }
 
 func (r *DeploymentRunRepository) FindByID(ctx context.Context, id kernel.DeploymentRunID) (*model.DeploymentRun, error) {
@@ -336,7 +352,9 @@ func (r *DeploymentRunRepository) RecordInfrastructureFailure(
 ) (*model.DeploymentRun, error) {
 	var row deploymentRunRow
 	var eventRow deploymentRunEventRow
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var run *model.DeploymentRun
+	err := postgres.NewTransactor(r.db).WithinTransaction(ctx, func(txCtx context.Context) error {
+		tx := postgres.DB(txCtx, r.db)
 		result := tx.Model(&deploymentRunRow{}).
 			Where("id = ? AND version = ? AND status IN ?", runID.String(), expectedVersion, []string{
 				string(model.StatusQueued), string(model.StatusPreparing),
@@ -364,12 +382,19 @@ func (r *DeploymentRunRepository) RecordInfrastructureFailure(
 			RunID: runID.String(), At: time.Now().UTC(), Status: row.Status, Stage: row.CurrentStage,
 			Message: fmt.Sprintf("infrastructure attempt %d: %s", row.AttemptCount, message),
 		}
-		return insertDeploymentEvent(tx, &eventRow).Error
+		if err := insertDeploymentEvent(tx, &eventRow).Error; err != nil {
+			return err
+		}
+		var err error
+		run, err = fromRunRow(row)
+		if err != nil {
+			return err
+		}
+		if r.onTerminal != nil && isTerminalStatus(run.Status) {
+			return r.onTerminal(txCtx, run)
+		}
+		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	run, err := fromRunRow(row)
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +488,7 @@ func toRunRow(run *model.DeploymentRun) *deploymentRunRow {
 		Version:      run.Version,
 		AttemptCount: run.AttemptCount, LeaseOwner: nullableString(run.LeaseOwner),
 		LeaseExpiresAt: run.LeaseExpiresAt,
-		EnvironmentID: environmentIDValue(run.EnvironmentID), DeployNamespace: run.DeployNamespace,
+		EnvironmentID:  environmentIDValue(run.EnvironmentID), DeployNamespace: run.DeployNamespace,
 		ProjectVersionID: projectVersionIDValue(run.ProjectVersionID),
 		UndeployOptions:  undeployOptionsValue(run.UndeployOptions),
 	}

@@ -67,7 +67,6 @@ type Orchestrator struct {
 	clock          func() time.Time
 	owner          string
 	operations     ExecutionRegistry
-	onTerminal     func(context.Context, *model.DeploymentRun)
 	versions       appctx.ProjectVersionReader
 	remover        runtimeport.ManifestRemover
 }
@@ -108,20 +107,6 @@ func NewOrchestrator(
 		orchestrator.operations = operations[0]
 	}
 	return orchestrator
-}
-
-func (o *Orchestrator) SetTerminalHook(hook func(context.Context, *model.DeploymentRun)) {
-	o.onTerminal = hook
-}
-
-func (o *Orchestrator) notifyTerminal(ctx context.Context, run *model.DeploymentRun) {
-	if o.onTerminal == nil || run == nil {
-		return
-	}
-	if run.Status != model.StatusSucceeded && run.Status != model.StatusFailed && run.Status != model.StatusAborted {
-		return
-	}
-	o.onTerminal(ctx, run)
 }
 
 func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, workspaceID kernel.WorkspaceID) error {
@@ -294,7 +279,6 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			if err := o.repo.Update(ctx, run); err != nil {
 				return o.resolveConcurrent(ctx, run.ID, err)
 			}
-			o.notifyTerminal(ctx, run)
 			return nil
 		}
 		if !(run.IsSyncOnly() && len(run.SyncManifests) > 0) {
@@ -321,7 +305,6 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 		if err := o.repo.Update(ctx, run); err != nil {
 			return o.resolveConcurrent(ctx, run.ID, err)
 		}
-		o.notifyTerminal(ctx, run)
 		return nil
 
 	default:
@@ -365,7 +348,6 @@ func (o *Orchestrator) failBusiness(ctx context.Context, run *model.DeploymentRu
 	if err := o.repo.Update(ctx, run); err != nil {
 		return o.resolveConcurrent(ctx, run.ID, err)
 	}
-	o.notifyTerminal(ctx, run)
 	return nil
 }
 
@@ -409,7 +391,6 @@ func (o *Orchestrator) recordInfrastructureFailure(ctx context.Context, run *mod
 		return err
 	}
 	if updated.Status == model.StatusFailed {
-		o.notifyTerminal(ctx, updated)
 		return nil
 	}
 	return cause

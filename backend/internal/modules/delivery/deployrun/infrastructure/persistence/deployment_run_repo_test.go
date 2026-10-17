@@ -10,6 +10,10 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
+	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	messagingpersistence "github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
+	sharedevents "github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
@@ -120,6 +124,35 @@ func TestRepositoryCreatePersistsRunAndInitialEvent(t *testing.T) {
 	require.Equal(t, "deployment queued", events[0].Message)
 	require.Equal(t, model.StatusQueued, events[0].Status)
 	require.NotZero(t, events[0].ID)
+}
+
+func TestTerminalUpdateAndDeployCompletedOutboxAreAtomic(t *testing.T) {
+	repo, db := newRunRepo(t)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+	require.NoError(t, messagingpersistence.AutoMigrate(db))
+	run := newRun(kernel.NewProjectID())
+	require.NoError(t, repo.Create(context.Background(), run))
+	run.Fail("boom", time.Now().UTC())
+
+	bus := messaging.NewReliableBus(
+		sharedevents.NewRegistry(),
+		messagingpersistence.NewOutboxStore(db),
+		nil, nil, nil,
+	)
+	repo.SetTerminalCallback(func(ctx context.Context, terminal *model.DeploymentRun) error {
+		return bus.Publish(ctx, deliveryevent.NewDeployCompleted(
+			terminal.ID, terminal.ProjectID, terminal.WorkspaceID, terminal.EnvironmentID,
+			"", string(terminal.Status), string(terminal.RunType), terminal.ImageTag,
+		))
+	})
+
+	require.Error(t, repo.Update(context.Background(), run))
+	stored, err := repo.FindByID(context.Background(), run.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.StatusQueued, stored.Status)
+	var outboxCount int64
+	require.NoError(t, db.Table("platform.event_outbox").Count(&outboxCount).Error)
+	require.Zero(t, outboxCount)
 }
 
 func TestRepositoryPublishesOnlyCommittedCreateAndUpdateEvents(t *testing.T) {

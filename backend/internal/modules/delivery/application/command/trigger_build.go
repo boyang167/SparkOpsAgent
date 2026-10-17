@@ -14,7 +14,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/runner"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/stream"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
-	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -27,6 +27,7 @@ type TriggerBuildHandler struct {
 	registry     *runner.Registry
 	onAsyncError func(error)
 	workerCtx    context.Context
+	tx           postgres.Transactor
 }
 
 func NewTriggerBuildHandler(
@@ -37,12 +38,13 @@ func NewTriggerBuildHandler(
 	hub *stream.Hub,
 	registry *runner.Registry,
 	workerCtx context.Context,
+	tx postgres.Transactor,
 	reporters ...func(error),
 ) *TriggerBuildHandler {
 	handler := &TriggerBuildHandler{
 		builds: builds, checker: checker, jenkins: jenkins,
 		bus: bus, hub: hub, registry: registry,
-		workerCtx: workerCtx,
+		workerCtx: workerCtx, tx: tx,
 	}
 	if len(reporters) > 0 {
 		handler.onAsyncError = reporters[0]
@@ -260,7 +262,7 @@ func (h *TriggerBuildHandler) executeBuild(
 	jenkins, err := h.jenkins.ForProject(execCtx, wsID, projectID)
 	if err != nil {
 		build.Fail(err.Error(), "")
-		if updateErr := h.updateBuildWithRetry(h.workerCtx, build); updateErr != nil {
+		if updateErr := h.persistTerminalBuild(h.workerCtx, build, projectName, memberID, wsID, projectID); updateErr != nil {
 			h.reportAsyncError(fmt.Errorf("persist jenkins config failure: %w", updateErr))
 		}
 		h.hub.Complete(build.ID, build.ConsoleLog)
@@ -281,61 +283,34 @@ func (h *TriggerBuildHandler) executeBuild(
 		build.Succeed(build.BuildNumber, build.JenkinsJob, consoleLog)
 	}
 
-	if err := h.updateBuildWithRetry(h.workerCtx, build); err != nil {
+	if err := h.persistTerminalBuild(h.workerCtx, build, projectName, memberID, wsID, projectID); err != nil {
 		h.hub.Complete(build.ID, build.ConsoleLog)
 		h.reportAsyncError(fmt.Errorf("persist completed build: %w", err))
 		return
 	}
 	h.hub.Complete(build.ID, build.ConsoleLog)
-	if err := publishBuildCompleted(h.workerCtx, h.bus, event.NewBuildCompleted(
-		build.ID, projectID, memberID, wsID, projectName, string(build.Status), build.BuildNumber,
-	)); err != nil {
-		h.reportAsyncError(fmt.Errorf("publish completed build: %w", err))
-	}
 }
 
-func (h *TriggerBuildHandler) updateBuildWithRetry(ctx context.Context, build *model.Build) error {
-	var err error
-	for attempt := 0; attempt < 3; attempt++ {
-		if err = h.builds.Update(ctx, build); err == nil {
-			return nil
+func (h *TriggerBuildHandler) persistTerminalBuild(
+	ctx context.Context,
+	build *model.Build,
+	projectName string,
+	memberID kernel.MemberID,
+	wsID kernel.WorkspaceID,
+	projectID kernel.ProjectID,
+) error {
+	return h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := h.builds.Update(txCtx, build); err != nil {
+			return err
 		}
-		if attempt == 2 {
-			break
-		}
-		timer := time.NewTimer(time.Duration(attempt+1) * 10 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-	return err
+		return h.bus.Publish(txCtx, event.NewBuildCompleted(
+			build.ID, projectID, memberID, wsID, projectName, string(build.Status), build.BuildNumber,
+		))
+	})
 }
 
 func (h *TriggerBuildHandler) reportAsyncError(err error) {
 	if h.onAsyncError != nil {
 		h.onAsyncError(err)
 	}
-}
-
-func publishBuildCompleted(ctx context.Context, bus eventbus.Bus, completed events.Event) error {
-	var err error
-	for attempt := 0; attempt < 3; attempt++ {
-		if err = bus.Publish(ctx, completed); err == nil {
-			return nil
-		}
-		if attempt == 2 {
-			break
-		}
-		timer := time.NewTimer(time.Duration(attempt+1) * 10 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-	return err
 }

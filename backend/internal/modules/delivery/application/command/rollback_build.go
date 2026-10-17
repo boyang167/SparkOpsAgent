@@ -11,6 +11,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/runner"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/stream"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -28,9 +29,10 @@ func NewRollbackBuildHandler(
 	hub *stream.Hub,
 	registry *runner.Registry,
 	workerCtx context.Context,
+	tx postgres.Transactor,
 ) *RollbackBuildHandler {
 	return &RollbackBuildHandler{
-		trigger: NewTriggerBuildHandler(builds, checker, jenkins, bus, hub, registry, workerCtx),
+		trigger: NewTriggerBuildHandler(builds, checker, jenkins, bus, hub, registry, workerCtx, tx),
 		builds:  builds,
 		checker: checker,
 	}

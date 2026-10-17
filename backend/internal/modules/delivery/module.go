@@ -54,6 +54,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	if c.DB == nil {
 		return fmt.Errorf("delivery module requires database")
 	}
+	if err := deliveryevent.Register(c.EventRegistry); err != nil {
+		return fmt.Errorf("delivery event codecs: %w", err)
+	}
 	if c.PermissionChecker == nil {
 		return fmt.Errorf("delivery module requires permission checker")
 	}
@@ -82,7 +85,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	hub := stream.NewHub()
 	registry := runner.NewRegistry()
 	abortBuild := command.NewAbortBuildHandler(repo, checker, registry, hub)
-	trigger := command.NewTriggerBuildHandler(repo, checker, jenkinsProvider, c.EventBus, hub, registry, c.Context, func(err error) {
+	trigger := command.NewTriggerBuildHandler(repo, checker, jenkinsProvider, c.EventBus, hub, registry, c.Context, c.Transactor, func(err error) {
 		if c.Logger != nil {
 			c.Logger.Error("asynchronous build failed", zap.Error(err))
 		}
@@ -97,7 +100,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	handler := deliveryhttp.NewHandler(
 		trigger,
 		abortBuild,
-		command.NewRollbackBuildHandler(repo, checker, jenkinsProvider, c.EventBus, hub, registry, c.Context),
+		command.NewRollbackBuildHandler(repo, checker, jenkinsProvider, c.EventBus, hub, registry, c.Context, c.Transactor),
 		query.NewListBuildsHandler(repo, checker),
 		query.NewGetBuildHandler(repo, checker),
 		query.NewStreamBuildLogsHandler(repo, checker, hub),
@@ -141,17 +144,15 @@ func (m *Module) Register(c *appctx.Container) error {
 	if remover, ok := c.ManifestDeployer.(runtimeport.ManifestRemover); ok {
 		deployOrchestrator.SetManifestRemover(remover)
 	}
-	deployOrchestrator.SetTerminalHook(func(ctx context.Context, run *deployrunmodel.DeploymentRun) {
+	deployRepo.SetTerminalCallback(func(ctx context.Context, run *deployrunmodel.DeploymentRun) error {
 		if run == nil {
-			return
+			return nil
 		}
 		completed := deliveryevent.NewDeployCompleted(
 			run.ID, run.ProjectID, run.WorkspaceID, run.EnvironmentID, "", string(run.Status), string(run.RunType), run.ImageTag,
 		)
 		completed.CreatedBy = run.CreatedBy
-		if err := c.EventBus.Publish(ctx, completed); err != nil && c.Logger != nil {
-			c.Logger.Warn("publish deploy completed failed", zap.Error(err))
-		}
+		return c.EventBus.Publish(ctx, completed)
 	})
 	deployConsumer, err := deployconsumer.New(deployRepo, deployOrchestrator)
 	if err != nil {
