@@ -77,6 +77,22 @@ func TestSSORuntimeRefreshesOnlyWhenRepositoryVersionChanges(t *testing.T) {
 	require.Equal(t, int64(2), runtime.Snapshot().Configuration.Version)
 }
 
+func TestSSORuntimeValidateDoesNotActivateConfiguration(t *testing.T) {
+	repo := &memorySSOConfigRepository{}
+	runtime := service.NewSSORuntime(repo, config.AuthConfig{}, http.DefaultClient)
+	require.NoError(t, runtime.Load(context.Background()))
+
+	candidate := model.SSOConfiguration{
+		LoginUI: model.LoginUISettings{
+			Provider:          model.SSOProviderOIDC,
+			ShowPasswordLogin: true,
+		},
+		Version: 9,
+	}
+	require.NoError(t, runtime.Validate(candidate))
+	require.Equal(t, int64(0), runtime.Snapshot().Configuration.Version)
+}
+
 func TestSSORuntimeOIDCTestUsesDiscovery(t *testing.T) {
 	var discoveryCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

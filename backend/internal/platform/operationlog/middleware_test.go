@@ -134,6 +134,33 @@ func TestMiddlewareOmitsKubernetesPluginRequestBodyAndPreservesHandlerBody(t *te
 	}
 }
 
+func TestMiddlewareOmitsSSOAdminSecretsAndPreservesHandlerBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := openOperationLogStore(t, "oplog_sso_body")
+	engine := gin.New()
+	engine.Use(Middleware(store))
+	var received string
+	engine.PUT("/api/v1/admin/sso", func(c *gin.Context) {
+		raw, readErr := io.ReadAll(c.Request.Body)
+		require.NoError(t, readErr)
+		received = string(raw)
+		c.Status(http.StatusOK)
+	})
+
+	payload := `{"oidc":{"client_secret":"oidc-secret"},"ldap":{"bind_password":"ldap-secret"}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/sso", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, payload, received)
+	records := waitForOperationLogRecords(t, store, 1)
+	require.Equal(t, "[sensitive body omitted]", records[0].Body)
+	require.NotContains(t, records[0].Body, "oidc-secret")
+	require.NotContains(t, records[0].Body, "ldap-secret")
+}
+
 func TestMiddlewarePreservesLargeJSONBodyForHandler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := openOperationLogStore(t, "oplog_large_json")

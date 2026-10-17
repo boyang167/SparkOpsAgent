@@ -21,6 +21,8 @@ func HandleError(c *gin.Context, err error) {
 			status = http.StatusNotFound
 		case "IDENTITY_EMAIL_EXISTS":
 			status = http.StatusConflict
+		case "IDENTITY_SSO_VERSION_CONFLICT":
+			status = http.StatusConflict
 		case "GOVERNANCE_ROLE_EXISTS":
 			status = http.StatusConflict
 		case "IDENTITY_CANNOT_MODIFY_SELF", "IDENTITY_CANNOT_DELETE_SELF", "IDENTITY_LAST_SUPER_ADMIN":

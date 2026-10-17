@@ -116,25 +116,38 @@ func (r *SSORuntime) TestProvider(
 }
 
 func (r *SSORuntime) Replace(cfg model.SSOConfiguration) error {
+	next, err := r.buildSnapshot(cfg)
+	if err != nil {
+		return err
+	}
+	r.snapshot.Store(next)
+	return nil
+}
+
+func (r *SSORuntime) Validate(cfg model.SSOConfiguration) error {
+	_, err := r.buildSnapshot(cfg)
+	return err
+}
+
+func (r *SSORuntime) buildSnapshot(cfg model.SSOConfiguration) (*SSOSnapshot, error) {
 	cfg = prepareConfiguration(cfg)
 	if err := cfg.ValidateForSave(); err != nil {
-		return err
+		return nil, err
 	}
 	next := &SSOSnapshot{Configuration: cfg}
 	if cfg.OIDC.Enabled {
 		if err := validateOIDCSettings(cfg.OIDC); err != nil {
-			return err
+			return nil, err
 		}
 		next.OIDC = idauth.NewOIDCClientFromSettings(cfg.OIDC, r.httpClient)
 	}
 	if cfg.LDAP.Enabled {
 		if err := validateLDAPSettings(cfg.LDAP); err != nil {
-			return err
+			return nil, err
 		}
 		next.LDAP = idauth.NewLDAPAuthenticatorFromSettings(cfg.LDAP)
 	}
-	r.snapshot.Store(next)
-	return nil
+	return next, nil
 }
 
 func (r *SSORuntime) RefreshIfChanged(ctx context.Context) error {

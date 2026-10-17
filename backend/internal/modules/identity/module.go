@@ -1,17 +1,21 @@
 package identity
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/application/command"
-	identityhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/interface/http"
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain/model"
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/infrastructure/auth"
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/application/query"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/application/service"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/infrastructure/persistence"
+	identityhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
 )
 
 type Module struct {
@@ -39,6 +43,14 @@ func (m *Module) Register(c *appctx.Container) error {
 	if err := externalStore.AutoMigrate(); err != nil {
 		return fmt.Errorf("identity external identity migrate: %w", err)
 	}
+	secretBox, err := crypto.NewSecretBoxFromConfig(c.Config)
+	if err != nil {
+		return fmt.Errorf("identity SSO secret crypto: %w", err)
+	}
+	ssoRepo := persistence.NewSSOConfigRepository(c.DB, secretBox)
+	if err := ssoRepo.AutoMigrate(); err != nil {
+		return fmt.Errorf("identity SSO config migrate: %w", err)
+	}
 
 	repo := persistence.NewMemberRepository(c.DB)
 	systemRoles := query.NewSystemRoleChecker(systemRoleStore)
@@ -53,13 +65,22 @@ func (m *Module) Register(c *appctx.Container) error {
 	handler := identityhttp.NewHandler(register, login, me, updateProfile, changePassword)
 
 	resolver := command.NewResolveExternalIdentityHandler(repo, externalStore, m.tokens)
-	var ldapLogin *command.LDAPLoginHandler
-	if c.Config.Auth.LDAP.Enabled {
-		ldapLogin = command.NewLDAPLoginHandler(auth.NewLDAPAuthenticator(c.Config.Auth.LDAP), resolver)
+	ssoRuntime := service.NewSSORuntime(
+		ssoRepo,
+		c.Config.Auth,
+		&http.Client{Timeout: 10 * time.Second},
+	)
+	loadContext := c.Context
+	if loadContext == nil {
+		loadContext = context.Background()
 	}
-	oidcClient := auth.NewOIDCClient(c.Config.Auth.OIDC)
+	if err := ssoRuntime.Load(loadContext); err != nil {
+		return fmt.Errorf("identity SSO runtime load: %w", err)
+	}
+	ssoManager := command.NewSSOConfigManager(ssoRepo, ssoRuntime)
 	stateStore := command.NewOIDCStateStore()
-	ssoHandler := identityhttp.NewSSOHandler(c.DB, oidcClient, ldapLogin, resolver, stateStore)
+	ssoHandler := identityhttp.NewSSOHandler(ssoRuntime, resolver, stateStore)
+	ssoAdminHandler := identityhttp.NewSSOAdminHandler(ssoManager)
 
 	createPlatformMember := command.NewCreatePlatformMemberHandler(repo, systemRoleStore, c.EventBus)
 	updatePlatformMember := command.NewUpdatePlatformMemberHandler(repo, systemRoleStore)
@@ -82,12 +103,32 @@ func (m *Module) Register(c *appctx.Container) error {
 	auth.GET("/oidc/callback", ssoHandler.OIDCCallback)
 	auth.POST("/ldap/login", ssoHandler.LDAPLogin)
 
+	adminSSO := c.Engine.Group("/api/v1/admin/sso", authn.RequireAuth(m.tokens), superAdmin)
+	adminSSO.GET("", ssoAdminHandler.Get)
+	adminSSO.POST("/test", ssoAdminHandler.Test)
+	adminSSO.PUT("", ssoAdminHandler.Update)
+
 	platform := c.Engine.Group("/api/v1/platform")
 	platform.GET("/members", authn.RequireAuth(m.tokens), superAdmin, platformHandler.ListMembers)
 	platform.POST("/members", authn.RequireAuth(m.tokens), superAdmin, platformHandler.CreateMember)
 	platform.PATCH("/members/:memberId", authn.RequireAuth(m.tokens), superAdmin, platformHandler.UpdateMember)
 	platform.PATCH("/members/:memberId/password", authn.RequireAuth(m.tokens), superAdmin, platformHandler.ResetPassword)
 	platform.DELETE("/members/:memberId", authn.RequireAuth(m.tokens), superAdmin, platformHandler.DeleteMember)
+
+	if c.Context != nil {
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-c.Context.Done():
+					return
+				case <-ticker.C:
+					_ = ssoRuntime.RefreshIfChanged(c.Context)
+				}
+			}
+		}()
+	}
 
 	return nil
 }

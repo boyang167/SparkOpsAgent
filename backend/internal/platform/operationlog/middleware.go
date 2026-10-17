@@ -51,6 +51,8 @@ func Middleware(store *Store) gin.HandlerFunc {
 				// Never truncate multipart: replacing Body with a 4KiB prefix
 				// breaks plugin ZIP uploads (unexpected EOF / hung proxies).
 				reqBody = "[multipart omitted]"
+			} else if shouldOmitSensitiveRequestBody(path) {
+				reqBody = "[sensitive body omitted]"
 			} else if shouldOmitPluginRequestBody(path) {
 				reqBody = "[plugin body omitted]"
 			} else {
@@ -122,6 +124,10 @@ func shouldSkip(path string) bool {
 
 func shouldOmitPluginRequestBody(path string) bool {
 	return strings.HasPrefix(path, "/api/v1/plugins/kubernetes/")
+}
+
+func shouldOmitSensitiveRequestBody(path string) bool {
+	return path == "/api/v1/admin/sso" || path == "/api/v1/admin/sso/test"
 }
 
 func extractWorkspaceID(c *gin.Context) string {

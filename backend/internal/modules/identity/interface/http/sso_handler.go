@@ -4,43 +4,43 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/application/command"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/application/service"
 	idauth "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/infrastructure/auth"
-	"github.com/sparkops/sparkops-agent/backend/internal/platform/entitlements"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 )
 
 type SSOHandler struct {
-	db       *gorm.DB
-	oidc     *idauth.OIDCClient
-	ldap     *command.LDAPLoginHandler
+	runtime  *service.SSORuntime
 	resolver *command.ResolveExternalIdentityHandler
 	states   *command.OIDCStateStore
 }
 
 func NewSSOHandler(
-	db *gorm.DB,
-	oidc *idauth.OIDCClient,
-	ldap *command.LDAPLoginHandler,
+	runtime *service.SSORuntime,
 	resolver *command.ResolveExternalIdentityHandler,
 	states *command.OIDCStateStore,
 ) *SSOHandler {
-	return &SSOHandler{db: db, oidc: oidc, ldap: ldap, resolver: resolver, states: states}
+	return &SSOHandler{runtime: runtime, resolver: resolver, states: states}
 }
 
 func (h *SSOHandler) AuthProviders(c *gin.Context) {
-	ui, _ := entitlements.LoadLoginUIConfig(c.Request.Context(), h.db)
+	snapshot := h.runtime.Snapshot()
+	ui := snapshot.Configuration.LoginUI
 	httpx.OK(c, gin.H{
-		"oidc_enabled":        h.oidc != nil && h.oidc.Enabled(),
-		"ldap_enabled":        h.ldap != nil,
-		"sso_ui":              ui,
+		"oidc_enabled": snapshot.OIDC != nil && snapshot.OIDC.Enabled(),
+		"ldap_enabled": snapshot.LDAP != nil,
+		"sso_ui": gin.H{
+			"enabled": ui.Enabled, "provider": ui.Provider,
+			"show_password_login": ui.ShowPasswordLogin,
+		},
 	})
 }
 
 func (h *SSOHandler) OIDCLogin(c *gin.Context) {
-	if h.oidc == nil || !h.oidc.Enabled() {
+	snapshot := h.runtime.Snapshot()
+	if snapshot.OIDC == nil || !snapshot.OIDC.Enabled() {
 		httpx.Fail(c, "AUTH_OIDC_DISABLED", "oidc login disabled", http.StatusBadRequest)
 		return
 	}
@@ -49,12 +49,18 @@ func (h *SSOHandler) OIDCLogin(c *gin.Context) {
 		httpx.HandleError(c, err)
 		return
 	}
+	authorizationURL, err := snapshot.OIDC.AuthURLContext(c.Request.Context(), state)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
 	h.states.Put(state)
-	httpx.OK(c, gin.H{"authorization_url": h.oidc.AuthURL(state), "state": state})
+	httpx.OK(c, gin.H{"authorization_url": authorizationURL, "state": state})
 }
 
 func (h *SSOHandler) OIDCCallback(c *gin.Context) {
-	if h.oidc == nil || !h.oidc.Enabled() {
+	snapshot := h.runtime.Snapshot()
+	if snapshot.OIDC == nil || !snapshot.OIDC.Enabled() {
 		httpx.Fail(c, "AUTH_OIDC_DISABLED", "oidc login disabled", http.StatusBadRequest)
 		return
 	}
@@ -64,7 +70,7 @@ func (h *SSOHandler) OIDCCallback(c *gin.Context) {
 		httpx.Fail(c, "AUTH_OIDC_INVALID_STATE", "invalid oauth state", http.StatusBadRequest)
 		return
 	}
-	user, err := h.oidc.ExchangeUser(c.Request.Context(), code)
+	user, err := snapshot.OIDC.ExchangeUser(c.Request.Context(), code)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
@@ -87,7 +93,8 @@ type ldapLoginRequest struct {
 }
 
 func (h *SSOHandler) LDAPLogin(c *gin.Context) {
-	if h.ldap == nil {
+	snapshot := h.runtime.Snapshot()
+	if snapshot.LDAP == nil {
 		httpx.Fail(c, "AUTH_LDAP_DISABLED", "ldap login disabled", http.StatusBadRequest)
 		return
 	}
@@ -96,7 +103,18 @@ func (h *SSOHandler) LDAPLogin(c *gin.Context) {
 		httpx.Fail(c, "INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
-	result, err := h.ldap.Handle(c.Request.Context(), req.Username, req.Password)
+	user, err := snapshot.LDAP.AuthenticateContext(c.Request.Context(), req.Username, req.Password)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	result, err := h.resolver.Handle(
+		c.Request.Context(),
+		"ldap",
+		user.Subject,
+		user.Email,
+		user.DisplayName,
+	)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
