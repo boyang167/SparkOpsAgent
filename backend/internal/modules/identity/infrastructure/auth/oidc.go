@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
 )
 
@@ -26,8 +28,19 @@ type OIDCUser struct {
 }
 
 type OIDCClient struct {
-	cfg  config.OIDCConfig
-	oauth *oauth2.Config
+	cfg         config.OIDCConfig
+	oauth       *oauth2.Config
+	httpClient  *http.Client
+	userInfoURL string
+	mu          sync.RWMutex
+	discovered  bool
+}
+
+type OIDCDiscovery struct {
+	Issuer                string `json:"issuer"`
+	AuthorizationEndpoint string `json:"authorization_endpoint"`
+	TokenEndpoint         string `json:"token_endpoint"`
+	UserInfoEndpoint      string `json:"userinfo_endpoint"`
 }
 
 func NewOIDCClient(cfg config.OIDCConfig) *OIDCClient {
@@ -52,30 +65,68 @@ func NewOIDCClient(cfg config.OIDCConfig) *OIDCClient {
 			},
 			Scopes: scopes,
 		},
+		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		userInfoURL: cfg.UserInfoURL,
+		discovered:  cfg.AuthURL != "" && cfg.TokenURL != "" && cfg.UserInfoURL != "",
 	}
 }
 
-func (c *OIDCClient) Enabled() bool { return c.cfg.Enabled && c.cfg.Issuer != "" && c.cfg.ClientID != "" }
+func NewOIDCClientFromSettings(settings model.OIDCSettings, client *http.Client) *OIDCClient {
+	oidc := NewOIDCClient(config.OIDCConfig{
+		Enabled: settings.Enabled, Issuer: settings.Issuer, ClientID: settings.ClientID,
+		ClientSecret: settings.ClientSecret, RedirectURL: settings.RedirectURL, Scopes: settings.Scopes,
+		AuthURL: settings.AuthorizationEndpoint, TokenURL: settings.TokenEndpoint,
+		UserInfoURL: settings.UserInfoEndpoint,
+	})
+	if client != nil {
+		oidc.httpClient = client
+	}
+	oidc.discovered = false
+	return oidc
+}
+
+func (c *OIDCClient) Enabled() bool {
+	return c.cfg.Enabled && c.cfg.Issuer != "" && c.cfg.ClientID != ""
+}
 
 func (c *OIDCClient) AuthURL(state string) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.oauth.AuthCodeURL(state, oauth2.AccessTypeOffline)
+}
+
+func (c *OIDCClient) AuthURLContext(ctx context.Context, state string) (string, error) {
+	if err := c.ensureDiscovery(ctx); err != nil {
+		return "", err
+	}
+	return c.AuthURL(state), nil
+}
+
+func (c *OIDCClient) TestConnection(ctx context.Context) error {
+	return c.ensureDiscovery(ctx)
 }
 
 func (c *OIDCClient) ExchangeUser(ctx context.Context, code string) (*OIDCUser, error) {
 	if !c.Enabled() {
 		return nil, fmt.Errorf("oidc auth disabled")
 	}
-	token, err := c.oauth.Exchange(ctx, code)
+	if err := c.ensureDiscovery(ctx); err != nil {
+		return nil, err
+	}
+	c.mu.RLock()
+	oauthConfig := *c.oauth
+	userInfoURL := c.userInfoURL
+	c.mu.RUnlock()
+	token, err := oauthConfig.Exchange(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("oidc exchange: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.userInfoURL(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, userInfoURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("oidc userinfo: %w", err)
 	}
@@ -126,9 +177,105 @@ func ParseOAuthState(raw string) (string, error) {
 	return raw, nil
 }
 
-func (c *OIDCClient) userInfoURL() string {
-	if c.cfg.UserInfoURL != "" {
-		return c.cfg.UserInfoURL
+func (c *OIDCClient) ensureDiscovery(ctx context.Context) error {
+	if !c.Enabled() {
+		return fmt.Errorf("oidc auth disabled")
 	}
-	return strings.TrimSuffix(c.cfg.Issuer, "/") + "/userinfo"
+	c.mu.RLock()
+	if c.discovered {
+		c.mu.RUnlock()
+		return nil
+	}
+	c.mu.RUnlock()
+
+	discovery, err := DiscoverOIDC(ctx, c.httpClient, c.cfg.Issuer)
+	if err != nil {
+		return err
+	}
+	authURL := discovery.AuthorizationEndpoint
+	tokenURL := discovery.TokenEndpoint
+	userInfoURL := discovery.UserInfoEndpoint
+	if c.cfg.AuthURL != "" {
+		authURL = c.cfg.AuthURL
+	}
+	if c.cfg.TokenURL != "" {
+		tokenURL = c.cfg.TokenURL
+	}
+	if c.cfg.UserInfoURL != "" {
+		userInfoURL = c.cfg.UserInfoURL
+	}
+	for name, value := range map[string]string{
+		"authorization endpoint": authURL,
+		"token endpoint":         tokenURL,
+		"userinfo endpoint":      userInfoURL,
+	} {
+		if err := validateHTTPURL(value); err != nil {
+			return fmt.Errorf("oidc %s: %w", name, err)
+		}
+	}
+
+	c.mu.Lock()
+	c.oauth.Endpoint = oauth2.Endpoint{AuthURL: authURL, TokenURL: tokenURL}
+	c.userInfoURL = userInfoURL
+	c.discovered = true
+	c.mu.Unlock()
+	return nil
+}
+
+func DiscoverOIDC(ctx context.Context, client *http.Client, issuer string) (OIDCDiscovery, error) {
+	issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
+	if err := validateHTTPURL(issuer); err != nil {
+		return OIDCDiscovery{}, fmt.Errorf("oidc issuer: %w", err)
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		issuer+"/.well-known/openid-configuration",
+		nil,
+	)
+	if err != nil {
+		return OIDCDiscovery{}, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return OIDCDiscovery{}, fmt.Errorf("oidc discovery: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return OIDCDiscovery{}, fmt.Errorf("oidc discovery status %d", resp.StatusCode)
+	}
+	var discovery OIDCDiscovery
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&discovery); err != nil {
+		return OIDCDiscovery{}, fmt.Errorf("oidc discovery decode: %w", err)
+	}
+	if strings.TrimRight(discovery.Issuer, "/") != issuer {
+		return OIDCDiscovery{}, fmt.Errorf("oidc discovery issuer mismatch")
+	}
+	for name, value := range map[string]string{
+		"authorization endpoint": discovery.AuthorizationEndpoint,
+		"token endpoint":         discovery.TokenEndpoint,
+		"userinfo endpoint":      discovery.UserInfoEndpoint,
+	} {
+		if err := validateHTTPURL(value); err != nil {
+			return OIDCDiscovery{}, fmt.Errorf("oidc %s: %w", name, err)
+		}
+	}
+	return discovery, nil
+}
+
+func validateHTTPURL(raw string) error {
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil {
+		return fmt.Errorf("invalid URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("URL must use http or https")
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("URL host is required")
+	}
+	return nil
 }
