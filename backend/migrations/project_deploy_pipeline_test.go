@@ -1,11 +1,17 @@
 package migrations
 
 import (
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	gormpostgres "gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func TestProjectDeployPipelineMigrationEnforcesWorkspaceClusterAuthorization(t *testing.T) {
@@ -191,7 +197,12 @@ func TestProjectArchiveIntentMigrationBackfillsConservatively(t *testing.T) {
 	require.Contains(t, up, "ADD COLUMN IF NOT EXISTS archive_allow_undeploy BOOLEAN")
 	require.Contains(t, up, "WHERE status = 'archiving'")
 	require.Contains(t, up, "archive_allow_undeploy IS NULL")
-	require.Contains(t, up, "SET archive_allow_undeploy = FALSE")
+	requireInOrder(t, up,
+		"SET archive_allow_undeploy = CASE",
+		"WHEN archive_phase = 'pending' THEN FALSE",
+		"ELSE TRUE",
+		"END",
+	)
 	require.Contains(t, up, "CHECK")
 	require.Contains(t, up, "conrelid = 'workspace_app.projects'::regclass")
 
@@ -199,11 +210,121 @@ func TestProjectArchiveIntentMigrationBackfillsConservatively(t *testing.T) {
 	require.Contains(t, down, "DROP COLUMN IF EXISTS archive_allow_undeploy")
 }
 
+func TestProjectArchiveIntentMigrationUpgradesPhaseSemanticsPostgres(t *testing.T) {
+	db := openMigrationPostgres(t)
+	require.NoError(t, db.Exec("CREATE SCHEMA workspace_app").Error)
+	require.NoError(t, db.Exec(`
+		CREATE TABLE workspace_app.projects (
+			id UUID PRIMARY KEY,
+			status VARCHAR(32) NOT NULL,
+			archive_phase VARCHAR(32) NOT NULL DEFAULT 'none'
+		)
+	`).Error)
+
+	expected := map[string]bool{
+		"pending":          false,
+		"undeploy_claimed": true,
+		"undeploying":      true,
+		"pipeline_pending": true,
+		"pipeline_claimed": true,
+		"finalizing":       true,
+	}
+	for phase := range expected {
+		require.NoError(t, db.Exec(
+			"INSERT INTO workspace_app.projects (id, status, archive_phase) VALUES (?, 'archiving', ?)",
+			uuid.NewString(), phase,
+		).Error)
+	}
+	activeID, archivedID := uuid.NewString(), uuid.NewString()
+	require.NoError(t, db.Exec(
+		"INSERT INTO workspace_app.projects (id, status, archive_phase) VALUES (?, 'active', 'none'), (?, 'archived', 'none')",
+		activeID, archivedID,
+	).Error)
+
+	require.NoError(t, db.Exec(readMigration(t, "000075_project_archive_intent.up.sql")).Error)
+
+	var rows []struct {
+		ArchivePhase         string
+		ArchiveAllowUndeploy *bool
+	}
+	require.NoError(t, db.Table("workspace_app.projects").
+		Where("status = 'archiving'").
+		Find(&rows).Error)
+	require.Len(t, rows, len(expected))
+	for _, row := range rows {
+		require.NotNil(t, row.ArchiveAllowUndeploy, row.ArchivePhase)
+		require.Equal(t, expected[row.ArchivePhase], *row.ArchiveAllowUndeploy, row.ArchivePhase)
+	}
+
+	var terminalNullCount int64
+	require.NoError(t, db.Table("workspace_app.projects").
+		Where("id IN ?", []string{activeID, archivedID}).
+		Where("archive_allow_undeploy IS NULL").
+		Count(&terminalNullCount).Error)
+	require.Equal(t, int64(2), terminalNullCount)
+
+	var columnDefault *string
+	require.NoError(t, db.Raw(`
+		SELECT column_default
+		FROM information_schema.columns
+		WHERE table_schema = 'workspace_app'
+		  AND table_name = 'projects'
+		  AND column_name = 'archive_allow_undeploy'
+	`).Scan(&columnDefault).Error)
+	require.Nil(t, columnDefault)
+}
+
 func readMigration(t *testing.T, name string) string {
 	t.Helper()
 	contents, err := os.ReadFile(name)
 	require.NoError(t, err)
 	return string(contents)
+}
+
+func openMigrationPostgres(t *testing.T) *gorm.DB {
+	t.Helper()
+	dsn := os.Getenv("DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("DATABASE_DSN is not set")
+	}
+	admin, err := gorm.Open(gormpostgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	databaseName := "sparkops_migration_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if err := admin.Exec("CREATE DATABASE " + databaseName).Error; err != nil {
+		t.Skipf("cannot create isolated PostgreSQL test database: %v", err)
+	}
+
+	db, err := gorm.Open(gormpostgres.Open(migrationDSNWithDatabase(t, dsn, databaseName)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		sqlDB, dbErr := db.DB()
+		require.NoError(t, dbErr)
+		require.NoError(t, sqlDB.Close())
+		require.NoError(t, admin.Exec("DROP DATABASE "+databaseName).Error)
+		adminSQL, adminErr := admin.DB()
+		require.NoError(t, adminErr)
+		require.NoError(t, adminSQL.Close())
+	})
+	return db
+}
+
+func migrationDSNWithDatabase(t *testing.T, dsn, databaseName string) string {
+	t.Helper()
+	if strings.Contains(dsn, "://") {
+		parsed, err := url.Parse(dsn)
+		require.NoError(t, err)
+		parsed.Path = "/" + databaseName
+		return parsed.String()
+	}
+	databaseSetting := regexp.MustCompile(`(?i)\b(?:dbname|database)\s*=\s*(?:'[^']*'|\S+)`)
+	if databaseSetting.MatchString(dsn) {
+		return databaseSetting.ReplaceAllString(dsn, "dbname="+databaseName)
+	}
+	return dsn + " dbname=" + databaseName
 }
 
 func requireInOrder(t *testing.T, haystack string, needles ...string) {

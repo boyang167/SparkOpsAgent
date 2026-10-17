@@ -379,6 +379,45 @@ func TestProjectUndeployRetriesUntilOfflineThenSchedulesPipeline(t *testing.T) {
 	require.False(t, teardown.calledInside)
 }
 
+func TestProjectUndeployResumesPreIntentClaimedPhases(t *testing.T) {
+	for _, phase := range []model.ArchivePhase{
+		model.ArchivePhaseUndeployClaimed,
+		model.ArchivePhaseUndeploying,
+	} {
+		t.Run(string(phase), func(t *testing.T) {
+			name, err := model.NewProjectName("orders")
+			require.NoError(t, err)
+			project := model.NewProject(
+				kernel.NewWorkspaceID(), name, kernel.NewMemberID(),
+				model.CreateProjectInput{Name: "orders"},
+			)
+			require.NoError(t, project.BeginArchivingWithIntent(true))
+			project.ArchivePhase = phase
+			repo := &pipelineProjectRepo{project: project}
+			teardown := &undeployTeardown{}
+			writer := &undeployOperationWriter{}
+			handler := NewProjectUndeployHandler(
+				repo, func() appctx.ProjectTeardown { return teardown },
+				writer, postgres.NewDirectTransactor(),
+			)
+
+			require.NoError(t, handler(context.Background(), operationWithPayload(
+				t,
+				ProjectUndeployPayload{
+					ProjectID:  project.ID.String(),
+					MemberID:   project.CreatedBy.String(),
+					Generation: project.ArchiveGeneration,
+				},
+			)))
+			require.Equal(t, 1, teardown.onlineChecks)
+			require.Zero(t, teardown.starts)
+			require.Equal(t, model.ArchivePhasePipelinePending, project.ArchivePhase)
+			require.Len(t, writer.requests, 1)
+			require.Equal(t, OperationTypePipelineDisable, writer.requests[0].OperationType)
+		})
+	}
+}
+
 func TestProjectUndeployClaimWinsConcurrentAbortBeforeExternalQuery(t *testing.T) {
 	name, err := model.NewProjectName("orders")
 	require.NoError(t, err)

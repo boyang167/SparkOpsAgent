@@ -291,7 +291,7 @@ None blocking. The Cursor shell auto-injected `git commit --trailer`, but instal
 
 ## Persistent archive intent and lifecycle-write closure (2026-10-18)
 
-- Migration `000075` adds nullable `workspace_app.projects.archive_allow_undeploy`, backfills legacy archiving rows conservatively to `false`, and constrains archiving rows to a non-null intent while active/archived rows keep it null. The production AMQP startup gate now requires migration 75.
+- Migration `000075` adds nullable `workspace_app.projects.archive_allow_undeploy`, backfills legacy `pending` rows conservatively to `false` and every already-advanced archiving phase to `true`, and constrains archiving rows to a non-null intent while active/archived rows keep it null. The production AMQP startup gate now requires migration 75.
 - `BeginArchive` is the only production active-to-archiving transition. Its CAS atomically writes status, generation, `pending` phase, and teardown intent; concurrent requests have one winner. The generic project `Update` no longer writes status, generation, phase, or intent and includes the caller's status in its predicate, so a stale active aggregate cannot overwrite a claimed/finalizing archive.
 - Resume and completion scheduling copy the persisted intent instead of defaulting to teardown. The undeploy handler treats the repository value as authoritative. For `false`, it queries online clusters and active runs outside transactions, never starts undeploy, then either aborts from `pending` when work remains or atomically advances to `pipeline_pending` and schedules pipeline disable when already offline.
 - RED: stale aggregate updates could reset lifecycle columns, archive entry used read-then-unconditional `Update`, and restart replay changed legacy intent to `true`. GREEN: repository CAS tests cover a single `BeginArchive` winner and stale writes at claimed/finalizing phases; real operation-outbox tests cover online/active abort with zero undeploy, offline pipeline finalization, persisted false-intent resume, operation replay, and schedule-failure rollback.
@@ -302,3 +302,10 @@ None blocking. The Cursor shell auto-injected `git commit --trailer`, but instal
 - Eight simultaneous `BeginArchive` contenders and independent claim/abort connections were repeated ten times; exactly one transition won in every run.
 - Fresh workspace, delivery, messaging, bootstrap, and migration tests passed with `-count=1`; `go build ./...` passed. The Go race build was unavailable because the installed Windows GCC lacks 64-bit cgo support, so high-repeat database concurrency tests were used instead.
 - Independent review closure: `BeginArchive` now also predicates `product_id IS NULL`, closing the bind-vs-archive TOCTOU. Both teardown and legacy pipeline scheduling failures are exercised with the SQL-backed repository and a real transaction, proving phase rollback and zero outbox rows. The migration constraint lookup is scoped to `workspace_app.projects`, and a two-connection concurrent claim-vs-abort test proves one CAS winner.
+
+### Migration 75 phase-aware upgrade closure
+
+- RED: the migration assertion failed because 75 used one unconditional `FALSE` backfill for every archiving row.
+- GREEN: a real isolated PostgreSQL 74→75 upgrade verifies `pending=false`; `undeploy_claimed`, `undeploying`, `pipeline_pending`, `pipeline_claimed`, and `finalizing=true`; active/archived intent remains null; and the new column keeps no default.
+- Operation recovery tests reload both `undeploy_claimed` and `undeploying` with persisted `true` intent and prove they advance to `pipeline_pending` and schedule pipeline disable rather than completing through the false-intent branch.
+- Verification: real PostgreSQL migrations, all workspace-app packages, and messaging/bootstrap schema gates passed three runs; `go build ./...` passed.
