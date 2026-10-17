@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -290,6 +291,78 @@ func TestFactoryAMQPSchemaFailureDoesNotConstructWorkersOrConnections(t *testing
 	require.ErrorContains(t, err, "make migrate-up")
 	require.False(t, queueCreated)
 	require.False(t, transportCreated)
+}
+
+func TestFactoryRejectsMultipleMigrationRowsBeforeRabbitMQDial(t *testing.T) {
+	tests := []struct {
+		name string
+		rows [][2]any
+	}{
+		{name: "clean then dirty", rows: [][2]any{{70, false}, {70, true}}},
+		{name: "dirty then clean", rows: [][2]any{{70, true}, {70, false}}},
+		{name: "current then old", rows: [][2]any{{70, false}, {69, false}}},
+		{name: "old then current", rows: [][2]any{{69, false}, {70, false}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dialector := factoryPostgresNamedSQLite{
+				Dialector: sqlite.Open("file:" + strings.ReplaceAll(t.Name(), "/", "-") + "?mode=memory&cache=shared"),
+			}
+			db, err := gorm.Open(dialector, &gorm.Config{})
+			require.NoError(t, err)
+			require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS information_schema").Error)
+			require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS public").Error)
+			require.NoError(t, db.Exec(
+				"CREATE TABLE information_schema.tables (table_schema TEXT, table_name TEXT)",
+			).Error)
+			for _, table := range []string{"event_outbox", "event_inbox", "operation_outbox"} {
+				require.NoError(t, db.Exec(
+					"INSERT INTO information_schema.tables (table_schema, table_name) VALUES ('platform', ?)",
+					table,
+				).Error)
+			}
+			require.NoError(t, db.Exec(
+				"CREATE TABLE public.schema_migrations (version INTEGER, dirty BOOLEAN)",
+			).Error)
+			for _, row := range tt.rows {
+				require.NoError(t, db.Exec(
+					"INSERT INTO public.schema_migrations (version, dirty) VALUES (?, ?)",
+					row[0],
+					row[1],
+				).Error)
+			}
+
+			queueCreated := false
+			transportCreated := false
+			_, err = newFromConfig(
+				&config.Config{Messaging: config.MessagingConfig{
+					Driver: "amqp",
+					AMQP:   config.AMQPConfig{URL: "amqp://broker", EventExchange: "events"},
+				}},
+				db,
+				events.NewRegistry(),
+				postgres.NewTransactor(db),
+				zap.NewNop(),
+				factoryDependencies{
+					newQueue: func(AMQPConfig) (Queue, error) {
+						queueCreated = true
+						return &recordingQueue{close: func() error { return nil }}, nil
+					},
+					newMetrics: NewMetrics,
+					newEventTransport: func(string, *Metrics, ...string) (EventTransport, error) {
+						transportCreated = true
+						return &fakeEventTransport{}, nil
+					},
+					runtimeIdentity: runtimeIdentity,
+				},
+			)
+
+			require.ErrorContains(t, err, "exactly one row")
+			require.False(t, queueCreated)
+			require.False(t, transportCreated)
+		})
+	}
 }
 
 type factoryPostgresNamedSQLite struct {

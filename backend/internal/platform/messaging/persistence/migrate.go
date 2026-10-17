@@ -28,19 +28,26 @@ func ValidateTransactionalEventSchema(db *gorm.DB) error {
 		return nil
 	}
 
-	var migration struct {
+	var migrations []struct {
 		Version int
 		Dirty   bool
 	}
 	result := db.Raw(
-		"SELECT version, dirty FROM public.schema_migrations LIMIT 1",
-	).Scan(&migration)
+		"SELECT version, dirty FROM public.schema_migrations",
+	).Scan(&migrations)
 	if result.Error != nil {
 		return migrationRequiredError("query public.schema_migrations", result.Error)
 	}
-	if result.RowsAffected == 0 {
-		return migrationRequiredError("no applied migration version found", nil)
+	if len(migrations) != 1 {
+		return migrationRequiredError(
+			fmt.Sprintf(
+				"public.schema_migrations must contain exactly one row, found %d",
+				len(migrations),
+			),
+			nil,
+		)
 	}
+	migration := migrations[0]
 	if migration.Dirty {
 		return migrationRequiredError(
 			fmt.Sprintf("schema migration version %d is dirty", migration.Version),

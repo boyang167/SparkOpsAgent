@@ -246,3 +246,77 @@ Task 7 相关包通过；全量命令仍仅有工作区既存的两个 Kubernete
 - AMQP 模式部署必须先执行 migration 000070，再启动应用。
 - 当前 `backend/config.yaml` 为 `inmemory`，即使远程开发库未迁移也应正常启动且不访问 Operation Outbox。
 - 真实 RabbitMQ/PostgreSQL 故障窗口端到端集成测试属于 Task 11；本任务覆盖配置、schema gate、Factory 和 bootstrap 启动顺序。
+
+## 第二轮审查修复：schema_migrations 单行约束
+
+### RED
+
+新增顺序无关的表驱动测试：
+
+```text
+clean(70) → dirty(70)
+dirty(70) → clean(70)
+current(70) → old(69)
+old(69) → current(70)
+```
+
+运行：
+
+```text
+go test ./internal/platform/messaging/persistence \
+  ./internal/platform/messaging \
+  -run 'MultipleMigrationRows' \
+  -count=1
+```
+
+现有 `SELECT ... LIMIT 1` 的 RED 结果：
+
+- clean/current 先插入时，schema 校验可能继续通过，Factory 会构造 RabbitMQ resources；
+- dirty/old 先插入时，错误变为 dirty/old；
+- 同一组 migration rows 的结果取决于返回顺序，未检测多行损坏状态。
+
+### GREEN
+
+`ValidateTransactionalEventSchema` 改为：
+
+1. 查询 `public.schema_migrations` 的全部 `version, dirty` rows；
+2. 首先要求行数严格等于 1；
+3. 0 行明确报 `found 0`；
+4. 多行明确报 `must contain exactly one row, found N`；
+5. 只有恰好一行时才校验 `dirty=false`、`version>=70`；
+6. 再验证三张 `platform` 表。
+
+Factory 继续在 Metrics、task Queue 和 EventTransport 创建之前调用该门禁。四种多行顺序下均断言 Queue/EventTransport 构造计数为零。
+
+Focused GREEN：
+
+```text
+go test ./internal/platform/messaging/persistence \
+  ./internal/platform/messaging \
+  -run 'MultipleMigrationRows' \
+  -count=1
+```
+
+结果：PASS。
+
+完整验证：
+
+```text
+go test ./internal/platform/config \
+  ./internal/platform/messaging/... \
+  ./internal/bootstrap \
+  ./migrations \
+  -count=1
+
+go build ./cmd/server
+```
+
+结果：PASS。
+
+后端源码修改后执行：
+
+```powershell
+.\scripts\dev-restart.ps1 -Backend
+```
+
+结果：本地 `inmemory` 后端成功重启并监听 8080。

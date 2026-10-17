@@ -162,7 +162,7 @@ func TestValidateTransactionalEventSchema(t *testing.T) {
 					"CREATE TABLE public.schema_migrations (version INTEGER, dirty BOOLEAN)",
 				).Error)
 			},
-			wantErr: "make migrate-up",
+			wantErr: "found 0",
 		},
 		{
 			name: "migration query error",
@@ -231,6 +231,60 @@ func TestValidateTransactionalEventSchema(t *testing.T) {
 func TestValidateTransactionalEventSchemaAllowsSQLiteUnitTests(t *testing.T) {
 	db := openAttachedPlatformSQLite(t, sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"))
 	require.NoError(t, ValidateTransactionalEventSchema(db))
+}
+
+type migrationState struct {
+	version int
+	dirty   bool
+}
+
+func TestValidateTransactionalEventSchemaRejectsMultipleMigrationRowsRegardlessOfOrder(t *testing.T) {
+	tests := []struct {
+		name string
+		rows []migrationState
+	}{
+		{
+			name: "clean then dirty",
+			rows: []migrationState{{version: 70}, {version: 70, dirty: true}},
+		},
+		{
+			name: "dirty then clean",
+			rows: []migrationState{{version: 70, dirty: true}, {version: 70}},
+		},
+		{
+			name: "current then old",
+			rows: []migrationState{{version: 70}, {version: 69}},
+		},
+		{
+			name: "old then current",
+			rows: []migrationState{{version: 69}, {version: 70}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dialector := postgresNamedSQLite{
+				Dialector: sqlite.Open("file:" + strings.ReplaceAll(t.Name(), "/", "-") + "?mode=memory&cache=shared"),
+			}
+			db := openAttachedPlatformSQLite(t, dialector)
+			attachMigrationSchemas(t, db)
+			require.NoError(t, db.Exec(
+				"CREATE TABLE public.schema_migrations (version INTEGER, dirty BOOLEAN)",
+			).Error)
+			for _, row := range tt.rows {
+				require.NoError(t, db.Exec(
+					"INSERT INTO public.schema_migrations (version, dirty) VALUES (?, ?)",
+					row.version,
+					row.dirty,
+				).Error)
+			}
+
+			err := ValidateTransactionalEventSchema(db)
+			require.ErrorContains(t, err, "exactly one row")
+			require.ErrorContains(t, err, "found 2")
+			require.ErrorContains(t, err, "make migrate-up")
+		})
+	}
 }
 
 func attachMigrationSchemas(t *testing.T, db *gorm.DB) {
