@@ -53,3 +53,67 @@ func TestProductionNamedSubscriptionsAreCompleteAndUnique(t *testing.T) {
 
 	require.Equal(t, expected, actual)
 }
+
+func TestDeferredExternalSubscribersReturnSentinelBeforeSideEffects(t *testing.T) {
+	guard := regexp.MustCompile(
+		`if\s+messaging\.IsInboxConsumerContext\(ctx\)\s*\{\s*return\s+messaging\.ErrOperationOutboxRequired\s*\}`,
+	)
+	cases := []struct {
+		subscriber      string
+		handlerFile     string
+		firstSideEffect string
+	}{
+		{
+			subscriber:      "product.workflow-run-completed",
+			handlerFile:     "../modules/product/application/subscriber/on_workflow_run_completed.go",
+			firstSideEffect: "h.releasePlans.OnWorkflowRunCompleted",
+		},
+		{
+			subscriber:      "product-workflow.build-completed",
+			handlerFile:     "../modules/product_workflow/application/subscriber/on_build_completed.go",
+			firstSideEffect: "s.scheduler.HandleBuildCompleted",
+		},
+		{
+			subscriber:      "product-workflow.deploy-completed",
+			handlerFile:     "../modules/product_workflow/application/subscriber/on_deploy_completed.go",
+			firstSideEffect: "s.scheduler.HandleDeployCompleted",
+		},
+		{
+			subscriber:      "workspace-app.deploy-completed.archive-coordinator",
+			handlerFile:     "../modules/workspace_app/application/command/archive_coordinator.go",
+			firstSideEffect: "c.repo.FindByID",
+		},
+		{
+			subscriber:      "delivery.build-completed.deployrun",
+			handlerFile:     "../modules/delivery/deployrun/application/subscriber/on_build_completed.go",
+			firstSideEffect: "s.repo.FindByBuildID",
+		},
+		{
+			subscriber:      "delivery.build-completed.webhook",
+			handlerFile:     "../modules/delivery/infrastructure/outbound/dispatcher.go",
+			firstSideEffect: "payloadFromEvent(e)",
+		},
+		{
+			subscriber:      "delivery.deploy-completed.webhook",
+			handlerFile:     "../modules/delivery/infrastructure/outbound/dispatcher.go",
+			firstSideEffect: "payloadFromEvent(e)",
+		},
+		{
+			subscriber:      "delivery.secret-updated.credential-sync",
+			handlerFile:     "../modules/delivery/deployrun/application/subscriber/on_secret_updated.go",
+			firstSideEffect: "go func()",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.subscriber, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Clean(tt.handlerFile))
+			require.NoError(t, err)
+			source := string(raw)
+			guardLocation := guard.FindStringIndex(source)
+			require.NotNil(t, guardLocation, "Inbox path must return the retry sentinel")
+			sideEffectOffset := strings.Index(source[guardLocation[1]:], tt.firstSideEffect)
+			require.GreaterOrEqual(t, sideEffectOffset, 0, "expected side-effect marker not found")
+		})
+	}
+}

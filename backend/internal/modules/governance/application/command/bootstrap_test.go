@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/command"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
@@ -119,6 +120,31 @@ type memoryBindingRepo struct {
 	bindings []*model.RoleBinding
 }
 
+type recordingPolicyEngine struct {
+	groupingPolicies int
+}
+
+func (*recordingPolicyEngine) Enforce(context.Context, string, string, string, string) (bool, error) {
+	return false, nil
+}
+func (*recordingPolicyEngine) AddPolicy(string, string, string, string) error { return nil }
+func (*recordingPolicyEngine) RemovePolicy(string, string, string, string) error {
+	return nil
+}
+func (*recordingPolicyEngine) RemoveFilteredPolicy(int, ...string) error { return nil }
+func (e *recordingPolicyEngine) AddGroupingPolicy(string, string, string) error {
+	e.groupingPolicies++
+	return nil
+}
+func (*recordingPolicyEngine) RemoveGroupingPolicy(string, string, string) error {
+	return nil
+}
+func (*recordingPolicyEngine) RemoveFilteredGroupingPolicy(int, ...string) error { return nil }
+func (*recordingPolicyEngine) SyncRoleAPIPolicies(string, string, [][2]string) error {
+	return nil
+}
+func (*recordingPolicyEngine) SavePolicy() error { return nil }
+
 func (r *memoryBindingRepo) Save(_ context.Context, binding *model.RoleBinding) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -195,6 +221,21 @@ func TestBootstrapWorkspaceCreatesDefaultRolesAndOnlyBindsAdmin(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 5)
 	require.Len(t, bindings.bindings, 1)
+}
+
+func TestBootstrapWorkspaceSynchronizesPolicyOutsideInbox(t *testing.T) {
+	ctx := context.Background()
+	wsID := kernel.NewWorkspaceID()
+	ownerID := kernel.NewMemberID()
+	roles := newMemoryRoleRepo()
+	bindings := &memoryBindingRepo{}
+	engine := &recordingPolicyEngine{}
+	syncer := service.NewAPIPolicySync(engine, roles, bindings, nil)
+	handler := command.NewBootstrapWorkspaceHandler(roles, bindings, syncer)
+
+	require.NoError(t, handler.Handle(ctx, wsID, ownerID, authz.DefaultAdminPermissions))
+
+	require.Equal(t, 1, engine.groupingPolicies)
 }
 
 func TestEnsureDefaultWorkspaceRolesAddsMissingRolesWithoutOverwritingExisting(t *testing.T) {

@@ -2,7 +2,6 @@ package modules_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -12,6 +11,7 @@ import (
 
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	governancecommand "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/command"
+	governanceservice "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/service"
 	governancesubscriber "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/subscriber"
 	governancepersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/persistence"
 	productsubscriber "github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/subscriber"
@@ -25,31 +25,84 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
-type subscriberTestTransport struct{}
+type subscriberTestTransport struct {
+	retries int
+}
 
-func (subscriberTestTransport) Declare(context.Context, []messaging.Subscription) error { return nil }
-func (subscriberTestTransport) Publish(context.Context, events.Envelope) error          { return nil }
-func (subscriberTestTransport) Consume(context.Context, messaging.Subscription, messaging.DeliveryHandler) error {
+func (*subscriberTestTransport) Declare(context.Context, []messaging.Subscription) error { return nil }
+func (*subscriberTestTransport) Publish(context.Context, events.Envelope) error          { return nil }
+func (*subscriberTestTransport) Consume(context.Context, messaging.Subscription, messaging.DeliveryHandler) error {
 	return nil
 }
-func (subscriberTestTransport) PublishRetry(context.Context, messaging.Subscription, events.Envelope, messaging.RetryDelay, int) error {
-	return errors.New("unexpected retry")
-}
-func (subscriberTestTransport) PublishDeadLetter(context.Context, messaging.Subscription, events.Envelope, string) error {
+func (t *subscriberTestTransport) PublishRetry(context.Context, messaging.Subscription, events.Envelope, messaging.RetryDelay, int) error {
+	t.retries++
 	return nil
 }
-func (subscriberTestTransport) Close() error { return nil }
+func (*subscriberTestTransport) PublishDeadLetter(context.Context, messaging.Subscription, events.Envelope, string) error {
+	return nil
+}
+func (*subscriberTestTransport) Close() error { return nil }
+
+func TestGovernanceInboxRollsBackDatabaseUntilPolicySyncCanBeScheduled(t *testing.T) {
+	db := openSubscriberDB(t)
+	registry := events.NewRegistry()
+	require.NoError(t, integration.RegisterWorkspaceCreated(registry))
+	transport := &subscriberTestTransport{}
+	consumer := messaging.NewInboxConsumer(
+		postgres.NewTransactor(db),
+		messagingpersistence.NewInboxStore(db),
+		registry,
+		transport,
+		nil,
+		nil,
+	)
+	store := governancepersistence.NewStore(db)
+	handler := governancesubscriber.NewOnWorkspaceCreated(
+		governancecommand.NewBootstrapWorkspaceHandler(
+			governancepersistence.NewRoleRepository(store),
+			governancepersistence.NewBindingRepository(store),
+			&governanceservice.APIPolicySync{},
+		),
+		nil,
+	)
+	event := integration.NewWorkspaceCreated(
+		kernel.NewWorkspaceID(),
+		kernel.NewOrgID(),
+		kernel.NewMemberID(),
+	)
+	envelope, err := registry.Encode(context.Background(), event)
+	require.NoError(t, err)
+	var handlerErr error
+	subscription := messaging.Subscription{
+		EventName:  integration.EventWorkspaceCreated,
+		Version:    1,
+		Subscriber: "governance.workspace-created.bootstrap",
+		Handler: func(ctx context.Context, event events.Event) error {
+			handlerErr = handler.Handle(ctx, event)
+			return handlerErr
+		},
+	}
+
+	require.NoError(t, consumer.Handle(context.Background(), subscription, envelope, 0))
+
+	require.ErrorIs(t, handlerErr, messaging.ErrOperationOutboxRequired)
+	require.Equal(t, 1, transport.retries)
+	assertCount(t, db, "platform.event_inbox", 0)
+	assertCount(t, db, "governance.roles", 0)
+	assertCount(t, db, "governance.role_bindings", 0)
+}
 
 func TestPureDatabaseSubscribersSkipDuplicateDeliveries(t *testing.T) {
 	db := openSubscriberDB(t)
 	registry := events.NewRegistry()
 	require.NoError(t, deliveryevent.Register(registry))
 	require.NoError(t, integration.RegisterWorkspaceCreated(registry))
+	transport := &subscriberTestTransport{}
 	consumer := messaging.NewInboxConsumer(
 		postgres.NewTransactor(db),
 		messagingpersistence.NewInboxStore(db),
 		registry,
-		subscriberTestTransport{},
+		transport,
 		nil,
 		nil,
 	)
@@ -67,24 +120,11 @@ func TestPureDatabaseSubscribersSkipDuplicateDeliveries(t *testing.T) {
 	`, requirementID.String(), kernel.NewProductID().String(), kernel.NewProductPlanID().String(),
 		projectID.String(), buildID.String()).Error)
 
-	governanceStore := governancepersistence.NewStore(db)
 	cases := []struct {
 		event      events.Event
 		subscriber string
 		handler    messaging.Handler
 	}{
-		{
-			event:      integration.NewWorkspaceCreated(workspaceID, kernel.NewOrgID(), ownerID),
-			subscriber: "governance.workspace-created.bootstrap",
-			handler: governancesubscriber.NewOnWorkspaceCreated(
-				governancecommand.NewBootstrapWorkspaceHandler(
-					governancepersistence.NewRoleRepository(governanceStore),
-					governancepersistence.NewBindingRepository(governanceStore),
-					nil,
-				),
-				nil,
-			).Handle,
-		},
 		{
 			event:      integration.NewWorkspaceCreated(workspaceID, kernel.NewOrgID(), ownerID),
 			subscriber: "workspace-app.workspace-created.seed-default-templates",
@@ -129,9 +169,9 @@ func TestPureDatabaseSubscribersSkipDuplicateDeliveries(t *testing.T) {
 		require.NoError(t, consumer.Handle(context.Background(), subscription, envelope, 0))
 	}
 
-	assertCount(t, db, "governance.roles", 5)
-	assertCount(t, db, "governance.role_bindings", 1)
+	require.Zero(t, transport.retries)
 	assertCount(t, db, "workspace_app.templates", 14)
+	assertCount(t, db, "platform.event_inbox", int64(len(cases)))
 	assertCount(t, db, "product.environment_projects", 1)
 	var status string
 	require.NoError(t, db.Table("product.product_requirements").

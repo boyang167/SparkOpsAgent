@@ -273,7 +273,10 @@ func (h *BootstrapWorkspaceHandler) Handle(ctx context.Context, workspaceID kern
 			return err
 		}
 	}
-	if h.sync != nil && !messaging.IsInboxConsumerContext(ctx) {
+	if messaging.IsInboxConsumerContext(ctx) {
+		return messaging.ErrOperationOutboxRequired
+	}
+	if h.sync != nil {
 		return h.sync.SyncMemberRole(ctx, workspaceID, admin.ID, ownerID, true)
 	}
 	return nil
