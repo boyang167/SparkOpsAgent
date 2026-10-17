@@ -2,6 +2,7 @@ package events_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -82,6 +83,29 @@ func TestRegistryDecodeReturnsPermanentError(t *testing.T) {
 
 	var permanent *events.PermanentError
 	require.ErrorAs(t, err, &permanent)
+}
+
+func TestRegistryDecodeMalformedPayloadReturnsPermanentErrorWithDescriptorContext(t *testing.T) {
+	registry := events.NewRegistry()
+	require.NoError(t, events.RegisterJSON[deliveryevent.BuildCompleted](
+		registry,
+		deliveryevent.BuildCompletedName,
+		1,
+		func(ev deliveryevent.BuildCompleted) events.AggregateRef {
+			return events.AggregateRef{Type: "build", ID: ev.BuildID.String()}
+		},
+	))
+
+	_, err := registry.Decode(events.Envelope{
+		Type:    deliveryevent.BuildCompletedName,
+		Version: 1,
+		Payload: []byte(`{"BuildID":`),
+	})
+
+	var permanent *events.PermanentError
+	require.True(t, errors.As(err, &permanent))
+	require.ErrorContains(t, err, deliveryevent.BuildCompletedName)
+	require.ErrorContains(t, err, "version 1")
 }
 
 func TestRegistryRejectsDuplicateDescriptor(t *testing.T) {
