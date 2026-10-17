@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -556,8 +557,20 @@ func TestEventTransportRoutesStructurallyInvalidEnvelopeToSubscriberDLQ(t *testi
 		{name: "non uuid id", mutate: func(envelope *events.Envelope) { envelope.ID = "not-a-uuid" }},
 		{name: "empty type", mutate: func(envelope *events.Envelope) { envelope.Type = "" }},
 		{name: "blank type", mutate: func(envelope *events.Envelope) { envelope.Type = "  " }},
+		{name: "type too long", mutate: func(envelope *events.Envelope) {
+			envelope.Type = strings.Repeat("a", 161)
+		}},
+		{name: "type contains nul", mutate: func(envelope *events.Envelope) {
+			envelope.Type = "delivery.\x00BuildCompleted"
+		}},
+		{name: "type mismatches subscription", mutate: func(envelope *events.Envelope) {
+			envelope.Type = "delivery.DeployCompleted"
+		}},
 		{name: "zero version", mutate: func(envelope *events.Envelope) { envelope.Version = 0 }},
 		{name: "negative version", mutate: func(envelope *events.Envelope) { envelope.Version = -1 }},
+		{name: "version mismatches subscription", mutate: func(envelope *events.Envelope) {
+			envelope.Version = 2
+		}},
 		{name: "missing occurred at", mutate: func(envelope *events.Envelope) { envelope.OccurredAt = time.Time{} }},
 		{name: "missing payload", mutate: func(envelope *events.Envelope) { envelope.Payload = nil }},
 	}

@@ -172,3 +172,36 @@ go test ./internal/platform/messaging/... ./internal/platform/postgres -count=1
 关键 poison、Stats side-path、graceful close 和部分启动失败用例以 `-count=20` 重复运行：PASS。
 
 后端全量 `go test ./... -count=1` 中 Task 5 相关包通过，仅命中既有两项 Kubernetes 基线失败：bundled descriptor 缺少 `diagnosis/agent.go`，以及 exec recording 精确字符串断言不匹配。
+
+---
+
+## 最终复审修复
+
+复审基线：`21e60b99107bb227fc6fdba5f93ef2d029fb1eb3`
+
+### TDD RED
+
+```text
+go test ./internal/platform/messaging -run TestEventTransportRoutesStructurallyInvalidEnvelopeToSubscriberDLQ -count=1
+```
+
+新增的 type 超长、type 含 NUL、type 与 subscription 不匹配、version 与 subscription 不匹配四个子测试全部失败：handler 被调用且没有 DLQ publish。
+
+integration 测试静态核对确认 MessageId 断言仍比较 queue suffix，而生产发布使用随机生成的 envelope UUID；连接 RabbitMQ 时该断言必然失败。
+
+### GREEN 实现
+
+- `validateEventEnvelope` 现在接收当前 `Subscription`，在 handler 前强制 `Type == EventName`、`Version == Version`。
+- event type 限制为最多 160 个 ASCII 字节、禁止 NUL，并采用稳定名称最小语法：点分段，段内仅字母、数字、下划线或连字符。
+- 所有新增结构错误继续复用 raw body/headers subscriber DLQ confirm 路径；confirm 成功 ACK，失败 NACK/requeue。
+- integration 测试保存实际发布的 envelope，并用 `envelope.ID` 断言 `delivery.MessageId`。
+
+### GREEN 验证
+
+```text
+go test ./internal/platform/messaging/... -count=1
+go test ./internal/platform/messaging -run 'TestEventTransportRoutesStructurallyInvalidEnvelopeToSubscriberDLQ|TestEventTransportRoutesMalformedRawDeliveryToSubscriberDLQBeforeAck|TestEventTransportNacksMalformedRawDeliveryWhenDLQConfirmFails' -count=20
+go test -tags=integration ./internal/platform/messaging -run '^$' -count=1
+```
+
+结果：全部 PASS。RabbitMQ integration 测试已成功编译；实际运行因本机未设置 `AMQP_URL` 而明确 SKIP。

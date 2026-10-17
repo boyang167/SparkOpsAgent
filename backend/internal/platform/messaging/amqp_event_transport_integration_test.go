@@ -65,13 +65,14 @@ func TestRabbitEventTransportRoutesOneEventToEachSubscriber(t *testing.T) {
 	defer cancel()
 	require.NoError(t, transport.Declare(ctx, subscriptions))
 	require.NoError(t, transport.Declare(ctx, subscriptions))
-	require.NoError(t, transport.Publish(ctx, events.Envelope{
+	envelope := events.Envelope{
 		ID:         uuid.NewString(),
 		Type:       "delivery.BuildCompleted",
 		Version:    1,
 		OccurredAt: time.Now().UTC(),
 		Payload:    []byte(`{"build_id":"build-123"}`),
-	}))
+	}
+	require.NoError(t, transport.Publish(ctx, envelope))
 
 	channel, err := connection.Channel()
 	require.NoError(t, err)
@@ -80,7 +81,7 @@ func TestRabbitEventTransportRoutesOneEventToEachSubscriber(t *testing.T) {
 		delivery, ok, getErr := channel.Get(topologyFor(subscription).Main.Name, false)
 		require.NoError(t, getErr)
 		require.True(t, ok)
-		require.Equal(t, suffix, delivery.MessageId)
+		require.Equal(t, envelope.ID, delivery.MessageId)
 		require.NoError(t, delivery.Ack(false))
 	}
 }

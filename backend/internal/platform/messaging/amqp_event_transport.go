@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -19,11 +20,13 @@ const (
 	eventAttemptsHeader       = "x-sparkops-attempts"
 	eventPublishAttemptHeader = "x-sparkops-publish-attempt"
 	eventCloseTimeout         = time.Second
+	maxPersistedEventTypeSize = 160
 )
 
 var (
 	errEventPublisherClosed                = errors.New("event publisher channel closed")
 	errEventPublisherConfirmationAbandoned = errors.New("event publisher confirmation abandoned")
+	stableEventTypeName                    = regexp.MustCompile(`^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_-]+)+$`)
 )
 
 type RetryDelay time.Duration
@@ -811,7 +814,7 @@ func (t *amqpEventTransport) consumeDeliveries(
 				t.routeRawPoison(ctx, subscription, delivery, reason)
 				continue
 			}
-			if err := validateEventEnvelope(envelope); err != nil {
+			if err := validateEventEnvelope(envelope, subscription); err != nil {
 				t.routeRawPoison(
 					ctx,
 					subscription,
@@ -846,15 +849,38 @@ func (t *amqpEventTransport) routeRawPoison(
 	_ = delivery.Ack(false)
 }
 
-func validateEventEnvelope(envelope events.Envelope) error {
+func validateEventEnvelope(envelope events.Envelope, subscription Subscription) error {
 	if _, err := uuid.Parse(envelope.ID); err != nil {
 		return fmt.Errorf("id must be a UUID")
 	}
 	if strings.TrimSpace(envelope.Type) == "" {
 		return fmt.Errorf("type is required")
 	}
+	if len(envelope.Type) > maxPersistedEventTypeSize {
+		return fmt.Errorf("type exceeds %d characters", maxPersistedEventTypeSize)
+	}
+	if strings.ContainsRune(envelope.Type, '\x00') {
+		return fmt.Errorf("type contains NUL")
+	}
+	if !stableEventTypeName.MatchString(envelope.Type) {
+		return fmt.Errorf("type has invalid stable event name syntax")
+	}
+	if envelope.Type != subscription.EventName {
+		return fmt.Errorf(
+			"type %q does not match subscription %q",
+			envelope.Type,
+			subscription.EventName,
+		)
+	}
 	if envelope.Version <= 0 {
 		return fmt.Errorf("version must be positive")
+	}
+	if envelope.Version != subscription.Version {
+		return fmt.Errorf(
+			"version %d does not match subscription version %d",
+			envelope.Version,
+			subscription.Version,
+		)
 	}
 	if envelope.OccurredAt.IsZero() {
 		return fmt.Errorf("occurred_at is required")
