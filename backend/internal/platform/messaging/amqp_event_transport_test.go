@@ -219,6 +219,67 @@ func TestEventTransportCloseUnblocksPendingPublish(t *testing.T) {
 	}
 }
 
+func TestEventTransportCloseDoesNotWaitForChannelClose(t *testing.T) {
+	confirmation := &stubEventConfirmation{done: make(chan struct{})}
+	channel := newStubEventChannel(confirmation)
+	channel.closeBlock = make(chan struct{})
+	channel.suppressCloseNotification = true
+	connection := &stubEventConnection{channels: []eventChannel{channel}}
+	transport := newAMQPEventTransport(connection)
+	t.Cleanup(func() {
+		close(channel.closeBlock)
+		close(confirmation.done)
+	})
+
+	publishResult := make(chan error, 1)
+	go func() {
+		publishResult <- transport.Publish(context.Background(), eventTransportTestEnvelope())
+	}()
+	<-channel.publishStarted
+
+	closeResult := make(chan error, 1)
+	go func() {
+		closeResult <- transport.Close()
+	}()
+
+	select {
+	case err := <-closeResult:
+		require.NoError(t, err)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Close waited for synchronous channel close")
+	}
+
+	select {
+	case err := <-publishResult:
+		require.ErrorContains(t, err, "transport closed")
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("pending publish did not observe transport closing")
+	}
+	require.Equal(t, 1, connection.closeDeadlineCalls)
+}
+
+func TestEventTransportFailedPublishDoesNotWaitForChannelClose(t *testing.T) {
+	confirmation := &stubEventConfirmation{done: make(chan struct{})}
+	close(confirmation.done)
+	channel := newStubEventChannel(confirmation)
+	channel.closeBlock = make(chan struct{})
+	transport := newAMQPEventTransport(&stubEventConnection{channels: []eventChannel{channel}})
+	t.Cleanup(func() { close(channel.closeBlock) })
+
+	result := make(chan error, 1)
+	go func() {
+		result <- transport.Publish(context.Background(), eventTransportTestEnvelope())
+	}()
+
+	select {
+	case err := <-result:
+		require.ErrorContains(t, err, "nack")
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("failed publish waited for synchronous channel close")
+	}
+	require.Zero(t, channel.closeCalls)
+}
+
 func TestEventTransportCloseAfterConfirmedPublishIsIdempotent(t *testing.T) {
 	confirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
 	close(confirmation.done)
@@ -259,8 +320,9 @@ func TestEventTransportRecreatesPublisherAfterFailedConcurrentPublish(t *testing
 }
 
 type stubEventConnection struct {
-	channels     []eventChannel
-	channelCalls int
+	channels           []eventChannel
+	channelCalls       int
+	closeDeadlineCalls int
 }
 
 func (c *stubEventConnection) Channel() (eventChannel, error) {
@@ -275,11 +337,19 @@ func (c *stubEventConnection) Channel() (eventChannel, error) {
 
 func (*stubEventConnection) Close() error { return nil }
 
+func (c *stubEventConnection) CloseDeadline(time.Time) error {
+	c.closeDeadlineCalls++
+	return nil
+}
+
 type stubEventChannel struct {
-	confirmation   eventConfirmation
-	publishStarted chan struct{}
-	returns        chan amqp.Return
-	closed         chan *amqp.Error
+	confirmation              eventConfirmation
+	publishStarted            chan struct{}
+	returns                   chan amqp.Return
+	closed                    chan *amqp.Error
+	closeBlock                chan struct{}
+	suppressCloseNotification bool
+	closeCalls                int
 }
 
 func newStubEventChannel(confirmation eventConfirmation) *stubEventChannel {
@@ -326,6 +396,13 @@ func (c *stubEventChannel) NotifyReturn(chan amqp.Return) chan amqp.Return { ret
 func (c *stubEventChannel) NotifyClose(chan *amqp.Error) chan *amqp.Error { return c.closed }
 
 func (c *stubEventChannel) Close() error {
+	c.closeCalls++
+	if c.closeBlock != nil {
+		<-c.closeBlock
+	}
+	if c.suppressCloseNotification {
+		return nil
+	}
 	select {
 	case c.closed <- &amqp.Error{Reason: "closed by transport"}:
 	default:

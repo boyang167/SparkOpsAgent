@@ -3,7 +3,6 @@ package messaging
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -12,7 +11,10 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
-const eventAttemptsHeader = "x-sparkops-attempts"
+const (
+	eventAttemptsHeader = "x-sparkops-attempts"
+	eventCloseTimeout   = time.Second
+)
 
 type RetryDelay time.Duration
 
@@ -58,7 +60,7 @@ type eventChannel interface {
 
 type eventConnection interface {
 	Channel() (eventChannel, error)
-	Close() error
+	CloseDeadline(time.Time) error
 }
 
 type realEventConnection struct {
@@ -73,8 +75,8 @@ func (c *realEventConnection) Channel() (eventChannel, error) {
 	return &realEventChannel{channel: channel}, nil
 }
 
-func (c *realEventConnection) Close() error {
-	return c.connection.Close()
+func (c *realEventConnection) CloseDeadline(deadline time.Time) error {
+	return c.connection.CloseDeadline(deadline)
 }
 
 type realEventChannel struct {
@@ -172,6 +174,7 @@ type amqpEventTransport struct {
 	publisherReturns <-chan amqp.Return
 	publisherClosed  <-chan *amqp.Error
 	consumers        map[eventChannel]string
+	closing          chan struct{}
 	closed           bool
 }
 
@@ -190,6 +193,7 @@ func newAMQPEventTransport(connection eventConnection) *amqpEventTransport {
 	return &amqpEventTransport{
 		connection: connection,
 		consumers:  make(map[eventChannel]string),
+		closing:    make(chan struct{}),
 	}
 }
 
@@ -200,17 +204,13 @@ func (t *amqpEventTransport) Declare(ctx context.Context, subscriptions []Subscr
 
 	t.publishMu.Lock()
 	defer t.publishMu.Unlock()
-	t.mu.Lock()
 	if err := ctx.Err(); err != nil {
-		t.mu.Unlock()
 		return err
 	}
-	channel, err := t.publisherChannelLocked()
+	channel, _, _, _, err := t.publisherChannel()
 	if err != nil {
-		t.mu.Unlock()
 		return err
 	}
-	t.mu.Unlock()
 	if err := channel.ExchangeDeclare(eventExchangeName, "topic", true, false, false, false, nil); err != nil {
 		t.invalidatePublisher(channel)
 		return fmt.Errorf("declare event exchange: %w", err)
@@ -326,15 +326,10 @@ func (t *amqpEventTransport) publish(
 ) error {
 	t.publishMu.Lock()
 	defer t.publishMu.Unlock()
-	t.mu.Lock()
-	channel, err := t.publisherChannelLocked()
+	channel, returns, closed, closing, err := t.publisherChannel()
 	if err != nil {
-		t.mu.Unlock()
 		return err
 	}
-	returns := t.publisherReturns
-	closed := t.publisherClosed
-	t.mu.Unlock()
 	err = publishEventConfirmed(
 		ctx,
 		channel,
@@ -344,6 +339,7 @@ func (t *amqpEventTransport) publish(
 		routingKey,
 		envelope,
 		headers,
+		closing,
 	)
 	if err != nil {
 		t.invalidatePublisher(channel)
@@ -360,7 +356,12 @@ func publishEventConfirmed(
 	routingKey string,
 	envelope events.Envelope,
 	headers amqp.Table,
+	closing ...<-chan struct{},
 ) error {
+	var stop <-chan struct{}
+	if len(closing) > 0 {
+		stop = closing[0]
+	}
 	body, err := json.Marshal(envelope)
 	if err != nil {
 		return fmt.Errorf("marshal event envelope: %w", err)
@@ -418,28 +419,54 @@ func publishEventConfirmed(
 		}
 	case <-ctx.Done():
 		return fmt.Errorf("publish event confirmation: %w", ctx.Err())
+	case <-stop:
+		return fmt.Errorf("publish event: transport closed")
 	}
 }
 
-func (t *amqpEventTransport) publisherChannelLocked() (eventChannel, error) {
+func (t *amqpEventTransport) publisherChannel() (
+	eventChannel,
+	<-chan amqp.Return,
+	<-chan *amqp.Error,
+	<-chan struct{},
+	error,
+) {
+	t.mu.Lock()
 	if t.closed || t.connection == nil {
-		return nil, fmt.Errorf("amqp event transport is closed")
+		t.mu.Unlock()
+		return nil, nil, nil, nil, fmt.Errorf("amqp event transport is closed")
 	}
 	if t.publisher != nil {
-		return t.publisher, nil
+		channel := t.publisher
+		returns := t.publisherReturns
+		closed := t.publisherClosed
+		closing := t.closing
+		t.mu.Unlock()
+		return channel, returns, closed, closing, nil
 	}
-	channel, err := t.connection.Channel()
+	connection := t.connection
+	closing := t.closing
+	t.mu.Unlock()
+
+	channel, err := connection.Channel()
 	if err != nil {
-		return nil, fmt.Errorf("open event publisher channel: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("open event publisher channel: %w", err)
 	}
 	if err := channel.Confirm(false); err != nil {
-		_ = channel.Close()
-		return nil, fmt.Errorf("enable event publisher confirms: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("enable event publisher confirms: %w", err)
+	}
+	returns := channel.NotifyReturn(make(chan amqp.Return, 1))
+	closed := channel.NotifyClose(make(chan *amqp.Error, 1))
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed || t.connection != connection {
+		return nil, nil, nil, nil, fmt.Errorf("amqp event transport is closed")
 	}
 	t.publisher = channel
-	t.publisherReturns = channel.NotifyReturn(make(chan amqp.Return, 1))
-	t.publisherClosed = channel.NotifyClose(make(chan *amqp.Error, 1))
-	return channel, nil
+	t.publisherReturns = returns
+	t.publisherClosed = closed
+	return channel, returns, closed, closing, nil
 }
 
 func (t *amqpEventTransport) invalidatePublisher(channel eventChannel) {
@@ -452,9 +479,6 @@ func (t *amqpEventTransport) invalidatePublisher(channel eventChannel) {
 }
 
 func (t *amqpEventTransport) invalidatePublisherLocked() {
-	if t.publisher != nil {
-		_ = t.publisher.Close()
-	}
 	t.publisher = nil
 	t.publisherReturns = nil
 	t.publisherClosed = nil
@@ -476,18 +500,22 @@ func (t *amqpEventTransport) Consume(
 		t.mu.Unlock()
 		return fmt.Errorf("amqp event transport is closed")
 	}
-	channel, err := t.connection.Channel()
+	connection := t.connection
+	t.mu.Unlock()
+	channel, err := connection.Channel()
 	if err != nil {
-		t.mu.Unlock()
 		return fmt.Errorf("open event consumer channel: %w", err)
 	}
 	topology := topologyFor(subscription)
 	consumerTag := "sparkops-event-" + normalizeQueueNamePart(subscription.Subscriber, false)
 	deliveries, err := channel.Consume(topology.Main.Name, consumerTag, false, false, false, false, nil)
 	if err != nil {
-		t.mu.Unlock()
-		_ = channel.Close()
 		return fmt.Errorf("consume event queue %s: %w", topology.Main.Name, err)
+	}
+	t.mu.Lock()
+	if t.closed || t.connection != connection {
+		t.mu.Unlock()
+		return fmt.Errorf("amqp event transport is closed")
 	}
 	t.consumers[channel] = consumerTag
 	t.mu.Unlock()
@@ -559,12 +587,8 @@ func (t *amqpEventTransport) Close() error {
 		return nil
 	}
 	t.closed = true
-	publisher := t.publisher
 	connection := t.connection
-	consumers := make([]eventChannel, 0, len(t.consumers))
-	for channel := range t.consumers {
-		consumers = append(consumers, channel)
-	}
+	close(t.closing)
 	t.publisher = nil
 	t.connection = nil
 	t.publisherReturns = nil
@@ -572,21 +596,8 @@ func (t *amqpEventTransport) Close() error {
 	t.consumers = make(map[eventChannel]string)
 	t.mu.Unlock()
 
-	var closeErrors []error
-	for _, channel := range consumers {
-		if err := channel.Close(); err != nil {
-			closeErrors = append(closeErrors, fmt.Errorf("close event consumer channel: %w", err))
-		}
-	}
-	if publisher != nil {
-		if err := publisher.Close(); err != nil {
-			closeErrors = append(closeErrors, fmt.Errorf("close event publisher channel: %w", err))
-		}
-	}
 	if connection != nil {
-		if err := connection.Close(); err != nil {
-			closeErrors = append(closeErrors, fmt.Errorf("close event connection: %w", err))
-		}
+		return connection.CloseDeadline(time.Now().Add(eventCloseTimeout))
 	}
-	return errors.Join(closeErrors...)
+	return nil
 }

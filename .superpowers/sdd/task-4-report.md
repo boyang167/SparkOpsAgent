@@ -94,3 +94,33 @@ PASS
 ```
 
 额外尝试 `go test -race` 未能启动：本机 C 编译器报 `cc1.exe: sorry, unimplemented: 64-bit mode not compiled in`。这属于本地工具链限制；上述非 race 单元测试均实际通过。
+
+## P1 修订：真实 AMQP 同步关闭语义
+
+后续复审指出上一版仍在全局关闭路径调用 `amqp.Channel.Close()`。amqp091-go 的该方法同步等待 broker `channel.close-ok`；网络分区时它可能一直阻塞，且 `NotifyClose` 不保证会及时唤醒 pending confirm。
+
+### TDD 记录
+
+新增 `TestEventTransportCloseDoesNotWaitForChannelClose`：fake publisher channel 的 `Close` 永不返回且不发送 `NotifyClose`，pending publish 无 confirm。修复前得到真实 RED：
+
+```text
+Close waited for synchronous channel close
+```
+
+修复后，transport 建立进程内 `closing` 信号。`Close` 在状态锁内原子标记关闭并关闭该信号；`publishEventConfirmed` 同时等待该信号、confirm、mandatory return、broker NotifyClose 与 context。因而 pending publish 无需等待 broker 即返回 `transport closed`。
+
+全局 `Close` 不再逐个调用 `Channel.Close`。它仅摘除本地状态后调用 `amqp.Connection.CloseDeadline(now + 1s)`；amqp091-go 明确保证该 API 将 deadline 传给底层 socket，并在返回后关闭 connection、channels、Notify listeners 和消费者，即使 I/O timeout 也把 connection 视为关闭。抽象 `eventConnection` 同步改为 `CloseDeadline(time.Time)`，fake 记录该调用。
+
+`invalidatePublisher` 也不再同步调用 `Channel.Close`：仅在 publisher 身份匹配时脱离本地状态，旧 channel 由下一次 transport `CloseDeadline` 收敛。这样 NACK、return 或 channel failure 不会在网络失联时阻塞发布返回，也没有额外的无限后台关闭 goroutine。
+
+新增 `TestEventTransportFailedPublishDoesNotWaitForChannelClose`，验证 NACK 发布在 fake `Channel.Close` 永不返回时仍有界返回，且未调用同步 channel close。
+
+### P1 修订验证
+
+```text
+go test ./internal/platform/messaging -run 'EventTransport|Close|Publish' -count=1
+PASS
+
+go test ./internal/platform/messaging -run 'EventTopology|EventTransport' -count=1
+PASS
+```
