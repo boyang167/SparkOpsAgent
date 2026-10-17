@@ -129,7 +129,8 @@ func (b *ReliableBus) Start(ctx context.Context) error {
 			envelope events.Envelope,
 			attempts int,
 		) error {
-			return b.consumer.Handle(deliveryCtx, current, envelope, attempts)
+			handlerCtx := context.WithoutCancel(deliveryCtx)
+			return b.consumer.Handle(handlerCtx, current, envelope, attempts)
 		}); err != nil {
 			cancel()
 			return b.failStart(err)
@@ -169,11 +170,14 @@ func (b *ReliableBus) Close() error {
 			closeErrors = append(closeErrors, err)
 		}
 	}
+	if b.consumer != nil {
+		b.consumer.StopAccepting()
+	}
 	if cancel != nil {
 		cancel()
 	}
 	if b.consumer != nil {
-		b.consumer.StopAndWait()
+		b.consumer.Wait()
 	}
 	if b.transport != nil {
 		if err := b.transport.Close(); err != nil {

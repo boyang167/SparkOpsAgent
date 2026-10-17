@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/stretchr/testify/require"
@@ -157,6 +158,64 @@ func TestInboxConsumerDoesNotAckWhenRetryPublishIsUnconfirmed(t *testing.T) {
 	require.ErrorContains(t, err, "retry confirm failed")
 }
 
+func TestInboxConsumerRecordsAllConsumptionOutcomes(t *testing.T) {
+	base, tx, inbox, transport, envelope := newInboxTestConsumer(t)
+	registry := prometheus.NewRegistry()
+	metrics, err := NewMetrics(registry)
+	require.NoError(t, err)
+	consumer := NewInboxConsumer(
+		tx, inbox, base.registry, transport, fixedClock{now: envelope.OccurredAt}, metrics,
+	)
+	success := inboxSubscription(func(context.Context, events.Event) error { return nil })
+
+	require.NoError(t, consumer.Handle(context.Background(), success, envelope, 0))
+	require.NoError(t, consumer.Handle(context.Background(), success, envelope, 0))
+	permanentEnvelope := envelope
+	permanentEnvelope.ID = "permanent-event"
+	permanentEnvelope.Payload = []byte(`{"value":`)
+	require.NoError(t, consumer.Handle(context.Background(), success, permanentEnvelope, 0))
+	retryEnvelope := envelope
+	retryEnvelope.ID = "retry-event"
+	temporary := inboxSubscription(func(context.Context, events.Event) error {
+		return errors.New("temporary")
+	})
+	require.NoError(t, consumer.Handle(context.Background(), temporary, retryEnvelope, 0))
+
+	require.Equal(t, float64(1), prometheusMetricValue(t, metrics.EventConsume.WithLabelValues("test.subscriber", "success")))
+	require.Equal(t, float64(1), prometheusMetricValue(t, metrics.EventConsume.WithLabelValues("test.subscriber", "duplicate")))
+	require.Equal(t, float64(1), prometheusMetricValue(t, metrics.EventConsume.WithLabelValues("test.subscriber", "permanent_error")))
+	require.Equal(t, float64(1), prometheusMetricValue(t, metrics.EventConsume.WithLabelValues("test.subscriber", "retry")))
+	require.Equal(t, float64(1), prometheusMetricValue(t, metrics.InboxDuplicate.WithLabelValues("test.subscriber")))
+	require.Equal(t, float64(1), prometheusMetricValue(t, metrics.EventDLQ.WithLabelValues("test.subscriber")))
+	require.Equal(t, float64(1), prometheusMetricValue(t, metrics.EventRetry.WithLabelValues("test.subscriber", "5s")))
+}
+
+func TestInboxConsumerRecordsRetryAndDLQPublishFailures(t *testing.T) {
+	base, tx, inbox, transport, envelope := newInboxTestConsumer(t)
+	registry := prometheus.NewRegistry()
+	metrics, err := NewMetrics(registry)
+	require.NoError(t, err)
+	consumer := NewInboxConsumer(
+		tx, inbox, base.registry, transport, fixedClock{now: envelope.OccurredAt}, metrics,
+	)
+	transport.publishErr = errors.New("confirm failed")
+	permanentEnvelope := envelope
+	permanentEnvelope.ID = "permanent-failure"
+	permanentEnvelope.Payload = []byte(`{"value":`)
+	subscription := inboxSubscription(func(context.Context, events.Event) error {
+		return errors.New("temporary")
+	})
+	require.Error(t, consumer.Handle(context.Background(), subscription, permanentEnvelope, 0))
+	retryEnvelope := envelope
+	retryEnvelope.ID = "retry-failure"
+	require.Error(t, consumer.Handle(context.Background(), subscription, retryEnvelope, 0))
+
+	require.Equal(t, float64(1), prometheusMetricValue(t, metrics.EventConsume.WithLabelValues("test.subscriber", "dlq_publish_failure")))
+	require.Equal(t, float64(1), prometheusMetricValue(t, metrics.EventConsume.WithLabelValues("test.subscriber", "retry_publish_failure")))
+	require.Zero(t, prometheusMetricValue(t, metrics.EventDLQ.WithLabelValues("test.subscriber")))
+	require.Zero(t, prometheusMetricValue(t, metrics.EventRetry.WithLabelValues("test.subscriber", "5s")))
+}
+
 func TestPermanentClassificationPreservesWrappedErrors(t *testing.T) {
 	cause := errors.New("invalid event")
 	err := Permanent(cause)
@@ -178,7 +237,7 @@ func newInboxTestConsumer(t *testing.T) (*InboxConsumer, *recordingTransactor, *
 	tx := &recordingTransactor{}
 	inbox := &transactionalInbox{processed: make(map[string]bool)}
 	transport := &fakeEventTransport{}
-	consumer := NewInboxConsumer(tx, inbox, registry, transport, fixedClock{now: event.At})
+	consumer := NewInboxConsumer(tx, inbox, registry, transport, fixedClock{now: event.At}, nil)
 	return consumer, tx, inbox, transport, envelope
 }
 

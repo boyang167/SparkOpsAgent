@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
@@ -25,6 +26,12 @@ type OutboxStore interface {
 	Claim(ctx context.Context, owner string, limit int, now time.Time, lease time.Duration) ([]OutboxRecord, error)
 	MarkPublished(ctx context.Context, id, owner string, at time.Time) error
 	Reschedule(ctx context.Context, id, owner, reason string, next time.Time) error
+	Stats(ctx context.Context, now time.Time) (OutboxStats, error)
+}
+
+type OutboxStats struct {
+	Pending   int64
+	OldestAge time.Duration
 }
 
 type outboxStore struct {
@@ -127,6 +134,30 @@ func (s *outboxStore) Reschedule(ctx context.Context, id, owner, reason string, 
 			"last_error":      reason,
 		})
 	return requireLeaseUpdate(result)
+}
+
+func (s *outboxStore) Stats(ctx context.Context, now time.Time) (OutboxStats, error) {
+	query := s.db.WithContext(ctx).Model(&EventOutbox{}).
+		Where("status IN ?", []string{"pending", "publishing"})
+	var stats OutboxStats
+	if err := query.Count(&stats.Pending).Error; err != nil {
+		return OutboxStats{}, err
+	}
+	if stats.Pending == 0 {
+		return stats, nil
+	}
+	var oldest EventOutbox
+	if err := query.Order("created_at ASC").Select("created_at").Take(&oldest).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return stats, nil
+		}
+		return OutboxStats{}, err
+	}
+	stats.OldestAge = now.Sub(oldest.CreatedAt)
+	if stats.OldestAge < 0 {
+		stats.OldestAge = 0
+	}
+	return stats, nil
 }
 
 func outboxClaimable(status string, nextAttemptAt time.Time, lockedAt *time.Time, now time.Time, lease time.Duration) bool {

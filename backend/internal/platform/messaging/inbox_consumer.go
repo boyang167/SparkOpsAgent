@@ -29,6 +29,7 @@ func NewInboxConsumer(
 	registry *events.Registry,
 	transport EventTransport,
 	clock Clock,
+	metrics *Metrics,
 ) *InboxConsumer {
 	if clock == nil {
 		clock = systemClock{}
@@ -39,6 +40,7 @@ func NewInboxConsumer(
 		registry:   registry,
 		transport:  transport,
 		clock:      clock,
+		metrics:    metrics,
 	}
 }
 
@@ -105,6 +107,12 @@ func (c *InboxConsumer) Handle(
 	}
 	if IsPermanent(err) {
 		if publishErr := c.transport.PublishDeadLetter(ctx, subscription, envelope, err.Error()); publishErr != nil {
+			if c.metrics != nil {
+				c.metrics.EventConsume.WithLabelValues(
+					subscription.Subscriber,
+					"dlq_publish_failure",
+				).Inc()
+			}
 			return fmt.Errorf("publish event dead letter: %w", publishErr)
 		}
 		if c.metrics != nil {
@@ -116,6 +124,12 @@ func (c *InboxConsumer) Handle(
 
 	delay := RetryDelay(retryDelay(attempts + 1))
 	if publishErr := c.transport.PublishRetry(ctx, subscription, envelope, delay, attempts+1); publishErr != nil {
+		if c.metrics != nil {
+			c.metrics.EventConsume.WithLabelValues(
+				subscription.Subscriber,
+				"retry_publish_failure",
+			).Inc()
+		}
 		return fmt.Errorf("publish event retry: %w", publishErr)
 	}
 	if c.metrics != nil {
@@ -125,14 +139,25 @@ func (c *InboxConsumer) Handle(
 	return nil
 }
 
-func (c *InboxConsumer) StopAndWait() {
+func (c *InboxConsumer) StopAccepting() {
 	if c == nil {
 		return
 	}
 	c.lifecycleMu.Lock()
 	c.stopping = true
 	c.lifecycleMu.Unlock()
+}
+
+func (c *InboxConsumer) Wait() {
+	if c == nil {
+		return
+	}
 	c.active.Wait()
+}
+
+func (c *InboxConsumer) StopAndWait() {
+	c.StopAccepting()
+	c.Wait()
 }
 
 func retryDelayLabel(delay RetryDelay) string {

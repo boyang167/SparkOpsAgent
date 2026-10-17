@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/stretchr/testify/require"
@@ -19,6 +21,9 @@ type dispatcherStore struct {
 	published   []string
 	rescheduled []string
 	markErr     error
+	claimErr    error
+	stats       persistence.OutboxStats
+	statsErr    error
 }
 
 func (s *dispatcherStore) Insert(context.Context, events.Envelope) error { return nil }
@@ -26,6 +31,9 @@ func (s *dispatcherStore) Insert(context.Context, events.Envelope) error { retur
 func (s *dispatcherStore) Claim(_ context.Context, owner string, limit int, _ time.Time, _ time.Duration) ([]persistence.OutboxRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.claimErr != nil {
+		return nil, s.claimErr
+	}
 	if s.claimed == nil {
 		s.claimed = make(map[string]string)
 	}
@@ -55,6 +63,10 @@ func (s *dispatcherStore) MarkPublished(_ context.Context, id, owner string, _ t
 	}
 	s.published = append(s.published, id)
 	return nil
+}
+
+func (s *dispatcherStore) Stats(context.Context, time.Time) (persistence.OutboxStats, error) {
+	return s.stats, s.statsErr
 }
 
 func (s *dispatcherStore) Reschedule(_ context.Context, id, owner, _ string, _ time.Time) error {
@@ -127,7 +139,7 @@ func TestDispatcherLeavesRecordRetryableWhenPublishConfirmFails(t *testing.T) {
 	transport := &fakeEventTransport{publishErr: errors.New("confirm failed")}
 	dispatcher := NewOutboxDispatcher(store, transport, OutboxDispatcherConfig{
 		Owner: "worker-a", BatchSize: 10, Lease: time.Minute,
-	}, fixedClock{now: record.OccurredAt})
+	}, fixedClock{now: record.OccurredAt}, nil)
 
 	err := dispatcher.DispatchOnce(context.Background())
 
@@ -145,7 +157,7 @@ func TestDispatcherMayRepublishAfterConfirmBeforeMarkPublished(t *testing.T) {
 	transport := &fakeEventTransport{}
 	dispatcher := NewOutboxDispatcher(store, transport, OutboxDispatcherConfig{
 		Owner: "worker-a", BatchSize: 1, Lease: time.Minute,
-	}, fixedClock{now: record.OccurredAt})
+	}, fixedClock{now: record.OccurredAt}, nil)
 
 	require.ErrorContains(t, dispatcher.DispatchOnce(context.Background()), "database unavailable")
 	store.mu.Lock()
@@ -169,10 +181,10 @@ func TestDispatcherClaimsDisjointBatchesAcrossInstances(t *testing.T) {
 	now := fixedClock{now: time.Now().UTC()}
 	first := NewOutboxDispatcher(store, firstTransport, OutboxDispatcherConfig{
 		Owner: "worker-a", BatchSize: 1, Lease: time.Minute,
-	}, now)
+	}, now, nil)
 	second := NewOutboxDispatcher(store, secondTransport, OutboxDispatcherConfig{
 		Owner: "worker-b", BatchSize: 1, Lease: time.Minute,
-	}, now)
+	}, now, nil)
 
 	require.NoError(t, first.DispatchOnce(context.Background()))
 	require.NoError(t, second.DispatchOnce(context.Background()))
@@ -191,7 +203,7 @@ func TestDispatcherCloseStopsClaimsAndWaitsForInflightConfirm(t *testing.T) {
 	}
 	dispatcher := NewOutboxDispatcher(store, transport, OutboxDispatcherConfig{
 		Owner: "worker-a", BatchSize: 1, Lease: time.Minute, PollInterval: time.Hour,
-	}, fixedClock{now: record.OccurredAt})
+	}, fixedClock{now: record.OccurredAt}, newDispatcherTestMetrics(t))
 	require.NoError(t, dispatcher.Start(context.Background()))
 	<-transport.started
 
@@ -213,6 +225,128 @@ func TestDispatcherCloseStopsClaimsAndWaitsForInflightConfirm(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Close did not return after the publisher confirm completed")
 	}
+}
+
+func TestDispatcherStartValidatesRequiredDependenciesBeforeLaunching(t *testing.T) {
+	config := OutboxDispatcherConfig{
+		Owner: "worker-a", BatchSize: 1, Lease: time.Minute, PollInterval: time.Millisecond,
+	}
+	validStore := &dispatcherStore{}
+	validTransport := &fakeEventTransport{}
+	validMetrics := newDispatcherTestMetrics(t)
+	tests := []struct {
+		name      string
+		store     persistence.OutboxStore
+		transport EventTransport
+		config    OutboxDispatcherConfig
+		metrics   *Metrics
+		wantErr   string
+	}{
+		{
+			name: "store", transport: validTransport, config: config,
+			metrics: validMetrics, wantErr: "store",
+		},
+		{
+			name: "transport", store: validStore, config: config,
+			metrics: validMetrics, wantErr: "transport",
+		},
+		{
+			name: "owner", store: validStore, transport: validTransport,
+			config:  OutboxDispatcherConfig{BatchSize: 1, Lease: time.Minute},
+			metrics: validMetrics,
+			wantErr: "owner",
+		},
+		{
+			name: "metrics", store: validStore, transport: validTransport,
+			config: config, wantErr: "metrics",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dispatcher := NewOutboxDispatcher(
+				tt.store, tt.transport, tt.config, fixedClock{}, tt.metrics,
+			)
+			require.ErrorContains(t, dispatcher.Start(context.Background()), tt.wantErr)
+			require.NoError(t, dispatcher.Close())
+		})
+	}
+}
+
+func newDispatcherTestMetrics(t *testing.T) *Metrics {
+	t.Helper()
+	metrics, err := NewMetrics(prometheus.NewRegistry())
+	require.NoError(t, err)
+	return metrics
+}
+
+func TestDispatcherUpdatesPublishAndBacklogMetrics(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics, err := NewMetrics(registry)
+	require.NoError(t, err)
+	now := time.Date(2026, 10, 17, 8, 0, 0, 0, time.UTC)
+	store := &dispatcherStore{
+		records: []persistence.OutboxRecord{dispatcherRecord("event-1")},
+		stats: persistence.OutboxStats{
+			Pending: 3, OldestAge: 2 * time.Minute,
+		},
+	}
+	dispatcher := NewOutboxDispatcher(
+		store,
+		&fakeEventTransport{},
+		OutboxDispatcherConfig{Owner: "worker-a", BatchSize: 1, Lease: time.Minute},
+		fixedClock{now: now},
+		metrics,
+	)
+
+	require.NoError(t, dispatcher.DispatchOnce(context.Background()))
+
+	require.Equal(t, float64(1), prometheusMetricValue(t, metrics.EventPublish.WithLabelValues("success")))
+	require.Equal(t, float64(3), prometheusMetricValue(t, metrics.OutboxPending))
+	require.Equal(t, float64(120), prometheusMetricValue(t, metrics.OutboxOldestSeconds))
+}
+
+func TestDispatcherTracksPublishFailureAndBackgroundLoopError(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics, err := NewMetrics(registry)
+	require.NoError(t, err)
+	record := dispatcherRecord("event-1")
+	store := &dispatcherStore{records: []persistence.OutboxRecord{record}}
+	dispatcher := NewOutboxDispatcher(
+		store,
+		&fakeEventTransport{publishErr: errors.New("confirm failed")},
+		OutboxDispatcherConfig{Owner: "worker-a", BatchSize: 1, Lease: time.Minute},
+		fixedClock{now: record.OccurredAt},
+		metrics,
+	)
+	require.Error(t, dispatcher.DispatchOnce(context.Background()))
+	require.Equal(t, float64(1), prometheusMetricValue(t, metrics.EventPublish.WithLabelValues("failure")))
+
+	store.claimErr = errors.New("database unavailable")
+	dispatcher = NewOutboxDispatcher(
+		store,
+		&fakeEventTransport{},
+		OutboxDispatcherConfig{
+			Owner: "worker-b", BatchSize: 1, Lease: time.Minute, PollInterval: time.Millisecond,
+		},
+		fixedClock{now: record.OccurredAt},
+		metrics,
+	)
+	require.NoError(t, dispatcher.Start(context.Background()))
+	require.Eventually(t, func() bool {
+		return prometheusMetricValue(t, metrics.EventPublish.WithLabelValues("dispatcher_error")) > 0
+	}, time.Second, time.Millisecond)
+	require.NoError(t, dispatcher.Close())
+}
+
+func prometheusMetricValue(t *testing.T, metric prometheus.Metric) float64 {
+	t.Helper()
+	var value dto.Metric
+	require.NoError(t, metric.Write(&value))
+	if value.Counter != nil {
+		return value.Counter.GetValue()
+	}
+	return value.Gauge.GetValue()
 }
 
 type fixedClock struct{ now time.Time }

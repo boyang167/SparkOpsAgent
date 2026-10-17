@@ -367,6 +367,61 @@ func (t *amqpEventTransport) PublishDeadLetter(
 	)
 }
 
+func (t *amqpEventTransport) publishRawDeadLetter(
+	ctx context.Context,
+	subscription Subscription,
+	delivery amqp.Delivery,
+	reason string,
+) error {
+	t.publishMu.Lock()
+	defer t.publishMu.Unlock()
+	channel, returns, closed, closing, err := t.publisherChannel()
+	if err != nil {
+		return err
+	}
+	headers := make(amqp.Table, len(delivery.Headers)+2)
+	for key, value := range delivery.Headers {
+		headers[key] = value
+	}
+	headers["x-sparkops-dead-letter-reason"] = reason
+	headers = withPublishAttempt(headers)
+	err = publishMessageConfirmed(
+		ctx,
+		channel,
+		returns,
+		closed,
+		"",
+		topologyFor(subscription).DeadLetter.Name,
+		delivery.MessageId,
+		headers,
+		amqp.Publishing{
+			Headers:         headers,
+			ContentType:     delivery.ContentType,
+			ContentEncoding: delivery.ContentEncoding,
+			DeliveryMode:    amqp.Persistent,
+			Priority:        delivery.Priority,
+			CorrelationId:   delivery.CorrelationId,
+			ReplyTo:         delivery.ReplyTo,
+			Expiration:      delivery.Expiration,
+			MessageId:       delivery.MessageId,
+			Timestamp:       delivery.Timestamp,
+			Type:            delivery.Type,
+			UserId:          delivery.UserId,
+			AppId:           delivery.AppId,
+			Body:            append([]byte(nil), delivery.Body...),
+		},
+		closing,
+	)
+	if errors.Is(err, errEventPublisherConfirmationAbandoned) {
+		if closeErr := t.retirePublisherConnection(channel); closeErr != nil {
+			return errors.Join(err, closeErr)
+		}
+	} else if shouldInvalidatePublisher(err, channel) {
+		t.invalidatePublisher(channel)
+	}
+	return err
+}
+
 func (t *amqpEventTransport) publish(
 	ctx context.Context,
 	exchange string,
@@ -434,12 +489,15 @@ func publishEventConfirmed(
 	if err != nil {
 		return fmt.Errorf("marshal event envelope: %w", err)
 	}
-	confirmation, err := channel.PublishWithDeferredConfirmWithContext(
+	return publishMessageConfirmed(
 		ctx,
+		channel,
+		returns,
+		closed,
 		exchange,
 		routingKey,
-		true,
-		false,
+		envelope.ID,
+		headers,
 		amqp.Publishing{
 			Headers:      headers,
 			MessageId:    envelope.ID,
@@ -448,6 +506,29 @@ func publishEventConfirmed(
 			Timestamp:    envelope.OccurredAt,
 			Body:         body,
 		},
+		stop,
+	)
+}
+
+func publishMessageConfirmed(
+	ctx context.Context,
+	channel eventPublishChannel,
+	returns <-chan amqp.Return,
+	closed <-chan *amqp.Error,
+	exchange string,
+	routingKey string,
+	messageID string,
+	headers amqp.Table,
+	message amqp.Publishing,
+	stop <-chan struct{},
+) error {
+	confirmation, err := channel.PublishWithDeferredConfirmWithContext(
+		ctx,
+		exchange,
+		routingKey,
+		true,
+		false,
+		message,
 	)
 	if err != nil {
 		return fmt.Errorf("publish event: %w", err)
@@ -462,7 +543,7 @@ func publishEventConfirmed(
 			if !ok {
 				return fmt.Errorf("publish event: return listener closed")
 			}
-			if !returnMatchesPublishAttempt(returned, envelope.ID, headers) {
+			if !returnMatchesPublishAttempt(returned, messageID, headers) {
 				continue
 			}
 			return fmt.Errorf(
@@ -485,7 +566,7 @@ func publishEventConfirmed(
 					if !ok {
 						return fmt.Errorf("publish event: return listener closed")
 					}
-					if !returnMatchesPublishAttempt(returned, envelope.ID, headers) {
+					if !returnMatchesPublishAttempt(returned, messageID, headers) {
 						continue
 					}
 					return fmt.Errorf(
@@ -694,7 +775,7 @@ func (t *amqpEventTransport) Consume(
 	t.consumers[channel] = consumerTag
 	t.mu.Unlock()
 
-	go t.consumeDeliveries(ctx, channel, consumerTag, deliveries, handler)
+	go t.consumeDeliveries(ctx, channel, consumerTag, subscription, deliveries, handler)
 	return nil
 }
 
@@ -702,6 +783,7 @@ func (t *amqpEventTransport) consumeDeliveries(
 	ctx context.Context,
 	channel eventChannel,
 	consumerTag string,
+	subscription Subscription,
 	deliveries <-chan amqp.Delivery,
 	handler DeliveryHandler,
 ) {
@@ -716,7 +798,12 @@ func (t *amqpEventTransport) consumeDeliveries(
 			}
 			var envelope events.Envelope
 			if err := json.Unmarshal(delivery.Body, &envelope); err != nil {
-				_ = delivery.Nack(false, true)
+				reason := fmt.Sprintf("cannot parse event envelope: %v", err)
+				if publishErr := t.publishRawDeadLetter(ctx, subscription, delivery, reason); publishErr != nil {
+					_ = delivery.Nack(false, true)
+					continue
+				}
+				_ = delivery.Ack(false)
 				continue
 			}
 			attempts := eventDeliveryAttempts(delivery.Headers)

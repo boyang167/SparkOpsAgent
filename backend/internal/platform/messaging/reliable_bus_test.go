@@ -36,6 +36,9 @@ func (*transactionCheckingOutbox) MarkPublished(context.Context, string, string,
 func (*transactionCheckingOutbox) Reschedule(context.Context, string, string, string, time.Time) error {
 	return nil
 }
+func (*transactionCheckingOutbox) Stats(context.Context, time.Time) (persistence.OutboxStats, error) {
+	return persistence.OutboxStats{}, nil
+}
 
 type fakeDispatcherLifecycle struct {
 	started int
@@ -133,7 +136,9 @@ func TestReliableBusCloseRejectsLateHandlersAndWaitsForActiveHandlers(t *testing
 		releaseHandler:     make(chan struct{}),
 		handlerStarted:     make(chan struct{}),
 	}
-	consumer := NewInboxConsumer(tx, inbox, registry, transport, fixedClock{now: envelope.OccurredAt})
+	consumer := NewInboxConsumer(
+		tx, inbox, registry, transport, fixedClock{now: envelope.OccurredAt}, nil,
+	)
 	bus := NewReliableBus(registry, &transactionCheckingOutbox{}, transport, nil, consumer)
 	var startedOnce sync.Once
 	require.NoError(t, bus.Subscribe("test.event", "test.subscriber", func(context.Context, events.Event) error {
@@ -163,6 +168,57 @@ func TestReliableBusCloseRejectsLateHandlersAndWaitsForActiveHandlers(t *testing
 	}
 
 	require.ErrorIs(t, transport.deliver(), context.Canceled)
+}
+
+func TestReliableBusClosePreservesActiveHandlerTransactionContext(t *testing.T) {
+	registry := events.NewRegistry()
+	require.NoError(t, events.RegisterJSON(registry, "test.event", 1, func(inboxTestEvent) events.AggregateRef {
+		return events.AggregateRef{}
+	}))
+	envelope, err := registry.Encode(context.Background(), inboxTestEvent{
+		BaseEvent: events.BaseEvent{Name: "test.event", At: time.Now().UTC()},
+	})
+	require.NoError(t, err)
+	tx := &recordingTransactor{}
+	inbox := &transactionalInbox{processed: make(map[string]bool)}
+	transport := &contextDeliveryTransport{
+		fakeEventTransport: fakeEventTransport{},
+		envelope:           envelope,
+	}
+	consumer := NewInboxConsumer(
+		tx, inbox, registry, transport, fixedClock{now: envelope.OccurredAt}, nil,
+	)
+	bus := NewReliableBus(registry, &transactionCheckingOutbox{}, transport, nil, consumer)
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	var startedOnce sync.Once
+	require.NoError(t, bus.Subscribe("test.event", "test.subscriber", func(ctx context.Context, _ events.Event) error {
+		startedOnce.Do(func() { close(handlerStarted) })
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-releaseHandler:
+			return nil
+		}
+	}))
+	require.NoError(t, bus.Start(context.Background()))
+	deliveryResult := make(chan error, 1)
+	go func() { deliveryResult <- transport.deliver() }()
+	<-handlerStarted
+
+	closed := make(chan error, 1)
+	go func() { closed <- bus.Close() }()
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned before active transaction completed: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	require.ErrorIs(t, transport.intakeContext.Err(), context.Canceled)
+	close(releaseHandler)
+	require.NoError(t, <-deliveryResult)
+	require.NoError(t, <-closed)
+	require.Equal(t, 1, tx.commits)
+	require.Zero(t, tx.rollbacks)
 }
 
 type orderedTransport struct {
@@ -214,4 +270,26 @@ func (t *lateDeliveryTransport) deliver() error {
 	handler := t.handler
 	t.mu.Unlock()
 	return handler(context.Background(), t.envelope, 0)
+}
+
+type contextDeliveryTransport struct {
+	fakeEventTransport
+	handler       DeliveryHandler
+	envelope      events.Envelope
+	intakeContext context.Context
+}
+
+func (t *contextDeliveryTransport) Consume(
+	ctx context.Context,
+	subscription Subscription,
+	handler DeliveryHandler,
+) error {
+	t.consumed = append(t.consumed, subscription)
+	t.intakeContext = ctx
+	t.handler = handler
+	return nil
+}
+
+func (t *contextDeliveryTransport) deliver() error {
+	return t.handler(t.intakeContext, t.envelope, 0)
 }

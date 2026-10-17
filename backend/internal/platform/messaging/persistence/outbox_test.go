@@ -142,6 +142,34 @@ func TestOutboxClaimEligibility(t *testing.T) {
 	}
 }
 
+func TestOutboxStatsCountsUnpublishedAndMeasuresOldestAge(t *testing.T) {
+	db := openStoreSQLite(t)
+	store := NewOutboxStore(db)
+	now := time.Date(2026, 10, 17, 8, 0, 0, 0, time.UTC)
+	rows := []EventOutbox{
+		statsOutboxRow("pending", now.Add(-2*time.Minute)),
+		statsOutboxRow("publishing", now.Add(-time.Minute)),
+		statsOutboxRow("published", now.Add(-time.Hour)),
+	}
+	for _, row := range rows {
+		require.NoError(t, db.Create(&row).Error)
+	}
+
+	stats, err := store.Stats(context.Background(), now)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 2, stats.Pending)
+	require.Equal(t, 2*time.Minute, stats.OldestAge)
+}
+
+func statsOutboxRow(status string, createdAt time.Time) EventOutbox {
+	return EventOutbox{
+		ID: uuid.NewString(), EventType: "test.event", EventVersion: 1,
+		Payload: []byte(`{}`), OccurredAt: createdAt, Status: status,
+		NextAttemptAt: createdAt, CreatedAt: createdAt,
+	}
+}
+
 func openStoreSQLite(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{

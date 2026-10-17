@@ -480,6 +480,112 @@ func TestEventTransportPublisherTimeoutKeepsConsumerConnectionAlive(t *testing.T
 	require.Equal(t, 1, reconnects)
 }
 
+func TestEventTransportRoutesMalformedRawDeliveryToSubscriberDLQBeforeAck(t *testing.T) {
+	confirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
+	close(confirmation.done)
+	publisherChannel := newStubEventChannel(confirmation)
+	consumerChannel := newStubEventChannel(nil)
+	consumerChannel.deliveries = make(chan amqp.Delivery, 1)
+	transport := newAMQPEventTransportWithConnections(
+		&stubEventConnection{channels: []eventChannel{publisherChannel}},
+		&stubEventConnection{channels: []eventChannel{consumerChannel}},
+		nil,
+	)
+	subscription := Subscription{
+		EventName: "delivery.BuildCompleted", Version: 1, Subscriber: "poison.consumer",
+	}
+	handlerCalled := make(chan struct{}, 1)
+	require.NoError(t, transport.Consume(context.Background(), subscription, func(
+		context.Context,
+		events.Envelope,
+		int,
+	) error {
+		handlerCalled <- struct{}{}
+		return nil
+	}))
+	acks := newRecordingAcknowledger()
+	body := []byte(`{"id":"poison","occurred_at":"not-a-time"}`)
+	consumerChannel.deliveries <- amqp.Delivery{
+		Acknowledger: acks,
+		DeliveryTag:  7,
+		Body:         body,
+		ContentType:  "application/json",
+		MessageId:    "raw-message-id",
+		Headers:      amqp.Table{"source": "untrusted"},
+	}
+
+	select {
+	case ack := <-acks.acked:
+		require.Equal(t, acknowledgement{tag: 7}, ack)
+	case nack := <-acks.nacked:
+		t.Fatalf("malformed delivery was nacked before DLQ publish: %+v", nack)
+	case <-time.After(time.Second):
+		t.Fatal("malformed delivery was neither acked nor nacked")
+	}
+	require.Empty(t, acks.nacked)
+	require.Empty(t, handlerCalled)
+	require.Len(t, publisherChannel.publishedRecords, 1)
+	published := publisherChannel.publishedRecords[0]
+	require.Empty(t, published.exchange)
+	require.Equal(t, topologyFor(subscription).DeadLetter.Name, published.key)
+	require.Equal(t, body, published.message.Body)
+	require.Equal(t, "raw-message-id", published.message.MessageId)
+	require.Equal(t, "untrusted", published.message.Headers["source"])
+	require.Contains(t, published.message.Headers["x-sparkops-dead-letter-reason"], "cannot parse")
+}
+
+func TestEventTransportNacksMalformedRawDeliveryWhenDLQConfirmFails(t *testing.T) {
+	tests := []struct {
+		name         string
+		confirmation eventConfirmation
+		publishErr   error
+	}{
+		{
+			name: "publisher confirm nack",
+			confirmation: func() eventConfirmation {
+				value := &stubEventConfirmation{done: make(chan struct{}), acked: false}
+				close(value.done)
+				return value
+			}(),
+		},
+		{name: "publish failure", publishErr: errors.New("publisher unavailable")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			publisherChannel := newStubEventChannel(tt.confirmation)
+			publisherChannel.publishError = tt.publishErr
+			consumerChannel := newStubEventChannel(nil)
+			consumerChannel.deliveries = make(chan amqp.Delivery, 1)
+			transport := newAMQPEventTransportWithConnections(
+				&stubEventConnection{channels: []eventChannel{publisherChannel}},
+				&stubEventConnection{channels: []eventChannel{consumerChannel}},
+				nil,
+			)
+			subscription := Subscription{
+				EventName: "delivery.BuildCompleted", Version: 1, Subscriber: "poison.consumer",
+			}
+			require.NoError(t, transport.Consume(context.Background(), subscription, func(
+				context.Context,
+				events.Envelope,
+				int,
+			) error {
+				t.Fatal("malformed raw delivery reached decoded handler")
+				return nil
+			}))
+			acks := newRecordingAcknowledger()
+			consumerChannel.deliveries <- amqp.Delivery{
+				Acknowledger: acks,
+				DeliveryTag:  9,
+				Body:         []byte(`{"id":`),
+			}
+
+			require.Equal(t, acknowledgement{tag: 9, requeue: true}, <-acks.nacked)
+			require.Empty(t, acks.acked)
+			require.Equal(t, 1, publisherChannel.publishCalls)
+		})
+	}
+}
+
 func TestEventTransportDeclareUsesConsumerConnection(t *testing.T) {
 	publisherConnection := &stubEventConnection{
 		channels: []eventChannel{newStubEventChannel(nil)},
@@ -643,6 +749,7 @@ type stubEventChannel struct {
 	publishError              error
 	onPublish                 func(amqp.Publishing)
 	published                 []amqp.Publishing
+	publishedRecords          []recordedEventPublish
 	deliveries                chan amqp.Delivery
 }
 
@@ -657,9 +764,9 @@ func newStubEventChannel(confirmation eventConfirmation) *stubEventChannel {
 
 func (c *stubEventChannel) PublishWithDeferredConfirmWithContext(
 	_ context.Context,
-	_ string,
-	_ string,
-	_ bool,
+	exchange string,
+	key string,
+	mandatory bool,
 	_ bool,
 	message amqp.Publishing,
 ) (eventConfirmation, error) {
@@ -671,6 +778,9 @@ func (c *stubEventChannel) PublishWithDeferredConfirmWithContext(
 		return nil, c.publishError
 	}
 	c.published = append(c.published, message)
+	c.publishedRecords = append(c.publishedRecords, recordedEventPublish{
+		exchange: exchange, key: key, mandatory: mandatory, message: message,
+	})
 	if c.onPublish != nil {
 		c.onPublish(message)
 	}
@@ -681,6 +791,35 @@ func (c *stubEventChannel) PublishWithDeferredConfirmWithContext(
 	c.publishCalls++
 	return confirmation, nil
 }
+
+type acknowledgement struct {
+	tag     uint64
+	requeue bool
+}
+
+type recordingAcknowledger struct {
+	acked  chan acknowledgement
+	nacked chan acknowledgement
+}
+
+func newRecordingAcknowledger() *recordingAcknowledger {
+	return &recordingAcknowledger{
+		acked:  make(chan acknowledgement, 1),
+		nacked: make(chan acknowledgement, 1),
+	}
+}
+
+func (a *recordingAcknowledger) Ack(tag uint64, _ bool) error {
+	a.acked <- acknowledgement{tag: tag}
+	return nil
+}
+
+func (a *recordingAcknowledger) Nack(tag uint64, _ bool, requeue bool) error {
+	a.nacked <- acknowledgement{tag: tag, requeue: requeue}
+	return nil
+}
+
+func (*recordingAcknowledger) Reject(uint64, bool) error { return nil }
 
 func (*stubEventChannel) Confirm(bool) error { return nil }
 
