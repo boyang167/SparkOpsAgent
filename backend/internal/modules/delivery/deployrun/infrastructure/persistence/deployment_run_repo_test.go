@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/glebarez/sqlite"
+	deployservice "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
@@ -140,12 +141,7 @@ func TestTerminalUpdateAndDeployCompletedOutboxAreAtomic(t *testing.T) {
 		messagingpersistence.NewOutboxStore(db),
 		nil, nil, nil,
 	)
-	repo.SetTerminalCallback(func(ctx context.Context, terminal *model.DeploymentRun) error {
-		return bus.Publish(ctx, deliveryevent.NewDeployCompleted(
-			terminal.ID, terminal.ProjectID, terminal.WorkspaceID, terminal.EnvironmentID,
-			"", string(terminal.Status), string(terminal.RunType), terminal.ImageTag,
-		))
-	})
+	repo.SetTerminalCallback(deployservice.NewTerminalCallback(bus))
 
 	require.Error(t, repo.Update(context.Background(), run))
 	stored, err := repo.FindByID(context.Background(), run.ID)
@@ -175,14 +171,7 @@ func TestTerminalUpdateAndDeployCompletedOutboxCommitTogether(t *testing.T) {
 		messagingpersistence.NewOutboxStore(db),
 		nil, nil, nil,
 	)
-	repo.SetTerminalCallback(func(ctx context.Context, terminal *model.DeploymentRun) error {
-		completed := deliveryevent.NewDeployCompleted(
-			terminal.ID, terminal.ProjectID, terminal.WorkspaceID, terminal.EnvironmentID,
-			"sparkops", string(terminal.Status), string(terminal.RunType), terminal.ImageTag,
-		)
-		completed.CreatedBy = terminal.CreatedBy
-		return bus.Publish(ctx, completed)
-	})
+	repo.SetTerminalCallback(deployservice.NewTerminalCallback(bus))
 
 	require.NoError(t, repo.Update(context.Background(), run))
 
@@ -207,7 +196,7 @@ func TestTerminalUpdateAndDeployCompletedOutboxCommitTogether(t *testing.T) {
 	require.Equal(t, run.ProjectID, payload.ProjectID)
 	require.Equal(t, run.WorkspaceID, payload.WorkspaceID)
 	require.Equal(t, run.EnvironmentID, payload.EnvironmentID)
-	require.Equal(t, "sparkops", payload.ProjectName)
+	require.Empty(t, payload.ProjectName)
 	require.Equal(t, string(model.StatusFailed), payload.Status)
 	require.Equal(t, string(run.RunType), payload.RunType)
 	require.Equal(t, run.ImageTag, payload.ImageTag)

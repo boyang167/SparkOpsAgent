@@ -144,16 +144,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	if remover, ok := c.ManifestDeployer.(runtimeport.ManifestRemover); ok {
 		deployOrchestrator.SetManifestRemover(remover)
 	}
-	deployRepo.SetTerminalCallback(func(ctx context.Context, run *deployrunmodel.DeploymentRun) error {
-		if run == nil {
-			return nil
-		}
-		completed := deliveryevent.NewDeployCompleted(
-			run.ID, run.ProjectID, run.WorkspaceID, run.EnvironmentID, "", string(run.Status), string(run.RunType), run.ImageTag,
-		)
-		completed.CreatedBy = run.CreatedBy
-		return c.EventBus.Publish(ctx, completed)
-	})
+	deployRepo.SetTerminalCallback(deployservice.NewTerminalCallback(c.EventBus))
 	deployConsumer, err := deployconsumer.New(deployRepo, deployOrchestrator)
 	if err != nil {
 		return fmt.Errorf("delivery deployment consumer: %w", err)

@@ -147,3 +147,11 @@ owner module 在暴露 handler / route 前注册 codec，并传播重复或非�
 - GREEN：增加空事件短路后，Agent command 测试通过。
 - RED：Deployment 成功链在未注册 codec 时返回 `event descriptor not registered for "delivery.DeployCompleted"`。
 - GREEN：通过 `deliveryevent.Register` 注册真实 codec 后，成功提交测试及原失败回滚测试通过。
+
+### Deployment callback 生产路径锁定
+
+- 将 `DeployCompleted` 构造与发布提取为 `deployrun/application/service.NewTerminalCallback`；`delivery/module.go` 与 persistence 集成测试注册同一生产 callback，测试不再复制事件映射逻辑。
+- 成功链继续断言 terminal run、deployment event、单条 Outbox、事件类型、aggregate 与全部关键 payload；`ProjectName` 明确锁定为生产当前语义的空值。
+- RED：集成测试先改为调用 `NewTerminalCallback`，因生产 helper 尚不存在而编译失败。
+- GREEN：加入最小 helper 并切换 module 注册后，成功提交与失败回滚测试均通过。
+- 回归：`go test ./internal/modules/delivery/... -count=1`、`go test ./internal/platform/messaging/... -count=1` 与后端构建通过。
