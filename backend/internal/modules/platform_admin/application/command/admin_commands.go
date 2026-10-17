@@ -26,6 +26,17 @@ func (h *UpdateSysConfigHandler) Handle(ctx context.Context, kind, name string, 
 	if err != nil {
 		return nil, err
 	}
+	nextConfig := make(map[string]any, len(config)+1)
+	for key, value := range config {
+		if key != "sso" {
+			nextConfig[key] = value
+		}
+	}
+	if current.Config != nil {
+		if sso, ok := current.Config["sso"]; ok {
+			nextConfig["sso"] = sso
+		}
+	}
 	if kind != "" {
 		current.Kind = kind
 	}
@@ -33,7 +44,7 @@ func (h *UpdateSysConfigHandler) Handle(ctx context.Context, kind, name string, 
 		current.Name = name
 	}
 	current.WhetherShare = whetherShare
-	current.Config = config
+	current.Config = nextConfig
 	if err := h.repo.UpsertSysConfig(ctx, current); err != nil {
 		return nil, err
 	}

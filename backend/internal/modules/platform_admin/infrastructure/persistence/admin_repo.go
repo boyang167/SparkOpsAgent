@@ -113,7 +113,6 @@ func (r *AdminRepository) GetSysConfig(ctx context.Context) (*repository.SysConf
 }
 
 func (r *AdminRepository) UpsertSysConfig(ctx context.Context, cfg *repository.SysConfig) error {
-	payload, _ := json.Marshal(cfg.Config)
 	var wsID *string
 	if cfg.WorkspaceID != nil {
 		s := cfg.WorkspaceID.String()
@@ -123,12 +122,43 @@ func (r *AdminRepository) UpsertSysConfig(ctx context.Context, cfg *repository.S
 	if id == "" {
 		id = kernel.NewMemberID().String()
 	}
-	row := sysCfgModel{
-		ID: id, Kind: cfg.Kind, Name: cfg.Name, WorkspaceID: wsID,
-		WhetherShare: cfg.WhetherShare, Config: string(payload),
-		AuditColumns: postgres.AuditColumns{UpdatedAt: time.Now().UTC()},
-	}
-	return r.db.WithContext(ctx).Save(&row).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		nextConfig := make(map[string]any, len(cfg.Config)+1)
+		for key, value := range cfg.Config {
+			if key != "sso" {
+				nextConfig[key] = value
+			}
+		}
+
+		var existing sysCfgModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", id).
+			First(&existing).Error
+		if err == nil {
+			var currentConfig map[string]any
+			if existing.Config != "" {
+				if err := json.Unmarshal([]byte(existing.Config), &currentConfig); err != nil {
+					return err
+				}
+			}
+			if sso, ok := currentConfig["sso"]; ok {
+				nextConfig["sso"] = sso
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		payload, err := json.Marshal(nextConfig)
+		if err != nil {
+			return err
+		}
+		row := sysCfgModel{
+			ID: id, Kind: cfg.Kind, Name: cfg.Name, WorkspaceID: wsID,
+			WhetherShare: cfg.WhetherShare, Config: string(payload),
+			AuditColumns: postgres.AuditColumns{UpdatedAt: time.Now().UTC()},
+		}
+		return tx.Save(&row).Error
+	})
 }
 
 func (r *AdminRepository) ListClusters(ctx context.Context) ([]*repository.ClusterInfo, error) {

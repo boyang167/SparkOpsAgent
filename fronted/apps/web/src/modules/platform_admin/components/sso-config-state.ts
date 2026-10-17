@@ -153,7 +153,7 @@ export function updateOIDCDraft(
       ...draft.oidc,
       ...patch,
       ...(connectionChanged
-        ? { testedFingerprint: "", testedAt: undefined }
+        ? { testedFingerprint: "" }
         : {}),
     },
   };
@@ -174,7 +174,7 @@ export function updateLDAPDraft(
       ...draft.ldap,
       ...patch,
       ...(connectionChanged
-        ? { testedFingerprint: "", testedAt: undefined }
+        ? { testedFingerprint: "" }
         : {}),
     },
   };
@@ -213,7 +213,9 @@ export function toUpdateCommand(
       token_endpoint: draft.oidc.tokenEndpoint,
       userinfo_endpoint: draft.oidc.userInfoEndpoint,
       tested_fingerprint: draft.oidc.testedFingerprint,
-      tested_at: draft.oidc.testedAt,
+      tested_at: draft.oidc.testedFingerprint
+        ? draft.oidc.testedAt
+        : undefined,
     },
     ldap: {
       enabled: draft.ldap.enabled,
@@ -226,7 +228,9 @@ export function toUpdateCommand(
       email_attribute: draft.ldap.emailAttribute,
       name_attribute: draft.ldap.nameAttribute,
       tested_fingerprint: draft.ldap.testedFingerprint,
-      tested_at: draft.ldap.testedAt,
+      tested_at: draft.ldap.testedFingerprint
+        ? draft.ldap.testedAt
+        : undefined,
     },
   };
 }

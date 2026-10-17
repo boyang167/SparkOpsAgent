@@ -11489,6 +11489,169 @@ textarea.input {
   background: var(--surface);
 }
 
+.platform-sso {
+  min-width: 0;
+}
+
+.platform-sso-loading {
+  padding: 3rem 1rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.platform-sso-progress {
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.platform-sso-alert-action {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
+  cursor: pointer;
+}
+
+.platform-sso-section {
+  min-width: 0;
+  padding: 1.125rem;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.platform-sso-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.9375rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.platform-sso-description {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.platform-sso-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.platform-sso-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.platform-sso-provider-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.platform-sso-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.875rem;
+}
+
+.platform-sso-form-grid .input {
+  width: 100%;
+  min-width: 0;
+}
+
+.platform-sso-span-2 {
+  grid-column: span 2;
+}
+
+.platform-sso-secret-hint {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.platform-sso-advanced {
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.platform-sso-advanced summary {
+  padding: 0.75rem 0.875rem;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.platform-sso-advanced[open] summary {
+  padding-bottom: 0.5rem;
+}
+
+.platform-sso-advanced .platform-sso-form-grid {
+  padding: 0.25rem 0.875rem 0.875rem;
+}
+
+.platform-sso-retest {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.platform-sso-provider-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.platform-sso-save {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.25rem;
+}
+
+@media (max-width: 900px) {
+  .platform-sso-policy-grid,
+  .platform-sso-provider-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .platform-sso-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .platform-sso-span-2 {
+    grid-column: span 1;
+  }
+
+  .platform-sso-provider-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .platform-sso-provider-actions .btn {
+    width: 100%;
+  }
+}
+
 .platform-empty-icon {
   display: flex;
   align-items: center;

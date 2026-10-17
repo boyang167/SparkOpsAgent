@@ -5,12 +5,12 @@ import {
   FEATURE_MODULE_LABELS,
   type FeatureModuleKey,
 } from "@sparkops/contracts/platform";
-import type { AuthProvidersVM } from "@sparkops/contracts/identity";
-import { identity, platform, tenant } from "@sparkops/web-sdk";
+import { platform, tenant } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { PlatformPanelHead } from "@/components/ui/PlatformPanelHead";
 import { notifyEntitlementsUpdated } from "@/components/layout/shell-context";
+import { SSOSettingsSection } from "./SSOSettingsSection";
 
 type FeatureKey = FeatureModuleKey;
 type FeatureValues = Pick<
@@ -150,14 +150,9 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
   const [message, setMessage] = useState<string | null>(null);
   const [config, setConfig] = useState<Record<string, unknown>>({});
   const [features, setFeatures] = useState<FeatureValues>(() => readFeatures(undefined));
-  const [providers, setProviders] = useState<AuthProvidersVM | null>(null);
   const [workspaces, setWorkspaces] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
   const [workspaceFeatures, setWorkspaceFeatures] = useState<WorkspaceFeatureOverrides>({});
-
-  const [ssoEnabled, setSsoEnabled] = useState(false);
-  const [ssoProvider, setSsoProvider] = useState("oidc");
-  const [showPasswordLogin, setShowPasswordLogin] = useState(true);
 
   const [licenseEdition, setLicenseEdition] = useState("community");
   const [licenseExpiresAt, setLicenseExpiresAt] = useState("");
@@ -192,26 +187,16 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
     setLoading(true);
     setError(null);
     try {
-      const [data, authProviders, workspaceList] = await Promise.all([
+      const [data, workspaceList] = await Promise.all([
         platform.getSysConfig(),
-        identity.getAuthProviders().catch(() => null),
         tenant.listWorkspaces().catch(() => []),
       ]);
       const nextConfig = (data.config ?? {}) as Record<string, unknown>;
       setConfig(nextConfig);
       setFeatures(readFeatures(nextConfig));
       setWorkspaceFeatures(readWorkspaceFeatures(nextConfig));
-      setProviders(authProviders);
       setWorkspaces(workspaceList.map((item) => ({ id: item.id, name: item.name })));
       setSelectedWorkspaceId((current) => current || workspaceList[0]?.id || "");
-
-      const sso = nextConfig.sso;
-      if (sso && typeof sso === "object") {
-        const item = sso as Record<string, unknown>;
-        setSsoEnabled(item.enabled === true);
-        setSsoProvider(typeof item.provider === "string" ? item.provider : "oidc");
-        setShowPasswordLogin(item.show_password_login !== false);
-      }
 
       const license = nextConfig.license;
       if (license && typeof license === "object") {
@@ -236,8 +221,9 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
     setError(null);
     setMessage(null);
     try {
-      await platform.updateSysConfig({ config: nextConfig });
-      setConfig(nextConfig);
+      const { sso: _dedicatedSSO, ...genericConfig } = nextConfig;
+      const saved = await platform.updateSysConfig({ config: genericConfig });
+      setConfig((saved.config ?? genericConfig) as Record<string, unknown>);
       setMessage(successMessage);
       notifyEntitlementsUpdated();
     } catch (err) {
@@ -245,14 +231,6 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
     } finally {
       setSaving(false);
     }
-  }
-
-  function buildSsoConfig() {
-    return {
-      enabled: ssoEnabled,
-      provider: ssoProvider,
-      show_password_login: showPasswordLogin,
-    };
   }
 
   function buildLicenseConfig() {
@@ -267,24 +245,10 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
       {
         ...config,
         features: { ...features },
-        sso: buildSsoConfig(),
         license: buildLicenseConfig(),
         workspace_features: workspaceFeatures,
       },
       "功能模块配置已保存，菜单将按新能力过滤。",
-    );
-  }
-
-  async function onSaveSso() {
-    await persistConfig(
-      {
-        ...config,
-        features: config.features ?? { ...features },
-        sso: buildSsoConfig(),
-        license: buildLicenseConfig(),
-        workspace_features: workspaceFeatures,
-      },
-      "SSO 登录策略已保存。",
     );
   }
 
@@ -293,7 +257,6 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
       {
         ...config,
         features: config.features ?? { ...features },
-        sso: buildSsoConfig(),
         license: buildLicenseConfig(),
         workspace_features: workspaceFeatures,
       },
@@ -307,7 +270,6 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
       {
         ...config,
         features: config.features ?? { ...features },
-        sso: buildSsoConfig(),
         license: buildLicenseConfig(),
         workspace_features: workspaceFeatures,
       },
@@ -328,14 +290,12 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
 
   function handleSaveActiveTab() {
     if (activeTab === "features") void onSaveFeatures();
-    else if (activeTab === "sso") void onSaveSso();
     else if (activeTab === "license") void onSaveLicense();
     else void onSaveWorkspaceOverrides();
   }
 
   function saveLabelForTab(tab: SettingsTab) {
     if (tab === "features") return "保存模块配置";
-    if (tab === "sso") return "保存 SSO 配置";
     if (tab === "license") return "保存许可证";
     return "保存工作区覆盖";
   }
@@ -389,84 +349,7 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
     </>
   );
 
-  const ssoSection = (
-    <>
-      {isPlatform ? (
-        <p className="platform-settings-section-desc">
-          运行时 OIDC/LDAP 由服务端 config.yaml 控制；此处配置登录页展示策略。
-        </p>
-      ) : (
-        <div>
-          <h2 className="text-lg font-semibold">单点登录 (SSO)</h2>
-          <p className="text-muted text-sm mt-1">
-            运行时 OIDC/LDAP 由服务端 config.yaml 控制；此处配置登录页展示策略。
-          </p>
-        </div>
-      )}
-      <div className={isPlatform ? "platform-settings-status-grid" : "stack-sm text-sm"}>
-        <div className="platform-settings-status-item">
-          <span className="platform-settings-status-name">OIDC 运行时</span>
-          <span
-            className={
-              providers?.oidc_enabled
-                ? "platform-settings-badge platform-settings-badge-on"
-                : "platform-settings-badge"
-            }
-          >
-            {providers?.oidc_enabled ? "已启用" : "未配置"}
-          </span>
-        </div>
-        <div className="platform-settings-status-item">
-          <span className="platform-settings-status-name">LDAP 运行时</span>
-          <span
-            className={
-              providers?.ldap_enabled
-                ? "platform-settings-badge platform-settings-badge-on"
-                : "platform-settings-badge"
-            }
-          >
-            {providers?.ldap_enabled ? "已启用" : "未配置"}
-          </span>
-        </div>
-      </div>
-      <div className={isPlatform ? "platform-settings-form-stack" : "stack-sm text-sm"}>
-        <FeatureSwitch
-          platformStyle={isPlatform}
-          label="登录页展示企业 SSO"
-          description="关闭后登录页仅显示邮箱密码（若允许）"
-          checked={ssoEnabled}
-          onChange={setSsoEnabled}
-        />
-        <div className={isPlatform ? "platform-settings-field" : "config-row"}>
-          <label htmlFor="sso-provider" className="platform-settings-field-label">
-            默认 SSO 提供商
-          </label>
-          <select
-            id="sso-provider"
-            className="input platform-settings-field-input"
-            value={ssoProvider}
-            onChange={(e) => setSsoProvider(e.target.value)}
-          >
-            <option value="oidc">OIDC</option>
-            <option value="ldap">LDAP</option>
-          </select>
-        </div>
-        <FeatureSwitch
-          platformStyle={isPlatform}
-          label="允许邮箱密码登录"
-          checked={showPasswordLogin}
-          onChange={setShowPasswordLogin}
-        />
-      </div>
-      {!isPlatform ? (
-        <div className="flex justify-end">
-          <button type="button" className="btn" disabled={saving} onClick={() => void onSaveSso()}>
-            {saving ? "保存中…" : "保存 SSO 配置"}
-          </button>
-        </div>
-      ) : null}
-    </>
-  );
+  const ssoSection = <SSOSettingsSection platformStyle={isPlatform} />;
 
   const licenseSection = (
     <>
@@ -657,16 +540,18 @@ export function PlatformSettingsPanel({ variant = "default" }: { variant?: "plat
             {activeTab === "workspace" ? workspaceSection : null}
           </div>
 
-          <div className="platform-settings-footer">
-            <button
-              type="button"
-              className="btn"
-              disabled={saving || (activeTab === "workspace" && !selectedWorkspaceId)}
-              onClick={handleSaveActiveTab}
-            >
-              {saving ? "保存中…" : saveLabelForTab(activeTab)}
-            </button>
-          </div>
+          {activeTab !== "sso" ? (
+            <div className="platform-settings-footer">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={saving || (activeTab === "workspace" && !selectedWorkspaceId)}
+                onClick={handleSaveActiveTab}
+              >
+                {saving ? "保存中…" : saveLabelForTab(activeTab)}
+              </button>
+            </div>
+          ) : null}
         </section>
       </div>
     );

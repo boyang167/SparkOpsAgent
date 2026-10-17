@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity/domain/model"
@@ -295,7 +296,8 @@ func (r *SSOConfigRepository) loadLoginUI(ctx context.Context, cfg *model.SSOCon
 
 func (r *SSOConfigRepository) saveLoginUI(tx *gorm.DB, ui model.LoginUISettings) error {
 	var row sysConfigRecord
-	err := tx.Table("platform_admin.sys_cfg").
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Table("platform_admin.sys_cfg").
 		Select("id, config").Where("deleted_at IS NULL").Order("updated_at DESC").First(&row).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
