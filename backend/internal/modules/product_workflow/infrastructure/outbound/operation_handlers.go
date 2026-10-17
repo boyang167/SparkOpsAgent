@@ -15,31 +15,29 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
-type WebhookPayload struct {
-	EventID string          `json:"event_id"`
-	Target  string          `json:"target"`
-	URL     string          `json:"url"`
-	Body    json.RawMessage `json:"body"`
-	Timeout time.Duration   `json:"timeout"`
-}
-
 type NotificationPayload struct {
-	EventID        string          `json:"event_id"`
-	Target         string          `json:"target"`
-	Channel        string          `json:"channel"`
-	URL            string          `json:"url,omitempty"`
-	Targets        string          `json:"targets,omitempty"`
-	WorkflowName   string          `json:"workflow_name"`
-	RunID          string          `json:"run_id"`
-	Status         string          `json:"status"`
-	ErrorMessage   string          `json:"error_message,omitempty"`
-	Event          string          `json:"event"`
-	Body           json.RawMessage `json:"body,omitempty"`
-	Timeout        time.Duration   `json:"timeout"`
-	IdempotencyKey string          `json:"-"`
+	EventID        string        `json:"event_id"`
+	Target         string        `json:"target"`
+	Channel        string        `json:"channel"`
+	Targets        string        `json:"targets,omitempty"`
+	WorkflowID     string        `json:"workflow_id"`
+	WorkflowName   string        `json:"workflow_name"`
+	RunID          string        `json:"run_id"`
+	Scope          string        `json:"scope"`
+	JobID          string        `json:"job_id,omitempty"`
+	NoteID         string        `json:"note_id"`
+	Status         string        `json:"status"`
+	ErrorMessage   string        `json:"error_message,omitempty"`
+	Event          string        `json:"event"`
+	Timeout        time.Duration `json:"timeout"`
+	IdempotencyKey string        `json:"-"`
 }
 
 type NotificationSender func(context.Context, NotificationPayload) error
+
+type WebhookResolver interface {
+	ResolveWebhook(context.Context, NotificationPayload) (string, json.RawMessage, bool, error)
+}
 
 func NewNotificationHandler(sender NotificationSender) messaging.OperationHandler {
 	return func(ctx context.Context, operation messaging.Operation) error {
@@ -52,14 +50,24 @@ func NewNotificationHandler(sender NotificationSender) messaging.OperationHandle
 	}
 }
 
-func NewWebhookHandler(client *http.Client) messaging.OperationHandler {
+func NewWebhookHandler(resolver WebhookResolver, client *http.Client) messaging.OperationHandler {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
 	return func(ctx context.Context, operation messaging.Operation) error {
-		var payload WebhookPayload
+		var payload NotificationPayload
 		if err := json.Unmarshal(operation.Payload, &payload); err != nil {
 			return messaging.Permanent(fmt.Errorf("decode workflow webhook operation: %w", err))
+		}
+		if resolver == nil {
+			return messaging.Permanent(fmt.Errorf("workflow webhook resolver is required"))
+		}
+		endpoint, body, active, err := resolver.ResolveWebhook(ctx, payload)
+		if err != nil {
+			return err
+		}
+		if !active {
+			return nil
 		}
 		timeout := payload.Timeout
 		if timeout <= 0 {
@@ -67,7 +75,7 @@ func NewWebhookHandler(client *http.Client) messaging.OperationHandler {
 		}
 		sendCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		req, err := http.NewRequestWithContext(sendCtx, http.MethodPost, payload.URL, bytes.NewReader(payload.Body))
+		req, err := http.NewRequestWithContext(sendCtx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
 			return messaging.Permanent(err)
 		}
@@ -94,12 +102,52 @@ func NewWebhookHandler(client *http.Client) messaging.OperationHandler {
 }
 
 const (
-	OperationTypeBuildTrigger   = "product-workflow.build.trigger.v1"
-	OperationTypeDeployTrigger  = "product-workflow.deploy.trigger.v1"
-	OperationTypeWebhookSend    = "product-workflow.webhook.send.v1"
-	OperationTypeMailSend       = "product-workflow.mail.send.v1"
-	OperationTypeFeishuUserSend = "product-workflow.feishu-user.send.v1"
+	OperationTypeBuildTrigger       = "product-workflow.build.trigger.v1"
+	OperationTypeDeployTrigger      = "product-workflow.deploy.trigger.v1"
+	OperationTypeWebhookSend        = "product-workflow.webhook.send.v1"
+	OperationTypeMailSend           = "product-workflow.mail.send.v1"
+	OperationTypeFeishuUserSend     = "product-workflow.feishu-user.send.v1"
+	OperationTypeGitLabStatusReport = "product-workflow.gitlab.status.report.v1"
 )
+
+type GitLabStatusPayload struct {
+	EventID         string `json:"event_id"`
+	RunID           string `json:"run_id"`
+	ProjectID       string `json:"project_id"`
+	Commit          string `json:"commit"`
+	Context         string `json:"context"`
+	DesiredStatus   string `json:"desired_status"`
+	Description     string `json:"description"`
+	MergeRequestIID int    `json:"merge_request_iid,omitempty"`
+}
+
+type GitLabStatusReporter interface {
+	CurrentStatus(context.Context, GitLabStatusPayload) (string, error)
+	Report(context.Context, GitLabStatusPayload) error
+}
+
+func NewGitLabStatusHandler(reporter GitLabStatusReporter) messaging.OperationHandler {
+	return func(ctx context.Context, operation messaging.Operation) error {
+		if reporter == nil {
+			return messaging.Permanent(fmt.Errorf("GitLab status reporter is required"))
+		}
+		var payload GitLabStatusPayload
+		if err := json.Unmarshal(operation.Payload, &payload); err != nil {
+			return messaging.Permanent(fmt.Errorf("decode GitLab status operation: %w", err))
+		}
+		if payload.RunID == "" || payload.ProjectID == "" || payload.Commit == "" || payload.Context == "" || payload.DesiredStatus == "" {
+			return messaging.Permanent(fmt.Errorf("GitLab status operation target is incomplete"))
+		}
+		current, err := reporter.CurrentStatus(ctx, payload)
+		if err != nil {
+			return err
+		}
+		if current == payload.DesiredStatus {
+			return nil
+		}
+		return reporter.Report(ctx, payload)
+	}
+}
 
 type CompletionPayload struct {
 	EventID  string `json:"event_id"`

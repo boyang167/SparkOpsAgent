@@ -10,6 +10,15 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 )
 
+type staticWebhookResolver struct {
+	url  string
+	body json.RawMessage
+}
+
+func (r staticWebhookResolver) ResolveWebhook(context.Context, NotificationPayload) (string, json.RawMessage, bool, error) {
+	return r.url, r.body, true, nil
+}
+
 func TestWebhookHandlerTreatsRequestTimeoutAsTemporaryAndForwardsIdempotency(t *testing.T) {
 	var gotKey string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -17,12 +26,12 @@ func TestWebhookHandlerTreatsRequestTimeoutAsTemporaryAndForwardsIdempotency(t *
 		w.WriteHeader(http.StatusRequestTimeout)
 	}))
 	defer server.Close()
-	payload, err := json.Marshal(WebhookPayload{EventID: "event-1", URL: server.URL, Body: json.RawMessage(`{}`)})
+	payload, err := json.Marshal(NotificationPayload{EventID: "event-1", NoteID: "hook-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = NewWebhookHandler(server.Client())(context.Background(), messaging.Operation{
+	err = NewWebhookHandler(staticWebhookResolver{url: server.URL, body: json.RawMessage(`{}`)}, server.Client())(context.Background(), messaging.Operation{
 		Payload: payload, IdempotencyKey: "event-1:subscriber:type:target",
 	})
 	if err == nil {

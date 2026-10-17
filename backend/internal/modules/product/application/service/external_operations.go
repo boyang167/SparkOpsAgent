@@ -25,6 +25,10 @@ func scheduleJiraTransition(ctx context.Context, writer messaging.OperationWrite
 }
 
 func scheduleReleasePlanWebhook(ctx context.Context, writer messaging.OperationWriter, payload productoutbound.ReleasePlanWebhookPayload) error {
+	return ScheduleReleasePlanWebhook(ctx, writer, payload)
+}
+
+func ScheduleReleasePlanWebhook(ctx context.Context, writer messaging.OperationWriter, payload productoutbound.ReleasePlanWebhookPayload) error {
 	metadata, ok := events.MetadataFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("schedule release plan webhook: event metadata missing")
@@ -34,6 +38,24 @@ func scheduleReleasePlanWebhook(ctx context.Context, writer messaging.OperationW
 		Owner:          metadata.Subscriber,
 		OperationType:  productoutbound.OperationTypeReleasePlanWebhookSend,
 		IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + productoutbound.OperationTypeReleasePlanWebhookSend + ":" + payload.PlanID,
+		Payload:        payload,
+	})
+}
+
+func scheduleReleasePlanApproval(ctx context.Context, writer messaging.OperationWriter, payload productoutbound.ReleasePlanApprovalPayload) error {
+	return ScheduleReleasePlanApproval(ctx, writer, payload)
+}
+
+func ScheduleReleasePlanApproval(ctx context.Context, writer messaging.OperationWriter, payload productoutbound.ReleasePlanApprovalPayload) error {
+	metadata, ok := events.MetadataFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("schedule release plan approval: event metadata missing")
+	}
+	payload.EventID = metadata.EventID
+	return writer.Schedule(ctx, messaging.OperationRequest{
+		Owner:          metadata.Subscriber,
+		OperationType:  productoutbound.OperationTypeReleasePlanApprovalSend,
+		IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + productoutbound.OperationTypeReleasePlanApprovalSend + ":" + payload.PlanID,
 		Payload:        payload,
 	})
 }

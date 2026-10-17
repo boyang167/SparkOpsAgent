@@ -12,6 +12,7 @@ import (
 	"time"
 
 	gitpkg "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/git"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 )
 
 type HookClient struct {
@@ -26,12 +27,12 @@ func (c HookClient) client() *http.Client {
 }
 
 type HookSpec struct {
-	APIBase  string
-	Token    string
-	Project  string
-	HookURL  string
-	Secret   string
-	Events   []string
+	APIBase string
+	Token   string
+	Project string
+	HookURL string
+	Secret  string
+	Events  []string
 }
 
 func (c HookClient) Ensure(ctx context.Context, spec HookSpec) error {
@@ -131,13 +132,17 @@ func hookBody(hookURL, secret string, events []string) map[string]any {
 }
 
 func ReportStatus(ctx context.Context, apiBase, token, projectPath, sha, state, description string) error {
+	return ReportStatusWithContext(ctx, apiBase, token, projectPath, sha, state, "sparkops/workflow", description)
+}
+
+func ReportStatusWithContext(ctx context.Context, apiBase, token, projectPath, sha, state, statusContext, description string) error {
 	if strings.TrimSpace(sha) == "" {
 		return nil
 	}
 	encodedProject := url.PathEscape(projectPath)
 	encodedSHA := url.PathEscape(sha)
 	raw, _ := json.Marshal(map[string]string{
-		"state": state, "context": "sparkops/workflow", "description": description,
+		"state": state, "context": statusContext, "description": description,
 	})
 	endpoint := fmt.Sprintf("%s/api/v4/projects/%s/statuses/%s", strings.TrimRight(apiBase, "/"), encodedProject, encodedSHA)
 	return gitlabJSON(ctx, http.MethodPost, endpoint, token, raw)
@@ -167,7 +172,18 @@ func gitlabJSON(ctx context.Context, method, endpoint, token string, body []byte
 	defer resp.Body.Close()
 	payload, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("gitlab %s: %s", resp.Status, strings.TrimSpace(string(payload)))
+		return classifyGitLabHTTP(resp.StatusCode, payload)
 	}
 	return nil
+}
+
+func classifyGitLabHTTP(status int, payload []byte) error {
+	err := fmt.Errorf("gitlab status %d: %s", status, strings.TrimSpace(string(payload)))
+	if status >= http.StatusBadRequest &&
+		status < http.StatusInternalServerError &&
+		status != http.StatusRequestTimeout &&
+		status != http.StatusTooManyRequests {
+		return messaging.Permanent(err)
+	}
+	return err
 }

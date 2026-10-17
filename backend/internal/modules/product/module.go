@@ -99,18 +99,15 @@ func (m *Module) Register(c *appctx.Container) error {
 		operationWriter = c.OperationWriter
 		releasePlanExecutor.UseOperationWriter(operationWriter)
 		sprintWorkItemExecutor.UseOperationWriter(operationWriter)
-		handler := productoutbound.NewWorkflowCompletionOperation(c.Transactor, func(ctx context.Context, runID kernel.ProductWorkflowRunID, success bool, message string) error {
-			if err := releasePlanExecutor.OnWorkflowRunCompleted(ctx, runID, success, message, kernel.MemberID{}); err != nil {
-				return err
-			}
-			return sprintWorkItemExecutor.OnWorkflowRunCompleted(ctx, runID, success, message)
-		})
-		if err := c.OperationRegistry.Register(productoutbound.OperationTypeWorkflowTrigger, handler); err != nil {
-			return fmt.Errorf("register product workflow completion operation: %w", err)
-		}
-		if err := c.OperationRegistry.Register(
-			productoutbound.OperationTypeJiraTransition,
-			productoutbound.NewJiraTransitionOperation(func(ctx context.Context, payload productoutbound.JiraTransitionPayload) error {
+		factory := OperationFactory{
+			Transactor: c.Transactor,
+			WorkflowCompletion: func(ctx context.Context, runID kernel.ProductWorkflowRunID, success bool, message string) error {
+				if err := releasePlanExecutor.OnWorkflowRunCompleted(ctx, runID, success, message, kernel.MemberID{}); err != nil {
+					return err
+				}
+				return sprintWorkItemExecutor.OnWorkflowRunCompleted(ctx, runID, success, message)
+			},
+			JiraTransition: func(ctx context.Context, payload productoutbound.JiraTransitionPayload) error {
 				workspaceID, err := kernel.ParseWorkspaceID(payload.WorkspaceID)
 				if err != nil {
 					return err
@@ -127,21 +124,24 @@ func (m *Module) Register(c *appctx.Container) error {
 					return nil
 				}
 				return connector.TransitionIssue(ctx, workspaceID, payload.PMWorkspaceID, payload.IssueKey, payload.Status)
-			}),
-		); err != nil {
-			return fmt.Errorf("register product jira operation: %w", err)
-		}
-		if err := c.OperationRegistry.Register(
-			productoutbound.OperationTypeReleasePlanWebhookSend,
-			productoutbound.NewReleasePlanWebhookOperation(func(ctx context.Context, planID kernel.ReleasePlanID, event, idempotencyKey string) error {
+			},
+			ReleasePlanWebhook: func(ctx context.Context, planID kernel.ReleasePlanID, event, idempotencyKey string) error {
 				plan, err := releasePlanRepo.FindPlanByID(ctx, planID)
 				if err != nil {
 					return err
 				}
 				return releasePlanHookNotifier.SendWithIdempotency(ctx, plan, productmodel.ReleasePlanHookEvent(event), idempotencyKey)
-			}),
-		); err != nil {
-			return fmt.Errorf("register product release plan webhook operation: %w", err)
+			},
+			ReleasePlanApproval: func(ctx context.Context, planID kernel.ReleasePlanID, idempotencyKey string) error {
+				plan, err := releasePlanRepo.FindPlanByID(ctx, planID)
+				if err != nil {
+					return err
+				}
+				return releasePlanNotifier.NotifyApprovalWithIdempotency(ctx, plan, idempotencyKey)
+			},
+		}
+		if err := factory.Register(c.OperationRegistry); err != nil {
+			return err
 		}
 	}
 	if c.SprintProcessPort == nil {
@@ -175,6 +175,19 @@ func (m *Module) Register(c *appctx.Container) error {
 
 	finishPlanning := command.NewFinishReleasePlanPlanningHandler(repo, releasePlanRepo, releasePlanExecutor, releasePlanNotifier, releasePlanHookNotifier, workflowSnapshotReader)
 	finishPlanning.UseRuntimeInputs(c.WorkflowRuntimeInputs)
+	finishPlanning.UseOperationOutbox(operationWriter, c.Transactor)
+	approveReleasePlan := command.NewApproveReleasePlanHandler(repo, releasePlanRepo, releasePlanExecutor, releasePlanHookNotifier)
+	approveReleasePlan.UseOperationOutbox(operationWriter, c.Transactor)
+	markReleasePlanJobDone := command.NewMarkReleasePlanJobDoneHandler(repo, releasePlanRepo, releasePlanExecutor)
+	markReleasePlanJobDone.UseOperationOutbox(operationWriter, c.Transactor)
+	skipReleasePlanJob := command.NewSkipReleasePlanJobHandler(repo, releasePlanRepo, releasePlanExecutor)
+	skipReleasePlanJob.UseOperationOutbox(operationWriter, c.Transactor)
+	approveReleasePlanByToken := command.NewApproveReleasePlanByTokenHandler(releasePlanRepo, releasePlanExecutor, releasePlanHookNotifier)
+	approveReleasePlanByToken.UseOperationOutbox(operationWriter, c.Transactor)
+	releasePlanHookCallback := command.NewReleasePlanHookCallbackHandler(
+		releasePlanRepo, releasePlanExecutor, releasePlanNotifier, releasePlanHookNotifier,
+	)
+	releasePlanHookCallback.UseOperationOutbox(operationWriter, c.Transactor)
 	getReleasePlan := query.NewGetReleasePlanHandlerWithSprint(repo, releasePlanRepo, sprintRepo)
 	getReleasePlan.UseRuntimeInputs(c.WorkflowRuntimeInputs)
 	releasePlanHandlers := producthttp.NewReleasePlanHandlers(
@@ -189,10 +202,10 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewDeleteReleasePlanJobHandler(repo, releasePlanRepo),
 		command.NewReorderReleasePlanJobsHandler(repo, releasePlanRepo),
 		finishPlanning,
-		command.NewApproveReleasePlanHandler(repo, releasePlanRepo, releasePlanExecutor, releasePlanHookNotifier),
+		approveReleasePlan,
 		command.NewRejectReleasePlanHandler(repo, releasePlanRepo),
-		command.NewMarkReleasePlanJobDoneHandler(repo, releasePlanRepo, releasePlanExecutor),
-		command.NewSkipReleasePlanJobHandler(repo, releasePlanRepo, releasePlanExecutor),
+		markReleasePlanJobDone,
+		skipReleasePlanJob,
 		command.NewExecuteReleasePlanHandler(repo, releasePlanRepo, releasePlanExecutor),
 		command.NewRetryReleasePlanJobHandler(repo, releasePlanRepo, releasePlanExecutor),
 		command.NewCopyReleasePlanHandler(repo, releasePlanRepo),
@@ -200,9 +213,9 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewCreateReleasePlanFromTemplateHandler(repo, releasePlanRepo, releasePlanTemplateRepo, sprintRepo),
 		command.NewListReleasePlanTemplatesHandler(releasePlanTemplateRepo),
 		command.NewDeleteReleasePlanTemplateHandler(releasePlanTemplateRepo),
-		command.NewApproveReleasePlanByTokenHandler(releasePlanRepo, releasePlanExecutor, releasePlanHookNotifier),
+		approveReleasePlanByToken,
 		command.NewRejectReleasePlanByTokenHandler(releasePlanRepo),
-		command.NewReleasePlanHookCallbackHandler(releasePlanRepo, releasePlanExecutor, releasePlanNotifier, releasePlanHookNotifier),
+		releasePlanHookCallback,
 		query.NewListReleasePlansHandler(repo, releasePlanRepo),
 		query.NewListWorkspaceReleasePlansHandler(repo, releasePlanRepo, sprintRepo),
 		getReleasePlan,

@@ -194,3 +194,36 @@ git diff --check -- <task10 files>
 ## Concerns
 
 None blocking. The Cursor shell auto-injected `git commit --trailer`, but installed Git 2.31.1 does not support that option. The repository has no active hooks, so the final commit was created with `git commit-tree` / `git update-ref` after `git commit -F` failed twice for the same injected option.
+
+## Final external-operation review fixes (2026-10-18)
+
+### Seven-item acceptance matrix
+
+1. **Archive ResumeAll** — each archiving project is handled in its own transaction. A UUIDv5 event ID derived from `projectID` and stable subscriber `workspace-app.archive-resumer` deduplicate restart replays. The resumer performs no teardown calls; it schedules `workspace-app.project.undeploy.v1`, whose handler reconciles online/active state and schedules `workspace-app.pipeline.disable.v1`. Pipeline disable is queried, applied, queried again, and only then is the project archived.
+2. **Product-workflow notification identity** — keys contain run ID, workflow/job scope, job ID sentinel, event, status, and note ID. SQLite transaction tests prove job/workflow notifications with the same note ID create distinct rows and duplicate delivery remains one row. Webhook payloads contain note/run references only and exclude URL/token values.
+3. **Runtime webhook resolution** — `WorkflowWebhookResolver` reloads the run, workflow/job notification, active state, URL, and interpolated body at handler execution. No credential-bearing URL is persisted in the outbox payload.
+4. **Release-plan hooks and approval** — webhook and approval delivery are separate operation types. HTTP command transitions run in a database transaction with scheduling; scheduling errors roll state back. AMQP paths no longer call or swallow webhook/approval delivery. Handlers reload the current plan and classify permanent HTTP rejection.
+5. **Mail and Feishu errors** — missing SMTP host/recipients and Feishu credentials/recipients return permanent errors. Feishu token and message HTTP-200 responses parse business `code`; nonzero codes fail, with throttling classified retryable.
+6. **GitLab status** — scheduler state transitions schedule `product-workflow.gitlab.status.report.v1` transactionally. The handler queries the current context status and skips an already-converged value; the adapter propagates lookup/query/write errors instead of logging and swallowing them.
+7. **Production registration** — product and product-workflow expose strongly typed `OperationFactory` values with `Validate` and fail-fast registration. The bootstrap test assembles all 16 Task10 operation types with non-nil production constructor dependencies and verifies every handler plus duplicate rejection.
+
+### RED / GREEN evidence
+
+- RED: product-workflow failed to compile because the old GitLab reporter did not implement `CurrentStatus` or error-returning `Report`. GREEN: adapter protocol tests, reconciliation handler, production factory registration, and module build pass.
+- RED: Feishu accepted HTTP 200 with nonzero business code when a token field was present. GREEN: nonzero token/message codes always fail with retry/permanent classification.
+- RED: archive resumer and archive command invoked teardown state directly before scheduling. GREEN: tests assert zero teardown calls before the advance operation executes; restart replay persists one stable operation.
+- RED: release-plan had no independent approval operation and direct hook/approval calls existed outside state transactions. GREEN: three real outbox rows (Jira, release hook, approval) persist/deduplicate, and an induced schedule failure rolls state back.
+- GREEN-only regression evidence retained from the previous session: notification cross-layer key separation, secret-free payload, mail configuration, webhook 408 handling, and archive finalization tests.
+
+### Verification
+
+- `go test -count=1` passed for delivery, governance, product, product-workflow, workspace-app, messaging, messaging persistence, postgres, and bootstrap packages.
+- `go test -count=2` passed for product service/command, product-workflow engine, workspace archive command, and bootstrap registration.
+- `go build ./...` passed.
+- `git diff --check` reported no whitespace errors (Windows LF/CRLF notices only).
+
+### Residual risks
+
+- External protocols remain at-least-once across an external-success/outbox-completion crash window. Stable idempotency headers and query-before-write reconciliation are required at receivers.
+- Release-plan approval/webhook endpoints that ignore `Idempotency-Key` can still observe duplicate delivery.
+- Inmemory mode intentionally keeps synchronous compatibility and has no durable retry.

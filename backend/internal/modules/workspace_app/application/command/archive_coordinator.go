@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
+
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/repository"
 	workspaceoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -30,6 +33,11 @@ type ArchiveCoordinator struct {
 	teardown   func() appctx.ProjectTeardown
 	warn       func(string, error)
 	operations messaging.OperationWriter
+	tx         postgres.Transactor
+}
+
+func (c *ArchiveCoordinator) UseTransactor(tx postgres.Transactor) {
+	c.tx = tx
 }
 
 func NewArchiveCoordinator(
@@ -60,6 +68,15 @@ func (c *ArchiveCoordinator) port() (appctx.ProjectTeardown, error) {
 }
 
 func (c *ArchiveCoordinator) Advance(ctx context.Context, project *model.Project, memberID kernel.MemberID) error {
+	return c.AdvanceWithTeardown(ctx, project, memberID, true)
+}
+
+func (c *ArchiveCoordinator) AdvanceWithTeardown(
+	ctx context.Context,
+	project *model.Project,
+	memberID kernel.MemberID,
+	allowUndeploy bool,
+) error {
 	teardown, err := c.port()
 	if err != nil {
 		return err
@@ -70,6 +87,12 @@ func (c *ArchiveCoordinator) Advance(ctx context.Context, project *model.Project
 	}
 	if len(online) == 0 {
 		return c.finish(ctx, teardown, project)
+	}
+	if !allowUndeploy {
+		if err := project.AbortArchiving(); err != nil {
+			return err
+		}
+		return c.repo.Update(ctx, project)
 	}
 	active, err := teardown.HasActiveRun(ctx, project.ID)
 	if err != nil || active {
@@ -147,6 +170,7 @@ func (c *ArchiveCoordinator) HandleDeployCompleted(ctx context.Context, e events
 			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + project.ID.String(),
 			Payload: workspaceoutbound.ProjectUndeployPayload{
 				EventID: metadata.EventID, ProjectID: project.ID.String(), MemberID: ev.CreatedBy.String(),
+				AllowUndeploy: boolPointer(true),
 			},
 		})
 	}
@@ -168,7 +192,35 @@ func (c *ArchiveCoordinator) ResumeAll(ctx context.Context) error {
 	}
 	var errs []error
 	for _, project := range projects {
-		if err := c.Advance(ctx, project, project.CreatedBy); err != nil {
+		if c.operations == nil {
+			if err := c.Advance(ctx, project, project.CreatedBy); err != nil {
+				errs = append(errs, err)
+			}
+			continue
+		}
+		if c.tx == nil {
+			errs = append(errs, errors.New("archive resumer requires transaction"))
+			continue
+		}
+		eventID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("workspace-app.archive-resumer:"+project.ID.String())).String()
+		err := c.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+			txCtx = events.WithMetadata(txCtx, events.Metadata{
+				EventID: eventID, Subscriber: "workspace-app.archive-resumer",
+			})
+			current, err := c.repo.FindByID(txCtx, project.ID)
+			if err != nil || !current.IsArchiving() {
+				return err
+			}
+			return c.operations.Schedule(txCtx, messaging.OperationRequest{
+				Owner: "workspace-app.archive-resumer", OperationType: workspaceoutbound.OperationTypeProjectUndeploy,
+				IdempotencyKey: eventID + ":workspace-app.archive-resumer:" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + current.ID.String(),
+				Payload: workspaceoutbound.ProjectUndeployPayload{
+					EventID: eventID, ProjectID: current.ID.String(), MemberID: current.CreatedBy.String(),
+					AllowUndeploy: boolPointer(true),
+				},
+			})
+		})
+		if err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -178,4 +230,8 @@ func (c *ArchiveCoordinator) ResumeAll(ctx context.Context) error {
 func isDeploymentRunning(err error) bool {
 	var domainErr *kernel.DomainError
 	return errors.As(err, &domainErr) && domainErr.Code() == deploymentRunningErrorCode
+}
+
+func boolPointer(value bool) *bool {
+	return &value
 }

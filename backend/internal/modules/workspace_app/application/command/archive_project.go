@@ -5,10 +5,14 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/repository"
+	workspaceoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/outbound"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -88,10 +92,11 @@ func (h *ArchiveProjectHandler) archiveInTransaction(
 	if h.tx == nil {
 		return ArchiveResult{}, errors.New("archive operation requires transaction")
 	}
+	eventID := uuid.NewString()
 	var result ArchiveResult
 	err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		txCtx = events.WithMetadata(txCtx, events.Metadata{
-			EventID:    "workspace-archive-" + project.ID.String(),
+			EventID:    eventID,
 			Subscriber: "workspace-app.archive-project",
 		})
 		var err error
@@ -138,6 +143,31 @@ func (h *ArchiveProjectHandler) archive(
 ) (ArchiveResult, error) {
 	if project.ProductID != nil {
 		return ArchiveResult{}, domain.ErrProjectBoundToProduct
+	}
+	if h.coordinator.operations != nil {
+		if err := project.BeginArchiving(); err != nil {
+			return ArchiveResult{}, err
+		}
+		if err := h.repo.Update(ctx, project); err != nil {
+			return ArchiveResult{}, err
+		}
+		metadata, ok := events.MetadataFromContext(ctx)
+		if !ok {
+			return ArchiveResult{}, errors.New("archive operation requires event metadata")
+		}
+		allowUndeploy := withTeardown
+		if err := h.coordinator.operations.Schedule(ctx, messaging.OperationRequest{
+			Owner:          metadata.Subscriber,
+			OperationType:  workspaceoutbound.OperationTypeProjectUndeploy,
+			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + project.ID.String(),
+			Payload: workspaceoutbound.ProjectUndeployPayload{
+				EventID: metadata.EventID, ProjectID: project.ID.String(),
+				MemberID: memberID.String(), AllowUndeploy: &allowUndeploy,
+			},
+		}); err != nil {
+			return ArchiveResult{}, err
+		}
+		return ArchiveResult{Status: string(model.ProjectStatusArchiving), PendingClusters: []string{}}, nil
 	}
 	teardown, err := h.coordinator.port()
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	productoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -181,6 +182,18 @@ func (e *ReleasePlanExecutor) beginAllDoneHook(ctx context.Context, plan *model.
 		return err
 	}
 	if e.operations != nil {
+		if _, ok := events.MetadataFromContext(ctx); !ok {
+			token := "-"
+			if plan.HookState != nil {
+				token = plan.HookState.Token
+			}
+			eventID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(
+				"product.release-plan:"+plan.ID.String()+":hook:all_done:"+token,
+			)).String()
+			ctx = events.WithMetadata(ctx, events.Metadata{
+				EventID: eventID, Subscriber: "product.release-plan",
+			})
+		}
 		return scheduleReleasePlanWebhook(ctx, e.operations, productoutbound.ReleasePlanWebhookPayload{
 			PlanID: plan.ID.String(), Event: string(model.ReleasePlanHookEventAllDone),
 		})

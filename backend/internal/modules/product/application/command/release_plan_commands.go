@@ -11,6 +11,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -133,17 +135,23 @@ func (h *AddReleasePlanJobHandler) Handle(ctx context.Context, productID kernel.
 }
 
 type FinishReleasePlanPlanningHandler struct {
-	products  repository.ProductRepository
-	plans     repository.ReleasePlanRepository
-	executor  *service.ReleasePlanExecutor
-	notifier  *service.ReleasePlanApprovalNotifier
-	hooks     *service.ReleasePlanHookNotifier
-	snapshots port.WorkflowSnapshotReader
-	inputs    appctx.WorkflowRuntimeInputReader
+	products   repository.ProductRepository
+	plans      repository.ReleasePlanRepository
+	executor   *service.ReleasePlanExecutor
+	notifier   *service.ReleasePlanApprovalNotifier
+	hooks      *service.ReleasePlanHookNotifier
+	snapshots  port.WorkflowSnapshotReader
+	inputs     appctx.WorkflowRuntimeInputReader
+	operations messaging.OperationWriter
+	tx         postgres.Transactor
 }
 
 func (h *FinishReleasePlanPlanningHandler) UseRuntimeInputs(reader appctx.WorkflowRuntimeInputReader) {
 	h.inputs = reader
+}
+
+func (h *FinishReleasePlanPlanningHandler) UseOperationOutbox(writer messaging.OperationWriter, tx postgres.Transactor) {
+	h.operations, h.tx = writer, tx
 }
 
 func NewFinishReleasePlanPlanningHandler(
@@ -161,6 +169,12 @@ func NewFinishReleasePlanPlanningHandler(
 }
 
 func (h *FinishReleasePlanPlanningHandler) Handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID, actor kernel.MemberID) (*model.ReleasePlan, error) {
+	return withinReleasePlanOperationTx(ctx, h.operations, h.tx, func(txCtx context.Context) (*model.ReleasePlan, error) {
+		return h.handle(txCtx, productID, planID, actor)
+	})
+}
+
+func (h *FinishReleasePlanPlanningHandler) handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID, actor kernel.MemberID) (*model.ReleasePlan, error) {
 	plan, err := loadReleasePlan(ctx, h.products, h.plans, productID, planID)
 	if err != nil {
 		return nil, err
@@ -174,7 +188,7 @@ func (h *FinishReleasePlanPlanningHandler) Handle(ctx context.Context, productID
 	if err := service.MaterializeWorkflowSnapshots(ctx, plan, h.snapshots); err != nil {
 		return nil, err
 	}
-	flow := releasePlanFlowDeps{plans: h.plans, executor: h.executor, approval: h.notifier, hooks: h.hooks}
+	flow := releasePlanFlowDeps{plans: h.plans, executor: h.executor, approval: h.notifier, hooks: h.hooks, operations: h.operations}
 	if err := flow.persistJobs(ctx, plan); err != nil {
 		return nil, err
 	}
@@ -202,10 +216,12 @@ func (h *FinishReleasePlanPlanningHandler) Handle(ctx context.Context, productID
 }
 
 type ApproveReleasePlanHandler struct {
-	products repository.ProductRepository
-	plans    repository.ReleasePlanRepository
-	executor *service.ReleasePlanExecutor
-	hooks    *service.ReleasePlanHookNotifier
+	products   repository.ProductRepository
+	plans      repository.ReleasePlanRepository
+	executor   *service.ReleasePlanExecutor
+	hooks      *service.ReleasePlanHookNotifier
+	operations messaging.OperationWriter
+	tx         postgres.Transactor
 }
 
 func NewApproveReleasePlanHandler(
@@ -217,7 +233,17 @@ func NewApproveReleasePlanHandler(
 	return &ApproveReleasePlanHandler{products: products, plans: plans, executor: executor, hooks: hooks}
 }
 
+func (h *ApproveReleasePlanHandler) UseOperationOutbox(writer messaging.OperationWriter, tx postgres.Transactor) {
+	h.operations, h.tx = writer, tx
+}
+
 func (h *ApproveReleasePlanHandler) Handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID, actor kernel.MemberID) (*model.ReleasePlan, error) {
+	return withinReleasePlanOperationTx(ctx, h.operations, h.tx, func(txCtx context.Context) (*model.ReleasePlan, error) {
+		return h.handle(txCtx, productID, planID, actor)
+	})
+}
+
+func (h *ApproveReleasePlanHandler) handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID, actor kernel.MemberID) (*model.ReleasePlan, error) {
 	plan, err := loadReleasePlan(ctx, h.products, h.plans, productID, planID)
 	if err != nil {
 		return nil, err
@@ -225,7 +251,7 @@ func (h *ApproveReleasePlanHandler) Handle(ctx context.Context, productID kernel
 	if err := plan.Approve(); err != nil {
 		return nil, err
 	}
-	flow := releasePlanFlowDeps{plans: h.plans, executor: h.executor, hooks: h.hooks}
+	flow := releasePlanFlowDeps{plans: h.plans, executor: h.executor, hooks: h.hooks, operations: h.operations}
 	if plan.Status == model.ReleasePlanStatusWaitExecuteExternalCheck {
 		flow.beginHookWait(plan, model.ReleasePlanHookEventBeforeExecute)
 		if err := h.plans.UpdatePlan(ctx, plan); err != nil {
@@ -270,16 +296,28 @@ func (h *RejectReleasePlanHandler) Handle(ctx context.Context, productID kernel.
 }
 
 type MarkReleasePlanJobDoneHandler struct {
-	products repository.ProductRepository
-	plans    repository.ReleasePlanRepository
-	executor *service.ReleasePlanExecutor
+	products   repository.ProductRepository
+	plans      repository.ReleasePlanRepository
+	executor   *service.ReleasePlanExecutor
+	operations messaging.OperationWriter
+	tx         postgres.Transactor
 }
 
 func NewMarkReleasePlanJobDoneHandler(products repository.ProductRepository, plans repository.ReleasePlanRepository, executor *service.ReleasePlanExecutor) *MarkReleasePlanJobDoneHandler {
 	return &MarkReleasePlanJobDoneHandler{products: products, plans: plans, executor: executor}
 }
 
+func (h *MarkReleasePlanJobDoneHandler) UseOperationOutbox(writer messaging.OperationWriter, tx postgres.Transactor) {
+	h.operations, h.tx = writer, tx
+}
+
 func (h *MarkReleasePlanJobDoneHandler) Handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID, jobID kernel.ReleasePlanJobID, actor kernel.MemberID, remark string) (*model.ReleasePlan, error) {
+	return withinReleasePlanOperationTx(ctx, h.operations, h.tx, func(txCtx context.Context) (*model.ReleasePlan, error) {
+		return h.handle(txCtx, productID, planID, jobID, actor, remark)
+	})
+}
+
+func (h *MarkReleasePlanJobDoneHandler) handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID, jobID kernel.ReleasePlanJobID, actor kernel.MemberID, remark string) (*model.ReleasePlan, error) {
 	plan, err := loadReleasePlan(ctx, h.products, h.plans, productID, planID)
 	if err != nil {
 		return nil, err
@@ -303,16 +341,28 @@ func (h *MarkReleasePlanJobDoneHandler) Handle(ctx context.Context, productID ke
 }
 
 type SkipReleasePlanJobHandler struct {
-	products repository.ProductRepository
-	plans    repository.ReleasePlanRepository
-	executor *service.ReleasePlanExecutor
+	products   repository.ProductRepository
+	plans      repository.ReleasePlanRepository
+	executor   *service.ReleasePlanExecutor
+	operations messaging.OperationWriter
+	tx         postgres.Transactor
 }
 
 func NewSkipReleasePlanJobHandler(products repository.ProductRepository, plans repository.ReleasePlanRepository, executor *service.ReleasePlanExecutor) *SkipReleasePlanJobHandler {
 	return &SkipReleasePlanJobHandler{products: products, plans: plans, executor: executor}
 }
 
+func (h *SkipReleasePlanJobHandler) UseOperationOutbox(writer messaging.OperationWriter, tx postgres.Transactor) {
+	h.operations, h.tx = writer, tx
+}
+
 func (h *SkipReleasePlanJobHandler) Handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID, jobID kernel.ReleasePlanJobID, actor kernel.MemberID) (*model.ReleasePlan, error) {
+	return withinReleasePlanOperationTx(ctx, h.operations, h.tx, func(txCtx context.Context) (*model.ReleasePlan, error) {
+		return h.handle(txCtx, productID, planID, jobID, actor)
+	})
+}
+
+func (h *SkipReleasePlanJobHandler) handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID, jobID kernel.ReleasePlanJobID, actor kernel.MemberID) (*model.ReleasePlan, error) {
 	plan, err := loadReleasePlan(ctx, h.products, h.plans, productID, planID)
 	if err != nil {
 		return nil, err

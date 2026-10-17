@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 )
 
 type ReleasePlanApprovalNotifier struct {
@@ -28,6 +29,14 @@ func NewReleasePlanApprovalNotifier(publicBase string) *ReleasePlanApprovalNotif
 }
 
 func (n *ReleasePlanApprovalNotifier) NotifyApproval(ctx context.Context, plan *model.ReleasePlan) error {
+	return n.NotifyApprovalWithIdempotency(ctx, plan, "")
+}
+
+func (n *ReleasePlanApprovalNotifier) NotifyApprovalWithIdempotency(
+	ctx context.Context,
+	plan *model.ReleasePlan,
+	idempotencyKey string,
+) error {
 	if n == nil || plan == nil || !plan.ApprovalConfig.UsesExternalApproval() {
 		return nil
 	}
@@ -49,6 +58,9 @@ func (n *ReleasePlanApprovalNotifier) NotifyApproval(ctx context.Context, plan *
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if idempotencyKey != "" {
+		req.Header.Set("Idempotency-Key", idempotencyKey)
+	}
 	resp, err := n.client.Do(req)
 	if err != nil {
 		return err
@@ -56,7 +68,13 @@ func (n *ReleasePlanApprovalNotifier) NotifyApproval(ctx context.Context, plan *
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("approval webhook status %d", resp.StatusCode)
+		err := fmt.Errorf("approval webhook status %d", resp.StatusCode)
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 &&
+			resp.StatusCode != http.StatusRequestTimeout &&
+			resp.StatusCode != http.StatusTooManyRequests {
+			return messaging.Permanent(err)
+		}
+		return err
 	}
 	return nil
 }
@@ -83,12 +101,12 @@ func approvalBody(provider model.ApprovalProvider, name, description, approveURL
 							map[string]any{
 								"tag": "button", "type": "primary",
 								"text": map[string]any{"tag": "plain_text", "content": "批准"},
-								"url": approveURL,
+								"url":  approveURL,
 							},
 							map[string]any{
-								"tag": "button",
+								"tag":  "button",
 								"text": map[string]any{"tag": "plain_text", "content": "拒绝"},
-								"url": rejectURL,
+								"url":  rejectURL,
 							},
 						},
 					},

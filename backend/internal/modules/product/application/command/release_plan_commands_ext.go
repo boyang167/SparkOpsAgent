@@ -13,6 +13,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -261,9 +263,11 @@ type ApprovalByTokenInput struct {
 }
 
 type ApproveReleasePlanByTokenHandler struct {
-	plans    repository.ReleasePlanRepository
-	executor *service.ReleasePlanExecutor
-	hooks    *service.ReleasePlanHookNotifier
+	plans      repository.ReleasePlanRepository
+	executor   *service.ReleasePlanExecutor
+	hooks      *service.ReleasePlanHookNotifier
+	operations messaging.OperationWriter
+	tx         postgres.Transactor
 }
 
 func NewApproveReleasePlanByTokenHandler(
@@ -274,7 +278,17 @@ func NewApproveReleasePlanByTokenHandler(
 	return &ApproveReleasePlanByTokenHandler{plans: plans, executor: executor, hooks: hooks}
 }
 
+func (h *ApproveReleasePlanByTokenHandler) UseOperationOutbox(writer messaging.OperationWriter, tx postgres.Transactor) {
+	h.operations, h.tx = writer, tx
+}
+
 func (h *ApproveReleasePlanByTokenHandler) Handle(ctx context.Context, token string, input ApprovalByTokenInput) (*model.ReleasePlan, error) {
+	return withinReleasePlanOperationTx(ctx, h.operations, h.tx, func(txCtx context.Context) (*model.ReleasePlan, error) {
+		return h.handle(txCtx, token, input)
+	})
+}
+
+func (h *ApproveReleasePlanByTokenHandler) handle(ctx context.Context, token string, input ApprovalByTokenInput) (*model.ReleasePlan, error) {
 	plan, err := h.plans.FindPlanByApprovalToken(ctx, token)
 	if err != nil {
 		return nil, err
@@ -283,7 +297,7 @@ func (h *ApproveReleasePlanByTokenHandler) Handle(ctx context.Context, token str
 	if err := plan.ApproveByToken(strings.TrimSpace(input.Note), now); err != nil {
 		return nil, err
 	}
-	flow := releasePlanFlowDeps{plans: h.plans, executor: h.executor, hooks: h.hooks}
+	flow := releasePlanFlowDeps{plans: h.plans, executor: h.executor, hooks: h.hooks, operations: h.operations}
 	if plan.Status == model.ReleasePlanStatusWaitExecuteExternalCheck {
 		flow.beginHookWait(plan, model.ReleasePlanHookEventBeforeExecute)
 		if err := h.plans.UpdatePlan(ctx, plan); err != nil {

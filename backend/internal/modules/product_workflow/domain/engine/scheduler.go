@@ -7,20 +7,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	deployrunmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	buildmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain"
 	pwfevent "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
+	workflowoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type GitReporter interface {
-	Report(ctx context.Context, run *model.ProductWorkflowRun)
+	CurrentStatus(context.Context, workflowoutbound.GitLabStatusPayload) (string, error)
+	Report(context.Context, workflowoutbound.GitLabStatusPayload) error
 }
 
 type ExternalStatusReader interface {
@@ -61,11 +66,54 @@ func (s *Scheduler) SetStatusReader(reader ExternalStatusReader) {
 	}
 }
 
-func (s *Scheduler) reportGit(ctx context.Context, run *model.ProductWorkflowRun) {
+func (s *Scheduler) reportGit(ctx context.Context, run *model.ProductWorkflowRun) error {
 	if s == nil || s.git == nil || run == nil {
-		return
+		return nil
 	}
-	s.git.Report(ctx, run)
+	var trigger struct {
+		Source    string `json:"source"`
+		ProjectID string `json:"project_id"`
+		Commit    string `json:"commit"`
+		MRIID     int    `json:"mr_iid"`
+	}
+	if err := json.Unmarshal(run.Trigger, &trigger); err != nil || trigger.Source != "git" || trigger.Commit == "" {
+		return nil
+	}
+	desired := "running"
+	switch run.Status {
+	case model.RunStatusSuccess:
+		desired = "success"
+	case model.RunStatusFailed:
+		desired = "failed"
+	}
+	description := "SparkOps workflow " + string(run.Status)
+	if run.ErrorMessage != "" {
+		description = run.ErrorMessage
+	}
+	payload := workflowoutbound.GitLabStatusPayload{
+		RunID: run.ID.String(), ProjectID: trigger.ProjectID, Commit: trigger.Commit,
+		Context: "sparkops/workflow", DesiredStatus: desired, Description: description,
+		MergeRequestIID: trigger.MRIID,
+	}
+	if s.operations != nil {
+		if metadata, ok := events.MetadataFromContext(ctx); ok {
+			payload.EventID = metadata.EventID
+			target := run.ID.String() + "/" + trigger.Commit + "/sparkops-workflow/" + desired
+			return s.operations.Schedule(ctx, messaging.OperationRequest{
+				Owner: metadata.Subscriber, OperationType: workflowoutbound.OperationTypeGitLabStatusReport,
+				IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workflowoutbound.OperationTypeGitLabStatusReport + ":" + target,
+				Payload:        payload,
+			})
+		}
+	}
+	current, err := s.git.CurrentStatus(ctx, payload)
+	if err != nil {
+		return err
+	}
+	if current == desired {
+		return nil
+	}
+	return s.git.Report(ctx, payload)
 }
 
 func NewScheduler(
@@ -87,6 +135,12 @@ func NewScheduler(
 }
 
 func (s *Scheduler) StartRun(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun) error {
+	return s.withOperationTransaction(ctx, run.ID.String()+":start", func(txCtx context.Context) error {
+		return s.startRun(txCtx, wf, run)
+	})
+}
+
+func (s *Scheduler) startRun(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun) error {
 	now := time.Now().UTC()
 	run.Status = model.RunStatusRunning
 	run.StartedAt = &now
@@ -96,11 +150,19 @@ func (s *Scheduler) StartRun(ctx context.Context, wf *model.ProductWorkflow, run
 	if err := s.emitNotification(ctx, wf, run, model.NotifyEventCreated); err != nil {
 		return err
 	}
-	s.reportGit(ctx, run)
+	if err := s.reportGit(ctx, run); err != nil {
+		return err
+	}
 	return s.executeCurrentStage(ctx, wf, run)
 }
 
 func (s *Scheduler) HandleBuildCompleted(ctx context.Context, buildID kernel.BuildID, status string) error {
+	return s.withOperationTransaction(ctx, buildID.String()+":build:"+status, func(txCtx context.Context) error {
+		return s.handleBuildCompleted(txCtx, buildID, status)
+	})
+}
+
+func (s *Scheduler) handleBuildCompleted(ctx context.Context, buildID kernel.BuildID, status string) error {
 	ref, err := s.repo.FindRunByBuildID(ctx, buildID)
 	if err != nil {
 		return nil
@@ -192,7 +254,7 @@ func (s *Scheduler) handleBuildCompletedAttempt(
 		}
 		if changed {
 			if job, ok := jobByName(wf, jobName); ok {
-				if err := s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed); err != nil {
+				if err := s.emitJobNotification(ctx, wf, run, job.Name, job.Spec, model.NotifyEventFailed); err != nil {
 					return err
 				}
 			}
@@ -205,7 +267,7 @@ func (s *Scheduler) handleBuildCompletedAttempt(
 		}
 		if changed {
 			if job, ok := jobByName(wf, jobName); ok {
-				if err := s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed); err != nil {
+				if err := s.emitJobNotification(ctx, wf, run, job.Name, job.Spec, model.NotifyEventFailed); err != nil {
 					return err
 				}
 			}
@@ -217,7 +279,7 @@ func (s *Scheduler) handleBuildCompletedAttempt(
 			return err
 		}
 		if job, ok := jobByName(wf, jobName); ok {
-			if err := s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventPassed); err != nil {
+			if err := s.emitJobNotification(ctx, wf, run, job.Name, job.Spec, model.NotifyEventPassed); err != nil {
 				return err
 			}
 		}
@@ -239,6 +301,12 @@ func (s *Scheduler) handleBuildCompletedAttempt(
 }
 
 func (s *Scheduler) HandleDeployCompleted(ctx context.Context, deploymentID kernel.DeploymentRunID, status string) error {
+	return s.withOperationTransaction(ctx, deploymentID.String()+":deploy:"+status, func(txCtx context.Context) error {
+		return s.handleDeployCompleted(txCtx, deploymentID, status)
+	})
+}
+
+func (s *Scheduler) handleDeployCompleted(ctx context.Context, deploymentID kernel.DeploymentRunID, status string) error {
 	ref, err := s.repo.FindRunByDeploymentID(ctx, deploymentID)
 	if err != nil {
 		return nil
@@ -441,6 +509,12 @@ func (s *Scheduler) SyncRunExternalStatuses(ctx context.Context, runID kernel.Pr
 
 // ProgressStuckRun syncs external statuses, refreshes job states, and advances or executes pending work.
 func (s *Scheduler) ProgressStuckRun(ctx context.Context, runID kernel.ProductWorkflowRunID) error {
+	return s.withOperationTransaction(ctx, runID.String()+":progress", func(txCtx context.Context) error {
+		return s.progressStuckRun(txCtx, runID)
+	})
+}
+
+func (s *Scheduler) progressStuckRun(ctx context.Context, runID kernel.ProductWorkflowRunID) error {
 	if s == nil {
 		return nil
 	}
@@ -483,6 +557,12 @@ func (s *Scheduler) ProgressStuckRun(ctx context.Context, runID kernel.ProductWo
 }
 
 func (s *Scheduler) ReconcileRun(ctx context.Context, runID kernel.ProductWorkflowRunID) error {
+	return s.withOperationTransaction(ctx, runID.String()+":reconcile", func(txCtx context.Context) error {
+		return s.reconcileRun(txCtx, runID)
+	})
+}
+
+func (s *Scheduler) reconcileRun(ctx context.Context, runID kernel.ProductWorkflowRunID) error {
 	if s == nil || s.status == nil {
 		return nil
 	}
@@ -599,6 +679,12 @@ func jobRunTerminal(status model.JobRunStatus) bool {
 }
 
 func (s *Scheduler) ApproveJob(ctx context.Context, runID kernel.ProductWorkflowRunID, jobName string, actor kernel.MemberID) error {
+	return s.withOperationTransaction(ctx, runID.String()+":approve:"+jobName, func(txCtx context.Context) error {
+		return s.approveJob(txCtx, runID, jobName, actor)
+	})
+}
+
+func (s *Scheduler) approveJob(ctx context.Context, runID kernel.ProductWorkflowRunID, jobName string, actor kernel.MemberID) error {
 	run, wf, jobRun, err := s.loadPendingApproval(ctx, runID, jobName)
 	if err != nil {
 		return err
@@ -637,7 +723,7 @@ func (s *Scheduler) ApproveJob(ctx context.Context, runID kernel.ProductWorkflow
 	if err := s.repo.UpdateRun(ctx, run); err != nil {
 		return err
 	}
-	if err := s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventPassed); err != nil {
+	if err := s.emitJobNotification(ctx, wf, run, job.Name, job.Spec, model.NotifyEventPassed); err != nil {
 		return err
 	}
 	stages := WorkflowStagesForRun(wf, run)
@@ -651,6 +737,12 @@ func (s *Scheduler) ApproveJob(ctx context.Context, runID kernel.ProductWorkflow
 }
 
 func (s *Scheduler) CancelRun(ctx context.Context, runID kernel.ProductWorkflowRunID, message string) error {
+	return s.withOperationTransaction(ctx, runID.String()+":cancel", func(txCtx context.Context) error {
+		return s.cancelRun(txCtx, runID, message)
+	})
+}
+
+func (s *Scheduler) cancelRun(ctx context.Context, runID kernel.ProductWorkflowRunID, message string) error {
 	run, err := s.repo.FindRunByID(ctx, runID)
 	if err != nil {
 		return err
@@ -702,6 +794,12 @@ func (s *Scheduler) CancelRun(ctx context.Context, runID kernel.ProductWorkflowR
 }
 
 func (s *Scheduler) RejectJob(ctx context.Context, runID kernel.ProductWorkflowRunID, jobName string, actor kernel.MemberID, message string) error {
+	return s.withOperationTransaction(ctx, runID.String()+":reject:"+jobName, func(txCtx context.Context) error {
+		return s.rejectJob(txCtx, runID, jobName, actor, message)
+	})
+}
+
+func (s *Scheduler) rejectJob(ctx context.Context, runID kernel.ProductWorkflowRunID, jobName string, actor kernel.MemberID, message string) error {
 	run, wf, jobRun, err := s.loadPendingApproval(ctx, runID, jobName)
 	if err != nil {
 		return err
@@ -787,7 +885,7 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 			if jobRun.Status == model.JobRunStatusRunning {
 				hasAsync = true
 			}
-			if err := s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventCreated); err != nil {
+			if err := s.emitJobNotification(ctx, wf, run, job.Name, job.Spec, model.NotifyEventCreated); err != nil {
 				return err
 			}
 		case model.JobTypeSparkopsCreateVersion:
@@ -856,6 +954,12 @@ func StageNeedsManualConfirm(stage model.WorkflowStage, stageRun model.StageRun)
 }
 
 func (s *Scheduler) ContinueManualStage(ctx context.Context, runID kernel.ProductWorkflowRunID) error {
+	return s.withOperationTransaction(ctx, runID.String()+":continue", func(txCtx context.Context) error {
+		return s.continueManualStage(txCtx, runID)
+	})
+}
+
+func (s *Scheduler) continueManualStage(ctx context.Context, runID kernel.ProductWorkflowRunID) error {
 	run, err := s.repo.FindRunByID(ctx, runID)
 	if err != nil {
 		return err
@@ -1012,8 +1116,7 @@ func (s *Scheduler) completeRun(ctx context.Context, run *model.ProductWorkflowR
 	if err := s.emitNotification(ctx, nil, run, model.NotifyEventPassed); err != nil {
 		return err
 	}
-	s.reportGit(ctx, run)
-	return nil
+	return s.reportGit(ctx, run)
 }
 
 func (s *Scheduler) failRun(ctx context.Context, run *model.ProductWorkflowRun, message string) error {
@@ -1033,15 +1136,42 @@ func (s *Scheduler) failRunEvent(ctx context.Context, run *model.ProductWorkflow
 	if err := s.emitNotification(ctx, nil, run, event); err != nil {
 		return err
 	}
-	s.reportGit(ctx, run)
-	return nil
+	return s.reportGit(ctx, run)
 }
 
 func (s *Scheduler) ExpireRun(ctx context.Context, run *model.ProductWorkflowRun) error {
+	seed := "expire"
+	if run != nil {
+		seed = run.ID.String() + ":expire"
+	}
+	return s.withOperationTransaction(ctx, seed, func(txCtx context.Context) error {
+		return s.expireRun(txCtx, run)
+	})
+}
+
+func (s *Scheduler) expireRun(ctx context.Context, run *model.ProductWorkflowRun) error {
 	if run == nil || run.Status == model.RunStatusSuccess || run.Status == model.RunStatusFailed {
 		return nil
 	}
 	return s.failRunEvent(ctx, run, "工作流超时", model.NotifyEventTimeout)
+}
+
+func (s *Scheduler) withOperationTransaction(ctx context.Context, seed string, fn func(context.Context) error) error {
+	if s == nil || s.operations == nil {
+		return fn(ctx)
+	}
+	if s.tx == nil {
+		return errors.New("product workflow operation transaction is required")
+	}
+	return s.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if _, ok := events.MetadataFromContext(txCtx); !ok {
+			txCtx = events.WithMetadata(txCtx, events.Metadata{
+				EventID:    uuid.NewSHA1(uuid.NameSpaceOID, []byte("product-workflow.scheduler:"+seed)).String(),
+				Subscriber: "product-workflow.scheduler",
+			})
+		}
+		return fn(txCtx)
+	})
 }
 
 func (s *Scheduler) publishRunCompleted(ctx context.Context, run *model.ProductWorkflowRun) error {

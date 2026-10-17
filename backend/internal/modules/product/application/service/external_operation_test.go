@@ -61,6 +61,25 @@ func TestScheduleReleasePlanWebhookPropagatesWriterFailure(t *testing.T) {
 	}
 }
 
+func TestScheduleReleasePlanApprovalUsesIndependentTypeAndStableKey(t *testing.T) {
+	writer := &recordingOperationWriter{}
+	ctx := events.WithMetadata(context.Background(), events.Metadata{
+		EventID: "event-approval", Subscriber: "product.release-plan",
+	})
+
+	err := scheduleReleasePlanApproval(ctx, writer, productoutbound.ReleasePlanApprovalPayload{
+		PlanID: "plan-1",
+	})
+
+	require.NoError(t, err)
+	require.Len(t, writer.requests, 1)
+	require.Equal(t, productoutbound.OperationTypeReleasePlanApprovalSend, writer.requests[0].OperationType)
+	require.Equal(t,
+		"event-approval:product.release-plan:product.release-plan.approval.send.v1:plan-1",
+		writer.requests[0].IdempotencyKey,
+	)
+}
+
 func TestProductExternalSchedulesPersistRealRowsAndDeduplicate(t *testing.T) {
 	db := openExternalOperationDB(t)
 	writer := messaging.NewOperationWriter(messagingpersistence.NewOperationStore(db), nil)
@@ -75,19 +94,25 @@ func TestProductExternalSchedulesPersistRealRowsAndDeduplicate(t *testing.T) {
 		if err := scheduleJiraTransition(ctx, writer, jira); err != nil {
 			return err
 		}
-		return scheduleReleasePlanWebhook(ctx, writer, productoutbound.ReleasePlanWebhookPayload{
+		if err := scheduleReleasePlanWebhook(ctx, writer, productoutbound.ReleasePlanWebhookPayload{
 			PlanID: "plan-1", Event: "all_done",
+		}); err != nil {
+			return err
+		}
+		return scheduleReleasePlanApproval(ctx, writer, productoutbound.ReleasePlanApprovalPayload{
+			PlanID: "plan-1",
 		})
 	})
 	require.NoError(t, err)
 
 	var count int64
 	require.NoError(t, db.Table("operation_outbox").Count(&count).Error)
-	require.Equal(t, int64(2), count)
+	require.Equal(t, int64(3), count)
 	var types []string
 	require.NoError(t, db.Table("operation_outbox").Order("operation_type").Pluck("operation_type", &types).Error)
 	require.Equal(t, []string{
 		productoutbound.OperationTypeJiraTransition,
+		productoutbound.OperationTypeReleasePlanApprovalSend,
 		productoutbound.OperationTypeReleasePlanWebhookSend,
 	}, types)
 }

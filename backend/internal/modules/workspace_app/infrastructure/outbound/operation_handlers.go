@@ -19,9 +19,10 @@ const (
 )
 
 type ProjectUndeployPayload struct {
-	EventID   string `json:"event_id"`
-	ProjectID string `json:"project_id"`
-	MemberID  string `json:"member_id"`
+	EventID       string `json:"event_id"`
+	ProjectID     string `json:"project_id"`
+	MemberID      string `json:"member_id"`
+	AllowUndeploy *bool  `json:"allow_undeploy,omitempty"`
 }
 
 type PipelineDisablePayload struct {
@@ -97,7 +98,7 @@ func NewPipelineDisableHandler(
 }
 
 type ArchiveAdvancer interface {
-	Advance(context.Context, *model.Project, kernel.MemberID) error
+	AdvanceWithTeardown(context.Context, *model.Project, kernel.MemberID, bool) error
 }
 
 func NewProjectUndeployHandler(repo repository.ProjectRepository, coordinator ArchiveAdvancer, tx postgres.Transactor) messaging.OperationHandler {
@@ -120,7 +121,11 @@ func NewProjectUndeployHandler(repo repository.ProjectRepository, coordinator Ar
 			if err != nil || !project.IsArchiving() {
 				return err
 			}
-			return coordinator.Advance(txCtx, project, memberID)
+			allowUndeploy := true
+			if payload.AllowUndeploy != nil {
+				allowUndeploy = *payload.AllowUndeploy
+			}
+			return coordinator.AdvanceWithTeardown(txCtx, project, memberID, allowUndeploy)
 		})
 	}
 }

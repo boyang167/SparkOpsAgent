@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -26,6 +27,61 @@ import (
 type archiveProjectRepo struct {
 	projects map[kernel.ProjectID]*model.Project
 	updates  int
+}
+
+type archiveSQLRepo struct {
+	*archiveProjectRepo
+	db *gorm.DB
+}
+
+func (r *archiveSQLRepo) Save(ctx context.Context, project *model.Project) error {
+	r.projects[project.ID] = project
+	return postgres.DB(ctx, r.db).Exec(
+		"INSERT INTO workspace_app.projects (id, status) VALUES (?, ?)",
+		project.ID.String(), string(project.Status),
+	).Error
+}
+
+func (r *archiveSQLRepo) Update(ctx context.Context, project *model.Project) error {
+	if err := postgres.DB(ctx, r.db).Exec(
+		"UPDATE workspace_app.projects SET status = ? WHERE id = ?",
+		string(project.Status), project.ID.String(),
+	).Error; err != nil {
+		return err
+	}
+	r.projects[project.ID] = project
+	return nil
+}
+
+func (r *archiveSQLRepo) FindByID(ctx context.Context, id kernel.ProjectID) (*model.Project, error) {
+	var status string
+	if err := postgres.DB(ctx, r.db).Table("workspace_app.projects").
+		Select("status").Where("id = ?", id.String()).Scan(&status).Error; err != nil {
+		return nil, err
+	}
+	project, ok := r.projects[id]
+	if !ok || status == "" {
+		return nil, domain.ErrProjectNotFound
+	}
+	project.Status = model.ProjectStatus(status)
+	return project, nil
+}
+
+func (r *archiveSQLRepo) ListByStatus(ctx context.Context, status model.ProjectStatus) ([]*model.Project, error) {
+	var ids []string
+	if err := postgres.DB(ctx, r.db).Table("workspace_app.projects").
+		Where("status = ?", string(status)).Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*model.Project, 0, len(ids))
+	for _, raw := range ids {
+		id, err := kernel.ParseProjectID(raw)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r.projects[id])
+	}
+	return out, nil
 }
 
 func (r *archiveProjectRepo) Save(context.Context, *model.Project) error { return nil }
@@ -68,6 +124,7 @@ func (r *archiveProjectRepo) ListByStatus(_ context.Context, status model.Projec
 
 type fakeTeardown struct {
 	online        []kernel.ClusterInfoID
+	onlineChecks  int
 	active        bool
 	started       []kernel.ClusterInfoID
 	disabled      int
@@ -87,6 +144,7 @@ func (w *archiveOperationWriter) Schedule(_ context.Context, request messaging.O
 }
 
 func (f *fakeTeardown) OnlineClusters(context.Context, kernel.WorkspaceID, kernel.ProjectID) ([]kernel.ClusterInfoID, error) {
+	f.onlineChecks++
 	return f.online, nil
 }
 func (f *fakeTeardown) HasActiveRun(context.Context, kernel.ProjectID) (bool, error) {
@@ -298,7 +356,7 @@ func TestCoordinatorSchedulesPipelineDisableBeforeArchive(t *testing.T) {
 	)
 }
 
-func TestArchiveCommandSchedulesPipelineDisable(t *testing.T) {
+func TestArchiveCommandSchedulesAdvanceWithoutCallingTeardown(t *testing.T) {
 	name, err := model.NewProjectName("orders")
 	require.NoError(t, err)
 	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
@@ -314,8 +372,9 @@ func TestArchiveCommandSchedulesPipelineDisable(t *testing.T) {
 	require.Equal(t, string(model.ProjectStatusArchiving), result.Status)
 	require.Equal(t, model.ProjectStatusArchiving, project.Status)
 	require.Zero(t, teardown.disabled)
+	require.Zero(t, teardown.onlineChecks)
 	require.Len(t, writer.requests, 1)
-	require.Equal(t, workspaceoutbound.OperationTypePipelineDisable, writer.requests[0].OperationType)
+	require.Equal(t, workspaceoutbound.OperationTypeProjectUndeploy, writer.requests[0].OperationType)
 }
 
 func TestArchiveCommandPersistsPipelineDisableOperation(t *testing.T) {
@@ -336,7 +395,32 @@ func TestArchiveCommandPersistsPipelineDisableOperation(t *testing.T) {
 	require.Equal(t, string(model.ProjectStatusArchiving), result.Status)
 	var operationType string
 	require.NoError(t, db.Table("platform.operation_outbox").Select("operation_type").Scan(&operationType).Error)
-	require.Equal(t, workspaceoutbound.OperationTypePipelineDisable, operationType)
+	require.Equal(t, workspaceoutbound.OperationTypeProjectUndeploy, operationType)
+}
+
+func TestArchiveCommandCreatesNewOperationForLaterRetry(t *testing.T) {
+	db := openArchiveOperationDB(t)
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	repo := &archiveProjectRepo{projects: map[kernel.ProjectID]*model.Project{project.ID: project}}
+	teardown := &fakeTeardown{}
+	writer := messaging.NewOperationWriter(messagingpersistence.NewOperationStore(db), nil)
+	tx := postgres.NewTransactor(db)
+	coordinator := command.NewArchiveCoordinator(repo, func() appctx.ProjectTeardown { return teardown }, nil, writer)
+	handler := command.NewArchiveProjectHandler(repo, updateWorkspaceChecker{}, coordinator, tx)
+
+	_, err = handler.Handle(context.Background(), project.WorkspaceID, kernel.NewMemberID(), project.ID, command.ArchiveInput{ConfirmName: "orders"})
+	require.NoError(t, err)
+	require.NoError(t, project.AbortArchiving())
+	_, err = handler.Handle(context.Background(), project.WorkspaceID, kernel.NewMemberID(), project.ID, command.ArchiveInput{
+		ConfirmName: "orders", Teardown: true,
+	})
+	require.NoError(t, err)
+
+	var count int64
+	require.NoError(t, db.Table("platform.operation_outbox").Count(&count).Error)
+	require.Equal(t, int64(2), count)
 }
 
 func openArchiveOperationDB(t *testing.T) *gorm.DB {
@@ -397,4 +481,89 @@ func TestResumeAllWaitsForActiveRun(t *testing.T) {
 
 	require.Empty(t, teardown.started)
 	require.Equal(t, model.ProjectStatusArchiving, project.Status)
+}
+
+func TestResumeAllPersistsStableAdvanceThenPipelineOperationsAndArchivesOnlyAfterExecution(t *testing.T) {
+	db := openArchiveResumeDB(t)
+	tx := postgres.NewTransactor(db)
+	repo := &archiveSQLRepo{
+		archiveProjectRepo: &archiveProjectRepo{projects: map[kernel.ProjectID]*model.Project{}},
+		db:                 db,
+	}
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, project.BeginArchiving())
+	require.NoError(t, repo.Save(context.Background(), project))
+	teardown := &fakeTeardown{}
+	writer := messaging.NewOperationWriter(messagingpersistence.NewOperationStore(db), nil)
+	coordinator := command.NewArchiveCoordinator(repo, func() appctx.ProjectTeardown { return teardown }, nil, writer)
+	coordinator.UseTransactor(tx)
+
+	require.NoError(t, coordinator.ResumeAll(context.Background()))
+	require.NoError(t, coordinator.ResumeAll(context.Background()))
+	require.Zero(t, teardown.onlineChecks)
+
+	var rows []struct {
+		EventID       string
+		Subscriber    string
+		OperationType string
+		Payload       []byte
+	}
+	require.NoError(t, db.Table("platform.operation_outbox").Find(&rows).Error)
+	require.Len(t, rows, 1)
+	require.Equal(t, "workspace-app.archive-resumer", rows[0].Subscriber)
+	require.Equal(t, workspaceoutbound.OperationTypeProjectUndeploy, rows[0].OperationType)
+	_, err = uuid.Parse(rows[0].EventID)
+	require.NoError(t, err)
+	stored, err := repo.FindByID(context.Background(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.ProjectStatusArchiving, stored.Status)
+
+	advanceHandler := workspaceoutbound.NewProjectUndeployHandler(repo, coordinator, tx)
+	require.NoError(t, advanceHandler(context.Background(), messaging.Operation{
+		EventID: rows[0].EventID, Owner: rows[0].Subscriber,
+		OperationType: rows[0].OperationType, Payload: rows[0].Payload,
+	}))
+	require.Equal(t, 1, teardown.onlineChecks)
+	require.NoError(t, db.Table("platform.operation_outbox").
+		Where("operation_type = ?", workspaceoutbound.OperationTypePipelineDisable).
+		Find(&rows).Error)
+	require.Len(t, rows, 1)
+
+	pipelineHandler := workspaceoutbound.NewPipelineDisableHandler(
+		func() workspaceoutbound.PipelineDisabler { return teardown }, repo, tx,
+	)
+	require.NoError(t, pipelineHandler(context.Background(), messaging.Operation{
+		EventID: rows[0].EventID, Owner: rows[0].Subscriber,
+		OperationType: rows[0].OperationType, Payload: rows[0].Payload,
+	}))
+	stored, err = repo.FindByID(context.Background(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.ProjectStatusArchived, stored.Status)
+}
+
+func openArchiveResumeDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS workspace_app").Error)
+	require.NoError(t, db.Exec(`
+		CREATE TABLE workspace_app.projects (id TEXT PRIMARY KEY, status TEXT);
+		CREATE TABLE platform.operation_outbox (
+			id TEXT PRIMARY KEY, event_id TEXT NOT NULL, subscriber TEXT NOT NULL,
+			operation_type TEXT NOT NULL, idempotency_key TEXT NOT NULL UNIQUE, payload BLOB NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+			next_attempt_at DATETIME NOT NULL, locked_at DATETIME, locked_by TEXT NOT NULL DEFAULT '',
+			completed_at DATETIME, last_error TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL
+		)
+	`).Error)
+	return db
 }

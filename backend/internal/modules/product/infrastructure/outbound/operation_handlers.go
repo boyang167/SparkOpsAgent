@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	OperationTypeWorkflowTrigger        = "product.workflow.trigger.v1"
-	OperationTypeJiraTransition         = "product.jira.transition.v1"
-	OperationTypeReleasePlanWebhookSend = "product.release-plan.webhook.send.v1"
+	OperationTypeWorkflowTrigger         = "product.workflow.trigger.v1"
+	OperationTypeJiraTransition          = "product.jira.transition.v1"
+	OperationTypeReleasePlanWebhookSend  = "product.release-plan.webhook.send.v1"
+	OperationTypeReleasePlanApprovalSend = "product.release-plan.approval.send.v1"
 )
 
 type WorkflowCompletionPayload struct {
@@ -37,6 +38,11 @@ type ReleasePlanWebhookPayload struct {
 	EventID string `json:"event_id"`
 	PlanID  string `json:"plan_id"`
 	Event   string `json:"event"`
+}
+
+type ReleasePlanApprovalPayload struct {
+	EventID string `json:"event_id"`
+	PlanID  string `json:"plan_id"`
 }
 
 type WorkflowCompletionHandler func(context.Context, kernel.ProductWorkflowRunID, bool, string) error
@@ -86,5 +92,24 @@ func NewReleasePlanWebhookOperation(handler ReleasePlanWebhookHandler) messaging
 			return messaging.Permanent(err)
 		}
 		return handler(ctx, planID, payload.Event, operation.IdempotencyKey)
+	}
+}
+
+type ReleasePlanApprovalHandler func(context.Context, kernel.ReleasePlanID, string) error
+
+func NewReleasePlanApprovalOperation(handler ReleasePlanApprovalHandler) messaging.OperationHandler {
+	return func(ctx context.Context, operation messaging.Operation) error {
+		var payload ReleasePlanApprovalPayload
+		if err := json.Unmarshal(operation.Payload, &payload); err != nil {
+			return messaging.Permanent(fmt.Errorf("decode release plan approval operation: %w", err))
+		}
+		planID, err := kernel.ParseReleasePlanID(payload.PlanID)
+		if err != nil {
+			return messaging.Permanent(err)
+		}
+		if handler == nil {
+			return messaging.Permanent(fmt.Errorf("release plan approval handler is required"))
+		}
+		return handler(ctx, planID, operation.IdempotencyKey)
 	}
 }

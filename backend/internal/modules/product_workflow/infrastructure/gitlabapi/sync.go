@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
 
 	"go.uber.org/zap"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
+	workflowoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/outbound"
 	gitpkg "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/git"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -79,55 +83,81 @@ type Reporter struct {
 	Logger *zap.Logger
 }
 
-func (r Reporter) Report(ctx context.Context, run *model.ProductWorkflowRun) {
-	if r.Lookup == nil || run == nil || len(run.Trigger) == 0 {
-		return
-	}
-	var trigger struct {
-		Source    string `json:"source"`
-		ProjectID string `json:"project_id"`
-		Commit    string `json:"commit"`
-		Event     string `json:"event"`
-		MRIID     int    `json:"mr_iid"`
-		Ref       string `json:"ref"`
-	}
-	if err := json.Unmarshal(run.Trigger, &trigger); err != nil || trigger.Source != "git" {
-		return
-	}
-	projectID, err := kernel.ParseProjectID(trigger.ProjectID)
+func (r Reporter) CurrentStatus(ctx context.Context, payload workflowoutbound.GitLabStatusPayload) (string, error) {
+	apiBase, token, projectPath, err := r.target(ctx, payload)
 	if err != nil {
-		return
+		return "", err
 	}
-	project, err := r.Lookup.LookupProjectGit(ctx, projectID)
-	if err != nil || project.Token == "" || project.GitURL == "" {
-		return
-	}
-	apiBase, err := gitpkg.ResolveGitLabAPIBase(project.GitURL, project.ServiceURL)
+	endpoint := strings.TrimRight(apiBase, "/") + "/api/v4/projects/" +
+		url.PathEscape(projectPath) + "/repository/commits/" + url.PathEscape(payload.Commit) + "/statuses"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return
+		return "", err
 	}
-	projectPath, err := gitpkg.ParseGitProjectPath(project.GitURL)
+	req.Header.Set("PRIVATE-TOKEN", token)
+	resp, err := (&http.Client{}).Do(req)
 	if err != nil {
-		return
+		return "", err
 	}
-	state := "running"
-	switch run.Status {
-	case model.RunStatusSuccess:
-		state = "success"
-	case model.RunStatusFailed:
-		state = "failed"
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
 	}
-	description := "SparkOps workflow " + string(run.Status)
-	if run.ErrorMessage != "" {
-		description = run.ErrorMessage
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		return "", classifyGitLabHTTP(resp.StatusCode, raw)
 	}
-	if err := ReportStatus(ctx, apiBase, project.Token, projectPath, trigger.Commit, state, description); err != nil && r.Logger != nil {
-		r.Logger.Warn("gitlab status report failed", zap.Error(err))
+	var statuses []struct {
+		Status string `json:"status"`
+		Name   string `json:"name"`
 	}
-	if trigger.MRIID > 0 {
-		note := fmt.Sprintf("SparkOps 工作流 %s：%s", run.ID.String(), description)
-		if err := ReportMergeRequestNote(ctx, apiBase, project.Token, projectPath, trigger.MRIID, note); err != nil && r.Logger != nil {
-			r.Logger.Warn("gitlab merge request note failed", zap.Error(err))
+	if err := json.Unmarshal(raw, &statuses); err != nil {
+		return "", err
+	}
+	for _, status := range statuses {
+		if status.Name == payload.Context {
+			return status.Status, nil
 		}
 	}
+	return "", nil
+}
+
+func (r Reporter) Report(ctx context.Context, payload workflowoutbound.GitLabStatusPayload) error {
+	apiBase, token, projectPath, err := r.target(ctx, payload)
+	if err != nil {
+		return err
+	}
+	return ReportStatusWithContext(
+		ctx, apiBase, token, projectPath, payload.Commit,
+		payload.DesiredStatus, payload.Context, payload.Description,
+	)
+}
+
+func (r Reporter) target(
+	ctx context.Context,
+	payload workflowoutbound.GitLabStatusPayload,
+) (apiBase, token, projectPath string, err error) {
+	if r.Lookup == nil {
+		return "", "", "", fmt.Errorf("project git lookup is required")
+	}
+	projectID, err := kernel.ParseProjectID(payload.ProjectID)
+	if err != nil {
+		return "", "", "", err
+	}
+	project, err := r.Lookup.LookupProjectGit(ctx, projectID)
+	if err != nil {
+		return "", "", "", err
+	}
+	if strings.TrimSpace(project.Token) == "" || strings.TrimSpace(project.GitURL) == "" {
+		return "", "", "", fmt.Errorf("project GitLab configuration is incomplete")
+	}
+	apiBase, err = gitpkg.ResolveGitLabAPIBase(project.GitURL, project.ServiceURL)
+	if err != nil {
+		return "", "", "", err
+	}
+	projectPath, err = gitpkg.ParseGitProjectPath(project.GitURL)
+	if err != nil {
+		return "", "", "", err
+	}
+	return apiBase, project.Token, projectPath, nil
 }

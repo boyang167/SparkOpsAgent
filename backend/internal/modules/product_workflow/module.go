@@ -17,7 +17,6 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/gitlabapi"
-	workflowoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/trigger"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/vault"
@@ -100,7 +99,8 @@ func (m *Module) Register(c *appctx.Container) error {
 	if c.Config != nil && c.Config.Vault.Address != "" && c.Config.Vault.Token != "" {
 		startRun.UseVault(vault.Client{Address: c.Config.Vault.Address, Token: c.Config.Vault.Token})
 	}
-	scheduler.SetGitReporter(gitlabapi.Reporter{Lookup: lookup, Logger: c.Logger})
+	gitReporter := gitlabapi.Reporter{Lookup: lookup, Logger: c.Logger}
+	scheduler.SetGitReporter(gitReporter)
 	scheduler.SetStatusReader(acl.NewDeliveryStatusReader(c.DB))
 	var operationWriter messaging.OperationWriter
 	if c.Config != nil && c.Config.Messaging.Driver == "amqp" {
@@ -109,20 +109,15 @@ func (m *Module) Register(c *appctx.Container) error {
 		}
 		operationWriter = c.OperationWriter
 		scheduler.SetOperationWriter(operationWriter)
-		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeBuildTrigger, workflowoutbound.NewBuildCompletionHandler(c.Transactor, scheduler)); err != nil {
-			return fmt.Errorf("register product workflow build operation: %w", err)
-		}
-		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeDeployTrigger, workflowoutbound.NewDeployCompletionHandler(c.Transactor, scheduler)); err != nil {
-			return fmt.Errorf("register product workflow deploy operation: %w", err)
-		}
-		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeWebhookSend, workflowoutbound.NewWebhookHandler(nil)); err != nil {
-			return fmt.Errorf("register product workflow webhook operation: %w", err)
-		}
-		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeMailSend, workflowoutbound.NewNotificationHandler(engine.SendMailOperation)); err != nil {
-			return fmt.Errorf("register product workflow mail operation: %w", err)
-		}
-		if err := c.OperationRegistry.Register(workflowoutbound.OperationTypeFeishuUserSend, workflowoutbound.NewNotificationHandler(engine.SendFeishuUserOperation)); err != nil {
-			return fmt.Errorf("register product workflow feishu operation: %w", err)
+		if err := (OperationFactory{
+			Transactor:      c.Transactor,
+			Scheduler:       scheduler,
+			WebhookResolver: engine.NewWorkflowWebhookResolver(workflowRepo),
+			MailSender:      engine.SendMailOperation,
+			FeishuSender:    engine.SendFeishuUserOperation,
+			GitLabReporter:  gitReporter,
+		}).Register(c.OperationRegistry); err != nil {
+			return err
 		}
 	}
 	trigger.NewScheduler(workflowRepo, startRun, c.Logger).Start(context.Background())

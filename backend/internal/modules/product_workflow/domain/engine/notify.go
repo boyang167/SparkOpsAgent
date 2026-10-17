@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
 	workflowoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type ChannelConfig struct {
@@ -27,6 +29,73 @@ type ChannelConfig struct {
 	SMTPFrom     string
 	FeishuAppID  string
 	FeishuSecret string
+}
+
+type WorkflowWebhookResolver struct {
+	repo repository.ProductWorkflowRepository
+}
+
+func NewWorkflowWebhookResolver(repo repository.ProductWorkflowRepository) *WorkflowWebhookResolver {
+	return &WorkflowWebhookResolver{repo: repo}
+}
+
+func (r *WorkflowWebhookResolver) ResolveWebhook(
+	ctx context.Context,
+	payload workflowoutbound.NotificationPayload,
+) (string, json.RawMessage, bool, error) {
+	if r == nil || r.repo == nil {
+		return "", nil, false, messaging.Permanent(fmt.Errorf("workflow notification repository is required"))
+	}
+	runID, err := kernel.ParseProductWorkflowRunID(payload.RunID)
+	if err != nil {
+		return "", nil, false, messaging.Permanent(err)
+	}
+	run, err := r.repo.FindRunByID(ctx, runID)
+	if err != nil {
+		return "", nil, false, err
+	}
+	workflowID := run.WorkflowID
+	if payload.WorkflowID != "" {
+		workflowID, err = kernel.ParseProductWorkflowID(payload.WorkflowID)
+		if err != nil {
+			return "", nil, false, messaging.Permanent(err)
+		}
+	}
+	wf, err := r.repo.FindWorkflowByID(ctx, workflowID)
+	if err != nil {
+		return "", nil, false, err
+	}
+	notes := wf.Notifications
+	if payload.Scope == "job" {
+		job, ok := jobByName(wf, payload.JobID)
+		if !ok {
+			return "", nil, false, nil
+		}
+		notes = notificationsFromJobSpec(job.Spec)
+	}
+	var note *model.WorkflowNotification
+	for i := range notes {
+		if notes[i].ID == payload.NoteID {
+			note = &notes[i]
+			break
+		}
+	}
+	if note == nil || !note.Active() || !containsEvent(note.Events, payload.Event) {
+		return "", nil, false, nil
+	}
+	endpoint := Interpolate(note.WebhookURL, VariablesFromRun(run))
+	if !allowedWebhook(endpoint) {
+		return "", nil, false, messaging.Permanent(fmt.Errorf("workflow webhook configuration is invalid"))
+	}
+	body, err := notificationBody(
+		note.Channel,
+		notificationText(wf.Name, payload.RunID, payload.Status, payload.ErrorMessage, payload.Event),
+		payload.Event, wf.Name, payload.RunID, payload.Status,
+	)
+	if err != nil {
+		return "", nil, false, messaging.Permanent(err)
+	}
+	return endpoint, body, true, nil
 }
 
 var (
@@ -57,14 +126,20 @@ func (s *Scheduler) emitNotification(ctx context.Context, wf *model.ProductWorkf
 	if wf == nil {
 		return nil
 	}
-	return s.emitNotes(ctx, wf, run, wf.Notifications, event)
+	return s.emitNotes(ctx, wf, run, wf.Notifications, event, "workflow", "")
 }
 
-func (s *Scheduler) emitJobNotification(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun, spec map[string]any, event string) error {
-	return s.emitNotes(ctx, wf, run, notificationsFromJobSpec(spec), event)
+func (s *Scheduler) emitJobNotification(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun, jobID string, spec map[string]any, event string) error {
+	return s.emitNotes(ctx, wf, run, notificationsFromJobSpec(spec), event, "job", jobID)
 }
 
-func (s *Scheduler) emitNotes(ctx context.Context, wf *model.ProductWorkflow, run *model.ProductWorkflowRun, notes []model.WorkflowNotification, event string) error {
+func (s *Scheduler) emitNotes(
+	ctx context.Context,
+	wf *model.ProductWorkflow,
+	run *model.ProductWorkflowRun,
+	notes []model.WorkflowNotification,
+	event, scope, jobID string,
+) error {
 	if run == nil || strings.TrimSpace(event) == "" || !notificationMatches(notes, event) {
 		return nil
 	}
@@ -96,18 +171,15 @@ func (s *Scheduler) emitNotes(ctx context.Context, wf *model.ProductWorkflow, ru
 				case model.NotifyChannelFeishuUser:
 					operationType = workflowoutbound.OperationTypeFeishuUserSend
 				}
-				body, err := notificationBody(note.Channel, notificationText(name, runID, status, message, event), event, name, runID, status)
-				if err != nil {
-					return err
-				}
+				target := strings.Join([]string{runID, scope, emptyTarget(jobID), event, emptyTarget(status), note.ID}, "/")
 				if err := s.operations.Schedule(ctx, messaging.OperationRequest{
 					Owner: metadata.Subscriber, OperationType: operationType,
-					IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + operationType + ":" + note.ID,
+					IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + operationType + ":" + target,
 					Payload: workflowoutbound.NotificationPayload{
-						EventID: metadata.EventID, Target: note.ID, Channel: note.Channel,
-						URL: note.WebhookURL, Targets: note.Targets, WorkflowName: name,
-						RunID: runID, Status: status, ErrorMessage: message, Event: event,
-						Body: body, Timeout: 8 * time.Second,
+						EventID: metadata.EventID, Target: target, Channel: note.Channel,
+						Targets: note.Targets, WorkflowID: wf.ID.String(), WorkflowName: name,
+						RunID: runID, Scope: scope, JobID: jobID, NoteID: note.ID,
+						Status: status, ErrorMessage: message, Event: event, Timeout: 8 * time.Second,
 					},
 				}); err != nil {
 					return err
@@ -119,6 +191,13 @@ func (s *Scheduler) emitNotes(ctx context.Context, wf *model.ProductWorkflow, ru
 	sendCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	return dispatchNotifications(sendCtx, copied, name, runID, status, message, event)
+}
+
+func emptyTarget(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return strings.TrimSpace(value)
 }
 
 func notificationsFromJobSpec(spec map[string]any) []model.WorkflowNotification {
@@ -257,13 +336,27 @@ func classifyNotificationHTTP(status int) error {
 }
 
 func SendMailOperation(_ context.Context, payload workflowoutbound.NotificationPayload) error {
-	return sendMail(currentChannels(), payload.Targets, payload.WorkflowName,
+	cfg := currentChannels()
+	if strings.TrimSpace(cfg.SMTPHost) == "" {
+		return messaging.Permanent(fmt.Errorf("SMTP host is required"))
+	}
+	if len(splitTargets(payload.Targets)) == 0 {
+		return messaging.Permanent(fmt.Errorf("SMTP recipients are required"))
+	}
+	return sendMail(cfg, payload.Targets, payload.WorkflowName,
 		notificationText(payload.WorkflowName, payload.RunID, payload.Status, payload.ErrorMessage, payload.Event),
 		payload.IdempotencyKey)
 }
 
 func SendFeishuUserOperation(ctx context.Context, payload workflowoutbound.NotificationPayload) error {
-	return sendFeishuUsers(ctx, currentChannels(), payload.Targets,
+	cfg := currentChannels()
+	if strings.TrimSpace(cfg.FeishuAppID) == "" || strings.TrimSpace(cfg.FeishuSecret) == "" {
+		return messaging.Permanent(fmt.Errorf("Feishu app credentials are required"))
+	}
+	if len(splitTargets(payload.Targets)) == 0 {
+		return messaging.Permanent(fmt.Errorf("Feishu recipients are required"))
+	}
+	return sendFeishuUsers(ctx, cfg, payload.Targets,
 		notificationText(payload.WorkflowName, payload.RunID, payload.Status, payload.ErrorMessage, payload.Event),
 		payload.IdempotencyKey)
 }
@@ -380,6 +473,19 @@ func sendMail(cfg ChannelConfig, targets, subject, body, idempotencyKey string) 
 }
 
 func sendFeishuUsers(ctx context.Context, cfg ChannelConfig, targets, text, idempotencyKey string) error {
+	return sendFeishuUsersWithClient(
+		ctx, cfg, targets, text, idempotencyKey,
+		&http.Client{Timeout: 8 * time.Second}, "https://open.feishu.cn",
+	)
+}
+
+func sendFeishuUsersWithClient(
+	ctx context.Context,
+	cfg ChannelConfig,
+	targets, text, idempotencyKey string,
+	client *http.Client,
+	baseURL string,
+) error {
 	if strings.TrimSpace(cfg.FeishuAppID) == "" || strings.TrimSpace(cfg.FeishuSecret) == "" {
 		return nil
 	}
@@ -387,11 +493,10 @@ func sendFeishuUsers(ctx context.Context, cfg ChannelConfig, targets, text, idem
 	if len(recipients) == 0 {
 		return nil
 	}
-	token, err := feishuTenantToken(ctx, cfg.FeishuAppID, cfg.FeishuSecret)
+	token, err := feishuTenantToken(ctx, cfg.FeishuAppID, cfg.FeishuSecret, client, baseURL)
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 8 * time.Second}
 	for _, target := range recipients {
 		idType := "open_id"
 		if strings.Contains(target, "@") {
@@ -401,7 +506,7 @@ func sendFeishuUsers(ctx context.Context, cfg ChannelConfig, targets, text, idem
 		raw, _ := json.Marshal(map[string]string{
 			"receive_id": target, "msg_type": "text", "content": string(content),
 		})
-		endpoint := "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=" + idType
+		endpoint := strings.TrimRight(baseURL, "/") + "/open-apis/im/v1/messages?receive_id_type=" + idType
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(raw))
 		if err != nil {
 			return err
@@ -415,23 +520,40 @@ func sendFeishuUsers(ctx context.Context, cfg ChannelConfig, targets, text, idem
 		if err != nil {
 			return err
 		}
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
+		var result struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+		}
+		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result)
+		closeErr := resp.Body.Close()
 		if err := classifyNotificationHTTP(resp.StatusCode); err != nil {
 			return err
+		}
+		if decodeErr != nil {
+			return fmt.Errorf("decode Feishu response: %w", decodeErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close Feishu response: %w", closeErr)
+		}
+		if result.Code != 0 {
+			err := fmt.Errorf("Feishu message code %d: %s", result.Code, strings.TrimSpace(result.Msg))
+			if result.Code == 99991663 || strings.Contains(strings.ToLower(result.Msg), "rate") {
+				return err
+			}
+			return messaging.Permanent(err)
 		}
 	}
 	return nil
 }
 
-func feishuTenantToken(ctx context.Context, appID, secret string) (string, error) {
+func feishuTenantToken(ctx context.Context, appID, secret string, client *http.Client, baseURL string) (string, error) {
 	raw, _ := json.Marshal(map[string]string{"app_id": appID, "app_secret": secret})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal", bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/open-apis/auth/v3/tenant_access_token/internal", bytes.NewReader(raw))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -440,11 +562,21 @@ func feishuTenantToken(ctx context.Context, appID, secret string) (string, error
 		TenantAccessToken string `json:"tenant_access_token"`
 		Code              int    `json:"code"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
 		return "", err
 	}
+	if err := classifyNotificationHTTP(resp.StatusCode); err != nil {
+		return "", err
+	}
+	if payload.Code != 0 {
+		err := fmt.Errorf("Feishu token code %d", payload.Code)
+		if payload.Code == 99991663 {
+			return "", err
+		}
+		return "", messaging.Permanent(err)
+	}
 	if payload.TenantAccessToken == "" {
-		return "", fmt.Errorf("feishu token code %d", payload.Code)
+		return "", messaging.Permanent(fmt.Errorf("Feishu token is missing"))
 	}
 	return payload.TenantAccessToken, nil
 }

@@ -110,6 +110,7 @@ func (m *Module) Register(c *appctx.Container) error {
 			c.Logger.Warn(msg, zap.Error(err))
 		}
 	}, operationWriter)
+	archiveCoordinator.UseTransactor(c.Transactor)
 	if operationWriter != nil {
 		if err := c.OperationRegistry.Register(
 			workspaceoutbound.OperationTypeProjectUndeploy,
@@ -239,9 +240,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.POST("/api/v1/workspaces/:wsId/git/file",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetGitFileContent)
 
-	if operationWriter == nil {
-		startArchiveResumer(c, archiveCoordinator)
-	}
+	startArchiveResumer(c, archiveCoordinator)
 	return nil
 }
 

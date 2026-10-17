@@ -42,7 +42,7 @@ func TestEmitNotesSchedulesOneOperationPerExternalTarget(t *testing.T) {
 		{ID: "feishu-a", Channel: model.NotifyChannelFeishuUser, Targets: "ou_1", Events: []string{model.NotifyEventPassed}},
 	}
 
-	err := scheduler.emitNotes(ctx, wf, run, notes, model.NotifyEventPassed)
+	err := scheduler.emitNotes(ctx, wf, run, notes, model.NotifyEventPassed, "workflow", "")
 
 	require.NoError(t, err)
 	require.Len(t, writer.requests, 3)
@@ -50,7 +50,8 @@ func TestEmitNotesSchedulesOneOperationPerExternalTarget(t *testing.T) {
 	require.Equal(t, workflowoutbound.OperationTypeMailSend, writer.requests[1].OperationType)
 	require.Equal(t, workflowoutbound.OperationTypeFeishuUserSend, writer.requests[2].OperationType)
 	require.Equal(t,
-		"event-1:product-workflow.build-completed:"+workflowoutbound.OperationTypeWebhookSend+":hook-a",
+		"event-1:product-workflow.build-completed:"+workflowoutbound.OperationTypeWebhookSend+":"+
+			run.ID.String()+"/workflow/-/passed/success/hook-a",
 		writer.requests[0].IdempotencyKey,
 	)
 }
@@ -67,9 +68,41 @@ func TestEmitNotesReturnsScheduleFailure(t *testing.T) {
 		[]model.WorkflowNotification{{
 			ID: "hook-a", Channel: model.NotifyChannelWebhook, WebhookURL: "https://example.invalid/a",
 			Events: []string{model.NotifyEventFailed},
-		}}, model.NotifyEventFailed)
+		}}, model.NotifyEventFailed, "workflow", "")
 
 	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestWorkflowStateRollsBackWhenNotificationScheduleFails(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.Exec("CREATE TABLE workflow_state (id TEXT PRIMARY KEY)").Error)
+
+	writer := &notificationOperationWriter{err: context.DeadlineExceeded}
+	scheduler := &Scheduler{operations: writer, tx: postgres.NewTransactor(db)}
+	run := &model.ProductWorkflowRun{ID: kernel.NewProductWorkflowRunID()}
+
+	err = scheduler.withOperationTransaction(context.Background(), run.ID.String()+":test", func(txCtx context.Context) error {
+		if err := postgres.DB(txCtx, db).Exec("INSERT INTO workflow_state (id) VALUES (?)", run.ID.String()).Error; err != nil {
+			return err
+		}
+		return scheduler.emitNotes(txCtx, &model.ProductWorkflow{Name: "release"}, run,
+			[]model.WorkflowNotification{{
+				ID: "hook-a", Channel: model.NotifyChannelWebhook,
+				Events: []string{model.NotifyEventFailed},
+			}}, model.NotifyEventFailed, "workflow", "")
+	})
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	var count int64
+	require.NoError(t, db.Table("workflow_state").Count(&count).Error)
+	require.Zero(t, count)
 }
 
 func TestEmitNotesKeepsSynchronousCompatibilityWithoutInboxMetadata(t *testing.T) {
@@ -81,7 +114,7 @@ func TestEmitNotesKeepsSynchronousCompatibilityWithoutInboxMetadata(t *testing.T
 		[]model.WorkflowNotification{{
 			ID: "mail-a", Channel: model.NotifyChannelMail, Targets: "a@example.com",
 			Events: []string{model.NotifyEventFailed},
-		}}, model.NotifyEventFailed)
+		}}, model.NotifyEventFailed, "workflow", "")
 
 	require.NoError(t, err)
 	require.Empty(t, writer.requests)
@@ -99,16 +132,70 @@ func TestEmitNotesPersistsAllNotificationTypesAndDeduplicates(t *testing.T) {
 	}
 	err := postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
 		ctx = events.WithMetadata(ctx, events.Metadata{EventID: "event-1", Subscriber: "product-workflow.build-completed"})
-		if err := scheduler.emitNotes(ctx, &model.ProductWorkflow{Name: "release"}, run, notes, model.NotifyEventPassed); err != nil {
+		if err := scheduler.emitNotes(ctx, &model.ProductWorkflow{Name: "release"}, run, notes, model.NotifyEventPassed, "workflow", ""); err != nil {
 			return err
 		}
-		return scheduler.emitNotes(ctx, &model.ProductWorkflow{Name: "release"}, run, notes, model.NotifyEventPassed)
+		return scheduler.emitNotes(ctx, &model.ProductWorkflow{Name: "release"}, run, notes, model.NotifyEventPassed, "workflow", "")
 	})
 	require.NoError(t, err)
 
 	var count int64
 	require.NoError(t, db.Table("platform.operation_outbox").Count(&count).Error)
 	require.Equal(t, int64(3), count)
+}
+
+func TestFinalJobAndWorkflowNotificationsUseDistinctSafeOperationTargets(t *testing.T) {
+	db := openNotificationOperationDB(t)
+	writer := messaging.NewOperationWriter(messagingpersistence.NewOperationStore(db), nil)
+	scheduler := &Scheduler{operations: writer}
+	run := &model.ProductWorkflowRun{
+		ID: kernel.NewProductWorkflowRunID(), WorkflowID: kernel.NewProductWorkflowID(),
+		Status: model.RunStatusSuccess,
+	}
+	workflowNote := model.WorkflowNotification{
+		ID: "same-note", Channel: model.NotifyChannelWebhook,
+		WebhookURL: "https://hooks.example.invalid/send?token=workflow-secret",
+		Events:     []string{model.NotifyEventPassed},
+	}
+	wf := &model.ProductWorkflow{
+		ID: run.WorkflowID, Name: "release", Notifications: []model.WorkflowNotification{workflowNote},
+	}
+	jobSpec := map[string]any{"notify": map[string]any{
+		"id": "same-note", "channel": model.NotifyChannelWebhook,
+		"webhook_url": "https://hooks.example.invalid/send?token=job-secret",
+		"on_success":  true,
+	}}
+	err := postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+		ctx = events.WithMetadata(ctx, events.Metadata{EventID: "event-final", Subscriber: "product-workflow.build-completed"})
+		if err := scheduler.emitJobNotification(ctx, wf, run, "build-api", jobSpec, model.NotifyEventPassed); err != nil {
+			return err
+		}
+		if err := scheduler.emitNotification(ctx, wf, run, model.NotifyEventPassed); err != nil {
+			return err
+		}
+		if err := scheduler.emitJobNotification(ctx, wf, run, "build-api", jobSpec, model.NotifyEventPassed); err != nil {
+			return err
+		}
+		return scheduler.emitNotification(ctx, wf, run, model.NotifyEventPassed)
+	})
+	require.NoError(t, err)
+
+	var rows []struct {
+		IdempotencyKey string
+		Payload        []byte
+	}
+	require.NoError(t, db.Table("platform.operation_outbox").Order("idempotency_key").Find(&rows).Error)
+	require.Len(t, rows, 2)
+	require.NotEqual(t, rows[0].IdempotencyKey, rows[1].IdempotencyKey)
+	for _, row := range rows {
+		raw := string(row.Payload)
+		require.NotContains(t, raw, "hooks.example.invalid")
+		require.NotContains(t, raw, "workflow-secret")
+		require.NotContains(t, raw, "job-secret")
+		require.NotContains(t, raw, "token=")
+		require.Contains(t, row.IdempotencyKey, run.ID.String())
+		require.Contains(t, row.IdempotencyKey, "same-note")
+	}
 }
 
 func openNotificationOperationDB(t *testing.T) *gorm.DB {
