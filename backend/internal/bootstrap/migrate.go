@@ -20,6 +20,7 @@ import (
 	tenantpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/tenant/infrastructure/persistence"
 	workflowpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/infrastructure/persistence"
 	wspersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/persistence"
+	messagingpersistence "github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	k8sschema "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/schema"
 )
@@ -47,6 +48,7 @@ func AutoMigrate(db *gorm.DB) error {
 		{"notification", notificationpersistence.AutoMigrate},
 		{"delivery", deliverypersistence.AutoMigrate},
 		{"agent_runtime", runtimepersistence.AutoMigrate},
+		{"messaging", messagingpersistence.AutoMigrate},
 		{"plugin", pluginpersistence.AutoMigrate},
 		{"plugin_kubernetes", k8sschema.AutoMigrate},
 	}

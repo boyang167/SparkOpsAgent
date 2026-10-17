@@ -119,6 +119,16 @@ func TestProjectDeployPipelineMigrationPersistsStreamEventStatus(t *testing.T) {
 	)
 }
 
+func TestTransactionalEventsMigrationDefinesReliabilityConstraints(t *testing.T) {
+	up := readMigration(t, "000070_transactional_events.up.sql")
+	require.Contains(t, up, "CREATE TABLE IF NOT EXISTS platform.event_outbox")
+	require.Contains(t, up, "CREATE TABLE IF NOT EXISTS platform.event_inbox")
+	require.Contains(t, up, "CREATE TABLE IF NOT EXISTS platform.operation_outbox")
+	require.Contains(t, up, "PRIMARY KEY (event_id, subscriber)")
+	require.Contains(t, up, "CREATE UNIQUE INDEX IF NOT EXISTS ux_operation_outbox_idempotency_key")
+	require.Contains(t, up, "CREATE INDEX IF NOT EXISTS ix_event_outbox_claim")
+}
+
 func readMigration(t *testing.T, name string) string {
 	t.Helper()
 	contents, err := os.ReadFile(name)
