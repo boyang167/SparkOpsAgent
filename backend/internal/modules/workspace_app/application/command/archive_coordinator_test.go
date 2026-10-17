@@ -132,6 +132,26 @@ func (r *archiveProjectRepo) Update(_ context.Context, p *model.Project) error {
 	r.projects[p.ID] = p
 	return nil
 }
+func (r *archiveProjectRepo) TransitionArchiving(
+	_ context.Context, id kernel.ProjectID, generation string, target model.ProjectStatus,
+) (bool, error) {
+	p, ok := r.projects[id]
+	if !ok || !p.IsArchiving() || p.ArchiveGeneration != generation {
+		return false, nil
+	}
+	p.Status = target
+	return true, nil
+}
+func (r *archiveProjectRepo) InitializeArchiveGeneration(
+	_ context.Context, id kernel.ProjectID, generation string,
+) (bool, error) {
+	p, ok := r.projects[id]
+	if !ok || !p.IsArchiving() || p.ArchiveGeneration != "" {
+		return false, nil
+	}
+	p.ArchiveGeneration = generation
+	return true, nil
+}
 func (r *archiveProjectRepo) FindByID(_ context.Context, id kernel.ProjectID) (*model.Project, error) {
 	p, ok := r.projects[id]
 	if !ok {
@@ -165,15 +185,17 @@ func (r *archiveProjectRepo) ListByStatus(_ context.Context, status model.Projec
 }
 
 type fakeTeardown struct {
-	online        []kernel.ClusterInfoID
-	onlineChecks  int
-	active        bool
-	started       []kernel.ClusterInfoID
-	disabled      int
-	disableErr    error
-	startErr      error
-	disabledState bool
-	statusChecks  int
+	online         []kernel.ClusterInfoID
+	onlineChecks   int
+	active         bool
+	started        []kernel.ClusterInfoID
+	disabled       int
+	disableErr     error
+	startErr       error
+	disabledState  bool
+	statusChecks   int
+	generation     string
+	runGenerations map[kernel.DeploymentRunID]string
 }
 
 type archiveOperationWriter struct {
@@ -197,7 +219,19 @@ func (f *fakeTeardown) StartUndeploy(_ context.Context, req appctx.UndeployReque
 		return kernel.DeploymentRunID{}, f.startErr
 	}
 	f.started = append(f.started, req.ClusterID)
-	return kernel.NewDeploymentRunID(), nil
+	runID := kernel.NewDeploymentRunID()
+	f.generation = req.ArchiveGeneration
+	if f.runGenerations == nil {
+		f.runGenerations = make(map[kernel.DeploymentRunID]string)
+	}
+	f.runGenerations[runID] = req.ArchiveGeneration
+	return runID, nil
+}
+func (f *fakeTeardown) ArchiveGeneration(_ context.Context, runID kernel.DeploymentRunID) (string, error) {
+	if generation, ok := f.runGenerations[runID]; ok {
+		return generation, nil
+	}
+	return f.generation, nil
 }
 func (f *fakeTeardown) DisablePipeline(context.Context, kernel.WorkspaceID, kernel.ProjectID) error {
 	f.disabled++
@@ -360,6 +394,55 @@ func TestCoordinatorAbortsArchivingOnUndeployFailure(t *testing.T) {
 	require.NoError(t, coordinator.HandleDeployCompleted(context.Background(), undeployEvent(project, "failed")))
 
 	require.Equal(t, model.ProjectStatusActive, project.Status)
+}
+
+func TestDelayedFailureFromPreviousArchiveGenerationCannotAbortCurrentArchive(t *testing.T) {
+	_, _, teardown, project := archiveFixture(t)
+	require.NoError(t, project.BeginArchiving())
+	generationA := project.ArchiveGeneration
+	require.NoError(t, project.AbortArchiving())
+	require.NoError(t, project.BeginArchiving())
+	generationB := project.ArchiveGeneration
+	require.NotEqual(t, generationA, generationB)
+
+	repo := &archiveProjectRepo{projects: map[kernel.ProjectID]*model.Project{project.ID: project}}
+	writer := &archiveOperationWriter{}
+	coordinator := command.NewArchiveCoordinator(repo, func() appctx.ProjectTeardown { return teardown }, nil, writer)
+	runA, runB := kernel.NewDeploymentRunID(), kernel.NewDeploymentRunID()
+	teardown.runGenerations = map[kernel.DeploymentRunID]string{runA: generationA, runB: generationB}
+
+	delayed := deliveryevent.NewDeployCompleted(runA, project.ID, project.WorkspaceID, nil, "", "failed", "undeploy", "v1")
+	require.NoError(t, coordinator.HandleDeployCompleted(context.Background(), delayed))
+	require.Equal(t, model.ProjectStatusArchiving, project.Status)
+	require.Equal(t, generationB, project.ArchiveGeneration)
+	require.Empty(t, writer.requests)
+	require.Zero(t, teardown.onlineChecks)
+
+	current := deliveryevent.NewDeployCompleted(runB, project.ID, project.WorkspaceID, nil, "", "succeeded", "undeploy", "v1")
+	current.CreatedBy = kernel.NewMemberID()
+	ctx := events.WithMetadata(context.Background(), events.Metadata{EventID: "event-b", Subscriber: "workspace-app.archive"})
+	require.NoError(t, coordinator.HandleDeployCompleted(ctx, current))
+	require.Len(t, writer.requests, 1)
+	payload := writer.requests[0].Payload.(workspaceoutbound.ProjectUndeployPayload)
+	require.Equal(t, generationB, payload.Generation)
+}
+
+func TestLegacyCompletionWithoutRunGenerationIsNoOpBeforeArchiveWork(t *testing.T) {
+	_, _, teardown, project := archiveFixture(t)
+	require.NoError(t, project.BeginArchiving())
+	repo := &archiveProjectRepo{projects: map[kernel.ProjectID]*model.Project{project.ID: project}}
+	writer := &archiveOperationWriter{}
+	coordinator := command.NewArchiveCoordinator(repo, func() appctx.ProjectTeardown { return teardown }, nil, writer)
+	runID := kernel.NewDeploymentRunID()
+	teardown.runGenerations = map[kernel.DeploymentRunID]string{runID: ""}
+
+	ev := deliveryevent.NewDeployCompleted(runID, project.ID, project.WorkspaceID, nil, "", "succeeded", "undeploy", "v1")
+	require.NoError(t, coordinator.HandleDeployCompleted(context.Background(), ev))
+
+	require.Equal(t, model.ProjectStatusArchiving, project.Status)
+	require.Empty(t, writer.requests)
+	require.Zero(t, teardown.onlineChecks)
+	require.Empty(t, teardown.started)
 }
 
 func TestCoordinatorDoesNotArchiveWhenDisableFails(t *testing.T) {

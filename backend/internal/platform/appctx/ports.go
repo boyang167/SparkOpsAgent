@@ -87,10 +87,11 @@ type DeploymentTrigger interface {
 }
 
 type UndeployRequest struct {
-	WorkspaceID kernel.WorkspaceID
-	ProjectID   kernel.ProjectID
-	MemberID    kernel.MemberID
-	ClusterID   kernel.ClusterInfoID
+	WorkspaceID       kernel.WorkspaceID
+	ProjectID         kernel.ProjectID
+	MemberID          kernel.MemberID
+	ClusterID         kernel.ClusterInfoID
+	ArchiveGeneration string
 }
 
 // ProjectTeardown lets workspace_app take a project offline before archiving it.

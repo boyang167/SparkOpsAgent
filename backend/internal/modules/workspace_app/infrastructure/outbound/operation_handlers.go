@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/repository"
@@ -49,6 +50,9 @@ func NewPipelineDisableHandler(
 		var payload PipelineDisablePayload
 		if err := json.Unmarshal(operation.Payload, &payload); err != nil {
 			return messaging.Permanent(fmt.Errorf("decode pipeline disable operation: %w", err))
+		}
+		if strings.TrimSpace(payload.Generation) == "" {
+			return nil
 		}
 		workspaceID, err := kernel.ParseWorkspaceID(payload.WorkspaceID)
 		if err != nil {
@@ -115,6 +119,9 @@ func NewProjectUndeployHandler(
 		if err := json.Unmarshal(operation.Payload, &payload); err != nil {
 			return messaging.Permanent(fmt.Errorf("decode project undeploy operation: %w", err))
 		}
+		if strings.TrimSpace(payload.Generation) == "" {
+			return nil
+		}
 		projectID, err := kernel.ParseProjectID(payload.ProjectID)
 		if err != nil {
 			return messaging.Permanent(err)
@@ -165,10 +172,11 @@ func NewProjectUndeployHandler(
 		if len(online) > 0 {
 			if allowUndeploy {
 				_, err = target.StartUndeploy(ctx, appctx.UndeployRequest{
-					WorkspaceID: project.WorkspaceID,
-					ProjectID:   project.ID,
-					MemberID:    memberID,
-					ClusterID:   online[0],
+					WorkspaceID:       project.WorkspaceID,
+					ProjectID:         project.ID,
+					MemberID:          memberID,
+					ClusterID:         online[0],
+					ArchiveGeneration: payload.Generation,
 				})
 				var domainErr *kernel.DomainError
 				if err != nil && !(errors.As(err, &domainErr) && domainErr.Code() == "DELIVERY_DEPLOYMENT_RUNNING") {

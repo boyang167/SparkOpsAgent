@@ -23,6 +23,7 @@ import (
 
 type pipelineProjectRepo struct {
 	project *model.Project
+	finds   int
 }
 
 func (r *pipelineProjectRepo) Save(context.Context, *model.Project) error { return nil }
@@ -51,10 +52,36 @@ func (r *pipelineProjectRepo) InitializeArchiveGeneration(
 	return true, nil
 }
 func (r *pipelineProjectRepo) FindByID(_ context.Context, id kernel.ProjectID) (*model.Project, error) {
+	r.finds++
 	if r.project == nil || r.project.ID != id {
 		return nil, domain.ErrProjectNotFound
 	}
 	return r.project, nil
+}
+
+func TestArchiveOperationsWithEmptyGenerationCompleteWithoutRepositoryOrProviderCalls(t *testing.T) {
+	projectID, workspaceID, memberID := kernel.NewProjectID(), kernel.NewWorkspaceID(), kernel.NewMemberID()
+	repo := &pipelineProjectRepo{}
+	providerCalls := 0
+
+	undeploy := NewProjectUndeployHandler(repo, func() appctx.ProjectTeardown {
+		providerCalls++
+		return nil
+	}, nil, postgres.NewDirectTransactor())
+	require.NoError(t, undeploy(context.Background(), operationWithPayload(t, ProjectUndeployPayload{
+		ProjectID: projectID.String(), MemberID: memberID.String(),
+	})))
+
+	pipeline := NewPipelineDisableHandler(func() PipelineDisabler {
+		providerCalls++
+		return nil
+	}, repo, postgres.NewDirectTransactor())
+	require.NoError(t, pipeline(context.Background(), operationWithPayload(t, PipelineDisablePayload{
+		WorkspaceID: workspaceID.String(), ProjectID: projectID.String(),
+	})))
+
+	require.Zero(t, repo.finds)
+	require.Zero(t, providerCalls)
 }
 func (r *pipelineProjectRepo) FindByWorkspaceAndName(context.Context, kernel.WorkspaceID, model.ProjectName) (*model.Project, error) {
 	return nil, domain.ErrProjectNotFound
@@ -79,6 +106,13 @@ type pipelineDisabler struct {
 	disabled   bool
 	disableErr error
 	calls      int
+}
+
+func operationWithPayload(t *testing.T, value any) messaging.Operation {
+	t.Helper()
+	payload, err := json.Marshal(value)
+	require.NoError(t, err)
+	return messaging.Operation{Payload: payload}
 }
 
 func (d *pipelineDisabler) PipelineDisabled(context.Context, kernel.WorkspaceID, kernel.ProjectID) (bool, error) {
@@ -136,6 +170,7 @@ type undeployTeardown struct {
 	starts       int
 	onlineChecks int
 	calledInside bool
+	lastRequest  appctx.UndeployRequest
 }
 
 func (t *undeployTeardown) mark(ctx context.Context) {
@@ -152,9 +187,10 @@ func (t *undeployTeardown) HasActiveRun(ctx context.Context, _ kernel.ProjectID)
 	t.mark(ctx)
 	return t.active, nil
 }
-func (t *undeployTeardown) StartUndeploy(ctx context.Context, _ appctx.UndeployRequest) (kernel.DeploymentRunID, error) {
+func (t *undeployTeardown) StartUndeploy(ctx context.Context, req appctx.UndeployRequest) (kernel.DeploymentRunID, error) {
 	t.mark(ctx)
 	t.starts++
+	t.lastRequest = req
 	return kernel.NewDeploymentRunID(), nil
 }
 func (t *undeployTeardown) DisablePipeline(context.Context, kernel.WorkspaceID, kernel.ProjectID) error {
@@ -199,6 +235,7 @@ func TestProjectUndeployRetriesUntilOfflineThenSchedulesPipeline(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, messaging.IsPermanent(err))
 	require.Equal(t, 1, teardown.starts)
+	require.Equal(t, project.ArchiveGeneration, teardown.lastRequest.ArchiveGeneration)
 	require.Empty(t, writer.requests)
 	require.False(t, teardown.calledInside)
 

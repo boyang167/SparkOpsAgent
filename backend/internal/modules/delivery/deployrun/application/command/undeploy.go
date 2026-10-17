@@ -100,7 +100,7 @@ func (h *UndeployHandler) handle(
 	}
 	return h.start(ctx, wsID, memberID, projectID, clusterID, model.UndeployOptions{
 		DeleteConfig: input.DeleteConfig, DeleteStorage: input.DeleteStorage,
-	})
+	}, "")
 }
 
 // StartForArchive is used by the archive flow, which has already confirmed the
@@ -111,17 +111,18 @@ func (h *UndeployHandler) StartForArchive(
 	memberID kernel.MemberID,
 	projectID kernel.ProjectID,
 	clusterID kernel.ClusterInfoID,
+	archiveGeneration string,
 ) (*model.DeploymentRun, error) {
 	if h.operations.enabled() {
 		var result *model.DeploymentRun
 		err := h.operations.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 			var err error
-			result, err = h.startForArchive(txCtx, wsID, memberID, projectID, clusterID)
+			result, err = h.startForArchive(txCtx, wsID, memberID, projectID, clusterID, archiveGeneration)
 			return err
 		})
 		return result, err
 	}
-	return h.startForArchive(ctx, wsID, memberID, projectID, clusterID)
+	return h.startForArchive(ctx, wsID, memberID, projectID, clusterID, archiveGeneration)
 }
 
 func (h *UndeployHandler) startForArchive(
@@ -130,6 +131,7 @@ func (h *UndeployHandler) startForArchive(
 	memberID kernel.MemberID,
 	projectID kernel.ProjectID,
 	clusterID kernel.ClusterInfoID,
+	archiveGeneration string,
 ) (*model.DeploymentRun, error) {
 	lifecycle, err := h.lifecycle.ProjectLifecycle(ctx, wsID, projectID)
 	if err != nil {
@@ -138,7 +140,7 @@ func (h *UndeployHandler) startForArchive(
 	if lifecycle.Status != projectStatusActive && lifecycle.Status != projectStatusArchiving {
 		return nil, domain.ErrProjectNotActive
 	}
-	return h.start(ctx, wsID, memberID, projectID, clusterID, model.UndeployOptions{})
+	return h.start(ctx, wsID, memberID, projectID, clusterID, model.UndeployOptions{}, archiveGeneration)
 }
 
 func (h *UndeployHandler) start(
@@ -148,6 +150,7 @@ func (h *UndeployHandler) start(
 	projectID kernel.ProjectID,
 	clusterID kernel.ClusterInfoID,
 	opts model.UndeployOptions,
+	archiveGeneration string,
 ) (*model.DeploymentRun, error) {
 	active, err := h.repo.HasActiveByProject(ctx, projectID)
 	if err != nil {
@@ -165,6 +168,7 @@ func (h *UndeployHandler) start(
 		return nil, domain.ErrEnvironmentNotDeployed
 	}
 	run := model.NewUndeployRun(wsID, projectID, memberID, baseline, opts)
+	run.ArchiveGeneration = archiveGeneration
 	run.CreatedAt = h.clock().UTC()
 	if err := h.repo.Create(ctx, run); err != nil {
 		return nil, err

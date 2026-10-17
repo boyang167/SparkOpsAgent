@@ -18,34 +18,35 @@ import (
 )
 
 type deploymentRunRow struct {
-	ID               string `gorm:"column:id;primaryKey"`
-	WorkspaceID      string `gorm:"not null"`
-	ProjectID        string `gorm:"not null"`
-	ClusterID        string `gorm:"not null"`
-	GitRefType       string `gorm:"size:16;not null"`
-	GitRefValue      string `gorm:"size:255;not null"`
-	ImageTag         string `gorm:"size:255;not null"`
-	ImageRepository  string `gorm:"size:512;not null;default:''"`
-	CrossCluster     bool   `gorm:"not null;default:false"`
-	SyncManifests    []byte `gorm:"column:sync_manifests;type:jsonb;not null;default:'[]'"`
-	Status           string `gorm:"size:16;not null"`
-	BuildID          *string
-	ErrorMessage     string    `gorm:"not null;default:''"`
-	CreatedBy        string    `gorm:"not null"`
-	CreatedAt        time.Time `gorm:"not null"`
-	StartedAt        *time.Time
-	FinishedAt       *time.Time
-	CurrentStage     string  `gorm:"size:16;not null;default:''"`
-	RunType          string  `gorm:"size:16;not null;default:normal"`
-	RollbackOfRunID  *string `gorm:"size:36"`
-	Version          int64   `gorm:"not null;default:0"`
-	AttemptCount     int     `gorm:"not null;default:0"`
-	LeaseOwner       *string
-	LeaseExpiresAt   *time.Time
-	EnvironmentID    *string
-	ProjectVersionID *string
-	DeployNamespace  string `gorm:"not null;default:''"`
-	UndeployOptions  []byte `gorm:"column:undeploy_options;type:jsonb"`
+	ID                string `gorm:"column:id;primaryKey"`
+	WorkspaceID       string `gorm:"not null"`
+	ProjectID         string `gorm:"not null"`
+	ClusterID         string `gorm:"not null"`
+	GitRefType        string `gorm:"size:16;not null"`
+	GitRefValue       string `gorm:"size:255;not null"`
+	ImageTag          string `gorm:"size:255;not null"`
+	ImageRepository   string `gorm:"size:512;not null;default:''"`
+	CrossCluster      bool   `gorm:"not null;default:false"`
+	SyncManifests     []byte `gorm:"column:sync_manifests;type:jsonb;not null;default:'[]'"`
+	Status            string `gorm:"size:16;not null"`
+	BuildID           *string
+	ErrorMessage      string    `gorm:"not null;default:''"`
+	CreatedBy         string    `gorm:"not null"`
+	CreatedAt         time.Time `gorm:"not null"`
+	StartedAt         *time.Time
+	FinishedAt        *time.Time
+	CurrentStage      string  `gorm:"size:16;not null;default:''"`
+	RunType           string  `gorm:"size:16;not null;default:normal"`
+	RollbackOfRunID   *string `gorm:"size:36"`
+	Version           int64   `gorm:"not null;default:0"`
+	AttemptCount      int     `gorm:"not null;default:0"`
+	LeaseOwner        *string
+	LeaseExpiresAt    *time.Time
+	EnvironmentID     *string
+	ProjectVersionID  *string
+	DeployNamespace   string  `gorm:"not null;default:''"`
+	UndeployOptions   []byte  `gorm:"column:undeploy_options;type:jsonb"`
+	ArchiveGeneration *string `gorm:"column:archive_generation;type:uuid"`
 }
 
 func (deploymentRunRow) TableName() string { return "delivery.deployment_runs" }
@@ -490,8 +491,9 @@ func toRunRow(run *model.DeploymentRun) *deploymentRunRow {
 		AttemptCount: run.AttemptCount, LeaseOwner: nullableString(run.LeaseOwner),
 		LeaseExpiresAt: run.LeaseExpiresAt,
 		EnvironmentID:  environmentIDValue(run.EnvironmentID), DeployNamespace: run.DeployNamespace,
-		ProjectVersionID: projectVersionIDValue(run.ProjectVersionID),
-		UndeployOptions:  undeployOptionsValue(run.UndeployOptions),
+		ProjectVersionID:  projectVersionIDValue(run.ProjectVersionID),
+		UndeployOptions:   undeployOptionsValue(run.UndeployOptions),
+		ArchiveGeneration: nullableString(run.ArchiveGeneration),
 	}
 }
 
@@ -527,11 +529,12 @@ func fromRunRow(row deploymentRunRow) (*model.DeploymentRun, error) {
 		CrossCluster:    row.CrossCluster, DeployNamespace: row.DeployNamespace,
 		Status: model.Status(row.Status), ErrorMessage: row.ErrorMessage, CreatedBy: createdBy,
 		CreatedAt: row.CreatedAt, StartedAt: row.StartedAt, FinishedAt: row.FinishedAt,
-		CurrentStage:   model.Stage(row.CurrentStage),
-		RunType:        runType,
-		Version:        row.Version,
-		AttemptCount:   row.AttemptCount,
-		LeaseExpiresAt: row.LeaseExpiresAt,
+		CurrentStage:      model.Stage(row.CurrentStage),
+		RunType:           runType,
+		Version:           row.Version,
+		AttemptCount:      row.AttemptCount,
+		LeaseExpiresAt:    row.LeaseExpiresAt,
+		ArchiveGeneration: valueOrEmpty(row.ArchiveGeneration),
 	}
 	if len(row.SyncManifests) > 0 && string(row.SyncManifests) != "null" {
 		_ = json.Unmarshal(row.SyncManifests, &run.SyncManifests)
@@ -611,6 +614,13 @@ func nullableString(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func valueOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func buildIDValue(id *kernel.BuildID) *string {

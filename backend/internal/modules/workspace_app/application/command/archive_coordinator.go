@@ -26,6 +26,10 @@ const (
 
 var errTeardownUnavailable = errors.New("project teardown is not configured")
 
+type archiveRunGenerationLookup interface {
+	ArchiveGeneration(context.Context, kernel.DeploymentRunID) (string, error)
+}
+
 // ArchiveCoordinator takes an archiving project offline one cluster at a time,
 // because delivery allows only one active run per project.
 type ArchiveCoordinator struct {
@@ -100,6 +104,7 @@ func (c *ArchiveCoordinator) AdvanceWithTeardown(
 	}
 	_, err = teardown.StartUndeploy(ctx, appctx.UndeployRequest{
 		WorkspaceID: project.WorkspaceID, ProjectID: project.ID, MemberID: memberID, ClusterID: online[0],
+		ArchiveGeneration: project.ArchiveGeneration,
 	})
 	if isDeploymentRunning(err) {
 		return nil
@@ -150,16 +155,34 @@ func (c *ArchiveCoordinator) HandleDeployCompleted(ctx context.Context, e events
 	if !ok || ev.RunType != undeployRunType {
 		return nil
 	}
+	teardown, err := c.port()
+	if err != nil {
+		return err
+	}
+	generations, ok := teardown.(archiveRunGenerationLookup)
+	if !ok {
+		return errors.New("project teardown cannot resolve archive generation")
+	}
+	generation, err := generations.ArchiveGeneration(ctx, ev.RunID)
+	if err != nil {
+		return err
+	}
+	if generation == "" {
+		return nil
+	}
 	project, err := c.repo.FindByID(ctx, ev.ProjectID)
-	if err != nil || !project.IsArchiving() {
+	if err != nil {
+		return err
+	}
+	if !project.IsArchiving() || project.ArchiveGeneration != generation {
 		return nil
 	}
 	if ev.Status != deployRunSucceeded {
-		if err := project.AbortArchiving(); err != nil {
+		if err := c.abortGeneration(ctx, project.ID, generation); err != nil {
 			return err
 		}
 		c.warn("archive aborted: undeploy "+ev.RunID.String()+" "+ev.Status, nil)
-		return c.repo.Update(ctx, project)
+		return nil
 	}
 	if c.operations != nil {
 		metadata, ok := events.MetadataFromContext(ctx)
@@ -168,21 +191,44 @@ func (c *ArchiveCoordinator) HandleDeployCompleted(ctx context.Context, e events
 		}
 		return c.operations.Schedule(ctx, messaging.OperationRequest{
 			Owner: metadata.Subscriber, OperationType: workspaceoutbound.OperationTypeProjectUndeploy,
-			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + project.ID.String() + "/" + project.ArchiveGeneration,
+			IdempotencyKey: metadata.EventID + ":" + metadata.Subscriber + ":" + workspaceoutbound.OperationTypeProjectUndeploy + ":" + project.ID.String() + "/" + generation,
 			Payload: workspaceoutbound.ProjectUndeployPayload{
 				EventID: metadata.EventID, ProjectID: project.ID.String(), MemberID: ev.CreatedBy.String(),
-				AllowUndeploy: boolPointer(true), Generation: project.ArchiveGeneration,
+				AllowUndeploy: boolPointer(true), Generation: generation,
 			},
 		})
 	}
 	if err := c.Advance(ctx, project, ev.CreatedBy); err != nil {
 		c.warn("advance archive failed", err)
-		if abortErr := project.AbortArchiving(); abortErr == nil {
-			return c.repo.Update(ctx, project)
+		if abortErr := c.abortGeneration(ctx, project.ID, generation); abortErr != nil {
+			return errors.Join(err, abortErr)
 		}
 		return err
 	}
 	return nil
+}
+
+func (c *ArchiveCoordinator) abortGeneration(
+	ctx context.Context, projectID kernel.ProjectID, generation string,
+) error {
+	terminal, ok := c.repo.(repository.ProjectTerminalRepository)
+	if !ok {
+		return errors.New("archive completion requires terminal transition repository")
+	}
+	transitioned, err := terminal.TransitionArchiving(ctx, projectID, generation, model.ProjectStatusActive)
+	if err != nil || transitioned {
+		return err
+	}
+	current, err := c.repo.FindByID(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if current.ArchiveGeneration != generation ||
+		current.Status == model.ProjectStatusActive ||
+		current.Status == model.ProjectStatusArchived {
+		return nil
+	}
+	return errors.New("archive abort transition conflicted")
 }
 
 // ResumeAll picks up archiving projects whose completion event was missed, e.g. after a restart.

@@ -147,7 +147,24 @@ func TestProjectArchiveGenerationMigrationIsExistingRowSafe(t *testing.T) {
 	up := readMigration(t, "000072_project_archive_generation.up.sql")
 	require.Contains(t, up, "ADD COLUMN IF NOT EXISTS archive_generation UUID")
 	require.NotContains(t, up, "NOT NULL")
+	require.Contains(t, up, "WHERE status = 'archiving'")
+	require.Contains(t, up, "AND archive_generation IS NULL")
+	require.Contains(t, up, "md5('workspace-archive:' || id::text)")
+	require.Contains(t, up, ")::uuid")
 	down := readMigration(t, "000072_project_archive_generation.down.sql")
+	require.Contains(t, down, "DROP COLUMN IF EXISTS archive_generation")
+}
+
+func TestDeploymentRunArchiveGenerationMigrationIsExistingRowSafe(t *testing.T) {
+	up := readMigration(t, "000073_deployment_run_archive_generation.up.sql")
+	require.Contains(t, up, "ALTER TABLE delivery.deployment_runs")
+	require.Contains(t, up, "ADD COLUMN IF NOT EXISTS archive_generation UUID")
+	require.NotContains(t, up, "NOT NULL")
+	require.Contains(t, up, "UPDATE workspace_app.projects")
+	require.Contains(t, up, "WHERE status = 'archiving'")
+	require.Contains(t, up, "AND archive_generation IS NULL")
+
+	down := readMigration(t, "000073_deployment_run_archive_generation.down.sql")
 	require.Contains(t, down, "DROP COLUMN IF EXISTS archive_generation")
 }
 

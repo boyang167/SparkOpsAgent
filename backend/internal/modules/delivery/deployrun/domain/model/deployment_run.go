@@ -43,34 +43,35 @@ type UndeployOptions struct {
 }
 
 type DeploymentRun struct {
-	ID              kernel.DeploymentRunID
-	WorkspaceID     kernel.WorkspaceID
-	ProjectID       kernel.ProjectID
-	ClusterID       kernel.ClusterInfoID
+	ID                kernel.DeploymentRunID
+	WorkspaceID       kernel.WorkspaceID
+	ProjectID         kernel.ProjectID
+	ClusterID         kernel.ClusterInfoID
 	EnvironmentID     *kernel.EnvironmentID
 	ProjectVersionID  *kernel.ProjectVersionID
 	DeployNamespace   string
-	BuildID         *kernel.BuildID
-	GitRefType      string
-	GitRefValue     string
-	ImageTag        string
-	ImageRepository string
-	CrossCluster    bool
-	SyncManifests   []SyncManifest
-	Status          Status
-	CurrentStage    Stage
-	RunType         RunType
-	RollbackOfRunID *kernel.DeploymentRunID
-	UndeployOptions *UndeployOptions
-	ErrorMessage    string
-	CreatedBy       kernel.MemberID
-	CreatedAt       time.Time
-	StartedAt       *time.Time
-	FinishedAt      *time.Time
-	Version         int64
-	AttemptCount    int
-	LeaseOwner      string
-	LeaseExpiresAt  *time.Time
+	BuildID           *kernel.BuildID
+	GitRefType        string
+	GitRefValue       string
+	ImageTag          string
+	ImageRepository   string
+	CrossCluster      bool
+	SyncManifests     []SyncManifest
+	Status            Status
+	CurrentStage      Stage
+	RunType           RunType
+	RollbackOfRunID   *kernel.DeploymentRunID
+	UndeployOptions   *UndeployOptions
+	ArchiveGeneration string
+	ErrorMessage      string
+	CreatedBy         kernel.MemberID
+	CreatedAt         time.Time
+	StartedAt         *time.Time
+	FinishedAt        *time.Time
+	Version           int64
+	AttemptCount      int
+	LeaseOwner        string
+	LeaseExpiresAt    *time.Time
 }
 
 type DeploymentRunEvent struct {
@@ -210,22 +211,22 @@ func NewUndeployRun(
 ) *DeploymentRun {
 	options := opts
 	return &DeploymentRun{
-		ID:              kernel.NewDeploymentRunID(),
-		WorkspaceID:     wsID,
-		ProjectID:       projectID,
-		ClusterID:       baseline.ClusterID,
+		ID:               kernel.NewDeploymentRunID(),
+		WorkspaceID:      wsID,
+		ProjectID:        projectID,
+		ClusterID:        baseline.ClusterID,
 		EnvironmentID:    baseline.EnvironmentID,
 		ProjectVersionID: baseline.ProjectVersionID,
 		DeployNamespace:  baseline.DeployNamespace,
-		CreatedBy:       createdBy,
-		GitRefType:      baseline.GitRefType,
-		GitRefValue:     baseline.GitRefValue,
-		ImageTag:        baseline.ImageTag,
-		ImageRepository: baseline.ImageRepository,
-		Status:          StatusQueued,
-		RunType:         RunTypeUndeploy,
-		UndeployOptions: &options,
-		CreatedAt:       time.Now().UTC(),
+		CreatedBy:        createdBy,
+		GitRefType:       baseline.GitRefType,
+		GitRefValue:      baseline.GitRefValue,
+		ImageTag:         baseline.ImageTag,
+		ImageRepository:  baseline.ImageRepository,
+		Status:           StatusQueued,
+		RunType:          RunTypeUndeploy,
+		UndeployOptions:  &options,
+		CreatedAt:        time.Now().UTC(),
 	}
 }
 

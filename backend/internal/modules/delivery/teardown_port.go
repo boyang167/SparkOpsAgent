@@ -16,6 +16,7 @@ const teardownRunWindow = 100
 type teardownRunReader interface {
 	ListByProject(ctx context.Context, projectID kernel.ProjectID, limit int) ([]*model.DeploymentRun, error)
 	HasActiveByProject(ctx context.Context, projectID kernel.ProjectID) (bool, error)
+	FindByID(ctx context.Context, runID kernel.DeploymentRunID) (*model.DeploymentRun, error)
 }
 
 type teardownPort struct {
@@ -44,11 +45,19 @@ func (p *teardownPort) HasActiveRun(ctx context.Context, projectID kernel.Projec
 }
 
 func (p *teardownPort) StartUndeploy(ctx context.Context, req appctx.UndeployRequest) (kernel.DeploymentRunID, error) {
-	run, err := p.undeploy.StartForArchive(ctx, req.WorkspaceID, req.MemberID, req.ProjectID, req.ClusterID)
+	run, err := p.undeploy.StartForArchive(ctx, req.WorkspaceID, req.MemberID, req.ProjectID, req.ClusterID, req.ArchiveGeneration)
 	if err != nil {
 		return kernel.DeploymentRunID{}, err
 	}
 	return run.ID, nil
+}
+
+func (p *teardownPort) ArchiveGeneration(ctx context.Context, runID kernel.DeploymentRunID) (string, error) {
+	run, err := p.runs.FindByID(ctx, runID)
+	if err != nil {
+		return "", err
+	}
+	return run.ArchiveGeneration, nil
 }
 
 func (p *teardownPort) DisablePipeline(ctx context.Context, wsID kernel.WorkspaceID, projectID kernel.ProjectID) error {

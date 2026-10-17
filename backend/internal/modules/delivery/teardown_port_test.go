@@ -2,9 +2,11 @@ package delivery
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
@@ -22,6 +24,15 @@ func (l teardownRunLister) ListByProject(context.Context, kernel.ProjectID, int)
 
 func (l teardownRunLister) HasActiveByProject(context.Context, kernel.ProjectID) (bool, error) {
 	return l.active, nil
+}
+
+func (l teardownRunLister) FindByID(_ context.Context, runID kernel.DeploymentRunID) (*model.DeploymentRun, error) {
+	for _, run := range l.runs {
+		if run.ID == runID {
+			return run, nil
+		}
+	}
+	return nil, errors.New("run not found")
 }
 
 func TestTeardownPortOnlineClustersFiltersWorkspace(t *testing.T) {
@@ -47,4 +58,18 @@ func TestTeardownPortHasActiveRun(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, active)
+}
+
+func TestTeardownPortLoadsArchiveGenerationByRunID(t *testing.T) {
+	run := model.NewDeploymentRun(
+		kernel.NewWorkspaceID(), kernel.NewProjectID(), kernel.NewClusterInfoID(),
+		kernel.NewMemberID(), "branch", "main", "v1",
+	)
+	run.ArchiveGeneration = uuid.NewString()
+	teardown := &teardownPort{runs: teardownRunLister{runs: []*model.DeploymentRun{run}}}
+
+	generation, err := teardown.ArchiveGeneration(context.Background(), run.ID)
+
+	require.NoError(t, err)
+	require.Equal(t, run.ArchiveGeneration, generation)
 }

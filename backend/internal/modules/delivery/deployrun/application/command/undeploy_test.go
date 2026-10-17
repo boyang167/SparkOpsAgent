@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
@@ -111,10 +112,12 @@ func TestUndeployRejectsArchivingProjectButStartForArchiveAllows(t *testing.T) {
 	})
 	require.ErrorIs(t, err, domain.ErrProjectArchiving)
 
-	run, err := handler.StartForArchive(context.Background(), wsID, kernel.NewMemberID(), projectID, clusterID)
+	generation := uuid.NewString()
+	run, err := handler.StartForArchive(context.Background(), wsID, kernel.NewMemberID(), projectID, clusterID, generation)
 	require.NoError(t, err)
 	require.Equal(t, model.RunTypeUndeploy, run.RunType)
 	require.Equal(t, &model.UndeployOptions{}, run.UndeployOptions)
+	require.Equal(t, generation, run.ArchiveGeneration)
 }
 
 func TestCreateDeploymentRejectsArchivingProject(t *testing.T) {
