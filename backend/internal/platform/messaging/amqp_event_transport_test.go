@@ -97,7 +97,8 @@ func TestEventTransportTreatsNackAsFailure(t *testing.T) {
 
 func TestEventTransportTreatsMandatoryReturnAsFailure(t *testing.T) {
 	returns := make(chan amqp.Return, 1)
-	returns <- amqp.Return{ReplyCode: 312, ReplyText: "NO_ROUTE"}
+	envelope := eventTransportTestEnvelope()
+	returns <- amqp.Return{ReplyCode: 312, ReplyText: "NO_ROUTE", MessageId: envelope.ID}
 
 	err := publishEventConfirmed(
 		context.Background(),
@@ -106,11 +107,31 @@ func TestEventTransportTreatsMandatoryReturnAsFailure(t *testing.T) {
 		make(chan *amqp.Error, 1),
 		eventExchangeName,
 		"delivery.BuildCompleted.v1",
-		eventTransportTestEnvelope(),
+		envelope,
 		nil,
 	)
 
 	require.ErrorContains(t, err, "returned")
+}
+
+func TestEventTransportIgnoresLateReturnForDifferentMessageID(t *testing.T) {
+	confirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
+	close(confirmation.done)
+	returns := make(chan amqp.Return, 1)
+	returns <- amqp.Return{ReplyCode: 312, ReplyText: "NO_ROUTE", MessageId: "previous-event"}
+
+	err := publishEventConfirmed(
+		context.Background(),
+		&stubEventPublishChannel{confirmation: confirmation},
+		returns,
+		make(chan *amqp.Error, 1),
+		eventExchangeName,
+		"delivery.BuildCompleted.v1",
+		eventTransportTestEnvelope(),
+		nil,
+	)
+
+	require.NoError(t, err)
 }
 
 func TestEventTransportTreatsChannelCloseAsFailure(t *testing.T) {
@@ -280,6 +301,77 @@ func TestEventTransportFailedPublishDoesNotWaitForChannelClose(t *testing.T) {
 	require.Zero(t, channel.closeCalls)
 }
 
+func TestEventTransportReusesHealthyPublisherAfterMessageFailures(t *testing.T) {
+	confirmations := make([]eventConfirmation, 3)
+	for index := range confirmations {
+		confirmation := &stubEventConfirmation{done: make(chan struct{})}
+		close(confirmation.done)
+		confirmations[index] = confirmation
+	}
+	channel := newStubEventChannel(confirmations[0])
+	channel.confirmations = confirmations
+	connection := &stubEventConnection{channels: []eventChannel{channel}}
+	transport := newAMQPEventTransport(connection)
+
+	for range confirmations {
+		require.ErrorContains(t, transport.Publish(context.Background(), eventTransportTestEnvelope()), "nack")
+	}
+
+	require.Equal(t, 1, connection.channelCalls)
+	require.Equal(t, 1, channel.returnListenerCalls)
+	require.Equal(t, 1, channel.closeListenerCalls)
+}
+
+func TestEventTransportReusesHealthyPublisherAfterReturnAndTimeout(t *testing.T) {
+	pendingConfirmation := &stubEventConfirmation{done: make(chan struct{})}
+	channel := newStubEventChannel(pendingConfirmation)
+	connection := &stubEventConnection{channels: []eventChannel{channel}}
+	transport := newAMQPEventTransport(connection)
+	envelope := eventTransportTestEnvelope()
+
+	for range 3 {
+		channel.returns <- amqp.Return{ReplyCode: 312, ReplyText: "NO_ROUTE", MessageId: envelope.ID}
+		require.ErrorContains(t, transport.Publish(context.Background(), envelope), "returned")
+	}
+	for range 3 {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+		require.ErrorIs(t, transport.Publish(ctx, envelope), context.DeadlineExceeded)
+		cancel()
+	}
+
+	require.Equal(t, 1, connection.channelCalls)
+	require.Equal(t, 1, channel.returnListenerCalls)
+	require.Equal(t, 1, channel.closeListenerCalls)
+}
+
+func TestEventTransportReusesHealthyPublisherAfterPublishError(t *testing.T) {
+	channel := newStubEventChannel(nil)
+	channel.publishError = errors.New("temporary write error")
+	connection := &stubEventConnection{channels: []eventChannel{channel}}
+	transport := newAMQPEventTransport(connection)
+
+	for range 3 {
+		require.ErrorIs(t, transport.Publish(context.Background(), eventTransportTestEnvelope()), channel.publishError)
+	}
+
+	require.Equal(t, 1, connection.channelCalls)
+}
+
+func TestEventTransportRecreatesPublisherAfterNotifyClose(t *testing.T) {
+	firstConfirmation := &stubEventConfirmation{done: make(chan struct{})}
+	firstChannel := newStubEventChannel(firstConfirmation)
+	firstChannel.closed <- &amqp.Error{Code: 504, Reason: "channel closed"}
+	secondConfirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
+	close(secondConfirmation.done)
+	secondChannel := newStubEventChannel(secondConfirmation)
+	connection := &stubEventConnection{channels: []eventChannel{firstChannel, secondChannel}}
+	transport := newAMQPEventTransport(connection)
+
+	require.ErrorContains(t, transport.Publish(context.Background(), eventTransportTestEnvelope()), "closed")
+	require.NoError(t, transport.Publish(context.Background(), eventTransportTestEnvelope()))
+	require.Equal(t, 2, connection.channelCalls)
+}
+
 func TestEventTransportCloseAfterConfirmedPublishIsIdempotent(t *testing.T) {
 	confirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
 	close(confirmation.done)
@@ -312,9 +404,9 @@ func TestEventTransportRecreatesPublisherAfterFailedConcurrentPublish(t *testing
 	go func() {
 		secondResult <- transport.Publish(context.Background(), eventTransportTestEnvelope())
 	}()
-	close(firstConfirmation.done)
+	firstChannel.closed <- &amqp.Error{Code: 504, Reason: "channel closed"}
 
-	require.ErrorContains(t, <-firstResult, "nack")
+	require.ErrorContains(t, <-firstResult, "closed")
 	require.NoError(t, <-secondResult)
 	require.Equal(t, 2, connection.channelCalls)
 }
@@ -344,12 +436,18 @@ func (c *stubEventConnection) CloseDeadline(time.Time) error {
 
 type stubEventChannel struct {
 	confirmation              eventConfirmation
+	confirmations             []eventConfirmation
+	publishCalls              int
 	publishStarted            chan struct{}
 	returns                   chan amqp.Return
 	closed                    chan *amqp.Error
 	closeBlock                chan struct{}
 	suppressCloseNotification bool
 	closeCalls                int
+	returnListenerCalls       int
+	closeListenerCalls        int
+	isClosed                  bool
+	publishError              error
 }
 
 func newStubEventChannel(confirmation eventConfirmation) *stubEventChannel {
@@ -369,8 +467,19 @@ func (c *stubEventChannel) PublishWithDeferredConfirmWithContext(
 	bool,
 	amqp.Publishing,
 ) (eventConfirmation, error) {
-	close(c.publishStarted)
-	return c.confirmation, nil
+	if c.publishCalls == 0 {
+		close(c.publishStarted)
+	}
+	if c.publishError != nil {
+		c.publishCalls++
+		return nil, c.publishError
+	}
+	confirmation := c.confirmation
+	if c.publishCalls < len(c.confirmations) {
+		confirmation = c.confirmations[c.publishCalls]
+	}
+	c.publishCalls++
+	return confirmation, nil
 }
 
 func (*stubEventChannel) Confirm(bool) error { return nil }
@@ -391,9 +500,17 @@ func (*stubEventChannel) Consume(string, string, bool, bool, bool, bool, amqp.Ta
 
 func (*stubEventChannel) Cancel(string, bool) error { return nil }
 
-func (c *stubEventChannel) NotifyReturn(chan amqp.Return) chan amqp.Return { return c.returns }
+func (c *stubEventChannel) NotifyReturn(chan amqp.Return) chan amqp.Return {
+	c.returnListenerCalls++
+	return c.returns
+}
 
-func (c *stubEventChannel) NotifyClose(chan *amqp.Error) chan *amqp.Error { return c.closed }
+func (c *stubEventChannel) NotifyClose(chan *amqp.Error) chan *amqp.Error {
+	c.closeListenerCalls++
+	return c.closed
+}
+
+func (c *stubEventChannel) IsClosed() bool { return c.isClosed }
 
 func (c *stubEventChannel) Close() error {
 	c.closeCalls++

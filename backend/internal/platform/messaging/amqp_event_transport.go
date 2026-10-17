@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -15,6 +16,8 @@ const (
 	eventAttemptsHeader = "x-sparkops-attempts"
 	eventCloseTimeout   = time.Second
 )
+
+var errEventPublisherClosed = errors.New("event publisher channel closed")
 
 type RetryDelay time.Duration
 
@@ -55,6 +58,7 @@ type eventChannel interface {
 	Cancel(string, bool) error
 	NotifyReturn(chan amqp.Return) chan amqp.Return
 	NotifyClose(chan *amqp.Error) chan *amqp.Error
+	IsClosed() bool
 	Close() error
 }
 
@@ -160,6 +164,10 @@ func (c *realEventChannel) NotifyReturn(receiver chan amqp.Return) chan amqp.Ret
 
 func (c *realEventChannel) NotifyClose(receiver chan *amqp.Error) chan *amqp.Error {
 	return c.channel.NotifyClose(receiver)
+}
+
+func (c *realEventChannel) IsClosed() bool {
+	return c.channel.IsClosed()
 }
 
 func (c *realEventChannel) Close() error {
@@ -341,10 +349,14 @@ func (t *amqpEventTransport) publish(
 		headers,
 		closing,
 	)
-	if err != nil {
+	if shouldInvalidatePublisher(err, channel) {
 		t.invalidatePublisher(channel)
 	}
 	return err
+}
+
+func shouldInvalidatePublisher(err error, channel eventChannel) bool {
+	return errors.Is(err, errEventPublisherClosed) || channel.IsClosed()
 }
 
 func publishEventConfirmed(
@@ -388,39 +400,52 @@ func publishEventConfirmed(
 		return fmt.Errorf("publish event: confirm mode is not enabled")
 	}
 
-	select {
-	case returned, ok := <-returns:
-		if !ok {
-			return fmt.Errorf("publish event: return listener closed")
-		}
-		return fmt.Errorf(
-			"publish event returned: code=%d text=%s",
-			returned.ReplyCode,
-			returned.ReplyText,
-		)
-	case closeErr, ok := <-closed:
-		if !ok || closeErr == nil {
-			return fmt.Errorf("publish event: channel closed")
-		}
-		return fmt.Errorf("publish event: channel closed: %s", closeErr.Reason)
-	case <-confirmation.Done():
-		if !confirmation.Acked() {
-			return fmt.Errorf("publish event: broker nack")
-		}
+	for {
 		select {
-		case returned := <-returns:
+		case returned, ok := <-returns:
+			if !ok {
+				return fmt.Errorf("publish event: return listener closed")
+			}
+			if returned.MessageId != envelope.ID {
+				continue
+			}
 			return fmt.Errorf(
 				"publish event returned: code=%d text=%s",
 				returned.ReplyCode,
 				returned.ReplyText,
 			)
-		default:
-			return nil
+		case closeErr, ok := <-closed:
+			if !ok || closeErr == nil {
+				return fmt.Errorf("%w: publish event: channel closed", errEventPublisherClosed)
+			}
+			return fmt.Errorf("%w: publish event: channel closed: %s", errEventPublisherClosed, closeErr.Reason)
+		case <-confirmation.Done():
+			if !confirmation.Acked() {
+				return fmt.Errorf("publish event: broker nack")
+			}
+			for {
+				select {
+				case returned, ok := <-returns:
+					if !ok {
+						return fmt.Errorf("publish event: return listener closed")
+					}
+					if returned.MessageId != envelope.ID {
+						continue
+					}
+					return fmt.Errorf(
+						"publish event returned: code=%d text=%s",
+						returned.ReplyCode,
+						returned.ReplyText,
+					)
+				default:
+					return nil
+				}
+			}
+		case <-ctx.Done():
+			return fmt.Errorf("publish event confirmation: %w", ctx.Err())
+		case <-stop:
+			return fmt.Errorf("publish event: transport closed")
 		}
-	case <-ctx.Done():
-		return fmt.Errorf("publish event confirmation: %w", ctx.Err())
-	case <-stop:
-		return fmt.Errorf("publish event: transport closed")
 	}
 }
 
@@ -436,7 +461,7 @@ func (t *amqpEventTransport) publisherChannel() (
 		t.mu.Unlock()
 		return nil, nil, nil, nil, fmt.Errorf("amqp event transport is closed")
 	}
-	if t.publisher != nil {
+	if t.publisher != nil && !t.publisher.IsClosed() {
 		channel := t.publisher
 		returns := t.publisherReturns
 		closed := t.publisherClosed
@@ -444,6 +469,7 @@ func (t *amqpEventTransport) publisherChannel() (
 		t.mu.Unlock()
 		return channel, returns, closed, closing, nil
 	}
+	t.invalidatePublisherLocked()
 	connection := t.connection
 	closing := t.closing
 	t.mu.Unlock()

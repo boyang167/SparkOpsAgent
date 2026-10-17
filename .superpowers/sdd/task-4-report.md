@@ -93,6 +93,44 @@ go test ./internal/platform/messaging -run 'EventTopology|EventTransport' -count
 PASS
 ```
 
+## P1 最终修订：消息级失败的资源上界
+
+复审发现上一版把每个发布错误都传给 `invalidatePublisher`。由于为避免同步 `Channel.Close` 阻塞而只脱离本地引用，连续 NACK、mandatory return 或 context timeout 会留下健康旧 channel 及其 Notify listeners，并为下一次发布创建新 channel，形成无界累积。
+
+### TDD 记录
+
+先新增 `TestEventTransportReusesHealthyPublisherAfterMessageFailures`：同一 transport 连续三个 NACK，只提供一个健康 fake channel，断言 `connection.Channel()` 与两类 Notify listener 各只调用一次。修复前得到真实 RED：
+
+```text
+open event publisher channel: no event channels
+```
+
+这证明每次 NACK 都错误地使 publisher 脱离状态。随后调整失效规则：
+
+- NACK、匹配的 mandatory return、context timeout/cancel，以及 Publish 返回但 channel 仍健康时，只返回消息级错误并复用 publisher；
+- `amqp.Return.MessageId` 必须等于当前 envelope ID 才能使本次发布失败；不匹配的迟到 return 在等待及 ACK 后 drain 时均被忽略；
+- 仅 `NotifyClose`、`IsClosed()`，或 Publish 返回错误且 `IsClosed()` 为真时，才从状态中失效；
+- `eventChannel` 增加最小 `IsClosed()`；真实适配调用 `amqp.Channel.IsClosed()`；
+- 未恢复同步 `Channel.Close`，全局 `closing` 信号与 `Connection.CloseDeadline(1s)` 方案保持不变。
+
+### 资源上界验证
+
+新增并通过：
+
+- `TestEventTransportReusesHealthyPublisherAfterMessageFailures`：重复 NACK 不增加 channel/listener；
+- `TestEventTransportReusesHealthyPublisherAfterReturnAndTimeout`：重复匹配 return 与 timeout 不增加 channel/listener；
+- `TestEventTransportReusesHealthyPublisherAfterPublishError`：健康 channel 上的 Publish 错误不重建；
+- `TestEventTransportIgnoresLateReturnForDifferentMessageID`：前一条消息的迟到 return 不污染当前确认；
+- `TestEventTransportRecreatesPublisherAfterNotifyClose`：收到关闭通知后恰好重建一次。
+
+```text
+go test ./internal/platform/messaging -run 'EventTransport|Close|Publish' -count=1
+PASS
+
+go test ./internal/platform/messaging -run 'EventTopology|EventTransport' -count=1
+PASS
+```
+
 额外尝试 `go test -race` 未能启动：本机 C 编译器报 `cc1.exe: sorry, unimplemented: 64-bit mode not compiled in`。这属于本地工具链限制；上述非 race 单元测试均实际通过。
 
 ## P1 修订：真实 AMQP 同步关闭语义
