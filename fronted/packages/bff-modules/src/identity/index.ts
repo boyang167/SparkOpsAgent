@@ -1,6 +1,14 @@
 export { executeLogin, executeRegister, getSession } from "./login";
 export { updateProfile, changePassword } from "./profile";
-export { getAuthProviders, startOIDCLogin, completeOIDCLogin, executeLDAPLogin } from "./sso";
+export {
+  getAuthProviders,
+  startOIDCLogin,
+  completeOIDCLogin,
+  executeLDAPLogin,
+  getSSOAdminConfig,
+  testSSOProvider,
+  updateSSOAdminConfig,
+} from "./sso";
 export {
   listPlatformMembers,
   createPlatformMember,

@@ -62,6 +62,89 @@ export const AuthProvidersVMSchema = z.object({
 
 export type AuthProvidersVM = z.infer<typeof AuthProvidersVMSchema>;
 
+export const SSOProviderSchema = z.enum(["oidc", "ldap"]);
+
+export const SSOLoginUISettingsSchema = z.object({
+  enabled: z.boolean(),
+  provider: SSOProviderSchema,
+  show_password_login: z.boolean(),
+}).strict();
+
+const OIDCAdminBaseSchema = z.object({
+  enabled: z.boolean(),
+  issuer: z.string(),
+  client_id: z.string(),
+  redirect_url: z.string(),
+  scopes: z.string(),
+  authorization_endpoint: z.string(),
+  token_endpoint: z.string(),
+  userinfo_endpoint: z.string(),
+  tested_fingerprint: z.string(),
+  tested_at: z.string().optional(),
+}).strict();
+
+const LDAPAdminBaseSchema = z.object({
+  enabled: z.boolean(),
+  url: z.string(),
+  bind_dn: z.string(),
+  user_search_base: z.string(),
+  user_search_filter: z.string(),
+  email_attribute: z.string(),
+  name_attribute: z.string(),
+  tested_fingerprint: z.string(),
+  tested_at: z.string().optional(),
+}).strict();
+
+export const SSOOIDCAdminVMSchema = OIDCAdminBaseSchema.extend({
+  has_client_secret: z.boolean(),
+  runtime_enabled: z.boolean(),
+}).strict();
+
+export const SSOLDAPAdminVMSchema = LDAPAdminBaseSchema.extend({
+  has_bind_password: z.boolean(),
+  runtime_enabled: z.boolean(),
+}).strict();
+
+export const SSOAdminConfigVMSchema = z.object({
+  version: z.number().int().nonnegative(),
+  login_ui: SSOLoginUISettingsSchema,
+  oidc: SSOOIDCAdminVMSchema,
+  ldap: SSOLDAPAdminVMSchema,
+}).strict();
+
+export type SSOAdminConfigVM = z.infer<typeof SSOAdminConfigVMSchema>;
+
+export const UpdateSSOConfigCommandSchema = z.object({
+  version: z.number().int().nonnegative(),
+  login_ui: SSOLoginUISettingsSchema,
+  oidc: OIDCAdminBaseSchema.extend({
+    client_secret: z.string(),
+    clear_client_secret: z.boolean(),
+  }).strict(),
+  ldap: LDAPAdminBaseSchema.extend({
+    bind_password: z.string(),
+    clear_bind_password: z.boolean(),
+  }).strict(),
+}).strict();
+
+export type UpdateSSOConfigCommand = z.infer<typeof UpdateSSOConfigCommandSchema>;
+
+export const TestSSOProviderCommandSchema = z.object({
+  provider: SSOProviderSchema,
+  config: UpdateSSOConfigCommandSchema,
+}).strict();
+
+export type TestSSOProviderCommand = z.infer<typeof TestSSOProviderCommandSchema>;
+
+export const TestSSOProviderResultVMSchema = z.object({
+  provider: SSOProviderSchema,
+  fingerprint: z.string().length(64),
+  tested_at: z.string(),
+  message: z.string(),
+}).strict();
+
+export type TestSSOProviderResultVM = z.infer<typeof TestSSOProviderResultVMSchema>;
+
 export const LDAPLoginCommandSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(1),

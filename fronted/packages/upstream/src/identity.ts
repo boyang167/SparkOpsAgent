@@ -1,4 +1,12 @@
-import type { LoginCommand, MeVM, RegisterCommand } from "@sparkops/contracts/identity";
+import type {
+  LoginCommand,
+  MeVM,
+  RegisterCommand,
+  SSOAdminConfigVM,
+  TestSSOProviderCommand,
+  TestSSOProviderResultVM,
+  UpdateSSOConfigCommand,
+} from "@sparkops/contracts/identity";
 import type { UpstreamRequestOptions } from "./core";
 import { upstreamFetch } from "./core";
 
@@ -87,6 +95,29 @@ export function createIdentityUpstream(options: UpstreamRequestOptions = {}) {
     async ldapLogin(input: { username: string; password: string }) {
       return upstreamFetch<LoginUpstreamData>("/api/v1/auth/ldap/login", {
         method: "POST",
+        body: JSON.stringify(input),
+        options,
+      });
+    },
+
+    async getSSOAdminConfig() {
+      return upstreamFetch<SSOAdminConfigVM>("/api/v1/admin/sso", {
+        method: "GET",
+        options,
+      });
+    },
+
+    async testSSOProvider(input: TestSSOProviderCommand) {
+      return upstreamFetch<TestSSOProviderResultVM>("/api/v1/admin/sso/test", {
+        method: "POST",
+        body: JSON.stringify(input),
+        options,
+      });
+    },
+
+    async updateSSOAdminConfig(input: UpdateSSOConfigCommand) {
+      return upstreamFetch<SSOAdminConfigVM>("/api/v1/admin/sso", {
+        method: "PUT",
         body: JSON.stringify(input),
         options,
       });

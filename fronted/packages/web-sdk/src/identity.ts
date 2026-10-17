@@ -45,6 +45,31 @@ export function ldapLogin(input: { username: string; password: string }) {
   });
 }
 
+export function getSSOAdminConfig() {
+  return bffFetch<import("@sparkops/contracts/identity").SSOAdminConfigVM>("/admin/sso");
+}
+
+export function testSSOProvider(
+  input: import("@sparkops/contracts/identity").TestSSOProviderCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/identity").TestSSOProviderResultVM>(
+    "/admin/sso/test",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function updateSSOAdminConfig(
+  input: import("@sparkops/contracts/identity").UpdateSSOConfigCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/identity").SSOAdminConfigVM>("/admin/sso", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
 export function listPlatformMembers() {
   return bffFetch<{ items: import("@sparkops/contracts/identity").PlatformMemberVM[] }>(
     "/platform/members",
