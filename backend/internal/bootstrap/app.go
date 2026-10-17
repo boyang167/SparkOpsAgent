@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -39,6 +40,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/k8s"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/observability"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/operationlog"
 	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
@@ -81,6 +83,9 @@ func Run(ctx context.Context) error {
 		if err := cfg.Validate(); err != nil {
 			return fmt.Errorf("config validation: %w", err)
 		}
+	}
+	if err := validateMessagingBootstrap(cfg, db); err != nil {
+		return fmt.Errorf("messaging schema validation: %w", err)
 	}
 
 	redisClient, err := openRedis(cfg, logger)
@@ -254,6 +259,13 @@ func Run(ctx context.Context) error {
 		factoryClosed = true
 		return errors.Join(err, closeErr)
 	}
+}
+
+func validateMessagingBootstrap(cfg *config.Config, db *gorm.DB) error {
+	if cfg == nil || !strings.EqualFold(strings.TrimSpace(cfg.Messaging.Driver), "amqp") {
+		return nil
+	}
+	return persistence.ValidateTransactionalEventSchema(db)
 }
 
 func loadConfig() (*config.Config, error) {

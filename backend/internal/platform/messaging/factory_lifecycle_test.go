@@ -243,6 +243,61 @@ func TestFactoryConstructionFailureClosesAlreadyOpenedQueue(t *testing.T) {
 	require.ErrorIs(t, err, closeErr)
 }
 
+func TestFactoryAMQPSchemaFailureDoesNotConstructWorkersOrConnections(t *testing.T) {
+	dialector := factoryPostgresNamedSQLite{
+		Dialector: sqlite.Open("file:" + t.Name() + "?mode=memory&cache=shared"),
+	}
+	db, err := gorm.Open(dialector, &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS information_schema").Error)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS public").Error)
+	require.NoError(t, db.Exec(
+		"CREATE TABLE information_schema.tables (table_schema TEXT, table_name TEXT)",
+	).Error)
+	require.NoError(t, db.Exec(
+		"CREATE TABLE public.schema_migrations (version INTEGER, dirty BOOLEAN)",
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO public.schema_migrations (version, dirty) VALUES (69, false)",
+	).Error)
+
+	queueCreated := false
+	transportCreated := false
+	_, err = newFromConfig(
+		&config.Config{Messaging: config.MessagingConfig{
+			Driver: "amqp",
+			AMQP:   config.AMQPConfig{URL: "amqp://broker", EventExchange: "events"},
+		}},
+		db,
+		events.NewRegistry(),
+		postgres.NewTransactor(db),
+		zap.NewNop(),
+		factoryDependencies{
+			newQueue: func(AMQPConfig) (Queue, error) {
+				queueCreated = true
+				return &recordingQueue{close: func() error { return nil }}, nil
+			},
+			newMetrics: NewMetrics,
+			newEventTransport: func(string, *Metrics, ...string) (EventTransport, error) {
+				transportCreated = true
+				return &fakeEventTransport{}, nil
+			},
+			runtimeIdentity: runtimeIdentity,
+		},
+	)
+
+	require.ErrorContains(t, err, "version 70")
+	require.ErrorContains(t, err, "make migrate-up")
+	require.False(t, queueCreated)
+	require.False(t, transportCreated)
+}
+
+type factoryPostgresNamedSQLite struct {
+	gorm.Dialector
+}
+
+func (factoryPostgresNamedSQLite) Name() string { return "postgres" }
+
 type recordingLifecycle struct {
 	start func(context.Context) error
 	close func() error

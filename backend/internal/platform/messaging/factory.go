@@ -122,10 +122,15 @@ func newFromConfig(
 		driver = "inmemory"
 	}
 	driver = strings.ToLower(strings.TrimSpace(driver))
+	if driver == "amqp" {
+		if err := persistence.ValidateTransactionalEventSchema(db); err != nil {
+			return nil, err
+		}
+	}
 	instanceOwner, runtimeID := dependencies.runtimeIdentity()
 
 	var metrics *Metrics
-	if driver == "amqp" || db != nil {
+	if driver == "amqp" {
 		var err error
 		metrics, err = dependencies.newMetrics(prometheus.DefaultRegisterer)
 		if err != nil {
@@ -194,7 +199,7 @@ func newFromConfig(
 		return nil, fmt.Errorf("unknown messaging driver: %s", driver)
 	}
 
-	if db != nil {
+	if driver == "amqp" {
 		operationStore := persistence.NewOperationStore(db)
 		operationRegistry := NewOperationRegistry()
 		factory.Operations = &OperationRuntime{

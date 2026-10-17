@@ -1,24 +1,90 @@
 package persistence
 
 import (
-	"gorm.io/gorm"
+	"fmt"
 
-	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
+	"gorm.io/gorm"
 )
 
 func AutoMigrate(db *gorm.DB) error {
-	if !postgres.ShouldRunAutoMigrate(db) {
-		return nil
-	}
 	if db.Dialector.Name() == "postgres" {
-		if err := db.Exec("CREATE SCHEMA IF NOT EXISTS platform").Error; err != nil {
-			return err
-		}
+		return nil
 	}
 	if err := db.AutoMigrate(&EventOutbox{}, &EventInbox{}, &OperationOutbox{}); err != nil {
 		return err
 	}
 	return createIndexes(db)
+}
+
+const transactionalEventMigrationVersion = 70
+
+// ValidateTransactionalEventSchema requires the official SQL migration on PostgreSQL.
+// Non-PostgreSQL databases are used only by unit tests and retain GORM AutoMigrate.
+func ValidateTransactionalEventSchema(db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("database is required for transactional event messaging")
+	}
+	if db.Dialector.Name() != "postgres" {
+		return nil
+	}
+
+	var migration struct {
+		Version int
+		Dirty   bool
+	}
+	result := db.Raw(
+		"SELECT version, dirty FROM public.schema_migrations LIMIT 1",
+	).Scan(&migration)
+	if result.Error != nil {
+		return migrationRequiredError("query public.schema_migrations", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return migrationRequiredError("no applied migration version found", nil)
+	}
+	if migration.Dirty {
+		return migrationRequiredError(
+			fmt.Sprintf("schema migration version %d is dirty", migration.Version),
+			nil,
+		)
+	}
+	if migration.Version < transactionalEventMigrationVersion {
+		return migrationRequiredError(
+			fmt.Sprintf(
+				"schema migration version %d is older than required version %d",
+				migration.Version,
+				transactionalEventMigrationVersion,
+			),
+			nil,
+		)
+	}
+
+	var tableCount int64
+	if err := db.Raw(`
+		SELECT COUNT(*)
+		FROM information_schema.tables
+		WHERE table_schema = 'platform'
+		  AND table_name IN ('event_outbox', 'event_inbox', 'operation_outbox')
+	`).Scan(&tableCount).Error; err != nil {
+		return migrationRequiredError("verify platform transactional event tables", err)
+	}
+	if tableCount != 3 {
+		return migrationRequiredError(
+			fmt.Sprintf("expected 3 platform tables, found %d", tableCount),
+			nil,
+		)
+	}
+	return nil
+}
+
+func migrationRequiredError(reason string, cause error) error {
+	message := fmt.Sprintf(
+		"transactional event schema is not ready: %s; run `make migrate-up` with DATABASE_URL to apply migration 000070",
+		reason,
+	)
+	if cause == nil {
+		return fmt.Errorf("%s", message)
+	}
+	return fmt.Errorf("%s: %w", message, cause)
 }
 
 func createIndexes(db *gorm.DB) error {

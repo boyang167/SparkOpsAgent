@@ -134,6 +134,126 @@ func TestAutoMigrateSkipsWhenSQLMigrationsApplied(t *testing.T) {
 	require.Zero(t, count)
 }
 
+func TestAutoMigrateDoesNotCreateTransactionalTablesOnFreshPostgres(t *testing.T) {
+	dialector := postgresNamedSQLite{Dialector: sqlite.Open("file:" + t.Name() + "?mode=memory&cache=shared")}
+	db := openAttachedPlatformSQLite(t, dialector)
+
+	require.NoError(t, AutoMigrate(db))
+
+	var count int64
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) FROM platform.sqlite_master WHERE type = 'table' AND name IN ?",
+		[]string{"event_outbox", "event_inbox", "operation_outbox"},
+	).Scan(&count).Error)
+	require.Zero(t, count)
+}
+
+func TestValidateTransactionalEventSchema(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func(*testing.T, *gorm.DB)
+		wantErr string
+	}{
+		{
+			name: "fresh database",
+			setup: func(t *testing.T, db *gorm.DB) {
+				attachMigrationSchemas(t, db)
+				require.NoError(t, db.Exec(
+					"CREATE TABLE public.schema_migrations (version INTEGER, dirty BOOLEAN)",
+				).Error)
+			},
+			wantErr: "make migrate-up",
+		},
+		{
+			name: "migration query error",
+			setup: func(t *testing.T, db *gorm.DB) {
+				attachMigrationSchemas(t, db)
+			},
+			wantErr: "query public.schema_migrations",
+		},
+		{
+			name: "old migration",
+			setup: func(t *testing.T, db *gorm.DB) {
+				attachMigrationSchemas(t, db)
+				createMigrationState(t, db, 69, false)
+			},
+			wantErr: "version 70",
+		},
+		{
+			name: "dirty migration",
+			setup: func(t *testing.T, db *gorm.DB) {
+				attachMigrationSchemas(t, db)
+				createMigrationState(t, db, 70, true)
+			},
+			wantErr: "dirty",
+		},
+		{
+			name: "current migration missing tables",
+			setup: func(t *testing.T, db *gorm.DB) {
+				attachMigrationSchemas(t, db)
+				createMigrationState(t, db, 70, false)
+			},
+			wantErr: "platform tables",
+		},
+		{
+			name: "current migration",
+			setup: func(t *testing.T, db *gorm.DB) {
+				attachMigrationSchemas(t, db)
+				createMigrationState(t, db, 70, false)
+				for _, table := range []string{"event_outbox", "event_inbox", "operation_outbox"} {
+					require.NoError(t, db.Exec(
+						"INSERT INTO information_schema.tables (table_schema, table_name) VALUES ('platform', ?)",
+						table,
+					).Error)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dialector := postgresNamedSQLite{
+				Dialector: sqlite.Open("file:" + strings.ReplaceAll(t.Name(), "/", "-") + "?mode=memory&cache=shared"),
+			}
+			db := openAttachedPlatformSQLite(t, dialector)
+			tt.setup(t, db)
+
+			err := ValidateTransactionalEventSchema(db)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestValidateTransactionalEventSchemaAllowsSQLiteUnitTests(t *testing.T) {
+	db := openAttachedPlatformSQLite(t, sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"))
+	require.NoError(t, ValidateTransactionalEventSchema(db))
+}
+
+func attachMigrationSchemas(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS information_schema").Error)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS public").Error)
+	require.NoError(t, db.Exec(
+		"CREATE TABLE information_schema.tables (table_schema TEXT, table_name TEXT)",
+	).Error)
+}
+
+func createMigrationState(t *testing.T, db *gorm.DB, version int, dirty bool) {
+	t.Helper()
+	require.NoError(t, db.Exec(
+		"CREATE TABLE public.schema_migrations (version INTEGER, dirty BOOLEAN)",
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO public.schema_migrations (version, dirty) VALUES (?, ?)",
+		version,
+		dirty,
+	).Error)
+}
+
 type postgresNamedSQLite struct {
 	gorm.Dialector
 }
