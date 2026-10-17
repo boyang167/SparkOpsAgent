@@ -428,7 +428,26 @@ export function ReleasePlanCreatePage({
           if (!isTextOnly) setJobsBusy(true);
           try {
             await product.updateReleasePlanJob(workspaceId, productId, planId, jobId, patch);
-            if (!isTextOnly) await refreshPlan(planId);
+            if (isTextOnly) {
+              setPlan((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      jobs: (prev.jobs ?? []).map((job) =>
+                        job.id === jobId
+                          ? {
+                              ...job,
+                              ...(patch.text_content !== undefined ? { text_content: patch.text_content } : {}),
+                              ...(patch.text_format !== undefined ? { text_format: patch.text_format } : {}),
+                            }
+                          : job,
+                      ),
+                    }
+                  : prev,
+              );
+            } else {
+              await refreshPlan(planId);
+            }
           } catch (err) {
             setError(err instanceof BffError ? err.message : "更新失败");
           } finally {

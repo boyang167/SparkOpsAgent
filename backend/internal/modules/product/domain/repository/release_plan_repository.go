@@ -34,8 +34,10 @@ type ReleasePlanRepository interface {
 	ListJobsByPlan(ctx context.Context, planID kernel.ReleasePlanID) ([]model.ReleasePlanJob, error)
 	SaveAuditLog(ctx context.Context, log *model.ReleasePlanAuditLog) error
 	ListAuditLogs(ctx context.Context, planID kernel.ReleasePlanID, limit int) ([]model.ReleasePlanAuditLog, error)
+	ListAuditLogsPage(ctx context.Context, planID kernel.ReleasePlanID, limit, offset int) ([]model.ReleasePlanAuditLog, error)
 	SaveVersion(ctx context.Context, version *model.ReleasePlanVersion) error
 	ListVersionsByPlan(ctx context.Context, planID kernel.ReleasePlanID, limit int) ([]model.ReleasePlanVersion, error)
+	ListVersionsByPlanPage(ctx context.Context, planID kernel.ReleasePlanID, limit, offset int) ([]model.ReleasePlanVersion, error)
 	GetVersion(ctx context.Context, planID kernel.ReleasePlanID, version int) (*model.ReleasePlanVersion, error)
 	UpdatePlanVersion(ctx context.Context, planID kernel.ReleasePlanID, version int) error
 	ListPlanIDsWithoutVersions(ctx context.Context, limit int) ([]kernel.ReleasePlanID, error)

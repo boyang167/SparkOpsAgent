@@ -209,9 +209,16 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
-    async listReleasePlanVersions(workspaceId: string, productId: string, planId: string) {
-      return upstreamFetch<{ items: ReleasePlanVersionSummaryVM[] }>(
-        `/api/v1/products/${productId}/release-plans/${planId}/versions`,
+    async listReleasePlanVersions(workspaceId: string, productId: string, planId: string, offset = 0) {
+      return upstreamFetch<{ items: ReleasePlanVersionSummaryVM[]; has_more: boolean }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/versions?offset=${offset}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+
+    async listReleasePlanAuditLogs(workspaceId: string, productId: string, planId: string, offset = 0) {
+      return upstreamFetch<{ items: import("@sparkops/contracts/product").ReleasePlanAuditLogVM[]; has_more: boolean }>(
+        `/api/v1/products/${productId}/release-plans/${planId}/audit-logs?offset=${offset}`,
         { method: "GET", options: { ...options, workspaceId } },
       );
     },

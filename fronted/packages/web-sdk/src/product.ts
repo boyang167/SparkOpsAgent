@@ -223,12 +223,28 @@ export function getReleasePlan(workspaceId: string, productId: string, planId: s
   );
 }
 
-export async function listReleasePlanVersions(workspaceId: string, productId: string, planId: string) {
-  const data = await bffFetch<{ items: import("@sparkops/contracts/product").ReleasePlanVersionSummaryVM[] }>(
-    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/versions`,
+export function listReleasePlanVersions(
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  offset = 0,
+) {
+  return bffFetch<{ items: import("@sparkops/contracts/product").ReleasePlanVersionSummaryVM[]; has_more: boolean }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/versions?offset=${offset}`,
     { workspaceId },
   );
-  return data.items;
+}
+
+export function listReleasePlanAuditLogs(
+  workspaceId: string,
+  productId: string,
+  planId: string,
+  offset = 0,
+) {
+  return bffFetch<{ items: import("@sparkops/contracts/product").ReleasePlanAuditLogVM[]; has_more: boolean }>(
+    `/workspaces/${workspaceId}/products/${productId}/release-plans/${planId}/audit-logs?offset=${offset}`,
+    { workspaceId },
+  );
 }
 
 export function getReleasePlanVersionDiff(

@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS product.idx_release_plan_audit_logs_plan_created_at;

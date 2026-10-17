@@ -68,19 +68,8 @@ func (h *GetReleasePlanHandler) Handle(ctx context.Context, productID kernel.Pro
 	if plan.ProductID != productID {
 		return nil, domain.ErrReleasePlanNotFound
 	}
-	logs, _ := h.plans.ListAuditLogs(ctx, planID, 20)
 	out := releasePlanDetail(plan)
 	h.attachRuntimeInputs(ctx, plan, out)
-	auditItems := make([]map[string]any, 0, len(logs))
-	for _, log := range logs {
-		var detail any
-		_ = json.Unmarshal(log.Detail, &detail)
-		auditItems = append(auditItems, map[string]any{
-			"id": log.ID, "action": log.Action, "actor_id": log.ActorID.String(),
-			"detail": detail, "created_at": log.CreatedAt.Format(time.RFC3339),
-		})
-	}
-	out["audit_logs"] = auditItems
 	return out, nil
 }
 

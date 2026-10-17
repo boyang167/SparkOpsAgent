@@ -46,6 +46,7 @@ type ReleasePlanHandlers struct {
 	listPlans        *query.ListReleasePlansHandler
 	listWorkspace    *query.ListWorkspaceReleasePlansHandler
 	getPlan          *query.GetReleasePlanHandlerWithSprint
+	listAuditLogs    *query.ListReleasePlanAuditLogsHandler
 	listVersions     *query.ListReleasePlanVersionsHandler
 	getVersionDiff   *query.GetReleasePlanVersionDiffHandler
 	blockingPlans    *query.ListBlockingReleasePlansHandler
@@ -80,6 +81,7 @@ func NewReleasePlanHandlers(
 	listPlans *query.ListReleasePlansHandler,
 	listWorkspace *query.ListWorkspaceReleasePlansHandler,
 	getPlan *query.GetReleasePlanHandlerWithSprint,
+	listAuditLogs *query.ListReleasePlanAuditLogsHandler,
 	listVersions *query.ListReleasePlanVersionsHandler,
 	getVersionDiff *query.GetReleasePlanVersionDiffHandler,
 	blockingPlans *query.ListBlockingReleasePlansHandler,
@@ -92,7 +94,7 @@ func NewReleasePlanHandlers(
 		copyPlan: copyPlan, saveTemplate: saveTemplate, createFromTpl: createFromTpl,
 		listTemplates: listTemplates, deleteTemplate: deleteTemplate,
 		approveByToken: approveByToken, rejectByToken: rejectByToken, hookCallback: hookCallback,
-		listPlans: listPlans, listWorkspace: listWorkspace, getPlan: getPlan,
+		listPlans: listPlans, listWorkspace: listWorkspace, getPlan: getPlan, listAuditLogs: listAuditLogs,
 		listVersions: listVersions, getVersionDiff: getVersionDiff, blockingPlans: blockingPlans,
 	}
 }
@@ -183,12 +185,47 @@ func (h *Handler) ListReleasePlanVersions(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, err := h.releasePlans.listVersions.Handle(c.Request.Context(), productID, planID)
+	offset, err := parseReleasePlanHistoryOffset(c)
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid offset", http.StatusBadRequest)
+		return
+	}
+	items, err := h.releasePlans.listVersions.Handle(c.Request.Context(), productID, planID, offset)
 	if err != nil {
 		httpx.HandleError(c, err)
 		return
 	}
-	httpx.OK(c, gin.H{"items": items})
+	httpx.OK(c, items)
+}
+
+func (h *Handler) ListReleasePlanAuditLogs(c *gin.Context) {
+	productID, planID, ok := parseProductReleasePlanIDs(c)
+	if !ok {
+		return
+	}
+	offset, err := parseReleasePlanHistoryOffset(c)
+	if err != nil {
+		httpx.Fail(c, "INVALID_REQUEST", "invalid offset", http.StatusBadRequest)
+		return
+	}
+	items, err := h.releasePlans.listAuditLogs.Handle(c.Request.Context(), productID, planID, offset)
+	if err != nil {
+		httpx.HandleError(c, err)
+		return
+	}
+	httpx.OK(c, items)
+}
+
+func parseReleasePlanHistoryOffset(c *gin.Context) (int, error) {
+	raw := c.Query("offset")
+	if raw == "" {
+		return 0, nil
+	}
+	offset, err := strconv.Atoi(raw)
+	if err != nil || offset < 0 {
+		return 0, fmt.Errorf("invalid offset")
+	}
+	return offset, nil
 }
 
 func (h *Handler) GetReleasePlanVersionDiff(c *gin.Context) {
@@ -232,7 +269,7 @@ type hookEventConfigRequest struct {
 }
 
 type hookSettingsRequest struct {
-	Enabled bool                                `json:"enabled"`
+	Enabled bool                              `json:"enabled"`
 	Events  map[string]hookEventConfigRequest `json:"events"`
 }
 
@@ -544,7 +581,7 @@ func (h *Handler) UpdateReleasePlan(c *gin.Context) {
 		ApprovalConfig: parseApprovalConfigRequest(req.ApprovalConfig),
 		HookSettings:   parseHookSettingsRequest(req.HookSettings),
 		Parameters:     req.Parameters,
-		ClearSprintID: req.ClearSprintID, ClearScheduleTime: req.ClearScheduleTime,
+		ClearSprintID:  req.ClearSprintID, ClearScheduleTime: req.ClearScheduleTime,
 	}
 	if req.ScheduleExecuteTime != nil && *req.ScheduleExecuteTime != "" {
 		t, err := time.Parse(time.RFC3339, *req.ScheduleExecuteTime)

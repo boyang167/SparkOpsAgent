@@ -34,6 +34,7 @@ export function ReleasePlanVersionHistory({
   memberName,
 }: ReleasePlanVersionHistoryProps) {
   const [versions, setVersions] = useState<ReleasePlanVersionSummaryVM[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [compareVersion, setCompareVersion] = useState<number | "auto">("auto");
   const [diff, setDiff] = useState<ReleasePlanVersionDiffVM | null>(null);
@@ -45,15 +46,17 @@ export function ReleasePlanVersionHistory({
     setLoading(true);
     setError(null);
     try {
-      const items = await product.listReleasePlanVersions(workspaceId, productId, planId);
-      setVersions(items);
+      const page = await product.listReleasePlanVersions(workspaceId, productId, planId);
+      setVersions(page.items);
+      setHasMore(page.has_more);
       setSelectedVersion((prev) => {
-        if (prev && items.some((item) => item.version === prev)) return prev;
-        return items[0]?.version ?? null;
+        if (prev && page.items.some((item) => item.version === prev)) return prev;
+        return page.items[0]?.version ?? null;
       });
     } catch (err) {
       setError(err instanceof BffError ? err.message : "加载版本历史失败");
       setVersions([]);
+      setHasMore(false);
       setSelectedVersion(null);
     } finally {
       setLoading(false);
@@ -64,6 +67,16 @@ export function ReleasePlanVersionHistory({
     if (!active) return;
     void loadVersions();
   }, [loadVersions, refreshKey, active]);
+
+  async function loadMoreVersions() {
+    try {
+      const page = await product.listReleasePlanVersions(workspaceId, productId, planId, versions.length);
+      setVersions((prev) => [...prev, ...page.items]);
+      setHasMore(page.has_more);
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "加载更多版本失败");
+    }
+  }
 
   const selectedSummary = useMemo(
     () => versions.find((item) => item.version === selectedVersion) ?? null,
@@ -160,6 +173,11 @@ export function ReleasePlanVersionHistory({
               );
             })}
           </ul>
+          {hasMore ? (
+            <button type="button" className="btn btn-secondary text-xs" onClick={() => void loadMoreVersions()}>
+              加载更多
+            </button>
+          ) : null}
         </aside>
 
         <section className="release-plan-version-diff-wrap">

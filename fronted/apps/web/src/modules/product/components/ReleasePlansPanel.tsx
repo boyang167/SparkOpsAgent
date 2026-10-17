@@ -10,7 +10,7 @@ import { Modal } from "@/components/ui/Modal";
 import { ProductDetailEmptyState } from "./ProductDetailEmptyState";
 import { ProductMasterDetail, type ProductMasterListItem } from "./ProductMasterDetail";
 import { useWorkspaceMembers } from "../hooks/useWorkspaceMembers";
-import { ReleasePlanAuditList, type ReleasePlanAuditLogEntry } from "./ReleasePlanAuditList";
+import { ReleasePlanAuditList } from "./ReleasePlanAuditList";
 import { ReleasePlanVersionHistory } from "./ReleasePlanVersionHistory";
 import {
   ReleasePlanForm,
@@ -1000,7 +1000,30 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
                   if (!isTextOnly) setBusy(true);
                   try {
                     await product.updateReleasePlanJob(workspaceId, productId, selected.id, jobId, patch);
-                    if (!isTextOnly) await refreshDetail();
+                    if (isTextOnly) {
+                      setSelected((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              jobs: (prev.jobs ?? []).map((job) =>
+                                job.id === jobId
+                                  ? {
+                                      ...job,
+                                      ...(patch.text_content !== undefined
+                                        ? { text_content: patch.text_content }
+                                        : {}),
+                                      ...(patch.text_format !== undefined
+                                        ? { text_format: patch.text_format }
+                                        : {}),
+                                    }
+                                  : job,
+                              ),
+                            }
+                          : prev,
+                      );
+                    } else {
+                      await refreshDetail();
+                    }
                   } catch (err) {
                     setError(err instanceof BffError ? err.message : "更新失败");
                   } finally {
@@ -1018,7 +1041,9 @@ export function ReleasePlansPanel({ workspaceId, productId, sprintId, embedded, 
               </>
             ) : detailTab === "audit" ? (
               <ReleasePlanAuditList
-                logs={(selected.audit_logs ?? []) as ReleasePlanAuditLogEntry[]}
+                workspaceId={workspaceId}
+                productId={productId}
+                planId={selected.id}
                 memberName={memberName}
               />
             ) : (

@@ -30,8 +30,8 @@ type releasePlanModel struct {
 	ReleaseWindowStart  time.Time
 	ReleaseWindowEnd    time.Time
 	ScheduleExecuteTime *time.Time
-	ApprovalConfig      string `gorm:"type:jsonb"`
-	HookSettings        string `gorm:"type:jsonb"`
+	ApprovalConfig      string  `gorm:"type:jsonb"`
+	HookSettings        string  `gorm:"type:jsonb"`
 	HookState           *string `gorm:"type:jsonb"`
 	Parameters          string  `gorm:"type:jsonb;not null;default:'{}'"`
 	CreatedBy           string
@@ -480,11 +480,19 @@ func (r *ReleasePlanRepository) ListVersionsByPlan(ctx context.Context, planID k
 	if limit <= 0 {
 		limit = 50
 	}
+	return r.ListVersionsByPlanPage(ctx, planID, limit, 0)
+}
+
+func (r *ReleasePlanRepository) ListVersionsByPlanPage(ctx context.Context, planID kernel.ReleasePlanID, limit, offset int) ([]model.ReleasePlanVersion, error) {
+	if limit <= 0 {
+		limit = 50
+	}
 	var rows []releasePlanVersionModel
 	err := r.db.WithContext(ctx).
 		Where("release_plan_id = ?", planID.String()).
 		Order("version DESC").
 		Limit(limit).
+		Offset(max(offset, 0)).
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
@@ -541,8 +549,20 @@ func (r *ReleasePlanRepository) ListAuditLogs(ctx context.Context, planID kernel
 	if limit <= 0 {
 		limit = 50
 	}
+	return r.ListAuditLogsPage(ctx, planID, limit, 0)
+}
+
+func (r *ReleasePlanRepository) ListAuditLogsPage(ctx context.Context, planID kernel.ReleasePlanID, limit, offset int) ([]model.ReleasePlanAuditLog, error) {
+	if limit <= 0 {
+		limit = 50
+	}
 	var rows []releasePlanAuditLogModel
-	err := r.db.WithContext(ctx).Where("release_plan_id = ?", planID.String()).Order("created_at DESC").Limit(limit).Find(&rows).Error
+	err := r.db.WithContext(ctx).
+		Where("release_plan_id = ?", planID.String()).
+		Order("created_at DESC, id DESC").
+		Limit(limit).
+		Offset(max(offset, 0)).
+		Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -639,7 +659,7 @@ func rowToReleasePlan(row releasePlanModel) (*model.ReleasePlan, error) {
 		ReleaseWindowStart: row.ReleaseWindowStart, ReleaseWindowEnd: row.ReleaseWindowEnd,
 		ScheduleExecuteTime: row.ScheduleExecuteTime, ApprovalConfig: approval,
 		HookSettings: hookSettings,
-		CreatedBy: createdBy, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		CreatedBy:    createdBy, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		Version: row.Version,
 	}
 	if row.Parameters != "" {

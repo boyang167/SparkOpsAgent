@@ -138,8 +138,12 @@ export async function getReleasePlan(ctx: BffContext, workspaceId: string, produ
   return ctx.upstream.product.getReleasePlan(workspaceId, productId, planId);
 }
 
-export function listReleasePlanVersions(ctx: BffContext, workspaceId: string, productId: string, planId: string) {
-  return ctx.upstream.product.listReleasePlanVersions(workspaceId, productId, planId);
+export function listReleasePlanVersions(ctx: BffContext, workspaceId: string, productId: string, planId: string, offset?: number) {
+  return ctx.upstream.product.listReleasePlanVersions(workspaceId, productId, planId, offset);
+}
+
+export function listReleasePlanAuditLogs(ctx: BffContext, workspaceId: string, productId: string, planId: string, offset?: number) {
+  return ctx.upstream.product.listReleasePlanAuditLogs(workspaceId, productId, planId, offset);
 }
 
 export function getReleasePlanVersionDiff(

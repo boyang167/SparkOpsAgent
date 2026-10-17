@@ -6,7 +6,6 @@ import (
 	"log"
 
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
-	pwfevent "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/service"
@@ -15,6 +14,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/persistence"
 	producthttp "github.com/sparkops/sparkops-agent/backend/internal/modules/product/interface/http"
+	pwfevent "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/event"
 	wspersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
@@ -149,6 +149,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewListReleasePlansHandler(repo, releasePlanRepo),
 		query.NewListWorkspaceReleasePlansHandler(repo, releasePlanRepo, sprintRepo),
 		getReleasePlan,
+		query.NewListReleasePlanAuditLogsHandler(repo, releasePlanRepo),
 		query.NewListReleasePlanVersionsHandler(repo, releasePlanRepo),
 		query.NewGetReleasePlanVersionDiffHandler(repo, releasePlanRepo),
 		query.NewListBlockingReleasePlansHandler(releasePlanRepo),
@@ -216,6 +217,8 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), handler.CreateReleasePlan)
 	c.Engine.GET("/api/v1/products/:productId/release-plans/:planId",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.GetReleasePlan)
+	c.Engine.GET("/api/v1/products/:productId/release-plans/:planId/audit-logs",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListReleasePlanAuditLogs)
 	c.Engine.GET("/api/v1/products/:productId/release-plans/:planId/versions",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListReleasePlanVersions)
 	c.Engine.GET("/api/v1/products/:productId/release-plans/:planId/versions/:version/diff",

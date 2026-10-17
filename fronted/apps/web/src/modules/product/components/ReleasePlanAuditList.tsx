@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { product } from "@sparkops/web-sdk";
+import { BffError } from "@sparkops/contracts";
 import {
   formatAuditDetail,
   releasePlanAuditActionLabel,
@@ -15,7 +17,9 @@ export interface ReleasePlanAuditLogEntry {
 }
 
 interface ReleasePlanAuditListProps {
-  logs: ReleasePlanAuditLogEntry[];
+  workspaceId: string;
+  productId: string;
+  planId: string;
   memberName: (memberId?: string | null) => string;
 }
 
@@ -27,9 +31,47 @@ function hasDetailPayload(detail: unknown): boolean {
   return true;
 }
 
-export function ReleasePlanAuditList({ logs, memberName }: ReleasePlanAuditListProps) {
+export function ReleasePlanAuditList({ workspaceId, productId, planId, memberName }: ReleasePlanAuditListProps) {
+  const [logs, setLogs] = useState<ReleasePlanAuditLogEntry[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [actionFilter, setActionFilter] = useState("");
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const page = await product.listReleasePlanAuditLogs(workspaceId, productId, planId);
+      setLogs(page.items);
+      setHasMore(page.has_more);
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "加载操作记录失败");
+      setLogs([]);
+      setHasMore(false);
+    } finally {
+      setLoading(false);
+    }
+  }, [workspaceId, productId, planId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function loadMore() {
+    setLoadingMore(true);
+    try {
+      const page = await product.listReleasePlanAuditLogs(workspaceId, productId, planId, logs.length);
+      setLogs((prev) => [...prev, ...page.items]);
+      setHasMore(page.has_more);
+    } catch (err) {
+      setError(err instanceof BffError ? err.message : "加载更多操作记录失败");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const actionOptions = useMemo(() => {
     const actions = [...new Set(logs.map((log) => String(log.action ?? "")).filter(Boolean))];
@@ -51,12 +93,17 @@ export function ReleasePlanAuditList({ logs, memberName }: ReleasePlanAuditListP
     });
   }
 
+  if (loading) {
+    return <p className="release-plan-audit-empty">加载操作记录中…</p>;
+  }
+
   if (logs.length === 0) {
     return <p className="release-plan-audit-empty">暂无操作记录</p>;
   }
 
   return (
     <div className="release-plan-audit-panel stack-sm">
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
       {actionOptions.length > 1 ? (
         <div className="release-plan-audit-toolbar">
           <label className="release-plan-audit-filter">
@@ -129,6 +176,11 @@ export function ReleasePlanAuditList({ logs, memberName }: ReleasePlanAuditListP
           })}
         </ul>
       )}
+      {hasMore ? (
+        <button type="button" className="btn btn-secondary text-xs self-center" disabled={loadingMore} onClick={() => void loadMore()}>
+          {loadingMore ? "加载中…" : "加载更多"}
+        </button>
+      ) : null}
     </div>
   );
 }

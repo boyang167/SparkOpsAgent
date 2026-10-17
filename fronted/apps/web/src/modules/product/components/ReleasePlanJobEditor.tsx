@@ -137,6 +137,7 @@ export function ReleasePlanJobEditor({
   const [workflowDetails, setWorkflowDetails] = useState<Record<string, ProductWorkflowVM>>({});
   const [workflowDetailErrors, setWorkflowDetailErrors] = useState<Set<string>>(() => new Set());
   const debounceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const pendingTextRef = useRef<Map<string, { html: string; baseline: string }>>(new Map());
   const loadingWorkflowIds = useRef<Set<string>>(new Set());
   const detailScope = useRef(`${workspaceId}:${productId}`);
   const prevJobCount = useRef(0);
@@ -239,38 +240,62 @@ export function ReleasePlanJobEditor({
   }, [jobCount, plan.jobs]);
 
   useEffect(() => {
+    const flushPendingText = () => {
+      for (const [jobId, pending] of pendingTextRef.current.entries()) {
+        const timer = debounceTimers.current.get(jobId);
+        if (timer) {
+          clearTimeout(timer);
+          debounceTimers.current.delete(jobId);
+        }
+        if (pending.html !== pending.baseline) {
+          void onUpdate(jobId, { text_content: pending.html, text_format: "html" });
+        }
+      }
+      pendingTextRef.current.clear();
+    };
+    window.addEventListener("pagehide", flushPendingText);
     return () => {
+      window.removeEventListener("pagehide", flushPendingText);
+      flushPendingText();
       for (const timer of debounceTimers.current.values()) {
         clearTimeout(timer);
       }
       debounceTimers.current.clear();
     };
-  }, []);
+  }, [onUpdate]);
 
   const flushTextUpdate = useCallback(
-    (jobId: string, html: string, current: string) => {
+    async (jobId: string, html: string, current: string) => {
       const timers = debounceTimers.current;
-      const pending = timers.get(jobId);
-      if (pending) {
-        clearTimeout(pending);
+      const pendingTimer = timers.get(jobId);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
         timers.delete(jobId);
       }
+      pendingTextRef.current.delete(jobId);
       if (html === current) return;
-      void onUpdate(jobId, { text_content: html, text_format: "html" });
+      // 卸载时 ref 可能已失效，避免用空字符串覆盖已有内容
+      if (!html && current) return;
+      await onUpdate(jobId, { text_content: html, text_format: "html" });
     },
     [onUpdate],
   );
 
   const scheduleTextUpdate = useCallback(
     (jobId: string, html: string, current: string) => {
-      if (html === current) return;
+      pendingTextRef.current.set(jobId, { html, baseline: current });
+      if (html === current) {
+        pendingTextRef.current.delete(jobId);
+        return;
+      }
       const timers = debounceTimers.current;
-      const pending = timers.get(jobId);
-      if (pending) clearTimeout(pending);
+      const pendingTimer = timers.get(jobId);
+      if (pendingTimer) clearTimeout(pendingTimer);
       timers.set(
         jobId,
         setTimeout(() => {
           timers.delete(jobId);
+          pendingTextRef.current.delete(jobId);
           void onUpdate(jobId, { text_content: html, text_format: "html" });
         }, 700),
       );
@@ -278,7 +303,27 @@ export function ReleasePlanJobEditor({
     [onUpdate],
   );
 
+  const flushJobTextOnCollapse = useCallback(
+    (jobId: string) => {
+      const job = jobs.find((item) => item.id === jobId);
+      if (!job) return;
+      const current = job.text_content ?? "";
+      const pending = pendingTextRef.current.get(jobId);
+      if (pending && pending.html !== pending.baseline) {
+        void flushTextUpdate(jobId, pending.html, pending.baseline);
+        return;
+      }
+      if (pending && pending.html !== current) {
+        void flushTextUpdate(jobId, pending.html, current);
+      }
+    },
+    [jobs, flushTextUpdate],
+  );
+
   function toggleExpanded(jobId: string) {
+    if (expandedIds.has(jobId)) {
+      flushJobTextOnCollapse(jobId);
+    }
     setExpandedIds((prev) => {
       const next = new Set(prev);
       const willExpand = !next.has(jobId);
@@ -300,6 +345,9 @@ export function ReleasePlanJobEditor({
   }
 
   function collapseAll() {
+    for (const jobId of expandedIds) {
+      flushJobTextOnCollapse(jobId);
+    }
     setExpandedIds(new Set());
   }
 
@@ -589,7 +637,7 @@ export function ReleasePlanJobEditor({
                           className="rich-text-field-compact"
                           value={job.text_content ?? ""}
                           onChange={(html) => scheduleTextUpdate(job.id, html, job.text_content ?? "")}
-                          onBlur={(html) => flushTextUpdate(job.id, html, job.text_content ?? "")}
+                          onBlur={(html) => void flushTextUpdate(job.id, html, job.text_content ?? "")}
                           placeholder="检查项说明"
                         />
                       ) : job.text_content ? (

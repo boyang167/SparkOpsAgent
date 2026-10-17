@@ -147,15 +147,26 @@ export function RichTextField({
 }: RichTextFieldProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const tableMenuRef = useRef<HTMLDivElement>(null);
+  const latestHtmlRef = useRef(value);
+  const onBlurRef = useRef(onBlur);
   const [tableMenuOpen, setTableMenuOpen] = useState(false);
 
+  onBlurRef.current = onBlur;
+
   useEffect(() => {
+    latestHtmlRef.current = value;
     const el = editorRef.current;
     if (!el || document.activeElement === el) return;
     if (el.innerHTML !== value) {
       el.innerHTML = value || "";
     }
   }, [value]);
+
+  useEffect(() => {
+    return () => {
+      onBlurRef.current?.(latestHtmlRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!tableMenuOpen) return;
@@ -169,7 +180,9 @@ export function RichTextField({
   }, [tableMenuOpen]);
 
   const syncChange = useCallback(() => {
-    onChange(editorRef.current?.innerHTML ?? "");
+    const html = editorRef.current?.innerHTML ?? "";
+    latestHtmlRef.current = html;
+    onChange(html);
   }, [onChange]);
 
   const exec = useCallback(
@@ -298,9 +311,10 @@ export function RichTextField({
         data-placeholder={placeholder}
         onInput={syncChange}
         onBlur={() => {
-          const html = editorRef.current?.innerHTML ?? "";
+          const html = editorRef.current?.innerHTML ?? latestHtmlRef.current;
+          latestHtmlRef.current = html;
           onChange(html);
-          onBlur?.(html);
+          onBlurRef.current?.(html);
         }}
       />
     </div>

@@ -19,19 +19,23 @@ func NewListReleasePlanVersionsHandler(products repository.ProductRepository, pl
 	return &ListReleasePlanVersionsHandler{products: products, plans: plans}
 }
 
-func (h *ListReleasePlanVersionsHandler) Handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID) ([]map[string]any, error) {
+func (h *ListReleasePlanVersionsHandler) Handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID, offset int) (map[string]any, error) {
 	if err := h.ensurePlan(ctx, productID, planID); err != nil {
 		return nil, err
 	}
-	versions, err := h.plans.ListVersionsByPlan(ctx, planID, 100)
+	versions, err := h.plans.ListVersionsByPlanPage(ctx, planID, releasePlanHistoryPageSize+1, offset)
 	if err != nil {
 		return nil, err
+	}
+	hasMore := len(versions) > releasePlanHistoryPageSize
+	if hasMore {
+		versions = versions[:releasePlanHistoryPageSize]
 	}
 	out := make([]map[string]any, 0, len(versions))
 	for _, item := range versions {
 		out = append(out, releasePlanVersionSummary(item))
 	}
-	return out, nil
+	return map[string]any{"items": out, "has_more": hasMore}, nil
 }
 
 type GetReleasePlanVersionDiffHandler struct {

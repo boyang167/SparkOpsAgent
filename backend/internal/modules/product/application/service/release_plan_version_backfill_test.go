@@ -13,13 +13,19 @@ import (
 )
 
 type releasePlanVersionBackfillRepo struct {
-	plans map[kernel.ReleasePlanID]*model.ReleasePlan
+	plans    map[kernel.ReleasePlanID]*model.ReleasePlan
 	versions []model.ReleasePlanVersion
 }
 
-func (r *releasePlanVersionBackfillRepo) SavePlan(context.Context, *model.ReleasePlan) error { return nil }
-func (r *releasePlanVersionBackfillRepo) UpdatePlan(context.Context, *model.ReleasePlan) error { return nil }
-func (r *releasePlanVersionBackfillRepo) DeletePlan(context.Context, kernel.ReleasePlanID) error { return nil }
+func (r *releasePlanVersionBackfillRepo) SavePlan(context.Context, *model.ReleasePlan) error {
+	return nil
+}
+func (r *releasePlanVersionBackfillRepo) UpdatePlan(context.Context, *model.ReleasePlan) error {
+	return nil
+}
+func (r *releasePlanVersionBackfillRepo) DeletePlan(context.Context, kernel.ReleasePlanID) error {
+	return nil
+}
 func (r *releasePlanVersionBackfillRepo) FindPlanByID(_ context.Context, id kernel.ReleasePlanID) (*model.ReleasePlan, error) {
 	plan, ok := r.plans[id]
 	if !ok {
@@ -45,14 +51,25 @@ func (r *releasePlanVersionBackfillRepo) HasBlockingPlansBySprint(context.Contex
 func (r *releasePlanVersionBackfillRepo) ListBlockingPlansBySprint(context.Context, kernel.SprintID) ([]*model.ReleasePlan, error) {
 	return nil, nil
 }
-func (r *releasePlanVersionBackfillRepo) SaveJob(context.Context, *model.ReleasePlanJob) error { return nil }
-func (r *releasePlanVersionBackfillRepo) UpdateJob(context.Context, *model.ReleasePlanJob) error { return nil }
-func (r *releasePlanVersionBackfillRepo) DeleteJob(context.Context, kernel.ReleasePlanJobID) error { return nil }
+func (r *releasePlanVersionBackfillRepo) SaveJob(context.Context, *model.ReleasePlanJob) error {
+	return nil
+}
+func (r *releasePlanVersionBackfillRepo) UpdateJob(context.Context, *model.ReleasePlanJob) error {
+	return nil
+}
+func (r *releasePlanVersionBackfillRepo) DeleteJob(context.Context, kernel.ReleasePlanJobID) error {
+	return nil
+}
 func (r *releasePlanVersionBackfillRepo) ListJobsByPlan(context.Context, kernel.ReleasePlanID) ([]model.ReleasePlanJob, error) {
 	return nil, nil
 }
-func (r *releasePlanVersionBackfillRepo) SaveAuditLog(context.Context, *model.ReleasePlanAuditLog) error { return nil }
+func (r *releasePlanVersionBackfillRepo) SaveAuditLog(context.Context, *model.ReleasePlanAuditLog) error {
+	return nil
+}
 func (r *releasePlanVersionBackfillRepo) ListAuditLogs(context.Context, kernel.ReleasePlanID, int) ([]model.ReleasePlanAuditLog, error) {
+	return nil, nil
+}
+func (r *releasePlanVersionBackfillRepo) ListAuditLogsPage(context.Context, kernel.ReleasePlanID, int, int) ([]model.ReleasePlanAuditLog, error) {
 	return nil, nil
 }
 func (r *releasePlanVersionBackfillRepo) SaveVersion(_ context.Context, version *model.ReleasePlanVersion) error {
@@ -60,6 +77,9 @@ func (r *releasePlanVersionBackfillRepo) SaveVersion(_ context.Context, version 
 	return nil
 }
 func (r *releasePlanVersionBackfillRepo) ListVersionsByPlan(context.Context, kernel.ReleasePlanID, int) ([]model.ReleasePlanVersion, error) {
+	return r.versions, nil
+}
+func (r *releasePlanVersionBackfillRepo) ListVersionsByPlanPage(context.Context, kernel.ReleasePlanID, int, int) ([]model.ReleasePlanVersion, error) {
 	return r.versions, nil
 }
 func (r *releasePlanVersionBackfillRepo) GetVersion(context.Context, kernel.ReleasePlanID, int) (*model.ReleasePlanVersion, error) {

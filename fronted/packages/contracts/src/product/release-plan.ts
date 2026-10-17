@@ -126,6 +126,22 @@ export const ReleasePlanVersionSummaryVMSchema = z.object({
 
 export type ReleasePlanVersionSummaryVM = z.infer<typeof ReleasePlanVersionSummaryVMSchema>;
 
+export const ReleasePlanHistoryPageSchema = <T extends z.ZodTypeAny>(item: T) =>
+  z.object({
+    items: z.array(item),
+    has_more: z.boolean(),
+  });
+
+export const ReleasePlanAuditLogVMSchema = z.object({
+  id: z.string(),
+  action: z.string(),
+  actor_id: z.string(),
+  detail: z.unknown().optional(),
+  created_at: z.string(),
+});
+
+export type ReleasePlanAuditLogVM = z.infer<typeof ReleasePlanAuditLogVMSchema>;
+
 export const ReleasePlanVersionDiffChangeVMSchema = z.object({
   change_type: z.string().optional(),
   path: z.string().optional(),

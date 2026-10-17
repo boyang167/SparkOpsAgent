@@ -283,3 +283,4 @@ foreach ($entry in $started) {
 }
 Write-Host ""
 Write-Host "改代码后再次执行: .\scripts\dev-restart.ps1" -ForegroundColor DarkGray
+Write-Host "性能对比（生产模式）: .\scripts\dev-restart-prod.ps1" -ForegroundColor DarkGray
