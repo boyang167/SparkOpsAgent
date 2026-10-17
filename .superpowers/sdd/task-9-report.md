@@ -39,6 +39,7 @@ All 15 names are asserted exactly once across the six production module registra
 - Repeated `(event_id, subscriber)` delivery skips the handler and acknowledges without repeating effects.
 - The eight mixed/external subscriptions return retryable `messaging.ErrOperationOutboxRequired` before any external call. Their Inbox and interim DB work do not commit until Task 10 can atomically schedule an Operation.
 - Governance returns the same sentinel after its transactional role/binding writes but before Casbin sync, rolling the Inbox and governance rows back together. The non-Inbox/inmemory path still calls `SyncMemberRole`.
+- Product-workflow runs use a persisted `version` CAS. Build/deploy completion retries a conflicting event at most three times, reloading the latest JSON `stage_runs` before each attempt and skipping already-applied terminal updates.
 - This is an intentionally unavailable, retrying safety state and is not production-ready AMQP behavior.
 
 ## TDD evidence
@@ -49,6 +50,7 @@ Observed RED before implementation:
 - Product stale deployment event test failed because older state overwrote newer state.
 - Inbox context test failed before the marker API existed.
 - Review RED: the real Governance `InboxConsumer` object graph committed Inbox, roles, and owner binding instead of retrying; expected retry count was 1, actual was 0.
+- Concurrency RED: workflow-run model had no version, stale writers overwrote JSON `stage_runs`, and build/deploy completion returned after the first CAS conflict instead of reloading and merging.
 
 GREEN coverage:
 
@@ -57,6 +59,8 @@ GREEN coverage:
 - Real Inbox success/duplicate tests verify template, product build, and product deploy DB effects commit once.
 - Production subscription completeness/uniqueness test.
 - Static safety test covers all eight deferred subscriber names and requires the Inbox sentinel guard before their first DB/external side-effect call.
+- PostgreSQL migration and SQLite fallback model tests require a non-null `version` default safe for existing rows.
+- Real repository tests cover stale-writer rejection and two independent repositories merging different stage updates after reload; scheduler tests cover build/deploy conflict recovery, a three-attempt bound, and duplicate-event idempotence.
 - Existing Inbox rollback, duplicate, retry-confirm, and ACK-boundary tests.
 
 ## Risks
@@ -71,6 +75,8 @@ GREEN coverage:
 - Task 9 module regression: PASS.
 - Messaging, PostgreSQL helper, and production registration regression: PASS.
 - Review regression for Governance sentinel rollback, non-Inbox Casbin sync, real Inbox success/duplicate behavior, and all eight deferred paths: PASS.
+- Product-workflow, migration, bootstrap, messaging, and PostgreSQL helper regression: PASS.
+- CAS conflict/merge, bounded retry, stale-writer, and duplicate-event tests repeated 20 times: PASS.
 - `go build ./cmd/server`: PASS.
 - Backend restarted; `GET /health`: HTTP 200.
 - `go test ./... -count=1 -timeout 600s`: Task 9 packages passed; the command failed only in unrelated, pre-existing Kubernetes plugin work:

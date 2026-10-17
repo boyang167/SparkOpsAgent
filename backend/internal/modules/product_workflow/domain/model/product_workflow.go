@@ -128,6 +128,7 @@ type ProductWorkflowRun struct {
 	StartedAt    *time.Time
 	CompletedAt  *time.Time
 	CreatedAt    time.Time
+	Version      int64
 }
 
 type WorkflowBuildRef struct {
@@ -151,7 +152,7 @@ func NewProductWorkflow(productID kernel.ProductID, wsID kernel.WorkspaceID, nam
 		Name: name, Key: key, Status: WorkflowStatusActive, Stages: stages,
 		Notifications: []WorkflowNotification{}, Variables: []WorkflowVariable{}, Triggers: []WorkflowTrigger{},
 		Advanced: DefaultAdvanced(),
-		Origin: json.RawMessage(`{"kind":"from_template"}`), CreatedBy: createdBy,
+		Origin:   json.RawMessage(`{"kind":"from_template"}`), CreatedBy: createdBy,
 		CreatedAt: now, UpdatedAt: now,
 	}
 }
@@ -166,7 +167,7 @@ func NewBlankProductWorkflow(productID kernel.ProductID, wsID kernel.WorkspaceID
 		Name: name, Key: key, Description: description, Status: WorkflowStatusDraft, Stages: stages,
 		Notifications: []WorkflowNotification{}, Variables: []WorkflowVariable{}, Triggers: []WorkflowTrigger{},
 		Advanced: DefaultAdvanced(),
-		Origin: json.RawMessage(`{"kind":"custom"}`), CreatedBy: createdBy,
+		Origin:   json.RawMessage(`{"kind":"custom"}`), CreatedBy: createdBy,
 		CreatedAt: now, UpdatedAt: now,
 	}
 }

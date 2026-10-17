@@ -129,6 +129,20 @@ func TestTransactionalEventsMigrationDefinesReliabilityConstraints(t *testing.T)
 	require.Contains(t, up, "CREATE INDEX IF NOT EXISTS ix_event_outbox_claim")
 }
 
+func TestProductWorkflowRunVersionMigrationIsExistingRowSafe(t *testing.T) {
+	up := readMigration(t, "000071_product_workflow_run_version.up.sql")
+	requireInOrder(t, up,
+		"ADD COLUMN IF NOT EXISTS version BIGINT",
+		"UPDATE product.product_workflow_runs",
+		"SET version = 0",
+		"WHERE version IS NULL",
+		"ALTER COLUMN version SET DEFAULT 0",
+		"ALTER COLUMN version SET NOT NULL",
+	)
+	down := readMigration(t, "000071_product_workflow_run_version.down.sql")
+	require.Contains(t, down, "DROP COLUMN IF EXISTS version")
+}
+
 func readMigration(t *testing.T, name string) string {
 	t.Helper()
 	contents, err := os.ReadFile(name)

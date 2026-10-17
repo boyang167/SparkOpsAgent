@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -25,6 +26,8 @@ type ExternalStatusReader interface {
 	BuildStatus(ctx context.Context, buildID kernel.BuildID) (status string, terminal bool, err error)
 	DeployStatus(ctx context.Context, deploymentID kernel.DeploymentRunID) (status string, terminal bool, err error)
 }
+
+const completionUpdateAttempts = 3
 
 type Scheduler struct {
 	repo           repository.ProductWorkflowRepository
@@ -104,6 +107,23 @@ func (s *Scheduler) handleBuildCompletedLocked(
 	buildID kernel.BuildID,
 	status string,
 ) error {
+	var err error
+	for range completionUpdateAttempts {
+		err = s.handleBuildCompletedAttempt(ctx, runID, jobName, buildID, status)
+		if !errors.Is(err, domain.ErrProductWorkflowRunConflict) {
+			return err
+		}
+	}
+	return err
+}
+
+func (s *Scheduler) handleBuildCompletedAttempt(
+	ctx context.Context,
+	runID kernel.ProductWorkflowRunID,
+	jobName string,
+	buildID kernel.BuildID,
+	status string,
+) error {
 	run, err := s.repo.FindRunByID(ctx, runID)
 	if err != nil {
 		return err
@@ -116,7 +136,17 @@ func (s *Scheduler) handleBuildCompletedLocked(
 		return err
 	}
 
-	updated := false
+	var targetStatus model.JobRunStatus
+	switch status {
+	case string(buildmodel.BuildStatusSuccess):
+		targetStatus = model.JobRunStatusSuccess
+	case string(buildmodel.BuildStatusFailed), string(buildmodel.BuildStatusAborted):
+		targetStatus = model.JobRunStatusFailed
+	default:
+		return nil
+	}
+	matched := false
+	changed := false
 	for si := range run.StageRuns {
 		for ji := range run.StageRuns[si].Jobs {
 			jobRun := &run.StageRuns[si].Jobs[ji]
@@ -127,45 +157,62 @@ func (s *Scheduler) handleBuildCompletedLocked(
 				if jobRun.Builds[bi].BuildID != buildID.String() {
 					continue
 				}
-				switch status {
-				case string(buildmodel.BuildStatusSuccess):
-					jobRun.Builds[bi].Status = model.JobRunStatusSuccess
-				case string(buildmodel.BuildStatusFailed), string(buildmodel.BuildStatusAborted):
-					jobRun.Builds[bi].Status = model.JobRunStatusFailed
-					jobRun.Builds[bi].ErrorMessage = "build " + status
-				default:
-					return nil
+				matched = true
+				if jobRunTerminal(jobRun.Builds[bi].Status) {
+					if jobRun.Builds[bi].Status != targetStatus {
+						return nil
+					}
+					continue
 				}
-				updated = true
+				jobRun.Builds[bi].Status = targetStatus
+				if targetStatus == model.JobRunStatusFailed {
+					jobRun.Builds[bi].ErrorMessage = "build " + status
+				}
+				changed = true
 			}
 		}
 	}
-	if !updated {
+	if !matched {
 		return nil
 	}
 	if status != string(buildmodel.BuildStatusSuccess) {
 		s.refreshJobStatuses(run)
-		if job, ok := jobByName(wf, jobName); ok {
-			s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed)
+		if err := s.failRun(ctx, run, "build failed"); err != nil {
+			return err
 		}
-		return s.failRun(ctx, run, "build failed")
+		if changed {
+			if job, ok := jobByName(wf, jobName); ok {
+				s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed)
+			}
+		}
+		return nil
 	}
 	if failed, msg := s.refreshJobStatuses(run); failed {
-		if job, ok := jobByName(wf, jobName); ok {
-			s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed)
+		if err := s.failRun(ctx, run, msg); err != nil {
+			return err
 		}
-		return s.failRun(ctx, run, msg)
+		if changed {
+			if job, ok := jobByName(wf, jobName); ok {
+				s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventFailed)
+			}
+		}
+		return nil
 	}
-	if job, ok := jobByName(wf, jobName); ok {
-		s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventPassed)
-	}
-	if err := s.repo.UpdateRun(ctx, run); err != nil {
-		return err
+	if changed {
+		if err := s.repo.UpdateRun(ctx, run); err != nil {
+			return err
+		}
+		if job, ok := jobByName(wf, jobName); ok {
+			s.emitJobNotification(ctx, wf, run, job.Spec, model.NotifyEventPassed)
+		}
 	}
 	if !runAllowsProgress(run) {
 		return nil
 	}
 	stages := WorkflowStagesForRun(wf, run)
+	if run.CurrentStage >= len(stages) || run.CurrentStage >= len(run.StageRuns) {
+		return s.completeRun(ctx, run)
+	}
 	if s.stageComplete(run, run.CurrentStage) {
 		return s.advanceStage(ctx, wf, run)
 	}
@@ -192,6 +239,23 @@ func (s *Scheduler) handleDeployCompletedLocked(
 	deploymentID kernel.DeploymentRunID,
 	status string,
 ) error {
+	var err error
+	for range completionUpdateAttempts {
+		err = s.handleDeployCompletedAttempt(ctx, runID, jobName, deploymentID, status)
+		if !errors.Is(err, domain.ErrProductWorkflowRunConflict) {
+			return err
+		}
+	}
+	return err
+}
+
+func (s *Scheduler) handleDeployCompletedAttempt(
+	ctx context.Context,
+	runID kernel.ProductWorkflowRunID,
+	jobName string,
+	deploymentID kernel.DeploymentRunID,
+	status string,
+) error {
 	run, err := s.repo.FindRunByID(ctx, runID)
 	if err != nil {
 		return err
@@ -204,7 +268,17 @@ func (s *Scheduler) handleDeployCompletedLocked(
 		return err
 	}
 
-	updated := false
+	var targetStatus model.JobRunStatus
+	switch status {
+	case string(deployrunmodel.StatusSucceeded):
+		targetStatus = model.JobRunStatusSuccess
+	case string(deployrunmodel.StatusFailed), string(deployrunmodel.StatusAborted):
+		targetStatus = model.JobRunStatusFailed
+	default:
+		return nil
+	}
+	matched := false
+	changed := false
 	for si := range run.StageRuns {
 		for ji := range run.StageRuns[si].Jobs {
 			jobRun := &run.StageRuns[si].Jobs[ji]
@@ -215,20 +289,22 @@ func (s *Scheduler) handleDeployCompletedLocked(
 				if jobRun.Deploys[di].DeploymentRunID != deploymentID.String() {
 					continue
 				}
-				switch status {
-				case string(deployrunmodel.StatusSucceeded):
-					jobRun.Deploys[di].Status = model.JobRunStatusSuccess
-				case string(deployrunmodel.StatusFailed), string(deployrunmodel.StatusAborted):
-					jobRun.Deploys[di].Status = model.JobRunStatusFailed
-					jobRun.Deploys[di].ErrorMessage = "deployment " + status
-				default:
-					return nil
+				matched = true
+				if jobRunTerminal(jobRun.Deploys[di].Status) {
+					if jobRun.Deploys[di].Status != targetStatus {
+						return nil
+					}
+					continue
 				}
-				updated = true
+				jobRun.Deploys[di].Status = targetStatus
+				if targetStatus == model.JobRunStatusFailed {
+					jobRun.Deploys[di].ErrorMessage = "deployment " + status
+				}
+				changed = true
 			}
 		}
 	}
-	if !updated {
+	if !matched {
 		return nil
 	}
 	if status != string(deployrunmodel.StatusSucceeded) {
@@ -238,13 +314,18 @@ func (s *Scheduler) handleDeployCompletedLocked(
 	if failed, msg := s.refreshJobStatuses(run); failed {
 		return s.failRun(ctx, run, msg)
 	}
-	if err := s.repo.UpdateRun(ctx, run); err != nil {
-		return err
+	if changed {
+		if err := s.repo.UpdateRun(ctx, run); err != nil {
+			return err
+		}
 	}
 	if !runAllowsProgress(run) {
 		return nil
 	}
 	stages := WorkflowStagesForRun(wf, run)
+	if run.CurrentStage >= len(stages) || run.CurrentStage >= len(run.StageRuns) {
+		return s.completeRun(ctx, run)
+	}
 	if s.stageComplete(run, run.CurrentStage) {
 		return s.advanceStage(ctx, wf, run)
 	}
@@ -952,12 +1033,17 @@ func (s *Scheduler) publishRunCompleted(ctx context.Context, run *model.ProductW
 }
 
 func (s *Scheduler) persistTerminalRun(ctx context.Context, run *model.ProductWorkflowRun) error {
-	return s.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	version := run.Version
+	err := s.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		if err := s.repo.UpdateRun(txCtx, run); err != nil {
 			return err
 		}
 		return s.publishRunCompleted(txCtx, run)
 	})
+	if err != nil {
+		run.Version = version
+	}
+	return err
 }
 
 func ParseStagesFromDefinition(def json.RawMessage) ([]model.WorkflowStage, error) {

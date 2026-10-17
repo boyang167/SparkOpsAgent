@@ -29,7 +29,8 @@ func TestProductWorkflowRunRepositoryUsesContextTransaction(t *testing.T) {
 		CREATE TABLE product.product_workflow_runs (
 			id TEXT PRIMARY KEY, workflow_id TEXT, product_id TEXT, status TEXT,
 			trigger TEXT, input TEXT, stage_runs TEXT, current_stage INTEGER,
-			error_message TEXT, started_at DATETIME, completed_at DATETIME, created_at DATETIME
+			error_message TEXT, started_at DATETIME, completed_at DATETIME, created_at DATETIME,
+			version INTEGER NOT NULL DEFAULT 0
 		)
 	`).Error)
 

@@ -47,6 +47,7 @@ type productWorkflowRunModel struct {
 	StartedAt    *time.Time
 	CompletedAt  *time.Time
 	CreatedAt    time.Time
+	Version      int64 `gorm:"not null;default:0"`
 }
 
 func (productWorkflowRunModel) TableName() string { return "product.product_workflow_runs" }
@@ -210,10 +211,21 @@ func (r *ProductWorkflowRepository) UpdateRun(ctx context.Context, run *model.Pr
 	if err != nil {
 		return err
 	}
-	return postgres.DB(ctx, r.db).Model(&productWorkflowRunModel{}).Where("id = ?", row.ID).Updates(map[string]any{
-		"status": row.Status, "stage_runs": row.StageRuns, "current_stage": row.CurrentStage,
-		"error_message": row.ErrorMessage, "started_at": row.StartedAt, "completed_at": row.CompletedAt,
-	}).Error
+	result := postgres.DB(ctx, r.db).Model(&productWorkflowRunModel{}).
+		Where("id = ? AND version = ?", row.ID, row.Version).
+		Updates(map[string]any{
+			"status": row.Status, "stage_runs": row.StageRuns, "current_stage": row.CurrentStage,
+			"error_message": row.ErrorMessage, "started_at": row.StartedAt, "completed_at": row.CompletedAt,
+			"version": gorm.Expr("version + 1"),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrProductWorkflowRunConflict
+	}
+	run.Version++
+	return nil
 }
 
 func (r *ProductWorkflowRepository) FindRunByID(ctx context.Context, id kernel.ProductWorkflowRunID) (*model.ProductWorkflowRun, error) {
@@ -444,7 +456,7 @@ func toRunModel(run *model.ProductWorkflowRun) (productWorkflowRunModel, error) 
 		ID: run.ID.String(), WorkflowID: run.WorkflowID.String(), ProductID: run.ProductID.String(),
 		Status: string(run.Status), Trigger: trigger, Input: input, StageRuns: string(stageRuns),
 		CurrentStage: run.CurrentStage, ErrorMessage: run.ErrorMessage,
-		StartedAt: run.StartedAt, CompletedAt: run.CompletedAt, CreatedAt: run.CreatedAt,
+		StartedAt: run.StartedAt, CompletedAt: run.CompletedAt, CreatedAt: run.CreatedAt, Version: run.Version,
 	}, nil
 }
 
@@ -469,6 +481,6 @@ func rowToRun(row productWorkflowRunModel) (*model.ProductWorkflowRun, error) {
 		ID: id, WorkflowID: workflowID, ProductID: productID, Status: model.RunStatus(row.Status),
 		Trigger: json.RawMessage(row.Trigger), Input: json.RawMessage(row.Input),
 		StageRuns: stageRuns, CurrentStage: row.CurrentStage, ErrorMessage: row.ErrorMessage,
-		StartedAt: row.StartedAt, CompletedAt: row.CompletedAt, CreatedAt: row.CreatedAt,
+		StartedAt: row.StartedAt, CompletedAt: row.CompletedAt, CreatedAt: row.CreatedAt, Version: row.Version,
 	}, nil
 }

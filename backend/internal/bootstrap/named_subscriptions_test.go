@@ -112,8 +112,9 @@ func TestDeferredExternalSubscribersReturnSentinelBeforeSideEffects(t *testing.T
 			source := string(raw)
 			guardLocation := guard.FindStringIndex(source)
 			require.NotNil(t, guardLocation, "Inbox path must return the retry sentinel")
-			sideEffectOffset := strings.Index(source[guardLocation[1]:], tt.firstSideEffect)
-			require.GreaterOrEqual(t, sideEffectOffset, 0, "expected side-effect marker not found")
+			sideEffectLocation := strings.Index(source, tt.firstSideEffect)
+			require.GreaterOrEqual(t, sideEffectLocation, 0, "expected side-effect marker not found")
+			require.Less(t, guardLocation[1], sideEffectLocation, "Inbox guard must precede the first side effect")
 		})
 	}
 }
