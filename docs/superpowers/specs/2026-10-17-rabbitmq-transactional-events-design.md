@@ -75,6 +75,7 @@ PostgreSQL 事务不能与 Jenkins、Kubernetes、Webhook 等外部系统形成�
 - Exchange：`sparkops.events`。
 - 类型：`topic`。
 - 属性：durable、非 auto-delete。
+- 队列类型：`quorum`，声明参数包含 `x-queue-type=quorum`。
 - 路由键：带版本的事件类型，例如 `delivery.BuildCompleted.v1`。
 - Message ID：Outbox 事件 UUID。
 - 消息持久化：`delivery_mode=2`。
@@ -87,6 +88,8 @@ PostgreSQL 事务不能与 Jenkins、Kubernetes、Webhook 等外部系统形成�
 例如通知模块和产品模块订阅同一个构建完成事件时拥有不同队列。通知模块的所有后端实例共同消费通知队列，产品模块的所有实例共同消费产品队列。
 
 队列在 Dispatcher 启动前一次性声明和绑定，避免交换机已接收事件但订阅队列尚不存在。
+
+生产 RabbitMQ 必须使用至少三个节点承载 quorum queues。单节点 RabbitMQ 可用于本地集成测试，但只能验证协议和恢复流程，不能提供节点故障下的多数派持久化保证。现有任务 Queue 保持原拓扑；新的事件队列使用独立命名空间，不尝试把已有 classic queue 原地转换为 quorum queue。
 
 ## 事件信封与类型注册
 
@@ -249,7 +252,14 @@ RabbitMQ 重试和多实例消费不能提供全局顺序。需要顺序约束�
 - 启动 Outbox Dispatcher。
 - 优雅停止 Dispatcher 和消费者。
 
-`messaging.driver: inmemory` 保留给单元测试和轻量本地开发，但不宣称具备可靠性。生产环境强制使用 `amqp + outbox`，且配置校验拒绝不可靠组合。
+`messaging.driver: inmemory` 保留给单元测试和轻量本地开发，继续使用同步 `NewInMemoryBus()`，不要求 RabbitMQ，也不经过 Event Outbox/Inbox。它不宣称具备跨实例、崩溃恢复或可靠性。生产环境强制使用 `amqp + outbox`，且配置校验拒绝不可靠组合。
+
+两种驱动共享事件类型注册和具名订阅接口，但采用不同运行路径：
+
+- `inmemory`：同步调用当前进程的全部 handler，保持现有测试和本地开发语义。
+- `amqp`：发布时在当前业务事务写 Event Outbox，由 Dispatcher 和 RabbitMQ 异步分发，并在消费端使用 Inbox。
+
+Operation Outbox 服务于外部副作用，在需要执行这类副作用的运行模式中独立启动，不与 RabbitMQ EventBus 的实现混为一体。
 
 AMQP 配置保留现有任务交换机，并为事件增加独立配置：
 
