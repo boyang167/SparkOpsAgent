@@ -5,13 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	messagingpersistence "github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -100,6 +105,10 @@ type markerTransactor struct{}
 func (markerTransactor) WithinTransaction(ctx context.Context, fn func(context.Context) error) error {
 	return fn(context.WithValue(ctx, txMarkerKey{}, true))
 }
+
+type operationTestClock struct{ now time.Time }
+
+func (c operationTestClock) Now() time.Time { return c.now }
 
 type undeployTeardown struct {
 	online       []kernel.ClusterInfoID
@@ -204,6 +213,94 @@ func TestProjectUndeployRetriesPipelineScheduleAfterExternalStateConverges(t *te
 	require.NoError(t, handler(context.Background(), operation))
 	require.Len(t, writer.requests, 2)
 	require.False(t, teardown.calledInside)
+}
+
+func TestProjectUndeployLegacyRejectRestoresProjectAndCompletes(t *testing.T) {
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, project.BeginArchiving())
+	repo := &pipelineProjectRepo{project: project}
+	teardown := &undeployTeardown{online: []kernel.ClusterInfoID{kernel.NewClusterInfoID()}}
+	writer := &undeployOperationWriter{}
+	handler := NewProjectUndeployHandler(
+		repo, func() appctx.ProjectTeardown { return teardown }, writer, markerTransactor{},
+	)
+	payload, err := json.Marshal(ProjectUndeployPayload{
+		ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
+		AllowUndeploy: boolRef(false),
+	})
+	require.NoError(t, err)
+
+	err = handler(context.Background(), messaging.Operation{
+		EventID: "event-legacy", Owner: "workspace-app.archive", Payload: payload,
+	})
+
+	require.NoError(t, err, "nil lets the AMQP dispatcher mark the operation completed")
+	require.Equal(t, model.ProjectStatusActive, project.Status)
+	require.Zero(t, teardown.starts)
+	require.Empty(t, writer.requests)
+	require.False(t, teardown.calledInside)
+	require.NoError(t, handler(context.Background(), messaging.Operation{
+		EventID: "event-legacy", Owner: "workspace-app.archive", Payload: payload,
+	}), "completed-operation replay must be idempotent")
+}
+
+func TestProjectUndeployLegacyRejectCompletesPersistedAMQPOperation(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+	require.NoError(t, messagingpersistence.AutoMigrate(db))
+	now := time.Now().UTC()
+	store := messagingpersistence.NewOperationStore(db)
+	writer := messaging.NewOperationWriter(store, operationTestClock{now: now})
+
+	name, err := model.NewProjectName("orders")
+	require.NoError(t, err)
+	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
+	require.NoError(t, project.BeginArchiving())
+	repo := &pipelineProjectRepo{project: project}
+	teardown := &undeployTeardown{online: []kernel.ClusterInfoID{kernel.NewClusterInfoID()}}
+	handler := NewProjectUndeployHandler(
+		repo, func() appctx.ProjectTeardown { return teardown }, writer, postgres.NewTransactor(db),
+	)
+	registry := messaging.NewOperationRegistry()
+	require.NoError(t, registry.Register(OperationTypeProjectUndeploy, handler))
+	eventID := uuid.NewString()
+	require.NoError(t, postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+		return writer.Schedule(ctx, messaging.OperationRequest{
+			Owner: "workspace-app.archive", OperationType: OperationTypeProjectUndeploy,
+			IdempotencyKey: eventID + ":workspace-app.archive:" + OperationTypeProjectUndeploy + ":" + project.ID.String(),
+			Payload: ProjectUndeployPayload{
+				EventID: eventID, ProjectID: project.ID.String(), MemberID: project.CreatedBy.String(),
+				AllowUndeploy: boolRef(false),
+			},
+		})
+	}))
+	var record messagingpersistence.OperationOutbox
+	require.NoError(t, db.First(&record).Error)
+	require.NoError(t, db.Model(&record).Updates(map[string]any{
+		"status": "executing", "locked_by": "test-worker", "locked_at": now, "attempts": 1,
+	}).Error)
+	operation := messaging.Operation{
+		ID: record.ID, EventID: record.EventID, Owner: record.Subscriber,
+		OperationType: record.OperationType, IdempotencyKey: record.IdempotencyKey,
+		Payload: record.Payload, Attempt: 1,
+	}
+	registered, ok := registry.Handler(record.OperationType)
+	require.True(t, ok)
+	require.NoError(t, registered(context.Background(), operation))
+	require.NoError(t, store.MarkCompleted(context.Background(), record.ID, "test-worker", now))
+	require.Equal(t, model.ProjectStatusActive, project.Status)
+	var status string
+	require.NoError(t, db.Model(&messagingpersistence.OperationOutbox{}).Select("status").Scan(&status).Error)
+	require.Equal(t, "completed", status)
+	require.NoError(t, registered(context.Background(), operation))
+	require.Zero(t, teardown.starts)
 }
 
 func boolRef(value bool) *bool {

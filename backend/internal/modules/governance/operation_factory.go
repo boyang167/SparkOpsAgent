@@ -18,18 +18,22 @@ func (f OperationFactory) Validate() error {
 	return nil
 }
 
-func (f OperationFactory) Register(registry messaging.OperationRegistry) error {
+func (f OperationFactory) Descriptors() ([]messaging.OperationDescriptor, error) {
 	if err := f.Validate(); err != nil {
+		return nil, err
+	}
+	return []messaging.OperationDescriptor{
+		{
+			Type:    governanceoutbound.OperationTypeMemberRoleSync,
+			Handler: governanceoutbound.NewMemberRoleSyncHandler(f.RoleSync),
+		},
+	}, nil
+}
+
+func (f OperationFactory) Register(registry messaging.OperationRegistry) error {
+	descriptors, err := f.Descriptors()
+	if err != nil {
 		return err
 	}
-	if registry == nil {
-		return fmt.Errorf("governance operation registry is required")
-	}
-	if err := registry.Register(
-		governanceoutbound.OperationTypeMemberRoleSync,
-		governanceoutbound.NewMemberRoleSyncHandler(f.RoleSync),
-	); err != nil {
-		return fmt.Errorf("register governance operation %s: %w", governanceoutbound.OperationTypeMemberRoleSync, err)
-	}
-	return nil
+	return messaging.RegisterOperationDescriptors(registry, descriptors)
 }

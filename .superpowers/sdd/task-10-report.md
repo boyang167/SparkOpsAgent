@@ -247,3 +247,15 @@ None blocking. The Cursor shell auto-injected `git commit --trailer`, but instal
 - RED: `Reporter` had no injectable HTTP client. GREEN: hanging read/write tests pass with a 25ms client timeout.
 - RED: Feishu 401 HTML/empty bodies surfaced as JSON decode errors. GREEN: status-first tests prove permanent 4xx and retryable throttling/server errors.
 - RED: delivery/workspace-app/governance factory tests did not compile because typed factories were absent. GREEN: production modules use their factories and bootstrap registration passes.
+
+## Final convergence review closure (2026-10-18)
+
+1. **Legacy archive rejection** — an AMQP `project.undeploy` operation with `allow_undeploy=false` and an online cluster now opens a short database transaction, reloads the project, aborts `archiving`, persists the restored active state, and returns success. It does not query active runs, start undeploy, or schedule pipeline disable. Replays after restoration are idempotent no-ops; the inmemory command path still returns `ErrProjectHasOnlineEnvironments`.
+2. **Release-hook retry convergence** — the durable payload records the pending hook token as a state reference. Before sending, the production handler reloads the plan and requires a matching pending event/token. Cleared, advanced, failed, or superseded hook state completes as a no-op. Only a matching pending state reaches notifier validation, where malformed URL/token configuration remains permanent. The regression simulates successful delivery, callback state clearance, failed completion persistence, and a harmless operation retry without duplicate delivery.
+3. **Production operation manifest** — all five typed factories expose `Descriptors()` and use the same descriptors for production registration. Bootstrap assembles the real factories, combines the manifests, verifies all 16 non-nil unique handlers, and checks duplicate rejection. Factory dependency validation remains fail-fast.
+
+### RED / GREEN
+
+- RED: legacy rejection returned `project remains online` forever. GREEN: persisted AMQP lifecycle reaches `completed`, restores the project, and replay performs no external work.
+- RED: release hook operations had no persisted token reference or current-state guard. GREEN: matching pending state sends once; callback-cleared or mismatched state converges with nil; truly invalid matching configuration is permanent.
+- RED: bootstrap registration tests duplicated operation-type lists and the factories had no shared descriptor API. GREEN: tests and production registration consume the same factory manifests.

@@ -130,16 +130,28 @@ func NewProjectUndeployHandler(
 		if err != nil {
 			return err
 		}
+		allowUndeploy := true
+		if payload.AllowUndeploy != nil {
+			allowUndeploy = *payload.AllowUndeploy
+		}
+		if len(online) > 0 && !allowUndeploy {
+			return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+				current, err := repo.FindByID(txCtx, projectID)
+				if err != nil || !current.IsArchiving() {
+					return err
+				}
+				if err := current.AbortArchiving(); err != nil {
+					return err
+				}
+				return repo.Update(txCtx, current)
+			})
+		}
 		active, err := target.HasActiveRun(ctx, project.ID)
 		if err != nil {
 			return err
 		}
 		if active {
 			return errors.New("project undeploy is still active")
-		}
-		allowUndeploy := true
-		if payload.AllowUndeploy != nil {
-			allowUndeploy = *payload.AllowUndeploy
 		}
 		if len(online) > 0 {
 			if allowUndeploy {

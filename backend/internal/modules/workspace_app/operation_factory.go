@@ -32,29 +32,25 @@ func (f OperationFactory) Validate() error {
 	}
 }
 
-func (f OperationFactory) Register(registry messaging.OperationRegistry) error {
+func (f OperationFactory) Descriptors() ([]messaging.OperationDescriptor, error) {
 	if err := f.Validate(); err != nil {
-		return err
+		return nil, err
 	}
-	if registry == nil {
-		return fmt.Errorf("workspace_app operation registry is required")
-	}
-	handlers := []struct {
-		operationType string
-		handler       messaging.OperationHandler
-	}{
-		{workspaceoutbound.OperationTypeProjectUndeploy,
-			workspaceoutbound.NewProjectUndeployHandler(f.Repository, f.Teardown, f.Operations, f.Transactor)},
-		{workspaceoutbound.OperationTypePipelineDisable,
-			workspaceoutbound.NewPipelineDisableHandler(
+	return []messaging.OperationDescriptor{
+		{Type: workspaceoutbound.OperationTypeProjectUndeploy,
+			Handler: workspaceoutbound.NewProjectUndeployHandler(f.Repository, f.Teardown, f.Operations, f.Transactor)},
+		{Type: workspaceoutbound.OperationTypePipelineDisable,
+			Handler: workspaceoutbound.NewPipelineDisableHandler(
 				func() workspaceoutbound.PipelineDisabler { return f.Teardown() },
 				f.Repository, f.Transactor,
 			)},
+	}, nil
+}
+
+func (f OperationFactory) Register(registry messaging.OperationRegistry) error {
+	descriptors, err := f.Descriptors()
+	if err != nil {
+		return err
 	}
-	for _, item := range handlers {
-		if err := registry.Register(item.operationType, item.handler); err != nil {
-			return fmt.Errorf("register workspace_app operation %s: %w", item.operationType, err)
-		}
-	}
-	return nil
+	return messaging.RegisterOperationDescriptors(registry, descriptors)
 }

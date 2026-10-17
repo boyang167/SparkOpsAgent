@@ -125,12 +125,11 @@ func (m *Module) Register(c *appctx.Container) error {
 				}
 				return connector.TransitionIssue(ctx, workspaceID, payload.PMWorkspaceID, payload.IssueKey, payload.Status)
 			},
-			ReleasePlanWebhook: func(ctx context.Context, planID kernel.ReleasePlanID, event, idempotencyKey string) error {
-				plan, err := releasePlanRepo.FindPlanByID(ctx, planID)
-				if err != nil {
-					return err
-				}
-				return releasePlanHookNotifier.SendWithIdempotency(ctx, plan, productmodel.ReleasePlanHookEvent(event), idempotencyKey)
+			ReleasePlanWebhook: func(ctx context.Context, planID kernel.ReleasePlanID, event, token, idempotencyKey string) error {
+				return service.SendReleasePlanHookOperation(
+					ctx, releasePlanRepo, releasePlanHookNotifier, planID,
+					productmodel.ReleasePlanHookEvent(event), token, idempotencyKey,
+				)
 			},
 			ReleasePlanApproval: func(ctx context.Context, planID kernel.ReleasePlanID, idempotencyKey string) error {
 				plan, err := releasePlanRepo.FindPlanByID(ctx, planID)

@@ -36,9 +36,26 @@ type Operation struct {
 
 type OperationHandler func(ctx context.Context, operation Operation) error
 
+type OperationDescriptor struct {
+	Type    string
+	Handler OperationHandler
+}
+
 type OperationRegistry interface {
 	Register(operationType string, handler OperationHandler) error
 	Handler(operationType string) (OperationHandler, bool)
+}
+
+func RegisterOperationDescriptors(registry OperationRegistry, descriptors []OperationDescriptor) error {
+	if registry == nil {
+		return fmt.Errorf("operation registry is required")
+	}
+	for _, descriptor := range descriptors {
+		if err := registry.Register(descriptor.Type, descriptor.Handler); err != nil {
+			return fmt.Errorf("register operation %s: %w", descriptor.Type, err)
+		}
+	}
+	return nil
 }
 
 type operationWriter struct {

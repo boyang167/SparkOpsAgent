@@ -33,26 +33,22 @@ func (f OperationFactory) Validate() error {
 	}
 }
 
-func (f OperationFactory) Register(registry messaging.OperationRegistry) error {
+func (f OperationFactory) Descriptors() ([]messaging.OperationDescriptor, error) {
 	if err := f.Validate(); err != nil {
+		return nil, err
+	}
+	return []messaging.OperationDescriptor{
+		{Type: productoutbound.OperationTypeWorkflowTrigger, Handler: productoutbound.NewWorkflowCompletionOperation(f.Transactor, f.WorkflowCompletion)},
+		{Type: productoutbound.OperationTypeJiraTransition, Handler: productoutbound.NewJiraTransitionOperation(f.JiraTransition)},
+		{Type: productoutbound.OperationTypeReleasePlanWebhookSend, Handler: productoutbound.NewReleasePlanWebhookOperation(f.ReleasePlanWebhook)},
+		{Type: productoutbound.OperationTypeReleasePlanApprovalSend, Handler: productoutbound.NewReleasePlanApprovalOperation(f.ReleasePlanApproval)},
+	}, nil
+}
+
+func (f OperationFactory) Register(registry messaging.OperationRegistry) error {
+	descriptors, err := f.Descriptors()
+	if err != nil {
 		return err
 	}
-	if registry == nil {
-		return fmt.Errorf("product operation registry is required")
-	}
-	handlers := []struct {
-		operationType string
-		handler       messaging.OperationHandler
-	}{
-		{productoutbound.OperationTypeWorkflowTrigger, productoutbound.NewWorkflowCompletionOperation(f.Transactor, f.WorkflowCompletion)},
-		{productoutbound.OperationTypeJiraTransition, productoutbound.NewJiraTransitionOperation(f.JiraTransition)},
-		{productoutbound.OperationTypeReleasePlanWebhookSend, productoutbound.NewReleasePlanWebhookOperation(f.ReleasePlanWebhook)},
-		{productoutbound.OperationTypeReleasePlanApprovalSend, productoutbound.NewReleasePlanApprovalOperation(f.ReleasePlanApproval)},
-	}
-	for _, item := range handlers {
-		if err := registry.Register(item.operationType, item.handler); err != nil {
-			return fmt.Errorf("register product operation %s: %w", item.operationType, err)
-		}
-	}
-	return nil
+	return messaging.RegisterOperationDescriptors(registry, descriptors)
 }

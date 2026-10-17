@@ -32,25 +32,21 @@ func (f OperationFactory) Validate() error {
 	}
 }
 
-func (f OperationFactory) Register(registry messaging.OperationRegistry) error {
+func (f OperationFactory) Descriptors() ([]messaging.OperationDescriptor, error) {
 	if err := f.Validate(); err != nil {
+		return nil, err
+	}
+	return []messaging.OperationDescriptor{
+		{Type: deliveryoutbound.OperationTypeWebhookSend, Handler: deliveryoutbound.NewWebhookHandler(f.Webhooks, f.WebhookClient).Handle},
+		{Type: deliveryoutbound.OperationTypeJenkinsCredentialSync, Handler: deliveryoutbound.NewCredentialSyncHandler(f.CredentialSync)},
+		{Type: deliveryoutbound.OperationTypeDeployQueuePublish, Handler: deliveryoutbound.NewDeployQueueHandler(f.Deployments, f.Queue)},
+	}, nil
+}
+
+func (f OperationFactory) Register(registry messaging.OperationRegistry) error {
+	descriptors, err := f.Descriptors()
+	if err != nil {
 		return err
 	}
-	if registry == nil {
-		return fmt.Errorf("delivery operation registry is required")
-	}
-	handlers := []struct {
-		operationType string
-		handler       messaging.OperationHandler
-	}{
-		{deliveryoutbound.OperationTypeWebhookSend, deliveryoutbound.NewWebhookHandler(f.Webhooks, f.WebhookClient).Handle},
-		{deliveryoutbound.OperationTypeJenkinsCredentialSync, deliveryoutbound.NewCredentialSyncHandler(f.CredentialSync)},
-		{deliveryoutbound.OperationTypeDeployQueuePublish, deliveryoutbound.NewDeployQueueHandler(f.Deployments, f.Queue)},
-	}
-	for _, item := range handlers {
-		if err := registry.Register(item.operationType, item.handler); err != nil {
-			return fmt.Errorf("register delivery operation %s: %w", item.operationType, err)
-		}
-	}
-	return nil
+	return messaging.RegisterOperationDescriptors(registry, descriptors)
 }

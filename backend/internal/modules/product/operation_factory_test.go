@@ -20,22 +20,19 @@ func TestOperationFactoryRegistersEveryProductType(t *testing.T) {
 			return nil
 		},
 		JiraTransition: func(context.Context, productoutbound.JiraTransitionPayload) error { return nil },
-		ReleasePlanWebhook: func(context.Context, kernel.ReleasePlanID, string, string) error {
+		ReleasePlanWebhook: func(context.Context, kernel.ReleasePlanID, string, string, string) error {
 			return nil
 		},
 		ReleasePlanApproval: func(context.Context, kernel.ReleasePlanID, string) error { return nil },
 	}
 
+	descriptors, err := factory.Descriptors()
+	require.NoError(t, err)
 	require.NoError(t, factory.Register(registry))
-	for _, operationType := range []string{
-		productoutbound.OperationTypeWorkflowTrigger,
-		productoutbound.OperationTypeJiraTransition,
-		productoutbound.OperationTypeReleasePlanWebhookSend,
-		productoutbound.OperationTypeReleasePlanApprovalSend,
-	} {
-		handler, ok := registry.Handler(operationType)
-		require.True(t, ok, operationType)
-		require.NotNil(t, handler, operationType)
+	for _, descriptor := range descriptors {
+		handler, ok := registry.Handler(descriptor.Type)
+		require.True(t, ok, descriptor.Type)
+		require.NotNil(t, handler, descriptor.Type)
 	}
 }
 

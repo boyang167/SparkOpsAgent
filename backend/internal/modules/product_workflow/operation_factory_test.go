@@ -48,18 +48,13 @@ func TestOperationFactoryRegistersEveryProductWorkflowType(t *testing.T) {
 		GitLabReporter:  operationGitReporterStub{},
 	}
 
+	descriptors, err := factory.Descriptors()
+	require.NoError(t, err)
 	require.NoError(t, factory.Register(registry))
-	for _, operationType := range []string{
-		workflowoutbound.OperationTypeBuildTrigger,
-		workflowoutbound.OperationTypeDeployTrigger,
-		workflowoutbound.OperationTypeWebhookSend,
-		workflowoutbound.OperationTypeMailSend,
-		workflowoutbound.OperationTypeFeishuUserSend,
-		workflowoutbound.OperationTypeGitLabStatusReport,
-	} {
-		handler, ok := registry.Handler(operationType)
-		require.True(t, ok, operationType)
-		require.NotNil(t, handler, operationType)
+	for _, descriptor := range descriptors {
+		handler, ok := registry.Handler(descriptor.Type)
+		require.True(t, ok, descriptor.Type)
+		require.NotNil(t, handler, descriptor.Type)
 	}
 }
 

@@ -38,28 +38,24 @@ func (f OperationFactory) Validate() error {
 	}
 }
 
-func (f OperationFactory) Register(registry messaging.OperationRegistry) error {
+func (f OperationFactory) Descriptors() ([]messaging.OperationDescriptor, error) {
 	if err := f.Validate(); err != nil {
+		return nil, err
+	}
+	return []messaging.OperationDescriptor{
+		{Type: workflowoutbound.OperationTypeBuildTrigger, Handler: workflowoutbound.NewBuildCompletionHandler(f.Transactor, f.Scheduler)},
+		{Type: workflowoutbound.OperationTypeDeployTrigger, Handler: workflowoutbound.NewDeployCompletionHandler(f.Transactor, f.Scheduler)},
+		{Type: workflowoutbound.OperationTypeWebhookSend, Handler: workflowoutbound.NewWebhookHandler(f.WebhookResolver, f.WebhookClient)},
+		{Type: workflowoutbound.OperationTypeMailSend, Handler: workflowoutbound.NewNotificationHandler(f.MailSender)},
+		{Type: workflowoutbound.OperationTypeFeishuUserSend, Handler: workflowoutbound.NewNotificationHandler(f.FeishuSender)},
+		{Type: workflowoutbound.OperationTypeGitLabStatusReport, Handler: workflowoutbound.NewGitLabStatusHandler(f.GitLabReporter)},
+	}, nil
+}
+
+func (f OperationFactory) Register(registry messaging.OperationRegistry) error {
+	descriptors, err := f.Descriptors()
+	if err != nil {
 		return err
 	}
-	if registry == nil {
-		return fmt.Errorf("product_workflow operation registry is required")
-	}
-	handlers := []struct {
-		operationType string
-		handler       messaging.OperationHandler
-	}{
-		{workflowoutbound.OperationTypeBuildTrigger, workflowoutbound.NewBuildCompletionHandler(f.Transactor, f.Scheduler)},
-		{workflowoutbound.OperationTypeDeployTrigger, workflowoutbound.NewDeployCompletionHandler(f.Transactor, f.Scheduler)},
-		{workflowoutbound.OperationTypeWebhookSend, workflowoutbound.NewWebhookHandler(f.WebhookResolver, f.WebhookClient)},
-		{workflowoutbound.OperationTypeMailSend, workflowoutbound.NewNotificationHandler(f.MailSender)},
-		{workflowoutbound.OperationTypeFeishuUserSend, workflowoutbound.NewNotificationHandler(f.FeishuSender)},
-		{workflowoutbound.OperationTypeGitLabStatusReport, workflowoutbound.NewGitLabStatusHandler(f.GitLabReporter)},
-	}
-	for _, item := range handlers {
-		if err := registry.Register(item.operationType, item.handler); err != nil {
-			return fmt.Errorf("register product_workflow operation %s: %w", item.operationType, err)
-		}
-	}
-	return nil
+	return messaging.RegisterOperationDescriptors(registry, descriptors)
 }

@@ -13,11 +13,43 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type ReleasePlanHookNotifier struct {
 	publicBase string
 	client     *http.Client
+}
+
+type ReleasePlanHookPlanLoader interface {
+	FindPlanByID(context.Context, kernel.ReleasePlanID) (*model.ReleasePlan, error)
+}
+
+type ReleasePlanHookSender interface {
+	SendWithIdempotency(context.Context, *model.ReleasePlan, model.ReleasePlanHookEvent, string) error
+}
+
+func SendReleasePlanHookOperation(
+	ctx context.Context,
+	plans ReleasePlanHookPlanLoader,
+	sender ReleasePlanHookSender,
+	planID kernel.ReleasePlanID,
+	event model.ReleasePlanHookEvent,
+	token string,
+	idempotencyKey string,
+) error {
+	if plans == nil || sender == nil {
+		return messaging.Permanent(fmt.Errorf("release plan hook operation dependencies are required"))
+	}
+	plan, err := plans.FindPlanByID(ctx, planID)
+	if err != nil {
+		return err
+	}
+	state := plan.HookState
+	if state == nil || state.Status != "pending" || state.Event != event || state.Token != token {
+		return nil
+	}
+	return sender.SendWithIdempotency(ctx, plan, event, idempotencyKey)
 }
 
 func NewReleasePlanHookNotifier(publicBase string) *ReleasePlanHookNotifier {
