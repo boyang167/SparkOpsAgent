@@ -227,6 +227,61 @@ func TestDispatcherCloseStopsClaimsAndWaitsForInflightConfirm(t *testing.T) {
 	}
 }
 
+func TestDispatcherCloseCancelsBlockedClaim(t *testing.T) {
+	store := &blockingClaimOutboxStore{
+		dispatcherStore: &dispatcherStore{},
+		started:         make(chan struct{}),
+		release:         make(chan struct{}),
+	}
+	dispatcher := NewOutboxDispatcher(
+		store,
+		&fakeEventTransport{},
+		OutboxDispatcherConfig{
+			Owner: "worker-a", BatchSize: 1, Lease: time.Minute, PollInterval: time.Hour,
+		},
+		fixedClock{now: time.Now().UTC()},
+		newDispatcherTestMetrics(t),
+	)
+	require.NoError(t, dispatcher.Start(context.Background()))
+	<-store.started
+
+	closed := make(chan struct{})
+	go func() {
+		_ = dispatcher.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(100 * time.Millisecond):
+		close(store.release)
+		<-closed
+		t.Fatal("Close did not cancel the blocked Outbox claim")
+	}
+}
+
+type blockingClaimOutboxStore struct {
+	*dispatcherStore
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingClaimOutboxStore) Claim(
+	ctx context.Context,
+	_ string,
+	_ int,
+	_ time.Time,
+	_ time.Duration,
+) ([]persistence.OutboxRecord, error) {
+	s.once.Do(func() { close(s.started) })
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.release:
+		return nil, nil
+	}
+}
+
 func TestDispatcherStartValidatesRequiredDependenciesBeforeLaunching(t *testing.T) {
 	config := OutboxDispatcherConfig{
 		Owner: "worker-a", BatchSize: 1, Lease: time.Minute, PollInterval: time.Millisecond,

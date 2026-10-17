@@ -25,8 +25,8 @@ import (
 	pluginmod "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow"
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/sprint_process"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/runtime"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/sprint_process"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/tenant"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workflow"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app"
@@ -46,6 +46,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/redis"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/routes"
 	_ "github.com/sparkops/sparkops-agent/backend/internal/plugins"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
 func Run(ctx context.Context) error {
@@ -59,6 +60,17 @@ func Run(ctx context.Context) error {
 	db, err := openDatabase(cfg, logger)
 	if err != nil {
 		return err
+	}
+	if db != nil {
+		sqlDB, sqlErr := db.DB()
+		if sqlErr != nil {
+			return fmt.Errorf("database handle: %w", sqlErr)
+		}
+		defer func() {
+			if closeErr := sqlDB.Close(); closeErr != nil {
+				logger.Error("database close failed", zap.Error(closeErr))
+			}
+		}()
 	}
 	if db != nil {
 		if err := AutoMigrate(db); err != nil {
@@ -75,11 +87,29 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if closeErr := redisClient.Close(); closeErr != nil {
+			logger.Error("redis close failed", zap.Error(closeErr))
+		}
+	}()
 
-	msgFactory, err := messaging.NewFromConfig(cfg)
+	eventRegistry := events.NewRegistry()
+	var transactor postgres.Transactor = postgres.NewDirectTransactor()
+	if db != nil {
+		transactor = postgres.NewTransactor(db)
+	}
+	msgFactory, err := messaging.NewFromConfig(cfg, db, eventRegistry, transactor, logger)
 	if err != nil {
 		return err
 	}
+	factoryClosed := false
+	defer func() {
+		if !factoryClosed {
+			if closeErr := msgFactory.Close(); closeErr != nil {
+				logger.Error("messaging close failed", zap.Error(closeErr))
+			}
+		}
+	}()
 
 	k8sFactory, err := openK8s(cfg, logger)
 	if err != nil {
@@ -87,15 +117,21 @@ func Run(ctx context.Context) error {
 	}
 
 	c := &appctx.Container{
-		Context:      ctx,
-		Config:       cfg,
-		DB:           db,
-		Redis:        redisClient,
-		Logger:       logger,
-		Engine:       httpx.NewEngine(),
-		EventBus:     msgFactory.Bus,
-		MessageQueue: msgFactory.Queue,
-		K8sFactory:   k8sFactory,
+		Context:       ctx,
+		Config:        cfg,
+		DB:            db,
+		Redis:         redisClient,
+		Logger:        logger,
+		Engine:        httpx.NewEngine(),
+		EventBus:      msgFactory.Bus,
+		EventRegistry: eventRegistry,
+		Transactor:    transactor,
+		MessageQueue:  msgFactory.Queue,
+		K8sFactory:    k8sFactory,
+	}
+	if msgFactory.Operations != nil {
+		c.OperationRegistry = msgFactory.Operations.Registry
+		c.OperationWriter = msgFactory.Operations.Writer
 	}
 	httpx.RegisterReadiness(c.Engine, httpx.ReadinessDeps{DB: db, Redis: redisClient})
 
@@ -184,6 +220,10 @@ func Run(ctx context.Context) error {
 	sparkplugin.InstallAllWithContext(c.Engine, pluginContext)
 	c.RouteRegistry = routes.Collect(c.Engine)
 
+	if err := msgFactory.Start(ctx); err != nil {
+		return fmt.Errorf("start messaging: %w", err)
+	}
+
 	server := &http.Server{
 		Addr:              cfg.Server.Addr,
 		Handler:           c.Engine,
@@ -205,9 +245,14 @@ func Run(ctx context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		logger.Info("server shutting down")
-		return server.Shutdown(shutdownCtx)
+		shutdownErr := server.Shutdown(shutdownCtx)
+		closeErr := msgFactory.Close()
+		factoryClosed = true
+		return errors.Join(shutdownErr, closeErr)
 	case err := <-errCh:
-		return err
+		closeErr := msgFactory.Close()
+		factoryClosed = true
+		return errors.Join(err, closeErr)
 	}
 }
 

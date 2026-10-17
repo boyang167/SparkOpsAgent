@@ -37,11 +37,12 @@ type OutboxDispatcher struct {
 	clock     Clock
 	metrics   *Metrics
 
-	mu      sync.Mutex
-	started bool
-	closed  bool
-	stop    chan struct{}
-	done    chan struct{}
+	mu          sync.Mutex
+	started     bool
+	closed      bool
+	stop        chan struct{}
+	done        chan struct{}
+	claimCancel context.CancelFunc
 }
 
 func NewOutboxDispatcher(
@@ -69,6 +70,10 @@ func NewOutboxDispatcher(
 }
 
 func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) error {
+	return d.dispatchOnce(ctx, ctx)
+}
+
+func (d *OutboxDispatcher) dispatchOnce(claimCtx, executionCtx context.Context) error {
 	if d.store == nil || d.transport == nil {
 		return fmt.Errorf("outbox dispatcher dependencies are required")
 	}
@@ -76,15 +81,19 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) error {
 		return fmt.Errorf("outbox dispatcher owner is required")
 	}
 	var dispatchErrors []error
-	if err := d.refreshBacklogMetrics(ctx); err != nil {
+	if err := d.refreshBacklogMetrics(claimCtx); err != nil {
 		d.recordDispatcherError("stats")
 		dispatchErrors = append(
 			dispatchErrors,
 			fmt.Errorf("read event outbox stats: %w", err),
 		)
 	}
+	if err := claimCtx.Err(); err != nil {
+		dispatchErrors = append(dispatchErrors, err)
+		return errors.Join(dispatchErrors...)
+	}
 	records, err := d.store.Claim(
-		ctx,
+		claimCtx,
 		d.config.Owner,
 		d.config.BatchSize,
 		d.clock.Now(),
@@ -97,12 +106,12 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) error {
 	}
 
 	for _, record := range records {
-		if err := d.transport.Publish(ctx, record.Envelope); err != nil {
+		if err := d.transport.Publish(executionCtx, record.Envelope); err != nil {
 			if d.metrics != nil {
 				d.metrics.EventPublish.WithLabelValues("failure").Inc()
 			}
 			next := d.clock.Now().Add(retryDelay(record.Attempts))
-			rescheduleErr := d.store.Reschedule(ctx, record.ID, d.config.Owner, err.Error(), next)
+			rescheduleErr := d.store.Reschedule(executionCtx, record.ID, d.config.Owner, err.Error(), next)
 			if rescheduleErr != nil {
 				d.recordDispatcherError("reschedule")
 			}
@@ -112,7 +121,7 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) error {
 		if d.metrics != nil {
 			d.metrics.EventPublish.WithLabelValues("success").Inc()
 		}
-		if err := d.store.MarkPublished(ctx, record.ID, d.config.Owner, d.clock.Now()); err != nil {
+		if err := d.store.MarkPublished(executionCtx, record.ID, d.config.Owner, d.clock.Now()); err != nil {
 			d.recordDispatcherError("mark_published")
 			dispatchErrors = append(dispatchErrors, fmt.Errorf("mark event %s published: %w", record.ID, err))
 		}
@@ -154,7 +163,9 @@ func (d *OutboxDispatcher) Start(ctx context.Context) error {
 	d.started = true
 	d.stop = make(chan struct{})
 	d.done = make(chan struct{})
-	go d.run(ctx, d.stop, d.done)
+	claimCtx, claimCancel := context.WithCancel(ctx)
+	d.claimCancel = claimCancel
+	go d.run(claimCtx, d.stop, d.done)
 	return nil
 }
 
@@ -184,7 +195,7 @@ func (d *OutboxDispatcher) run(ctx context.Context, stop <-chan struct{}, done c
 			return
 		default:
 		}
-		_ = d.DispatchOnce(ctx)
+		_ = d.dispatchOnce(ctx, context.WithoutCancel(ctx))
 		timer := time.NewTimer(d.config.PollInterval)
 		select {
 		case <-ctx.Done():
@@ -199,20 +210,34 @@ func (d *OutboxDispatcher) run(ctx context.Context, stop <-chan struct{}, done c
 }
 
 func (d *OutboxDispatcher) Close() error {
+	d.StopAccepting()
+	d.Wait()
+	return nil
+}
+
+func (d *OutboxDispatcher) StopAccepting() {
 	d.mu.Lock()
 	if !d.closed {
 		d.closed = true
+		if d.claimCancel != nil {
+			d.claimCancel()
+			d.claimCancel = nil
+		}
 		if d.stop != nil {
 			close(d.stop)
 		}
 	}
+	d.mu.Unlock()
+}
+
+func (d *OutboxDispatcher) Wait() {
+	d.mu.Lock()
 	done := d.done
 	d.mu.Unlock()
 	if done == nil {
-		return nil
+		return
 	}
 	<-done
-	return nil
 }
 
 func retryDelay(attempts int) time.Duration {

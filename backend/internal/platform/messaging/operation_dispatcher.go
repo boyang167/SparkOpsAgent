@@ -17,6 +17,7 @@ const operationOwnerMaxLength = 160
 
 type OperationDispatcherConfig struct {
 	Owner        string
+	RuntimeID    string
 	BatchSize    int
 	Lease        time.Duration
 	PollInterval time.Duration
@@ -61,9 +62,13 @@ func NewOperationDispatcher(
 	if clock == nil {
 		clock = systemClock{}
 	}
+	runtimeID := config.RuntimeID
+	if runtimeID == "" {
+		runtimeID = uuid.NewString()
+	}
 	return &OperationDispatcher{
 		store: store, registry: registry, config: config, clock: clock, metrics: metrics,
-		runtimeID: uuid.NewString(),
+		runtimeID: runtimeID,
 	}
 }
 
@@ -301,6 +306,12 @@ func operationWorkerOwner(instanceOwner, runtimeID string, workerIndex int) stri
 }
 
 func (d *OperationDispatcher) Close() error {
+	d.StopAccepting()
+	d.Wait()
+	return nil
+}
+
+func (d *OperationDispatcher) StopAccepting() {
 	d.mu.Lock()
 	if !d.closed {
 		d.closed = true
@@ -312,12 +323,16 @@ func (d *OperationDispatcher) Close() error {
 			close(d.stop)
 		}
 	}
+	d.mu.Unlock()
+}
+
+func (d *OperationDispatcher) Wait() {
+	d.mu.Lock()
 	done := d.done
 	d.mu.Unlock()
 	if done != nil {
 		<-done
 	}
-	return nil
 }
 
 func operationRetryDelay(attempts int) time.Duration {

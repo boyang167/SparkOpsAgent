@@ -200,13 +200,21 @@ type amqpEventTransport struct {
 	topology            eventChannel
 	consumers           map[eventChannel]string
 	metrics             *Metrics
+	eventExchange       string
 	closing             chan struct{}
 	closed              bool
 }
 
-func NewAMQPEventTransport(url string, metrics *Metrics) (EventTransport, error) {
+func NewAMQPEventTransport(url string, metrics *Metrics, eventExchanges ...string) (EventTransport, error) {
 	if url == "" {
 		return nil, fmt.Errorf("amqp url is required")
+	}
+	eventExchange := eventExchangeName
+	if len(eventExchanges) > 0 {
+		eventExchange = strings.TrimSpace(eventExchanges[0])
+		if eventExchange == "" {
+			return nil, fmt.Errorf("amqp event exchange is required")
+		}
 	}
 	factory := func() (eventConnection, error) {
 		connection, err := amqp.Dial(url)
@@ -230,6 +238,7 @@ func NewAMQPEventTransport(url string, metrics *Metrics) (EventTransport, error)
 		factory,
 	)
 	transport.metrics = metrics
+	transport.eventExchange = eventExchange
 	return transport, nil
 }
 
@@ -255,6 +264,7 @@ func newAMQPEventTransportWithConnections(
 		sharedConnection:    publisherConnection == consumerConnection,
 		connectionFactory:   factory,
 		consumers:           make(map[eventChannel]string),
+		eventExchange:       eventExchangeName,
 		closing:             make(chan struct{}),
 	}
 }
@@ -273,12 +283,12 @@ func (t *amqpEventTransport) Declare(ctx context.Context, subscriptions []Subscr
 	if err != nil {
 		return err
 	}
-	if err := channel.ExchangeDeclare(eventExchangeName, "topic", true, false, false, false, nil); err != nil {
+	if err := channel.ExchangeDeclare(t.eventExchange, "topic", true, false, false, false, nil); err != nil {
 		t.invalidateTopology(channel)
 		return fmt.Errorf("declare event exchange: %w", err)
 	}
 	for _, subscription := range subscriptions {
-		if err := declareEventTopology(ctx, channel, topologyFor(subscription)); err != nil {
+		if err := declareEventTopology(ctx, channel, t.eventExchange, topologyFor(subscription)); err != nil {
 			t.invalidateTopology(channel)
 			return err
 		}
@@ -286,7 +296,7 @@ func (t *amqpEventTransport) Declare(ctx context.Context, subscriptions []Subscr
 	return nil
 }
 
-func declareEventTopology(ctx context.Context, channel eventChannel, topology eventTopology) error {
+func declareEventTopology(ctx context.Context, channel eventChannel, eventExchange string, topology eventTopology) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -296,7 +306,7 @@ func declareEventTopology(ctx context.Context, channel eventChannel, topology ev
 	if err := channel.QueueBind(
 		topology.Main.Name,
 		topology.Main.RoutingKey,
-		eventExchangeName,
+		eventExchange,
 		false,
 		nil,
 	); err != nil {
@@ -325,7 +335,7 @@ func declareEventTopology(ctx context.Context, channel eventChannel, topology ev
 
 func (t *amqpEventTransport) Publish(ctx context.Context, envelope events.Envelope) error {
 	routingKey := fmt.Sprintf("%s.v%d", envelope.Type, envelope.Version)
-	return t.publish(ctx, eventExchangeName, routingKey, envelope, nil)
+	return t.publish(ctx, t.eventExchange, routingKey, envelope, nil)
 }
 
 func (t *amqpEventTransport) PublishRetry(

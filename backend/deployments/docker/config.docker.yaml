@@ -10,6 +10,11 @@ messaging:
     url: "amqp://sparkops:sparkops@rabbitmq:5672/"
     exchange: "sparkops"
     exchange_type: "direct"
+    event_exchange: "sparkops.events"
+  outbox:
+    poll_interval: 1s
+    batch_size: 100
+    lock_timeout: 1m
 runtime:
   driver: "k8s"
   cluster: ""

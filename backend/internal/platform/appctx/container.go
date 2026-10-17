@@ -17,8 +17,10 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/k8s"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/policy"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/redis"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/routes"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
 type Module interface {
@@ -34,7 +36,11 @@ type Container struct {
 	Logger                     *zap.Logger
 	Engine                     *gin.Engine
 	EventBus                   eventbus.Bus
+	EventRegistry              *events.Registry
+	Transactor                 postgres.Transactor
 	MessageQueue               messaging.Queue
+	OperationRegistry          messaging.OperationRegistry
+	OperationWriter            messaging.OperationWriter
 	K8sFactory                 *k8s.Factory
 	PermissionChecker          authz.PermissionChecker
 	SystemRoleChecker          authz.SystemRoleChecker

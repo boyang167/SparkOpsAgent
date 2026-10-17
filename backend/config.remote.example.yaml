@@ -12,6 +12,12 @@ redis:
   addr: "192.168.5.24:16379"
 messaging:
   driver: inmemory
+  amqp:
+    event_exchange: "sparkops.events"
+  outbox:
+    poll_interval: 1s
+    batch_size: 100
+    lock_timeout: 1m
 deploy:
   jenkins_timeout: 30m
   rollout_timeout: 10m

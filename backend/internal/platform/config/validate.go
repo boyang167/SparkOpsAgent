@@ -52,11 +52,36 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("unsupported runtime.driver: %s", c.Runtime.Driver)
 	}
+	messagingDriver := strings.ToLower(strings.TrimSpace(c.Messaging.Driver))
+	if messagingDriver == "" {
+		messagingDriver = "inmemory"
+	}
+	switch messagingDriver {
+	case "inmemory":
+	case "amqp":
+		if strings.TrimSpace(c.Messaging.AMQP.URL) == "" {
+			return fmt.Errorf("messaging.amqp.url is required when driver=amqp")
+		}
+		if strings.TrimSpace(c.Messaging.AMQP.EventExchange) == "" {
+			return fmt.Errorf("messaging.amqp.event_exchange is required when driver=amqp")
+		}
+		if c.Messaging.Outbox.PollInterval <= 0 {
+			return fmt.Errorf("messaging.outbox.poll_interval must be greater than zero")
+		}
+		if c.Messaging.Outbox.BatchSize <= 0 {
+			return fmt.Errorf("messaging.outbox.batch_size must be greater than zero")
+		}
+		if c.Messaging.Outbox.LockTimeout <= 0 {
+			return fmt.Errorf("messaging.outbox.lock_timeout must be greater than zero")
+		}
+	default:
+		return fmt.Errorf("unsupported messaging.driver: %s", c.Messaging.Driver)
+	}
 	if IsProduction() {
 		if c.JWT.Secret == "dev-only-change-me" || c.JWT.Secret == "docker-dev-secret" {
 			return fmt.Errorf("jwt.secret must be changed in production")
 		}
-		if c.Messaging.Driver == "inmemory" {
+		if messagingDriver == "inmemory" {
 			return fmt.Errorf("messaging.driver must not be inmemory in production")
 		}
 		if c.Delivery.Driver == "mock" {
@@ -64,9 +89,6 @@ func (c *Config) Validate() error {
 		}
 		if c.Runtime.Driver == "mock" {
 			return fmt.Errorf("runtime.driver must not be mock in production")
-		}
-		if c.Messaging.Driver == "amqp" && c.Messaging.AMQP.URL == "" {
-			return fmt.Errorf("messaging.amqp.url is required when driver=amqp")
 		}
 	}
 	return nil

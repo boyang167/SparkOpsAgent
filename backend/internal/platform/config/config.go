@@ -100,14 +100,22 @@ type RedisConfig struct {
 }
 
 type MessagingConfig struct {
-	Driver string     `yaml:"driver"`
-	AMQP   AMQPConfig `yaml:"amqp"`
+	Driver string       `yaml:"driver"`
+	AMQP   AMQPConfig   `yaml:"amqp"`
+	Outbox OutboxConfig `yaml:"outbox"`
 }
 
 type AMQPConfig struct {
-	URL          string `yaml:"url"`
-	Exchange     string `yaml:"exchange"`
-	ExchangeType string `yaml:"exchange_type"`
+	URL           string `yaml:"url"`
+	Exchange      string `yaml:"exchange"`
+	ExchangeType  string `yaml:"exchange_type"`
+	EventExchange string `yaml:"event_exchange"`
+}
+
+type OutboxConfig struct {
+	PollInterval time.Duration `yaml:"poll_interval"`
+	BatchSize    int           `yaml:"batch_size"`
+	LockTimeout  time.Duration `yaml:"lock_timeout"`
 }
 
 type K8sConfig struct {
@@ -281,6 +289,30 @@ func (c *Config) applyEnvOverrides() error {
 	if v := os.Getenv("AMQP_URL"); v != "" {
 		c.Messaging.AMQP.URL = v
 	}
+	if v := os.Getenv("AMQP_EVENT_EXCHANGE"); v != "" {
+		c.Messaging.AMQP.EventExchange = v
+	}
+	if v := os.Getenv("OUTBOX_POLL_INTERVAL"); v != "" {
+		duration, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("OUTBOX_POLL_INTERVAL: %w", err)
+		}
+		c.Messaging.Outbox.PollInterval = duration
+	}
+	if v := os.Getenv("OUTBOX_BATCH_SIZE"); v != "" {
+		batchSize, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("OUTBOX_BATCH_SIZE: %w", err)
+		}
+		c.Messaging.Outbox.BatchSize = batchSize
+	}
+	if v := os.Getenv("OUTBOX_LOCK_TIMEOUT"); v != "" {
+		duration, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("OUTBOX_LOCK_TIMEOUT: %w", err)
+		}
+		c.Messaging.Outbox.LockTimeout = duration
+	}
 	if v := os.Getenv("KUBECONFIG"); v != "" {
 		c.K8s.KubeconfigPath = v
 	}
@@ -373,6 +405,18 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Messaging.AMQP.ExchangeType == "" {
 		c.Messaging.AMQP.ExchangeType = "direct"
+	}
+	if c.Messaging.AMQP.EventExchange == "" {
+		c.Messaging.AMQP.EventExchange = "sparkops.events"
+	}
+	if c.Messaging.Outbox.PollInterval == 0 {
+		c.Messaging.Outbox.PollInterval = time.Second
+	}
+	if c.Messaging.Outbox.BatchSize == 0 {
+		c.Messaging.Outbox.BatchSize = 100
+	}
+	if c.Messaging.Outbox.LockTimeout == 0 {
+		c.Messaging.Outbox.LockTimeout = time.Minute
 	}
 	if c.Runtime.Driver == "" {
 		c.Runtime.Driver = "k8s"

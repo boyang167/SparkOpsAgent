@@ -25,6 +25,7 @@ type ReliableBus struct {
 	mu            sync.Mutex
 	subscriptions []Subscription
 	started       bool
+	stopping      bool
 	closed        bool
 	cancel        context.CancelFunc
 }
@@ -143,6 +144,7 @@ func (b *ReliableBus) Start(ctx context.Context) error {
 func (b *ReliableBus) abortStart(cancel context.CancelFunc, startErr error) error {
 	b.mu.Lock()
 	b.closed = true
+	b.stopping = true
 	b.cancel = nil
 	b.mu.Unlock()
 
@@ -168,20 +170,39 @@ func (b *ReliableBus) abortStart(cancel context.CancelFunc, startErr error) erro
 }
 
 func (b *ReliableBus) Close() error {
+	b.StopAccepting()
+	b.Wait()
+
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
 		return nil
 	}
 	b.closed = true
+	b.mu.Unlock()
+
+	if b.transport != nil {
+		return b.transport.Close()
+	}
+	return nil
+}
+
+func (b *ReliableBus) StopAccepting() {
+	b.mu.Lock()
+	if b.stopping {
+		b.mu.Unlock()
+		return
+	}
+	b.stopping = true
 	cancel := b.cancel
 	b.cancel = nil
 	b.mu.Unlock()
 
-	var closeErrors []error
 	if b.dispatcher != nil {
-		if err := b.dispatcher.Close(); err != nil {
-			closeErrors = append(closeErrors, err)
+		if staged, ok := b.dispatcher.(interface{ StopAccepting() }); ok {
+			staged.StopAccepting()
+		} else {
+			_ = b.dispatcher.Close()
 		}
 	}
 	if b.consumer != nil {
@@ -190,13 +211,15 @@ func (b *ReliableBus) Close() error {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func (b *ReliableBus) Wait() {
+	if b.dispatcher != nil {
+		if staged, ok := b.dispatcher.(interface{ Wait() }); ok {
+			staged.Wait()
+		}
+	}
 	if b.consumer != nil {
 		b.consumer.Wait()
 	}
-	if b.transport != nil {
-		if err := b.transport.Close(); err != nil {
-			closeErrors = append(closeErrors, err)
-		}
-	}
-	return errors.Join(closeErrors...)
 }
