@@ -28,11 +28,11 @@ Stable keys use `<eventID>:<subscriber>:<operationType>:<target>`. Command-creat
 
 - Delivery: webhook send, Jenkins credential sync, deploy queue publish.
 - Workspace App: project undeploy, pipeline disable.
-- Product Workflow: build completion/trigger, deploy completion/trigger, webhook send, SMTP send, Feishu-user send.
-- Product: workflow completion/trigger, Jira transition, release-plan webhook send.
+- Product Workflow: build completion/trigger, deploy completion/trigger, webhook send, SMTP send, Feishu-user send, GitLab status report.
+- Product: workflow completion/trigger, Jira transition, release-plan webhook send, release-plan approval send.
 - Governance: Casbin member-role sync.
 
-Registration is guarded by `OperationRegistry.Register`; duplicate types fail startup. A runtime registry test registers all 14 production handler constructors, resolves every scheduled type, and proves duplicate registration fails.
+Registration is guarded by `OperationRegistry.Register`; duplicate types fail startup. A runtime registry test consumes the five production factory manifests, registers all 16 handler descriptors, resolves every scheduled type, and proves duplicate registration fails.
 
 ## Idempotency and reconciliation
 
@@ -78,6 +78,8 @@ GREEN:
 | Product-workflow Feishu-user notification | `product-workflow.feishu-user.send.v1` | original completion subscriber / notification ID | Stable event key forwarded to the HTTP protocol; 408/429/5xx retry |
 | Product Jira transition | `product.jira.transition.v1` | `product.workflow-run-completed` / provider + issue | Query current issue status before transition; an already-converged issue is success |
 | Product release-plan hook | `product.release-plan.webhook.send.v1` | `product.workflow-run-completed` / plan ID | Reload current plan at execution and forward `Idempotency-Key`; HTTP failures are observable |
+| Product release-plan approval | `product.release-plan.approval.send.v1` | `product.release-plan` / plan ID | Reload current approval state; completed/superseded state converges without duplicate business transition |
+| Product-workflow GitLab status | `product-workflow.gitlab.status.report.v1` | workflow scheduler / run + scope | Query current commit status before setting desired state; bounded shared HTTP client and retryable adapter errors |
 | Workspace archive pipeline disable | `workspace-app.pipeline.disable.v1` | archive subscriber or command / project ID | Query Jenkins job state before disable and again before archive; archived replay is a no-op |
 | Delivery build webhook | `delivery.webhook.send.v1` | `delivery.build-completed.webhook` / webhook ID | Payload stores webhook ID only; handler reloads latest URL/token; 408/429/5xx retry |
 | Delivery deploy webhook | `delivery.webhook.send.v1` | `delivery.deploy-completed.webhook` / webhook ID | Same protected lookup and retry policy as build webhook |
@@ -259,3 +261,9 @@ None blocking. The Cursor shell auto-injected `git commit --trailer`, but instal
 - RED: legacy rejection returned `project remains online` forever. GREEN: persisted AMQP lifecycle reaches `completed`, restores the project, and replay performs no external work.
 - RED: release hook operations had no persisted token reference or current-state guard. GREEN: matching pending state sends once; callback-cleared or mismatched state converges with nil; truly invalid matching configuration is permanent.
 - RED: bootstrap registration tests duplicated operation-type lists and the factories had no shared descriptor API. GREEN: tests and production registration consume the same factory manifests.
+
+## Terminal CAS and capability-token closure (2026-10-18)
+
+- Project terminal transitions now use `UPDATE ... WHERE id = ? AND status = 'archiving'` and require exactly one affected row. A zero-row result is reread: either legal terminal state is a converged no-op, while nonterminal/unknown conflicts remain retryable. Two independent-transaction tests prove archive-wins and abort-wins orderings cannot overwrite each other.
+- Release-hook operation payloads persist only plan ID, hook event, and a SHA-256 token digest. The handler reloads the current raw capability token, compares event/digest against a pending state, and only then sends. Persisted-row tests reject raw token/callback capability leakage; callback-cleared and superseded generations complete as no-ops, database failures retry, and matching malformed configuration remains permanent.
+- The authoritative registration count is 16: Delivery 3, Workspace App 2, Product Workflow 6 (including GitLab status), Product 4 (including approval), and Governance 1.

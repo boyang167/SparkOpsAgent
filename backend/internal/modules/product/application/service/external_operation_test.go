@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -95,7 +96,7 @@ func TestProductExternalSchedulesPersistRealRowsAndDeduplicate(t *testing.T) {
 			return err
 		}
 		if err := scheduleReleasePlanWebhook(ctx, writer, productoutbound.ReleasePlanWebhookPayload{
-			PlanID: "plan-1", Event: "all_done",
+			PlanID: "plan-1", Event: "all_done", TokenDigest: ReleasePlanHookTokenDigest("capability-token"),
 		}); err != nil {
 			return err
 		}
@@ -115,6 +116,13 @@ func TestProductExternalSchedulesPersistRealRowsAndDeduplicate(t *testing.T) {
 		productoutbound.OperationTypeReleasePlanApprovalSend,
 		productoutbound.OperationTypeReleasePlanWebhookSend,
 	}, types)
+	var hookPayload string
+	require.NoError(t, db.Table("operation_outbox").Select("payload").
+		Where("operation_type = ?", productoutbound.OperationTypeReleasePlanWebhookSend).
+		Scan(&hookPayload).Error)
+	require.NotContains(t, hookPayload, "capability-token")
+	require.NotContains(t, hookPayload, "https://callback.example")
+	require.True(t, strings.Contains(hookPayload, ReleasePlanHookTokenDigest("capability-token")))
 }
 
 func openExternalOperationDB(t *testing.T) *gorm.DB {

@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,7 +36,7 @@ func SendReleasePlanHookOperation(
 	sender ReleasePlanHookSender,
 	planID kernel.ReleasePlanID,
 	event model.ReleasePlanHookEvent,
-	token string,
+	tokenDigest string,
 	idempotencyKey string,
 ) error {
 	if plans == nil || sender == nil {
@@ -46,10 +47,16 @@ func SendReleasePlanHookOperation(
 		return err
 	}
 	state := plan.HookState
-	if state == nil || state.Status != "pending" || state.Event != event || state.Token != token {
+	if state == nil || state.Status != "pending" || state.Event != event ||
+		ReleasePlanHookTokenDigest(state.Token) != tokenDigest {
 		return nil
 	}
 	return sender.SendWithIdempotency(ctx, plan, event, idempotencyKey)
+}
+
+func ReleasePlanHookTokenDigest(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return fmt.Sprintf("%x", sum[:])
 }
 
 func NewReleasePlanHookNotifier(publicBase string) *ReleasePlanHookNotifier {

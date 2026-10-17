@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -83,7 +84,7 @@ func (projectModel) TableName() string { return "workspace_app.projects" }
 
 type ProjectRepository struct{ db *gorm.DB }
 
-func NewProjectRepository(db *gorm.DB) repository.ProjectRepository {
+func NewProjectRepository(db *gorm.DB) *ProjectRepository {
 	return &ProjectRepository{db: db}
 }
 
@@ -206,6 +207,23 @@ func (r *ProjectRepository) Update(ctx context.Context, project *model.Project) 
 		return domain.ErrProjectNameExists
 	}
 	return err
+}
+
+func (r *ProjectRepository) TransitionArchiving(
+	ctx context.Context,
+	id kernel.ProjectID,
+	target model.ProjectStatus,
+) (bool, error) {
+	if target != model.ProjectStatusActive && target != model.ProjectStatusArchived {
+		return false, fmt.Errorf("invalid project terminal status %q", target)
+	}
+	result := postgres.DB(ctx, r.db).Model(&projectModel{}).
+		Where("id = ? AND status = ?", id.String(), model.ProjectStatusArchiving).
+		Updates(map[string]any{"status": string(target), "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
 }
 
 func (r *ProjectRepository) FindByID(ctx context.Context, id kernel.ProjectID) (*model.Project, error) {
@@ -374,3 +392,4 @@ func rowToProject(row projectModel) (*model.Project, error) {
 }
 
 var _ repository.ProjectRepository = (*ProjectRepository)(nil)
+var _ repository.ProjectTerminalRepository = (*ProjectRepository)(nil)

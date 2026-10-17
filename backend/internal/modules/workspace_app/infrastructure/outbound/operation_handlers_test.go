@@ -30,6 +30,15 @@ func (r *pipelineProjectRepo) Update(_ context.Context, project *model.Project) 
 	r.project = project
 	return nil
 }
+func (r *pipelineProjectRepo) TransitionArchiving(
+	_ context.Context, id kernel.ProjectID, target model.ProjectStatus,
+) (bool, error) {
+	if r.project == nil || r.project.ID != id || !r.project.IsArchiving() {
+		return false, nil
+	}
+	r.project.Status = target
+	return true, nil
+}
 func (r *pipelineProjectRepo) FindByID(_ context.Context, id kernel.ProjectID) (*model.Project, error) {
 	if r.project == nil || r.project.ID != id {
 		return nil, domain.ErrProjectNotFound

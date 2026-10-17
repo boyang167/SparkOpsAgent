@@ -18,3 +18,8 @@ type ProjectRepository interface {
 	CountByProduct(ctx context.Context, productID kernel.ProductID) (int, error)
 	ListByStatus(ctx context.Context, status model.ProjectStatus) ([]*model.Project, error)
 }
+
+type ProjectTerminalRepository interface {
+	ProjectRepository
+	TransitionArchiving(ctx context.Context, id kernel.ProjectID, target model.ProjectStatus) (bool, error)
+}

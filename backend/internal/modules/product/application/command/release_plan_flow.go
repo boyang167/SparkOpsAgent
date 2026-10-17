@@ -39,9 +39,12 @@ func (d releasePlanFlowDeps) sendHook(ctx context.Context, plan *model.ReleasePl
 		return err
 	}
 	if d.operations != nil {
-		ctx = releasePlanOperationContext(ctx, plan, "hook:"+string(event), hookToken(plan))
+		ctx = releasePlanOperationContext(
+			ctx, plan, "hook:"+string(event), service.ReleasePlanHookTokenDigest(hookToken(plan)),
+		)
 		return service.ScheduleReleasePlanWebhook(ctx, d.operations, productoutbound.ReleasePlanWebhookPayload{
-			PlanID: plan.ID.String(), Event: string(event), Token: hookToken(plan),
+			PlanID: plan.ID.String(), Event: string(event),
+			TokenDigest: service.ReleasePlanHookTokenDigest(hookToken(plan)),
 		})
 	}
 	if d.hooks == nil {

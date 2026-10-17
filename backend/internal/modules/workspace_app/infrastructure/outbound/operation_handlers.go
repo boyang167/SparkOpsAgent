@@ -40,7 +40,7 @@ type PipelineDisabler interface {
 
 func NewPipelineDisableHandler(
 	disabler func() PipelineDisabler,
-	repo repository.ProjectRepository,
+	repo repository.ProjectTerminalRepository,
 	tx postgres.Transactor,
 ) messaging.OperationHandler {
 	return func(ctx context.Context, operation messaging.Operation) error {
@@ -84,23 +84,13 @@ func NewPipelineDisableHandler(
 			return fmt.Errorf("pipeline remains enabled after disable")
 		}
 		return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-			current, err := repo.FindByID(txCtx, projectID)
-			if err != nil {
-				return err
-			}
-			if current.Status == model.ProjectStatusArchived || !current.IsArchiving() {
-				return nil
-			}
-			if err := current.Archive(); err != nil {
-				return err
-			}
-			return repo.Update(txCtx, current)
+			return transitionProjectTerminal(txCtx, repo, projectID, model.ProjectStatusArchived)
 		})
 	}
 }
 
 func NewProjectUndeployHandler(
-	repo repository.ProjectRepository,
+	repo repository.ProjectTerminalRepository,
 	teardown func() appctx.ProjectTeardown,
 	operations messaging.OperationWriter,
 	tx postgres.Transactor,
@@ -136,14 +126,7 @@ func NewProjectUndeployHandler(
 		}
 		if len(online) > 0 && !allowUndeploy {
 			return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-				current, err := repo.FindByID(txCtx, projectID)
-				if err != nil || !current.IsArchiving() {
-					return err
-				}
-				if err := current.AbortArchiving(); err != nil {
-					return err
-				}
-				return repo.Update(txCtx, current)
+				return transitionProjectTerminal(txCtx, repo, projectID, model.ProjectStatusActive)
 			})
 		}
 		active, err := target.HasActiveRun(ctx, project.ID)
@@ -183,5 +166,30 @@ func NewProjectUndeployHandler(
 				},
 			})
 		})
+	}
+}
+
+func transitionProjectTerminal(
+	ctx context.Context,
+	repo repository.ProjectTerminalRepository,
+	projectID kernel.ProjectID,
+	target model.ProjectStatus,
+) error {
+	updated, err := repo.TransitionArchiving(ctx, projectID, target)
+	if err != nil || updated {
+		return err
+	}
+	current, err := repo.FindByID(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if current.Status == target {
+		return nil
+	}
+	switch current.Status {
+	case model.ProjectStatusActive, model.ProjectStatusArchived:
+		return nil
+	default:
+		return fmt.Errorf("project terminal transition conflicted with status %q", current.Status)
 	}
 }

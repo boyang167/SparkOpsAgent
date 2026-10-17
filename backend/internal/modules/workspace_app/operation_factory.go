@@ -11,7 +11,7 @@ import (
 )
 
 type OperationFactory struct {
-	Repository repository.ProjectRepository
+	Repository repository.ProjectTerminalRepository
 	Teardown   func() appctx.ProjectTeardown
 	Operations messaging.OperationWriter
 	Transactor postgres.Transactor

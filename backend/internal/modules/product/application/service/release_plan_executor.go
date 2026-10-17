@@ -198,7 +198,8 @@ func (e *ReleasePlanExecutor) beginAllDoneHook(ctx context.Context, plan *model.
 			})
 		}
 		return scheduleReleasePlanWebhook(ctx, e.operations, productoutbound.ReleasePlanWebhookPayload{
-			PlanID: plan.ID.String(), Event: string(model.ReleasePlanHookEventAllDone), Token: plan.HookState.Token,
+			PlanID: plan.ID.String(), Event: string(model.ReleasePlanHookEventAllDone),
+			TokenDigest: ReleasePlanHookTokenDigest(plan.HookState.Token),
 		})
 	}
 	if e.hooks != nil {

@@ -35,10 +35,10 @@ type JiraTransitionPayload struct {
 }
 
 type ReleasePlanWebhookPayload struct {
-	EventID string `json:"event_id"`
-	PlanID  string `json:"plan_id"`
-	Event   string `json:"event"`
-	Token   string `json:"token"`
+	EventID     string `json:"event_id"`
+	PlanID      string `json:"plan_id"`
+	Event       string `json:"event"`
+	TokenDigest string `json:"token_digest"`
 }
 
 type ReleasePlanApprovalPayload struct {
@@ -92,7 +92,7 @@ func NewReleasePlanWebhookOperation(handler ReleasePlanWebhookHandler) messaging
 		if err != nil {
 			return messaging.Permanent(err)
 		}
-		return handler(ctx, planID, payload.Event, payload.Token, operation.IdempotencyKey)
+		return handler(ctx, planID, payload.Event, payload.TokenDigest, operation.IdempotencyKey)
 	}
 }
 

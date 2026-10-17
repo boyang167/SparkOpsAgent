@@ -53,6 +53,20 @@ func (r *archiveSQLRepo) Update(ctx context.Context, project *model.Project) err
 	return nil
 }
 
+func (r *archiveSQLRepo) TransitionArchiving(
+	ctx context.Context, id kernel.ProjectID, target model.ProjectStatus,
+) (bool, error) {
+	result := postgres.DB(ctx, r.db).Exec(
+		"UPDATE workspace_app.projects SET status = ? WHERE id = ? AND status = ?",
+		string(target), id.String(), string(model.ProjectStatusArchiving),
+	)
+	if result.Error != nil || result.RowsAffected == 0 {
+		return false, result.Error
+	}
+	r.projects[id].Status = target
+	return true, nil
+}
+
 func (r *archiveSQLRepo) FindByID(ctx context.Context, id kernel.ProjectID) (*model.Project, error) {
 	var status string
 	if err := postgres.DB(ctx, r.db).Table("workspace_app.projects").

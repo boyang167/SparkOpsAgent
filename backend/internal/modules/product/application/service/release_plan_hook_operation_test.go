@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -21,14 +22,18 @@ func (l hookOperationPlanLoader) FindPlanByID(context.Context, kernel.ReleasePla
 }
 
 type hookOperationSender struct {
-	calls int
-	err   error
+	calls     int
+	seenToken string
+	err       error
 }
 
 func (s *hookOperationSender) SendWithIdempotency(
-	context.Context, *model.ReleasePlan, model.ReleasePlanHookEvent, string,
+	_ context.Context, plan *model.ReleasePlan, _ model.ReleasePlanHookEvent, _ string,
 ) error {
 	s.calls++
+	if plan.HookState != nil {
+		s.seenToken = plan.HookState.Token
+	}
 	return s.err
 }
 
@@ -43,15 +48,16 @@ func TestReleasePlanHookOperationCompletesAfterCallbackClearsPendingState(t *tes
 
 	require.NoError(t, SendReleasePlanHookOperation(
 		context.Background(), hookOperationPlanLoader{plan: plan}, sender,
-		plan.ID, model.ReleasePlanHookEventFinishPlanning, "hook-token", "operation-key",
+		plan.ID, model.ReleasePlanHookEventFinishPlanning, ReleasePlanHookTokenDigest("hook-token"), "operation-key",
 	))
 	require.Equal(t, 1, sender.calls, "first delivery succeeds before operation completion persistence")
+	require.Equal(t, "hook-token", sender.seenToken, "raw capability is loaded only at handler execution")
 
 	// The external callback advances the business flow before MarkCompleted can persist.
 	plan.ClearHookState()
 	require.NoError(t, SendReleasePlanHookOperation(
 		context.Background(), hookOperationPlanLoader{plan: plan}, sender,
-		plan.ID, model.ReleasePlanHookEventFinishPlanning, "hook-token", "operation-key",
+		plan.ID, model.ReleasePlanHookEventFinishPlanning, ReleasePlanHookTokenDigest("hook-token"), "operation-key",
 	))
 	require.Equal(t, 1, sender.calls, "operation retry must converge without a duplicate send")
 }
@@ -73,7 +79,7 @@ func TestReleasePlanHookOperationRejectsInvalidMatchingPendingConfiguration(t *t
 	err := SendReleasePlanHookOperation(
 		context.Background(), hookOperationPlanLoader{plan: plan},
 		NewReleasePlanHookNotifier("https://sparkops.example"), plan.ID,
-		model.ReleasePlanHookEventFinishPlanning, "hook-token", "operation-key",
+		model.ReleasePlanHookEventFinishPlanning, ReleasePlanHookTokenDigest("hook-token"), "operation-key",
 	)
 
 	require.Error(t, err)
@@ -91,7 +97,18 @@ func TestReleasePlanHookOperationIgnoresSupersededTokenOrEvent(t *testing.T) {
 
 	require.NoError(t, SendReleasePlanHookOperation(
 		context.Background(), hookOperationPlanLoader{plan: plan}, sender,
-		plan.ID, model.ReleasePlanHookEventFinishPlanning, "old-token", "operation-key",
+		plan.ID, model.ReleasePlanHookEventFinishPlanning, ReleasePlanHookTokenDigest("old-token"), "operation-key",
 	))
 	require.Zero(t, sender.calls)
+}
+
+func TestReleasePlanHookOperationKeepsDatabaseFailureRetryable(t *testing.T) {
+	err := SendReleasePlanHookOperation(
+		context.Background(), hookOperationPlanLoader{err: errors.New("database unavailable")},
+		&hookOperationSender{}, kernel.NewReleasePlanID(),
+		model.ReleasePlanHookEventFinishPlanning, ReleasePlanHookTokenDigest("hook-token"), "operation-key",
+	)
+
+	require.Error(t, err)
+	require.False(t, messaging.IsPermanent(err))
 }
