@@ -35,6 +35,9 @@ func (d releasePlanFlowDeps) persistJobs(ctx context.Context, plan *model.Releas
 }
 
 func (d releasePlanFlowDeps) sendHook(ctx context.Context, plan *model.ReleasePlan, event model.ReleasePlanHookEvent) error {
+	if err := service.ValidateReleasePlanHook(plan, event); err != nil {
+		return err
+	}
 	if d.operations != nil {
 		ctx = releasePlanOperationContext(ctx, plan, "hook:"+string(event), hookToken(plan))
 		return service.ScheduleReleasePlanWebhook(ctx, d.operations, productoutbound.ReleasePlanWebhookPayload{
@@ -57,6 +60,9 @@ func (d releasePlanFlowDeps) beginHookWait(plan *model.ReleasePlan, event model.
 func (d releasePlanFlowDeps) afterPlanningComplete(ctx context.Context, plan *model.ReleasePlan, actor kernel.MemberID) error {
 	switch plan.Status {
 	case model.ReleasePlanStatusWaitForApproval:
+		if err := service.ValidateReleasePlanApproval(plan); err != nil {
+			return err
+		}
 		initApprovalToken(plan)
 		if err := d.plans.UpdatePlan(ctx, plan); err != nil {
 			return err
@@ -88,6 +94,9 @@ func (d releasePlanFlowDeps) afterPlanningComplete(ctx context.Context, plan *mo
 }
 
 func (d releasePlanFlowDeps) sendApproval(ctx context.Context, plan *model.ReleasePlan) error {
+	if err := service.ValidateReleasePlanApproval(plan); err != nil {
+		return err
+	}
 	if d.operations != nil {
 		ctx = releasePlanOperationContext(ctx, plan, "approval", approvalToken(plan))
 		return service.ScheduleReleasePlanApproval(ctx, d.operations, productoutbound.ReleasePlanApprovalPayload{
@@ -119,12 +128,32 @@ func (d releasePlanFlowDeps) afterAllDoneHookPass(ctx context.Context, plan *mod
 }
 
 func (d releasePlanFlowDeps) beginAllDoneHook(ctx context.Context, plan *model.ReleasePlan, actor kernel.MemberID) error {
+	if err := service.ValidateReleasePlanHook(plan, model.ReleasePlanHookEventAllDone); err != nil {
+		return err
+	}
 	d.beginHookWait(plan, model.ReleasePlanHookEventAllDone)
 	if err := d.plans.UpdatePlan(ctx, plan); err != nil {
 		return err
 	}
 	_ = auditReleasePlan(ctx, d.plans, plan.ID, actor, "wait_all_done_hook", nil)
 	return d.sendHook(ctx, plan, model.ReleasePlanHookEventAllDone)
+}
+
+func validatePlanningExternalConfig(plan *model.ReleasePlan) error {
+	if err := service.ValidateReleasePlanHook(plan, model.ReleasePlanHookEventFinishPlanning); err != nil {
+		return err
+	}
+	if err := service.ValidateReleasePlanHook(plan, model.ReleasePlanHookEventBeforeExecute); err != nil {
+		return err
+	}
+	return service.ValidateReleasePlanApproval(plan)
+}
+
+func validateApprovalExternalConfig(plan *model.ReleasePlan) error {
+	if err := service.ValidateReleasePlanApproval(plan); err != nil {
+		return err
+	}
+	return service.ValidateReleasePlanHook(plan, model.ReleasePlanHookEventBeforeExecute)
 }
 
 func releasePlanOperationContext(ctx context.Context, plan *model.ReleasePlan, action, token string) context.Context {

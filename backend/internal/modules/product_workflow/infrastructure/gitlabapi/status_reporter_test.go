@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -58,4 +59,33 @@ func TestReporterPropagatesGitLabStatusFailure(t *testing.T) {
 	})
 
 	require.Error(t, err)
+}
+
+func TestReporterBoundsCurrentAndSetStatusIO(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	defer server.Close()
+	defer close(release)
+	reporter := Reporter{
+		Lookup: statusLookup{project: command.ProjectGit{
+			GitURL: "https://git.example/group/repo.git", ServiceURL: server.URL, Token: "secret",
+		}},
+		HTTP: &http.Client{Timeout: 25 * time.Millisecond},
+	}
+	payload := workflowoutbound.GitLabStatusPayload{
+		ProjectID: kernel.NewProjectID().String(), Commit: "abc", Context: "sparkops/workflow",
+		DesiredStatus: "success",
+	}
+
+	started := time.Now()
+	_, err := reporter.CurrentStatus(context.Background(), payload)
+	require.Error(t, err)
+	require.Less(t, time.Since(started), time.Second)
+
+	started = time.Now()
+	err = reporter.Report(context.Background(), payload)
+	require.Error(t, err)
+	require.Less(t, time.Since(started), time.Second)
 }

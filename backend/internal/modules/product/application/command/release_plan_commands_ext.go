@@ -293,6 +293,9 @@ func (h *ApproveReleasePlanByTokenHandler) handle(ctx context.Context, token str
 	if err != nil {
 		return nil, err
 	}
+	if err := validateApprovalExternalConfig(plan); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	if err := plan.ApproveByToken(strings.TrimSpace(input.Note), now); err != nil {
 		return nil, err

@@ -173,6 +173,9 @@ func (e *ReleasePlanExecutor) BeginAllDoneHook(ctx context.Context, plan *model.
 }
 
 func (e *ReleasePlanExecutor) beginAllDoneHook(ctx context.Context, plan *model.ReleasePlan, actor kernel.MemberID) error {
+	if err := ValidateReleasePlanHook(plan, model.ReleasePlanHookEventAllDone); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	plan.InitHookWait(model.ReleasePlanHookEventAllDone, uuid.NewString(), now)
 	if err := e.plans.UpdatePlan(ctx, plan); err != nil {

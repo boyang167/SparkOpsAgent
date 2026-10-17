@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
 	workflowoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/outbound"
@@ -52,6 +54,9 @@ func (r *WorkflowWebhookResolver) ResolveWebhook(
 	}
 	run, err := r.repo.FindRunByID(ctx, runID)
 	if err != nil {
+		if errors.Is(err, domain.ErrProductWorkflowRunNotFound) {
+			return "", nil, false, nil
+		}
 		return "", nil, false, err
 	}
 	workflowID := run.WorkflowID
@@ -63,6 +68,9 @@ func (r *WorkflowWebhookResolver) ResolveWebhook(
 	}
 	wf, err := r.repo.FindWorkflowByID(ctx, workflowID)
 	if err != nil {
+		if errors.Is(err, domain.ErrProductWorkflowNotFound) {
+			return "", nil, false, nil
+		}
 		return "", nil, false, err
 	}
 	notes := wf.Notifications
@@ -558,14 +566,18 @@ func feishuTenantToken(ctx context.Context, appID, secret string, client *http.C
 		return "", err
 	}
 	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	if err := classifyNotificationHTTP(resp.StatusCode); err != nil {
+		return "", err
+	}
 	var payload struct {
 		TenantAccessToken string `json:"tenant_access_token"`
 		Code              int    `json:"code"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
-		return "", err
-	}
-	if err := classifyNotificationHTTP(resp.StatusCode); err != nil {
+	if err := json.Unmarshal(body, &payload); err != nil {
 		return "", err
 	}
 	if payload.Code != 0 {

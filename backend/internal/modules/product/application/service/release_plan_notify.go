@@ -37,15 +37,18 @@ func (n *ReleasePlanApprovalNotifier) NotifyApprovalWithIdempotency(
 	plan *model.ReleasePlan,
 	idempotencyKey string,
 ) error {
-	if n == nil || plan == nil || !plan.ApprovalConfig.UsesExternalApproval() {
+	if n == nil {
+		return messaging.Permanent(fmt.Errorf("release plan approval notifier is required"))
+	}
+	if err := ValidateReleasePlanApproval(plan); err != nil {
+		return messaging.Permanent(err)
+	}
+	if !plan.ApprovalConfig.UsesExternalApproval() {
 		return nil
 	}
 	webhook := strings.TrimSpace(plan.ApprovalConfig.WebhookURL)
-	if webhook == "" || plan.ApprovalConfig.Instance == nil || plan.ApprovalConfig.Instance.Token == "" {
-		return nil
-	}
-	if !allowedWebhookURL(webhook) {
-		return nil
+	if plan.ApprovalConfig.Instance == nil || strings.TrimSpace(plan.ApprovalConfig.Instance.Token) == "" {
+		return messaging.Permanent(fmt.Errorf("release plan approval token is required"))
 	}
 	approveURL := n.publicBase + "/api/v1/public/release-plans/approval/" + url.PathEscape(plan.ApprovalConfig.Instance.Token) + "/approve"
 	rejectURL := n.publicBase + "/api/v1/public/release-plans/approval/" + url.PathEscape(plan.ApprovalConfig.Instance.Token) + "/reject"
@@ -75,6 +78,19 @@ func (n *ReleasePlanApprovalNotifier) NotifyApprovalWithIdempotency(
 			return messaging.Permanent(err)
 		}
 		return err
+	}
+	return nil
+}
+
+func ValidateReleasePlanApproval(plan *model.ReleasePlan) error {
+	if plan == nil {
+		return fmt.Errorf("release plan is required")
+	}
+	if !plan.ApprovalConfig.UsesExternalApproval() {
+		return nil
+	}
+	if !allowedWebhookURL(strings.TrimSpace(plan.ApprovalConfig.WebhookURL)) {
+		return fmt.Errorf("release plan approval webhook URL is invalid")
 	}
 	return nil
 }

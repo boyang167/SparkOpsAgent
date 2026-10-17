@@ -9,17 +9,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	deliverymodule "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery"
 	deploypersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/persistence"
 	deliveryoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/outbound"
 	deliverypersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/persistence"
+	governancemodule "github.com/sparkops/sparkops-agent/backend/internal/modules/governance"
 	governanceoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/outbound"
 	productmodule "github.com/sparkops/sparkops-agent/backend/internal/modules/product"
 	productoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/outbound"
 	productworkflow "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow"
 	workflowoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/outbound"
-	workspacemodel "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
+	workspacemodule "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app"
 	workspaceoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/outbound"
 	workspacepersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/persistence"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -61,9 +64,9 @@ func (registrationPolicySyncer) SyncMemberRole(context.Context, kernel.Workspace
 	return nil
 }
 
-type registrationArchiveAdvancer struct{}
+type registrationOperationWriter struct{}
 
-func (registrationArchiveAdvancer) AdvanceWithTeardown(context.Context, *workspacemodel.Project, kernel.MemberID, bool) error {
+func (registrationOperationWriter) Schedule(context.Context, messaging.OperationRequest) error {
 	return nil
 }
 
@@ -74,6 +77,15 @@ func (registrationPipelineDisabler) DisablePipeline(context.Context, kernel.Work
 }
 func (registrationPipelineDisabler) PipelineDisabled(context.Context, kernel.WorkspaceID, kernel.ProjectID) (bool, error) {
 	return true, nil
+}
+func (registrationPipelineDisabler) OnlineClusters(context.Context, kernel.WorkspaceID, kernel.ProjectID) ([]kernel.ClusterInfoID, error) {
+	return nil, nil
+}
+func (registrationPipelineDisabler) HasActiveRun(context.Context, kernel.ProjectID) (bool, error) {
+	return false, nil
+}
+func (registrationPipelineDisabler) StartUndeploy(context.Context, appctx.UndeployRequest) (kernel.DeploymentRunID, error) {
+	return kernel.DeploymentRunID{}, nil
 }
 
 func TestProductionRegistryAcceptsEveryScheduledTask10HandlerExactlyOnce(t *testing.T) {
@@ -105,33 +117,23 @@ func TestProductionRegistryAcceptsEveryScheduledTask10HandlerExactlyOnce(t *test
 	require.NoError(t, productFactory.Register(registry))
 	deployRepo := deploypersistence.NewDeploymentRunRepository(db)
 	projectRepo := workspacepersistence.NewProjectRepository(db)
-	handlers := map[string]messaging.OperationHandler{
-		deliveryoutbound.OperationTypeWebhookSend: deliveryoutbound.NewWebhookHandler(
-			deliverypersistence.NewWebhookRepository(db), nil,
-		).Handle,
-		deliveryoutbound.OperationTypeJenkinsCredentialSync: deliveryoutbound.NewCredentialSyncHandler(registrationCredentialSyncer{}),
-		deliveryoutbound.OperationTypeDeployQueuePublish: deliveryoutbound.NewDeployQueueHandler(
-			deployRepo, messaging.NewNoopQueue(),
-		),
-		workspaceoutbound.OperationTypeProjectUndeploy: workspaceoutbound.NewProjectUndeployHandler(
-			projectRepo, registrationArchiveAdvancer{}, postgres.NewDirectTransactor(),
-		),
-		workspaceoutbound.OperationTypePipelineDisable: workspaceoutbound.NewPipelineDisableHandler(
-			func() workspaceoutbound.PipelineDisabler { return registrationPipelineDisabler{} },
-			projectRepo, postgres.NewDirectTransactor(),
-		),
-		governanceoutbound.OperationTypeMemberRoleSync: governanceoutbound.NewMemberRoleSyncHandler(registrationPolicySyncer{}),
+	deliveryFactory := deliverymodule.OperationFactory{
+		Webhooks: deliverypersistence.NewWebhookRepository(db), CredentialSync: registrationCredentialSyncer{},
+		Deployments: deployRepo, Queue: messaging.NewNoopQueue(),
 	}
-	require.Len(t, handlers, 6)
-	for operationType, handler := range handlers {
-		require.NoError(t, registry.Register(operationType, handler), operationType)
-		registered, ok := registry.Handler(operationType)
-		require.True(t, ok, operationType)
-		require.NotNil(t, registered, operationType)
+	require.NoError(t, deliveryFactory.Validate())
+	require.NoError(t, deliveryFactory.Register(registry))
+	teardown := registrationPipelineDisabler{}
+	workspaceFactory := workspacemodule.OperationFactory{
+		Repository: projectRepo, Teardown: func() appctx.ProjectTeardown { return teardown },
+		Operations: registrationOperationWriter{}, Transactor: postgres.NewDirectTransactor(),
 	}
-	for operationType, handler := range handlers {
-		require.Error(t, registry.Register(operationType, handler), operationType)
-	}
+	require.NoError(t, workspaceFactory.Validate())
+	require.NoError(t, workspaceFactory.Register(registry))
+	governanceFactory := governancemodule.OperationFactory{RoleSync: registrationPolicySyncer{}}
+	require.NoError(t, governanceFactory.Validate())
+	require.NoError(t, governanceFactory.Register(registry))
+
 	for _, operationType := range []string{
 		workflowoutbound.OperationTypeBuildTrigger,
 		workflowoutbound.OperationTypeDeployTrigger,
@@ -156,6 +158,19 @@ func TestProductionRegistryAcceptsEveryScheduledTask10HandlerExactlyOnce(t *test
 		require.NotNil(t, handler, operationType)
 		require.Error(t, registry.Register(operationType, handler), operationType)
 	}
+	for _, operationType := range []string{
+		deliveryoutbound.OperationTypeWebhookSend,
+		deliveryoutbound.OperationTypeJenkinsCredentialSync,
+		deliveryoutbound.OperationTypeDeployQueuePublish,
+		workspaceoutbound.OperationTypeProjectUndeploy,
+		workspaceoutbound.OperationTypePipelineDisable,
+		governanceoutbound.OperationTypeMemberRoleSync,
+	} {
+		handler, ok := registry.Handler(operationType)
+		require.True(t, ok, operationType)
+		require.NotNil(t, handler, operationType)
+		require.Error(t, registry.Register(operationType, handler), operationType)
+	}
 }
 
 func TestProductionOperationFactoryFailsFastOnMissingDependency(t *testing.T) {
@@ -165,4 +180,13 @@ func TestProductionOperationFactoryFailsFastOnMissingDependency(t *testing.T) {
 	err = (productmodule.OperationFactory{}).Validate()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "transactor")
+	err = (deliverymodule.OperationFactory{}).Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "webhook")
+	err = (workspacemodule.OperationFactory{}).Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "repository")
+	err = (governancemodule.OperationFactory{}).Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "role sync")
 }

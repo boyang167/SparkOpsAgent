@@ -71,3 +71,32 @@ func TestFeishuTokenRejectsHTTP200NonzeroCodeEvenWhenTokenPresent(t *testing.T) 
 	require.Error(t, err)
 	require.True(t, messaging.IsPermanent(err))
 }
+
+func TestFeishuTokenClassifiesHTTPErrorBeforeParsingBody(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		status    int
+		body      string
+		permanent bool
+	}{
+		{name: "HTML unauthorized", status: http.StatusUnauthorized, body: "<html>unauthorized</html>", permanent: true},
+		{name: "empty unauthorized", status: http.StatusUnauthorized, permanent: true},
+		{name: "rate limited", status: http.StatusTooManyRequests, body: "<html>busy</html>"},
+		{name: "server error", status: http.StatusInternalServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+
+			_, err := feishuTenantToken(
+				context.Background(), "app", "secret", server.Client(), server.URL,
+			)
+
+			require.Error(t, err)
+			require.Equal(t, test.permanent, messaging.IsPermanent(err))
+		})
+	}
+}

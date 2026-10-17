@@ -227,3 +227,23 @@ None blocking. The Cursor shell auto-injected `git commit --trailer`, but instal
 - External protocols remain at-least-once across an external-success/outbox-completion crash window. Stable idempotency headers and query-before-write reconciliation are required at receivers.
 - Release-plan approval/webhook endpoints that ignore `Idempotency-Key` can still observe duplicate delivery.
 - Inmemory mode intentionally keeps synchronous compatibility and has no durable retry.
+
+## Final Important/Minor review closure (2026-10-18)
+
+### Acceptance evidence
+
+1. **Archive retry lifecycle** — project undeploy performs cluster/run queries and idempotent undeploy start outside database transactions. Online or active state returns a retryable error so the fixed operation remains pending. Only confirmed offline/no-active state opens a short transaction, rechecks `archiving`, and schedules pipeline disable. The integration test covers online → start → retry → lost completion event → offline reconciliation → pipeline disable → archived, plus schedule failure after external convergence.
+2. **Deleted webhook configuration** — soft-deleted workflow/config references resolve as inactive and complete as an idempotent no-op. Other repository failures remain retryable; changed active configuration is loaded at execution time.
+3. **Release hook/approval validation** — enabled external delivery validates an HTTP(S) URL with host and required token/config before state persistence or operation scheduling. Missing/invalid configuration rolls the state transaction back; operation handlers repeat validation and return permanent errors.
+4. **Bounded GitLab I/O** — status reads and writes use the same injected `http.Client`; production defaults to a 12-second timeout. A hanging-server test proves both paths return within the configured deadline even when operation execution uses a cancellation-detached context.
+5. **Strong production factories** — delivery, workspace-app, and governance now join product/product-workflow with typed `OperationFactory`, `Validate`, and module-owned registration. The real bootstrap assembly covers all 16 operation types, non-nil handlers, duplicate rejection, and missing-dependency fail-fast.
+6. **Feishu token classification** — the bounded token body is read, HTTP status is classified first, and only successful 2xx bodies are decoded. HTML/empty 401 responses are permanent; 408/429/5xx remain retryable.
+
+### Additional RED / GREEN evidence
+
+- RED: archive operation tests failed against the transaction-bound constructor and completed after starting undeploy. GREEN: external calls are outside the transaction and online/active results force retry until reconciliation converges.
+- RED: deleted workflow resolution returned not-found and retried forever. GREEN: semantic not-found is inactive/no-op while injected database errors remain retryable.
+- RED: missing release hook/approval URLs could create waiting states. GREEN: command tests prove validation occurs before token/state persistence, and notifier tests prove invalid runtime configuration is permanent.
+- RED: `Reporter` had no injectable HTTP client. GREEN: hanging read/write tests pass with a 25ms client timeout.
+- RED: Feishu 401 HTML/empty bodies surfaced as JSON decode errors. GREEN: status-first tests prove permanent 4xx and retryable throttling/server errors.
+- RED: delivery/workspace-app/governance factory tests did not compile because typed factories were absent. GREEN: production modules use their factories and bootstrap registration passes.

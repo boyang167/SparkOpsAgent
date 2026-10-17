@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	messagingpersistence "github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
@@ -48,4 +49,37 @@ func TestReleasePlanStateRollsBackWhenOperationScheduleFails(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Table("release_plan_state").Count(&count).Error)
 	require.Zero(t, count)
+}
+
+func TestPlanningExternalConfigRejectsMissingHookBeforeWaitState(t *testing.T) {
+	event := model.ReleasePlanHookEventFinishPlanning
+	plan := &model.ReleasePlan{
+		Status: model.ReleasePlanStatusPlanning,
+		HookSettings: model.ReleasePlanHookSettings{
+			Enabled: true,
+			Events: map[model.ReleasePlanHookEvent]model.ReleasePlanHookEventConfig{
+				event: {Enabled: true},
+			},
+		},
+	}
+
+	err := validatePlanningExternalConfig(plan)
+
+	require.Error(t, err)
+	require.Equal(t, model.ReleasePlanStatusPlanning, plan.Status)
+	require.Nil(t, plan.HookState)
+}
+
+func TestApprovalExternalConfigRejectsMissingURLBeforeTokenCreation(t *testing.T) {
+	plan := &model.ReleasePlan{
+		Status: model.ReleasePlanStatusWaitForApproval,
+		ApprovalConfig: model.ApprovalConfig{
+			Enabled: true, Provider: model.ApprovalProviderFeishu,
+		},
+	}
+
+	err := validateApprovalExternalConfig(plan)
+
+	require.Error(t, err)
+	require.Nil(t, plan.ApprovalConfig.Instance)
 }

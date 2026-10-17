@@ -136,8 +136,22 @@ func ReportStatus(ctx context.Context, apiBase, token, projectPath, sha, state, 
 }
 
 func ReportStatusWithContext(ctx context.Context, apiBase, token, projectPath, sha, state, statusContext, description string) error {
+	return ReportStatusWithClient(
+		ctx, apiBase, token, projectPath, sha, state, statusContext, description,
+		&http.Client{Timeout: 12 * time.Second},
+	)
+}
+
+func ReportStatusWithClient(
+	ctx context.Context,
+	apiBase, token, projectPath, sha, state, statusContext, description string,
+	client *http.Client,
+) error {
 	if strings.TrimSpace(sha) == "" {
 		return nil
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 12 * time.Second}
 	}
 	encodedProject := url.PathEscape(projectPath)
 	encodedSHA := url.PathEscape(sha)
@@ -145,7 +159,7 @@ func ReportStatusWithContext(ctx context.Context, apiBase, token, projectPath, s
 		"state": state, "context": statusContext, "description": description,
 	})
 	endpoint := fmt.Sprintf("%s/api/v4/projects/%s/statuses/%s", strings.TrimRight(apiBase, "/"), encodedProject, encodedSHA)
-	return gitlabJSON(ctx, http.MethodPost, endpoint, token, raw)
+	return gitlabJSONWithClient(ctx, http.MethodPost, endpoint, token, raw, client)
 }
 
 func ReportMergeRequestNote(ctx context.Context, apiBase, token, projectPath string, iid int, body string) error {
@@ -159,13 +173,17 @@ func ReportMergeRequestNote(ctx context.Context, apiBase, token, projectPath str
 }
 
 func gitlabJSON(ctx context.Context, method, endpoint, token string, body []byte) error {
+	return gitlabJSONWithClient(ctx, method, endpoint, token, body, &http.Client{Timeout: 12 * time.Second})
+}
+
+func gitlabJSONWithClient(ctx context.Context, method, endpoint, token string, body []byte, client *http.Client) error {
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("PRIVATE-TOKEN", token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{Timeout: 12 * time.Second}).Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

@@ -73,6 +73,9 @@ func (h *ReleasePlanHookCallbackHandler) handle(ctx context.Context, token strin
 	event := plan.PassHookCheck(now)
 	switch event {
 	case model.ReleasePlanHookEventFinishPlanning:
+		if err := validatePlanningExternalConfig(plan); err != nil {
+			return nil, err
+		}
 		if err := plan.FinishPlanning(); err != nil {
 			return nil, err
 		}

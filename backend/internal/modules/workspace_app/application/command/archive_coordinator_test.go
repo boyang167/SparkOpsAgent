@@ -495,7 +495,8 @@ func TestResumeAllPersistsStableAdvanceThenPipelineOperationsAndArchivesOnlyAfte
 	project := model.NewProject(kernel.NewWorkspaceID(), name, kernel.NewMemberID(), model.CreateProjectInput{Name: "orders"})
 	require.NoError(t, project.BeginArchiving())
 	require.NoError(t, repo.Save(context.Background(), project))
-	teardown := &fakeTeardown{}
+	clusterID := kernel.NewClusterInfoID()
+	teardown := &fakeTeardown{online: []kernel.ClusterInfoID{clusterID}}
 	writer := messaging.NewOperationWriter(messagingpersistence.NewOperationStore(db), nil)
 	coordinator := command.NewArchiveCoordinator(repo, func() appctx.ProjectTeardown { return teardown }, nil, writer)
 	coordinator.UseTransactor(tx)
@@ -520,12 +521,24 @@ func TestResumeAllPersistsStableAdvanceThenPipelineOperationsAndArchivesOnlyAfte
 	require.NoError(t, err)
 	require.Equal(t, model.ProjectStatusArchiving, stored.Status)
 
-	advanceHandler := workspaceoutbound.NewProjectUndeployHandler(repo, coordinator, tx)
-	require.NoError(t, advanceHandler(context.Background(), messaging.Operation{
+	advanceHandler := workspaceoutbound.NewProjectUndeployHandler(
+		repo, func() appctx.ProjectTeardown { return teardown }, writer, tx,
+	)
+	operation := messaging.Operation{
 		EventID: rows[0].EventID, Owner: rows[0].Subscriber,
 		OperationType: rows[0].OperationType, Payload: rows[0].Payload,
-	}))
-	require.Equal(t, 1, teardown.onlineChecks)
+	}
+	require.Error(t, advanceHandler(context.Background(), operation))
+	require.Equal(t, []kernel.ClusterInfoID{clusterID}, teardown.started)
+	require.NoError(t, db.Table("platform.operation_outbox").
+		Where("operation_type = ?", workspaceoutbound.OperationTypePipelineDisable).
+		Find(&rows).Error)
+	require.Empty(t, rows)
+
+	// The external completion event is lost; the same operation reconciles offline state on retry.
+	teardown.online = nil
+	require.NoError(t, advanceHandler(context.Background(), operation))
+	require.Equal(t, 2, teardown.onlineChecks)
 	require.NoError(t, db.Table("platform.operation_outbox").
 		Where("operation_type = ?", workspaceoutbound.OperationTypePipelineDisable).
 		Find(&rows).Error)

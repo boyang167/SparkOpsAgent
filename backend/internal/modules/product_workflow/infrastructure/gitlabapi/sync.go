@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -81,6 +82,14 @@ func (s HookSync) Sync(ctx context.Context, wf *model.ProductWorkflow) error {
 type Reporter struct {
 	Lookup command.ProjectGitLookup
 	Logger *zap.Logger
+	HTTP   *http.Client
+}
+
+func (r Reporter) client() *http.Client {
+	if r.HTTP != nil {
+		return r.HTTP
+	}
+	return &http.Client{Timeout: 12 * time.Second}
 }
 
 func (r Reporter) CurrentStatus(ctx context.Context, payload workflowoutbound.GitLabStatusPayload) (string, error) {
@@ -95,7 +104,7 @@ func (r Reporter) CurrentStatus(ctx context.Context, payload workflowoutbound.Gi
 		return "", err
 	}
 	req.Header.Set("PRIVATE-TOKEN", token)
-	resp, err := (&http.Client{}).Do(req)
+	resp, err := r.client().Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -127,9 +136,9 @@ func (r Reporter) Report(ctx context.Context, payload workflowoutbound.GitLabSta
 	if err != nil {
 		return err
 	}
-	return ReportStatusWithContext(
+	return ReportStatusWithClient(
 		ctx, apiBase, token, projectPath, payload.Commit,
-		payload.DesiredStatus, payload.Context, payload.Description,
+		payload.DesiredStatus, payload.Context, payload.Description, r.client(),
 	)
 }
 

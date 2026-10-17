@@ -182,6 +182,9 @@ func (h *FinishReleasePlanPlanningHandler) handle(ctx context.Context, productID
 	if plan.Status != model.ReleasePlanStatusPlanning {
 		return nil, domain.ErrInvalidReleasePlanTransition
 	}
+	if err := validatePlanningExternalConfig(plan); err != nil {
+		return nil, err
+	}
 	if err := service.CheckReleasePlanInputs(ctx, plan, h.inputs); err != nil {
 		return nil, err
 	}
@@ -246,6 +249,9 @@ func (h *ApproveReleasePlanHandler) Handle(ctx context.Context, productID kernel
 func (h *ApproveReleasePlanHandler) handle(ctx context.Context, productID kernel.ProductID, planID kernel.ReleasePlanID, actor kernel.MemberID) (*model.ReleasePlan, error) {
 	plan, err := loadReleasePlan(ctx, h.products, h.plans, productID, planID)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateApprovalExternalConfig(plan); err != nil {
 		return nil, err
 	}
 	if err := plan.Approve(); err != nil {

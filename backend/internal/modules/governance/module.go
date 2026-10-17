@@ -9,7 +9,6 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/subscriber"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/acl"
-	governanceoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/persistence"
 	govhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/interface/http"
 	identitycommand "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/application/command"
@@ -99,11 +98,8 @@ func (m *Module) Register(c *appctx.Container) error {
 			return fmt.Errorf("governance module requires operation outbox")
 		}
 		operationWriter = c.OperationWriter
-		if err := c.OperationRegistry.Register(
-			governanceoutbound.OperationTypeMemberRoleSync,
-			governanceoutbound.NewMemberRoleSyncHandler(apiPolicySync),
-		); err != nil {
-			return fmt.Errorf("register governance policy operation: %w", err)
+		if err := (OperationFactory{RoleSync: apiPolicySync}).Register(c.OperationRegistry); err != nil {
+			return err
 		}
 	}
 	bootstrap := command.NewBootstrapWorkspaceHandler(roleRepo, bindingRepo, apiPolicySync, operationWriter)

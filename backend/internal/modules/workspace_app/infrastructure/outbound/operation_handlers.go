@@ -3,10 +3,12 @@ package outbound
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
@@ -97,11 +99,12 @@ func NewPipelineDisableHandler(
 	}
 }
 
-type ArchiveAdvancer interface {
-	AdvanceWithTeardown(context.Context, *model.Project, kernel.MemberID, bool) error
-}
-
-func NewProjectUndeployHandler(repo repository.ProjectRepository, coordinator ArchiveAdvancer, tx postgres.Transactor) messaging.OperationHandler {
+func NewProjectUndeployHandler(
+	repo repository.ProjectRepository,
+	teardown func() appctx.ProjectTeardown,
+	operations messaging.OperationWriter,
+	tx postgres.Transactor,
+) messaging.OperationHandler {
 	return func(ctx context.Context, operation messaging.Operation) error {
 		var payload ProjectUndeployPayload
 		if err := json.Unmarshal(operation.Payload, &payload); err != nil {
@@ -115,17 +118,58 @@ func NewProjectUndeployHandler(repo repository.ProjectRepository, coordinator Ar
 		if err != nil {
 			return messaging.Permanent(err)
 		}
+		project, err := repo.FindByID(ctx, projectID)
+		if err != nil || !project.IsArchiving() {
+			return err
+		}
+		target := teardown()
+		if target == nil {
+			return fmt.Errorf("project teardown unavailable")
+		}
+		online, err := target.OnlineClusters(ctx, project.WorkspaceID, project.ID)
+		if err != nil {
+			return err
+		}
+		active, err := target.HasActiveRun(ctx, project.ID)
+		if err != nil {
+			return err
+		}
+		if active {
+			return errors.New("project undeploy is still active")
+		}
+		allowUndeploy := true
+		if payload.AllowUndeploy != nil {
+			allowUndeploy = *payload.AllowUndeploy
+		}
+		if len(online) > 0 {
+			if allowUndeploy {
+				_, err = target.StartUndeploy(ctx, appctx.UndeployRequest{
+					WorkspaceID: project.WorkspaceID,
+					ProjectID:   project.ID,
+					MemberID:    memberID,
+					ClusterID:   online[0],
+				})
+				var domainErr *kernel.DomainError
+				if err != nil && !(errors.As(err, &domainErr) && domainErr.Code() == "DELIVERY_DEPLOYMENT_RUNNING") {
+					return err
+				}
+			}
+			return errors.New("project remains online after undeploy reconciliation")
+		}
 		return tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 			txCtx = events.WithMetadata(txCtx, events.Metadata{EventID: operation.EventID, Subscriber: operation.Owner})
-			project, err := repo.FindByID(txCtx, projectID)
-			if err != nil || !project.IsArchiving() {
+			current, err := repo.FindByID(txCtx, projectID)
+			if err != nil || !current.IsArchiving() {
 				return err
 			}
-			allowUndeploy := true
-			if payload.AllowUndeploy != nil {
-				allowUndeploy = *payload.AllowUndeploy
-			}
-			return coordinator.AdvanceWithTeardown(txCtx, project, memberID, allowUndeploy)
+			return operations.Schedule(txCtx, messaging.OperationRequest{
+				Owner:          operation.Owner,
+				OperationType:  OperationTypePipelineDisable,
+				IdempotencyKey: operation.EventID + ":" + operation.Owner + ":" + OperationTypePipelineDisable + ":" + projectID.String(),
+				Payload: PipelineDisablePayload{
+					EventID: operation.EventID, WorkspaceID: current.WorkspaceID.String(), ProjectID: current.ID.String(),
+				},
+			})
 		})
 	}
 }

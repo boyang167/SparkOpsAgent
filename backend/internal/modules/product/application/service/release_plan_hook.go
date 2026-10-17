@@ -33,13 +33,19 @@ func (n *ReleasePlanHookNotifier) Send(ctx context.Context, plan *model.ReleaseP
 }
 
 func (n *ReleasePlanHookNotifier) SendWithIdempotency(ctx context.Context, plan *model.ReleasePlan, event model.ReleasePlanHookEvent, idempotencyKey string) error {
-	if n == nil || plan == nil || plan.HookState == nil {
+	if n == nil {
+		return messaging.Permanent(fmt.Errorf("release plan hook notifier is required"))
+	}
+	if err := ValidateReleasePlanHook(plan, event); err != nil {
+		return messaging.Permanent(err)
+	}
+	if !releasePlanHookConfigured(plan, event) {
 		return nil
+	}
+	if plan.HookState == nil || strings.TrimSpace(plan.HookState.Token) == "" {
+		return messaging.Permanent(fmt.Errorf("release plan hook token is required"))
 	}
 	hookURL := strings.TrimSpace(plan.HookSettings.EventURL(event))
-	if hookURL == "" || !allowedWebhookURL(hookURL) {
-		return nil
-	}
 	passURL := n.publicBase + "/api/v1/public/release-plans/hook/" + url.PathEscape(plan.HookState.Token) + "/pass"
 	failURL := n.publicBase + "/api/v1/public/release-plans/hook/" + url.PathEscape(plan.HookState.Token) + "/fail"
 	body, err := json.Marshal(map[string]any{
@@ -77,4 +83,25 @@ func (n *ReleasePlanHookNotifier) SendWithIdempotency(ctx context.Context, plan 
 		return err
 	}
 	return nil
+}
+
+func ValidateReleasePlanHook(plan *model.ReleasePlan, event model.ReleasePlanHookEvent) error {
+	if plan == nil {
+		return fmt.Errorf("release plan is required")
+	}
+	if !releasePlanHookConfigured(plan, event) {
+		return nil
+	}
+	if !allowedWebhookURL(strings.TrimSpace(plan.HookSettings.EventURL(event))) {
+		return fmt.Errorf("release plan hook URL is invalid for event %s", event)
+	}
+	return nil
+}
+
+func releasePlanHookConfigured(plan *model.ReleasePlan, event model.ReleasePlanHookEvent) bool {
+	if plan == nil || !plan.HookSettings.Enabled {
+		return false
+	}
+	cfg, ok := plan.HookSettings.Events[event]
+	return ok && cfg.Enabled
 }

@@ -191,14 +191,11 @@ func (m *Module) Register(c *appctx.Container) error {
 		if c.OperationRegistry == nil || c.OperationWriter == nil {
 			return fmt.Errorf("delivery module requires operation outbox")
 		}
-		for operationType, handler := range map[string]messaging.OperationHandler{
-			outbound.OperationTypeWebhookSend:           outbound.NewWebhookHandler(hookRepo, nil).Handle,
-			outbound.OperationTypeJenkinsCredentialSync: outbound.NewCredentialSyncHandler(credentialSync),
-			outbound.OperationTypeDeployQueuePublish:    outbound.NewDeployQueueHandler(deployRepo, c.MessageQueue),
-		} {
-			if err := c.OperationRegistry.Register(operationType, handler); err != nil {
-				return fmt.Errorf("register delivery operation %s: %w", operationType, err)
-			}
+		if err := (OperationFactory{
+			Webhooks: hookRepo, CredentialSync: credentialSync,
+			Deployments: deployRepo, Queue: c.MessageQueue,
+		}).Register(c.OperationRegistry); err != nil {
+			return err
 		}
 	}
 	if err := c.EventBus.Subscribe(

@@ -16,7 +16,6 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/subscriber"
 	workspaceevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/acl"
-	workspaceoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/outbound"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/portadapter"
 	wshttp "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/interface/http"
@@ -112,19 +111,11 @@ func (m *Module) Register(c *appctx.Container) error {
 	}, operationWriter)
 	archiveCoordinator.UseTransactor(c.Transactor)
 	if operationWriter != nil {
-		if err := c.OperationRegistry.Register(
-			workspaceoutbound.OperationTypeProjectUndeploy,
-			workspaceoutbound.NewProjectUndeployHandler(repo, archiveCoordinator, c.Transactor),
-		); err != nil {
-			return fmt.Errorf("register workspace archive operation: %w", err)
-		}
-		if err := c.OperationRegistry.Register(
-			workspaceoutbound.OperationTypePipelineDisable,
-			workspaceoutbound.NewPipelineDisableHandler(func() workspaceoutbound.PipelineDisabler {
-				return c.ProjectTeardown
-			}, repo, c.Transactor),
-		); err != nil {
-			return fmt.Errorf("register workspace pipeline operation: %w", err)
+		if err := (OperationFactory{
+			Repository: repo, Teardown: func() appctx.ProjectTeardown { return c.ProjectTeardown },
+			Operations: operationWriter, Transactor: c.Transactor,
+		}).Register(c.OperationRegistry); err != nil {
+			return err
 		}
 	}
 	if c.EventBus != nil {
