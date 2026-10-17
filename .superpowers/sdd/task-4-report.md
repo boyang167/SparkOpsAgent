@@ -28,7 +28,7 @@ go test ./internal/platform/messaging -run 'EventTopology|EventTransport' -count
 - retry 队列通过默认 exchange（空 `x-dead-letter-exchange`）及自己的主队列名作为 routing key 回流，不会经 topic exchange 扇出给其他订阅者。
 - 队列名规范化为小写 `[a-z0-9.-]`，超过 240 字符及规范化碰撞在声明前拒绝。
 - 发布使用独立 confirm-enabled channel、`mandatory=true`、持久化 JSON、`MessageId`、时间戳和 deferred publisher confirm。
-- NACK、mandatory return、channel close、上下文超时和缺少确认均被视为失败；失败时丢弃 publisher channel，下一次发布在互斥锁内重建；发布、声明及关闭均受同一互斥锁保护。
+- NACK、mandatory return、channel close、上下文超时和缺少确认均被视为失败；失败时丢弃 publisher channel，下一次发布在状态锁内重建；发布串行化与资源状态锁分离，保证关闭可唤醒待确认发布。
 
 ## 验证
 
@@ -56,3 +56,41 @@ go test ./internal/platform/messaging -run 'EventTopology|EventTransport' -count
 - `.superpowers/sdd/task-4-report.md`
 
 未暂存 `.superpowers/sdd/progress.md`、日志或其他未跟踪文件。
+
+## P1 修复：发布确认与关闭并发
+
+审查发现：原来的 `publish` 在 `t.mu` 持锁状态下等待 deferred confirm。无 deadline 且 broker 不确认时，`Close` 需要同一把锁才能关闭 publisher channel，无法唤醒发布，形成循环等待。
+
+### TDD 记录
+
+先新增 `TestEventTransportCloseUnblocksPendingPublish`，以 fake channel 和未完成的 fake confirmation 让发布卡在确认等待；调用 `Close` 后要求其在 100ms 内返回，且发布因 channel close 返回错误。修复前运行该测试得到真实 RED：
+
+```text
+Close blocked while publish waited for a confirmation
+```
+
+随后拆分锁职责：
+
+- `mu` 只保护连接、publisher、监听通道和关闭状态；
+- `publishMu` 串行化同一 publisher channel 上的声明与发布；
+- 发布在 `mu` 下取得 channel 及监听通道快照后立即释放状态锁，再等待 confirm；
+- `Close` 在状态锁下先标记关闭并摘除资源，再在锁外关闭 channel/connection；关闭通知可唤醒待确认发布；
+- 发布失败仅当 publisher 身份仍匹配时才失效并关闭该 channel，避免关闭后的清理影响其他状态。
+
+GREEN 后补充并通过：
+
+- pending publish 与 `Close` 并发时，`Close` 有界返回且发布被关闭通知唤醒；
+- 已确认的发布后重复 `Close` 安全，之后的发布被拒绝；
+- 两个并发发布中第一个 NACK 后，第二个在串行锁下使用重建的 channel 成功发布。
+
+### P1 验证
+
+```text
+go test ./internal/platform/messaging -run 'EventTransport|Close|Publish' -count=1
+PASS
+
+go test ./internal/platform/messaging -run 'EventTopology|EventTransport' -count=1
+PASS
+```
+
+额外尝试 `go test -race` 未能启动：本机 C 编译器报 `cc1.exe: sorry, unimplemented: 64-bit mode not compiled in`。这属于本地工具链限制；上述非 race 单元测试均实际通过。

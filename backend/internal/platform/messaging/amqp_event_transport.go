@@ -166,6 +166,7 @@ func (c *realEventChannel) Close() error {
 
 type amqpEventTransport struct {
 	mu               sync.Mutex
+	publishMu        sync.Mutex
 	connection       eventConnection
 	publisher        eventChannel
 	publisherReturns <-chan amqp.Return
@@ -197,22 +198,26 @@ func (t *amqpEventTransport) Declare(ctx context.Context, subscriptions []Subscr
 		return err
 	}
 
+	t.publishMu.Lock()
+	defer t.publishMu.Unlock()
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	if err := ctx.Err(); err != nil {
+		t.mu.Unlock()
 		return err
 	}
 	channel, err := t.publisherChannelLocked()
 	if err != nil {
+		t.mu.Unlock()
 		return err
 	}
+	t.mu.Unlock()
 	if err := channel.ExchangeDeclare(eventExchangeName, "topic", true, false, false, false, nil); err != nil {
-		t.invalidatePublisherLocked()
+		t.invalidatePublisher(channel)
 		return fmt.Errorf("declare event exchange: %w", err)
 	}
 	for _, subscription := range subscriptions {
 		if err := declareEventTopology(ctx, channel, topologyFor(subscription)); err != nil {
-			t.invalidatePublisherLocked()
+			t.invalidatePublisher(channel)
 			return err
 		}
 	}
@@ -319,24 +324,29 @@ func (t *amqpEventTransport) publish(
 	envelope events.Envelope,
 	headers amqp.Table,
 ) error {
+	t.publishMu.Lock()
+	defer t.publishMu.Unlock()
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	channel, err := t.publisherChannelLocked()
 	if err != nil {
+		t.mu.Unlock()
 		return err
 	}
+	returns := t.publisherReturns
+	closed := t.publisherClosed
+	t.mu.Unlock()
 	err = publishEventConfirmed(
 		ctx,
 		channel,
-		t.publisherReturns,
-		t.publisherClosed,
+		returns,
+		closed,
 		exchange,
 		routingKey,
 		envelope,
 		headers,
 	)
 	if err != nil {
-		t.invalidatePublisherLocked()
+		t.invalidatePublisher(channel)
 	}
 	return err
 }
@@ -430,6 +440,15 @@ func (t *amqpEventTransport) publisherChannelLocked() (eventChannel, error) {
 	t.publisherReturns = channel.NotifyReturn(make(chan amqp.Return, 1))
 	t.publisherClosed = channel.NotifyClose(make(chan *amqp.Error, 1))
 	return channel, nil
+}
+
+func (t *amqpEventTransport) invalidatePublisher(channel eventChannel) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.publisher != channel {
+		return
+	}
+	t.invalidatePublisherLocked()
 }
 
 func (t *amqpEventTransport) invalidatePublisherLocked() {

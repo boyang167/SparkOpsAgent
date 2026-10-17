@@ -180,6 +180,159 @@ func TestEventTransportReturnsPublishError(t *testing.T) {
 	require.ErrorIs(t, err, publishErr)
 }
 
+func TestEventTransportCloseUnblocksPendingPublish(t *testing.T) {
+	confirmation := &stubEventConfirmation{done: make(chan struct{})}
+	channel := newStubEventChannel(confirmation)
+	transport := newAMQPEventTransport(&stubEventConnection{channels: []eventChannel{channel}})
+	t.Cleanup(func() {
+		select {
+		case <-confirmation.done:
+		default:
+			close(confirmation.done)
+		}
+		_ = transport.Close()
+	})
+
+	publishResult := make(chan error, 1)
+	go func() {
+		publishResult <- transport.Publish(context.Background(), eventTransportTestEnvelope())
+	}()
+	<-channel.publishStarted
+
+	closeResult := make(chan error, 1)
+	go func() {
+		closeResult <- transport.Close()
+	}()
+
+	select {
+	case err := <-closeResult:
+		require.NoError(t, err)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Close blocked while publish waited for a confirmation")
+	}
+
+	select {
+	case err := <-publishResult:
+		require.ErrorContains(t, err, "closed")
+	case <-time.After(time.Second):
+		t.Fatal("pending publish was not unblocked by Close")
+	}
+}
+
+func TestEventTransportCloseAfterConfirmedPublishIsIdempotent(t *testing.T) {
+	confirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
+	close(confirmation.done)
+	channel := newStubEventChannel(confirmation)
+	transport := newAMQPEventTransport(&stubEventConnection{channels: []eventChannel{channel}})
+
+	require.NoError(t, transport.Publish(context.Background(), eventTransportTestEnvelope()))
+	require.NoError(t, transport.Close())
+	require.NoError(t, transport.Close())
+	require.ErrorContains(t, transport.Publish(context.Background(), eventTransportTestEnvelope()), "closed")
+}
+
+func TestEventTransportRecreatesPublisherAfterFailedConcurrentPublish(t *testing.T) {
+	firstConfirmation := &stubEventConfirmation{done: make(chan struct{})}
+	firstChannel := newStubEventChannel(firstConfirmation)
+	secondConfirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
+	close(secondConfirmation.done)
+	secondChannel := newStubEventChannel(secondConfirmation)
+	connection := &stubEventConnection{channels: []eventChannel{firstChannel, secondChannel}}
+	transport := newAMQPEventTransport(connection)
+	t.Cleanup(func() { _ = transport.Close() })
+
+	firstResult := make(chan error, 1)
+	go func() {
+		firstResult <- transport.Publish(context.Background(), eventTransportTestEnvelope())
+	}()
+	<-firstChannel.publishStarted
+
+	secondResult := make(chan error, 1)
+	go func() {
+		secondResult <- transport.Publish(context.Background(), eventTransportTestEnvelope())
+	}()
+	close(firstConfirmation.done)
+
+	require.ErrorContains(t, <-firstResult, "nack")
+	require.NoError(t, <-secondResult)
+	require.Equal(t, 2, connection.channelCalls)
+}
+
+type stubEventConnection struct {
+	channels     []eventChannel
+	channelCalls int
+}
+
+func (c *stubEventConnection) Channel() (eventChannel, error) {
+	if len(c.channels) == 0 {
+		return nil, errors.New("no event channels")
+	}
+	channel := c.channels[0]
+	c.channels = c.channels[1:]
+	c.channelCalls++
+	return channel, nil
+}
+
+func (*stubEventConnection) Close() error { return nil }
+
+type stubEventChannel struct {
+	confirmation   eventConfirmation
+	publishStarted chan struct{}
+	returns        chan amqp.Return
+	closed         chan *amqp.Error
+}
+
+func newStubEventChannel(confirmation eventConfirmation) *stubEventChannel {
+	return &stubEventChannel{
+		confirmation:   confirmation,
+		publishStarted: make(chan struct{}),
+		returns:        make(chan amqp.Return, 1),
+		closed:         make(chan *amqp.Error, 1),
+	}
+}
+
+func (c *stubEventChannel) PublishWithDeferredConfirmWithContext(
+	context.Context,
+	string,
+	string,
+	bool,
+	bool,
+	amqp.Publishing,
+) (eventConfirmation, error) {
+	close(c.publishStarted)
+	return c.confirmation, nil
+}
+
+func (*stubEventChannel) Confirm(bool) error { return nil }
+
+func (*stubEventChannel) ExchangeDeclare(string, string, bool, bool, bool, bool, amqp.Table) error {
+	return nil
+}
+
+func (*stubEventChannel) QueueDeclare(string, bool, bool, bool, bool, amqp.Table) (amqp.Queue, error) {
+	return amqp.Queue{}, nil
+}
+
+func (*stubEventChannel) QueueBind(string, string, string, bool, amqp.Table) error { return nil }
+
+func (*stubEventChannel) Consume(string, string, bool, bool, bool, bool, amqp.Table) (<-chan amqp.Delivery, error) {
+	return make(chan amqp.Delivery), nil
+}
+
+func (*stubEventChannel) Cancel(string, bool) error { return nil }
+
+func (c *stubEventChannel) NotifyReturn(chan amqp.Return) chan amqp.Return { return c.returns }
+
+func (c *stubEventChannel) NotifyClose(chan *amqp.Error) chan *amqp.Error { return c.closed }
+
+func (c *stubEventChannel) Close() error {
+	select {
+	case c.closed <- &amqp.Error{Reason: "closed by transport"}:
+	default:
+	}
+	return nil
+}
+
 func eventTransportTestEnvelope() events.Envelope {
 	return events.Envelope{
 		ID:         "event-123",
