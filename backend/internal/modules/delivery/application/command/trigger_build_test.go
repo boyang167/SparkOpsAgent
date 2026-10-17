@@ -29,7 +29,7 @@ func (b *flakyBuildCompletedBus) Publish(context.Context, ...events.Event) error
 	}
 	return nil
 }
-func (*flakyBuildCompletedBus) Subscribe(string, eventbus.Handler) {}
+func (*flakyBuildCompletedBus) Subscribe(string, string, eventbus.Handler) error { return nil }
 
 func TestPublishBuildCompletedRetriesTransientSubscriberFailure(t *testing.T) {
 	bus := &flakyBuildCompletedBus{}
@@ -368,7 +368,7 @@ func (b *countingEventBus) Publish(context.Context, ...events.Event) error {
 	b.published++
 	return b.err
 }
-func (*countingEventBus) Subscribe(string, eventbus.Handler) {}
+func (*countingEventBus) Subscribe(string, string, eventbus.Handler) error { return nil }
 
 func TestExecuteBuildRetriesTerminalUpdateAndSuppressesEventOnFailure(t *testing.T) {
 	updateErr := errors.New("build update unavailable")

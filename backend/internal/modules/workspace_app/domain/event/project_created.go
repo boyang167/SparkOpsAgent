@@ -22,3 +22,14 @@ func NewProjectCreated(projectID kernel.ProjectID, workspaceID kernel.WorkspaceI
 		CreatedBy:   createdBy,
 	}
 }
+
+func Register(registry *events.Registry) error {
+	return events.RegisterJSON[ProjectCreated](
+		registry,
+		ProjectCreatedName,
+		1,
+		func(ev ProjectCreated) events.AggregateRef {
+			return events.AggregateRef{Type: "project", ID: ev.ProjectID.String()}
+		},
+	)
+}

@@ -82,7 +82,9 @@ func main() {
 	if err := bootstrap.AutoMigrate(db); err != nil {
 		log.Fatal(err)
 	}
-	wireGovernanceBootstrap(bus, db)
+	if err := wireGovernanceBootstrap(bus, db); err != nil {
+		log.Fatal(err)
+	}
 
 	memberRepo := identitypersistence.NewMemberRepository(db)
 	register := identitycommand.NewRegisterMemberHandler(memberRepo, bus)
@@ -184,7 +186,7 @@ func main() {
 	printSummary(token, memberID, ws.ID, project.ID, agentID, accounts)
 }
 
-func wireGovernanceBootstrap(bus eventbus.Bus, db *gorm.DB) {
+func wireGovernanceBootstrap(bus eventbus.Bus, db *gorm.DB) error {
 	store := govpersistence.NewStore(db)
 	menuStore := govpersistence.NewMenuStore(db)
 	roleRepo := govpersistence.NewRoleRepository(store)
@@ -195,7 +197,11 @@ func wireGovernanceBootstrap(bus eventbus.Bus, db *gorm.DB) {
 	)
 	seedMenus := govcommand.NewSeedWorkspaceMenusHandler(menuStore)
 	menuPolicies := govcommand.NewApplyMenuRolePoliciesHandler(menuStore, roleRepo, seedMenus)
-	bus.Subscribe(integration.EventWorkspaceCreated, subscriber.NewOnWorkspaceCreated(bootstrapHandler, menuPolicies).Handle)
+	return bus.Subscribe(
+		integration.EventWorkspaceCreated,
+		"governance.workspace-created.bootstrap.seed",
+		subscriber.NewOnWorkspaceCreated(bootstrapHandler, menuPolicies).Handle,
+	)
 }
 
 func ensureMember(

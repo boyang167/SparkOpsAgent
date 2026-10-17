@@ -278,9 +278,27 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.Engine.GET("/api/v1/products/:productId/release-plans/:planId/collaboration/ws",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ReleasePlanCollabWebSocket)
 
-	c.EventBus.Subscribe(deliveryevent.BuildCompletedName, subscriber.NewOnBuildCompleted(repo).Handle)
-	c.EventBus.Subscribe(pwfevent.WorkflowRunCompletedName, subscriber.NewOnWorkflowRunCompleted(releasePlanExecutor, sprintWorkItemExecutor).Handle)
-	c.EventBus.Subscribe(deliveryevent.DeployCompletedName, subscriber.NewOnDeployCompleted(environmentRepo).Handle)
+	if err := c.EventBus.Subscribe(
+		deliveryevent.BuildCompletedName,
+		"product.build-completed",
+		subscriber.NewOnBuildCompleted(repo).Handle,
+	); err != nil {
+		return fmt.Errorf("subscribe product build completed: %w", err)
+	}
+	if err := c.EventBus.Subscribe(
+		pwfevent.WorkflowRunCompletedName,
+		"product.workflow-run-completed",
+		subscriber.NewOnWorkflowRunCompleted(releasePlanExecutor, sprintWorkItemExecutor).Handle,
+	); err != nil {
+		return fmt.Errorf("subscribe product workflow run completed: %w", err)
+	}
+	if err := c.EventBus.Subscribe(
+		deliveryevent.DeployCompletedName,
+		"product.deploy-completed",
+		subscriber.NewOnDeployCompleted(environmentRepo).Handle,
+	); err != nil {
+		return fmt.Errorf("subscribe product deploy completed: %w", err)
+	}
 
 	c.Engine.GET("/api/v1/products/:productId/sprints",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), handler.ListSprints)

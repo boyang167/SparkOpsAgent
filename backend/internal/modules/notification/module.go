@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/domain/event"
-	workflowevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/domain/event"
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/notification/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/notification/application/query"
@@ -12,6 +11,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/notification/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/notification/infrastructure/persistence"
 	notificationhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/notification/interface/http"
+	workflowevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
@@ -46,9 +46,15 @@ func (m *Module) Register(c *appctx.Container) error {
 	list := query.NewListNotificationsHandler(repo)
 	agentACL := acl.NewAgentACL(c.DB)
 
-	c.EventBus.Subscribe(event.RunCompletedName, subscriber.NewOnRunCompleted(create, agentACL).Handle)
-	c.EventBus.Subscribe(workflowevent.WorkflowRunCompletedName, subscriber.NewOnWorkflowRunCompleted(create).Handle)
-	c.EventBus.Subscribe(deliveryevent.BuildCompletedName, subscriber.NewOnBuildCompleted(create).Handle)
+	if err := c.EventBus.Subscribe(event.RunCompletedName, "notification.run-completed", subscriber.NewOnRunCompleted(create, agentACL).Handle); err != nil {
+		return fmt.Errorf("subscribe notification run completed: %w", err)
+	}
+	if err := c.EventBus.Subscribe(workflowevent.WorkflowRunCompletedName, "notification.workflow-run-completed", subscriber.NewOnWorkflowRunCompleted(create).Handle); err != nil {
+		return fmt.Errorf("subscribe notification workflow run completed: %w", err)
+	}
+	if err := c.EventBus.Subscribe(deliveryevent.BuildCompletedName, "notification.build-completed", subscriber.NewOnBuildCompleted(create).Handle); err != nil {
+		return fmt.Errorf("subscribe notification build completed: %w", err)
+	}
 
 	handler := notificationhttp.NewHandler(list, markRead, markAllRead)
 

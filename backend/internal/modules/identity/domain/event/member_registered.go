@@ -20,3 +20,14 @@ func NewMemberRegistered(memberID kernel.MemberID, email string) MemberRegistere
 		Email:     email,
 	}
 }
+
+func Register(registry *events.Registry) error {
+	return events.RegisterJSON[MemberRegistered](
+		registry,
+		MemberRegisteredName,
+		1,
+		func(ev MemberRegistered) events.AggregateRef {
+			return events.AggregateRef{Type: "member", ID: ev.MemberID.String()}
+		},
+	)
+}
