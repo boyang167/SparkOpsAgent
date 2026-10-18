@@ -3,8 +3,11 @@ package messaging
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,4 +64,48 @@ func TestValidateEventTopologiesRejectsNormalizedNameCollision(t *testing.T) {
 	})
 
 	require.ErrorContains(t, err, "collision")
+}
+
+func TestValidateEventDeadLetterQueueUsesProductionNormalization(t *testing.T) {
+	envelope := events.Envelope{
+		ID:         uuid.NewString(),
+		Type:       "agent_runtime.Run_Completed",
+		Version:    2,
+		OccurredAt: time.Now().UTC(),
+		Payload:    []byte(`{}`),
+	}
+	subscription := Subscription{
+		EventName:  envelope.Type,
+		Version:    envelope.Version,
+		Subscriber: "notification.audit_worker",
+	}
+	topology := topologyFor(subscription)
+
+	mainQueue, err := ValidateEventDeadLetterQueue(topology.DeadLetter.Name, envelope)
+
+	require.NoError(t, err)
+	require.Equal(t, topology.Main.Name, mainQueue)
+}
+
+func TestValidateEventDeadLetterQueueRejectsMismatchedIdentityAndUnstableSubscriber(t *testing.T) {
+	envelope := events.Envelope{
+		ID:         uuid.NewString(),
+		Type:       "workspace_app.ProjectCreated",
+		Version:    1,
+		OccurredAt: time.Now().UTC(),
+		Payload:    []byte(`{}`),
+	}
+	valid := topologyFor(Subscription{
+		EventName: envelope.Type, Version: envelope.Version, Subscriber: "workspace.audit-worker",
+	}).DeadLetter.Name
+
+	for _, queue := range []string{
+		strings.Replace(valid, "workspace-app-projectcreated", "workspace-app-other", 1),
+		strings.Replace(valid, ".v1.dlq", ".v2.dlq", 1),
+		strings.TrimSuffix(valid, ".dlq"),
+		strings.Replace(valid, "workspace.audit-worker", "workspace..audit-worker", 1),
+	} {
+		_, err := ValidateEventDeadLetterQueue(queue, envelope)
+		require.Error(t, err, queue)
+	}
 }

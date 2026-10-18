@@ -46,7 +46,7 @@ func (t *subscriberTestTransport) PublishRetry(context.Context, messaging.Subscr
 	t.retries++
 	return nil
 }
-func (*subscriberTestTransport) PublishDeadLetter(context.Context, messaging.Subscription, events.Envelope, string) error {
+func (*subscriberTestTransport) PublishDeadLetter(context.Context, messaging.Subscription, events.Envelope, string, int) error {
 	return nil
 }
 func (*subscriberTestTransport) Close() error { return nil }

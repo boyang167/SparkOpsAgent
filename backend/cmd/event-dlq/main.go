@@ -22,12 +22,12 @@ import (
 	productworkflowevent "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/event"
 	workflowevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/domain/event"
 	workspaceevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/event"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 )
 
 var dlqQueueName = regexp.MustCompile(`^sparkops\.event\.[a-z0-9.-]+\.v[1-9][0-9]*\.dlq$`)
-var stableReplayQueuePart = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`)
 
 type options struct {
 	operation string
@@ -300,22 +300,7 @@ func replayTargetQueue(
 	if delivery.MessageId == "" || delivery.MessageId != envelope.ID {
 		return "", fmt.Errorf("delivery MessageId must match envelope event id")
 	}
-	eventPart := strings.ToLower(strings.ReplaceAll(envelope.Type, ".", "-"))
-	expectedSuffix := fmt.Sprintf(".%s.v%d.dlq", eventPart, envelope.Version)
-	prefix := "sparkops.event."
-	if !strings.HasPrefix(dlq, prefix) || !strings.HasSuffix(dlq, expectedSuffix) {
-		return "", fmt.Errorf(
-			"DLQ queue %q does not match envelope %s.v%d",
-			dlq,
-			envelope.Type,
-			envelope.Version,
-		)
-	}
-	subscriber := strings.TrimSuffix(strings.TrimPrefix(dlq, prefix), expectedSuffix)
-	if !stableReplayQueuePart.MatchString(subscriber) || strings.Contains(subscriber, "..") {
-		return "", fmt.Errorf("DLQ queue contains an invalid subscriber identity")
-	}
-	return strings.TrimSuffix(dlq, ".dlq"), nil
+	return messaging.ValidateEventDeadLetterQueue(dlq, envelope)
 }
 
 func validateReplayEnvelope(envelope events.Envelope) error {

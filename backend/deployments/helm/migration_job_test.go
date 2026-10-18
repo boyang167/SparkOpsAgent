@@ -19,6 +19,10 @@ func TestMigrationHookBlocksRolloutAndUsesPackagedRunner(t *testing.T) {
 	require.Contains(t, job, `/app/migrate-sql -path /app/migrations -min-version 70`)
 	require.Contains(t, job, `key: DATABASE_URL`)
 	require.Contains(t, job, `restartPolicy: Never`)
+	require.Contains(t, job, `serviceAccountName: {{ include "sparkops.serviceAccountName" . }}`)
+	require.Contains(t, job, `{{- with .Values.global.imagePullSecrets }}`)
+	require.Contains(t, job, `imagePullSecrets:`)
+	require.Contains(t, job, `{{- toYaml . | nindent 8 }}`)
 
 	secret := readChartTemplate(t, "migration-secret.yaml")
 	require.Contains(t, secret, `"helm.sh/hook-weight": "-20"`)

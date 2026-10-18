@@ -42,7 +42,7 @@ type EventTransport interface {
 	Publish(ctx context.Context, envelope events.Envelope) error
 	Consume(ctx context.Context, subscription Subscription, handler DeliveryHandler) error
 	PublishRetry(ctx context.Context, subscription Subscription, envelope events.Envelope, delay RetryDelay, attempts int) error
-	PublishDeadLetter(ctx context.Context, subscription Subscription, envelope events.Envelope, reason string) error
+	PublishDeadLetter(ctx context.Context, subscription Subscription, envelope events.Envelope, reason string, attempts int) error
 	Close() error
 }
 
@@ -439,13 +439,17 @@ func (t *amqpEventTransport) PublishDeadLetter(
 	subscription Subscription,
 	envelope events.Envelope,
 	reason string,
+	attempts int,
 ) error {
 	return t.publish(
 		ctx,
 		"",
 		topologyFor(subscription).DeadLetter.Name,
 		envelope,
-		amqp.Table{"x-sparkops-dead-letter-reason": reason},
+		amqp.Table{
+			"x-sparkops-dead-letter-reason": reason,
+			eventAttemptsHeader:             int32(attempts),
+		},
 	)
 }
 

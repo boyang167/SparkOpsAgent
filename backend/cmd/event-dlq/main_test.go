@@ -10,6 +10,9 @@ import (
 
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
+	agentruntimeevent "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/domain/event"
+	productworkflowevent "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/event"
+	workspaceevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/stretchr/testify/require"
 )
@@ -249,4 +252,59 @@ func TestReplayRejectsQueueWhoseEventIdentityDoesNotMatchEnvelope(t *testing.T) 
 	require.ErrorContains(t, err, "does not match")
 	require.Empty(t, publisher.deliveries)
 	require.Empty(t, acks.acked)
+}
+
+func TestReplayAcceptsProductionUnderscoreEventQueues(t *testing.T) {
+	registry, err := productionRegistry()
+	require.NoError(t, err)
+	tests := []struct {
+		eventName string
+		queue     string
+		mainQueue string
+	}{
+		{
+			eventName: agentruntimeevent.RunCompletedName,
+			queue:     "sparkops.event.notification.run-completed.agent-runtime-runcompleted.v1.dlq",
+			mainQueue: "sparkops.event.notification.run-completed.agent-runtime-runcompleted.v1",
+		},
+		{
+			eventName: workspaceevent.ProjectCreatedName,
+			queue:     "sparkops.event.workspace.audit-project.workspace-app-projectcreated.v1.dlq",
+			mainQueue: "sparkops.event.workspace.audit-project.workspace-app-projectcreated.v1",
+		},
+		{
+			eventName: productworkflowevent.WorkflowRunCompletedName,
+			queue:     "sparkops.event.product.workflow-run-completed.product-workflow-workflowruncompleted.v1.dlq",
+			mainQueue: "sparkops.event.product.workflow-run-completed.product-workflow-workflowruncompleted.v1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.eventName, func(t *testing.T) {
+			acks := &recordingAcknowledger{}
+			envelope := events.Envelope{
+				ID: uuid.NewString(), Type: tt.eventName, Version: 1,
+				OccurredAt: time.Now().UTC(), Payload: json.RawMessage(`{}`),
+			}
+			body, marshalErr := json.Marshal(envelope)
+			require.NoError(t, marshalErr)
+			delivery := amqp.Delivery{
+				Acknowledger: acks, DeliveryTag: 1, MessageId: envelope.ID, Body: body,
+			}
+			publisher := &fakePublisher{}
+
+			require.NoError(t, replay(
+				context.Background(),
+				&fakeQueueClient{deliveries: []amqp.Delivery{delivery}},
+				publisher,
+				registry,
+				tt.queue,
+				1,
+				&bytes.Buffer{},
+			))
+
+			require.Len(t, publisher.deliveries, 1)
+			require.Equal(t, tt.mainQueue, publisher.deliveries[0].queue)
+			require.Equal(t, []uint64{1}, acks.acked)
+		})
+	}
 }

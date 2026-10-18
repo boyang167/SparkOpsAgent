@@ -18,6 +18,11 @@ spec:
         {{- include "sparkops.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: migration
     spec:
+      serviceAccountName: {{ include "sparkops.serviceAccountName" . }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       restartPolicy: Never
       containers:
         - name: migration

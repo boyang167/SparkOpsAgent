@@ -140,7 +140,9 @@ func (c *InboxConsumer) Handle(
 			zap.Int("attempt", attempts+1),
 			zap.Error(err),
 		)
-		if publishErr := c.transport.PublishDeadLetter(ctx, subscription, envelope, err.Error()); publishErr != nil {
+		if publishErr := c.transport.PublishDeadLetter(
+			ctx, subscription, envelope, err.Error(), attempts,
+		); publishErr != nil {
 			if c.metrics != nil {
 				c.metrics.EventConsume.WithLabelValues(
 					subscription.Subscriber,
@@ -165,7 +167,9 @@ func (c *InboxConsumer) Handle(
 			zap.Int("attempt", attempts+1),
 			zap.Error(err),
 		)
-		if publishErr := c.transport.PublishDeadLetter(ctx, subscription, envelope, reason); publishErr != nil {
+		if publishErr := c.transport.PublishDeadLetter(
+			ctx, subscription, envelope, reason, attempts,
+		); publishErr != nil {
 			if c.metrics != nil {
 				c.metrics.EventConsume.WithLabelValues(
 					subscription.Subscriber,

@@ -81,14 +81,15 @@ func (s *dispatcherStore) Reschedule(_ context.Context, id, owner, _ string, _ t
 }
 
 type fakeEventTransport struct {
-	mu          sync.Mutex
-	publishErr  error
-	published   []events.Envelope
-	retries     []RetryDelay
-	deadLetters []string
-	declared    []Subscription
-	consumed    []Subscription
-	closed      int
+	mu                 sync.Mutex
+	publishErr         error
+	published          []events.Envelope
+	retries            []RetryDelay
+	deadLetters        []string
+	deadLetterAttempts []int
+	declared           []Subscription
+	consumed           []Subscription
+	closed             int
 }
 
 func (t *fakeEventTransport) Declare(_ context.Context, subscriptions []Subscription) error {
@@ -119,10 +120,17 @@ func (t *fakeEventTransport) PublishRetry(_ context.Context, _ Subscription, _ e
 	return t.publishErr
 }
 
-func (t *fakeEventTransport) PublishDeadLetter(_ context.Context, _ Subscription, _ events.Envelope, reason string) error {
+func (t *fakeEventTransport) PublishDeadLetter(
+	_ context.Context,
+	_ Subscription,
+	_ events.Envelope,
+	reason string,
+	attempts int,
+) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.deadLetters = append(t.deadLetters, reason)
+	t.deadLetterAttempts = append(t.deadLetterAttempts, attempts)
 	return t.publishErr
 }
 

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/stretchr/testify/require"
 )
@@ -95,6 +97,114 @@ func TestReplayMandatoryReturnDoesNotAckDLQ(t *testing.T) {
 		queue, inspectErr := channel.QueueInspect(dlq)
 		return inspectErr == nil && queue.Messages == 1
 	}, 3*time.Second, 20*time.Millisecond)
+}
+
+func TestRetryExhaustionDLQAttemptsSurviveCLIReplay(t *testing.T) {
+	amqpURL := requireDLQIntegrationEnv(t, "AMQP_URL")
+	connection, channel := openDLQIntegrationChannel(t, amqpURL)
+	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
+	subscriber := "integration." + suffix + ".retry-replay"
+	mainQueue := "sparkops.event." + subscriber + ".test-dlqevent.v1"
+	dlq := mainQueue + ".dlq"
+	queues := declareShortReplayRetryTopology(t, channel, mainQueue, dlq)
+	cleanupReplayQueues(t, connection, queues...)
+
+	registry := replayIntegrationRegistry(t)
+	envelope, err := registry.Encode(
+		context.Background(),
+		replayIntegrationEvent{Value: "retry-exhaustion", At: time.Now().UTC()},
+	)
+	require.NoError(t, err)
+	transport, err := messaging.NewAMQPEventTransport(amqpURL, nil)
+	require.NoError(t, err)
+	consumer := messaging.NewInboxConsumer(
+		directTransactor{},
+		alwaysInsertInbox{},
+		registry,
+		transport,
+		nil,
+		nil,
+	)
+	subscription := messaging.Subscription{
+		EventName:  replayIntegrationEventName,
+		Version:    1,
+		Subscriber: subscriber,
+		Handler: func(context.Context, events.Event) error {
+			return errors.New("temporary")
+		},
+	}
+	require.NoError(t, transport.Consume(
+		context.Background(),
+		subscription,
+		func(ctx context.Context, delivered events.Envelope, attempts int) error {
+			return consumer.Handle(ctx, subscription, delivered, attempts)
+		},
+	))
+	require.NoError(t, transport.Publish(context.Background(), envelope))
+	require.Eventually(t, func() bool {
+		queue, inspectErr := channel.QueueInspect(dlq)
+		return inspectErr == nil && queue.Messages == 1
+	}, 10*time.Second, 20*time.Millisecond)
+	require.NoError(t, transport.Close())
+
+	deadLetter, ok, err := channel.Get(dlq, false)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.EqualValues(t, 4, deadLetter.Headers["x-sparkops-attempts"])
+	require.NoError(t, deadLetter.Nack(false, true))
+
+	client, err := openQueueClient(amqpURL, true)
+	require.NoError(t, err)
+	require.NoError(t, replay(context.Background(), client, client, registry, dlq, 1, &bytes.Buffer{}))
+	require.NoError(t, client.Close())
+
+	replayed, ok, err := channel.Get(mainQueue, false)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, envelope.ID, replayed.MessageId)
+	require.EqualValues(t, 4, replayed.Headers["x-sparkops-attempts"])
+	require.NoError(t, replayed.Ack(false))
+}
+
+type directTransactor struct{}
+
+func (directTransactor) WithinTransaction(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+type alwaysInsertInbox struct{}
+
+func (alwaysInsertInbox) TryInsert(context.Context, string, string, string, time.Time) (bool, error) {
+	return true, nil
+}
+
+func declareShortReplayRetryTopology(
+	t *testing.T,
+	channel *amqp.Channel,
+	mainQueue string,
+	dlq string,
+) []string {
+	t.Helper()
+	require.NoError(t, channel.ExchangeDeclare("sparkops.events", "topic", true, false, false, false, nil))
+	quorum := amqp.Table{"x-queue-type": "quorum"}
+	_, err := channel.QueueDeclare(mainQueue, true, false, false, false, quorum)
+	require.NoError(t, err)
+	require.NoError(t, channel.QueueBind(mainQueue, replayIntegrationEventName+".v1", "sparkops.events", false, nil))
+	queues := []string{mainQueue, dlq}
+	for index, suffix := range []string{"5s", "30s", "5m", "30m"} {
+		name := mainQueue + ".retry." + suffix
+		_, err = channel.QueueDeclare(name, true, false, false, false, amqp.Table{
+			"x-queue-type":              "quorum",
+			"x-message-ttl":             int32(30 + index*20),
+			"x-dead-letter-exchange":    "",
+			"x-dead-letter-routing-key": mainQueue,
+		})
+		require.NoError(t, err)
+		queues = append(queues, name)
+	}
+	_, err = channel.QueueDeclare(dlq, true, false, false, false, quorum)
+	require.NoError(t, err)
+	return queues
 }
 
 func replayIntegrationRegistry(t *testing.T) *events.Registry {

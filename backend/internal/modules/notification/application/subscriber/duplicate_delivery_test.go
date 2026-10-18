@@ -34,7 +34,7 @@ func (duplicateTestTransport) Consume(context.Context, messaging.Subscription, m
 func (duplicateTestTransport) PublishRetry(context.Context, messaging.Subscription, events.Envelope, messaging.RetryDelay, int) error {
 	return errors.New("unexpected retry")
 }
-func (duplicateTestTransport) PublishDeadLetter(context.Context, messaging.Subscription, events.Envelope, string) error {
+func (duplicateTestTransport) PublishDeadLetter(context.Context, messaging.Subscription, events.Envelope, string, int) error {
 	return nil
 }
 func (duplicateTestTransport) Close() error { return nil }

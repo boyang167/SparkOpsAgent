@@ -546,6 +546,30 @@ func TestEventTransportRoutesMalformedRawDeliveryToSubscriberDLQBeforeAck(t *tes
 	))
 }
 
+func TestEventTransportPublishesStructuredDLQWithCurrentAttempts(t *testing.T) {
+	confirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
+	close(confirmation.done)
+	channel := newStubEventChannel(confirmation)
+	transport := newAMQPEventTransport(&stubEventConnection{channels: []eventChannel{channel}})
+	subscription := Subscription{
+		EventName: "delivery.BuildCompleted", Version: 1, Subscriber: "retry.consumer",
+	}
+
+	require.NoError(t, transport.PublishDeadLetter(
+		context.Background(),
+		subscription,
+		eventTransportTestEnvelope(),
+		"attempts exhausted",
+		4,
+	))
+
+	require.Len(t, channel.publishedRecords, 1)
+	published := channel.publishedRecords[0]
+	require.Equal(t, topologyFor(subscription).DeadLetter.Name, published.key)
+	require.EqualValues(t, 4, published.message.Headers[eventAttemptsHeader])
+	require.Equal(t, "attempts exhausted", published.message.Headers["x-sparkops-dead-letter-reason"])
+}
+
 func TestEventTransportRoutesStructurallyInvalidEnvelopeToSubscriberDLQ(t *testing.T) {
 	valid := eventTransportTestEnvelope()
 	valid.Payload = json.RawMessage(`{"build_id":"build-123"}`)

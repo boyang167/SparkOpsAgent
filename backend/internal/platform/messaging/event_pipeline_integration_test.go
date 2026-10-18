@@ -364,6 +364,11 @@ func TestEventPipelineTemporaryFailureUsesEveryRetryTier(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("message did not traverse retry TTL queues to eventual success")
 	}
+	deadLetter, ok, err := channel.Get(topologyFor(subscription).DeadLetter.Name, false)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.EqualValues(t, maxEventRetryAttempts, deadLetter.Headers[eventAttemptsHeader])
+	require.NoError(t, deadLetter.Ack(false))
 	seenMu.Lock()
 	defer seenMu.Unlock()
 	require.Equal(t, []int{0, 1, 2, 3, 4}, seen[successEnvelope.ID])
@@ -445,7 +450,7 @@ func TestEventPipelineDLQReplayWithOriginalIDIsSafe(t *testing.T) {
 		return consumer.Handle(ctx, subscription, envelope, attempts)
 	}))
 	envelope := f.envelope(t, "dlq-replay")
-	require.NoError(t, transport.PublishDeadLetter(context.Background(), subscription, envelope, "operator test"))
+	require.NoError(t, transport.PublishDeadLetter(context.Background(), subscription, envelope, "operator test", 0))
 	channel, err := f.connection.Channel()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = channel.Close() })

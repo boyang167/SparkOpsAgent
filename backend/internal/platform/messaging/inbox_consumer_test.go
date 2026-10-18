@@ -118,12 +118,13 @@ func TestInboxConsumerRoutesPermanentDecodeErrorToDLQ(t *testing.T) {
 		return nil
 	})
 
-	err := consumer.Handle(context.Background(), subscription, envelope, 0)
+	err := consumer.Handle(context.Background(), subscription, envelope, 3)
 
 	require.NoError(t, err, "confirmed DLQ publish should ACK the original delivery")
 	require.Equal(t, 1, tx.rollbacks)
 	require.False(t, inbox.processed[envelope.ID+":"+subscription.Subscriber])
 	require.Len(t, transport.deadLetters, 1)
+	require.Equal(t, []int{3}, transport.deadLetterAttempts)
 	require.Empty(t, transport.retries)
 }
 
@@ -145,6 +146,7 @@ func TestInboxConsumerRoutesTemporaryErrorThroughBackoffTiersThenDLQ(t *testing.
 
 	require.Equal(t, expected, transport.retries)
 	require.Len(t, transport.deadLetters, 1)
+	require.Equal(t, []int{4}, transport.deadLetterAttempts)
 }
 
 func TestInboxConsumerDoesNotAckWhenRetryPublishIsUnconfirmed(t *testing.T) {

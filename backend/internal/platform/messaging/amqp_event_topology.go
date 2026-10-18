@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
 const (
@@ -84,6 +85,48 @@ func normalizeQueueNamePart(value string, preserveDots bool) string {
 	}
 	value = invalidQueueNamePart.ReplaceAllString(value, "-")
 	return strings.Trim(value, ".-")
+}
+
+// ValidateEventDeadLetterQueue validates an exact production DLQ identity and
+// returns its corresponding main queue.
+func ValidateEventDeadLetterQueue(queue string, envelope events.Envelope) (string, error) {
+	if !stableEventTypeName.MatchString(envelope.Type) {
+		return "", fmt.Errorf("event type has invalid stable event name syntax")
+	}
+	if envelope.Version <= 0 {
+		return "", fmt.Errorf("event version must be positive")
+	}
+	const placeholder = "sparkops-dlq-subscriber"
+	template := topologyFor(Subscription{
+		EventName: envelope.Type, Version: envelope.Version, Subscriber: placeholder,
+	})
+	prefix := "sparkops.event."
+	suffix := strings.TrimPrefix(template.DeadLetter.Name, prefix+placeholder)
+	if !strings.HasPrefix(queue, prefix) || !strings.HasSuffix(queue, suffix) {
+		return "", fmt.Errorf(
+			"DLQ queue %q does not match envelope %s.v%d",
+			queue,
+			envelope.Type,
+			envelope.Version,
+		)
+	}
+	subscriber := strings.TrimSuffix(strings.TrimPrefix(queue, prefix), suffix)
+	if subscriber == "" ||
+		strings.Contains(subscriber, "..") ||
+		normalizeQueueNamePart(subscriber, true) != subscriber {
+		return "", fmt.Errorf("DLQ queue contains an invalid subscriber identity")
+	}
+	subscription := Subscription{
+		EventName: envelope.Type, Version: envelope.Version, Subscriber: subscriber,
+	}
+	if err := validateEventTopologies([]Subscription{subscription}); err != nil {
+		return "", err
+	}
+	topology := topologyFor(subscription)
+	if queue != topology.DeadLetter.Name {
+		return "", fmt.Errorf("DLQ queue %q is not an exact production dead-letter queue", queue)
+	}
+	return topology.Main.Name, nil
 }
 
 func validateEventTopologies(subscriptions []Subscription) error {
