@@ -4,6 +4,7 @@
 
 - Baseline: `05408d7`
 - Follow-up parent HEAD: `c5cb4e482a384feba9c8bf20431daed1da36c03c`
+- Final P2 parent HEAD: `ea8db4ac37b0d186112dd9910984db9f3abb4a5d`
 - This change is limited to final-review messaging lifecycle, retry classification,
   outbound HTTP error sanitization, SMTP semantics, configuration, tests, and
   related operational documentation.
@@ -66,6 +67,15 @@
 - All `http.Client.Do` network errors in delivery and product-workflow use the
   sanitizer, including webhook, GitLab, Harbor, Vault, Feishu, and notification
   paths.
+- The final P2 follow-up applies the same sanitizer to every
+  `http.NewRequestWithContext` and `Client.Do` failure in the product module:
+  release-plan hook/approval notifications plus Jira and PM connectors.
+  Request-construction failures remain permanent for release-plan operations;
+  DNS temporary and timeout classifications remain retryable.
+- Product release-plan Operation tests cover malformed URLs with secret path
+  and query values, DNS and timeout failures, returned handler errors,
+  Operation Outbox `last_error`, and structured warning logs. None expose the
+  full URL, path, query, or token.
 
 ### SMTP protocol boundary
 
@@ -99,6 +109,8 @@ Observed RED before implementation:
 - HTTP sanitizer test failed because `SanitizeNetwork` did not exist.
 - SMTP stable Message-ID test failed because the message builder did not exist.
 - Config validation accepted a negative publish timeout.
+- Product release-plan webhook and approval Operation tests returned complete
+  secret-bearing URLs for DNS and timeout failures before the final P2 fix.
 
 Observed GREEN after the minimal fixes:
 
@@ -106,6 +118,8 @@ Observed GREEN after the minimal fixes:
   close, context value/deadline, retry saturation, permanent attempt-4 DLQ,
   URL sanitization, persisted `last_error`, stable Message-ID, and config
   validation tests all pass.
+- Product release-plan handler, persisted `last_error`, and structured-log
+  assertions pass while preserving DNS temporary and timeout classification.
 
 ## Verification
 
@@ -120,6 +134,8 @@ Passed:
 - Critical shutdown/retry tests with `-count=10`
 - Delivery outbound/GitLab/Harbor package tests
 - `go test ./internal/modules/product_workflow/... -count=1`
+- `go test ./internal/modules/product/application/service ./internal/modules/product/infrastructure/outbound ./internal/platform/messaging/... -count=3`
+- `go test ./internal/modules/product/... -count=3`
 - Config and HTTP sanitizer tests
 - Task 11 tagged messaging, DLQ, and delivery integration package matrices
 - `go test ./deployments/helm -count=1`

@@ -17,6 +17,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/port"
 	wsmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/crypto"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httperror"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"gorm.io/gorm"
 )
@@ -206,7 +207,7 @@ func (c *JiraConnector) doRequest(ctx context.Context, creds jiraCredentials, me
 	}
 	req, err := http.NewRequestWithContext(ctx, method, reqURL, reader)
 	if err != nil {
-		return nil, err
+		return nil, httperror.SanitizeNetwork(err)
 	}
 	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(creds.username+":"+creds.token)))
 	req.Header.Set("Accept", "application/json")
@@ -215,7 +216,7 @@ func (c *JiraConnector) doRequest(ctx context.Context, creds jiraCredentials, me
 	}
 	res, err := c.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, httperror.SanitizeNetwork(err)
 	}
 	defer res.Body.Close()
 	respBody, err := io.ReadAll(res.Body)

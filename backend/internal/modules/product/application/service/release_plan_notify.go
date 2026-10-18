@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httperror"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 )
 
@@ -58,7 +59,7 @@ func (n *ReleasePlanApprovalNotifier) NotifyApprovalWithIdempotency(
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhook, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return messaging.Permanent(httperror.SanitizeNetwork(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if idempotencyKey != "" {
@@ -66,7 +67,7 @@ func (n *ReleasePlanApprovalNotifier) NotifyApprovalWithIdempotency(
 	}
 	resp, err := n.client.Do(req)
 	if err != nil {
-		return err
+		return httperror.SanitizeNetwork(err)
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
