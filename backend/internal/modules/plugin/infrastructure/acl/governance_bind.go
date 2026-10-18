@@ -97,22 +97,27 @@ func (b *GovernanceBinder) Bind(ctx context.Context, workspaceID kernel.Workspac
 	parentID := parent.ID
 	menuIDs := make(map[string]string, len(spec.Menus))
 	for index, menu := range spec.Menus {
-		row := menuRow{
-			ID: uuid.NewString(), WorkspaceID: workspaceID.String(),
-			Name: fmt.Sprintf("plugin-%s-%d", spec.ID, index+1),
-			Path: menu.Path, Title: menu.Title, Component: menu.Component,
-			Sort: index + 1, TransitionAnimation: "global",
-			CreatedAt: now, UpdatedAt: now,
-		}
 		assign := map[string]any{
-			"name": row.Name, "title": row.Title, "component": row.Component,
-			"sort": row.Sort, "updated_at": now, "deleted_at": nil,
+			"name":        fmt.Sprintf("plugin-%s-%d", spec.ID, index+1),
+			"title":       menu.Title,
+			"component":   menu.Component,
+			"sort":        index + 1,
+			"updated_at":  now,
+			"deleted_at":  nil,
 		}
-		if err := db.Where("workspace_id = ? AND path = ?", workspaceID.String(), menu.Path).
-			Assign(assign).FirstOrCreate(&row).Error; err != nil {
+		menuID, err := upsertWorkspaceMenu(db, workspaceID.String(), menu.Path, assign, func() menuRow {
+			return menuRow{
+				ID: uuid.NewString(), WorkspaceID: workspaceID.String(),
+				Name: assign["name"].(string), Path: menu.Path,
+				Title: menu.Title, Component: menu.Component,
+				Sort: index + 1, TransitionAnimation: "global",
+				CreatedAt: now, UpdatedAt: now,
+			}
+		}, now)
+		if err != nil {
 			return err
 		}
-		menuIDs[menu.Path] = row.ID
+		menuIDs[menu.Path] = menuID
 	}
 	for _, menu := range spec.Menus {
 		targetParentID := parentID
@@ -123,8 +128,11 @@ func (b *GovernanceBinder) Bind(ctx context.Context, workspaceID kernel.Workspac
 			}
 			targetParentID = resolvedParentID
 		}
-		result := db.Model(&menuRow{}).
-			Where("workspace_id = ? AND path = ?", workspaceID.String(), menu.Path).
+		menuID, ok := menuIDs[menu.Path]
+		if !ok {
+			return kernel.NewDomainError("PLUGIN_MANIFEST_INVALID", fmt.Sprintf("menu %q was not upserted before parent binding", menu.Path))
+		}
+		result := db.Model(&menuRow{}).Where("id = ?", menuID).
 			Updates(map[string]any{"parent_id": targetParentID, "updated_at": now})
 		if result.Error != nil {
 			return result.Error
@@ -198,6 +206,45 @@ func (b *GovernanceBinder) Bind(ctx context.Context, workspaceID kernel.Workspac
 		}
 	}
 	return nil
+}
+
+func upsertWorkspaceMenu(
+	db *gorm.DB,
+	workspaceID, path string,
+	assign map[string]any,
+	create func() menuRow,
+	now time.Time,
+) (string, error) {
+	var existing []menuRow
+	if err := db.Where(
+		"workspace_id = ? AND path = ? AND deleted_at IS NULL",
+		workspaceID, path,
+	).Order("updated_at DESC, created_at DESC").Find(&existing).Error; err != nil {
+		return "", err
+	}
+	if len(existing) == 0 {
+		row := create()
+		if err := db.Create(&row).Error; err != nil {
+			return "", err
+		}
+		return row.ID, nil
+	}
+	keeper := existing[0]
+	if err := db.Model(&keeper).Updates(assign).Error; err != nil {
+		return "", err
+	}
+	if len(existing) > 1 {
+		deletedAt := now
+		duplicateIDs := make([]string, 0, len(existing)-1)
+		for _, dup := range existing[1:] {
+			duplicateIDs = append(duplicateIDs, dup.ID)
+		}
+		if err := db.Model(&menuRow{}).Where("id IN ?", duplicateIDs).
+			Updates(map[string]any{"deleted_at": deletedAt, "updated_at": now}).Error; err != nil {
+			return "", err
+		}
+	}
+	return keeper.ID, nil
 }
 
 func expandPluginAPIGrants(apis []manifest.APISpec) []pluginAPIGrant {

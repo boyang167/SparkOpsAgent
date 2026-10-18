@@ -48,9 +48,9 @@ export function emptyStorageTemplate(kind: StorageTab, namespace?: string): Reco
 }
 
 export function storageTableColSpan(tab: StorageTab): number {
-  if (tab === "PersistentVolumeClaim") return 10;
-  if (tab === "PersistentVolume") return 10;
-  return 6;
+  if (tab === "PersistentVolumeClaim") return 9;
+  if (tab === "PersistentVolume") return 9;
+  return 5;
 }
 
 export function readNestedString(obj: Record<string, unknown>, path: string[]): string {

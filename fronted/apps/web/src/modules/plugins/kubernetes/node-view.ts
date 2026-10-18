@@ -124,6 +124,21 @@ export function nodeStatus(node: NodeObject): string {
   return status;
 }
 
+const INVERTED_NODE_CONDITIONS = new Set([
+  "MemoryPressure",
+  "DiskPressure",
+  "PIDPressure",
+  "NetworkUnavailable",
+]);
+
+export function nodeConditionTone(type?: string, status?: string): "success" | "danger" | "neutral" {
+  if (!status) return "neutral";
+  const isTrue = status === "True";
+  if (type === "Ready") return isTrue ? "success" : "danger";
+  if (type && INVERTED_NODE_CONDITIONS.has(type)) return isTrue ? "danger" : "success";
+  return isTrue ? "success" : "neutral";
+}
+
 export function nodeRoles(labels?: Record<string, string>): string[] {
   if (!labels) return ["Worker"];
   const roles = Object.keys(labels)

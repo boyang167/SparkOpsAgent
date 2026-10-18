@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useK8sConfirm } from "@/components/k8s";
+import { K8sEmptyState, K8sLoadingState, useK8sConfirm } from "@/components/k8s";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, KubernetesApiError, parseApiError, type ApiErrorInfo } from "../api";
 import { podOperationPath } from "../operations";
 import type { PodObject } from "../node-view";
 import {
   joinPodFilePath,
+  normalizePodFilePath,
   parseLsOutput,
   podFileBreadcrumbs,
   podFilePathFromBreadcrumbs,
@@ -24,6 +25,7 @@ type PodFilesBrowserProps = {
 export function PodFilesBrowser({ clusterId, pod, container, canManage }: PodFilesBrowserProps) {
   const { ask, dialog: confirmDialog } = useK8sConfirm();
   const [currentPath, setCurrentPath] = useState("/");
+  const [pathDraft, setPathDraft] = useState("/");
   const [files, setFiles] = useState<PodFileEntry[]>([]);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
   const [loading, setLoading] = useState(false);
@@ -60,6 +62,7 @@ export function PodFilesBrowser({ clusterId, pod, container, canManage }: PodFil
   }, [base, container]);
 
   useEffect(() => {
+    setPathDraft(currentPath);
     void listFiles(currentPath);
     return () => active.current?.abort();
   }, [currentPath, listFiles]);
@@ -107,7 +110,7 @@ export function PodFilesBrowser({ clusterId, pod, container, canManage }: PodFil
     const kind = entry.isDir ? "文件夹" : "文件";
     const ok = await ask({
       title: "删除文件",
-      description: `您确定要删除 ${entry.name} ${kind}？该操作不可逆，是否继续？`,
+      description: `确定删除 ${entry.name} ${kind}？该操作不可恢复。`,
       confirmLabel: "删除",
       danger: true,
     });
@@ -133,61 +136,81 @@ export function PodFilesBrowser({ clusterId, pod, container, canManage }: PodFil
     setCurrentPath(podFilePathFromBreadcrumbs(breadcrumbs.slice(0, index + 1)));
   }
 
+  function goToPathDraft() {
+    setCurrentPath(normalizePodFilePath(pathDraft));
+  }
+
+  const pathDirty = normalizePodFilePath(pathDraft) !== currentPath;
+
   return (
     <div className="k8s-pod-files">
-      <div className="k8s-pod-files-toolbar">
+      <div className="k8s-pod-files-path-row">
+        <label className="k8s-pod-files-path-field">
+          <span className="label">当前目录</span>
+          <input
+            className="input font-mono text-sm k8s-pod-files-path-input"
+            value={pathDraft}
+            aria-label="容器内路径"
+            placeholder="/"
+            onChange={(event) => setPathDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") goToPathDraft();
+            }}
+          />
+        </label>
+        <button type="button" className="btn-secondary text-sm" disabled={!pathDirty} onClick={goToPathDraft}>
+          前往
+        </button>
         {canManage ? (
-          <label className="btn-primary k8s-pod-files-upload">
-            上传文件
+          <label className="btn-secondary text-sm k8s-pod-files-upload" title={`上传到 ${currentPath}`}>
+            上传
             <input className="hidden" type="file" onChange={(event) => void upload(event.target.files?.[0])} />
           </label>
         ) : null}
       </div>
-
-      <div className="k8s-pod-files-breadcrumb">
-        <button type="button" className="k8s-action-link" onClick={() => openBreadcrumb(-1)}>
+      <nav className="k8s-pod-files-breadcrumb" aria-label="路径快捷导航">
+        <button type="button" className="btn-ghost text-sm" onClick={() => openBreadcrumb(-1)}>
           根目录
         </button>
         {breadcrumbs.map((segment, index) => (
           <span key={`${segment}-${index}`} className="k8s-pod-files-crumb">
-            <span>/</span>
+            <span className="text-muted">/</span>
             {index === breadcrumbs.length - 1 ? (
-              <span>{segment}</span>
+              <span className="text-sm text-muted">{segment}</span>
             ) : (
-              <button type="button" className="k8s-action-link" onClick={() => openBreadcrumb(index)}>
+              <button type="button" className="btn-ghost text-sm" onClick={() => openBreadcrumb(index)}>
                 {segment}
               </button>
             )}
           </span>
         ))}
-      </div>
+        {canManage ? <span className="k8s-pod-files-upload-hint text-xs text-muted">上传至当前目录</span> : null}
+      </nav>
 
       <ApiErrorBanner error={error} />
 
-      <div className="k8s-table-wrap">
-        <table className="k8s-table k8s-pod-files-table">
+      <div className="table-wrap k8s-pod-files-table-wrap">
+        <table className="data-table text-sm k8s-pod-files-table">
           <thead>
             <tr>
               <th>名称</th>
               <th>大小</th>
               <th>权限</th>
-              <th>所有者</th>
-              <th>所属组</th>
-              <th>最后修改时间</th>
-              <th>操作</th>
+              <th>修改时间</th>
+              <th className="w-28">操作</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} className="text-center text-muted py-6">
-                  加载中…
+                <td colSpan={5}>
+                  <K8sLoadingState compact />
                 </td>
               </tr>
             ) : files.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-center text-muted py-6">
-                  暂无文件
+                <td colSpan={5}>
+                  <K8sEmptyState variant="empty" title="暂无文件" compact />
                 </td>
               </tr>
             ) : (
@@ -195,35 +218,36 @@ export function PodFilesBrowser({ clusterId, pod, container, canManage }: PodFil
                 <tr key={`${entry.mode}-${entry.name}-${entry.link}`}>
                   <td>
                     {entry.isDir ? (
-                      <button type="button" className="k8s-action-link" onClick={() => openDirectory(entry.name)}>
-                        📁 {entry.name}
+                      <button type="button" className="k8s-cluster-name-link" onClick={() => openDirectory(entry.name)}>
+                        <span className="k8s-file-kind">目录</span>
+                        {entry.name}
                       </button>
                     ) : (
-                      <span className="k8s-pod-files-name">
-                        {entry.isSymlink ? "🔗" : "📄"} {entry.name}
-                        {entry.link ? ` -> ${entry.link}` : ""}
+                      <span className="k8s-pod-files-name" title={entry.link ? `${entry.name} -> ${entry.link}` : entry.name}>
+                        <span className="k8s-file-kind">{entry.isSymlink ? "链接" : "文件"}</span>
+                        {entry.name}
                       </span>
                     )}
                   </td>
-                  <td>{entry.size}</td>
-                  <td className="font-mono text-xs">{entry.mode}</td>
-                  <td>{entry.user}</td>
-                  <td>{entry.group}</td>
-                  <td>{entry.modTime}</td>
-                  <td className="k8s-pod-files-actions">
-                    <button
-                      type="button"
-                      className="k8s-action-link"
-                      disabled={entry.isDir || entry.isSymlink}
-                      onClick={() => void download(entry)}
-                    >
-                      下载
-                    </button>
-                    {canManage ? (
-                      <button type="button" className="k8s-action-link is-danger" onClick={() => void remove(entry)}>
-                        删除
+                  <td className="text-muted text-xs tabular-nums">{entry.size}</td>
+                  <td className="font-mono text-xs text-muted">{entry.mode}</td>
+                  <td className="text-muted text-xs whitespace-nowrap">{entry.modTime}</td>
+                  <td>
+                    <div className="k8s-row-actions">
+                      <button
+                        type="button"
+                        className="btn-ghost text-sm"
+                        disabled={entry.isDir || entry.isSymlink}
+                        onClick={() => void download(entry)}
+                      >
+                        下载
                       </button>
-                    ) : null}
+                      {canManage ? (
+                        <button type="button" className="btn-ghost text-sm text-danger" onClick={() => void remove(entry)}>
+                          删除
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))

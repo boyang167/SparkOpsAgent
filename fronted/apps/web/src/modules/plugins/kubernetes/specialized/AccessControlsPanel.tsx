@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   K8sEmptyState,
   K8sLoadingState,
@@ -11,12 +11,13 @@ import {
 } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import {
+  ACCESS_LIST_PREVIEW,
   ACCESS_TABS,
   accessTabLabel,
   accessTabNamespaced,
   accessTableColSpan,
+  bindingSubjectNames,
   emptyAccessTemplate,
-  formatBindingSubjects,
   formatRoleRef,
   type AccessTab,
 } from "../access-view";
@@ -48,7 +49,6 @@ type K8sList<T> = {
 };
 
 type QueryState = {
-  draftKeyword: string;
   keyword: string;
   page: number;
   pageSize: number;
@@ -61,7 +61,6 @@ type AccessTarget = {
 
 const namespaceDef = CATALOG.find((item) => item.kind === "Namespace");
 const initialQuery = (): QueryState => ({
-  draftKeyword: "",
   keyword: "",
   page: 1,
   pageSize: 10,
@@ -91,8 +90,6 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [detail, setDetail] = useState<K8sObject | null>(null);
   const [editTarget, setEditTarget] = useState<AccessTarget | null>(null);
   const [createTarget, setCreateTarget] = useState<{ title: string; def: ResourceDef; value: K8sObject } | null>(null);
   const { ask, dialog: confirmDialog } = useK8sConfirm();
@@ -111,7 +108,6 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
   }, []);
 
   const closeModals = useCallback(() => {
-    setDetail(null);
     setEditTarget(null);
     setCreateTarget(null);
   }, []);
@@ -210,19 +206,16 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
   useEffect(() => {
     setNamespace("");
     setQueries(initialQueries());
-    setSelected([]);
     closeModals();
     abortObjectRequest();
   }, [abortObjectRequest, closeModals, clusterId]);
 
   useEffect(() => {
-    setSelected([]);
     closeModals();
     abortObjectRequest();
   }, [abortObjectRequest, closeModals, namespace, tab]);
 
   useEffect(() => {
-    setSelected([]);
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
@@ -260,10 +253,6 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
     } finally {
       if (activeObjectRequest.current === controller) activeObjectRequest.current = null;
     }
-  }
-
-  async function openDetail(item: K8sObject) {
-    await openLatest(item, (latest) => setDetail(latest), "加载详情失败");
   }
 
   async function openEdit(item: K8sObject) {
@@ -369,36 +358,90 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
     );
   }
 
+  const hasActiveFilters =
+    query.keyword.trim().length > 0 || (useNamespaceFilter && namespace.length > 0);
+  const tabLabel = accessTabLabel(tab);
+
   return (
     <div className="stack-md">
-      <K8sPanelCard>
-        <ApiErrorBanner error={error} />
-
-        <div className="k8s-toolbar-row">
-          <label className="min-w-52">
-            <span className="label">命名空间</span>
-            <select
-              className="input"
-              value={namespace}
-              onChange={(e) => {
-                setNamespace(e.target.value);
-                setQueries((current) => resetPages(current));
-              }}
+      <K8sPanelCard className="k8s-access-panel">
+        <div className="k8s-clusters-toolbar k8s-workloads-toolbar">
+          <div className="k8s-clusters-toolbar-filters">
+            {useNamespaceFilter ? (
+              <label className="k8s-workloads-namespace">
+                <span className="sr-only">命名空间</span>
+                <select
+                  className="input"
+                  value={namespace}
+                  aria-label="命名空间"
+                  onChange={(e) => {
+                    setNamespace(e.target.value);
+                    setQueries((current) => resetPages(current));
+                  }}
+                >
+                  <option value="">All Namespaces</option>
+                  {namespaces.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <label className="projects-search-wrap">
+              <svg className="projects-search-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M9 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M13 13l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <input
+                className="projects-search-input"
+                value={query.keyword}
+                placeholder={`搜索${tabLabel}`}
+                aria-label="搜索名称"
+                onChange={(e) => updateCurrentQuery({ keyword: e.target.value, page: 1 })}
+              />
+            </label>
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                className="btn-secondary projects-reset-btn"
+                onClick={() => {
+                  setNamespace("");
+                  updateCurrentQuery({ keyword: "", page: 1 });
+                }}
+              >
+                重置
+              </button>
+            ) : null}
+          </div>
+          <div className="k8s-toolbar-actions">
+            {!loading && total > 0 ? (
+              <span className="k8s-clusters-count" role="status">
+                共 {total} 个{tabLabel}
+              </span>
+            ) : null}
+            <button type="button" className="btn-secondary text-sm" disabled={!canManage} onClick={() => setCloudOpen(true)}>
+              CloudShell
+            </button>
+            <button type="button" className="btn-secondary text-sm" onClick={() => setChatOpen(true)}>
+              AI 助手
+            </button>
+            <button type="button" className="btn-secondary text-sm" disabled={!canManage} onClick={() => openCreate(`YAML ${tabLabel}`)}>
+              YAML 创建
+            </button>
+            <button type="button" className="btn text-sm" disabled={!canManage} onClick={() => openCreate(`新增 ${tabLabel}`)}>
+              新增
+            </button>
+            <button
+              type="button"
+              className="btn-secondary k8s-clusters-refresh-btn"
+              disabled={loading}
+              aria-label="刷新列表"
+              onClick={() => void load()}
             >
-              <option value="">All Namespaces</option>
-              {namespaces.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="button" className="btn" disabled={!canManage} onClick={() => setCloudOpen(true)}>
-            CloudShell
-          </button>
-          <button type="button" className="btn" onClick={() => setChatOpen(true)}>
-            AI 助手
-          </button>
+              ↻
+            </button>
+          </div>
         </div>
 
         <K8sResourceTabs
@@ -412,43 +455,9 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
           }}
         />
 
-        <div className="k8s-toolbar-row">
-          <label>
-            <span className="label">名称</span>
-            <input
-              className="input"
-              placeholder="名称"
-              value={query.draftKeyword}
-              onChange={(e) => updateCurrentQuery({ draftKeyword: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  updateCurrentQuery((current) => ({ ...current, keyword: current.draftKeyword, page: 1 }));
-                }
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            className="btn"
-            disabled={loading}
-            onClick={() => updateCurrentQuery((current) => ({ ...current, keyword: current.draftKeyword, page: 1 }))}
-          >
-            查询
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            disabled={loading}
-            onClick={() => updateCurrentQuery({ draftKeyword: "", keyword: "", page: 1 })}
-          >
-            重置
-          </button>
-          <button type="button" className="btn" disabled={!canManage} onClick={() => openCreate(`新增 ${accessTabLabel(tab)}`)}>
-            新增
-          </button>
-        </div>
+        <ApiErrorBanner error={error} />
 
-        <div className="table-wrap">
+        <div className="table-wrap k8s-access-table">
           <table className="data-table text-sm">
             <thead>
               <AccessTableHead tab={tab} />
@@ -468,9 +477,6 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
                     tab={tab}
                     item={item}
                     canManage={canManage}
-                    selected={selected}
-                    setSelected={setSelected}
-                    onDetail={openDetail}
                     onEdit={openEdit}
                     onDelete={deleteItem}
                   />
@@ -478,7 +484,16 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
               {!loading && items.length === 0 ? (
                 <tr>
                   <td colSpan={colSpan}>
-                    <K8sEmptyState variant="empty" compact />
+                    <K8sEmptyState
+                      variant="empty"
+                      compact
+                      title={`暂无 ${tabLabel}`}
+                      description={
+                        hasActiveFilters
+                          ? "没有符合筛选条件的资源，可调整命名空间或搜索词。"
+                          : `当前范围下没有 ${tabLabel} 资源。`
+                      }
+                    />
                   </td>
                 </tr>
               ) : null}
@@ -496,10 +511,13 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
         />
       </K8sPanelCard>
 
-      <Modal open={Boolean(detail)} title={`详情 ${detail?.metadata?.name ?? ""}`} size="xl" onClose={() => setDetail(null)}>
-        {detail ? <pre className="k8s-yaml-panel font-mono text-xs whitespace-pre-wrap">{JSON.stringify(detail, null, 2)}</pre> : null}
-      </Modal>
-      <Modal open={Boolean(editTarget)} title={`编辑 ${editTarget?.value.metadata?.name ?? ""}`} size="xl" onClose={() => setEditTarget(null)}>
+      <Modal
+        open={Boolean(editTarget)}
+        title={editTarget?.value.metadata?.name ? `YAML · ${editTarget.value.metadata.name}` : "YAML"}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setEditTarget(null)}
+      >
         {editTarget ? (
           <YamlEditor
             title={`${editTarget.def.kind} ${qualifiedName(editTarget.value)}`}
@@ -511,7 +529,13 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
           />
         ) : null}
       </Modal>
-      <Modal open={Boolean(createTarget)} title={createTarget?.title ?? "新增"} size="xl" onClose={() => setCreateTarget(null)}>
+      <Modal
+        open={Boolean(createTarget)}
+        title={createTarget?.title ?? "新增"}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setCreateTarget(null)}
+      >
         {createTarget ? (
           <YamlEditor
             title={createTarget.title}
@@ -524,10 +548,10 @@ export function AccessControlsPanel({ clusterId, canManage }: { clusterId: strin
           />
         ) : null}
       </Modal>
-      <Modal nested open={cloudOpen} title="CloudShell" size="xl" onClose={() => setCloudOpen(false)}>
+      <Modal nested open={cloudOpen} title="CloudShell" size="xl" panelClassName="k8s-pod-submodal" onClose={() => setCloudOpen(false)}>
         <CloudTTYPage clusterId={clusterId} canManage={canManage} />
       </Modal>
-      <Modal nested open={chatOpen} title="AI 助手" size="xl" onClose={() => setChatOpen(false)}>
+      <Modal nested open={chatOpen} title="AI 助手" size="xl" panelClassName="k8s-pod-submodal" onClose={() => setChatOpen(false)}>
         <ChatPage clusterId={clusterId} canManage={canManage} />
       </Modal>
       {confirmDialog}
@@ -548,9 +572,6 @@ function AccessTableHead({ tab }: { tab: AccessTab }) {
 
   return (
     <tr>
-      <th className="w-10">
-        <span className="sr-only">选择</span>
-      </th>
       <th>名称</th>
       {showNamespace ? <th>命名空间</th> : null}
       {showBindingCols ? (
@@ -562,7 +583,7 @@ function AccessTableHead({ tab }: { tab: AccessTab }) {
         </>
       ) : null}
       <th>存活时间</th>
-      <th>操作</th>
+      <th className="w-28">操作</th>
     </tr>
   );
 }
@@ -571,72 +592,79 @@ function AccessTableRow({
   tab,
   item,
   canManage,
-  selected,
-  setSelected,
-  onDetail,
   onEdit,
   onDelete,
 }: {
   tab: AccessTab;
   item: K8sObject;
   canManage: boolean;
-  selected: string[];
-  setSelected: Dispatch<SetStateAction<string[]>>;
-  onDetail: (item: K8sObject) => Promise<void>;
   onEdit: (item: K8sObject) => Promise<void>;
   onDelete: (item: K8sObject) => Promise<void>;
 }) {
-  const key = item.metadata?.namespace ? `${item.metadata.namespace}/${item.metadata.name}` : (item.metadata?.name ?? "");
   const name = item.metadata?.name ?? "-";
   const showNamespace = accessTabNamespaced(tab);
   const showBindingCols = tab === "RoleBinding" || tab === "ClusterRoleBinding";
 
   return (
     <tr>
-      <td>
-        <input
-          type="checkbox"
-          checked={selected.includes(key)}
-          onChange={(e) => setSelected((current) => (e.target.checked ? [...current, key] : current.filter((value) => value !== key)))}
-        />
-      </td>
-      <td>
-        <button type="button" className="k8s-action-link font-semibold" onClick={() => void onDetail(item)}>
-          {name}
-        </button>
+      <td className="font-medium">
+        {name}
         <LabelsHint labels={item.metadata?.labels} />
       </td>
-      {showNamespace ? <td>{item.metadata?.namespace ?? "-"}</td> : null}
+      {showNamespace ? <td className="text-muted">{item.metadata?.namespace ?? "-"}</td> : null}
       {showBindingCols ? (
         <>
-          <td>{formatRoleRef(item.roleRef)}</td>
-          <td>{formatBindingSubjects(item.subjects, "User")}</td>
-          <td>{formatBindingSubjects(item.subjects, "Group")}</td>
-          <td>{formatBindingSubjects(item.subjects, "ServiceAccount")}</td>
+          <td className="text-muted">{formatRoleRef(item.roleRef)}</td>
+          <td>
+            <CompactSubjectList names={bindingSubjectNames(item.subjects, "User")} />
+          </td>
+          <td>
+            <CompactSubjectList names={bindingSubjectNames(item.subjects, "Group")} />
+          </td>
+          <td>
+            <CompactSubjectList names={bindingSubjectNames(item.subjects, "ServiceAccount")} />
+          </td>
         </>
       ) : null}
-      <td>{formatNodeAge(item.metadata?.creationTimestamp)}</td>
-      <td className="whitespace-nowrap">
-        <button type="button" className="k8s-action-link" disabled={!canManage} onClick={() => void onEdit(item)}>
-          编辑
-        </button>
-        <span className="text-muted"> / </span>
-        <button type="button" className="k8s-action-link" disabled={!canManage} onClick={() => void onDelete(item)}>
-          删除
-        </button>
+      <td className="text-muted">{formatNodeAge(item.metadata?.creationTimestamp)}</td>
+      <td>
+        <div className="k8s-row-actions">
+          <button type="button" className="btn-ghost text-sm" disabled={!canManage} onClick={() => void onEdit(item)}>
+            YAML
+          </button>
+          {canManage ? (
+            <button type="button" className="btn-ghost text-sm is-danger" onClick={() => void onDelete(item)}>
+              删除
+            </button>
+          ) : null}
+        </div>
       </td>
     </tr>
   );
 }
 
-function LabelsHint({ labels }: { labels?: Record<string, string> }) {
-  if (!labels || Object.keys(labels).length === 0) return null;
-  const text = Object.entries(labels)
-    .map(([k, v]) => `${k}: ${v}`)
-    .join("\n");
+function CompactSubjectList({ names }: { names: string[] }) {
+  if (names.length === 0) return <span className="text-muted">-</span>;
+  const preview = names.slice(0, ACCESS_LIST_PREVIEW);
+  const overflow = names.length - preview.length;
   return (
-    <span className="ml-1 text-muted cursor-help" title={text}>
-      🏷
+    <div className="k8s-access-subject-list k8s-selector-list" title={names.join("\n")}>
+      {preview.map((name) => (
+        <span key={name} className="k8s-selector-chip">
+          {name}
+        </span>
+      ))}
+      {overflow > 0 ? <span className="k8s-ns-label-more">+{overflow}</span> : null}
+    </div>
+  );
+}
+
+function LabelsHint({ labels }: { labels?: Record<string, string> }) {
+  const entries = Object.entries(labels ?? {});
+  if (entries.length === 0) return null;
+  return (
+    <span className="k8s-label-hint" title={entries.map(([key, value]) => `${key}: ${value}`).join("\n")}>
+      ▸
     </span>
   );
 }

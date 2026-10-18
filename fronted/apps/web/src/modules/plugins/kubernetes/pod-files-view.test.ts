@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { joinPodFilePath, parseLsOutput, podFileBreadcrumbs, podFilePathFromBreadcrumbs } from "./pod-files-view";
+import {
+  joinPodFilePath,
+  normalizePodFilePath,
+  parseLsOutput,
+  podFileBreadcrumbs,
+  podFilePathFromBreadcrumbs,
+} from "./pod-files-view";
 
 describe("pod files view", () => {
   it("parses directory, file and symlink rows from ls -la output", () => {
@@ -59,5 +65,12 @@ describe("pod files view", () => {
     expect(joinPodFilePath("/dev", "shm")).toBe("/dev/shm");
     expect(podFileBreadcrumbs("/dev/shm")).toEqual(["dev", "shm"]);
     expect(podFilePathFromBreadcrumbs(["dev", "shm"])).toBe("/dev/shm");
+  });
+
+  it("normalizes manual pod file paths", () => {
+    expect(normalizePodFilePath("/")).toBe("/");
+    expect(normalizePodFilePath("app/config")).toBe("/app/config");
+    expect(normalizePodFilePath("/app/config/")).toBe("/app/config");
+    expect(normalizePodFilePath("  //tmp//logs/  ")).toBe("/tmp/logs");
   });
 });

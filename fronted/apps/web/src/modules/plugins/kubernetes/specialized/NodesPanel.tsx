@@ -2,18 +2,23 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  K8sActionIcons,
+  K8sActionSheet,
+  K8sActionSheetGroup,
+  K8sActionSheetItem,
   K8sEmptyState,
   K8sLoadingState,
   K8sPagination,
   K8sPanelCard,
+  K8sStatusBadge,
   useK8sConfirm,
 } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
-import { errorInfo, k8sFetch, KubernetesApiError, parseApiError, type ApiErrorInfo } from "../api";
+import { errorInfo, k8sFetch, type ApiErrorInfo } from "../api";
 import { CATALOG, proxyPath } from "../catalog";
-import { appendBoundedLines, createSSEParser, formatSSEPayload } from "../sse";
-import { podOperationPath, toCommandQuery, waitForNodeTTYReady } from "../operations";
+import { humanizeK8sApiError, isKnownK8sApiError } from "../k8s-api-errors";
+import { podOperationPath, readKubernetesSSE, toCommandQuery, waitForNodeTTYReady } from "../operations";
 import { resourceCollectionUrl } from "../resource-url";
 import { YamlEditor } from "../YamlEditor";
 import { ChatPage } from "./ChatPage";
@@ -40,7 +45,6 @@ type Row = {
 };
 
 export function NodesPanel({ clusterId, canManage }: { clusterId: string; canManage: boolean }) {
-  const [draftKeyword, setDraftKeyword] = useState("");
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -235,86 +239,96 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
     );
   }
 
+  const hasActiveFilters = keyword.trim().length > 0;
+
   return (
-    <div className="stack-md">
-      <K8sPanelCard>
-        <div>
-          <h1 className="text-xl font-semibold">节点管理</h1>
-          <p className="text-sm text-muted mt-1">查看节点状态、资源用量，并执行调度、排空与终端操作。</p>
-        </div>
-        <ApiErrorBanner error={error} />
-        <div className="k8s-toolbar-row">
-          <label>
-            <span className="label">名称</span>
+    <>
+    <K8sPanelCard className="k8s-nodes-panel">
+      <div className="k8s-clusters-toolbar k8s-nodes-toolbar">
+        <div className="k8s-clusters-toolbar-filters">
+          <label className="projects-search-wrap">
+            <svg className="projects-search-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M9 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M13 13l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
             <input
-              className="input"
-              placeholder="名称"
-              value={draftKeyword}
-              onChange={(e) => setDraftKeyword(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  setKeyword(draftKeyword);
-                  setPage(1);
-                }
+              className="projects-search-input"
+              value={keyword}
+              placeholder="节点名称"
+              aria-label="搜索节点"
+              onChange={(e) => {
+                setKeyword(e.target.value);
+                setPage(1);
               }}
             />
           </label>
-          <button
-            type="button"
-            className="btn"
-            disabled={loading}
-            onClick={() => {
-              setKeyword(draftKeyword);
-              setPage(1);
-            }}
-          >
-            查询
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => {
-              setDraftKeyword("");
-              setKeyword("");
-              setPage(1);
-            }}
-          >
-            重置
-          </button>
-          <button type="button" className="btn" disabled={!canManage} onClick={openLabelsTaints}>
+          {hasActiveFilters ? (
+            <button
+              type="button"
+              className="btn-secondary projects-reset-btn"
+              onClick={() => {
+                setKeyword("");
+                setPage(1);
+              }}
+            >
+              重置
+            </button>
+          ) : null}
+        </div>
+        <div className="k8s-toolbar-actions">
+          {!loading && total > 0 ? (
+            <span className="k8s-clusters-count" role="status">
+              共 {total} 个节点
+            </span>
+          ) : null}
+          <button type="button" className="btn-secondary text-sm" disabled={!canManage} onClick={openLabelsTaints}>
             标签与污点
           </button>
-          <button type="button" className="btn" disabled={!canManage} onClick={() => setCloudOpen(true)}>
+          <button type="button" className="btn-secondary text-sm" disabled={!canManage} onClick={() => setCloudOpen(true)}>
             CloudShell
           </button>
-          <button type="button" className="btn" onClick={() => setChatOpen(true)}>
+          <button type="button" className="btn-secondary text-sm" onClick={() => setChatOpen(true)}>
             AI 助手
           </button>
+          <button
+            type="button"
+            className="btn-secondary k8s-clusters-refresh-btn"
+            disabled={loading}
+            onClick={() => void load()}
+            aria-label="刷新节点列表"
+          >
+            ↻
+          </button>
         </div>
-        <div className="table-wrap">
-          <table className="data-table text-sm">
-            <thead>
-              <tr>
-                <th>
-                  <input
-                    type="checkbox"
-                    checked={rows.length > 0 && selected.length === rows.length}
-                    onChange={(e) =>
-                      setSelected(e.target.checked ? rows.map((item) => item.node.metadata?.name ?? "").filter(Boolean) : [])
-                    }
-                  />
-                </th>
-                <th>名称</th>
-                <th>Internal IP</th>
-                <th>状态</th>
-                <th>角色</th>
-                <th>CPU用量</th>
-                <th>内存用量</th>
-                <th>版本</th>
-                <th>存活时间</th>
-                <th>操作</th>
-              </tr>
-            </thead>
+      </div>
+
+      <ApiErrorBanner error={error} />
+
+      <div className="table-wrap k8s-nodes-table">
+        <table className="data-table text-sm">
+          <thead>
+            <tr>
+              <th className="w-10">
+                <input
+                  type="checkbox"
+                  aria-label="全选"
+                  checked={rows.length > 0 && selected.length === rows.length}
+                  onChange={(e) =>
+                    setSelected(e.target.checked ? rows.map((item) => item.node.metadata?.name ?? "").filter(Boolean) : [])
+                  }
+                />
+              </th>
+              <th>名称</th>
+              <th>Internal IP</th>
+              <th>状态</th>
+              <th>角色</th>
+              <th>CPU</th>
+              <th>内存</th>
+              <th>版本</th>
+              <th>存活时间</th>
+              <th className="w-28">操作</th>
+            </tr>
+          </thead>
             <tbody>
               {loading ? (
                 <tr>
@@ -343,19 +357,19 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
                         />
                       </td>
                       <td>
-                        <button type="button" className="k8s-action-link font-semibold" onClick={() => void openDetail(name)}>
+                        <button type="button" className="k8s-cluster-name-link" onClick={() => void openDetail(name)}>
                           {name}
                         </button>
                         <LabelsHint labels={row.node.metadata?.labels} />
                       </td>
-                      <td className="font-mono text-xs">{nodeInternalIP(row.node)}</td>
+                      <td className="font-mono text-xs text-muted">{nodeInternalIP(row.node)}</td>
                       <td>
-                        <span className={ready ? "badge badge-success" : "badge badge-danger"}>{status}</span>
+                        <K8sStatusBadge tone={ready ? "success" : "danger"}>{status}</K8sStatusBadge>
                       </td>
                       <td>
-                        <div className="k8s-role-badges">
+                        <div className="k8s-role-tags">
                           {nodeRoles(row.node.metadata?.labels).map((role) => (
-                            <span key={role} className="badge badge-neutral">
+                            <span key={role} className="k8s-meta-tag">
                               {role}
                             </span>
                           ))}
@@ -367,33 +381,29 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
                       <td>
                         <MetricCell view={row.memory} />
                       </td>
-                      <td className="text-xs leading-5">
+                      <td className="text-xs">
                         <div>{info?.kubeletVersion || "-"}</div>
-                        <div className="text-muted">{info?.containerRuntimeVersion || "-"}</div>
-                        <div className="text-muted">{info?.osImage || "-"}</div>
+                        {info?.osImage ? <div className="text-muted truncate max-w-[10rem]">{info.osImage}</div> : null}
                       </td>
-                      <td>{formatNodeAge(row.node.metadata?.creationTimestamp)}</td>
-                      <td className="whitespace-nowrap">
-                        <button
-                          type="button"
-                          className="k8s-action-link"
-                          disabled={!canManage}
-                          onClick={() =>
-                            void refreshNode(name)
-                              .then(setEditNode)
-                              .catch((err) => setError(errorInfo(err, "加载节点失败")))
-                          }
-                        >
-                          编辑
-                        </button>
-                        <span className="text-muted"> / </span>
-                        <button
-                          type="button"
-                          className="k8s-action-link"
-                          onClick={() => setMoreNode(row.node)}
-                        >
-                          更多
-                        </button>
+                      <td className="text-muted text-xs">{formatNodeAge(row.node.metadata?.creationTimestamp)}</td>
+                      <td>
+                        <div className="k8s-row-actions">
+                          <button
+                            type="button"
+                            className="btn-ghost text-sm"
+                            disabled={!canManage}
+                            onClick={() =>
+                              void refreshNode(name)
+                                .then(setEditNode)
+                                .catch((err) => setError(errorInfo(err, "加载节点失败")))
+                            }
+                          >
+                            编辑
+                          </button>
+                          <button type="button" className="btn-ghost text-sm" onClick={() => setMoreNode(row.node)}>
+                            更多
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -419,107 +429,104 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
             setPage(1);
           }}
         />
-      </K8sPanelCard>
+    </K8sPanelCard>
 
       <Modal
         nested
         open={Boolean(moreNode)}
-        title={moreNode ? `更多操作 · ${moreNode.metadata?.name ?? ""}` : "更多操作"}
-        description={
-          moreNode
-            ? `${nodeInternalIP(moreNode)} · ${nodeStatus(moreNode)} · ${nodeRoles(moreNode.metadata?.labels).join(", ")}`
-            : undefined
-        }
-        size="md"
+        title={moreNode ? moreNode.metadata?.name ?? "节点操作" : "节点操作"}
+        description={moreNode ? nodeActionDescription(moreNode) : undefined}
+        size="sm"
+        panelClassName="k8s-cluster-dialog-modal k8s-action-sheet-modal"
         onClose={() => setMoreNode(null)}
       >
         {moreNode ? (
-          <div className="k8s-action-sheet">
-            {(
-              [
-                {
-                  key: "detail",
-                  label: "详情",
-                  hint: "查看节点完整信息",
-                  enabled: true,
-                  run: () => {
-                    const n = moreNode.metadata?.name;
-                    if (n) void openDetail(n);
-                  },
-                },
-                {
-                  key: "shell",
-                  label: "Shell",
-                  hint: "在节点上执行一次性命令",
-                  enabled: canManage,
-                  run: () => setShellNode(moreNode.metadata?.name ?? null),
-                },
-                {
-                  key: "monitor",
-                  label: "监控",
-                  hint: "查询节点 CPU / 内存指标",
-                  enabled: true,
-                  run: () => setMonitorNode(moreNode.metadata?.name ?? null),
-                },
-                {
-                  key: "yaml",
-                  label: "YAML",
-                  hint: "以 YAML 编辑完整节点对象",
-                  enabled: canManage,
-                  run: () => {
+          <K8sActionSheet>
+            <K8sActionSheetGroup title="查看">
+              <K8sActionSheetItem
+                label="详情"
+                icon={K8sActionIcons.detail}
+                onClick={() => {
+                  const n = moreNode.metadata?.name;
+                  setMoreNode(null);
+                  if (n) void openDetail(n);
+                }}
+              />
+              <K8sActionSheetItem
+                label="监控"
+                icon={K8sActionIcons.monitor}
+                onClick={() => {
+                  setMonitorNode(moreNode.metadata?.name ?? null);
+                  setMoreNode(null);
+                }}
+              />
+            </K8sActionSheetGroup>
+            {canManage ? (
+              <K8sActionSheetGroup title="运维">
+                <K8sActionSheetItem
+                  label="Shell"
+                  icon={K8sActionIcons.shell}
+                  onClick={() => {
+                    setShellNode(moreNode.metadata?.name ?? null);
+                    setMoreNode(null);
+                  }}
+                />
+                <K8sActionSheetItem
+                  label="YAML"
+                  icon={K8sActionIcons.yaml}
+                  onClick={() => {
                     const name = moreNode.metadata?.name;
+                    setMoreNode(null);
                     if (!name) return;
                     void refreshNode(name)
                       .then(setYamlNode)
                       .catch((err) => setError(errorInfo(err, "加载节点失败")));
-                  },
-                },
-                {
-                  key: "drain",
-                  label: "节点排空",
-                  hint: "设置不可调度并驱逐工作负载 Pod",
-                  enabled: canManage,
-                  danger: false,
-                  run: () => void drain(moreNode),
-                },
-                {
-                  key: "schedule",
-                  label: "调度设置",
-                  hint: moreNode.spec?.unschedulable ? "恢复为可调度" : "设置为不可调度",
-                  enabled: canManage,
-                  run: () => void toggleSchedule(moreNode),
-                },
-                {
-                  key: "delete",
-                  label: "删除",
-                  hint: "从集群删除该节点对象",
-                  enabled: canManage,
-                  danger: true,
-                  run: () => void deleteNode(moreNode),
-                },
-              ] as const
-            ).map((action) => (
-              <button
-                key={action.key}
-                type="button"
-                className={"danger" in action && action.danger ? "k8s-action-sheet-item is-danger" : "k8s-action-sheet-item"}
-                disabled={!action.enabled}
-                onClick={() => {
-                  setMoreNode(null);
-                  action.run();
-                }}
-              >
-                <span className="k8s-action-sheet-label">{action.label}</span>
-                <span className="k8s-action-sheet-hint">{action.hint}</span>
-              </button>
-            ))}
-          </div>
+                  }}
+                />
+              </K8sActionSheetGroup>
+            ) : null}
+            {canManage ? (
+              <K8sActionSheetGroup title="节点">
+                <K8sActionSheetItem
+                  label="节点排空"
+                  icon={K8sActionIcons.drain}
+                  onClick={() => {
+                    setMoreNode(null);
+                    void drain(moreNode);
+                  }}
+                />
+                <K8sActionSheetItem
+                  label={moreNode.spec?.unschedulable ? "恢复调度" : "停止调度"}
+                  icon={K8sActionIcons.schedule}
+                  onClick={() => {
+                    setMoreNode(null);
+                    void toggleSchedule(moreNode);
+                  }}
+                />
+              </K8sActionSheetGroup>
+            ) : null}
+            {canManage ? (
+              <K8sActionSheetGroup danger>
+                <K8sActionSheetItem
+                  label="删除节点"
+                  icon={K8sActionIcons.delete}
+                  danger
+                  onClick={() => {
+                    setMoreNode(null);
+                    void deleteNode(moreNode);
+                  }}
+                />
+              </K8sActionSheetGroup>
+            ) : null}
+          </K8sActionSheet>
         ) : null}
       </Modal>
       <Modal
         open={Boolean(editNode)}
-        title="编辑"
+        title={editNode?.metadata?.name ?? "编辑"}
+        description="标签与注解"
         size="lg"
+        panelClassName="k8s-pod-submodal"
         onClose={() => {
           if (!saving) setEditNode(null);
         }}
@@ -534,7 +541,13 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
           />
         ) : null}
       </Modal>
-      <Modal open={Boolean(yamlNode)} title={`YAML ${yamlNode?.metadata?.name ?? ""}`} size="xl" onClose={() => setYamlNode(null)}>
+      <Modal
+        open={Boolean(yamlNode)}
+        title={yamlNode?.metadata?.name ?? "YAML"}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setYamlNode(null)}
+      >
         {yamlNode ? (
           <YamlEditor
             title={`Node ${yamlNode.metadata?.name ?? ""}`}
@@ -546,7 +559,14 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
           />
         ) : null}
       </Modal>
-      <Modal open={Boolean(detailNode)} title={`详情 ${detailNode?.metadata?.name ?? ""}`} size="xl" onClose={() => setDetailNode(null)}>
+      <Modal
+        open={Boolean(detailNode)}
+        title={detailNode?.metadata?.name ?? "节点详情"}
+        description={detailNode ? nodeInternalIP(detailNode) : undefined}
+        size="xl"
+        panelClassName="k8s-node-detail-modal"
+        onClose={() => setDetailNode(null)}
+      >
         {detailNode ? <NodeDetailView clusterId={clusterId} node={detailNode} canManage={canManage} /> : null}
       </Modal>
       <Modal nested open={cloudOpen} title="CloudShell" size="xl" onClose={() => setCloudOpen(false)}>
@@ -555,13 +575,37 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
       <Modal nested open={chatOpen} title="AI 助手" size="xl" onClose={() => setChatOpen(false)}>
         <ChatPage clusterId={clusterId} canManage={canManage} />
       </Modal>
-      <Modal nested open={Boolean(shellNode)} title={`NodeShell ${shellNode ?? ""}`} size="lg" onClose={() => setShellNode(null)}>
+      <Modal
+        nested
+        open={Boolean(shellNode)}
+        title="Shell"
+        description={shellNode ?? undefined}
+        size="lg"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setShellNode(null)}
+      >
         {shellNode ? <NodeShellForm clusterId={clusterId} node={shellNode} canManage={canManage} /> : null}
       </Modal>
-      <Modal nested open={Boolean(monitorNode)} title={`节点监控 ${monitorNode ?? ""}`} size="lg" onClose={() => setMonitorNode(null)}>
+      <Modal
+        nested
+        open={Boolean(monitorNode)}
+        title="监控"
+        description={monitorNode ?? undefined}
+        size="lg"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setMonitorNode(null)}
+      >
         {monitorNode ? <NodeMonitorForm clusterId={clusterId} node={monitorNode} /> : null}
       </Modal>
-      <Modal nested open={Boolean(taintNode)} title={`标签与污点 ${taintNode?.metadata?.name ?? ""}`} size="lg" onClose={() => setTaintNode(null)}>
+      <Modal
+        nested
+        open={Boolean(taintNode)}
+        title="标签与污点"
+        description={taintNode?.metadata?.name}
+        size="lg"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setTaintNode(null)}
+      >
         {taintNode ? (
           <LabelsTaintsForm
             node={taintNode}
@@ -571,16 +615,19 @@ export function NodesPanel({ clusterId, canManage }: { clusterId: string; canMan
         ) : null}
       </Modal>
       {confirmDialog}
-    </div>
+    </>
   );
+}
+
+function nodeActionDescription(node: NodeObject) {
+  return [nodeInternalIP(node), ...nodeRoles(node.metadata?.labels), nodeStatus(node)].filter(Boolean).join(" · ");
 }
 
 function MetricCell({ view }: { view: NodeMetricView }) {
   return (
-    <div className="k8s-percent-box">
-      <div>{view.percent.toFixed(0)}%</div>
-      <div className="k8s-percent-sep" />
-      <div className={view.overcommit ? "text-red-600" : "text-xs text-muted"}>{view.usedLabel}</div>
+    <div className="k8s-metric-cell">
+      <span className="k8s-metric-percent">{view.percent.toFixed(0)}%</span>
+      <span className={`k8s-metric-detail${view.overcommit ? " is-overcommit" : ""}`}>{view.usedLabel}</span>
     </div>
   );
 }
@@ -597,6 +644,10 @@ function LabelsHint({ labels }: { labels?: Record<string, string> }) {
 
 type KvRow = { key: string; value: string };
 
+type TaintRow = { key: string; value: string; effect: string };
+
+const TAINT_EFFECTS = ["NoSchedule", "PreferNoSchedule", "NoExecute"] as const;
+
 function mapToRows(map?: Record<string, string>): KvRow[] {
   return Object.entries(map ?? {}).map(([key, value]) => ({ key, value }));
 }
@@ -609,6 +660,24 @@ function rowsToMap(rows: KvRow[]): Record<string, string> {
     out[key] = row.value;
   }
   return out;
+}
+
+function mapToTaintRows(taints?: { key?: string; value?: string; effect?: string }[]): TaintRow[] {
+  return (taints ?? []).map((item) => ({
+    key: item.key ?? "",
+    value: item.value ?? "",
+    effect: item.effect ?? "NoSchedule",
+  }));
+}
+
+function rowsToTaints(rows: TaintRow[]): { key: string; value: string; effect: string }[] {
+  return rows
+    .filter((row) => row.key.trim())
+    .map((row) => ({
+      key: row.key.trim(),
+      value: row.value,
+      effect: TAINT_EFFECTS.includes(row.effect as (typeof TAINT_EFFECTS)[number]) ? row.effect : "NoSchedule",
+    }));
 }
 
 function KeyValueEditor({
@@ -674,6 +743,77 @@ function KeyValueEditor({
   );
 }
 
+function TaintEditor({
+  rows,
+  onChange,
+  disabled,
+}: {
+  rows: TaintRow[];
+  onChange: (next: TaintRow[]) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="stack-sm">
+      <span className="label">污点</span>
+      <div className="k8s-kv-table k8s-kv-table-taints">
+        <div className="k8s-kv-head">
+          <span>键</span>
+          <span>值</span>
+          <span>效果</span>
+          <span />
+        </div>
+        {rows.length === 0 ? <p className="text-sm text-muted">暂无污点</p> : null}
+        {rows.map((row, index) => (
+          <div key={index} className="k8s-kv-row">
+            <input
+              className="input"
+              placeholder="请输入键"
+              value={row.key}
+              disabled={disabled}
+              onChange={(e) => onChange(rows.map((item, i) => (i === index ? { ...item, key: e.target.value } : item)))}
+            />
+            <input
+              className="input"
+              placeholder="可选"
+              value={row.value}
+              disabled={disabled}
+              onChange={(e) => onChange(rows.map((item, i) => (i === index ? { ...item, value: e.target.value } : item)))}
+            />
+            <select
+              className="input k8s-kv-effect-select"
+              value={row.effect}
+              disabled={disabled}
+              onChange={(e) => onChange(rows.map((item, i) => (i === index ? { ...item, effect: e.target.value } : item)))}
+            >
+              {TAINT_EFFECTS.map((effect) => (
+                <option key={effect} value={effect}>
+                  {effect}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="k8s-action-link k8s-kv-delete"
+              disabled={disabled}
+              onClick={() => onChange(rows.filter((_, i) => i !== index))}
+            >
+              删除
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          className="k8s-action-link"
+          disabled={disabled}
+          onClick={() => onChange([...rows, { key: "", value: "", effect: "NoSchedule" }])}
+        >
+          + 添加污点
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function NodeEditForm({
   node,
   canManage,
@@ -722,12 +862,12 @@ function NodeEditForm({
       </label>
       <KeyValueEditor title="标签" rows={labels} onChange={setLabels} disabled={!canManage || saving} />
       <KeyValueEditor title="注解" rows={annotations} onChange={setAnnotations} disabled={!canManage || saving} />
-      <div className="flex justify-end gap-2">
+      <div className="modal-footer-actions">
         <button type="button" className="btn-secondary" disabled={saving} onClick={onCancel}>
           取消
         </button>
         <button type="button" className="btn" disabled={!canManage || saving} onClick={() => void submit()}>
-          {saving ? "保存中…" : "确定"}
+          {saving ? "保存中…" : "保存"}
         </button>
       </div>
     </div>
@@ -743,48 +883,27 @@ function LabelsTaintsForm({
   canManage: boolean;
   onSave: (next: NodeObject) => Promise<void>;
 }) {
-  const [labelsText, setLabelsText] = useState(
-    Object.entries(node.metadata?.labels ?? {})
-      .map(([k, v]) => `${k}=${v}`)
-      .join("\n"),
-  );
-  const [taintsText, setTaintsText] = useState(
-    (node.spec?.taints ?? []).map((item) => `${item.key ?? ""}=${item.value ?? ""}:${item.effect ?? "NoSchedule"}`).join("\n"),
-  );
+  const [labels, setLabels] = useState<KvRow[]>(() => mapToRows(node.metadata?.labels));
+  const [taints, setTaints] = useState<TaintRow[]>(() => mapToTaintRows(node.spec?.taints));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
+  const disabled = !canManage || saving;
 
   async function save() {
     setError(null);
-    const labels: Record<string, string> = {};
-    for (const line of labelsText.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      const idx = trimmed.indexOf("=");
-      if (idx <= 0) {
-        setError({ code: "INVALID_REQUEST", message: `标签格式应为 key=value：${trimmed}` });
-        return;
-      }
-      labels[trimmed.slice(0, idx)] = trimmed.slice(idx + 1);
-    }
-    const taints = [];
-    for (const line of taintsText.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      const [kv, effect] = trimmed.split(":");
-      const eq = kv.indexOf("=");
-      if (eq < 0 || !effect) {
-        setError({ code: "INVALID_REQUEST", message: `污点格式应为 key=value:Effect：${trimmed}` });
-        return;
-      }
-      taints.push({ key: kv.slice(0, eq), value: kv.slice(eq + 1), effect });
+    const emptyKey = [...labels, ...taints.map((row) => ({ key: row.key, value: row.value }))].find(
+      (row) => !row.key.trim() && row.value.trim(),
+    );
+    if (emptyKey) {
+      setError({ code: "INVALID_REQUEST", message: "键不能为空" });
+      return;
     }
     setSaving(true);
     try {
       await onSave({
         ...node,
-        metadata: { ...(node.metadata ?? {}), labels },
-        spec: { ...(node.spec ?? {}), taints },
+        metadata: { ...(node.metadata ?? {}), labels: rowsToMap(labels) },
+        spec: { ...(node.spec ?? {}), taints: rowsToTaints(taints) },
       });
     } catch (err) {
       setError(errorInfo(err, "保存标签与污点失败"));
@@ -796,17 +915,10 @@ function LabelsTaintsForm({
   return (
     <div className="stack-md">
       <ApiErrorBanner error={error} />
-      <p className="text-sm text-muted">每行一个。标签：key=value。污点：key=value:NoSchedule|PreferNoSchedule|NoExecute。</p>
-      <label>
-        <span className="label">标签</span>
-        <textarea className="input font-mono text-xs" rows={8} value={labelsText} onChange={(e) => setLabelsText(e.target.value)} />
-      </label>
-      <label>
-        <span className="label">污点</span>
-        <textarea className="input font-mono text-xs" rows={6} value={taintsText} onChange={(e) => setTaintsText(e.target.value)} />
-      </label>
-      <div className="flex justify-end">
-        <button type="button" className="btn" disabled={!canManage || saving} onClick={() => void save()}>
+      <KeyValueEditor title="标签" rows={labels} onChange={setLabels} disabled={disabled} />
+      <TaintEditor rows={taints} onChange={setTaints} disabled={disabled} />
+      <div className="modal-footer-actions">
+        <button type="button" className="btn" disabled={disabled} onClick={() => void save()}>
           {saving ? "保存中…" : "保存"}
         </button>
       </div>
@@ -818,14 +930,19 @@ function NodeShellForm({ clusterId, node, canManage }: { clusterId: string; node
   const [command, setCommand] = useState("uname -a");
   const [output, setOutput] = useState<string[]>([]);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
+  const [running, setRunning] = useState(false);
+  const [phase, setPhase] = useState<string | null>(null);
   const active = useRef<AbortController | null>(null);
   useEffect(() => () => active.current?.abort(), []);
 
   async function run() {
+    if (running) return;
     active.current?.abort();
     const controller = new AbortController();
     active.current = controller;
     let createdPod: { name: string; namespace: string } | undefined;
+    setRunning(true);
+    setPhase("正在创建临时 Pod…");
     try {
       setError(null);
       setOutput([]);
@@ -839,27 +956,22 @@ function NodeShellForm({ clusterId, node, canManage }: { clusterId: string; node
         `/api/bff/v1/plugins/kubernetes/clusters/${encodeURIComponent(clusterId)}` +
         `/proxy/api/v1/namespaces/${encodeURIComponent(session.pod.namespace)}` +
         `/pods/${encodeURIComponent(session.pod.name)}`;
-      await waitForNodeTTYReady({ signal: controller.signal, load: () => k8sFetch(podURL, { signal: controller.signal }) });
-      const url = podOperationPath(clusterId, session.pod.namespace, session.pod.name, "exec");
-      const res = await fetch(`${url}?node_tty=true&container=node-shell&${toCommandQuery(command.trim().split(/\s+/).filter(Boolean))}`, {
-        cache: "no-store",
+      setPhase("等待 Pod 就绪…");
+      await waitForNodeTTYReady({
         signal: controller.signal,
+        load: () => k8sFetch(podURL, { signal: controller.signal }),
+        onAttempt: (attempt, pod) => {
+          const status = pod.status?.phase ?? "Unknown";
+          setPhase(`等待 Pod 就绪…（${status}，第 ${attempt} 次检查）`);
+        },
       });
-      if (!res.ok) throw new KubernetesApiError(await parseApiError(res));
-      if (!res.body) throw new Error("SSE 响应为空");
-      const parser = createSSEParser((event) => {
-        setOutput((current) =>
-          appendBoundedLines(current, `${event.event}: ${formatSSEPayload(event.data)}`, { maxLines: 1000, maxBytes: 1 << 20 }),
-        );
-      });
-      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        parser.push(value);
-      }
-      parser.flush();
+      setPhase("执行命令中…");
+      const url = podOperationPath(clusterId, session.pod.namespace, session.pod.name, "exec");
+      const execURL = `${url}?node_tty=true&container=node-shell&${toCommandQuery(command.trim().split(/\s+/).filter(Boolean))}`;
+      await readKubernetesSSE(execURL, setOutput, controller.signal);
+      setPhase(null);
     } catch (err) {
+      if (controller.signal.aborted) return;
       if (createdPod) {
         await k8sFetch(
           `/api/bff/v1/plugins/kubernetes/clusters/${encodeURIComponent(clusterId)}/proxy/api/v1/namespaces/${encodeURIComponent(createdPod.namespace)}/pods/${encodeURIComponent(createdPod.name)}`,
@@ -867,20 +979,41 @@ function NodeShellForm({ clusterId, node, canManage }: { clusterId: string; node
         ).catch(() => undefined);
       }
       setError(errorInfo(err, "NodeTTY 创建或命令执行失败"));
+      setPhase(null);
+    } finally {
+      if (active.current === controller) {
+        active.current = null;
+        setRunning(false);
+      }
     }
   }
 
+  const panelText = output.join("\n") || (!running ? "暂无输出" : "");
+
   return (
-    <div className="stack-md">
-      <p className="text-sm text-muted">创建特权临时 Pod 后执行一次性命令，不提供交互式终端。</p>
-      <input className="input font-mono" value={command} onChange={(e) => setCommand(e.target.value)} />
-      {canManage ? (
-        <button type="button" className="btn" disabled={!command.trim()} onClick={() => void run()}>
-          创建并执行
-        </button>
-      ) : null}
+    <div className="k8s-stream-view stack-sm">
+      <p className="text-sm text-muted">通过临时 Pod 在节点 {node} 上执行一次性命令。</p>
+      <div className="k8s-stream-toolbar">
+        <input
+          className="input font-mono text-sm flex-1"
+          value={command}
+          disabled={running}
+          onChange={(e) => setCommand(e.target.value)}
+        />
+        {canManage ? (
+          <button
+            type="button"
+            className="btn-secondary text-sm"
+            disabled={!command.trim() || running}
+            onClick={() => void run()}
+          >
+            {running ? "执行中…" : "执行"}
+          </button>
+        ) : null}
+      </div>
       <ApiErrorBanner error={error} />
-      <pre className="input font-mono text-xs min-h-32 whitespace-pre-wrap">{output.join("\n")}</pre>
+      {running ? <K8sLoadingState compact label={phase ?? "处理中…"} /> : null}
+      <pre className={`k8s-stream-panel${running ? " is-pending" : ""}`}>{panelText}</pre>
     </div>
   );
 }
@@ -889,10 +1022,13 @@ function NodeMonitorForm({ clusterId, node }: { clusterId: string; node: string 
   const [result, setResult] = useState("");
   const [error, setError] = useState<ApiErrorInfo | null>(null);
   const [loading, setLoading] = useState(false);
+  const humanizedError = error ? humanizeK8sApiError(error) : null;
+  const prometheusMissing = isKnownK8sApiError(error, "PLUGIN_PROMETHEUS_NOT_CONFIGURED");
 
   async function query() {
     setLoading(true);
     setError(null);
+    setResult("");
     try {
       const [cpu, memory] = await Promise.all(
         ["node_cpu", "node_memory"].map((template) =>
@@ -915,12 +1051,23 @@ function NodeMonitorForm({ clusterId, node }: { clusterId: string; node: string 
   }, [clusterId, node]);
 
   return (
-    <div className="stack-md">
-      <button type="button" className="btn-secondary" disabled={loading} onClick={() => void query()}>
-        {loading ? "查询中…" : "刷新"}
-      </button>
-      <ApiErrorBanner error={error} />
-      <pre className="input font-mono text-xs min-h-48 whitespace-pre-wrap">{result || "暂无指标（需配置 Prometheus）"}</pre>
+    <div className="k8s-stream-view stack-sm">
+      <div className="k8s-stream-toolbar">
+        <span className="text-sm text-muted">
+          {loading ? "查询中…" : `节点 ${node} · CPU / 内存（近 1 小时）`}
+        </span>
+        <button type="button" className="btn-secondary text-sm" disabled={loading} onClick={() => void query()}>
+          刷新
+        </button>
+      </div>
+      {loading ? <K8sLoadingState compact label="正在查询指标…" /> : null}
+      {prometheusMissing && humanizedError ? (
+        <K8sEmptyState compact title={humanizedError.message} description={humanizedError.hint} />
+      ) : null}
+      {!prometheusMissing && error ? <ApiErrorBanner error={error} /> : null}
+      {!prometheusMissing ? (
+        <pre className="k8s-stream-panel">{result || (!loading && !error ? "暂无指标数据" : "")}</pre>
+      ) : null}
     </div>
   );
 }

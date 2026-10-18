@@ -7,7 +7,9 @@ import {
   K8sPagination,
   K8sPanelCard,
   K8sResourceTabs,
+  K8sStatusBadge,
   useK8sConfirm,
+  type K8sStatusTone,
 } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
@@ -63,7 +65,6 @@ type K8sList<T> = {
 };
 
 type QueryState = {
-  draftKeyword: string;
   keyword: string;
   page: number;
   pageSize: number;
@@ -87,7 +88,6 @@ const podDef = CATALOG.find((item) => item.kind === "Pod");
 const POD_METRIC_CONCURRENCY = 6;
 
 const initialQuery = (): QueryState => ({
-  draftKeyword: "",
   keyword: "",
   page: 1,
   pageSize: 10,
@@ -489,35 +489,88 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
     );
   }
 
+  const hasActiveFilters = query.keyword.trim().length > 0 || namespace.length > 0;
+
   return (
     <div className="stack-md">
-      <K8sPanelCard>
-        <ApiErrorBanner error={error} />
-        <div className="k8s-toolbar-row">
-          <label className="min-w-52">
-            <span className="label">命名空间</span>
-            <select
-              className="input"
-              value={namespace}
-              onChange={(e) => {
-                setNamespace(e.target.value);
-                setQueries((current) => resetPages(current));
-              }}
+      <K8sPanelCard className="k8s-workloads-panel">
+        <div className="k8s-clusters-toolbar k8s-workloads-toolbar">
+          <div className="k8s-clusters-toolbar-filters">
+            <label className="k8s-workloads-namespace">
+              <span className="sr-only">命名空间</span>
+              <select
+                className="input"
+                value={namespace}
+                aria-label="命名空间"
+                onChange={(e) => {
+                  setNamespace(e.target.value);
+                  setQueries((current) => resetPages(current));
+                }}
+              >
+                <option value="">All Namespaces</option>
+                {namespaces.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="projects-search-wrap">
+              <svg className="projects-search-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M9 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M13 13l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <input
+                className="projects-search-input"
+                value={query.keyword}
+                placeholder={`搜索${tabLabel(tab)}`}
+                aria-label="搜索名称"
+                onChange={(e) => updateCurrentQuery({ keyword: e.target.value, page: 1 })}
+              />
+            </label>
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                className="btn-secondary projects-reset-btn"
+                onClick={() => {
+                  setNamespace("");
+                  updateCurrentQuery({ keyword: "", page: 1 });
+                }}
+              >
+                重置
+              </button>
+            ) : null}
+          </div>
+          <div className="k8s-toolbar-actions">
+            {!loading && total > 0 ? (
+              <span className="k8s-clusters-count" role="status">
+                共 {total} 个{tabLabel(tab)}
+              </span>
+            ) : null}
+            <button type="button" className="btn-secondary text-sm" disabled={!canManage} onClick={() => setCloudOpen(true)}>
+              CloudShell
+            </button>
+            <button type="button" className="btn-secondary text-sm" onClick={() => setChatOpen(true)}>
+              AI 助手
+            </button>
+            {tab === "Pod" ? null : (
+              <button type="button" className="btn-secondary text-sm" disabled={!canManage} onClick={() => openCreate(`YAML ${tab}`)}>
+                YAML 创建
+              </button>
+            )}
+            <button type="button" className="btn text-sm" disabled={!canManage} onClick={() => openCreate(`新增 ${tab}`)}>
+              新增
+            </button>
+            <button
+              type="button"
+              className="btn-secondary k8s-clusters-refresh-btn"
+              disabled={loading}
+              aria-label="刷新列表"
+              onClick={() => void load()}
             >
-              <option value="">All Namespaces</option>
-              {namespaces.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="button" className="btn" disabled={!canManage} onClick={() => setCloudOpen(true)}>
-            CloudShell
-          </button>
-          <button type="button" className="btn" onClick={() => setChatOpen(true)}>
-            AI 助手
-          </button>
+              ↻
+            </button>
+          </div>
         </div>
 
         <K8sResourceTabs
@@ -531,48 +584,9 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
           }}
         />
 
-        <div className="k8s-toolbar-row">
-          <label>
-            <span className="label">名称</span>
-            <input
-              className="input"
-              placeholder="名称"
-              value={query.draftKeyword}
-              onChange={(e) => updateCurrentQuery({ draftKeyword: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  updateCurrentQuery((current) => ({ ...current, keyword: current.draftKeyword, page: 1 }));
-                }
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            className="btn"
-            disabled={loading}
-            onClick={() => updateCurrentQuery((current) => ({ ...current, keyword: current.draftKeyword, page: 1 }))}
-          >
-            查询
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            disabled={loading}
-            onClick={() => updateCurrentQuery({ draftKeyword: "", keyword: "", page: 1 })}
-          >
-            重置
-          </button>
-          {tab === "Pod" ? null : (
-            <button type="button" className="btn-secondary" disabled={!canManage} onClick={() => openCreate(`YAML ${tab}`)}>
-              YAML
-            </button>
-          )}
-          <button type="button" className="btn" disabled={!canManage} onClick={() => openCreate(`新增 ${tab}`)}>
-            新增
-          </button>
-        </div>
+        <ApiErrorBanner error={error} />
 
-        <div className="table-wrap">
+        <div className="table-wrap k8s-workloads-table">
           <table className="data-table text-sm">
             <thead>{tab === "Pod" ? <PodHead /> : <ControllerHead tab={tab} />}</thead>
             <tbody>
@@ -617,7 +631,12 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
               {!loading && items.length === 0 ? (
                 <tr>
                   <td colSpan={tab === "Pod" ? podColSpan() : controllerColSpan(tab)}>
-                    <K8sEmptyState variant="empty" compact />
+                    <K8sEmptyState
+                      variant="empty"
+                      compact
+                      title={`暂无${tabLabel(tab)}`}
+                      description={hasActiveFilters ? "没有符合筛选条件的资源，可调整命名空间或搜索词。" : "当前命名空间下没有该类型的工作负载。"}
+                    />
                   </td>
                 </tr>
               ) : null}
@@ -635,10 +654,30 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
         />
       </K8sPanelCard>
 
-      <Modal open={Boolean(detail)} title={`详情 ${detail?.metadata?.name ?? ""}`} size="xl" onClose={() => setDetail(null)}>
-        {detail ? <pre className="k8s-yaml-panel font-mono text-xs whitespace-pre-wrap">{JSON.stringify(detail, null, 2)}</pre> : null}
+      <Modal
+        open={Boolean(detail)}
+        title={detail?.metadata?.name ?? "详情"}
+        description={detail ? `${tab} · ${detail.metadata?.namespace ?? "-"}` : undefined}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setDetail(null)}
+      >
+        {detail ? (
+          <YamlEditor value={detail} canSave={false} onSave={async () => undefined} onClose={() => setDetail(null)} cancelLabel="关闭" />
+        ) : null}
       </Modal>
-      <Modal open={Boolean(podDetail)} title="详情" size="xl" onClose={closePodDetail}>
+      <Modal
+        open={Boolean(podDetail)}
+        title={podDetail?.pod?.metadata?.name ?? "Pod 详情"}
+        description={
+          podDetail?.pod
+            ? `${podDetail.pod.metadata?.namespace ?? "-"} · ${podDetail.pod.status?.phase ?? "-"}`
+            : undefined
+        }
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={closePodDetail}
+      >
         {podDetail?.loading || !podDetail?.pod ? (
           <K8sLoadingState label="Pod 详情加载中…" />
         ) : (
@@ -650,10 +689,16 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
           />
         )}
       </Modal>
-      <Modal open={Boolean(yamlTarget)} title={`YAML ${yamlTarget?.value.metadata?.name ?? ""}`} size="xl" onClose={() => setYamlTarget(null)}>
+      <Modal
+        open={Boolean(yamlTarget)}
+        title={yamlTarget?.value.metadata?.name ?? "YAML"}
+        description={yamlTarget ? `${yamlTarget.def.kind} · ${qualifiedName(yamlTarget.value)}` : undefined}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setYamlTarget(null)}
+      >
         {yamlTarget ? (
           <YamlEditor
-            title={`${yamlTarget.def.kind} ${qualifiedName(yamlTarget.value)}`}
             value={yamlTarget.value}
             canSave={canManage}
             saving={saving}
@@ -662,10 +707,16 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
           />
         ) : null}
       </Modal>
-      <Modal open={Boolean(editTarget)} title={`编辑 ${editTarget?.value.metadata?.name ?? ""}`} size="xl" onClose={() => setEditTarget(null)}>
+      <Modal
+        open={Boolean(editTarget)}
+        title={editTarget?.value.metadata?.name ?? "编辑"}
+        description={editTarget ? `${editTarget.def.kind} · ${qualifiedName(editTarget.value)}` : undefined}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setEditTarget(null)}
+      >
         {editTarget ? (
           <YamlEditor
-            title={`${editTarget.def.kind} ${qualifiedName(editTarget.value)}`}
             value={editTarget.value}
             canSave={canManage}
             saving={saving}
@@ -674,7 +725,14 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
           />
         ) : null}
       </Modal>
-      <Modal open={Boolean(createTarget)} title={createTarget?.title ?? "新增"} size="xl" onClose={() => setCreateTarget(null)}>
+      <Modal
+        open={Boolean(createTarget)}
+        title={createTarget?.title ?? "新增"}
+        description={createTarget ? createTarget.def.kind : undefined}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setCreateTarget(null)}
+      >
         {createTarget ? (
           <YamlEditor
             title={createTarget.title}
@@ -687,10 +745,10 @@ export function WorkloadsPanel({ clusterId, canManage }: { clusterId: string; ca
           />
         ) : null}
       </Modal>
-      <Modal nested open={cloudOpen} title="CloudShell" size="xl" onClose={() => setCloudOpen(false)}>
+      <Modal nested open={cloudOpen} title="CloudShell" size="xl" panelClassName="k8s-pod-submodal" onClose={() => setCloudOpen(false)}>
         <CloudTTYPage clusterId={clusterId} canManage={canManage} />
       </Modal>
-      <Modal nested open={chatOpen} title="AI 助手" size="xl" onClose={() => setChatOpen(false)}>
+      <Modal nested open={chatOpen} title="AI 助手" size="xl" panelClassName="k8s-pod-submodal" onClose={() => setChatOpen(false)}>
         <ChatPage clusterId={clusterId} canManage={canManage} />
       </Modal>
       {confirmDialog}
@@ -797,18 +855,18 @@ function ControllerRow({
       <td>{item.metadata?.namespace ?? "-"}</td>
       <ControllerSpecificCells item={item} tab={tab} />
       <td>{formatNodeAge(item.metadata?.creationTimestamp)}</td>
-      <td className="whitespace-nowrap">
-        <button type="button" className="k8s-action-link" disabled={!canManage} onClick={() => void onYaml(item)}>
-          YAML
-        </button>
-        <span className="text-muted"> / </span>
-        <button type="button" className="k8s-action-link" disabled={!canManage} onClick={() => void onEdit(item)}>
-          编辑
-        </button>
-        <span className="text-muted"> / </span>
-        <button type="button" className="k8s-action-link is-danger" disabled={!canManage} onClick={() => void onDelete(item)}>
-          删除
-        </button>
+      <td>
+        <div className="k8s-row-actions">
+          <button type="button" className="btn-ghost text-sm" disabled={!canManage} onClick={() => void onYaml(item)}>
+            YAML
+          </button>
+          <button type="button" className="btn-ghost text-sm" disabled={!canManage} onClick={() => void onEdit(item)}>
+            编辑
+          </button>
+          <button type="button" className="btn-ghost text-sm is-danger" disabled={!canManage} onClick={() => void onDelete(item)}>
+            删除
+          </button>
+        </div>
       </td>
     </tr>
   );
@@ -819,7 +877,9 @@ function ControllerSpecificCells({ item, tab }: { item: K8sObject; tab: Workload
     const badge = replicaBadge(Number(item.status?.readyReplicas ?? 0), Number(item.spec?.replicas ?? 0));
     return (
       <td>
-        <span className={badge.tone === "ok" ? "k8s-badge-ok" : "k8s-badge-bad"}>{badge.text}</span>
+        <K8sStatusBadge tone={workloadBadgeTone(badge.tone)} dot>
+          {badge.text}
+        </K8sStatusBadge>
       </td>
     );
   }
@@ -839,9 +899,9 @@ function ControllerSpecificCells({ item, tab }: { item: K8sObject; tab: Workload
       <>
         <td>
           <div className="k8s-workload-badges">
-            <span className={status.active > 0 ? "k8s-badge-ok" : "badge badge-neutral"}>active {status.active}</span>
-            <span className={status.succeeded > 0 ? "k8s-badge-ok" : "badge badge-neutral"}>succeeded {status.succeeded}</span>
-            <span className={status.failed > 0 ? "k8s-badge-bad" : "badge badge-neutral"}>failed {status.failed}</span>
+            <K8sStatusBadge tone={status.active > 0 ? "info" : "neutral"}>active {status.active}</K8sStatusBadge>
+            <K8sStatusBadge tone={status.succeeded > 0 ? "success" : "neutral"}>succeeded {status.succeeded}</K8sStatusBadge>
+            <K8sStatusBadge tone={status.failed > 0 ? "danger" : "neutral"}>failed {status.failed}</K8sStatusBadge>
           </div>
         </td>
         <td>{status.duration}</td>
@@ -855,7 +915,9 @@ function ControllerSpecificCells({ item, tab }: { item: K8sObject; tab: Workload
         <td className="font-mono text-xs">{view.schedule}</td>
         <td>{view.lastSchedule}</td>
         <td>
-          <span className={view.suspend ? "k8s-badge-bad" : "k8s-badge-ok"}>{view.suspend ? "是" : "否"}</span>
+          <K8sStatusBadge tone={view.suspend ? "warning" : "success"} dot>
+            {view.suspend ? "已暂停" : "运行中"}
+          </K8sStatusBadge>
         </td>
       </>
     );
@@ -926,20 +988,17 @@ function PodRow({
       </td>
       <td>
         <span className="inline-flex items-center gap-1.5">
-          <svg className="h-3.5 w-3.5 text-sky-500" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
-            <path d="M8 1 2 4v5c0 3.1 2.2 5.7 6 6 3.8-.3 6-2.9 6-6V4L8 1Zm0 2.2 3.8 1.9V9c0 2-1.3 3.6-3.8 3.9C5.5 12.6 4.2 11 4.2 9V5.1L8 3.2Z" />
-          </svg>
           <button type="button" className="k8s-action-link font-semibold" onClick={() => void onDetail(pod)}>
             {pod.metadata?.name ?? "-"}
           </button>
           <LabelsHint labels={pod.metadata?.labels} />
         </span>
       </td>
-      <td className={totals.cpuLim > 0 && totals.cpuReq > totals.cpuLim ? "text-red-600" : undefined} title={resources.cpu}>
+      <td className={totals.cpuLim > 0 && totals.cpuReq > totals.cpuLim ? "k8s-overcommit" : undefined} title={resources.cpu}>
         {formatCores(totals.cpuReq)} 核
       </td>
       <td title={resources.cpu}>{formatCores(totals.cpuLim)} 核</td>
-      <td className={totals.memLim > 0 && totals.memReq > totals.memLim ? "text-red-600" : undefined} title={resources.memory}>
+      <td className={totals.memLim > 0 && totals.memReq > totals.memLim ? "k8s-overcommit" : undefined} title={resources.memory}>
         {formatGi(totals.memReq)} Gi
       </td>
       <td title={resources.memory}>{formatGi(totals.memLim)} Gi</td>
@@ -963,28 +1022,30 @@ function PodRow({
       </td>
       <td className="font-mono text-xs whitespace-nowrap">{metric ?? "-"}</td>
       <td>
-        <span className={badge.tone === "ok" ? "k8s-badge-ok" : badge.tone === "bad" ? "k8s-badge-bad" : "badge badge-neutral"}>
+        <K8sStatusBadge tone={workloadBadgeTone(badge.tone)} dot>
           {badge.text}
-        </span>
+        </K8sStatusBadge>
       </td>
       <td>{podRestartCount(pod)}</td>
       <td>{pod.metadata?.namespace ?? "-"}</td>
       <td className="font-mono text-xs">{pod.status?.podIP ?? "-"}</td>
       <td>{pod.spec?.nodeName ?? "-"}</td>
       <td>{formatNodeAge(pod.metadata?.creationTimestamp)}</td>
-      <td className="whitespace-nowrap">
-        <button type="button" className="k8s-action-link" disabled={!canManage} onClick={() => void onEdit(pod)}>
-          编辑
-        </button>
-        <span className="text-muted"> / </span>
-        <WorkloadPodActions
-          clusterId={clusterId}
-          pod={pod}
-          canManage={canManage}
-          onOpenDetail={(target) => void onDetail(target)}
-          onDeleted={onDeleted}
-          onError={onError}
-        />
+      <td>
+        <div className="k8s-row-actions">
+          <button type="button" className="btn-ghost text-sm" disabled={!canManage} onClick={() => void onEdit(pod)}>
+            编辑
+          </button>
+          <WorkloadPodActions
+            clusterId={clusterId}
+            pod={pod}
+            canManage={canManage}
+            trigger="ghost"
+            onOpenDetail={(target) => void onDetail(target)}
+            onDeleted={onDeleted}
+            onError={onError}
+          />
+        </div>
       </td>
     </tr>
   );
@@ -992,6 +1053,12 @@ function PodRow({
 
 function podKey(pod: PodObject): string {
   return `${pod.metadata?.namespace ?? "_"}/${pod.metadata?.name ?? ""}`;
+}
+
+function workloadBadgeTone(tone: "ok" | "bad" | "muted"): K8sStatusTone {
+  if (tone === "ok") return "success";
+  if (tone === "bad") return "danger";
+  return "neutral";
 }
 
 function LabelsHint({ labels }: { labels?: Record<string, string> }) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { K8sEmptyState, useK8sConfirm } from "@/components/k8s";
+import { K8sEmptyState, K8sPagination, useK8sConfirm } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "../api";
@@ -36,6 +36,8 @@ export function ClusterAssociateDialog({ cluster }: { cluster: KubernetesCluster
   const [items, setItems] = useState<VelauxCluster[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
   const [form, setForm] = useState({ name: "", alias: "", description: "", kubeConfig: "" });
   const { ask, dialog: confirmDialog } = useK8sConfirm();
@@ -45,15 +47,18 @@ export function ClusterAssociateDialog({ cluster }: { cluster: KubernetesCluster
   const load = useCallback(async () => {
     if (!configured) return;
     setError(null);
+    setLoading(true);
     try {
-      const data = await k8sFetch<unknown>(`${velauxPath(cluster.id)}?page=${page}&pageSize=10&query=`);
+      const data = await k8sFetch<unknown>(`${velauxPath(cluster.id)}?page=${page}&pageSize=${pageSize}&query=`);
       const parsed = parseVelauxList(data);
       setItems(parsed.items);
       setTotal(parsed.total);
     } catch (err) {
-      setError(errorInfo(err, "加载 Velaux 集群失败。请确认已在「变更」中填写 Velaux 地址，并已安装 KubeVela/Velaux。"));
+      setError(errorInfo(err, "加载 Velaux 集群失败"));
+    } finally {
+      setLoading(false);
     }
-  }, [cluster.id, configured, page]);
+  }, [cluster.id, configured, page, pageSize]);
 
   useEffect(() => {
     void load();
@@ -100,96 +105,131 @@ export function ClusterAssociateDialog({ cluster }: { cluster: KubernetesCluster
   }
 
   if (!configured) {
-    return <div className="alert alert-info">未配置 Velaux 地址。请先在「变更」中填写 Velaux 接口地址后再关联多集群。</div>;
+    return (
+      <K8sEmptyState
+        variant="empty"
+        title="未配置 Velaux"
+        description="请先在「变更配置」中填写 Velaux 地址。"
+        compact
+      />
+    );
   }
 
   return (
-    <div className="stack-md">
-      <p className="text-sm text-muted">请在目标 Kubernetes 中安装 KubeVela 控制器及 Velaux 插件（建议 KubeVela ≥ v1.9）。</p>
+    <div className="stack-sm">
       <ApiErrorBanner error={error} />
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn" onClick={() => setJoining(true)}>
-          添加
-        </button>
-        <button type="button" className="btn-secondary" onClick={() => void load()}>
-          刷新
-        </button>
+      <div className="k8s-dialog-toolbar">
+        <span className="text-xs text-muted">{loading ? "…" : `${total} 项`}</span>
+        <div className="k8s-dialog-toolbar-actions">
+          <button type="button" className="btn-secondary text-sm" disabled={loading} onClick={() => void load()}>
+            ↻
+          </button>
+          <button type="button" className="btn text-sm" onClick={() => setJoining(true)}>
+            注册
+          </button>
+        </div>
       </div>
-      <div className="table-wrap">
+      <div className="table-wrap k8s-dialog-table">
         <table className="data-table text-sm">
+          <colgroup>
+            <col />
+            <col style={{ width: "4rem" }} />
+            <col style={{ width: "25%" }} />
+            <col style={{ width: "5rem" }} />
+            <col style={{ width: "4rem" }} />
+          </colgroup>
           <thead>
             <tr>
               <th>名称</th>
-              <th>角色</th>
+              <th className="col-compact">角色</th>
               <th>别名</th>
-              <th>状态</th>
-              <th>操作</th>
+              <th className="col-compact">状态</th>
+              <th className="col-actions">操作</th>
             </tr>
           </thead>
           <tbody>
             {items.map((item) => (
               <tr key={item.name}>
                 <td>{item.name}</td>
-                <td>{item.name === "local" ? "管控节点" : "被控节点"}</td>
-                <td>{item.alias || "-"}</td>
-                <td>{item.status || "-"}</td>
-                <td>
+                <td className="text-muted">{item.name === "local" ? "管控" : "被控"}</td>
+                <td className="text-muted">{item.alias || "—"}</td>
+                <td className="text-muted">{item.status || "—"}</td>
+                <td className="col-actions">
                   {item.name === "local" ? (
-                    "-"
+                    <span className="text-muted text-xs">—</span>
                   ) : (
-                    <button type="button" className="k8s-action-link" onClick={() => item.name && void remove(item.name)}>
+                    <button type="button" className="btn-ghost text-sm" onClick={() => item.name && void remove(item.name)}>
                       删除
                     </button>
                   )}
                 </td>
               </tr>
             ))}
-            {items.length === 0 ? (
+            {!loading && items.length === 0 ? (
               <tr>
                 <td colSpan={5}>
-                  <K8sEmptyState variant="empty" title="暂无 Velaux 关联集群" compact />
+                  <K8sEmptyState variant="empty" title="暂无关联" compact />
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
       </div>
-      <div className="text-sm text-muted">共 {total} 条</div>
+      {total > 0 ? (
+        <K8sPagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          pageSizes={[10, 20, 50]}
+          loading={loading}
+          onPageChange={setPage}
+          onPageSizeChange={(next) => {
+            setPageSize(next);
+            setPage(1);
+          }}
+        />
+      ) : null}
 
       <Modal
+        nested
         open={joining}
         title="注册集群"
         size="lg"
+        panelClassName="k8s-cluster-form-modal"
         onClose={() => setJoining(false)}
         footer={
-          <>
+          <div className="modal-footer-actions">
             <button type="button" className="btn-secondary" onClick={() => setJoining(false)}>
               取消
             </button>
             <button type="button" className="btn" onClick={() => void join()}>
-              确定
+              注册
             </button>
-          </>
+          </div>
         }
       >
-        <div className="stack-md">
-          <label>
-            <span className="label">名称</span>
+        <div className="k8s-cluster-form-section-body stack-sm">
+          <label className="k8s-form-field">
+            <span className="label">
+              名称<span className="text-danger"> *</span>
+            </span>
             <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </label>
-          <label>
+          <label className="k8s-form-field">
             <span className="label">别名</span>
             <input className="input" value={form.alias} onChange={(e) => setForm({ ...form, alias: e.target.value })} />
           </label>
-          <label>
+          <label className="k8s-form-field">
             <span className="label">描述</span>
             <input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </label>
-          <label>
-            <span className="label">KubeConfig</span>
+          <label className="k8s-form-field">
+            <span className="label">
+              KubeConfig<span className="text-danger"> *</span>
+            </span>
             <textarea
-              className="input font-mono text-xs"
-              rows={10}
+              className="input font-mono text-xs k8s-cluster-credential-input"
+              rows={8}
               value={form.kubeConfig}
               onChange={(e) => setForm({ ...form, kubeConfig: e.target.value })}
             />

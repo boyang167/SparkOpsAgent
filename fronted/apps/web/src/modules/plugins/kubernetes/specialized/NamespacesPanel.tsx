@@ -6,27 +6,35 @@ import {
   K8sLoadingState,
   K8sPagination,
   K8sPanelCard,
+  K8sStatusBadge,
   useK8sConfirm,
+  k8sPhaseTone,
 } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "../api";
 import { CATALOG, proxyPath } from "../catalog";
 import { formatNodeAge } from "../node-view";
+import {
+  NAMESPACE_LABEL_PREVIEW,
+  namespaceDisplayLabels,
+  namespacePhaseBadge,
+  type NamespaceObject,
+} from "../namespace-view";
 import { resourceCollectionUrl } from "../resource-url";
 import { clampPageToTotal, validateCreateIdentity, validateExistingIdentity } from "../workload-view";
-import { emptyNamespaceTemplate, namespacePhaseBadge, type NamespaceObject } from "../namespace-view";
 import { YamlEditor } from "../YamlEditor";
 import { CloudTTYPage } from "./CloudTTYPage";
+import { NamespaceCreateForm } from "./NamespaceCreateForm";
 
 const namespaceDef = CATALOG.find((item) => item.kind === "Namespace");
+
 export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; canManage: boolean }) {
   const mountedRef = useRef(false);
   const listRequestSeq = useRef(0);
   const activeObjectRequest = useRef<AbortController | null>(null);
   const objectRequestSeq = useRef(0);
 
-  const [draftKeyword, setDraftKeyword] = useState("");
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -35,7 +43,6 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
   const [editTarget, setEditTarget] = useState<NamespaceObject | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [cloudOpen, setCloudOpen] = useState(false);
@@ -80,9 +87,7 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
   }, [clusterId, keyword, page, pageSize]);
 
   useEffect(() => {
-    setSelected([]);
     setPage(1);
-    setDraftKeyword("");
     setKeyword("");
   }, [clusterId]);
 
@@ -184,10 +189,6 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
     }
   }
 
-  function toggleSelected(name: string, checked: boolean) {
-    setSelected((current) => (checked ? [...current, name] : current.filter((item) => item !== name)));
-  }
-
   if (!clusterId) {
     return (
       <K8sPanelCard>
@@ -196,76 +197,83 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
     );
   }
 
+  const hasActiveFilters = keyword.trim().length > 0;
+
   return (
     <div className="stack-md">
-      <K8sPanelCard>
+      <K8sPanelCard className="k8s-namespaces-panel">
+        <div className="k8s-clusters-toolbar">
+          <div className="k8s-clusters-toolbar-filters">
+            <label className="projects-search-wrap">
+              <svg className="projects-search-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M9 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M13 13l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <input
+                className="projects-search-input"
+                value={keyword}
+                placeholder="搜索命名空间"
+                aria-label="搜索命名空间"
+                onChange={(e) => {
+                  setKeyword(e.target.value);
+                  setPage(1);
+                }}
+              />
+            </label>
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                className="btn-secondary projects-reset-btn"
+                onClick={() => {
+                  setKeyword("");
+                  setPage(1);
+                }}
+              >
+                重置
+              </button>
+            ) : null}
+          </div>
+          <div className="k8s-toolbar-actions">
+            {!loading && total > 0 ? (
+              <span className="k8s-clusters-count" role="status">
+                共 {total} 个命名空间
+              </span>
+            ) : null}
+            <button type="button" className="btn-secondary text-sm" disabled={!canManage} onClick={() => setCloudOpen(true)}>
+              CloudShell
+            </button>
+            <button type="button" className="btn text-sm" disabled={!canManage} onClick={() => setCreateOpen(true)}>
+              新建
+            </button>
+            <button
+              type="button"
+              className="btn-secondary k8s-clusters-refresh-btn"
+              disabled={loading}
+              aria-label="刷新列表"
+              onClick={() => void load()}
+            >
+              ↻
+            </button>
+          </div>
+        </div>
+
         <ApiErrorBanner error={error} />
 
-        <div className="k8s-toolbar-row">
-          <label>
-            <span className="label">名称</span>
-            <input
-              className="input"
-              placeholder="名称"
-              value={draftKeyword}
-              onChange={(e) => setDraftKeyword(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  setKeyword(draftKeyword);
-                  setPage(1);
-                }
-              }}
-            />
-          </label>
-          <button type="button" className="btn" disabled={loading} onClick={() => { setKeyword(draftKeyword); setPage(1); }}>
-            查询
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            disabled={loading}
-            onClick={() => {
-              setDraftKeyword("");
-              setKeyword("");
-              setPage(1);
-            }}
-          >
-            重置
-          </button>
-          <button type="button" className="btn" disabled={!canManage} onClick={() => setCloudOpen(true)}>
-            CloudShell
-          </button>
-        </div>
-
-        <div>
-          <button type="button" className="btn" disabled={!canManage} onClick={() => setCreateOpen(true)}>
-            + 新建
-          </button>
-        </div>
-
-        <div className="table-wrap">
+        <div className="table-wrap k8s-namespaces-table">
           <table className="data-table text-sm">
             <thead>
               <tr>
-                <th className="w-10">
-                  <input
-                    type="checkbox"
-                    aria-label="全选"
-                    checked={items.length > 0 && selected.length === items.length}
-                    onChange={(e) => setSelected(e.target.checked ? items.map((item) => item.metadata?.name ?? "").filter(Boolean) : [])}
-                  />
-                </th>
                 <th>名称</th>
                 <th>标签</th>
                 <th>状态</th>
                 <th>存活时间</th>
-                <th>操作</th>
+                <th className="w-28">操作</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={5}>
                     <K8sLoadingState compact />
                   </td>
                 </tr>
@@ -274,41 +282,49 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
                 items.map((item) => {
                   const name = item.metadata?.name ?? "";
                   const phase = namespacePhaseBadge(item.status?.phase);
+                  const phaseText = phase.text === "-" ? "未知" : phase.text;
                   return (
                     <tr key={name}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={selected.includes(name)}
-                          onChange={(e) => toggleSelected(name, e.target.checked)}
-                        />
-                      </td>
-                      <td>{name || "-"}</td>
+                      <td className="font-medium">{name || "-"}</td>
                       <td>
                         <NamespaceLabels labels={item.metadata?.labels} />
                       </td>
                       <td>
-                        <span className={phase.tone === "ok" ? "k8s-badge-ok" : phase.tone === "bad" ? "k8s-badge-bad" : "text-muted"}>
-                          {phase.text}
-                        </span>
+                        {phase.text === "-" ? (
+                          <span className="text-muted">-</span>
+                        ) : (
+                          <K8sStatusBadge tone={k8sPhaseTone(phaseText)} dot>
+                            {phaseText}
+                          </K8sStatusBadge>
+                        )}
                       </td>
-                      <td>{formatNodeAge(item.metadata?.creationTimestamp)}</td>
-                      <td className="whitespace-nowrap">
-                        <button type="button" className="k8s-action-link" disabled={!canManage} onClick={() => void openEdit(item)}>
-                          编辑
-                        </button>
-                        <span className="text-muted"> / </span>
-                        <button type="button" className="k8s-action-link is-danger" disabled={!canManage} onClick={() => void deleteItem(item)}>
-                          删除
-                        </button>
+                      <td className="text-muted">{formatNodeAge(item.metadata?.creationTimestamp)}</td>
+                      <td>
+                        <div className="k8s-row-actions">
+                          <button type="button" className="btn-ghost text-sm" disabled={!canManage} onClick={() => void openEdit(item)}>
+                            YAML
+                          </button>
+                          {canManage ? (
+                            <button type="button" className="btn-ghost text-sm is-danger" onClick={() => void deleteItem(item)}>
+                              删除
+                            </button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   );
                 })}
               {!loading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>
-                    <K8sEmptyState variant="empty" compact />
+                  <td colSpan={5}>
+                    <K8sEmptyState
+                      variant="empty"
+                      compact
+                      title="暂无命名空间"
+                      description={
+                        hasActiveFilters ? "没有符合搜索条件的命名空间，可调整关键词。" : "当前集群下没有 Namespace 资源。"
+                      }
+                    />
                   </td>
                 </tr>
               ) : null}
@@ -329,17 +345,23 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
         />
       </K8sPanelCard>
 
-      <Modal open={cloudOpen} title="CloudShell" size="xl" onClose={() => setCloudOpen(false)}>
+      <Modal open={cloudOpen} title="CloudShell" size="xl" panelClassName="k8s-pod-submodal" onClose={() => setCloudOpen(false)}>
         <CloudTTYPage clusterId={clusterId} canManage={canManage} />
       </Modal>
 
-      <Modal open={Boolean(editTarget)} title="编辑" size="xl" onClose={() => setEditTarget(null)}>
+      <Modal
+        open={Boolean(editTarget)}
+        title={editTarget?.metadata?.name ? `编辑 · ${editTarget.metadata.name}` : "编辑命名空间"}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setEditTarget(null)}
+      >
         {editTarget ? (
           <YamlEditor
             value={editTarget}
             canSave={canManage}
             saving={saving}
-            confirmLabel="确定"
+            confirmLabel="保存"
             cancelLabel="取消"
             onSave={saveExisting}
             onClose={() => setEditTarget(null)}
@@ -347,13 +369,11 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
         ) : null}
       </Modal>
 
-      <Modal open={createOpen} title="创建" size="xl" onClose={() => setCreateOpen(false)}>
-        <YamlEditor
-          value={emptyNamespaceTemplate()}
+      <Modal open={createOpen} title="新建命名空间" size="lg" panelClassName="k8s-pod-submodal" onClose={() => setCreateOpen(false)}>
+        <NamespaceCreateForm
+          open={createOpen}
           canSave={canManage}
           saving={saving}
-          confirmLabel="确定"
-          cancelLabel="取消"
           onSave={createNamespace}
           onClose={() => setCreateOpen(false)}
         />
@@ -364,15 +384,18 @@ export function NamespacesPanel({ clusterId, canManage }: { clusterId: string; c
 }
 
 function NamespaceLabels({ labels }: { labels?: Record<string, string> }) {
-  const entries = Object.entries(labels ?? {});
-  if (entries.length === 0) return <>-</>;
+  const entries = namespaceDisplayLabels(labels);
+  if (entries.length === 0) return <span className="text-muted">-</span>;
+  const preview = entries.slice(0, NAMESPACE_LABEL_PREVIEW);
+  const overflow = entries.length - preview.length;
   return (
-    <div className="k8s-ns-label-list">
-      {entries.map(([key, value]) => (
-        <span key={key} className="k8s-ns-label-chip">
+    <div className="k8s-ns-label-list" title={entries.map(({ key, value }) => `${key}: ${value}`).join("\n")}>
+      {preview.map(({ key, value }) => (
+        <span key={key} className="k8s-ns-label-chip" title={`${key}: ${value}`}>
           {key}: {value}
         </span>
       ))}
+      {overflow > 0 ? <span className="k8s-ns-label-more">+{overflow}</span> : null}
     </div>
   );
 }

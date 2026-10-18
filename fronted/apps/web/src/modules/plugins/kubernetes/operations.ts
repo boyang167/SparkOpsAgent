@@ -1,4 +1,6 @@
+import { KubernetesApiError, parseApiError } from "./api";
 import { serviceProxyPath } from "./catalog";
+import { appendStreamEvent, createSSEParser, K8S_STREAM_LIMIT } from "./sse";
 
 const base = "/api/bff/v1/plugins/kubernetes/clusters";
 
@@ -38,17 +40,44 @@ export async function waitForNodeTTYReady(options: {
   attempts?: number;
   intervalMs?: number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  onAttempt?: (attempt: number, pod: NodeTTYPodStatus) => void;
 }) {
-  const attempts = options.attempts ?? 30;
+  const attempts = options.attempts ?? 60;
   const intervalMs = options.intervalMs ?? 1000;
   const sleep = options.sleep ?? abortableSleep;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (options.signal.aborted) throw new Error("NodeTTY 等待已取消");
     const pod = await options.load();
+    options.onAttempt?.(attempt + 1, pod);
     if (isNodeTTYReady(pod)) return pod;
     if (attempt + 1 < attempts) await sleep(intervalMs, options.signal);
   }
   throw new Error("NodeTTY Pod 就绪超时");
+}
+
+export async function readKubernetesSSE(
+  url: string,
+  setOutput: (updater: (current: string[]) => string[]) => void,
+  signal?: AbortSignal,
+) {
+  const res = await fetch(url, { cache: "no-store", signal });
+  if (!res.ok) throw new KubernetesApiError(await parseApiError(res));
+  if (!res.body) throw new Error("SSE 响应为空");
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  const parser = createSSEParser((event) => {
+    setOutput((current) => appendStreamEvent(current, event, K8S_STREAM_LIMIT));
+  });
+  signal?.addEventListener("abort", () => void reader.cancel().catch(() => undefined), { once: true });
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      parser.push(value);
+    }
+    parser.flush();
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 function abortableSleep(ms: number, signal: AbortSignal) {

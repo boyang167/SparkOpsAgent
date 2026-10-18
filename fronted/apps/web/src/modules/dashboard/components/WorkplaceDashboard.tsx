@@ -208,7 +208,7 @@ export function WorkplaceDashboard({
           </div>
         </dl>
         <div className="workplace-hero-actions">
-          <Link href="/dashboard?create=1" className="workplace-hero-primary">
+          <Link href="/dashboard?create=1" className="btn text-sm">
             创建项目
           </Link>
         </div>

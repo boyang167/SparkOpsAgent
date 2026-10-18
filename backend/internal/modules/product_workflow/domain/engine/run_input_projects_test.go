@@ -94,8 +94,8 @@ func TestApplyRunInputPerProjectBranchesCoverAddedProjects(t *testing.T) {
 	}}
 
 	got := ApplyRunInput(stages, map[string]any{
-		"project_ids":      []any{"p1", "p2"},
-		"branch":           "develop",
+		"project_ids":        []any{"p1", "p2"},
+		"branch":             "develop",
 		"branch_overrides":   map[string]any{"p2": "v1.2.0"},
 		"ref_type_overrides": map[string]any{"p2": "tag"},
 	})

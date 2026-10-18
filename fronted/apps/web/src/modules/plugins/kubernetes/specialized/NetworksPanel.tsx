@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   K8sEmptyState,
   K8sLoadingState,
@@ -24,6 +24,7 @@ import {
   formatSelector,
   formatServiceExternalEndpoints,
   formatServiceInternalEndpoints,
+  NETWORK_LIST_PREVIEW,
   networkTabLabel,
   networkTableColSpan,
   type NetworkTab,
@@ -51,7 +52,6 @@ type K8sList<T> = {
 };
 
 type QueryState = {
-  draftKeyword: string;
   keyword: string;
   page: number;
   pageSize: number;
@@ -64,7 +64,6 @@ type NetworkTarget = {
 
 const namespaceDef = CATALOG.find((item) => item.kind === "Namespace");
 const initialQuery = (): QueryState => ({
-  draftKeyword: "",
   keyword: "",
   page: 1,
   pageSize: 10,
@@ -89,8 +88,6 @@ export function NetworksPanel({ clusterId, canManage }: { clusterId: string; can
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [detail, setDetail] = useState<K8sObject | null>(null);
   const [yamlTarget, setYamlTarget] = useState<NetworkTarget | null>(null);
   const [editTarget, setEditTarget] = useState<NetworkTarget | null>(null);
   const [createTarget, setCreateTarget] = useState<{ title: string; def: ResourceDef; value: K8sObject } | null>(null);
@@ -111,7 +108,6 @@ export function NetworksPanel({ clusterId, canManage }: { clusterId: string; can
   }, []);
 
   const closeModals = useCallback(() => {
-    setDetail(null);
     setYamlTarget(null);
     setEditTarget(null);
     setCreateTarget(null);
@@ -211,19 +207,16 @@ export function NetworksPanel({ clusterId, canManage }: { clusterId: string; can
   useEffect(() => {
     setNamespace("");
     setQueries(initialQueries());
-    setSelected([]);
     closeModals();
     abortObjectRequest();
   }, [abortObjectRequest, closeModals, clusterId]);
 
   useEffect(() => {
-    setSelected([]);
     closeModals();
     abortObjectRequest();
   }, [abortObjectRequest, closeModals, namespace, tab]);
 
   useEffect(() => {
-    setSelected([]);
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
@@ -263,10 +256,6 @@ export function NetworksPanel({ clusterId, canManage }: { clusterId: string; can
     } finally {
       if (activeObjectRequest.current === controller) activeObjectRequest.current = null;
     }
-  }
-
-  async function openDetail(item: K8sObject) {
-    await openLatest(item, (latest) => setDetail(latest), "加载详情失败");
   }
 
   async function openYaml(item: K8sObject) {
@@ -378,30 +367,90 @@ export function NetworksPanel({ clusterId, canManage }: { clusterId: string; can
     );
   }
 
+  const hasActiveFilters = query.keyword.trim().length > 0 || namespace.length > 0;
+  const tabLabel = networkTabLabel(tab);
+
   return (
     <div className="stack-md">
-      <K8sPanelCard>
-        <ApiErrorBanner error={error} />
-
-        <div className="k8s-toolbar-row">
-          <label className="min-w-52">
-            <span className="label">命名空间</span>
-            <select
-              className="input"
-              value={namespace}
-              onChange={(e) => {
-                setNamespace(e.target.value);
-                setQueries((current) => resetPages(current));
-              }}
+      <K8sPanelCard className="k8s-networks-panel">
+        <div className="k8s-clusters-toolbar k8s-workloads-toolbar">
+          <div className="k8s-clusters-toolbar-filters">
+            <label className="k8s-workloads-namespace">
+              <span className="sr-only">命名空间</span>
+              <select
+                className="input"
+                value={namespace}
+                aria-label="命名空间"
+                onChange={(e) => {
+                  setNamespace(e.target.value);
+                  setQueries((current) => resetPages(current));
+                }}
+              >
+                <option value="">All Namespaces</option>
+                {namespaces.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="projects-search-wrap">
+              <svg className="projects-search-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M9 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M13 13l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <input
+                className="projects-search-input"
+                value={query.keyword}
+                placeholder={`搜索${tabLabel}`}
+                aria-label="搜索名称"
+                onChange={(e) => updateCurrentQuery({ keyword: e.target.value, page: 1 })}
+              />
+            </label>
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                className="btn-secondary projects-reset-btn"
+                onClick={() => {
+                  setNamespace("");
+                  updateCurrentQuery({ keyword: "", page: 1 });
+                }}
+              >
+                重置
+              </button>
+            ) : null}
+          </div>
+          <div className="k8s-toolbar-actions">
+            {!loading && total > 0 ? (
+              <span className="k8s-clusters-count" role="status">
+                共 {total} 个{tabLabel}
+              </span>
+            ) : null}
+            {tab === "Endpoints" ? null : (
+              <>
+                <button
+                  type="button"
+                  className="btn-secondary text-sm"
+                  disabled={!canManage}
+                  onClick={() => openCreate(`YAML ${tabLabel}`)}
+                >
+                  YAML 创建
+                </button>
+                <button type="button" className="btn text-sm" disabled={!canManage} onClick={() => openCreate(`新增 ${tabLabel}`)}>
+                  新增
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              className="btn-secondary k8s-clusters-refresh-btn"
+              disabled={loading}
+              aria-label="刷新列表"
+              onClick={() => void load()}
             >
-              <option value="">All Namespaces</option>
-              {namespaces.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
+              ↻
+            </button>
+          </div>
         </div>
 
         <K8sResourceTabs
@@ -415,48 +464,9 @@ export function NetworksPanel({ clusterId, canManage }: { clusterId: string; can
           }}
         />
 
-        <div className="k8s-toolbar-row">
-          <label>
-            <span className="label">名称</span>
-            <input
-              className="input"
-              placeholder="名称"
-              value={query.draftKeyword}
-              onChange={(e) => updateCurrentQuery({ draftKeyword: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  updateCurrentQuery((current) => ({ ...current, keyword: current.draftKeyword, page: 1 }));
-                }
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            className="btn"
-            disabled={loading}
-            onClick={() => updateCurrentQuery((current) => ({ ...current, keyword: current.draftKeyword, page: 1 }))}
-          >
-            查询
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            disabled={loading}
-            onClick={() => updateCurrentQuery({ draftKeyword: "", keyword: "", page: 1 })}
-          >
-            重置
-          </button>
-          {tab === "Endpoints" ? null : (
-            <button type="button" className="btn-secondary" disabled={!canManage} onClick={() => openCreate(`YAML ${tab}`)}>
-              YAML
-            </button>
-          )}
-          <button type="button" className="btn" disabled={!canManage} onClick={() => openCreate(`新增 ${networkTabLabel(tab)}`)}>
-            新增
-          </button>
-        </div>
+        <ApiErrorBanner error={error} />
 
-        <div className="table-wrap">
+        <div className="table-wrap k8s-networks-table">
           <table className="data-table text-sm">
             <thead>
               <NetworkTableHead tab={tab} />
@@ -476,9 +486,6 @@ export function NetworksPanel({ clusterId, canManage }: { clusterId: string; can
                     tab={tab}
                     item={item}
                     canManage={canManage}
-                    selected={selected}
-                    setSelected={setSelected}
-                    onDetail={openDetail}
                     onYaml={openYaml}
                     onEdit={openEdit}
                     onDelete={deleteItem}
@@ -487,7 +494,16 @@ export function NetworksPanel({ clusterId, canManage }: { clusterId: string; can
               {!loading && items.length === 0 ? (
                 <tr>
                   <td colSpan={colSpan}>
-                    <K8sEmptyState variant="empty" compact />
+                    <K8sEmptyState
+                      variant="empty"
+                      compact
+                      title={`暂无 ${tabLabel}`}
+                      description={
+                        hasActiveFilters
+                          ? "没有符合筛选条件的资源，可调整命名空间或搜索词。"
+                          : `当前范围下没有 ${tabLabel} 资源。`
+                      }
+                    />
                   </td>
                 </tr>
               ) : null}
@@ -505,10 +521,13 @@ export function NetworksPanel({ clusterId, canManage }: { clusterId: string; can
         />
       </K8sPanelCard>
 
-      <Modal open={Boolean(detail)} title={`详情 ${detail?.metadata?.name ?? ""}`} size="xl" onClose={() => setDetail(null)}>
-        {detail ? <pre className="k8s-yaml-panel font-mono text-xs whitespace-pre-wrap">{JSON.stringify(detail, null, 2)}</pre> : null}
-      </Modal>
-      <Modal open={Boolean(yamlTarget)} title={`YAML ${yamlTarget?.value.metadata?.name ?? ""}`} size="xl" onClose={() => setYamlTarget(null)}>
+      <Modal
+        open={Boolean(yamlTarget)}
+        title={yamlTarget?.value.metadata?.name ? `YAML · ${yamlTarget.value.metadata.name}` : "YAML"}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setYamlTarget(null)}
+      >
         {yamlTarget ? (
           <YamlEditor
             title={`${yamlTarget.def.kind} ${qualifiedName(yamlTarget.value)}`}
@@ -520,7 +539,13 @@ export function NetworksPanel({ clusterId, canManage }: { clusterId: string; can
           />
         ) : null}
       </Modal>
-      <Modal open={Boolean(editTarget)} title={`编辑 ${editTarget?.value.metadata?.name ?? ""}`} size="xl" onClose={() => setEditTarget(null)}>
+      <Modal
+        open={Boolean(editTarget)}
+        title={editTarget?.value.metadata?.name ? `编辑 · ${editTarget.value.metadata.name}` : "编辑资源"}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setEditTarget(null)}
+      >
         {editTarget ? (
           <YamlEditor
             title={`${editTarget.def.kind} ${qualifiedName(editTarget.value)}`}
@@ -532,7 +557,13 @@ export function NetworksPanel({ clusterId, canManage }: { clusterId: string; can
           />
         ) : null}
       </Modal>
-      <Modal open={Boolean(createTarget)} title={createTarget?.title ?? "新增"} size="xl" onClose={() => setCreateTarget(null)}>
+      <Modal
+        open={Boolean(createTarget)}
+        title={createTarget?.title ?? "新增"}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setCreateTarget(null)}
+      >
         {createTarget ? (
           <YamlEditor
             title={createTarget.title}
@@ -560,16 +591,13 @@ function resetPages(queries: Record<NetworkTab, QueryState>): Record<NetworkTab,
 function NetworkTableHead({ tab }: { tab: NetworkTab }) {
   return (
     <tr>
-      <th className="w-10">
-        <span className="sr-only">选择</span>
-      </th>
       <th>名称</th>
       <th>命名空间</th>
       {tab === "Service" ? (
         <>
           <th>类型</th>
-          <th>ClusterIP</th>
-          <th>externalIPs</th>
+          <th>Cluster IP</th>
+          <th>External IP</th>
           <th>内部端点</th>
           <th>外部端点</th>
           <th>选择器</th>
@@ -583,7 +611,7 @@ function NetworkTableHead({ tab }: { tab: NetworkTab }) {
       ) : null}
       {tab === "Endpoints" ? <th>Endpoints</th> : null}
       <th>存活时间</th>
-      <th>操作</th>
+      <th className="w-28">操作</th>
     </tr>
   );
 }
@@ -592,9 +620,6 @@ function NetworkTableRow({
   tab,
   item,
   canManage,
-  selected,
-  setSelected,
-  onDetail,
   onYaml,
   onEdit,
   onDelete,
@@ -602,58 +627,47 @@ function NetworkTableRow({
   tab: NetworkTab;
   item: K8sObject;
   canManage: boolean;
-  selected: string[];
-  setSelected: Dispatch<SetStateAction<string[]>>;
-  onDetail: (item: K8sObject) => Promise<void>;
   onYaml: (item: K8sObject) => Promise<void>;
   onEdit: (item: K8sObject) => Promise<void>;
   onDelete: (item: K8sObject) => Promise<void>;
 }) {
-  const key = item.metadata?.namespace ? `${item.metadata.namespace}/${item.metadata.name}` : (item.metadata?.name ?? "");
   const name = item.metadata?.name ?? "-";
   const spec = item.spec ?? {};
   const status = item.status ?? {};
 
   return (
     <tr>
-      <td>
-        <input
-          type="checkbox"
-          checked={selected.includes(key)}
-          onChange={(e) => setSelected((current) => (e.target.checked ? [...current, key] : current.filter((value) => value !== key)))}
-        />
-      </td>
-      <td>
-        <button type="button" className="k8s-action-link font-semibold" onClick={() => void onDetail(item)}>
-          {name}
-        </button>
+      <td className="font-medium">
+        {name}
         <LabelsHint labels={item.metadata?.labels} />
       </td>
-      <td>{item.metadata?.namespace ?? "-"}</td>
+      <td className="text-muted">{item.metadata?.namespace ?? "-"}</td>
       {tab === "Service" ? <ServiceCells spec={spec} status={status} name={name} /> : null}
       {tab === "Ingress" ? <IngressCells spec={spec} status={status} /> : null}
       {tab === "Endpoints" ? (
         <td>
-          <LineList lines={formatEndpointSubsets(item.subsets as Parameters<typeof formatEndpointSubsets>[0])} />
+          <CompactLineList lines={formatEndpointSubsets(item.subsets as Parameters<typeof formatEndpointSubsets>[0])} />
         </td>
       ) : null}
-      <td>{formatNodeAge(item.metadata?.creationTimestamp)}</td>
-      <td className="whitespace-nowrap">
-        {tab === "Endpoints" ? null : (
-          <>
-            <button type="button" className="k8s-action-link" disabled={!canManage} onClick={() => void onYaml(item)}>
+      <td className="text-muted">{formatNodeAge(item.metadata?.creationTimestamp)}</td>
+      <td>
+        <div className="k8s-row-actions">
+          {tab === "Endpoints" ? null : (
+            <button type="button" className="btn-ghost text-sm" disabled={!canManage} onClick={() => void onYaml(item)}>
               YAML
             </button>
-            <span className="text-muted"> / </span>
-          </>
-        )}
-        <button type="button" className="k8s-action-link" disabled={!canManage} onClick={() => void onEdit(item)}>
-          编辑
-        </button>
-        <span className="text-muted"> / </span>
-        <button type="button" className="k8s-action-link is-danger" disabled={!canManage} onClick={() => void onDelete(item)}>
-          删除
-        </button>
+          )}
+          {tab === "Endpoints" ? null : (
+            <button type="button" className="btn-ghost text-sm" disabled={!canManage} onClick={() => void onEdit(item)}>
+              编辑
+            </button>
+          )}
+          {canManage ? (
+            <button type="button" className="btn-ghost text-sm is-danger" onClick={() => void onDelete(item)}>
+              删除
+            </button>
+          ) : null}
+        </div>
       </td>
     </tr>
   );
@@ -680,13 +694,13 @@ function ServiceCells({
       <td>{String(spec.clusterIP ?? "-")}</td>
       <td>{formatExternalIPs(spec.externalIPs as string[] | undefined)}</td>
       <td>
-        <LineList lines={internalLines} />
+        <CompactLineList lines={internalLines} />
       </td>
       <td>
-        <LineList lines={externalLines} fallback="-" />
+        <CompactLineList lines={externalLines} />
       </td>
       <td>
-        <SelectorChips items={selectors} />
+        <CompactSelectorChips items={selectors} />
       </td>
     </>
   );
@@ -700,35 +714,43 @@ function IngressCells({ spec, status }: { spec: Record<string, unknown>; status:
   return (
     <>
       <td>
-        <LineList lines={endpointLines} />
+        <CompactLineList lines={endpointLines} />
       </td>
       <td>
-        <LineList lines={ruleLines} />
+        <CompactLineList lines={ruleLines} />
       </td>
     </>
   );
 }
 
-function LineList({ lines, fallback = "-" }: { lines: string[]; fallback?: string }) {
-  if (lines.length === 0) return <>{fallback}</>;
+function CompactLineList({ lines }: { lines: string[] }) {
+  if (lines.length === 0) return <span className="text-muted">-</span>;
+  const preview = lines.slice(0, NETWORK_LIST_PREVIEW);
+  const overflow = lines.length - preview.length;
   return (
-    <div className="k8s-endpoint-lines">
-      {lines.map((line) => (
-        <div key={line}>{line}</div>
+    <div className="k8s-endpoint-lines" title={lines.join("\n")}>
+      {preview.map((line) => (
+        <div key={line} className="text-sm">
+          {line}
+        </div>
       ))}
+      {overflow > 0 ? <span className="k8s-ns-label-more">+{overflow}</span> : null}
     </div>
   );
 }
 
-function SelectorChips({ items }: { items: string[] }) {
-  if (items.length === 0) return <>-</>;
+function CompactSelectorChips({ items }: { items: string[] }) {
+  if (items.length === 0) return <span className="text-muted">-</span>;
+  const preview = items.slice(0, NETWORK_LIST_PREVIEW);
+  const overflow = items.length - preview.length;
   return (
-    <div className="k8s-selector-list">
-      {items.map((item) => (
+    <div className="k8s-selector-list" title={items.join("\n")}>
+      {preview.map((item) => (
         <span key={item} className="k8s-selector-chip">
           {item}
         </span>
       ))}
+      {overflow > 0 ? <span className="k8s-ns-label-more">+{overflow}</span> : null}
     </div>
   );
 }

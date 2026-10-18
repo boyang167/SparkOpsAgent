@@ -119,10 +119,6 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 		"app/(platform)/plugins/kubernetes/clusters/page.tsx",
 		"app/(platform)/plugins/kubernetes/nodes/page.tsx",
 		"app/(platform)/plugins/kubernetes/workloads/page.tsx",
-		"app/(platform)/plugins/kubernetes/openkruise/page.tsx",
-		"app/(platform)/plugins/kubernetes/kruise-rollouts/page.tsx",
-		"app/(platform)/plugins/kubernetes/kubeblocks/page.tsx",
-		"app/(platform)/plugins/kubernetes/kubevela/page.tsx",
 		"app/(platform)/plugins/kubernetes/namespaces/page.tsx",
 		"app/(platform)/plugins/kubernetes/networks/page.tsx",
 		"app/(platform)/plugins/kubernetes/gateway/page.tsx",
@@ -134,6 +130,10 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 		"app/(platform)/plugins/kubernetes/diagnosis/page.tsx",
 		"app/(platform)/plugins/kubernetes/chat/page.tsx",
 		"app/(platform)/plugins/kubernetes/cloudtty/page.tsx",
+		"app/(platform)/plugins/kubernetes/openkruise/page.tsx",
+		"app/(platform)/plugins/kubernetes/kruise-rollouts/page.tsx",
+		"app/(platform)/plugins/kubernetes/kubeblocks/page.tsx",
+		"app/(platform)/plugins/kubernetes/kubevela/page.tsx",
 		"app/(platform)/plugins/kubernetes/velaux/page.tsx",
 	}, spec.Frontend.Pages)
 
@@ -142,10 +142,6 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 		"/plugins/kubernetes/clusters",
 		"/plugins/kubernetes/nodes",
 		"/plugins/kubernetes/workloads",
-		"/plugins/kubernetes/openkruise",
-		"/plugins/kubernetes/kruise-rollouts",
-		"/plugins/kubernetes/kubeblocks",
-		"/plugins/kubernetes/kubevela",
 		"/plugins/kubernetes/namespaces",
 		"/plugins/kubernetes/networks",
 		"/plugins/kubernetes/gateway",
@@ -157,6 +153,10 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 		"/plugins/kubernetes/backup",
 		"/plugins/kubernetes/chat",
 		"/plugins/kubernetes/cloudtty",
+		"/plugins/kubernetes/openkruise",
+		"/plugins/kubernetes/kruise-rollouts",
+		"/plugins/kubernetes/kubeblocks",
+		"/plugins/kubernetes/kubevela",
 		"/plugins/kubernetes/velaux",
 	} {
 		menu, ok := findMenu(spec.Menus, path)

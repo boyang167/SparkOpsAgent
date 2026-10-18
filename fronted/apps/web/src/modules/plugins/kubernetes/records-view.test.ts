@@ -1,7 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { bucketRecordFrames, coalesceRecordFrames, ndjsonToAsciicastV2, parseRecordFrames, parseRecordObjectPath } from "./records-view";
+import {
+  bucketRecordFrames,
+  coalesceRecordFrames,
+  ndjsonToAsciicastV2,
+  parseRecordFrames,
+  parseRecordObjectPath,
+  resolveClusterLabel,
+} from "./records-view";
 
 describe("records view", () => {
+  it("resolves cluster label from map or truncated id", () => {
+    const names = new Map([["c1", "dev"]]);
+    expect(resolveClusterLabel("c1", names)).toEqual({ label: "dev", title: "c1" });
+    expect(resolveClusterLabel("5721bb3d-15d0-4782-ab62-b773ab04fabc", names)).toEqual({
+      label: "5721bb3d…",
+      title: "5721bb3d-15d0-4782-ab62-b773ab04fabc",
+    });
+  });
+
   it("parses object path", () => {
     expect(parseRecordObjectPath("namespaces/default/pods/web-0/containers/app")).toEqual({
       namespace: "default",

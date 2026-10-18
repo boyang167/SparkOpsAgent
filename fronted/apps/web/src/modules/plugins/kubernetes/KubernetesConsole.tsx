@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ClusterPicker } from "./ClusterPicker";
 import { ResourceMenuPage } from "./ResourceMenuPage";
@@ -50,12 +50,7 @@ export function KubernetesConsole({ mode, title, description, menu, canManage }:
   }, [canManage, clusterId, description, menu, mode, title]);
 
   if (mode === "clusters") {
-    return (
-      <div className="page stack-lg">
-        <PageHeader eyebrow="Kubernetes" title={title} description={description} />
-        <ClusterPicker value={clusterId} onChange={setClusterId} canManage={canManage} layout="table" />
-      </div>
-    );
+    return <KubernetesClustersPage title={title} description={description} canManage={canManage} />;
   }
 
   if (mode === "records") {
@@ -69,6 +64,7 @@ export function KubernetesConsole({ mode, title, description, menu, canManage }:
   if (mode === "diagnosis") {
     return (
       <div className="page stack-lg">
+        <PageHeader eyebrow="Kubernetes" title={title} description={description} />
         <DiagnosisPanel canManage={canManage} />
       </div>
     );
@@ -76,18 +72,65 @@ export function KubernetesConsole({ mode, title, description, menu, canManage }:
 
   return (
     <div className="page stack-lg">
-      <ClusterPicker value={clusterId} onChange={setClusterId} canManage={canManage} layout="picker" />
       {mode === "resource" ? (
-        body
-      ) : (
-        <section className="card stack-md p-4">
-          <div>
-            <h1 className="text-xl font-semibold">{title}</h1>
-            {description ? <p className="text-sm text-muted mt-1">{description}</p> : null}
-          </div>
+        <>
+          <PageHeader eyebrow="Kubernetes" title={title} description={description} />
+          <ClusterPicker value={clusterId} onChange={setClusterId} canManage={canManage} layout="picker" />
           {body}
-        </section>
+        </>
+      ) : (
+        <>
+          <ClusterPicker value={clusterId} onChange={setClusterId} canManage={canManage} layout="picker" />
+          <section className="card stack-md p-4">
+            <div>
+              <h1 className="text-xl font-semibold">{title}</h1>
+              {description ? <p className="text-sm text-muted mt-1">{description}</p> : null}
+            </div>
+            {body}
+          </section>
+        </>
       )}
+    </div>
+  );
+}
+
+function KubernetesClustersPage({
+  title,
+  description,
+  canManage,
+}: {
+  title: string;
+  description?: string;
+  canManage: boolean;
+}) {
+  const [clusterId, setClusterId] = useState("");
+  const createClusterRef = useRef<(() => void) | null>(null);
+
+  return (
+    <div className="page stack-lg">
+      <PageHeader
+        eyebrow="Kubernetes"
+        title={title}
+        description={description}
+        actions={
+          canManage ? (
+            <button
+              type="button"
+              className="btn btn-primary text-sm"
+              onClick={() => createClusterRef.current?.()}
+            >
+              接入集群
+            </button>
+          ) : null
+        }
+      />
+      <ClusterPicker
+        value={clusterId}
+        onChange={setClusterId}
+        canManage={canManage}
+        layout="table"
+        createActionRef={createClusterRef}
+      />
     </div>
   );
 }

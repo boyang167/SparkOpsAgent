@@ -1,6 +1,13 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  K8sEmptyState,
+  K8sPanelCard,
+  K8sResourceTabs,
+  K8sStatusBadge,
+} from "@/components/k8s";
+import type { K8sStatusTone } from "@/components/k8s/K8sStatusBadge";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "../api";
@@ -41,6 +48,7 @@ type DiagnosisContextValue = {
 };
 
 const DiagnosisContext = createContext<DiagnosisContextValue | null>(null);
+const DIAGNOSIS_TAB_IDS = DIAGNOSIS_TABS.map((item) => item.id);
 
 function useDiagnosisContext() {
   const ctx = useContext(DiagnosisContext);
@@ -222,137 +230,185 @@ export function DiagnosisPanel({ canManage }: { canManage: boolean }) {
     [canManage, consumerId, installed, sessionId, target],
   );
 
+  const targetReady = isTargetReady(target);
+  const tabLabel = (id: DiagnosisTab) => DIAGNOSIS_TABS.find((item) => item.id === id)?.label ?? id;
+
   return (
-    <div className="stack-lg">
-      <section className="card stack-md p-4">
-        <div>
-          <h1 className="text-xl font-semibold">应用诊断</h1>
-          <p className="text-sm text-muted mt-1">选择 Java 容器并安装 Arthas，查看 JVM 运行态与诊断命令结果。</p>
-        </div>
-        <div className="flex flex-wrap gap-3 items-end">
-          <label>
-            <span className="label">集群</span>
-            <select
-              className="input min-w-40"
-              value={target.clusterId}
-              onChange={(e) => {
-                const clusterId = e.target.value;
-                window.localStorage.setItem(CLUSTER_STORAGE_KEY, clusterId);
-                setTarget({ clusterId, namespace: "", pod: "", container: "", processId: "" });
-              }}
-            >
-              <option value="">请选择</option>
-              {clusters.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span className="label">命名空间</span>
-            <select
-              className="input min-w-40"
-              value={target.namespace}
-              onChange={(e) => setTarget((current) => ({ ...current, namespace: e.target.value, pod: "", container: "", processId: "" }))}
-            >
-              {namespaces.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span className="label">Pod</span>
-            <select
-              className="input min-w-40"
-              value={target.pod}
-              onChange={(e) => setTarget((current) => ({ ...current, pod: e.target.value, container: "", processId: "" }))}
-            >
-              {pods.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span className="label">Container</span>
-            <select
-              className="input min-w-40"
-              value={target.container}
-              onChange={(e) => setTarget((current) => ({ ...current, container: e.target.value, processId: "" }))}
-            >
-              {containers.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
-          {!installed?.id ? (
-            <label>
-              <span className="label">进程</span>
+    <div className="stack-md">
+      <K8sPanelCard className="k8s-diagnosis-panel">
+        <div className="k8s-clusters-toolbar k8s-workloads-toolbar k8s-diagnosis-target-toolbar">
+          <div className="k8s-clusters-toolbar-filters">
+            <label className="k8s-diagnosis-field">
+              <span className="sr-only">集群</span>
               <select
-                className="input min-w-48"
-                value={target.processId}
-                onChange={(e) => setTarget((current) => ({ ...current, processId: e.target.value }))}
+                className="input"
+                value={target.clusterId}
+                aria-label="集群"
+                onChange={(e) => {
+                  const clusterId = e.target.value;
+                  window.localStorage.setItem(CLUSTER_STORAGE_KEY, clusterId);
+                  setTarget({ clusterId, namespace: "", pod: "", container: "", processId: "" });
+                }}
               >
-                <option value="">请选择</option>
-                {processes.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.value} {item.name}
+                <option value="">选择集群</option>
+                {clusters.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
                   </option>
                 ))}
               </select>
             </label>
-          ) : null}
-          {!installed?.id ? (
-            <button type="button" className="btn" disabled={!canManage || loading || !target.processId} onClick={() => void handleInstall()}>
-              安装
-            </button>
-          ) : (
-            <>
-              <button type="button" className="btn btn-danger" disabled={!canManage || loading} onClick={() => void handleUninstall()}>
-                卸载
-              </button>
-              <button type="button" className="btn" disabled={!canManage} onClick={() => setTerminalOpen(true)}>
-                终端
-              </button>
-            </>
-          )}
+            <label className="k8s-diagnosis-field">
+              <span className="sr-only">命名空间</span>
+              <select
+                className="input"
+                value={target.namespace}
+                aria-label="命名空间"
+                disabled={!target.clusterId}
+                onChange={(e) =>
+                  setTarget((current) => ({ ...current, namespace: e.target.value, pod: "", container: "", processId: "" }))
+                }
+              >
+                {namespaces.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="k8s-diagnosis-field">
+              <span className="sr-only">Pod</span>
+              <select
+                className="input"
+                value={target.pod}
+                aria-label="Pod"
+                disabled={!target.namespace}
+                onChange={(e) => setTarget((current) => ({ ...current, pod: e.target.value, container: "", processId: "" }))}
+              >
+                {pods.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="k8s-diagnosis-field">
+              <span className="sr-only">Container</span>
+              <select
+                className="input"
+                value={target.container}
+                aria-label="Container"
+                disabled={!target.pod}
+                onChange={(e) => setTarget((current) => ({ ...current, container: e.target.value, processId: "" }))}
+              >
+                {containers.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {!installed?.id ? (
+              <label className="k8s-diagnosis-field k8s-diagnosis-field-process">
+                <span className="sr-only">Java 进程</span>
+                <select
+                  className="input"
+                  value={target.processId}
+                  aria-label="Java 进程"
+                  disabled={!targetReady}
+                  onChange={(e) => setTarget((current) => ({ ...current, processId: e.target.value }))}
+                >
+                  <option value="">选择进程</option>
+                  {processes.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.value} {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
+          <div className="k8s-toolbar-actions">
+            {installed?.id ? (
+              <K8sStatusBadge tone="success" dot>
+                Arthas 已安装
+              </K8sStatusBadge>
+            ) : targetReady ? (
+              <span className="k8s-clusters-count" role="status">
+                {processes.length > 0 ? `${processes.length} 个 Java 进程` : "未发现 Java 进程"}
+              </span>
+            ) : null}
+            {!installed?.id ? (
+              <>
+                <button
+                  type="button"
+                  className="btn-secondary k8s-clusters-refresh-btn"
+                  disabled={!targetReady || loading}
+                  aria-label="刷新进程列表"
+                  onClick={() => void refreshProcesses()}
+                >
+                  ↻
+                </button>
+                <button
+                  type="button"
+                  className="btn text-sm"
+                  disabled={!canManage || loading || !target.processId}
+                  onClick={() => void handleInstall()}
+                >
+                  安装 Arthas
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" className="btn-secondary text-sm" disabled={!canManage} onClick={() => setTerminalOpen(true)}>
+                  终端
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary text-sm is-danger"
+                  disabled={!canManage || loading}
+                  onClick={() => void handleUninstall()}
+                >
+                  卸载
+                </button>
+              </>
+            )}
+          </div>
         </div>
-        {!canManage ? <div className="alert alert-info">需要 governance:admin 权限才能安装或卸载 Arthas。</div> : null}
+
+        {!canManage ? <p className="text-sm text-muted">需要 governance:admin 权限才能安装或卸载 Arthas。</p> : null}
         <ApiErrorBanner error={error} />
-      </section>
+      </K8sPanelCard>
 
       <DiagnosisContext.Provider value={contextValue}>
-        <section className="card stack-md p-4">
-          <div className="flex flex-wrap gap-2 border-b border-border pb-3">
-            {DIAGNOSIS_TABS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`btn btn-sm ${tab === item.id ? "" : "btn-ghost"}`}
-                onClick={() => setTab(item.id)}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
+        <K8sPanelCard className="k8s-diagnosis-panel">
+          <K8sResourceTabs
+            tabs={DIAGNOSIS_TAB_IDS}
+            active={tab}
+            ariaLabel="诊断视图"
+            label={tabLabel}
+            onChange={setTab}
+          />
           {tab === "dashboard" ? (
-            <DiagnosisDashboard onSessionChange={(nextSessionId, nextConsumerId) => {
-              setSessionId(nextSessionId);
-              setConsumerId(nextConsumerId);
-            }} />
+            <DiagnosisDashboard
+              onSessionChange={(nextSessionId, nextConsumerId) => {
+                setSessionId(nextSessionId);
+                setConsumerId(nextConsumerId);
+              }}
+            />
           ) : (
             <DiagnosisCommandTab tab={tab} />
           )}
-        </section>
+        </K8sPanelCard>
       </DiagnosisContext.Provider>
 
-      <Modal open={terminalOpen} title={`Arthas 终端 · ${target.pod}/${target.container}`} onClose={() => setTerminalOpen(false)}>
+      <Modal
+        open={terminalOpen}
+        title={target.pod ? `Arthas 终端 · ${target.namespace}/${target.pod}` : "Arthas 终端"}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setTerminalOpen(false)}
+      >
         <DiagnosisTerminal target={target} onClose={() => setTerminalOpen(false)} />
       </Modal>
     </div>
@@ -421,42 +477,47 @@ function DiagnosisDashboard({ onSessionChange }: { onSessionChange: (sessionId: 
 
   const summary = threadStateSummary(threads);
 
+  if (!installed?.id) {
+    return (
+      <K8sEmptyState
+        compact
+        title="尚未安装 Arthas"
+        description="选择 Java 进程并安装 Arthas 后，即可查看 JVM 控制面板。"
+      />
+    );
+  }
+
   return (
-    <div className="stack-md">
+    <div className="stack-md k8s-diagnosis-dashboard">
       <ApiErrorBanner error={error} />
-      {!installed?.id ? <div className="alert alert-info">请先安装 Arthas 后再查看控制面板。</div> : null}
-      <div className="stack-sm">
-        <h2 className="font-medium">线程 TOP-10</h2>
-        <div className="flex flex-wrap gap-2 text-sm">
-          <span>总量: {summary.SUM}</span>
+      <DiagnosisSection title="线程 TOP-10">
+        <div className="k8s-diagnosis-thread-summary">
+          <span className="k8s-clusters-count">总量 {summary.SUM}</span>
           {(["NEW", "RUNNABLE", "BLOCKED", "WAITING", "TIMED_WAITING", "TERMINATED"] as const).map((state) => (
-            <span key={state} className="badge">
-              {state}: {summary[state]}
-            </span>
+            <K8sStatusBadge key={state} tone={threadStateTone(state)} dot>
+              {state} {summary[state]}
+            </K8sStatusBadge>
           ))}
         </div>
         <DiagnosisTable rows={threads.slice(0, 10).map((item) => ({ name: item.name ?? "-", value: item.state ?? "-" }))} />
-      </div>
-      <div className="stack-sm">
-        <h2 className="font-medium">内存</h2>
+      </DiagnosisSection>
+      <DiagnosisSection title="内存">
         <DiagnosisTable
           rows={memory.map((item) => ({
             name: item.name ?? item.type ?? "-",
             value: `${item.used ?? 0}/${item.total ?? item.max ?? 0}`,
           }))}
         />
-      </div>
-      <div className="stack-sm">
-        <h2 className="font-medium">GC</h2>
+      </DiagnosisSection>
+      <DiagnosisSection title="GC">
         <DiagnosisTable
           rows={gcInfos.map((item) => ({
             name: item.name ?? "-",
             value: `${item.collectionCount ?? 0} / ${item.collectionTime ?? 0}ms`,
           }))}
         />
-      </div>
-      <div className="stack-sm">
-        <h2 className="font-medium">运行时</h2>
+      </DiagnosisSection>
+      <DiagnosisSection title="运行时">
         <DiagnosisTable
           rows={[
             { name: "OS", value: `${runtimeInfo.osName ?? "-"} ${runtimeInfo.osVersion ?? ""}`.trim() },
@@ -465,7 +526,7 @@ function DiagnosisDashboard({ onSessionChange }: { onSessionChange: (sessionId: 
             { name: "Uptime", value: String(runtimeInfo.uptime ?? "-") },
           ]}
         />
-      </div>
+      </DiagnosisSection>
     </div>
   );
 }
@@ -495,25 +556,56 @@ function DiagnosisCommandTab({ tab }: { tab: DiagnosisTab }) {
     return () => window.clearInterval(timer);
   }, [load]);
 
+  if (!installed?.id) {
+    return (
+      <K8sEmptyState compact title="尚未安装 Arthas" description="安装 Arthas 后即可执行诊断命令并查看结果。" />
+    );
+  }
+
   return (
     <div className="stack-md">
-      <div className="flex justify-end">
-        <button type="button" className="btn btn-sm" onClick={() => void load()}>
-          更新
-        </button>
+      <div className="k8s-clusters-toolbar">
+        <div />
+        <div className="k8s-toolbar-actions">
+          <span className="k8s-clusters-count" role="status">
+            {tabLabel(tab)}
+          </span>
+          <button
+            type="button"
+            className="btn-secondary k8s-clusters-refresh-btn"
+            aria-label="刷新数据"
+            onClick={() => void load()}
+          >
+            ↻
+          </button>
+        </div>
       </div>
       <ApiErrorBanner error={error} />
-      {!installed?.id ? <div className="alert alert-info">请先安装 Arthas。</div> : null}
-      <DiagnosisTable rows={rows} />
+      <DiagnosisTable rows={rows} emptyTitle={`暂无 ${tabLabel(tab)} 数据`} />
     </div>
   );
 }
 
-function DiagnosisTable({ rows }: { rows: NameValueRow[] }) {
-  if (!rows.length) return <div className="text-sm text-muted">暂无数据</div>;
+function tabLabel(tab: DiagnosisTab): string {
+  return DIAGNOSIS_TABS.find((item) => item.id === tab)?.label ?? tab;
+}
+
+function DiagnosisSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="overflow-auto">
-      <table className="table table-sm">
+    <section className="stack-sm k8s-diagnosis-section">
+      <h2 className="k8s-diagnosis-section-title">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function DiagnosisTable({ rows, emptyTitle = "暂无数据" }: { rows: NameValueRow[]; emptyTitle?: string }) {
+  if (!rows.length) {
+    return <K8sEmptyState variant="empty" compact title={emptyTitle} description="当前命令未返回可展示的数据。" />;
+  }
+  return (
+    <div className="table-wrap k8s-diagnosis-table">
+      <table className="data-table text-sm">
         <thead>
           <tr>
             <th>名称</th>
@@ -523,12 +615,20 @@ function DiagnosisTable({ rows }: { rows: NameValueRow[] }) {
         <tbody>
           {rows.map((row, index) => (
             <tr key={`${row.name}-${index}`}>
-              <td>{row.name}</td>
-              <td className="font-mono text-xs whitespace-pre-wrap">{row.value}</td>
+              <td className="font-medium">{row.name}</td>
+              <td className="text-muted font-mono text-xs whitespace-pre-wrap">{row.value}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
   );
+}
+
+function threadStateTone(state: string): K8sStatusTone {
+  if (state === "RUNNABLE") return "success";
+  if (state === "BLOCKED") return "danger";
+  if (state === "WAITING" || state === "TIMED_WAITING") return "warning";
+  if (state === "NEW") return "info";
+  return "neutral";
 }

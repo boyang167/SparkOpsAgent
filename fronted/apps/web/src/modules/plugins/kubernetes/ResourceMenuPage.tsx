@@ -18,17 +18,9 @@ type ResourceMenuPageProps = {
   canManage: boolean;
 };
 
-export function ResourceMenuPage({ title, description, menu, clusterId, canManage }: ResourceMenuPageProps) {
+export function ResourceMenuPage({ menu, clusterId, canManage }: ResourceMenuPageProps) {
   return (
     <div className="stack-md">
-      {menu === "nodes" || menu === "workloads" || menu === "namespaces" || menu === "networks" || menu === "configs" || menu === "storages" || menu === "access-controls" ? null : (
-        <section className="card stack-sm p-4">
-          <div>
-            <h1 className="text-xl font-semibold">{title}</h1>
-            {description ? <p className="text-sm text-muted mt-1">{description}</p> : null}
-          </div>
-        </section>
-      )}
       {menu === "nodes" ? (
         <NodesPanel clusterId={clusterId} canManage={canManage} />
       ) : menu === "workloads" ? (

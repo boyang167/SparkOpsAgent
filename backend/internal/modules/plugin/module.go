@@ -57,6 +57,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	if err := persistence.AutoMigrate(c.DB); err != nil {
 		return fmt.Errorf("plugin migrate: %w", err)
 	}
+	if err := acl.SyncBundledPlugins(ctx, c.DB); err != nil {
+		return fmt.Errorf("plugin bundled sync: %w", err)
+	}
 
 	repo := persistence.NewStore(c.DB)
 	unitOfWork := acl.NewUnitOfWork(c.DB)

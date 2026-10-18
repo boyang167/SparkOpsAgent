@@ -30,28 +30,6 @@ export function EndpointForm({
   );
 }
 
-export function TargetFields<T extends { namespace: string; pod: string; container: string }>({
-  form,
-  setForm,
-}: {
-  form: T;
-  setForm: (next: T) => void;
-}) {
-  return (
-    <>
-      <Field label="命名空间">
-        <input className="input" value={form.namespace} onChange={(e) => setForm({ ...form, namespace: e.target.value })} />
-      </Field>
-      <Field label="Pod">
-        <input className="input" value={form.pod} onChange={(e) => setForm({ ...form, pod: e.target.value })} />
-      </Field>
-      <Field label="容器">
-        <input className="input" value={form.container} onChange={(e) => setForm({ ...form, container: e.target.value })} />
-      </Field>
-    </>
-  );
-}
-
 export function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
   return (
     <label>

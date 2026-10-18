@@ -7,9 +7,9 @@ import (
 )
 
 type GitHook struct {
-	Event   string
-	Ref     string
-	RefType string
+	Event           string
+	Ref             string
+	RefType         string
 	Commit          string
 	HTTPURL         string
 	Path            string

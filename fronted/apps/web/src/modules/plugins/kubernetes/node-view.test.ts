@@ -4,6 +4,7 @@ import {
   formatNodeAge,
   isEvictablePod,
   memoryToBytes,
+  nodeConditionTone,
   nodeInternalIP,
   nodeResourceView,
   nodeRoles,
@@ -55,5 +56,12 @@ describe("node-view", () => {
   it("formats age in days", () => {
     const now = Date.parse("2026-08-31T00:00:00Z");
     expect(formatNodeAge("2024-01-07T00:00:00Z", now)).toBe("967 天");
+  });
+
+  it("maps node condition tone with inverted pressure types", () => {
+    expect(nodeConditionTone("Ready", "True")).toBe("success");
+    expect(nodeConditionTone("Ready", "False")).toBe("danger");
+    expect(nodeConditionTone("PIDPressure", "False")).toBe("success");
+    expect(nodeConditionTone("PIDPressure", "True")).toBe("danger");
   });
 });

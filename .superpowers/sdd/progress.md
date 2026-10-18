@@ -122,3 +122,22 @@ helm lint deployments/helm/sparkops
 - Istio VirtualService — 未实现
 - PG/Redis/RabbitMQ 需外部或自行部署（Helm 不含数据层）
 - CronJob 为应用内分钟级调度
+
+# RabbitMQ Transactional Events SDD Progress
+
+Baseline: `05408d7`; `go test ./... -count=1` has two unrelated pre-existing failures: `TestKubernetesBundledFilesBuildRealInspectableZip` (descriptor missing `backend/internal/plugins/kubernetes/diagnosis/agent.go`) and `TestExecPersistsRecordingWithoutCommandOrCredentials` (recording combines stdout/stderr), plus a Windows temp executable unlink permission error. Messaging/config/postgres/migrations packages pass.
+Plan: `docs/superpowers/plans/2026-10-17-rabbitmq-transactional-events.md`
+Execution: current `feat/product-fucntions` working tree by explicit user choice; existing untracked files must never be staged.
+Task 1: complete (commits 05408d7..c1e9140, review approved after adding full fallback schema, constraint, index, and migration-gate behavior tests).
+Task 2: complete (commits c1e9140..a1c4fed, review approved after a safe revert/reimplementation established real RED→GREEN and malformed-payload PermanentError coverage).
+Task 3 decision: user approved strengthening the plan-mandated store API so terminal/reschedule updates require `owner`, current claimed status, and `RowsAffected == 1`; stale workers must receive a lease-lost error.
+Task 3: complete (commits a1c4fed..80c09c9, review approved after owner/status lease enforcement and real PostgreSQL Outbox/Operation concurrency tests; plan synchronized in e1179b6).
+Task 4: complete (commits e1179b6..d54b93b, review approved after stable-MessageId publish-attempt correlation, bounded deferred-confirm retirement, and dedicated publisher/consumer connection isolation; real RabbitMQ integration remains pending because localhost:5672 is unavailable).
+Task 5: complete (commits d54b93b..ecc2bb9, review approved after poison-delivery DLQ handling, graceful in-flight transaction shutdown, dispatcher validation/observability, metrics wiring, startup rollback, and subscription-bound envelope validation; real RabbitMQ integration remains pending because AMQP_URL is unavailable).
+Task 6: complete (commits ecc2bb9..35af97a, review approved after per-runtime lease fencing, single-record worker claims, exact idempotency conflict detection, strict command keys, cancellable claim lifecycle, and in-flight operation draining; PostgreSQL integration remains pending because DATABASE_DSN is unavailable).
+Task 7: complete (commits 35af97a..366707f, review approved after inmemory/AMQP runtime isolation, complete factory/lifecycle wiring, and pre-dial migration 000070 schema gates; rollout must migrate before startup and must not run incompatible down migrations against live applications).
+Task 8: complete (commits 366707f..aa55c52, review approved after migrating all ten production publishers into shared business/outbox transactions, adding real atomicity coverage, and binding deployment tests to the production terminal callback).
+Task 9: complete (commits aa55c52..d73ddf4, review approved after stable named subscriptions, transaction-aware database consumers, safe retry sentinels for deferred external effects, governance rollback safety, and migration 000071 optimistic concurrency for product-workflow runs).
+Task 10: complete (commits d73ddf4..77066c3, review approved after migrating sixteen external/queue side-effect types to Operation Outbox, adding idempotent reconciliation and secret-safe payloads, and fencing multi-stage project archival through migrations 000072–000075).
+Task 11: complete (commits 77066c3..72b4107, review approved after real PostgreSQL/RabbitMQ failure-window coverage, runtime reconnect, targeted DLQ replay with preserved attempts, real migration runner, CI fail-closed integration, and Docker/Helm migrate-before-rollout configuration).
+Final review: complete at `c965e3687560dbdd42bba1365b5882c4c2d1175e`; no remaining P0–P2 findings. Targeted product/messaging/bootstrap/migrations/Helm/DLQ tests, `go build ./...`, and `git diff --check 05408d7..HEAD` passed. Runtime integration against real RabbitMQ/PostgreSQL remains environment-dependent.

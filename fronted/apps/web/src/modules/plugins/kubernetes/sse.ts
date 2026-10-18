@@ -36,6 +36,30 @@ export function formatSSEPayload(value: unknown): string {
   return JSON.stringify(value);
 }
 
+export const K8S_STREAM_LIMIT = { maxLines: 1000, maxBytes: 1 << 20 } satisfies BoundedOptions;
+
+export function appendStreamEvent(current: string[], event: SSEEvent, options: BoundedOptions = K8S_STREAM_LIMIT): string[] {
+  if (event.event === "open") return current;
+  if (event.event === "exit") {
+    const payload = event.data;
+    const code =
+      payload && typeof payload === "object" && "code" in payload && typeof (payload as { code: unknown }).code === "number"
+        ? (payload as { code: number }).code
+        : undefined;
+    if (code !== undefined && code !== 0) {
+      return appendBoundedLines(current, `命令退出码 ${code}`, options);
+    }
+    return current;
+  }
+  if (event.event === "output" || event.event === "error" || event.event === "message") {
+    return appendBoundedLines(current, formatSSEPayload(event.data), options);
+  }
+  if (event.event === "warning") {
+    return appendBoundedLines(current, `[警告] ${formatSSEPayload(event.data)}`, options);
+  }
+  return appendBoundedLines(current, `${event.event}: ${formatSSEPayload(event.data)}`, options);
+}
+
 export function appendBoundedLines(current: string[], next: string, options: BoundedOptions): string[] {
   const lines = [...current, ...next.split("\n")].filter((line) => line.length > 0);
   let bounded = lines.slice(-options.maxLines);

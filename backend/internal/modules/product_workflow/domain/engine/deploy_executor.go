@@ -13,10 +13,10 @@ import (
 )
 
 type DeployExecutor struct {
-	trigger  appctx.DeploymentTrigger
-	creator  appctx.VersionCreator
-	reader   appctx.ProjectVersionReader
-	repo     repository.ProductWorkflowRepository
+	trigger appctx.DeploymentTrigger
+	creator appctx.VersionCreator
+	reader  appctx.ProjectVersionReader
+	repo    repository.ProductWorkflowRepository
 }
 
 func NewDeployExecutor(

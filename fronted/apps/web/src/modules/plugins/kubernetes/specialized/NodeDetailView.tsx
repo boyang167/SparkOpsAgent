@@ -1,27 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { K8sEmptyState, K8sLoadingState, useK8sConfirm } from "@/components/k8s";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { K8sEmptyState, K8sLoadingState, K8sStatusBadge } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
-import { errorInfo, k8sFetch, KubernetesApiError, parseApiError, type ApiErrorInfo } from "../api";
+import { errorInfo, k8sFetch, type ApiErrorInfo } from "../api";
 import { CATALOG, proxyPath } from "../catalog";
-import { appendBoundedLines, createSSEParser, formatSSEPayload } from "../sse";
-import { podOperationPath } from "../operations";
+import { type PodEvent } from "../pod-detail-view";
+import { podEventsUrl } from "../resource-url";
 import { YamlEditor } from "../YamlEditor";
-import { PodTerminal } from "./PodTerminal";
-import { PodFilesBrowser } from "./PodFilesBrowser";
 import {
   formatDateTime,
   formatNodeAge,
+  nodeConditionTone,
   nodeInternalIP,
-  podContainerNames,
+  nodeRoles,
   podPhase,
   podResourceSummary,
   podRestartCount,
   type NodeObject,
   type PodObject,
 } from "../node-view";
+import { formatMetaKey, formatMetaValue, splitMetaEntries } from "./node-detail-meta";
+import { PodDetailView } from "./PodDetailView";
+import { WorkloadPodActions } from "./WorkloadPodActions";
 
 const podDef = CATALOG.find((item) => item.kind === "Pod");
 
@@ -32,44 +34,77 @@ async function loadNodePods(clusterId: string, nodeName: string): Promise<PodObj
   return data.items ?? [];
 }
 
-function MetaPills({ map, bordered }: { map?: Record<string, string>; bordered?: boolean }) {
-  const entries = Object.entries(map ?? {});
-  if (entries.length === 0) return <span className="text-muted">-</span>;
-  return (
-    <div className="k8s-role-badges">
-      {entries.map(([key, value]) => (
-        <span key={key} className={bordered ? "badge badge-neutral" : "badge badge-primary"} title={`${key}: ${value}`}>
-          {key}: {value || '""'}
-        </span>
-      ))}
-    </div>
-  );
+function dash(value: unknown): string {
+  if (value === undefined || value === null || value === "") return "-";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
 }
 
-function InfoRow({ left, right }: { left: React.ReactNode; right?: React.ReactNode }) {
+function conditionTone(type?: string, status?: string) {
+  return nodeConditionTone(type, status);
+}
+
+type PodDetailState = {
+  pod: PodObject | null;
+  loading: boolean;
+  events: PodEvent[];
+  eventsLoading: boolean;
+  eventsError: ApiErrorInfo | null;
+};
+
+function InfoRow({ left, right }: { left: ReactNode; right?: ReactNode }) {
   return (
-    <div className="k8s-detail-row">
+    <div className="k8s-pod-detail-row">
       <div>{left}</div>
       {right !== undefined ? <div>{right}</div> : null}
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="k8s-detail-field">
-      <span className="k8s-detail-label">{label}</span>
-      <span className="k8s-detail-sep">:</span>
-      <span className="k8s-detail-value">{children}</span>
+    <div className="k8s-pod-detail-field">
+      <span className="k8s-pod-detail-label">{label}</span>
+      <span className="k8s-pod-detail-value">{children}</span>
     </div>
   );
 }
 
-type StreamTarget = {
-  pod: PodObject;
-  container: string;
-  mode: "exec" | "logs";
-};
+function MetaPills({ entries }: { entries: Array<[string, string]> }) {
+  if (entries.length === 0) return <span className="text-muted">-</span>;
+  return (
+    <div className="k8s-pod-detail-pills">
+      {entries.map(([key, value]) => (
+        <span key={key} className="k8s-pod-detail-pill" title={`${key}: ${value}`}>
+          {formatMetaKey(key)}
+          {value !== "" ? `: ${formatMetaValue(value)}` : ""}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function CollapsibleMetaBlock({
+  title,
+  entries,
+  defaultOpen = false,
+}: {
+  title: string;
+  entries: Array<[string, string]>;
+  defaultOpen?: boolean;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <details className="k8s-node-meta-block" open={defaultOpen}>
+      <summary className="k8s-node-meta-summary">
+        <span>{title}</span>
+        <span className="k8s-node-meta-count">{entries.length}</span>
+      </summary>
+      <MetaPills entries={entries} />
+    </details>
+  );
+}
 
 export function NodeDetailView({
   clusterId,
@@ -84,15 +119,19 @@ export function NodeDetailView({
   const [loadingPods, setLoadingPods] = useState(true);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
   const [editPod, setEditPod] = useState<PodObject | null>(null);
-  const [podDetail, setPodDetail] = useState<PodObject | null>(null);
-  const [morePod, setMorePod] = useState<PodObject | null>(null);
-  const [stream, setStream] = useState<StreamTarget | null>(null);
-  const [filesTarget, setFilesTarget] = useState<{ pod: PodObject; container: string } | null>(null);
-  const [terminalFullscreen, setTerminalFullscreen] = useState(false);
+  const [podDetail, setPodDetail] = useState<PodDetailState | null>(null);
   const [saving, setSaving] = useState(false);
-  const { ask, dialog: confirmDialog } = useK8sConfirm();
+  const podDetailRequestSeq = useRef(0);
+  const activePodDetailRequest = useRef<AbortController | null>(null);
   const info = node.status?.nodeInfo;
   const name = node.metadata?.name ?? "";
+  const labelGroups = splitMetaEntries(node.metadata?.labels);
+  const annotationGroups = splitMetaEntries(node.metadata?.annotations);
+  const roles = nodeRoles(node.metadata?.labels);
+  const addresses = node.status?.addresses ?? [];
+  const internalIp = nodeInternalIP(node);
+  const hostname = addresses.find((item) => item.type === "Hostname")?.address;
+  const otherAddresses = addresses.filter((item) => item.type !== "InternalIP" && item.type !== "Hostname");
 
   useEffect(() => {
     let cancelled = false;
@@ -152,133 +191,219 @@ export function NodeDetailView({
     }
   }
 
-  async function deletePod(pod: PodObject) {
-    const podName = pod.metadata?.name;
-    const ns = pod.metadata?.namespace;
-    if (!canManage || !podDef || !podName || !ns) return;
-    const ok = await ask({
-      title: "删除 Pod",
-      description: `确定删除 Pod「${ns}/${podName}」？`,
-      confirmLabel: "删除",
-      danger: true,
+  function closePodDetail() {
+    activePodDetailRequest.current?.abort();
+    activePodDetailRequest.current = null;
+    setPodDetail(null);
+  }
+
+  async function openPodDetail(pod: PodObject) {
+    const namespace = pod.metadata?.namespace?.trim();
+    const podName = pod.metadata?.name?.trim();
+    const eventsUrl = namespace && podName ? podEventsUrl(clusterId, namespace, podName) : null;
+    if (!podDef || !namespace || !podName || !eventsUrl) return;
+
+    activePodDetailRequest.current?.abort();
+    const controller = new AbortController();
+    activePodDetailRequest.current = controller;
+    const requestSeq = podDetailRequestSeq.current + 1;
+    podDetailRequestSeq.current = requestSeq;
+    const isCurrent = () =>
+      activePodDetailRequest.current === controller && requestSeq === podDetailRequestSeq.current;
+
+    setPodDetail({ pod: null, loading: true, events: [], eventsLoading: true, eventsError: null });
+    const podRequest = k8sFetch<PodObject>(proxyPath(clusterId, podDef, namespace, podName), { signal: controller.signal });
+    const eventsRequest = k8sFetch<{ items?: PodEvent[] }>(eventsUrl, { signal: controller.signal });
+
+    void eventsRequest
+      .then((data) => {
+        if (!isCurrent()) return;
+        setPodDetail((current) =>
+          current ? { ...current, events: data.items ?? [], eventsLoading: false, eventsError: null } : current,
+        );
+      })
+      .catch((err) => {
+        if (!isCurrent()) return;
+        setPodDetail((current) =>
+          current
+            ? { ...current, events: [], eventsLoading: false, eventsError: errorInfo(err, "加载 Pod 事件失败") }
+            : current,
+        );
+      });
+
+    void Promise.allSettled([podRequest, eventsRequest]).finally(() => {
+      if (activePodDetailRequest.current === controller) activePodDetailRequest.current = null;
     });
-    if (!ok) return;
+
     try {
-      await k8sFetch(proxyPath(clusterId, podDef, ns, podName), { method: "DELETE" });
-      await reloadPods();
+      const latest = await podRequest;
+      if (!isCurrent()) return;
+      setPodDetail((current) => (current ? { ...current, pod: latest, loading: false } : current));
     } catch (err) {
-      setError(errorInfo(err, "删除 Pod 失败"));
+      if (!isCurrent()) return;
+      closePodDetail();
+      setError(errorInfo(err, "加载 Pod 详情失败"));
     }
   }
 
+  const conditions = node.status?.conditions ?? [];
+
   return (
-    <div className="stack-lg k8s-node-detail">
+    <div className="stack-lg k8s-node-detail-root">
       <ApiErrorBanner error={error} />
 
-      <section className="stack-sm">
-        <h3 className="k8s-detail-section-title">基本信息</h3>
-        <div className="k8s-detail-grid">
+      <section className="k8s-node-detail-section stack-sm">
+        <h3 className="k8s-node-detail-title">概览</h3>
+        <div className="k8s-node-detail-grid">
           <InfoRow
-            left={<Field label="名称">{node.metadata?.name || "-"}</Field>}
+            left={<Field label="名称">{dash(name)}</Field>}
             right={<Field label="存活时间">{formatNodeAge(node.metadata?.creationTimestamp)}</Field>}
           />
-          <InfoRow left={<Field label="UID">{node.metadata?.uid || "-"}</Field>} />
-          <InfoRow
-            left={<Field label="容器组 CIDR">{node.spec?.podCIDR || "-"}</Field>}
-            right={<Field label="调度状态">{node.spec?.unschedulable ? "不可调度" : "可调度"}</Field>}
-          />
           <InfoRow
             left={
-              <Field label="IP 地址">
-                <div className="stack-xs">
-                  {(node.status?.addresses ?? []).length === 0 ? "-" : null}
-                  {(node.status?.addresses ?? []).map((item) => (
-                    <div key={`${item.type}-${item.address}`}>
-                      {item.type}: {item.address}
-                    </div>
-                  ))}
-                </div>
+              <Field label="内部 IP">
+                <span className="font-mono text-sm">{internalIp || "-"}</span>
+              </Field>
+            }
+            right={
+              <Field label="调度">
+                <K8sStatusBadge tone={node.spec?.unschedulable ? "warning" : "success"}>
+                  {node.spec?.unschedulable ? "不可调度" : "可调度"}
+                </K8sStatusBadge>
               </Field>
             }
           />
           <InfoRow
             left={
-              <Field label="标签">
-                <MetaPills map={node.metadata?.labels} />
+              <Field label="角色">
+                {roles.length > 0 ? (
+                  <div className="k8s-role-tags">
+                    {roles.map((role) => (
+                      <span key={role} className="k8s-meta-tag">
+                        {role}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-muted">-</span>
+                )}
+              </Field>
+            }
+            right={
+              <Field label="主机名">
+                <span className="font-mono text-sm">{dash(hostname)}</span>
               </Field>
             }
           />
           <InfoRow
-            left={
-              <Field label="注解">
-                <MetaPills map={node.metadata?.annotations} bordered />
-              </Field>
-            }
-          />
-          <InfoRow
-            left={<Field label="系统镜像">{info?.osImage || "-"}</Field>}
-            right={<Field label="内核版本">{info?.kernelVersion || "-"}</Field>}
-          />
-          <InfoRow
-            left={<Field label="Kubelet 版本">{info?.kubeletVersion || "-"}</Field>}
-            right={<Field label="Kube-Proxy 版本">{info?.kubeProxyVersion || "-"}</Field>}
-          />
-          <InfoRow
-            left={<Field label="机器 ID">{info?.machineID || "-"}</Field>}
-            right={<Field label="系统 UUID">{info?.systemUUID || "-"}</Field>}
-          />
-          <InfoRow
-            left={<Field label="启动 ID">{info?.bootID || "-"}</Field>}
-            right={<Field label="容器运行时版本">{info?.containerRuntimeVersion || "-"}</Field>}
-          />
-          <InfoRow
-            left={<Field label="操作系统">{info?.operatingSystem || "-"}</Field>}
-            right={<Field label="架构">{info?.architecture || "-"}</Field>}
-          />
-          <InfoRow
-            left={
-              <Field label="污点（Taints）">
-                <div className="k8s-role-badges">
-                  {(node.spec?.taints ?? []).length === 0 ? <span className="text-muted">-</span> : null}
-                  {(node.spec?.taints ?? []).map((taint, index) => (
-                    <span key={`${taint.key}-${index}`} className="badge badge-neutral">
-                      {taint.key}
-                      {taint.value ? `: ${taint.value}` : ""} Effect: {taint.effect}
-                    </span>
-                  ))}
-                </div>
-              </Field>
-            }
+            left={<Field label="Kubelet">{dash(info?.kubeletVersion)}</Field>}
+            right={<Field label="操作系统">{dash(info?.osImage)}</Field>}
           />
         </div>
       </section>
 
-      <section className="stack-sm">
-        <h3 className="k8s-detail-section-title">状态</h3>
-        <div className="table-wrap">
+      <section className="k8s-node-detail-section stack-sm">
+        <h3 className="k8s-node-detail-title">元数据</h3>
+        <div className="k8s-node-meta-stack">
+          {labelGroups.user.length > 0 ? (
+            <div className="k8s-node-meta-group">
+              <span className="k8s-node-meta-group-label">自定义标签</span>
+              <MetaPills entries={labelGroups.user} />
+            </div>
+          ) : null}
+          <CollapsibleMetaBlock title="系统标签" entries={labelGroups.system} />
+          <CollapsibleMetaBlock title="注解" entries={[...annotationGroups.user, ...annotationGroups.system]} />
+          {(node.spec?.taints ?? []).length > 0 ? (
+            <div className="k8s-node-meta-group">
+              <span className="k8s-node-meta-group-label">污点</span>
+              <div className="k8s-role-tags">
+                {(node.spec?.taints ?? []).map((taint, index) => (
+                  <span key={`${taint.key}-${index}`} className="k8s-meta-tag" title={taint.effect}>
+                    {taint.key}
+                    {taint.value ? `: ${taint.value}` : ""}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {labelGroups.user.length === 0 &&
+          labelGroups.system.length === 0 &&
+          annotationGroups.user.length === 0 &&
+          annotationGroups.system.length === 0 &&
+          (node.spec?.taints ?? []).length === 0 ? (
+            <span className="text-sm text-muted">暂无标签、注解或污点</span>
+          ) : null}
+        </div>
+      </section>
+
+      <details className="k8s-node-meta-block">
+        <summary className="k8s-node-meta-summary">
+          <span>系统信息</span>
+        </summary>
+        <div className="k8s-node-detail-grid k8s-node-detail-grid-nested">
+          <InfoRow
+            left={<Field label="Pod CIDR">{dash(node.spec?.podCIDR)}</Field>}
+            right={<Field label="容器运行时">{dash(info?.containerRuntimeVersion)}</Field>}
+          />
+          <InfoRow
+            left={<Field label="内核">{dash(info?.kernelVersion)}</Field>}
+            right={<Field label="架构">{dash(info?.architecture)}</Field>}
+          />
+          <InfoRow
+            left={<Field label="Kube-Proxy">{dash(info?.kubeProxyVersion)}</Field>}
+            right={<Field label="UID">{dash(node.metadata?.uid)}</Field>}
+          />
+          {otherAddresses.length > 0 ? (
+            <InfoRow
+              left={
+                <Field label="其他地址">
+                  <div className="stack-xs text-sm">
+                    {otherAddresses.map((item) => (
+                      <div key={`${item.type}-${item.address}`} className="text-muted">
+                        {item.type}: <span className="font-mono">{item.address}</span>
+                      </div>
+                    ))}
+                  </div>
+                </Field>
+              }
+            />
+          ) : null}
+          <InfoRow
+            left={<Field label="机器 ID">{dash(info?.machineID)}</Field>}
+            right={<Field label="系统 UUID">{dash(info?.systemUUID)}</Field>}
+          />
+        </div>
+      </details>
+
+      <details className="k8s-node-meta-block k8s-node-conditions-block" open={conditions.length > 0}>
+        <summary className="k8s-node-meta-summary">
+          <span>状态条件</span>
+          {conditions.length > 0 ? <span className="k8s-node-meta-count">{conditions.length}</span> : null}
+        </summary>
+        <div className="table-wrap k8s-node-detail-table">
           <table className="data-table text-sm">
             <thead>
               <tr>
                 <th>类型</th>
                 <th>状态</th>
                 <th>更新时间</th>
-                <th>内容</th>
-                <th>消息</th>
+                <th>原因</th>
               </tr>
             </thead>
             <tbody>
-              {(node.status?.conditions ?? []).map((item) => (
-                <tr key={item.type}>
-                  <td>{item.type || "-"}</td>
-                  <td>{item.status || "-"}</td>
-                  <td>{formatDateTime(item.lastTransitionTime)}</td>
-                  <td>{item.reason || "-"}</td>
-                  <td className="max-w-xs break-words">{item.message || "-"}</td>
+              {conditions.map((item) => (
+                <tr key={item.type} title={item.message || undefined}>
+                  <td>{dash(item.type)}</td>
+                  <td>
+                    <K8sStatusBadge tone={conditionTone(item.type, item.status)}>{dash(item.status)}</K8sStatusBadge>
+                  </td>
+                  <td className="text-muted text-xs whitespace-nowrap">{formatDateTime(item.lastTransitionTime)}</td>
+                  <td className="text-muted text-xs">{dash(item.reason)}</td>
                 </tr>
               ))}
-              {(node.status?.conditions ?? []).length === 0 ? (
+              {conditions.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>
+                  <td colSpan={4}>
                     <K8sEmptyState variant="empty" title="暂无状态" compact />
                   </td>
                 </tr>
@@ -286,30 +411,30 @@ export function NodeDetailView({
             </tbody>
           </table>
         </div>
-      </section>
+      </details>
 
-      <section className="stack-sm">
-        <h3 className="k8s-detail-section-title">容器组</h3>
-        <div className="table-wrap">
+      <details className="k8s-node-meta-block k8s-node-pods-block" open>
+        <summary className="k8s-node-meta-summary">
+          <span>容器组</span>
+          {!loadingPods ? <span className="k8s-node-meta-count">{pods.length}</span> : null}
+        </summary>
+        <div className="table-wrap k8s-node-detail-table">
           <table className="data-table text-sm">
             <thead>
               <tr>
                 <th>名称</th>
-                <th>容器</th>
-                <th>CPU / 内存</th>
-                <th>状态</th>
-                <th>重启次数</th>
                 <th>命名空间</th>
-                <th>Pod IP</th>
-                <th>调度节点</th>
+                <th>状态</th>
+                <th>资源</th>
+                <th>重启</th>
                 <th>存活时间</th>
-                <th>操作</th>
+                <th className="w-28">操作</th>
               </tr>
             </thead>
             <tbody>
               {loadingPods ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={7}>
                     <K8sLoadingState compact />
                   </td>
                 </tr>
@@ -321,62 +446,53 @@ export function NodeDetailView({
                   const resources = podResourceSummary(pod);
                   return (
                     <tr key={`${pod.metadata?.namespace}/${pod.metadata?.name}`}>
-                      <td>
-                        <button type="button" className="k8s-action-link font-semibold" onClick={() => setPodDetail(pod)}>
+                      <td className="k8s-pod-name-cell">
+                        <button
+                          type="button"
+                          className="k8s-cluster-name-link k8s-pod-name-link"
+                          title={pod.metadata?.name}
+                          onClick={() => void openPodDetail(pod)}
+                        >
                           {pod.metadata?.name}
                         </button>
                       </td>
+                      <td className="text-muted text-xs">{pod.metadata?.namespace || "-"}</td>
                       <td>
-                        <div className="flex flex-wrap gap-1">
-                          {(pod.status?.containerStatuses ?? pod.spec?.containers ?? []).map((c, index) => {
-                            const ready = "ready" in c ? Boolean(c.ready) : false;
-                            const title =
-                              "name" in c && c.name
-                                ? `${c.name}${ready ? "（ready）" : ""}`
-                                : `container-${index}`;
-                            return (
-                              <span
-                                key={title}
-                                title={title}
-                                className={ready ? "k8s-container-dot is-ready" : "k8s-container-dot"}
-                              />
-                            );
-                          })}
-                          {(pod.status?.containerStatuses ?? pod.spec?.containers ?? []).length === 0 ? "-" : null}
-                        </div>
+                        <K8sStatusBadge tone={running ? "success" : "neutral"}>{phase}</K8sStatusBadge>
                       </td>
-                      <td className="text-xs leading-5">
+                      <td className="k8s-resource-cell text-xs whitespace-nowrap font-mono">
                         <div>{resources.cpu}</div>
                         <div className="text-muted">{resources.memory}</div>
                       </td>
+                      <td className="text-muted tabular-nums">{podRestartCount(pod)}</td>
+                      <td className="text-muted text-xs whitespace-nowrap">{formatNodeAge(pod.metadata?.creationTimestamp)}</td>
                       <td>
-                        <span className={running ? "badge badge-success" : "badge badge-neutral"}>{phase}</span>
-                      </td>
-                      <td>{podRestartCount(pod)}</td>
-                      <td>{pod.metadata?.namespace || "-"}</td>
-                      <td className="font-mono text-xs">{pod.status?.podIP || "-"}</td>
-                      <td className="font-mono text-xs">{pod.status?.hostIP || nodeInternalIP(node)}</td>
-                      <td>{formatNodeAge(pod.metadata?.creationTimestamp)}</td>
-                      <td className="whitespace-nowrap">
-                        <button
-                          type="button"
-                          className="k8s-action-link"
-                          disabled={!canManage}
-                          onClick={() => void openPodYaml(pod)}
-                        >
-                          编辑
-                        </button>
-                        <span className="text-muted"> / </span>
-                        <button type="button" className="k8s-action-link" onClick={() => setMorePod(pod)}>
-                          更多
-                        </button>
+                        <div className="k8s-row-actions">
+                          <button
+                            type="button"
+                            className="btn-ghost text-sm"
+                            disabled={!canManage}
+                            onClick={() => void openPodYaml(pod)}
+                          >
+                            编辑
+                          </button>
+                          <WorkloadPodActions
+                            clusterId={clusterId}
+                            pod={pod}
+                            canManage={canManage}
+                            trigger="ghost"
+                            onOpenDetail={(target) => void openPodDetail(target)}
+                            onDeleted={reloadPods}
+                            onError={setError}
+                          />
+                        </div>
                       </td>
                     </tr>
                   );
                 })}
               {!loadingPods && pods.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={7}>
                     <K8sEmptyState variant="empty" title="该节点暂无 Pod" compact />
                   </td>
                 </tr>
@@ -384,9 +500,17 @@ export function NodeDetailView({
             </tbody>
           </table>
         </div>
-      </section>
+      </details>
 
-      <Modal nested open={Boolean(editPod)} title="编辑" size="xl" onClose={() => setEditPod(null)}>
+      <Modal
+        nested
+        open={Boolean(editPod)}
+        title={editPod?.metadata?.name ?? "编辑"}
+        description={editPod?.metadata?.namespace}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setEditPod(null)}
+      >
         {editPod ? (
           <YamlEditor
             value={editPod}
@@ -402,215 +526,24 @@ export function NodeDetailView({
 
       <Modal
         nested
-        open={Boolean(morePod)}
-        title={morePod ? `更多操作 · ${morePod.metadata?.name ?? ""}` : "更多操作"}
-        description={morePod ? `${morePod.metadata?.namespace ?? ""} / ${podPhase(morePod)}` : undefined}
-        size="md"
-        onClose={() => setMorePod(null)}
-      >
-        {morePod ? (
-          <div className="k8s-action-sheet">
-            {podContainerNames(morePod).map((container) => (
-              <button
-                key={`files-${container}`}
-                type="button"
-                className="k8s-action-sheet-item"
-                onClick={() => {
-                  setMorePod(null);
-                  setFilesTarget({ pod: morePod, container });
-                }}
-              >
-                <span className="k8s-action-sheet-label">{container} 文件浏览</span>
-                <span className="k8s-action-sheet-hint">列出、上传、下载或删除容器内文件</span>
-              </button>
-            ))}
-            {podContainerNames(morePod).map((container) => (
-              <button
-                key={`exec-${container}`}
-                type="button"
-                className="k8s-action-sheet-item"
-                disabled={!canManage}
-                onClick={() => {
-                  setMorePod(null);
-                  setStream({ pod: morePod, container, mode: "exec" });
-                }}
-              >
-                <span className="k8s-action-sheet-label">{container} 终端</span>
-                <span className="k8s-action-sheet-hint">打开交互式容器终端</span>
-              </button>
-            ))}
-            {podContainerNames(morePod).map((container) => (
-              <button
-                key={`logs-${container}`}
-                type="button"
-                className="k8s-action-sheet-item"
-                onClick={() => {
-                  setMorePod(null);
-                  setStream({ pod: morePod, container, mode: "logs" });
-                }}
-              >
-                <span className="k8s-action-sheet-label">{container} 终端日志</span>
-                <span className="k8s-action-sheet-hint">查看容器标准输出日志</span>
-              </button>
-            ))}
-            <button
-              type="button"
-              className="k8s-action-sheet-item is-danger"
-              disabled={!canManage}
-              onClick={() => {
-                const target = morePod;
-                setMorePod(null);
-                void deletePod(target);
-              }}
-            >
-              <span className="k8s-action-sheet-label">删除</span>
-              <span className="k8s-action-sheet-hint">删除该 Pod 对象</span>
-            </button>
-          </div>
-        ) : null}
-      </Modal>
-
-      <Modal nested open={Boolean(podDetail)} title={`Pod 详情 ${podDetail?.metadata?.name ?? ""}`} size="lg" onClose={() => setPodDetail(null)}>
-        <pre className="k8s-yaml-panel font-mono text-xs min-h-80 overflow-auto whitespace-pre-wrap">
-          {podDetail ? JSON.stringify(podDetail, null, 2) : ""}
-        </pre>
-      </Modal>
-
-      <Modal
-        nested
-        open={Boolean(filesTarget)}
-        title={
-          filesTarget
-            ? `Pod: ${filesTarget.pod.metadata?.name ?? ""} Container: ${filesTarget.container} 文件浏览`
-            : "文件浏览"
-        }
+        open={Boolean(podDetail)}
+        title={podDetail?.pod?.metadata?.name ?? "Pod 详情"}
+        description={podDetail?.pod?.metadata?.namespace}
         size="xl"
-        onClose={() => setFilesTarget(null)}
+        panelClassName="k8s-pod-submodal"
+        onClose={closePodDetail}
       >
-        {filesTarget ? (
-          <PodFilesBrowser
-            clusterId={clusterId}
-            pod={filesTarget.pod}
-            container={filesTarget.container}
-            canManage={canManage}
+        {podDetail?.loading || !podDetail?.pod ? (
+          <K8sLoadingState label="Pod 详情加载中…" />
+        ) : (
+          <PodDetailView
+            pod={podDetail.pod}
+            events={podDetail.events}
+            eventsError={podDetail.eventsError}
+            eventsLoading={podDetail.eventsLoading}
           />
-        ) : null}
+        )}
       </Modal>
-
-      <Modal
-        nested
-        open={Boolean(stream)}
-        title={
-          stream
-            ? stream.mode === "logs"
-              ? `终端日志 · ${stream.pod.metadata?.name}/${stream.container}`
-              : `容器组名: ${stream.pod.metadata?.name} 容器名: ${stream.container} 终端`
-            : "容器输出"
-        }
-        size={stream?.mode === "exec" ? "xl" : "lg"}
-        panelClassName={
-          stream?.mode === "exec"
-            ? terminalFullscreen
-              ? "k8s-pod-terminal-modal-fullscreen"
-              : "k8s-pod-terminal-modal"
-            : undefined
-        }
-        headerExtra={
-          stream?.mode === "exec" ? (
-            <button
-              type="button"
-              className="modal-header-action"
-              aria-label={terminalFullscreen ? "退出全屏" : "全屏"}
-              title={terminalFullscreen ? "退出全屏" : "全屏"}
-              onClick={() => setTerminalFullscreen((value) => !value)}
-            >
-              <span aria-hidden>{terminalFullscreen ? "⊙" : "⛶"}</span>
-            </button>
-          ) : undefined
-        }
-        onClose={() => {
-          setStream(null);
-          setTerminalFullscreen(false);
-        }}
-      >
-        {stream?.mode === "exec" ? (
-          <PodTerminal
-            clusterId={clusterId}
-            namespace={stream.pod.metadata?.namespace ?? ""}
-            pod={stream.pod.metadata?.name ?? ""}
-            container={stream.container}
-            canManage={canManage}
-          />
-        ) : stream ? (
-          <PodLogPanel clusterId={clusterId} pod={stream.pod} container={stream.container} />
-        ) : null}
-      </Modal>
-      {confirmDialog}
     </div>
   );
-}
-
-function PodLogPanel({
-  clusterId,
-  pod,
-  container,
-}: {
-  clusterId: string;
-  pod: PodObject;
-  container: string;
-}) {
-  const [output, setOutput] = useState<string[]>([]);
-  const [error, setError] = useState<ApiErrorInfo | null>(null);
-  const [running, setRunning] = useState(false);
-  const ns = pod.metadata?.namespace ?? "";
-  const podName = pod.metadata?.name ?? "";
-
-  async function run() {
-    if (!ns || !podName) return;
-    setRunning(true);
-    setError(null);
-    setOutput([]);
-    try {
-      const base = podOperationPath(clusterId, ns, podName, "logs");
-      const params = new URLSearchParams({ container });
-      await readSSE(`${base}?${params.toString()}`, setOutput);
-    } catch (err) {
-      setError(errorInfo(err, "读取日志失败"));
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  useEffect(() => {
-    void run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clusterId, ns, podName, container]);
-
-  return (
-    <div className="stack-md">
-      <button type="button" className="btn-secondary" disabled={running} onClick={() => void run()}>
-        {running ? "加载中…" : "刷新日志"}
-      </button>
-      <ApiErrorBanner error={error} />
-      <pre className="k8s-yaml-panel font-mono text-xs min-h-64 whitespace-pre-wrap">{output.join("\n") || "暂无输出"}</pre>
-    </div>
-  );
-}
-
-async function readSSE(url: string, setOutput: (updater: (current: string[]) => string[]) => void) {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new KubernetesApiError(await parseApiError(res));
-  if (!res.body) throw new Error("SSE 响应为空");
-  const parser = createSSEParser((event) => {
-    setOutput((current) =>
-      appendBoundedLines(current, `${event.event}: ${formatSSEPayload(event.data)}`, { maxLines: 1000, maxBytes: 1 << 20 }),
-    );
-  });
-  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    parser.push(value);
-  }
-  parser.flush();
 }

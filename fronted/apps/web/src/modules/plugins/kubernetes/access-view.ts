@@ -42,12 +42,14 @@ export function accessTabNamespaced(tab: AccessTab): boolean {
   return tab === "ServiceAccount" || tab === "Role" || tab === "RoleBinding";
 }
 
+export const ACCESS_LIST_PREVIEW = 2;
+
 export function accessTableColSpan(tab: AccessTab): number {
-  if (tab === "ServiceAccount" || tab === "Role") return 5;
-  if (tab === "RoleBinding") return 9;
-  if (tab === "ClusterRole" || tab === "PodSecurityPolicy") return 4;
-  if (tab === "ClusterRoleBinding") return 8;
-  return 5;
+  if (tab === "ServiceAccount" || tab === "Role") return 4;
+  if (tab === "RoleBinding") return 8;
+  if (tab === "ClusterRole" || tab === "PodSecurityPolicy") return 3;
+  if (tab === "ClusterRoleBinding") return 7;
+  return 4;
 }
 
 export function formatRoleRef(roleRef?: RoleRef): string {
@@ -55,9 +57,13 @@ export function formatRoleRef(roleRef?: RoleRef): string {
   return `${roleRef.kind}/${roleRef.name}`;
 }
 
+export function bindingSubjectNames(subjects: BindingSubject[] | undefined, kind: string): string[] {
+  if (!subjects?.length) return [];
+  return subjects.filter((item) => item.kind === kind).map((item) => item.name).filter(Boolean) as string[];
+}
+
 export function formatBindingSubjects(subjects: BindingSubject[] | undefined, kind: string): string {
-  if (!subjects?.length) return "-";
-  const names = subjects.filter((item) => item.kind === kind).map((item) => item.name).filter(Boolean) as string[];
+  const names = bindingSubjectNames(subjects, kind);
   return names.length ? names.join(", ") : "-";
 }
 

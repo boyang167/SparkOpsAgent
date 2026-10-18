@@ -1,17 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   K8sEmptyState,
   K8sLoadingState,
   K8sPagination,
   K8sPanelCard,
+  K8sResourceTabs,
   useK8sConfirm,
 } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "./ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "./api";
 import { CATALOG, proxyPath, type ResourceDef } from "./catalog";
+import { humanizeResourceLoadError, isCrdUnavailableError } from "./k8s-api-errors";
+import { formatNodeAge } from "./node-view";
 import { resourceCollectionUrl } from "./resource-url";
 import { YamlEditor } from "./YamlEditor";
 
@@ -53,6 +56,16 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
   const [detail, setDetail] = useState<K8sObject | null>(null);
   const { ask, dialog: confirmDialog } = useK8sConfirm();
 
+  const humanizedError = useMemo(
+    () => (error && selected ? humanizeResourceLoadError(error, selected.kind, selected.group) : null),
+    [error, selected],
+  );
+  const resourceUnavailable = selected ? isCrdUnavailableError(error, selected.kind, selected.group) : false;
+  const hasActiveFilters = keyword.trim().length > 0 || namespace.length > 0;
+  const resourceKinds = useMemo(() => resources.map((item) => item.kind), [resources]);
+  const showResourceTabs = resources.length > 1;
+  const showFilters = !resourceUnavailable;
+
   useEffect(() => {
     setResourceId(resources[0]?.id ?? "");
     setNamespace("");
@@ -89,11 +102,7 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
     } catch (err) {
       setItems([]);
       setTotal(0);
-      const info = errorInfo(err, `加载 ${selected.kind} 失败`);
-      if (info.status === 404 && selected.group === "gateway.networking.k8s.io") {
-        info.message = `Gateway API 资源 ${selected.kind} 不可用：请确认集群已安装 Gateway API CRD，且控制器正常运行。`;
-      }
-      setError(info);
+      setError(errorInfo(err, `加载 ${selected.kind} 失败`));
     } finally {
       setLoading(false);
     }
@@ -165,101 +174,168 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
     );
   }
 
+  if (!clusterId) {
+    return (
+      <K8sPanelCard>
+        <K8sEmptyState variant="no-cluster" />
+      </K8sPanelCard>
+    );
+  }
+
+  function selectResourceKind(kind: string) {
+    const next = resources.find((item) => item.kind === kind);
+    if (!next) return;
+    setResourceId(next.id);
+    setNamespace("");
+    setKeyword("");
+    setPage(1);
+    setError(null);
+  }
+
   return (
-    <K8sPanelCard>
-      <div className="k8s-toolbar-row">
-        <label className="min-w-52">
-          <span className="label">资源类型</span>
-          <select
-            className="input"
-            value={selected.id}
-            onChange={(e) => {
-              setResourceId(e.target.value);
-              setNamespace("");
-              setPage(1);
-            }}
-          >
-            {resources.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.kind}
-              </option>
-            ))}
-          </select>
-        </label>
-        {selected.namespaced ? (
-          <label className="min-w-52">
-            <span className="label">命名空间</span>
-            <select
-              className="input"
-              value={namespace}
-              onChange={(e) => {
-                setNamespace(e.target.value);
+    <K8sPanelCard className="k8s-resource-table-panel">
+      {!showResourceTabs ? (
+        <div className="k8s-resource-table-kind-label">
+          <span className="text-sm text-muted">{selected.kind}</span>
+        </div>
+      ) : null}
+
+      <div className="k8s-clusters-toolbar k8s-resource-table-toolbar">
+        <div className="k8s-clusters-toolbar-filters">
+          {showFilters && selected.namespaced ? (
+            <label className="k8s-resource-table-namespace k8s-workloads-namespace">
+              <span className="sr-only">命名空间</span>
+              <select
+                className="input"
+                value={namespace}
+                aria-label="命名空间"
+                onChange={(e) => {
+                  setNamespace(e.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">请选择命名空间</option>
+                {namespaces.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {showFilters ? (
+            <label className="projects-search-wrap">
+              <svg className="projects-search-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M9 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M13 13l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <input
+                className="projects-search-input"
+                value={keyword}
+                placeholder={`搜索${selected.kind}`}
+                aria-label="搜索资源"
+                onChange={(e) => {
+                  setKeyword(e.target.value);
+                  setPage(1);
+                }}
+              />
+            </label>
+          ) : null}
+          {showFilters && hasActiveFilters ? (
+            <button
+              type="button"
+              className="btn-secondary projects-reset-btn"
+              onClick={() => {
+                setNamespace("");
+                setKeyword("");
                 setPage(1);
               }}
             >
-              <option value="">请选择命名空间</option>
-              {namespaces.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        <label className="min-w-64 flex-1">
-          <span className="label">关键词</span>
-          <input
-            className="input"
-            value={keyword}
-            placeholder="名称、命名空间或 YAML/JSON 内容"
-            onChange={(e) => {
-              setKeyword(e.target.value);
-              setPage(1);
-            }}
-          />
-        </label>
-        <button type="button" className="btn-secondary" disabled={loading || !clusterId} onClick={() => void load()}>
-          {loading ? "加载中…" : "刷新"}
-        </button>
+              重置
+            </button>
+          ) : null}
+        </div>
+        <div className="k8s-toolbar-actions">
+          {showFilters && !loading && total > 0 ? (
+            <span className="k8s-clusters-count" role="status">
+              共 {total} 个{selected.kind}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="btn-secondary k8s-clusters-refresh-btn"
+            disabled={loading}
+            aria-label="刷新列表"
+            onClick={() => void load()}
+          >
+            ↻
+          </button>
+        </div>
       </div>
 
-      <ApiErrorBanner error={error} />
+      {showResourceTabs ? (
+        <K8sResourceTabs
+          tabs={resourceKinds}
+          active={selected.kind}
+          ariaLabel="资源类型"
+          onChange={selectResourceKind}
+        />
+      ) : null}
 
-      {!clusterId ? (
-        <K8sEmptyState variant="no-cluster" />
-      ) : selected.namespaced && !namespace ? (
+      {selected.namespaced && !namespace && !resourceUnavailable ? (
         <K8sEmptyState
-          variant="custom"
+          compact
           title="请选择命名空间"
           description={`选择命名空间后即可加载 ${selected.kind} 列表。`}
         />
-      ) : loading ? (
-        <K8sLoadingState label={`加载 ${selected.kind} 中…`} />
+      ) : null}
+
+      {resourceUnavailable && humanizedError ? (
+        <div className="k8s-resource-unavailable">
+          <K8sEmptyState title={humanizedError.message} description={humanizedError.hint} />
+        </div>
+      ) : null}
+
+      {!resourceUnavailable && error ? <ApiErrorBanner error={error} /> : null}
+
+      {selected.namespaced && !namespace ? null : resourceUnavailable ? null : loading ? (
+        <K8sLoadingState compact label={`加载 ${selected.kind} 中…`} />
       ) : (
         <>
-          <div className="table-wrap">
-            <table className="data-table">
+          <div className="table-wrap k8s-resource-table">
+            <table className="data-table text-sm">
               <thead>
                 <tr>
                   {selected.columns.map((column) => (
                     <th key={column.key}>{column.title}</th>
                   ))}
-                  <th>操作</th>
+                  <th className="w-28">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {items.map((item, idx) => (
                   <tr key={`${item.metadata?.namespace ?? "_"}-${item.metadata?.name ?? idx}`}>
                     {selected.columns.map((column) => (
-                      <td key={column.key}>{formatCell(valueAtPath(item, column.key))}</td>
+                      <td
+                        key={column.key}
+                        className={
+                          column.key === "metadata.name"
+                            ? "font-medium"
+                            : column.key === "metadata.namespace" || column.key.endsWith("creationTimestamp")
+                              ? "text-muted"
+                              : undefined
+                        }
+                      >
+                        {formatCell(valueAtPath(item, column.key), column.key)}
+                      </td>
                     ))}
                     <td>
-                      <div className="flex flex-wrap gap-2">
-                        <button type="button" className="btn-secondary text-xs" onClick={() => void openDetail(item)}>
-                          详情/YAML
+                      <div className="k8s-row-actions">
+                        <button type="button" className="btn-ghost text-sm" onClick={() => void openDetail(item)}>
+                          YAML
                         </button>
                         {canManage ? (
-                          <button type="button" className="btn-secondary text-xs" onClick={() => void deleteItem(item)}>
+                          <button type="button" className="btn-ghost text-sm is-danger" onClick={() => void deleteItem(item)}>
                             删除
                           </button>
                         ) : null}
@@ -270,7 +346,16 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
                 {items.length === 0 ? (
                   <tr>
                     <td colSpan={selected.columns.length + 1}>
-                      <K8sEmptyState variant="empty" compact />
+                      <K8sEmptyState
+                        variant="empty"
+                        compact
+                        title={`暂无 ${selected.kind}`}
+                        description={
+                          hasActiveFilters
+                            ? "没有符合筛选条件的资源，可调整命名空间或搜索词。"
+                            : `当前范围下没有 ${selected.kind} 资源。`
+                        }
+                      />
                     </td>
                   </tr>
                 ) : null}
@@ -289,10 +374,18 @@ export function ResourceTable({ clusterId, resources, canManage }: ResourceTable
         </>
       )}
 
-      <Modal open={Boolean(detail)} title="资源详情" size="xl" onClose={() => setDetail(null)}>
+      <Modal
+        open={Boolean(detail)}
+        title={detail?.metadata?.name ? `YAML · ${detail.metadata.name}` : "资源详情"}
+        description={
+          detail ? `${selected.kind}${detail.metadata?.namespace ? ` · ${detail.metadata.namespace}` : ""}` : undefined
+        }
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setDetail(null)}
+      >
         {detail ? (
           <YamlEditor
-            title={`${selected.kind} ${detail.metadata?.namespace ? `${detail.metadata.namespace}/` : ""}${detail.metadata?.name ?? ""}`}
             value={detail}
             canSave={canManage}
             saving={saving}
@@ -315,9 +408,11 @@ function valueAtPath(item: K8sObject, path: string): unknown {
   }, item);
 }
 
-function formatCell(value: unknown): string {
+function formatCell(value: unknown, key: string): string {
   if (value === undefined || value === null || value === "") return "-";
+  if (key.endsWith("creationTimestamp") && typeof value === "string") return formatNodeAge(value);
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return JSON.stringify(value);
+  const json = JSON.stringify(value);
+  return json.length > 48 ? `${json.slice(0, 45)}…` : json;
 }

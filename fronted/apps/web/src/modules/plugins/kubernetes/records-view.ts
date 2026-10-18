@@ -1,3 +1,5 @@
+import { truncateClusterId } from "./cluster-view";
+
 export type RecordItem = {
   id: string;
   clusterId: string;
@@ -19,7 +21,15 @@ export type RecordFrame = {
   data: string;
 };
 
-export const RECORDS_TABLE_COL_SPAN = 9;
+export const RECORDS_TABLE_COL_SPAN = 8;
+
+export function resolveClusterLabel(clusterId: string, namesById: ReadonlyMap<string, string>): { label: string; title: string } {
+  const id = clusterId.trim();
+  if (!id) return { label: "-", title: "" };
+  const name = namesById.get(id);
+  if (name) return { label: name, title: id };
+  return { label: truncateClusterId(id), title: id };
+}
 
 export function parseRecordObjectPath(objectPath?: string): ParsedRecordTarget {
   const empty = { namespace: "-", pod: "-", container: "-" };

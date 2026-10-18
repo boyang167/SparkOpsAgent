@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   accessTabLabel,
   accessTabNamespaced,
+  bindingSubjectNames,
   emptyAccessTemplate,
   formatBindingSubjects,
   formatRoleRef,
@@ -23,15 +24,12 @@ describe("access view", () => {
   });
 
   it("formats binding subjects", () => {
-    expect(
-      formatBindingSubjects(
-        [
-          { kind: "User", name: "alice" },
-          { kind: "Group", name: "devs" },
-        ],
-        "User",
-      ),
-    ).toBe("alice");
+    const subjects = [
+      { kind: "User", name: "alice" },
+      { kind: "Group", name: "devs" },
+    ];
+    expect(formatBindingSubjects(subjects, "User")).toBe("alice");
+    expect(bindingSubjectNames(subjects, "Group")).toEqual(["devs"]);
   });
 
   it("creates role binding template", () => {

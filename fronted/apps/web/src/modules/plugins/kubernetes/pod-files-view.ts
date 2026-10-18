@@ -39,6 +39,14 @@ export function podFilePathFromBreadcrumbs(segments: string[]): string {
   return `/${segments.join("/")}`;
 }
 
+export function normalizePodFilePath(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed || trimmed === "/") return "/";
+  const withRoot = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  const collapsed = withRoot.replace(/\/+/g, "/").replace(/\/+$/, "");
+  return collapsed || "/";
+}
+
 function parseLsLine(line: string): PodFileEntry | null {
   const parts = line.trim().split(/\s+/);
   if (parts.length < 9) return null;

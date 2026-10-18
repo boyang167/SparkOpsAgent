@@ -31,6 +31,15 @@ type WorkspaceMember = {
 
 const COMMON_ROLES = ["view", "edit", "admin", "cluster-admin"] as const;
 
+function SearchIcon() {
+  return (
+    <svg className="projects-search-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M9 3.5a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11Z" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M13.5 13.5 17 17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function usersURL(clusterId: string, memberId?: string) {
   const base = `/api/bff/v1/plugins/kubernetes/clusters/${encodeURIComponent(clusterId)}/users`;
   return memberId ? `${base}/${encodeURIComponent(memberId)}` : base;
@@ -58,10 +67,30 @@ function RoleChipPicker({
   const [query, setQuery] = useState("");
   const catalog = roles.length ? roles : [...COMMON_ROLES];
   const common = COMMON_ROLES.filter((name) => catalog.includes(name));
-  const filtered = catalog.filter((name) => name.toLowerCase().includes(query.trim().toLowerCase()));
+  const q = query.trim().toLowerCase();
+  const filtered = q ? catalog.filter((name) => name.toLowerCase().includes(q)) : [];
 
   return (
-    <div className="stack-sm">
+    <div className="k8s-grant-form-section">
+      {selected.length > 0 ? (
+        <div className="k8s-selected-tags">
+          {selected.map((name) => (
+            <span key={name} className="k8s-selected-tag">
+              {name}
+              {!disabled ? (
+                <button
+                  type="button"
+                  className="k8s-selected-tag-remove"
+                  aria-label={`移除 ${name}`}
+                  onClick={() => onChange(selected.filter((item) => item !== name))}
+                >
+                  ×
+                </button>
+              ) : null}
+            </span>
+          ))}
+        </div>
+      ) : null}
       <div className="flex flex-wrap gap-1.5">
         {common.map((name) => (
           <button
@@ -75,49 +104,35 @@ function RoleChipPicker({
           </button>
         ))}
       </div>
-      <input
-        className="input"
-        type="search"
-        placeholder="搜索完整 ClusterRole…"
-        value={query}
-        disabled={disabled}
-        onChange={(e) => setQuery(e.target.value)}
-      />
-      <div className="k8s-role-list">
-        {filtered.length === 0 ? <p className="text-sm text-muted">无匹配角色</p> : null}
-        {filtered.map((name) => (
-          <label key={name} className="flex items-center gap-2 py-1 text-sm">
-            <input
-              type="checkbox"
-              checked={selected.includes(name)}
-              disabled={disabled}
-              onChange={() => onChange(toggleValue(selected, name))}
-            />
-            <span className="font-mono text-xs">{name}</span>
-          </label>
-        ))}
-      </div>
-      {selected.length > 0 ? (
-        <div className="k8s-role-badges">
-          {selected.map((name) => (
-            <span key={name} className="badge badge-primary">
-              {name}
-              {!disabled ? (
-                <button
-                  type="button"
-                  className="ml-1 border-0 bg-transparent p-0 text-xs leading-none"
-                  aria-label={`移除 ${name}`}
-                  onClick={() => onChange(selected.filter((item) => item !== name))}
-                >
-                  ×
-                </button>
-              ) : null}
-            </span>
+      <label className="projects-search-wrap">
+        <SearchIcon />
+        <input
+          className="projects-search-input"
+          type="search"
+          placeholder="搜索角色"
+          value={query}
+          disabled={disabled}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </label>
+      {q ? (
+        <div className="k8s-picker-list">
+          {filtered.length === 0 ? <p className="text-xs text-muted px-1 py-2">无匹配</p> : null}
+          {filtered.map((name) => (
+            <label key={name} className="k8s-picker-row">
+              <input
+                type="checkbox"
+                checked={selected.includes(name)}
+                disabled={disabled}
+                onChange={() => onChange(toggleValue(selected, name))}
+              />
+              <span className="k8s-picker-row-label font-mono text-xs truncate" title={name}>
+                {name}
+              </span>
+            </label>
           ))}
         </div>
-      ) : (
-        <p className="text-xs text-muted">尚未选择角色</p>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -126,28 +141,12 @@ function GrantRoleSummary({ grant }: { grant: ClusterUserGrant }) {
   const nsLabels = (grant.namespace_roles ?? []).flatMap((item) =>
     (item.roles ?? []).map((role) => `${item.namespace}:${role}`),
   );
+  const clusterText = (grant.cluster_roles ?? []).join("、") || "—";
+  const nsText = nsLabels.join("、") || "—";
   return (
     <>
-      <td>
-        <div className="k8s-role-badges">
-          {(grant.cluster_roles ?? []).length === 0 ? <span className="text-muted">-</span> : null}
-          {(grant.cluster_roles ?? []).map((role) => (
-            <span key={role} className="badge badge-primary">
-              {role}
-            </span>
-          ))}
-        </div>
-      </td>
-      <td>
-        <div className="k8s-role-badges">
-          {nsLabels.length === 0 ? <span className="text-muted">-</span> : null}
-          {nsLabels.map((label) => (
-            <span key={label} className="badge badge-neutral">
-              {label}
-            </span>
-          ))}
-        </div>
-      </td>
+      <td className="text-xs text-muted font-mono truncate max-w-[10rem]" title={clusterText}>{clusterText}</td>
+      <td className="text-xs text-muted font-mono truncate max-w-[10rem]" title={nsText}>{nsText}</td>
     </>
   );
 }
@@ -330,37 +329,47 @@ export function ClusterAuthorizeUsers({
   }
 
   return (
-    <div className="stack-md">
+    <div className="stack-sm">
       <ApiErrorBanner error={error} />
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn" disabled={!canManage} onClick={openCreate}>
-          添加
-        </button>
-        <button
-          type="button"
-          className="btn-secondary"
-          disabled={!canManage || selected.length === 0}
-          onClick={() => void remove(selected)}
-        >
-          删除
-        </button>
-        <button
-          type="button"
-          className="btn-secondary"
-          disabled={loading}
-          onClick={() => {
-            setError(null);
-            setLoading(true);
-            void load()
-              .catch((err) => setError(errorInfo(err, "刷新失败")))
-              .finally(() => setLoading(false));
-          }}
-        >
-          刷新
-        </button>
+      <div className="k8s-dialog-toolbar">
+        <span className="text-xs text-muted">{loading ? "…" : `${grants.length} 人`}</span>
+        <div className="k8s-dialog-toolbar-actions">
+          {canManage && selected.length > 0 ? (
+            <button type="button" className="btn-secondary text-sm" onClick={() => void remove(selected)}>
+              删除 ({selected.length})
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="btn-secondary text-sm"
+            disabled={loading}
+            aria-label="刷新"
+            onClick={() => {
+              setError(null);
+              setLoading(true);
+              void load()
+                .catch((err) => setError(errorInfo(err, "刷新失败")))
+                .finally(() => setLoading(false));
+            }}
+          >
+            ↻
+          </button>
+          {canManage ? (
+            <button type="button" className="btn text-sm" onClick={openCreate}>
+              添加
+            </button>
+          ) : null}
+        </div>
       </div>
-      <div className="table-wrap">
+      <div className="table-wrap k8s-dialog-table">
         <table className="data-table text-sm">
+          <colgroup>
+            <col style={{ width: "2.25rem" }} />
+            <col />
+            <col style={{ width: "28%" }} />
+            <col style={{ width: "28%" }} />
+            <col style={{ width: "8.5rem" }} />
+          </colgroup>
           <thead>
             <tr>
               <th>
@@ -368,19 +377,19 @@ export function ClusterAuthorizeUsers({
                   type="checkbox"
                   checked={grants.length > 0 && selected.length === grants.length}
                   onChange={(e) => setSelected(e.target.checked ? grants.map((item) => item.member_id) : [])}
+                  aria-label="全选"
                 />
               </th>
-              <th>英文名称</th>
-              <th>名称</th>
+              <th>成员</th>
               <th>集群角色</th>
               <th>命名空间</th>
-              <th>操作</th>
+              <th className="col-actions">操作</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={5}>
                   <K8sLoadingState compact />
                 </td>
               </tr>
@@ -399,45 +408,47 @@ export function ClusterAuthorizeUsers({
                             : current.filter((id) => id !== item.member_id),
                         )
                       }
+                      aria-label={`选择 ${item.display_name || item.email}`}
                     />
                   </td>
-                  <td>{item.email || "-"}</td>
-                  <td>{item.display_name || "-"}</td>
+                  <td className="min-w-0">
+                    <div className="k8s-member-cell">
+                      <span className="k8s-member-name truncate">{item.display_name || item.email || "—"}</span>
+                      {item.display_name && item.email ? (
+                        <span className="text-xs text-muted truncate">{item.email}</span>
+                      ) : null}
+                    </div>
+                  </td>
                   <GrantRoleSummary grant={item} />
-                  <td className="whitespace-nowrap">
-                    <button
-                      type="button"
-                      className="k8s-action-link"
-                      disabled={!canManage || issuing}
-                      onClick={() => void issueKubeconfig(item)}
-                    >
-                      凭据
-                    </button>
-                    <span className="text-muted"> / </span>
-                    <button
-                      type="button"
-                      className="k8s-action-link"
-                      disabled={!canManage}
-                      onClick={() => openEdit(item)}
-                    >
-                      变更
-                    </button>
-                    <span className="text-muted"> / </span>
-                    <button
-                      type="button"
-                      className="k8s-action-link"
-                      disabled={!canManage}
-                      onClick={() => void remove([item.member_id])}
-                    >
-                      删除
-                    </button>
+                  <td className="col-actions">
+                    <div className="k8s-row-actions">
+                      <button
+                        type="button"
+                        className="btn-ghost text-sm"
+                        disabled={!canManage || issuing}
+                        onClick={() => void issueKubeconfig(item)}
+                      >
+                        凭据
+                      </button>
+                      <button type="button" className="btn-ghost text-sm" disabled={!canManage} onClick={() => openEdit(item)}>
+                        变更
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ghost text-sm"
+                        disabled={!canManage}
+                        onClick={() => void remove([item.member_id])}
+                      >
+                        删除
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
             {!loading && grants.length === 0 ? (
               <tr>
-                <td colSpan={6}>
-                  <K8sEmptyState variant="empty" title="暂无已授权成员" description="点击「添加」为工作区成员授予集群访问。" compact />
+                <td colSpan={5}>
+                  <K8sEmptyState variant="empty" title="暂无成员" compact />
                 </td>
               </tr>
             ) : null}
@@ -449,8 +460,8 @@ export function ClusterAuthorizeUsers({
         nested
         open={showForm}
         size="lg"
-        title={editing ? "变更用户授权" : "添加用户"}
-        description="集群角色覆盖全集群；命名空间角色仅在所选命名空间生效（RoleRef 仍为 ClusterRole）。"
+        panelClassName="k8s-cluster-form-modal"
+        title={editing ? "变更授权" : "添加成员"}
         onClose={closeForm}
         footer={
           <div className="modal-footer-actions">
@@ -458,65 +469,83 @@ export function ClusterAuthorizeUsers({
               取消
             </button>
             <button type="button" className="btn" disabled={!canManage || saving} onClick={() => void save()}>
-              {saving ? "保存中…" : "确定"}
+              {saving ? "保存中…" : "保存"}
             </button>
           </div>
         }
       >
-        <div className="stack-md">
+        <div className="k8s-cluster-form">
           <ApiErrorBanner error={formError} />
           {editing ? (
-            <div>
-              <span className="label">成员</span>
-              <p className="text-sm">
-                {editing.email} / {editing.display_name}
-              </p>
-            </div>
-          ) : (
-            <div className="stack-sm">
-              <span className="label">工作区成员</span>
-              <input
-                className="input"
-                type="search"
-                placeholder="按邮箱或名称搜索…"
-                value={memberQuery}
-                onChange={(e) => setMemberQuery(e.target.value)}
-              />
-              <div className="k8s-role-list">
-                {addableMembers.length === 0 ? (
-                  <p className="text-sm text-muted">没有可添加的工作区成员</p>
+            <section className="k8s-cluster-form-section">
+              <header className="k8s-cluster-form-section-head">
+                <h3 className="k8s-cluster-form-section-title">成员</h3>
+              </header>
+              <div className="k8s-member-cell px-0.5">
+                <span className="k8s-member-name">{editing.display_name || editing.email}</span>
+                {editing.display_name && editing.email ? (
+                  <span className="text-xs text-muted">{editing.email}</span>
                 ) : null}
-                {addableMembers.map((item) => (
-                  <label key={item.member_id} className="flex items-center gap-2 py-1 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={pickedMembers.includes(item.member_id)}
-                      onChange={() => setPickedMembers((current) => toggleValue(current, item.member_id))}
-                    />
-                    <span>
-                      {item.email}
-                      <span className="text-muted"> / {item.display_name}</span>
-                    </span>
-                  </label>
-                ))}
               </div>
-              {pickedMembers.length > 0 ? (
-                <p className="text-xs text-muted">已选 {pickedMembers.length} 人</p>
-              ) : null}
-            </div>
+            </section>
+          ) : (
+            <section className="k8s-cluster-form-section">
+              <header className="k8s-cluster-form-section-head">
+                <h3 className="k8s-cluster-form-section-title">成员</h3>
+                {pickedMembers.length > 0 ? (
+                  <span className="k8s-cluster-form-section-hint">已选 {pickedMembers.length}</span>
+                ) : null}
+              </header>
+              <div className="k8s-cluster-form-section-body stack-sm">
+                <label className="projects-search-wrap">
+                  <SearchIcon />
+                  <input
+                    className="projects-search-input"
+                    type="search"
+                    placeholder="搜索"
+                    value={memberQuery}
+                    onChange={(e) => setMemberQuery(e.target.value)}
+                  />
+                </label>
+                <div className="k8s-picker-list">
+                  {addableMembers.length === 0 ? (
+                    <p className="text-xs text-muted px-1 py-2">无可添加成员</p>
+                  ) : null}
+                  {addableMembers.map((item) => (
+                    <label key={item.member_id} className="k8s-picker-row">
+                      <input
+                        type="checkbox"
+                        checked={pickedMembers.includes(item.member_id)}
+                        onChange={() => setPickedMembers((current) => toggleValue(current, item.member_id))}
+                      />
+                      <span className="k8s-picker-row-label">
+                        {item.display_name || item.email}
+                        {item.display_name && item.email ? (
+                          <span className="k8s-picker-row-meta">{item.email}</span>
+                        ) : null}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </section>
           )}
 
-          <div className="stack-sm">
-            <span className="label">集群角色</span>
-            <RoleChipPicker roles={roles} selected={clusterRoles} onChange={setClusterRoles} disabled={!canManage} />
-          </div>
+          <section className="k8s-cluster-form-section">
+            <header className="k8s-cluster-form-section-head">
+              <h3 className="k8s-cluster-form-section-title">集群角色</h3>
+            </header>
+            <div className="k8s-cluster-form-section-body">
+              <RoleChipPicker roles={roles} selected={clusterRoles} onChange={setClusterRoles} disabled={!canManage} />
+            </div>
+          </section>
 
-          <div className="stack-sm">
-            <div className="flex items-center justify-between gap-2">
-              <span className="label">命名空间角色</span>
+          <section className="k8s-cluster-form-section">
+            <header className="k8s-cluster-form-section-head k8s-cluster-form-section-head-row">
+              <h3 className="k8s-cluster-form-section-title">命名空间角色</h3>
               <button
                 type="button"
-                className="k8s-action-link"
+                className="btn-ghost text-sm shrink-0"
                 disabled={!canManage}
                 onClick={() =>
                   setNamespaceRoles((current) => [
@@ -525,48 +554,47 @@ export function ClusterAuthorizeUsers({
                   ])
                 }
               >
-                添加一组
+                添加
               </button>
-            </div>
-            {namespaceRoles.length === 0 ? (
-              <p className="text-xs text-muted">可选。仅需命名空间内权限时再添加。</p>
-            ) : null}
-            {namespaceRoles.map((row, index) => (
-              <div key={`${row.namespace}-${index}`} className="stack-sm rounded border p-3">
-                <div className="flex flex-wrap items-end gap-2">
-                  <label className="min-w-[10rem] flex-1">
-                    <span className="label">命名空间</span>
-                    <select
-                      className="input"
-                      value={row.namespace}
+            </header>
+            {namespaceRoles.length > 0 ? (
+              <div className="k8s-cluster-form-section-body stack-sm">
+                {namespaceRoles.map((row, index) => (
+                  <div key={`${row.namespace}-${index}`} className="stack-sm k8s-form-subsection">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        className="input text-sm flex-1 min-w-[8rem]"
+                        value={row.namespace}
+                        disabled={!canManage}
+                        aria-label="命名空间"
+                        onChange={(e) => updateNamespaceRow(index, { namespace: e.target.value })}
+                      >
+                        {(namespaces.length ? namespaces : ["default"]).map((ns) => (
+                          <option key={ns} value={ns}>
+                            {ns}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="btn-ghost text-sm"
+                        disabled={!canManage}
+                        onClick={() => setNamespaceRoles((current) => current.filter((_, i) => i !== index))}
+                      >
+                        移除
+                      </button>
+                    </div>
+                    <RoleChipPicker
+                      roles={roles}
+                      selected={row.roles}
                       disabled={!canManage}
-                      onChange={(e) => updateNamespaceRow(index, { namespace: e.target.value })}
-                    >
-                      {(namespaces.length ? namespaces : ["default"]).map((ns) => (
-                        <option key={ns} value={ns}>
-                          {ns}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    className="k8s-action-link mb-2"
-                    disabled={!canManage}
-                    onClick={() => setNamespaceRoles((current) => current.filter((_, i) => i !== index))}
-                  >
-                    移除
-                  </button>
-                </div>
-                <RoleChipPicker
-                  roles={roles}
-                  selected={row.roles}
-                  disabled={!canManage}
-                  onChange={(next) => updateNamespaceRow(index, { roles: next })}
-                />
+                      onChange={(next) => updateNamespaceRow(index, { roles: next })}
+                    />
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            ) : null}
+          </section>
         </div>
       </Modal>
 
@@ -574,12 +602,8 @@ export function ClusterAuthorizeUsers({
         nested
         open={Boolean(credential)}
         size="lg"
-        title={credential ? `用户凭据 · ${credential.email}` : "用户凭据"}
-        description={
-          credential
-            ? `ServiceAccount Token，有效期至 ${credential.expires_at || "24 小时后"}。Token 不会入库，关闭后需重新签发。`
-            : undefined
-        }
+        title={credential ? `凭据 · ${credential.email}` : "凭据"}
+        description={credential?.expires_at ? `有效期至 ${credential.expires_at}` : undefined}
         onClose={() => setCredential(null)}
         footer={
           <div className="modal-footer-actions">

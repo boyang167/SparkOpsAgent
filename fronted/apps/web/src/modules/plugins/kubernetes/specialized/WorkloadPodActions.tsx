@@ -1,12 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useK8sConfirm } from "@/components/k8s";
+import {
+  K8sActionIcons,
+  K8sActionSheet,
+  K8sActionSheetGroup,
+  K8sActionSheetItem,
+  useK8sConfirm,
+} from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, KubernetesApiError, parseApiError, type ApiErrorInfo } from "../api";
 import { CATALOG, proxyPath } from "../catalog";
-import { podContainerNames, type PodObject } from "../node-view";
+import { podContainerNames, podPhase, type PodObject } from "../node-view";
 import { podOperationPath } from "../operations";
 import { appendBoundedLines, createSSEParser, formatSSEPayload } from "../sse";
 import { PodTerminal } from "./PodTerminal";
@@ -28,6 +34,8 @@ export function WorkloadPodActions({
   onOpenDetail,
   onDeleted,
   onError,
+  trigger = "link",
+  showDetail = true,
 }: {
   clusterId: string;
   pod: PodObject;
@@ -35,32 +43,36 @@ export function WorkloadPodActions({
   onOpenDetail: (pod: PodObject) => void;
   onDeleted: () => Promise<void> | void;
   onError: (error: ApiErrorInfo) => void;
+  trigger?: "link" | "ghost";
+  showDetail?: boolean;
 }) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [view, setView] = useState<PodActionView | null>(null);
   const [terminalFullscreen, setTerminalFullscreen] = useState(false);
   const { ask, dialog: confirmDialog } = useK8sConfirm();
-  const title = `${pod.metadata?.namespace ?? "-"}/${pod.metadata?.name ?? "-"}`;
+  const podName = pod.metadata?.name ?? "-";
+  const namespace = pod.metadata?.namespace ?? "-";
+  const title = `${namespace}/${podName}`;
 
   useEffect(() => {
     setSheetOpen(false);
     setView(null);
     setTerminalFullscreen(false);
-  }, [clusterId, pod.metadata?.namespace, pod.metadata?.name]);
+  }, [clusterId, namespace, podName]);
 
   async function deletePod() {
-    const namespace = pod.metadata?.namespace;
+    const ns = pod.metadata?.namespace;
     const name = pod.metadata?.name;
-    if (!canManage || !podDef || !namespace || !name) return;
+    if (!canManage || !podDef || !ns || !name) return;
     const ok = await ask({
       title: "删除 Pod",
-      description: `确定删除 Pod「${namespace}/${name}」？`,
+      description: `确定删除 Pod「${ns}/${name}」？`,
       confirmLabel: "删除",
       danger: true,
     });
     if (!ok) return;
     try {
-      await k8sFetch(proxyPath(clusterId, podDef, namespace, name), { method: "DELETE" });
+      await k8sFetch(proxyPath(clusterId, podDef, ns, name), { method: "DELETE" });
       await onDeleted();
     } catch (err) {
       onError(errorInfo(err, "删除 Pod 失败"));
@@ -68,55 +80,91 @@ export function WorkloadPodActions({
   }
 
   const containers = podContainerNames(pod);
+  const triggerClass = trigger === "ghost" ? "btn-ghost text-sm" : "k8s-action-link";
 
   return (
     <>
-      <button type="button" className="k8s-action-link" onClick={() => setSheetOpen(true)}>
+      <button type="button" className={triggerClass} onClick={() => setSheetOpen(true)}>
         更多
       </button>
 
-      <Modal nested open={sheetOpen} title={`更多操作 · ${pod.metadata?.name ?? ""}`} description={title} size="md" onClose={() => setSheetOpen(false)}>
-        <div className="k8s-action-sheet">
-          <ActionItem label="详情" hint="查看 Pod 详情" onClick={openDetail} />
+      <Modal
+        nested
+        open={sheetOpen}
+        title={podName}
+        description={`${namespace} · ${podPhase(pod)}`}
+        size="sm"
+        panelClassName="k8s-cluster-dialog-modal k8s-action-sheet-modal"
+        onClose={() => setSheetOpen(false)}
+      >
+        <K8sActionSheet>
+          {showDetail ? (
+            <K8sActionSheetGroup title="查看">
+              <K8sActionSheetItem
+                label="详情"
+                icon={K8sActionIcons.detail}
+                onClick={() => {
+                  setSheetOpen(false);
+                  onOpenDetail(pod);
+                }}
+              />
+              <K8sActionSheetItem
+                label="监控"
+                icon={K8sActionIcons.monitor}
+                onClick={() => openView({ type: "monitor" })}
+              />
+            </K8sActionSheetGroup>
+          ) : (
+            <K8sActionSheetGroup>
+              <K8sActionSheetItem
+                label="监控"
+                icon={K8sActionIcons.monitor}
+                onClick={() => openView({ type: "monitor" })}
+              />
+            </K8sActionSheetGroup>
+          )}
           {containers.map((container) => (
-            <ActionItem
-              key={`files-${container}`}
-              label={`${container} 文件浏览`}
-              hint="列出、上传、下载或删除容器内文件"
-              onClick={() => openView({ type: "files", container })}
-            />
+            <K8sActionSheetGroup key={container} title={container}>
+              <K8sActionSheetItem
+                label="文件"
+                onClick={() => openView({ type: "files", container })}
+              />
+              {canManage ? (
+                <K8sActionSheetItem
+                  label="终端"
+                  icon={K8sActionIcons.shell}
+                  onClick={() => openView({ type: "terminal", container })}
+                />
+              ) : null}
+              <K8sActionSheetItem
+                label="日志"
+                onClick={() => openView({ type: "logs", container })}
+              />
+            </K8sActionSheetGroup>
           ))}
-          <ActionItem label="监控" hint="查看 Pod CPU / 内存指标" onClick={() => openView({ type: "monitor" })} />
-          {containers.map((container) => (
-            <ActionItem
-              key={`terminal-${container}`}
-              label={`${container} 终端`}
-              hint="打开交互式容器终端"
-              disabled={!canManage}
-              onClick={() => openView({ type: "terminal", container })}
-            />
-          ))}
-          {containers.map((container) => (
-            <ActionItem
-              key={`logs-${container}`}
-              label={`${container} 终端日志`}
-              hint="查看容器标准输出日志"
-              onClick={() => openView({ type: "logs", container })}
-            />
-          ))}
-          <ActionItem label="删除" hint="删除该 Pod 对象" disabled={!canManage} danger onClick={() => void deletePod()} />
-        </div>
+          {canManage ? (
+            <K8sActionSheetGroup danger>
+              <K8sActionSheetItem
+                label="删除 Pod"
+                icon={K8sActionIcons.delete}
+                danger
+                onClick={() => {
+                  setSheetOpen(false);
+                  void deletePod();
+                }}
+              />
+            </K8sActionSheetGroup>
+          ) : null}
+        </K8sActionSheet>
       </Modal>
 
       <Modal
         nested
         open={view?.type === "files"}
-        title={
-          view?.type === "files"
-            ? `Pod: ${pod.metadata?.name ?? ""} Container: ${view.container} 文件浏览`
-            : "文件浏览"
-        }
+        title={view?.type === "files" ? "文件浏览" : "文件浏览"}
+        description={view?.type === "files" ? `${title} · ${view.container}` : undefined}
         size="xl"
+        panelClassName="k8s-pod-submodal"
         onClose={() => setView(null)}
       >
         {view?.type === "files" ? (
@@ -124,21 +172,30 @@ export function WorkloadPodActions({
         ) : null}
       </Modal>
 
-      <Modal nested open={view?.type === "monitor"} title={`Pod 监控 ${pod.metadata?.name ?? ""}`} size="lg" onClose={() => setView(null)}>
+      <Modal
+        nested
+        open={view?.type === "monitor"}
+        title="监控"
+        description={title}
+        size="lg"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setView(null)}
+      >
         {view?.type === "monitor" ? <PodMetricsPanel clusterId={clusterId} pod={pod} /> : null}
       </Modal>
 
       <Modal
         nested
         open={view?.type === "terminal"}
-        title={view?.type === "terminal" ? `容器组名: ${pod.metadata?.name} 容器名: ${view.container} 终端` : "容器终端"}
+        title="终端"
+        description={view?.type === "terminal" ? `${title} · ${view.container}` : undefined}
         size="xl"
         panelClassName={
           view?.type === "terminal"
             ? terminalFullscreen
               ? "k8s-pod-terminal-modal-fullscreen"
               : "k8s-pod-terminal-modal"
-            : undefined
+            : "k8s-pod-submodal"
         }
         headerExtra={
           view?.type === "terminal" ? (
@@ -172,8 +229,10 @@ export function WorkloadPodActions({
       <Modal
         nested
         open={view?.type === "logs"}
-        title={view?.type === "logs" ? `终端日志 · ${pod.metadata?.name}/${view.container}` : "终端日志"}
+        title="日志"
+        description={view?.type === "logs" ? `${title} · ${view.container}` : undefined}
         size="lg"
+        panelClassName="k8s-pod-submodal"
         onClose={() => setView(null)}
       >
         {view?.type === "logs" ? <PodLogPanel clusterId={clusterId} pod={pod} container={view.container} /> : null}
@@ -186,37 +245,6 @@ export function WorkloadPodActions({
     setSheetOpen(false);
     setView(next);
   }
-
-  function openDetail() {
-    setSheetOpen(false);
-    onOpenDetail(pod);
-  }
-}
-
-function ActionItem({
-  label,
-  hint,
-  disabled,
-  danger,
-  onClick,
-}: {
-  label: string;
-  hint: string;
-  disabled?: boolean;
-  danger?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={danger ? "k8s-action-sheet-item is-danger" : "k8s-action-sheet-item"}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      <span className="k8s-action-sheet-label">{label}</span>
-      <span className="k8s-action-sheet-hint">{hint}</span>
-    </button>
-  );
 }
 
 function PodLogPanel({ clusterId, pod, container }: { clusterId: string; pod: PodObject; container: string }) {
@@ -255,12 +283,15 @@ function PodLogPanel({ clusterId, pod, container }: { clusterId: string; pod: Po
   }
 
   return (
-    <div className="stack-md">
-      <button type="button" className="btn-secondary" disabled={running} onClick={() => void run()}>
-        {running ? "加载中…" : "刷新日志"}
-      </button>
+    <div className="k8s-stream-view stack-sm">
+      <div className="k8s-stream-toolbar">
+        <span className="text-sm text-muted">{running ? "接收中…" : "实时日志"}</span>
+        <button type="button" className="btn-secondary text-sm" disabled={running} onClick={() => void run()}>
+          刷新
+        </button>
+      </div>
       <ApiErrorBanner error={error} />
-      <pre className="k8s-yaml-panel font-mono text-xs min-h-64 whitespace-pre-wrap">{output.join("\n") || "暂无输出"}</pre>
+      <pre className="k8s-stream-panel">{output.join("\n") || "暂无输出"}</pre>
     </div>
   );
 }
@@ -316,12 +347,15 @@ function PodMetricsPanel({ clusterId, pod }: { clusterId: string; pod: PodObject
   }
 
   return (
-    <div className="stack-md">
-      <button type="button" className="btn-secondary" disabled={loading} onClick={() => void query()}>
-        {loading ? "查询中…" : "刷新"}
-      </button>
+    <div className="k8s-stream-view stack-sm">
+      <div className="k8s-stream-toolbar">
+        <span className="text-sm text-muted">{loading ? "查询中…" : "Prometheus 指标"}</span>
+        <button type="button" className="btn-secondary text-sm" disabled={loading} onClick={() => void query()}>
+          刷新
+        </button>
+      </div>
       <ApiErrorBanner error={error} />
-      <pre className="k8s-yaml-panel font-mono text-xs min-h-48 whitespace-pre-wrap">{result || "暂无指标（需配置 Prometheus）"}</pre>
+      <pre className="k8s-stream-panel">{result || "暂无指标（需配置 Prometheus）"}</pre>
     </div>
   );
 }

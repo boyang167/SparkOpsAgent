@@ -29,6 +29,6 @@ export function formatRoleAge(timestamp?: string, now = Date.now()): string {
   const days = Math.floor(hours / 24);
   if (days < 30) return `${days} 天`;
   const months = Math.floor(days / 30);
-  if (months < 12) return `${months} 个月`;
-  return `${Math.floor(days / 365)} 年`;
+  if (months < 12) return `${months}个月`;
+  return `${Math.floor(days / 365)}年`;
 }

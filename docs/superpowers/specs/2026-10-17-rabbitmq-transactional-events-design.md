@@ -272,6 +272,7 @@ messaging:
     exchange: sparkops
     exchange_type: direct
     event_exchange: sparkops.events
+    virtual_host: "/" # RabbitMQ 默认 vhost；生产建议使用独立的 /sparkops
   outbox:
     poll_interval: 1s
     batch_size: 100
@@ -279,7 +280,7 @@ messaging:
     publish_timeout: 30s
 ```
 
-`exchange` 继续服务现有异步任务 Queue；`event_exchange` 固定使用 topic 类型。首期重试层级按本设计固定，不增加无必要的动态配置。
+`exchange` 继续服务现有异步任务 Queue；`event_exchange` 固定使用 topic 类型。`virtual_host` 默认使用 `/`，生产环境建议创建并授权独立的 `/sparkops`；若 URL 自带 vhost 路径，则必须与该字段一致。首期重试层级按本设计固定，不增加无必要的动态配置。
 
 ## 启动与关闭
 

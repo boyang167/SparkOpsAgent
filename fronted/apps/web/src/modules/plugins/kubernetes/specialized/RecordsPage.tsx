@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   K8sEmptyState,
   K8sLoadingState,
@@ -11,10 +11,13 @@ import {
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "../api";
+import type { KubernetesCluster } from "../cluster-types";
+import { formatNodeAge } from "../node-view";
 import {
   formatRecordTime,
   parseRecordObjectPath,
   RECORDS_TABLE_COL_SPAN,
+  resolveClusterLabel,
   shortRecordId,
   type RecordItem,
 } from "../records-view";
@@ -26,15 +29,17 @@ type RecordsResponse = {
   total?: number;
 };
 
+type ClusterListResponse = {
+  items?: KubernetesCluster[];
+};
+
 type QueryState = {
-  draftKeyword: string;
   keyword: string;
   page: number;
   pageSize: number;
 };
 
 const initialQuery = (): QueryState => ({
-  draftKeyword: "",
   keyword: "",
   page: 1,
   pageSize: 10,
@@ -49,10 +54,26 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [clusterNames, setClusterNames] = useState<Map<string, string>>(() => new Map());
   const [playOpen, setPlayOpen] = useState(false);
   const [playData, setPlayData] = useState("");
+  const [playTitle, setPlayTitle] = useState("");
   const { ask, dialog: confirmDialog } = useK8sConfirm();
+
+  const loadClusters = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const data = await k8sFetch<ClusterListResponse>("/api/bff/v1/plugins/kubernetes/clusters", { signal });
+      if (signal?.aborted || !mountedRef.current) return;
+      const next = new Map<string, string>();
+      for (const cluster of data.items ?? []) {
+        if (cluster.id && cluster.name) next.set(cluster.id, cluster.name);
+      }
+      setClusterNames(next);
+    } catch {
+      if (signal?.aborted || !mountedRef.current) return;
+      setClusterNames(new Map());
+    }
+  }, []);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const requestSeq = listRequestSeq.current + 1;
@@ -81,7 +102,6 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
       }
       setItems(nextItems);
       setTotal(nextTotal);
-      setSelected([]);
     } catch (err) {
       if (!isCurrent()) return;
       setItems([]);
@@ -101,6 +121,12 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
 
   useEffect(() => {
     const controller = new AbortController();
+    void loadClusters(controller.signal);
+    return () => controller.abort();
+  }, [loadClusters]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
@@ -109,6 +135,8 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
     setError(null);
     try {
       const detail = await k8sFetch<string>(`/api/bff/v1/plugins/kubernetes/records/${encodeURIComponent(item.id)}`);
+      const target = parseRecordObjectPath(item.objectPath);
+      setPlayTitle(target.pod !== "-" ? `${target.namespace}/${target.pod}` : shortRecordId(item.id));
       setPlayData(detail);
       setPlayOpen(true);
     } catch (err) {
@@ -134,75 +162,60 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
     }
   }
 
-  async function deleteSelected() {
-    if (!canManage || selected.length === 0) return;
-    const ok = await ask({
-      title: "批量删除录制",
-      description: `确定要删除选中的 ${selected.length} 条记录吗？此操作不可恢复。`,
-      confirmLabel: "删除",
-      danger: true,
-    });
-    if (!ok) return;
-    setError(null);
-    try {
-      for (const id of selected) {
-        await k8sFetch<void>(`/api/bff/v1/plugins/kubernetes/records/${encodeURIComponent(id)}`, { method: "DELETE" });
-      }
-      setSelected([]);
-      await load();
-    } catch (err) {
-      setError(errorInfo(err, "批量删除失败"));
-    }
-  }
+  const hasActiveFilters = query.keyword.trim().length > 0;
 
   return (
     <div className="stack-md">
-      <K8sPanelCard>
-        <ApiErrorBanner error={error} />
-
-        <div className="k8s-toolbar-row">
-          <label>
-            <span className="label">Pod 名称</span>
-            <input
-              className="input"
-              placeholder="Pod 名称"
-              value={query.draftKeyword}
-              onChange={(e) => setQuery((current) => ({ ...current, draftKeyword: e.target.value }))}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  setQuery((current) => ({ ...current, keyword: current.draftKeyword, page: 1 }));
-                }
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            className="btn"
-            disabled={loading}
-            onClick={() => setQuery((current) => ({ ...current, keyword: current.draftKeyword, page: 1 }))}
-          >
-            查询
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            disabled={loading}
-            onClick={() => setQuery({ draftKeyword: "", keyword: "", page: 1, pageSize: query.pageSize })}
-          >
-            重置
-          </button>
-          <button type="button" className="btn-secondary" disabled={!canManage || selected.length === 0} onClick={() => void deleteSelected()}>
-            删除
-          </button>
+      <K8sPanelCard className="k8s-records-panel">
+        <div className="k8s-clusters-toolbar">
+          <div className="k8s-clusters-toolbar-filters">
+            <label className="projects-search-wrap">
+              <svg className="projects-search-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M9 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M13 13l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <input
+                className="projects-search-input"
+                value={query.keyword}
+                placeholder="搜索 Pod 名称"
+                aria-label="搜索 Pod 名称"
+                onChange={(e) => setQuery((current) => ({ ...current, keyword: e.target.value, page: 1 }))}
+              />
+            </label>
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                className="btn-secondary projects-reset-btn"
+                onClick={() => setQuery((current) => ({ ...current, keyword: "", page: 1 }))}
+              >
+                重置
+              </button>
+            ) : null}
+          </div>
+          <div className="k8s-toolbar-actions">
+            {!loading && total > 0 ? (
+              <span className="k8s-clusters-count" role="status">
+                共 {total} 条记录
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="btn-secondary k8s-clusters-refresh-btn"
+              disabled={loading}
+              aria-label="刷新列表"
+              onClick={() => void load()}
+            >
+              ↻
+            </button>
+          </div>
         </div>
 
-        <div className="table-wrap">
+        <ApiErrorBanner error={error} />
+
+        <div className="table-wrap k8s-records-table">
           <table className="data-table text-sm">
             <thead>
               <tr>
-                <th className="w-10">
-                  <span className="sr-only">选择</span>
-                </th>
                 <th>ID</th>
                 <th>集群</th>
                 <th>命名空间</th>
@@ -210,7 +223,7 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
                 <th>Container</th>
                 <th>类型</th>
                 <th>创建时间</th>
-                <th>操作</th>
+                <th className="w-28">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -226,9 +239,8 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
                   <RecordRow
                     key={item.id}
                     item={item}
+                    clusterNames={clusterNames}
                     canManage={canManage}
-                    selected={selected}
-                    setSelected={setSelected}
                     onPlay={playRecord}
                     onDelete={deleteRecord}
                   />
@@ -236,7 +248,14 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
               {!loading && items.length === 0 ? (
                 <tr>
                   <td colSpan={RECORDS_TABLE_COL_SPAN}>
-                    <K8sEmptyState variant="empty" compact />
+                    <K8sEmptyState
+                      variant="empty"
+                      compact
+                      title="暂无终端审计记录"
+                      description={
+                        hasActiveFilters ? "没有符合搜索条件的记录，可调整 Pod 名称关键词。" : "当前还没有终端会话录制。"
+                      }
+                    />
                   </td>
                 </tr>
               ) : null}
@@ -254,7 +273,13 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
         />
       </K8sPanelCard>
 
-      <Modal open={playOpen} title="终端录制播放" size="xl" onClose={() => setPlayOpen(false)}>
+      <Modal
+        open={playOpen}
+        title={playTitle ? `回放 · ${playTitle}` : "终端录制回放"}
+        size="xl"
+        panelClassName="k8s-pod-submodal"
+        onClose={() => setPlayOpen(false)}
+      >
         {playData ? <RecordPlayer ndjson={playData} /> : null}
       </Modal>
       {confirmDialog}
@@ -264,51 +289,48 @@ export function RecordsPage({ canManage }: { canManage: boolean }) {
 
 function RecordRow({
   item,
+  clusterNames,
   canManage,
-  selected,
-  setSelected,
   onPlay,
   onDelete,
 }: {
   item: RecordItem;
+  clusterNames: ReadonlyMap<string, string>;
   canManage: boolean;
-  selected: string[];
-  setSelected: Dispatch<SetStateAction<string[]>>;
   onPlay: (item: RecordItem) => Promise<void>;
   onDelete: (item: RecordItem) => Promise<void>;
 }) {
   const target = parseRecordObjectPath(item.objectPath);
+  const cluster = resolveClusterLabel(item.clusterId, clusterNames);
+  const createdAt = formatRecordTime(item.startedAt);
+  const age = formatNodeAge(item.startedAt);
 
   return (
     <tr>
-      <td>
-        <input
-          type="checkbox"
-          checked={selected.includes(item.id)}
-          onChange={(e) =>
-            setSelected((current) => (e.target.checked ? [...current, item.id] : current.filter((value) => value !== item.id)))
-          }
-        />
+      <td className="text-muted font-mono text-xs" title={item.id}>
+        {shortRecordId(item.id)}
       </td>
-      <td title={item.id}>{shortRecordId(item.id)}</td>
-      <td>{item.clusterId || "-"}</td>
-      <td>{target.namespace}</td>
-      <td>{target.pod}</td>
-      <td>{target.container}</td>
-      <td>{item.kind || "-"}</td>
-      <td>{formatRecordTime(item.startedAt)}</td>
-      <td className="whitespace-nowrap">
-        <button type="button" className="k8s-action-link" onClick={() => void onPlay(item)}>
-          播放
-        </button>
-        {canManage ? (
-          <>
-            <span className="text-muted"> / </span>
-            <button type="button" className="k8s-action-link" onClick={() => void onDelete(item)}>
+      <td className={clusterNames.has(item.clusterId) ? "font-medium" : "text-muted"} title={cluster.title}>
+        {cluster.label}
+      </td>
+      <td className="text-muted">{target.namespace}</td>
+      <td className="font-medium">{target.pod}</td>
+      <td className="text-muted">{target.container}</td>
+      <td className="text-muted">{item.kind || "-"}</td>
+      <td className="text-muted" title={createdAt}>
+        {age}
+      </td>
+      <td>
+        <div className="k8s-row-actions">
+          <button type="button" className="btn-ghost text-sm" onClick={() => void onPlay(item)}>
+            播放
+          </button>
+          {canManage ? (
+            <button type="button" className="btn-ghost text-sm is-danger" onClick={() => void onDelete(item)}>
               删除
             </button>
-          </>
-        ) : null}
+          ) : null}
+        </div>
       </td>
     </tr>
   );

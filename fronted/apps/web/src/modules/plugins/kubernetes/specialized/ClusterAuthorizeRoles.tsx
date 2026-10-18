@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { K8sEmptyState, K8sLoadingState, K8sResourceTabs, useK8sConfirm } from "@/components/k8s";
+import { K8sEmptyState, K8sLoadingState, useK8sConfirm } from "@/components/k8s";
 import { Modal } from "@/components/ui/Modal";
 import { ApiErrorBanner } from "../ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "../api";
@@ -82,6 +82,15 @@ function editorObject(item: RoleObject): Record<string, unknown> {
     rules: item.rules ?? [],
     ...(item.aggregationRule ? { aggregationRule: item.aggregationRule } : {}),
   };
+}
+
+function SearchIcon() {
+  return (
+    <svg className="projects-search-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M9 3.5a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11Z" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M13.5 13.5 17 17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 export function ClusterAuthorizeRoles({
@@ -227,7 +236,7 @@ export function ClusterAuthorizeRoles({
     const kindLabel = scope === "cluster" ? "ClusterRole" : "Role";
     const ok = await ask({
       title: `删除${kindLabel}`,
-      description: `确定删除 ${kindLabel}「${name}」？此操作不可恢复。`,
+      description: `确定删除 ${kindLabel}「${name}」？`,
       confirmLabel: "删除",
       danger: true,
     });
@@ -246,61 +255,88 @@ export function ClusterAuthorizeRoles({
   const kindLabel = scope === "cluster" ? "集群角色" : "命名空间角色";
 
   return (
-    <div className="stack-md">
-      <K8sResourceTabs
-        tabs={["cluster", "namespace"] as const}
-        active={scope}
-        ariaLabel="角色范围"
-        label={(id) => (id === "cluster" ? "集群" : "命名空间")}
-        onChange={(id) => {
-          setQuery("");
-          setScope(id);
-        }}
-      />
-      <p className="text-sm text-muted">
-        {scope === "cluster"
-          ? "ClusterRole 在整个集群生效，授权用户时可绑定为集群角色或命名空间角色。"
-          : "Role 仅在所选命名空间生效。授权用户页的「命名空间角色」绑定的是 ClusterRole，与此处 namespaced Role 不同。"}
-      </p>
+    <div className="stack-sm">
       <ApiErrorBanner error={error} />
-      <div className="flex flex-wrap items-end gap-2">
-        {scope === "namespace" ? (
-          <label>
-            <span className="label">命名空间</span>
-            <select className="input" value={namespace} onChange={(e) => setNamespace(e.target.value)}>
+      <div className="k8s-dialog-toolbar">
+        <div className="k8s-dialog-toolbar-filters">
+          <div className="k8s-segmented" role="tablist" aria-label="角色范围">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={scope === "cluster"}
+              className={`k8s-segmented-btn${scope === "cluster" ? " is-active" : ""}`}
+              onClick={() => {
+                setQuery("");
+                setScope("cluster");
+              }}
+            >
+              集群
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={scope === "namespace"}
+              className={`k8s-segmented-btn${scope === "namespace" ? " is-active" : ""}`}
+              onClick={() => {
+                setQuery("");
+                setScope("namespace");
+              }}
+            >
+              命名空间
+            </button>
+          </div>
+          {scope === "namespace" ? (
+            <select
+              className="input w-auto text-sm"
+              value={namespace}
+              aria-label="命名空间"
+              onChange={(e) => setNamespace(e.target.value)}
+            >
               {(namespaces.length ? namespaces : [namespace]).map((ns) => (
                 <option key={ns} value={ns}>
                   {ns}
                 </option>
               ))}
             </select>
+          ) : null}
+          <label className="projects-search-wrap k8s-dialog-search">
+            <SearchIcon />
+            <input
+              className="projects-search-input"
+              type="search"
+              placeholder="搜索"
+              aria-label="搜索角色"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
           </label>
-        ) : null}
-        <label className="min-w-[12rem] flex-1">
-          <span className="label">搜索</span>
-          <input
-            className="input"
-            type="search"
-            placeholder="按名称过滤…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
-        <button type="button" className="btn" disabled={!canManage} onClick={openCreate}>
-          添加
-        </button>
-        <button type="button" className="btn-secondary" disabled={loading} onClick={() => void reload()}>
-          刷新
-        </button>
+        </div>
+        <div className="k8s-dialog-toolbar-actions">
+          <span className="text-xs text-muted hidden sm:inline">{loading ? "…" : `${filtered.length} 项`}</span>
+          <button type="button" className="btn-secondary text-sm" disabled={loading} aria-label="刷新" onClick={() => void reload()}>
+            ↻
+          </button>
+          {canManage ? (
+            <button type="button" className="btn text-sm" onClick={openCreate}>
+              添加
+            </button>
+          ) : null}
+        </div>
       </div>
-      <div className="table-wrap">
+      <div className="table-wrap k8s-dialog-table">
         <table className="data-table text-sm">
+          <colgroup>
+            <col />
+            <col style={{ width: "4.5rem" }} />
+            <col style={{ width: "5.5rem" }} />
+            <col style={{ width: "9rem" }} />
+          </colgroup>
           <thead>
             <tr>
               <th>名称</th>
-              <th>规则数</th>
-              <th>存活时间</th>
-              <th>操作</th>
+              <th className="col-compact">规则</th>
+              <th className="col-compact">时长</th>
+              <th className="col-actions">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -317,36 +353,36 @@ export function ClusterAuthorizeRoles({
                 const builtin = isBuiltinRole(item, scope);
                 return (
                   <tr key={`${item.metadata?.namespace ?? "cluster"}/${name}`}>
-                    <td>
-                      <button type="button" className="k8s-action-link" onClick={() => void openRole(item, "view")}>
+                    <td className="min-w-0">
+                      <button type="button" className="k8s-cluster-name-link text-sm" onClick={() => void openRole(item, "view")}>
                         {name}
                       </button>
-                      {builtin ? <span className="badge badge-neutral ml-2">内置</span> : null}
+                      {builtin ? <span className="k8s-meta-tag">内置</span> : null}
                     </td>
-                    <td>{item.rules?.length ?? 0}</td>
-                    <td>{formatRoleAge(item.metadata?.creationTimestamp)}</td>
-                    <td className="whitespace-nowrap">
-                      <button type="button" className="k8s-action-link" onClick={() => void openRole(item, "view")}>
-                        查看
-                      </button>
-                      <span className="text-muted"> / </span>
-                      <button
-                        type="button"
-                        className="k8s-action-link"
-                        disabled={!canManage || builtin}
-                        onClick={() => void openRole(item, "edit")}
-                      >
-                        编辑
-                      </button>
-                      <span className="text-muted"> / </span>
-                      <button
-                        type="button"
-                        className="k8s-action-link"
-                        disabled={!canManage || builtin}
-                        onClick={() => void deleteRole(item)}
-                      >
-                        删除
-                      </button>
+                    <td className="col-compact">{item.rules?.length ?? 0}</td>
+                    <td className="col-compact">{formatRoleAge(item.metadata?.creationTimestamp)}</td>
+                    <td className="col-actions">
+                      <div className="k8s-row-actions">
+                        <button type="button" className="btn-ghost text-sm" onClick={() => void openRole(item, "view")}>
+                          查看
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-ghost text-sm"
+                          disabled={!canManage || builtin}
+                          onClick={() => void openRole(item, "edit")}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-ghost text-sm"
+                          disabled={!canManage || builtin}
+                          onClick={() => void deleteRole(item)}
+                        >
+                          删除
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -366,10 +402,11 @@ export function ClusterAuthorizeRoles({
         nested
         open={Boolean(editor)}
         size="lg"
+        panelClassName="k8s-cluster-form-modal"
         title={
           editor?.mode === "create" ? `添加${kindLabel}` : editor?.mode === "edit" ? `编辑 ${editor.name}` : `查看 ${editor?.name ?? ""}`
         }
-        description={scope === "namespace" ? `命名空间：${namespace}` : "集群范围 ClusterRole"}
+        description={scope === "namespace" ? namespace : undefined}
         onClose={() => {
           if (!saving) setEditor(null);
         }}
@@ -380,7 +417,7 @@ export function ClusterAuthorizeRoles({
             </button>
             {editor?.mode !== "view" ? (
               <button type="button" className="btn" disabled={!canManage || saving} onClick={() => void saveEditor()}>
-                {saving ? "保存中…" : "确定"}
+                {saving ? "保存中…" : "保存"}
               </button>
             ) : null}
           </div>
@@ -388,11 +425,8 @@ export function ClusterAuthorizeRoles({
       >
         <div className="stack-md">
           <ApiErrorBanner error={formError} />
-          {editor?.mode === "create" ? (
-            <p className="text-xs text-muted">名称以 YAML 中的 metadata.name 为准。</p>
-          ) : null}
           <textarea
-            className="input font-mono text-xs"
+            className="input font-mono text-xs k8s-kubeconfig-area"
             rows={16}
             readOnly={editor?.mode === "view"}
             value={editor?.yaml ?? ""}

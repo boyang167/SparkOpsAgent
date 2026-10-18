@@ -4,5 +4,12 @@ export { K8sStatusBadge, k8sPhaseTone, type K8sStatusTone } from "./K8sStatusBad
 export { K8sResourceTabs } from "./K8sResourceTabs";
 export { K8sPagination } from "./K8sPagination";
 export { K8sPanelCard } from "./K8sPanelCard";
+export {
+  K8sActionSheet,
+  K8sActionSheetDivider,
+  K8sActionSheetGroup,
+  K8sActionSheetItem,
+  K8sActionIcons,
+} from "./K8sActionSheet";
 export { K8sConfirmDialog } from "./K8sConfirmDialog";
 export { useK8sConfirm, type K8sConfirmOptions } from "./useK8sConfirm";

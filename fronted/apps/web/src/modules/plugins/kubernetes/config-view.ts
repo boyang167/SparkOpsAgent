@@ -55,5 +55,5 @@ export function emptyConfigTemplate(kind: ConfigTab, namespace?: string): Record
 }
 
 export function configTableColSpan(tab: ConfigTab): number {
-  return tab === "Secret" ? 6 : 5;
+  return tab === "Secret" ? 5 : 4;
 }

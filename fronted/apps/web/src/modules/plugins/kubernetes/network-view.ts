@@ -123,9 +123,11 @@ export function formatEndpointSubsets(subsets?: EndpointSubset[]): string[] {
   return lines;
 }
 
+export const NETWORK_LIST_PREVIEW = 2;
+
 export function networkTableColSpan(tab: NetworkTab): number {
-  if (tab === "Service") return 11;
-  if (tab === "Ingress") return 7;
-  if (tab === "Endpoints") return 6;
-  return 5;
+  if (tab === "Service") return 10;
+  if (tab === "Ingress") return 6;
+  if (tab === "Endpoints") return 5;
+  return 4;
 }

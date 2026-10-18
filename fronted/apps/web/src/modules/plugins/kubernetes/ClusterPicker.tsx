@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import { ApiErrorBanner } from "./ApiErrorBanner";
 import { errorInfo, k8sFetch, type ApiErrorInfo } from "./api";
 import { selectStoredClusterId } from "./catalog";
@@ -10,6 +10,7 @@ import {
   settingsFromCluster,
 } from "./cluster-settings-form";
 import type { KubernetesCluster } from "./cluster-types";
+import { formatClusterServer, truncateClusterId } from "./cluster-view";
 import { ClustersPanel } from "./specialized/ClustersPanel";
 
 export type { KubernetesCluster } from "./cluster-types";
@@ -27,6 +28,7 @@ type ClusterPickerProps = {
   canManage: boolean;
   showSettings?: boolean;
   layout?: "picker" | "table";
+  createActionRef?: RefObject<(() => void) | null>;
 };
 
 export function ClusterPicker({
@@ -36,6 +38,7 @@ export function ClusterPicker({
   canManage,
   showSettings = false,
   layout = "picker",
+  createActionRef,
 }: ClusterPickerProps) {
   const [clusters, setClusters] = useState<KubernetesCluster[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,6 +125,7 @@ export function ClusterPicker({
         selectedId={value}
         onRefresh={() => void load()}
         onSelect={choose}
+        createActionRef={createActionRef}
         onClustersChange={(next) => {
           setClusters(next);
           onClustersChange?.(next);
@@ -131,27 +135,43 @@ export function ClusterPicker({
   }
 
   return (
-    <section className="card stack-md p-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="min-w-72 flex-1">
+    <section className="k8s-cluster-bar">
+      <div className="k8s-cluster-bar-row">
+        <label className="k8s-cluster-bar-field">
           <span className="label">集群</span>
-          <select className="input" value={value} disabled={loading || clusters.length === 0} onChange={(e) => choose(e.target.value)}>
+          <select
+            className="input k8s-cluster-bar-select"
+            value={value}
+            disabled={loading || clusters.length === 0}
+            onChange={(e) => choose(e.target.value)}
+            aria-label="选择集群"
+          >
             {clusters.length === 0 ? <option value="">暂无可用集群</option> : null}
             {clusters.map((item) => (
               <option key={item.id} value={item.id}>
-                {item.name || item.id}
+                {item.name || truncateClusterId(item.id)}
               </option>
             ))}
           </select>
         </label>
-        <button type="button" className="btn-secondary" disabled={loading} onClick={() => void load()}>
-          {loading ? "刷新中…" : "刷新集群"}
+        <button
+          type="button"
+          className="btn-secondary k8s-clusters-refresh-btn"
+          disabled={loading}
+          onClick={() => void load()}
+          aria-label="刷新集群列表"
+        >
+          {loading ? "…" : "↻"}
         </button>
       </div>
       {selected ? (
-        <div className="text-sm text-muted">
-          {selected.id} · {selected.server || "未返回 server"}
-        </div>
+        <p className="k8s-cluster-summary">
+          <span className="font-mono text-xs" title={selected.id}>
+            {truncateClusterId(selected.id)}
+          </span>
+          <span className="k8s-page-sep">·</span>
+          <span className="font-mono text-xs">{formatClusterServer(selected.server) || "未配置接口地址"}</span>
+        </p>
       ) : null}
       <ApiErrorBanner error={error} />
       {showSettings && selected ? (
