@@ -88,3 +88,15 @@ func TestReconcilerPublishFailuresConsumeGlobalRunBudget(t *testing.T) {
 	require.NoError(t, reconciler.RunOnce(context.Background()))
 	require.Equal(t, calls, f.publisher.calls)
 }
+
+func TestReliableReconcilerTemporaryScheduleFailureDoesNotConsumeRunBudget(t *testing.T) {
+	f := newOrchestratorFixture(model.StatusBuilding)
+	f.repo.active = nil
+	scheduleErr := errors.New("operation outbox temporarily unavailable")
+	f.publisher.err = scheduleErr
+	reconciler := NewReliableReconciler(f.repo, f.publisher)
+
+	require.ErrorIs(t, reconciler.RunOnce(context.Background()), scheduleErr)
+	require.Equal(t, model.StatusBuilding, f.run.Status)
+	require.Zero(t, f.run.AttemptCount)
+}

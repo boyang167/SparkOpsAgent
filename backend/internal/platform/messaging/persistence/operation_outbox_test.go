@@ -49,6 +49,37 @@ func TestOperationInsertTreatsDuplicateIdempotencyKeyAsSuccess(t *testing.T) {
 	require.Equal(t, int64(2), count)
 }
 
+func TestOperationInsertRepeatableRequeuesCompletedIntentWithoutAddingRow(t *testing.T) {
+	db := openStoreSQLite(t)
+	store := NewOperationStore(db)
+	now := time.Now().UTC()
+	operation := testOperation(now)
+	operation.IdempotencyKey = operation.EventID + ":" +
+		operation.Subscriber + ":" + operation.OperationType + ":target-1"
+	insertTestOperation(t, db, store, operation)
+	setOperationLease(t, db, operation.ID, "worker-a")
+	require.NoError(t, store.MarkCompleted(context.Background(), operation.ID, "worker-a", now))
+
+	repeated := operation
+	repeated.ID = uuid.NewString()
+	repeated.Repeatable = true
+	repeated.NextAttemptAt = now.Add(time.Minute)
+	repeated.CreatedAt = repeated.NextAttemptAt
+	require.NoError(t, postgres.NewTransactor(db).WithinTransaction(
+		context.Background(),
+		func(ctx context.Context) error { return store.Insert(ctx, repeated) },
+	))
+
+	var rows []OperationOutbox
+	require.NoError(t, db.Find(&rows).Error)
+	require.Len(t, rows, 1)
+	require.Equal(t, "pending", rows[0].Status)
+	require.Zero(t, rows[0].Attempts)
+	require.Nil(t, rows[0].CompletedAt)
+	require.WithinDuration(t, repeated.NextAttemptAt, rows[0].NextAttemptAt, time.Millisecond)
+	require.WithinDuration(t, repeated.CreatedAt, rows[0].CreatedAt, time.Millisecond)
+}
+
 func TestOperationInsertRejectsIdempotencyKeyForDifferentIntent(t *testing.T) {
 	tests := []struct {
 		name   string

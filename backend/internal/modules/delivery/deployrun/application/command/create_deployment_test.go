@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
-	deliverydomain "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/port"
+	deliverydomain "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 )
@@ -91,6 +93,19 @@ func (r fakeDeploymentReader) ListAuthorizedClusters(context.Context, kernel.Wor
 type recordingQueue struct {
 	payloads [][]byte
 	err      error
+}
+
+type metadataCheckingOperationWriter struct {
+	request messaging.OperationRequest
+}
+
+func (w *metadataCheckingOperationWriter) Schedule(ctx context.Context, request messaging.OperationRequest) error {
+	metadata, ok := events.MetadataFromContext(ctx)
+	if ok && request.Owner != metadata.Subscriber {
+		return errors.New("operation owner does not match event subscriber")
+	}
+	w.request = request
+	return nil
 }
 
 func (q *recordingQueue) Publish(_ context.Context, _ string, payload []byte) error {
@@ -317,6 +332,30 @@ func TestCreateDeploymentDefaultsImageTagAndPublishes(t *testing.T) {
 	require.Equal(t, now, run.CreatedAt)
 	require.Len(t, repo.created, 1)
 	require.Len(t, queue.payloads, 1)
+}
+
+func TestCreateDeploymentOperationInheritsEventMetadata(t *testing.T) {
+	run := model.NewDeploymentRun(
+		kernel.NewWorkspaceID(), kernel.NewProjectID(), kernel.NewClusterInfoID(),
+		kernel.NewMemberID(), "branch", "main", "main",
+	)
+	writer := &metadataCheckingOperationWriter{}
+	publisher := deploymentOperationPublisher{
+		writer: writer,
+		owner:  "delivery.command.create-deployment",
+	}
+	ctx := events.WithMetadata(context.Background(), events.Metadata{
+		EventID: "workflow-event-1", Subscriber: "product-workflow.scheduler",
+	})
+
+	err := publisher.schedule(ctx, run)
+
+	require.NoError(t, err)
+	require.Equal(t, "product-workflow.scheduler", writer.request.Owner)
+	require.Equal(t,
+		"workflow-event-1:product-workflow.scheduler:delivery.queue.deploy.publish.v1:"+run.ID.String(),
+		writer.request.IdempotencyKey,
+	)
 }
 
 func TestCreateDeploymentAttachesConfigManifestsOnNormalRun(t *testing.T) {

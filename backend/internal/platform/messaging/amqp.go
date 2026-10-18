@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -23,7 +24,17 @@ type amqpQueue struct {
 	ch               *amqp.Channel
 	mu               sync.Mutex
 	consumerChannels map[*amqp.Channel]struct{}
+	consumerByTopic  map[string]*amqp.Channel
+	subscriptions    map[string]queueSubscription
+	nextSubscription uint64
 	closed           bool
+}
+
+type queueSubscription struct {
+	id      uint64
+	ctx     context.Context
+	topic   string
+	handler func(context.Context, []byte) error
 }
 
 type queueBinding struct {
@@ -55,24 +66,34 @@ func NewAMQPQueue(cfg AMQPConfig) (Queue, error) {
 		cfg.ExchangeType = "direct"
 	}
 
-	conn, err := amqp.Dial(cfg.URL)
+	conn, ch, err := openAMQPQueueConnection(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("amqp dial: %w", err)
-	}
-	ch, err := conn.Channel()
-	if err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("amqp channel: %w", err)
-	}
-	if err := ch.ExchangeDeclare(cfg.Exchange, cfg.ExchangeType, true, false, false, false, nil); err != nil {
-		_ = ch.Close()
-		_ = conn.Close()
-		return nil, fmt.Errorf("amqp exchange declare: %w", err)
+		return nil, err
 	}
 	return &amqpQueue{
 		cfg: cfg, conn: conn, ch: ch,
 		consumerChannels: make(map[*amqp.Channel]struct{}),
+		consumerByTopic:  make(map[string]*amqp.Channel),
+		subscriptions:    make(map[string]queueSubscription),
 	}, nil
+}
+
+func openAMQPQueueConnection(cfg AMQPConfig) (*amqp.Connection, *amqp.Channel, error) {
+	conn, err := amqp.Dial(cfg.URL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("amqp dial: %w", err)
+	}
+	ch, err := conn.Channel()
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, fmt.Errorf("amqp channel: %w", err)
+	}
+	if err := ch.ExchangeDeclare(cfg.Exchange, cfg.ExchangeType, true, false, false, false, nil); err != nil {
+		_ = ch.Close()
+		_ = conn.Close()
+		return nil, nil, fmt.Errorf("amqp exchange declare: %w", err)
+	}
+	return conn, ch, nil
 }
 
 func (q *amqpQueue) Publish(ctx context.Context, topic string, payload []byte) error {
@@ -85,9 +106,23 @@ func (q *amqpQueue) publishWithHeaders(ctx context.Context, topic string, payloa
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.closed || q.ch == nil {
-		return fmt.Errorf("amqp channel is closed")
+	if q.closed {
+		return fmt.Errorf("amqp queue is closed")
 	}
+	var publishErr error
+	if q.ch != nil {
+		publishErr = q.publishLocked(ctx, topic, payload, headers)
+	}
+	if publishErr == nil && q.ch != nil {
+		return nil
+	}
+	if err := q.reconnectLocked(); err != nil {
+		return errors.Join(publishErr, err)
+	}
+	return q.publishLocked(ctx, topic, payload, headers)
+}
+
+func (q *amqpQueue) publishLocked(ctx context.Context, topic string, payload []byte, headers amqp.Table) error {
 	if err := ensureTopology(q.ch, q.cfg.Exchange, topic); err != nil {
 		return err
 	}
@@ -104,40 +139,60 @@ func (q *amqpQueue) Subscribe(ctx context.Context, topic string, h func(context.
 		return err
 	}
 	q.mu.Lock()
+	defer q.mu.Unlock()
 	if q.closed || q.conn == nil {
-		q.mu.Unlock()
 		return fmt.Errorf("amqp connection is closed")
 	}
+	if _, exists := q.subscriptions[topic]; exists {
+		return fmt.Errorf("amqp topic %s already has a consumer", topic)
+	}
+	q.nextSubscription++
+	subscription := queueSubscription{id: q.nextSubscription, ctx: ctx, topic: topic, handler: h}
+	if err := q.startConsumerLocked(subscription); err != nil {
+		return err
+	}
+	q.subscriptions[topic] = subscription
+	return nil
+}
+
+func (q *amqpQueue) startConsumerLocked(subscription queueSubscription) error {
+	if err := subscription.ctx.Err(); err != nil {
+		return err
+	}
+	topic, ctx, h := subscription.topic, subscription.ctx, subscription.handler
 	consumerChannel, err := q.conn.Channel()
 	if err == nil {
 		q.consumerChannels[consumerChannel] = struct{}{}
 	}
-	q.mu.Unlock()
 	if err != nil {
 		return fmt.Errorf("amqp consumer channel: %w", err)
 	}
 	if err := ensureTopology(consumerChannel, q.cfg.Exchange, topic); err != nil {
-		_ = q.stopConsumer(consumerChannel, "")
+		_ = q.stopConsumerLocked(consumerChannel, "")
 		return err
 	}
 	consumerTag := "sparkops-" + strings.ReplaceAll(topic, ".", "-")
 	deliveries, err := consumerChannel.Consume(topic, consumerTag, false, false, false, false, nil)
 	if err != nil {
-		_ = q.stopConsumer(consumerChannel, consumerTag)
+		_ = q.stopConsumerLocked(consumerChannel, consumerTag)
 		return fmt.Errorf("amqp consume: %w", err)
 	}
+	q.consumerByTopic[topic] = consumerChannel
 
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
-				if closeErr := q.stopConsumer(consumerChannel, consumerTag); closeErr != nil {
+				if closeErr := q.stopSubscription(subscription, consumerChannel, consumerTag); closeErr != nil {
 					log.Printf("amqp consumer %s shutdown failed: %v", topic, closeErr)
 				}
 				return
 			case d, ok := <-deliveries:
 				if !ok {
-					_ = q.detachConsumer(consumerChannel)
+					if closeErr := q.stopSubscription(subscription, consumerChannel, ""); closeErr != nil {
+						log.Printf("amqp consumer %s closed: %v", topic, closeErr)
+					}
+					go q.recoverSubscription(subscription)
 					return
 				}
 				retry := retryFromHeaders(d.Headers)
@@ -152,14 +207,52 @@ func (q *amqpQueue) Subscribe(ctx context.Context, topic string, h func(context.
 				if err := handleDelivery(ctx, topic, retry, d.Body, h, publish,
 					func() error { return d.Ack(false) }); err != nil {
 					log.Printf("amqp consumer %s stopped after delivery failure: %v", topic, err)
-					if closeErr := q.stopConsumer(consumerChannel, consumerTag); closeErr != nil {
+					if closeErr := q.stopSubscription(subscription, consumerChannel, consumerTag); closeErr != nil {
 						log.Printf("amqp consumer %s shutdown failed: %v", topic, closeErr)
 					}
+					go q.recoverSubscription(subscription)
 					return
 				}
 			}
 		}
 	}()
+	return nil
+}
+
+func (q *amqpQueue) reconnectLocked() error {
+	if q.closed {
+		return fmt.Errorf("amqp queue is closed")
+	}
+	conn, ch, err := openAMQPQueueConnection(q.cfg)
+	if err != nil {
+		return fmt.Errorf("reconnect amqp queue: %w", err)
+	}
+	oldConnection := q.conn
+	q.conn = conn
+	q.ch = ch
+	q.consumerChannels = make(map[*amqp.Channel]struct{})
+	q.consumerByTopic = make(map[string]*amqp.Channel)
+	for topic, subscription := range q.subscriptions {
+		if subscription.ctx.Err() != nil {
+			delete(q.subscriptions, topic)
+			continue
+		}
+		if err := q.startConsumerLocked(subscription); err != nil {
+			_ = ch.Close()
+			_ = conn.Close()
+			if oldConnection != nil {
+				_ = oldConnection.Close()
+			}
+			q.conn = nil
+			q.ch = nil
+			q.consumerChannels = make(map[*amqp.Channel]struct{})
+			q.consumerByTopic = make(map[string]*amqp.Channel)
+			return fmt.Errorf("restore amqp consumer %s: %w", topic, err)
+		}
+	}
+	if oldConnection != nil {
+		_ = oldConnection.Close()
+	}
 	return nil
 }
 
@@ -216,21 +309,84 @@ func handleDelivery(
 func (q *amqpQueue) stopConsumer(channel *amqp.Channel, consumerTag string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	return q.stopConsumerLocked(channel, consumerTag)
+}
+
+func (q *amqpQueue) stopConsumerLocked(channel *amqp.Channel, consumerTag string) error {
 	if _, exists := q.consumerChannels[channel]; !exists {
 		return nil
 	}
 	delete(q.consumerChannels, channel)
+	for topic, current := range q.consumerByTopic {
+		if current == channel {
+			delete(q.consumerByTopic, topic)
+		}
+	}
 	return stopConsumerChannel(channel, consumerTag)
 }
 
-func (q *amqpQueue) detachConsumer(channel *amqp.Channel) bool {
+func (q *amqpQueue) stopSubscription(
+	subscription queueSubscription,
+	channel *amqp.Channel,
+	consumerTag string,
+) error {
 	q.mu.Lock()
-	defer q.mu.Unlock()
-	if _, exists := q.consumerChannels[channel]; !exists {
-		return false
+	if current, exists := q.subscriptions[subscription.topic]; exists && current.id == subscription.id {
+		activeChannel := q.consumerByTopic[subscription.topic]
+		if activeChannel == nil || activeChannel == channel {
+			delete(q.subscriptions, subscription.topic)
+		}
 	}
-	delete(q.consumerChannels, channel)
-	return true
+	err := q.stopConsumerLocked(channel, consumerTag)
+	q.mu.Unlock()
+	return err
+}
+
+func (q *amqpQueue) recoverSubscription(subscription queueSubscription) {
+	delay := 50 * time.Millisecond
+	for {
+		q.mu.Lock()
+		if q.closed || subscription.ctx.Err() != nil {
+			if current, exists := q.subscriptions[subscription.topic]; exists && current.id == subscription.id {
+				delete(q.subscriptions, subscription.topic)
+			}
+			q.mu.Unlock()
+			return
+		}
+		if channel := q.consumerByTopic[subscription.topic]; channel != nil {
+			q.mu.Unlock()
+			return
+		}
+		if current, exists := q.subscriptions[subscription.topic]; exists {
+			if current.id != subscription.id {
+				q.mu.Unlock()
+				return
+			}
+		} else {
+			q.nextSubscription++
+			subscription.id = q.nextSubscription
+			q.subscriptions[subscription.topic] = subscription
+		}
+		err := q.reconnectLocked()
+		q.mu.Unlock()
+		if err == nil {
+			return
+		}
+		log.Printf("amqp consumer %s recovery failed: %v", subscription.topic, err)
+		timer := time.NewTimer(delay)
+		select {
+		case <-subscription.ctx.Done():
+			timer.Stop()
+			continue
+		case <-timer.C:
+		}
+		if delay < time.Second {
+			delay *= 2
+			if delay > time.Second {
+				delay = time.Second
+			}
+		}
+	}
 }
 
 func stopConsumerChannel(channel consumerResource, consumerTag string) error {
@@ -278,6 +434,8 @@ func (q *amqpQueue) Close() error {
 	q.ch = nil
 	q.conn = nil
 	q.consumerChannels = make(map[*amqp.Channel]struct{})
+	q.consumerByTopic = make(map[string]*amqp.Channel)
+	q.subscriptions = make(map[string]queueSubscription)
 	q.mu.Unlock()
 
 	var errs []error

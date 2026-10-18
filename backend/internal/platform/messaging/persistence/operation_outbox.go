@@ -25,6 +25,7 @@ type OperationRecord struct {
 	OperationType  string
 	IdempotencyKey string
 	Payload        json.RawMessage
+	Repeatable     bool
 	Attempts       int
 	NextAttemptAt  time.Time
 	LockedAt       *time.Time
@@ -96,6 +97,23 @@ func (s *operationStore) Insert(ctx context.Context, operation OperationRecord) 
 		existing.Subscriber == operation.Subscriber &&
 		existing.OperationType == operation.OperationType &&
 		jsonPayloadEqual(existing.Payload, operation.Payload) {
+		if operation.Repeatable && existing.Status == "completed" {
+			result := tx.Model(&OperationOutbox{}).
+				Where("id = ? AND status = ?", existing.ID, "completed").
+				Updates(map[string]any{
+					"status":          "pending",
+					"attempts":        0,
+					"next_attempt_at": operation.NextAttemptAt,
+					"locked_at":       nil,
+					"locked_by":       "",
+					"completed_at":    nil,
+					"last_error":      "",
+					"created_at":      operation.CreatedAt,
+				})
+			if result.Error != nil {
+				return fmt.Errorf("requeue completed operation intent: %w", result.Error)
+			}
+		}
 		return nil
 	}
 	return fmt.Errorf(

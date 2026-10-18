@@ -18,6 +18,7 @@ type OperationRequest struct {
 	OperationType  string
 	IdempotencyKey string
 	Payload        any
+	Repeatable     bool
 }
 
 type OperationWriter interface {
@@ -127,6 +128,7 @@ func (w *operationWriter) Schedule(ctx context.Context, request OperationRequest
 		OperationType:  request.OperationType,
 		IdempotencyKey: request.IdempotencyKey,
 		Payload:        payload,
+		Repeatable:     request.Repeatable,
 		NextAttemptAt:  now,
 		CreatedAt:      now,
 	})

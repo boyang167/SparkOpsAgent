@@ -9,13 +9,29 @@ import (
 )
 
 type Reconciler struct {
-	repo      repository.DeploymentRunRepository
-	publisher RunPublisher
-	report    func(error)
+	repo                 repository.DeploymentRunRepository
+	publisher            RunPublisher
+	report               func(error)
+	consumeFailureBudget bool
 }
 
 func NewReconciler(repo repository.DeploymentRunRepository, publisher RunPublisher, reporters ...func(error)) *Reconciler {
-	reconciler := &Reconciler{repo: repo, publisher: publisher}
+	return newReconciler(repo, publisher, true, reporters...)
+}
+
+func NewReliableReconciler(repo repository.DeploymentRunRepository, publisher RunPublisher, reporters ...func(error)) *Reconciler {
+	return newReconciler(repo, publisher, false, reporters...)
+}
+
+func newReconciler(
+	repo repository.DeploymentRunRepository,
+	publisher RunPublisher,
+	consumeFailureBudget bool,
+	reporters ...func(error),
+) *Reconciler {
+	reconciler := &Reconciler{
+		repo: repo, publisher: publisher, consumeFailureBudget: consumeFailureBudget,
+	}
 	if len(reporters) > 0 {
 		reconciler.report = reporters[0]
 	}
@@ -33,6 +49,9 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 		if err := r.publisher.PublishRun(ctx, run); err != nil {
 			r.reportError(err)
 			result = errors.Join(result, err)
+			if !r.consumeFailureBudget {
+				continue
+			}
 			if _, updateErr := r.repo.RecordInfrastructureFailure(
 				ctx, run.ID, run.Version, "deployment message retry budget exhausted",
 			); updateErr != nil {

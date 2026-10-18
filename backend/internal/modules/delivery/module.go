@@ -205,11 +205,22 @@ func (m *Module) Register(c *appctx.Container) error {
 	); err != nil {
 		return fmt.Errorf("subscribe delivery secret updated credential sync: %w", err)
 	}
-	deployservice.NewReconciler(deployRepo, deployPublisher, func(err error) {
+	reportReconcileError := func(err error) {
 		if c.Logger != nil {
 			c.Logger.Error("deployment reconciliation failed", zap.Error(err))
 		}
-	}).Start(c.Context, c.Config.Deploy.ReconcileInterval)
+	}
+	if useOperations {
+		deployservice.NewReliableReconciler(
+			deployRepo,
+			deploycommand.NewOperationRunPublisher(operationWriter, c.Transactor),
+			reportReconcileError,
+		).Start(c.Context, c.Config.Deploy.ReconcileInterval)
+	} else {
+		deployservice.NewReconciler(
+			deployRepo, deployPublisher, reportReconcileError,
+		).Start(c.Context, c.Config.Deploy.ReconcileInterval)
+	}
 	envResolver := deployacl.NewEnvironmentResolver(c.DB)
 	createDeployment := deploycommand.NewCreateDeploymentHandler(deployRepo, deployReader, c.MessageQueue, nil, envResolver)
 	createDeployment.SetProjectLifecycleReader(deployReader)
