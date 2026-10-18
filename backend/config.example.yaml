@@ -13,12 +13,16 @@ database:
 redis:
   addr: "localhost:6379"
 messaging:
+  # inmemory is synchronous and intended only for local development/tests.
+  # Production must set MESSAGING_DRIVER=amqp and provide AMQP_URL as a secret.
+  # The event exchange below is separate from the existing task queue exchange.
   driver: "inmemory"
   amqp:
+    # Prefer the AMQP_URL environment variable; do not commit production credentials.
     url: "amqp://sparkops:sparkops@localhost:5672/"
-    exchange: "sparkops"
+    exchange: "sparkops" # Existing async task queue exchange.
     exchange_type: "direct"
-    event_exchange: "sparkops.events"
+    event_exchange: "sparkops.events" # Transactional domain-event topic exchange.
   outbox:
     poll_interval: 1s
     batch_size: 100

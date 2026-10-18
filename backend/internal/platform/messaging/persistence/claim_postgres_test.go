@@ -285,7 +285,9 @@ func openStorePostgres(t *testing.T) *gorm.DB {
 		require.NoError(t, adminErr)
 		require.NoError(t, adminSQL.Close())
 	})
-	require.NoError(t, AutoMigrate(db))
+	migration, err := os.ReadFile("../../../../migrations/000070_transactional_events.up.sql")
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(string(migration)).Error)
 	return db
 }
 

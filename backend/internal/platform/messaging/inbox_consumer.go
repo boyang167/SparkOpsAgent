@@ -9,6 +9,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
+	"go.uber.org/zap"
 )
 
 type InboxConsumer struct {
@@ -18,6 +19,7 @@ type InboxConsumer struct {
 	transport   EventTransport
 	clock       Clock
 	metrics     *Metrics
+	logger      *zap.Logger
 	lifecycleMu sync.Mutex
 	stopping    bool
 	active      sync.WaitGroup
@@ -37,9 +39,14 @@ func NewInboxConsumer(
 	transport EventTransport,
 	clock Clock,
 	metrics *Metrics,
+	loggers ...*zap.Logger,
 ) *InboxConsumer {
 	if clock == nil {
 		clock = systemClock{}
+	}
+	logger := zap.NewNop()
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
 	}
 	return &InboxConsumer{
 		transactor: transactor,
@@ -48,6 +55,7 @@ func NewInboxConsumer(
 		transport:  transport,
 		clock:      clock,
 		metrics:    metrics,
+		logger:     logger,
 	}
 }
 
@@ -100,6 +108,14 @@ func (c *InboxConsumer) Handle(
 		return subscription.Handler(handlerCtx, event)
 	})
 	if err == nil {
+		c.logger.Debug(
+			"event consumed",
+			zap.String("event_id", envelope.ID),
+			zap.String("event_type", envelope.Type),
+			zap.String("subscriber", subscription.Subscriber),
+			zap.Int("attempt", attempts+1),
+			zap.Bool("duplicate", duplicate),
+		)
 		if c.metrics != nil {
 			result := "success"
 			if duplicate {
@@ -114,6 +130,14 @@ func (c *InboxConsumer) Handle(
 		return err
 	}
 	if IsPermanent(err) {
+		c.logger.Error(
+			"event routed to dead letter queue",
+			zap.String("event_id", envelope.ID),
+			zap.String("event_type", envelope.Type),
+			zap.String("subscriber", subscription.Subscriber),
+			zap.Int("attempt", attempts+1),
+			zap.Error(err),
+		)
 		if publishErr := c.transport.PublishDeadLetter(ctx, subscription, envelope, err.Error()); publishErr != nil {
 			if c.metrics != nil {
 				c.metrics.EventConsume.WithLabelValues(
@@ -131,6 +155,15 @@ func (c *InboxConsumer) Handle(
 	}
 
 	delay := RetryDelay(retryDelay(attempts + 1))
+	c.logger.Warn(
+		"event scheduled for retry",
+		zap.String("event_id", envelope.ID),
+		zap.String("event_type", envelope.Type),
+		zap.String("subscriber", subscription.Subscriber),
+		zap.Int("attempt", attempts+1),
+		zap.Duration("delay", time.Duration(delay)),
+		zap.Error(err),
+	)
 	if publishErr := c.transport.PublishRetry(ctx, subscription, envelope, delay, attempts+1); publishErr != nil {
 		if c.metrics != nil {
 			c.metrics.EventConsume.WithLabelValues(

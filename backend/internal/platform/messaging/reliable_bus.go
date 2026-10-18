@@ -11,6 +11,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
+	"go.uber.org/zap"
 )
 
 var stableSubscriberName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`)
@@ -21,6 +22,7 @@ type ReliableBus struct {
 	transport  EventTransport
 	dispatcher DispatcherLifecycle
 	consumer   *InboxConsumer
+	logger     *zap.Logger
 
 	mu            sync.Mutex
 	subscriptions []Subscription
@@ -36,10 +38,15 @@ func NewReliableBus(
 	transport EventTransport,
 	dispatcher DispatcherLifecycle,
 	consumer *InboxConsumer,
+	loggers ...*zap.Logger,
 ) *ReliableBus {
+	logger := zap.NewNop()
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
 	return &ReliableBus{
 		registry: registry, outbox: outbox, transport: transport,
-		dispatcher: dispatcher, consumer: consumer,
+		dispatcher: dispatcher, consumer: consumer, logger: logger,
 	}
 }
 
@@ -117,6 +124,7 @@ func (b *ReliableBus) Start(ctx context.Context) error {
 	if err := b.transport.Declare(runCtx, subscriptions); err != nil {
 		return b.abortStart(cancel, err)
 	}
+	b.logger.Info("event topology declared", zap.Int("subscription_count", len(subscriptions)))
 	for _, subscription := range subscriptions {
 		if b.consumer == nil {
 			return b.abortStart(cancel, fmt.Errorf("inbox consumer is required"))
@@ -133,10 +141,12 @@ func (b *ReliableBus) Start(ctx context.Context) error {
 			return b.abortStart(cancel, err)
 		}
 	}
+	b.logger.Info("event consumers started", zap.Int64("consumer_count", int64(len(subscriptions))))
 	if b.dispatcher != nil {
 		if err := b.dispatcher.Start(runCtx); err != nil {
 			return b.abortStart(cancel, err)
 		}
+		b.logger.Info("event outbox dispatcher started")
 	}
 	return nil
 }

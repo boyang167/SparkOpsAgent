@@ -572,6 +572,7 @@ func TestDeploymentPipelineAcceptance(t *testing.T) {
 	require.NotEmpty(t, env.runtime.lastKubeconfig)
 	require.Equal(t, "registry.test.invalid/team/orders", env.jenkins.LastBuildRequest.ImageRepository)
 	require.Equal(t, run.ImageTag, env.jenkins.LastBuildRequest.ImageTag)
+	require.Equal(t, 2, env.runtime.applyCalls, "successful pipeline applies both deployment stages")
 }
 
 func TestDeploymentPipelineCIFailureHasZeroApply(t *testing.T) {

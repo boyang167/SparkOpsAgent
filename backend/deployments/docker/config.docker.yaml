@@ -5,12 +5,15 @@ database:
 redis:
   addr: "redis:6379"
 messaging:
+  # Docker runs reliable events over AMQP. The task queue exchange and
+  # transactional event exchange intentionally remain separate.
   driver: "amqp"
   amqp:
+    # Override with the AMQP_URL secret outside local Docker Compose.
     url: "amqp://sparkops:sparkops@rabbitmq:5672/"
-    exchange: "sparkops"
+    exchange: "sparkops" # Existing async task queue exchange.
     exchange_type: "direct"
-    event_exchange: "sparkops.events"
+    event_exchange: "sparkops.events" # Transactional domain-event topic exchange.
   outbox:
     poll_interval: 1s
     batch_size: 100

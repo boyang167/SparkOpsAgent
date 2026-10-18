@@ -13,6 +13,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -96,6 +98,38 @@ func TestReliableBusStartDeclaresBeforeConsumersAndDispatcher(t *testing.T) {
 	require.NoError(t, bus.Start(context.Background()))
 
 	require.Equal(t, []string{"declare", "consume", "dispatcher"}, transport.order)
+}
+
+func TestReliableBusLogsAuditableStartupOrder(t *testing.T) {
+	core, observed := observer.New(zap.InfoLevel)
+	logger := zap.New(core)
+	transport := &orderedTransport{}
+	dispatcher := &orderedDispatcher{order: &transport.order}
+	bus := NewReliableBus(
+		events.NewRegistry(),
+		&transactionCheckingOutbox{},
+		transport,
+		dispatcher,
+		&InboxConsumer{},
+		logger,
+	)
+	require.NoError(t, bus.Subscribe("test.event", "test.subscriber", func(context.Context, events.Event) error {
+		return nil
+	}))
+
+	require.NoError(t, bus.Start(context.Background()))
+
+	entries := observed.All()
+	messages := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		messages = append(messages, entry.Message)
+	}
+	require.Equal(t, []string{
+		"event topology declared",
+		"event consumers started",
+		"event outbox dispatcher started",
+	}, messages)
+	require.Equal(t, int64(1), observed.FilterMessage("event consumers started").All()[0].ContextMap()["consumer_count"])
 }
 
 func TestReliableBusRejectsInvalidAndDuplicateSubscriptions(t *testing.T) {

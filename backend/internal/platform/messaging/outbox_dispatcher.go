@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
+	"go.uber.org/zap"
 )
 
 type Clock interface {
@@ -36,6 +37,7 @@ type OutboxDispatcher struct {
 	config    OutboxDispatcherConfig
 	clock     Clock
 	metrics   *Metrics
+	logger    *zap.Logger
 
 	mu          sync.Mutex
 	started     bool
@@ -51,6 +53,7 @@ func NewOutboxDispatcher(
 	config OutboxDispatcherConfig,
 	clock Clock,
 	metrics *Metrics,
+	loggers ...*zap.Logger,
 ) *OutboxDispatcher {
 	if config.BatchSize <= 0 {
 		config.BatchSize = 100
@@ -64,8 +67,12 @@ func NewOutboxDispatcher(
 	if clock == nil {
 		clock = systemClock{}
 	}
+	logger := zap.NewNop()
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
 	return &OutboxDispatcher{
-		store: store, transport: transport, config: config, clock: clock, metrics: metrics,
+		store: store, transport: transport, config: config, clock: clock, metrics: metrics, logger: logger,
 	}
 }
 
@@ -107,6 +114,13 @@ func (d *OutboxDispatcher) dispatchOnce(claimCtx, executionCtx context.Context) 
 
 	for _, record := range records {
 		if err := d.transport.Publish(executionCtx, record.Envelope); err != nil {
+			d.logger.Warn(
+				"event outbox publish failed",
+				zap.String("event_id", record.ID),
+				zap.String("event_type", record.Type),
+				zap.Int("attempt", record.Attempts),
+				zap.Error(err),
+			)
 			if d.metrics != nil {
 				d.metrics.EventPublish.WithLabelValues("failure").Inc()
 			}
@@ -122,8 +136,22 @@ func (d *OutboxDispatcher) dispatchOnce(claimCtx, executionCtx context.Context) 
 			d.metrics.EventPublish.WithLabelValues("success").Inc()
 		}
 		if err := d.store.MarkPublished(executionCtx, record.ID, d.config.Owner, d.clock.Now()); err != nil {
+			d.logger.Error(
+				"event outbox mark published failed",
+				zap.String("event_id", record.ID),
+				zap.String("event_type", record.Type),
+				zap.Int("attempt", record.Attempts),
+				zap.Error(err),
+			)
 			d.recordDispatcherError("mark_published")
 			dispatchErrors = append(dispatchErrors, fmt.Errorf("mark event %s published: %w", record.ID, err))
+		} else {
+			d.logger.Debug(
+				"event outbox published",
+				zap.String("event_id", record.ID),
+				zap.String("event_type", record.Type),
+				zap.Int("attempt", record.Attempts),
+			)
 		}
 	}
 	return errors.Join(dispatchErrors...)

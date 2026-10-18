@@ -24,6 +24,7 @@ func TestRabbitEventTransportRoutesOneEventToEachSubscriber(t *testing.T) {
 
 	connection, err := amqp.Dial(url)
 	require.NoError(t, err)
+	t.Logf("RabbitMQ AMQP server version: %v", connection.Properties["version"])
 	t.Cleanup(func() { _ = connection.Close() })
 
 	suffix := fmt.Sprintf("event-transport-%d", time.Now().UnixNano())

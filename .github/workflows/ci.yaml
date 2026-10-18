@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache-dependency-path: backend/go.sum
 
       - name: Run tests
@@ -27,6 +27,65 @@ jobs:
 
       - name: Check domain layer dependencies
         run: go run ./scripts/check-deps.go
+
+  messaging-integration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: sparkops
+          POSTGRES_PASSWORD: sparkops
+          POSTGRES_DB: sparkops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sparkops -d sparkops"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      rabbitmq:
+        image: rabbitmq:3.13-management-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: sparkops
+          RABBITMQ_DEFAULT_PASS: sparkops
+        ports:
+          - 5672:5672
+          - 15672:15672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q check_running"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: backend/go.sum
+
+      - name: Bootstrap fresh application schema
+        env:
+          DATABASE_DSN: postgres://sparkops:sparkops@localhost:5432/sparkops?sslmode=disable
+        run: go run ./cmd/migrate
+
+      - name: Verify fresh and upgrade 000070-000075 plus startup gate
+        env:
+          DATABASE_DSN: postgres://sparkops:sparkops@localhost:5432/sparkops?sslmode=disable
+        run: >-
+          go test ./migrations
+          -run 'TestTransactionalEventMigrationsFreshUp70Through75Postgres|TestTransactionalEventMigrationsUpgradePre70RowsThrough75Postgres|TestProjectArchiveIntentMigrationUpgradesPhaseSemanticsPostgres'
+          -count=1
+
+      - name: Run messaging integration tests
+        env:
+          DATABASE_DSN: postgres://sparkops:sparkops@localhost:5432/sparkops?sslmode=disable
+          AMQP_URL: amqp://sparkops:sparkops@localhost:5672/
+        run: go test -tags=integration ./internal/platform/messaging/... ./internal/modules/delivery/deployrun/application/... -count=1 -timeout 300s
 
   frontend:
     runs-on: ubuntu-latest

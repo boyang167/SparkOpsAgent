@@ -11,8 +11,11 @@ database:
 redis:
   addr: "192.168.5.24:16379"
 messaging:
+  # Remote development remains compatible with the synchronous local driver.
+  # Production must override this to amqp and inject AMQP_URL from a secret.
   driver: inmemory
   amqp:
+    # event_exchange is not the existing task queue exchange.
     event_exchange: "sparkops.events"
   outbox:
     poll_interval: 1s

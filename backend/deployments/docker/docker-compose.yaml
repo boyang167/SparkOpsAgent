@@ -26,7 +26,7 @@ services:
       retries: 10
 
   rabbitmq:
-    image: rabbitmq:3-management-alpine
+    image: rabbitmq:3.13-management-alpine
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -39,6 +39,44 @@ services:
       timeout: 5s
       retries: 10
 
+  schema-bootstrap:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_DSN: postgres://sparkops:sparkops@postgres:5432/sparkops?sslmode=disable
+    command: ["./migrate-schema"]
+    restart: "no"
+
+  migrate:
+    image: migrate/migrate:v4.18.3
+    depends_on:
+      schema-bootstrap:
+        condition: service_completed_successfully
+    volumes:
+      # The GORM bootstrap creates the historical baseline; this rollout applies
+      # only the ordered transactional-event increment and records gate 75.
+      - ../../migrations/000070_transactional_events.up.sql:/event-migrations/000070_transactional_events.up.sql:ro
+      - ../../migrations/000070_transactional_events.down.sql:/event-migrations/000070_transactional_events.down.sql:ro
+      - ../../migrations/000071_product_workflow_run_version.up.sql:/event-migrations/000071_product_workflow_run_version.up.sql:ro
+      - ../../migrations/000071_product_workflow_run_version.down.sql:/event-migrations/000071_product_workflow_run_version.down.sql:ro
+      - ../../migrations/000072_project_archive_generation.up.sql:/event-migrations/000072_project_archive_generation.up.sql:ro
+      - ../../migrations/000072_project_archive_generation.down.sql:/event-migrations/000072_project_archive_generation.down.sql:ro
+      - ../../migrations/000073_deployment_run_archive_generation.up.sql:/event-migrations/000073_deployment_run_archive_generation.up.sql:ro
+      - ../../migrations/000073_deployment_run_archive_generation.down.sql:/event-migrations/000073_deployment_run_archive_generation.down.sql:ro
+      - ../../migrations/000074_project_archive_phase.up.sql:/event-migrations/000074_project_archive_phase.up.sql:ro
+      - ../../migrations/000074_project_archive_phase.down.sql:/event-migrations/000074_project_archive_phase.down.sql:ro
+      - ../../migrations/000075_project_archive_intent.up.sql:/event-migrations/000075_project_archive_intent.up.sql:ro
+      - ../../migrations/000075_project_archive_intent.down.sql:/event-migrations/000075_project_archive_intent.down.sql:ro
+    command:
+      - -path=/event-migrations
+      - -database=postgres://sparkops:sparkops@postgres:5432/sparkops?sslmode=disable
+      - up
+    restart: "no"
+
   api:
     build:
       context: ../..
@@ -46,8 +84,8 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       rabbitmq:
@@ -59,6 +97,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-docker-dev-secret-min16}
       MESSAGING_DRIVER: ${MESSAGING_DRIVER:-amqp}
       AMQP_URL: amqp://sparkops:sparkops@rabbitmq:5672/
+      AMQP_EVENT_EXCHANGE: ${AMQP_EVENT_EXCHANGE:-sparkops.events}
+      OUTBOX_POLL_INTERVAL: ${OUTBOX_POLL_INTERVAL:-1s}
+      OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-100}
+      OUTBOX_LOCK_TIMEOUT: ${OUTBOX_LOCK_TIMEOUT:-1m}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       RUNTIME_DRIVER: ${RUNTIME_DRIVER:-mock}

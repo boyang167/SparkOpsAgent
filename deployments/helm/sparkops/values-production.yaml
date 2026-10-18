@@ -3,7 +3,8 @@
 #     -f deployments/helm/sparkops/values.yaml \
 #     -f deployments/helm/sparkops/values-production.yaml \
 #     --set secrets.jwtSecret=$JWT_SECRET \
-#     --set secrets.databaseDsn=$DATABASE_DSN
+#     --set-string secrets.databaseDsn=$DATABASE_DSN \
+#     --set-string secrets.amqpUrl=$AMQP_URL
 
 api:
   env:
@@ -11,6 +12,12 @@ api:
     MESSAGING_DRIVER: amqp
     RUNTIME_DRIVER: k8s
     DELIVERY_DRIVER: jenkins
+  amqp:
+    eventExchange: sparkops.events
+  outbox:
+    pollInterval: 1s
+    batchSize: 100
+    lockTimeout: 1m
   autoscaling:
     enabled: true
     minReplicas: 2
@@ -39,3 +46,8 @@ ingress:
 
 kubeconfig:
   enabled: true
+
+# Enable only when the Prometheus Operator CRD is installed.
+observability:
+  messagingAlerts:
+    enabled: false

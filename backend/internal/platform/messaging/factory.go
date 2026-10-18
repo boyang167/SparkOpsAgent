@@ -25,6 +25,7 @@ type Factory struct {
 	Operations *OperationRuntime
 
 	eventLifecycle Lifecycle
+	logger         *zap.Logger
 	mu             sync.Mutex
 	started        bool
 	closed         bool
@@ -126,6 +127,7 @@ func newFromConfig(
 		if err := persistence.ValidateTransactionalEventSchema(db); err != nil {
 			return nil, err
 		}
+		logger.Info("messaging migration current", zap.Int("version", 75))
 	}
 	instanceOwner, runtimeID := dependencies.runtimeIdentity()
 
@@ -138,11 +140,12 @@ func newFromConfig(
 		}
 	}
 
-	factory := &Factory{}
+	factory := &Factory{logger: logger}
 	switch driver {
 	case "inmemory":
 		factory.Bus = NewInMemoryBus(registry)
 		factory.Queue = NewNoopQueue()
+		logger.Info("inmemory event runtime configured", zap.String("messaging_driver", driver))
 	case "amqp":
 		if db == nil {
 			return nil, fmt.Errorf("database is required when messaging.driver=amqp")
@@ -185,9 +188,10 @@ func newFromConfig(
 			},
 			nil,
 			metrics,
+			logger,
 		)
-		consumer := NewInboxConsumer(transactor, inbox, registry, transport, nil, metrics)
-		reliableBus := NewReliableBus(registry, outbox, transport, dispatcher, consumer)
+		consumer := NewInboxConsumer(transactor, inbox, registry, transport, nil, metrics, logger)
+		reliableBus := NewReliableBus(registry, outbox, transport, dispatcher, consumer, logger)
 		factory.Bus = reliableBus
 		factory.eventLifecycle = reliableBus
 		logger.Info(
@@ -217,6 +221,7 @@ func newFromConfig(
 				},
 				nil,
 				metrics,
+				logger,
 			),
 		}
 	}
@@ -243,6 +248,9 @@ func (f *Factory) Start(ctx context.Context) error {
 	if f.Operations != nil {
 		if err := f.Operations.Start(ctx); err != nil {
 			return f.rollbackStart(fmt.Errorf("start operation runtime: %w", err))
+		}
+		if f.logger != nil {
+			f.logger.Info("operation dispatcher started")
 		}
 	}
 

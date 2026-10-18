@@ -1,0 +1,53 @@
+{{- if .Values.observability.messagingAlerts.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "sparkops.fullname" . }}-messaging
+  {{- with .Values.observability.messagingAlerts.namespace }}
+  namespace: {{ . }}
+  {{- end }}
+  labels:
+    {{- include "sparkops.labels" . | nindent 4 }}
+    {{- with .Values.observability.messagingAlerts.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: sparkops.messaging
+      rules:
+        - alert: SparkOpsEventOutboxStalled
+          expr: sparkops_event_outbox_oldest_seconds > {{ .Values.observability.messagingAlerts.outboxOldestSeconds }}
+          for: {{ .Values.observability.messagingAlerts.for }}
+          labels:
+            severity: warning
+          annotations:
+            summary: SparkOps event Outbox is not draining
+        - alert: SparkOpsOperationOutboxStalled
+          expr: sparkops_operation_outbox_oldest_seconds > {{ .Values.observability.messagingAlerts.operationOldestSeconds }}
+          for: {{ .Values.observability.messagingAlerts.for }}
+          labels:
+            severity: warning
+          annotations:
+            summary: SparkOps Operation Outbox is not draining
+        - alert: SparkOpsMessagingBacklogHigh
+          expr: max(sparkops_event_outbox_pending or sparkops_operation_outbox_pending) > {{ .Values.observability.messagingAlerts.pendingCount }}
+          for: {{ .Values.observability.messagingAlerts.for }}
+          labels:
+            severity: warning
+          annotations:
+            summary: SparkOps messaging backlog is high
+        - alert: SparkOpsEventDLQActive
+          expr: increase(sparkops_event_dlq_total[10m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: SparkOps routed an event to a subscriber DLQ
+        - alert: SparkOpsMessagingDispatcherErrors
+          expr: increase(sparkops_event_dispatcher_error_total[10m]) + increase(sparkops_operation_dispatcher_error_total[10m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: SparkOps messaging dispatchers are reporting errors
+{{- end }}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
+	"go.uber.org/zap"
 )
 
 const operationOwnerMaxLength = 160
@@ -30,6 +31,7 @@ type OperationDispatcher struct {
 	config    OperationDispatcherConfig
 	clock     Clock
 	metrics   *Metrics
+	logger    *zap.Logger
 	runtimeID string
 
 	mu          sync.Mutex
@@ -46,6 +48,7 @@ func NewOperationDispatcher(
 	config OperationDispatcherConfig,
 	clock Clock,
 	metrics *Metrics,
+	loggers ...*zap.Logger,
 ) *OperationDispatcher {
 	if config.BatchSize <= 0 {
 		config.BatchSize = 100
@@ -62,13 +65,17 @@ func NewOperationDispatcher(
 	if clock == nil {
 		clock = systemClock{}
 	}
+	logger := zap.NewNop()
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
 	runtimeID := config.RuntimeID
 	if runtimeID == "" {
 		runtimeID = uuid.NewString()
 	}
 	return &OperationDispatcher{
 		store: store, registry: registry, config: config, clock: clock, metrics: metrics,
-		runtimeID: runtimeID,
+		logger: logger, runtimeID: runtimeID,
 	}
 }
 
@@ -157,11 +164,34 @@ func (d *OperationDispatcher) dispatch(
 		if markErr := d.store.MarkCompleted(
 			ctx, record.ID, owner, d.clock.Now(),
 		); markErr != nil {
+			d.logger.Error(
+				"operation mark completed failed",
+				zap.String("event_id", record.EventID),
+				zap.String("event_type", record.OperationType),
+				zap.String("subscriber", record.Subscriber),
+				zap.Int("attempt", record.Attempts),
+				zap.Error(markErr),
+			)
 			d.recordOperationError("mark", markErr)
 			return fmt.Errorf("mark operation %s completed: %w", record.ID, markErr)
 		}
+		d.logger.Debug(
+			"operation completed",
+			zap.String("event_id", record.EventID),
+			zap.String("event_type", record.OperationType),
+			zap.String("subscriber", record.Subscriber),
+			zap.Int("attempt", record.Attempts),
+		)
 		return nil
 	}
+	d.logger.Warn(
+		"operation execution failed",
+		zap.String("event_id", record.EventID),
+		zap.String("event_type", record.OperationType),
+		zap.String("subscriber", record.Subscriber),
+		zap.Int("attempt", record.Attempts),
+		zap.Error(err),
+	)
 	d.recordOperationError("handler", err)
 	if IsPermanent(err) {
 		markErr := d.store.MarkFailed(

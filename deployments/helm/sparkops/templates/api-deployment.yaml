@@ -39,6 +39,14 @@ spec:
               value: {{ .Values.api.env.APP_ENV | quote }}
             - name: MESSAGING_DRIVER
               value: {{ .Values.api.env.MESSAGING_DRIVER | quote }}
+            - name: AMQP_EVENT_EXCHANGE
+              value: {{ .Values.api.amqp.eventExchange | quote }}
+            - name: OUTBOX_POLL_INTERVAL
+              value: {{ .Values.api.outbox.pollInterval | quote }}
+            - name: OUTBOX_BATCH_SIZE
+              value: {{ .Values.api.outbox.batchSize | quote }}
+            - name: OUTBOX_LOCK_TIMEOUT
+              value: {{ .Values.api.outbox.lockTimeout | quote }}
             - name: RUNTIME_DRIVER
               value: {{ .Values.api.env.RUNTIME_DRIVER | quote }}
             - name: DELIVERY_DRIVER
