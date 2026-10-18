@@ -75,7 +75,7 @@ func TestExecuteCurrentStage_sequentialStartsOnlyFirstApproval(t *testing.T) {
 	wf := &model.ProductWorkflow{Stages: stages}
 	run := model.NewProductWorkflowRun(kernel.NewProductWorkflowID(), kernel.ProductID{}, stages)
 	repo := &updateOnlyRepo{}
-	err := NewScheduler(repo, nil, nil, nil, nil).StartRun(context.Background(), wf, run)
+	err := NewScheduler(repo, nil, nil, nil, nil, nil).StartRun(context.Background(), wf, run)
 	require.NoError(t, err)
 	require.Equal(t, model.JobRunStatusRunning, run.StageRuns[0].Jobs[0].Status)
 	require.Equal(t, model.JobRunStatusPending, run.StageRuns[0].Jobs[1].Status)
@@ -92,7 +92,7 @@ func TestExecuteCurrentStage_parallelStartsEveryApproval(t *testing.T) {
 	}}
 	wf := &model.ProductWorkflow{Stages: stages}
 	run := model.NewProductWorkflowRun(kernel.NewProductWorkflowID(), kernel.ProductID{}, stages)
-	err := NewScheduler(&updateOnlyRepo{}, nil, nil, nil, nil).StartRun(context.Background(), wf, run)
+	err := NewScheduler(&updateOnlyRepo{}, nil, nil, nil, nil, nil).StartRun(context.Background(), wf, run)
 	require.NoError(t, err)
 	require.Equal(t, model.JobRunStatusRunning, run.StageRuns[0].Jobs[0].Status)
 	require.Equal(t, model.JobRunStatusRunning, run.StageRuns[0].Jobs[1].Status)
@@ -105,7 +105,7 @@ func TestExecuteCurrentStage_debugPausesBeforeJobs(t *testing.T) {
 	}}
 	wf := &model.ProductWorkflow{Stages: stages, Advanced: model.WorkflowAdvanced{Debug: true}}
 	run := model.NewProductWorkflowRun(kernel.NewProductWorkflowID(), kernel.ProductID{}, stages)
-	err := NewScheduler(&updateOnlyRepo{}, nil, nil, nil, nil).StartRun(context.Background(), wf, run)
+	err := NewScheduler(&updateOnlyRepo{}, nil, nil, nil, nil, nil).StartRun(context.Background(), wf, run)
 	require.NoError(t, err)
 	require.Equal(t, model.RunStatusPaused, run.Status)
 	require.Equal(t, model.JobRunStatusPending, run.StageRuns[0].Jobs[0].Status)

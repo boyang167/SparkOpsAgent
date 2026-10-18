@@ -33,7 +33,77 @@ const run: ProductWorkflowRunVM = {
   ],
 };
 
+function workflowRunToPipelineTasks(run: ProductWorkflowRunVM) {
+  return buildPipelineStages(run, {}).flatMap((stage) => stage.tasks);
+}
+
 describe("buildPipelineStages", () => {
+  it("renders every environment sync project as a deploy task", () => {
+    const syncRun: ProductWorkflowRunVM = {
+      id: "run-sync",
+      workflow_id: "wf-1",
+      product_id: "prod-1",
+      status: "failed",
+      current_stage: 0,
+      stage_runs: [
+        {
+          name: "同步",
+          status: "failed",
+          jobs: [
+            {
+              name: "promote",
+              type: "sparkops-environment-sync",
+              status: "failed",
+              deploys: [
+                {
+                  project_id: "p1",
+                  environment_id: "prod",
+                  source_environment_id: "dev",
+                  sync_image: true,
+                  sync_yaml: false,
+                  first_sync: false,
+                  status: "success",
+                  deployment_run_id: "dr-1",
+                  image_repository: "registry/app",
+                  image_tag: "v1",
+                },
+                {
+                  project_id: "p2",
+                  environment_id: "prod",
+                  source_environment_id: "dev",
+                  sync_image: true,
+                  sync_yaml: true,
+                  first_sync: true,
+                  status: "failed",
+                  error_message: "deployment already running",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const tasks = workflowRunToPipelineTasks(syncRun);
+    expect(tasks.filter((task) => task.jobType === "sparkops-environment-sync")).toMatchObject([
+      {
+        projectId: "p1",
+        kind: "deploy",
+        sourceEnvironmentId: "dev",
+        environmentId: "prod",
+        syncImage: true,
+        syncYaml: false,
+        firstSync: false,
+      },
+      {
+        projectId: "p2",
+        kind: "deploy",
+        status: "failed",
+        firstSync: true,
+        errorMessage: "deployment already running",
+      },
+    ]);
+  });
+
   it("flattens build tasks per project", () => {
     const stages = buildPipelineStages(run, { p1: "backend", p2: "frontend" });
     expect(stages[0]?.tasks).toHaveLength(2);

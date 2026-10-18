@@ -251,6 +251,7 @@ export function SprintWorkItemExecuteModal({
             <WorkflowRunFormSkeleton />
           ) : (
             <StartWorkflowRunModal
+              key={activeWorkflowId}
               open
               presentation="embedded"
               workspaceId={workspaceId}

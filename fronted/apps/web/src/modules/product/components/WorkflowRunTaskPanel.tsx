@@ -30,6 +30,13 @@ function versionImageSummary(images: ProjectVersionDetailVM["images"]): string {
   return images.map((item) => `${item.image}${item.tag ? `:${item.tag}` : ""}`.trim()).join(" · ");
 }
 
+function environmentSyncScopeLabel(syncImage?: boolean, syncYaml?: boolean): string {
+  const parts: string[] = [];
+  if (syncImage) parts.push("镜像");
+  if (syncYaml) parts.push("YAML");
+  return parts.length ? parts.join(" + ") : "—";
+}
+
 export function WorkflowRunTaskPanel({
   workspaceId,
   productId,
@@ -101,6 +108,10 @@ export function WorkflowRunTaskPanel({
   const activeDeploy = deploy ? isActiveDeploymentRun(deploy) : task.status === "running";
   const deployStatus = deploy?.status ?? task.status;
   const deployError = deploy?.error_message?.trim() || task.errorMessage;
+  const isEnvironmentSync = task.jobType === "sparkops-environment-sync";
+  const sourceEnvironmentId =
+    task.sourceEnvironmentId ?? deploy?.source_environment_id?.trim() ?? "";
+  const targetEnvironmentId = task.environmentId ?? deploy?.environment_id?.trim() ?? "";
   const versionImageRef =
     version && version.images.length > 0
       ? versionImageSummary(version.images)
@@ -181,11 +192,33 @@ export function WorkflowRunTaskPanel({
             </span>
           </div>
         ) : null}
-        {task.environmentId ? (
+        {isEnvironmentSync && (sourceEnvironmentId || targetEnvironmentId) ? (
+          <div className="wf-run-live-meta-item">
+            <span className="wf-run-live-meta-label">环境同步</span>
+            <span>
+              {sourceEnvironmentId || "—"} → {targetEnvironmentId || "—"}
+            </span>
+          </div>
+        ) : null}
+        {!isEnvironmentSync && task.environmentId ? (
           <div className="wf-run-live-meta-item">
             <span className="wf-run-live-meta-label">环境</span>
             <span>{task.environmentId}</span>
           </div>
+        ) : null}
+        {isEnvironmentSync ? (
+          <>
+            <div className="wf-run-live-meta-item">
+              <span className="wf-run-live-meta-label">同步范围</span>
+              <span>{environmentSyncScopeLabel(task.syncImage, task.syncYaml)}</span>
+            </div>
+            {task.firstSync ? (
+              <div className="wf-run-live-meta-item">
+                <span className="wf-run-live-meta-label">首次同步</span>
+                <span>目标环境将新建项目关联</span>
+              </div>
+            ) : null}
+          </>
         ) : null}
         {task.kind === "deploy" && deploy ? (
           <>

@@ -32,13 +32,14 @@ type ProjectBuildSpec struct {
 }
 
 const (
-	JobTypeSparkopsBuild         = "sparkops-build"
-	JobTypeSparkopsCreateVersion = "sparkops-create-version"
-	JobTypeSparkopsDeploy        = "sparkops-deploy"
-	JobTypeSparkopsDeployVersion = "sparkops-deploy-version"
-	JobTypeSparkopsApproval      = "sparkops-approval"
-	JobTypeFreestyle             = "freestyle"
-	JobTypeNotify                = "notify"
+	JobTypeSparkopsBuild           = "sparkops-build"
+	JobTypeSparkopsCreateVersion   = "sparkops-create-version"
+	JobTypeSparkopsDeploy          = "sparkops-deploy"
+	JobTypeSparkopsDeployVersion   = "sparkops-deploy-version"
+	JobTypeSparkopsEnvironmentSync = "sparkops-environment-sync"
+	JobTypeSparkopsApproval        = "sparkops-approval"
+	JobTypeFreestyle               = "freestyle"
+	JobTypeNotify                  = "notify"
 )
 
 const (

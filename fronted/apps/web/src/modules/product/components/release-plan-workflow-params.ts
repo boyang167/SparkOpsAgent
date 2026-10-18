@@ -1,10 +1,12 @@
 import type { EnvironmentVM, ProductWorkflowVM } from "@sparkops/contracts/product";
+import { parseEnvironmentSyncJobSpec } from "./environment-sync-job-spec";
 import { defaultDeployEnvironmentId } from "./workflow-run-form";
 
 const ENV_OVERRIDES_KEY = "_environment_overrides";
 const PROJECT_IDS_KEY = "_project_ids";
 const BRANCH_OVERRIDES_KEY = "_branch_overrides";
 const REF_TYPE_OVERRIDES_KEY = "_ref_type_overrides";
+const ENV_SYNC_PREVIEW_PREFIX = "_environment_sync_preview:";
 
 export async function resolveWorkflowDetails(
   workflow: ProductWorkflowVM,
@@ -87,6 +89,74 @@ export function workflowProjectSources(
     }
   }
   return out;
+}
+
+export function environmentSyncPreviewParamKey(jobName: string): string {
+  return `${ENV_SYNC_PREVIEW_PREFIX}${jobName}`;
+}
+
+export function environmentSyncJobNames(workflow: ProductWorkflowVM | null | undefined): string[] {
+  const names: string[] = [];
+  for (const stage of workflow?.stages ?? []) {
+    for (const job of stage.jobs ?? []) {
+      if (job.type === "sparkops-environment-sync") names.push(job.name);
+    }
+  }
+  return names;
+}
+
+export function parseEnvironmentSyncPreviewIds(parameters?: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parameters ?? {})) {
+    if (!key.startsWith(ENV_SYNC_PREVIEW_PREFIX)) continue;
+    const jobName = key.slice(ENV_SYNC_PREVIEW_PREFIX.length);
+    const previewId = value.trim();
+    if (jobName && previewId) out[jobName] = previewId;
+  }
+  return out;
+}
+
+export function missingEnvironmentSyncPreviewJobs(
+  workflow: ProductWorkflowVM | null | undefined,
+  parameters?: Record<string, string>,
+): string[] {
+  const previewIds = parseEnvironmentSyncPreviewIds(parameters);
+  return environmentSyncJobNames(workflow).filter((name) => !previewIds[name]?.trim());
+}
+
+export function buildEnvironmentSyncPreviewIdsForRun(
+  workflow: ProductWorkflowVM | null | undefined,
+  parameters?: Record<string, string>,
+): Record<string, string> {
+  const previewIds = parseEnvironmentSyncPreviewIds(parameters);
+  const out: Record<string, string> = {};
+  for (const jobName of environmentSyncJobNames(workflow)) {
+    const previewId = previewIds[jobName]?.trim();
+    if (previewId) out[jobName] = previewId;
+  }
+  return out;
+}
+
+export function environmentSyncJobsInWorkflow(workflow: ProductWorkflowVM | null | undefined) {
+  const jobs: Array<{
+    jobName: string;
+    sourceEnvironmentId: string;
+    targetEnvironmentId: string;
+    projects: ReturnType<typeof parseEnvironmentSyncJobSpec>["projects"];
+  }> = [];
+  for (const stage of workflow?.stages ?? []) {
+    for (const job of stage.jobs ?? []) {
+      if (job.type !== "sparkops-environment-sync") continue;
+      const spec = parseEnvironmentSyncJobSpec(job.spec);
+      jobs.push({
+        jobName: job.name,
+        sourceEnvironmentId: spec.sourceEnvironmentId,
+        targetEnvironmentId: spec.targetEnvironmentId,
+        projects: spec.projects,
+      });
+    }
+  }
+  return jobs;
 }
 
 export function deployJobNames(workflow: ProductWorkflowVM | null | undefined): string[] {
@@ -263,6 +333,8 @@ export interface WorkflowJobParamsPatch {
   projectIds?: string[];
   /** 传入即整体替换 */
   refOverrides?: ProjectRefOverrides;
+  /** 环境同步预览 ID，按工作流任务名写入发布项参数 */
+  environmentSyncPreviewIds?: Record<string, string | null>;
   /** 发布项单独填写的运行参数；值为 null 或空表示恢复继承 */
   variables?: Record<string, string | null>;
 }
@@ -301,6 +373,14 @@ export function mergeWorkflowJobParameters(
         projectIds.length > 0 ? projectIds : undefined,
       ),
     );
+  }
+  if (patch.environmentSyncPreviewIds) {
+    for (const [jobName, previewId] of Object.entries(patch.environmentSyncPreviewIds)) {
+      const key = environmentSyncPreviewParamKey(jobName);
+      const trimmed = previewId?.trim() ?? "";
+      if (trimmed) merged[key] = trimmed;
+      else delete merged[key];
+    }
   }
   if (patch.variables) {
     for (const [key, value] of Object.entries(patch.variables)) {

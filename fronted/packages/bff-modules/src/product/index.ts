@@ -521,6 +521,24 @@ export function getEnvironmentStatus(ctx: BffContext, workspaceId: string, produ
   return ctx.upstream.product.getEnvironmentStatus(workspaceId, productId, envId);
 }
 
+export function createEnvironmentSyncPreview(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").EnvironmentSyncPreviewCommand,
+) {
+  return ctx.upstream.product.createEnvironmentSyncPreview(workspaceId, productId, input);
+}
+
+export function listEnvironmentSyncSourceResources(
+  ctx: BffContext,
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").EnvironmentSyncSourceResourcesCommand,
+) {
+  return ctx.upstream.product.listEnvironmentSyncSourceResources(workspaceId, productId, input);
+}
+
 export function getSprintProcess(ctx: BffContext, workspaceId: string, productId: string) {
   return ctx.upstream.product.getSprintProcess(workspaceId, productId);
 }

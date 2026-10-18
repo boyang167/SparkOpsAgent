@@ -53,6 +53,8 @@ type Container struct {
 	AuditLogger                audit.Logger
 	BuildTrigger               BuildTrigger
 	DeploymentTrigger          DeploymentTrigger
+	EnvironmentSyncSnapshots   EnvironmentSyncSnapshots
+	EnvironmentSyncTrigger     EnvironmentSyncTrigger
 	ProjectTeardown            ProjectTeardown
 	VersionCreator             VersionCreator
 	ProjectVersionReader       ProjectVersionReader

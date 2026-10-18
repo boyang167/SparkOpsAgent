@@ -10,6 +10,7 @@ import { ApprovalJobConfigDrawer } from "./ApprovalJobConfigDrawer";
 import { BuildJobConfigDrawer } from "./BuildJobConfigDrawer";
 import { CreateVersionJobConfigDrawer } from "./CreateVersionJobConfigDrawer";
 import { DeployJobConfigDrawer } from "./DeployJobConfigDrawer";
+import { EnvironmentSyncJobConfigDrawer } from "./EnvironmentSyncJobConfigDrawer";
 import { BuildNotifyList } from "./BuildNotifyList";
 import {
   emptyStage,
@@ -66,7 +67,8 @@ function hasDedicatedJobConfigDrawer(type?: string): boolean {
     type === "sparkops-deploy" ||
     type === "sparkops-deploy-version" ||
     type === "sparkops-create-version" ||
-    type === "sparkops-approval"
+    type === "sparkops-approval" ||
+    type === "sparkops-environment-sync"
   );
 }
 
@@ -528,6 +530,25 @@ export function ProductWorkflowEditor({
             name: nextName,
             type: "sparkops-deploy",
             spec: nextSpec,
+          });
+          setSelection(null);
+        }}
+      />
+
+      <EnvironmentSyncJobConfigDrawer
+        open={selection?.kind === "job" && selectedJob?.type === "sparkops-environment-sync"}
+        workspaceId={workspaceId}
+        productId={productId}
+        job={selectedJob ?? { name: "", type: "sparkops-environment-sync", spec: {} }}
+        environments={environments}
+        projects={projects}
+        onClose={() => setSelection(null)}
+        onConfirm={(nextJob) => {
+          if (!selection || selection.kind !== "job") return;
+          updateJob(selection.stageIndex, selection.jobIndex, {
+            name: nextJob.name,
+            type: nextJob.type,
+            spec: nextJob.spec,
           });
           setSelection(null);
         }}

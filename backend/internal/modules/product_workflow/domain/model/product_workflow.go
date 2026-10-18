@@ -67,14 +67,18 @@ type ProjectBuildRun struct {
 }
 
 type ProjectDeployRun struct {
-	ProjectID       string       `json:"project_id"`
-	EnvironmentID   string       `json:"environment_id,omitempty"`
-	DeploymentRunID string       `json:"deployment_run_id,omitempty"`
-	VersionID       string       `json:"version_id,omitempty"`
-	ImageTag        string       `json:"image_tag,omitempty"`
-	ImageRepository string       `json:"image_repository,omitempty"`
-	Status          JobRunStatus `json:"status"`
-	ErrorMessage    string       `json:"error_message,omitempty"`
+	ProjectID           string       `json:"project_id"`
+	EnvironmentID       string       `json:"environment_id,omitempty"`
+	SourceEnvironmentID string       `json:"source_environment_id,omitempty"`
+	DeploymentRunID     string       `json:"deployment_run_id,omitempty"`
+	VersionID           string       `json:"version_id,omitempty"`
+	ImageTag            string       `json:"image_tag,omitempty"`
+	ImageRepository     string       `json:"image_repository,omitempty"`
+	SyncImage           bool         `json:"sync_image,omitempty"`
+	SyncYAML            bool         `json:"sync_yaml,omitempty"`
+	FirstSync           bool         `json:"first_sync,omitempty"`
+	Status              JobRunStatus `json:"status"`
+	ErrorMessage        string       `json:"error_message,omitempty"`
 }
 
 type ProjectVersionRun struct {

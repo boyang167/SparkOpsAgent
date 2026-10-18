@@ -82,6 +82,36 @@ describe("workflow-run-form", () => {
     expect(defaultDeployEnvironmentId(stages)).toBe("env-9");
   });
 
+  it("maps environment sync jobs into the run form", () => {
+    const form = buildWorkflowRunForm(
+      [
+        {
+          name: "同步",
+          parallel: false,
+          exec_mode: "auto",
+          jobs: [
+            {
+              name: "promote",
+              type: "sparkops-environment-sync",
+              spec: {
+                source_environment_id: "dev",
+                target_environment_id: "prod",
+                projects: [{ project_id: "p1" }],
+              },
+            },
+          ],
+        },
+      ],
+      [{ id: "p1", name: "api", status: "active" }],
+      [],
+    );
+    expect(form.stages[0].environmentSyncJobs[0]).toMatchObject({
+      jobName: "promote",
+      sourceEnvironmentId: "dev",
+      targetEnvironmentId: "prod",
+    });
+  });
+
   it("skips empty stages", () => {
     expect(buildWorkflowRunForm([{ name: "空", parallel: false, exec_mode: "auto", jobs: [] }]).pills).toEqual([]);
   });

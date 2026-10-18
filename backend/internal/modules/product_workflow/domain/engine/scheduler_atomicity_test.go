@@ -34,7 +34,7 @@ func TestProductWorkflowTerminalRunAndOutboxAreAtomic(t *testing.T) {
 	run.CompletedAt = &now
 
 	scheduler := NewScheduler(
-		repo, nil, nil, nil,
+		repo, nil, nil, nil, nil,
 		messaging.NewReliableBus(
 			sharedevents.NewRegistry(),
 			messagingpersistence.NewOutboxStore(db),
@@ -51,7 +51,7 @@ func TestProductWorkflowTerminalRunAndOutboxAreAtomic(t *testing.T) {
 	registry := sharedevents.NewRegistry()
 	require.NoError(t, pwfevent.Register(registry))
 	scheduler = NewScheduler(
-		repo, nil, nil, nil,
+		repo, nil, nil, nil, nil,
 		messaging.NewReliableBus(
 			registry,
 			messagingpersistence.NewOutboxStore(db),

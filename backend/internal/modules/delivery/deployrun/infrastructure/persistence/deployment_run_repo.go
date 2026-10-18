@@ -46,7 +46,9 @@ type deploymentRunRow struct {
 	ProjectVersionID  *string
 	DeployNamespace   string  `gorm:"not null;default:''"`
 	UndeployOptions   []byte  `gorm:"column:undeploy_options;type:jsonb"`
-	ArchiveGeneration *string `gorm:"column:archive_generation;type:uuid"`
+	ArchiveGeneration         *string `gorm:"column:archive_generation;type:uuid"`
+	SourceEnvironmentID       *string
+	EnvironmentSyncSnapshotID *string
 }
 
 func (deploymentRunRow) TableName() string { return "delivery.deployment_runs" }
@@ -66,7 +68,7 @@ func AutoMigrate(db *gorm.DB) error {
 	if !postgres.ShouldRunAutoMigrate(db) {
 		return nil
 	}
-	if err := db.AutoMigrate(&deploymentRunRow{}, &deploymentRunEventRow{}); err != nil {
+	if err := db.AutoMigrate(&deploymentRunRow{}, &deploymentRunEventRow{}, &environmentSyncSnapshotRow{}); err != nil {
 		return err
 	}
 	statements := []string{
@@ -493,7 +495,9 @@ func toRunRow(run *model.DeploymentRun) *deploymentRunRow {
 		EnvironmentID:  environmentIDValue(run.EnvironmentID), DeployNamespace: run.DeployNamespace,
 		ProjectVersionID:  projectVersionIDValue(run.ProjectVersionID),
 		UndeployOptions:   undeployOptionsValue(run.UndeployOptions),
-		ArchiveGeneration: nullableString(run.ArchiveGeneration),
+		ArchiveGeneration:         nullableString(run.ArchiveGeneration),
+		SourceEnvironmentID:       environmentIDValue(run.SourceEnvironmentID),
+		EnvironmentSyncSnapshotID: environmentSyncSnapshotIDValue(run.EnvironmentSyncSnapshotID),
 	}
 }
 
@@ -576,6 +580,20 @@ func fromRunRow(row deploymentRunRow) (*model.DeploymentRun, error) {
 		}
 		run.ProjectVersionID = &versionID
 	}
+	if row.SourceEnvironmentID != nil && *row.SourceEnvironmentID != "" {
+		sourceEnvID, err := kernel.ParseEnvironmentID(*row.SourceEnvironmentID)
+		if err != nil {
+			return nil, fmt.Errorf("parse source_environment_id: %w", err)
+		}
+		run.SourceEnvironmentID = &sourceEnvID
+	}
+	if row.EnvironmentSyncSnapshotID != nil && *row.EnvironmentSyncSnapshotID != "" {
+		snapshotID, err := kernel.ParseEnvironmentSyncSnapshotID(*row.EnvironmentSyncSnapshotID)
+		if err != nil {
+			return nil, fmt.Errorf("parse environment_sync_snapshot_id: %w", err)
+		}
+		run.EnvironmentSyncSnapshotID = &snapshotID
+	}
 	return run, nil
 }
 
@@ -640,6 +658,14 @@ func deploymentRunIDValue(id *kernel.DeploymentRunID) *string {
 }
 
 func environmentIDValue(id *kernel.EnvironmentID) *string {
+	if id == nil {
+		return nil
+	}
+	value := id.String()
+	return &value
+}
+
+func environmentSyncSnapshotIDValue(id *kernel.EnvironmentSyncSnapshotID) *string {
 	if id == nil {
 		return nil
 	}

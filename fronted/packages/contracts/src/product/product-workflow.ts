@@ -119,10 +119,14 @@ export type ProjectBuildRunVM = z.infer<typeof ProjectBuildRunVMSchema>;
 export const ProjectDeployRunVMSchema = z.object({
   project_id: z.string(),
   environment_id: z.string().optional(),
+  source_environment_id: z.string().optional(),
   deployment_run_id: z.string().optional(),
   version_id: z.string().optional(),
   image_tag: z.string().optional(),
   image_repository: z.string().optional(),
+  sync_image: z.boolean().optional(),
+  sync_yaml: z.boolean().optional(),
+  first_sync: z.boolean().optional(),
   status: z.string(),
   error_message: z.string().optional(),
 });
@@ -259,6 +263,8 @@ export const StartProductWorkflowRunCommandSchema = z.object({
       version_tag_overrides: z.record(z.string()).optional(),
       variables: z.record(z.string()).optional(),
       remark: z.string().optional(),
+      /** Confirmed environment-sync preview IDs keyed by workflow job name. */
+      environment_sync_preview_ids: z.record(z.string()).optional(),
       /** 0-based indices of workflow stages to execute; omit or include all to run every stage. */
       stage_indices: z.array(z.number().int().nonnegative()).optional(),
     })
@@ -315,6 +321,14 @@ export const PRODUCT_WORKFLOW_JOB_TYPES = [
     label: "部署",
     title: "SparkOps 部署",
     description: "部署构建产物或交付版本到产品环境",
+    official: true,
+  },
+  {
+    type: "sparkops-environment-sync",
+    category: "deploy",
+    label: "环境同步",
+    title: "环境部署同步",
+    description: "将源环境中的项目部署同步到目标环境",
     official: true,
   },
   {

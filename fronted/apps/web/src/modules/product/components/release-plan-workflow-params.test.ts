@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { ProductWorkflowVM } from "@sparkops/contracts/product";
 import {
   buildEnvironmentOverrides,
+  buildEnvironmentSyncPreviewIdsForRun,
   buildWorkflowJobParameters,
   defaultBranchForWorkflow,
+  environmentSyncPreviewParamKey,
   mergeWorkflowJobParameters,
+  missingEnvironmentSyncPreviewJobs,
   parseWorkflowJobBranch,
   parseWorkflowJobEnvironmentId,
   parseWorkflowJobProjectIds,
@@ -97,6 +100,59 @@ describe("release-plan-workflow-params", () => {
 
     expect(loadedIds).toEqual(["wf-1"]);
     expect(workflowProjectIds(resolved)).toEqual(["project-1", "project-2"]);
+  });
+});
+
+const envSyncWorkflow: ProductWorkflowVM = {
+  id: "wf-sync",
+  product_id: "p-1",
+  name: "环境同步",
+  key: "env-sync",
+  status: "active",
+  stage_count: 1,
+  notifications: [],
+  variables: [],
+  triggers: [],
+  stages: [
+    {
+      name: "同步",
+      parallel: false,
+      exec_mode: "auto",
+      jobs: [
+        {
+          name: "promote",
+          type: "sparkops-environment-sync",
+          spec: {
+            source_environment_id: "dev",
+            target_environment_id: "prod",
+            projects: [{ project_id: "project-1" }],
+          },
+        },
+      ],
+    },
+  ],
+};
+
+describe("environment sync preview parameters", () => {
+  it("reports one missing required preview and becomes valid after preview id is supplied", () => {
+    expect(missingEnvironmentSyncPreviewJobs(envSyncWorkflow, {})).toEqual(["promote"]);
+    const params = {
+      [environmentSyncPreviewParamKey("promote")]: "preview-123",
+    };
+    expect(missingEnvironmentSyncPreviewJobs(envSyncWorkflow, params)).toEqual([]);
+    expect(buildEnvironmentSyncPreviewIdsForRun(envSyncWorkflow, params)).toEqual({ promote: "preview-123" });
+  });
+
+  it("stores preview ids through mergeWorkflowJobParameters", () => {
+    const merged = mergeWorkflowJobParameters({}, envSyncWorkflow, {
+      environmentSyncPreviewIds: { promote: "preview-456" },
+    });
+    expect(merged[environmentSyncPreviewParamKey("promote")]).toBe("preview-456");
+    expect(
+      mergeWorkflowJobParameters(merged, envSyncWorkflow, {
+        environmentSyncPreviewIds: { promote: null },
+      }),
+    ).not.toHaveProperty(environmentSyncPreviewParamKey("promote"));
   });
 });
 

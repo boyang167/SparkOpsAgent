@@ -86,6 +86,54 @@ type DeploymentTrigger interface {
 	TriggerForEnvironment(ctx context.Context, req WorkflowDeploymentRequest) (kernel.DeploymentRunID, error)
 }
 
+type EnvironmentSyncProjectOption struct {
+	ProjectID         kernel.ProjectID
+	SyncImage         bool
+	SyncYAML          bool
+	SyncResourceKinds []string
+	ResourceOverrides map[string]string
+	FirstSync         bool
+}
+
+type EnvironmentSyncProjectSnapshot struct {
+	ProjectID kernel.ProjectID
+	Option    EnvironmentSyncProjectOption
+}
+
+type EnvironmentSyncSnapshot struct {
+	ID                  kernel.EnvironmentSyncSnapshotID
+	WorkspaceID         kernel.WorkspaceID
+	ProductID           kernel.ProductID
+	WorkflowID          kernel.ProductWorkflowID
+	JobName             string
+	SourceEnvironmentID kernel.EnvironmentID
+	TargetEnvironmentID kernel.EnvironmentID
+	Projects            []EnvironmentSyncProjectSnapshot
+	BoundRunID          *kernel.ProductWorkflowRunID
+}
+
+type EnvironmentSyncSnapshotBinding struct {
+	SnapshotID kernel.EnvironmentSyncSnapshotID
+	RunID      kernel.ProductWorkflowRunID
+}
+
+type EnvironmentSyncSnapshots interface {
+	Validate(
+		ctx context.Context,
+		snapshotID kernel.EnvironmentSyncSnapshotID,
+		productID kernel.ProductID,
+		workflowID kernel.ProductWorkflowID,
+		jobName string,
+	) error
+	BindMany(ctx context.Context, bindings []EnvironmentSyncSnapshotBinding) error
+	LoadPreview(ctx context.Context, snapshotID kernel.EnvironmentSyncSnapshotID) (*EnvironmentSyncSnapshot, error)
+	LoadBound(ctx context.Context, snapshotID kernel.EnvironmentSyncSnapshotID, runID kernel.ProductWorkflowRunID) (*EnvironmentSyncSnapshot, error)
+}
+
+type EnvironmentSyncTrigger interface {
+	TriggerEnvironmentSync(ctx context.Context, snapshotID kernel.EnvironmentSyncSnapshotID, projectID kernel.ProjectID) (kernel.DeploymentRunID, error)
+}
+
 type UndeployRequest struct {
 	WorkspaceID       kernel.WorkspaceID
 	ProjectID         kernel.ProjectID

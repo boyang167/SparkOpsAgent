@@ -11,7 +11,9 @@ import (
 	deployquery "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/application/query"
 	deployservice "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/application/service"
 	deploysubscriber "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/application/subscriber"
+	deployrun "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain"
 	deployrunmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
+	deployrunrepo "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/repository"
 	deployacl "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/acl"
 	deployconsumer "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/consumer"
 	deploypersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/persistence"
@@ -222,16 +224,31 @@ func (m *Module) Register(c *appctx.Container) error {
 		).Start(c.Context, c.Config.Deploy.ReconcileInterval)
 	}
 	envResolver := deployacl.NewEnvironmentResolver(c.DB)
+	envSyncSnapshotRepo := deploypersistence.NewEnvironmentSyncSnapshotRepository(c.DB)
 	createDeployment := deploycommand.NewCreateDeploymentHandler(deployRepo, deployReader, c.MessageQueue, nil, envResolver)
 	createDeployment.SetProjectLifecycleReader(deployReader)
+	createEnvironmentSync := deploycommand.NewCreateEnvironmentSyncDeploymentHandler(
+		deployRepo, envSyncSnapshotRepo, envResolver, c.MessageQueue, nil,
+	)
 	rollbackDeployment := deploycommand.NewRollbackDeploymentHandler(deployRepo, c.MessageQueue, nil)
 	rollbackDeployment.SetProjectLifecycleReader(deployReader)
 	undeploy := deploycommand.NewUndeployHandler(deployRepo, deployReader, c.MessageQueue, nil)
 	if useOperations {
 		createDeployment.UseOperationOutbox(operationWriter, c.Transactor)
+		createEnvironmentSync.UseOperationOutbox(operationWriter, c.Transactor)
 		rollbackDeployment.UseOperationOutbox(operationWriter, c.Transactor)
 		undeploy.UseOperationOutbox(operationWriter, c.Transactor)
 	}
+	createEnvironmentSyncPreview := deployquery.NewCreateEnvironmentSyncPreviewHandler(
+		deployReader, envResolver, envSyncSnapshotRepo, c.DB,
+	)
+	listEnvironmentSyncSourceResources := deployquery.NewListEnvironmentSyncSourceResourcesHandler(
+		deployReader, envResolver,
+	)
+	environmentSyncHandler := deployhttp.NewEnvironmentSyncHandler(
+		createEnvironmentSyncPreview, listEnvironmentSyncSourceResources,
+	)
+
 	deployHandler := deployhttp.NewHandler(
 		createDeployment,
 		rollbackDeployment,
@@ -305,9 +322,17 @@ func (m *Module) Register(c *appctx.Container) error {
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), deployHandler.Stream)
 	c.Engine.POST("/api/v1/deployments/:runId/abort",
 		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectOperate), deployHandler.Abort)
+	c.Engine.POST("/api/v1/products/:productId/environment-sync-previews",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectWrite), environmentSyncHandler.CreatePreview)
+	c.Engine.POST("/api/v1/products/:productId/environment-sync-source-resources",
+		auth, ws, wsMember, authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead), environmentSyncHandler.ListSourceResources)
 
 	c.BuildTrigger = &buildTriggerPort{handler: trigger}
 	c.DeploymentTrigger = &deploymentTriggerPort{create: createDeployment, checker: checker}
+	c.EnvironmentSyncSnapshots = &environmentSyncSnapshotsPort{repo: envSyncSnapshotRepo}
+	c.EnvironmentSyncTrigger = &environmentSyncTriggerPort{
+		create: createEnvironmentSync, snapshots: envSyncSnapshotRepo,
+	}
 	c.ProjectTeardown = &teardownPort{runs: deployRepo, undeploy: undeploy, reader: deployReader, prepare: prepareService}
 
 	return nil
@@ -351,6 +376,120 @@ func (p *deploymentTriggerPort) TriggerForEnvironment(ctx context.Context, req a
 		input.ProjectVersionID = req.ProjectVersionID.String()
 	}
 	run, err := p.create.Handle(ctx, auto.WorkspaceID, auto.MemberID, req.ProjectID, input)
+	if err != nil {
+		return kernel.DeploymentRunID{}, err
+	}
+	return run.ID, nil
+}
+
+type environmentSyncSnapshotsPort struct {
+	repo deployrunrepo.EnvironmentSyncSnapshotRepository
+}
+
+func (p *environmentSyncSnapshotsPort) Validate(
+	ctx context.Context,
+	snapshotID kernel.EnvironmentSyncSnapshotID,
+	productID kernel.ProductID,
+	workflowID kernel.ProductWorkflowID,
+	jobName string,
+) error {
+	snapshot, err := p.repo.FindByID(ctx, snapshotID)
+	if err != nil {
+		return err
+	}
+	if snapshot.ProductID != productID || snapshot.WorkflowID != workflowID || snapshot.JobName != strings.TrimSpace(jobName) {
+		return deployrun.ErrEnvironmentSyncSnapshotNotFound
+	}
+	if snapshot.BoundRunID != nil {
+		return deployrun.ErrEnvironmentSyncSnapshotAlreadyBound
+	}
+	return nil
+}
+
+func (p *environmentSyncSnapshotsPort) BindMany(ctx context.Context, bindings []appctx.EnvironmentSyncSnapshotBinding) error {
+	for _, binding := range bindings {
+		if err := p.repo.BindToRun(ctx, binding.SnapshotID, binding.RunID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *environmentSyncSnapshotsPort) LoadPreview(ctx context.Context, snapshotID kernel.EnvironmentSyncSnapshotID) (*appctx.EnvironmentSyncSnapshot, error) {
+	snapshot, err := p.repo.FindByID(ctx, snapshotID)
+	if err != nil {
+		return nil, err
+	}
+	if snapshot.BoundRunID != nil {
+		return nil, deployrun.ErrEnvironmentSyncSnapshotAlreadyBound
+	}
+	return toAppctxEnvironmentSyncSnapshot(snapshot), nil
+}
+
+func (p *environmentSyncSnapshotsPort) LoadBound(
+	ctx context.Context,
+	snapshotID kernel.EnvironmentSyncSnapshotID,
+	runID kernel.ProductWorkflowRunID,
+) (*appctx.EnvironmentSyncSnapshot, error) {
+	snapshot, err := p.repo.FindByID(ctx, snapshotID)
+	if err != nil {
+		return nil, err
+	}
+	if snapshot.BoundRunID == nil || *snapshot.BoundRunID != runID {
+		return nil, deployrun.ErrEnvironmentSyncSnapshotNotBound
+	}
+	return toAppctxEnvironmentSyncSnapshot(snapshot), nil
+}
+
+func toAppctxEnvironmentSyncSnapshot(snapshot *deployrunmodel.EnvironmentSyncSnapshot) *appctx.EnvironmentSyncSnapshot {
+	if snapshot == nil {
+		return nil
+	}
+	projects := make([]appctx.EnvironmentSyncProjectSnapshot, 0, len(snapshot.Projects))
+	for _, project := range snapshot.Projects {
+		projects = append(projects, appctx.EnvironmentSyncProjectSnapshot{
+			ProjectID: project.ProjectID,
+			Option: appctx.EnvironmentSyncProjectOption{
+				ProjectID:         project.Option.ProjectID,
+				SyncImage:         project.Option.SyncImage,
+				SyncYAML:          project.Option.SyncYAML,
+				SyncResourceKinds: append([]string(nil), project.Option.SyncResourceKinds...),
+				ResourceOverrides: project.Option.ResourceOverrides,
+				FirstSync:         project.Option.FirstSync,
+			},
+		})
+	}
+	return &appctx.EnvironmentSyncSnapshot{
+		ID:                  snapshot.ID,
+		WorkspaceID:         snapshot.WorkspaceID,
+		ProductID:           snapshot.ProductID,
+		WorkflowID:          snapshot.WorkflowID,
+		JobName:             snapshot.JobName,
+		SourceEnvironmentID: snapshot.SourceEnvironmentID,
+		TargetEnvironmentID: snapshot.TargetEnvironmentID,
+		Projects:            projects,
+		BoundRunID:          snapshot.BoundRunID,
+	}
+}
+
+type environmentSyncTriggerPort struct {
+	create    *deploycommand.CreateEnvironmentSyncDeploymentHandler
+	snapshots deployrunrepo.EnvironmentSyncSnapshotRepository
+}
+
+func (p *environmentSyncTriggerPort) TriggerEnvironmentSync(
+	ctx context.Context,
+	snapshotID kernel.EnvironmentSyncSnapshotID,
+	projectID kernel.ProjectID,
+) (kernel.DeploymentRunID, error) {
+	snapshot, err := p.snapshots.FindByID(ctx, snapshotID)
+	if err != nil {
+		return kernel.DeploymentRunID{}, err
+	}
+	run, err := p.create.Handle(ctx, snapshot.WorkspaceID, snapshot.CreatedBy, deploycommand.CreateEnvironmentSyncDeploymentInput{
+		SnapshotID: snapshotID,
+		ProjectID:  projectID,
+	})
 	if err != nil {
 		return kernel.DeploymentRunID{}, err
 	}

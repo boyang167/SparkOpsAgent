@@ -645,6 +645,28 @@ export function createProductUpstream(options: UpstreamRequestOptions = {}) {
       );
     },
 
+    async createEnvironmentSyncPreview(
+      workspaceId: string,
+      productId: string,
+      input: import("@sparkops/contracts/product").EnvironmentSyncPreviewCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/product").EnvironmentSyncPreviewVM>(
+        `/api/v1/products/${productId}/environment-sync-previews`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
+    async listEnvironmentSyncSourceResources(
+      workspaceId: string,
+      productId: string,
+      input: import("@sparkops/contracts/product").EnvironmentSyncSourceResourcesCommand,
+    ) {
+      return upstreamFetch<import("@sparkops/contracts/product").EnvironmentSyncSourceResourcesVM>(
+        `/api/v1/products/${productId}/environment-sync-source-resources`,
+        { method: "POST", body: JSON.stringify(input), options: { ...options, workspaceId } },
+      );
+    },
+
     async getSprintProcess(workspaceId: string, productId: string) {
       return upstreamFetch<import("@sparkops/contracts/product").SprintProcessVM>(
         `/api/v1/products/${productId}/sprint-process`,

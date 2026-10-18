@@ -72,6 +72,19 @@ func TestNewRollbackDeploymentRunCopiesCrossCluster(t *testing.T) {
 	require.True(t, rollback.SkipsBuild())
 }
 
+func TestNewEnvironmentSyncDeploymentRunSkipsBuildAndTargetsEnvironment(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	projectID := kernel.NewProjectID()
+	clusterID := kernel.NewClusterInfoID()
+	actorID := kernel.NewMemberID()
+	run := model.NewEnvironmentSyncDeploymentRun(wsID, projectID, clusterID, actorID)
+	require.Equal(t, model.RunTypeEnvironmentSync, run.RunType)
+	require.False(t, run.CrossCluster)
+	require.Equal(t, model.StatusQueued, run.Status)
+	require.True(t, run.SkipsBuild())
+	require.True(t, run.IsEnvironmentSync())
+}
+
 func TestNewSyncDeploymentRunSkipsBuildAndForcesCrossCluster(t *testing.T) {
 	run := model.NewSyncDeploymentRun(kernel.NewWorkspaceID(), kernel.NewProjectID(),
 		kernel.NewClusterInfoID(), kernel.NewMemberID(), "branch", "main", "v9")

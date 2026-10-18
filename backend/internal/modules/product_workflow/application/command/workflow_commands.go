@@ -12,6 +12,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -300,6 +302,8 @@ type StartWorkflowRunHandler struct {
 	workflows repository.ProductWorkflowRepository
 	scheduler *engine.Scheduler
 	products  port.ProductChecker
+	snapshots appctx.EnvironmentSyncSnapshots
+	tx        postgres.Transactor
 	gitLookup ProjectGitLookup
 	box       model.ValueCipher
 	vault     VaultReader
@@ -333,7 +337,20 @@ func NewStartWorkflowRunHandler(
 	scheduler *engine.Scheduler,
 	products port.ProductChecker,
 ) *StartWorkflowRunHandler {
-	return &StartWorkflowRunHandler{workflows: workflows, scheduler: scheduler, products: products}
+	return &StartWorkflowRunHandler{
+		workflows: workflows, scheduler: scheduler, products: products,
+		tx: postgres.NewDirectTransactor(),
+	}
+}
+
+func (h *StartWorkflowRunHandler) UseEnvironmentSyncSnapshots(snapshots appctx.EnvironmentSyncSnapshots) {
+	h.snapshots = snapshots
+}
+
+func (h *StartWorkflowRunHandler) UseTransactor(tx postgres.Transactor) {
+	if tx != nil {
+		h.tx = tx
+	}
 }
 
 func (h *StartWorkflowRunHandler) Handle(
@@ -399,7 +416,19 @@ func (h *StartWorkflowRunHandler) launch(
 	}
 	runWF := prepared
 	runWF.Stages = stages
-	if err := h.workflows.SaveRun(ctx, run); err != nil {
+	bindings, err := collectEnvironmentSyncBindings(ctx, h.snapshots, wf, stages, stored, runID)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := h.workflows.SaveRun(txCtx, run); err != nil {
+			return err
+		}
+		if len(bindings) == 0 {
+			return nil
+		}
+		return h.snapshots.BindMany(txCtx, bindings)
+	}); err != nil {
 		return nil, err
 	}
 	if err := h.scheduler.StartRun(ctx, &runWF, run); err != nil {

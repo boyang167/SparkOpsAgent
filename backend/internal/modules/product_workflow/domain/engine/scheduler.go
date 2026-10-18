@@ -40,6 +40,7 @@ type Scheduler struct {
 	builds         *BuildExecutor
 	createVersions *CreateVersionExecutor
 	deploys        *DeployExecutor
+	envSyncs       *EnvironmentSyncExecutor
 	bus            eventbus.Bus
 	git            GitReporter
 	locker         runLocker
@@ -121,6 +122,7 @@ func NewScheduler(
 	builds *BuildExecutor,
 	createVersions *CreateVersionExecutor,
 	deploys *DeployExecutor,
+	envSyncs *EnvironmentSyncExecutor,
 	bus eventbus.Bus,
 	transactors ...postgres.Transactor,
 ) *Scheduler {
@@ -130,7 +132,7 @@ func NewScheduler(
 	}
 	return &Scheduler{
 		repo: repo, builds: builds, createVersions: createVersions,
-		deploys: deploys, bus: bus, tx: tx,
+		deploys: deploys, envSyncs: envSyncs, bus: bus, tx: tx,
 	}
 }
 
@@ -363,6 +365,7 @@ func (s *Scheduler) handleDeployCompletedAttempt(
 	}
 	matched := false
 	changed := false
+	var matchedJob *model.JobRun
 	for si := range run.StageRuns {
 		for ji := range run.StageRuns[si].Jobs {
 			jobRun := &run.StageRuns[si].Jobs[ji]
@@ -374,6 +377,7 @@ func (s *Scheduler) handleDeployCompletedAttempt(
 					continue
 				}
 				matched = true
+				matchedJob = jobRun
 				if jobRunTerminal(jobRun.Deploys[di].Status) {
 					if jobRun.Deploys[di].Status != targetStatus {
 						return nil
@@ -391,8 +395,18 @@ func (s *Scheduler) handleDeployCompletedAttempt(
 	if !matched {
 		return nil
 	}
+	envSyncJob := matchedJob != nil && matchedJob.Type == model.JobTypeSparkopsEnvironmentSync
 	if status != string(deployrunmodel.StatusSucceeded) {
 		s.refreshJobStatuses(run)
+		if envSyncJob {
+			if failed, msg := refreshEnvironmentSyncDeployJob(matchedJob); failed {
+				return s.failRun(ctx, run, msg)
+			}
+			if changed {
+				return s.repo.UpdateRun(ctx, run)
+			}
+			return nil
+		}
 		return s.failRun(ctx, run, "deployment failed")
 	}
 	if failed, msg := s.refreshJobStatuses(run); failed {
@@ -909,6 +923,21 @@ func (s *Scheduler) executeCurrentStage(ctx context.Context, wf *model.ProductWo
 			if jobRun.Status == model.JobRunStatusRunning {
 				hasAsync = true
 			}
+		case model.JobTypeSparkopsEnvironmentSync:
+			if s.envSyncs == nil {
+				jobRun.Status = model.JobRunStatusFailed
+				jobRun.ErrorMessage = "environment sync executor unavailable"
+				return s.failRun(ctx, run, jobRun.ErrorMessage)
+			}
+			if err := s.envSyncs.RunJob(ctx, run, run.CurrentStage, ji, job); err != nil {
+				return s.failRun(ctx, run, jobRun.ErrorMessage)
+			}
+			if jobRun.Status == model.JobRunStatusRunning {
+				hasAsync = true
+			}
+			if jobRun.Status == model.JobRunStatusFailed {
+				return s.failRun(ctx, run, jobRun.ErrorMessage)
+			}
 		case model.JobTypeSparkopsApproval:
 			hasAsync = true
 			StartApprovalJob(jobRun, job)
@@ -1008,6 +1037,11 @@ func (s *Scheduler) refreshJobStatuses(run *model.ProductWorkflowRun) (bool, str
 				}
 			case model.JobTypeSparkopsDeploy, model.JobTypeSparkopsDeployVersion:
 				if failed, msg := refreshDeployJob(jobRun); failed {
+					run.StageRuns[si].Status = model.JobRunStatusFailed
+					return true, msg
+				}
+			case model.JobTypeSparkopsEnvironmentSync:
+				if failed, msg := refreshEnvironmentSyncDeployJob(jobRun); failed {
 					run.StageRuns[si].Status = model.JobRunStatusFailed
 					return true, msg
 				}

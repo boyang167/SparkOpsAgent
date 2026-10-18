@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product/domain"
@@ -47,14 +48,18 @@ type GetEnvironmentStatusHandler struct {
 	products     repository.ProductRepository
 	environments repository.EnvironmentRepository
 	catalog      port.ProjectCatalogPort
+	runImages    port.DeploymentRunImageReader
 }
 
 func NewGetEnvironmentStatusHandler(
 	products repository.ProductRepository,
 	environments repository.EnvironmentRepository,
 	catalog port.ProjectCatalogPort,
+	runImages port.DeploymentRunImageReader,
 ) *GetEnvironmentStatusHandler {
-	return &GetEnvironmentStatusHandler{products: products, environments: environments, catalog: catalog}
+	return &GetEnvironmentStatusHandler{
+		products: products, environments: environments, catalog: catalog, runImages: runImages,
+	}
 }
 
 func (h *GetEnvironmentStatusHandler) Handle(
@@ -92,15 +97,25 @@ func (h *GetEnvironmentStatusHandler) Handle(
 		LastDeployedAt         string
 	}
 	byProject := make(map[string]projectState, len(envProjects))
+	runIDs := make([]kernel.DeploymentRunID, 0, len(envProjects))
 	for _, row := range envProjects {
 		state := projectState{Enabled: row.Enabled, CurrentImageTag: row.CurrentImageTag}
 		if row.CurrentDeploymentRunID != nil {
 			state.CurrentDeploymentRunID = row.CurrentDeploymentRunID.String()
+			runIDs = append(runIDs, *row.CurrentDeploymentRunID)
 		}
 		if row.LastDeployedAt != nil {
 			state.LastDeployedAt = row.LastDeployedAt.Format(time.RFC3339)
 		}
 		byProject[row.ProjectID.String()] = state
+	}
+	runImages := map[string]port.DeploymentRunImage{}
+	if h.runImages != nil && len(runIDs) > 0 {
+		loaded, err := h.runImages.FindByRunIDs(ctx, runIDs)
+		if err != nil {
+			return nil, err
+		}
+		runImages = loaded
 	}
 	matrix := make([]map[string]any, 0, len(projects))
 	for _, p := range projects {
@@ -115,6 +130,14 @@ func (h *GetEnvironmentStatusHandler) Handle(
 			}
 			if state.CurrentDeploymentRunID != "" {
 				row["current_deployment_run_id"] = state.CurrentDeploymentRunID
+				if image, ok := runImages[state.CurrentDeploymentRunID]; ok {
+					if currentImage := joinEnvironmentImageRef(image.Repository, image.Tag); currentImage != "" {
+						row["current_image"] = currentImage
+					}
+				}
+			}
+			if _, hasImage := row["current_image"]; !hasImage && state.CurrentImageTag != "" {
+				row["current_image"] = state.CurrentImageTag
 			}
 			if state.LastDeployedAt != "" {
 				row["last_deployed_at"] = state.LastDeployedAt
@@ -126,4 +149,16 @@ func (h *GetEnvironmentStatusHandler) Handle(
 		"environment_id": env.ID.String(), "name": env.Name, "namespace": env.Namespace,
 		"cluster_id": env.ClusterID.String(), "projects": matrix,
 	}, nil
+}
+
+func joinEnvironmentImageRef(repo, tag string) string {
+	repo = strings.TrimSpace(repo)
+	tag = strings.TrimSpace(tag)
+	if repo == "" {
+		return tag
+	}
+	if tag == "" {
+		return repo
+	}
+	return repo + ":" + tag
 }

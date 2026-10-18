@@ -183,7 +183,7 @@ func TestHandleBuildCompleted_concurrentUpdatesKeepBothBuildsSuccessful(t *testi
 			buildB.String(): {BuildID: buildB, RunID: runID, JobName: "build-1"},
 		},
 	}
-	scheduler := NewScheduler(repo, nil, nil, nil, nil)
+	scheduler := NewScheduler(repo, nil, nil, nil, nil, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -236,7 +236,7 @@ func TestHandleBuildCompletedReloadsAndMergesAfterVersionConflict(t *testing.T) 
 	}
 	repo := &conflictRunRepo{concurrentRunRepo: base, concurrentBuildID: buildB.String()}
 
-	err := NewScheduler(repo, nil, nil, nil, nil).
+	err := NewScheduler(repo, nil, nil, nil, nil, nil).
 		HandleBuildCompleted(context.Background(), buildA, string(buildmodel.BuildStatusSuccess))
 
 	require.NoError(t, err)
@@ -273,7 +273,7 @@ func TestHandleBuildCompletedStopsAfterBoundedVersionConflicts(t *testing.T) {
 	}
 	repo := &conflictRunRepo{concurrentRunRepo: base, alwaysConflict: true}
 
-	err := NewScheduler(repo, nil, nil, nil, nil).
+	err := NewScheduler(repo, nil, nil, nil, nil, nil).
 		HandleBuildCompleted(context.Background(), buildID, string(buildmodel.BuildStatusSuccess))
 
 	require.ErrorIs(t, err, domain.ErrProductWorkflowRunConflict)
@@ -311,7 +311,7 @@ func TestHandleBuildCompletedDuplicateDoesNotRewriteStageRuns(t *testing.T) {
 		},
 	}
 	repo := &conflictRunRepo{concurrentRunRepo: base, updateAttempts: 1}
-	scheduler := NewScheduler(repo, nil, nil, nil, nil)
+	scheduler := NewScheduler(repo, nil, nil, nil, nil, nil)
 
 	require.NoError(t, scheduler.HandleBuildCompleted(
 		context.Background(), buildA, string(buildmodel.BuildStatusSuccess),
@@ -357,7 +357,7 @@ func TestHandleDeployCompletedReloadsAndMergesAfterVersionConflict(t *testing.T)
 	}
 	repo := &conflictRunRepo{concurrentRunRepo: base, concurrentDeployID: deployB.String()}
 
-	err := NewScheduler(repo, nil, nil, nil, nil).
+	err := NewScheduler(repo, nil, nil, nil, nil, nil).
 		HandleDeployCompleted(context.Background(), deployA, string(deployrunmodel.StatusSucceeded))
 
 	require.NoError(t, err)
@@ -400,7 +400,7 @@ func TestHandleBuildCompleted_partialStageRunCompletes(t *testing.T) {
 			buildB.String(): {BuildID: buildB, RunID: runID, JobName: "build-1"},
 		},
 	}
-	scheduler := NewScheduler(repo, nil, nil, nil, nil)
+	scheduler := NewScheduler(repo, nil, nil, nil, nil, nil)
 
 	require.NoError(t, scheduler.HandleBuildCompleted(context.Background(), buildA, string(buildmodel.BuildStatusSuccess)))
 	require.NoError(t, scheduler.HandleBuildCompleted(context.Background(), buildB, string(buildmodel.BuildStatusSuccess)))
@@ -409,6 +409,52 @@ func TestHandleBuildCompleted_partialStageRunCompletes(t *testing.T) {
 	defer repo.mu.Unlock()
 	require.Equal(t, model.RunStatusSuccess, repo.run.Status)
 	require.NotNil(t, repo.run.CompletedAt)
+}
+
+func TestHandleDeployCompletedEnvironmentSyncWaitsForAllProjects(t *testing.T) {
+	deployA := kernel.NewDeploymentRunID()
+	deployB := kernel.NewDeploymentRunID()
+	runID := kernel.NewProductWorkflowRunID()
+	wfID := kernel.NewProductWorkflowID()
+	repo := &concurrentRunRepo{
+		run: &model.ProductWorkflowRun{
+			ID: runID, WorkflowID: wfID, Status: model.RunStatusRunning, CurrentStage: 0,
+			StageRuns: []model.StageRun{{
+				Name: "sync", Status: model.JobRunStatusRunning,
+				Jobs: []model.JobRun{{
+					Name: "sync-1", Type: model.JobTypeSparkopsEnvironmentSync, Status: model.JobRunStatusRunning,
+					Deploys: []model.ProjectDeployRun{
+						{DeploymentRunID: deployA.String(), Status: model.JobRunStatusRunning},
+						{DeploymentRunID: deployB.String(), Status: model.JobRunStatusRunning},
+					},
+				}},
+			}},
+		},
+		wf: &model.ProductWorkflow{
+			ID: wfID,
+			Stages: []model.WorkflowStage{{
+				Name: "sync", Jobs: []model.WorkflowJob{{Name: "sync-1", Type: model.JobTypeSparkopsEnvironmentSync}},
+			}},
+		},
+		deployRefs: map[string]*model.WorkflowDeployRef{
+			deployA.String(): {DeploymentRunID: deployA, RunID: runID, JobName: "sync-1"},
+			deployB.String(): {DeploymentRunID: deployB, RunID: runID, JobName: "sync-1"},
+		},
+	}
+	scheduler := NewScheduler(repo, nil, nil, nil, nil, nil)
+
+	require.NoError(t, scheduler.HandleDeployCompleted(context.Background(), deployA, string(deployrunmodel.StatusFailed)))
+	repo.mu.Lock()
+	require.Equal(t, model.RunStatusRunning, repo.run.Status)
+	require.Equal(t, model.JobRunStatusRunning, repo.run.StageRuns[0].Jobs[0].Status)
+	require.Equal(t, model.JobRunStatusFailed, repo.run.StageRuns[0].Jobs[0].Deploys[0].Status)
+	repo.mu.Unlock()
+
+	require.NoError(t, scheduler.HandleDeployCompleted(context.Background(), deployB, string(deployrunmodel.StatusSucceeded)))
+	repo.mu.Lock()
+	require.Equal(t, model.RunStatusFailed, repo.run.Status)
+	require.Equal(t, model.JobRunStatusFailed, repo.run.StageRuns[0].Jobs[0].Status)
+	repo.mu.Unlock()
 }
 
 func TestHealStuckRun_completesWhenAllStagesDone(t *testing.T) {
@@ -434,7 +480,7 @@ func TestHealStuckRun_completesWhenAllStagesDone(t *testing.T) {
 			},
 		},
 	}
-	scheduler := NewScheduler(repo, nil, nil, nil, nil)
+	scheduler := NewScheduler(repo, nil, nil, nil, nil, nil)
 	require.NoError(t, scheduler.healStuckRun(context.Background(), run))
 
 	repo.mu.Lock()

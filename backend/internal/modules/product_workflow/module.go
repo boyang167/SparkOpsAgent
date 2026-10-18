@@ -56,6 +56,12 @@ func (m *Module) Register(c *appctx.Container) error {
 	if c.DeploymentTrigger == nil {
 		return fmt.Errorf("product_workflow module requires deployment trigger")
 	}
+	if c.EnvironmentSyncSnapshots == nil {
+		return fmt.Errorf("product_workflow module requires environment sync snapshots")
+	}
+	if c.EnvironmentSyncTrigger == nil {
+		return fmt.Errorf("product_workflow module requires environment sync trigger")
+	}
 	if c.VersionCreator == nil {
 		return fmt.Errorf("product_workflow module requires version creator")
 	}
@@ -73,7 +79,8 @@ func (m *Module) Register(c *appctx.Container) error {
 	buildExecutor := engine.NewBuildExecutor(c.BuildTrigger, workflowRepo, acl.NewRegistryResolver(c.DB))
 	createVersionExecutor := engine.NewCreateVersionExecutor(c.VersionCreator)
 	deployExecutor := engine.NewDeployExecutor(c.DeploymentTrigger, c.VersionCreator, c.ProjectVersionReader, workflowRepo)
-	scheduler := engine.NewScheduler(workflowRepo, buildExecutor, createVersionExecutor, deployExecutor, c.EventBus, c.Transactor)
+	envSyncExecutor := engine.NewEnvironmentSyncExecutor(c.EnvironmentSyncSnapshots, c.EnvironmentSyncTrigger, workflowRepo)
+	scheduler := engine.NewScheduler(workflowRepo, buildExecutor, createVersionExecutor, deployExecutor, envSyncExecutor, c.EventBus, c.Transactor)
 	box, err := crypto.NewSecretBoxFromConfig(c.Config)
 	if err != nil {
 		log.Printf("product_workflow: variable cipher unavailable: %v", err)
@@ -92,6 +99,8 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 
 	startRun := command.NewStartWorkflowRunHandler(workflowRepo, scheduler, productChecker)
+	startRun.UseEnvironmentSyncSnapshots(c.EnvironmentSyncSnapshots)
+	startRun.UseTransactor(c.Transactor)
 	startRun.UseGitLookup(lookup)
 	if box != nil {
 		startRun.UseVariableCipher(box)

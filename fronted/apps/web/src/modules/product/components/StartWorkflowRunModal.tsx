@@ -14,6 +14,13 @@ import { Modal } from "@/components/ui/Modal";
 import { runtimeVersionTag } from "./create-version-job-spec";
 import { DeployYamlCompareModal } from "./DeployYamlCompareModal";
 import { deployImageRef, imageTagFromRef } from "./deploy-job-spec";
+import { EnvironmentSyncRunFields } from "./EnvironmentSyncRunFields";
+import {
+  allEnvironmentSyncPreviewsConfirmed,
+  createEnvironmentSyncRunState,
+  environmentSyncPreviewIdsFromStates,
+  type EnvironmentSyncRunJobState,
+} from "./environment-sync-run-state";
 import { RunBranchField } from "./RunBranchField";
 import { runModalExtraInputs } from "./release-plan-runtime-inputs";
 import {
@@ -36,16 +43,7 @@ interface StartWorkflowRunModalProps {
   workflowName?: string;
   submitError?: string | null;
   onClose: () => void;
-  onSubmit: (input: {
-    branch?: string;
-    branch_overrides?: Record<string, string>;
-    ref_type_overrides?: Record<string, string>;
-    environment_overrides?: Record<string, string>;
-    version_tag_overrides?: Record<string, string>;
-    variables?: Record<string, string>;
-    remark?: string;
-    stage_indices?: number[];
-  }) => void;
+  onSubmit: (input: StartProductWorkflowRunCommand["input"]) => void;
 }
 
 export function StartWorkflowRunModal({
@@ -95,6 +93,7 @@ export function StartWorkflowRunModal({
   const [collapsedStageIds, setCollapsedStageIds] = useState<Set<string>>(new Set());
   const [remark, setRemark] = useState("");
   const [versionTags, setVersionTags] = useState<Record<string, string>>({});
+  const [environmentSyncStates, setEnvironmentSyncStates] = useState<Record<string, EnvironmentSyncRunJobState>>({});
 
   const stageSelectors = useMemo(() => {
     const items = form.pills.map((pill) => ({ id: pill.id, name: pill.name }));
@@ -112,7 +111,13 @@ export function StartWorkflowRunModal({
     () => selectedStages.flatMap((stage) => stage.deployJobs),
     [selectedStages],
   );
+  const selectedEnvironmentSyncJobs = useMemo(
+    () => selectedStages.flatMap((stage) => stage.environmentSyncJobs),
+    [selectedStages],
+  );
   const selectedHasBuild = selectedStages.some((stage) => stage.buildRows.length > 0);
+  const productId = workflow?.product_id ?? "";
+  const workflowId = workflow?.id ?? "";
 
   useEffect(() => {
     if (!active || !workspaceId) return;
@@ -157,6 +162,17 @@ export function StartWorkflowRunModal({
     setCollapsedStageIds(new Set());
   }, [active, workflow?.id, stageSelectors]);
 
+  useEffect(() => {
+    if (!active || !workflow) return;
+    const next: Record<string, EnvironmentSyncRunJobState> = {};
+    for (const stage of form.stages) {
+      for (const job of stage.environmentSyncJobs) {
+        next[job.jobName] = createEnvironmentSyncRunState(job);
+      }
+    }
+    setEnvironmentSyncStates(next);
+  }, [active, workflow?.id, form.stages]);
+
   const modalReady = Boolean(workflow) && !loading;
 
   if (presentation === "page") {
@@ -200,6 +216,9 @@ export function StartWorkflowRunModal({
   const missingVersionTag = selectedStages.some((stage) =>
     stage.versionJobs.some((job) => !runtimeVersionTag(versionTags[job.jobName] ?? job.versionTag)),
   );
+  const missingEnvSyncPreview =
+    selectedEnvironmentSyncJobs.length > 0 &&
+    !allEnvironmentSyncPreviewsConfirmed(selectedEnvironmentSyncJobs, environmentSyncStates);
 
   function toggleStageVisibility(stageId: string) {
     setVisibleStageIds((prev) => {
@@ -299,12 +318,18 @@ export function StartWorkflowRunModal({
       .filter((index): index is number => index != null)
       .sort((a, b) => a - b);
     const runAllStages = stage_indices.length === form.stages.length;
+    const environment_sync_preview_ids = environmentSyncPreviewIdsFromStates(
+      selectedEnvironmentSyncJobs,
+      environmentSyncStates,
+    );
     onSubmit({
       branch: selectedHasBuild ? firstBranch : undefined,
       branch_overrides: Object.keys(branch_overrides).length ? branch_overrides : undefined,
       ref_type_overrides: Object.keys(ref_type_overrides).length ? ref_type_overrides : undefined,
       environment_overrides,
       version_tag_overrides: Object.keys(version_tag_overrides).length ? version_tag_overrides : undefined,
+      environment_sync_preview_ids:
+        Object.keys(environment_sync_preview_ids).length > 0 ? environment_sync_preview_ids : undefined,
       variables: runtimeVariables.length ? variables : undefined,
       remark: trimmedRemark || undefined,
       stage_indices: runAllStages ? undefined : stage_indices,
@@ -316,17 +341,21 @@ export function StartWorkflowRunModal({
       <button
         type="button"
         className="wf-run-submit"
-        disabled={busy || missingVariable || missingEnv || missingBranch || missingVersionTag}
+        disabled={
+          busy || missingVariable || missingEnv || missingBranch || missingVersionTag || missingEnvSyncPreview
+        }
         title={
-          missingEnv
-            ? "请选择部署环境"
-            : missingBranch
-              ? "请选择分支"
-              : missingVersionTag
-                ? "请填写交付版本号（不能包含 {{…}} 占位符）"
-                : missingVariable
-                  ? "请填写运行时变量"
-                  : undefined
+          missingEnvSyncPreview
+            ? "请为每个环境同步任务生成并确认预览"
+            : missingEnv
+              ? "请选择部署环境"
+              : missingBranch
+                ? "请选择分支"
+                : missingVersionTag
+                  ? "请填写交付版本号（不能包含 {{…}} 占位符）"
+                  : missingVariable
+                    ? "请填写运行时变量"
+                    : undefined
         }
         onClick={submit}
       >
@@ -445,6 +474,28 @@ export function StartWorkflowRunModal({
                     ))}
                   </tbody>
                 </table>
+              </div>
+            ) : null}
+
+            {stage.environmentSyncJobs.length > 0 && productId && workflowId ? (
+              <div className="wf-run-block stack-md">
+                {stage.environmentSyncJobs.map((job) => (
+                  <div key={job.jobName} className="wf-env-sync-run-block">
+                    <h4 className="wf-env-sync-run-job-title">{job.jobName}</h4>
+                    <EnvironmentSyncRunFields
+                      workspaceId={workspaceId}
+                      productId={productId}
+                      workflowId={workflowId}
+                      jobName={job.jobName}
+                      environments={environments}
+                      projects={projects}
+                      state={environmentSyncStates[job.jobName] ?? createEnvironmentSyncRunState(job)}
+                      onChange={(next) =>
+                        setEnvironmentSyncStates((prev) => ({ ...prev, [job.jobName]: next }))
+                      }
+                    />
+                  </div>
+                ))}
               </div>
             ) : null}
 

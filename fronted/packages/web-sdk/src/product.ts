@@ -713,6 +713,28 @@ export function getEnvironmentStatus(workspaceId: string, productId: string, env
   );
 }
 
+export function createEnvironmentSyncPreview(
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").EnvironmentSyncPreviewCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/product").EnvironmentSyncPreviewVM>(
+    `/workspaces/${workspaceId}/products/${productId}/environment-sync-previews`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
+export function listEnvironmentSyncSourceResources(
+  workspaceId: string,
+  productId: string,
+  input: import("@sparkops/contracts/product").EnvironmentSyncSourceResourcesCommand,
+) {
+  return bffFetch<import("@sparkops/contracts/product").EnvironmentSyncSourceResourcesVM>(
+    `/workspaces/${workspaceId}/products/${productId}/environment-sync-source-resources`,
+    { method: "POST", body: JSON.stringify(input), workspaceId },
+  );
+}
+
 export function getSprintProcess(workspaceId: string, productId: string) {
   return bffFetch<import("@sparkops/contracts/product").SprintProcessVM>(
     `/workspaces/${workspaceId}/products/${productId}/sprint-process`,

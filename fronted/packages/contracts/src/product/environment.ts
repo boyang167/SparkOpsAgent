@@ -45,6 +45,7 @@ export const EnvironmentProjectStatusVMSchema = z.object({
   display_name: z.string().optional(),
   enabled: z.boolean(),
   current_image_tag: z.string().optional(),
+  current_image: z.string().optional(),
   current_deployment_run_id: z.string().optional(),
   last_deployed_at: z.string().optional(),
 });
@@ -82,3 +83,93 @@ export const UpdateEnvironmentCommandSchema = z.object({
 });
 
 export type UpdateEnvironmentCommand = z.infer<typeof UpdateEnvironmentCommandSchema>;
+
+export const EnvironmentSyncPreviewCommandSchema = z.object({
+  workflow_id: z.string().min(1),
+  job_name: z.string().min(1),
+  source_environment_id: z.string().min(1),
+  target_environment_id: z.string().min(1),
+  projects: z
+    .array(
+      z.object({
+        project_id: z.string().min(1),
+        sync_image: z.boolean(),
+        sync_yaml: z.boolean(),
+        sync_resource_kinds: z.array(z.string()).optional(),
+        resource_overrides: z.record(z.string()).optional(),
+      }),
+    )
+    .min(1),
+});
+
+export type EnvironmentSyncPreviewCommand = z.infer<typeof EnvironmentSyncPreviewCommandSchema>;
+
+export const EnvironmentSyncSourceResourcesCommandSchema = z.object({
+  source_environment_id: z.string().min(1),
+  projects: z
+    .array(
+      z.object({
+        project_id: z.string().min(1),
+        sync_image: z.boolean(),
+        sync_yaml: z.boolean(),
+        sync_resource_kinds: z.array(z.string()).optional(),
+        resource_overrides: z.record(z.string()).optional(),
+      }),
+    )
+    .min(1),
+});
+
+export type EnvironmentSyncSourceResourcesCommand = z.infer<
+  typeof EnvironmentSyncSourceResourcesCommandSchema
+>;
+
+export const EnvironmentSyncSourceResourceVMSchema = z.object({
+  kind: z.string(),
+  name: z.string(),
+  yaml: z.string().optional(),
+  managed_pull_secret: z.boolean().optional(),
+  note: z.string().optional(),
+});
+
+export const EnvironmentSyncSourceProjectResourcesVMSchema = z.object({
+  project_id: z.string(),
+  resources: z.array(EnvironmentSyncSourceResourceVMSchema),
+});
+
+export const EnvironmentSyncSourceResourcesVMSchema = z.object({
+  projects: z.array(EnvironmentSyncSourceProjectResourcesVMSchema),
+});
+
+export type EnvironmentSyncSourceResourcesVM = z.infer<typeof EnvironmentSyncSourceResourcesVMSchema>;
+
+export const EnvironmentSyncPreviewProjectVMSchema = z.object({
+  project_id: z.string(),
+  first_sync: z.boolean(),
+  sync_image: z.boolean(),
+  sync_yaml: z.boolean(),
+  source_image: z.string().optional(),
+  target_image: z.string().optional(),
+  diffs: z.array(
+    z.object({
+      kind: z.string(),
+      name: z.string(),
+      action: z.enum(["create", "update", "unchanged", "excluded"]),
+      before: z.string().optional(),
+      after: z.string().optional(),
+      note: z.string().optional(),
+    }),
+  ),
+});
+
+export const EnvironmentSyncPreviewVMSchema = z.object({
+  preview_id: z.string(),
+  workflow_id: z.string().optional(),
+  job_name: z.string().optional(),
+  source_environment_id: z.string(),
+  target_environment_id: z.string(),
+  checksum: z.string().optional(),
+  projects: z.array(EnvironmentSyncPreviewProjectVMSchema),
+  warnings: z.array(z.string()).optional(),
+});
+
+export type EnvironmentSyncPreviewVM = z.infer<typeof EnvironmentSyncPreviewVMSchema>;

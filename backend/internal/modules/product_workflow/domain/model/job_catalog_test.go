@@ -28,6 +28,17 @@ func TestJobCatalog_registersExecutableSparkOpsJobs(t *testing.T) {
 	require.False(t, model.IsKnownJobType("jenkins"))
 }
 
+func TestJobCatalogIncludesEnvironmentSync(t *testing.T) {
+	got := map[string]model.JobCatalogItem{}
+	for _, item := range model.JobCatalog() {
+		got[item.Type] = item
+	}
+	item := got[model.JobTypeSparkopsEnvironmentSync]
+	require.Equal(t, "deploy", item.Category)
+	require.Equal(t, "环境部署同步", item.Title)
+	require.True(t, model.IsKnownJobType(model.JobTypeSparkopsEnvironmentSync))
+}
+
 func keysOf(set map[string]struct{}) []string {
 	order := []string{"build", "deploy", "flow", "tools"}
 	out := make([]string, 0, len(order))

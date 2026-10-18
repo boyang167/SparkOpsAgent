@@ -7,6 +7,7 @@ export interface PipelineTask {
   id: string;
   stageIndex: number;
   jobName: string;
+  jobType?: string;
   kind: PipelineTaskKind;
   projectId?: string;
   projectLabel: string;
@@ -19,6 +20,10 @@ export interface PipelineTask {
   imageTag?: string;
   imageRepository?: string;
   environmentId?: string;
+  sourceEnvironmentId?: string;
+  syncImage?: boolean;
+  syncYaml?: boolean;
+  firstSync?: boolean;
   errorMessage?: string;
   approvalStatus?: string;
   approvedCount?: number;
@@ -52,6 +57,7 @@ export function buildPipelineStages(
             id: `${stageIndex}:${job.name}:build:${build.project_id}`,
             stageIndex,
             jobName: job.name,
+            jobType: job.type,
             kind: "build",
             projectId: build.project_id,
             projectLabel: projectDisplayName(build.project_id, projectNames),
@@ -73,6 +79,7 @@ export function buildPipelineStages(
             id: `${stageIndex}:${job.name}:version:${version.project_id}`,
             stageIndex,
             jobName: job.name,
+            jobType: job.type,
             kind: "version",
             projectId: version.project_id,
             projectLabel: `${projectDisplayName(version.project_id, projectNames)} · ${version.version_tag}`,
@@ -86,7 +93,9 @@ export function buildPipelineStages(
         continue;
       }
       if (
-        (job.type === "sparkops-deploy" || job.type === "sparkops-deploy-version") &&
+        (job.type === "sparkops-deploy" ||
+          job.type === "sparkops-deploy-version" ||
+          job.type === "sparkops-environment-sync") &&
         job.deploys?.length
       ) {
         for (const deploy of job.deploys) {
@@ -94,6 +103,7 @@ export function buildPipelineStages(
             id: `${stageIndex}:${job.name}:deploy:${deploy.project_id}`,
             stageIndex,
             jobName: job.name,
+            jobType: job.type,
             kind: "deploy",
             projectId: deploy.project_id,
             projectLabel: projectDisplayName(deploy.project_id, projectNames),
@@ -103,6 +113,10 @@ export function buildPipelineStages(
             imageTag: deploy.image_tag,
             imageRepository: deploy.image_repository,
             environmentId: deploy.environment_id,
+            sourceEnvironmentId: deploy.source_environment_id,
+            syncImage: deploy.sync_image,
+            syncYaml: deploy.sync_yaml,
+            firstSync: deploy.first_sync,
             errorMessage: deploy.error_message,
           });
         }
@@ -112,6 +126,7 @@ export function buildPipelineStages(
         id: `${stageIndex}:${job.name}:${job.type}`,
         stageIndex,
         jobName: job.name,
+        jobType: job.type,
         kind: job.type === "sparkops-approval" ? "approval" : "build",
         projectLabel: job.name,
         jobTypeLabel: typeLabel,

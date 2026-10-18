@@ -44,6 +44,7 @@ type ClusterInfoID struct{ uuid.UUID }
 type ProclaimID struct{ uuid.UUID }
 type PluginInstallID struct{ uuid.UUID }
 type ProjectVersionID struct{ uuid.UUID }
+type EnvironmentSyncSnapshotID struct{ uuid.UUID }
 
 func NewMemberID() MemberID { return MemberID{UUID: uuid.New()} }
 func NewOrgID() OrgID       { return OrgID{UUID: uuid.New()} }
@@ -98,6 +99,9 @@ func NewClusterInfoID() ClusterInfoID             { return ClusterInfoID{UUID: u
 func NewProclaimID() ProclaimID           { return ProclaimID{UUID: uuid.New()} }
 func NewPluginInstallID() PluginInstallID { return PluginInstallID{UUID: uuid.New()} }
 func NewProjectVersionID() ProjectVersionID { return ProjectVersionID{UUID: uuid.New()} }
+func NewEnvironmentSyncSnapshotID() EnvironmentSyncSnapshotID {
+	return EnvironmentSyncSnapshotID{UUID: uuid.New()}
+}
 
 func ParseRoleID(s string) (RoleID, error) {
 	id, err := uuid.Parse(s)
@@ -299,6 +303,11 @@ func ParseProjectVersionID(s string) (ProjectVersionID, error) {
 	return ProjectVersionID{UUID: id}, err
 }
 
+func ParseEnvironmentSyncSnapshotID(s string) (EnvironmentSyncSnapshotID, error) {
+	id, err := uuid.Parse(s)
+	return EnvironmentSyncSnapshotID{UUID: id}, err
+}
+
 func (id MemberID) String() string             { return id.UUID.String() }
 func (id WorkspaceID) String() string          { return id.UUID.String() }
 func (id ProjectID) String() string            { return id.UUID.String() }
@@ -339,3 +348,6 @@ func (id ClusterInfoID) String() string          { return id.UUID.String() }
 func (id ProclaimID) String() string           { return id.UUID.String() }
 func (id PluginInstallID) String() string      { return id.UUID.String() }
 func (id ProjectVersionID) String() string    { return id.UUID.String() }
+func (id EnvironmentSyncSnapshotID) String() string {
+	return id.UUID.String()
+}

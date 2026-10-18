@@ -29,7 +29,7 @@ func TestPauseRun_and_ResumeRun_userPause(t *testing.T) {
 			Jobs: []model.WorkflowJob{{Name: "build-1", Type: model.JobTypeSparkopsBuild}},
 		}},
 	}}
-	scheduler := NewScheduler(repo, nil, nil, nil, nil)
+	scheduler := NewScheduler(repo, nil, nil, nil, nil, nil)
 
 	require.NoError(t, scheduler.PauseRun(context.Background(), runID))
 	repo.mu.Lock()
@@ -47,6 +47,6 @@ func TestPauseRun_rejectsNonRunning(t *testing.T) {
 	runID := kernel.NewProductWorkflowRunID()
 	run := &model.ProductWorkflowRun{ID: runID, Status: model.RunStatusSuccess}
 	repo := &concurrentRunRepo{run: run}
-	scheduler := NewScheduler(repo, nil, nil, nil, nil)
+	scheduler := NewScheduler(repo, nil, nil, nil, nil, nil)
 	require.ErrorIs(t, scheduler.PauseRun(context.Background(), runID), domain.ErrRunNotPausable)
 }

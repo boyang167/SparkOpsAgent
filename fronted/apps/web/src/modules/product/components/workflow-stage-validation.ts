@@ -1,5 +1,7 @@
 import { parseCreateVersionJobSpec } from "./create-version-job-spec";
 import { parseDeployJobSpec } from "./deploy-job-spec";
+import { parseEnvironmentSyncJobSpec } from "./environment-sync-job-spec";
+import { validateEnvironmentSyncJob } from "./environment-sync-job-validation";
 import {
   upstreamBuildJobs,
   upstreamVersionSourceJobs,
@@ -38,6 +40,21 @@ export function validateWorkflowStages(stages: EditorStage[]): WorkflowValidatio
             jobName,
             message: `上游构建任务「${parsed.jobName}」无效或不在当前任务之前`,
           });
+        }
+        continue;
+      }
+
+      if (job.type === "sparkops-environment-sync") {
+        const parsed = parseEnvironmentSyncJobSpec(job.spec);
+        const syncErrors = validateEnvironmentSyncJob(parsed);
+        if (syncErrors.sourceEnvironmentId) {
+          issues.push({ stageName, jobName, message: syncErrors.sourceEnvironmentId });
+        }
+        if (syncErrors.targetEnvironmentId) {
+          issues.push({ stageName, jobName, message: syncErrors.targetEnvironmentId });
+        }
+        if (syncErrors.projects) {
+          issues.push({ stageName, jobName, message: syncErrors.projects });
         }
         continue;
       }

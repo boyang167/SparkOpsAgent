@@ -66,7 +66,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		UpdateEnvironment: command.NewUpdateEnvironmentHandler(repo, environmentRepo, c.DB),
 		DeleteEnvironment: command.NewDeleteEnvironmentHandler(repo, environmentRepo),
 		ListEnvironments:  query.NewListEnvironmentsHandler(repo, environmentRepo),
-		GetStatus:         query.NewGetEnvironmentStatusHandler(repo, environmentRepo, projectCatalog),
+		GetStatus:         query.NewGetEnvironmentStatusHandler(repo, environmentRepo, projectCatalog, acl.NewDeploymentRunImageReader(c.DB)),
 	}
 
 	secretBox, err := crypto.NewSecretBoxFromConfig(c.Config)

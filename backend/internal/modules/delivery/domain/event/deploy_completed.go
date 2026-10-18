@@ -9,15 +9,17 @@ const DeployCompletedName = "delivery.DeployCompleted"
 
 type DeployCompleted struct {
 	events.BaseEvent
-	RunID         kernel.DeploymentRunID
-	ProjectID     kernel.ProjectID
-	WorkspaceID   kernel.WorkspaceID
-	EnvironmentID *kernel.EnvironmentID
-	ProjectName   string
-	Status        string
-	RunType       string
-	ImageTag      string
-	CreatedBy     kernel.MemberID
+	RunID                     kernel.DeploymentRunID
+	ProjectID                 kernel.ProjectID
+	WorkspaceID               kernel.WorkspaceID
+	EnvironmentID             *kernel.EnvironmentID
+	SourceEnvironmentID       *kernel.EnvironmentID
+	EnvironmentSyncSnapshotID *kernel.EnvironmentSyncSnapshotID
+	ProjectName               string
+	Status                    string
+	RunType                   string
+	ImageTag                  string
+	CreatedBy                 kernel.MemberID
 }
 
 func NewDeployCompleted(

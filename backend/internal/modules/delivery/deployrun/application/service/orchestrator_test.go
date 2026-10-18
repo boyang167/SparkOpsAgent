@@ -733,3 +733,66 @@ func TestDeployingSyncOnlyWithDeploymentRestarts(t *testing.T) {
 	require.Equal(t, 1, f.deployer.restartCalls)
 	require.Equal(t, "demo", f.deployer.target.DeploymentName)
 }
+
+func TestEnvironmentSyncRunAppliesToTargetWithoutBuildOrCrossCluster(t *testing.T) {
+	f := newOrchestratorFixture(model.StatusDeploying)
+	f.run = model.NewEnvironmentSyncDeploymentRun(f.wsID, f.run.ProjectID, f.run.ClusterID, f.run.CreatedBy)
+	f.run.Status = model.StatusDeploying
+	f.run.DeployNamespace = "target-ns"
+	f.repo.run = f.run
+	f.run.SyncManifests = []model.SyncManifest{
+		{Kind: model.SyncManifestKindSecret, Name: "registry-pull", ManagedPullSecret: true},
+		{
+			Kind: model.SyncManifestKindConfigMap,
+			Name: "app-config",
+			YAML: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-config\n  namespace: target-ns\ndata:\n  k: v\n",
+		},
+		{
+			Kind: model.SyncManifestKindDeployment,
+			Name: "demo",
+			YAML: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n  namespace: target-ns\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          image: repo/app:v2\n",
+		},
+	}
+	f.projects.project.Namespace = "target-ns"
+
+	require.NoError(t, f.o.Step(context.Background(), f.run.ID, f.wsID))
+
+	require.Equal(t, model.StatusSucceeded, f.run.Status)
+	require.Zero(t, f.prepare.calls)
+	require.Zero(t, f.trigger.calls)
+	require.Equal(t, 3, f.deployer.calls)
+	require.Equal(t, 1, f.deployer.restartCalls)
+	require.Equal(t, "target-ns", f.deployer.target.Namespace)
+	require.Contains(t, f.repo.events, "applied: Secret/registry-pull")
+	require.Contains(t, f.repo.events, "applied: ConfigMap/app-config")
+	require.Contains(t, f.repo.events, "applied: Deployment/demo")
+}
+
+func TestEnvironmentSyncRunReportsPartialApplyFailure(t *testing.T) {
+	f := newOrchestratorFixture(model.StatusDeploying)
+	f.run = model.NewEnvironmentSyncDeploymentRun(f.wsID, f.run.ProjectID, f.run.ClusterID, f.run.CreatedBy)
+	f.run.Status = model.StatusDeploying
+	f.run.DeployNamespace = "target-ns"
+	f.repo.run = f.run
+	f.run.SyncManifests = []model.SyncManifest{
+		{
+			Kind: model.SyncManifestKindConfigMap,
+			Name: "app-config",
+			YAML: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-config\n  namespace: target-ns\ndata:\n  k: v\n",
+		},
+		{
+			Kind: model.SyncManifestKindDeployment,
+			Name: "demo",
+			YAML: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n  namespace: target-ns\n",
+		},
+	}
+	f.deployer.errAfter = 1
+	f.deployer.err = errors.New("apply failed")
+
+	require.NoError(t, f.o.Step(context.Background(), f.run.ID, f.wsID))
+
+	require.Equal(t, model.StatusFailed, f.run.Status)
+	require.Equal(t, 2, f.deployer.calls)
+	require.Contains(t, f.repo.events, "applied: ConfigMap/app-config")
+	require.Contains(t, f.repo.events[len(f.repo.events)-1], "failed: Deployment/demo")
+}

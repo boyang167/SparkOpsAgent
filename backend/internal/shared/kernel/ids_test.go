@@ -27,3 +27,10 @@ func TestDocumentID_ParseAndString(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, id, parsed)
 }
+
+func TestEnvironmentSyncSnapshotID_ParseAndString(t *testing.T) {
+	id := kernel.NewEnvironmentSyncSnapshotID()
+	parsed, err := kernel.ParseEnvironmentSyncSnapshotID(id.String())
+	require.NoError(t, err)
+	require.Equal(t, id, parsed)
+}

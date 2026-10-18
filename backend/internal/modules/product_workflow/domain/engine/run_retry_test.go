@@ -73,7 +73,7 @@ func retryFixture(t *testing.T) (*concurrentRunRepo, *recordingBuildTrigger, *Sc
 		refs: map[string]*model.WorkflowBuildRef{},
 	}
 	trigger := &recordingBuildTrigger{}
-	scheduler := NewScheduler(repo, NewBuildExecutor(trigger, repo, nil), nil, nil, nil)
+	scheduler := NewScheduler(repo, NewBuildExecutor(trigger, repo, nil), nil, nil, nil, nil)
 	return repo, trigger, scheduler, p1, p2
 }
 
@@ -177,7 +177,7 @@ func TestHandleBuildFailedMarksJobAndStageFailed(t *testing.T) {
 		}},
 		refs: map[string]*model.WorkflowBuildRef{buildID.String(): {BuildID: buildID, RunID: runID, JobName: "build-1"}},
 	}
-	scheduler := NewScheduler(repo, nil, nil, nil, nil)
+	scheduler := NewScheduler(repo, nil, nil, nil, nil, nil)
 
 	require.NoError(t, scheduler.HandleBuildCompleted(context.Background(), buildID, string(buildmodel.BuildStatusFailed)))
 

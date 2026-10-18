@@ -23,6 +23,8 @@ func NewTerminalCallback(bus messaging.Bus) func(context.Context, *model.Deploym
 			string(run.RunType),
 			run.ImageTag,
 		)
+		completed.SourceEnvironmentID = run.SourceEnvironmentID
+		completed.EnvironmentSyncSnapshotID = run.EnvironmentSyncSnapshotID
 		completed.CreatedBy = run.CreatedBy
 		return bus.Publish(ctx, completed)
 	}

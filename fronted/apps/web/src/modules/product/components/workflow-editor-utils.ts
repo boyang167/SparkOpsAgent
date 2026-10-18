@@ -48,6 +48,16 @@ export function defaultJob(type: string, index: number): EditorJob {
           status_check: true,
         },
       };
+    case "sparkops-environment-sync":
+      return {
+        ...base,
+        name: `environment-sync-${index}`,
+        spec: {
+          source_environment_id: "",
+          target_environment_id: "",
+          projects: [],
+        },
+      };
     case "sparkops-approval":
       return {
         ...base,

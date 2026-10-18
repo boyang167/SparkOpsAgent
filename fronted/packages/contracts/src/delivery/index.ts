@@ -34,7 +34,13 @@ export const DeploymentStatusSchema = z.enum([
 
 export type DeploymentStatus = z.infer<typeof DeploymentStatusSchema>;
 
-export const DeploymentRunTypeSchema = z.enum(["normal", "rollback", "sync", "undeploy"]);
+export const DeploymentRunTypeSchema = z.enum([
+  "normal",
+  "rollback",
+  "sync",
+  "undeploy",
+  "environment-sync",
+]);
 
 export type DeploymentRunType = z.infer<typeof DeploymentRunTypeSchema>;
 
@@ -43,6 +49,9 @@ export const DeploymentRunVMSchema = z.object({
   workspace_id: z.string(),
   project_id: z.string(),
   cluster_id: z.string(),
+  environment_id: z.string().optional(),
+  source_environment_id: z.string().optional(),
+  environment_sync_snapshot_id: z.string().optional(),
   git_ref_type: z.enum(["branch", "tag"]),
   git_ref_value: z.string(),
   image_tag: z.string(),

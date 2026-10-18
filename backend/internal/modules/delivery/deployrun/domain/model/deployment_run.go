@@ -34,7 +34,8 @@ const (
 	RunTypeNormal   RunType = "normal"
 	RunTypeRollback RunType = "rollback"
 	RunTypeSync     RunType = "sync"
-	RunTypeUndeploy RunType = "undeploy"
+	RunTypeUndeploy        RunType = "undeploy"
+	RunTypeEnvironmentSync RunType = "environment-sync"
 )
 
 type UndeployOptions struct {
@@ -47,8 +48,10 @@ type DeploymentRun struct {
 	WorkspaceID       kernel.WorkspaceID
 	ProjectID         kernel.ProjectID
 	ClusterID         kernel.ClusterInfoID
-	EnvironmentID     *kernel.EnvironmentID
-	ProjectVersionID  *kernel.ProjectVersionID
+	EnvironmentID             *kernel.EnvironmentID
+	SourceEnvironmentID       *kernel.EnvironmentID
+	EnvironmentSyncSnapshotID *kernel.EnvironmentSyncSnapshotID
+	ProjectVersionID          *kernel.ProjectVersionID
 	DeployNamespace   string
 	BuildID           *kernel.BuildID
 	GitRefType        string
@@ -202,6 +205,18 @@ func NewSyncDeploymentRun(
 	}
 }
 
+func NewEnvironmentSyncDeploymentRun(
+	wsID kernel.WorkspaceID,
+	projectID kernel.ProjectID,
+	clusterID kernel.ClusterInfoID,
+	createdBy kernel.MemberID,
+) *DeploymentRun {
+	run := NewDeploymentRun(wsID, projectID, clusterID, createdBy, "branch", "", "")
+	run.RunType = RunTypeEnvironmentSync
+	run.ImageTag = ""
+	return run
+}
+
 func NewUndeployRun(
 	wsID kernel.WorkspaceID,
 	projectID kernel.ProjectID,
@@ -242,8 +257,12 @@ func (r *DeploymentRun) IsUndeploy() bool {
 	return r.RunType == RunTypeUndeploy
 }
 
+func (r *DeploymentRun) IsEnvironmentSync() bool {
+	return r.RunType == RunTypeEnvironmentSync
+}
+
 func (r *DeploymentRun) SkipsBuild() bool {
-	return r.IsRollback() || r.IsSyncOnly() || r.IsUndeploy()
+	return r.IsRollback() || r.IsSyncOnly() || r.IsUndeploy() || r.IsEnvironmentSync()
 }
 
 func (r *DeploymentRun) Transition(to Status, at time.Time) error {

@@ -17,6 +17,11 @@ import { MemberNameLabel } from "./MemberNameLabel";
 import { ReleasePlanAddWorkflowModal } from "./ReleasePlanAddWorkflowModal";
 import { ReleasePlanJobInputs } from "./ReleasePlanJobInputs";
 import { ReleasePlanModalFooter } from "./ReleasePlanModalFooter";
+import { EnvironmentSyncRunFields } from "./EnvironmentSyncRunFields";
+import {
+  createEnvironmentSyncRunState,
+  type EnvironmentSyncRunJobState,
+} from "./environment-sync-run-state";
 import { ReleasePlanProjectBranches } from "./ReleasePlanProjectBranches";
 import { SprintWorkItemsImportModal } from "./SprintWorkItemsImportModal";
 import { productDetailTabIcons } from "./product-detail-icons";
@@ -26,6 +31,9 @@ import {
   defaultBranchForWorkflow,
   defaultEnvironmentIdForWorkflow,
   environmentLabel,
+  environmentSyncJobsInWorkflow,
+  missingEnvironmentSyncPreviewJobs,
+  parseEnvironmentSyncPreviewIds,
   parseWorkflowJobBranch,
   parseWorkflowJobEnvironmentId,
   parseWorkflowJobProjectIds,
@@ -107,6 +115,10 @@ function workflowName(workflows: ProductWorkflowVM[], workflowId?: string): stri
   return match?.name ?? `${workflowId.slice(0, 8)}…`;
 }
 
+function envSyncStateKey(releaseJobId: string, syncJobName: string): string {
+  return `${releaseJobId}:${syncJobName}`;
+}
+
 export function ReleasePlanJobEditor({
   workspaceId,
   productId,
@@ -136,6 +148,7 @@ export function ReleasePlanJobEditor({
   const [projects, setProjects] = useState<ProductProjectVM[]>([]);
   const [workflowDetails, setWorkflowDetails] = useState<Record<string, ProductWorkflowVM>>({});
   const [workflowDetailErrors, setWorkflowDetailErrors] = useState<Set<string>>(() => new Set());
+  const [envSyncRunStates, setEnvSyncRunStates] = useState<Record<string, EnvironmentSyncRunJobState>>({});
   const debounceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const pendingTextRef = useRef<Map<string, { html: string; baseline: string }>>(new Map());
   const loadingWorkflowIds = useRef<Set<string>>(new Set());
@@ -504,6 +517,12 @@ export function ReleasePlanJobEditor({
             const projectSources = workflowProjectSources(jobWorkflow);
             const workflowDefaultBranch = defaultBranchForWorkflow(jobWorkflow);
             const jobHasBuild = workflowHasBuildJobs(jobWorkflow);
+            const envSyncJobs = environmentSyncJobsInWorkflow(jobWorkflow);
+            const missingEnvSyncPreviews = missingEnvironmentSyncPreviewJobs(
+              jobWorkflow,
+              job.workflow_ref?.parameters,
+            );
+            const storedEnvSyncPreviewIds = parseEnvironmentSyncPreviewIds(job.workflow_ref?.parameters);
             const jobInputs = jobInputStates(job, plan.parameters);
             const canEditInputs =
               canEditJob || (plan.status === "executing" && job.type === "workflow" && job.status === "failed");
@@ -565,6 +584,7 @@ export function ReleasePlanJobEditor({
                                 jobBranch ? `分支 ${jobBranch}` : null,
                                 selectedProjectIds.length > 0 ? `${selectedProjectIds.length} 个项目` : null,
                                 jobInputs.some((state) => state.source === "missing") ? "缺少运行参数" : null,
+                                missingEnvSyncPreviews.length > 0 ? "缺少环境同步预览" : null,
                               ]
                                 .filter(Boolean)
                                 .join(" · ")
@@ -753,6 +773,62 @@ export function ReleasePlanJobEditor({
                                 void onWorkflowParamsChange(job.id, workflowId, { variables: { [key]: value } })
                               }
                             />
+                          </JobField>
+                        ) : null}
+                        {envSyncJobs.length > 0 ? (
+                          <JobField label="环境同步预览" alignTop>
+                            {!canEditJob && missingEnvSyncPreviews.length > 0 ? (
+                              <InlineAlert tone="warning">缺少环境同步预览：{missingEnvSyncPreviews.join("、")}</InlineAlert>
+                            ) : null}
+                            <div className="stack-md">
+                              {envSyncJobs.map((syncJob) => {
+                                const stateKey = envSyncStateKey(job.id, syncJob.jobName);
+                                const fallback = createEnvironmentSyncRunState({
+                                  jobName: syncJob.jobName,
+                                  sourceEnvironmentId: syncJob.sourceEnvironmentId,
+                                  targetEnvironmentId: syncJob.targetEnvironmentId,
+                                  projects: syncJob.projects,
+                                });
+                                const previewId = storedEnvSyncPreviewIds[syncJob.jobName] ?? "";
+                                const resolvedState =
+                                  envSyncRunStates[stateKey] ??
+                                  (previewId ? { ...fallback, previewId, pendingPreview: null } : fallback);
+                                const previewReady = Boolean(storedEnvSyncPreviewIds[syncJob.jobName]?.trim());
+                                return (
+                                  <div key={syncJob.jobName} className="wf-env-sync-run-block">
+                                    <h4 className="wf-env-sync-run-job-title">{syncJob.jobName}</h4>
+                                    {canEditJob ? (
+                                      <EnvironmentSyncRunFields
+                                        compact
+                                        workspaceId={workspaceId}
+                                        productId={productId}
+                                        workflowId={workflowId}
+                                        jobName={syncJob.jobName}
+                                        environments={environments}
+                                        projects={projects}
+                                        state={resolvedState}
+                                        onChange={(next) => {
+                                          setEnvSyncRunStates((current) => ({ ...current, [stateKey]: next }));
+                                          const previousPreviewId = storedEnvSyncPreviewIds[syncJob.jobName] ?? "";
+                                          if (next.previewId === previousPreviewId) return;
+                                          void onWorkflowParamsChange(job.id, workflowId, {
+                                            environmentSyncPreviewIds: {
+                                              [syncJob.jobName]: next.previewId || null,
+                                            },
+                                          });
+                                        }}
+                                      />
+                                    ) : (
+                                      <p className="text-xs text-muted">
+                                        {previewReady
+                                          ? `已确认预览 ${storedEnvSyncPreviewIds[syncJob.jobName].slice(0, 8)}…`
+                                          : "尚未确认环境同步预览"}
+                                      </p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </JobField>
                         ) : null}
                       </>

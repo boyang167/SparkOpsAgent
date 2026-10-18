@@ -281,22 +281,31 @@ func (o *Orchestrator) Step(ctx context.Context, runID kernel.DeploymentRunID, w
 			}
 			return nil
 		}
-		if !(run.IsSyncOnly() && len(run.SyncManifests) > 0) {
-			if err := o.finalizeKubernetes(operationCtx, run, project); err != nil {
+		if run.IsEnvironmentSync() {
+			if err := o.applyEnvironmentSyncManifests(operationCtx, ctx, run, project); err != nil {
 				if operationCtx.Err() != nil {
 					return operationCtx.Err()
 				}
-				return o.handleDependencyError(ctx, run, err)
+				return o.failBusiness(ctx, run, err)
 			}
-		}
-		if operationCtx.Err() != nil {
-			return operationCtx.Err()
-		}
-		if err := o.syncCrossClusterTargets(operationCtx, ctx, workspaceID, run); err != nil {
+		} else {
+			if !(run.IsSyncOnly() && len(run.SyncManifests) > 0) {
+				if err := o.finalizeKubernetes(operationCtx, run, project); err != nil {
+					if operationCtx.Err() != nil {
+						return operationCtx.Err()
+					}
+					return o.handleDependencyError(ctx, run, err)
+				}
+			}
 			if operationCtx.Err() != nil {
 				return operationCtx.Err()
 			}
-			return o.failBusiness(ctx, run, err)
+			if err := o.syncCrossClusterTargets(operationCtx, ctx, workspaceID, run); err != nil {
+				if operationCtx.Err() != nil {
+					return operationCtx.Err()
+				}
+				return o.failBusiness(ctx, run, err)
+			}
 		}
 		if err := run.Transition(model.StatusSucceeded, o.clock()); err != nil {
 			return err
@@ -515,6 +524,61 @@ func (o *Orchestrator) syncCrossClusterTargets(
 			return fmt.Errorf("sync cluster %s: %w", cluster.Name, err)
 		}
 		_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("cross-cluster sync succeeded: %s", cluster.Name))
+	}
+	return nil
+}
+
+func (o *Orchestrator) applyEnvironmentSyncManifests(
+	operationCtx context.Context,
+	parentCtx context.Context,
+	run *model.DeploymentRun,
+	project deployport.ProjectDeploymentContext,
+) error {
+	ordered := model.SyncApplyOrder(run.SyncManifests)
+	if len(ordered) == 0 {
+		return domain.ErrDeploymentSyncManifestsEmpty
+	}
+	deploymentName := ""
+	serviceName := ""
+	restartWorkloads := false
+	for _, item := range ordered {
+		if item.ManagedPullSecret {
+			target := o.buildDeploymentTarget(project, run, deploymentName, serviceName)
+			target.AllowPartialWorkloads = true
+			target.SkipRolloutWait = true
+			target.ExtraImagePullSecrets = []string{item.Name}
+			if err := o.deployer.Deploy(operationCtx, target, nil); err != nil {
+				_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("failed: %s/%s: %v", item.Kind, item.Name, err))
+				return err
+			}
+			_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("applied: %s/%s", item.Kind, item.Name))
+			continue
+		}
+		if strings.TrimSpace(item.YAML) == "" {
+			continue
+		}
+		target := o.buildDeploymentTarget(project, run, deploymentName, serviceName)
+		target.AllowPartialWorkloads = true
+		target.SkipRolloutWait = true
+		switch item.Kind {
+		case model.SyncManifestKindDeployment:
+			deploymentName = item.Name
+			restartWorkloads = true
+		case model.SyncManifestKindService:
+			serviceName = item.Name
+		}
+		if err := o.deployer.Deploy(operationCtx, target, []runtimeport.Manifest{{YAML: item.YAML}}); err != nil {
+			_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("failed: %s/%s: %v", item.Kind, item.Name, err))
+			return err
+		}
+		_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("applied: %s/%s", item.Kind, item.Name))
+	}
+	if restartWorkloads && deploymentName != "" {
+		target := o.buildDeploymentTarget(project, run, deploymentName, serviceName)
+		if err := o.deployer.RolloutRestart(operationCtx, target); err != nil {
+			_ = o.repo.AppendEvent(parentCtx, run, fmt.Sprintf("failed: %s/%s: %v", model.SyncManifestKindDeployment, deploymentName, err))
+			return err
+		}
 	}
 	return nil
 }

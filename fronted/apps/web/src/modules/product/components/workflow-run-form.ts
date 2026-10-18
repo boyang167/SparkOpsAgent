@@ -2,6 +2,7 @@ import type { ProductProjectVM, WorkflowJobVM, WorkflowStageVM } from "@sparkops
 import { parseBuildJobSpec } from "./build-job-spec";
 import { parseCreateVersionJobSpec, runtimeVersionTag } from "./create-version-job-spec";
 import { parseDeployJobSpec } from "./deploy-job-spec";
+import { parseEnvironmentSyncJobSpec } from "./environment-sync-job-spec";
 import { jobTypeLabel } from "./workflow-editor-utils";
 
 export interface RunFormBuildRow {
@@ -49,12 +50,20 @@ export interface RunFormVersionJob {
   fromDeploy?: boolean;
 }
 
+export interface RunFormEnvironmentSyncJob {
+  jobName: string;
+  sourceEnvironmentId: string;
+  targetEnvironmentId: string;
+  projects: import("./environment-sync-job-spec").EnvironmentSyncProjectSpec[];
+}
+
 export interface RunFormStage {
   id: string;
   name: string;
   buildRows: RunFormBuildRow[];
   versionJobs: RunFormVersionJob[];
   deployJobs: RunFormDeployJob[];
+  environmentSyncJobs: RunFormEnvironmentSyncJob[];
   otherJobs: RunFormOtherJob[];
 }
 
@@ -207,6 +216,7 @@ export function buildWorkflowRunForm(
       const buildRows: RunFormBuildRow[] = [];
       const versionJobs: RunFormVersionJob[] = [];
       const deployJobs: RunFormDeployJob[] = [];
+      const environmentSyncJobs: RunFormEnvironmentSyncJob[] = [];
       const otherJobs: RunFormOtherJob[] = [];
       for (const job of stage.jobs) {
         if (job.type === "sparkops-build") {
@@ -236,17 +246,28 @@ export function buildWorkflowRunForm(
           });
           continue;
         }
+        if (job.type === "sparkops-environment-sync") {
+          const parsed = parseEnvironmentSyncJobSpec(job.spec);
+          environmentSyncJobs.push({
+            jobName: job.name,
+            sourceEnvironmentId: parsed.sourceEnvironmentId,
+            targetEnvironmentId: parsed.targetEnvironmentId,
+            projects: parsed.projects,
+          });
+          continue;
+        }
         otherJobs.push({ jobName: job.name, typeLabel: jobTypeLabel(job.type) });
       }
       const id = `wf-run-stage-${index}`;
       const name = stage.name.trim() || `阶段${index + 1}`;
-      return { id, name, buildRows, versionJobs, deployJobs, otherJobs };
+      return { id, name, buildRows, versionJobs, deployJobs, environmentSyncJobs, otherJobs };
     })
     .filter(
       (stage) =>
         stage.buildRows.length +
           stage.versionJobs.length +
           stage.deployJobs.length +
+          stage.environmentSyncJobs.length +
           stage.otherJobs.length >
         0,
     );

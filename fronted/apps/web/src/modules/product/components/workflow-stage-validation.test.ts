@@ -30,6 +30,48 @@ describe("validateWorkflowStages", () => {
     expect(formatWorkflowValidationErrors(issues)).toContain("版本 / create-version-2");
   });
 
+  it("flags invalid environment sync job", () => {
+    const invalid: EditorStage[] = [
+      {
+        name: "同步",
+        parallel: false,
+        exec_mode: "auto",
+        jobs: [
+          {
+            name: "sync-1",
+            type: "sparkops-environment-sync",
+            spec: { source_environment_id: "env-a", target_environment_id: "env-a", projects: [] },
+          },
+        ],
+      },
+    ];
+    const issues = validateWorkflowStages(invalid);
+    expect(issues.some((item) => item.jobName === "sync-1" && item.message.includes("不能相同"))).toBe(true);
+    expect(formatWorkflowValidationErrors(issues)).toContain("同步 / sync-1");
+  });
+
+  it("passes when environment sync job is configured", () => {
+    const valid: EditorStage[] = [
+      {
+        name: "同步",
+        parallel: false,
+        exec_mode: "auto",
+        jobs: [
+          {
+            name: "sync-1",
+            type: "sparkops-environment-sync",
+            spec: {
+              source_environment_id: "env-a",
+              target_environment_id: "env-b",
+              projects: [{ project_id: "p1", sync_image: true, sync_yaml: false }],
+            },
+          },
+        ],
+      },
+    ];
+    expect(validateWorkflowStages(valid)).toEqual([]);
+  });
+
   it("passes when create-version references upstream build", () => {
     const valid: EditorStage[] = [
       stages[0],
