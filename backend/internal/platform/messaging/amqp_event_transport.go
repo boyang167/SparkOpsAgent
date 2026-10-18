@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 	"sync"
@@ -20,6 +21,9 @@ const (
 	eventAttemptsHeader       = "x-sparkops-attempts"
 	eventPublishAttemptHeader = "x-sparkops-publish-attempt"
 	eventCloseTimeout         = time.Second
+	eventReconnectMinDelay    = 25 * time.Millisecond
+	eventReconnectMaxDelay    = time.Second
+	eventDialTimeout          = 10 * time.Second
 	maxPersistedEventTypeSize = 160
 )
 
@@ -77,7 +81,16 @@ type eventConnection interface {
 	CloseDeadline(time.Time) error
 }
 
-type eventConnectionFactory func() (eventConnection, error)
+type eventConnectionFactory func(context.Context) (eventConnection, error)
+
+type eventConsumerRegistration struct {
+	ctx          context.Context
+	subscription Subscription
+	handler      DeliveryHandler
+	channel      eventChannel
+	consumerTag  string
+	connection   eventConnection
+}
 
 type realEventConnection struct {
 	connection *amqp.Connection
@@ -199,9 +212,15 @@ type amqpEventTransport struct {
 	publisherClosed     <-chan *amqp.Error
 	topology            eventChannel
 	consumers           map[eventChannel]string
+	declared            map[string]Subscription
+	registrations       map[string]*eventConsumerRegistration
+	consumerReconnect   chan eventConnection
+	reconnectWG         sync.WaitGroup
 	metrics             *Metrics
 	eventExchange       string
 	closing             chan struct{}
+	reconnectContext    context.Context
+	cancelReconnect     context.CancelFunc
 	closed              bool
 }
 
@@ -216,18 +235,27 @@ func NewAMQPEventTransport(url string, metrics *Metrics, eventExchanges ...strin
 			return nil, fmt.Errorf("amqp event exchange is required")
 		}
 	}
-	factory := func() (eventConnection, error) {
-		connection, err := amqp.Dial(url)
+	factory := func(ctx context.Context) (eventConnection, error) {
+		dialer := &net.Dialer{Timeout: eventDialTimeout}
+		connection, err := amqp.DialConfig(url, amqp.Config{
+			Heartbeat: 10 * time.Second,
+			Locale:    "en_US",
+			Dial: func(network, address string) (net.Conn, error) {
+				return dialer.DialContext(ctx, network, address)
+			},
+		})
 		if err != nil {
 			return nil, err
 		}
 		return &realEventConnection{connection: connection}, nil
 	}
-	publisherConnection, err := factory()
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), eventDialTimeout)
+	defer cancelDial()
+	publisherConnection, err := factory(dialCtx)
 	if err != nil {
 		return nil, fmt.Errorf("amqp event dial: %w", err)
 	}
-	consumerConnection, err := factory()
+	consumerConnection, err := factory(dialCtx)
 	if err != nil {
 		_ = publisherConnection.CloseDeadline(time.Now().Add(eventCloseTimeout))
 		return nil, fmt.Errorf("amqp event consumer dial: %w", err)
@@ -258,21 +286,41 @@ func newAMQPEventTransportWithConnections(
 	consumerConnection eventConnection,
 	factory eventConnectionFactory,
 ) *amqpEventTransport {
-	return &amqpEventTransport{
+	reconnectContext, cancelReconnect := context.WithCancel(context.Background())
+	transport := &amqpEventTransport{
 		publisherConnection: publisherConnection,
 		consumerConnection:  consumerConnection,
 		sharedConnection:    publisherConnection == consumerConnection,
 		connectionFactory:   factory,
 		consumers:           make(map[eventChannel]string),
+		declared:            make(map[string]Subscription),
+		registrations:       make(map[string]*eventConsumerRegistration),
+		consumerReconnect:   make(chan eventConnection, 1),
 		eventExchange:       eventExchangeName,
 		closing:             make(chan struct{}),
+		reconnectContext:    reconnectContext,
+		cancelReconnect:     cancelReconnect,
 	}
+	if factory != nil {
+		transport.reconnectWG.Add(1)
+		go transport.consumerReconnectLoop()
+	}
+	return transport
 }
 
 func (t *amqpEventTransport) Declare(ctx context.Context, subscriptions []Subscription) error {
 	if err := validateEventTopologies(subscriptions); err != nil {
 		return err
 	}
+	t.mu.Lock()
+	if t.closed {
+		t.mu.Unlock()
+		return fmt.Errorf("amqp event transport is closed")
+	}
+	for _, subscription := range subscriptions {
+		t.declared[topologyFor(subscription).Main.Name] = subscription
+	}
+	t.mu.Unlock()
 
 	t.topologyMu.Lock()
 	defer t.topologyMu.Unlock()
@@ -287,9 +335,21 @@ func (t *amqpEventTransport) Declare(ctx context.Context, subscriptions []Subscr
 		t.invalidateTopology(channel)
 		return fmt.Errorf("declare event exchange: %w", err)
 	}
+	if err := declareEventSubscriptions(ctx, channel, t.eventExchange, subscriptions); err != nil {
+		t.invalidateTopology(channel)
+		return err
+	}
+	return nil
+}
+
+func declareEventSubscriptions(
+	ctx context.Context,
+	channel eventChannel,
+	eventExchange string,
+	subscriptions []Subscription,
+) error {
 	for _, subscription := range subscriptions {
-		if err := declareEventTopology(ctx, channel, t.eventExchange, topologyFor(subscription)); err != nil {
-			t.invalidateTopology(channel)
+		if err := declareEventTopology(ctx, channel, eventExchange, topologyFor(subscription)); err != nil {
 			return err
 		}
 	}
@@ -397,7 +457,7 @@ func (t *amqpEventTransport) publishRawDeadLetter(
 ) error {
 	t.publishMu.Lock()
 	defer t.publishMu.Unlock()
-	channel, returns, closed, closing, err := t.publisherChannel()
+	channel, returns, closed, closing, err := t.publisherChannel(ctx)
 	if err != nil {
 		return err
 	}
@@ -453,7 +513,7 @@ func (t *amqpEventTransport) publish(
 ) error {
 	t.publishMu.Lock()
 	defer t.publishMu.Unlock()
-	channel, returns, closed, closing, err := t.publisherChannel()
+	channel, returns, closed, closing, err := t.publisherChannel(ctx)
 	if err != nil {
 		return err
 	}
@@ -621,13 +681,14 @@ func returnMatchesPublishAttempt(returned amqp.Return, messageID string, headers
 	return returnedHasAttempt && returnedAttempt == expectedAttempt
 }
 
-func (t *amqpEventTransport) publisherChannel() (
+func (t *amqpEventTransport) publisherChannel(ctx context.Context) (
 	eventChannel,
 	<-chan amqp.Return,
 	<-chan *amqp.Error,
 	<-chan struct{},
 	error,
 ) {
+	delay := eventReconnectMinDelay
 	for {
 		t.mu.Lock()
 		if t.closed {
@@ -652,9 +713,15 @@ func (t *amqpEventTransport) publisherChannel() (
 			if factory == nil {
 				return nil, nil, nil, nil, fmt.Errorf("amqp event transport connection is unavailable")
 			}
-			reconnected, err := factory()
+			dialCtx, cancelDial := mergeEventContexts(ctx, t.reconnectContext)
+			reconnected, err := factory(dialCtx)
+			cancelDial()
 			if err != nil {
-				return nil, nil, nil, nil, fmt.Errorf("reconnect event transport: %w", err)
+				if waitErr := waitEventReconnect(ctx, closing, delay); waitErr != nil {
+					return nil, nil, nil, nil, fmt.Errorf("reconnect event transport: %w", errors.Join(err, waitErr))
+				}
+				delay = nextEventReconnectDelay(delay)
+				continue
 			}
 			t.mu.Lock()
 			if t.closed {
@@ -672,10 +739,27 @@ func (t *amqpEventTransport) publisherChannel() (
 
 		channel, err := connection.Channel()
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("open event publisher channel: %w", err)
+			if factory == nil {
+				return nil, nil, nil, nil, fmt.Errorf("open event publisher channel: %w", err)
+			}
+			t.retirePublisherConnectionValue(connection)
+			if waitErr := waitEventReconnect(ctx, closing, delay); waitErr != nil {
+				return nil, nil, nil, nil, fmt.Errorf("open event publisher channel: %w", errors.Join(err, waitErr))
+			}
+			delay = nextEventReconnectDelay(delay)
+			continue
 		}
 		if err := channel.Confirm(false); err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("enable event publisher confirms: %w", err)
+			_ = channel.Close()
+			if factory == nil {
+				return nil, nil, nil, nil, fmt.Errorf("enable event publisher confirms: %w", err)
+			}
+			t.retirePublisherConnectionValue(connection)
+			if waitErr := waitEventReconnect(ctx, closing, delay); waitErr != nil {
+				return nil, nil, nil, nil, fmt.Errorf("enable event publisher confirms: %w", errors.Join(err, waitErr))
+			}
+			delay = nextEventReconnectDelay(delay)
+			continue
 		}
 		returns := channel.NotifyReturn(make(chan amqp.Return, 1))
 		closed := channel.NotifyClose(make(chan *amqp.Error, 1))
@@ -691,6 +775,36 @@ func (t *amqpEventTransport) publisherChannel() (
 		t.mu.Unlock()
 		return channel, returns, closed, closing, nil
 	}
+}
+
+func waitEventReconnect(ctx context.Context, closing <-chan struct{}, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-closing:
+		return fmt.Errorf("amqp event transport is closed")
+	case <-timer.C:
+		return nil
+	}
+}
+
+func mergeEventContexts(primary, interrupt context.Context) (context.Context, context.CancelFunc) {
+	merged, cancel := context.WithCancel(primary)
+	stop := context.AfterFunc(interrupt, cancel)
+	return merged, func() {
+		stop()
+		cancel()
+	}
+}
+
+func nextEventReconnectDelay(delay time.Duration) time.Duration {
+	delay *= 2
+	if delay > eventReconnectMaxDelay {
+		return eventReconnectMaxDelay
+	}
+	return delay
 }
 
 func (t *amqpEventTransport) topologyChannel() (eventChannel, error) {
@@ -761,6 +875,19 @@ func (t *amqpEventTransport) retirePublisherConnection(channel eventChannel) err
 	return nil
 }
 
+func (t *amqpEventTransport) retirePublisherConnectionValue(connection eventConnection) {
+	t.mu.Lock()
+	if t.publisherConnection != connection {
+		t.mu.Unlock()
+		return
+	}
+	t.invalidatePublisherLocked()
+	t.publisherConnection = nil
+	t.sharedConnection = false
+	t.mu.Unlock()
+	_ = connection.CloseDeadline(time.Now().Add(eventCloseTimeout))
+}
+
 func (t *amqpEventTransport) Consume(
 	ctx context.Context,
 	subscription Subscription,
@@ -772,69 +899,139 @@ func (t *amqpEventTransport) Consume(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	key := topologyFor(subscription).Main.Name
+	registration := &eventConsumerRegistration{
+		ctx:          ctx,
+		subscription: subscription,
+		handler:      handler,
+		consumerTag:  "sparkops-event-" + normalizeQueueNamePart(subscription.Subscriber, false),
+	}
 	t.mu.Lock()
-	if t.closed || t.consumerConnection == nil {
+	if t.closed {
 		t.mu.Unlock()
 		return fmt.Errorf("amqp event transport is closed")
 	}
-	connection := t.consumerConnection
+	if _, exists := t.registrations[key]; exists {
+		t.mu.Unlock()
+		return fmt.Errorf("event consumer already registered for queue %s", key)
+	}
+	t.registrations[key] = registration
 	t.mu.Unlock()
+
+	t.topologyMu.Lock()
+	defer t.topologyMu.Unlock()
+	if err := t.startConsumerRegistration(registration); err != nil {
+		t.mu.Lock()
+		if t.registrations[key] == registration {
+			delete(t.registrations, key)
+		}
+		t.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+func (t *amqpEventTransport) startConsumerRegistration(registration *eventConsumerRegistration) error {
+	if err := registration.ctx.Err(); err != nil {
+		return err
+	}
+	t.mu.Lock()
+	if t.closed {
+		t.mu.Unlock()
+		return fmt.Errorf("amqp event transport is closed")
+	}
+	if registration.channel != nil {
+		t.mu.Unlock()
+		return nil
+	}
+	connection := t.consumerConnection
+	if connection == nil {
+		t.mu.Unlock()
+		return nil
+	}
+	t.mu.Unlock()
+
 	channel, err := connection.Channel()
 	if err != nil {
+		t.signalConsumerReconnect(connection)
 		return fmt.Errorf("open event consumer channel: %w", err)
 	}
-	topology := topologyFor(subscription)
-	consumerTag := "sparkops-event-" + normalizeQueueNamePart(subscription.Subscriber, false)
-	deliveries, err := channel.Consume(topology.Main.Name, consumerTag, false, false, false, false, nil)
+	topology := topologyFor(registration.subscription)
+	deliveries, err := channel.Consume(
+		topology.Main.Name,
+		registration.consumerTag,
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
 	if err != nil {
+		_ = channel.Close()
+		t.signalConsumerReconnect(connection)
 		return fmt.Errorf("consume event queue %s: %w", topology.Main.Name, err)
 	}
 	t.mu.Lock()
 	if t.closed || t.consumerConnection != connection {
 		t.mu.Unlock()
+		_ = channel.Cancel(registration.consumerTag, false)
+		_ = channel.Close()
 		return fmt.Errorf("amqp event transport is closed")
 	}
-	t.consumers[channel] = consumerTag
+	if registration.channel != nil {
+		t.mu.Unlock()
+		_ = channel.Cancel(registration.consumerTag, false)
+		_ = channel.Close()
+		return nil
+	}
+	registration.channel = channel
+	registration.connection = connection
+	t.consumers[channel] = registration.consumerTag
 	t.mu.Unlock()
 
-	go t.consumeDeliveries(ctx, channel, consumerTag, subscription, deliveries, handler)
+	go t.consumeDeliveries(registration, channel, connection, deliveries)
 	return nil
 }
 
 func (t *amqpEventTransport) consumeDeliveries(
-	ctx context.Context,
+	registration *eventConsumerRegistration,
 	channel eventChannel,
-	consumerTag string,
-	subscription Subscription,
+	connection eventConnection,
 	deliveries <-chan amqp.Delivery,
-	handler DeliveryHandler,
 ) {
-	defer t.stopConsumer(channel, consumerTag)
+	unexpectedClose := false
+	defer func() {
+		t.stopConsumer(registration, channel)
+		if unexpectedClose {
+			t.signalConsumerReconnect(connection)
+		}
+	}()
 	for {
 		select {
-		case <-ctx.Done():
+		case <-registration.ctx.Done():
 			return
 		case delivery, ok := <-deliveries:
 			if !ok {
+				unexpectedClose = true
 				return
 			}
 			var envelope events.Envelope
 			if err := json.Unmarshal(delivery.Body, &envelope); err != nil {
 				reason := fmt.Sprintf("cannot parse event envelope: %v", err)
-				t.routeRawPoison(ctx, subscription, delivery, reason)
+				t.routeRawPoison(registration.ctx, registration.subscription, delivery, reason)
 				continue
 			}
-			if err := validateEventEnvelope(envelope, subscription); err != nil {
+			if err := validateEventEnvelope(envelope, registration.subscription); err != nil {
 				t.routeRawPoison(
-					ctx,
-					subscription,
+					registration.ctx,
+					registration.subscription,
 					delivery,
 					fmt.Sprintf("invalid event envelope: %v", err),
 				)
 				continue
 			}
 			attempts := eventDeliveryAttempts(delivery.Headers)
-			if err := handler(ctx, envelope, attempts); err != nil {
+			if err := registration.handler(registration.ctx, envelope, attempts); err != nil {
 				_ = delivery.Nack(false, true)
 				continue
 			}
@@ -915,16 +1112,189 @@ func eventDeliveryAttempts(headers amqp.Table) int {
 	}
 }
 
-func (t *amqpEventTransport) stopConsumer(channel eventChannel, consumerTag string) {
+func (t *amqpEventTransport) stopConsumer(
+	registration *eventConsumerRegistration,
+	channel eventChannel,
+) {
 	t.mu.Lock()
 	if _, exists := t.consumers[channel]; !exists {
 		t.mu.Unlock()
 		return
 	}
 	delete(t.consumers, channel)
+	if registration.channel == channel {
+		registration.channel = nil
+		registration.connection = nil
+	}
 	t.mu.Unlock()
-	_ = channel.Cancel(consumerTag, false)
+	_ = channel.Cancel(registration.consumerTag, false)
 	_ = channel.Close()
+}
+
+func (t *amqpEventTransport) signalConsumerReconnect(connection eventConnection) {
+	t.mu.Lock()
+	closed := t.closed
+	t.mu.Unlock()
+	if closed || t.connectionFactory == nil {
+		return
+	}
+	select {
+	case t.consumerReconnect <- connection:
+	default:
+	}
+}
+
+func (t *amqpEventTransport) consumerReconnectLoop() {
+	defer t.reconnectWG.Done()
+	for {
+		select {
+		case <-t.closing:
+			return
+		case failedConnection := <-t.consumerReconnect:
+			t.reconnectConsumers(failedConnection)
+		}
+	}
+}
+
+func (t *amqpEventTransport) reconnectConsumers(failedConnection eventConnection) {
+	delay := eventReconnectMinDelay
+	for {
+		if err := t.rebuildConsumerRuntime(failedConnection); err == nil {
+			return
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-t.closing:
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		failedConnection = nil
+		delay = nextEventReconnectDelay(delay)
+	}
+}
+
+func (t *amqpEventTransport) rebuildConsumerRuntime(failedConnection eventConnection) error {
+	t.topologyMu.Lock()
+	defer t.topologyMu.Unlock()
+
+	t.mu.Lock()
+	if t.closed {
+		t.mu.Unlock()
+		return nil
+	}
+	if failedConnection != nil && t.consumerConnection != failedConnection {
+		t.mu.Unlock()
+		return nil
+	}
+	factory := t.connectionFactory
+	if factory == nil {
+		t.mu.Unlock()
+		return fmt.Errorf("event consumer connection factory is unavailable")
+	}
+	oldConnection := t.consumerConnection
+	t.consumerConnection = nil
+	t.topology = nil
+	t.sharedConnection = false
+	t.consumers = make(map[eventChannel]string)
+	subscriptions := make([]Subscription, 0, len(t.declared))
+	for _, subscription := range t.declared {
+		subscriptions = append(subscriptions, subscription)
+	}
+	registrations := make([]*eventConsumerRegistration, 0, len(t.registrations))
+	for _, registration := range t.registrations {
+		registration.channel = nil
+		registration.connection = nil
+		if registration.ctx.Err() == nil {
+			registrations = append(registrations, registration)
+		}
+	}
+	t.mu.Unlock()
+
+	if oldConnection != nil {
+		_ = oldConnection.CloseDeadline(time.Now().Add(eventCloseTimeout))
+	}
+	connection, err := factory(t.reconnectContext)
+	if err != nil {
+		return fmt.Errorf("reconnect event consumer: %w", err)
+	}
+	topologyChannel, err := connection.Channel()
+	if err != nil {
+		_ = connection.CloseDeadline(time.Now().Add(eventCloseTimeout))
+		return fmt.Errorf("open recovered event topology channel: %w", err)
+	}
+	if err := topologyChannel.ExchangeDeclare(
+		t.eventExchange,
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		_ = connection.CloseDeadline(time.Now().Add(eventCloseTimeout))
+		return fmt.Errorf("redeclare event exchange: %w", err)
+	}
+	if err := declareEventSubscriptions(
+		context.Background(),
+		topologyChannel,
+		t.eventExchange,
+		subscriptions,
+	); err != nil {
+		_ = connection.CloseDeadline(time.Now().Add(eventCloseTimeout))
+		return fmt.Errorf("redeclare event topology: %w", err)
+	}
+
+	type recoveredConsumer struct {
+		registration *eventConsumerRegistration
+		channel      eventChannel
+		deliveries   <-chan amqp.Delivery
+	}
+	recovered := make([]recoveredConsumer, 0, len(registrations))
+	for _, registration := range registrations {
+		channel, channelErr := connection.Channel()
+		if channelErr != nil {
+			_ = connection.CloseDeadline(time.Now().Add(eventCloseTimeout))
+			return fmt.Errorf("open recovered event consumer channel: %w", channelErr)
+		}
+		deliveries, consumeErr := channel.Consume(
+			topologyFor(registration.subscription).Main.Name,
+			registration.consumerTag,
+			false,
+			false,
+			false,
+			false,
+			nil,
+		)
+		if consumeErr != nil {
+			_ = connection.CloseDeadline(time.Now().Add(eventCloseTimeout))
+			return fmt.Errorf("restore event consumer %s: %w", registration.consumerTag, consumeErr)
+		}
+		recovered = append(recovered, recoveredConsumer{
+			registration: registration,
+			channel:      channel,
+			deliveries:   deliveries,
+		})
+	}
+
+	t.mu.Lock()
+	if t.closed || t.consumerConnection != nil {
+		t.mu.Unlock()
+		_ = connection.CloseDeadline(time.Now().Add(eventCloseTimeout))
+		return fmt.Errorf("event consumer recovery superseded")
+	}
+	t.consumerConnection = connection
+	t.topology = topologyChannel
+	for _, item := range recovered {
+		item.registration.channel = item.channel
+		item.registration.connection = connection
+		t.consumers[item.channel] = item.registration.consumerTag
+	}
+	t.mu.Unlock()
+	for _, item := range recovered {
+		go t.consumeDeliveries(item.registration, item.channel, connection, item.deliveries)
+	}
+	return nil
 }
 
 func (t *amqpEventTransport) Close() error {
@@ -934,6 +1304,7 @@ func (t *amqpEventTransport) Close() error {
 		return nil
 	}
 	t.closed = true
+	t.cancelReconnect()
 	publisherConnection := t.publisherConnection
 	consumerConnection := t.consumerConnection
 	sharedConnection := t.sharedConnection
@@ -959,5 +1330,6 @@ func (t *amqpEventTransport) Close() error {
 			closeErrors = append(closeErrors, fmt.Errorf("close event consumer connection: %w", err))
 		}
 	}
+	t.reconnectWG.Wait()
 	return errors.Join(closeErrors...)
 }

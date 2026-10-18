@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 
@@ -10,6 +11,12 @@ import (
 )
 
 func main() {
+	ifUnversioned := flag.Bool(
+		"if-unversioned",
+		false,
+		"run the historical GORM bootstrap only when schema_migrations is absent",
+	)
+	flag.Parse()
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
 		log.Fatal(err)
@@ -21,6 +28,17 @@ func main() {
 	db, err := postgres.Open(cfg.Database.DSN)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	if *ifUnversioned {
+		var migrationsTable *string
+		if err := db.Raw("SELECT to_regclass('public.schema_migrations')").Scan(&migrationsTable).Error; err != nil {
+			log.Fatal(err)
+		}
+		if migrationsTable != nil {
+			fmt.Println("=== schema bootstrap skipped: versioned database ===")
+			return
+		}
 	}
 
 	if err := bootstrap.AutoMigrate(db); err != nil {

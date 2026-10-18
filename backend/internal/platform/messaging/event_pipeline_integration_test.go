@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,11 +52,8 @@ type messagingIntegrationFixture struct {
 
 func newMessagingIntegrationFixture(t *testing.T) *messagingIntegrationFixture {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_DSN")
-	amqpURL := os.Getenv("AMQP_URL")
-	if dsn == "" || amqpURL == "" {
-		t.Skip("DATABASE_DSN and AMQP_URL are required for messaging integration tests")
-	}
+	dsn := requireIntegrationEnv(t, "DATABASE_DSN")
+	amqpURL := requireIntegrationEnv(t, "AMQP_URL")
 	db := openIsolatedMessagingPostgres(t, dsn)
 	require.NoError(t, db.Exec(`
 		CREATE TABLE integration_effects (
@@ -323,34 +321,81 @@ func TestEventPipelineFanoutAndCompetingInstancesConvergeOnce(t *testing.T) {
 
 func TestEventPipelineTemporaryFailureUsesEveryRetryTier(t *testing.T) {
 	f := newMessagingIntegrationFixture(t)
-	subscription := f.subscription("retry-tiers", func(context.Context, events.Event) error {
+	var calls sync.Map
+	succeeded := make(chan struct{}, 1)
+	subscription := f.subscription("retry-tiers", func(_ context.Context, event events.Event) error {
+		key := event.(integrationEvent).Key
+		value, _ := calls.LoadOrStore(key, new(atomic.Int32))
+		call := value.(*atomic.Int32).Add(1)
+		if key == "eventual-success" && call == 5 {
+			succeeded <- struct{}{}
+			return nil
+		}
 		return errors.New("temporary")
 	})
 	f.cleanupTopology(t, subscription)
+	declareShortRetryTopology(t, f.connection, subscription)
 	transport := f.transport(t)
-	require.NoError(t, transport.Declare(context.Background(), []Subscription{subscription}))
 	metrics, err := NewMetrics(prometheus.NewRegistry())
 	require.NoError(t, err)
 	consumer := NewInboxConsumer(f.transactor, f.inbox, f.registry, transport, nil, metrics)
-	envelope := f.envelope(t, "retry-tiers")
-	for attempts := 0; attempts < 5; attempts++ {
-		require.NoError(t, consumer.Handle(context.Background(), subscription, envelope, attempts))
-	}
+	seen := make(map[string][]int)
+	var seenMu sync.Mutex
+	require.NoError(t, transport.Consume(context.Background(), subscription, func(ctx context.Context, envelope events.Envelope, attempts int) error {
+		seenMu.Lock()
+		seen[envelope.ID] = append(seen[envelope.ID], attempts)
+		seenMu.Unlock()
+		return consumer.Handle(ctx, subscription, envelope, attempts)
+	}))
+	successEnvelope := f.envelope(t, "eventual-success")
+	deadEnvelope := f.envelope(t, "dead-letter")
+	require.NoError(t, transport.Publish(context.Background(), successEnvelope))
+	require.NoError(t, transport.Publish(context.Background(), deadEnvelope))
 
 	channel, err := f.connection.Channel()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = channel.Close() })
-	topology := topologyFor(subscription)
 	require.Eventually(t, func() bool {
-		expected := []int{1, 1, 1, 2}
-		for index, queue := range topology.Retry {
-			inspected, inspectErr := channel.QueueInspect(queue.Name)
-			if inspectErr != nil || inspected.Messages != expected[index] {
-				return false
-			}
-		}
-		return true
-	}, 5*time.Second, 25*time.Millisecond)
+		queue, inspectErr := channel.QueueInspect(topologyFor(subscription).DeadLetter.Name)
+		return inspectErr == nil && queue.Messages == 1
+	}, 10*time.Second, 20*time.Millisecond)
+	select {
+	case <-succeeded:
+	case <-time.After(10 * time.Second):
+		t.Fatal("message did not traverse retry TTL queues to eventual success")
+	}
+	seenMu.Lock()
+	defer seenMu.Unlock()
+	require.Equal(t, []int{0, 1, 2, 3, 4}, seen[successEnvelope.ID])
+	require.Equal(t, []int{0, 1, 2, 3, 4}, seen[deadEnvelope.ID])
+}
+
+func declareShortRetryTopology(t *testing.T, connection *amqp.Connection, subscription Subscription) {
+	t.Helper()
+	channel, err := connection.Channel()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = channel.Close() })
+	topology := topologyFor(subscription)
+	require.NoError(t, channel.ExchangeDeclare(eventExchangeName, "topic", true, false, false, false, nil))
+	_, err = channel.QueueDeclare(topology.Main.Name, true, false, false, false, nil)
+	require.NoError(t, err)
+	require.NoError(t, channel.QueueBind(
+		topology.Main.Name,
+		fmt.Sprintf("%s.v%d", subscription.EventName, subscription.Version),
+		eventExchangeName,
+		false,
+		nil,
+	))
+	for index, retry := range topology.Retry {
+		_, err = channel.QueueDeclare(retry.Name, true, false, false, false, amqp.Table{
+			"x-message-ttl":             int32(30 + index*20),
+			"x-dead-letter-exchange":    "",
+			"x-dead-letter-routing-key": topology.Main.Name,
+		})
+		require.NoError(t, err)
+	}
+	_, err = channel.QueueDeclare(topology.DeadLetter.Name, true, false, false, false, nil)
+	require.NoError(t, err)
 }
 
 func TestEventPipelineMalformedPayloadReachesOnlySubscriberDLQ(t *testing.T) {

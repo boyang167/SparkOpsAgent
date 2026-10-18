@@ -59,10 +59,8 @@ func (s *terminalDeploymentStepper) Step(
 }
 
 func TestReliableBuildCompletedPipelineReachesOneTerminalState(t *testing.T) {
-	dsn, amqpURL := os.Getenv("DATABASE_DSN"), os.Getenv("AMQP_URL")
-	if dsn == "" || amqpURL == "" {
-		t.Skip("DATABASE_DSN and AMQP_URL are required for reliable deployment integration")
-	}
+	dsn := requireReliableIntegrationEnv(t, "DATABASE_DSN")
+	amqpURL := requireReliableIntegrationEnv(t, "AMQP_URL")
 	db := openReliablePipelinePostgres(t, dsn)
 	require.NoError(t, db.Exec(`
 		CREATE SCHEMA delivery;
@@ -265,6 +263,19 @@ func TestReliableBuildCompletedPipelineReachesOneTerminalState(t *testing.T) {
 	require.Equal(t, eventCount, reliablePipelineCount(t, db, "delivery.deployment_run_events", "TRUE"))
 	require.Equal(t, int64(1), reliablePipelineCount(t, db, "integration_notifications", "TRUE"))
 	require.Equal(t, int64(1), reliablePipelineCount(t, db, "platform.operation_outbox", "operation_type = 'delivery.queue.deploy.publish.v1'"))
+}
+
+func requireReliableIntegrationEnv(t *testing.T, name string) string {
+	t.Helper()
+	value := os.Getenv(name)
+	if value != "" {
+		return value
+	}
+	if strings.EqualFold(os.Getenv("CI"), "true") || strings.EqualFold(os.Getenv("REQUIRE_INTEGRATION"), "true") {
+		t.Fatalf("%s is required when integration tests run in CI", name)
+	}
+	t.Skipf("%s is required for integration tests", name)
+	return ""
 }
 
 func openReliablePipelinePostgres(t *testing.T, dsn string) *gorm.DB {

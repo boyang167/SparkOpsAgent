@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"fmt"
 	"net/url"
 	"os"
 	"regexp"
@@ -8,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/sparkops/sparkops-agent/backend/internal/bootstrap"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/dbmigration"
 	messagepersistence "github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 	"github.com/stretchr/testify/require"
 	gormpostgres "gorm.io/driver/postgres"
@@ -275,106 +278,27 @@ func TestProjectArchiveIntentMigrationUpgradesPhaseSemanticsPostgres(t *testing.
 	require.Nil(t, columnDefault)
 }
 
-func TestTransactionalEventMigrationsFreshUp70Through75Postgres(t *testing.T) {
+func TestSQLMigrationRunnerFreshReaches75AndPassesStartupGate(t *testing.T) {
 	db := openMigrationPostgres(t)
-	require.NoError(t, db.Exec(`
-		CREATE SCHEMA product;
-		CREATE SCHEMA workspace_app;
-		CREATE SCHEMA delivery;
-		CREATE TABLE product.product_workflow_runs (
-			id UUID PRIMARY KEY
-		);
-		CREATE TABLE workspace_app.projects (
-			id UUID PRIMARY KEY,
-			status VARCHAR(32) NOT NULL
-		);
-		CREATE TABLE delivery.deployment_runs (
-			id UUID PRIMARY KEY
-		)
-	`).Error)
-
-	applyTransactionalEventMigrations(t, db)
-
-	for _, table := range []string{
-		"platform.event_outbox",
-		"platform.event_inbox",
-		"platform.operation_outbox",
-	} {
-		var exists bool
-		require.NoError(t, db.Raw("SELECT to_regclass(?) IS NOT NULL", table).Scan(&exists).Error)
-		require.True(t, exists, table)
-	}
-	require.NoError(t, db.Exec(`
-		CREATE TABLE public.schema_migrations (version BIGINT NOT NULL, dirty BOOLEAN NOT NULL);
-		INSERT INTO public.schema_migrations(version, dirty) VALUES (75, FALSE)
-	`).Error)
+	require.NoError(t, bootstrap.AutoMigrate(db))
+	require.NoError(t, dbmigration.RunFrom(currentMigrationDSN(t, db), ".", 70, 0))
 	require.NoError(t, messagepersistence.ValidateTransactionalEventSchema(db))
 }
 
-func TestTransactionalEventMigrationsUpgradePre70RowsThrough75Postgres(t *testing.T) {
-	db := openMigrationPostgres(t)
-	require.NoError(t, db.Exec(`
-		CREATE SCHEMA product;
-		CREATE SCHEMA workspace_app;
-		CREATE SCHEMA delivery;
-		CREATE TABLE product.product_workflow_runs (
-			id UUID PRIMARY KEY
-		);
-		CREATE TABLE workspace_app.projects (
-			id UUID PRIMARY KEY,
-			status VARCHAR(32) NOT NULL
-		);
-		CREATE TABLE delivery.deployment_runs (
-			id UUID PRIMARY KEY
-		);
-		INSERT INTO product.product_workflow_runs(id) VALUES ('00000000-0000-0000-0000-000000000001');
-		INSERT INTO workspace_app.projects(id, status)
-		VALUES
-			('00000000-0000-0000-0000-000000000002', 'active'),
-			('00000000-0000-0000-0000-000000000003', 'archiving')
-	`).Error)
-
-	applyTransactionalEventMigrations(t, db)
-
-	var workflowVersion int64
-	require.NoError(t, db.Raw(`
-		SELECT version
-		FROM product.product_workflow_runs
-		WHERE id = '00000000-0000-0000-0000-000000000001'
-	`).Scan(&workflowVersion).Error)
-	require.Zero(t, workflowVersion)
-	var archived struct {
-		ArchiveGeneration    *string
-		ArchivePhase         string
-		ArchiveAllowUndeploy *bool
-	}
-	require.NoError(t, db.Table("workspace_app.projects").
-		Where("id = ?", "00000000-0000-0000-0000-000000000003").
-		Take(&archived).Error)
-	require.NotNil(t, archived.ArchiveGeneration)
-	require.Equal(t, "pending", archived.ArchivePhase)
-	require.NotNil(t, archived.ArchiveAllowUndeploy)
-	require.False(t, *archived.ArchiveAllowUndeploy)
-	require.NoError(t, db.Exec(`
-		CREATE TABLE public.schema_migrations (version BIGINT NOT NULL, dirty BOOLEAN NOT NULL);
-		INSERT INTO public.schema_migrations(version, dirty) VALUES (75, FALSE)
-	`).Error)
-	require.NoError(t, messagepersistence.ValidateTransactionalEventSchema(db))
-}
-
-func applyTransactionalEventMigrations(t *testing.T, db *gorm.DB) {
-	t.Helper()
-	for _, name := range []string{
-		"000070_transactional_events.up.sql",
-		"000071_product_workflow_run_version.up.sql",
-		"000072_project_archive_generation.up.sql",
-		"000073_deployment_run_archive_generation.up.sql",
-		"000074_project_archive_phase.up.sql",
-		"000075_project_archive_intent.up.sql",
-	} {
-		contents, readErr := os.ReadFile(name)
-		require.NoError(t, readErr, name)
-		require.NoErrorf(t, db.Exec(string(contents)).Error, "apply %s", name)
+func TestSQLMigrationRunnerUpgrades69And74To75WithStartupGate(t *testing.T) {
+	for _, startingVersion := range []uint{69, 74} {
+		t.Run(fmt.Sprintf("from-%d", startingVersion), func(t *testing.T) {
+			db := openMigrationPostgres(t)
+			dsn := currentMigrationDSN(t, db)
+			require.NoError(t, bootstrap.AutoMigrate(db))
+			require.NoError(t, dbmigration.RunFrom(dsn, ".", 70, 69))
+			if startingVersion > 69 {
+				require.NoError(t, dbmigration.RunFrom(dsn, ".", 70, startingVersion))
+			}
+			require.ErrorContains(t, messagepersistence.ValidateTransactionalEventSchema(db), "required version 75")
+			require.NoError(t, dbmigration.RunFrom(dsn, ".", 70, 0))
+			require.NoError(t, messagepersistence.ValidateTransactionalEventSchema(db))
+		})
 	}
 }
 
@@ -389,6 +313,10 @@ func openMigrationPostgres(t *testing.T) *gorm.DB {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_DSN")
 	if dsn == "" {
+		if strings.EqualFold(os.Getenv("CI"), "true") ||
+			strings.EqualFold(os.Getenv("REQUIRE_INTEGRATION"), "true") {
+			t.Fatal("DATABASE_DSN is required when migration integration tests run in CI")
+		}
 		t.Skip("DATABASE_DSN is not set")
 	}
 	admin, err := gorm.Open(gormpostgres.Open(dsn), &gorm.Config{
@@ -397,6 +325,10 @@ func openMigrationPostgres(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	databaseName := "sparkops_migration_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	if err := admin.Exec("CREATE DATABASE " + databaseName).Error; err != nil {
+		if strings.EqualFold(os.Getenv("CI"), "true") ||
+			strings.EqualFold(os.Getenv("REQUIRE_INTEGRATION"), "true") {
+			t.Fatalf("cannot create isolated PostgreSQL test database: %v", err)
+		}
 		t.Skipf("cannot create isolated PostgreSQL test database: %v", err)
 	}
 
@@ -414,6 +346,13 @@ func openMigrationPostgres(t *testing.T) *gorm.DB {
 		require.NoError(t, adminSQL.Close())
 	})
 	return db
+}
+
+func currentMigrationDSN(t *testing.T, db *gorm.DB) string {
+	t.Helper()
+	var databaseName string
+	require.NoError(t, db.Raw("SELECT current_database()").Scan(&databaseName).Error)
+	return migrationDSNWithDatabase(t, os.Getenv("DATABASE_DSN"), databaseName)
 }
 
 func migrationDSNWithDatabase(t *testing.T, dsn, databaseName string) string {

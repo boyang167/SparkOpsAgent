@@ -22,14 +22,12 @@ import (
 	productworkflowevent "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/event"
 	workflowevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workflow/domain/event"
 	workspaceevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/event"
-	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 )
 
-const defaultEventExchange = "sparkops.events"
-
 var dlqQueueName = regexp.MustCompile(`^sparkops\.event\.[a-z0-9.-]+\.v[1-9][0-9]*\.dlq$`)
+var stableReplayQueuePart = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`)
 
 type options struct {
 	operation string
@@ -43,14 +41,15 @@ type queueClient interface {
 	Close() error
 }
 
-type eventPublisher interface {
-	Publish(context.Context, events.Envelope) error
-	Close() error
+type directReplayPublisher interface {
+	PublishToQueue(context.Context, string, amqp.Delivery) error
 }
 
 type realQueueClient struct {
 	connection *amqp.Connection
 	channel    *amqp.Channel
+	returns    <-chan amqp.Return
+	closed     <-chan *amqp.Error
 }
 
 func (c *realQueueClient) QueueInspect(name string) (amqp.Queue, error) {
@@ -63,6 +62,90 @@ func (c *realQueueClient) Get(name string, autoAck bool) (amqp.Delivery, bool, e
 
 func (c *realQueueClient) Close() error {
 	return errors.Join(c.channel.Close(), c.connection.Close())
+}
+
+func (c *realQueueClient) PublishToQueue(
+	ctx context.Context,
+	queue string,
+	delivery amqp.Delivery,
+) error {
+	confirmation, err := c.channel.PublishWithDeferredConfirmWithContext(
+		ctx,
+		"",
+		queue,
+		true,
+		false,
+		amqp.Publishing{
+			Headers:         cloneHeaders(delivery.Headers),
+			ContentType:     delivery.ContentType,
+			ContentEncoding: delivery.ContentEncoding,
+			DeliveryMode:    amqp.Persistent,
+			Priority:        delivery.Priority,
+			CorrelationId:   delivery.CorrelationId,
+			ReplyTo:         delivery.ReplyTo,
+			Expiration:      delivery.Expiration,
+			MessageId:       delivery.MessageId,
+			Timestamp:       delivery.Timestamp,
+			Type:            delivery.Type,
+			UserId:          delivery.UserId,
+			AppId:           delivery.AppId,
+			Body:            append([]byte(nil), delivery.Body...),
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("publish replay to %s: %w", queue, err)
+	}
+	if confirmation == nil {
+		return fmt.Errorf("publish replay to %s: confirm mode unavailable", queue)
+	}
+	for {
+		select {
+		case returned, ok := <-c.returns:
+			if !ok {
+				return fmt.Errorf("publish replay to %s: return listener closed", queue)
+			}
+			if returned.MessageId == delivery.MessageId {
+				return fmt.Errorf(
+					"publish replay to %s returned: code=%d text=%s",
+					queue,
+					returned.ReplyCode,
+					returned.ReplyText,
+				)
+			}
+		case closeErr, ok := <-c.closed:
+			if !ok || closeErr == nil {
+				return fmt.Errorf("publish replay to %s: channel closed", queue)
+			}
+			return fmt.Errorf("publish replay to %s: channel closed: %s", queue, closeErr.Reason)
+		case <-confirmation.Done():
+			if !confirmation.Acked() {
+				return fmt.Errorf("publish replay to %s: broker nack", queue)
+			}
+			select {
+			case returned := <-c.returns:
+				if returned.MessageId == delivery.MessageId {
+					return fmt.Errorf(
+						"publish replay to %s returned: code=%d text=%s",
+						queue,
+						returned.ReplyCode,
+						returned.ReplyText,
+					)
+				}
+			default:
+			}
+			return nil
+		case <-ctx.Done():
+			return fmt.Errorf("publish replay to %s: %w", queue, ctx.Err())
+		}
+	}
+}
+
+func cloneHeaders(headers amqp.Table) amqp.Table {
+	cloned := make(amqp.Table, len(headers))
+	for key, value := range headers {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func parseOptions(args []string) (options, error) {
@@ -115,7 +198,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	if amqpURL == "" {
 		return fmt.Errorf("AMQP_URL is required")
 	}
-	client, err := openQueueClient(amqpURL)
+	client, err := openQueueClient(amqpURL, opts.operation == "replay")
 	if err != nil {
 		return err
 	}
@@ -140,19 +223,10 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	eventExchange := strings.TrimSpace(os.Getenv("AMQP_EVENT_EXCHANGE"))
-	if eventExchange == "" {
-		eventExchange = defaultEventExchange
-	}
-	publisher, err := messaging.NewAMQPEventTransport(amqpURL, nil, eventExchange)
-	if err != nil {
-		return err
-	}
-	defer publisher.Close()
-	return replay(ctx, client, publisher, registry, opts.queue, opts.limit, output)
+	return replay(ctx, client, client, registry, opts.queue, opts.limit, output)
 }
 
-func openQueueClient(amqpURL string) (queueClient, error) {
+func openQueueClient(amqpURL string, confirms bool) (*realQueueClient, error) {
 	connection, err := amqp.Dial(amqpURL)
 	if err != nil {
 		return nil, fmt.Errorf("dial RabbitMQ: %w", err)
@@ -162,13 +236,22 @@ func openQueueClient(amqpURL string) (queueClient, error) {
 		_ = connection.Close()
 		return nil, fmt.Errorf("open RabbitMQ channel: %w", err)
 	}
-	return &realQueueClient{connection: connection, channel: channel}, nil
+	client := &realQueueClient{connection: connection, channel: channel}
+	if confirms {
+		if err := channel.Confirm(false); err != nil {
+			_ = client.Close()
+			return nil, fmt.Errorf("enable RabbitMQ publisher confirms: %w", err)
+		}
+		client.returns = channel.NotifyReturn(make(chan amqp.Return, 1))
+		client.closed = channel.NotifyClose(make(chan *amqp.Error, 1))
+	}
+	return client, nil
 }
 
 func replay(
 	ctx context.Context,
 	client queueClient,
-	publisher eventPublisher,
+	publisher directReplayPublisher,
 	registry *events.Registry,
 	queue string,
 	limit int,
@@ -193,7 +276,11 @@ func replay(
 		if _, err := registry.Decode(envelope); err != nil {
 			return fmt.Errorf("validate DLQ delivery %d: %w", delivery.DeliveryTag, err)
 		}
-		if err := publisher.Publish(ctx, envelope); err != nil {
+		mainQueue, err := replayTargetQueue(queue, envelope, delivery)
+		if err != nil {
+			return fmt.Errorf("validate DLQ delivery %d: %w", delivery.DeliveryTag, err)
+		}
+		if err := publisher.PublishToQueue(ctx, mainQueue, delivery); err != nil {
 			return fmt.Errorf("republish event %s: %w", envelope.ID, err)
 		}
 		if err := delivery.Ack(false); err != nil {
@@ -203,6 +290,32 @@ func replay(
 	}
 	_, err := fmt.Fprintf(output, "queue=%s replayed=%d limit=%d\n", queue, replayed, limit)
 	return err
+}
+
+func replayTargetQueue(
+	dlq string,
+	envelope events.Envelope,
+	delivery amqp.Delivery,
+) (string, error) {
+	if delivery.MessageId == "" || delivery.MessageId != envelope.ID {
+		return "", fmt.Errorf("delivery MessageId must match envelope event id")
+	}
+	eventPart := strings.ToLower(strings.ReplaceAll(envelope.Type, ".", "-"))
+	expectedSuffix := fmt.Sprintf(".%s.v%d.dlq", eventPart, envelope.Version)
+	prefix := "sparkops.event."
+	if !strings.HasPrefix(dlq, prefix) || !strings.HasSuffix(dlq, expectedSuffix) {
+		return "", fmt.Errorf(
+			"DLQ queue %q does not match envelope %s.v%d",
+			dlq,
+			envelope.Type,
+			envelope.Version,
+		)
+	}
+	subscriber := strings.TrimSuffix(strings.TrimPrefix(dlq, prefix), expectedSuffix)
+	if !stableReplayQueuePart.MatchString(subscriber) || strings.Contains(subscriber, "..") {
+		return "", fmt.Errorf("DLQ queue contains an invalid subscriber identity")
+	}
+	return strings.TrimSuffix(dlq, ".dlq"), nil
 }
 
 func validateReplayEnvelope(envelope events.Envelope) error {

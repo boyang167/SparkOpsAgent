@@ -105,11 +105,11 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM pg_constraint
     WHERE conname = 'members_email_key'
-      AND conrelid = 'identity.members'::regclass
+      AND conrelid = to_regclass('identity.members')
   ) AND NOT EXISTS (
     SELECT 1 FROM pg_constraint
     WHERE conname = 'uni_members_email'
-      AND conrelid = 'identity.members'::regclass
+      AND conrelid = to_regclass('identity.members')
   ) THEN
     ALTER TABLE identity.members RENAME CONSTRAINT members_email_key TO uni_members_email;
   END IF;

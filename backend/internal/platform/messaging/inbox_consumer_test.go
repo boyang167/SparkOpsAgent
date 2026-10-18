@@ -127,7 +127,7 @@ func TestInboxConsumerRoutesPermanentDecodeErrorToDLQ(t *testing.T) {
 	require.Empty(t, transport.retries)
 }
 
-func TestInboxConsumerRoutesTemporaryErrorThroughBackoffTiers(t *testing.T) {
+func TestInboxConsumerRoutesTemporaryErrorThroughBackoffTiersThenDLQ(t *testing.T) {
 	consumer, _, _, transport, envelope := newInboxTestConsumer(t)
 	subscription := inboxSubscription(func(context.Context, events.Event) error {
 		return errors.New("temporary")
@@ -137,14 +137,14 @@ func TestInboxConsumerRoutesTemporaryErrorThroughBackoffTiers(t *testing.T) {
 		RetryDelay(30 * time.Second),
 		RetryDelay(5 * time.Minute),
 		RetryDelay(30 * time.Minute),
-		RetryDelay(30 * time.Minute),
 	}
 
-	for attempts := range expected {
+	for attempts := 0; attempts <= len(expected); attempts++ {
 		require.NoError(t, consumer.Handle(context.Background(), subscription, envelope, attempts))
 	}
 
 	require.Equal(t, expected, transport.retries)
+	require.Len(t, transport.deadLetters, 1)
 }
 
 func TestInboxConsumerDoesNotAckWhenRetryPublishIsUnconfirmed(t *testing.T) {

@@ -27,6 +27,8 @@ type InboxConsumer struct {
 
 type inboxConsumerContextKey struct{}
 
+const maxEventRetryAttempts = 4
+
 func IsInboxConsumerContext(ctx context.Context) bool {
 	inbox, _ := ctx.Value(inboxConsumerContextKey{}).(bool)
 	return inbox
@@ -150,6 +152,31 @@ func (c *InboxConsumer) Handle(
 		if c.metrics != nil {
 			c.metrics.EventDLQ.WithLabelValues(subscription.Subscriber).Inc()
 			c.metrics.EventConsume.WithLabelValues(subscription.Subscriber, "permanent_error").Inc()
+		}
+		return nil
+	}
+	if attempts >= maxEventRetryAttempts {
+		reason := fmt.Sprintf("retry attempts exhausted after %d retries: %v", attempts, err)
+		c.logger.Error(
+			"event retries exhausted; routed to dead letter queue",
+			zap.String("event_id", envelope.ID),
+			zap.String("event_type", envelope.Type),
+			zap.String("subscriber", subscription.Subscriber),
+			zap.Int("attempt", attempts+1),
+			zap.Error(err),
+		)
+		if publishErr := c.transport.PublishDeadLetter(ctx, subscription, envelope, reason); publishErr != nil {
+			if c.metrics != nil {
+				c.metrics.EventConsume.WithLabelValues(
+					subscription.Subscriber,
+					"dlq_publish_failure",
+				).Inc()
+			}
+			return fmt.Errorf("publish exhausted event dead letter: %w", publishErr)
+		}
+		if c.metrics != nil {
+			c.metrics.EventDLQ.WithLabelValues(subscription.Subscriber).Inc()
+			c.metrics.EventConsume.WithLabelValues(subscription.Subscriber, "retry_exhausted").Inc()
 		}
 		return nil
 	}

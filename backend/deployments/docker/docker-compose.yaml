@@ -39,7 +39,7 @@ services:
       timeout: 5s
       retries: 10
 
-  schema-bootstrap:
+  migrate:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile
@@ -47,34 +47,13 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_DSN: postgres://sparkops:sparkops@postgres:5432/sparkops?sslmode=disable
-    command: ["./migrate-schema"]
-    restart: "no"
-
-  migrate:
-    image: migrate/migrate:v4.18.3
-    depends_on:
-      schema-bootstrap:
-        condition: service_completed_successfully
-    volumes:
-      # The GORM bootstrap creates the historical baseline; this rollout applies
-      # only the ordered transactional-event increment and records gate 75.
-      - ../../migrations/000070_transactional_events.up.sql:/event-migrations/000070_transactional_events.up.sql:ro
-      - ../../migrations/000070_transactional_events.down.sql:/event-migrations/000070_transactional_events.down.sql:ro
-      - ../../migrations/000071_product_workflow_run_version.up.sql:/event-migrations/000071_product_workflow_run_version.up.sql:ro
-      - ../../migrations/000071_product_workflow_run_version.down.sql:/event-migrations/000071_product_workflow_run_version.down.sql:ro
-      - ../../migrations/000072_project_archive_generation.up.sql:/event-migrations/000072_project_archive_generation.up.sql:ro
-      - ../../migrations/000072_project_archive_generation.down.sql:/event-migrations/000072_project_archive_generation.down.sql:ro
-      - ../../migrations/000073_deployment_run_archive_generation.up.sql:/event-migrations/000073_deployment_run_archive_generation.up.sql:ro
-      - ../../migrations/000073_deployment_run_archive_generation.down.sql:/event-migrations/000073_deployment_run_archive_generation.down.sql:ro
-      - ../../migrations/000074_project_archive_phase.up.sql:/event-migrations/000074_project_archive_phase.up.sql:ro
-      - ../../migrations/000074_project_archive_phase.down.sql:/event-migrations/000074_project_archive_phase.down.sql:ro
-      - ../../migrations/000075_project_archive_intent.up.sql:/event-migrations/000075_project_archive_intent.up.sql:ro
-      - ../../migrations/000075_project_archive_intent.down.sql:/event-migrations/000075_project_archive_intent.down.sql:ro
+      DATABASE_URL: postgres://sparkops:sparkops@postgres:5432/sparkops?sslmode=disable
     command:
-      - -path=/event-migrations
-      - -database=postgres://sparkops:sparkops@postgres:5432/sparkops?sslmode=disable
-      - up
+      - /bin/sh
+      - -ec
+      - >-
+        DATABASE_DSN="$DATABASE_URL" ./migrate-schema -if-unversioned &&
+        ./migrate-sql -path ./migrations -min-version 70
     restart: "no"
 
   api:

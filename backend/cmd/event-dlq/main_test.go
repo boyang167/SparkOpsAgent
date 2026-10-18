@@ -91,17 +91,31 @@ func (c *fakeQueueClient) Get(string, bool) (amqp.Delivery, bool, error) {
 
 func (c *fakeQueueClient) Close() error { return nil }
 
-type fakePublisher struct {
-	ids []string
-	err error
+type replayedDelivery struct {
+	queue   string
+	body    []byte
+	headers amqp.Table
+	id      string
 }
 
-func (p *fakePublisher) Publish(_ context.Context, envelope events.Envelope) error {
-	p.ids = append(p.ids, envelope.ID)
+type fakePublisher struct {
+	deliveries []replayedDelivery
+	err        error
+}
+
+func (p *fakePublisher) PublishToQueue(
+	_ context.Context,
+	queue string,
+	delivery amqp.Delivery,
+) error {
+	p.deliveries = append(p.deliveries, replayedDelivery{
+		queue:   queue,
+		body:    append([]byte(nil), delivery.Body...),
+		headers: delivery.Headers,
+		id:      delivery.MessageId,
+	})
 	return p.err
 }
-
-func (p *fakePublisher) Close() error { return nil }
 
 type dlqTestEvent struct {
 	At time.Time `json:"at"`
@@ -133,7 +147,13 @@ func testDelivery(t *testing.T, acknowledger amqp.Acknowledger, tag uint64) amqp
 	}
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
-	return amqp.Delivery{Acknowledger: acknowledger, DeliveryTag: tag, Body: body}
+	return amqp.Delivery{
+		Acknowledger: acknowledger,
+		DeliveryTag:  tag,
+		Body:         body,
+		MessageId:    envelope.ID,
+		Headers:      amqp.Table{"x-sparkops-attempts": int32(3), "safe": "kept"},
+	}
 }
 
 func TestReplayKeepsOriginalEventIDAndAcksOnlyAfterConfirmedPublish(t *testing.T) {
@@ -144,13 +164,26 @@ func TestReplayKeepsOriginalEventIDAndAcksOnlyAfterConfirmedPublish(t *testing.T
 	publisher := &fakePublisher{}
 	var output bytes.Buffer
 
-	err := replay(context.Background(), client, publisher, testRegistry(t), "sparkops.event.test.dlq-event.v1.dlq", 2, &output)
+	err := replay(
+		context.Background(),
+		client,
+		publisher,
+		testRegistry(t),
+		"sparkops.event.target.test-dlqevent.v1.dlq",
+		2,
+		&output,
+	)
 
 	require.NoError(t, err)
-	require.Equal(t, []string{
-		envelopeID(t, first.Body),
-		envelopeID(t, second.Body),
-	}, publisher.ids)
+	require.Len(t, publisher.deliveries, 2)
+	for index, published := range publisher.deliveries {
+		original := []amqp.Delivery{first, second}[index]
+		require.Equal(t, "sparkops.event.target.test-dlqevent.v1", published.queue)
+		require.Equal(t, original.Body, published.body)
+		require.Equal(t, original.MessageId, published.id)
+		require.Equal(t, int32(3), published.headers["x-sparkops-attempts"])
+		require.Equal(t, "kept", published.headers["safe"])
+	}
 	require.Equal(t, []uint64{1, 2}, acks.acked)
 	require.Empty(t, acks.nacked)
 	require.Contains(t, output.String(), "replayed=2")
@@ -167,7 +200,7 @@ func TestReplayDoesNotAckWhenConfirmedPublishFails(t *testing.T) {
 		client,
 		publisher,
 		testRegistry(t),
-		"sparkops.event.test.dlq-event.v1.dlq",
+		"sparkops.event.target.test-dlqevent.v1.dlq",
 		1,
 		&bytes.Buffer{},
 	)
@@ -189,7 +222,7 @@ func TestReplayRejectsInvalidEnvelopeWithoutAck(t *testing.T) {
 		client,
 		&fakePublisher{},
 		testRegistry(t),
-		"sparkops.event.test.dlq-event.v1.dlq",
+		"sparkops.event.target.test-dlqevent.v1.dlq",
 		1,
 		&bytes.Buffer{},
 	)
@@ -198,9 +231,22 @@ func TestReplayRejectsInvalidEnvelopeWithoutAck(t *testing.T) {
 	require.Empty(t, acks.acked)
 }
 
-func envelopeID(t *testing.T, body []byte) string {
-	t.Helper()
-	var envelope events.Envelope
-	require.NoError(t, json.Unmarshal(body, &envelope))
-	return envelope.ID
+func TestReplayRejectsQueueWhoseEventIdentityDoesNotMatchEnvelope(t *testing.T) {
+	acks := &recordingAcknowledger{}
+	delivery := testDelivery(t, acks, 1)
+	publisher := &fakePublisher{}
+
+	err := replay(
+		context.Background(),
+		&fakeQueueClient{deliveries: []amqp.Delivery{delivery}},
+		publisher,
+		testRegistry(t),
+		"sparkops.event.other.other-event.v1.dlq",
+		1,
+		&bytes.Buffer{},
+	)
+
+	require.ErrorContains(t, err, "does not match")
+	require.Empty(t, publisher.deliveries)
+	require.Empty(t, acks.acked)
 }

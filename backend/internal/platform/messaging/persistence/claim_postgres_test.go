@@ -261,6 +261,9 @@ func openStorePostgres(t *testing.T) *gorm.DB {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_DSN")
 	if dsn == "" {
+		if strings.EqualFold(os.Getenv("CI"), "true") || strings.EqualFold(os.Getenv("REQUIRE_INTEGRATION"), "true") {
+			t.Fatal("DATABASE_DSN is required when integration tests run in CI")
+		}
 		t.Skip("DATABASE_DSN is not set")
 	}
 	admin, err := gorm.Open(gormpostgres.Open(dsn), &gorm.Config{
@@ -269,6 +272,9 @@ func openStorePostgres(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	databaseName := "sparkops_task3_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	if err := admin.Exec("CREATE DATABASE " + databaseName).Error; err != nil {
+		if strings.EqualFold(os.Getenv("CI"), "true") || strings.EqualFold(os.Getenv("REQUIRE_INTEGRATION"), "true") {
+			t.Fatalf("cannot create isolated PostgreSQL test database: %v", err)
+		}
 		t.Skipf("cannot create isolated PostgreSQL test database: %v", err)
 	}
 

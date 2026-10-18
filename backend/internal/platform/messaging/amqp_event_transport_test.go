@@ -406,7 +406,7 @@ func TestEventTransportRetiresConfirmationSessionsAfterTimeout(t *testing.T) {
 	})
 
 	nextConnection := 1
-	transport := newAMQPEventTransportWithFactory(connections[0], func() (eventConnection, error) {
+	transport := newAMQPEventTransportWithFactory(connections[0], func(context.Context) (eventConnection, error) {
 		connection := connections[nextConnection]
 		nextConnection++
 		return connection, nil
@@ -446,7 +446,7 @@ func TestEventTransportPublisherTimeoutKeepsConsumerConnectionAlive(t *testing.T
 	transport := newAMQPEventTransportWithConnections(
 		publisherConnection,
 		consumerConnection,
-		func() (eventConnection, error) {
+		func(context.Context) (eventConnection, error) {
 			reconnects++
 			return reconnectedPublisher, nil
 		},
@@ -759,6 +759,142 @@ func TestEventTransportRecreatesPublisherAfterNotifyClose(t *testing.T) {
 	require.Equal(t, 2, connection.channelCalls)
 }
 
+func TestEventTransportRedialsPublisherWhenConnectionCannotOpenChannel(t *testing.T) {
+	initialPublisher := &stubEventConnection{}
+	consumerConnection := &stubEventConnection{}
+	confirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
+	close(confirmation.done)
+	recoveredPublisher := &stubEventConnection{
+		channels: []eventChannel{newStubEventChannel(confirmation)},
+	}
+	reconnects := 0
+	transport := newAMQPEventTransportWithConnections(
+		initialPublisher,
+		consumerConnection,
+		func(context.Context) (eventConnection, error) {
+			reconnects++
+			return recoveredPublisher, nil
+		},
+	)
+	t.Cleanup(func() { _ = transport.Close() })
+
+	require.NoError(t, transport.Publish(context.Background(), eventTransportTestEnvelope()))
+	require.Equal(t, 1, reconnects)
+	require.Equal(t, 1, initialPublisher.closeDeadlineCalls)
+	require.Equal(t, 1, recoveredPublisher.channelCalls)
+}
+
+func TestEventTransportReconnectsConsumerConnectionAndRestoresEverySubscription(t *testing.T) {
+	publisherConnection := &stubEventConnection{}
+	initialTopology := newStubEventChannel(nil)
+	initialOne := newStubEventChannel(nil)
+	initialOne.deliveries = make(chan amqp.Delivery, 1)
+	initialTwo := newStubEventChannel(nil)
+	initialTwo.deliveries = make(chan amqp.Delivery, 1)
+	initialConsumer := &stubEventConnection{channels: []eventChannel{
+		initialTopology, initialOne, initialTwo,
+	}}
+	recoveredTopology := newStubEventChannel(nil)
+	recoveredOne := newStubEventChannel(nil)
+	recoveredOne.deliveries = make(chan amqp.Delivery, 1)
+	recoveredTwo := newStubEventChannel(nil)
+	recoveredTwo.deliveries = make(chan amqp.Delivery, 1)
+	recoveredConsumer := &stubEventConnection{channels: []eventChannel{
+		recoveredTopology, recoveredOne, recoveredTwo,
+	}}
+	reconnects := make(chan struct{}, 1)
+	transport := newAMQPEventTransportWithConnections(
+		publisherConnection,
+		initialConsumer,
+		func(context.Context) (eventConnection, error) {
+			reconnects <- struct{}{}
+			return recoveredConsumer, nil
+		},
+	)
+	t.Cleanup(func() { _ = transport.Close() })
+
+	one := Subscription{EventName: "delivery.BuildCompleted", Version: 1, Subscriber: "consumer.one"}
+	two := Subscription{EventName: "delivery.BuildCompleted", Version: 1, Subscriber: "consumer.two"}
+	require.NoError(t, transport.Declare(context.Background(), []Subscription{one, two}))
+	handledOne := make(chan string, 1)
+	handledTwo := make(chan string, 1)
+	require.NoError(t, transport.Consume(context.Background(), one, func(_ context.Context, envelope events.Envelope, _ int) error {
+		handledOne <- envelope.ID
+		return nil
+	}))
+	require.NoError(t, transport.Consume(context.Background(), two, func(_ context.Context, envelope events.Envelope, _ int) error {
+		handledTwo <- envelope.ID
+		return nil
+	}))
+
+	close(initialOne.deliveries)
+	close(initialTwo.deliveries)
+	select {
+	case <-reconnects:
+	case <-time.After(time.Second):
+		t.Fatal("consumer connection was not redialed")
+	}
+	require.Eventually(t, func() bool {
+		return recoveredConsumer.channelCalls == 3
+	}, time.Second, time.Millisecond)
+
+	envelope := eventTransportTestEnvelope()
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	recoveredOne.deliveries <- amqp.Delivery{Body: body}
+	recoveredTwo.deliveries <- amqp.Delivery{Body: body}
+	require.Equal(t, envelope.ID, <-handledOne)
+	require.Equal(t, envelope.ID, <-handledTwo)
+	require.Equal(t, 1, initialConsumer.closeDeadlineCalls)
+	require.Equal(t, 1, recoveredTopology.exchangeDeclareCalls)
+	require.Equal(t, 2, recoveredTopology.queueBindCalls)
+}
+
+func TestEventTransportCloseInterruptsConsumerReconnectBackoff(t *testing.T) {
+	initialTopology := newStubEventChannel(nil)
+	initialConsumerChannel := newStubEventChannel(nil)
+	initialConsumerChannel.deliveries = make(chan amqp.Delivery)
+	initialConsumer := &stubEventConnection{channels: []eventChannel{initialTopology, initialConsumerChannel}}
+	attempted := make(chan struct{}, 1)
+	transport := newAMQPEventTransportWithConnections(
+		&stubEventConnection{},
+		initialConsumer,
+		func(ctx context.Context) (eventConnection, error) {
+			select {
+			case attempted <- struct{}{}:
+			default:
+			}
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	)
+	subscription := Subscription{
+		EventName:  "delivery.BuildCompleted",
+		Version:    1,
+		Subscriber: "consumer.close-during-reconnect",
+	}
+	require.NoError(t, transport.Declare(context.Background(), []Subscription{subscription}))
+	require.NoError(t, transport.Consume(context.Background(), subscription, func(context.Context, events.Envelope, int) error {
+		return nil
+	}))
+
+	close(initialConsumerChannel.deliveries)
+	select {
+	case <-attempted:
+	case <-time.After(time.Second):
+		t.Fatal("consumer reconnect was not attempted")
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- transport.Close() }()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Close did not interrupt reconnect backoff")
+	}
+}
+
 func TestEventTransportCloseAfterConfirmedPublishIsIdempotent(t *testing.T) {
 	confirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
 	close(confirmation.done)
@@ -839,6 +975,8 @@ type stubEventChannel struct {
 	published                 []amqp.Publishing
 	publishedRecords          []recordedEventPublish
 	deliveries                chan amqp.Delivery
+	exchangeDeclareCalls      int
+	queueBindCalls            int
 }
 
 func newStubEventChannel(confirmation eventConfirmation) *stubEventChannel {
@@ -911,7 +1049,8 @@ func (*recordingAcknowledger) Reject(uint64, bool) error { return nil }
 
 func (*stubEventChannel) Confirm(bool) error { return nil }
 
-func (*stubEventChannel) ExchangeDeclare(string, string, bool, bool, bool, bool, amqp.Table) error {
+func (c *stubEventChannel) ExchangeDeclare(string, string, bool, bool, bool, bool, amqp.Table) error {
+	c.exchangeDeclareCalls++
 	return nil
 }
 
@@ -919,7 +1058,10 @@ func (*stubEventChannel) QueueDeclare(string, bool, bool, bool, bool, amqp.Table
 	return amqp.Queue{}, nil
 }
 
-func (*stubEventChannel) QueueBind(string, string, string, bool, amqp.Table) error { return nil }
+func (c *stubEventChannel) QueueBind(string, string, string, bool, amqp.Table) error {
+	c.queueBindCalls++
+	return nil
+}
 
 func (c *stubEventChannel) Consume(string, string, bool, bool, bool, bool, amqp.Table) (<-chan amqp.Delivery, error) {
 	if c.deliveries != nil {

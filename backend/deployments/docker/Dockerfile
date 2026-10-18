@@ -8,7 +8,8 @@ RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /server ./cmd/server \
-    && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /migrate-schema ./cmd/migrate
+    && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /migrate-schema ./cmd/migrate \
+    && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /migrate-sql ./cmd/migrate-sql
 
 FROM alpine:3.21
 
@@ -17,6 +18,7 @@ RUN apk add --no-cache ca-certificates tzdata wget
 
 COPY --from=builder /server ./server
 COPY --from=builder /migrate-schema ./migrate-schema
+COPY --from=builder /migrate-sql ./migrate-sql
 COPY deployments/docker/config.docker.yaml ./config.yaml
 COPY migrations ./migrations
 

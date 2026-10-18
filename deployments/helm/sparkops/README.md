@@ -67,11 +67,13 @@ an external secret manager or `--set-string`, never a committed values file.
 
 Use this order for every first install and upgrade:
 
-1. Back up PostgreSQL and apply SQL migrations through `000075` with the
-   migration image/tool. Verify `schema_migrations` contains exactly one clean
-   row at version 75.
-2. Verify the RabbitMQ cluster is healthy and has at least three nodes.
-3. Roll out the API. Startup declares `sparkops.events`, all quorum main/retry/
+1. Back up PostgreSQL and verify the RabbitMQ cluster is healthy.
+2. Run the documented `helm upgrade --install` command above. The chart's
+   `pre-install,pre-upgrade` Job conditionally bootstraps an unversioned fresh
+   database, then runs `/app/migrate-sql -path /app/migrations -min-version 70`
+   from the API image with `DATABASE_URL`; Helm aborts before API rollout if
+   migrations do not reach version 75.
+3. The API rollout declares `sparkops.events`, all quorum main/retry/
    DLQ queues, and then starts the 15 named consumers.
 4. After consumers exist, startup enables Event Outbox and Operation Outbox
    dispatchers.
