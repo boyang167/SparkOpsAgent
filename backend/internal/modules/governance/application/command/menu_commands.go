@@ -21,6 +21,13 @@ func NewSeedWorkspaceMenusHandler(menus *persistence.MenuStore) *SeedWorkspaceMe
 	return &SeedWorkspaceMenusHandler{menus: menus}
 }
 
+func (h *SeedWorkspaceMenusHandler) EnsureWorkspaceMenus(
+	ctx context.Context,
+	workspaceID kernel.WorkspaceID,
+) error {
+	return h.Handle(ctx, workspaceID)
+}
+
 func (h *SeedWorkspaceMenusHandler) Handle(ctx context.Context, workspaceID kernel.WorkspaceID) error {
 	count, err := h.menus.CountByWorkspace(ctx, workspaceID)
 	if err != nil {
@@ -72,6 +79,19 @@ func (h *SeedWorkspaceMenusHandler) seedAll(ctx context.Context, workspaceID ker
 			childSort++
 		}
 	}
+	for _, item := range defaultDirectMenus {
+		if err := h.menus.Save(ctx, &model.Menu{
+			WorkspaceID: workspaceID,
+			ID:          uuid.NewString(),
+			Name:        menuNameFromPath(item.Href),
+			Path:        item.Href,
+			Title:       item.Label,
+			Component:   item.Href,
+			Sort:        item.Sort,
+		}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -82,66 +102,64 @@ func (h *SeedWorkspaceMenusHandler) ensureDefaults(ctx context.Context, workspac
 	if err := h.repairRemovedMenus(ctx, workspaceID); err != nil {
 		return err
 	}
-	if err := h.repairEnterpriseNavMenus(ctx, workspaceID); err != nil {
+	if err := h.repairBusinessNavigation(ctx, workspaceID); err != nil {
 		return err
 	}
-	if err := h.repairSecretConfigMenu(ctx, workspaceID); err != nil {
+	if err := h.repairDuplicatePluginContainers(ctx, workspaceID); err != nil {
 		return err
 	}
-	if err := h.repairProductWorkflowsMenu(ctx, workspaceID); err != nil {
+	return h.syncEnterpriseMenuTitles(ctx, workspaceID)
+}
+
+func (h *SeedWorkspaceMenusHandler) repairDuplicatePluginContainers(
+	ctx context.Context,
+	workspaceID kernel.WorkspaceID,
+) error {
+	menus, err := h.menus.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
 		return err
 	}
-	if err := h.repairReleasePlansMenu(ctx, workspaceID); err != nil {
-		return err
-	}
-	for _, group := range defaultMenuGroups {
-		parent, err := h.menus.FindGroupMenu(ctx, workspaceID, group.ID)
-		if err != nil {
-			if parent, err = h.menus.FindByPath(ctx, workspaceID, group.ID); err != nil {
-				continue
-			}
+	containers := make([]*model.Menu, 0, 1)
+	for _, menu := range menus {
+		if menu.Path == "/plugins" && menu.ParentID == nil {
+			containers = append(containers, menu)
 		}
-		children, err := h.menus.ListChildren(ctx, workspaceID, parent.ID)
-		if err != nil {
-			return err
+	}
+	if len(containers) <= 1 {
+		return nil
+	}
+
+	keeper := containers[0]
+	keeperChildren := -1
+	for _, candidate := range containers {
+		children, listErr := h.menus.ListChildren(ctx, workspaceID, candidate.ID)
+		if listErr != nil {
+			return listErr
 		}
-		maxSort := 0
+		if len(children) > keeperChildren {
+			keeper = candidate
+			keeperChildren = len(children)
+		}
+	}
+
+	for _, duplicate := range containers {
+		if duplicate.ID == keeper.ID {
+			continue
+		}
+		children, listErr := h.menus.ListChildren(ctx, workspaceID, duplicate.ID)
+		if listErr != nil {
+			return listErr
+		}
+		keeperID := keeper.ID
 		for _, child := range children {
-			if child.Sort > maxSort {
-				maxSort = child.Sort
+			child.ParentID = &keeperID
+			if saveErr := h.menus.Save(ctx, child); saveErr != nil {
+				return saveErr
 			}
 		}
-		nextSort := maxSort + 1
-		for _, item := range group.Items {
-			existing, err := h.menus.FindByPath(ctx, workspaceID, item.Href)
-			if err == nil {
-				if existing.Title != item.Label {
-					existing.Title = item.Label
-					existing.Name = menuNameFromPath(item.Href)
-					existing.Component = item.Href
-					if err := h.menus.Save(ctx, existing); err != nil {
-						return err
-					}
-				}
-				continue
-			}
-			pid := parent.ID
-			menu := &model.Menu{
-				WorkspaceID: workspaceID,
-				ParentID:    &pid,
-				Name:        menuNameFromPath(item.Href),
-				Path:        item.Href,
-				Title:       item.Label,
-				Component:   item.Href,
-				Sort:        nextSort,
-			}
-			if err := h.menus.Save(ctx, menu); err != nil {
-				return err
-			}
-			if err := h.menus.AppendMenuToRolesWithSiblingBindings(ctx, workspaceID, parent.ID, menu.ID); err != nil {
-				return err
-			}
-			nextSort++
+		duplicate.Hidden = true
+		if saveErr := h.menus.Save(ctx, duplicate); saveErr != nil {
+			return saveErr
 		}
 	}
 	return nil
@@ -315,57 +333,59 @@ type defaultMenuGroup struct {
 	Label string
 	// Sort overrides the position among root menus; zero keeps declaration order.
 	Sort  int
-	Items []struct {
-		Href  string
-		Label string
-	}
+	Items []defaultMenuItem
+}
+
+type defaultMenuItem struct {
+	Href  string
+	Label string
+}
+
+type defaultDirectMenu struct {
+	Href  string
+	Label string
+	Sort  int
 }
 
 const (
 	settingsGroupID    = "ops-infra"
-	settingsGroupTitle = "集成"
-	// settingsGroupSort keeps 集成 below plugin roots, which are created with sort 90.
+	settingsGroupTitle = "配置与集成"
+	// settingsGroupSort keeps 配置与集成 below plugin roots, which are created with sort 90.
 	settingsGroupSort = 100
 )
 
 var defaultMenuGroups = []defaultMenuGroup{
 	{
-		ID: "application", Label: "构建",
-		Items: []struct{ Href, Label string }{
-			{"/projects", "项目"},
-			{"/templates", "模板"},
-			{"/knowledge", "知识库"},
-		},
-	},
-	{
-		ID: "ops-delivery", Label: "交付",
-		Items: []struct{ Href, Label string }{
+		ID: "application", Label: "产品交付",
+		Items: []defaultMenuItem{
 			{"/publish/products", "产品"},
-			{"/products/workflows", "工作流"},
+			{"/projects", "项目"},
 			{"/publish/release-plans", "发布计划"},
+			{"/products/workflows", "工作流"},
+			{"/cronjobs", "定时构建"},
+			{"/templates", "模板中心"},
 		},
 	},
 	{
-		ID: "ops-runtime", Label: "运行",
-		Items: []struct{ Href, Label string }{
+		ID: "ops-runtime", Label: "运行观测",
+		Items: []defaultMenuItem{
 			{"/runtime/pods", "运行实例"},
-			{"/cronjobs", "定时任务"},
-		},
-	},
-	{
-		ID: "ops-observability", Label: "观测",
-		Items: []struct{ Href, Label string }{
-			{"/monitor/overview", "监控"},
-			{"/monitor/log-viewer", "日志"},
+			{"/monitor/overview", "监控概览"},
+			{"/monitor/log-viewer", "日志查询"},
 		},
 	},
 	{
 		ID: settingsGroupID, Label: settingsGroupTitle, Sort: settingsGroupSort,
-		Items: []struct{ Href, Label string }{
-			{"/config/secrets", "密钥"},
+		Items: []defaultMenuItem{
+			{"/config/secrets", "密钥管理"},
 			{"/config/webhooks", "外部集成"},
+			{"/config/mcp", "MCP 集成"},
 		},
 	},
+}
+
+var defaultDirectMenus = []defaultDirectMenu{
+	{Href: "/knowledge", Label: "知识库", Sort: 95},
 }
 
 var legacyBusinessNavGroupIDs = []string{
@@ -374,23 +394,113 @@ var legacyBusinessNavGroupIDs = []string{
 
 // enterpriseMenuTitleByPath also covers group menus, whose path equals the group ID.
 var enterpriseMenuTitleByPath = map[string]string{
-	"application":            "构建",
-	"ops-delivery":           "交付",
-	"ops-runtime":            "运行",
-	"ops-observability":      "观测",
+	"application":            "产品交付",
+	"ops-runtime":            "运行观测",
 	settingsGroupID:          settingsGroupTitle,
 	"/projects":              "项目",
-	"/templates":             "模板",
+	"/templates":             "模板中心",
 	"/knowledge":             "知识库",
 	"/publish/products":      "产品",
 	"/products/workflows":    "工作流",
 	"/publish/release-plans": "发布计划",
-	"/config/secrets":        "密钥",
+	"/config/secrets":        "密钥管理",
 	"/runtime/pods":          "运行实例",
-	"/cronjobs":              "定时任务",
-	"/monitor/overview":      "监控",
-	"/monitor/log-viewer":    "日志",
+	"/cronjobs":              "定时构建",
+	"/monitor/overview":      "监控概览",
+	"/monitor/log-viewer":    "日志查询",
 	"/config/webhooks":       "外部集成",
+	"/config/mcp":            "MCP 集成",
+}
+
+func (h *SeedWorkspaceMenusHandler) repairBusinessNavigation(
+	ctx context.Context,
+	workspaceID kernel.WorkspaceID,
+) error {
+	for index, group := range defaultMenuGroups {
+		groupSort := index + 1
+		if group.Sort > 0 {
+			groupSort = group.Sort
+		}
+		parent, err := h.menus.FindGroupMenu(ctx, workspaceID, group.ID)
+		if err != nil {
+			parent, err = h.menus.FindByPath(ctx, workspaceID, group.ID)
+		}
+		if err != nil {
+			parent = &model.Menu{
+				WorkspaceID: workspaceID,
+				Name:        group.ID,
+				Path:        group.ID,
+			}
+		}
+		parent.ParentID = nil
+		parent.Name = group.ID
+		parent.Path = group.ID
+		parent.Title = group.Label
+		parent.Icon = group.ID
+		parent.Component = "layout/routerHolder"
+		parent.Sort = groupSort
+		if err := h.menus.Save(ctx, parent); err != nil {
+			return err
+		}
+
+		for itemIndex, item := range group.Items {
+			menu, findErr := h.menus.FindByPath(ctx, workspaceID, item.Href)
+			if findErr != nil {
+				menu = &model.Menu{
+					WorkspaceID: workspaceID,
+					Path:        item.Href,
+				}
+			}
+			pid := parent.ID
+			menu.ParentID = &pid
+			menu.Name = menuNameFromPath(item.Href)
+			menu.Title = item.Label
+			menu.Component = item.Href
+			menu.Sort = itemIndex + 1
+			if err := h.menus.Save(ctx, menu); err != nil {
+				return err
+			}
+		}
+	}
+
+	for _, item := range defaultDirectMenus {
+		menu, err := h.menus.FindByPath(ctx, workspaceID, item.Href)
+		if err != nil {
+			menu = &model.Menu{
+				WorkspaceID: workspaceID,
+				Path:        item.Href,
+			}
+		}
+		menu.ParentID = nil
+		menu.Name = menuNameFromPath(item.Href)
+		menu.Title = item.Label
+		menu.Component = item.Href
+		menu.Sort = item.Sort
+		if err := h.menus.Save(ctx, menu); err != nil {
+			return err
+		}
+	}
+
+	for _, groupID := range []string{"ops-delivery", "ops-observability"} {
+		group, err := h.menus.FindGroupMenu(ctx, workspaceID, groupID)
+		if err != nil {
+			group, err = h.menus.FindByPath(ctx, workspaceID, groupID)
+		}
+		if err != nil {
+			continue
+		}
+		children, err := h.menus.ListChildren(ctx, workspaceID, group.ID)
+		if err != nil {
+			return err
+		}
+		if len(children) == 0 {
+			group.Hidden = true
+			if err := h.menus.Save(ctx, group); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // ensureSettingsGroup finds or creates the 集成 root group and pins it below plugin roots.

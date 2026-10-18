@@ -82,28 +82,28 @@ type pluginAPIGrant struct {
 func (b *GovernanceBinder) Bind(ctx context.Context, workspaceID kernel.WorkspaceID, spec *manifest.Manifest) error {
 	db := b.db.WithContext(ctx)
 	now := time.Now().UTC()
-	parent := menuRow{
-		ID: uuid.NewString(), WorkspaceID: workspaceID.String(),
-		Name: "plugins", Path: "/plugins", Title: "插件",
-		Sort: 90, TransitionAnimation: "global",
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if err := db.Where("workspace_id = ? AND path = ?", workspaceID.String(), "/plugins").
-		Assign(map[string]any{
-			"name": "plugins", "title": "插件", "parent_id": nil, "updated_at": now, "deleted_at": nil,
-		}).FirstOrCreate(&parent).Error; err != nil {
+	parentID, err := upsertWorkspaceMenu(db, workspaceID.String(), "/plugins", map[string]any{
+		"name": "plugins", "title": "插件", "parent_id": nil, "updated_at": now, "deleted_at": nil,
+	}, func() menuRow {
+		return menuRow{
+			ID: uuid.NewString(), WorkspaceID: workspaceID.String(),
+			Name: "plugins", Path: "/plugins", Title: "插件",
+			Sort: 90, TransitionAnimation: "global",
+			CreatedAt: now, UpdatedAt: now,
+		}
+	}, now)
+	if err != nil {
 		return err
 	}
-	parentID := parent.ID
 	menuIDs := make(map[string]string, len(spec.Menus))
 	for index, menu := range spec.Menus {
 		assign := map[string]any{
-			"name":        fmt.Sprintf("plugin-%s-%d", spec.ID, index+1),
-			"title":       menu.Title,
-			"component":   menu.Component,
-			"sort":        index + 1,
-			"updated_at":  now,
-			"deleted_at":  nil,
+			"name":       fmt.Sprintf("plugin-%s-%d", spec.ID, index+1),
+			"title":      menu.Title,
+			"component":  menu.Component,
+			"sort":       index + 1,
+			"updated_at": now,
+			"deleted_at": nil,
 		}
 		menuID, err := upsertWorkspaceMenu(db, workspaceID.String(), menu.Path, assign, func() menuRow {
 			return menuRow{

@@ -4,26 +4,26 @@ display_name: Kubernetes
 route_prefix: /api/v1/plugins/kubernetes
 entitlement: plugin:kubernetes
 menus:
-  - title: Kubernetes管理
+  - title: Kubernetes
     path: /plugins/kubernetes
     component: plugins/kubernetes/page
   - title: 集群管理
     path: /plugins/kubernetes/clusters
     component: plugins/kubernetes/clusters/page
     parent: /plugins/kubernetes
-  - title: 节点管理
-    path: /plugins/kubernetes/nodes
-    component: plugins/kubernetes/nodes/page
-    parent: /plugins/kubernetes
   - title: 工作负载
     path: /plugins/kubernetes/workloads
     component: plugins/kubernetes/workloads/page
+    parent: /plugins/kubernetes
+  - title: 节点管理
+    path: /plugins/kubernetes/nodes
+    component: plugins/kubernetes/nodes/page
     parent: /plugins/kubernetes
   - title: 命名空间
     path: /plugins/kubernetes/namespaces
     component: plugins/kubernetes/namespaces/page
     parent: /plugins/kubernetes
-  - title: 网络管理
+  - title: 网络与网关
     path: /plugins/kubernetes/networks
     component: plugins/kubernetes/networks/page
     parent: /plugins/kubernetes
@@ -31,7 +31,7 @@ menus:
     path: /plugins/kubernetes/gateway
     component: plugins/kubernetes/gateway/page
     parent: /plugins/kubernetes
-  - title: 配置管理
+  - title: 配置与存储
     path: /plugins/kubernetes/configs
     component: plugins/kubernetes/configs/page
     parent: /plugins/kubernetes
@@ -39,7 +39,7 @@ menus:
     path: /plugins/kubernetes/storages
     component: plugins/kubernetes/storages/page
     parent: /plugins/kubernetes
-  - title: 访问控制
+  - title: 安全与访问
     path: /plugins/kubernetes/access-controls
     component: plugins/kubernetes/access-controls/page
     parent: /plugins/kubernetes
@@ -47,7 +47,7 @@ menus:
     path: /plugins/kubernetes/records
     component: plugins/kubernetes/records/page
     parent: /plugins/kubernetes
-  - title: 应用诊断
+  - title: 运维工具
     path: /plugins/kubernetes/diagnosis
     component: plugins/kubernetes/diagnosis/page
     parent: /plugins/kubernetes

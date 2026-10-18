@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/repository"
@@ -28,9 +27,13 @@ type MyMenuButtonsResult struct {
 	Items      []MyMenuButtonItem `json:"items"`
 }
 
+type workspaceMenuEnsurer interface {
+	EnsureWorkspaceMenus(context.Context, kernel.WorkspaceID) error
+}
+
 type ListNavMenusHandler struct {
 	menus       *persistence.MenuStore
-	seed        *command.SeedWorkspaceMenusHandler
+	seed        workspaceMenuEnsurer
 	checker     *Checker
 	systemRoles authz.SystemRoleChecker
 	db          *gorm.DB
@@ -38,7 +41,7 @@ type ListNavMenusHandler struct {
 
 func NewListNavMenusHandler(
 	menus *persistence.MenuStore,
-	seed *command.SeedWorkspaceMenusHandler,
+	seed workspaceMenuEnsurer,
 	checker *Checker,
 	systemRoles authz.SystemRoleChecker,
 	db *gorm.DB,
@@ -51,7 +54,7 @@ func (h *ListNavMenusHandler) Handle(
 	workspaceID kernel.WorkspaceID,
 	memberID kernel.MemberID,
 ) ([]model.MenuTreeNode, error) {
-	if err := h.seed.Handle(ctx, workspaceID); err != nil {
+	if err := h.seed.EnsureWorkspaceMenus(ctx, workspaceID); err != nil {
 		return nil, err
 	}
 	menus, err := h.menus.ListByWorkspace(ctx, workspaceID)
@@ -88,15 +91,15 @@ func (h *ListNavMenusHandler) Handle(
 
 type ListMenuTreeHandler struct {
 	menus *persistence.MenuStore
-	seed  *command.SeedWorkspaceMenusHandler
+	seed  workspaceMenuEnsurer
 }
 
-func NewListMenuTreeHandler(menus *persistence.MenuStore, seed *command.SeedWorkspaceMenusHandler) *ListMenuTreeHandler {
+func NewListMenuTreeHandler(menus *persistence.MenuStore, seed workspaceMenuEnsurer) *ListMenuTreeHandler {
 	return &ListMenuTreeHandler{menus: menus, seed: seed}
 }
 
 func (h *ListMenuTreeHandler) Handle(ctx context.Context, workspaceID kernel.WorkspaceID) ([]model.MenuTreeNode, error) {
-	if err := h.seed.Handle(ctx, workspaceID); err != nil {
+	if err := h.seed.EnsureWorkspaceMenus(ctx, workspaceID); err != nil {
 		return nil, err
 	}
 	menus, err := h.menus.ListByWorkspace(ctx, workspaceID)
@@ -169,15 +172,15 @@ type WorkspaceMenuButtonView struct {
 
 type ListWorkspaceMenuButtonsHandler struct {
 	menus *persistence.MenuStore
-	seed  *command.SeedWorkspaceMenusHandler
+	seed  workspaceMenuEnsurer
 }
 
-func NewListWorkspaceMenuButtonsHandler(menus *persistence.MenuStore, seed *command.SeedWorkspaceMenusHandler) *ListWorkspaceMenuButtonsHandler {
+func NewListWorkspaceMenuButtonsHandler(menus *persistence.MenuStore, seed workspaceMenuEnsurer) *ListWorkspaceMenuButtonsHandler {
 	return &ListWorkspaceMenuButtonsHandler{menus: menus, seed: seed}
 }
 
 func (h *ListWorkspaceMenuButtonsHandler) Handle(ctx context.Context, workspaceID kernel.WorkspaceID) ([]WorkspaceMenuButtonView, error) {
-	if err := h.seed.Handle(ctx, workspaceID); err != nil {
+	if err := h.seed.EnsureWorkspaceMenus(ctx, workspaceID); err != nil {
 		return nil, err
 	}
 	rows, err := h.menus.ListAllButtonsInWorkspace(ctx, workspaceID)

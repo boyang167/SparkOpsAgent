@@ -264,7 +264,7 @@ export function WorkspaceReleasePlansPanel({
                   <th>迭代</th>
                   <th>状态</th>
                   <th>发布窗口</th>
-                  <th className="w-[4.5rem]">操作</th>
+                  <th className="release-plans-table-actions">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -313,10 +313,10 @@ export function WorkspaceReleasePlansPanel({
                       <td className="text-xs text-muted-foreground whitespace-nowrap">
                         {new Date(item.release_window_start).toLocaleDateString()} — {new Date(item.release_window_end).toLocaleDateString()}
                       </td>
-                      <td>
+                      <td className="release-plans-table-actions">
                         <button
                           type="button"
-                          className="btn-ghost text-xs text-primary px-2"
+                          className="btn-ghost text-xs text-primary whitespace-nowrap"
                           onClick={(e) => {
                             e.stopPropagation();
                             openPlan(item);

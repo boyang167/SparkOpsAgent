@@ -30,6 +30,13 @@ func NewApplyMenuRolePoliciesHandler(
 	return &ApplyMenuRolePoliciesHandler{menus: menus, roles: roles, seedMenus: seedMenus}
 }
 
+func (h *ApplyMenuRolePoliciesHandler) EnsureWorkspaceMenus(
+	ctx context.Context,
+	workspaceID kernel.WorkspaceID,
+) error {
+	return h.Handle(ctx, workspaceID, ApplyMenuRolePoliciesOptions{SkipIfConfigured: true})
+}
+
 func (h *ApplyMenuRolePoliciesHandler) HandleAllWorkspaces(ctx context.Context, opts ApplyMenuRolePoliciesOptions) error {
 	type workspaceLister interface {
 		ListWorkspaceIDs(context.Context) ([]kernel.WorkspaceID, error)

@@ -10,6 +10,32 @@ interface MonitorOverviewPanelProps {
   workspaceId: string;
 }
 
+function MonitorLinkCard({
+  title,
+  description,
+  url,
+  emptyHint,
+}: {
+  title: string;
+  description: string;
+  url?: string;
+  emptyHint: string;
+}) {
+  return (
+    <article className="monitor-link-card">
+      <h3 className="monitor-link-card-title">{title}</h3>
+      <p className="monitor-link-card-desc">{description}</p>
+      {url ? (
+        <a className="monitor-link-card-url" href={url} target="_blank" rel="noreferrer">
+          {url}
+        </a>
+      ) : (
+        <p className="monitor-link-card-desc">{emptyHint}</p>
+      )}
+    </article>
+  );
+}
+
 export function MonitorOverviewPanel({ workspaceId }: MonitorOverviewPanelProps) {
   const [data, setData] = useState<MonitorOverviewVM | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,27 +62,19 @@ export function MonitorOverviewPanel({ workspaceId }: MonitorOverviewPanelProps)
   return (
     <div className="stack-md">
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-lg border border-[var(--border)] p-4">
-          <h3 className="font-medium">Grafana</h3>
-          {data?.grafana_url ? (
-            <a href={data.grafana_url} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">
-              {data.grafana_url}
-            </a>
-          ) : (
-            <p className="text-sm text-muted mt-2">未配置 Grafana 地址。</p>
-          )}
-        </div>
-        <div className="rounded-lg border border-[var(--border)] p-4">
-          <h3 className="font-medium">Prometheus</h3>
-          {data?.prometheus_url ? (
-            <a href={data.prometheus_url} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">
-              {data.prometheus_url}
-            </a>
-          ) : (
-            <p className="text-sm text-muted mt-2">未配置。可在系统配置中设置 prometheus_url。</p>
-          )}
-        </div>
+      <div className="monitor-link-grid">
+        <MonitorLinkCard
+          title="Grafana"
+          description="可视化仪表盘与告警面板"
+          url={data?.grafana_url}
+          emptyHint="未配置 Grafana 地址，可在系统配置中设置。"
+        />
+        <MonitorLinkCard
+          title="Prometheus"
+          description="指标采集与 PromQL 查询"
+          url={data?.prometheus_url}
+          emptyHint="未配置 Prometheus 地址，可在系统配置中设置 prometheus_url。"
+        />
       </div>
     </div>
   );

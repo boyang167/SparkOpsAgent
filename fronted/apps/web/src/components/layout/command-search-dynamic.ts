@@ -79,9 +79,9 @@ export async function buildDynamicCommandItems(options: {
   }));
 
   const productItems: CommandSearchItem[] = products.slice(0, MAX_PRODUCTS).map((item) => ({
-    href: "/products",
+    href: "/publish/products",
     label: item.name,
-    group: "交付",
+    group: "产品交付",
     kind: "product" as const,
     keywords: `${item.name} 产品 product`,
   }));
@@ -130,7 +130,7 @@ export async function buildDynamicCommandItems(options: {
       const buildItems: CommandSearchItem[] = builds.slice(0, MAX_BUILDS_PER_PROJECT).map((item) => ({
         href: `/delivery/builds/${item.id}`,
         label: `${project.name} · 构建 #${item.build_number}`,
-        group: "交付",
+        group: "产品交付",
         kind: "build" as const,
         keywords: `${project.name} build 构建 ${item.branch ?? ""}`,
       }));

@@ -1,6 +1,7 @@
 import {
   ADMIN_NAV_SECTIONS,
   BUSINESS_NAV_TREE,
+  KNOWLEDGE_NAV_ITEM,
   PLATFORM_OPS_NAV_TREE,
 } from "./nav-tree";
 import type { WorkspaceEntitlementsVM } from "@sparkops/contracts/platform";
@@ -32,6 +33,13 @@ export function buildNavSearchItems(options?: {
       if (entitlements && !isPathEntitled(item.href, entitlements)) continue;
       items.push({ href: item.href, label: item.label, group: group.label });
     }
+  }
+  if (!entitlements || isPathEntitled(KNOWLEDGE_NAV_ITEM.href, entitlements)) {
+    items.push({
+      href: KNOWLEDGE_NAV_ITEM.href,
+      label: KNOWLEDGE_NAV_ITEM.label,
+      group: "知识库",
+    });
   }
 
   if (showAdmin) {

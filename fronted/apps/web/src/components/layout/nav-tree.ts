@@ -4,6 +4,8 @@ import { filterNavGroupsByEntitlements, isPathEntitled } from "@/components/layo
 export interface NavLeafConfig {
   href: string;
   label: string;
+  /** 同一聚合入口覆盖的其他页面路径，用于保持导航激活态 */
+  activeHrefs?: string[];
   /** 所需功能模块，未设置则始终可见 */
   entitlement?: "agent" | "knowledge" | "delivery" | "k8s" | "observability" | "mcp";
 }
@@ -20,49 +22,41 @@ export type ConsoleKind = "business" | "admin" | "platform";
 
 /** 业务控制台顶层入口，不归入任何分组 */
 export const WORKPLACE_NAV_ITEM: NavLeafConfig = { href: "/dashboard/workplace", label: "工作台" };
+export const KNOWLEDGE_NAV_ITEM: NavLeafConfig = {
+  href: "/knowledge",
+  label: "知识库",
+  entitlement: "knowledge",
+};
 
-/** 业务控制台按交付生命周期分组：构建 → 交付 → 运行 → 观测，集成沉底 */
+/** 业务控制台按用户任务分组，知识库作为顶层直达入口。 */
 export const BUSINESS_NAV_TREE: NavGroupConfig[] = [
   {
     id: "application",
-    label: "构建",
+    label: "产品交付",
     items: [
+      { href: "/publish/products", label: "产品", entitlement: "delivery" },
       { href: "/projects", label: "项目", entitlement: "agent" },
-      { href: "/templates", label: "模板", entitlement: "agent" },
-      { href: "/knowledge", label: "知识库", entitlement: "knowledge" },
-    ],
-  },
-  {
-    id: "ops-delivery",
-    label: "交付",
-    items: [
-      { href: "/products", label: "产品", entitlement: "delivery" },
-      { href: "/products/workflows", label: "工作流", entitlement: "delivery" },
       { href: "/publish/release-plans", label: "发布计划", entitlement: "delivery" },
+      { href: "/products/workflows", label: "工作流", entitlement: "delivery" },
+      { href: "/cronjobs", label: "定时构建", entitlement: "k8s" },
+      { href: "/templates", label: "模板中心", entitlement: "agent" },
     ],
   },
   {
     id: "ops-runtime",
-    label: "运行",
+    label: "运行观测",
     items: [
       { href: "/runtime/pods", label: "运行实例", entitlement: "k8s" },
-      { href: "/cronjobs", label: "定时任务", entitlement: "k8s" },
-    ],
-  },
-  {
-    id: "ops-observability",
-    label: "观测",
-    items: [
-      { href: "/monitor/overview", label: "监控", entitlement: "observability" },
-      { href: "/monitor/log-viewer", label: "日志", entitlement: "observability" },
+      { href: "/monitor/overview", label: "监控概览", entitlement: "observability" },
+      { href: "/monitor/log-viewer", label: "日志查询", entitlement: "observability" },
     ],
   },
   {
     id: "ops-infra",
-    label: "集成",
+    label: "配置与集成",
     defaultCollapsed: true,
     items: [
-      { href: "/config/secrets", label: "密钥", entitlement: "delivery" },
+      { href: "/config/secrets", label: "密钥管理", entitlement: "delivery" },
       { href: "/config/webhooks", label: "外部集成", entitlement: "mcp" },
       { href: "/config/mcp", label: "MCP 集成", entitlement: "mcp" },
     ],

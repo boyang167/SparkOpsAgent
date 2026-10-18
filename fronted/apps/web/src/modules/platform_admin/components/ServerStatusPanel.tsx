@@ -17,17 +17,14 @@ function UsageBar({ used, total, label }: { used: number; total: number; label: 
   const percent = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
   return (
     <div>
-      <div className="flex justify-between text-xs text-muted mb-1">
+      <div className="monitor-server-usage-label">
         <span>{label}</span>
         <span>
           {used.toFixed(1)} / {total.toFixed(1)} MB ({percent}%)
         </span>
       </div>
-      <div className="h-2 rounded-full bg-[var(--surface-muted)] overflow-hidden">
-        <div
-          className="h-full rounded-full bg-[var(--primary)] transition-all"
-          style={{ width: `${percent}%` }}
-        />
+      <div className="monitor-server-usage-bar">
+        <div className="monitor-server-usage-fill" style={{ width: `${percent}%` }} />
       </div>
     </div>
   );
@@ -35,10 +32,10 @@ function UsageBar({ used, total, label }: { used: number; total: number; label: 
 
 function StateCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 min-h-[280px]">
-      <h3 className="text-sm font-semibold mb-4">{title}</h3>
+    <article className="monitor-server-card">
+      <h3 className="monitor-server-card-title">{title}</h3>
       {children}
-    </div>
+    </article>
   );
 }
 
@@ -75,67 +72,67 @@ export function ServerStatusPanel({ workspaceId }: ServerStatusPanelProps) {
 
   return (
     <div className="stack-md">
-      <div className="flex justify-between items-center">
-        <p className="text-muted text-sm">每 10 秒自动刷新 · 参照 GVA 服务器状态</p>
-        <button type="button" className="btn-secondary" onClick={() => void load()}>
+      <div className="monitor-server-toolbar">
+        <p className="monitor-server-footnote">每 10 秒自动刷新</p>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => void load()}>
           立即刷新
         </button>
       </div>
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       {status ? (
         <>
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="monitor-server-grid">
             <StateCard title="Runtime">
-              <dl className="grid gap-3 text-sm">
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted">OS</dt>
+              <dl className="monitor-server-dl">
+                <div>
+                  <dt>OS</dt>
                   <dd>{status.go_os ?? "—"}</dd>
                 </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted">Arch</dt>
+                <div>
+                  <dt>Arch</dt>
                   <dd>{status.go_arch ?? "—"}</dd>
                 </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted">Hostname</dt>
+                <div>
+                  <dt>Hostname</dt>
                   <dd>{status.hostname}</dd>
                 </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted">CPU 核心</dt>
+                <div>
+                  <dt>CPU 核心</dt>
                   <dd>{status.num_cpu}</dd>
                 </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted">Go Version</dt>
+                <div>
+                  <dt>Go Version</dt>
                   <dd className="font-mono text-xs">{status.go_version}</dd>
                 </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted">Goroutines</dt>
+                <div>
+                  <dt>Goroutines</dt>
                   <dd>{status.goroutines}</dd>
                 </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted">Uptime</dt>
+                <div>
+                  <dt>Uptime</dt>
                   <dd>{formatUptime(status.uptime_sec)}</dd>
                 </div>
               </dl>
             </StateCard>
 
-            <StateCard title="Ram">
-              <div className="stack-md">
+            <StateCard title="Memory">
+              <div className="monitor-server-usage">
                 <UsageBar used={status.mem_alloc_mb} total={status.mem_sys_mb} label="堆分配 / 系统内存" />
                 <UsageBar used={status.heap_inuse_mb} total={status.mem_sys_mb} label="堆使用 / 系统内存" />
-                <dl className="grid gap-2 text-sm pt-2">
-                  <div className="flex justify-between gap-4">
-                    <dt className="text-muted">堆对象数</dt>
+                <dl className="monitor-server-dl">
+                  <div>
+                    <dt>堆对象数</dt>
                     <dd>{status.heap_objects}</dd>
                   </div>
-                  <div className="flex justify-between gap-4">
-                    <dt className="text-muted">GC 累计暂停</dt>
+                  <div>
+                    <dt>GC 累计暂停</dt>
                     <dd>{status.gc_pause_ms} ms</dd>
                   </div>
                 </dl>
               </div>
             </StateCard>
           </div>
-          <p className="text-xs text-muted">
+          <p className="monitor-server-footnote">
             采集于 {new Date(status.collected_at).toLocaleString()} · 当前为 Go 进程运行时指标，磁盘/CPU 使用率需接入 node exporter
           </p>
         </>

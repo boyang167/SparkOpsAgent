@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { isNavHrefActive } from "@/components/layout/menu-tree-nav";
 
 export interface NavLeafItem {
   href: string;
   label: string;
+  activeHrefs?: string[];
 }
 
 interface NavGroupProps {
@@ -19,12 +20,16 @@ interface NavGroupProps {
 
 function isGroupActive(pathname: string, items: NavLeafItem[]) {
   const hrefs = items.map((item) => item.href);
-  return items.some((item) => isNavHrefActive(pathname, item.href, hrefs));
+  return items.some((item) => isNavHrefActive(pathname, item.href, hrefs, item.activeHrefs));
 }
 
 export function NavGroup({ label, icon, items, pathname, defaultOpen = false }: NavGroupProps) {
   const active = isGroupActive(pathname, items);
   const [open, setOpen] = useState(defaultOpen);
+
+  useEffect(() => {
+    if (active) setOpen(true);
+  }, [active]);
 
   return (
     <div className="nav-group">
@@ -53,10 +58,11 @@ export function NavGroup({ label, icon, items, pathname, defaultOpen = false }: 
               pathname,
               item.href,
               items.map((candidate) => candidate.href),
+              item.activeHrefs,
             );
             return (
               <Link
-                key={item.href}
+                key={`${item.href}:${item.label}`}
                 href={item.href}
                 className={`nav-sublink ${itemActive ? "nav-sublink-active" : ""}`}
               >

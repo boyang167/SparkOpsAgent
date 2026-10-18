@@ -450,7 +450,7 @@ export function EnvironmentSyncJobConfigDrawer({
                       </div>
                     </div>
                   ) : null}
-                  <dl className="pwf-env-sync-content">
+                  <div className="pwf-env-sync-summary">
                     {buildProjectSyncContentLines({
                       projectId: item.project_id,
                       sourceProjects: sourceStatus?.projects,
@@ -459,33 +459,35 @@ export function EnvironmentSyncJobConfigDrawer({
                       syncYaml,
                       syncResourceKinds,
                       firstSync,
-                    }).map((line) => {
-                      const editable = line.label === SYNC_OPTION_YAML_LABEL && syncYaml;
-                      const overrideCount = Object.keys(spec?.resourceOverrides ?? {}).length;
-                      return (
+                    })
+                      .filter((line) => line.label !== SYNC_OPTION_YAML_LABEL)
+                      .map((line) => (
                         <div
                           key={line.label}
-                          className={`pwf-env-sync-content-row${line.muted ? " pwf-env-sync-content-row--muted" : ""}${editable ? " pwf-env-sync-content-row--action" : ""}`}
+                          className={`pwf-env-sync-summary-row${line.muted ? " pwf-env-sync-summary-row--muted" : ""}`}
                         >
-                          <dt>{line.label}</dt>
-                          <dd className={line.label === "容器镜像" ? "mono" : undefined}>
-                            {editable ? (
-                              <button
-                                type="button"
-                                className="pwf-env-sync-content-link"
-                                onClick={() => void openResourceEditor(item.project_id)}
-                              >
-                                {line.value}
-                                {overrideCount > 0 ? ` · ${overrideCount} 项已修改` : " · 查看并编辑"}
-                              </button>
-                            ) : (
-                              line.value
-                            )}
-                          </dd>
+                          <span className="pwf-env-sync-summary-label">{line.label}</span>
+                          <span
+                            className={`pwf-env-sync-summary-value${line.label === SYNC_OPTION_IMAGE_LABEL ? " mono" : ""}`}
+                          >
+                            {line.value}
+                          </span>
                         </div>
-                      );
-                    })}
-                  </dl>
+                      ))}
+                    {syncYaml ? (
+                      <div className="pwf-env-sync-summary-action">
+                        <button
+                          type="button"
+                          className="btn-ghost text-xs pwf-env-sync-edit-btn"
+                          onClick={() => void openResourceEditor(item.project_id)}
+                        >
+                          {Object.keys(spec?.resourceOverrides ?? {}).length > 0
+                            ? `查看并编辑 · ${Object.keys(spec?.resourceOverrides ?? {}).length} 项已修改`
+                            : "查看并编辑"}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 </>
               ) : null}
             </li>
@@ -641,8 +643,7 @@ export function EnvironmentSyncJobConfigDrawer({
         </section>
 
         <p className="pwf-env-sync-footnote">
-          「容器镜像」指同步源环境当前运行的镜像版本；「部署配置」指同步 K8s 资源 YAML，可点击查看并修改后再发布。首次同步强制两项全开。YAML
-          同步仅创建或更新，不删除目标独有资源，也不复制 Secret 密文。完整差异请在启动工作流前通过「生成同步预览」确认。
+          容器镜像同步运行中版本；部署配置同步 K8s YAML，可在发布前编辑。首次同步两项全开。完整差异请用「生成同步预览」确认。
         </p>
       </div>
 

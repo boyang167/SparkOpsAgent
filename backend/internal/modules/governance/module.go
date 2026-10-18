@@ -147,13 +147,13 @@ func (m *Module) Register(c *appctx.Container) error {
 	)
 
 	menuHandler := govhttp.NewMenuHandler(
-		query.NewListMenuTreeHandler(menuStore, seedMenus),
-		query.NewListNavMenusHandler(menuStore, seedMenus, checker, c.SystemRoleChecker, c.DB),
+		query.NewListMenuTreeHandler(menuStore, menuPolicies),
+		query.NewListNavMenusHandler(menuStore, menuPolicies, checker, c.SystemRoleChecker, c.DB),
 		query.NewListMyMenuButtonsHandler(menuStore, checker, c.SystemRoleChecker),
 		query.NewGetMenuHandler(menuStore),
 		query.NewGetMenuRolesHandler(menuStore),
 		query.NewGetRoleMenusHandler(menuStore, roleRepo),
-		query.NewListWorkspaceMenuButtonsHandler(menuStore, seedMenus),
+		query.NewListWorkspaceMenuButtonsHandler(menuStore, menuPolicies),
 		query.NewGetRoleMenuButtonsHandler(menuStore, roleRepo),
 		command.NewCreateMenuHandler(menuStore),
 		command.NewUpdateMenuHandler(menuStore),

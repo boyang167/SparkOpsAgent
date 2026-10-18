@@ -11,6 +11,7 @@ import type {
   TraceDetailVM,
 } from "@sparkops/contracts/platform";
 import { InlineAlert } from "@/components/ui/InlineAlert";
+import { MetricCard } from "@/components/ui/MetricCard";
 
 const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 const LOG_CATEGORIES = [
@@ -32,10 +33,8 @@ function levelBadgeClass(level: string) {
       return "badge badge-warning";
     case "warn":
       return "badge badge-neutral";
-    case "debug":
-      return "badge badge-neutral";
     default:
-      return "badge badge-primary";
+      return "badge badge-neutral";
   }
 }
 
@@ -52,6 +51,28 @@ function fmtSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fmtLogTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function fmtFileLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return line;
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return line;
+  }
 }
 
 interface LogViewerPanelProps {
@@ -237,7 +258,7 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
         kind: "operation",
         at: op.created_at,
         label: `${op.method} ${op.path}`,
-        detail: `status=${op.status} latency=${op.latency_ms}ms`,
+        detail: `status=${op.status} · ${op.latency_ms}ms`,
       });
     }
     return events.sort((a, b) => a.at.localeCompare(b.at));
@@ -250,16 +271,24 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
     { key: "metrics", label: "Metrics 指标" },
   ];
 
+  const selectedFileMeta = logFiles.find((file) => file.name === selectedFile);
+
   return (
-    <div className="stack-lg">
+    <div className="log-viewer stack-md">
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
 
-      <div className="flex flex-wrap gap-2 border-b border-border pb-2">
+      <div
+        className="segmented-control log-viewer-segmented"
+        role="tablist"
+        aria-label="日志查看方式"
+      >
         {tabs.map((item) => (
           <button
             key={item.key}
             type="button"
-            className={tab === item.key ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"}
+            role="tab"
+            aria-selected={tab === item.key}
+            className={`segmented-item${tab === item.key ? " segmented-item-active" : ""}`}
             onClick={() => setTab(item.key)}
           >
             {item.label}
@@ -268,16 +297,16 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
       </div>
 
       {tab === "logs" ? (
-        <Fragment>
+        <section className="log-viewer-section stack-md" aria-label="结构化日志">
           <form
-            className="grid gap-3 md:grid-cols-5 items-end"
+            className="log-viewer-toolbar"
             onSubmit={(e) => {
               e.preventDefault();
               setAppliedLogFilters({ ...logFilters, page: 1 });
             }}
           >
-            <label className="stack-xs">
-              <span className="text-sm text-muted">级别</span>
+            <label className="log-viewer-field">
+              <span className="log-viewer-field-label">级别</span>
               <select
                 className="input"
                 value={logFilters.level ?? ""}
@@ -291,8 +320,8 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
                 ))}
               </select>
             </label>
-            <label className="stack-xs">
-              <span className="text-sm text-muted">类型</span>
+            <label className="log-viewer-field">
+              <span className="log-viewer-field-label">类型</span>
               <select
                 className="input"
                 value={logFilters.category ?? ""}
@@ -307,8 +336,8 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
                 ))}
               </select>
             </label>
-            <label className="stack-xs md:col-span-2">
-              <span className="text-sm text-muted">关键词 / Trace ID</span>
+            <label className="log-viewer-field log-viewer-field--wide">
+              <span className="log-viewer-field-label">关键词 / Trace ID</span>
               <input
                 className="input"
                 placeholder="message、caller 或 trace_id"
@@ -322,59 +351,71 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
                 }
               />
             </label>
-            <button type="submit" className="btn btn-primary">
+            <button type="submit" className="btn btn-primary text-sm">
               查询
             </button>
           </form>
 
-          <div className="table-wrap">
-            <table className="table">
+          <div className="table-wrap log-viewer-table-wrap">
+            <table className="data-table">
               <thead>
                 <tr>
-                  <th>时间</th>
+                  <th className="log-viewer-col-time">时间</th>
                   <th>级别</th>
                   <th>类型</th>
                   <th>消息</th>
-                  <th>Trace</th>
+                  <th className="log-viewer-col-trace">Trace</th>
                 </tr>
               </thead>
               <tbody>
                 {logLoading ? (
                   <tr>
-                    <td colSpan={5} className="text-muted">
-                      加载中…
+                    <td colSpan={5}>
+                      <div className="empty-state border-0 bg-transparent" role="status">
+                        加载日志…
+                      </div>
                     </td>
                   </tr>
                 ) : logItems.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="text-muted">
-                      暂无日志
+                    <td colSpan={5}>
+                      <div className="empty-state border-0 bg-transparent" role="status">
+                        暂无匹配的日志
+                      </div>
                     </td>
                   </tr>
                 ) : (
                   logItems.map((row) => (
                     <Fragment key={row.id}>
                       <tr
-                        className="cursor-pointer hover:bg-muted/30"
+                        className="log-viewer-row"
                         onClick={() => setExpandedLogId((id) => (id === row.id ? null : row.id))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            setExpandedLogId((id) => (id === row.id ? null : row.id));
+                          }
+                        }}
+                        tabIndex={0}
                       >
-                        <td className="whitespace-nowrap text-sm">{row.created_at}</td>
+                        <td className="log-viewer-col-time whitespace-nowrap text-muted">
+                          {fmtLogTime(row.created_at)}
+                        </td>
                         <td>
                           <span className={levelBadgeClass(row.level)}>{row.level}</span>
                         </td>
-                        <td>{row.category}</td>
-                        <td className="max-w-xl truncate">{row.message}</td>
-                        <td>
+                        <td className="text-muted">{row.category}</td>
+                        <td className="log-viewer-message">{row.message}</td>
+                        <td className="log-viewer-col-trace">
                           {row.trace_id ? (
                             <button
                               type="button"
-                              className="link text-sm"
+                              className="btn-ghost text-xs log-viewer-trace-link"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 openTraceFromLog(row.trace_id!);
                               }}
                             >
-                              {row.trace_id.slice(0, 8)}…
+                              {row.trace_id.slice(0, 8)}
                             </button>
                           ) : (
                             "—"
@@ -382,9 +423,9 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
                         </td>
                       </tr>
                       {expandedLogId === row.id ? (
-                        <tr>
+                        <tr className="log-viewer-detail-row">
                           <td colSpan={5}>
-                            <pre className="text-xs bg-muted/40 p-3 rounded overflow-auto">
+                            <pre className="log-viewer-detail">
                               {row.caller ? `caller: ${row.caller}\n` : ""}
                               {fmtFields(row.fields) ?? "无附加字段"}
                             </pre>
@@ -398,9 +439,9 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
             </table>
           </div>
 
-          <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="log-viewer-pagination">
             <span className="text-sm text-muted">共 {logTotal} 条</span>
-            <div className="flex items-center gap-2">
+            <div className="log-viewer-pagination-actions">
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -411,7 +452,7 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
               >
                 上一页
               </button>
-              <span className="text-sm">
+              <span className="text-sm text-muted">
                 {appliedLogFilters.page ?? 1} / {logTotalPages}
               </span>
               <button
@@ -429,109 +470,130 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
               </button>
             </div>
           </div>
-        </Fragment>
+        </section>
       ) : null}
 
       {tab === "files" ? (
-        <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
-          <div className="stack-sm">
-            <p className="text-sm text-muted">目录：{logDirectory || "logs"}</p>
-            <div className="stack-xs">
+        <section className="log-viewer-section log-viewer-files" aria-label="本地日志文件">
+          <div className="log-viewer-files-layout">
+            <aside className="log-viewer-files-sidebar">
+              <p className="log-viewer-files-sidebar-label">日志文件</p>
               {logFiles.length === 0 ? (
-                <p className="text-sm text-muted">暂无本地日志文件</p>
+                <p className="log-viewer-files-empty" role="status">
+                  {fileLoading ? "加载中…" : "暂无本地日志文件"}
+                </p>
               ) : (
-                logFiles.map((file) => (
-                  <button
-                    key={file.name}
-                    type="button"
-                    className={
-                      selectedFile === file.name
-                        ? "btn btn-primary btn-sm justify-start"
-                        : "btn btn-ghost btn-sm justify-start"
-                    }
-                    onClick={() => setSelectedFile(file.name)}
-                  >
-                    <span className="truncate">{file.name}</span>
-                    <span className="text-xs opacity-70 ml-auto">{fmtSize(file.size)}</span>
-                  </button>
-                ))
+                <ul className="log-viewer-file-list">
+                  {logFiles.map((file) => (
+                    <li key={file.name}>
+                      <button
+                        type="button"
+                        className={`log-viewer-file-item${selectedFile === file.name ? " log-viewer-file-item--active" : ""}`}
+                        onClick={() => setSelectedFile(file.name)}
+                      >
+                        <span className="log-viewer-file-name">{file.name}</span>
+                        <span className="log-viewer-file-size">{fmtSize(file.size)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               )}
+            </aside>
+            <div className="log-viewer-files-main stack-sm">
+              <div className="log-viewer-files-head">
+                <div className="log-viewer-files-head-copy">
+                  <p className="log-viewer-files-title">{selectedFile ?? "选择文件"}</p>
+                  <p className="log-viewer-files-meta">
+                    {logDirectory ? `目录 · ${logDirectory}` : "目录 · logs"}
+                    {selectedFileMeta ? ` · ${fmtSize(selectedFileMeta.size)}` : ""}
+                  </p>
+                </div>
+                <div className="log-viewer-files-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={!selectedFile || fileLoading}
+                    onClick={() => selectedFile && void loadFileTail(selectedFile, 0, false)}
+                  >
+                    刷新
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={!selectedFile || fileLoading || fileEof}
+                    onClick={() =>
+                      selectedFile && void loadFileTail(selectedFile, fileOffset, true)
+                    }
+                  >
+                    加载更多
+                  </button>
+                </div>
+              </div>
+              <pre className="log-viewer-terminal" role="log">
+                {fileLines.length === 0
+                  ? (fileLoading ? "加载中…" : "选择左侧文件查看内容")
+                  : fileLines.map(fmtFileLine).join("\n\n")}
+              </pre>
             </div>
           </div>
-          <div className="stack-sm">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                disabled={!selectedFile || fileLoading}
-                onClick={() => selectedFile && void loadFileTail(selectedFile, 0, false)}
-              >
-                刷新
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                disabled={!selectedFile || fileLoading || fileEof}
-                onClick={() =>
-                  selectedFile && void loadFileTail(selectedFile, fileOffset, true)
-                }
-              >
-                加载更多
-              </button>
-            </div>
-            <pre className="text-xs bg-[#0f172a] text-[#e2e8f0] p-4 rounded min-h-[420px] max-h-[620px] overflow-auto font-mono">
-              {fileLines.length === 0 ? (fileLoading ? "加载中…" : "选择文件查看内容") : fileLines.join("\n")}
-            </pre>
-          </div>
-        </div>
+        </section>
       ) : null}
 
       {tab === "traces" ? (
-        <div className="stack-md">
-          <form className="flex flex-wrap gap-2 items-end" onSubmit={onSearchTrace}>
-            <label className="stack-xs flex-1 min-w-[240px]">
-              <span className="text-sm text-muted">Trace ID</span>
+        <section className="log-viewer-section stack-md" aria-label="Trace 追踪">
+          <form className="log-viewer-trace-form" onSubmit={onSearchTrace}>
+            <label className="log-viewer-field log-viewer-field--grow">
+              <span className="log-viewer-field-label">Trace ID</span>
               <input
-                className="input"
+                className="input font-mono"
                 value={traceInput}
                 onChange={(e) => setTraceInput(e.target.value)}
                 placeholder="X-Trace-Id / BFF trace_id"
               />
             </label>
-            <button type="submit" className="btn btn-primary" disabled={traceLoading}>
+            <button type="submit" className="btn btn-primary text-sm" disabled={traceLoading}>
               {traceLoading ? "查询中…" : "查询"}
             </button>
           </form>
 
           {traceDetail ? (
             <div className="stack-md">
-              <p className="text-sm">
-                Trace ID：<code>{traceDetail.trace_id}</code>
+              <p className="log-viewer-trace-id">
+                Trace ID
+                <code>{traceDetail.trace_id}</code>
               </p>
-              <div className="stack-sm">
+              <div className="log-viewer-timeline">
                 {traceTimeline.length === 0 ? (
-                  <p className="text-muted text-sm">未找到关联事件</p>
+                  <p className="log-viewer-files-empty" role="status">
+                    未找到关联事件
+                  </p>
                 ) : (
                   traceTimeline.map((event, idx) => (
-                    <div key={`${event.at}-${idx}`} className="border border-border rounded p-3">
-                      <div className="flex flex-wrap gap-2 items-center text-sm">
-                        <span className="badge badge-neutral">{event.kind}</span>
-                        <span className="text-muted">{event.at}</span>
-                        <span className="font-medium">{event.label}</span>
+                    <article key={`${event.at}-${idx}`} className="log-viewer-timeline-item">
+                      <div className="log-viewer-timeline-meta">
+                        <span className="log-viewer-timeline-kind">{event.kind}</span>
+                        <time className="log-viewer-timeline-time">{fmtLogTime(event.at)}</time>
                       </div>
-                      <p className="text-sm mt-1">{event.detail}</p>
-                    </div>
+                      <p className="log-viewer-timeline-label">{event.label}</p>
+                      <p className="log-viewer-timeline-detail">{event.detail}</p>
+                    </article>
                   ))
                 )}
               </div>
             </div>
-          ) : null}
-        </div>
+          ) : (
+            !traceLoading && (
+              <p className="log-viewer-files-empty" role="status">
+                输入 Trace ID 查看关联日志与操作
+              </p>
+            )
+          )}
+        </section>
       ) : null}
 
       {tab === "metrics" ? (
-        <div className="stack-md">
-          <div className="flex items-center gap-2">
+        <section className="log-viewer-section stack-md" aria-label="Metrics 指标">
+          <div className="log-viewer-metrics-actions">
             <button
               type="button"
               className="btn btn-ghost btn-sm"
@@ -550,46 +612,68 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
             </a>
           </div>
           {metricsLoading ? (
-            <p className="text-muted text-sm">加载中…</p>
+            <p className="log-viewer-files-empty" role="status">
+              加载指标…
+            </p>
           ) : metrics ? (
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="card p-4">
-                <p className="text-sm text-muted">HTTP 平均耗时 (ms)</p>
-                <p className="text-2xl font-semibold mt-1">
-                  {metrics.http_duration_p50_ms.toFixed(1)}
-                </p>
+            <>
+              <div className="log-viewer-metrics-grid">
+                <MetricCard
+                  label="HTTP P50 耗时"
+                  value={`${metrics.http_duration_p50_ms.toFixed(1)} ms`}
+                  tone="sky"
+                  icon={
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 8v4l2 2" strokeLinecap="round" />
+                      <circle cx="12" cy="12" r="9" />
+                    </svg>
+                  }
+                />
+                <MetricCard
+                  label="请求序列数"
+                  value={metrics.http_requests_total.length}
+                  tone="violet"
+                  icon={
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 6h16M4 12h16M4 18h10" strokeLinecap="round" />
+                    </svg>
+                  }
+                />
+                <MetricCard
+                  label="采集时间"
+                  value={fmtLogTime(metrics.collected_at)}
+                  tone="emerald"
+                  icon={
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="4" y="5" width="16" height="15" rx="2" />
+                      <path d="M8 3v4M16 3v4" strokeLinecap="round" />
+                    </svg>
+                  }
+                />
               </div>
-              <div className="card p-4">
-                <p className="text-sm text-muted">请求序列数</p>
-                <p className="text-2xl font-semibold mt-1">{metrics.http_requests_total.length}</p>
-              </div>
-              <div className="card p-4">
-                <p className="text-sm text-muted">采集时间</p>
-                <p className="text-sm font-medium mt-1">{metrics.collected_at}</p>
-              </div>
-            </div>
+              {metrics.http_requests_total.length > 0 ? (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>标签</th>
+                        <th className="log-viewer-col-count">计数</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {metrics.http_requests_total.map((row) => (
+                        <tr key={row.label}>
+                          <td className="font-mono text-sm">{row.label}</td>
+                          <td className="log-viewer-col-count">{row.value}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </>
           ) : null}
-          {metrics && metrics.http_requests_total.length > 0 ? (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>标签</th>
-                    <th>计数</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {metrics.http_requests_total.map((row) => (
-                    <tr key={row.label}>
-                      <td>{row.label}</td>
-                      <td>{row.value}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </div>
+        </section>
       ) : null}
     </div>
   );

@@ -7,7 +7,7 @@ export default async function CronJobsPage() {
 
   return (
     <div className="stack-lg">
-      <PageHeader eyebrow="Delivery" title="定时任务" description="Cron 触发构建（对应旧 /cornjob/list）" />
+      <PageHeader eyebrow="Delivery" title="定时构建" description="按计划自动触发项目构建任务" />
       <CronJobsPanel workspaceId={workspaceId} projects={projects} initialProjectId={projects[0]?.id} />
     </div>
   );

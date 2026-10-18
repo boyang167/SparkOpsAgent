@@ -15,6 +15,7 @@ export interface RouteLabelRule {
 const STATIC_RULES: RouteLabelRule[] = [
   { prefix: "/dashboard/workplace", label: "工作台", group: "工作台", exact: true },
   { prefix: "/dashboard/module-unavailable", label: "模块不可用", group: "工作台", exact: true },
+  { prefix: "/knowledge", label: "知识库", group: "知识库", exact: true },
   { prefix: "/projects/create", label: "新建项目", group: "项目", exact: true },
   { prefix: "/settings/profile", label: "个人设置", group: "账号", exact: true },
   { prefix: "/settings/rbac", label: "权限说明", group: "账号", exact: true },
@@ -46,13 +47,36 @@ function rulesFromNavTree(): RouteLabelRule[] {
 
 const DYNAMIC_RULES: RouteLabelRule[] = [
   { prefix: "/projects/", label: "项目详情", group: "项目" },
-  { prefix: "/knowledge/", label: "知识库", group: "构建" },
-  { prefix: "/delivery/builds/", label: "构建详情", group: "交付" },
+  { prefix: "/knowledge/", label: "知识库", group: "知识库" },
+  { prefix: "/delivery/builds/", label: "构建详情", group: "产品交付" },
+];
+
+const KUBERNETES_RULES: RouteLabelRule[] = [
+  { prefix: "/plugins/kubernetes/clusters", label: "集群管理", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/workloads", label: "工作负载", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/nodes", label: "节点管理", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/namespaces", label: "命名空间", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/networks", label: "网络资源", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/gateway", label: "Gateway", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/configs", label: "配置", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/storages", label: "存储", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/access-controls", label: "访问控制", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/records", label: "终端审计", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/diagnosis", label: "应用诊断", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/backup", label: "备份", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/chat", label: "AI Chat", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/cloudtty", label: "CloudTTY", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/openkruise", label: "OpenKruise", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/kruise-rollouts", label: "Kruise Rollouts", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/kubeblocks", label: "KubeBlocks", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/kubevela", label: "KubeVela", group: "Kubernetes" },
+  { prefix: "/plugins/kubernetes/velaux", label: "Velaux", group: "Kubernetes" },
 ];
 
 export const ROUTE_LABEL_RULES: RouteLabelRule[] = [
   ...STATIC_RULES,
   ...rulesFromNavTree(),
+  ...KUBERNETES_RULES,
   ...DYNAMIC_RULES,
 ];
 

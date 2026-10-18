@@ -67,10 +67,11 @@ export function EnvironmentSyncResourceEditorModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={`配置内容 · ${projectName}`}
-      description="查看并修改将同步到目标环境的 Kubernetes 资源配置。修改会随任务保存，并在执行时发布。"
+      title={projectName}
+      description="编辑将同步到目标环境的 Kubernetes 配置，保存后随任务一起发布。"
       size="xl"
       priority
+      panelClassName="pwf-env-sync-editor-modal"
       footer={
         <div className="modal-footer-actions">
           <button type="button" className="btn-secondary" onClick={onClose}>
@@ -109,7 +110,7 @@ export function EnvironmentSyncResourceEditorModal({
                       className={`pwf-env-sync-editor-item${active ? " pwf-env-sync-editor-item--active" : ""}`}
                       onClick={() => setSelectedKey(key)}
                     >
-                      <span className="badge badge-neutral">{item.kind}</span>
+                      <span className="pwf-env-sync-editor-item-kind">{item.kind}</span>
                       <span className="pwf-env-sync-editor-item-name">{item.name}</span>
                       {edited ? <span className="pwf-env-sync-editor-edited">已修改</span> : null}
                     </button>
@@ -121,8 +122,10 @@ export function EnvironmentSyncResourceEditorModal({
               {selected ? (
                 <>
                   <div className="pwf-env-sync-editor-pane-head">
-                    <strong className="mono">{selected.kind}/{selected.name}</strong>
-                    {selected.note ? <p className="text-xs text-muted">{selected.note}</p> : null}
+                    <span className="pwf-env-sync-editor-pane-title">
+                      {selected.kind}/{selected.name}
+                    </span>
+                    {selected.note ? <p className="pwf-env-sync-editor-pane-note">{selected.note}</p> : null}
                   </div>
                   {selected.managed_pull_secret ? (
                     <p className="pwf-env-sync-editor-status">

@@ -6,8 +6,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { governance } from "@sparkops/web-sdk";
 import type { MenuTreeVM } from "@sparkops/contracts/governance";
 import { NavGroup } from "@/components/layout/NavGroup";
-import { menuTreeToNavGroups } from "@/components/layout/menu-tree-nav";
-import { WORKPLACE_NAV_ITEM, filterBusinessNavGroups } from "@/components/layout/nav-tree";
+import {
+  menuTreeToNavEntries,
+  type SidebarNavEntry,
+} from "@/components/layout/menu-tree-nav";
+import {
+  KNOWLEDGE_NAV_ITEM,
+  WORKPLACE_NAV_ITEM,
+  filterBusinessNavGroups,
+} from "@/components/layout/nav-tree";
 import { useShellContext } from "@/components/layout/shell-context";
 
 interface PlatformNavProps {
@@ -21,6 +28,12 @@ const icons = {
       <rect x="14" y="3" width="7" height="7" rx="1" />
       <rect x="3" y="14" width="7" height="7" rx="1" />
       <rect x="14" y="14" width="7" height="7" rx="1" />
+    </svg>
+  ),
+  knowledge: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M4 5.5A2.5 2.5 0 016.5 3H11v16H6.5A2.5 2.5 0 004 21.5v-16Z" strokeLinejoin="round" />
+      <path d="M20 5.5A2.5 2.5 0 0017.5 3H13v16h4.5a2.5 2.5 0 012.5 2.5v-16Z" strokeLinejoin="round" />
     </svg>
   ),
   application: (
@@ -72,23 +85,46 @@ function resolveGroupIcon(key?: string) {
   return icons[key as keyof typeof icons] ?? icons.default;
 }
 
-function toSidebarGroups(tree: MenuTreeVM[]) {
-  return menuTreeToNavGroups(tree).map((group) => ({
-    ...group,
-    defaultCollapsed: collapsedByDefault.has(group.id) || group.defaultCollapsed,
-  }));
+function toSidebarEntries(tree: MenuTreeVM[]): SidebarNavEntry[] {
+  return menuTreeToNavEntries(tree).map((entry) => (
+    entry.type === "group"
+      ? {
+          ...entry,
+          defaultCollapsed: collapsedByDefault.has(entry.iconKey) || entry.defaultCollapsed,
+        }
+      : entry
+  ));
+}
+
+function directNavLink(
+  item: { id: string; href: string; label: string },
+  pathname: string,
+) {
+  const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+  return (
+    <Link
+      key={item.id}
+      href={item.href}
+      className={`nav-group-trigger ${active ? "nav-group-trigger-active" : ""}`}
+      aria-current={active ? "page" : undefined}
+    >
+      <span className="nav-icon">{item.href === WORKPLACE_NAV_ITEM.href ? icons.dashboard : icons.knowledge}</span>
+      <span className="flex-1 text-left">{item.label}</span>
+    </Link>
+  );
 }
 
 export function PlatformNav({ workspaceId }: PlatformNavProps) {
   const pathname = usePathname();
   const { entitlements } = useShellContext();
-  const [menuTree, setMenuTree] = useState<MenuTreeVM[] | null>(null);
+  const [menuTree, setMenuTree] = useState<MenuTreeVM[] | null | undefined>(undefined);
 
   const loadNav = useCallback(async () => {
     if (!workspaceId) {
       setMenuTree(null);
       return;
     }
+    setMenuTree(undefined);
     try {
       setMenuTree(await governance.listNavMenus(workspaceId));
     } catch {
@@ -108,43 +144,69 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
     return () => window.removeEventListener("sparkops:menus-updated", onMenusUpdated);
   }, [loadNav]);
 
-  const dynamicGroups = useMemo(
-    () => (menuTree ? toSidebarGroups(menuTree) : null),
+  const dynamicEntries = useMemo(
+    () => (
+      menuTree === undefined
+        ? []
+        : menuTree
+          ? toSidebarEntries(menuTree)
+          : null
+    ),
     [menuTree],
   );
 
-  const fallbackGroups = useMemo(
-    () =>
-      filterBusinessNavGroups({ showSuperAdmin: false, entitlements }).map((group) => ({
-        ...group,
-        defaultCollapsed: group.defaultCollapsed ?? false,
-      })),
+  const fallbackEntries = useMemo(() => {
+    const groups = filterBusinessNavGroups({ showSuperAdmin: false, entitlements });
+    const primary = groups.filter((group) => group.id !== "ops-infra");
+    const settings = groups.filter((group) => group.id === "ops-infra");
+    const entries: SidebarNavEntry[] = primary.map((group) => ({
+      type: "group",
+      id: group.id,
+      iconKey: group.id,
+      label: group.label,
+      items: group.items,
+      defaultCollapsed: group.defaultCollapsed ?? false,
+    }));
+    if (!entitlements || entitlements.knowledge) {
+      entries.push({
+        type: "link",
+        id: KNOWLEDGE_NAV_ITEM.href,
+        href: KNOWLEDGE_NAV_ITEM.href,
+        label: KNOWLEDGE_NAV_ITEM.label,
+      });
+    }
+    entries.push(...settings.map((group) => ({
+      type: "group" as const,
+      id: group.id,
+      iconKey: group.id,
+      label: group.label,
+      items: group.items,
+      defaultCollapsed: group.defaultCollapsed ?? false,
+    })));
+    return entries;
+  },
     [entitlements],
   );
 
-  const groups = dynamicGroups ?? fallbackGroups;
-  const workplaceActive =
-    pathname === WORKPLACE_NAV_ITEM.href || pathname.startsWith(`${WORKPLACE_NAV_ITEM.href}/`);
+  const entries = dynamicEntries ?? fallbackEntries;
 
   return (
     <>
-      <Link
-        href={WORKPLACE_NAV_ITEM.href}
-        className={`nav-group-trigger ${workplaceActive ? "nav-group-trigger-active" : ""}`}
-        aria-current={workplaceActive ? "page" : undefined}
-      >
-        <span className="nav-icon">{icons.dashboard}</span>
-        <span className="flex-1 text-left">{WORKPLACE_NAV_ITEM.label}</span>
-      </Link>
+      {directNavLink({ id: WORKPLACE_NAV_ITEM.href, ...WORKPLACE_NAV_ITEM }, pathname)}
 
-      {groups.map((group) => (
-        <NavGroup
-          key={group.id + group.label}
-          label={group.label}
-          icon={resolveGroupIcon(group.id)}
-          items={group.items}
-          pathname={pathname}
-        />
+      {entries.map((entry) => (
+        entry.type === "link"
+          ? directNavLink(entry, pathname)
+          : (
+              <NavGroup
+                key={entry.id}
+                label={entry.label}
+                icon={resolveGroupIcon(entry.iconKey)}
+                items={entry.items}
+                pathname={pathname}
+                defaultOpen={entry.iconKey === "application"}
+              />
+            )
       ))}
     </>
   );
