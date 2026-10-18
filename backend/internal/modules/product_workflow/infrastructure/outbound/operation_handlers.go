@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httperror"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
@@ -84,7 +85,7 @@ func NewWebhookHandler(resolver WebhookResolver, client *http.Client) messaging.
 		req.Header.Set("X-SparkOps-Idempotency-Key", operation.IdempotencyKey)
 		resp, err := client.Do(req)
 		if err != nil {
-			return err
+			return httperror.SanitizeNetwork(err)
 		}
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()

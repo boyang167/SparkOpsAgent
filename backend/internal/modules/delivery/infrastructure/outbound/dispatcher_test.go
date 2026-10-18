@@ -18,6 +18,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"gorm.io/gorm"
 )
 
@@ -77,6 +79,29 @@ func TestDispatcherPostsJSONAndToken(t *testing.T) {
 	if body["event"] != "Build" {
 		t.Fatalf("body: %#v", body)
 	}
+}
+
+func TestDispatcherSanitizesWebhookURLFromReturnAndLog(t *testing.T) {
+	const secret = "legacy-secret-token"
+	const endpoint = "https://127.0.0.1:1/hook?token=" + secret
+	core, logs := observer.New(zap.WarnLevel)
+	d := &Dispatcher{
+		client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		})},
+		logger: zap.New(core),
+	}
+
+	err := d.dispatch(context.Background(), persistence.WebhookRecord{
+		ID: kernel.NewWebhookID(), URL: endpoint,
+	}, map[string]any{"event": "Build"})
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NotContains(t, err.Error(), secret)
+	require.NotContains(t, err.Error(), endpoint)
+	require.NotContains(t, logs.All()[0].ContextMap()["error"], secret)
+	require.NotContains(t, logs.All()[0].ContextMap()["error"], endpoint)
 }
 
 func TestDispatcherSchedulesWebhookOperationWithoutHTTP(t *testing.T) {

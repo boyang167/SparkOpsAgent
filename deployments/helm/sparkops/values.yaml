@@ -65,6 +65,7 @@ api:
     pollInterval: 1s
     batchSize: 100
     lockTimeout: 1m
+    publishTimeout: 30s
   jenkins:
     url: ""
     user: ""

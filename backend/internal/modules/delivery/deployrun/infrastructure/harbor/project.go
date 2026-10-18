@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httperror"
 )
 
 const defaultTimeout = 15 * time.Second
@@ -95,7 +97,7 @@ func doRequest(
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, httperror.SanitizeNetwork(err)
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4096))

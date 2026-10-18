@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httperror"
 )
 
 type Client struct {
@@ -56,7 +57,7 @@ func (c *Client) ListBranches(ctx context.Context, projectName string) ([]port.G
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("gitlab request: %w", err)
+		return nil, fmt.Errorf("gitlab request: %w", httperror.SanitizeNetwork(err))
 	}
 	defer resp.Body.Close()
 

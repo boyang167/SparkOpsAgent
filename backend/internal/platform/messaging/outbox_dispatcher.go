@@ -20,10 +20,11 @@ type systemClock struct{}
 func (systemClock) Now() time.Time { return time.Now().UTC() }
 
 type OutboxDispatcherConfig struct {
-	Owner        string
-	BatchSize    int
-	Lease        time.Duration
-	PollInterval time.Duration
+	Owner          string
+	BatchSize      int
+	Lease          time.Duration
+	PollInterval   time.Duration
+	PublishTimeout time.Duration
 }
 
 type DispatcherLifecycle interface {
@@ -63,6 +64,9 @@ func NewOutboxDispatcher(
 	}
 	if config.PollInterval <= 0 {
 		config.PollInterval = time.Second
+	}
+	if config.PublishTimeout <= 0 {
+		config.PublishTimeout = 30 * time.Second
 	}
 	if clock == nil {
 		clock = systemClock{}
@@ -113,7 +117,10 @@ func (d *OutboxDispatcher) dispatchOnce(claimCtx, executionCtx context.Context) 
 	}
 
 	for _, record := range records {
-		if err := d.transport.Publish(executionCtx, record.Envelope); err != nil {
+		publishCtx, cancelPublish := context.WithTimeout(executionCtx, d.config.PublishTimeout)
+		err := d.transport.Publish(publishCtx, record.Envelope)
+		cancelPublish()
+		if err != nil {
 			d.logger.Warn(
 				"event outbox publish failed",
 				zap.String("event_id", record.ID),
@@ -125,33 +132,41 @@ func (d *OutboxDispatcher) dispatchOnce(claimCtx, executionCtx context.Context) 
 				d.metrics.EventPublish.WithLabelValues("failure").Inc()
 			}
 			next := d.clock.Now().Add(retryDelay(record.Attempts))
-			rescheduleErr := d.store.Reschedule(executionCtx, record.ID, d.config.Owner, err.Error(), next)
+			rescheduleCtx, cancelReschedule := context.WithTimeout(executionCtx, d.config.PublishTimeout)
+			rescheduleErr := d.store.Reschedule(rescheduleCtx, record.ID, d.config.Owner, err.Error(), next)
+			cancelReschedule()
 			if rescheduleErr != nil {
 				d.recordDispatcherError("reschedule")
 			}
 			dispatchErrors = append(dispatchErrors, errors.Join(err, rescheduleErr))
-			continue
-		}
-		if d.metrics != nil {
-			d.metrics.EventPublish.WithLabelValues("success").Inc()
-		}
-		if err := d.store.MarkPublished(executionCtx, record.ID, d.config.Owner, d.clock.Now()); err != nil {
-			d.logger.Error(
-				"event outbox mark published failed",
-				zap.String("event_id", record.ID),
-				zap.String("event_type", record.Type),
-				zap.Int("attempt", record.Attempts),
-				zap.Error(err),
-			)
-			d.recordDispatcherError("mark_published")
-			dispatchErrors = append(dispatchErrors, fmt.Errorf("mark event %s published: %w", record.ID, err))
 		} else {
-			d.logger.Debug(
-				"event outbox published",
-				zap.String("event_id", record.ID),
-				zap.String("event_type", record.Type),
-				zap.Int("attempt", record.Attempts),
-			)
+			if d.metrics != nil {
+				d.metrics.EventPublish.WithLabelValues("success").Inc()
+			}
+			markCtx, cancelMark := context.WithTimeout(executionCtx, d.config.PublishTimeout)
+			markErr := d.store.MarkPublished(markCtx, record.ID, d.config.Owner, d.clock.Now())
+			cancelMark()
+			if markErr != nil {
+				d.logger.Error(
+					"event outbox mark published failed",
+					zap.String("event_id", record.ID),
+					zap.String("event_type", record.Type),
+					zap.Int("attempt", record.Attempts),
+					zap.Error(markErr),
+				)
+				d.recordDispatcherError("mark_published")
+				dispatchErrors = append(dispatchErrors, fmt.Errorf("mark event %s published: %w", record.ID, markErr))
+			} else {
+				d.logger.Debug(
+					"event outbox published",
+					zap.String("event_id", record.ID),
+					zap.String("event_type", record.Type),
+					zap.Int("attempt", record.Attempts),
+				)
+			}
+		}
+		if claimCtx.Err() != nil {
+			break
 		}
 	}
 	return errors.Join(dispatchErrors...)

@@ -47,6 +47,8 @@ spec:
               value: {{ .Values.api.outbox.batchSize | quote }}
             - name: OUTBOX_LOCK_TIMEOUT
               value: {{ .Values.api.outbox.lockTimeout | quote }}
+            - name: OUTBOX_PUBLISH_TIMEOUT
+              value: {{ .Values.api.outbox.publishTimeout | quote }}
             - name: RUNTIME_DRIVER
               value: {{ .Values.api.env.RUNTIME_DRIVER | quote }}
             - name: DELIVERY_DRIVER

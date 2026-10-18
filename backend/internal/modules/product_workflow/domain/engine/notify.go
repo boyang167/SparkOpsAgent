@@ -18,6 +18,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/repository"
 	workflowoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/outbound"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httperror"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -321,7 +322,7 @@ func dispatchNotifications(ctx context.Context, notes []model.WorkflowNotificati
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
 		if err != nil {
-			return err
+			return httperror.SanitizeNetwork(err)
 		}
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
@@ -467,17 +468,26 @@ func sendMail(cfg ChannelConfig, targets, subject, body, idempotencyKey string) 
 	if from == "" {
 		from = cfg.SMTPUser
 	}
-	messageID := ""
-	if idempotencyKey != "" {
-		messageID = "Message-ID: <" + url.QueryEscape(idempotencyKey) + "@sparkops>\r\n"
-	}
-	msg := []byte("From: " + from + "\r\nTo: " + strings.Join(recipients, ",") + "\r\nSubject: " + subject + "\r\n" + messageID + "\r\n" + body)
+	msg := buildSMTPMessage(from, recipients, subject, body, idempotencyKey)
 	addr := fmt.Sprintf("%s:%d", host, port)
 	var auth smtp.Auth
 	if cfg.SMTPUser != "" {
 		auth = smtp.PlainAuth("", cfg.SMTPUser, cfg.SMTPPassword, host)
 	}
 	return smtp.SendMail(addr, auth, from, recipients, msg)
+}
+
+func buildSMTPMessage(from string, recipients []string, subject, body, idempotencyKey string) []byte {
+	messageID := ""
+	if idempotencyKey != "" {
+		messageID = "Message-ID: <" + url.QueryEscape(idempotencyKey) + "@sparkops>\r\n"
+	}
+	return []byte(
+		"From: " + from + "\r\n" +
+			"To: " + strings.Join(recipients, ",") + "\r\n" +
+			"Subject: " + subject + "\r\n" +
+			messageID + "\r\n" + body,
+	)
 }
 
 func sendFeishuUsers(ctx context.Context, cfg ChannelConfig, targets, text, idempotencyKey string) error {
@@ -526,7 +536,7 @@ func sendFeishuUsersWithClient(
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			return err
+			return httperror.SanitizeNetwork(err)
 		}
 		var result struct {
 			Code int    `json:"code"`
@@ -563,7 +573,7 @@ func feishuTenantToken(ctx context.Context, appID, secret string, client *http.C
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", httperror.SanitizeNetwork(err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

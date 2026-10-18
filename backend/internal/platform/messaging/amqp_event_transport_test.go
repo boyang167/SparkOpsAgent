@@ -808,6 +808,45 @@ func TestEventTransportRedialsPublisherWhenConnectionCannotOpenChannel(t *testin
 	require.Equal(t, 1, recoveredPublisher.channelCalls)
 }
 
+func TestEventTransportCloseInterruptsContinuousPublisherRedial(t *testing.T) {
+	attempted := make(chan struct{}, 1)
+	transport := newAMQPEventTransportWithConnections(
+		&stubEventConnection{},
+		&stubEventConnection{},
+		func(context.Context) (eventConnection, error) {
+			select {
+			case attempted <- struct{}{}:
+			default:
+			}
+			return nil, errors.New("broker unreachable")
+		},
+	)
+	published := make(chan error, 1)
+	go func() {
+		published <- transport.Publish(context.Background(), eventTransportTestEnvelope())
+	}()
+	select {
+	case <-attempted:
+	case <-time.After(time.Second):
+		t.Fatal("publisher redial was not attempted")
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- transport.Close() }()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Close did not interrupt continuous publisher redial")
+	}
+	select {
+	case err := <-published:
+		require.ErrorContains(t, err, "closed")
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("publisher redial did not observe transport close")
+	}
+}
+
 func TestEventTransportReconnectsConsumerConnectionAndRestoresEverySubscription(t *testing.T) {
 	publisherConnection := &stubEventConnection{}
 	initialTopology := newStubEventChannel(nil)

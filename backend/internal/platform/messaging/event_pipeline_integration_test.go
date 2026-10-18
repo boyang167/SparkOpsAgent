@@ -319,7 +319,7 @@ func TestEventPipelineFanoutAndCompetingInstancesConvergeOnce(t *testing.T) {
 	}, 10*time.Second, 20*time.Millisecond)
 }
 
-func TestEventPipelineTemporaryFailureUsesEveryRetryTier(t *testing.T) {
+func TestEventPipelineTemporaryFailureRetriesBeyondFourthAttemptWithoutDLQ(t *testing.T) {
 	f := newMessagingIntegrationFixture(t)
 	var calls sync.Map
 	succeeded := make(chan struct{}, 1)
@@ -327,7 +327,7 @@ func TestEventPipelineTemporaryFailureUsesEveryRetryTier(t *testing.T) {
 		key := event.(integrationEvent).Key
 		value, _ := calls.LoadOrStore(key, new(atomic.Int32))
 		call := value.(*atomic.Int32).Add(1)
-		if key == "eventual-success" && call == 5 {
+		if call == 7 {
 			succeeded <- struct{}{}
 			return nil
 		}
@@ -348,31 +348,22 @@ func TestEventPipelineTemporaryFailureUsesEveryRetryTier(t *testing.T) {
 		return consumer.Handle(ctx, subscription, envelope, attempts)
 	}))
 	successEnvelope := f.envelope(t, "eventual-success")
-	deadEnvelope := f.envelope(t, "dead-letter")
 	require.NoError(t, transport.Publish(context.Background(), successEnvelope))
-	require.NoError(t, transport.Publish(context.Background(), deadEnvelope))
 
 	channel, err := f.connection.Channel()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = channel.Close() })
-	require.Eventually(t, func() bool {
-		queue, inspectErr := channel.QueueInspect(topologyFor(subscription).DeadLetter.Name)
-		return inspectErr == nil && queue.Messages == 1
-	}, 10*time.Second, 20*time.Millisecond)
 	select {
 	case <-succeeded:
 	case <-time.After(10 * time.Second):
 		t.Fatal("message did not traverse retry TTL queues to eventual success")
 	}
-	deadLetter, ok, err := channel.Get(topologyFor(subscription).DeadLetter.Name, false)
+	deadLetter, err := channel.QueueInspect(topologyFor(subscription).DeadLetter.Name)
 	require.NoError(t, err)
-	require.True(t, ok)
-	require.EqualValues(t, maxEventRetryAttempts, deadLetter.Headers[eventAttemptsHeader])
-	require.NoError(t, deadLetter.Ack(false))
+	require.Zero(t, deadLetter.Messages)
 	seenMu.Lock()
 	defer seenMu.Unlock()
-	require.Equal(t, []int{0, 1, 2, 3, 4}, seen[successEnvelope.ID])
-	require.Equal(t, []int{0, 1, 2, 3, 4}, seen[deadEnvelope.ID])
+	require.Equal(t, []int{0, 1, 2, 3, 4, 5, 6}, seen[successEnvelope.ID])
 }
 
 func declareShortRetryTopology(t *testing.T, connection *amqp.Connection, subscription Subscription) {

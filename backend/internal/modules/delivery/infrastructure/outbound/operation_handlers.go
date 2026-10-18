@@ -13,6 +13,7 @@ import (
 	deploymodel "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/model"
 	deployrepo "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/persistence"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httperror"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"gorm.io/gorm"
@@ -159,7 +160,7 @@ func (h *WebhookHandler) Handle(ctx context.Context, operation messaging.Operati
 	}
 	resp, err := h.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("send webhook: %w", err)
+		return fmt.Errorf("send webhook: %w", httperror.SanitizeNetwork(err))
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()

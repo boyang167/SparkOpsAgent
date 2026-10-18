@@ -16,6 +16,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/domain/model"
 	workflowoutbound "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/outbound"
 	gitpkg "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/git"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httperror"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -106,7 +107,7 @@ func (r Reporter) CurrentStatus(ctx context.Context, payload workflowoutbound.Gi
 	req.Header.Set("PRIVATE-TOKEN", token)
 	resp, err := r.client().Do(req)
 	if err != nil {
-		return "", err
+		return "", httperror.SanitizeNetwork(err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

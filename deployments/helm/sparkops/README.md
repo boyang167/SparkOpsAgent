@@ -88,9 +88,19 @@ The local `inmemory` driver remains supported for development and unit tests,
 but production validation rejects it. RabbitMQ outages leave HTTP readiness
 healthy because committed Outbox rows can safely accumulate; treat the service
 as degraded and alert on backlog/age. PostgreSQL failure makes `/ready` fail.
+Outbox publish/confirm and completion bookkeeping use
+`api.outbox.publishTimeout` (default `30s`), so shutdown cannot wait forever on
+an unreachable broker.
 
 Single-node RabbitMQ (including CI and Docker Compose) validates protocol and
 recovery behavior only. It does not validate quorum availability.
+
+SMTP workflow notifications are at-least-once, non-destructive side effects.
+If an SMTP server accepts a message and the process crashes before the
+Operation Outbox row is marked completed, recovery can send the same message
+again. SparkOps supplies a stable `Message-ID` derived from the operation
+idempotency key, but standard SMTP cannot guarantee receiver-side deduplication;
+operators must allow for duplicate email delivery.
 
 ## Metrics and alerts
 

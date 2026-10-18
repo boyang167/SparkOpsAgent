@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -34,6 +35,17 @@ func TestMailOperationRejectsMissingRecipientsPermanently(t *testing.T) {
 
 	require.Error(t, err)
 	require.True(t, messaging.IsPermanent(err))
+}
+
+func TestSMTPMessageIDIsStableForOperationIdempotencyKey(t *testing.T) {
+	key := "event-1:subscriber:product-workflow.mail.send.v1:mail-a"
+
+	first := buildSMTPMessage("from@example.com", []string{"ops@example.com"}, "subject", "body", key)
+	second := buildSMTPMessage("from@example.com", []string{"ops@example.com"}, "subject", "body", key)
+
+	require.Equal(t, first, second)
+	require.Equal(t, 1, bytes.Count(first, []byte("Message-ID:")))
+	require.Contains(t, string(first), "Message-ID: <event-1%3Asubscriber%3Aproduct-workflow.mail.send.v1%3Amail-a@sparkops>")
 }
 
 func TestFeishuOperationParsesHTTP200BusinessError(t *testing.T) {

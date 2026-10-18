@@ -167,9 +167,10 @@ func TestFactoryAMQPAssemblyUsesSeparateEventTransportAndStableRuntimeIdentity(t
 			EventExchange: "event.exchange",
 		},
 		Outbox: config.OutboxConfig{
-			PollInterval: time.Second,
-			BatchSize:    42,
-			LockTimeout:  time.Minute,
+			PollInterval:   time.Second,
+			BatchSize:      42,
+			LockTimeout:    time.Minute,
+			PublishTimeout: 17 * time.Second,
 		},
 	}}
 
@@ -207,6 +208,7 @@ func TestFactoryAMQPAssemblyUsesSeparateEventTransportAndStableRuntimeIdentity(t
 	dispatcher := bus.dispatcher.(*OutboxDispatcher)
 	require.Equal(t, "instance-a.runtime-a.event-outbox", dispatcher.config.Owner)
 	require.Equal(t, 42, dispatcher.config.BatchSize)
+	require.Equal(t, 17*time.Second, dispatcher.config.PublishTimeout)
 	operationDispatcher := factory.Operations.dispatcher.(*OperationDispatcher)
 	require.Equal(t, "instance-a", operationDispatcher.config.Owner)
 	require.Equal(t, "runtime-a", operationDispatcher.runtimeID)

@@ -85,6 +85,7 @@ type fakeEventTransport struct {
 	publishErr         error
 	published          []events.Envelope
 	retries            []RetryDelay
+	retryAttempts      []int
 	deadLetters        []string
 	deadLetterAttempts []int
 	declared           []Subscription
@@ -113,10 +114,11 @@ func (t *fakeEventTransport) Consume(_ context.Context, subscription Subscriptio
 	return nil
 }
 
-func (t *fakeEventTransport) PublishRetry(_ context.Context, _ Subscription, _ events.Envelope, delay RetryDelay, _ int) error {
+func (t *fakeEventTransport) PublishRetry(_ context.Context, _ Subscription, _ events.Envelope, delay RetryDelay, attempts int) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.retries = append(t.retries, delay)
+	t.retryAttempts = append(t.retryAttempts, attempts)
 	return t.publishErr
 }
 
@@ -233,6 +235,63 @@ func TestDispatcherCloseStopsClaimsAndWaitsForInflightConfirm(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Close did not return after the publisher confirm completed")
 	}
+}
+
+func TestDispatcherCloseBoundsPermanentlyBlockedInflightPublish(t *testing.T) {
+	record := dispatcherRecord("event-1")
+	store := &dispatcherStore{records: []persistence.OutboxRecord{record}}
+	transport := &blockingPublishTransport{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	dispatcher := NewOutboxDispatcher(store, transport, OutboxDispatcherConfig{
+		Owner: "worker-a", BatchSize: 1, Lease: time.Minute, PollInterval: time.Hour,
+		PublishTimeout: 40 * time.Millisecond,
+	}, fixedClock{now: record.OccurredAt}, newDispatcherTestMetrics(t))
+	require.NoError(t, dispatcher.Start(context.Background()))
+	<-transport.started
+
+	closed := make(chan struct{})
+	go func() {
+		_ = dispatcher.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Close did not bound a permanently blocked publisher")
+	}
+	require.Equal(t, []string{record.ID}, store.rescheduled)
+}
+
+func TestDispatcherPublishAttemptPreservesContextValuesAndHasDeadline(t *testing.T) {
+	type contextKey string
+	const key contextKey = "trace"
+	record := dispatcherRecord("event-1")
+	store := &dispatcherStore{records: []persistence.OutboxRecord{record}}
+	transport := &contextInspectingPublishTransport{
+		fakeEventTransport: fakeEventTransport{},
+		key:                key,
+	}
+	dispatcher := NewOutboxDispatcher(store, transport, OutboxDispatcherConfig{
+		Owner: "worker-a", BatchSize: 1, Lease: time.Minute, PublishTimeout: time.Second,
+	}, fixedClock{now: record.OccurredAt}, nil)
+
+	require.NoError(t, dispatcher.DispatchOnce(context.WithValue(context.Background(), key, "trace-1")))
+	require.Equal(t, "trace-1", transport.value)
+	require.True(t, transport.hasDeadline)
+}
+
+func TestDispatcherDefaultsPublishTimeout(t *testing.T) {
+	dispatcher := NewOutboxDispatcher(
+		&dispatcherStore{},
+		&fakeEventTransport{},
+		OutboxDispatcherConfig{Owner: "worker-a"},
+		nil,
+		nil,
+	)
+
+	require.Equal(t, 30*time.Second, dispatcher.config.PublishTimeout)
 }
 
 func TestDispatcherCloseCancelsBlockedClaim(t *testing.T) {
@@ -482,4 +541,17 @@ func (t *blockingPublishTransport) Publish(ctx context.Context, envelope events.
 		t.published = append(t.published, envelope)
 		return nil
 	}
+}
+
+type contextInspectingPublishTransport struct {
+	fakeEventTransport
+	key         any
+	value       any
+	hasDeadline bool
+}
+
+func (t *contextInspectingPublishTransport) Publish(ctx context.Context, _ events.Envelope) error {
+	t.value = ctx.Value(t.key)
+	_, t.hasDeadline = ctx.Deadline()
+	return nil
 }

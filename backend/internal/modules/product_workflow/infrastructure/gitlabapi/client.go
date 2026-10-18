@@ -12,6 +12,7 @@ import (
 	"time"
 
 	gitpkg "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/git"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httperror"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 )
 
@@ -68,7 +69,7 @@ func (c HookClient) Ensure(ctx context.Context, spec HookSpec) error {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.client().Do(req)
 	if err != nil {
-		return err
+		return httperror.SanitizeNetwork(err)
 	}
 	defer resp.Body.Close()
 	payload, _ := io.ReadAll(resp.Body)
@@ -87,7 +88,7 @@ func (c HookClient) find(ctx context.Context, apiBase, project, token, hookURL s
 	req.Header.Set("PRIVATE-TOKEN", token)
 	resp, err := c.client().Do(req)
 	if err != nil {
-		return 0, err
+		return 0, httperror.SanitizeNetwork(err)
 	}
 	defer resp.Body.Close()
 	payload, _ := io.ReadAll(resp.Body)
@@ -185,7 +186,7 @@ func gitlabJSONWithClient(ctx context.Context, method, endpoint, token string, b
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return httperror.SanitizeNetwork(err)
 	}
 	defer resp.Body.Close()
 	payload, _ := io.ReadAll(resp.Body)

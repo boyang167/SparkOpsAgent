@@ -113,9 +113,10 @@ type AMQPConfig struct {
 }
 
 type OutboxConfig struct {
-	PollInterval time.Duration `yaml:"poll_interval"`
-	BatchSize    int           `yaml:"batch_size"`
-	LockTimeout  time.Duration `yaml:"lock_timeout"`
+	PollInterval   time.Duration `yaml:"poll_interval"`
+	BatchSize      int           `yaml:"batch_size"`
+	LockTimeout    time.Duration `yaml:"lock_timeout"`
+	PublishTimeout time.Duration `yaml:"publish_timeout"`
 }
 
 type K8sConfig struct {
@@ -313,6 +314,13 @@ func (c *Config) applyEnvOverrides() error {
 		}
 		c.Messaging.Outbox.LockTimeout = duration
 	}
+	if v := os.Getenv("OUTBOX_PUBLISH_TIMEOUT"); v != "" {
+		duration, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("OUTBOX_PUBLISH_TIMEOUT: %w", err)
+		}
+		c.Messaging.Outbox.PublishTimeout = duration
+	}
 	if v := os.Getenv("KUBECONFIG"); v != "" {
 		c.K8s.KubeconfigPath = v
 	}
@@ -417,6 +425,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Messaging.Outbox.LockTimeout == 0 {
 		c.Messaging.Outbox.LockTimeout = time.Minute
+	}
+	if c.Messaging.Outbox.PublishTimeout == 0 {
+		c.Messaging.Outbox.PublishTimeout = 30 * time.Second
 	}
 	if c.Runtime.Driver == "" {
 		c.Runtime.Driver = "k8s"

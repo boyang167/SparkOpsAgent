@@ -60,17 +60,20 @@ messaging:
 	require.Equal(t, 2*time.Second, cfg.Messaging.Outbox.PollInterval)
 	require.Equal(t, 25, cfg.Messaging.Outbox.BatchSize)
 	require.Equal(t, 2*time.Minute, cfg.Messaging.Outbox.LockTimeout)
+	require.Equal(t, 30*time.Second, cfg.Messaging.Outbox.PublishTimeout)
 
 	t.Setenv("AMQP_EVENT_EXCHANGE", "env.events")
 	t.Setenv("OUTBOX_POLL_INTERVAL", "3s")
 	t.Setenv("OUTBOX_BATCH_SIZE", "50")
 	t.Setenv("OUTBOX_LOCK_TIMEOUT", "90s")
+	t.Setenv("OUTBOX_PUBLISH_TIMEOUT", "12s")
 	cfg, err = config.Load(path)
 	require.NoError(t, err)
 	require.Equal(t, "env.events", cfg.Messaging.AMQP.EventExchange)
 	require.Equal(t, 3*time.Second, cfg.Messaging.Outbox.PollInterval)
 	require.Equal(t, 50, cfg.Messaging.Outbox.BatchSize)
 	require.Equal(t, 90*time.Second, cfg.Messaging.Outbox.LockTimeout)
+	require.Equal(t, 12*time.Second, cfg.Messaging.Outbox.PublishTimeout)
 }
 
 func TestMessagingDefaults(t *testing.T) {
@@ -83,6 +86,7 @@ func TestMessagingDefaults(t *testing.T) {
 	require.Equal(t, time.Second, cfg.Messaging.Outbox.PollInterval)
 	require.Equal(t, 100, cfg.Messaging.Outbox.BatchSize)
 	require.Equal(t, time.Minute, cfg.Messaging.Outbox.LockTimeout)
+	require.Equal(t, 30*time.Second, cfg.Messaging.Outbox.PublishTimeout)
 }
 
 func TestMessagingEnvironmentOverridesRejectInvalidValues(t *testing.T) {
@@ -97,6 +101,7 @@ func TestMessagingEnvironmentOverridesRejectInvalidValues(t *testing.T) {
 		{name: "poll interval", key: "OUTBOX_POLL_INTERVAL", value: "never"},
 		{name: "batch size", key: "OUTBOX_BATCH_SIZE", value: "many"},
 		{name: "lock timeout", key: "OUTBOX_LOCK_TIMEOUT", value: "never"},
+		{name: "publish timeout", key: "OUTBOX_PUBLISH_TIMEOUT", value: "never"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(tc.key, tc.value)
@@ -137,14 +142,18 @@ func TestValidateMessagingOutboxValues(t *testing.T) {
 	cfg.Messaging.AMQP.URL = "amqp://localhost"
 	cfg.Messaging.AMQP.EventExchange = "sparkops.events"
 	cfg.Messaging.Outbox = config.OutboxConfig{
-		PollInterval: time.Second,
-		BatchSize:    100,
-		LockTimeout:  time.Minute,
+		PollInterval:   time.Second,
+		BatchSize:      100,
+		LockTimeout:    time.Minute,
+		PublishTimeout: 30 * time.Second,
 	}
 
 	require.NoError(t, cfg.Validate())
 	cfg.Messaging.Outbox.BatchSize = 0
 	require.ErrorContains(t, cfg.Validate(), "messaging.outbox.batch_size")
+	cfg.Messaging.Outbox.BatchSize = 100
+	cfg.Messaging.Outbox.PublishTimeout = -time.Second
+	require.ErrorContains(t, cfg.Validate(), "messaging.outbox.publish_timeout")
 }
 
 func validConfig() *config.Config {

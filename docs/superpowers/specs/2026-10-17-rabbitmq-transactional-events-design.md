@@ -30,6 +30,7 @@ PostgreSQL 事务不能与 Jenkins、Kubernetes、Webhook 等外部系统形成�
 - 外部 API 支持幂等键时，使用事件 ID 或派生操作 ID 保证效果一次。
 - 外部 API 不支持幂等键时，执行前查询状态、使用持久化状态机并定期对账，不能承诺数学意义上的绝对一次。
 - Webhook 携带稳定事件 ID，由接收方负责幂等。
+- 标准 SMTP 没有可查询的幂等提交协议；服务端接受邮件后、Operation Outbox 标记完成前若进程崩溃，恢复执行可能重复发送。邮件通知因此属于至少一次、非破坏性副作用；稳定 `Message-ID`/操作幂等键只帮助接收端去重，不构成 exactly-once 保证。
 
 ## 非目标
 
@@ -275,6 +276,7 @@ messaging:
     poll_interval: 1s
     batch_size: 100
     lock_timeout: 1m
+    publish_timeout: 30s
 ```
 
 `exchange` 继续服务现有异步任务 Queue；`event_exchange` 固定使用 topic 类型。首期重试层级按本设计固定，不增加无必要的动态配置。
@@ -295,7 +297,7 @@ messaging:
 关闭顺序：
 
 1. 停止领取新 Outbox 和 Operation Outbox。
-2. 等待在途 Publisher Confirm。
+2. 等待在途 Publisher Confirm；每次 Publish/Mark/Reschedule 受 `publish_timeout` 限制，RabbitMQ 永久不可达时关闭仍在确定上界内结束。
 3. 停止消费者领取新消息。
 4. 等待当前数据库事务完成。
 5. 关闭 RabbitMQ channel 和 connection。

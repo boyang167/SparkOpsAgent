@@ -99,7 +99,7 @@ func TestReplayMandatoryReturnDoesNotAckDLQ(t *testing.T) {
 	}, 3*time.Second, 20*time.Millisecond)
 }
 
-func TestRetryExhaustionDLQAttemptsSurviveCLIReplay(t *testing.T) {
+func TestPermanentErrorAtAttemptFourSurvivesCLIReplay(t *testing.T) {
 	amqpURL := requireDLQIntegrationEnv(t, "AMQP_URL")
 	connection, channel := openDLQIntegrationChannel(t, amqpURL)
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -130,7 +130,7 @@ func TestRetryExhaustionDLQAttemptsSurviveCLIReplay(t *testing.T) {
 		Version:    1,
 		Subscriber: subscriber,
 		Handler: func(context.Context, events.Event) error {
-			return errors.New("temporary")
+			return messaging.Permanent(errors.New("invalid business payload"))
 		},
 	}
 	require.NoError(t, transport.Consume(
@@ -140,7 +140,22 @@ func TestRetryExhaustionDLQAttemptsSurviveCLIReplay(t *testing.T) {
 			return consumer.Handle(ctx, subscription, delivered, attempts)
 		},
 	))
-	require.NoError(t, transport.Publish(context.Background(), envelope))
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	require.NoError(t, channel.PublishWithContext(
+		context.Background(),
+		"",
+		mainQueue,
+		false,
+		false,
+		amqp.Publishing{
+			Headers:      amqp.Table{"x-sparkops-attempts": int32(4)},
+			MessageId:    envelope.ID,
+			ContentType:  "application/json",
+			DeliveryMode: amqp.Persistent,
+			Body:         body,
+		},
+	))
 	require.Eventually(t, func() bool {
 		queue, inspectErr := channel.QueueInspect(dlq)
 		return inspectErr == nil && queue.Messages == 1

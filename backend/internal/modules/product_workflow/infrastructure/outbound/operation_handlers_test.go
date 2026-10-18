@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/stretchr/testify/require"
 )
 
 type staticWebhookResolver struct {
@@ -43,6 +45,35 @@ func TestWebhookHandlerTreatsRequestTimeoutAsTemporaryAndForwardsIdempotency(t *
 	if gotKey != "event-1:subscriber:type:target" {
 		t.Fatalf("idempotency key = %q", gotKey)
 	}
+}
+
+func TestWebhookHandlerSanitizesURLFromNetworkError(t *testing.T) {
+	const secret = "workflow-secret-token"
+	const endpoint = "https://127.0.0.1:1/hook?access_token=" + secret
+	payload, err := json.Marshal(NotificationPayload{
+		EventID: "event-1", NoteID: "hook-a", Timeout: time.Second,
+	})
+	require.NoError(t, err)
+	client := &http.Client{Transport: workflowRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, context.DeadlineExceeded
+	})}
+
+	err = NewWebhookHandler(
+		staticWebhookResolver{url: endpoint, body: json.RawMessage(`{}`)},
+		client,
+	)(context.Background(), messaging.Operation{Payload: payload})
+
+	require.Error(t, err)
+	require.False(t, messaging.IsPermanent(err))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NotContains(t, err.Error(), secret)
+	require.NotContains(t, err.Error(), endpoint)
+}
+
+type workflowRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f workflowRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func TestNotificationHandlerPassesIdempotencyKeyToSender(t *testing.T) {

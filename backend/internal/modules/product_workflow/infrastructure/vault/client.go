@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httperror"
 )
 
 type Client struct {
@@ -34,7 +36,7 @@ func (c Client) Read(ctx context.Context, secretPath string) (string, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", httperror.SanitizeNetwork(err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
@@ -43,8 +45,8 @@ func (c Client) Read(ctx context.Context, secretPath string) (string, error) {
 	}
 	var payload struct {
 		Data struct {
-			Data map[string]any `json:"data"`
-			Value string `json:"value"`
+			Data  map[string]any `json:"data"`
+			Value string         `json:"value"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {

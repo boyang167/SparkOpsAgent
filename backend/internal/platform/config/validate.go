@@ -74,6 +74,9 @@ func (c *Config) Validate() error {
 		if c.Messaging.Outbox.LockTimeout <= 0 {
 			return fmt.Errorf("messaging.outbox.lock_timeout must be greater than zero")
 		}
+		if c.Messaging.Outbox.PublishTimeout <= 0 {
+			return fmt.Errorf("messaging.outbox.publish_timeout must be greater than zero")
+		}
 	default:
 		return fmt.Errorf("unsupported messaging.driver: %s", c.Messaging.Driver)
 	}

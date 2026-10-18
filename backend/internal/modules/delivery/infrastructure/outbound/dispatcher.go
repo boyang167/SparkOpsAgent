@@ -13,6 +13,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/application/command"
 	deliveryevent "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/persistence"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httperror"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
@@ -97,20 +98,19 @@ func (d *Dispatcher) dispatch(ctx context.Context, hook persistence.WebhookRecor
 	}
 	resp, err := d.client.Do(req)
 	if err != nil {
+		safeErr := httperror.SanitizeNetwork(err)
 		if d.logger != nil {
 			d.logger.Warn("webhook post failed",
 				zap.String("webhook_id", hook.ID.String()),
-				zap.String("url", hook.URL),
-				zap.Error(err),
+				zap.Error(safeErr),
 			)
 		}
-		return err
+		return safeErr
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode >= 300 && d.logger != nil {
 		d.logger.Warn("webhook post rejected",
 			zap.String("webhook_id", hook.ID.String()),
-			zap.String("url", hook.URL),
 			zap.Int("status", resp.StatusCode),
 		)
 	}
