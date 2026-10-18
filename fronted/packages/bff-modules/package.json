@@ -20,6 +20,7 @@
     "./platform": "./src/platform/index.ts",
     "./product": "./src/product/index.ts",
     "./secret": "./src/secret/index.ts",
+    "./mcp": "./src/mcp/index.ts",
     "./plugins": "./src/plugins/index.ts"
   },
   "scripts": {

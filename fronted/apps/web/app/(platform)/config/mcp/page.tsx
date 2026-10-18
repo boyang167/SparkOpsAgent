@@ -13,9 +13,9 @@ export default function McpIntegrationPage() {
       <PageHeader
         eyebrow="Config"
         title="MCP 集成"
-        description="通过 Model Context Protocol 让 Cursor、Claude Desktop 等 AI 客户端调用 SparkOps 能力。"
+        description="连接 Cursor、Claude Desktop 等 AI 客户端。"
         actions={
-          <Link href="/admin/api-tokens" className="btn btn-ghost btn-sm">
+          <Link href="/admin/api-tokens" className="btn-ghost btn-sm">
             管理 API Token
           </Link>
         }

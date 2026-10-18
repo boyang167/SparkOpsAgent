@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"time"
 
 	agentquery "github.com/sparkops/sparkops-agent/backend/internal/modules/agent/application/query"
 	agentacl "github.com/sparkops/sparkops-agent/backend/internal/modules/agent/infrastructure/acl"
@@ -14,8 +15,19 @@ import (
 	knowledgeacl "github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge/infrastructure/acl"
 	knowledgepersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/mcp/application"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/mcp/domain"
 	mcphttp "github.com/sparkops/sparkops-agent/backend/internal/modules/mcp/interface/http"
+	adminacl "github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/infrastructure/acl"
+	adminpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/infrastructure/persistence"
+	productcommand "github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/command"
+	productquery "github.com/sparkops/sparkops-agent/backend/internal/modules/product/application/query"
+	productacl "github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/acl"
+	productpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/product/infrastructure/persistence"
+	pwfquery "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/application/query"
+	pwfacl "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/acl"
+	pwfpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/product_workflow/infrastructure/persistence"
 	workspacequery "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/query"
+	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
 	workspaceacl "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/acl"
 	workspacepersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
@@ -64,29 +76,58 @@ func (m *Module) Register(c *appctx.Container) error {
 	knowledge := runtimeacl.NewKnowledgeACL(c.DB)
 	hub := runtimestream.NewHub()
 
-	toolExecutor := application.NewToolExecutor(
-		workspacequery.NewListProjectsHandler(projectRepo, projectMemberRepo, wsChecker, c.PermissionChecker, memberLookup),
-		knowledgequery.NewListKnowledgeBasesHandler(kbRepo, kbWsChecker),
-		knowledgequery.NewSearchDocumentsHandler(kbRepo, kbWsChecker),
-		agentquery.NewListAgentsHandler(agentRepo, projectChecker),
-		runtimecommand.NewStartChatHandler(
+	registry := domain.NewRegistry()
+	application.RegisterBuiltinTools(registry, application.BuiltinDeps{
+		ListProjects: workspacequery.NewListProjectsHandler(projectRepo, projectMemberRepo, wsChecker, c.PermissionChecker, memberLookup),
+		GetProject: workspacequery.NewGetProjectHandler(projectRepo, projectMemberRepo, wsChecker, c.PermissionChecker, memberLookup),
+		ListKBs:      knowledgequery.NewListKnowledgeBasesHandler(kbRepo, kbWsChecker),
+		SearchDocs:   knowledgequery.NewSearchDocumentsHandler(kbRepo, kbWsChecker),
+		ListAgents:   agentquery.NewListAgentsHandler(agentRepo, projectChecker),
+		StartChat: runtimecommand.NewStartChatHandler(
 			conversations, messages, runs, agents, knowledge, c.LLMClient, hub, c.EventBus, c.Transactor, c.Logger,
 		),
-		runs,
-	)
+		Runs:          runs,
+		ChatWaitLimit: 30 * time.Second,
+	})
 
-	handler := mcphttp.NewHandler(application.NewRPCHandler(toolExecutor))
+	productRepo := productpersistence.NewProductRepository(c.DB)
+	sprintRepo := productpersistence.NewSprintRepository(c.DB)
+	productWsChecker := productacl.NewTenantACL(c.DB)
+	workflowRepo := pwfpersistence.NewProductWorkflowRepository(c.DB)
+	productChecker := pwfacl.NewProductChecker(c.DB)
+	application.RegisterActionTools(registry, application.ActionDeps{
+		ListProducts:    productquery.NewListProductsHandler(productRepo, productWsChecker),
+		ListSprints:     productquery.NewListSprintsHandler(productRepo, sprintRepo),
+		ListWorkflows:   pwfquery.NewListProductWorkflowsHandler(workflowRepo, productChecker),
+		WorkflowTrigger: c.WorkflowRunTrigger,
+		CreateWorkItem:  productcommand.NewCreateWorkItemHandler(productRepo, sprintRepo, nil),
+	})
+
+	adminRepo := adminpersistence.NewAdminRepository(c.DB)
+	pluginContext := sparkplugin.PluginContext{
+		Logger:   c.Logger,
+		DB:       c.DB,
+		Clusters: sparkplugin.NewFactory(adminacl.NewClusterCredentialSource(adminRepo)),
+	}
+	application.RegisterPluginTools(registry, pluginContext)
+
+	entsProvider := application.DBEntitlementsProvider{DB: c.DB}
+	toolExecutor := application.NewToolExecutor(registry, c.PermissionChecker, entsProvider)
+	listTools := application.NewListToolsHandler(registry, c.PermissionChecker, entsProvider)
+	handler := mcphttp.NewHandler(
+		application.NewRPCHandler(toolExecutor, listTools),
+		listTools,
+	)
 
 	auth := authn.RequireAuth(m.tokens)
 	ws := httpx.RequireWorkspace()
 	wsMember := authz.RequireWorkspaceMember(c.WorkspaceMemberChecker)
 	projectRead := authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead)
-	chatUse := authz.RequirePermission(c.PermissionChecker, authz.PermChatUse)
 
 	c.Engine.GET("/api/v1/mcp/tools",
 		auth, ws, wsMember, projectRead, handler.ListTools)
 	c.Engine.POST("/api/v1/mcp/rpc",
-		auth, ws, wsMember, projectRead, chatUse, handler.HandleRPC)
+		auth, ws, wsMember, projectRead, handler.HandleRPC)
 
 	return nil
 }

@@ -83,6 +83,11 @@ menus:
     path: /plugins/kubernetes/velaux
     component: plugins/kubernetes/velaux/page
     parent: /plugins/kubernetes
+mcp_tools:
+  - name: list_kubernetes_clusters
+    description: List Kubernetes clusters authorized for the current workspace.
+    permission: project:read
+    tier: discovery
 apis:
   - method: GET
     path: /api/v1/plugins/kubernetes/ready

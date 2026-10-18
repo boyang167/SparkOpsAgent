@@ -17,15 +17,16 @@ var (
 )
 
 type Manifest struct {
-	ID          string       `yaml:"id"`
-	Version     string       `yaml:"version"`
-	DisplayName string       `yaml:"display_name"`
-	RoutePrefix string       `yaml:"route_prefix"`
-	Entitlement string       `yaml:"entitlement"`
-	Menus       []MenuSpec   `yaml:"menus"`
-	APIs        []APISpec    `yaml:"apis"`
-	Frontend    FrontendSpec `yaml:"frontend"`
-	Assets      []string     `yaml:"assets"`
+	ID          string         `yaml:"id"`
+	Version     string         `yaml:"version"`
+	DisplayName string         `yaml:"display_name"`
+	RoutePrefix string         `yaml:"route_prefix"`
+	Entitlement string         `yaml:"entitlement"`
+	Menus       []MenuSpec     `yaml:"menus"`
+	APIs        []APISpec      `yaml:"apis"`
+	MCPTools    []MCPToolSpec  `yaml:"mcp_tools"`
+	Frontend    FrontendSpec   `yaml:"frontend"`
+	Assets      []string       `yaml:"assets"`
 }
 
 type MenuSpec struct {
@@ -39,6 +40,13 @@ type APISpec struct {
 	Method   string `yaml:"method"`
 	Path     string `yaml:"path"`
 	ReadOnly bool   `yaml:"read_only"`
+}
+
+type MCPToolSpec struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Permission  string `yaml:"permission"`
+	Tier        string `yaml:"tier"`
 }
 
 type FrontendSpec struct {
@@ -107,6 +115,12 @@ func (m *Manifest) Validate() error {
 		}
 	}
 
+	for _, tool := range m.MCPTools {
+		if err := validateMCPTool(tool); err != nil {
+			return err
+		}
+	}
+
 	if len(m.Frontend.Pages) == 0 {
 		return invalid("at least one frontend page is required")
 	}
@@ -161,6 +175,21 @@ func validateMenuParent(menu MenuSpec, menuPaths map[string]struct{}, parentMap 
 			return invalid(fmt.Sprintf("menu parent chain for %q exceeds maximum depth of 3", menu.Path))
 		}
 		current = parent
+	}
+	return nil
+}
+
+func validateMCPTool(tool MCPToolSpec) error {
+	if tool.Name == "" {
+		return invalid("mcp tool name is required")
+	}
+	if tool.Description == "" {
+		return invalid(fmt.Sprintf("mcp tool %q description is required", tool.Name))
+	}
+	switch tool.Tier {
+	case "", "discovery", "read", "action":
+	default:
+		return invalid(fmt.Sprintf("mcp tool %q tier %q is invalid", tool.Name, tool.Tier))
 	}
 	return nil
 }

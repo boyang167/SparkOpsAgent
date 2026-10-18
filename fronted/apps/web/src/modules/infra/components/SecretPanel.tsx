@@ -363,7 +363,7 @@ export function SecretPanel({ workspaceId }: SecretPanelProps) {
             </select>
           </label>
           <div className="secret-search-actions">
-            <button type="button" className="btn secret-btn-primary">
+            <button type="button" className="btn-secondary">
               <SearchIcon />
               搜索
             </button>
@@ -374,7 +374,7 @@ export function SecretPanel({ workspaceId }: SecretPanelProps) {
           </div>
         </div>
         <div className="secret-toolbar-actions">
-          <button type="button" className="btn secret-btn-primary" onClick={openCreate}>
+          <button type="button" className="btn" onClick={openCreate}>
             <PlusIcon />
             创建配置
           </button>
@@ -394,7 +394,7 @@ export function SecretPanel({ workspaceId }: SecretPanelProps) {
         ) : filtered.length === 0 ? (
           <div className="secret-empty-state">
             <p>暂无密钥配置</p>
-            <button type="button" className="btn secret-btn-primary" onClick={openCreate}>
+            <button type="button" className="btn" onClick={openCreate}>
               <PlusIcon />
               创建第一个配置
             </button>
@@ -573,7 +573,7 @@ export function SecretPanel({ workspaceId }: SecretPanelProps) {
             </button>
             <button
               type="button"
-              className="btn secret-btn-primary"
+              className="btn"
               onClick={() => {
                 if (selected) {
                   setDetailOpen(false);

@@ -14,3 +14,4 @@ export * from "./platform/index";
 export * from "./product/index";
 export * from "./secret/index";
 export * from "./plugin/index";
+export * from "./mcp/index";

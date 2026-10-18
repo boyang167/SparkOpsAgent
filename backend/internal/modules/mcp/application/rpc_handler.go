@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/mcp/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -30,10 +29,11 @@ type RPCError struct {
 
 type RPCHandler struct {
 	tools *ToolExecutor
+	list  *ListToolsHandler
 }
 
-func NewRPCHandler(tools *ToolExecutor) *RPCHandler {
-	return &RPCHandler{tools: tools}
+func NewRPCHandler(tools *ToolExecutor, list *ListToolsHandler) *RPCHandler {
+	return &RPCHandler{tools: tools, list: list}
 }
 
 func (h *RPCHandler) Handle(
@@ -61,14 +61,21 @@ func (h *RPCHandler) Handle(
 	case "notifications/initialized", "initialized":
 		return h.ok(req.ID, map[string]any{})
 	case "tools/list":
-		defs := domain.AllTools()
+		defs, err := h.list.Handle(ctx, wsID, memberID)
+		if err != nil {
+			return h.err(req.ID, -32000, err.Error())
+		}
 		tools := make([]map[string]any, 0, len(defs))
 		for _, tool := range defs {
-			tools = append(tools, map[string]any{
+			entry := map[string]any{
 				"name":        tool.Name,
 				"description": tool.Description,
 				"inputSchema": tool.InputSchema,
-			})
+			}
+			if tool.Tier != "" {
+				entry["tier"] = tool.Tier
+			}
+			tools = append(tools, entry)
 		}
 		return h.ok(req.ID, map[string]any{"tools": tools})
 	case "tools/call":

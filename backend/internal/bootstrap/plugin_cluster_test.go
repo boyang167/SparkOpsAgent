@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/domain/repository"
+	adminacl "github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/infrastructure/acl"
 	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -94,7 +95,7 @@ func TestClusterCredentialSourceListsOnlyAuthorizedClusters(t *testing.T) {
 	wsID := kernel.NewWorkspaceID()
 	clusterID := kernel.NewClusterInfoID()
 	otherClusterID := kernel.NewClusterInfoID()
-	src := newClusterCredentialSource(fakeAdminClusterRepo{
+	src := adminacl.NewClusterCredentialSource(fakeAdminClusterRepo{
 		clusters: map[kernel.ClusterInfoID]*repository.ClusterInfo{
 			clusterID:      testCluster(clusterID, "prod"),
 			otherClusterID: testCluster(otherClusterID, "other"),
@@ -120,7 +121,7 @@ func TestClusterCredentialSourceGetAuthorizedLoadsFullCredentials(t *testing.T) 
 	wsID := kernel.NewWorkspaceID()
 	clusterID := kernel.NewClusterInfoID()
 	full := testCluster(clusterID, "dev")
-	src := newClusterCredentialSource(fakeAdminClusterRepo{
+	src := adminacl.NewClusterCredentialSource(fakeAdminClusterRepo{
 		clusters: map[kernel.ClusterInfoID]*repository.ClusterInfo{clusterID: full},
 		grants:   map[kernel.WorkspaceID]map[kernel.ClusterInfoID]bool{wsID: {clusterID: true}},
 	})
@@ -135,7 +136,7 @@ func TestClusterCredentialSourceGetAuthorizedLoadsFullCredentials(t *testing.T) 
 func TestClusterCredentialSourceRejectsUngrantWithoutLeakingCredentials(t *testing.T) {
 	wsID := kernel.NewWorkspaceID()
 	clusterID := kernel.NewClusterInfoID()
-	src := newClusterCredentialSource(fakeAdminClusterRepo{
+	src := adminacl.NewClusterCredentialSource(fakeAdminClusterRepo{
 		clusters: map[kernel.ClusterInfoID]*repository.ClusterInfo{clusterID: testCluster(clusterID, "prod")},
 		grants:   map[kernel.WorkspaceID]map[kernel.ClusterInfoID]bool{wsID: {}},
 	})

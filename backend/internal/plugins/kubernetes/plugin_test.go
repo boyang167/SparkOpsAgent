@@ -69,6 +69,10 @@ func TestPluginImplementsContextPlugin(t *testing.T) {
 	var _ sparkplugin.ContextPlugin = (*plugin)(nil)
 }
 
+func TestPluginImplementsMCPPlugin(t *testing.T) {
+	var _ sparkplugin.MCPPlugin = (*plugin)(nil)
+}
+
 func TestRegisterBundledDescriptor(t *testing.T) {
 	sparkplugin.ResetRegistryForTest()
 	t.Cleanup(sparkplugin.ResetRegistryForTest)

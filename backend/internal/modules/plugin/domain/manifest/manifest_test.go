@@ -78,6 +78,17 @@ func TestParse_KubernetesRecordsGETReliesOnBinderReadOnlyDefault(t *testing.T) {
 	requireAPIReadOnly(t, m.APIs, "GET", "/api/v1/plugins/kubernetes/records/:recordId", false)
 }
 
+func TestParse_KubernetesMCPTools(t *testing.T) {
+	raw, err := os.ReadFile("../../../../../internal/plugins/kubernetes/plugin.yaml")
+	require.NoError(t, err)
+
+	m, err := manifest.Parse(raw)
+	require.NoError(t, err)
+	require.Len(t, m.MCPTools, 1)
+	require.Equal(t, "list_kubernetes_clusters", m.MCPTools[0].Name)
+	require.Equal(t, "discovery", m.MCPTools[0].Tier)
+}
+
 func TestParse_ValidInlineYAML(t *testing.T) {
 	m, err := manifest.Parse([]byte(validYAML))
 	require.NoError(t, err)

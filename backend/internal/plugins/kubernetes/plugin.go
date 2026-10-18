@@ -31,6 +31,7 @@ func registerBundledDescriptor() {
 			"backend/internal/plugins/kubernetes/diagnosis/arthas.go",
 			"backend/internal/plugins/kubernetes/files/handler.go",
 			"backend/internal/plugins/kubernetes/http/clusters.go",
+			"backend/internal/plugins/kubernetes/mcp_tools.go",
 			"backend/internal/plugins/kubernetes/http/cluster_users.go",
 			"backend/internal/plugins/kubernetes/http/kubeconfig.go",
 			"backend/internal/plugins/kubernetes/http/metrics.go",

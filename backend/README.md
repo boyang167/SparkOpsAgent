@@ -135,12 +135,37 @@ Org 成员管理 API 需 `org:member:manage`；创建工作区需 `org:workspace
 
 | 能力 | 路径 | 权限 |
 |------|------|------|
-| 工具列表 | `GET /api/v1/mcp/tools` | `project:read` + 工作区成员 |
-| JSON-RPC | `POST /api/v1/mcp/rpc` | `project:read` + `chat:use` |
+| 工具列表 | `GET /api/v1/mcp/tools` | 工作区成员 + 各 Tool 自身权限过滤 |
+| JSON-RPC | `POST /api/v1/mcp/rpc` | 工作区成员 + 各 Tool 自身权限过滤 |
 
 需在平台配置中启用 **MCP 集成** 模块（`entitlements.mcp`）。鉴权使用工作区 **API Token**（Bearer）+ `X-Workspace-Id` 请求头。
 
-内置 Tools：`list_projects`、`list_knowledge_bases`、`list_agents`、`search_knowledge`、`chat_with_agent`。
+内置 Tools（Registry 单一注册源，列表按 entitlement / RBAC 过滤）：
+
+| Tool | 层级 | 权限 | 模块 |
+|------|------|------|------|
+| `list_projects` | discovery | `project:read` | — |
+| `get_project` | discovery | `project:read` | — |
+| `list_knowledge_bases` | discovery | `project:read` | knowledge |
+| `list_agents` | discovery | `agent:read` | agent |
+| `search_knowledge` | read | `project:read` | knowledge |
+| `get_chat_run` | read | `chat:use` | agent |
+| `chat_with_agent` | action | `chat:use` | agent |
+| `list_products` | discovery | `project:read` | delivery |
+| `list_product_workflows` | discovery | `project:read` | delivery |
+| `list_sprints` | discovery | `project:read` | delivery |
+| `trigger_workflow` | action | `project:write` | delivery |
+| `create_work_item` | action | `project:write` | delivery |
+
+插件 Tools（工作区启用对应插件后可见，如 `plugin:kubernetes`）：
+
+| Tool | 层级 | 权限 | 插件 |
+|------|------|------|------|
+| `list_kubernetes_clusters` | discovery | `project:read` | kubernetes |
+
+插件通过实现 `platform/plugin.MCPPlugin` 在启动时向 Registry 注册 handler；`plugin.yaml` 的 `mcp_tools` 段用于 manifest 声明与校验。
+
+`chat_with_agent` 默认立即返回 `run_id`；可选 `wait_seconds`（≤30）同步等待。轮询请用 `get_chat_run`。
 
 本地 stdio 桥接（供 Cursor / Claude Desktop）：
 

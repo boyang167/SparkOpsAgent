@@ -73,5 +73,5 @@ func TestRunInstallsPluginsAfterAuthMiddlewareBeforeRouteCollect(t *testing.T) {
 	require.Less(t, entitlementsMiddleware, pluginAuth)
 	require.Less(t, pluginAuth, installAll)
 	require.Less(t, installAll, routeCollect)
-	require.Contains(t, app, "sparkplugin.NewFactory(newClusterCredentialSource(adminRepo))")
+	require.Contains(t, app, "sparkplugin.NewFactory(adminacl.NewClusterCredentialSource(adminRepo))")
 }

@@ -42,6 +42,8 @@ import {
   type ProductUpstream,
   createSecretUpstream,
   type SecretUpstream,
+  createMcpUpstream,
+  type McpUpstream,
   createPluginUpstream,
   type PluginUpstream,
   createKubernetesPluginUpstream,
@@ -73,6 +75,7 @@ export interface BffContext {
     platform: PlatformUpstream;
     product: ProductUpstream;
     secret: SecretUpstream;
+    mcp: McpUpstream;
     plugin: PluginUpstream;
     kubernetesPlugin: KubernetesPluginUpstream;
   };
@@ -377,6 +380,7 @@ function buildBffContext(input: {
       platform: createPlatformUpstream(baseOptions),
       product: createProductUpstream(baseOptions),
       secret: createSecretUpstream(baseOptions),
+      mcp: createMcpUpstream(baseOptions),
       plugin: createPluginUpstream(baseOptions),
       kubernetesPlugin: createKubernetesPluginUpstream(baseOptions),
     },

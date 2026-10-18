@@ -22,6 +22,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/mcp"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/notification"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin"
+	adminacl "github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/infrastructure/acl"
 	adminpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/platform_admin/infrastructure/persistence"
 	pluginmod "github.com/sparkops/sparkops-agent/backend/internal/modules/plugin"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/product"
@@ -214,7 +215,7 @@ func Run(ctx context.Context) error {
 	}
 	if c.DB != nil {
 		adminRepo := adminpersistence.NewAdminRepository(c.DB)
-		pluginContext.Clusters = sparkplugin.NewFactory(newClusterCredentialSource(adminRepo))
+		pluginContext.Clusters = sparkplugin.NewFactory(adminacl.NewClusterCredentialSource(adminRepo))
 	}
 	if c.PermissionChecker != nil {
 		pluginContext.Writer = newGovernanceWriteAuthorizer(c.PermissionChecker)

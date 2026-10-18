@@ -35,6 +35,8 @@ export { createProductUpstream } from "./product";
 export type { ProductUpstream } from "./product";
 export { createSecretUpstream } from "./secret";
 export type { SecretUpstream } from "./secret";
+export { createMcpUpstream } from "./mcp";
+export type { McpUpstream } from "./mcp";
 export { createPluginUpstream } from "./plugin";
 export type { PluginUpstream } from "./plugin";
 export {

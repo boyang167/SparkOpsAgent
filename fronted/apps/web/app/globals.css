@@ -3227,37 +3227,7 @@ textarea {
 
 /* ---- Forms & buttons ---- */
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
-  border: none;
-  border-radius: var(--radius-pill);
-  padding: 0.625rem 1.125rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-  background: var(--primary);
-  color: #ffffff;
-  cursor: pointer;
-  box-shadow: none;
-  transition: background var(--motion-duration) var(--motion-ease), opacity var(--motion-duration) var(--motion-ease), transform var(--motion-duration) var(--motion-ease);
-}
-
-.btn:hover:not(:disabled) {
-  background: var(--primary-hover);
-  box-shadow: none;
-}
-
-.btn:active:not(:disabled) {
-  transform: scale(0.98);
-}
-
-.btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
+.btn,
 .btn-primary {
   display: inline-flex;
   align-items: center;
@@ -3268,22 +3238,25 @@ textarea {
   padding: 0.625rem 1.125rem;
   font-size: 0.875rem;
   font-weight: 600;
-  background: var(--primary);
+  background: var(--text);
   color: #ffffff;
   cursor: pointer;
   box-shadow: none;
   transition: background var(--motion-duration) var(--motion-ease), opacity var(--motion-duration) var(--motion-ease), transform var(--motion-duration) var(--motion-ease);
 }
 
+.btn:hover:not(:disabled),
 .btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover);
+  background: var(--primary);
   box-shadow: none;
 }
 
+.btn:active:not(:disabled),
 .btn-primary:active:not(:disabled) {
   transform: scale(0.98);
 }
 
+.btn:disabled,
 .btn-primary:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -14167,17 +14140,7 @@ textarea.input {
 }
 
 .secret-btn-primary {
-  display: inline-flex;
-  align-items: center;
   gap: 0.35rem;
-  background: var(--text);
-  border-color: var(--text);
-  color: #fff;
-}
-
-.secret-btn-primary:hover {
-  background: var(--primary);
-  border-color: var(--primary);
 }
 
 .secret-table-section {
@@ -14845,19 +14808,8 @@ textarea.input {
 }
 
 .project-btn-primary {
-  display: inline-flex;
-  align-items: center;
   gap: 0.35rem;
-  background: var(--text);
-  border-color: var(--text);
-  color: #fff;
   text-decoration: none;
-}
-
-.project-btn-primary:hover {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #fff;
 }
 
 .project-search-bar {
@@ -32052,7 +32004,10 @@ button.sprint-board-column-wf:hover:not(:disabled) {
 
 /* MCP integration (config/mcp) */
 .mcp-integration {
-  max-width: 48rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 40rem;
 }
 
 .mcp-integration-block {
@@ -32063,6 +32018,102 @@ button.sprint-board-column-wf:hover:not(:disabled) {
   border-radius: var(--radius-xl);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
+}
+
+.mcp-integration-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.mcp-integration-details {
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+
+.mcp-integration-details--flat {
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  border-top: none;
+}
+
+.mcp-integration-details > summary,
+.mcp-integration-details--flat > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--muted);
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.mcp-integration-details > summary::-webkit-details-marker,
+.mcp-integration-details--flat > summary::-webkit-details-marker {
+  display: none;
+}
+
+.mcp-integration-details > summary:hover,
+.mcp-integration-details--flat > summary:hover {
+  color: var(--text);
+}
+
+.mcp-integration-details[open] > summary,
+.mcp-integration-details--flat[open] > summary {
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+}
+
+.mcp-integration-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mcp-integration-tool-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mcp-integration-tool-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.mcp-integration-tool-list code {
+  flex-shrink: 0;
+  min-width: 9rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  color: var(--text);
+}
+
+.mcp-integration-tool-list span {
+  color: var(--muted);
+}
+
+.mcp-integration-tool-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.mcp-integration-tool-group-label {
+  margin: 0 0 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .mcp-integration-block-head {
@@ -32132,40 +32183,9 @@ button.sprint-board-column-wf:hover:not(:disabled) {
   word-break: break-all;
 }
 
-.mcp-integration-tools {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
-}
-
-.mcp-integration-tool {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  padding: 0.625rem 0.875rem;
-  border-radius: var(--radius-md);
-  background: var(--surface-muted);
-}
-
-.mcp-integration-tool-name {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.mcp-integration-tool-desc {
-  font-size: 0.75rem;
-  line-height: 1.45;
-  color: var(--muted);
-}
-
 .mcp-integration-code {
   margin: 0;
-  max-height: 20rem;
+  max-height: 14rem;
   padding: 1rem 1.125rem;
   overflow: auto;
   border-radius: var(--radius-lg);
@@ -32190,12 +32210,18 @@ button.sprint-board-column-wf:hover:not(:disabled) {
 }
 
 @media (max-width: 640px) {
-  .mcp-integration-tools {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .mcp-integration-block-head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .mcp-integration-tool-list li {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.125rem;
+  }
+
+  .mcp-integration-tool-list code {
+    min-width: 0;
   }
 }
