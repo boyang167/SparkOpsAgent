@@ -87,7 +87,7 @@ func doRequest(
 	}
 	req, err := http.NewRequestWithContext(ctx, method, requestURL, reader)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, httperror.SanitizeNetwork(err)
 	}
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")

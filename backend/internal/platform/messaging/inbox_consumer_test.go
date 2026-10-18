@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -149,6 +150,22 @@ func TestInboxConsumerRetriesTemporaryErrorForeverAtLastBackoffTier(t *testing.T
 	require.Equal(t, expected, transport.retries)
 	require.Equal(t, []int{1, 2, 3, 4, 5, 6}, transport.retryAttempts)
 	require.Empty(t, transport.deadLetters)
+}
+
+func TestInboxConsumerSaturatesAttemptsAcrossConsecutiveRetries(t *testing.T) {
+	consumer, _, _, transport, envelope := newInboxTestConsumer(t)
+	subscription := inboxSubscription(func(context.Context, events.Event) error {
+		return errors.New("temporary")
+	})
+
+	require.NoError(t, consumer.Handle(context.Background(), subscription, envelope, math.MaxInt32))
+	require.NoError(t, consumer.Handle(context.Background(), subscription, envelope, math.MaxInt32))
+
+	require.Equal(t, []RetryDelay{
+		RetryDelay(30 * time.Minute),
+		RetryDelay(30 * time.Minute),
+	}, transport.retries)
+	require.Equal(t, []int{math.MaxInt32, math.MaxInt32}, transport.retryAttempts)
 }
 
 func TestInboxConsumerDoesNotAckWhenRetryPublishIsUnconfirmed(t *testing.T) {

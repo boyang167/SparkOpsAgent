@@ -63,7 +63,7 @@ func (c HookClient) Ensure(ctx context.Context, spec HookSpec) error {
 	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(raw))
 	if err != nil {
-		return err
+		return httperror.SanitizeNetwork(err)
 	}
 	req.Header.Set("PRIVATE-TOKEN", spec.Token)
 	req.Header.Set("Content-Type", "application/json")
@@ -83,7 +83,7 @@ func (c HookClient) find(ctx context.Context, apiBase, project, token, hookURL s
 	endpoint := fmt.Sprintf("%s/api/v4/projects/%s/hooks", apiBase, project)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return 0, err
+		return 0, httperror.SanitizeNetwork(err)
 	}
 	req.Header.Set("PRIVATE-TOKEN", token)
 	resp, err := c.client().Do(req)
@@ -180,7 +180,7 @@ func gitlabJSON(ctx context.Context, method, endpoint, token string, body []byte
 func gitlabJSONWithClient(ctx context.Context, method, endpoint, token string, body []byte, client *http.Client) error {
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return httperror.SanitizeNetwork(err)
 	}
 	req.Header.Set("PRIVATE-TOKEN", token)
 	req.Header.Set("Content-Type", "application/json")

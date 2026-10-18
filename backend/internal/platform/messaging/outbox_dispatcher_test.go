@@ -18,6 +18,7 @@ type dispatcherStore struct {
 	mu          sync.Mutex
 	records     []persistence.OutboxRecord
 	claimed     map[string]string
+	claimLimits []int
 	published   []string
 	rescheduled []string
 	markErr     error
@@ -26,11 +27,77 @@ type dispatcherStore struct {
 	statsErr    error
 }
 
+type leasedTestRecord struct {
+	owner     string
+	lockedAt  time.Time
+	published bool
+}
+
+type leaseAwareDispatcherStore struct {
+	*dispatcherStore
+	state        map[string]leasedTestRecord
+	secondMarked chan struct{}
+	releaseMark  chan struct{}
+}
+
+func (s *leaseAwareDispatcherStore) Claim(
+	_ context.Context,
+	owner string,
+	limit int,
+	now time.Time,
+	lease time.Duration,
+) ([]persistence.OutboxRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.claimLimits = append(s.claimLimits, limit)
+	var result []persistence.OutboxRecord
+	for _, record := range s.records {
+		state := s.state[record.ID]
+		if state.published ||
+			(state.owner != "" && state.lockedAt.After(now.Add(-lease))) {
+			continue
+		}
+		state.owner = owner
+		state.lockedAt = now
+		s.state[record.ID] = state
+		record.LockedBy = owner
+		result = append(result, record)
+		if len(result) == limit {
+			break
+		}
+	}
+	return result, nil
+}
+
+func (s *leaseAwareDispatcherStore) MarkPublished(
+	_ context.Context,
+	id, owner string,
+	_ time.Time,
+) error {
+	s.mu.Lock()
+	state := s.state[id]
+	if state.owner != owner {
+		s.mu.Unlock()
+		return persistence.ErrLeaseLost
+	}
+	state.published = true
+	s.state[id] = state
+	s.published = append(s.published, id)
+	shouldBlock := id == "event-2" && owner == "worker-a"
+	s.mu.Unlock()
+	if shouldBlock {
+		close(s.secondMarked)
+		<-s.releaseMark
+	}
+	return nil
+}
+
 func (s *dispatcherStore) Insert(context.Context, events.Envelope) error { return nil }
 
 func (s *dispatcherStore) Claim(_ context.Context, owner string, limit int, _ time.Time, _ time.Duration) ([]persistence.OutboxRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.claimLimits = append(s.claimLimits, limit)
 	if s.claimErr != nil {
 		return nil, s.claimErr
 	}
@@ -294,6 +361,90 @@ func TestDispatcherDefaultsPublishTimeout(t *testing.T) {
 	require.Equal(t, 30*time.Second, dispatcher.config.PublishTimeout)
 }
 
+func TestDispatcherRuntimeClaimsOneRecordAndDrainsWithoutPolling(t *testing.T) {
+	store := &dispatcherStore{records: []persistence.OutboxRecord{
+		dispatcherRecord("event-1"),
+		dispatcherRecord("event-2"),
+	}}
+	transport := &fakeEventTransport{}
+	dispatcher := NewOutboxDispatcher(
+		store,
+		transport,
+		OutboxDispatcherConfig{
+			Owner: "worker-a", BatchSize: 100, Lease: time.Millisecond,
+			PollInterval: time.Hour,
+		},
+		fixedClock{now: time.Now().UTC()},
+		newDispatcherTestMetrics(t),
+	)
+
+	require.NoError(t, dispatcher.Start(context.Background()))
+	require.Eventually(t, func() bool {
+		transport.mu.Lock()
+		defer transport.mu.Unlock()
+		return len(transport.published) == 2
+	}, time.Second, time.Millisecond)
+	require.NoError(t, dispatcher.Close())
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.GreaterOrEqual(t, len(store.claimLimits), 2)
+	require.Equal(t, []int{1, 1}, store.claimLimits[:2])
+}
+
+func TestDispatcherRuntimeDoesNotLeaseUnstartedRecordsDuringSlowPublishing(t *testing.T) {
+	records := []persistence.OutboxRecord{
+		dispatcherRecord("event-1"),
+		dispatcherRecord("event-2"),
+		dispatcherRecord("event-3"),
+	}
+	store := &leaseAwareDispatcherStore{
+		dispatcherStore: &dispatcherStore{records: records},
+		state:           make(map[string]leasedTestRecord),
+		secondMarked:    make(chan struct{}),
+		releaseMark:     make(chan struct{}),
+	}
+	lease := time.Millisecond
+	firstTransport := &slowEventTransport{delay: 2 * time.Millisecond}
+	first := NewOutboxDispatcher(
+		store,
+		firstTransport,
+		OutboxDispatcherConfig{
+			Owner: "worker-a", BatchSize: 100, Lease: lease,
+			PollInterval: time.Hour,
+		},
+		fixedClock{now: time.Now().UTC()},
+		newDispatcherTestMetrics(t),
+	)
+	require.NoError(t, first.Start(context.Background()))
+	<-store.secondMarked
+
+	secondTransport := &slowEventTransport{delay: 2 * time.Millisecond}
+	second := NewOutboxDispatcher(
+		store,
+		secondTransport,
+		OutboxDispatcherConfig{Owner: "worker-b", BatchSize: 100, Lease: lease},
+		fixedClock{now: time.Now().UTC().Add(time.Second)},
+		nil,
+	)
+	require.NoError(t, second.DispatchOnce(context.Background()))
+	close(store.releaseMark)
+	require.Eventually(t, func() bool {
+		firstTransport.mu.Lock()
+		defer firstTransport.mu.Unlock()
+		return len(firstTransport.published) == 2
+	}, time.Second, time.Millisecond)
+	require.NoError(t, first.Close())
+
+	published := append([]events.Envelope(nil), firstTransport.published...)
+	published = append(published, secondTransport.published...)
+	counts := make(map[string]int)
+	for _, envelope := range published {
+		counts[envelope.ID]++
+	}
+	require.Equal(t, map[string]int{"event-1": 1, "event-2": 1, "event-3": 1}, counts)
+}
+
 func TestDispatcherCloseCancelsBlockedClaim(t *testing.T) {
 	store := &blockingClaimOutboxStore{
 		dispatcherStore: &dispatcherStore{},
@@ -548,6 +699,19 @@ type contextInspectingPublishTransport struct {
 	key         any
 	value       any
 	hasDeadline bool
+}
+
+type slowEventTransport struct {
+	fakeEventTransport
+	delay time.Duration
+}
+
+func (t *slowEventTransport) Publish(_ context.Context, envelope events.Envelope) error {
+	time.Sleep(t.delay)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.published = append(t.published, envelope)
+	return nil
 }
 
 func (t *contextInspectingPublishTransport) Publish(ctx context.Context, _ events.Envelope) error {

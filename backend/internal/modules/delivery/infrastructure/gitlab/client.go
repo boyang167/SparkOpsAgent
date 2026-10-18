@@ -51,7 +51,7 @@ func (c *Client) ListBranches(ctx context.Context, projectName string) ([]port.G
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, err
+		return nil, httperror.SanitizeNetwork(err)
 	}
 	req.Header.Set("PRIVATE-TOKEN", c.token)
 

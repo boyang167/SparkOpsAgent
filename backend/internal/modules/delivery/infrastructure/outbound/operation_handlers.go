@@ -150,7 +150,10 @@ func (h *WebhookHandler) Handle(ctx context.Context, operation messaging.Operati
 	defer cancel()
 	req, err := http.NewRequestWithContext(sendCtx, http.MethodPost, hook.URL, bytes.NewReader(body))
 	if err != nil {
-		return messaging.Permanent(fmt.Errorf("create webhook request: %w", err))
+		return messaging.Permanent(fmt.Errorf(
+			"create webhook request: %w",
+			httperror.SanitizeNetwork(err),
+		))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-SparkOps-Event-ID", payload.EventID)

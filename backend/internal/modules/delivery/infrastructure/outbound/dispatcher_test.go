@@ -104,6 +104,23 @@ func TestDispatcherSanitizesWebhookURLFromReturnAndLog(t *testing.T) {
 	require.NotContains(t, logs.All()[0].ContextMap()["error"], endpoint)
 }
 
+func TestDispatcherSanitizesMalformedWebhookURL(t *testing.T) {
+	const secret = "request-build-secret"
+	const endpoint = "https://example.com/%zz?token=" + secret
+	core, logs := observer.New(zap.WarnLevel)
+	d := &Dispatcher{client: http.DefaultClient, logger: zap.New(core)}
+
+	err := d.dispatch(context.Background(), persistence.WebhookRecord{
+		ID: kernel.NewWebhookID(), URL: endpoint,
+	}, map[string]any{"event": "Build"})
+
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), secret)
+	require.NotContains(t, err.Error(), endpoint)
+	require.NotContains(t, logs.All()[0].ContextMap()["error"], secret)
+	require.NotContains(t, logs.All()[0].ContextMap()["error"], endpoint)
+}
+
 func TestDispatcherSchedulesWebhookOperationWithoutHTTP(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)

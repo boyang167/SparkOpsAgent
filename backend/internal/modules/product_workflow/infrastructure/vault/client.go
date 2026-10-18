@@ -27,7 +27,7 @@ func (c Client) Read(ctx context.Context, secretPath string) (string, error) {
 	endpoint := address + "/v1/" + secretPath
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return "", err
+		return "", httperror.SanitizeNetwork(err)
 	}
 	req.Header.Set("X-Vault-Token", c.Token)
 	client := c.HTTP

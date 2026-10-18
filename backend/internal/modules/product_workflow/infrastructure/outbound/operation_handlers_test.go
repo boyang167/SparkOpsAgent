@@ -70,6 +70,25 @@ func TestWebhookHandlerSanitizesURLFromNetworkError(t *testing.T) {
 	require.NotContains(t, err.Error(), endpoint)
 }
 
+func TestWebhookHandlerSanitizesMalformedURL(t *testing.T) {
+	const secret = "workflow-build-secret"
+	const endpoint = "https://example.com/%zz?access_token=" + secret
+	payload, err := json.Marshal(NotificationPayload{
+		EventID: "event-1", NoteID: "hook-a",
+	})
+	require.NoError(t, err)
+
+	err = NewWebhookHandler(
+		staticWebhookResolver{url: endpoint, body: json.RawMessage(`{}`)},
+		http.DefaultClient,
+	)(context.Background(), messaging.Operation{Payload: payload})
+
+	require.Error(t, err)
+	require.True(t, messaging.IsPermanent(err))
+	require.NotContains(t, err.Error(), secret)
+	require.NotContains(t, err.Error(), endpoint)
+}
+
 type workflowRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f workflowRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {

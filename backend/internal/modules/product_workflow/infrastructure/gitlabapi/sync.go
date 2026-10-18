@@ -102,7 +102,7 @@ func (r Reporter) CurrentStatus(ctx context.Context, payload workflowoutbound.Gi
 		url.PathEscape(projectPath) + "/repository/commits/" + url.PathEscape(payload.Commit) + "/statuses"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return "", err
+		return "", httperror.SanitizeNetwork(err)
 	}
 	req.Header.Set("PRIVATE-TOKEN", token)
 	resp, err := r.client().Do(req)

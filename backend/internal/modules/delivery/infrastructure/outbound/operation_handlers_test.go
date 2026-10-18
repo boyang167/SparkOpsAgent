@@ -113,6 +113,25 @@ func TestWebhookOperationSanitizesURLFromNetworkError(t *testing.T) {
 	require.NotContains(t, err.Error(), endpoint)
 }
 
+func TestWebhookOperationSanitizesControlCharacterURL(t *testing.T) {
+	const secret = "operation-build-secret"
+	const endpoint = "https://example.com/hook?token=" + secret + "\n"
+	hookID := kernel.NewWebhookID()
+	payload, err := json.Marshal(WebhookPayload{
+		EventID: "event-1", WebhookID: hookID.String(), Body: map[string]any{},
+	})
+	require.NoError(t, err)
+
+	err = NewWebhookHandler(webhookLookupStub{hook: &persistence.WebhookRecord{
+		ID: hookID, URL: endpoint, Enabled: true,
+	}}, http.DefaultClient).Handle(context.Background(), messaging.Operation{Payload: payload})
+
+	require.Error(t, err)
+	require.True(t, messaging.IsPermanent(err))
+	require.NotContains(t, err.Error(), secret)
+	require.NotContains(t, err.Error(), endpoint)
+}
+
 func TestWebhookOperationPersistsSanitizedLastError(t *testing.T) {
 	const secret = "persisted-secret-token"
 	const endpoint = "https://127.0.0.1:1/hook?token=" + secret

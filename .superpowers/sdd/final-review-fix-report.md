@@ -3,7 +3,7 @@
 ## Scope and baseline
 
 - Baseline: `05408d7`
-- Reviewed/fixed HEAD: `72b4107fe2ade8fb325424739270af17fb7fda6a`
+- Follow-up parent HEAD: `c5cb4e482a384feba9c8bf20431daed1da36c03c`
 - This change is limited to final-review messaging lifecycle, retry classification,
   outbound HTTP error sanitization, SMTP semantics, configuration, tests, and
   related operational documentation.
@@ -11,6 +11,24 @@
   tree changes were not staged or committed.
 
 ## Fixes
+
+### Final review P2 follow-up
+
+- Runtime Outbox dispatch claims one record per loop instead of leasing the
+  configured batch before serial publication. A successful non-empty pass
+  immediately claims again; empty passes and errors wait for `PollInterval`.
+  The public `DispatchOnce` batch behavior remains available for explicit use
+  and tests. A deterministic short-lease/slow-publish two-owner test proves an
+  unstarted later record is not leased by the first runtime worker. Existing
+  owner fencing and shutdown draining remain unchanged.
+- AMQP `x-sparkops-attempts` parsing rejects negative and unsupported values
+  as raw poison before invoking a handler, saturates large `int64` values at
+  `MaxInt32`, and saturates published retry/DLQ headers. Inbox retries also use
+  saturating increment and remain on the 30-minute tier at `MaxInt32`.
+- Request-construction errors now use the same URL sanitizer as `Client.Do`
+  errors throughout delivery and product-workflow HTTP paths. Invalid escapes
+  and control characters cannot expose full URLs or secret query parameters in
+  returned, logged, or persisted errors.
 
 ### Bounded Outbox shutdown
 
@@ -65,6 +83,12 @@
 
 Observed RED before implementation:
 
+- Runtime Outbox used the configured batch size and then slept after a
+  successful non-empty pass.
+- Attempts parser tests did not compile with an error-returning contract;
+  MaxInt32 consecutive retries overflowed, and published headers wrapped.
+- Invalid-escape and control-character webhook URLs exposed secret query
+  values in request-construction errors.
 - Outbox tests failed to compile because `PublishTimeout` did not exist.
 - Factory propagation test failed because `config.OutboxConfig.PublishTimeout`
   did not exist.
@@ -87,6 +111,11 @@ Observed GREEN after the minimal fixes:
 
 Passed:
 
+- `go test ./internal/platform/messaging/... -count=3`
+- Runtime single-claim/short-lease tests with `-count=10`
+- `go test ./internal/modules/delivery/... -count=3`
+- `go test ./internal/modules/product_workflow/... -count=3`
+- All non-plugin backend packages with `-count=1`
 - `go test ./internal/platform/messaging -count=3`
 - Critical shutdown/retry tests with `-count=10`
 - Delivery outbound/GitLab/Harbor package tests
@@ -104,3 +133,9 @@ Environment-limited:
   `AMQP_URL` and `DATABASE_DSN` are not set.
 - Helm CLI lint was not run because `helm` is not installed; the Go Helm static
   contract tests pass.
+- The literal `go test ./... -count=1` is blocked only by unrelated Kubernetes
+  plugin working-tree changes that this fix was forbidden to touch:
+  `TestKubernetesBundledFilesBuildRealInspectableZip` reports a missing bundled
+  `diagnosis/agent.go`, and `TestExecPersistsRecordingWithoutCommandOrCredentials`
+  reports an existing stream-recording assertion mismatch. The same regression
+  excluding `internal/plugins/*` passes.

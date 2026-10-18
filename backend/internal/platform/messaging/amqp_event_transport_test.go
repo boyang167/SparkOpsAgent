@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -568,6 +569,96 @@ func TestEventTransportPublishesStructuredDLQWithCurrentAttempts(t *testing.T) {
 	require.Equal(t, topologyFor(subscription).DeadLetter.Name, published.key)
 	require.EqualValues(t, 4, published.message.Headers[eventAttemptsHeader])
 	require.Equal(t, "attempts exhausted", published.message.Headers["x-sparkops-dead-letter-reason"])
+}
+
+func TestEventDeliveryAttemptsRejectsNegativeAndInvalidHeaders(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+	}{
+		{name: "negative", value: int32(-1)},
+		{name: "invalid type", value: "4"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := eventDeliveryAttempts(amqp.Table{eventAttemptsHeader: tt.value})
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestEventDeliveryAttemptsSaturatesHugeInt64(t *testing.T) {
+	attempts, err := eventDeliveryAttempts(amqp.Table{
+		eventAttemptsHeader: int64(math.MaxInt64),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, math.MaxInt32, attempts)
+}
+
+func TestEventTransportSaturatesPublishedAttemptsHeader(t *testing.T) {
+	confirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
+	close(confirmation.done)
+	channel := newStubEventChannel(confirmation)
+	transport := newAMQPEventTransport(&stubEventConnection{channels: []eventChannel{channel}})
+	subscription := Subscription{
+		EventName: "delivery.BuildCompleted", Version: 1, Subscriber: "retry.consumer",
+	}
+
+	require.NoError(t, transport.PublishRetry(
+		context.Background(),
+		subscription,
+		eventTransportTestEnvelope(),
+		RetryDelay(30*time.Minute),
+		math.MaxInt,
+	))
+
+	require.EqualValues(t, math.MaxInt32, channel.publishedRecords[0].message.Headers[eventAttemptsHeader])
+}
+
+func TestEventTransportRoutesInvalidAttemptsHeaderToRawPoisonDLQ(t *testing.T) {
+	for _, header := range []any{int32(-1), "4"} {
+		confirmation := &stubEventConfirmation{done: make(chan struct{}), acked: true}
+		close(confirmation.done)
+		publisherChannel := newStubEventChannel(confirmation)
+		consumerChannel := newStubEventChannel(nil)
+		consumerChannel.deliveries = make(chan amqp.Delivery, 1)
+		transport := newAMQPEventTransportWithConnections(
+			&stubEventConnection{channels: []eventChannel{publisherChannel}},
+			&stubEventConnection{channels: []eventChannel{consumerChannel}},
+			nil,
+		)
+		subscription := Subscription{
+			EventName: "delivery.BuildCompleted", Version: 1, Subscriber: "poison.consumer",
+		}
+		handlerCalled := make(chan struct{}, 1)
+		require.NoError(t, transport.Consume(context.Background(), subscription, func(
+			context.Context,
+			events.Envelope,
+			int,
+		) error {
+			handlerCalled <- struct{}{}
+			return nil
+		}))
+		acks := newRecordingAcknowledger()
+		body, err := json.Marshal(eventTransportTestEnvelope())
+		require.NoError(t, err)
+		consumerChannel.deliveries <- amqp.Delivery{
+			Acknowledger: acks,
+			DeliveryTag:  9,
+			Body:         body,
+			Headers:      amqp.Table{eventAttemptsHeader: header},
+		}
+
+		require.Equal(t, acknowledgement{tag: 9}, <-acks.acked)
+		require.Empty(t, handlerCalled)
+		require.Len(t, publisherChannel.publishedRecords, 1)
+		require.Contains(
+			t,
+			publisherChannel.publishedRecords[0].message.Headers["x-sparkops-dead-letter-reason"],
+			"invalid x-sparkops-attempts header",
+		)
+	}
 }
 
 func TestEventTransportRoutesStructurallyInvalidEnvelopeToSubscriberDLQ(t *testing.T) {

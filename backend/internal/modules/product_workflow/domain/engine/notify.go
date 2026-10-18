@@ -317,7 +317,7 @@ func dispatchNotifications(ctx context.Context, notes []model.WorkflowNotificati
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
-			return err
+			return httperror.SanitizeNetwork(err)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
@@ -527,7 +527,7 @@ func sendFeishuUsersWithClient(
 		endpoint := strings.TrimRight(baseURL, "/") + "/open-apis/im/v1/messages?receive_id_type=" + idType
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(raw))
 		if err != nil {
-			return err
+			return httperror.SanitizeNetwork(err)
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
@@ -568,7 +568,7 @@ func feishuTenantToken(ctx context.Context, appID, secret string, client *http.C
 	raw, _ := json.Marshal(map[string]string{"app_id": appID, "app_secret": secret})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/open-apis/auth/v3/tenant_access_token/internal", bytes.NewReader(raw))
 	if err != nil {
-		return "", err
+		return "", httperror.SanitizeNetwork(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)

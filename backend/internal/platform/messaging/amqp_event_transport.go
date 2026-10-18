@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"regexp"
 	"strings"
@@ -415,7 +416,7 @@ func (t *amqpEventTransport) PublishRetry(
 		"",
 		topology.Retry[index].Name,
 		envelope,
-		amqp.Table{eventAttemptsHeader: int32(attempts)},
+		amqp.Table{eventAttemptsHeader: saturatingAttemptsHeader(attempts)},
 	)
 }
 
@@ -448,7 +449,7 @@ func (t *amqpEventTransport) PublishDeadLetter(
 		envelope,
 		amqp.Table{
 			"x-sparkops-dead-letter-reason": reason,
-			eventAttemptsHeader:             int32(attempts),
+			eventAttemptsHeader:             saturatingAttemptsHeader(attempts),
 		},
 	)
 }
@@ -1034,7 +1035,16 @@ func (t *amqpEventTransport) consumeDeliveries(
 				)
 				continue
 			}
-			attempts := eventDeliveryAttempts(delivery.Headers)
+			attempts, err := eventDeliveryAttempts(delivery.Headers)
+			if err != nil {
+				t.routeRawPoison(
+					registration.ctx,
+					registration.subscription,
+					delivery,
+					fmt.Sprintf("invalid %s header: %v", eventAttemptsHeader, err),
+				)
+				continue
+			}
 			if err := registration.handler(registration.ctx, envelope, attempts); err != nil {
 				_ = delivery.Nack(false, true)
 				continue
@@ -1103,16 +1113,39 @@ func validateEventEnvelope(envelope events.Envelope, subscription Subscription) 
 	return nil
 }
 
-func eventDeliveryAttempts(headers amqp.Table) int {
-	switch value := headers[eventAttemptsHeader].(type) {
+func eventDeliveryAttempts(headers amqp.Table) (int, error) {
+	raw, exists := headers[eventAttemptsHeader]
+	if !exists {
+		return 0, nil
+	}
+	var value int64
+	switch typed := raw.(type) {
 	case int:
-		return value
+		value = int64(typed)
 	case int32:
-		return int(value)
+		value = int64(typed)
 	case int64:
-		return int(value)
+		value = typed
 	default:
+		return 0, fmt.Errorf("unsupported type %T", raw)
+	}
+	if value < 0 {
+		return 0, fmt.Errorf("must not be negative")
+	}
+	if value > math.MaxInt32 {
+		return math.MaxInt32, nil
+	}
+	return int(value), nil
+}
+
+func saturatingAttemptsHeader(attempts int) int32 {
+	switch {
+	case attempts < 0:
 		return 0
+	case attempts > math.MaxInt32:
+		return math.MaxInt32
+	default:
+		return int32(attempts)
 	}
 }
 

@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -108,12 +109,13 @@ func (c *InboxConsumer) Handle(
 		return subscription.Handler(handlerCtx, event)
 	})
 	if err == nil {
+		nextAttempt := saturatingIncrementAttempts(attempts)
 		c.logger.Debug(
 			"event consumed",
 			zap.String("event_id", envelope.ID),
 			zap.String("event_type", envelope.Type),
 			zap.String("subscriber", subscription.Subscriber),
-			zap.Int("attempt", attempts+1),
+			zap.Int("attempt", nextAttempt),
 			zap.Bool("duplicate", duplicate),
 		)
 		if c.metrics != nil {
@@ -130,12 +132,13 @@ func (c *InboxConsumer) Handle(
 		return err
 	}
 	if IsPermanent(err) {
+		nextAttempt := saturatingIncrementAttempts(attempts)
 		c.logger.Error(
 			"event routed to dead letter queue",
 			zap.String("event_id", envelope.ID),
 			zap.String("event_type", envelope.Type),
 			zap.String("subscriber", subscription.Subscriber),
-			zap.Int("attempt", attempts+1),
+			zap.Int("attempt", nextAttempt),
 			zap.Error(err),
 		)
 		if publishErr := c.transport.PublishDeadLetter(
@@ -155,17 +158,18 @@ func (c *InboxConsumer) Handle(
 		}
 		return nil
 	}
-	delay := RetryDelay(retryDelay(attempts + 1))
+	nextAttempt := saturatingIncrementAttempts(attempts)
+	delay := RetryDelay(retryDelay(nextAttempt))
 	c.logger.Warn(
 		"event scheduled for retry",
 		zap.String("event_id", envelope.ID),
 		zap.String("event_type", envelope.Type),
 		zap.String("subscriber", subscription.Subscriber),
-		zap.Int("attempt", attempts+1),
+		zap.Int("attempt", nextAttempt),
 		zap.Duration("delay", time.Duration(delay)),
 		zap.Error(err),
 	)
-	if publishErr := c.transport.PublishRetry(ctx, subscription, envelope, delay, attempts+1); publishErr != nil {
+	if publishErr := c.transport.PublishRetry(ctx, subscription, envelope, delay, nextAttempt); publishErr != nil {
 		if c.metrics != nil {
 			c.metrics.EventConsume.WithLabelValues(
 				subscription.Subscriber,
@@ -179,6 +183,13 @@ func (c *InboxConsumer) Handle(
 		c.metrics.EventConsume.WithLabelValues(subscription.Subscriber, "retry").Inc()
 	}
 	return nil
+}
+
+func saturatingIncrementAttempts(attempts int) int {
+	if attempts >= math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return attempts + 1
 }
 
 func (c *InboxConsumer) StopAccepting() {

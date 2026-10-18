@@ -78,7 +78,7 @@ func NewWebhookHandler(resolver WebhookResolver, client *http.Client) messaging.
 		defer cancel()
 		req, err := http.NewRequestWithContext(sendCtx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
-			return messaging.Permanent(err)
+			return messaging.Permanent(httperror.SanitizeNetwork(err))
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-SparkOps-Event-ID", payload.EventID)

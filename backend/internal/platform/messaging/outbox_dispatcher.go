@@ -81,15 +81,19 @@ func NewOutboxDispatcher(
 }
 
 func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) error {
-	return d.dispatchOnce(ctx, ctx)
+	_, err := d.dispatchOnce(ctx, ctx, d.config.BatchSize)
+	return err
 }
 
-func (d *OutboxDispatcher) dispatchOnce(claimCtx, executionCtx context.Context) error {
+func (d *OutboxDispatcher) dispatchOnce(
+	claimCtx, executionCtx context.Context,
+	claimLimit int,
+) (bool, error) {
 	if d.store == nil || d.transport == nil {
-		return fmt.Errorf("outbox dispatcher dependencies are required")
+		return false, fmt.Errorf("outbox dispatcher dependencies are required")
 	}
 	if d.config.Owner == "" {
-		return fmt.Errorf("outbox dispatcher owner is required")
+		return false, fmt.Errorf("outbox dispatcher owner is required")
 	}
 	var dispatchErrors []error
 	if err := d.refreshBacklogMetrics(claimCtx); err != nil {
@@ -101,19 +105,19 @@ func (d *OutboxDispatcher) dispatchOnce(claimCtx, executionCtx context.Context) 
 	}
 	if err := claimCtx.Err(); err != nil {
 		dispatchErrors = append(dispatchErrors, err)
-		return errors.Join(dispatchErrors...)
+		return false, errors.Join(dispatchErrors...)
 	}
 	records, err := d.store.Claim(
 		claimCtx,
 		d.config.Owner,
-		d.config.BatchSize,
+		claimLimit,
 		d.clock.Now(),
 		d.config.Lease,
 	)
 	if err != nil {
 		d.recordDispatcherError("claim")
 		dispatchErrors = append(dispatchErrors, fmt.Errorf("claim event outbox: %w", err))
-		return errors.Join(dispatchErrors...)
+		return false, errors.Join(dispatchErrors...)
 	}
 
 	for _, record := range records {
@@ -169,7 +173,7 @@ func (d *OutboxDispatcher) dispatchOnce(claimCtx, executionCtx context.Context) 
 			break
 		}
 	}
-	return errors.Join(dispatchErrors...)
+	return len(records) > 0, errors.Join(dispatchErrors...)
 }
 
 func (d *OutboxDispatcher) recordDispatcherError(stage string) {
@@ -238,7 +242,10 @@ func (d *OutboxDispatcher) run(ctx context.Context, stop <-chan struct{}, done c
 			return
 		default:
 		}
-		_ = d.dispatchOnce(ctx, context.WithoutCancel(ctx))
+		claimed, err := d.dispatchOnce(ctx, context.WithoutCancel(ctx), 1)
+		if err == nil && claimed {
+			continue
+		}
 		timer := time.NewTimer(d.config.PollInterval)
 		select {
 		case <-ctx.Done():

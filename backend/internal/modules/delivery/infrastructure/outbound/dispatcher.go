@@ -90,7 +90,14 @@ func (d *Dispatcher) dispatch(ctx context.Context, hook persistence.WebhookRecor
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, hook.URL, bytes.NewReader(body))
 	if err != nil {
-		return err
+		safeErr := httperror.SanitizeNetwork(err)
+		if d.logger != nil {
+			d.logger.Warn("webhook request creation failed",
+				zap.String("webhook_id", hook.ID.String()),
+				zap.Error(safeErr),
+			)
+		}
+		return safeErr
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if hook.Token != "" {
