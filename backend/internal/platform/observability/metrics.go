@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"sort"
 	"strconv"
 	"time"
 
@@ -57,21 +58,45 @@ type MetricSeries struct {
 	Labels map[string]string `json:"labels,omitempty"`
 }
 
+const (
+	DefaultMetricsPageSize = 20
+	MaxMetricsPageSize     = 200
+)
+
 type MetricsSummary struct {
-	HTTPRequestsTotal   []MetricSeries `json:"http_requests_total"`
-	HTTPDurationP50Ms   float64        `json:"http_duration_p50_ms"`
-	HTTPDurationP95Ms   float64        `json:"http_duration_p95_ms"`
-	HTTPDurationP99Ms   float64        `json:"http_duration_p99_ms"`
-	CollectedAt         string         `json:"collected_at"`
-	PrometheusURL       string         `json:"prometheus_url,omitempty"`
+	HTTPRequestsTotal []MetricSeries `json:"http_requests_total"`
+	Total             int            `json:"total"`
+	Page              int            `json:"page"`
+	PageSize          int            `json:"page_size"`
+	HTTPDurationP50Ms float64        `json:"http_duration_p50_ms"`
+	HTTPDurationP95Ms float64        `json:"http_duration_p95_ms"`
+	HTTPDurationP99Ms float64        `json:"http_duration_p99_ms"`
+	CollectedAt       string         `json:"collected_at"`
+	PrometheusURL     string         `json:"prometheus_url,omitempty"`
 }
 
-func GatherMetricsSummary() MetricsSummary {
-	summary := MetricsSummary{CollectedAt: time.Now().UTC().Format(time.RFC3339)}
+func GatherMetricsSummary(page, pageSize int) MetricsSummary {
+	if pageSize <= 0 {
+		pageSize = DefaultMetricsPageSize
+	}
+	if pageSize > MaxMetricsPageSize {
+		pageSize = MaxMetricsPageSize
+	}
+	if page <= 0 {
+		page = 1
+	}
+
+	summary := MetricsSummary{
+		CollectedAt: time.Now().UTC().Format(time.RFC3339),
+		Page:        page,
+		PageSize:    pageSize,
+	}
 	mfs, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {
 		return summary
 	}
+
+	allSeries := make([]MetricSeries, 0)
 	var durationSamples []float64
 	for _, mf := range mfs {
 		name := mf.GetName()
@@ -82,7 +107,7 @@ func GatherMetricsSummary() MetricsSummary {
 			}
 			switch name {
 			case "http_requests_total":
-				summary.HTTPRequestsTotal = append(summary.HTTPRequestsTotal, MetricSeries{
+				allSeries = append(allSeries, MetricSeries{
 					Label:  labels["method"] + " " + labels["path"] + " " + labels["status"],
 					Value:  metric.GetCounter().GetValue(),
 					Labels: labels,
@@ -100,6 +125,22 @@ func GatherMetricsSummary() MetricsSummary {
 		summary.HTTPDurationP95Ms = durationSamples[0]
 		summary.HTTPDurationP99Ms = durationSamples[0]
 	}
+
+	sort.Slice(allSeries, func(i, j int) bool {
+		return allSeries[i].Label < allSeries[j].Label
+	})
+
+	summary.Total = len(allSeries)
+	start := (page - 1) * pageSize
+	if start >= len(allSeries) {
+		summary.HTTPRequestsTotal = []MetricSeries{}
+		return summary
+	}
+	end := start + pageSize
+	if end > len(allSeries) {
+		end = len(allSeries)
+	}
+	summary.HTTPRequestsTotal = allSeries[start:end]
 	return summary
 }
 

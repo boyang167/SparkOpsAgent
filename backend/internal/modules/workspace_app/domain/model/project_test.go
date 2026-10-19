@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain"
+	workspaceevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
@@ -98,10 +99,17 @@ func TestProject_SubmitAndApproveReview(t *testing.T) {
 	input := completeInput()
 	p := model.NewProject(kernel.NewWorkspaceID(), mustName(t, "demo"), submitter, input)
 
+	_ = p.PullEvents()
 	require.NoError(t, p.SubmitReview(submitter))
 	require.Equal(t, model.ProjectReviewPending, p.ReviewStatus)
 	require.Equal(t, submitter, *p.SubmittedBy)
 	require.NotNil(t, p.SubmittedAt)
+	domainEvents := p.PullEvents()
+	require.Len(t, domainEvents, 1)
+	submitted, ok := domainEvents[0].(workspaceevent.ProjectReviewSubmitted)
+	require.True(t, ok)
+	require.Equal(t, p.ID, submitted.ProjectID)
+	require.Equal(t, submitter, submitted.SubmittedBy)
 
 	require.NoError(t, p.DecideReview(reviewer, model.ProjectReviewApproved, "looks good"))
 	require.Equal(t, model.ProjectReviewApproved, p.ReviewStatus)

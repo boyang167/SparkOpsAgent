@@ -71,6 +71,12 @@ func TestDefaultTemplatesRenderToValidManifests(t *testing.T) {
 			if doc["kind"] != kind {
 				t.Fatalf("%s/%s: kind %v, want %s", entry.Name(), c.label, doc["kind"], kind)
 			}
+			if kind == "Deployment" {
+				meta, _ := doc["metadata"].(map[string]any)
+				if meta["name"] != "demo" {
+					t.Fatalf("%s/%s: deployment name %v, want demo", entry.Name(), c.label, meta["name"])
+				}
+			}
 		}
 	}
 }

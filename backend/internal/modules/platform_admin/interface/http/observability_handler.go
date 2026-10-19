@@ -99,7 +99,9 @@ func (h *ObservabilityHandler) GetTrace(c *gin.Context) {
 }
 
 func (h *ObservabilityHandler) MetricsSummary(c *gin.Context) {
-	summary := observability.GatherMetricsSummary()
+	pageSize := queryIntObs(c, "page_size", observability.DefaultMetricsPageSize)
+	page := queryIntObs(c, "page", 1)
+	summary := observability.GatherMetricsSummary(page, pageSize)
 	httpx.OK(c, summary)
 }
 

@@ -6,10 +6,32 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain"
+	workspaceevent "github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 )
+
+type passthroughTransactor struct{}
+
+func (passthroughTransactor) WithinTransaction(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+type recordingEventBus struct {
+	events []events.Event
+}
+
+func (b *recordingEventBus) Publish(_ context.Context, evs ...events.Event) error {
+	b.events = append(b.events, evs...)
+	return nil
+}
+
+func (b *recordingEventBus) Subscribe(string, string, messaging.Handler) error {
+	return nil
+}
 
 type reviewProjectRepo struct {
 	project *model.Project
@@ -106,7 +128,7 @@ func TestSubmitProjectReviewRequiresProjectWriteAndSubmitPermission(t *testing.T
 	repo := &reviewProjectRepo{project: project}
 	access := reviewAccessChecker{allowed: map[string]bool{actor.String() + ":write": true}}
 	permissions := reviewPermissionChecker{allowed: map[string]bool{}}
-	handler := command.NewSubmitProjectReviewHandler(repo, access, permissions)
+	handler := command.NewSubmitProjectReviewHandler(repo, access, permissions, nil, nil)
 
 	_, err := handler.Handle(ctx, wsID, actor, project.ID)
 	require.ErrorIs(t, err, domain.ErrProjectReviewForbidden)
@@ -115,6 +137,27 @@ func TestSubmitProjectReviewRequiresProjectWriteAndSubmitPermission(t *testing.T
 	updated, err := handler.Handle(ctx, wsID, actor, project.ID)
 	require.NoError(t, err)
 	require.Equal(t, model.ProjectReviewPending, updated.ReviewStatus)
+}
+
+func TestSubmitProjectReviewPublishesDomainEvent(t *testing.T) {
+	ctx := context.Background()
+	wsID := kernel.NewWorkspaceID()
+	actor := kernel.NewMemberID()
+	project := reviewReadyProject(t, wsID, actor)
+	_ = project.PullEvents()
+	repo := &reviewProjectRepo{project: project}
+	access := reviewAccessChecker{allowed: map[string]bool{actor.String() + ":write": true}}
+	permissions := reviewPermissionChecker{allowed: map[string]bool{actor.String() + ":project:submit": true}}
+	bus := &recordingEventBus{}
+	handler := command.NewSubmitProjectReviewHandler(repo, access, permissions, bus, passthroughTransactor{})
+
+	_, err := handler.Handle(ctx, wsID, actor, project.ID)
+	require.NoError(t, err)
+	require.Len(t, bus.events, 1)
+	ev, ok := bus.events[0].(workspaceevent.ProjectReviewSubmitted)
+	require.True(t, ok)
+	require.Equal(t, project.ID, ev.ProjectID)
+	require.Equal(t, actor, ev.SubmittedBy)
 }
 
 func TestReviewProjectRequiresReadReviewPermissionAndDifferentActor(t *testing.T) {

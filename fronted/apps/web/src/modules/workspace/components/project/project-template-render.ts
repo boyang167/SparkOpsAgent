@@ -156,7 +156,7 @@ export function buildTemplateVars(
     args: project.resources?.args ?? "",
     registry_type: project.resources?.registry_type || "Harbor",
     service_name: `${name}-service`,
-    deployment_name: `${name}-deployment`,
+    deployment_name: name,
     app_label: name,
     org_name: hints.orgName?.trim() || orgSlug,
     org_slug: orgSlug,

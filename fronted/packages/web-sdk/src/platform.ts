@@ -120,9 +120,16 @@ export function getTraceDetail(workspaceId: string, traceId: string) {
   );
 }
 
-export function getMetricsSummary(workspaceId: string) {
+export function getMetricsSummary(
+  workspaceId: string,
+  query: import("@sparkops/contracts/platform").ListMetricsSummaryQuery = {},
+) {
+  const params = new URLSearchParams();
+  if (query.page) params.set("page", String(query.page));
+  if (query.page_size) params.set("page_size", String(query.page_size));
+  const qs = params.toString();
   return bffFetch<import("@sparkops/contracts/platform").MetricsSummaryVM>(
-    `/workspaces/${workspaceId}/observability/metrics/summary`,
+    `/workspaces/${workspaceId}/observability/metrics/summary${qs ? `?${qs}` : ""}`,
     { workspaceId },
   );
 }

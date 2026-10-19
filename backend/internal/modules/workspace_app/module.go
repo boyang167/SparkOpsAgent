@@ -158,7 +158,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewUpdateGeneratedTemplateHandler(repo, wsChecker, generateTemplates),
 		listProjectVersions,
 		getProjectVersion,
-		command.NewSubmitProjectReviewHandler(repo, c.ProjectAccessChecker, c.PermissionChecker),
+		command.NewSubmitProjectReviewHandler(repo, c.ProjectAccessChecker, c.PermissionChecker, c.EventBus, c.Transactor),
 		command.NewReviewProjectHandler(repo, c.ProjectAccessChecker, c.PermissionChecker),
 		memberLookup,
 	)

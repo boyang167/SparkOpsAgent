@@ -5,7 +5,7 @@ export interface NotificationStatus {
   tone: NotificationTone;
 }
 
-export type NotificationKind = "build" | "workflow" | "agent" | "other";
+export type NotificationKind = "build" | "workflow" | "agent" | "project" | "other";
 
 const STATUS_MAP: Record<string, NotificationStatus> = {
   success: { label: "成功", tone: "success" },
@@ -37,6 +37,7 @@ export function notificationKind(type: string): NotificationKind {
   if (type.startsWith("build.")) return "build";
   if (type.startsWith("workflow.")) return "workflow";
   if (type.startsWith("run.")) return "agent";
+  if (type.startsWith("project.")) return "project";
   return "other";
 }
 

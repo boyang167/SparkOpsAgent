@@ -7,7 +7,9 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/workspace_app/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/eventbus"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/policy"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -15,14 +17,20 @@ type SubmitProjectReviewHandler struct {
 	repo        repository.ProjectRepository
 	access      authz.ProjectAccessChecker
 	permissions authz.PermissionChecker
+	bus         eventbus.Bus
+	tx          postgres.Transactor
 }
 
 func NewSubmitProjectReviewHandler(
 	repo repository.ProjectRepository,
 	access authz.ProjectAccessChecker,
 	permissions authz.PermissionChecker,
+	bus eventbus.Bus,
+	tx postgres.Transactor,
 ) *SubmitProjectReviewHandler {
-	return &SubmitProjectReviewHandler{repo: repo, access: access, permissions: permissions}
+	return &SubmitProjectReviewHandler{
+		repo: repo, access: access, permissions: permissions, bus: bus, tx: tx,
+	}
 }
 
 func (h *SubmitProjectReviewHandler) Handle(
@@ -44,8 +52,29 @@ func (h *SubmitProjectReviewHandler) Handle(
 	if err := project.SubmitReview(actorID); err != nil {
 		return nil, err
 	}
+	domainEvents := project.PullEvents()
+	if h.tx != nil {
+		err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+			if err := h.repo.Update(txCtx, project); err != nil {
+				return err
+			}
+			if h.bus != nil && len(domainEvents) > 0 {
+				return h.bus.Publish(txCtx, domainEvents...)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return project, nil
+	}
 	if err := h.repo.Update(ctx, project); err != nil {
 		return nil, err
+	}
+	if h.bus != nil && len(domainEvents) > 0 {
+		if err := h.bus.Publish(ctx, domainEvents...); err != nil {
+			return nil, err
+		}
 	}
 	return project, nil
 }

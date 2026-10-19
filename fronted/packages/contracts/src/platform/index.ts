@@ -210,8 +210,18 @@ export const MetricSeriesVMSchema = z.object({
 
 export type MetricSeriesVM = z.infer<typeof MetricSeriesVMSchema>;
 
+export const ListMetricsSummaryQuerySchema = z.object({
+  page: z.number().int().min(1).optional(),
+  page_size: z.number().int().min(1).max(200).optional(),
+});
+
+export type ListMetricsSummaryQuery = z.infer<typeof ListMetricsSummaryQuerySchema>;
+
 export const MetricsSummaryVMSchema = z.object({
   http_requests_total: z.array(MetricSeriesVMSchema),
+  total: z.number(),
+  page: z.number(),
+  page_size: z.number(),
   http_duration_p50_ms: z.number(),
   http_duration_p95_ms: z.number(),
   http_duration_p99_ms: z.number(),

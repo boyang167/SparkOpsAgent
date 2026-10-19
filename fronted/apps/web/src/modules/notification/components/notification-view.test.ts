@@ -63,5 +63,6 @@ describe("notificationKind", () => {
     expect(notificationKind("build.completed")).toBe("build");
     expect(notificationKind("workflow.run.completed")).toBe("workflow");
     expect(notificationKind("run.completed")).toBe("agent");
+    expect(notificationKind("project.review.pending")).toBe("project");
   });
 });

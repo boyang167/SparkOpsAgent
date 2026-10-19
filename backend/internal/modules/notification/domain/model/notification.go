@@ -14,6 +14,7 @@ const (
 	NotificationTypeRunCompleted         NotificationType = "run.completed"
 	NotificationTypeWorkflowRunCompleted NotificationType = "workflow.run.completed"
 	NotificationTypeBuildCompleted       NotificationType = "build.completed"
+	NotificationTypeProjectReviewPending NotificationType = "project.review.pending"
 )
 
 type Notification struct {

@@ -592,7 +592,7 @@ func buildTemplateVars(project *model.Project, renderCtx TemplateRenderContext) 
 		"args":            res.Args,
 		"registry_type":   registry,
 		"service_name":    name + "-service",
-		"deployment_name": name + "-deployment",
+		"deployment_name": name,
 		"app_label":       name,
 		"ports_yaml":      formatPortsYAML(res.Ports),
 	}

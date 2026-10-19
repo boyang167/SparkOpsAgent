@@ -58,6 +58,13 @@ function KindIcon({ kind }: { kind: NotificationKind }) {
           <path d="M8 1.75 9.4 6.6 14.25 8 9.4 9.4 8 14.25 6.6 9.4 1.75 8 6.6 6.6 8 1.75Z" />
         </svg>
       );
+    case "project":
+      return (
+        <svg {...common}>
+          <path d="M3.25 4.75h9.5a.75.75 0 0 1 .75.75v7a.75.75 0 0 1-.75.75h-9.5a.75.75 0 0 1-.75-.75v-7a.75.75 0 0 1 .75-.75Z" />
+          <path d="M6.25 4.75V3.75a.75.75 0 0 1 .75-.75h2a.75.75 0 0 1 .75.75v1" />
+        </svg>
+      );
     default:
       return (
         <svg {...common}>
@@ -159,7 +166,7 @@ export function NotificationPanel({ workspaceId, items, unreadCount }: Notificat
       {visible.length === 0 ? (
         <div className="notif-empty">
           <p className="notif-empty-title">{filter === "unread" ? "没有未读通知" : "暂无通知"}</p>
-          <p className="notif-empty-desc">构建、工作流或 Agent 运行完成后，会在这里提醒你。</p>
+          <p className="notif-empty-desc">构建、工作流、Agent 运行完成或项目待审核时，会在这里提醒你。</p>
         </div>
       ) : (
         <div className="notif-groups">

@@ -8,11 +8,8 @@ import type {
   ReleasePlanVersionSummaryVM,
 } from "@sparkops/contracts/product";
 import { InlineAlert } from "@/components/ui/InlineAlert";
-import {
-  diffChangeSummary,
-  formatDiffValue,
-  releasePlanVersionVerbLabel,
-} from "./release-plan-version-utils";
+import { ReleasePlanVersionChangeDetail } from "./ReleasePlanVersionChangeDetail";
+import { diffChangeSummary, releasePlanVersionVerbLabel } from "./release-plan-version-utils";
 
 interface ReleasePlanVersionHistoryProps {
   workspaceId: string;
@@ -250,12 +247,7 @@ export function ReleasePlanVersionHistory({
                               </div>
                             </div>
                           ) : null}
-                          {(change.change_type === "job_added" || change.change_type === "job_removed") &&
-                          (change.before || change.after) ? (
-                            <pre className="release-plan-version-diff-json">
-                              {formatDiffValue(change.after ?? change.before)}
-                            </pre>
-                          ) : null}
+                          <ReleasePlanVersionChangeDetail change={change} memberName={memberName} />
                         </li>
                       );
                     })}

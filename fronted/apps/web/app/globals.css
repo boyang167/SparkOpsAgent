@@ -5040,10 +5040,74 @@ textarea.input {
   color: var(--text-secondary);
 }
 
+.release-plan-version-detail {
+  margin-top: 0.25rem;
+}
+
+.release-plan-version-detail-section + .release-plan-version-detail-section {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--border);
+}
+
+.release-plan-version-detail-section-title {
+  margin: 0 0 0.375rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.release-plan-version-field-grid {
+  display: grid;
+  grid-template-columns: minmax(5rem, 7rem) minmax(0, 1fr);
+  gap: 0.375rem 0.75rem;
+  margin: 0;
+}
+
+.release-plan-version-field-row {
+  display: contents;
+}
+
+.release-plan-version-field-row dt {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.release-plan-version-field-row dd {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.release-plan-version-before-after {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.release-plan-version-before-after p {
+  margin: 0.125rem 0 0;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.release-plan-version-raw-wrap {
+  margin-top: 0.375rem;
+}
+
+.release-plan-version-raw-toggle {
+  color: var(--muted);
+}
+
 .release-plan-version-diff-json {
-  margin: 0.25rem 0 0;
+  margin: 0.375rem 0 0;
   padding: 0.5rem 0.625rem;
-  max-height: 10rem;
+  max-height: 12rem;
   overflow: auto;
   font-size: 0.6875rem;
   line-height: 1.45;
@@ -15512,7 +15576,7 @@ textarea.input {
 
 .undeploy-modal {
   display: grid;
-  gap: 1.25rem;
+  gap: 1.5rem;
 }
 
 .product-binding-notice {
@@ -15551,16 +15615,13 @@ textarea.input {
 
 .undeploy-summary {
   display: grid;
-  gap: 0.75rem;
-  padding: 0.875rem 1rem;
-  border-radius: var(--radius-md);
-  background: var(--surface-muted);
+  gap: 0.875rem;
 }
 
 .undeploy-summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.75rem;
+  gap: 1rem 1.25rem;
   margin: 0;
 }
 
@@ -15572,16 +15633,17 @@ textarea.input {
 
 .undeploy-summary-grid dt {
   color: var(--muted);
-  font-size: 0.6875rem;
-  letter-spacing: 0.02em;
+  font-size: 0.75rem;
+  font-weight: 400;
 }
 
 .undeploy-summary-grid dd {
-  margin: 0;
+  margin: 0.15rem 0 0;
   overflow: hidden;
   color: var(--text);
-  font-size: 0.8125rem;
-  font-weight: 500;
+  font-size: 0.875rem;
+  font-weight: 560;
+  letter-spacing: -0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -15596,7 +15658,7 @@ textarea.input {
   padding: 0.25rem 0.75rem;
   border: 0;
   border-radius: 999px;
-  background: var(--surface);
+  background: var(--surface-muted);
   color: var(--text-secondary);
   font-size: 0.75rem;
   cursor: pointer;
@@ -15615,28 +15677,14 @@ textarea.input {
 
 .undeploy-section {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.25rem;
 }
 
 .undeploy-section-title {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
   margin: 0;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 0.75rem;
   font-weight: 500;
-}
-
-.undeploy-section-count {
-  min-width: 1.125rem;
-  padding: 0 0.3rem;
-  border-radius: 999px;
-  background: var(--surface-muted);
-  color: var(--muted);
-  font-size: 0.6875rem;
-  line-height: 1.125rem;
-  text-align: center;
 }
 
 .undeploy-resources {
@@ -15648,52 +15696,42 @@ textarea.input {
 
 .undeploy-resources li {
   display: grid;
-  grid-template-columns: 8.5rem minmax(0, 1fr);
-  align-items: center;
+  grid-template-columns: 7.5rem minmax(0, 1fr);
+  align-items: baseline;
   gap: 0.75rem;
-  padding: 0.45rem 0;
+  padding: 0.3rem 0;
   font-size: 0.8125rem;
-}
-
-.undeploy-resources li + li {
-  box-shadow: inset 0 1px 0 var(--border);
 }
 
 .undeploy-resource-kind {
   color: var(--muted);
-  font-size: 0.75rem;
 }
 
 .undeploy-resource-name {
   overflow: hidden;
   color: var(--text);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.75rem;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.undeploy-resources li.is-danger .undeploy-resource-kind,
 .undeploy-resources li.is-danger .undeploy-resource-name {
   color: var(--danger);
 }
 
 .undeploy-options {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
 }
 
 .undeploy-option {
   display: flex;
   align-items: flex-start;
   gap: 0.625rem;
-  padding: 0.75rem;
+  margin: 0 -0.5rem;
+  padding: 0.5rem;
   border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border);
   cursor: pointer;
-  transition: background 150ms ease, box-shadow 150ms ease;
+  transition: background 150ms ease;
 }
 
 .undeploy-option:hover {
@@ -15701,22 +15739,14 @@ textarea.input {
 }
 
 .undeploy-option input {
-  margin-top: 0.15rem;
+  margin-top: 0.2rem;
   flex-shrink: 0;
-}
-
-.undeploy-option.is-checked {
-  box-shadow: inset 0 0 0 1px var(--border-strong);
-}
-
-.undeploy-option.is-danger {
-  background: var(--danger-bg);
-  box-shadow: inset 0 0 0 1px var(--danger-border);
+  accent-color: var(--text);
 }
 
 .undeploy-option-copy {
   display: grid;
-  gap: 0.2rem;
+  gap: 0.15rem;
   min-width: 0;
 }
 
@@ -15729,10 +15759,9 @@ textarea.input {
 .undeploy-option-desc {
   color: var(--muted);
   font-size: 0.75rem;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
-.undeploy-option.is-danger .undeploy-option-title,
 .undeploy-option.is-danger .undeploy-option-desc {
   color: var(--danger);
 }
@@ -15748,31 +15777,20 @@ textarea.input {
 }
 
 .undeploy-confirm-label code {
-  padding: 0.05rem 0.375rem;
-  border-radius: var(--radius-sm);
-  background: var(--surface-muted);
   color: var(--text);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.75rem;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
   user-select: all;
-}
-
-.undeploy-confirm-input {
-  font-family: var(--font-mono, ui-monospace, monospace);
 }
 
 .undeploy-confirm-input::placeholder {
   color: var(--muted);
-  opacity: 0.5;
-}
-
-.undeploy-confirm-input.is-match {
-  box-shadow: inset 0 0 0 1px var(--border-strong);
+  opacity: 0.55;
 }
 
 @media (max-width: 520px) {
-  .undeploy-summary-grid,
-  .undeploy-options {
+  .undeploy-summary-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }

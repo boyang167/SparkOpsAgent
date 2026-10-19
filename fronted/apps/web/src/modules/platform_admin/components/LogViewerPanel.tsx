@@ -6,6 +6,7 @@ import { BffError } from "@sparkops/contracts";
 import type {
   AppLogVM,
   ListAppLogsQuery,
+  ListMetricsSummaryQuery,
   LogFileVM,
   MetricsSummaryVM,
   TraceDetailVM,
@@ -108,11 +109,21 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
 
   const [metrics, setMetrics] = useState<MetricsSummaryVM | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsQuery, setMetricsQuery] = useState<ListMetricsSummaryQuery>({
+    page: 1,
+    page_size: PAGE_SIZES[0],
+  });
+  const [metricsRefreshToken, setMetricsRefreshToken] = useState(0);
 
   const logTotalPages = Math.max(
     1,
     Math.ceil(logTotal / (appliedLogFilters.page_size ?? PAGE_SIZES[0])),
   );
+
+  const metricsTotal = metrics?.total ?? 0;
+  const metricsPage = metricsQuery.page ?? 1;
+  const metricsPageSize = metricsQuery.page_size ?? PAGE_SIZES[0];
+  const metricsTotalPages = Math.max(1, Math.ceil(metricsTotal / metricsPageSize));
 
   const loadLogs = useCallback(async () => {
     setLogLoading(true);
@@ -167,14 +178,14 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
     setMetricsLoading(true);
     setError(null);
     try {
-      const data = await platform.getMetricsSummary(workspaceId);
+      const data = await platform.getMetricsSummary(workspaceId, metricsQuery);
       setMetrics(data);
     } catch (err) {
       setError(err instanceof BffError ? err.message : "加载指标失败");
     } finally {
       setMetricsLoading(false);
     }
-  }, [workspaceId]);
+  }, [workspaceId, metricsQuery, metricsRefreshToken]);
 
   useEffect(() => {
     if (tab === "logs") void loadLogs();
@@ -598,7 +609,10 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
               type="button"
               className="btn btn-ghost btn-sm"
               disabled={metricsLoading}
-              onClick={() => void loadMetrics()}
+              onClick={() => {
+                setMetricsQuery((query) => ({ ...query, page: 1 }));
+                setMetricsRefreshToken((token) => token + 1);
+              }}
             >
               刷新
             </button>
@@ -631,7 +645,7 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
                 />
                 <MetricCard
                   label="请求序列数"
-                  value={metrics.http_requests_total.length}
+                  value={metrics.total}
                   tone="violet"
                   icon={
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -652,24 +666,83 @@ export function LogViewerPanel({ workspaceId, initialTraceId }: LogViewerPanelPr
                 />
               </div>
               {metrics.http_requests_total.length > 0 ? (
-                <div className="table-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>标签</th>
-                        <th className="log-viewer-col-count">计数</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {metrics.http_requests_total.map((row) => (
-                        <tr key={row.label}>
-                          <td className="font-mono text-sm">{row.label}</td>
-                          <td className="log-viewer-col-count">{row.value}</td>
+                <>
+                  <div className="table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>标签</th>
+                          <th className="log-viewer-col-count">计数</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {metrics.http_requests_total.map((row) => (
+                          <tr key={row.label}>
+                            <td className="font-mono text-sm">{row.label}</td>
+                            <td className="log-viewer-col-count">{row.value}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="log-viewer-pagination">
+                    <div className="log-viewer-pagination-actions">
+                      <label className="log-viewer-field">
+                        <span className="log-viewer-field-label">每页</span>
+                        <select
+                          className="input text-sm"
+                          value={metricsPageSize}
+                          onChange={(e) =>
+                            setMetricsQuery((query) => ({
+                              ...query,
+                              page: 1,
+                              page_size: Number(e.target.value),
+                            }))
+                          }
+                          aria-label="每页条数"
+                        >
+                          {PAGE_SIZES.map((size) => (
+                            <option key={size} value={size}>
+                              {size}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <span className="text-sm text-muted">共 {metricsTotal} 条</span>
+                    <div className="log-viewer-pagination-actions">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={metricsPage <= 1}
+                        onClick={() =>
+                          setMetricsQuery((query) => ({
+                            ...query,
+                            page: Math.max(1, (query.page ?? 1) - 1),
+                          }))
+                        }
+                      >
+                        上一页
+                      </button>
+                      <span className="text-sm text-muted">
+                        {metricsPage} / {metricsTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={metricsPage >= metricsTotalPages}
+                        onClick={() =>
+                          setMetricsQuery((query) => ({
+                            ...query,
+                            page: Math.min(metricsTotalPages, (query.page ?? 1) + 1),
+                          }))
+                        }
+                      >
+                        下一页
+                      </button>
+                    </div>
+                  </div>
+                </>
               ) : null}
             </>
           ) : null}

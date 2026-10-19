@@ -34,9 +34,7 @@ interface UndeployOptionProps {
 
 function UndeployOption({ checked, danger, title, description, onChange }: UndeployOptionProps) {
   return (
-    <label
-      className={`undeploy-option${checked ? " is-checked" : ""}${checked && danger ? " is-danger" : ""}`}
-    >
+    <label className={`undeploy-option${checked && danger ? " is-danger" : ""}`}>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       <span className="undeploy-option-copy">
         <span className="undeploy-option-title">{title}</span>
@@ -173,10 +171,7 @@ export function UndeployModal({
           </section>
 
           <section className="undeploy-section">
-            <h4 className="undeploy-section-title">
-              将删除的资源
-              <span className="undeploy-section-count">{resources.length}</span>
-            </h4>
+            <h4 className="undeploy-section-title">将删除的资源</h4>
             <ul className="undeploy-resources">
               {resources.map((item) => (
                 <li key={item.kind} className={"danger" in item ? "is-danger" : undefined}>
@@ -193,7 +188,7 @@ export function UndeployModal({
               <UndeployOption
                 checked={deleteConfig}
                 title="删除配置"
-                description="ConfigMap 与 Secret。默认保留，重新发布时直接复用。"
+                description="ConfigMap 与 Secret 默认保留，重新发布时可直接复用。"
                 onChange={setDeleteConfig}
               />
               <UndeployOption
@@ -203,7 +198,7 @@ export function UndeployModal({
                 description={
                   deleteStorage
                     ? "PVC 及其中的数据将被永久删除，无法恢复。"
-                    : "PVC 及其数据。默认保留，避免数据丢失。"
+                    : "PVC 及其中的数据默认保留。"
                 }
                 onChange={setDeleteStorage}
               />
@@ -215,7 +210,7 @@ export function UndeployModal({
               请输入 <code>{project.name}</code> 确认下线
             </span>
             <input
-              className={`input undeploy-confirm-input${confirmed ? " is-match" : ""}`}
+              className="input undeploy-confirm-input"
               value={confirmName}
               onChange={(e) => setConfirmName(e.target.value)}
               onKeyDown={(e) => {

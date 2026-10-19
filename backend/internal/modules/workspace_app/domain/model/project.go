@@ -449,6 +449,11 @@ func (p *Project) SubmitReview(actor kernel.MemberID) error {
 	p.ReviewedBy = nil
 	p.ReviewedAt = nil
 	p.ReviewComment = ""
+	displayName := strings.TrimSpace(p.DisplayName)
+	if displayName == "" {
+		displayName = p.Name.String()
+	}
+	p.record(event.NewProjectReviewSubmitted(p.ID, p.WorkspaceID, p.Name.String(), displayName, actor))
 	return nil
 }
 

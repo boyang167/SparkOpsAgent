@@ -161,8 +161,12 @@ export async function getTraceDetail(ctx: BffContext, workspaceId: string, trace
   return ctx.upstream.platform.getTraceDetail(workspaceId, traceId);
 }
 
-export async function getMetricsSummary(ctx: BffContext, workspaceId: string) {
-  return ctx.upstream.platform.getMetricsSummary(workspaceId);
+export async function getMetricsSummary(
+  ctx: BffContext,
+  workspaceId: string,
+  query: import("@sparkops/contracts/platform").ListMetricsSummaryQuery = {},
+) {
+  return ctx.upstream.platform.getMetricsSummary(workspaceId, query);
 }
 
 export async function getWorkspaceEntitlements(ctx: BffContext, workspaceId: string) {
