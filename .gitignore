@@ -63,3 +63,8 @@ temp/
 /plugins/
 /demo/
 /dependencies/
+.superpowers/
+.cursor/
+docs/
+spec/
+plugins
