@@ -8,6 +8,7 @@ import (
 	agentacl "github.com/sparkops/sparkops-agent/backend/internal/modules/agent/infrastructure/acl"
 	agentpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/agent/infrastructure/persistence"
 	runtimecommand "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/application/command"
+	runtimequery "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/application/query"
 	runtimeacl "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/infrastructure/acl"
 	runtimepersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/infrastructure/persistence"
 	runtimestream "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/infrastructure/stream"
@@ -86,6 +87,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		StartChat: runtimecommand.NewStartChatHandler(
 			conversations, messages, runs, agents, knowledge, c.LLMClient, hub, c.EventBus, c.Transactor, c.Logger,
 		),
+		GetChatRun:    runtimequery.NewGetChatRunHandler(conversations, runs),
 		Runs:          runs,
 		ChatWaitLimit: 30 * time.Second,
 	})
@@ -122,12 +124,17 @@ func (m *Module) Register(c *appctx.Container) error {
 	auth := authn.RequireAuth(m.tokens)
 	ws := httpx.RequireWorkspace()
 	wsMember := authz.RequireWorkspaceMember(c.WorkspaceMemberChecker)
-	projectRead := authz.RequirePermission(c.PermissionChecker, authz.PermProjectRead)
 
 	c.Engine.GET("/api/v1/mcp/tools",
-		auth, ws, wsMember, projectRead, handler.ListTools)
+		auth, ws, wsMember, handler.ListTools)
 	c.Engine.POST("/api/v1/mcp/rpc",
-		auth, ws, wsMember, projectRead, handler.HandleRPC)
+		auth, ws, wsMember, handler.HandleRPC)
+	c.Engine.GET("/api/v1/mcp",
+		auth, ws, wsMember, handler.HandleStreamable)
+	c.Engine.POST("/api/v1/mcp",
+		auth, ws, wsMember, handler.HandleStreamable)
+	c.Engine.DELETE("/api/v1/mcp",
+		auth, ws, wsMember, handler.HandleStreamable)
 
 	return nil
 }

@@ -5,8 +5,50 @@ info:
   description: |
     Model Context Protocol (JSON-RPC 2.0) over HTTP for external AI clients.
     Requires Bearer token (workspace API token) and `X-Workspace-Id` header.
+    Gateway: workspace member + MCP module entitlement; each tool enforces its own permission.
 
 paths:
+  /api/v1/mcp:
+    get:
+      summary: MCP Streamable HTTP (GET — SSE not offered; 405)
+      tags: [mcp]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdHeader'
+      responses:
+        '405':
+          description: Standalone SSE stream not supported
+    post:
+      summary: MCP Streamable HTTP (POST JSON-RPC — Cursor url transport)
+      tags: [mcp]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                - type: array
+      responses:
+        '200':
+          description: JSON-RPC response(s)
+        '202':
+          description: Notification accepted
+    delete:
+      summary: MCP session terminate (not supported; 405)
+      tags: [mcp]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdHeader'
+      responses:
+        '405':
+          description: Session terminate not supported
   /api/v1/mcp/tools:
     get:
       summary: List MCP tool definitions (REST discovery)

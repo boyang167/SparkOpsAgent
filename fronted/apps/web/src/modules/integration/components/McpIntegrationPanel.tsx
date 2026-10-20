@@ -58,14 +58,56 @@ export function McpIntegrationPanel({ apiBaseUrl = "http://localhost:8080" }: Mc
     void loadTools();
   }, [loadTools]);
 
-  const stdioConfig = useMemo(
+  const cursorConfig = useMemo(
+    () =>
+      JSON.stringify(
+        {
+          mcpServers: {
+            sparkops: {
+              url: `${backendRoot}/api/v1/mcp`,
+              headers: {
+                Authorization: `Bearer ${token || "<your-api-token>"}`,
+                "X-Workspace-Id": workspaceId || "<workspace-id>",
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    [backendRoot, token, workspaceId],
+  );
+
+  const stdioBridgeConfig = useMemo(
+    () =>
+      JSON.stringify(
+        {
+          mcpServers: {
+            sparkops: {
+              command: "node",
+              args: ["${workspaceFolder}/scripts/mcp-stdio-bridge.mjs"],
+              env: {
+                SPARKOPS_API_URL: backendRoot,
+                SPARKOPS_TOKEN: token || "<your-api-token>",
+                SPARKOPS_WORKSPACE_ID: workspaceId || "<workspace-id>",
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    [backendRoot, token, workspaceId],
+  );
+
+  const devGoConfig = useMemo(
     () =>
       JSON.stringify(
         {
           mcpServers: {
             sparkops: {
               command: "go",
-              args: ["run", "./backend/cmd/mcp-server"],
+              args: ["-C", "${workspaceFolder}/backend", "run", "./cmd/mcp-server"],
               env: {
                 SPARKOPS_API_URL: backendRoot,
                 SPARKOPS_TOKEN: token || "<your-api-token>",
@@ -114,10 +156,11 @@ Content-Type: application/json
     <div className="mcp-integration">
       <section className="mcp-integration-block" aria-labelledby="mcp-setup-title">
         <h2 id="mcp-setup-title" className="mcp-integration-block-title">
-          生成 Cursor / Claude 配置
+          连接运行中的 SparkOps
         </h2>
         <p className="mcp-integration-block-desc">
-          粘贴 API Token 后复制配置到 MCP 客户端。Token 仅在本地使用，不会上传。
+          MCP 能力由后端 API 提供，无需在本机再启动 Go 进程。粘贴 API Token 后复制配置到 Cursor / Claude Desktop。
+          Token 仅在本地使用，不会上传。
         </p>
 
         <label htmlFor="mcp-token" className="mcp-integration-field">
@@ -141,24 +184,54 @@ Content-Type: application/json
             </dd>
           </div>
           <div>
-            <dt>端点</dt>
+            <dt>MCP 端点</dt>
             <dd>
-              <code>/api/v1/mcp/rpc</code>
+              <code>{backendRoot}/api/v1/mcp</code>
             </dd>
           </div>
         </dl>
 
         <div className="mcp-integration-actions">
-          <button type="button" className="btn btn-sm" onClick={() => void copy(stdioConfig, "stdio")}>
-            {copied === "stdio" ? "已复制" : "复制 mcp.json"}
+          <button type="button" className="btn btn-sm" onClick={() => void copy(cursorConfig, "cursor")}>
+            {copied === "cursor" ? "已复制" : "复制 Cursor mcp.json"}
           </button>
         </div>
 
         <details className="mcp-integration-details">
-          <summary>预览配置</summary>
-          <pre className="mcp-integration-code mcp-integration-code--dark">{stdioConfig}</pre>
+          <summary>预览推荐配置（Streamable HTTP）</summary>
+          <pre className="mcp-integration-code mcp-integration-code--dark">{cursorConfig}</pre>
         </details>
       </section>
+
+      <details className="mcp-integration-details mcp-integration-details--flat">
+        <summary>备用：stdio 桥接（仅当客户端不支持 url）</summary>
+        <div className="mcp-integration-details-body">
+          <p className="mcp-integration-block-desc">
+            使用仓库内 Node 脚本转发到已运行的 API，需本机已安装 Node.js，并将 MCP 配置放在打开本仓库的 Cursor 项目中。
+          </p>
+          <div className="mcp-integration-actions">
+            <button type="button" className="btn-ghost btn-sm" onClick={() => void copy(stdioBridgeConfig, "stdio")}>
+              {copied === "stdio" ? "已复制" : "复制 stdio 配置"}
+            </button>
+          </div>
+          <pre className="mcp-integration-code">{stdioBridgeConfig}</pre>
+        </div>
+      </details>
+
+      <details className="mcp-integration-details mcp-integration-details--flat">
+        <summary>开发者：从源码运行 Go stdio 桥</summary>
+        <div className="mcp-integration-details-body">
+          <p className="mcp-integration-block-desc">
+            等价于 <code>cd backend &amp;&amp; go run ./cmd/mcp-server</code>，仅用于调试桥接本身。
+          </p>
+          <div className="mcp-integration-actions">
+            <button type="button" className="btn-ghost btn-sm" onClick={() => void copy(devGoConfig, "go")}>
+              {copied === "go" ? "已复制" : "复制 Go 配置"}
+            </button>
+          </div>
+          <pre className="mcp-integration-code">{devGoConfig}</pre>
+        </div>
+      </details>
 
       <details className="mcp-integration-details mcp-integration-details--flat">
         <summary>
@@ -190,9 +263,11 @@ Content-Type: application/json
       </details>
 
       <details className="mcp-integration-details mcp-integration-details--flat">
-        <summary>HTTP JSON-RPC</summary>
+        <summary>HTTP JSON-RPC（脚本 / 自研客户端）</summary>
         <div className="mcp-integration-details-body">
-          <p className="mcp-integration-block-desc">远程调用时需携带 Bearer Token 与 X-Workspace-Id。</p>
+          <p className="mcp-integration-block-desc">
+            直接调用 <code>/api/v1/mcp/rpc</code>，需携带 Bearer Token 与 X-Workspace-Id。
+          </p>
           <div className="mcp-integration-actions">
             <button type="button" className="btn-ghost btn-sm" onClick={() => void copy(httpExample, "http")}>
               {copied === "http" ? "已复制" : "复制示例"}

@@ -135,8 +135,9 @@ Org 成员管理 API 需 `org:member:manage`；创建工作区需 `org:workspace
 
 | 能力 | 路径 | 权限 |
 |------|------|------|
-| 工具列表 | `GET /api/v1/mcp/tools` | 工作区成员 + 各 Tool 自身权限过滤 |
-| JSON-RPC | `POST /api/v1/mcp/rpc` | 工作区成员 + 各 Tool 自身权限过滤 |
+| 工具列表 | `GET /api/v1/mcp/tools` | 工作区成员 + MCP 模块 entitlement + 各 Tool 权限过滤 |
+| JSON-RPC | `POST /api/v1/mcp/rpc` | 同上 |
+| Streamable HTTP | `POST /api/v1/mcp` | 同上 |
 
 需在平台配置中启用 **MCP 集成** 模块（`entitlements.mcp`）。鉴权使用工作区 **API Token**（Bearer）+ `X-Workspace-Id` 请求头。
 
@@ -167,7 +168,27 @@ Org 成员管理 API 需 `org:member:manage`；创建工作区需 `org:workspace
 
 `chat_with_agent` 默认立即返回 `run_id`；可选 `wait_seconds`（≤30）同步等待。轮询请用 `get_chat_run`。
 
-本地 stdio 桥接（供 Cursor / Claude Desktop）：
+**推荐：连接已运行的后端（Streamable HTTP）**
+
+Cursor / 支持 `url` 的 MCP 客户端：
+
+```json
+{
+  "mcpServers": {
+    "sparkops": {
+      "url": "http://localhost:8080/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer <api-token>",
+        "X-Workspace-Id": "<workspace-uuid>"
+      }
+    }
+  }
+}
+```
+
+兼容 JSON-RPC：`POST /api/v1/mcp/rpc`（与上表相同鉴权头）。
+
+**备用 stdio 桥**（客户端仅支持 stdio 时）：仓库根目录 `node scripts/mcp-stdio-bridge.mjs`，或：
 
 ```bash
 cd backend

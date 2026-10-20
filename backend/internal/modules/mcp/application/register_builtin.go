@@ -8,6 +8,7 @@ import (
 	agentquery "github.com/sparkops/sparkops-agent/backend/internal/modules/agent/application/query"
 	runtimecommand "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/domain/model"
+	runtimequery "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/application/query"
 	runtimerepo "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/mcp/domain"
 	knowledgequery "github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge/application/query"
@@ -23,6 +24,7 @@ type BuiltinDeps struct {
 	SearchDocs    *knowledgequery.SearchDocumentsHandler
 	ListAgents    *agentquery.ListAgentsHandler
 	StartChat     *runtimecommand.StartChatHandler
+	GetChatRun    *runtimequery.GetChatRunHandler
 	Runs          runtimerepo.RunRepository
 	ChatWaitLimit time.Duration
 }
@@ -168,7 +170,7 @@ func RegisterBuiltinTools(registry *domain.Registry, deps BuiltinDeps) {
 		Permission: authz.PermChatUse,
 		Modules:    []string{"agent"},
 		Tier:       domain.ToolTierRead,
-	}, func(ctx context.Context, _ kernel.WorkspaceID, _ kernel.MemberID, args map[string]any) (any, error) {
+	}, func(ctx context.Context, wsID kernel.WorkspaceID, memberID kernel.MemberID, args map[string]any) (any, error) {
 		runIDRaw, err := parseStringArg(args, "run_id")
 		if err != nil {
 			return nil, err
@@ -177,11 +179,10 @@ func RegisterBuiltinTools(registry *domain.Registry, deps BuiltinDeps) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid run_id")
 		}
-		run, err := deps.Runs.FindByID(ctx, runID)
-		if err != nil {
-			return nil, err
+		if deps.GetChatRun == nil {
+			return nil, fmt.Errorf("get_chat_run unavailable")
 		}
-		return runPayload(run), nil
+		return deps.GetChatRun.Handle(ctx, wsID, memberID, runID)
 	})
 }
 
@@ -244,23 +245,9 @@ func chatWithAgent(
 			"message":         "Agent is still running; call get_chat_run to poll status.",
 		}, nil
 	}
-	out := runPayload(run)
+	out := runtimequery.ChatRunView(run)
 	out["conversation_id"] = result.ConversationID.String()
 	return out, nil
-}
-
-func runPayload(run *model.Run) map[string]any {
-	out := map[string]any{
-		"run_id": run.ID.String(),
-		"status": string(run.Status),
-	}
-	if run.Status == model.RunStatusCompleted {
-		out["reply"] = run.Output
-	}
-	if run.Status == model.RunStatusFailed {
-		out["error"] = "agent run failed"
-	}
-	return out
 }
 
 func waitForRun(ctx context.Context, runs runtimerepo.RunRepository, runID kernel.RunID, limit time.Duration) (*model.Run, error) {
