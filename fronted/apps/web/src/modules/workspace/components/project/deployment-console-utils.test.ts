@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DeploymentRunVM } from "@sparkops/contracts/delivery";
-import { deploymentRunKindLabel, deploymentRunTitle } from "./deployment-console-utils";
+import { deploymentRunTitle } from "./deployment-console-utils";
 import { parseProjectDetailTab, projectDetailTabs } from "./project-detail-tabs";
 
 describe("projectDetailTabs", () => {
@@ -49,13 +48,5 @@ describe("deploymentRunTitle", () => {
         created_at: "2026-09-06T00:00:00Z",
       }),
     ).toBe("master · v1.0.1");
-  });
-});
-
-describe("undeploy titles", () => {
-  it("prefixes undeploy runs", () => {
-    const run = { id: "abcdef123", run_type: "undeploy", git_ref_value: "main", image_tag: "v1" } as DeploymentRunVM;
-    expect(deploymentRunTitle(run)).toBe("下线 · main · v1");
-    expect(deploymentRunKindLabel(run)).toBe("下线");
   });
 });

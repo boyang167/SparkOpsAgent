@@ -37,14 +37,7 @@ function boundSecrets(): SecretVM[] {
 }
 
 const options: DeploymentOptionsVM = {
-  clusters: [{
-    id: "c",
-    cluster_name: "dev",
-    server: "https://k8s",
-    priority_id: 0,
-    is_build_env: false,
-    available: true,
-  }],
+  clusters: [{ id: "c", cluster_name: "dev", server: "https://k8s", priority_id: 0, is_build_env: false, available: true }],
   missing: [],
 };
 

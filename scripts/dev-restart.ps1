@@ -135,12 +135,20 @@ function Test-PortListening {
 function Wait-BackendReady {
     param(
         [int]$Port,
+        [System.Diagnostics.Process]$Process,
+        [string]$LogPath,
+        [string]$ErrPath,
         [int]$TimeoutSec = 90
     )
 
     Write-Host "  等待后端编译并监听 :$Port ..." -ForegroundColor DarkGray
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
+        if ($Process -and $Process.HasExited) {
+            Write-Host "  后端进程已退出 (exit=$($Process.ExitCode))，最近日志:" -ForegroundColor Red
+            Show-BackendStartupLog -LogPath $LogPath -ErrPath $ErrPath
+            return $false
+        }
         if (Test-PortListening -Port $Port) {
             try {
                 $resp = Invoke-WebRequest -Uri "http://localhost:$Port/api/v1/auth/providers" -UseBasicParsing -TimeoutSec 3
@@ -159,7 +167,25 @@ function Wait-BackendReady {
         }
         Start-Sleep -Seconds 2
     }
+    Write-Host "  后端在 $TimeoutSec 秒内未就绪，最近日志:" -ForegroundColor Red
+    Show-BackendStartupLog -LogPath $LogPath -ErrPath $ErrPath
     return $false
+}
+
+function Show-BackendStartupLog {
+    param(
+        [string]$LogPath,
+        [string]$ErrPath
+    )
+
+    foreach ($path in @($ErrPath, $LogPath)) {
+        if (-not $path -or -not (Test-Path -LiteralPath $path)) { continue }
+        $lines = Get-Content -LiteralPath $path -Tail 40 -ErrorAction SilentlyContinue
+        if ($lines) {
+            Write-Host "  --- $path ---" -ForegroundColor DarkGray
+            $lines | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkYellow }
+        }
+    }
 }
 
 function Start-BackendService {
@@ -173,15 +199,26 @@ function Start-BackendService {
         Write-Host "  提示: backend/config.yaml 不存在，可参考 config.example.yaml 创建" -ForegroundColor DarkYellow
     }
 
+    Ensure-DevDir
+    $logPath = Join-Path $DevDir "backend-run.log"
+    $errPath = Join-Path $DevDir "backend-run.err.log"
+    Remove-Item -LiteralPath $logPath, $errPath -ErrorAction SilentlyContinue
+
     Write-Host ">> 启动后端 http://localhost:$BackendPort" -ForegroundColor Green
+    Write-Host "  启动日志: $errPath" -ForegroundColor DarkGray
     $proc = Start-Process -FilePath "go" `
         -ArgumentList "run", "./cmd/server" `
         -WorkingDirectory $BackendDir `
+        -RedirectStandardOutput $logPath `
+        -RedirectStandardError $errPath `
         -PassThru `
-        -WindowStyle Normal
+        -WindowStyle Hidden
 
-    if (-not (Wait-BackendReady -Port $BackendPort)) {
-        throw "后端在 90 秒内未就绪，请查看 go run 窗口中的编译/启动错误"
+    if (-not (Wait-BackendReady -Port $BackendPort -Process $proc -LogPath $logPath -ErrPath $errPath)) {
+        if (-not $proc.HasExited) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        }
+        throw "后端在 90 秒内未就绪，请查看 $errPath"
     }
 
     return @{

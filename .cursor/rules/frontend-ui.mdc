@@ -1,0 +1,82 @@
+---
+description: SparkOps 企业级前端 UI 规范 — 清爽、友好、有品位
+globs:
+  - fronted/apps/web/**/*.tsx
+  - fronted/apps/web/**/*.css
+  - fronted/apps/web/app/**/*.tsx
+alwaysApply: false
+---
+
+# SparkOps 企业级前端 UI
+
+交付**企业版控制台**体验：信息层次清晰、操作可预期、页面干净清爽、交互友好、视觉克制但有艺术感。避免「后台模板感」和「堆组件感」。
+
+**设计方法论（内容优先 / 近乎无色 / 空间层级）：** `.cursor/skills/apple-restrained-ui/SKILL.md`
+
+**组件与交互规范：** `.cursor/skills/fronted/SKILL.md`
+
+## 路径约定
+
+| 类型 | 路径 |
+|------|------|
+| 页面 | `app/(platform)/**/page.tsx` |
+| 业务组件 | `src/modules/<domain>/components/` |
+| 通用 UI | `src/components/ui/` |
+| 设计 Token | `app/globals.css` |
+
+优先复用现有组件与 CSS 类；**禁止**引入新 UI 库或内联硬编码色值。
+
+## 美感与品位（必须）
+
+- **留白与对齐优先于装饰** — 用 `stack-lg` / `stack-md` / `stack-sm` 统一间距，禁止随意 margin 堆叠
+- **单一主色 + 中性灰阶** — 语义色仅用于状态；主色只出现在主按钮、链接、选中态、关键指标
+- **微妙质感** — 轻阴影 `var(--shadow-sm/md)`、圆角 `var(--radius-*)`、hover 过渡 150ms ease；禁止 bounce、长动画、大面积渐变
+- **视觉焦点唯一** — 每屏最多一个 `btn-primary`；第一屏能回答：我在哪？能做什么？关键数据是什么？
+- **空态有引导** — 虚线边框 + 引导动作（如「新建」），禁止冷冰冰一句「无数据」
+- **文案简洁** — 动作动词开头（「新建产品」非「产品创建」）；错误说明原因 + 可行动建议
+
+## 页面骨架
+
+```
+stack-lg
+├── PageHeader（eyebrow + title + description + actions）
+└── Panel / section（工具栏 → 内容 → 分页）
+```
+
+内嵌页用 `PlatformPanelHead`，避免与外层 `PageHeader` 重复层级。
+
+## 设计 Token（必须使用）
+
+`var(--bg)` `var(--surface)` `var(--text)` `var(--primary)` `var(--border)` `var(--shadow-sm)` `var(--radius-md)` 等 — 禁止 `#409eff`、`#f56c6c` 等散落色值。
+
+## 共享组件（优先使用）
+
+`PageHeader` · `PlatformPanelHead` · `Modal` · `Drawer` · `InlineAlert` · `MetricCard` · `Breadcrumb` · `ComingSoonPanel`
+
+K8s 页面遵循 `.cursor/rules/k8s-enterprise-ui.mdc`。
+
+## 交互（必须 / 禁止）
+
+**必须：**
+1. 加载 / 空 / 错 **三态分离**，禁止混用文案或组件状态
+2. 危险操作 **Modal 二次确认**；提交时 `disabled` + 「保存中…」；失败用 `InlineAlert tone="error"`
+3. Modal 支持 Esc；加载区 `role="status"`；图标按钮加 `aria-label`
+4. 可点击行/卡有 hover 反馈（边框/阴影/背景）
+
+**禁止：**
+- `window.confirm` / `window.alert`
+- 无间距堆叠表单项
+- 硬编码 px 色值
+- 同一屏多个 competing 主按钮
+
+## 表单与表格
+
+- 表单：标签在上、校验错误贴近字段、长表单分 `section` 区块；Modal footer 取消 secondary / 确认 primary
+- 表格：`table-wrap` → `data-table`；thead muted 背景；tbody hover；空态/加载 td colSpan 居中
+
+## 交付前自检
+
+- [ ] 视觉层级：eyebrow < description < section-title < page-title
+- [ ] 间距一致（stack-* 而非随意值）
+- [ ] hover / focus / disabled 状态完整
+- [ ] 窄屏：table-wrap 可横向滚动，工具栏 flex-wrap

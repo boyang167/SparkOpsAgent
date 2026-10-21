@@ -1,0 +1,501 @@
+package stream
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	sparkplugin "github.com/sparkops/sparkops-agent/backend/internal/platform/plugin"
+	k8sschema "github.com/sparkops/sparkops-agent/backend/internal/plugins/kubernetes/schema"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
+)
+
+func TestLogsStreamsChunksAsJSONSSE(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	logs := &fakeLogStreamer{body: "alpha\nbeta\n"}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+	}, logs, nil)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/logs?container=app&tailLines=10&sinceSeconds=60", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Header().Get("Content-Type"), "text/event-stream")
+	require.Equal(t, "no-cache, no-transform", rec.Header().Get("Cache-Control"))
+	require.Equal(t, "no", rec.Header().Get("X-Accel-Buffering"))
+	require.Equal(t, LogRequest{
+		Namespace:    "default",
+		Pod:          "web-0",
+		Container:    "app",
+		TailLines:    int64Ptr(10),
+		SinceSeconds: int64Ptr(60),
+	}, logs.request)
+	body := rec.Body.String()
+	require.Contains(t, body, "event: open\n")
+	require.Contains(t, body, "event: log\ndata: \"alpha\\nbeta\\n\"\n\n")
+}
+
+func TestLogsStreamsLargeChunkWithoutAccumulatingUntilNewline(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	payload := strings.Repeat("x", 70*1024)
+	logs := &fakeLogStreamer{body: payload}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+	}, logs, nil)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/logs", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	chunks := logEventChunks(t, rec.Body.String())
+	require.Greater(t, len(chunks), 2)
+	for _, chunk := range chunks {
+		require.LessOrEqual(t, len(chunk), logChunkBytes)
+	}
+	require.Equal(t, payload, strings.Join(chunks, ""))
+}
+
+func TestLogsPreservesUTF8RuneAcrossChunkBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		prefixBytes int
+		suffix      string
+	}{
+		{name: "chinese rune split 1 plus 2", prefixBytes: logChunkBytes - 1, suffix: "中tail"},
+		{name: "emoji rune split 2 plus 2", prefixBytes: logChunkBytes - 2, suffix: "🙂tail"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wsID := kernel.NewWorkspaceID()
+			memberID := kernel.NewMemberID()
+			clusterID := kernel.NewClusterInfoID()
+			payload := strings.Repeat("a", tc.prefixBytes) + tc.suffix
+			logs := &fakeLogStreamer{body: payload}
+			engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+				Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+			}, logs, nil)
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/logs", nil)
+			req.Header.Set("X-Workspace-Id", wsID.String())
+			engine.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			joined := strings.Join(logEventChunks(t, rec.Body.String()), "")
+			require.Equal(t, payload, joined)
+			require.True(t, bytes.Equal([]byte(payload), []byte(joined)))
+			require.NotContains(t, joined, "\uFFFD")
+		})
+	}
+}
+
+func TestExecRequiresWriterBeforeClusterConnection(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	factory := &recordingStreamClusterFactory{}
+	exec := &fakeExecStreamer{}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: factory,
+		Writer:   allowStreamWriter{allow: false},
+	}, nil, exec)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/exec?command=date", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.False(t, factory.called)
+	require.False(t, exec.called)
+}
+
+func TestExecStreamsOutputErrorExitAndAuditsEnd(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	audit := &recordingAudit{}
+	exec := &fakeExecStreamer{
+		run: func(ctx context.Context, req ExecRequest) error {
+			_, _ = req.Stdout.Write([]byte("hello\n"))
+			_, _ = req.Stderr.Write([]byte("warn\n"))
+			return nil
+		},
+	}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+		Writer:   allowStreamWriter{allow: true},
+		Audit:    audit,
+	}, nil, exec)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/exec?container=app&command=echo&command=hello", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, ExecRequest{
+		Namespace: "default",
+		Pod:       "web-0",
+		Container: "app",
+		Command:   []string{"echo", "hello"},
+	}, exec.request.withoutWriters())
+	body := rec.Body.String()
+	require.Contains(t, body, "event: open\n")
+	require.Contains(t, body, "event: output\ndata: \"hello\\n\"\n\n")
+	require.Contains(t, body, "event: error\ndata: \"warn\\n\"\n\n")
+	require.Contains(t, body, "event: exit\ndata: {\"code\":0}\n\n")
+	require.Len(t, audit.events, 2)
+	require.Equal(t, "kubernetes.exec.started", audit.events[0].Action)
+	require.Equal(t, "kubernetes.exec.ended", audit.events[1].Action)
+	require.NotContains(t, rec.Body.String(), "echo hello")
+}
+
+func TestNodeTTYExecUsesServerFixedNsenterWrapper(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	exec := &fakeExecStreamer{}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+		Writer:   allowStreamWriter{allow: true},
+	}, nil, exec)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/clusters/"+clusterID.String()+"/namespaces/kube-system/pods/sparkops-nodetty-abcd/exec"+
+			"?node_tty=true&container=node-shell&command=uname&command=-a", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"nsenter", "-t", "1", "-m", "-u", "-i", "-n", "--", "uname", "-a"}, exec.request.Command)
+	require.Equal(t, "kube-system", exec.request.Namespace)
+	require.Equal(t, "node-shell", exec.request.Container)
+}
+
+func TestNodeTTYExecRejectsNonManagedPodBeforeClusterLookup(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	factory := &recordingStreamClusterFactory{}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: factory,
+		Writer:   allowStreamWriter{allow: true},
+	}, nil, &fakeExecStreamer{})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/clusters/"+clusterID.String()+"/namespaces/kube-system/pods/attacker/exec"+
+			"?node_tty=true&container=node-shell&command=id", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.False(t, factory.called)
+}
+
+func TestExecPersistsRecordingWithoutCommandOrCredentials(t *testing.T) {
+	db := openStreamRecordsDB(t)
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	exec := &fakeExecStreamer{
+		run: func(ctx context.Context, req ExecRequest) error {
+			_, _ = req.Stdout.Write([]byte("stdout token is allowed as terminal content\n"))
+			_, _ = req.Stderr.Write([]byte("stderr line\n"))
+			return nil
+		},
+	}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		DB:       db,
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID, host: "https://token-secret.example"},
+		Writer:   allowStreamWriter{allow: true},
+	}, nil, exec)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/exec?container=app&command=sh&command=-c&command=cat%20%2Fvar%2Frun%2Fsecrets%2Ftoken", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var saved k8sschema.Record
+	require.NoError(t, db.First(&saved, "workspace_id = ? AND cluster_id = ?", wsID.String(), clusterID.String()).Error)
+	require.Equal(t, "exec", saved.Kind)
+	require.NotNil(t, saved.EndedAt)
+	recording := string(saved.Blob)
+	require.Contains(t, recording, `"stream":"stdout"`)
+	require.Contains(t, recording, `"data":"stdout token is allowed as terminal content\n"`)
+	require.Contains(t, recording, `"stream":"stderr"`)
+	require.NotContains(t, recording, "cat /var/run/secrets/token")
+	require.NotContains(t, recording, "token-secret.example")
+}
+
+func TestExecPersistsRecordingWhenRequestIsCanceled(t *testing.T) {
+	db := openStreamRecordsDB(t)
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	exec := &fakeExecStreamer{
+		run: func(ctx context.Context, req ExecRequest) error {
+			_, _ = req.Stdout.Write([]byte("before cancel\n"))
+			return context.Canceled
+		},
+	}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		DB:       db,
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+		Writer:   allowStreamWriter{allow: true},
+	}, nil, exec)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/exec?command=date", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var saved k8sschema.Record
+	require.NoError(t, db.First(&saved, "workspace_id = ? AND cluster_id = ?", wsID.String(), clusterID.String()).Error)
+	require.NotNil(t, saved.EndedAt)
+	require.Contains(t, string(saved.Blob), "before cancel")
+}
+
+func TestExecContinuesWithFixedWarningWhenRecordingStartFails(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	exec := &fakeExecStreamer{
+		run: func(ctx context.Context, req ExecRequest) error {
+			_, _ = req.Stdout.Write([]byte("still streaming\n"))
+			return nil
+		},
+	}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		DB:       db,
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+		Writer:   allowStreamWriter{allow: true},
+	}, nil, exec)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/exec?command=date", nil)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "event: warning\ndata: \"terminal recording unavailable\"")
+	require.Contains(t, rec.Body.String(), "event: output\ndata: \"still streaming\\n\"")
+	require.NotContains(t, rec.Body.String(), "no such table")
+}
+
+func TestExecCancelsStreamerWhenClientContextIsDone(t *testing.T) {
+	wsID := kernel.NewWorkspaceID()
+	memberID := kernel.NewMemberID()
+	clusterID := kernel.NewClusterInfoID()
+	started := make(chan struct{})
+	exec := &fakeExecStreamer{
+		run: func(ctx context.Context, req ExecRequest) error {
+			close(started)
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
+	engine := streamTestEngine(memberID, sparkplugin.PluginContext{
+		Clusters: fakeStreamClusterFactory{clusterID: clusterID},
+		Writer:   allowStreamWriter{allow: true},
+	}, nil, exec)
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/clusters/"+clusterID.String()+"/namespaces/default/pods/web-0/exec?command=date", nil).WithContext(ctx)
+	req.Header.Set("X-Workspace-Id", wsID.String())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		engine.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	<-started
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("exec stream did not stop after request context cancellation")
+	}
+}
+
+func TestSSEWriterEscapesMultilineDataAndSerializesConcurrentWrites(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writer := newSSEWriter(rec)
+	var wg sync.WaitGroup
+	for _, event := range []string{"output", "error"} {
+		wg.Add(1)
+		go func(event string) {
+			defer wg.Done()
+			require.NoError(t, writer.Event(event, "line 1\nline 2"))
+		}(event)
+	}
+	wg.Wait()
+
+	body := rec.Body.String()
+	require.Contains(t, body, "data: \"line 1\\nline 2\"")
+	require.NotContains(t, body, "data: line 1\nline 2")
+	require.Equal(t, 1, strings.Count(body, "event: output"))
+	require.Equal(t, 1, strings.Count(body, "event: error"))
+}
+
+func streamTestEngine(memberID kernel.MemberID, ctx sparkplugin.PluginContext, logs LogStreamer, exec ExecStreamer) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		authn.SetMemberIDForTest(c, memberID)
+		c.Next()
+	})
+	engine.Use(httpx.RequireWorkspace())
+	handler := NewHandlerWithStreamers(ctx, logs, exec)
+	engine.GET("/clusters/:clusterId/namespaces/:namespace/pods/:pod/logs", handler.Logs)
+	engine.GET("/clusters/:clusterId/namespaces/:namespace/pods/:pod/exec", handler.Exec)
+	return engine
+}
+
+type fakeLogStreamer struct {
+	body    string
+	request LogRequest
+}
+
+func (f *fakeLogStreamer) StreamLogs(_ context.Context, _ kubernetes.Interface, req LogRequest) (io.ReadCloser, error) {
+	f.request = req
+	return io.NopCloser(strings.NewReader(f.body)), nil
+}
+
+type fakeExecStreamer struct {
+	called  bool
+	request ExecRequest
+	run     func(context.Context, ExecRequest) error
+}
+
+func (f *fakeExecStreamer) StreamExec(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, req ExecRequest) error {
+	f.called = true
+	f.request = req
+	if f.run != nil {
+		return f.run(ctx, req)
+	}
+	return nil
+}
+
+type fakeStreamClusterFactory struct {
+	clusterID kernel.ClusterInfoID
+	host      string
+}
+
+func (f fakeStreamClusterFactory) ForWorkspace(context.Context, kernel.WorkspaceID, kernel.ClusterInfoID) (
+	kubernetes.Interface, dynamic.Interface, *rest.Config, *sparkplugin.ClusterMeta, error,
+) {
+	host := f.host
+	if host == "" {
+		host = "https://kubernetes.example"
+	}
+	return fake.NewSimpleClientset(), nil, &rest.Config{Host: host}, nil, nil
+}
+
+func (f fakeStreamClusterFactory) ListMeta(context.Context, kernel.WorkspaceID) ([]sparkplugin.ClusterMeta, error) {
+	return []sparkplugin.ClusterMeta{{ID: f.clusterID.String(), Name: "prod"}}, nil
+}
+
+type recordingStreamClusterFactory struct {
+	called bool
+}
+
+func (f *recordingStreamClusterFactory) ForWorkspace(context.Context, kernel.WorkspaceID, kernel.ClusterInfoID) (
+	kubernetes.Interface, dynamic.Interface, *rest.Config, *sparkplugin.ClusterMeta, error,
+) {
+	f.called = true
+	return fake.NewSimpleClientset(), nil, &rest.Config{Host: "https://kubernetes.example"}, nil, nil
+}
+
+func (f *recordingStreamClusterFactory) ListMeta(context.Context, kernel.WorkspaceID) ([]sparkplugin.ClusterMeta, error) {
+	return nil, errors.New("not used")
+}
+
+type allowStreamWriter struct {
+	allow bool
+}
+
+func (w allowStreamWriter) CanWrite(context.Context, kernel.WorkspaceID, kernel.MemberID) (bool, error) {
+	return w.allow, nil
+}
+
+type recordingAudit struct {
+	events []sparkplugin.AuditEvent
+}
+
+func (a *recordingAudit) Record(_ context.Context, event sparkplugin.AuditEvent) error {
+	a.events = append(a.events, event)
+	return nil
+}
+
+func int64Ptr(v int64) *int64 {
+	return &v
+}
+
+func (r ExecRequest) withoutWriters() ExecRequest {
+	r.Stdout = nil
+	r.Stderr = nil
+	return r
+}
+
+func openStreamRecordsDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS plugin_kubernetes").Error)
+	require.NoError(t, k8sschema.AutoMigrate(db))
+	return db
+}
+
+func logEventChunks(t *testing.T, body string) []string {
+	t.Helper()
+	frames := strings.Split(body, "\n\n")
+	var chunks []string
+	for _, frame := range frames {
+		if !strings.HasPrefix(frame, "event: log\n") {
+			continue
+		}
+		raw := strings.TrimPrefix(strings.TrimPrefix(frame, "event: log\n"), "data: ")
+		var chunk string
+		require.NoError(t, json.Unmarshal([]byte(raw), &chunk))
+		chunks = append(chunks, chunk)
+	}
+	return chunks
+}

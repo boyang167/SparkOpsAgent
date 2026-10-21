@@ -6,10 +6,6 @@ import { useRouter } from "next/navigation";
 import { identity } from "@sparkops/web-sdk";
 import { BffError } from "@sparkops/contracts";
 
-function FieldIcon({ children }: { children: React.ReactNode }) {
-  return <span className="auth-field-icon">{children}</span>;
-}
-
 export function LoginForm() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -84,47 +80,31 @@ export function LoginForm() {
       {showPassword ? (
         <form className="auth-form-fields" onSubmit={onSubmit}>
           <label className="auth-field" htmlFor="email">
-            <span className="auth-field-label">工作邮箱</span>
-            <div className="auth-field-control">
-              <FieldIcon>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-                  <path d="M4 6h16v12H4z" strokeLinejoin="round" />
-                  <path d="M4 7l8 6 8-6" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </FieldIcon>
-              <input
-                id="email"
-                className="auth-input"
-                type="email"
-                autoComplete="email"
-                placeholder="name@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
+            <span className="auth-field-label">邮箱</span>
+            <input
+              id="email"
+              className="auth-input"
+              type="email"
+              autoComplete="email"
+              placeholder="name@company.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
           </label>
 
           <label className="auth-field" htmlFor="password">
             <span className="auth-field-label">密码</span>
-            <div className="auth-field-control">
-              <FieldIcon>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-                  <rect x="5" y="11" width="14" height="10" rx="2" />
-                  <path d="M8 11V8a4 4 0 118 0v3" strokeLinecap="round" />
-                </svg>
-              </FieldIcon>
-              <input
-                id="password"
-                className="auth-input"
-                type="password"
-                autoComplete="current-password"
-                placeholder="请输入密码"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
+            <input
+              id="password"
+              className="auth-input"
+              type="password"
+              autoComplete="current-password"
+              placeholder="请输入密码"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
           </label>
 
           <button className="auth-submit" type="submit" disabled={loading}>
@@ -189,10 +169,6 @@ export function LoginForm() {
           ) : null}
         </div>
       ) : null}
-
-      <p className="auth-form-note">
-        登录即表示您同意平台安全策略与会话管理规范
-      </p>
     </div>
   );
 }

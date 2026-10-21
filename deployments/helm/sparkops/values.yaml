@@ -22,13 +22,6 @@ rabbitmq:
 nameOverride: ""
 fullnameOverride: ""
 
-migration:
-  # The pre-install/pre-upgrade hook uses the API image, which contains
-  # /app/migrate-sql and /app/migrations.
-  enabled: true
-  backoffLimit: 2
-  activeDeadlineSeconds: 600
-
 api:
   replicaCount: 2
   image:
@@ -55,17 +48,11 @@ api:
     MESSAGING_DRIVER: amqp
     RUNTIME_DRIVER: k8s
     DELIVERY_DRIVER: jenkins
-  # Non-sensitive connection defaults. The task queue exchange remains
-  # "sparkops"; this is the separate transactional event topic exchange.
+  # Non-sensitive connection defaults; override in values-production.yaml
   redis:
     addr: redis:6379
   amqp:
-    eventExchange: sparkops.events
-  outbox:
-    pollInterval: 1s
-    batchSize: 100
-    lockTimeout: 1m
-    publishTimeout: 30s
+    url: amqp://sparkops:sparkops@rabbitmq:5672/
   jenkins:
     url: ""
     user: ""
@@ -119,9 +106,8 @@ ingress:
   tls: []
 
 secrets:
-  # Set via --set-string or an external secret manager in production.
+  # Set via --set or external secret manager in production
   databaseDsn: postgres://sparkops:changeme@postgres:5432/sparkops?sslmode=disable
-  amqpUrl: ""
   jwtSecret: replace-with-long-random-secret
   webhookSecret: replace-with-webhook-secret
   jenkinsToken: ""
@@ -136,17 +122,6 @@ kubeconfig:
 serviceAccount:
   create: true
   name: ""
-
-observability:
-  messagingAlerts:
-    # Requires the Prometheus Operator monitoring.coreos.com/v1 CRD.
-    enabled: false
-    namespace: ""
-    labels: {}
-    outboxOldestSeconds: 60
-    operationOldestSeconds: 300
-    pendingCount: 100
-    for: 10m
 
 nodeSelector: {}
 tolerations: []

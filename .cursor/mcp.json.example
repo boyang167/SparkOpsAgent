@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "jenkins": {
+      "command": "C:/Users/你的用户名/.local/bin/pawangunjkar-jenkins-mcp.exe",
+      "args": [],
+      "envFile": "${workspaceFolder}/.cursor/jenkins.env",
+      "env": {
+        "JENKINS_URL": "http://192.168.5.24:9999",
+        "JENKINS_USERNAME": "root",
+        "JENKINS_SSL_VERIFY": "false",
+        "JENKINS_TIMEOUT": "30"
+      }
+    }
+  }
+}

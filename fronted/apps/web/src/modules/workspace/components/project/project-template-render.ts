@@ -34,17 +34,8 @@ function looksLikeManifest(text: string) {
   );
 }
 
-const YAML_NON_STRING_SCALAR =
-  /^(?:|~|null|true|false|y|yes|n|no|on|off|[-+]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?|0x[\da-f]+|0o[0-7]+|[-+]?\.inf|\.nan)$/i;
-
 function escapeYaml(value: string) {
-  if (
-    /[:#{}[\],&*?|>!%@`]/.test(value) ||
-    value.includes("\n") ||
-    value.includes('"') ||
-    value !== value.trim() ||
-    YAML_NON_STRING_SCALAR.test(value)
-  ) {
+  if (/[:#{}[\],&*?|>!%@`]/.test(value) || value.includes("\n") || value.includes('"')) {
     return JSON.stringify(value);
   }
   return value;
@@ -156,7 +147,7 @@ export function buildTemplateVars(
     args: project.resources?.args ?? "",
     registry_type: project.resources?.registry_type || "Harbor",
     service_name: `${name}-service`,
-    deployment_name: name,
+    deployment_name: `${name}-deployment`,
     app_label: name,
     org_name: hints.orgName?.trim() || orgSlug,
     org_slug: orgSlug,
@@ -499,14 +490,12 @@ function defaultJenkinsfile(vars: Record<string, string>, enableScan: boolean) {
         script {
           def branch = (env.BRANCH ?: 'main').trim()
           def refType = (params.GIT_REF_TYPE ?: env.GIT_REF_TYPE ?: 'branch').trim()
-          def branchSpec = refType == 'tag' ? "refs/tags/\${branch}" : refType == 'pr' ? "refs/merge-requests/\${branch}/head" : "*/\${branch}"
+          def branchSpec = refType == 'tag' ? "refs/tags/\${branch}" : "*/\${branch}"
           def cloneExtensions = refType == 'tag'
             ? [[$class: 'CloneOption', shallow: false]]
             : [[$class: 'CloneOption', shallow: true, depth: 1]]
           def remoteConfigs = refType == 'tag'
             ? [[url: env.GIT_URL, credentialsId: env.GIT_CREDENTIAL_ID, refspec: '+refs/tags/*:refs/remotes/origin/tags/*']]
-            : refType == 'pr'
-            ? [[url: env.GIT_URL, credentialsId: env.GIT_CREDENTIAL_ID, refspec: "+refs/merge-requests/\${branch}/head:refs/remotes/origin/merge-requests/\${branch}/head"]]
             : [[url: env.GIT_URL, credentialsId: env.GIT_CREDENTIAL_ID]]
           checkout([
             $class: 'GitSCM',

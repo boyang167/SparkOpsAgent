@@ -60,11 +60,6 @@ backend/deployments/docker/.env
 tmp/
 temp/
 *.tmp
-/plugins/
 /demo/
 /dependencies/
-.superpowers/
-.cursor/
-docs/
-spec/
-plugins
+/brag-output/
