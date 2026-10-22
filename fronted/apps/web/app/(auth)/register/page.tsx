@@ -5,9 +5,8 @@ export default function RegisterPage() {
   return (
     <div className="auth-card">
       <header className="auth-card-header">
-        <p className="auth-card-eyebrow">Get started</p>
+        <p className="auth-card-kicker">SparkOps</p>
         <h1 className="auth-card-title">创建账号</h1>
-        <p className="auth-card-desc">注册后即可创建组织与工作区，开始使用 Agent 运营平台</p>
       </header>
 
       <RegisterForm />

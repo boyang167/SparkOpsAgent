@@ -19,22 +19,6 @@ menus:
     path: /plugins/kubernetes/workloads
     component: plugins/kubernetes/workloads/page
     parent: /plugins/kubernetes
-  - title: OpenKruise
-    path: /plugins/kubernetes/openkruise
-    component: plugins/kubernetes/openkruise/page
-    parent: /plugins/kubernetes
-  - title: Kruise Rollouts
-    path: /plugins/kubernetes/kruise-rollouts
-    component: plugins/kubernetes/kruise-rollouts/page
-    parent: /plugins/kubernetes
-  - title: KubeBlocks
-    path: /plugins/kubernetes/kubeblocks
-    component: plugins/kubernetes/kubeblocks/page
-    parent: /plugins/kubernetes
-  - title: KubeVela
-    path: /plugins/kubernetes/kubevela
-    component: plugins/kubernetes/kubevela/page
-    parent: /plugins/kubernetes
   - title: 命名空间
     path: /plugins/kubernetes/namespaces
     component: plugins/kubernetes/namespaces/page
@@ -63,26 +47,46 @@ menus:
     path: /plugins/kubernetes/records
     component: plugins/kubernetes/records/page
     parent: /plugins/kubernetes
+  - title: 运维工具
+    path: /plugins/kubernetes/ops-tools
+    component: plugins/kubernetes/ops-tools/page
+    parent: /plugins/kubernetes
   - title: 应用诊断
     path: /plugins/kubernetes/diagnosis
     component: plugins/kubernetes/diagnosis/page
-    parent: /plugins/kubernetes
-  - title: Velero备份
-    path: /plugins/kubernetes/backup
-    component: plugins/kubernetes/backup/page
-    parent: /plugins/kubernetes
-  - title: AI Chat
-    path: /plugins/kubernetes/chat
-    component: plugins/kubernetes/chat/page
-    parent: /plugins/kubernetes
+    parent: /plugins/kubernetes/ops-tools
   - title: CloudTTY
     path: /plugins/kubernetes/cloudtty
     component: plugins/kubernetes/cloudtty/page
-    parent: /plugins/kubernetes
+    parent: /plugins/kubernetes/ops-tools
+  - title: Velero备份
+    path: /plugins/kubernetes/backup
+    component: plugins/kubernetes/backup/page
+    parent: /plugins/kubernetes/ops-tools
+  - title: AI Chat
+    path: /plugins/kubernetes/chat
+    component: plugins/kubernetes/chat/page
+    parent: /plugins/kubernetes/ops-tools
+  - title: OpenKruise
+    path: /plugins/kubernetes/openkruise
+    component: plugins/kubernetes/openkruise/page
+    parent: /plugins/kubernetes/ops-tools
+  - title: Kruise Rollouts
+    path: /plugins/kubernetes/kruise-rollouts
+    component: plugins/kubernetes/kruise-rollouts/page
+    parent: /plugins/kubernetes/ops-tools
+  - title: KubeBlocks
+    path: /plugins/kubernetes/kubeblocks
+    component: plugins/kubernetes/kubeblocks/page
+    parent: /plugins/kubernetes/ops-tools
+  - title: KubeVela
+    path: /plugins/kubernetes/kubevela
+    component: plugins/kubernetes/kubevela/page
+    parent: /plugins/kubernetes/ops-tools
   - title: Velaux
     path: /plugins/kubernetes/velaux
     component: plugins/kubernetes/velaux/page
-    parent: /plugins/kubernetes
+    parent: /plugins/kubernetes/ops-tools
 apis:
   - method: GET
     path: /api/v1/plugins/kubernetes/ready
@@ -170,6 +174,7 @@ frontend:
     - app/(platform)/plugins/kubernetes/access-controls/page.tsx
     - app/(platform)/plugins/kubernetes/backup/page.tsx
     - app/(platform)/plugins/kubernetes/records/page.tsx
+    - app/(platform)/plugins/kubernetes/ops-tools/page.tsx
     - app/(platform)/plugins/kubernetes/diagnosis/page.tsx
     - app/(platform)/plugins/kubernetes/chat/page.tsx
     - app/(platform)/plugins/kubernetes/cloudtty/page.tsx

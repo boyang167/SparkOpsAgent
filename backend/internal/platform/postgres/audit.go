@@ -12,3 +12,9 @@ type AuditColumns struct {
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`
 }
+
+// TimestampColumns provides created_at and updated_at without soft delete (child/junction rows).
+type TimestampColumns struct {
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}

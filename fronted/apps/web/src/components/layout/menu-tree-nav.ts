@@ -1,4 +1,5 @@
 import type { MenuTreeVM } from "@sparkops/contracts/governance";
+import { KUBERNETES_SECTIONS } from "@/modules/plugins/kubernetes/kubernetes-section-nav";
 
 export type NavGroupFromMenu = {
   /** 唯一 React key，来自治理菜单 id */
@@ -14,6 +15,7 @@ export type NavLeafFromMenu = {
   href: string;
   label: string;
   activeHrefs?: string[];
+  children?: NavLeafFromMenu[];
 };
 
 export type SidebarNavEntry =
@@ -21,42 +23,6 @@ export type SidebarNavEntry =
   | { type: "link"; id: string; href: string; label: string };
 
 const PLUGIN_CONTAINER_PATH = "/plugins";
-
-const KUBERNETES_NAV_SECTIONS: NavLeafFromMenu[] = [
-  { href: "/plugins/kubernetes/clusters", label: "集群管理" },
-  { href: "/plugins/kubernetes/workloads", label: "工作负载" },
-  { href: "/plugins/kubernetes/nodes", label: "节点管理" },
-  { href: "/plugins/kubernetes/namespaces", label: "命名空间" },
-  {
-    href: "/plugins/kubernetes/networks",
-    label: "网络与网关",
-    activeHrefs: ["/plugins/kubernetes/gateway"],
-  },
-  {
-    href: "/plugins/kubernetes/configs",
-    label: "配置与存储",
-    activeHrefs: ["/plugins/kubernetes/storages"],
-  },
-  {
-    href: "/plugins/kubernetes/access-controls",
-    label: "安全与访问",
-    activeHrefs: ["/plugins/kubernetes/records"],
-  },
-  {
-    href: "/plugins/kubernetes/diagnosis",
-    label: "运维工具",
-    activeHrefs: [
-      "/plugins/kubernetes/backup",
-      "/plugins/kubernetes/chat",
-      "/plugins/kubernetes/cloudtty",
-      "/plugins/kubernetes/openkruise",
-      "/plugins/kubernetes/kruise-rollouts",
-      "/plugins/kubernetes/kubeblocks",
-      "/plugins/kubernetes/kubevela",
-      "/plugins/kubernetes/velaux",
-    ],
-  },
-];
 
 function visibleChildren(node: MenuTreeVM): MenuTreeVM[] {
   return (node.children ?? []).filter((child) => !child.hidden && child.path.trim().startsWith("/"));
@@ -86,16 +52,44 @@ function toLeaves(nodes: MenuTreeVM[]): NavLeafFromMenu[] {
 
 function toKubernetesLeaves(nodes: MenuTreeVM[]): NavLeafFromMenu[] {
   const visiblePaths = new Set(nodes.map((node) => node.path.trim()));
-  return KUBERNETES_NAV_SECTIONS.flatMap((section) => {
-    const sectionPaths = [section.href, ...(section.activeHrefs ?? [])];
-    const href = sectionPaths.find((path) => visiblePaths.has(path));
-    if (!href) return [];
+  const fromMenu = nodes.flatMap((node) => {
+    const nested = visibleChildren(node);
+    const path = node.path.trim();
+    if (nested.length > 0) {
+      const children = nested.map((child) => ({
+        href: child.path.trim(),
+        label: child.title,
+      }));
+      if (children.length === 1) {
+        return [{ href: children[0].href, label: node.title }];
+      }
+      return [{ href: children[0].href, label: node.title, children }];
+    }
+    return [{ href: path, label: node.title }];
+  });
+
+  const covered = new Set(fromMenu.flatMap((leaf) => [
+    leaf.href,
+    ...(leaf.children?.map((child) => child.href) ?? []),
+  ]));
+
+  const consolidated = KUBERNETES_SECTIONS.filter((section) => section.label !== "运维工具").flatMap((section) => {
+    const visibleItems = section.items.filter(
+      (item) => visiblePaths.has(item.href) && !covered.has(item.href),
+    );
+    if (visibleItems.length === 0) return [];
+    if (visibleItems.length === 1) {
+      const [only] = visibleItems;
+      return [{ href: only.href, label: section.label }];
+    }
     return [{
-      href,
+      href: visibleItems[0].href,
       label: section.label,
-      activeHrefs: sectionPaths.filter((path) => path !== href),
+      children: visibleItems.map((item) => ({ href: item.href, label: item.label })),
     }];
   });
+
+  return [...fromMenu, ...consolidated];
 }
 
 function mergePluginContainers(roots: MenuTreeVM[]): MenuTreeVM[] {
@@ -242,11 +236,28 @@ function appendStandardRoot(
   }
 }
 
+/** Hidden 「插件」根节点仍将其子插件（如 Kubernetes）暴露给侧栏。 */
+function navMenuRoots(tree: MenuTreeVM[]): MenuTreeVM[] {
+  const roots: MenuTreeVM[] = [];
+  for (const root of tree) {
+    if (isPluginContainer(root) && root.hidden) {
+      for (const child of visibleChildren(root)) {
+        roots.push(child);
+      }
+      continue;
+    }
+    if (!root.hidden) {
+      roots.push(root);
+    }
+  }
+  return roots;
+}
+
 /** 将治理菜单树转为侧栏分组。带子菜单的插件根提升为独立分组，避免只显示「Kubernetes管理」一层。 */
 export function menuTreeToNavEntries(tree: MenuTreeVM[]): SidebarNavEntry[] {
   const entries: SidebarNavEntry[] = [];
   const seenIds = new Set<string>();
-  const normalizedTree = mergePluginContainers(tree.filter((root) => !root.hidden));
+  const normalizedTree = mergePluginContainers(navMenuRoots(tree));
 
   for (const root of normalizedTree) {
     if (isPluginContainer(root)) {

@@ -21,37 +21,27 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
               </p>
             </div>
 
-            <section className="auth-brand-workflow" aria-labelledby="auth-workflow-title">
-              <div className="auth-brand-workflow-head">
-                <p id="auth-workflow-title">Agent delivery</p>
-                <span>统一生命周期</span>
-              </div>
-              <ol className="auth-brand-flow" aria-label="Agent 生命周期">
-                {[
-                  { label: "构建", description: "模型、工具与工作流" },
-                  { label: "发布", description: "版本与环境编排" },
-                  { label: "运行", description: "弹性执行与调度" },
-                  { label: "观测", description: "质量、成本与审计" },
-                ].map((item, index) => (
-                  <li className="auth-brand-flow-step" key={item.label}>
-                    <span className="auth-brand-flow-index">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
-                    <span className="auth-brand-flow-copy">
-                      <strong>{item.label}</strong>
-                      <small>{item.description}</small>
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            </section>
+            <ol className="auth-brand-flow" aria-label="Agent 生命周期">
+              {[
+                { label: "构建", description: "模型、工具与工作流" },
+                { label: "发布", description: "版本与环境编排" },
+                { label: "运行", description: "弹性执行与调度" },
+                { label: "观测", description: "质量、成本与审计" },
+              ].map((item, index) => (
+                <li className="auth-brand-flow-step" key={item.label}>
+                  <span className="auth-brand-flow-index">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <span className="auth-brand-flow-copy">
+                    <strong>{item.label}</strong>
+                    <small>{item.description}</small>
+                  </span>
+                </li>
+              ))}
+            </ol>
           </div>
 
-          <div className="auth-brand-trust" aria-label="平台能力">
-            <span>私有化部署</span>
-            <span>企业身份接入</span>
-            <span>审计治理</span>
-          </div>
+          <p className="auth-brand-trust">私有化部署 · 企业身份 · 审计治理</p>
         </div>
       </aside>
 

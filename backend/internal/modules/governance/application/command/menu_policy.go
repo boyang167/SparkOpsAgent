@@ -35,6 +35,7 @@ var DefaultMenuRolePolicies = map[string][]string{
 	"/plugins/kubernetes/storages":        {"admin", "operator"},
 	"/plugins/kubernetes/access-controls": {"admin", "operator"},
 	"/plugins/kubernetes/records":         {"admin", "operator", "viewer"},
+	"/plugins/kubernetes/ops-tools":       {"admin", "developer", "operator"},
 	"/plugins/kubernetes/diagnosis":       {"admin", "operator"},
 	"/plugins/kubernetes/backup":          {"admin", "operator"},
 	"/plugins/kubernetes/chat":            {"admin", "developer", "operator"},

@@ -1,4 +1,4 @@
-import type { MenuTreeVM } from "@sparkops/contracts/governance";
+import type { MenuTreeVM, UpsertMenuCommand } from "@sparkops/contracts/governance";
 
 export type MenuTreeNode = MenuTreeVM & { depth: number };
 
@@ -123,4 +123,27 @@ export function collectExpandableIds(nodes: MenuTreeVM[]): string[] {
 
 export function notifyMenusUpdated() {
   window.dispatchEvent(new Event("sparkops:menus-updated"));
+}
+
+/** 用树节点数据填充编辑表单，便于在详情 API 返回前先打开弹窗。 */
+export function menuTreeToForm(menu: MenuTreeVM): UpsertMenuCommand {
+  const animation = menu.transition_animation;
+  return {
+    parent_id: menu.parent_id ?? null,
+    name: menu.name,
+    path: menu.path,
+    title: menu.title,
+    icon: menu.icon ?? "",
+    component: menu.component ?? "",
+    hidden: menu.hidden,
+    sort: menu.sort,
+    keep_alive: menu.keep_alive,
+    active_menu: menu.active_menu ?? "",
+    close_tab: menu.close_tab ?? false,
+    is_basic: menu.is_basic ?? false,
+    transition_animation:
+      animation === "fade" || animation === "none" ? animation : "global",
+    params: [],
+    buttons: [],
+  };
 }

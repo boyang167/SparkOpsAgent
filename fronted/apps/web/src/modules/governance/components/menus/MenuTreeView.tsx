@@ -82,18 +82,32 @@ export function MenuTreeView({
                   type="button"
                   className="menu-tree-action"
                   title="添加子菜单"
-                  onClick={() => onAddChild(node)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAddChild(node);
+                  }}
                 >
                   子项
                 </button>
-                <button type="button" className="menu-tree-action" title="编辑" onClick={() => onEdit(node)}>
+                <button
+                  type="button"
+                  className="menu-tree-action"
+                  title="编辑"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit(node);
+                  }}
+                >
                   编辑
                 </button>
                 <button
                   type="button"
                   className="menu-tree-action"
                   title="分配角色"
-                  onClick={() => onAssignRoles(node)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAssignRoles(node);
+                  }}
                 >
                   角色
                 </button>
@@ -102,7 +116,10 @@ export function MenuTreeView({
                   className="menu-tree-action menu-tree-action-danger"
                   title="删除"
                   disabled={actionId === node.id}
-                  onClick={() => onDelete(node)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(node);
+                  }}
                 >
                   删除
                 </button>

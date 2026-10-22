@@ -55,7 +55,7 @@ export const KUBERNETES_SECTIONS: KubernetesSection[] = [
     ],
   },
   {
-    href: "/plugins/kubernetes/diagnosis",
+    href: "/plugins/kubernetes/ops-tools",
     label: "运维工具",
     items: [
       { href: "/plugins/kubernetes/diagnosis", label: "应用诊断" },

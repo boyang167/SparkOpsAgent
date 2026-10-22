@@ -80,6 +80,7 @@ func registerBundledDescriptor() {
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/access-controls/page.tsx",
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/backup/page.tsx",
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/records/page.tsx",
+			"fronted/apps/web/app/(platform)/plugins/kubernetes/ops-tools/page.tsx",
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/diagnosis/page.tsx",
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/chat/page.tsx",
 			"fronted/apps/web/app/(platform)/plugins/kubernetes/cloudtty/page.tsx",

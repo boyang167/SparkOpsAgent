@@ -11,6 +11,7 @@ interface MenuFormModalProps {
   form: UpsertMenuCommand;
   roles: RoleVM[];
   saving: boolean;
+  detailLoading?: boolean;
   parentOptions: Array<{ id: string; label: string; depth: number }>;
   onClose: () => void;
   onChange: (next: UpsertMenuCommand) => void;
@@ -23,6 +24,7 @@ export function MenuFormModal({
   form,
   roles,
   saving,
+  detailLoading = false,
   parentOptions,
   onClose,
   onChange,
@@ -33,7 +35,7 @@ export function MenuFormModal({
       <button type="button" className="btn-secondary" onClick={onClose}>
         取消
       </button>
-      <button type="submit" form="menu-form" className="btn" disabled={saving}>
+      <button type="submit" form="menu-form" className="btn" disabled={saving || detailLoading}>
         {saving ? "保存中…" : mode === "add" ? "创建菜单" : "保存更改"}
       </button>
     </div>
@@ -46,8 +48,14 @@ export function MenuFormModal({
       title={mode === "add" ? "新增菜单" : "编辑菜单"}
       description="配置菜单展示信息与路由，保存后可在右侧详情面板分配角色。"
       size="lg"
+      priority
       footer={footer}
     >
+      {detailLoading ? (
+        <p className="text-sm text-muted mb-3" role="status">
+          正在加载菜单详情…
+        </p>
+      ) : null}
       <form id="menu-form" onSubmit={onSubmit} className="stack-md">
         <div className="menu-form-grid">
           <section className="menu-form-section">

@@ -44,7 +44,7 @@ type menuParamModel struct {
 	ParamKey   string `gorm:"column:param_key"`
 	ParamValue string `gorm:"column:param_value"`
 	Sort       int
-	postgres.AuditColumns
+	postgres.TimestampColumns
 }
 
 func (menuParamModel) TableName() string { return "governance.menu_params" }
@@ -56,7 +56,7 @@ type menuButtonModel struct {
 	Code   string
 	Remark string
 	Sort   int
-	postgres.AuditColumns
+	postgres.TimestampColumns
 }
 
 func (menuButtonModel) TableName() string { return "governance.menu_buttons" }
@@ -326,7 +326,7 @@ func (s *MenuStore) ReplaceParams(ctx context.Context, menuID string, params []m
 			if err := tx.Create(&menuParamModel{
 				ID: id, MenuID: menuID, ParamType: ptype, ParamKey: key,
 				ParamValue: strings.TrimSpace(param.Value), Sort: sort,
-				AuditColumns: postgres.AuditColumns{CreatedAt: now, UpdatedAt: now},
+				TimestampColumns: postgres.TimestampColumns{CreatedAt: now, UpdatedAt: now},
 			}).Error; err != nil {
 				return err
 			}
@@ -367,7 +367,7 @@ func (s *MenuStore) ReplaceButtons(ctx context.Context, menuID string, buttons [
 			if err := tx.Create(&menuButtonModel{
 				ID: id, MenuID: menuID, Name: name, Code: code,
 				Remark: strings.TrimSpace(btn.Remark), Sort: sort,
-				AuditColumns: postgres.AuditColumns{CreatedAt: now, UpdatedAt: now},
+				TimestampColumns: postgres.TimestampColumns{CreatedAt: now, UpdatedAt: now},
 			}).Error; err != nil {
 				return err
 			}

@@ -5,8 +5,8 @@ export default function LoginPage() {
   return (
     <div className="auth-card">
       <header className="auth-card-header">
-        <h1 className="auth-card-title">登录 SparkOps</h1>
-        <p className="auth-card-desc">使用邮箱或企业账号进入控制台</p>
+        <p className="auth-card-kicker">SparkOps</p>
+        <h1 className="auth-card-title">登录</h1>
       </header>
 
       <LoginForm />

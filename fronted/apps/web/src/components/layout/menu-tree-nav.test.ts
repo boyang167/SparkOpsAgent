@@ -57,7 +57,7 @@ describe("menuTreeToNavGroups", () => {
     expect(groups[0]?.items.map((item) => [item.href, item.label])).toEqual([
       ["/plugins/kubernetes/clusters", "集群管理"],
       ["/plugins/kubernetes/nodes", "节点管理"],
-      ["/plugins/kubernetes/backup", "运维工具"],
+      ["/plugins/kubernetes/backup", "Velero备份"],
     ]);
     expect(menuTreeToNavEntries(tree)).toContainEqual({
       type: "link",
@@ -68,7 +68,7 @@ describe("menuTreeToNavGroups", () => {
     expect(menuTreeToNavEntries(tree).some((entry) => entry.label === "插件")).toBe(false);
   });
 
-  it("maps kubernetes deep routes to consolidated entries", () => {
+  it("maps kubernetes menu folders to expandable sidebar submenus", () => {
     const tree = [
       node({
         path: "/plugins",
@@ -78,10 +78,14 @@ describe("menuTreeToNavGroups", () => {
             path: "/plugins/kubernetes",
             title: "Kubernetes",
             children: [
-              node({ path: "/plugins/kubernetes/networks", title: "网络与网关" }),
-              node({ path: "/plugins/kubernetes/configs", title: "配置与存储" }),
-              node({ path: "/plugins/kubernetes/access-controls", title: "安全与访问" }),
-              node({ path: "/plugins/kubernetes/diagnosis", title: "运维工具" }),
+              node({
+                path: "/plugins/kubernetes/ops-tools",
+                title: "运维工具",
+                children: [
+                  node({ path: "/plugins/kubernetes/diagnosis", title: "应用诊断" }),
+                  node({ path: "/plugins/kubernetes/cloudtty", title: "CloudTTY" }),
+                ],
+              }),
             ],
           }),
         ],
@@ -89,14 +93,11 @@ describe("menuTreeToNavGroups", () => {
     ];
 
     const [group] = menuTreeToNavGroups(tree);
-    expect(group.items.find((item) => item.href.endsWith("/networks"))?.activeHrefs)
-      .toContain("/plugins/kubernetes/gateway");
-    expect(group.items.find((item) => item.href.endsWith("/configs"))?.activeHrefs)
-      .toContain("/plugins/kubernetes/storages");
-    expect(group.items.find((item) => item.href.endsWith("/access-controls"))?.activeHrefs)
-      .toContain("/plugins/kubernetes/records");
-    expect(group.items.find((item) => item.href.endsWith("/diagnosis"))?.activeHrefs)
-      .toContain("/plugins/kubernetes/cloudtty");
+    const opsTools = group.items.find((item) => item.label === "运维工具");
+    expect(opsTools?.children?.map((child) => child.href)).toEqual([
+      "/plugins/kubernetes/diagnosis",
+      "/plugins/kubernetes/cloudtty",
+    ]);
   });
 
   it("keeps a consolidated entry when the member only has a deep menu role", () => {
@@ -122,8 +123,8 @@ describe("menuTreeToNavGroups", () => {
       "/plugins/kubernetes/records",
       "/plugins/kubernetes/chat",
     ]);
-    expect(group.items[0]?.activeHrefs).toContain("/plugins/kubernetes/access-controls");
-    expect(group.items[1]?.activeHrefs).toContain("/plugins/kubernetes/diagnosis");
+    expect(group.items[0]?.children).toBeUndefined();
+    expect(group.items[1]?.children).toBeUndefined();
   });
 
   it("collapses duplicate empty plugin containers", () => {
@@ -165,6 +166,32 @@ describe("menuTreeToNavGroups", () => {
       label: "Kubernetes",
     });
     expect(groups[0]?.items.map((item) => item.href)).toEqual(["/plugins/kubernetes/clusters"]);
+  });
+
+  it("promotes kubernetes when plugin container root is hidden", () => {
+    const tree = [
+      node({
+        id: "menu-plugins",
+        path: "/plugins",
+        title: "插件",
+        hidden: true,
+        children: [
+          node({
+            id: "menu-k8s",
+            path: "/plugins/kubernetes",
+            title: "Kubernetes管理",
+            children: [
+              node({ id: "menu-clusters", path: "/plugins/kubernetes/clusters", title: "集群管理" }),
+            ],
+          }),
+        ],
+      }),
+    ];
+
+    const groups = menuTreeToNavGroups(tree);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.label).toBe("Kubernetes");
+    expect(groups[0]?.items.map((item) => item.href)).toContain("/plugins/kubernetes/clusters");
   });
 
   it("keeps one-level groups unchanged", () => {

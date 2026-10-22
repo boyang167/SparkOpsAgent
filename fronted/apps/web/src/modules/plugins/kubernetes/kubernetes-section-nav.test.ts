@@ -6,8 +6,9 @@ describe("KubernetesSectionNav", () => {
     ["/plugins/kubernetes/gateway", "/plugins/kubernetes/networks"],
     ["/plugins/kubernetes/storages", "/plugins/kubernetes/configs"],
     ["/plugins/kubernetes/records", "/plugins/kubernetes/access-controls"],
-    ["/plugins/kubernetes/cloudtty", "/plugins/kubernetes/diagnosis"],
-    ["/plugins/kubernetes/velaux", "/plugins/kubernetes/diagnosis"],
+    ["/plugins/kubernetes/cloudtty", "/plugins/kubernetes/ops-tools"],
+    ["/plugins/kubernetes/velaux", "/plugins/kubernetes/ops-tools"],
+    ["/plugins/kubernetes/diagnosis", "/plugins/kubernetes/ops-tools"],
   ])("maps %s to consolidated section %s", (pathname, sectionHref) => {
     expect(sectionForPath(pathname)?.href).toBe(sectionHref);
   });

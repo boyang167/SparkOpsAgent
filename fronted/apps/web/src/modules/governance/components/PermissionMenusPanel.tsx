@@ -18,6 +18,7 @@ import {
   computeMenuStats,
   filterMenuTree,
   findMenuNode,
+  menuTreeToForm,
   notifyMenusUpdated,
 } from "./menus/menu-utils";
 
@@ -65,6 +66,7 @@ export function PermissionMenusPanel({ workspaceId }: PermissionMenusPanelProps)
   const [formMode, setFormMode] = useState<"add" | "edit">("add");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<UpsertMenuCommand>(EMPTY_FORM);
+  const [formDetailLoading, setFormDetailLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [assignMenu, setAssignMenu] = useState<MenuTreeVM | null>(null);
@@ -165,9 +167,16 @@ export function PermissionMenusPanel({ workspaceId }: PermissionMenusPanelProps)
   }
 
   async function openEdit(menu: MenuTreeVM) {
+    if (!menu.id) {
+      setError("菜单 ID 无效，无法编辑");
+      return;
+    }
     setFormMode("edit");
     setEditingId(menu.id);
     setError(null);
+    setForm(menuTreeToForm(menu));
+    setFormOpen(true);
+    setFormDetailLoading(true);
     try {
       const detail = await governance.getMenu(workspaceId, menu.id);
       setForm({
@@ -190,9 +199,10 @@ export function PermissionMenusPanel({ workspaceId }: PermissionMenusPanelProps)
         params: detail.params ?? [],
         buttons: detail.buttons ?? [],
       });
-      setFormOpen(true);
     } catch (err) {
-      setError(err instanceof BffError ? err.message : "加载菜单失败");
+      setError(err instanceof BffError ? err.message : "加载菜单详情失败，仍可使用基础字段编辑");
+    } finally {
+      setFormDetailLoading(false);
     }
   }
 
@@ -440,8 +450,12 @@ export function PermissionMenusPanel({ workspaceId }: PermissionMenusPanelProps)
         form={form}
         roles={roles}
         saving={saving}
+        detailLoading={formDetailLoading}
         parentOptions={parentOptions}
-        onClose={() => setFormOpen(false)}
+        onClose={() => {
+          setFormOpen(false);
+          setFormDetailLoading(false);
+        }}
         onChange={setForm}
         onSubmit={onSaveForm}
       />

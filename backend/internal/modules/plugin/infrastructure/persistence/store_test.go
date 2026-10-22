@@ -127,6 +127,7 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 		"app/(platform)/plugins/kubernetes/access-controls/page.tsx",
 		"app/(platform)/plugins/kubernetes/backup/page.tsx",
 		"app/(platform)/plugins/kubernetes/records/page.tsx",
+		"app/(platform)/plugins/kubernetes/ops-tools/page.tsx",
 		"app/(platform)/plugins/kubernetes/diagnosis/page.tsx",
 		"app/(platform)/plugins/kubernetes/chat/page.tsx",
 		"app/(platform)/plugins/kubernetes/cloudtty/page.tsx",
@@ -137,6 +138,17 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 		"app/(platform)/plugins/kubernetes/velaux/page.tsx",
 	}, spec.Frontend.Pages)
 
+	opsToolPaths := map[string]struct{}{
+		"/plugins/kubernetes/diagnosis":       {},
+		"/plugins/kubernetes/backup":          {},
+		"/plugins/kubernetes/chat":            {},
+		"/plugins/kubernetes/cloudtty":        {},
+		"/plugins/kubernetes/openkruise":      {},
+		"/plugins/kubernetes/kruise-rollouts": {},
+		"/plugins/kubernetes/kubeblocks":      {},
+		"/plugins/kubernetes/kubevela":        {},
+		"/plugins/kubernetes/velaux":          {},
+	}
 	for _, path := range []string{
 		"/plugins/kubernetes",
 		"/plugins/kubernetes/clusters",
@@ -149,6 +161,7 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 		"/plugins/kubernetes/storages",
 		"/plugins/kubernetes/access-controls",
 		"/plugins/kubernetes/records",
+		"/plugins/kubernetes/ops-tools",
 		"/plugins/kubernetes/diagnosis",
 		"/plugins/kubernetes/backup",
 		"/plugins/kubernetes/chat",
@@ -161,9 +174,14 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 	} {
 		menu, ok := findMenu(spec.Menus, path)
 		require.Truef(t, ok, "missing menu %s", path)
-		if path == "/plugins/kubernetes" {
+		switch {
+		case path == "/plugins/kubernetes":
 			require.Empty(t, menu.Parent)
-		} else {
+		case path == "/plugins/kubernetes/ops-tools":
+			require.Equal(t, "/plugins/kubernetes", menu.Parent)
+		case func() bool { _, ok := opsToolPaths[path]; return ok }():
+			require.Equal(t, "/plugins/kubernetes/ops-tools", menu.Parent)
+		default:
 			require.Equal(t, "/plugins/kubernetes", menu.Parent)
 		}
 	}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 
 interface ModalProps {
   open: boolean;
@@ -57,7 +58,7 @@ export function Modal({
 
   if (!open) return null;
 
-  return (
+  const modal = (
     <div
       className={`modal-root${nested ? " modal-nested" : ""}${priority ? " modal-priority" : ""}`}
       role="presentation"
@@ -105,4 +106,6 @@ export function Modal({
       </div>
     </div>
   );
+
+  return typeof document !== "undefined" ? createPortal(modal, document.body) : null;
 }

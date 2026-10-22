@@ -1,0 +1,75 @@
+<h2>失败处理与测试范围</h2>
+<p class="subtitle">确认后会把完整设计写入 docs/superpowers/specs，再请你审阅文档。</p>
+
+<div class="section">
+  <p class="label">失败策略</p>
+  <div class="mockup">
+    <div class="mockup-header">按阶段处理，不静默吞错</div>
+    <div class="mockup-body" style="padding:14px;font-size:13px;line-height:1.7;">
+      <table style="width:100%;border-collapse:collapse;">
+        <tr><td style="padding:6px;border-bottom:1px solid #e2e8f0;width:28%;"><strong>门禁失败</strong><br>未审核 / 缺密钥 / 无集群</td><td style="padding:6px;border-bottom:1px solid #e2e8f0;">HTTP 400，不创建 Run，前端展示原因。</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid #e2e8f0;"><strong>并发冲突</strong></td><td style="padding:6px;border-bottom:1px solid #e2e8f0;">同一项目已有进行中 Run → 409，不入队。</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid #e2e8f0;"><strong>preparing</strong><br>Jenkins Job upsert 失败</td><td style="padding:6px;border-bottom:1px solid #e2e8f0;">Run → failed。幂等：同一 run_id 重入只继续未完成步骤。</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid #e2e8f0;"><strong>building</strong><br>扫描/测试/推镜像失败</td><td style="padding:6px;border-bottom:1px solid #e2e8f0;">同步 Build 失败态，<strong>不</strong> Apply K8s。日志走现有 SSE。</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid #e2e8f0;"><strong>deploying</strong><br>Apply 或 Rollout 超时</td><td style="padding:6px;border-bottom:1px solid #e2e8f0;">Run → failed，记录 K8s 错误。本次不自动回滚旧镜像（回滚另做）。</td></tr>
+        <tr><td style="padding:6px;"><strong>中止</strong></td><td style="padding:6px;">building 时 abort Jenkins；deploying 时停止等待，不删已 Apply 资源。</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p class="label">超时与重试</p>
+  <ul>
+    <li>Jenkins 构建超时：可配置，默认 30 分钟 → failed</li>
+    <li>Rollout 等待：可配置，默认 10 分钟 → failed</li>
+    <li>MQ 消费：业务失败 ACK；仅连接/反序列化瞬时错误才重试</li>
+    <li>用户可对 <strong>failed</strong> Run「重新部署」：新建 Run，不原地改旧记录</li>
+  </ul>
+</div>
+
+<div class="section">
+  <p class="label">测试（第一期必须有）</p>
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">后端</div>
+      <div class="mockup-body" style="padding:14px;font-size:13px;">
+        <ul>
+          <li>门禁：未审核 / 缺密钥 / 进行中冲突</li>
+          <li>状态机合法迁移与非法迁移拒绝</li>
+          <li>消费者幂等：重复消息不重复触发 Jenkins</li>
+          <li>Build 失败不进入 deploying</li>
+          <li>Apply + Rollout Ready / 超时 mock runtime</li>
+        </ul>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">前端 / 契约</div>
+      <div class="mockup-body" style="padding:14px;font-size:13px;">
+        <ul>
+          <li>contracts：DeploymentRun 类型与状态枚举</li>
+          <li>部署按钮：approved 才可点；进行中显示进度</li>
+          <li>详情「部署次数 / 最近部署」绑定真实 API</li>
+        </ul>
+        <p style="color:#64748b;font-size:12px;">第一期不做真实 Jenkins/Harbor/K8s 集成测试；delivery.driver / runtime.driver 继续 mock 覆盖编排。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="err-ok" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>这一节可以</h3>
+      <p>写入设计文档并请你审阅</p>
+    </div>
+  </div>
+  <div class="option" data-choice="err-change" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>要改失败或测试策略</h3>
+      <p>请在对话里说明（例如要自动回滚）</p>
+    </div>
+  </div>
+</div>
