@@ -4,6 +4,7 @@ export const DEFAULT_ENTITLEMENTS: WorkspaceEntitlementsVM = {
   agent: true,
   knowledge: true,
   delivery: true,
+  filesystem: true,
   observability: true,
   k8s: false,
   mcp: false,

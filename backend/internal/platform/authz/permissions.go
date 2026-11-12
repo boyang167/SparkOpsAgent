@@ -14,6 +14,14 @@ const (
 	PermChatUse         = "chat:use"
 	PermGovernanceAdmin = "governance:admin"
 	PermPlatformAdmin   = "platform:admin"
+	PermFileRead        = "file:read"
+	PermFileWrite       = "file:write"
+	PermFileDelete      = "file:delete"
+	PermFileShare       = "file:share"
+	PermFileAdmin       = "file:admin"
+	PermStorageRead     = "storage:read"
+	PermStorageAdmin    = "storage:admin"
+	PermLifecycleAdmin  = "lifecycle:admin"
 )
 
 var DefaultAdminPermissions = []string{
@@ -29,6 +37,14 @@ var DefaultAdminPermissions = []string{
 	PermAgentPublish,
 	PermChatUse,
 	PermGovernanceAdmin,
+	PermFileRead,
+	PermFileWrite,
+	PermFileDelete,
+	PermFileShare,
+	PermFileAdmin,
+	PermStorageRead,
+	PermStorageAdmin,
+	PermLifecycleAdmin,
 }
 
 // MergePermissions returns existing permissions plus any defaults not yet present.
@@ -72,6 +88,14 @@ var AllPermissions = []string{
 	PermAgentPublish,
 	PermChatUse,
 	PermGovernanceAdmin,
+	PermFileRead,
+	PermFileWrite,
+	PermFileDelete,
+	PermFileShare,
+	PermFileAdmin,
+	PermStorageRead,
+	PermStorageAdmin,
+	PermLifecycleAdmin,
 }
 
 type DefaultRoleDefinition struct {
@@ -83,7 +107,7 @@ var DefaultWorkspaceRoles = []DefaultRoleDefinition{
 	{Name: "admin", Permissions: DefaultAdminPermissions},
 	{Name: "developer", Permissions: []string{
 		PermProjectRead, PermProjectWrite, PermProjectSubmit,
-		PermSecretRead, PermAgentRead, PermChatUse,
+		PermSecretRead, PermAgentRead, PermChatUse, PermFileRead, PermFileWrite,
 	}},
 	{Name: "reviewer", Permissions: []string{
 		PermProjectRead, PermProjectReview, PermSecretRead,

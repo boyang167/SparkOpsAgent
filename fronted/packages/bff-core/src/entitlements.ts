@@ -61,6 +61,15 @@ function isWorkspacePluginManagementApi(path: string): boolean {
   return false;
 }
 
+function isWorkspaceFilesystemApi(path: string): boolean {
+  const normalized = path.split("?", 1)[0].replace(/\/+$/, "");
+  const prefix = "/api/v1/workspaces/";
+  if (!normalized.startsWith(prefix)) return false;
+  const parts = normalized.slice(prefix.length).split("/");
+  if (parts.length < 2 || !parts[0]) return false;
+  return parts[1] === "files" || parts[1] === "namespaces" || parts[1] === "transfers";
+}
+
 function isGovernanceWorkspaceApi(path: string): boolean {
   if (!path.includes("/workspaces/")) return false;
   const markers = [
@@ -79,6 +88,7 @@ function isGovernanceWorkspaceApi(path: string): boolean {
 /** Mirrors backend entitlements.APIPathEntitlement. */
 export function apiPathEntitlement(path: string): string {
   if (!path.startsWith("/api/v1/")) return "";
+  if (isWorkspaceFilesystemApi(path)) return "filesystem";
   if (path.startsWith("/api/v1/plugins/")) {
     const parts = path.slice("/api/v1/plugins/".length).split("/");
     if (parts.length >= 2 && parts[0] && parts[1]) {
@@ -158,6 +168,7 @@ export const DEFAULT_ENTITLEMENTS: WorkspaceEntitlementsVM = {
   agent: true,
   knowledge: true,
   delivery: true,
+  filesystem: true,
   observability: true,
   k8s: false,
   mcp: false,

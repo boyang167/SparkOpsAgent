@@ -253,6 +253,7 @@ export const WorkspaceEntitlementsVMSchema = z.object({
   agent: z.boolean(),
   knowledge: z.boolean(),
   delivery: z.boolean(),
+  filesystem: z.boolean().default(true),
   k8s: z.boolean(),
   observability: z.boolean(),
   mcp: z.boolean(),

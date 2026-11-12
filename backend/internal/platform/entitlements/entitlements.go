@@ -2,6 +2,7 @@ package entitlements
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"gorm.io/gorm"
@@ -12,6 +13,7 @@ type WorkspaceEntitlements struct {
 	Agent         bool     `json:"agent"`
 	Knowledge     bool     `json:"knowledge"`
 	Delivery      bool     `json:"delivery"`
+	Filesystem    bool     `json:"filesystem"`
 	K8s           bool     `json:"k8s"`
 	Observability bool     `json:"observability"`
 	Mcp           bool     `json:"mcp"`
@@ -23,11 +25,31 @@ func Default() WorkspaceEntitlements {
 		Agent:         true,
 		Knowledge:     true,
 		Delivery:      true,
+		Filesystem:    true,
 		Observability: true,
 		K8s:           false,
 		Mcp:           false,
 		Plugins:       []string{},
 	}
+}
+
+// UnmarshalJSON keeps filesystem enabled for payloads produced before the
+// entitlement was introduced, while preserving an explicit false.
+func (e *WorkspaceEntitlements) UnmarshalJSON(data []byte) error {
+	type alias WorkspaceEntitlements
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if _, ok := fields["filesystem"]; !ok {
+		decoded.Filesystem = true
+	}
+	*e = WorkspaceEntitlements(decoded)
+	return nil
 }
 
 type sysCfgRow struct {

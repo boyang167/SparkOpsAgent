@@ -7,6 +7,9 @@ func APIPathEntitlement(path string) string {
 	if !strings.HasPrefix(path, "/api/v1/") {
 		return ""
 	}
+	if isWorkspaceFilesystemAPI(path) {
+		return "filesystem"
+	}
 	if strings.HasPrefix(path, "/api/v1/plugins/") {
 		rest := strings.TrimPrefix(path, "/api/v1/plugins/")
 		if id, suffix, ok := strings.Cut(rest, "/"); ok && id != "" && suffix != "" {
@@ -47,6 +50,24 @@ func APIPathEntitlement(path string) string {
 		return "agent"
 	default:
 		return ""
+	}
+}
+
+func isWorkspaceFilesystemAPI(path string) bool {
+	path = strings.TrimSuffix(strings.SplitN(path, "?", 2)[0], "/")
+	const prefix = "/api/v1/workspaces/"
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(path, prefix), "/")
+	if len(parts) < 2 || parts[0] == "" {
+		return false
+	}
+	switch parts[1] {
+	case "files", "namespaces", "transfers":
+		return true
+	default:
+		return false
 	}
 }
 
