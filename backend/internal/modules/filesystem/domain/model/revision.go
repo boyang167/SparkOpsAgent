@@ -42,6 +42,15 @@ func NewRevision(nodeID uuid.UUID, revisionNo int, blobID uuid.UUID, size int64,
 	}, nil
 }
 
+func NewRevisionWithID(id, nodeID uuid.UUID, revisionNo int, blobID uuid.UUID, size int64, mimeType string, createdBy uuid.UUID) (*FileRevision, error) {
+	revision, err := NewRevision(nodeID, revisionNo, blobID, size, mimeType, createdBy)
+	if err != nil {
+		return nil, err
+	}
+	revision.id = id
+	return revision, nil
+}
+
 func (r *FileRevision) ID() uuid.UUID {
 	return r.id
 }

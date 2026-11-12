@@ -18,4 +18,6 @@ var (
 	ErrRevisionBlobMismatch = errors.New("filesystem revision blob mismatch")
 	ErrReplicaBlobMismatch  = errors.New("filesystem replica blob mismatch")
 	ErrPersistence          = errors.New("filesystem persistence failure")
+	ErrQuotaExceeded        = errors.New("filesystem quota exceeded")
+	ErrDirectoryCycle       = errors.New("filesystem directory cycle")
 )

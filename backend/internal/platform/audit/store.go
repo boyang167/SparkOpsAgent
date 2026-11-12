@@ -60,7 +60,7 @@ func (s *GormStore) Append(ctx context.Context, entry Entry) error {
 		Detail:       EncodeDetail(entry.Detail),
 		CreatedAt:    time.Now().UTC(),
 	}
-	return s.db.WithContext(ctx).Create(&row).Error
+	return postgres.DB(ctx, s.db).Create(&row).Error
 }
 
 func (s *GormStore) List(ctx context.Context, filter ListFilter) ([]LogView, error) {
@@ -68,7 +68,7 @@ func (s *GormStore) List(ctx context.Context, filter ListFilter) ([]LogView, err
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := s.db.WithContext(ctx).Model(&auditLogModel{}).Order("created_at DESC").Limit(limit).Offset(filter.Offset)
+	q := postgres.DB(ctx, s.db).Model(&auditLogModel{}).Order("created_at DESC").Limit(limit).Offset(filter.Offset)
 	if filter.OrgID != nil {
 		q = q.Where("org_id = ?", filter.OrgID.String())
 	}

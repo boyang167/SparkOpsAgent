@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS filesystem.quota_accounts (
     reserved_bytes BIGINT NOT NULL DEFAULT 0 CHECK (reserved_bytes >= 0),
     used_files BIGINT NOT NULL DEFAULT 0 CHECK (used_files >= 0),
     reserved_files BIGINT NOT NULL DEFAULT 0 CHECK (reserved_files >= 0),
+    max_bytes BIGINT CHECK (max_bytes IS NULL OR max_bytes >= 0),
+    max_files BIGINT CHECK (max_files IS NULL OR max_files >= 0),
     version BIGINT NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -27,6 +27,15 @@ func NewDirectory(namespaceID, ownerID uuid.UUID, name string, parentID uuid.UUI
 	return newNode(namespaceID, ownerID, name, parentID, NodeTypeDirectory)
 }
 
+func NewRootDirectory(namespaceID, ownerID uuid.UUID, name string) (*Node, error) {
+	node, err := newNode(namespaceID, ownerID, name, uuid.Nil, NodeTypeDirectory)
+	if err != nil {
+		return nil, err
+	}
+	node.ParentID = nil
+	return node, nil
+}
+
 func newNode(namespaceID, ownerID uuid.UUID, name string, parentID uuid.UUID, nodeType NodeType) (*Node, error) {
 	node := &Node{
 		ID:          uuid.New(),

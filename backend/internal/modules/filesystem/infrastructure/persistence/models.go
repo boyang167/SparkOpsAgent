@@ -72,3 +72,19 @@ type replicaRow struct {
 }
 
 func (replicaRow) TableName() string { return "filesystem.storage_replicas" }
+
+type quotaAccountRow struct {
+	ID             uuid.UUID `gorm:"column:id;primaryKey;type:uuid"`
+	OrganizationID uuid.UUID `gorm:"column:organization_id;not null;type:uuid"`
+	WorkspaceID    uuid.UUID `gorm:"column:workspace_id;not null;uniqueIndex;type:uuid"`
+	UsedBytes      int64     `gorm:"column:used_bytes;not null"`
+	ReservedBytes  int64     `gorm:"column:reserved_bytes;not null"`
+	UsedFiles      int64     `gorm:"column:used_files;not null"`
+	ReservedFiles  int64     `gorm:"column:reserved_files;not null"`
+	MaxBytes       *int64    `gorm:"column:max_bytes"`
+	MaxFiles       *int64    `gorm:"column:max_files"`
+	Version        int64     `gorm:"column:version;not null"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (quotaAccountRow) TableName() string { return "filesystem.quota_accounts" }

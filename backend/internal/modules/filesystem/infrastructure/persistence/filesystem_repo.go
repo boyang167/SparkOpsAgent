@@ -16,6 +16,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 )
 
 type Repository struct{ db *gorm.DB }
@@ -28,15 +29,21 @@ func (r *Repository) CreateNamespace(ctx context.Context, namespace *model.Names
 	if status == "" {
 		status = "ACTIVE"
 	}
-	return wrapPersistence(r.db.WithContext(ctx).Create(&namespaceRow{
-		ID: namespace.ID, OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID,
-		RootNodeID: namespace.RootNodeID, Status: status, CreatedAt: now, UpdatedAt: now,
-	}).Error)
+	db := postgres.DB(ctx, r.db)
+	return wrapPersistence(db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&namespaceRow{
+			ID: namespace.ID, OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID,
+			RootNodeID: namespace.RootNodeID, Status: status, CreatedAt: now, UpdatedAt: now,
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&quotaAccountRow{ID: uuid.New(), OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID, UpdatedAt: now}).Error
+	}))
 }
 
 func (r *Repository) GetNamespaceByWorkspace(ctx context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
 	var row namespaceRow
-	err := r.db.WithContext(ctx).Where("workspace_id = ?", workspaceID).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("workspace_id = ?", workspaceID).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrNamespaceNotFound
 	}
@@ -46,8 +53,21 @@ func (r *Repository) GetNamespaceByWorkspace(ctx context.Context, workspaceID uu
 	return &model.Namespace{ID: row.ID, OrganizationID: row.OrganizationID, WorkspaceID: row.WorkspaceID, RootNodeID: row.RootNodeID, Status: row.Status}, nil
 }
 
+func (r *Repository) SetNamespaceRoot(ctx context.Context, workspaceID, rootNodeID uuid.UUID) error {
+	result := postgres.DB(ctx, r.db).Model(&namespaceRow{}).
+		Where("workspace_id = ?", workspaceID).
+		Updates(map[string]any{"root_node_id": rootNodeID, "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrNamespaceNotFound
+	}
+	return nil
+}
+
 func (r *Repository) CreateNode(ctx context.Context, node *model.Node) error {
-	db := r.db.WithContext(ctx)
+	db := postgres.DB(ctx, r.db)
 	if node.ParentID != nil {
 		var parent nodeRow
 		err := db.Where("id = ?", *node.ParentID).First(&parent).Error
@@ -90,7 +110,7 @@ func (r *Repository) CreateNode(ctx context.Context, node *model.Node) error {
 
 func (r *Repository) GetNode(ctx context.Context, namespaceID, nodeID uuid.UUID) (*model.Node, error) {
 	var row nodeRow
-	err := r.db.WithContext(ctx).Where("namespace_id = ? AND id = ?", namespaceID, nodeID).First(&row).Error
+	err := postgres.DB(ctx, r.db).Where("namespace_id = ? AND id = ?", namespaceID, nodeID).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrNodeNotFound
 	}
@@ -101,7 +121,7 @@ func (r *Repository) GetNode(ctx context.Context, namespaceID, nodeID uuid.UUID)
 }
 
 func (r *Repository) ListChildren(ctx context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, limit int, cursor string) ([]model.Node, string, error) {
-	query := r.db.WithContext(ctx).Where("namespace_id = ?", namespaceID)
+	query := postgres.DB(ctx, r.db).Where("namespace_id = ?", namespaceID)
 	if parentID == nil {
 		query = query.Where("parent_id IS NULL")
 	} else {
@@ -137,7 +157,7 @@ func (r *Repository) SaveRevision(ctx context.Context, revision *model.FileRevis
 		return domain.ErrReplicaBlobMismatch
 	}
 	var node nodeRow
-	nodeErr := r.db.WithContext(ctx).Where("id = ?", revision.NodeID()).First(&node).Error
+	nodeErr := postgres.DB(ctx, r.db).Where("id = ?", revision.NodeID()).First(&node).Error
 	if errors.Is(nodeErr, gorm.ErrRecordNotFound) {
 		return domain.ErrNodeNotFound
 	}
@@ -212,8 +232,141 @@ func (r *Repository) SaveRevision(ctx context.Context, revision *model.FileRevis
 	return domain.ErrPersistence
 }
 
+func (r *Repository) GetRevision(ctx context.Context, nodeID, revisionID uuid.UUID) (*model.FileRevision, error) {
+	var row revisionRow
+	err := postgres.DB(ctx, r.db).Where("node_id = ? AND id = ?", nodeID, revisionID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrRevisionNotFound
+	}
+	if err != nil {
+		return nil, wrapPersistence(err)
+	}
+	revision, err := model.NewRevisionWithID(row.ID, row.NodeID, row.RevisionNo, row.BlobID, row.Size, row.MIMEType, row.CreatedBy)
+	if err != nil {
+		return nil, domain.ErrPersistence
+	}
+	return revision, nil
+}
+
+func (r *Repository) ListRevisions(ctx context.Context, nodeID, namespaceID uuid.UUID, limit int, cursor string) ([]model.FileRevision, string, error) {
+	query := postgres.DB(ctx, r.db).Where("node_id = ?", nodeID)
+	if cursor != "" {
+		var boundary revisionRow
+		if err := postgres.DB(ctx, r.db).Where("node_id = ? AND id = ?", nodeID, cursor).First(&boundary).Error; err != nil {
+			return nil, "", domain.ErrRevisionNotFound
+		}
+		query = query.Where("(revision_no < ?) OR (revision_no = ? AND id < ?)", boundary.RevisionNo, boundary.RevisionNo, boundary.ID)
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	var rows []revisionRow
+	if err := query.Order("revision_no DESC, id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
+		return nil, "", wrapPersistence(err)
+	}
+	next := ""
+	if len(rows) > limit {
+		next = rows[limit-1].ID.String()
+		rows = rows[:limit]
+	}
+	out := make([]model.FileRevision, 0, len(rows))
+	for _, row := range rows {
+		revision, err := model.NewRevisionWithID(row.ID, row.NodeID, row.RevisionNo, row.BlobID, row.Size, row.MIMEType, row.CreatedBy)
+		if err != nil {
+			return nil, "", domain.ErrPersistence
+		}
+		out = append(out, *revision)
+	}
+	return out, next, nil
+}
+
+func (r *Repository) IncrementBlobRef(ctx context.Context, blobID uuid.UUID) error {
+	result := postgres.DB(ctx, r.db).Model(&blobRow{}).Where("id = ?", blobID).UpdateColumn("ref_count", gorm.Expr("ref_count + 1"))
+	if result.Error != nil {
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrBlobConflict
+	}
+	return nil
+}
+
+func (r *Repository) GetBlob(ctx context.Context, blobID uuid.UUID) (*model.Blob, error) {
+	var row blobRow
+	err := postgres.DB(ctx, r.db).Where("id = ?", blobID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrBlobConflict
+	}
+	if err != nil {
+		return nil, wrapPersistence(err)
+	}
+	return &model.Blob{ID: row.ID, DedupDomain: row.DedupDomain, SHA256: row.SHA256, Size: row.Size, EncryptionKeyRef: row.EncryptionKeyRef, RefCount: row.RefCount, State: row.State}, nil
+}
+
+func (r *Repository) GetAvailableReplica(ctx context.Context, blobID, providerID uuid.UUID) (*model.StorageReplica, error) {
+	var row replicaRow
+	query := postgres.DB(ctx, r.db).Where("blob_id = ? AND state = ?", blobID, model.ReplicaStateAvailable)
+	if providerID != uuid.Nil {
+		query = query.Where("provider_id = ?", providerID)
+	}
+	if err := query.Order("id ASC").First(&row).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrReplicaConflict
+	} else if err != nil {
+		return nil, wrapPersistence(err)
+	}
+	return &model.StorageReplica{ID: row.ID, BlobID: row.BlobID, ProviderID: row.ProviderID, ObjectKey: row.ObjectKey, Checksum: row.Checksum, State: row.State}, nil
+}
+
+func (r *Repository) ApplyQuotaUsage(ctx context.Context, workspaceID uuid.UUID, bytesDelta, filesDelta int64) error {
+	if bytesDelta < 0 || filesDelta < 0 {
+		return domain.ErrPersistence
+	}
+	db := postgres.DB(ctx, r.db)
+	result := db.Model(&quotaAccountRow{}).
+		Where("workspace_id = ? AND (max_bytes IS NULL OR used_bytes + reserved_bytes + ? <= max_bytes) AND (max_files IS NULL OR used_files + reserved_files + ? <= max_files)", workspaceID, bytesDelta, filesDelta).
+		Updates(map[string]any{
+			"used_bytes": gorm.Expr("used_bytes + ?", bytesDelta),
+			"used_files": gorm.Expr("used_files + ?", filesDelta),
+			"version":    gorm.Expr("version + 1"),
+			"updated_at": time.Now().UTC(),
+		})
+	if result.Error != nil {
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		var count int64
+		if err := db.Model(&quotaAccountRow{}).Where("workspace_id = ?", workspaceID).Count(&count).Error; err != nil {
+			return wrapPersistence(err)
+		}
+		if count == 0 {
+			return domain.ErrNamespaceNotFound
+		}
+		return domain.ErrQuotaExceeded
+	}
+	return nil
+}
+
+func (r *Repository) RenameNode(ctx context.Context, nodeID uuid.UUID, name string) error {
+	var node nodeRow
+	db := postgres.DB(ctx, r.db)
+	if err := db.Where("id = ?", nodeID).First(&node).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return domain.ErrNodeNotFound
+	} else if err != nil {
+		return wrapPersistence(err)
+	}
+	canonical := strings.TrimSpace(norm.NFC.String(name))
+	if canonical == "" || strings.ContainsAny(canonical, `/\`) {
+		return model.ErrInvalidNodeName
+	}
+	result := db.Model(&nodeRow{}).Where("id = ?", nodeID).Updates(map[string]any{"name": canonical, "normalized_name": strings.ToLower(canonical), "updated_at": time.Now().UTC()})
+	if conflict := mapUniqueConflict(result.Error); conflict != nil {
+		return conflict
+	}
+	return wrapPersistence(result.Error)
+}
+
 func (r *Repository) SetCurrentRevision(ctx context.Context, nodeID, revisionID uuid.UUID) error {
-	return wrapPersistence(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return wrapPersistence(postgres.DB(ctx, r.db).Transaction(func(tx *gorm.DB) error {
 		var node nodeRow
 		if err := tx.Where("id = ?", nodeID).First(&node).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 			return domain.ErrNodeNotFound
@@ -237,7 +390,7 @@ func (r *Repository) SetCurrentRevision(ctx context.Context, nodeID, revisionID 
 }
 
 func (r *Repository) MoveNode(ctx context.Context, nodeID uuid.UUID, parentID *uuid.UUID, normalizedName string) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return postgres.DB(ctx, r.db).Transaction(func(tx *gorm.DB) error {
 		var node nodeRow
 		if err := tx.Where("id = ?", nodeID).First(&node).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 			return domain.ErrNodeNotFound
@@ -272,7 +425,7 @@ func (r *Repository) MoveNode(ctx context.Context, nodeID uuid.UUID, parentID *u
 }
 
 func (r *Repository) TrashNode(ctx context.Context, nodeID uuid.UUID) error {
-	result := r.db.WithContext(ctx).Model(&nodeRow{}).Where("id = ?", nodeID).Update("state", model.NodeStateTrashed)
+	result := postgres.DB(ctx, r.db).Model(&nodeRow{}).Where("id = ?", nodeID).Update("state", model.NodeStateTrashed)
 	if result.Error != nil {
 		return wrapPersistence(result.Error)
 	}

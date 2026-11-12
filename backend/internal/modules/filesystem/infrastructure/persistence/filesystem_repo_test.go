@@ -17,6 +17,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 )
 
 func TestCreateChildRejectsDuplicateNormalizedName(t *testing.T) {
@@ -28,6 +29,24 @@ func TestCreateChildRejectsDuplicateNormalizedName(t *testing.T) {
 	err := repo.CreateNode(context.Background(), mustFile(ns.ID, parent.ID, "report.CSV"))
 
 	require.ErrorIs(t, err, domain.ErrNodeNameConflict)
+}
+
+func TestRepositoryUsesAmbientTransactionContext(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	node := rootFile(ns.ID, "transactional")
+	tx := postgres.NewTransactor(db)
+
+	err := tx.WithinTransaction(context.Background(), func(ctx context.Context) error {
+		if err := repo.CreateNode(ctx, node); err != nil {
+			return err
+		}
+		return errors.New("rollback filesystem transaction")
+	})
+
+	require.Error(t, err)
+	_, err = repo.GetNode(context.Background(), ns.ID, node.ID)
+	require.ErrorIs(t, err, domain.ErrNodeNotFound)
 }
 
 func TestCreateChildRejectsFileParent(t *testing.T) {
