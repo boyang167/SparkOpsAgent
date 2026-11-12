@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -12,6 +13,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage"
@@ -21,6 +23,16 @@ import (
 type recordingAudit struct {
 	mu      sync.Mutex
 	entries []audit.Entry
+}
+
+type failingAudit struct {
+	calls int
+	err   error
+}
+
+func (a *failingAudit) Log(context.Context, audit.Entry) error {
+	a.calls++
+	return a.err
 }
 
 type namespaceReadErrorRepository struct {
@@ -46,6 +58,19 @@ type failingPutProvider struct {
 
 func (failingPutProvider) Put(context.Context, storage.PutRequest) (storage.ObjectInfo, error) {
 	return storage.ObjectInfo{}, errors.New("fixture-content object-key secret")
+}
+
+type retryMoveRepository struct {
+	repository.FilesystemRepository
+	calls int
+}
+
+func (r *retryMoveRepository) MoveNodeSafely(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID, string) error {
+	r.calls++
+	if r.calls == 1 {
+		return domain.ErrTransactionRetry
+	}
+	return nil
 }
 
 func (a *recordingAudit) Log(_ context.Context, entry audit.Entry) error {
@@ -206,24 +231,37 @@ func TestCreateNamespaceConcurrentSameWorkspaceReturnsSingleNamespace(t *testing
 }
 
 func TestPutLocalFileConcurrentQuotaAllowsOnlyOneWinner(t *testing.T) {
-	db, repo, ns := newPutTestRepository(t)
+	db, _, ns, mainDSN, filesystemDSN := newConcurrentPutTestRepository(t)
 	require.NoError(t, db.Table("filesystem.quota_accounts").Where("workspace_id = ?", ns.WorkspaceID).
 		Updates(map[string]any{"max_bytes": 15, "max_files": 1}).Error)
 	provider, err := local.New(t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = provider.Close() })
-	handler := NewPutLocalFileHandler(repo, provider, postgres.NewTransactor(db), nil, nil)
 	start := make(chan struct{})
+	ready := make(chan error, 2)
 	errs := make(chan error, 2)
+	claimBarrier := newConcurrentBarrier()
 	for range 2 {
 		go func() {
+			workerDB, openErr := openPutWorkerDB(mainDSN, filesystemDSN)
+			ready <- openErr
+			if openErr != nil {
+				errs <- openErr
+				return
+			}
+			workerSQLDB, _ := workerDB.DB()
+			defer workerSQLDB.Close()
 			cmd := putFixture(ns)
 			cmd.Name = cmd.CommandID.String() + ".txt"
 			<-start
+			workerRepo := claimBarrierRepository{FilesystemRepository: persistence.NewRepository(workerDB), barrier: claimBarrier}
+			handler := NewPutLocalFileHandler(workerRepo, provider, postgres.NewTransactor(workerDB), nil, nil)
 			_, putErr := handler.Handle(context.Background(), cmd)
 			errs <- putErr
 		}()
 	}
+	require.NoError(t, <-ready)
+	require.NoError(t, <-ready)
 	close(start)
 	first, second := <-errs, <-errs
 	require.True(t,
@@ -241,16 +279,19 @@ func TestPutLocalFileConcurrentQuotaAllowsOnlyOneWinner(t *testing.T) {
 }
 
 func TestMoveConcurrentOppositeMovesCannotCreateCycle(t *testing.T) {
-	db, repo, ns := newPutTestRepository(t)
+	_, repo, ns, mainDSN, filesystemDSN := newConcurrentPutTestRepository(t)
 	first, err := model.NewDirectory(ns.ID, uuid.New(), "first", *ns.RootNodeID)
 	require.NoError(t, err)
 	second, err := model.NewDirectory(ns.ID, uuid.New(), "second", *ns.RootNodeID)
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateNode(context.Background(), first))
 	require.NoError(t, repo.CreateNode(context.Background(), second))
-	handler := NewMoveNodeHandler(repo, postgres.NewTransactor(db), nil, nil)
 	start := make(chan struct{})
+	ready := make(chan error, 2)
 	errs := make(chan error, 2)
+	namespaceBarrier := newConcurrentBarrier()
+	retries := make(chan struct{}, 10)
+	logs := &recordingAudit{}
 	moves := []MoveNode{
 		{
 			ActorID: first.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID,
@@ -264,17 +305,51 @@ func TestMoveConcurrentOppositeMovesCannotCreateCycle(t *testing.T) {
 	for _, move := range moves {
 		move := move
 		go func() {
+			workerDB, openErr := openPutWorkerDB(mainDSN, filesystemDSN)
+			ready <- openErr
+			if openErr != nil {
+				errs <- openErr
+				return
+			}
+			workerSQLDB, _ := workerDB.DB()
+			defer workerSQLDB.Close()
 			<-start
+			workerRepo := namespaceBarrierRepository{FilesystemRepository: persistence.NewRepository(workerDB), barrier: namespaceBarrier}
+			handler := NewMoveNodeHandler(workerRepo, postgres.NewTransactor(workerDB), nil, logs)
+			defaultWait := handler.retryWait
+			handler.retryWait = func(ctx context.Context, delay time.Duration) error {
+				retries <- struct{}{}
+				return defaultWait(ctx, delay)
+			}
 			errs <- handler.Handle(context.Background(), move)
 		}()
 	}
+	require.NoError(t, <-ready)
+	require.NoError(t, <-ready)
 	close(start)
 	left, right := <-errs, <-errs
+	close(retries)
+	retryCount := 0
+	for range retries {
+		retryCount++
+	}
+	require.GreaterOrEqual(t, retryCount, 1)
 	require.True(t,
 		(left == nil && errors.Is(right, domain.ErrDirectoryCycle)) ||
 			(right == nil && errors.Is(left, domain.ErrDirectoryCycle)),
 		"unexpected results: left=%v right=%v", left, right,
 	)
+	allowCount, denyCount := 0, 0
+	for _, decision := range logs.decisions() {
+		switch decision {
+		case "ALLOW":
+			allowCount++
+		case "DENY":
+			denyCount++
+		}
+	}
+	require.Equal(t, 1, allowCount)
+	require.Equal(t, 1, denyCount)
 	persistedFirst, err := repo.GetNode(context.Background(), ns.ID, first.ID)
 	require.NoError(t, err)
 	persistedSecond, err := repo.GetNode(context.Background(), ns.ID, second.ID)
@@ -283,6 +358,34 @@ func TestMoveConcurrentOppositeMovesCannotCreateCycle(t *testing.T) {
 		persistedFirst.ParentID != nil && persistedSecond.ParentID != nil &&
 			*persistedFirst.ParentID == second.ID && *persistedSecond.ParentID == first.ID,
 	)
+}
+
+func TestMoveRetriesWholeTransactionWithInjectedBackoffAndAuditsOnce(t *testing.T) {
+	_, baseRepo, ns := newPutTestRepository(t)
+	node, err := model.NewDirectory(ns.ID, uuid.New(), "moving", *ns.RootNodeID)
+	require.NoError(t, err)
+	require.NoError(t, baseRepo.CreateNode(context.Background(), node))
+	repo := &retryMoveRepository{FilesystemRepository: baseRepo}
+	logs := &recordingAudit{}
+	handler := NewMoveNodeHandler(repo, postgres.NewDirectTransactor(), nil, logs)
+	var waits []time.Duration
+	handler.retryBackoff = func(attempt int) time.Duration {
+		return time.Duration(attempt+1) * 7 * time.Millisecond
+	}
+	handler.retryWait = func(_ context.Context, delay time.Duration) error {
+		waits = append(waits, delay)
+		return nil
+	}
+
+	err = handler.Handle(context.Background(), MoveNode{
+		ActorID: node.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID,
+		NamespaceID: ns.ID, NodeID: node.ID, Authorization: Authorization{Allowed: true},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 2, repo.calls)
+	require.Equal(t, []time.Duration{7 * time.Millisecond}, waits)
+	require.Equal(t, []string{"ALLOW"}, logs.decisions())
 }
 
 func TestCreateNamespaceRepositoryFailureIsAuditedAndDoesNotStartTransaction(t *testing.T) {
@@ -341,4 +444,18 @@ func TestMutationConstructorsRejectMissingRequiredDependencies(t *testing.T) {
 	require.Panics(t, func() {
 		NewMoveNodeHandler(repo, nil, nil, nil)
 	})
+}
+
+func TestDeniedWithAuditFailureAttemptsAuditOnceAndPreservesBusinessError(t *testing.T) {
+	db, repo, ns := newPutTestRepository(t)
+	auditErr := errors.New("audit unavailable")
+	logs := &failingAudit{err: auditErr}
+	_, err := NewCreateDirectoryHandler(repo, postgres.NewTransactor(db), nil, logs).Handle(context.Background(), CreateDirectory{
+		ActorID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: ns.WorkspaceID,
+		NamespaceID: ns.ID, Name: "child", Authorization: Authorization{Allowed: true},
+	})
+
+	require.ErrorIs(t, err, domain.ErrNamespaceMismatch)
+	require.ErrorIs(t, err, auditErr)
+	require.Equal(t, 1, logs.calls)
 }

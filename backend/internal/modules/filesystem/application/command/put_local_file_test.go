@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -69,6 +71,45 @@ func (r *commandReadOverrideRepository) GetCommand(ctx context.Context, id uuid.
 type deleteTrackingProvider struct {
 	storage.Provider
 	deletes int
+}
+
+type concurrentBarrier struct {
+	arrivals atomic.Int32
+	release  chan struct{}
+}
+
+func newConcurrentBarrier() *concurrentBarrier {
+	return &concurrentBarrier{release: make(chan struct{})}
+}
+
+func (b *concurrentBarrier) wait() {
+	if b.arrivals.Add(1) == 2 {
+		close(b.release)
+	}
+	<-b.release
+}
+
+type claimBarrierRepository struct {
+	repository.FilesystemRepository
+	barrier *concurrentBarrier
+}
+
+func (r claimBarrierRepository) ClaimCommand(ctx context.Context, command repository.CommandDedup) (*repository.CommandDedup, error) {
+	r.barrier.wait()
+	return r.FilesystemRepository.ClaimCommand(ctx, command)
+}
+
+type namespaceBarrierRepository struct {
+	repository.FilesystemRepository
+	barrier *concurrentBarrier
+}
+
+func (r namespaceBarrierRepository) GetNamespaceByWorkspace(ctx context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+	namespace, err := r.FilesystemRepository.GetNamespaceByWorkspace(ctx, workspaceID)
+	if err == nil {
+		r.barrier.wait()
+	}
+	return namespace, err
 }
 
 func (p *deleteTrackingProvider) Delete(ctx context.Context, key string) error {
@@ -267,7 +308,7 @@ func TestPutLocalFileMissingDedupRebuildsAuthorityForExactDeterministicRevision(
 }
 
 func TestPutLocalFileConcurrentDifferentCommandsAllocateContinuousUniqueRevisions(t *testing.T) {
-	db, repo, ns := newPutTestRepository(t)
+	db, repo, ns, mainDSN, filesystemDSN := newConcurrentPutTestRepository(t)
 	provider, err := local.New(t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = provider.Close() })
@@ -279,20 +320,34 @@ func TestPutLocalFileConcurrentDifferentCommandsAllocateContinuousUniqueRevision
 	require.NoError(t, err)
 
 	start := make(chan struct{})
+	ready := make(chan error, 2)
 	results := make(chan error, 2)
+	claimBarrier := newConcurrentBarrier()
 	var wg sync.WaitGroup
 	for range 2 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			workerDB, openErr := openPutWorkerDB(mainDSN, filesystemDSN)
+			ready <- openErr
+			if openErr != nil {
+				results <- openErr
+				return
+			}
+			workerSQLDB, _ := workerDB.DB()
+			defer workerSQLDB.Close()
 			cmd := putFixture(ns)
 			cmd.NodeID = &nodeID
 			cmd.Name = initial.Name
 			<-start
-			_, putErr := h.Handle(context.Background(), cmd)
+			workerRepo := claimBarrierRepository{FilesystemRepository: persistence.NewRepository(workerDB), barrier: claimBarrier}
+			worker := NewPutLocalFileHandler(workerRepo, provider, postgres.NewTransactor(workerDB), nil, nil)
+			_, putErr := worker.Handle(context.Background(), cmd)
 			results <- putErr
 		}()
 	}
+	require.NoError(t, <-ready)
+	require.NoError(t, <-ready)
 	close(start)
 	wg.Wait()
 	close(results)
@@ -348,6 +403,43 @@ func newPutTestRepository(t *testing.T) (*gorm.DB, repository.FilesystemReposito
 	require.NoError(t, repo.CreateNamespace(context.Background(), ns))
 	seedPutNamespaceRoot(t, repo, ns)
 	return db, repo, ns
+}
+
+func newConcurrentPutTestRepository(t *testing.T) (*gorm.DB, repository.FilesystemRepository, *model.Namespace, string, string) {
+	t.Helper()
+	mainDSN := "file:" + uuid.NewString() + "?mode=memory&cache=shared&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
+	filesystemDSN := filepath.Join(t.TempDir(), "filesystem.db")
+	db, err := openPutWorkerDB(mainDSN, filesystemDSN)
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	require.NoError(t, persistence.AutoMigrate(db))
+	repo := persistence.NewRepository(db)
+	ns := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	require.NoError(t, repo.CreateNamespace(context.Background(), ns))
+	seedPutNamespaceRoot(t, repo, ns)
+	return db, repo, ns, mainDSN, filesystemDSN
+}
+
+func openPutWorkerDB(mainDSN, filesystemDSN string) (*gorm.DB, error) {
+	db, err := gorm.Open(sqlite.Open(mainDSN), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		return nil, err
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Exec("ATTACH DATABASE ? AS filesystem", filesystemDSN).Error; err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
+	if err := db.Exec("PRAGMA busy_timeout = 5000").Error; err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
+	return db, nil
 }
 
 func seedPutNamespaceRoot(t *testing.T, repo repository.FilesystemRepository, ns *model.Namespace) {

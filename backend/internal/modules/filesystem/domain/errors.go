@@ -23,4 +23,6 @@ var (
 	ErrIdempotencyConflict  = errors.New("filesystem idempotency conflict")
 	ErrOutcomeUnknown       = errors.New("filesystem outcome unknown")
 	ErrCommandInProgress    = errors.New("filesystem command in progress")
+	ErrCommandNotFound      = errors.New("filesystem command not found")
+	ErrTransactionRetry     = errors.New("filesystem transaction should be retried")
 )

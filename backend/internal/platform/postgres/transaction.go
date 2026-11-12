@@ -10,7 +10,6 @@ import (
 
 var (
 	ErrCommitOutcomeUnknown = errors.New("postgres transaction commit outcome unknown")
-	ErrTransactionRetry     = errors.New("postgres transaction should be retried")
 )
 
 type Transactor interface {

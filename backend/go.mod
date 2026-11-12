@@ -3,6 +3,7 @@ module github.com/sparkops/sparkops-agent/backend
 go 1.26
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/bndr/gojenkins v1.2.0
 	github.com/casbin/casbin/v3 v3.11.0
 	github.com/casbin/gorm-adapter/v3 v3.41.0

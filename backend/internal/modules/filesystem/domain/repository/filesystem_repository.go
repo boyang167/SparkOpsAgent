@@ -46,7 +46,6 @@ type FilesystemRepository interface {
 	GetAvailableReplica(context.Context, uuid.UUID, uuid.UUID) (*model.StorageReplica, error)
 	ApplyQuotaUsage(context.Context, uuid.UUID, int64, int64) error
 	RenameNode(context.Context, uuid.UUID, string) error
-	MoveNode(context.Context, uuid.UUID, *uuid.UUID, string) error
 	MoveNodeSafely(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID, string) error
 	TrashNode(context.Context, uuid.UUID) error
 	ClaimCommand(context.Context, CommandDedup) (*CommandDedup, error)

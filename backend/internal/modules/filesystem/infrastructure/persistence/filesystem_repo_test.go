@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
@@ -114,6 +115,15 @@ func TestGetNodeConvertsNotFound(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrNodeNotFound)
 }
 
+func TestGetCommandConvertsNotFoundPrecisely(t *testing.T) {
+	repo, _ := newTestRepository(t)
+
+	_, err := repo.GetCommand(context.Background(), uuid.New())
+
+	require.ErrorIs(t, err, domain.ErrCommandNotFound)
+	require.NotErrorIs(t, err, domain.ErrNodeNotFound)
+}
+
 func TestSaveRevisionAndSetCurrentRevisionRoundTrip(t *testing.T) {
 	repo, db := newTestRepository(t)
 	ns := seedNamespace(t, db)
@@ -181,9 +191,14 @@ func TestMoveNodeRejectsInvalidParents(t *testing.T) {
 	require.NoError(t, repo.CreateNode(context.Background(), fileParent))
 	require.NoError(t, repo.CreateNode(context.Background(), foreignParent))
 
-	require.ErrorIs(t, repo.MoveNode(context.Background(), node.ID, &fileParent.ID, "renamed"), domain.ErrParentNotDirectory)
-	require.ErrorIs(t, repo.MoveNode(context.Background(), node.ID, &foreignParent.ID, "renamed"), domain.ErrNamespaceMismatch)
-	require.NoError(t, repo.MoveNode(context.Background(), node.ID, nil, "  Renamed  "))
+	move := func(namespaceID uuid.UUID, parentID *uuid.UUID, name string) error {
+		return postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+			return repo.MoveNodeSafely(ctx, namespaceID, node.ID, parentID, name)
+		})
+	}
+	require.ErrorIs(t, move(ns1.ID, &fileParent.ID, "renamed"), domain.ErrParentNotDirectory)
+	require.ErrorIs(t, move(ns1.ID, &foreignParent.ID, "renamed"), domain.ErrParentNotFound)
+	require.NoError(t, move(ns1.ID, nil, "  Renamed  "))
 
 	got, err := repo.GetNode(context.Background(), ns1.ID, node.ID)
 	require.NoError(t, err)
@@ -391,23 +406,42 @@ func TestClaimCommandConcurrentSQLiteSameAndDifferentHashesAreStable(t *testing.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo, db := newTestRepository(t)
+			_, verifyDB, mainDSN, filesystemDSN := newConcurrentTestRepository(t)
 			commandID := uuid.New()
 			workspaceID := uuid.New()
 			start := make(chan struct{})
+			ready := make(chan error, 2)
 			results := make(chan error, 2)
 			for _, hash := range tt.hashes {
 				hash := hash
 				go func() {
+					workerDB, openErr := openConcurrentWorkerDB(mainDSN, filesystemDSN)
+					ready <- openErr
+					if openErr != nil {
+						results <- openErr
+						return
+					}
+					sqlDB, _ := workerDB.DB()
+					defer sqlDB.Close()
 					<-start
-					results <- postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
-						_, err := repo.ClaimCommand(ctx, repository.CommandDedup{
-							CommandID: commandID, WorkspaceID: workspaceID, Operation: "put_local", RequestHash: hash,
+					var claimErr error
+					for attempt := 0; attempt < 10; attempt++ {
+						claimErr = postgres.NewTransactor(workerDB).WithinTransaction(context.Background(), func(ctx context.Context) error {
+							_, err := NewRepository(workerDB).ClaimCommand(ctx, repository.CommandDedup{
+								CommandID: commandID, WorkspaceID: workspaceID, Operation: "put_local", RequestHash: hash,
+							})
+							return err
 						})
-						return err
-					})
+						if !errors.Is(claimErr, domain.ErrTransactionRetry) {
+							break
+						}
+						time.Sleep(time.Duration(attempt+1) * time.Millisecond)
+					}
+					results <- claimErr
 				}()
 			}
+			require.NoError(t, <-ready)
+			require.NoError(t, <-ready)
 			close(start)
 			first, second := <-results, <-results
 			require.True(t,
@@ -415,6 +449,9 @@ func TestClaimCommandConcurrentSQLiteSameAndDifferentHashesAreStable(t *testing.
 					(second == nil && errors.Is(first, tt.secondWant)),
 				"unexpected results: first=%v second=%v", first, second,
 			)
+			var count int64
+			require.NoError(t, verifyDB.Table("filesystem.command_dedup").Where("command_id = ?", commandID).Count(&count).Error)
+			require.Equal(t, int64(1), count)
 		})
 	}
 }
@@ -517,6 +554,26 @@ func newConcurrentTestRepository(t *testing.T) (repository.FilesystemRepository,
 	require.NoError(t, db.Exec("ATTACH DATABASE ? AS filesystem", filesystemDSN).Error)
 	require.NoError(t, AutoMigrate(db))
 	return NewRepository(db), db, mainDSN, filesystemDSN
+}
+
+func openConcurrentWorkerDB(mainDSN, filesystemDSN string) (*gorm.DB, error) {
+	db, err := gorm.Open(sqlite.Open(mainDSN), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		return nil, err
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Exec("ATTACH DATABASE ? AS filesystem", filesystemDSN).Error; err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
+	if err := db.Exec("PRAGMA busy_timeout = 5000").Error; err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
+	return db, nil
 }
 
 func seedNamespace(t *testing.T, db *gorm.DB) *model.Namespace {

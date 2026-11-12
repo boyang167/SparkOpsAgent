@@ -34,7 +34,8 @@ type resourceContextKey struct{}
 type auditStateContextKey struct{}
 
 type mutationAuditState struct {
-	decision string
+	decision  string
+	attempted bool
 }
 
 func withTraceID(ctx context.Context, traceID string) context.Context {
@@ -66,12 +67,12 @@ func beginMutationAudit(ctx context.Context, logger auditPort, actor, organizati
 	ctx = context.WithValue(ctx, auditStateContextKey{}, state)
 	return ctx, func(resultErr *error) {
 		if resultErr != nil && *resultErr != nil {
-			if state.decision != "DENY" {
+			if !state.attempted || state.decision != "DENY" {
 				*resultErr = errors.Join(*resultErr, logMutation(ctx, logger, actor, organization, workspace, action, false, *resultErr))
 			}
 			return
 		}
-		if state.decision == "" {
+		if !state.attempted {
 			if auditErr := logMutation(ctx, logger, actor, organization, workspace, action, true, nil); resultErr != nil {
 				*resultErr = auditErr
 			}
@@ -102,6 +103,10 @@ func logMutation(ctx context.Context, logger auditPort, actor, organization uuid
 	if reason != nil {
 		detail["reason"] = reasonCode(reason)
 	}
+	if state, ok := ctx.Value(auditStateContextKey{}).(*mutationAuditState); ok {
+		state.attempted = true
+		state.decision = decision
+	}
 	err := logger.Log(ctx, audit.Entry{
 		ActorID:      kernel.MemberID{UUID: actor},
 		Action:       action,
@@ -110,11 +115,6 @@ func logMutation(ctx context.Context, logger auditPort, actor, organization uuid
 		OrgID:        &kernel.OrgID{UUID: organization},
 		Detail:       detail,
 	})
-	if err == nil {
-		if state, ok := ctx.Value(auditStateContextKey{}).(*mutationAuditState); ok {
-			state.decision = decision
-		}
-	}
 	return err
 }
 
@@ -376,7 +376,7 @@ func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (out
 			return nil, revisionErr
 		}
 		return completedNode, nil
-	} else if !errors.Is(priorErr, domain.ErrNodeNotFound) {
+	} else if !errors.Is(priorErr, domain.ErrCommandNotFound) {
 		return nil, priorErr
 	}
 	nodeID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-node:"+cmd.CommandID.String()))
@@ -523,7 +523,7 @@ func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (out
 			}
 			return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", true, nil)
 		})
-		if !errors.Is(err, postgres.ErrTransactionRetry) {
+		if !errors.Is(err, domain.ErrTransactionRetry) {
 			break
 		}
 	}
@@ -543,7 +543,7 @@ func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (out
 					}
 				}
 			}
-			if readErr == nil || !errors.Is(readErr, domain.ErrNodeNotFound) {
+			if readErr == nil || !errors.Is(readErr, domain.ErrCommandNotFound) {
 				published = false
 			}
 			outcomeErr := fmt.Errorf("%w: commit result could not be confirmed", domain.ErrOutcomeUnknown)

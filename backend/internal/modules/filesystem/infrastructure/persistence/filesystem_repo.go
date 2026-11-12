@@ -161,7 +161,7 @@ func (r *Repository) NextRevisionNumber(ctx context.Context, nodeID uuid.UUID) (
 		result := tx.Exec("UPDATE filesystem.nodes SET updated_at = updated_at WHERE id = ?", nodeID)
 		err = result.Error
 		if isSQLiteBusy(err) {
-			return 0, postgres.ErrTransactionRetry
+			return 0, domain.ErrTransactionRetry
 		}
 		if err == nil && result.RowsAffected == 0 {
 			err = gorm.ErrRecordNotFound
@@ -432,41 +432,6 @@ func (r *Repository) SetCurrentRevision(ctx context.Context, nodeID, revisionID 
 	}))
 }
 
-func (r *Repository) MoveNode(ctx context.Context, nodeID uuid.UUID, parentID *uuid.UUID, normalizedName string) error {
-	return postgres.DB(ctx, r.db).Transaction(func(tx *gorm.DB) error {
-		var node nodeRow
-		if err := tx.Where("id = ?", nodeID).First(&node).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			return domain.ErrNodeNotFound
-		} else if err != nil {
-			return wrapPersistence(err)
-		}
-		if parentID != nil {
-			var parent nodeRow
-			if err := tx.Where("id = ?", *parentID).First(&parent).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-				return domain.ErrParentNotFound
-			} else if err != nil {
-				return wrapPersistence(err)
-			}
-			if parent.NamespaceID != node.NamespaceID {
-				return domain.ErrNamespaceMismatch
-			}
-			if parent.Type != model.NodeTypeDirectory {
-				return domain.ErrParentNotDirectory
-			}
-		}
-		canonical := strings.TrimSpace(norm.NFC.String(normalizedName))
-		if canonical == "" || strings.ContainsAny(canonical, `/\`) {
-			return model.ErrInvalidNodeName
-		}
-		result := tx.Model(&nodeRow{}).Where("id = ?", nodeID).
-			Updates(map[string]any{"parent_id": parentID, "normalized_name": strings.ToLower(canonical), "name": canonical, "updated_at": time.Now().UTC()})
-		if conflict := mapUniqueConflict(result.Error); conflict != nil {
-			return conflict
-		}
-		return wrapPersistence(result.Error)
-	})
-}
-
 func (r *Repository) MoveNodeSafely(ctx context.Context, namespaceID, nodeID uuid.UUID, parentID *uuid.UUID, name string) error {
 	tx, err := postgres.RequireTx(ctx)
 	if err != nil {
@@ -478,6 +443,9 @@ func (r *Repository) MoveNodeSafely(ctx context.Context, namespaceID, nodeID uui
 	} else {
 		result := tx.Exec("UPDATE filesystem.namespaces SET updated_at = updated_at WHERE id = ?", namespaceID)
 		err = result.Error
+		if isSQLiteBusy(err) {
+			return domain.ErrTransactionRetry
+		}
 		if err == nil && result.RowsAffected == 0 {
 			err = gorm.ErrRecordNotFound
 		}
@@ -486,12 +454,18 @@ func (r *Repository) MoveNodeSafely(ctx context.Context, namespaceID, nodeID uui
 		return domain.ErrNamespaceNotFound
 	}
 	if err != nil {
+		if tx.Dialector.Name() == "sqlite" && isSQLiteBusy(err) {
+			return domain.ErrTransactionRetry
+		}
 		return wrapPersistence(err)
 	}
 	var node nodeRow
 	if err := tx.Where("namespace_id = ? AND id = ?", namespaceID, nodeID).First(&node).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 		return domain.ErrNodeNotFound
 	} else if err != nil {
+		if tx.Dialector.Name() == "sqlite" && isSQLiteBusy(err) {
+			return domain.ErrTransactionRetry
+		}
 		return wrapPersistence(err)
 	}
 	if parentID != nil {
@@ -506,6 +480,9 @@ func (r *Repository) MoveNodeSafely(ctx context.Context, namespaceID, nodeID uui
 			if err := tx.Where("namespace_id = ? AND id = ?", namespaceID, current).First(&parent).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 				return domain.ErrParentNotFound
 			} else if err != nil {
+				if tx.Dialector.Name() == "sqlite" && isSQLiteBusy(err) {
+					return domain.ErrTransactionRetry
+				}
 				return wrapPersistence(err)
 			}
 			if parent.Type != model.NodeTypeDirectory {
@@ -526,6 +503,9 @@ func (r *Repository) MoveNodeSafely(ctx context.Context, namespaceID, nodeID uui
 	}
 	result := tx.Model(&nodeRow{}).Where("namespace_id = ? AND id = ?", namespaceID, nodeID).
 		Updates(map[string]any{"parent_id": parentID, "normalized_name": strings.ToLower(canonical), "name": canonical, "updated_at": time.Now().UTC()})
+	if tx.Dialector.Name() == "sqlite" && isSQLiteBusy(result.Error) {
+		return domain.ErrTransactionRetry
+	}
 	if conflict := mapUniqueConflict(result.Error); conflict != nil {
 		return conflict
 	}
@@ -547,7 +527,7 @@ func (r *Repository) GetCommand(ctx context.Context, commandID uuid.UUID) (*repo
 	var row commandDedupRow
 	err := postgres.DB(ctx, r.db).Where("command_id = ?", commandID).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, domain.ErrNodeNotFound
+		return nil, domain.ErrCommandNotFound
 	}
 	if err != nil {
 		return nil, domain.ErrPersistence
@@ -565,7 +545,7 @@ func (r *Repository) ClaimCommand(ctx context.Context, command repository.Comman
 	result := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
 	if result.Error != nil {
 		if db.Dialector.Name() == "sqlite" && isSQLiteBusy(result.Error) {
-			return nil, postgres.ErrTransactionRetry
+			return nil, domain.ErrTransactionRetry
 		}
 		return nil, wrapPersistence(result.Error)
 	}
@@ -698,6 +678,7 @@ func isDomainError(err error) bool {
 		domain.ErrRevisionBlobMismatch, domain.ErrReplicaBlobMismatch,
 		domain.ErrPersistence, domain.ErrQuotaExceeded, domain.ErrDirectoryCycle,
 		domain.ErrIdempotencyConflict, domain.ErrOutcomeUnknown, domain.ErrCommandInProgress, model.ErrInvalidNodeName,
+		domain.ErrCommandNotFound, domain.ErrTransactionRetry,
 	} {
 		if errors.Is(err, sentinel) {
 			return true
