@@ -15,5 +15,7 @@ var (
 	ErrNamespaceMismatch    = errors.New("filesystem namespace mismatch")
 	ErrBlobConflict         = errors.New("filesystem blob conflict")
 	ErrReplicaConflict      = errors.New("filesystem replica conflict")
+	ErrRevisionBlobMismatch = errors.New("filesystem revision blob mismatch")
+	ErrReplicaBlobMismatch  = errors.New("filesystem replica blob mismatch")
 	ErrPersistence          = errors.New("filesystem persistence failure")
 )

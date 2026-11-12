@@ -28,6 +28,29 @@ func TestCreateChildRejectsDuplicateNormalizedName(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrNodeNameConflict)
 }
 
+func TestCreateChildRejectsFileParent(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	fileParent := rootFile(ns.ID, "file-parent")
+	require.NoError(t, repo.CreateNode(context.Background(), fileParent))
+	child := mustFile(ns.ID, fileParent.ID, "child")
+
+	err := repo.CreateNode(context.Background(), child)
+
+	require.ErrorIs(t, err, domain.ErrParentNotDirectory)
+}
+
+func TestCreateChildRejectsCrossNamespaceParent(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns1, ns2 := seedNamespace(t, db), seedNamespace(t, db)
+	parent := rootDirectory(ns2.ID, "parent")
+	require.NoError(t, repo.CreateNode(context.Background(), parent))
+
+	err := repo.CreateNode(context.Background(), mustFile(ns1.ID, parent.ID, "child"))
+
+	require.ErrorIs(t, err, domain.ErrNamespaceMismatch)
+}
+
 func TestCreateRootRejectsDuplicateNormalizedName(t *testing.T) {
 	repo, db := newTestRepository(t)
 	ns := seedNamespace(t, db)
@@ -141,6 +164,36 @@ func TestSaveRevisionRejectsBlobIDContentConflictAndRollsBack(t *testing.T) {
 	require.Zero(t, count)
 }
 
+func TestSaveRevisionRejectsMismatchedAssociationsBeforeWriting(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	node := rootFile(ns.ID, "report")
+	require.NoError(t, repo.CreateNode(context.Background(), node))
+	revision, blob, replica := revisionFixture(t, node.ID, 1)
+	revisionBlobID := uuid.New()
+	revision, err := model.NewRevision(node.ID, 1, revisionBlobID, blob.Size, "text/plain", uuid.New())
+	require.NoError(t, err)
+
+	err = repo.SaveRevision(context.Background(), revision, blob, replica)
+
+	require.ErrorIs(t, err, domain.ErrRevisionBlobMismatch)
+	assertNoFilesystemRows(t, db, revision.ID(), blob.ID, replica.ID)
+}
+
+func TestSaveRevisionRejectsMismatchedReplicaBeforeWriting(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	node := rootFile(ns.ID, "report")
+	require.NoError(t, repo.CreateNode(context.Background(), node))
+	revision, blob, replica := revisionFixture(t, node.ID, 1)
+	replica.BlobID = uuid.New()
+
+	err := repo.SaveRevision(context.Background(), revision, blob, replica)
+
+	require.ErrorIs(t, err, domain.ErrReplicaBlobMismatch)
+	assertNoFilesystemRows(t, db, revision.ID(), blob.ID, replica.ID)
+}
+
 func TestListChildrenCursorHasStableExclusiveBoundary(t *testing.T) {
 	repo, db := newTestRepository(t)
 	ns := seedNamespace(t, db)
@@ -160,11 +213,24 @@ func TestListChildrenCursorHasStableExclusiveBoundary(t *testing.T) {
 }
 
 func TestUniqueConflictMappingIsConstraintSpecific(t *testing.T) {
-	require.ErrorIs(t, mapUniqueConflict(&pgconn.PgError{Code: "23505", ConstraintName: "nodes_namespace_id_parent_id_normalized_name_key"}), domain.ErrNodeNameConflict)
-	require.ErrorIs(t, mapUniqueConflict(&pgconn.PgError{Code: "23505", ConstraintName: "nodes_pkey"}), domain.ErrNodeIDConflict)
-	require.ErrorIs(t, mapUniqueConflict(&pgconn.PgError{Code: "23505", ConstraintName: "file_revisions_node_id_revision_no_key"}), domain.ErrRevisionConflict)
-	require.ErrorIs(t, mapUniqueConflict(&pgconn.PgError{Code: "23505", ConstraintName: "blobs_dedup_domain_sha256_size_key"}), domain.ErrBlobConflict)
-	require.Nil(t, mapUniqueConflict(&pgconn.PgError{Code: "23505", ConstraintName: "unrelated_constraint"}))
+	tests := []struct {
+		name string
+		err  error
+		want error
+	}{
+		{"node name unique", &pgconn.PgError{Code: "23505", ConstraintName: "nodes_namespace_id_parent_id_normalized_name_key"}, domain.ErrNodeNameConflict},
+		{"node id unique", &pgconn.PgError{Code: "23505", ConstraintName: "nodes_pkey"}, domain.ErrNodeIDConflict},
+		{"revision unique", &pgconn.PgError{Code: "23505", ConstraintName: "file_revisions_node_id_revision_no_key"}, domain.ErrRevisionConflict},
+		{"blob unique", &pgconn.PgError{Code: "23505", ConstraintName: "blobs_dedup_domain_sha256_size_key"}, domain.ErrBlobConflict},
+		{"foreign key with similar name", &pgconn.PgError{Code: "23503", ConstraintName: "nodes_namespace_id_parent_id_normalized_name_key"}, domain.ErrPersistence},
+		{"check with similar name", &pgconn.PgError{Code: "23514", ConstraintName: "blobs_dedup_domain_sha256_size_key"}, domain.ErrPersistence},
+		{"unrelated unique", &pgconn.PgError{Code: "23505", ConstraintName: "unrelated_constraint"}, domain.ErrPersistence},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.ErrorIs(t, mapUniqueConflict(tt.err), tt.want)
+		})
+	}
 }
 
 func TestPersistenceErrorsDoNotExposeDriverType(t *testing.T) {
@@ -261,4 +327,15 @@ func revisionFixtureWithBlob(t *testing.T, nodeID uuid.UUID, revisionNo int, blo
 	require.NoError(t, err)
 	replica := &model.StorageReplica{ID: uuid.New(), BlobID: blob.ID, ProviderID: uuid.New(), ObjectKey: uuid.NewString(), State: model.ReplicaStateAvailable}
 	return revision, blob, replica
+}
+
+func assertNoFilesystemRows(t *testing.T, db *gorm.DB, revisionID, blobID, replicaID uuid.UUID) {
+	t.Helper()
+	var count int64
+	require.NoError(t, db.Table("filesystem.file_revisions").Where("id = ?", revisionID).Count(&count).Error)
+	require.Zero(t, count)
+	require.NoError(t, db.Table("filesystem.blobs").Where("id = ?", blobID).Count(&count).Error)
+	require.Zero(t, count)
+	require.NoError(t, db.Table("filesystem.storage_replicas").Where("id = ?", replicaID).Count(&count).Error)
+	require.Zero(t, count)
 }

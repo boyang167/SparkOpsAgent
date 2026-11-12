@@ -49,12 +49,18 @@ func (r *Repository) CreateNode(ctx context.Context, node *model.Node) error {
 	db := r.db.WithContext(ctx)
 	if node.ParentID != nil {
 		var parent nodeRow
-		err := db.Where("id = ? AND namespace_id = ?", *node.ParentID, node.NamespaceID).First(&parent).Error
+		err := db.Where("id = ?", *node.ParentID).First(&parent).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return domain.ErrNodeNotFound
+			return domain.ErrParentNotFound
 		}
 		if err != nil {
 			return wrapPersistence(err)
+		}
+		if parent.NamespaceID != node.NamespaceID {
+			return domain.ErrNamespaceMismatch
+		}
+		if parent.Type != model.NodeTypeDirectory {
+			return domain.ErrParentNotDirectory
 		}
 	}
 	query := db.Where("namespace_id = ? AND normalized_name = ?", node.NamespaceID, node.NormalizedName)
@@ -123,6 +129,20 @@ func (r *Repository) ListChildren(ctx context.Context, namespaceID uuid.UUID, pa
 }
 
 func (r *Repository) SaveRevision(ctx context.Context, revision *model.FileRevision, blob *model.Blob, replica *model.StorageReplica) error {
+	if revision.BlobID() != blob.ID {
+		return domain.ErrRevisionBlobMismatch
+	}
+	if replica.BlobID != blob.ID {
+		return domain.ErrReplicaBlobMismatch
+	}
+	var node nodeRow
+	nodeErr := r.db.WithContext(ctx).Where("id = ?", revision.NodeID()).First(&node).Error
+	if errors.Is(nodeErr, gorm.ErrRecordNotFound) {
+		return domain.ErrNodeNotFound
+	}
+	if nodeErr != nil {
+		return wrapPersistence(nodeErr)
+	}
 	return wrapPersistence(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		var existingBlob blobRow
@@ -255,28 +275,49 @@ func mapUniqueConflict(err error) error {
 	message := strings.ToLower(err.Error())
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
+		if pgErr.Code != "23505" {
+			return domain.ErrPersistence
+		}
 		constraint = strings.ToLower(pgErr.ConstraintName)
+		switch constraint {
+		case "nodes_namespace_id_parent_id_normalized_name_key", "nodes_namespace_id_normalized_name_key":
+			return domain.ErrNodeNameConflict
+		case "nodes_pkey":
+			return domain.ErrNodeIDConflict
+		case "file_revisions_pkey", "file_revisions_node_id_revision_no_key":
+			return domain.ErrRevisionConflict
+		case "blobs_pkey", "blobs_dedup_domain_sha256_size_key":
+			return domain.ErrBlobConflict
+		case "storage_replicas_pkey", "storage_replicas_blob_id_provider_id_object_key_key":
+			return domain.ErrReplicaConflict
+		default:
+			return domain.ErrPersistence
+		}
 	}
-	nameConflict := strings.Contains(constraint, "normalized_name") ||
-		strings.Contains(message, "ux_filesystem_nodes_root_name") ||
-		strings.Contains(message, "ux_filesystem_nodes_child_name") ||
-		(strings.Contains(message, "nodes") && strings.Contains(message, "normalized_name"))
-	if nameConflict {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return domain.ErrPersistence
+	}
+	if !strings.Contains(message, "unique constraint failed") {
+		return nil
+	}
+	switch {
+	case strings.Contains(message, "ux_filesystem_nodes_root_name"),
+		strings.Contains(message, "ux_filesystem_nodes_child_name"),
+		strings.Contains(message, "nodes.namespace_id, nodes.normalized_name"),
+		strings.Contains(message, "nodes.namespace_id, filesystem.nodes.normalized_name"),
+		strings.Contains(message, "nodes.namespace_id, nodes.parent_id, nodes.normalized_name"):
 		return domain.ErrNodeNameConflict
-	}
-	if strings.Contains(constraint, "nodes_pkey") || strings.Contains(message, "nodes.id") {
+	case strings.Contains(message, "nodes.id"):
 		return domain.ErrNodeIDConflict
-	}
-	if strings.Contains(constraint, "file_revisions") || strings.Contains(message, "file_revisions") {
+	case strings.Contains(message, "file_revisions"):
 		return domain.ErrRevisionConflict
-	}
-	if strings.Contains(constraint, "blobs") || strings.Contains(message, "blobs") {
+	case strings.Contains(message, "blobs"):
 		return domain.ErrBlobConflict
-	}
-	if strings.Contains(constraint, "storage_replicas") || strings.Contains(message, "storage_replicas") {
+	case strings.Contains(message, "storage_replicas"):
 		return domain.ErrReplicaConflict
+	default:
+		return domain.ErrPersistence
 	}
-	return nil
 }
 
 func wrapPersistence(err error) error {
@@ -301,6 +342,7 @@ func isDomainError(err error) bool {
 		domain.ErrNamespaceNotFound, domain.ErrRevisionNotFound, domain.ErrRevisionConflict,
 		domain.ErrRevisionNodeMismatch, domain.ErrParentNotFound, domain.ErrParentNotDirectory,
 		domain.ErrNamespaceMismatch, domain.ErrBlobConflict, domain.ErrReplicaConflict,
+		domain.ErrRevisionBlobMismatch, domain.ErrReplicaBlobMismatch,
 		domain.ErrPersistence, model.ErrInvalidNodeName,
 	} {
 		if errors.Is(err, sentinel) {
