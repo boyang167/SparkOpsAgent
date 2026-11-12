@@ -14,6 +14,21 @@ var (
 	ErrNodeNotFound     = domain.ErrNodeNotFound
 )
 
+type CommandDedup struct {
+	CommandID   uuid.UUID
+	WorkspaceID uuid.UUID
+	Operation   string
+	RequestHash string
+	NodeID      *uuid.UUID
+	RevisionID  *uuid.UUID
+	State       string
+}
+
+var (
+	ErrCommandInProgress   = domain.ErrCommandInProgress
+	ErrIdempotencyConflict = domain.ErrIdempotencyConflict
+)
+
 type FilesystemRepository interface {
 	CreateNamespace(context.Context, *model.Namespace) error
 	GetNamespaceByWorkspace(context.Context, uuid.UUID) (*model.Namespace, error)
@@ -32,4 +47,7 @@ type FilesystemRepository interface {
 	RenameNode(context.Context, uuid.UUID, string) error
 	MoveNode(context.Context, uuid.UUID, *uuid.UUID, string) error
 	TrashNode(context.Context, uuid.UUID) error
+	ClaimCommand(context.Context, CommandDedup) (*CommandDedup, error)
+	CompleteCommand(context.Context, uuid.UUID, *uuid.UUID, *uuid.UUID) error
+	GetCommand(context.Context, uuid.UUID) (*CommandDedup, error)
 }

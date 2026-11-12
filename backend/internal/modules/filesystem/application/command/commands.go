@@ -2,6 +2,8 @@ package command
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -264,6 +266,16 @@ type PutLocalFileHandler struct {
 	audit auditPort
 }
 
+func putRequestHash(cmd PutLocalFile, parent uuid.UUID) string {
+	target := ""
+	if cmd.NodeID != nil {
+		target = cmd.NodeID.String()
+	}
+	value := fmt.Sprintf("put|%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s", cmd.WorkspaceID, cmd.NamespaceID, target, parent, cmd.Name, cmd.ActorID, cmd.ReplicaProviderID, cmd.Size, cmd.MIMEType, strings.ToLower(strings.TrimSpace(cmd.SHA256)), cmd.CommandID)
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
 func NewPutLocalFileHandler(repo repository.FilesystemRepository, store storage.Provider, tx postgres.Transactor, bus messaging.Bus, logger auditPort) *PutLocalFileHandler {
 	return &PutLocalFileHandler{repo: repo, store: store, tx: tx, bus: bus, audit: logger}
 }
@@ -295,6 +307,21 @@ func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (*mo
 		parent = *cmd.ParentID
 	} else if ns.RootNodeID != nil {
 		parent = *ns.RootNodeID
+	}
+	if len(cmd.SHA256) != 64 {
+		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", errors.New("invalid checksum"))
+	}
+	requestHash := putRequestHash(cmd, parent)
+	if prior, priorErr := h.repo.GetCommand(ctx, cmd.CommandID); priorErr == nil {
+		if prior.RequestHash != requestHash {
+			return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", domain.ErrIdempotencyConflict)
+		}
+		if prior.State != "COMPLETED" {
+			return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", domain.ErrCommandInProgress)
+		}
+		if prior.NodeID != nil {
+			return h.repo.GetNode(ctx, cmd.NamespaceID, *prior.NodeID)
+		}
 	}
 	nodeID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-node:"+cmd.CommandID.String()))
 	if cmd.NodeID != nil {
@@ -363,6 +390,13 @@ func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (*mo
 	}
 	replica := &model.StorageReplica{ID: uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-replica:"+cmd.CommandID.String())), BlobID: blob.ID, ProviderID: providerID, ObjectKey: info.ObjectKey, Checksum: info.SHA256, State: model.ReplicaStateAvailable}
 	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		claimed, claimErr := h.repo.ClaimCommand(txCtx, repository.CommandDedup{CommandID: cmd.CommandID, WorkspaceID: cmd.WorkspaceID, Operation: "put_local", RequestHash: requestHash, NodeID: &node.ID, RevisionID: &revisionID})
+		if claimErr != nil {
+			return claimErr
+		}
+		if claimed.State == "COMPLETED" {
+			return domain.ErrCommandInProgress
+		}
 		if existing == nil {
 			if err := h.repo.CreateNode(txCtx, node); err != nil {
 				return err
@@ -388,6 +422,9 @@ func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (*mo
 			); err != nil {
 				return err
 			}
+		}
+		if err := h.repo.CompleteCommand(txCtx, cmd.CommandID, &node.ID, &revisionID); err != nil {
+			return err
 		}
 		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", true, nil)
 	})

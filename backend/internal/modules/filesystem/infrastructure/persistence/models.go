@@ -88,3 +88,17 @@ type quotaAccountRow struct {
 }
 
 func (quotaAccountRow) TableName() string { return "filesystem.quota_accounts" }
+
+type commandDedupRow struct {
+	CommandID   uuid.UUID  `gorm:"column:command_id;primaryKey;type:uuid"`
+	WorkspaceID uuid.UUID  `gorm:"column:workspace_id;not null;type:uuid"`
+	Operation   string     `gorm:"column:operation;not null"`
+	RequestHash string     `gorm:"column:request_hash;not null;size:64"`
+	NodeID      *uuid.UUID `gorm:"column:node_id;type:uuid"`
+	RevisionID  *uuid.UUID `gorm:"column:revision_id;type:uuid"`
+	State       string     `gorm:"column:state;not null;size:16"`
+	CreatedAt   time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt   time.Time  `gorm:"column:updated_at;not null"`
+}
+
+func (commandDedupRow) TableName() string { return "filesystem.command_dedup" }

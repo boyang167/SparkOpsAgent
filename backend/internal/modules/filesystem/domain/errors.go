@@ -22,4 +22,5 @@ var (
 	ErrDirectoryCycle       = errors.New("filesystem directory cycle")
 	ErrIdempotencyConflict  = errors.New("filesystem idempotency conflict")
 	ErrOutcomeUnknown       = errors.New("filesystem outcome unknown")
+	ErrCommandInProgress    = errors.New("filesystem command in progress")
 )

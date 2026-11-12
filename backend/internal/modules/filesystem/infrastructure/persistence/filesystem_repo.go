@@ -439,6 +439,56 @@ func (r *Repository) TrashNode(ctx context.Context, nodeID uuid.UUID) error {
 	return nil
 }
 
+func (r *Repository) GetCommand(ctx context.Context, commandID uuid.UUID) (*repository.CommandDedup, error) {
+	var row commandDedupRow
+	err := postgres.DB(ctx, r.db).Where("command_id = ?", commandID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrNodeNotFound
+	}
+	if err != nil {
+		return nil, domain.ErrPersistence
+	}
+	return commandFromRow(row), nil
+}
+
+func (r *Repository) ClaimCommand(ctx context.Context, command repository.CommandDedup) (*repository.CommandDedup, error) {
+	if _, err := postgres.RequireTx(ctx); err != nil {
+		return nil, domain.ErrPersistence
+	}
+	now := time.Now().UTC()
+	row := commandDedupRow{CommandID: command.CommandID, WorkspaceID: command.WorkspaceID, Operation: command.Operation, RequestHash: command.RequestHash, NodeID: command.NodeID, RevisionID: command.RevisionID, State: "IN_PROGRESS", CreatedAt: now, UpdatedAt: now}
+	db := postgres.DB(ctx, r.db)
+	if err := db.Create(&row).Error; err != nil {
+		var existing commandDedupRow
+		if readErr := db.Where("command_id = ?", command.CommandID).First(&existing).Error; readErr != nil {
+			return nil, domain.ErrPersistence
+		}
+		if existing.RequestHash != command.RequestHash || existing.WorkspaceID != command.WorkspaceID || existing.Operation != command.Operation {
+			return nil, domain.ErrIdempotencyConflict
+		}
+		if existing.State != "COMPLETED" {
+			return nil, domain.ErrCommandInProgress
+		}
+		return commandFromRow(existing), nil
+	}
+	return commandFromRow(row), nil
+}
+
+func (r *Repository) CompleteCommand(ctx context.Context, commandID uuid.UUID, nodeID, revisionID *uuid.UUID) error {
+	result := postgres.DB(ctx, r.db).Model(&commandDedupRow{}).Where("command_id = ? AND state = ?", commandID, "IN_PROGRESS").Updates(map[string]any{"node_id": nodeID, "revision_id": revisionID, "state": "COMPLETED", "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		return domain.ErrPersistence
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrCommandInProgress
+	}
+	return nil
+}
+
+func commandFromRow(row commandDedupRow) *repository.CommandDedup {
+	return &repository.CommandDedup{CommandID: row.CommandID, WorkspaceID: row.WorkspaceID, Operation: row.Operation, RequestHash: row.RequestHash, NodeID: row.NodeID, RevisionID: row.RevisionID, State: row.State}
+}
+
 func nodeFromRow(row nodeRow) *model.Node {
 	return &model.Node{ID: row.ID, NamespaceID: row.NamespaceID, ParentID: row.ParentID, Type: row.Type, Name: row.Name, NormalizedName: row.NormalizedName, CurrentRevisionID: row.CurrentRevisionID, State: row.State, OwnerID: row.OwnerID}
 }
@@ -530,7 +580,7 @@ func isDomainError(err error) bool {
 		domain.ErrNamespaceMismatch, domain.ErrBlobConflict, domain.ErrReplicaConflict,
 		domain.ErrRevisionBlobMismatch, domain.ErrReplicaBlobMismatch,
 		domain.ErrPersistence, domain.ErrQuotaExceeded, domain.ErrDirectoryCycle,
-		domain.ErrIdempotencyConflict, domain.ErrOutcomeUnknown, model.ErrInvalidNodeName,
+		domain.ErrIdempotencyConflict, domain.ErrOutcomeUnknown, domain.ErrCommandInProgress, model.ErrInvalidNodeName,
 	} {
 		if errors.Is(err, sentinel) {
 			return true

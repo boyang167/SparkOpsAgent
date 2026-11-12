@@ -3,9 +3,12 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"gorm.io/gorm"
 )
+
+var ErrCommitOutcomeUnknown = errors.New("postgres transaction commit outcome unknown")
 
 type Transactor interface {
 	WithinTransaction(ctx context.Context, fn func(context.Context) error) error
@@ -25,9 +28,27 @@ func (t *gormTransactor) WithinTransaction(ctx context.Context, fn func(context.
 	if _, ok := ctx.Value(txKey{}).(*gorm.DB); ok {
 		return fn(ctx)
 	}
-	return t.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return fn(context.WithValue(ctx, txKey{}, tx))
-	})
+	tx := t.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	txCtx := context.WithValue(ctx, txKey{}, tx)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			_ = tx.Rollback().Error
+			panic(recovered)
+		}
+	}()
+	if err := fn(txCtx); err != nil {
+		if rollbackErr := tx.Rollback().Error; rollbackErr != nil {
+			return errors.Join(err, rollbackErr)
+		}
+		return err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return fmt.Errorf("%w: %v", ErrCommitOutcomeUnknown, err)
+	}
+	return nil
 }
 
 type directTransactor struct{}

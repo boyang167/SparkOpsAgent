@@ -113,6 +113,18 @@ CREATE TABLE IF NOT EXISTS filesystem.file_links (
     UNIQUE(link_type, link_id, node_id, revision_id)
 );
 
+CREATE TABLE IF NOT EXISTS filesystem.command_dedup (
+    command_id UUID PRIMARY KEY,
+    workspace_id UUID NOT NULL,
+    operation VARCHAR(64) NOT NULL,
+    request_hash VARCHAR(64) NOT NULL,
+    node_id UUID,
+    revision_id UUID,
+    state VARCHAR(16) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 ALTER TABLE filesystem.nodes
     ADD CONSTRAINT fk_nodes_current_revision
     FOREIGN KEY (current_revision_id, id)

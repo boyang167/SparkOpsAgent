@@ -17,6 +17,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage/adapters/local"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
@@ -51,7 +52,8 @@ func TestPutLocalFileRollsBackWhenEventPublishFails(t *testing.T) {
 		CommandID: uuid.New(), ActorID: uuid.New(), OrganizationID: ns.OrganizationID,
 		WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, Name: "fixture.txt",
 		MIMEType: "text/plain", Size: int64(len("fixture-content")),
-		Body: bytes.NewBufferString("fixture-content"), Authorization: Authorization{Allowed: true},
+		SHA256: storage.SHA256([]byte("fixture-content")),
+		Body:   bytes.NewBufferString("fixture-content"), Authorization: Authorization{Allowed: true},
 		ReplicaProviderID: uuid.New(),
 	}
 
