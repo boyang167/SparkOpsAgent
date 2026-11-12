@@ -193,6 +193,10 @@ func TestCreateEnvironmentSyncPreviewDoesNotExposeSecretData(t *testing.T) {
 		}
 		return []model.EnvironmentSyncResource{
 			{Kind: model.SyncManifestKindDeployment, Name: "demo", YAML: deploymentYAML("demo", "registry/target/demo:v1")},
+			{
+				Kind: model.SyncManifestKindSecret, Name: "app-secret",
+				YAML: "apiVersion: v1\nkind: Secret\nmetadata:\n  name: app-secret\nstringData:\n  password: target-password\ndata:\n  token: dGFyZ2V0LXNlY3JldA==\n",
+			},
 		}, nil
 	}
 

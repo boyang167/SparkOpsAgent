@@ -98,12 +98,18 @@ func mergeResource(
 	diff = model.EnvironmentSyncDiff{Kind: src.Kind, Name: src.Name}
 	if hasTarget {
 		diff.Before = tgt.YAML
+		if src.Kind == model.SyncManifestKindSecret {
+			diff.Before, err = redactSecretYAML(diff.Before)
+			if err != nil {
+				return "", diff, false, err
+			}
+		}
 	}
 
 	if !option.SyncImage && !option.SyncYAML {
 		diff.Action = "unchanged"
 		if hasTarget {
-			diff.After = tgt.YAML
+			diff.After = diff.Before
 		}
 		return "", diff, false, nil
 	}
@@ -113,7 +119,7 @@ func mergeResource(
 		if !hasTarget || !isWorkloadKind(src.Kind) {
 			diff.Action = "unchanged"
 			if hasTarget {
-				diff.After = tgt.YAML
+				diff.After = diff.Before
 			}
 			return "", diff, false, nil
 		}
@@ -131,16 +137,10 @@ func mergeResource(
 	}
 
 	if src.Kind == model.SyncManifestKindSecret {
-		doc, parseErr := parseYAMLDoc(mergedYAML)
-		if parseErr != nil {
-			return "", diff, false, parseErr
+		mergedYAML, err = redactSecretYAML(mergedYAML)
+		if err != nil {
+			return "", diff, false, err
 		}
-		stripSecretData(doc)
-		out, marshalErr := marshalYAMLDoc(doc)
-		if marshalErr != nil {
-			return "", diff, false, marshalErr
-		}
-		mergedYAML = out
 		diff.Note = "secret data is not copied"
 	}
 
@@ -281,6 +281,15 @@ func sanitizeResourceMetadata(doc map[string]any, targetNamespace string) {
 func stripSecretData(doc map[string]any) {
 	delete(doc, "data")
 	delete(doc, "stringData")
+}
+
+func redactSecretYAML(raw string) (string, error) {
+	doc, err := parseYAMLDoc(raw)
+	if err != nil {
+		return "", err
+	}
+	stripSecretData(doc)
+	return marshalYAMLDoc(doc)
 }
 
 func containerLists(doc map[string]any) ([]any, []any, bool) {

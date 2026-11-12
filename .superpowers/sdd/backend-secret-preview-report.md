@@ -103,3 +103,64 @@ the exact commit identifier is returned in the handoff.
   untouched because the requested scope is backend Cluster 3 only.
 - The full backend baseline still contains the other diagnosis-report failure
   clusters; they were intentionally not addressed.
+
+## Follow-up: target Secret `Before` redaction
+
+### Finding and root cause
+
+Review found that `mergeResource` assigned `tgt.YAML` directly to
+`diff.Before` before the existing Secret redaction branch. The prior query test
+had no target Secret, so it could not observe this leak. For a target Secret
+containing `data` or `stringData`, the preview view exposed those fields in
+`Before`.
+
+### TDD RED
+
+The query regression test was extended with a target Secret containing both
+`data` and `stringData`, while retaining the existing assertions for both
+`Before` and `After`:
+
+```text
+go test ./internal/modules/delivery/deployrun/application/query -run '^TestCreateEnvironmentSyncPreviewDoesNotExposeSecretData$' -count=1
+```
+
+Result: RED. The failure showed the target Secret `Before` still contained
+`stringData`/`data`.
+
+### Minimal fix and GREEN
+
+The planner now:
+
+- redacts Secret `diff.Before` immediately after reading target YAML;
+- uses the redacted `diff.Before` for unchanged/unsupported Secret `After`;
+- reuses the same `redactSecretYAML` helper for merged Secret `After`;
+- leaves non-Secret `Before`/`After` behavior unchanged.
+
+The exact regression test then passed:
+
+```text
+go test ./internal/modules/delivery/deployrun/application/query -run '^TestCreateEnvironmentSyncPreviewDoesNotExposeSecretData$' -count=1
+```
+
+### Follow-up verification
+
+Passed:
+
+```text
+go test ./internal/modules/delivery/deployrun/domain/model -count=1
+go test ./internal/modules/delivery/deployrun/application/service -count=1
+go test ./internal/modules/delivery/deployrun/application/query -count=1
+```
+
+`git diff --check` passed and IDE lint reported no errors for the changed files.
+
+### Follow-up commit
+
+The test, planner fix, and this report append are included in the new atomic
+follow-up commit; its exact identifier is returned in the handoff.
+
+### Follow-up concerns
+
+No new concerns. The existing scope concerns remain: the frontend does not yet
+offer an explicit Secret kind selector, and other baseline failure clusters
+remain intentionally untouched.
