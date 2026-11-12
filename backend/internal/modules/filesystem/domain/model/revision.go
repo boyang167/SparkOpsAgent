@@ -11,13 +11,13 @@ import (
 var ErrInvalidRevision = errors.New("invalid file revision")
 
 type FileRevision struct {
-	ID         uuid.UUID
-	NodeID     uuid.UUID
+	id         uuid.UUID
+	nodeID     uuid.UUID
 	blobID     uuid.UUID
 	revisionNo int
 	size       int64
 	mimeType   string
-	CreatedBy  uuid.UUID
+	createdBy  uuid.UUID
 }
 
 func NewRevision(nodeID uuid.UUID, revisionNo int, blobID uuid.UUID, size int64, mimeType string, createdBy uuid.UUID) (*FileRevision, error) {
@@ -32,14 +32,22 @@ func NewRevision(nodeID uuid.UUID, revisionNo int, blobID uuid.UUID, size int64,
 		return nil, ErrInvalidRevision
 	}
 	return &FileRevision{
-		ID:         uuid.New(),
-		NodeID:     nodeID,
+		id:         uuid.New(),
+		nodeID:     nodeID,
 		blobID:     blobID,
 		revisionNo: revisionNo,
 		size:       size,
 		mimeType:   mimeType,
-		CreatedBy:  createdBy,
+		createdBy:  createdBy,
 	}, nil
+}
+
+func (r *FileRevision) ID() uuid.UUID {
+	return r.id
+}
+
+func (r *FileRevision) NodeID() uuid.UUID {
+	return r.nodeID
 }
 
 func (r *FileRevision) BlobID() uuid.UUID {
@@ -56,4 +64,8 @@ func (r *FileRevision) Size() int64 {
 
 func (r *FileRevision) MIMEType() string {
 	return r.mimeType
+}
+
+func (r *FileRevision) CreatedBy() uuid.UUID {
+	return r.createdBy
 }

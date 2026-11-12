@@ -1,6 +1,7 @@
 package model_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/google/uuid"
@@ -39,12 +40,22 @@ func TestRevisionContentIsImmutable(t *testing.T) {
 	revision, err := model.NewRevision(uuid.New(), 1, uuid.New(), 42, "text/plain", uuid.New())
 	require.NoError(t, err)
 
+	assert.NotEqual(t, uuid.Nil, revision.ID())
+	assert.NotEqual(t, uuid.Nil, revision.NodeID())
+	assert.NotEqual(t, uuid.Nil, revision.CreatedBy())
 	assert.Equal(t, int64(42), revision.Size())
 	assert.Equal(t, 1, revision.RevisionNo())
 	assert.NotPanics(t, func() {
 		_ = revision.BlobID()
 		_ = revision.MIMEType()
 	})
+}
+
+func TestRevisionExposesNoWritableFields(t *testing.T) {
+	revisionType := reflect.TypeOf(model.FileRevision{})
+	for index := 0; index < revisionType.NumField(); index++ {
+		assert.NotEmpty(t, revisionType.Field(index).PkgPath, revisionType.Field(index).Name)
+	}
 }
 
 func TestRevisionRejectsInvalidContent(t *testing.T) {
