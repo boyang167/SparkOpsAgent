@@ -253,10 +253,15 @@ func (r *Repository) GetRevision(ctx context.Context, nodeID, revisionID uuid.UU
 }
 
 func (r *Repository) ListRevisions(ctx context.Context, nodeID, namespaceID uuid.UUID, limit int, cursor string) ([]model.FileRevision, string, error) {
-	query := postgres.DB(ctx, r.db).Where("node_id = ?", nodeID)
+	query := postgres.DB(ctx, r.db).Table("filesystem.file_revisions").
+		Joins("JOIN filesystem.nodes ON filesystem.nodes.id = filesystem.file_revisions.node_id").
+		Where("filesystem.file_revisions.node_id = ? AND filesystem.nodes.namespace_id = ?", nodeID, namespaceID)
 	if cursor != "" {
 		var boundary revisionRow
-		if err := postgres.DB(ctx, r.db).Where("node_id = ? AND id = ?", nodeID, cursor).First(&boundary).Error; err != nil {
+		if err := postgres.DB(ctx, r.db).Table("filesystem.file_revisions").
+			Joins("JOIN filesystem.nodes ON filesystem.nodes.id = filesystem.file_revisions.node_id").
+			Where("filesystem.file_revisions.node_id = ? AND filesystem.file_revisions.id = ? AND filesystem.nodes.namespace_id = ?", nodeID, cursor, namespaceID).
+			First(&boundary).Error; err != nil {
 			return nil, "", domain.ErrRevisionNotFound
 		}
 		query = query.Where("(revision_no < ?) OR (revision_no = ? AND id < ?)", boundary.RevisionNo, boundary.RevisionNo, boundary.ID)
