@@ -38,12 +38,13 @@ func (r *envProjectRepo) SaveEnvironmentProject(_ context.Context, row *model.En
 
 func TestOnDeployCompletedClearsCurrentVersionOnUndeploy(t *testing.T) {
 	envID := kernel.NewEnvironmentID()
+	projectID := kernel.NewProjectID()
 	runID := kernel.NewDeploymentRunID()
 	deployedAt := time.Now().UTC()
 	repo := &envProjectRepo{row: &model.EnvironmentProject{
-		EnvironmentID: envID, Enabled: true, CurrentImageTag: "v1", CurrentDeploymentRunID: &runID, LastDeployedAt: &deployedAt,
+		EnvironmentID: envID, ProjectID: projectID, Enabled: true, CurrentImageTag: "v1", CurrentDeploymentRunID: &runID, LastDeployedAt: &deployedAt,
 	}}
-	ev := deliveryevent.NewDeployCompleted(kernel.NewDeploymentRunID(), kernel.NewProjectID(), kernel.NewWorkspaceID(), &envID, "", "succeeded", "undeploy", "v1")
+	ev := deliveryevent.NewDeployCompleted(kernel.NewDeploymentRunID(), projectID, kernel.NewWorkspaceID(), &envID, "", "succeeded", "undeploy", "v1")
 
 	require.NoError(t, NewOnDeployCompleted(repo).Handle(context.Background(), ev))
 
@@ -75,14 +76,15 @@ func TestOnDeployCompletedUpsertsMissingEnvironmentProjectForEnvironmentSync(t *
 
 func TestOnDeployCompletedDoesNotOverwriteNewerDeploymentState(t *testing.T) {
 	envID := kernel.NewEnvironmentID()
+	projectID := kernel.NewProjectID()
 	currentRunID := kernel.NewDeploymentRunID()
 	deployedAt := time.Now().UTC().Add(time.Minute)
 	repo := &envProjectRepo{row: &model.EnvironmentProject{
-		EnvironmentID: envID, Enabled: true, CurrentImageTag: "new",
+		EnvironmentID: envID, ProjectID: projectID, Enabled: true, CurrentImageTag: "new",
 		CurrentDeploymentRunID: &currentRunID, LastDeployedAt: &deployedAt,
 	}}
 	ev := deliveryevent.NewDeployCompleted(
-		kernel.NewDeploymentRunID(), kernel.NewProjectID(), kernel.NewWorkspaceID(),
+		kernel.NewDeploymentRunID(), projectID, kernel.NewWorkspaceID(),
 		&envID, "", "succeeded", "normal", "old",
 	)
 
