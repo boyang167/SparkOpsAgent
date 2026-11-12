@@ -1,3 +1,9 @@
+ALTER TABLE IF EXISTS filesystem.namespaces
+    DROP CONSTRAINT IF EXISTS fk_namespaces_root_node;
+
+ALTER TABLE IF EXISTS filesystem.nodes
+    DROP CONSTRAINT IF EXISTS fk_nodes_parent_namespace;
+
 ALTER TABLE IF EXISTS filesystem.nodes
     DROP CONSTRAINT IF EXISTS fk_nodes_current_revision;
 

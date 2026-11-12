@@ -18,7 +18,11 @@ const (
 type NodeState string
 
 const (
-	NodeStateActive NodeState = "ACTIVE"
+	NodeStateActive        NodeState = "ACTIVE"
+	NodeStateTrashed       NodeState = "TRASHED"
+	NodeStateRetentionHold NodeState = "RETENTION_HOLD"
+	NodeStatePurgePending  NodeState = "PURGE_PENDING"
+	NodeStatePurged        NodeState = "PURGED"
 )
 
 type BlobState string

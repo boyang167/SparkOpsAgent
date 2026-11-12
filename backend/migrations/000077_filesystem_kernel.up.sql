@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS filesystem.namespaces (
 CREATE TABLE IF NOT EXISTS filesystem.nodes (
     id UUID PRIMARY KEY,
     namespace_id UUID NOT NULL REFERENCES filesystem.namespaces(id),
-    parent_id UUID REFERENCES filesystem.nodes(id),
+    parent_id UUID,
     node_type VARCHAR(16) NOT NULL CHECK (node_type IN ('FILE','DIRECTORY')),
     name TEXT NOT NULL,
     normalized_name TEXT NOT NULL,
@@ -23,8 +23,14 @@ CREATE TABLE IF NOT EXISTS filesystem.nodes (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,
+    UNIQUE(id, namespace_id),
     UNIQUE(namespace_id, parent_id, normalized_name)
 );
+
+ALTER TABLE filesystem.nodes
+    ADD CONSTRAINT fk_nodes_parent_namespace
+    FOREIGN KEY (parent_id, namespace_id)
+    REFERENCES filesystem.nodes(id, namespace_id);
 
 CREATE TABLE IF NOT EXISTS filesystem.blobs (
     id UUID PRIMARY KEY,
@@ -47,6 +53,7 @@ CREATE TABLE IF NOT EXISTS filesystem.file_revisions (
     mime_type VARCHAR(255) NOT NULL,
     created_by UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(id, node_id),
     UNIQUE(node_id, revision_no)
 );
 
@@ -106,5 +113,10 @@ CREATE TABLE IF NOT EXISTS filesystem.file_links (
 
 ALTER TABLE filesystem.nodes
     ADD CONSTRAINT fk_nodes_current_revision
-    FOREIGN KEY (current_revision_id)
-    REFERENCES filesystem.file_revisions(id);
+    FOREIGN KEY (current_revision_id, id)
+    REFERENCES filesystem.file_revisions(id, node_id);
+
+ALTER TABLE filesystem.namespaces
+    ADD CONSTRAINT fk_namespaces_root_node
+    FOREIGN KEY (root_node_id, id)
+    REFERENCES filesystem.nodes(id, namespace_id);
