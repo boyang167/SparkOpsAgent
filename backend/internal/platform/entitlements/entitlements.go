@@ -37,16 +37,14 @@ func Default() WorkspaceEntitlements {
 // entitlement was introduced, while preserving an explicit false.
 func (e *WorkspaceEntitlements) UnmarshalJSON(data []byte) error {
 	type alias WorkspaceEntitlements
-	var decoded alias
+	if e.Agent == false && e.Knowledge == false && e.Delivery == false &&
+		e.Filesystem == false && e.K8s == false && e.Observability == false &&
+		e.Mcp == false && e.Plugins == nil {
+		*e = Default()
+	}
+	decoded := alias(*e)
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	if _, ok := fields["filesystem"]; !ok {
-		decoded.Filesystem = true
 	}
 	*e = WorkspaceEntitlements(decoded)
 	return nil
@@ -74,6 +72,9 @@ func applyFeatureMap(ents *WorkspaceEntitlements, features map[string]bool) {
 	}
 	if v, ok := features["delivery"]; ok {
 		ents.Delivery = v
+	}
+	if v, ok := features["filesystem"]; ok {
+		ents.Filesystem = v
 	}
 	if v, ok := features["k8s"]; ok {
 		ents.K8s = v

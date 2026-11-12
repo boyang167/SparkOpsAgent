@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { WorkspaceEntitlementsVMSchema } from "@sparkops/contracts/platform";
 import { apiPathEntitlement, DEFAULT_ENTITLEMENTS, isModuleEnabled } from "./entitlements";
+import { invalidateEntitlementsCache, resolveWorkspaceEntitlements } from "./entitlements-cache";
 
 describe("apiPathEntitlement", () => {
   it.each([
@@ -38,8 +39,12 @@ describe("apiPathEntitlement", () => {
     "/api/v1/workspaces/ws/files",
     "/api/v1/workspaces/ws/files?sort=name",
     "/api/v1/workspaces/ws/files/",
+    "/api/v1/workspaces/ws/files////?sort=name",
     "/api/v1/workspaces/ws/namespaces",
+    "/api/v1/workspaces/ws/namespaces/",
+    "/api/v1/workspaces/ws/transfers",
     "/api/v1/workspaces/ws/transfers/",
+    "/api/v1/workspaces/ws/%66iles",
   ])("maps workspace filesystem API %s to filesystem", (path) => {
     expect(apiPathEntitlement(path)).toBe("filesystem");
   });
@@ -48,7 +53,12 @@ describe("apiPathEntitlement", () => {
     "/api/v1/workspaces/ws/files-legacy",
     "/api/v1/workspaces/ws/namespaces-old",
     "/api/v1/workspaces/ws/transfers-v2",
+    "/api/v1/workspaces/ws/%66iles-legacy",
+    "/api/v1/workspaces/ws/%ZZ",
+    "/api/v1/workspaces/ws/files?sort=%ZZ",
     "/api/v1/files",
+    "/api/v1/namespaces",
+    "/api/v1/transfers",
     "/api/v1/orgs/org/workspaces/ws/files",
   ])("does not map non-filesystem API %s", (path) => {
     expect(apiPathEntitlement(path)).toBe("");
@@ -61,5 +71,32 @@ describe("apiPathEntitlement", () => {
     delete (legacy as Partial<typeof legacy>).filesystem;
     expect(WorkspaceEntitlementsVMSchema.parse(legacy).filesystem).toBe(true);
     expect(WorkspaceEntitlementsVMSchema.parse({ ...legacy, filesystem: false }).filesystem).toBe(false);
+  });
+
+  it("normalizes old upstream entitlements at the BFF boundary", async () => {
+    invalidateEntitlementsCache();
+    const legacy = {
+      agent: false,
+      knowledge: true,
+      delivery: true,
+      k8s: false,
+      observability: true,
+      mcp: false,
+      plugins: [],
+    };
+    const normalized = await resolveWorkspaceEntitlements(
+      "workspace-1",
+      async () => legacy as never,
+      { fresh: true },
+    );
+    expect(normalized).toEqual({ ...DEFAULT_ENTITLEMENTS, ...legacy, filesystem: true });
+
+    const disabled = await resolveWorkspaceEntitlements(
+      "workspace-2",
+      async () => ({ ...legacy, filesystem: false }) as never,
+      { fresh: true },
+    );
+    expect(disabled.filesystem).toBe(false);
+    expect(Object.keys(disabled).sort()).toEqual(Object.keys(DEFAULT_ENTITLEMENTS).sort());
   });
 });

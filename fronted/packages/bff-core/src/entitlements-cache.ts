@@ -1,4 +1,7 @@
-import type { WorkspaceEntitlementsVM } from "@sparkops/contracts/platform";
+import {
+  WorkspaceEntitlementsVMSchema,
+  type WorkspaceEntitlementsVM,
+} from "@sparkops/contracts/platform";
 import { DEFAULT_ENTITLEMENTS } from "./entitlements";
 import {
   getEntitlementsCacheTtlMs,
@@ -13,6 +16,14 @@ interface CacheEntry {
 const cacheByWorkspace = new Map<string, CacheEntry>();
 const inflightByWorkspace = new Map<string, Promise<WorkspaceEntitlementsVM>>();
 
+function normalizeWorkspaceEntitlements(value: unknown): WorkspaceEntitlementsVM {
+  const upstream = value && typeof value === "object" ? value : {};
+  return WorkspaceEntitlementsVMSchema.parse({
+    ...DEFAULT_ENTITLEMENTS,
+    ...upstream,
+  });
+}
+
 export function invalidateEntitlementsCache() {
   cacheByWorkspace.clear();
   inflightByWorkspace.clear();
@@ -26,7 +37,7 @@ export async function getCachedEntitlements(
   const ttlMs = getEntitlementsCacheTtlMs();
 
   if (options?.fresh || !isEntitlementsCacheEnabled()) {
-    const value = await fetcher();
+    const value = normalizeWorkspaceEntitlements(await fetcher());
     if (isEntitlementsCacheEnabled()) {
       cacheByWorkspace.set(cacheKey, { value, expiresAt: Date.now() + ttlMs });
     } else {
@@ -49,9 +60,10 @@ export async function getCachedEntitlements(
 
   const pending = fetcher()
     .then((value) => {
-      cacheByWorkspace.set(cacheKey, { value, expiresAt: Date.now() + ttlMs });
+      const normalized = normalizeWorkspaceEntitlements(value);
+      cacheByWorkspace.set(cacheKey, { value: normalized, expiresAt: Date.now() + ttlMs });
       inflightByWorkspace.delete(cacheKey);
-      return value;
+      return normalized;
     })
     .catch((err) => {
       inflightByWorkspace.delete(cacheKey);

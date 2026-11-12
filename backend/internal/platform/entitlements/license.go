@@ -94,6 +94,9 @@ func applyWorkspaceOverrides(ents *WorkspaceEntitlements, overrides map[string]b
 	if v, ok := overrides["delivery"]; ok {
 		ents.Delivery = v
 	}
+	if v, ok := overrides["filesystem"]; ok {
+		ents.Filesystem = v
+	}
 	if v, ok := overrides["k8s"]; ok {
 		ents.K8s = v
 	}

@@ -264,7 +264,7 @@ export type WorkspaceEntitlementsVM = z.infer<typeof WorkspaceEntitlementsVMSche
 
 export type FeatureModuleKey = keyof Pick<
   WorkspaceEntitlementsVM,
-  "agent" | "knowledge" | "delivery" | "k8s" | "observability" | "mcp"
+  "agent" | "knowledge" | "delivery" | "filesystem" | "k8s" | "observability" | "mcp"
 >;
 
 export const FEATURE_MODULE_LABELS: Record<FeatureModuleKey, string> &
@@ -272,6 +272,7 @@ export const FEATURE_MODULE_LABELS: Record<FeatureModuleKey, string> &
   agent: "智能体 / 项目",
   knowledge: "知识库",
   delivery: "持续交付",
+  filesystem: "文件系统",
   k8s: "Kubernetes 运行",
   observability: "可观测性",
   mcp: "MCP 集成",

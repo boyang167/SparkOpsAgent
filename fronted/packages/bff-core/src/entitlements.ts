@@ -62,7 +62,16 @@ function isWorkspacePluginManagementApi(path: string): boolean {
 }
 
 function isWorkspaceFilesystemApi(path: string): boolean {
-  const normalized = path.split("?", 1)[0].replace(/\/+$/, "");
+  let normalized: string;
+  try {
+    const queryIndex = path.indexOf("?");
+    const rawPath = queryIndex >= 0 ? path.slice(0, queryIndex) : path;
+    const rawQuery = queryIndex >= 0 ? path.slice(queryIndex + 1) : "";
+    normalized = decodeURIComponent(rawPath).replace(/\/+$/, "");
+    decodeURIComponent(rawQuery);
+  } catch {
+    return false;
+  }
   const prefix = "/api/v1/workspaces/";
   if (!normalized.startsWith(prefix)) return false;
   const parts = normalized.slice(prefix.length).split("/");

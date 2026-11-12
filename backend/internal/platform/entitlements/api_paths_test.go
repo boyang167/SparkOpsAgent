@@ -12,10 +12,12 @@ func TestFilesystemAPIPathEntitlement(t *testing.T) {
 		"/api/v1/workspaces/ws-1/files",
 		"/api/v1/workspaces/ws-1/files?sort=name",
 		"/api/v1/workspaces/ws-1/files/",
+		"/api/v1/workspaces/ws-1/files////?sort=name",
 		"/api/v1/workspaces/ws-1/namespaces",
 		"/api/v1/workspaces/ws-1/namespaces/",
 		"/api/v1/workspaces/ws-1/transfers",
 		"/api/v1/workspaces/ws-1/transfers/",
+		"/api/v1/workspaces/ws-1/%66iles",
 	} {
 		t.Run(path, func(t *testing.T) {
 			require.Equal(t, "filesystem", APIPathEntitlement(path))
@@ -28,6 +30,9 @@ func TestFilesystemAPIPathEntitlementRejectsSimilarAndNonWorkspacePaths(t *testi
 		"/api/v1/workspaces/ws-1/files-legacy",
 		"/api/v1/workspaces/ws-1/namespaces-old",
 		"/api/v1/workspaces/ws-1/transfers-v2",
+		"/api/v1/workspaces/ws-1/%66iles-legacy",
+		"/api/v1/workspaces/ws-1/%ZZ",
+		"/api/v1/workspaces/ws-1/files?sort=%ZZ",
 		"/api/v1/files",
 		"/api/v1/namespaces",
 		"/api/v1/transfers",
@@ -37,6 +42,11 @@ func TestFilesystemAPIPathEntitlementRejectsSimilarAndNonWorkspacePaths(t *testi
 			require.Empty(t, APIPathEntitlement(path))
 		})
 	}
+}
+
+func TestFilesystemAllowsModule(t *testing.T) {
+	require.True(t, (WorkspaceEntitlements{Filesystem: true}).AllowsModule("filesystem"))
+	require.False(t, (WorkspaceEntitlements{Filesystem: false}).AllowsModule("filesystem"))
 }
 
 func TestFilesystemEntitlementDefaultsAndJSONCompatibility(t *testing.T) {

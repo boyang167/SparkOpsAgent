@@ -1,56 +1,79 @@
 package entitlements
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+)
 
 // APIPathEntitlement maps an HTTP API path to a module key. Empty means no check.
 func APIPathEntitlement(path string) string {
-	if !strings.HasPrefix(path, "/api/v1/") {
+	normalized, ok := normalizeAPIPath(path)
+	if !ok || !strings.HasPrefix(normalized, "/api/v1/") {
 		return ""
 	}
-	if isWorkspaceFilesystemAPI(path) {
+	if isWorkspaceFilesystemAPI(normalized) {
 		return "filesystem"
 	}
-	if strings.HasPrefix(path, "/api/v1/plugins/") {
-		rest := strings.TrimPrefix(path, "/api/v1/plugins/")
+	if strings.HasPrefix(normalized, "/api/v1/plugins/") {
+		rest := strings.TrimPrefix(normalized, "/api/v1/plugins/")
 		if id, suffix, ok := strings.Cut(rest, "/"); ok && id != "" && suffix != "" {
 			return "plugin:" + id
 		}
 	}
-	if shouldSkipAPIEntitlement(path) {
+	if shouldSkipAPIEntitlement(normalized) {
 		return ""
 	}
-	if isGovernanceWorkspaceAPI(path) {
+	if isGovernanceWorkspaceAPI(normalized) {
 		return ""
 	}
 
 	switch {
-	case strings.Contains(path, "/knowledge-bases"), strings.HasPrefix(path, "/api/v1/documents/"):
+	case strings.Contains(normalized, "/knowledge-bases"), strings.HasPrefix(normalized, "/api/v1/documents/"):
 		return "knowledge"
-	case strings.Contains(path, "/builds"), strings.Contains(path, "/products"),
-		strings.Contains(path, "/workspaces/") && strings.Contains(path, "/secrets"),
-		strings.Contains(path, "/projects/") && strings.Contains(path, "/webhooks"),
-		strings.HasPrefix(path, "/api/v1/deployments/"),
-		strings.Contains(path, "/projects/") && strings.Contains(path, "/deployments") && !strings.Contains(path, "/k8s/"),
-		strings.HasPrefix(path, "/api/v1/projects/") &&
-			(strings.Contains(path, "/pods") || strings.Contains(path, "/runtime/")):
+	case strings.Contains(normalized, "/builds"), strings.Contains(normalized, "/products"),
+		strings.Contains(normalized, "/workspaces/") && strings.Contains(normalized, "/secrets"),
+		strings.Contains(normalized, "/projects/") && strings.Contains(normalized, "/webhooks"),
+		strings.HasPrefix(normalized, "/api/v1/deployments/"),
+		strings.Contains(normalized, "/projects/") && strings.Contains(normalized, "/deployments") && !strings.Contains(normalized, "/k8s/"),
+		strings.HasPrefix(normalized, "/api/v1/projects/") &&
+			(strings.Contains(normalized, "/pods") || strings.Contains(normalized, "/runtime/")):
 		return "delivery"
-	case strings.Contains(path, "/mcp/"):
+	case strings.Contains(normalized, "/mcp/"):
 		return "mcp"
-	case strings.Contains(path, "/cronjobs"), strings.Contains(path, "/pods"),
-		strings.Contains(path, "/k8s/"),
-		strings.Contains(path, "/storageclasses"):
+	case strings.Contains(normalized, "/cronjobs"), strings.Contains(normalized, "/pods"),
+		strings.Contains(normalized, "/k8s/"),
+		strings.Contains(normalized, "/storageclasses"):
 		return "k8s"
-	case strings.Contains(path, "/monitor/"), strings.Contains(path, "/observability/"),
-		strings.Contains(path, "/statistics"):
+	case strings.Contains(normalized, "/monitor/"), strings.Contains(normalized, "/observability/"),
+		strings.Contains(normalized, "/statistics"):
 		return "observability"
-	case strings.Contains(path, "/projects"), strings.HasPrefix(path, "/api/v1/agents/"),
-		strings.HasPrefix(path, "/api/v1/runs/"), strings.HasPrefix(path, "/api/v1/conversations/"),
-		strings.HasPrefix(path, "/api/v1/workflows/"), strings.HasPrefix(path, "/api/v1/workflow-runs/"),
-		strings.Contains(path, "/templates"):
+	case strings.Contains(normalized, "/projects"), strings.HasPrefix(normalized, "/api/v1/agents/"),
+		strings.HasPrefix(normalized, "/api/v1/runs/"), strings.HasPrefix(normalized, "/api/v1/conversations/"),
+		strings.HasPrefix(normalized, "/api/v1/workflows/"), strings.HasPrefix(normalized, "/api/v1/workflow-runs/"),
+		strings.Contains(normalized, "/templates"):
 		return "agent"
 	default:
 		return ""
 	}
+}
+
+func normalizeAPIPath(raw string) (string, bool) {
+	u, err := url.ParseRequestURI(raw)
+	if err != nil || u.Path == "" {
+		return "", false
+	}
+	if _, err := url.ParseQuery(u.RawQuery); err != nil {
+		return "", false
+	}
+	path, err := url.PathUnescape(u.EscapedPath())
+	if err != nil {
+		return "", false
+	}
+	path = strings.TrimRight(path, "/")
+	if path == "" {
+		path = "/"
+	}
+	return path, true
 }
 
 func isWorkspaceFilesystemAPI(path string) bool {
@@ -155,6 +178,8 @@ func (e WorkspaceEntitlements) AllowsModule(key string) bool {
 		return e.Knowledge
 	case "delivery":
 		return e.Delivery
+	case "filesystem":
+		return e.Filesystem
 	case "k8s":
 		return e.K8s
 	case "observability":
