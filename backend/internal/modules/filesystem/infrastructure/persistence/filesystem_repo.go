@@ -149,6 +149,40 @@ func (r *Repository) ListChildren(ctx context.Context, namespaceID uuid.UUID, pa
 	return out, next, nil
 }
 
+func (r *Repository) NextRevisionNumber(ctx context.Context, nodeID uuid.UUID) (int, error) {
+	tx, err := postgres.RequireTx(ctx)
+	if err != nil {
+		return 0, domain.ErrPersistence
+	}
+	var node nodeRow
+	if tx.Dialector.Name() == "postgres" {
+		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", nodeID).First(&node).Error
+	} else {
+		result := tx.Exec("UPDATE filesystem.nodes SET updated_at = updated_at WHERE id = ?", nodeID)
+		err = result.Error
+		if isSQLiteBusy(err) {
+			return 0, postgres.ErrTransactionRetry
+		}
+		if err == nil && result.RowsAffected == 0 {
+			err = gorm.ErrRecordNotFound
+		}
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, domain.ErrNodeNotFound
+	}
+	if err != nil {
+		return 0, wrapPersistence(err)
+	}
+	var maxRevision int
+	if err := tx.Table("filesystem.file_revisions").
+		Select("COALESCE(MAX(revision_no), 0)").
+		Where("node_id = ?", nodeID).
+		Scan(&maxRevision).Error; err != nil {
+		return 0, wrapPersistence(err)
+	}
+	return maxRevision + 1, nil
+}
+
 func (r *Repository) SaveRevision(ctx context.Context, revision *model.FileRevision, blob *model.Blob, replica *model.StorageReplica) error {
 	if revision.BlobID() != blob.ID {
 		return domain.ErrRevisionBlobMismatch
@@ -264,13 +298,13 @@ func (r *Repository) ListRevisions(ctx context.Context, nodeID, namespaceID uuid
 			First(&boundary).Error; err != nil {
 			return nil, "", domain.ErrRevisionNotFound
 		}
-		query = query.Where("(revision_no < ?) OR (revision_no = ? AND id < ?)", boundary.RevisionNo, boundary.RevisionNo, boundary.ID)
+		query = query.Where("(filesystem.file_revisions.revision_no < ?) OR (filesystem.file_revisions.revision_no = ? AND filesystem.file_revisions.id < ?)", boundary.RevisionNo, boundary.RevisionNo, boundary.ID)
 	}
 	if limit <= 0 {
 		limit = 100
 	}
 	var rows []revisionRow
-	if err := query.Order("revision_no DESC, id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
+	if err := query.Order("filesystem.file_revisions.revision_no DESC, filesystem.file_revisions.id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
 		return nil, "", wrapPersistence(err)
 	}
 	next := ""
@@ -433,6 +467,71 @@ func (r *Repository) MoveNode(ctx context.Context, nodeID uuid.UUID, parentID *u
 	})
 }
 
+func (r *Repository) MoveNodeSafely(ctx context.Context, namespaceID, nodeID uuid.UUID, parentID *uuid.UUID, name string) error {
+	tx, err := postgres.RequireTx(ctx)
+	if err != nil {
+		return domain.ErrPersistence
+	}
+	var namespace namespaceRow
+	if tx.Dialector.Name() == "postgres" {
+		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", namespaceID).First(&namespace).Error
+	} else {
+		result := tx.Exec("UPDATE filesystem.namespaces SET updated_at = updated_at WHERE id = ?", namespaceID)
+		err = result.Error
+		if err == nil && result.RowsAffected == 0 {
+			err = gorm.ErrRecordNotFound
+		}
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return domain.ErrNamespaceNotFound
+	}
+	if err != nil {
+		return wrapPersistence(err)
+	}
+	var node nodeRow
+	if err := tx.Where("namespace_id = ? AND id = ?", namespaceID, nodeID).First(&node).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return domain.ErrNodeNotFound
+	} else if err != nil {
+		return wrapPersistence(err)
+	}
+	if parentID != nil {
+		visited := map[uuid.UUID]struct{}{nodeID: {}}
+		current := *parentID
+		for depth := 0; depth < 10000; depth++ {
+			if _, exists := visited[current]; exists {
+				return domain.ErrDirectoryCycle
+			}
+			visited[current] = struct{}{}
+			var parent nodeRow
+			if err := tx.Where("namespace_id = ? AND id = ?", namespaceID, current).First(&parent).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrParentNotFound
+			} else if err != nil {
+				return wrapPersistence(err)
+			}
+			if parent.Type != model.NodeTypeDirectory {
+				return domain.ErrParentNotDirectory
+			}
+			if parent.ParentID == nil {
+				break
+			}
+			current = *parent.ParentID
+			if depth == 9999 {
+				return domain.ErrDirectoryCycle
+			}
+		}
+	}
+	canonical := strings.TrimSpace(norm.NFC.String(name))
+	if canonical == "" || strings.ContainsAny(canonical, `/\`) {
+		return model.ErrInvalidNodeName
+	}
+	result := tx.Model(&nodeRow{}).Where("namespace_id = ? AND id = ?", namespaceID, nodeID).
+		Updates(map[string]any{"parent_id": parentID, "normalized_name": strings.ToLower(canonical), "name": canonical, "updated_at": time.Now().UTC()})
+	if conflict := mapUniqueConflict(result.Error); conflict != nil {
+		return conflict
+	}
+	return wrapPersistence(result.Error)
+}
+
 func (r *Repository) TrashNode(ctx context.Context, nodeID uuid.UUID) error {
 	result := postgres.DB(ctx, r.db).Model(&nodeRow{}).Where("id = ?", nodeID).Update("state", model.NodeStateTrashed)
 	if result.Error != nil {
@@ -463,20 +562,27 @@ func (r *Repository) ClaimCommand(ctx context.Context, command repository.Comman
 	now := time.Now().UTC()
 	row := commandDedupRow{CommandID: command.CommandID, WorkspaceID: command.WorkspaceID, Operation: command.Operation, RequestHash: command.RequestHash, NodeID: command.NodeID, RevisionID: command.RevisionID, State: "IN_PROGRESS", CreatedAt: now, UpdatedAt: now}
 	db := postgres.DB(ctx, r.db)
-	if err := db.Create(&row).Error; err != nil {
-		var existing commandDedupRow
-		if readErr := db.Where("command_id = ?", command.CommandID).First(&existing).Error; readErr != nil {
-			return nil, domain.ErrPersistence
+	result := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+	if result.Error != nil {
+		if db.Dialector.Name() == "sqlite" && isSQLiteBusy(result.Error) {
+			return nil, postgres.ErrTransactionRetry
 		}
-		if existing.RequestHash != command.RequestHash || existing.WorkspaceID != command.WorkspaceID || existing.Operation != command.Operation {
-			return nil, domain.ErrIdempotencyConflict
-		}
-		if existing.State != "COMPLETED" {
-			return nil, domain.ErrCommandInProgress
-		}
-		return commandFromRow(existing), nil
+		return nil, wrapPersistence(result.Error)
 	}
-	return commandFromRow(row), nil
+	if result.RowsAffected == 1 {
+		return commandFromRow(row), nil
+	}
+	var existing commandDedupRow
+	if readErr := db.Where("command_id = ?", command.CommandID).First(&existing).Error; readErr != nil {
+		return nil, wrapPersistence(readErr)
+	}
+	if existing.RequestHash != command.RequestHash || existing.WorkspaceID != command.WorkspaceID || existing.Operation != command.Operation {
+		return nil, domain.ErrIdempotencyConflict
+	}
+	if existing.State != "COMPLETED" {
+		return nil, domain.ErrCommandInProgress
+	}
+	return commandFromRow(existing), nil
 }
 
 func (r *Repository) CompleteCommand(ctx context.Context, commandID uuid.UUID, nodeID, revisionID *uuid.UUID) error {
@@ -540,11 +646,17 @@ func mapUniqueConflict(err error) error {
 		return domain.ErrNodeNameConflict
 	case strings.Contains(message, "nodes.id"):
 		return domain.ErrNodeIDConflict
-	case strings.Contains(message, "file_revisions"):
+	case strings.Contains(message, "file_revisions.id"),
+		strings.Contains(message, "file_revisions.node_id, file_revisions.revision_no"),
+		strings.Contains(message, "file_revisions.node_id, filesystem.file_revisions.revision_no"):
 		return domain.ErrRevisionConflict
-	case strings.Contains(message, "blobs"):
+	case strings.Contains(message, "blobs.id"),
+		strings.Contains(message, "blobs.dedup_domain, blobs.sha256, blobs.size"),
+		strings.Contains(message, "blobs.dedup_domain, filesystem.blobs.sha256, filesystem.blobs.size"):
 		return domain.ErrBlobConflict
-	case strings.Contains(message, "storage_replicas"):
+	case strings.Contains(message, "storage_replicas.id"),
+		strings.Contains(message, "storage_replicas.blob_id, storage_replicas.provider_id, storage_replicas.object_key"),
+		strings.Contains(message, "storage_replicas.blob_id, filesystem.storage_replicas.provider_id, filesystem.storage_replicas.object_key"):
 		return domain.ErrReplicaConflict
 	default:
 		return domain.ErrPersistence

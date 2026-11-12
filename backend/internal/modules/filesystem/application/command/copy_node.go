@@ -31,11 +31,14 @@ type CopyNodeHandler struct {
 }
 
 func NewCopyNodeHandler(repo repository.FilesystemRepository, tx postgres.Transactor, logger auditPort) *CopyNodeHandler {
+	requireMutationDependencies(repo, tx)
 	return &CopyNodeHandler{repo: repo, tx: tx, audit: logger}
 }
 
-func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (*model.Node, error) {
+func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.Node, err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy")
+	defer finishAudit(&err)
 	if !cmd.Allowed {
 		err := errors.New(cmd.Reason)
 		if err.Error() == "" {
@@ -44,12 +47,12 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (*model.Node
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy", err)
 	}
 	var result *model.Node
-	err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
 		if err != nil {
 			return err
 		}
-		if ns.ID != cmd.NamespaceID {
+		if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
 			return domain.ErrNamespaceMismatch
 		}
 		source, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.SourceNodeID)
@@ -62,6 +65,8 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (*model.Node
 		parent := uuid.Nil
 		if cmd.ParentID != nil {
 			parent = *cmd.ParentID
+		} else if ns.RootNodeID != nil {
+			parent = *ns.RootNodeID
 		}
 		name := cmd.Name
 		if name == "" {
@@ -72,9 +77,6 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (*model.Node
 			return err
 		}
 		txCtx = withResourceID(txCtx, result.ID.String())
-		if cmd.ParentID == nil {
-			result.ParentID = nil
-		}
 		revision, err := h.repo.GetRevision(txCtx, source.ID, *source.CurrentRevisionID)
 		if err != nil {
 			return err

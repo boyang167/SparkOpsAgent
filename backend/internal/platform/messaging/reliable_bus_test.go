@@ -84,6 +84,35 @@ func TestReliableBusRequiresTransactionAndOnlyWritesOutbox(t *testing.T) {
 	require.Empty(t, transport.published, "transactional publish must not perform network I/O")
 }
 
+func TestReliableBusRollbackLeavesNoOutboxAndNoExternalPublish(t *testing.T) {
+	registry := events.NewRegistry()
+	require.NoError(t, events.RegisterJSON(registry, "test.rollback", 1, func(inboxTestEvent) events.AggregateRef {
+		return events.AggregateRef{Type: "test", ID: "aggregate-rollback"}
+	}))
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+	require.NoError(t, persistence.AutoMigrate(db))
+	store := persistence.NewOutboxStore(db)
+	transport := &fakeEventTransport{}
+	bus := NewReliableBus(registry, store, transport, nil, nil)
+	rollback := errors.New("rollback")
+	event := inboxTestEvent{BaseEvent: events.BaseEvent{Name: "test.rollback", At: time.Now().UTC()}}
+
+	err = postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+		require.NoError(t, bus.Publish(ctx, event))
+		return rollback
+	})
+
+	require.ErrorIs(t, err, rollback)
+	var count int64
+	require.NoError(t, db.Table("platform.event_outbox").Count(&count).Error)
+	require.Zero(t, count)
+	require.Empty(t, transport.published)
+}
+
 func TestReliableBusStartDeclaresBeforeConsumersAndDispatcher(t *testing.T) {
 	registry := events.NewRegistry()
 	store := &transactionCheckingOutbox{}

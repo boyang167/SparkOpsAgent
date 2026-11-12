@@ -1,9 +1,15 @@
 package persistence
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
+	"net/url"
+	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -11,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
+	gormpostgres "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -334,11 +341,117 @@ func TestUniqueConflictMappingIsConstraintSpecific(t *testing.T) {
 		{"foreign key with similar name", &pgconn.PgError{Code: "23503", ConstraintName: "nodes_namespace_id_parent_id_normalized_name_key"}, domain.ErrPersistence},
 		{"check with similar name", &pgconn.PgError{Code: "23514", ConstraintName: "blobs_dedup_domain_sha256_size_key"}, domain.ErrPersistence},
 		{"unrelated unique", &pgconn.PgError{Code: "23505", ConstraintName: "unrelated_constraint"}, domain.ErrPersistence},
+		{"unrelated sqlite revision unique", errors.New("UNIQUE constraint failed: file_revisions.future_column"), domain.ErrPersistence},
+		{"sqlite revision number unique", errors.New("UNIQUE constraint failed: file_revisions.node_id, file_revisions.revision_no"), domain.ErrRevisionConflict},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.ErrorIs(t, mapUniqueConflict(tt.err), tt.want)
 		})
+	}
+}
+
+func TestClaimCommandUsesConflictFreeInsertBeforeReadingExistingClaim(t *testing.T) {
+	_, db := newTestRepository(t)
+	commandID := uuid.New()
+	workspaceID := uuid.New()
+	require.NoError(t, db.Create(&commandDedupRow{
+		CommandID: commandID, WorkspaceID: workspaceID, Operation: "put_local",
+		RequestHash: "same", State: "COMPLETED",
+	}).Error)
+	var statements bytes.Buffer
+	loggedDB := db.Session(&gorm.Session{Logger: logger.New(
+		log.New(&statements, "", 0),
+		logger.Config{LogLevel: logger.Info},
+	)})
+	repo := NewRepository(loggedDB)
+
+	var claimed *repository.CommandDedup
+	err := postgres.NewTransactor(loggedDB).WithinTransaction(context.Background(), func(ctx context.Context) error {
+		var claimErr error
+		claimed, claimErr = repo.ClaimCommand(ctx, repository.CommandDedup{
+			CommandID: commandID, WorkspaceID: workspaceID, Operation: "put_local", RequestHash: "same",
+		})
+		return claimErr
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "COMPLETED", claimed.State)
+	require.Contains(t, strings.ToUpper(statements.String()), "ON CONFLICT DO NOTHING")
+}
+
+func TestClaimCommandConcurrentSQLiteSameAndDifferentHashesAreStable(t *testing.T) {
+	tests := []struct {
+		name       string
+		hashes     [2]string
+		secondWant error
+	}{
+		{name: "same hash", hashes: [2]string{"same", "same"}, secondWant: domain.ErrCommandInProgress},
+		{name: "different hash", hashes: [2]string{"first", "different"}, secondWant: domain.ErrIdempotencyConflict},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, db := newTestRepository(t)
+			commandID := uuid.New()
+			workspaceID := uuid.New()
+			start := make(chan struct{})
+			results := make(chan error, 2)
+			for _, hash := range tt.hashes {
+				hash := hash
+				go func() {
+					<-start
+					results <- postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+						_, err := repo.ClaimCommand(ctx, repository.CommandDedup{
+							CommandID: commandID, WorkspaceID: workspaceID, Operation: "put_local", RequestHash: hash,
+						})
+						return err
+					})
+				}()
+			}
+			close(start)
+			first, second := <-results, <-results
+			require.True(t,
+				(first == nil && errors.Is(second, tt.secondWant)) ||
+					(second == nil && errors.Is(first, tt.secondWant)),
+				"unexpected results: first=%v second=%v", first, second,
+			)
+		})
+	}
+}
+
+func TestClaimCommandPostgresConflictDoesNotAbortTransaction(t *testing.T) {
+	db := openFilesystemPostgres(t)
+	repo := NewRepository(db)
+	commandID, workspaceID := uuid.New(), uuid.New()
+	require.NoError(t, postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+		_, err := repo.ClaimCommand(ctx, repository.CommandDedup{
+			CommandID: commandID, WorkspaceID: workspaceID, Operation: "put_local", RequestHash: "same",
+		})
+		if err != nil {
+			return err
+		}
+		return repo.CompleteCommand(ctx, commandID, nil, nil)
+	}))
+	for _, test := range []struct {
+		hash string
+		want error
+	}{
+		{hash: "same"},
+		{hash: "different", want: domain.ErrIdempotencyConflict},
+	} {
+		require.NoError(t, postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+			_, claimErr := repo.ClaimCommand(ctx, repository.CommandDedup{
+				CommandID: commandID, WorkspaceID: workspaceID, Operation: "put_local", RequestHash: test.hash,
+			})
+			if test.want == nil {
+				require.NoError(t, claimErr)
+			} else {
+				require.ErrorIs(t, claimErr, test.want)
+			}
+			tx, err := postgres.RequireTx(ctx)
+			require.NoError(t, err)
+			return tx.Exec("SELECT 1").Error
+		}))
 	}
 }
 
@@ -465,4 +578,53 @@ func assertNoFilesystemRows(t *testing.T, db *gorm.DB, revisionID, blobID, repli
 	require.Zero(t, count)
 	require.NoError(t, db.Table("filesystem.storage_replicas").Where("id = ?", replicaID).Count(&count).Error)
 	require.Zero(t, count)
+}
+
+func openFilesystemPostgres(t *testing.T) *gorm.DB {
+	t.Helper()
+	dsn := os.Getenv("DATABASE_DSN")
+	if dsn == "" {
+		if strings.EqualFold(os.Getenv("CI"), "true") || strings.EqualFold(os.Getenv("REQUIRE_INTEGRATION"), "true") {
+			t.Fatal("DATABASE_DSN is required when integration tests run in CI")
+		}
+		t.Skip("DATABASE_DSN is not set")
+	}
+	admin, err := gorm.Open(gormpostgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	databaseName := "sparkops_task5_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if err := admin.Exec("CREATE DATABASE " + databaseName).Error; err != nil {
+		if strings.EqualFold(os.Getenv("CI"), "true") || strings.EqualFold(os.Getenv("REQUIRE_INTEGRATION"), "true") {
+			t.Fatalf("cannot create isolated PostgreSQL test database: %v", err)
+		}
+		t.Skipf("cannot create isolated PostgreSQL test database: %v", err)
+	}
+	testDSN := dsn
+	if strings.Contains(dsn, "://") {
+		parsed, parseErr := url.Parse(dsn)
+		require.NoError(t, parseErr)
+		parsed.Path = "/" + databaseName
+		testDSN = parsed.String()
+	} else {
+		databaseSetting := regexp.MustCompile(`(?i)\b(?:dbname|database)\s*=\s*(?:'[^']*'|\S+)`)
+		if databaseSetting.MatchString(dsn) {
+			testDSN = databaseSetting.ReplaceAllString(dsn, "dbname="+databaseName)
+		} else {
+			testDSN = dsn + " dbname=" + databaseName
+		}
+	}
+	db, err := gorm.Open(gormpostgres.Open(testDSN), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		sqlDB, dbErr := db.DB()
+		require.NoError(t, dbErr)
+		require.NoError(t, sqlDB.Close())
+		require.NoError(t, admin.Exec("DROP DATABASE "+databaseName).Error)
+		adminDB, adminErr := admin.DB()
+		require.NoError(t, adminErr)
+		require.NoError(t, adminDB.Close())
+	})
+	migration, err := os.ReadFile("../../../../../migrations/000077_filesystem_kernel.up.sql")
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(string(migration)).Error)
+	return db
 }

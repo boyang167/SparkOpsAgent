@@ -31,11 +31,14 @@ type RenameNodeHandler struct {
 }
 
 func NewRenameNodeHandler(repo repository.FilesystemRepository, tx postgres.Transactor, _ messaging.Bus, logger auditPort) *RenameNodeHandler {
+	requireMutationDependencies(repo, tx)
 	return &RenameNodeHandler{repo: repo, tx: tx, audit: logger}
 }
 
-func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) error {
+func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) (err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename")
+	defer finishAudit(&err)
 	if !cmd.Allowed {
 		err := errors.New(cmd.Reason)
 		if err.Error() == "" {
@@ -43,7 +46,7 @@ func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) error {
 		}
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename", err)
 	}
-	err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
 		if err != nil {
 			return err
@@ -54,7 +57,7 @@ func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) error {
 			return err
 		}
 		txCtx = withResourceID(txCtx, node.ID.String())
-		if ns.ID != cmd.NamespaceID {
+		if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
 			return domain.ErrNamespaceMismatch
 		}
 		if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
@@ -89,11 +92,14 @@ type MoveNodeHandler struct {
 }
 
 func NewMoveNodeHandler(repo repository.FilesystemRepository, tx postgres.Transactor, _ messaging.Bus, logger auditPort) *MoveNodeHandler {
+	requireMutationDependencies(repo, tx)
 	return &MoveNodeHandler{repo: repo, tx: tx, audit: logger}
 }
 
-func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) error {
+func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) (err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move")
+	defer finishAudit(&err)
 	if !cmd.Allowed {
 		err := errors.New(cmd.Reason)
 		if err.Error() == "" {
@@ -101,7 +107,7 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) error {
 		}
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", err)
 	}
-	err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
 		if err != nil {
 			return err
@@ -111,35 +117,11 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) error {
 		if err != nil {
 			return err
 		}
-		if ns.ID != cmd.NamespaceID {
+		if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
 			return domain.ErrNamespaceMismatch
 		}
 		if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
 			return fmt.Errorf("filesystem root cannot be moved")
-		}
-		if cmd.NewParentID != nil {
-			if *cmd.NewParentID == node.ID {
-				return domain.ErrDirectoryCycle
-			}
-			visited := map[uuid.UUID]bool{node.ID: true}
-			current := *cmd.NewParentID
-			for depth := 0; depth < 10000; depth++ {
-				if visited[current] {
-					return domain.ErrDirectoryCycle
-				}
-				visited[current] = true
-				parent, getErr := h.repo.GetNode(txCtx, cmd.NamespaceID, current)
-				if getErr != nil {
-					return getErr
-				}
-				if parent.ParentID == nil {
-					break
-				}
-				current = *parent.ParentID
-			}
-			if len(visited) >= 10000 {
-				return domain.ErrDirectoryCycle
-			}
 		}
 		name := cmd.NewName
 		if name == "" {
@@ -149,7 +131,7 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) error {
 		if targetParent == nil {
 			targetParent = ns.RootNodeID
 		}
-		if err := h.repo.MoveNode(txCtx, node.ID, targetParent, name); err != nil {
+		if err := h.repo.MoveNodeSafely(txCtx, cmd.NamespaceID, node.ID, targetParent, name); err != nil {
 			return err
 		}
 		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", true, nil)
@@ -176,11 +158,14 @@ type TrashNodeHandler struct {
 }
 
 func NewTrashNodeHandler(repo repository.FilesystemRepository, tx postgres.Transactor, _ messaging.Bus, logger auditPort) *TrashNodeHandler {
+	requireMutationDependencies(repo, tx)
 	return &TrashNodeHandler{repo: repo, tx: tx, audit: logger}
 }
 
-func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) error {
+func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) (err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash")
+	defer finishAudit(&err)
 	if !cmd.Allowed {
 		err := errors.New(cmd.Reason)
 		if err.Error() == "" {
@@ -188,7 +173,7 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) error {
 		}
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash", err)
 	}
-	err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
 		if err != nil {
 			return err
@@ -197,7 +182,7 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) error {
 		if err != nil {
 			return err
 		}
-		if ns.ID != cmd.NamespaceID {
+		if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
 			return domain.ErrNamespaceMismatch
 		}
 		if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
@@ -233,11 +218,14 @@ type RestoreRevisionHandler struct {
 }
 
 func NewRestoreRevisionHandler(repo repository.FilesystemRepository, tx postgres.Transactor, _ messaging.Bus, logger auditPort) *RestoreRevisionHandler {
+	requireMutationDependencies(repo, tx)
 	return &RestoreRevisionHandler{repo: repo, tx: tx, audit: logger}
 }
 
-func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision) error {
+func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision) (err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.revision.restore")
+	defer finishAudit(&err)
 	if !cmd.Allowed {
 		err := errors.New(cmd.Reason)
 		if err.Error() == "" {
@@ -245,12 +233,12 @@ func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision
 		}
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.revision.restore", err)
 	}
-	err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
 		if err != nil {
 			return err
 		}
-		if ns.ID != cmd.NamespaceID {
+		if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
 			return domain.ErrNamespaceMismatch
 		}
 		if _, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID); err != nil {

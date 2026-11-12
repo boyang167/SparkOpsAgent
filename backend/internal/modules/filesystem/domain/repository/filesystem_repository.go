@@ -36,6 +36,7 @@ type FilesystemRepository interface {
 	CreateNode(context.Context, *model.Node) error
 	GetNode(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
 	ListChildren(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Node, string, error)
+	NextRevisionNumber(context.Context, uuid.UUID) (int, error)
 	SaveRevision(context.Context, *model.FileRevision, *model.Blob, *model.StorageReplica) error
 	GetRevision(context.Context, uuid.UUID, uuid.UUID) (*model.FileRevision, error)
 	ListRevisions(context.Context, uuid.UUID, uuid.UUID, int, string) ([]model.FileRevision, string, error)
@@ -46,6 +47,7 @@ type FilesystemRepository interface {
 	ApplyQuotaUsage(context.Context, uuid.UUID, int64, int64) error
 	RenameNode(context.Context, uuid.UUID, string) error
 	MoveNode(context.Context, uuid.UUID, *uuid.UUID, string) error
+	MoveNodeSafely(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID, string) error
 	TrashNode(context.Context, uuid.UUID) error
 	ClaimCommand(context.Context, CommandDedup) (*CommandDedup, error)
 	CompleteCommand(context.Context, uuid.UUID, *uuid.UUID, *uuid.UUID) error

@@ -8,7 +8,10 @@ import (
 	"gorm.io/gorm"
 )
 
-var ErrCommitOutcomeUnknown = errors.New("postgres transaction commit outcome unknown")
+var (
+	ErrCommitOutcomeUnknown = errors.New("postgres transaction commit outcome unknown")
+	ErrTransactionRetry     = errors.New("postgres transaction should be retried")
+)
 
 type Transactor interface {
 	WithinTransaction(ctx context.Context, fn func(context.Context) error) error

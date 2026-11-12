@@ -31,6 +31,11 @@ type Authorization struct {
 
 type traceContextKey struct{}
 type resourceContextKey struct{}
+type auditStateContextKey struct{}
+
+type mutationAuditState struct {
+	decision string
+}
 
 func withTraceID(ctx context.Context, traceID string) context.Context {
 	return context.WithValue(ctx, traceContextKey{}, traceID)
@@ -46,8 +51,32 @@ type auditPort interface {
 
 type auditService struct{ store audit.Store }
 
+func requireMutationDependencies(repo repository.FilesystemRepository, tx postgres.Transactor) {
+	if repo == nil || tx == nil {
+		panic("filesystem mutation repository and transactor are required")
+	}
+}
+
 func deniedWithAudit(ctx context.Context, logger auditPort, actor, organization uuid.UUID, workspace, action string, err error) error {
 	return errors.Join(err, logMutation(ctx, logger, actor, organization, workspace, action, false, err))
+}
+
+func beginMutationAudit(ctx context.Context, logger auditPort, actor, organization uuid.UUID, workspace, action string) (context.Context, func(*error)) {
+	state := &mutationAuditState{}
+	ctx = context.WithValue(ctx, auditStateContextKey{}, state)
+	return ctx, func(resultErr *error) {
+		if resultErr != nil && *resultErr != nil {
+			if state.decision != "DENY" {
+				*resultErr = errors.Join(*resultErr, logMutation(ctx, logger, actor, organization, workspace, action, false, *resultErr))
+			}
+			return
+		}
+		if state.decision == "" {
+			if auditErr := logMutation(ctx, logger, actor, organization, workspace, action, true, nil); resultErr != nil {
+				*resultErr = auditErr
+			}
+		}
+	}
 }
 
 func (s auditService) Log(ctx context.Context, entry audit.Entry) error {
@@ -73,7 +102,7 @@ func logMutation(ctx context.Context, logger auditPort, actor, organization uuid
 	if reason != nil {
 		detail["reason"] = reasonCode(reason)
 	}
-	return logger.Log(ctx, audit.Entry{
+	err := logger.Log(ctx, audit.Entry{
 		ActorID:      kernel.MemberID{UUID: actor},
 		Action:       action,
 		ResourceType: "filesystem",
@@ -81,6 +110,12 @@ func logMutation(ctx context.Context, logger auditPort, actor, organization uuid
 		OrgID:        &kernel.OrgID{UUID: organization},
 		Detail:       detail,
 	})
+	if err == nil {
+		if state, ok := ctx.Value(auditStateContextKey{}).(*mutationAuditState); ok {
+			state.decision = decision
+		}
+	}
+	return err
 }
 
 func traceID(ctx context.Context) string {
@@ -129,11 +164,14 @@ type CreateNamespaceHandler struct {
 }
 
 func NewCreateNamespaceHandler(repo repository.FilesystemRepository, tx postgres.Transactor, bus messaging.Bus, logger auditPort) *CreateNamespaceHandler {
+	requireMutationDependencies(repo, tx)
 	return &CreateNamespaceHandler{repo: repo, tx: tx, bus: bus, audit: logger}
 }
 
-func (h *CreateNamespaceHandler) Handle(ctx context.Context, cmd CreateNamespace) (*model.Namespace, error) {
+func (h *CreateNamespaceHandler) Handle(ctx context.Context, cmd CreateNamespace) (out *model.Namespace, err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.namespace.create")
+	defer finishAudit(&err)
 	if !cmd.Allowed {
 		err := errors.New(cmd.Reason)
 		if err.Error() == "" {
@@ -141,11 +179,13 @@ func (h *CreateNamespaceHandler) Handle(ctx context.Context, cmd CreateNamespace
 		}
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.namespace.create", err)
 	}
-	if existing, err := h.repo.GetNamespaceByWorkspace(ctx, cmd.WorkspaceID); err == nil {
+	if existing, lookupErr := h.repo.GetNamespaceByWorkspace(ctx, cmd.WorkspaceID); lookupErr == nil {
 		if existing.OrganizationID != cmd.OrganizationID {
 			return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.namespace.create", domain.ErrNamespaceMismatch)
 		}
 		return existing, nil
+	} else if !errors.Is(lookupErr, domain.ErrNamespaceNotFound) {
+		return nil, lookupErr
 	}
 	ns := &model.Namespace{ID: uuid.New(), OrganizationID: cmd.OrganizationID, WorkspaceID: cmd.WorkspaceID, Status: "ACTIVE"}
 	ctx = withResourceID(ctx, ns.ID.String())
@@ -202,11 +242,14 @@ type CreateDirectoryHandler struct {
 }
 
 func NewCreateDirectoryHandler(repo repository.FilesystemRepository, tx postgres.Transactor, bus messaging.Bus, logger auditPort) *CreateDirectoryHandler {
+	requireMutationDependencies(repo, tx)
 	return &CreateDirectoryHandler{repo: repo, tx: tx, bus: bus, audit: logger}
 }
 
-func (h *CreateDirectoryHandler) Handle(ctx context.Context, cmd CreateDirectory) (*model.Node, error) {
+func (h *CreateDirectoryHandler) Handle(ctx context.Context, cmd CreateDirectory) (out *model.Node, err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create")
+	defer finishAudit(&err)
 	if !cmd.Allowed {
 		err := errors.New(cmd.Reason)
 		if err.Error() == "" {
@@ -218,7 +261,7 @@ func (h *CreateDirectoryHandler) Handle(ctx context.Context, cmd CreateDirectory
 	if err != nil {
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", err)
 	}
-	if ns.ID != cmd.NamespaceID {
+	if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", domain.ErrNamespaceMismatch)
 	}
 	parent := uuid.Nil
@@ -271,26 +314,29 @@ func putRequestHash(cmd PutLocalFile, parent uuid.UUID) string {
 	if cmd.NodeID != nil {
 		target = cmd.NodeID.String()
 	}
-	value := fmt.Sprintf("put|%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s", cmd.WorkspaceID, cmd.NamespaceID, target, parent, cmd.Name, cmd.ActorID, cmd.ReplicaProviderID, cmd.Size, cmd.MIMEType, strings.ToLower(strings.TrimSpace(cmd.SHA256)), cmd.CommandID)
+	value := fmt.Sprintf("put|%s|%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s", cmd.OrganizationID, cmd.WorkspaceID, cmd.NamespaceID, target, parent, cmd.Name, cmd.ActorID, cmd.ReplicaProviderID, cmd.Size, cmd.MIMEType, strings.ToLower(strings.TrimSpace(cmd.SHA256)), cmd.CommandID)
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }
 
 func NewPutLocalFileHandler(repo repository.FilesystemRepository, store storage.Provider, tx postgres.Transactor, bus messaging.Bus, logger auditPort) *PutLocalFileHandler {
+	requireMutationDependencies(repo, tx)
+	if store == nil {
+		panic("filesystem local storage provider is required")
+	}
 	return &PutLocalFileHandler{repo: repo, store: store, tx: tx, bus: bus, audit: logger}
 }
 
-func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (*model.Node, error) {
+func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (out *model.Node, err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local")
+	defer finishAudit(&err)
 	if !cmd.Allowed {
 		err := errors.New(cmd.Reason)
 		if err.Error() == "" {
 			err = errors.New("authorization denied")
 		}
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", err)
-	}
-	if h.store == nil || h.tx == nil {
-		return nil, errors.New("filesystem local file dependencies are required")
 	}
 	if cmd.CommandID == uuid.Nil {
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", domain.ErrIdempotencyConflict)
@@ -299,7 +345,7 @@ func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (*mo
 	if err != nil {
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", err)
 	}
-	if ns.ID != cmd.NamespaceID {
+	if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", domain.ErrNamespaceMismatch)
 	}
 	parent := uuid.Nil
@@ -319,9 +365,19 @@ func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (*mo
 		if prior.State != "COMPLETED" {
 			return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", domain.ErrCommandInProgress)
 		}
-		if prior.NodeID != nil {
-			return h.repo.GetNode(ctx, cmd.NamespaceID, *prior.NodeID)
+		if prior.NodeID == nil || prior.RevisionID == nil {
+			return nil, domain.ErrOutcomeUnknown
 		}
+		completedNode, nodeErr := h.repo.GetNode(ctx, cmd.NamespaceID, *prior.NodeID)
+		if nodeErr != nil {
+			return nil, nodeErr
+		}
+		if _, revisionErr := h.repo.GetRevision(ctx, completedNode.ID, *prior.RevisionID); revisionErr != nil {
+			return nil, revisionErr
+		}
+		return completedNode, nil
+	} else if !errors.Is(priorErr, domain.ErrNodeNotFound) {
+		return nil, priorErr
 	}
 	nodeID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-node:"+cmd.CommandID.String()))
 	if cmd.NodeID != nil {
@@ -337,10 +393,43 @@ func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (*mo
 	deterministicRevisionID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-revision:"+cmd.CommandID.String()))
 	if existingErr == nil {
 		if prior, priorErr := h.repo.GetRevision(ctx, existing.ID, deterministicRevisionID); priorErr == nil {
-			if prior.Size() == cmd.Size && prior.MIMEType() == cmd.MIMEType {
-				return existing, nil
+			existingBlob, blobErr := h.repo.GetBlob(ctx, prior.BlobID())
+			existingReplica, replicaErr := h.repo.GetAvailableReplica(ctx, prior.BlobID(), cmd.ReplicaProviderID)
+			if existing.NamespaceID != cmd.NamespaceID ||
+				existing.Type != model.NodeTypeFile ||
+				existing.Name != node.Name ||
+				existing.NormalizedName != node.NormalizedName ||
+				!sameUUIDPointer(existing.ParentID, node.ParentID) ||
+				existing.OwnerID != cmd.ActorID ||
+				prior.Size() != cmd.Size ||
+				prior.MIMEType() != cmd.MIMEType ||
+				prior.CreatedBy() != cmd.ActorID ||
+				blobErr != nil ||
+				existingBlob.DedupDomain != cmd.OrganizationID ||
+				existingBlob.Size != cmd.Size ||
+				!strings.EqualFold(existingBlob.SHA256, cmd.SHA256) ||
+				replicaErr != nil ||
+				existingReplica.ProviderID != cmd.ReplicaProviderID ||
+				!strings.EqualFold(existingReplica.Checksum, cmd.SHA256) {
+				return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", domain.ErrIdempotencyConflict)
 			}
-			return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", domain.ErrIdempotencyConflict)
+			rebuildErr := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+				claimed, claimErr := h.repo.ClaimCommand(txCtx, repository.CommandDedup{
+					CommandID: cmd.CommandID, WorkspaceID: cmd.WorkspaceID, Operation: "put_local",
+					RequestHash: requestHash, NodeID: &existing.ID, RevisionID: &deterministicRevisionID,
+				})
+				if claimErr != nil {
+					return claimErr
+				}
+				if claimed.State == "COMPLETED" {
+					return nil
+				}
+				return h.repo.CompleteCommand(txCtx, cmd.CommandID, &existing.ID, &deterministicRevisionID)
+			})
+			if rebuildErr != nil {
+				return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", rebuildErr)
+			}
+			return existing, nil
 		}
 	}
 	if cmd.NodeID == nil && existingErr == nil && existing.CurrentRevisionID != nil {
@@ -372,69 +461,107 @@ func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (*mo
 	}()
 	blob := &model.Blob{ID: uuid.NewSHA1(uuid.NameSpaceURL, []byte(cmd.CommandID.String())), DedupDomain: cmd.OrganizationID, SHA256: info.SHA256, Size: info.Size, RefCount: 1, State: model.BlobStateAvailable}
 	revisionID := deterministicRevisionID
-	revisionNo := 1
-	if existing == nil && cmd.NodeID != nil {
-		revisions, _, listErr := h.repo.ListRevisions(ctx, node.ID, cmd.NamespaceID, 1, "")
-		if listErr == nil && len(revisions) > 0 {
-			revisionNo = revisions[0].RevisionNo() + 1
-			revisionID = uuid.New()
-		}
-	}
-	revision, err := model.NewRevisionWithID(revisionID, node.ID, revisionNo, blob.ID, info.Size, cmd.MIMEType, cmd.ActorID)
-	if err != nil {
-		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", err)
-	}
 	providerID := cmd.ReplicaProviderID
 	if providerID == uuid.Nil {
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", errors.New("replica provider id is required"))
 	}
 	replica := &model.StorageReplica{ID: uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-replica:"+cmd.CommandID.String())), BlobID: blob.ID, ProviderID: providerID, ObjectKey: info.ObjectKey, Checksum: info.SHA256, State: model.ReplicaStateAvailable}
-	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-		claimed, claimErr := h.repo.ClaimCommand(txCtx, repository.CommandDedup{CommandID: cmd.CommandID, WorkspaceID: cmd.WorkspaceID, Operation: "put_local", RequestHash: requestHash, NodeID: &node.ID, RevisionID: &revisionID})
-		if claimErr != nil {
-			return claimErr
-		}
-		if claimed.State == "COMPLETED" {
-			return domain.ErrCommandInProgress
-		}
-		if existing == nil {
-			if err := h.repo.CreateNode(txCtx, node); err != nil {
+	var completedNodeID *uuid.UUID
+	for attempt := 0; attempt < 5; attempt++ {
+		err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+			claimed, claimErr := h.repo.ClaimCommand(txCtx, repository.CommandDedup{CommandID: cmd.CommandID, WorkspaceID: cmd.WorkspaceID, Operation: "put_local", RequestHash: requestHash, NodeID: &node.ID, RevisionID: &revisionID})
+			if claimErr != nil {
+				return claimErr
+			}
+			if claimed.State == "COMPLETED" {
+				if claimed.NodeID == nil || claimed.RevisionID == nil {
+					return domain.ErrOutcomeUnknown
+				}
+				completedNodeID = claimed.NodeID
+				return nil
+			}
+			if existing == nil {
+				if err := h.repo.CreateNode(txCtx, node); err != nil {
+					return err
+				}
+			}
+			revisionNo := 1
+			if existing != nil && cmd.NodeID != nil {
+				var allocateErr error
+				revisionNo, allocateErr = h.repo.NextRevisionNumber(txCtx, node.ID)
+				if allocateErr != nil {
+					return allocateErr
+				}
+			}
+			revision, revisionErr := model.NewRevisionWithID(revisionID, node.ID, revisionNo, blob.ID, info.Size, cmd.MIMEType, cmd.ActorID)
+			if revisionErr != nil {
+				return revisionErr
+			}
+			if err := h.repo.SaveRevision(txCtx, revision, blob, replica); err != nil {
 				return err
 			}
-		}
-		if err := h.repo.SaveRevision(txCtx, revision, blob, replica); err != nil {
-			return err
-		}
-		if err := h.repo.SetCurrentRevision(txCtx, node.ID, revision.ID()); err != nil {
-			return err
-		}
-		filesDelta := int64(0)
-		if existing == nil {
-			filesDelta = 1
-		}
-		if err := h.repo.ApplyQuotaUsage(txCtx, cmd.WorkspaceID, info.Size, filesDelta); err != nil {
-			return err
-		}
-		if h.bus != nil {
-			if err := h.bus.Publish(txCtx,
-				event.FileCreated{BaseEvent: events.NewBaseEvent(event.FileCreatedName), FileID: node.ID, NamespaceID: node.NamespaceID},
-				event.FileRevisionCreated{BaseEvent: events.NewBaseEvent(event.FileRevisionCreatedName), FileID: node.ID, RevisionID: revision.ID(), RevisionNo: revision.RevisionNo()},
-			); err != nil {
+			if err := h.repo.SetCurrentRevision(txCtx, node.ID, revision.ID()); err != nil {
 				return err
 			}
+			filesDelta := int64(0)
+			if existing == nil {
+				filesDelta = 1
+			}
+			if err := h.repo.ApplyQuotaUsage(txCtx, cmd.WorkspaceID, info.Size, filesDelta); err != nil {
+				return err
+			}
+			if h.bus != nil {
+				if err := h.bus.Publish(txCtx,
+					event.FileCreated{BaseEvent: events.NewBaseEvent(event.FileCreatedName), FileID: node.ID, NamespaceID: node.NamespaceID},
+					event.FileRevisionCreated{BaseEvent: events.NewBaseEvent(event.FileRevisionCreatedName), FileID: node.ID, RevisionID: revision.ID(), RevisionNo: revision.RevisionNo()},
+				); err != nil {
+					return err
+				}
+			}
+			if err := h.repo.CompleteCommand(txCtx, cmd.CommandID, &node.ID, &revisionID); err != nil {
+				return err
+			}
+			return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", true, nil)
+		})
+		if !errors.Is(err, postgres.ErrTransactionRetry) {
+			break
 		}
-		if err := h.repo.CompleteCommand(txCtx, cmd.CommandID, &node.ID, &revisionID); err != nil {
-			return err
-		}
-		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", true, nil)
-	})
+	}
 	if err != nil {
-		if errors.Is(err, storage.ErrOutcomeUnknown) {
-			published = false
-			return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", domain.ErrOutcomeUnknown)
+		if errors.Is(err, postgres.ErrCommitOutcomeUnknown) || errors.Is(err, storage.ErrOutcomeUnknown) {
+			authoritative, readErr := h.repo.GetCommand(ctx, cmd.CommandID)
+			if readErr == nil &&
+				authoritative.State == "COMPLETED" &&
+				authoritative.RequestHash == requestHash &&
+				authoritative.NodeID != nil &&
+				authoritative.RevisionID != nil {
+				result, resultErr := h.repo.GetNode(ctx, cmd.NamespaceID, *authoritative.NodeID)
+				if resultErr == nil {
+					if _, revisionErr := h.repo.GetRevision(ctx, result.ID, *authoritative.RevisionID); revisionErr == nil {
+						published = false
+						return result, nil
+					}
+				}
+			}
+			if readErr == nil || !errors.Is(readErr, domain.ErrNodeNotFound) {
+				published = false
+			}
+			outcomeErr := fmt.Errorf("%w: commit result could not be confirmed", domain.ErrOutcomeUnknown)
+			return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", outcomeErr)
 		}
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", err)
 	}
 	published = false
+	if completedNodeID != nil {
+		return h.repo.GetNode(ctx, cmd.NamespaceID, *completedNodeID)
+	}
+	node.CurrentRevisionID = &revisionID
 	return node, nil
+}
+
+func sameUUIDPointer(left, right *uuid.UUID) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
