@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS filesystem.nodes (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,
     UNIQUE(id, namespace_id),
-    UNIQUE(namespace_id, parent_id, normalized_name)
+    UNIQUE NULLS NOT DISTINCT (namespace_id, parent_id, normalized_name)
 );
 
 ALTER TABLE filesystem.nodes

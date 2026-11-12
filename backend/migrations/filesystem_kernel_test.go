@@ -17,7 +17,7 @@ func TestFilesystemKernelMigrationDefinesCoreTablesAndInvariants(t *testing.T) {
 	} {
 		require.Contains(t, up, "CREATE TABLE IF NOT EXISTS filesystem."+table)
 	}
-	require.Contains(t, up, "UNIQUE(namespace_id, parent_id, normalized_name)")
+	require.Contains(t, up, "UNIQUE NULLS NOT DISTINCT (namespace_id, parent_id, normalized_name)")
 	require.Contains(t, up, "UNIQUE(dedup_domain, sha256, size)")
 	require.Contains(t, up, "CHECK (node_type IN ('FILE','DIRECTORY'))")
 	require.Contains(t, up, "fk_nodes_current_revision")
