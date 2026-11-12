@@ -11,7 +11,7 @@ import (
 func (p *plugin) RegisterMCPTools(registrar sparkplugin.MCPToolRegistrar, ctx sparkplugin.PluginContext) {
 	registrar.Register("kubernetes", sparkplugin.MCPToolSpec{
 		Name:        "list_kubernetes_clusters",
-		Description: "List Kubernetes clusters authorized for the current workspace.",
+		Description: "List Kubernetes clusters available to the current workspace",
 		InputSchema: sparkplugin.ObjectSchema(map[string]any{}),
 		Permission:  authz.PermProjectRead,
 		Tier:        sparkplugin.MCPToolTierDiscovery,
