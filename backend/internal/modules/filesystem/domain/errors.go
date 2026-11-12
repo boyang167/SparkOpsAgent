@@ -20,4 +20,6 @@ var (
 	ErrPersistence          = errors.New("filesystem persistence failure")
 	ErrQuotaExceeded        = errors.New("filesystem quota exceeded")
 	ErrDirectoryCycle       = errors.New("filesystem directory cycle")
+	ErrIdempotencyConflict  = errors.New("filesystem idempotency conflict")
+	ErrOutcomeUnknown       = errors.New("filesystem outcome unknown")
 )

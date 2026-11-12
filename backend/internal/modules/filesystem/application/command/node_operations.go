@@ -35,6 +35,7 @@ func NewRenameNodeHandler(repo repository.FilesystemRepository, tx postgres.Tran
 }
 
 func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) error {
+	ctx = withTraceID(ctx, cmd.TraceID)
 	if !cmd.Allowed {
 		err := errors.New(cmd.Reason)
 		if err.Error() == "" {
@@ -42,12 +43,21 @@ func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) error {
 		}
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename", err)
 	}
-	return h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
 		if err != nil {
 			return err
 		}
-		if node.ParentID == nil {
+		txCtx = withResourceID(txCtx, node.ID.String())
+		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
+		if err != nil {
+			return err
+		}
+		txCtx = withResourceID(txCtx, node.ID.String())
+		if ns.ID != cmd.NamespaceID {
+			return domain.ErrNamespaceMismatch
+		}
+		if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
 			return fmt.Errorf("filesystem root cannot be renamed")
 		}
 		if err := h.repo.RenameNode(txCtx, cmd.NodeID, cmd.Name); err != nil {
@@ -55,6 +65,10 @@ func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) error {
 		}
 		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename", true, nil)
 	})
+	if err != nil {
+		return errors.Join(err, logMutation(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename", false, err))
+	}
+	return nil
 }
 
 type MoveNode struct {
@@ -79,6 +93,7 @@ func NewMoveNodeHandler(repo repository.FilesystemRepository, tx postgres.Transa
 }
 
 func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) error {
+	ctx = withTraceID(ctx, cmd.TraceID)
 	if !cmd.Allowed {
 		err := errors.New(cmd.Reason)
 		if err.Error() == "" {
@@ -86,14 +101,18 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) error {
 		}
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", err)
 	}
-	return h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
 		if err != nil {
 			return err
 		}
+		txCtx = withResourceID(txCtx, node.ID.String())
 		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
 		if err != nil {
 			return err
+		}
+		if ns.ID != cmd.NamespaceID {
+			return domain.ErrNamespaceMismatch
 		}
 		if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
 			return fmt.Errorf("filesystem root cannot be moved")
@@ -126,11 +145,19 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) error {
 		if name == "" {
 			name = node.Name
 		}
-		if err := h.repo.MoveNode(txCtx, node.ID, cmd.NewParentID, name); err != nil {
+		targetParent := cmd.NewParentID
+		if targetParent == nil {
+			targetParent = ns.RootNodeID
+		}
+		if err := h.repo.MoveNode(txCtx, node.ID, targetParent, name); err != nil {
 			return err
 		}
 		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", true, nil)
 	})
+	if err != nil {
+		return errors.Join(err, logMutation(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", false, err))
+	}
+	return nil
 }
 
 type TrashNode struct {
@@ -153,6 +180,7 @@ func NewTrashNodeHandler(repo repository.FilesystemRepository, tx postgres.Trans
 }
 
 func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) error {
+	ctx = withTraceID(ctx, cmd.TraceID)
 	if !cmd.Allowed {
 		err := errors.New(cmd.Reason)
 		if err.Error() == "" {
@@ -160,7 +188,7 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) error {
 		}
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash", err)
 	}
-	return h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
 		if err != nil {
 			return err
@@ -168,6 +196,9 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) error {
 		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
 		if err != nil {
 			return err
+		}
+		if ns.ID != cmd.NamespaceID {
+			return domain.ErrNamespaceMismatch
 		}
 		if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
 			return fmt.Errorf("filesystem root cannot be trashed")
@@ -179,6 +210,10 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) error {
 		}
 		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash", true, nil)
 	})
+	if err != nil {
+		return errors.Join(err, logMutation(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash", false, err))
+	}
+	return nil
 }
 
 type RestoreRevision struct {
@@ -202,6 +237,7 @@ func NewRestoreRevisionHandler(repo repository.FilesystemRepository, tx postgres
 }
 
 func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision) error {
+	ctx = withTraceID(ctx, cmd.TraceID)
 	if !cmd.Allowed {
 		err := errors.New(cmd.Reason)
 		if err.Error() == "" {
@@ -209,7 +245,18 @@ func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision
 		}
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.revision.restore", err)
 	}
-	return h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
+		if err != nil {
+			return err
+		}
+		if ns.ID != cmd.NamespaceID {
+			return domain.ErrNamespaceMismatch
+		}
+		if _, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID); err != nil {
+			return err
+		}
+		txCtx = withResourceID(txCtx, cmd.RevisionID.String())
 		if _, err := h.repo.GetRevision(txCtx, cmd.NodeID, cmd.RevisionID); err != nil {
 			return err
 		}
@@ -218,4 +265,8 @@ func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision
 		}
 		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.revision.restore", true, nil)
 	})
+	if err != nil {
+		return errors.Join(err, logMutation(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.revision.restore", false, err))
+	}
+	return nil
 }

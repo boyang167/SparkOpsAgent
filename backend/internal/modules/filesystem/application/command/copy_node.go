@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
@@ -34,6 +35,7 @@ func NewCopyNodeHandler(repo repository.FilesystemRepository, tx postgres.Transa
 }
 
 func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (*model.Node, error) {
+	ctx = withTraceID(ctx, cmd.TraceID)
 	if !cmd.Allowed {
 		err := errors.New(cmd.Reason)
 		if err.Error() == "" {
@@ -43,6 +45,13 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (*model.Node
 	}
 	var result *model.Node
 	err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
+		if err != nil {
+			return err
+		}
+		if ns.ID != cmd.NamespaceID {
+			return domain.ErrNamespaceMismatch
+		}
 		source, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.SourceNodeID)
 		if err != nil {
 			return err
@@ -62,6 +71,7 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (*model.Node
 		if err != nil {
 			return err
 		}
+		txCtx = withResourceID(txCtx, result.ID.String())
 		if cmd.ParentID == nil {
 			result.ParentID = nil
 		}
@@ -98,5 +108,8 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (*model.Node
 		}
 		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy", true, nil)
 	})
+	if err != nil {
+		return nil, errors.Join(err, logMutation(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy", false, err))
+	}
 	return result, err
 }

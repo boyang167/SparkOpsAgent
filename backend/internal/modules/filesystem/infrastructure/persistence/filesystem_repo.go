@@ -164,64 +164,68 @@ func (r *Repository) SaveRevision(ctx context.Context, revision *model.FileRevis
 	if nodeErr != nil {
 		return wrapPersistence(nodeErr)
 	}
+	save := func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&blobRow{
+			ID: blob.ID, DedupDomain: blob.DedupDomain, SHA256: blob.SHA256, Size: blob.Size,
+			EncryptionKeyRef: blob.EncryptionKeyRef, RefCount: blob.RefCount, State: blob.State, CreatedAt: now,
+		}).Error; err != nil {
+			if conflict := mapUniqueConflict(err); conflict != nil && !errors.Is(conflict, domain.ErrPersistence) {
+				return conflict
+			}
+			return err
+		}
+		var existingBlob blobRow
+		if err := tx.Where("id = ?", blob.ID).First(&existingBlob).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.ErrBlobConflict
+		} else if err != nil {
+			return err
+		} else if !sameBlob(existingBlob, blob) {
+			return domain.ErrBlobConflict
+		}
+
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&revisionRow{
+			ID: revision.ID(), NodeID: revision.NodeID(), RevisionNo: revision.RevisionNo(), BlobID: revision.BlobID(),
+			Size: revision.Size(), MIMEType: revision.MIMEType(), CreatedBy: revision.CreatedBy(), CreatedAt: now,
+		}).Error; err != nil {
+			if conflict := mapUniqueConflict(err); conflict != nil && !errors.Is(conflict, domain.ErrPersistence) {
+				return conflict
+			}
+			return err
+		}
+		var existingRevision revisionRow
+		if err := tx.Where("id = ?", revision.ID()).First(&existingRevision).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.ErrRevisionConflict
+		} else if err != nil {
+			return err
+		} else if !sameRevision(existingRevision, revision) {
+			return domain.ErrRevisionConflict
+		}
+
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&replicaRow{
+			ID: replica.ID, BlobID: replica.BlobID, ProviderID: replica.ProviderID, ObjectKey: replica.ObjectKey,
+			Checksum: replica.Checksum, State: replica.State, CreatedAt: now,
+		}).Error; err != nil {
+			if conflict := mapUniqueConflict(err); conflict != nil && !errors.Is(conflict, domain.ErrPersistence) {
+				return conflict
+			}
+			return err
+		}
+		var existingReplica replicaRow
+		if err := tx.Where("id = ?", replica.ID).First(&existingReplica).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.ErrReplicaConflict
+		} else if err != nil {
+			return err
+		} else if !sameReplica(existingReplica, replica) {
+			return domain.ErrReplicaConflict
+		}
+		return nil
+	}
+	if _, err := postgres.RequireTx(ctx); err == nil {
+		return wrapPersistence(save(postgres.DB(ctx, r.db)))
+	}
 	for attempt := 0; attempt < 10; attempt++ {
-		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			now := time.Now().UTC()
-			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&blobRow{
-				ID: blob.ID, DedupDomain: blob.DedupDomain, SHA256: blob.SHA256, Size: blob.Size,
-				EncryptionKeyRef: blob.EncryptionKeyRef, RefCount: blob.RefCount, State: blob.State, CreatedAt: now,
-			}).Error; err != nil {
-				if conflict := mapUniqueConflict(err); conflict != nil && !errors.Is(conflict, domain.ErrPersistence) {
-					return conflict
-				}
-				return err
-			}
-			var existingBlob blobRow
-			if err := tx.Where("id = ?", blob.ID).First(&existingBlob).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-				return domain.ErrBlobConflict
-			} else if err != nil {
-				return err
-			} else if !sameBlob(existingBlob, blob) {
-				return domain.ErrBlobConflict
-			}
-
-			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&revisionRow{
-				ID: revision.ID(), NodeID: revision.NodeID(), RevisionNo: revision.RevisionNo(), BlobID: revision.BlobID(),
-				Size: revision.Size(), MIMEType: revision.MIMEType(), CreatedBy: revision.CreatedBy(), CreatedAt: now,
-			}).Error; err != nil {
-				if conflict := mapUniqueConflict(err); conflict != nil && !errors.Is(conflict, domain.ErrPersistence) {
-					return conflict
-				}
-				return err
-			}
-			var existingRevision revisionRow
-			if err := tx.Where("id = ?", revision.ID()).First(&existingRevision).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-				return domain.ErrRevisionConflict
-			} else if err != nil {
-				return err
-			} else if !sameRevision(existingRevision, revision) {
-				return domain.ErrRevisionConflict
-			}
-
-			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&replicaRow{
-				ID: replica.ID, BlobID: replica.BlobID, ProviderID: replica.ProviderID, ObjectKey: replica.ObjectKey,
-				Checksum: replica.Checksum, State: replica.State, CreatedAt: now,
-			}).Error; err != nil {
-				if conflict := mapUniqueConflict(err); conflict != nil && !errors.Is(conflict, domain.ErrPersistence) {
-					return conflict
-				}
-				return err
-			}
-			var existingReplica replicaRow
-			if err := tx.Where("id = ?", replica.ID).First(&existingReplica).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-				return domain.ErrReplicaConflict
-			} else if err != nil {
-				return err
-			} else if !sameReplica(existingReplica, replica) {
-				return domain.ErrReplicaConflict
-			}
-			return nil
-		})
+		err := r.db.WithContext(ctx).Transaction(save)
 		if err == nil {
 			return nil
 		}
@@ -323,7 +327,7 @@ func (r *Repository) ApplyQuotaUsage(ctx context.Context, workspaceID uuid.UUID,
 	}
 	db := postgres.DB(ctx, r.db)
 	result := db.Model(&quotaAccountRow{}).
-		Where("workspace_id = ? AND (max_bytes IS NULL OR used_bytes + reserved_bytes + ? <= max_bytes) AND (max_files IS NULL OR used_files + reserved_files + ? <= max_files)", workspaceID, bytesDelta, filesDelta).
+		Where("workspace_id = ? AND (max_bytes IS NULL OR (max_bytes >= used_bytes AND max_bytes - used_bytes >= reserved_bytes AND max_bytes - used_bytes - reserved_bytes >= ?)) AND (max_files IS NULL OR (max_files >= used_files AND max_files - used_files >= reserved_files AND max_files - used_files - reserved_files >= ?))", workspaceID, bytesDelta, filesDelta).
 		Updates(map[string]any{
 			"used_bytes": gorm.Expr("used_bytes + ?", bytesDelta),
 			"used_files": gorm.Expr("used_files + ?", filesDelta),
@@ -525,7 +529,8 @@ func isDomainError(err error) bool {
 		domain.ErrRevisionNodeMismatch, domain.ErrParentNotFound, domain.ErrParentNotDirectory,
 		domain.ErrNamespaceMismatch, domain.ErrBlobConflict, domain.ErrReplicaConflict,
 		domain.ErrRevisionBlobMismatch, domain.ErrReplicaBlobMismatch,
-		domain.ErrPersistence, model.ErrInvalidNodeName,
+		domain.ErrPersistence, domain.ErrQuotaExceeded, domain.ErrDirectoryCycle,
+		domain.ErrIdempotencyConflict, domain.ErrOutcomeUnknown, model.ErrInvalidNodeName,
 	} {
 		if errors.Is(err, sentinel) {
 			return true

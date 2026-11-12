@@ -49,6 +49,23 @@ func TestRepositoryUsesAmbientTransactionContext(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrNodeNotFound)
 }
 
+func TestSaveRevisionUsesAmbientTransactionAndRollsBackAllRows(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	node := rootFile(ns.ID, "transactional-revision")
+	require.NoError(t, repo.CreateNode(context.Background(), node))
+	revision, blob, replica := revisionFixture(t, node.ID, 1)
+
+	err := postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+		if err := repo.SaveRevision(ctx, revision, blob, replica); err != nil {
+			return err
+		}
+		return errors.New("rollback revision transaction")
+	})
+	require.Error(t, err)
+	assertNoFilesystemRows(t, db, revision.ID(), blob.ID, replica.ID)
+}
+
 func TestCreateChildRejectsFileParent(t *testing.T) {
 	repo, db := newTestRepository(t)
 	ns := seedNamespace(t, db)
