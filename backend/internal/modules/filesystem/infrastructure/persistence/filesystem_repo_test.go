@@ -197,13 +197,14 @@ func TestSaveRevisionRejectsMismatchedReplicaBeforeWriting(t *testing.T) {
 }
 
 func TestSaveRevisionConcurrentIdenticalRequestsAreIdempotent(t *testing.T) {
-	repo, db, filesystemDSN := newConcurrentTestRepository(t)
+	seedRepo, db, mainDSN, filesystemDSN := newConcurrentTestRepository(t)
 	ns := seedNamespace(t, db)
 	node := rootFile(ns.ID, "concurrent")
-	require.NoError(t, repo.CreateNode(context.Background(), node))
+	require.NoError(t, seedRepo.CreateNode(context.Background(), node))
 	revision, blob, replica := revisionFixture(t, node.ID, 1)
 
 	const callers = 4
+	ready := make(chan error, callers)
 	errs := make(chan error, callers)
 	var wg sync.WaitGroup
 	start := make(chan struct{})
@@ -211,11 +212,38 @@ func TestSaveRevisionConcurrentIdenticalRequestsAreIdempotent(t *testing.T) {
 	for i := 0; i < callers; i++ {
 		go func() {
 			defer wg.Done()
-			_ = db.Exec("PRAGMA busy_timeout = 5000").Error
-			_ = db.Exec("ATTACH DATABASE ? AS filesystem", filesystemDSN).Error
+			workerDB, openErr := gorm.Open(sqlite.Open(mainDSN), &gorm.Config{
+				Logger: logger.Default.LogMode(logger.Silent),
+			})
+			if openErr != nil {
+				ready <- openErr
+				errs <- openErr
+				return
+			}
+			workerSQLDB, dbErr := workerDB.DB()
+			if dbErr != nil {
+				ready <- dbErr
+				errs <- dbErr
+				return
+			}
+			defer workerSQLDB.Close()
+			if attachErr := workerDB.Exec("ATTACH DATABASE ? AS filesystem", filesystemDSN).Error; attachErr != nil {
+				ready <- attachErr
+				errs <- attachErr
+				return
+			}
+			if pragmaErr := workerDB.Exec("PRAGMA busy_timeout = 5000").Error; pragmaErr != nil {
+				ready <- pragmaErr
+				errs <- pragmaErr
+				return
+			}
+			ready <- nil
 			<-start
-			errs <- repo.SaveRevision(context.Background(), revision, blob, replica)
+			errs <- NewRepository(workerDB).SaveRevision(context.Background(), revision, blob, replica)
 		}()
+	}
+	for i := 0; i < callers; i++ {
+		require.NoError(t, <-ready)
 	}
 	close(start)
 	wg.Wait()
@@ -224,12 +252,18 @@ func TestSaveRevisionConcurrentIdenticalRequestsAreIdempotent(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	verifyDB, err := gorm.Open(sqlite.Open(mainDSN), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	verifySQLDB, err := verifyDB.DB()
+	require.NoError(t, err)
+	defer verifySQLDB.Close()
+	require.NoError(t, verifyDB.Exec("ATTACH DATABASE ? AS filesystem", filesystemDSN).Error)
 	var count int64
-	require.NoError(t, db.Table("filesystem.blobs").Where("id = ?", blob.ID).Count(&count).Error)
+	require.NoError(t, verifyDB.Table("filesystem.blobs").Where("id = ?", blob.ID).Count(&count).Error)
 	require.Equal(t, int64(1), count)
-	require.NoError(t, db.Table("filesystem.file_revisions").Where("id = ?", revision.ID()).Count(&count).Error)
+	require.NoError(t, verifyDB.Table("filesystem.file_revisions").Where("id = ?", revision.ID()).Count(&count).Error)
 	require.Equal(t, int64(1), count)
-	require.NoError(t, db.Table("filesystem.storage_replicas").Where("id = ?", replica.ID).Count(&count).Error)
+	require.NoError(t, verifyDB.Table("filesystem.storage_replicas").Where("id = ?", replica.ID).Count(&count).Error)
 	require.Equal(t, int64(1), count)
 }
 
@@ -318,10 +352,11 @@ func newTestRepository(t *testing.T) (repository.FilesystemRepository, *gorm.DB)
 	return NewRepository(db), db
 }
 
-func newConcurrentTestRepository(t *testing.T) (repository.FilesystemRepository, *gorm.DB, string) {
+func newConcurrentTestRepository(t *testing.T) (repository.FilesystemRepository, *gorm.DB, string, string) {
 	t.Helper()
+	mainDSN := "file:" + t.Name() + "?mode=memory&cache=shared&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
 	filesystemDSN := filepath.Join(t.TempDir(), "filesystem.db")
-	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"), &gorm.Config{
+	db, err := gorm.Open(sqlite.Open(mainDSN), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
@@ -332,17 +367,7 @@ func newConcurrentTestRepository(t *testing.T) (repository.FilesystemRepository,
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, db.Exec("ATTACH DATABASE ? AS filesystem", filesystemDSN).Error)
 	require.NoError(t, AutoMigrate(db))
-	var attachWG sync.WaitGroup
-	attachWG.Add(4)
-	for i := 0; i < 4; i++ {
-		go func() {
-			defer attachWG.Done()
-			_ = db.Exec("PRAGMA busy_timeout = 5000").Error
-			_ = db.Exec("ATTACH DATABASE ? AS filesystem", filesystemDSN).Error
-		}()
-	}
-	attachWG.Wait()
-	return NewRepository(db), db, filesystemDSN
+	return NewRepository(db), db, mainDSN, filesystemDSN
 }
 
 func seedNamespace(t *testing.T, db *gorm.DB) *model.Namespace {
