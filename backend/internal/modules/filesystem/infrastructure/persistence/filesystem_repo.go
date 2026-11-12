@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/text/unicode/norm"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
@@ -143,54 +144,72 @@ func (r *Repository) SaveRevision(ctx context.Context, revision *model.FileRevis
 	if nodeErr != nil {
 		return wrapPersistence(nodeErr)
 	}
-	return wrapPersistence(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		now := time.Now().UTC()
-		var existingBlob blobRow
-		blobErr := tx.Where("id = ?", blob.ID).First(&existingBlob).Error
-		if errors.Is(blobErr, gorm.ErrRecordNotFound) {
-			if err := tx.Create(&blobRow{ID: blob.ID, DedupDomain: blob.DedupDomain, SHA256: blob.SHA256, Size: blob.Size, EncryptionKeyRef: blob.EncryptionKeyRef, RefCount: blob.RefCount, State: blob.State, CreatedAt: now}).Error; err != nil {
-				if conflict := mapUniqueConflict(err); conflict != nil {
+	for attempt := 0; attempt < 10; attempt++ {
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			now := time.Now().UTC()
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&blobRow{
+				ID: blob.ID, DedupDomain: blob.DedupDomain, SHA256: blob.SHA256, Size: blob.Size,
+				EncryptionKeyRef: blob.EncryptionKeyRef, RefCount: blob.RefCount, State: blob.State, CreatedAt: now,
+			}).Error; err != nil {
+				if conflict := mapUniqueConflict(err); conflict != nil && !errors.Is(conflict, domain.ErrPersistence) {
 					return conflict
 				}
-				return wrapPersistence(err)
+				return err
 			}
-		} else if blobErr != nil {
-			return wrapPersistence(blobErr)
-		} else if !sameBlob(existingBlob, blob) {
-			return domain.ErrBlobConflict
-		}
+			var existingBlob blobRow
+			if err := tx.Where("id = ?", blob.ID).First(&existingBlob).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrBlobConflict
+			} else if err != nil {
+				return err
+			} else if !sameBlob(existingBlob, blob) {
+				return domain.ErrBlobConflict
+			}
 
-		var existingRevision revisionRow
-		revisionErr := tx.Where("id = ?", revision.ID()).First(&existingRevision).Error
-		if errors.Is(revisionErr, gorm.ErrRecordNotFound) {
-			if err := tx.Create(&revisionRow{ID: revision.ID(), NodeID: revision.NodeID(), RevisionNo: revision.RevisionNo(), BlobID: revision.BlobID(), Size: revision.Size(), MIMEType: revision.MIMEType(), CreatedBy: revision.CreatedBy(), CreatedAt: now}).Error; err != nil {
-				if conflict := mapUniqueConflict(err); conflict != nil {
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&revisionRow{
+				ID: revision.ID(), NodeID: revision.NodeID(), RevisionNo: revision.RevisionNo(), BlobID: revision.BlobID(),
+				Size: revision.Size(), MIMEType: revision.MIMEType(), CreatedBy: revision.CreatedBy(), CreatedAt: now,
+			}).Error; err != nil {
+				if conflict := mapUniqueConflict(err); conflict != nil && !errors.Is(conflict, domain.ErrPersistence) {
 					return conflict
 				}
-				return wrapPersistence(err)
+				return err
 			}
-		} else if revisionErr != nil {
-			return wrapPersistence(revisionErr)
-		} else if !sameRevision(existingRevision, revision) {
-			return domain.ErrRevisionConflict
-		}
+			var existingRevision revisionRow
+			if err := tx.Where("id = ?", revision.ID()).First(&existingRevision).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrRevisionConflict
+			} else if err != nil {
+				return err
+			} else if !sameRevision(existingRevision, revision) {
+				return domain.ErrRevisionConflict
+			}
 
-		var existingReplica replicaRow
-		replicaErr := tx.Where("id = ?", replica.ID).First(&existingReplica).Error
-		if errors.Is(replicaErr, gorm.ErrRecordNotFound) {
-			if err := tx.Create(&replicaRow{ID: replica.ID, BlobID: replica.BlobID, ProviderID: replica.ProviderID, ObjectKey: replica.ObjectKey, Checksum: replica.Checksum, State: replica.State, CreatedAt: now}).Error; err != nil {
-				if conflict := mapUniqueConflict(err); conflict != nil {
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&replicaRow{
+				ID: replica.ID, BlobID: replica.BlobID, ProviderID: replica.ProviderID, ObjectKey: replica.ObjectKey,
+				Checksum: replica.Checksum, State: replica.State, CreatedAt: now,
+			}).Error; err != nil {
+				if conflict := mapUniqueConflict(err); conflict != nil && !errors.Is(conflict, domain.ErrPersistence) {
 					return conflict
 				}
-				return wrapPersistence(err)
+				return err
 			}
-		} else if replicaErr != nil {
-			return wrapPersistence(replicaErr)
-		} else if !sameReplica(existingReplica, replica) {
-			return domain.ErrReplicaConflict
+			var existingReplica replicaRow
+			if err := tx.Where("id = ?", replica.ID).First(&existingReplica).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrReplicaConflict
+			} else if err != nil {
+				return err
+			} else if !sameReplica(existingReplica, replica) {
+				return domain.ErrReplicaConflict
+			}
+			return nil
+		})
+		if err == nil {
+			return nil
 		}
-		return nil
-	}))
+		if r.db.Dialector.Name() != "sqlite" || !isSQLiteBusy(err) || attempt == 9 {
+			return wrapPersistence(err)
+		}
+	}
+	return domain.ErrPersistence
 }
 
 func (r *Repository) SetCurrentRevision(ctx context.Context, nodeID, revisionID uuid.UUID) error {
@@ -334,6 +353,16 @@ func wrapPersistence(err error) error {
 		return conflict
 	}
 	return fmt.Errorf("%w: operation failed", domain.ErrPersistence)
+}
+
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "database is locked") ||
+		strings.Contains(message, "database table is locked") ||
+		strings.Contains(message, "busy")
 }
 
 func isDomainError(err error) bool {

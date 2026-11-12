@@ -3,6 +3,8 @@ package persistence
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -194,6 +196,43 @@ func TestSaveRevisionRejectsMismatchedReplicaBeforeWriting(t *testing.T) {
 	assertNoFilesystemRows(t, db, revision.ID(), blob.ID, replica.ID)
 }
 
+func TestSaveRevisionConcurrentIdenticalRequestsAreIdempotent(t *testing.T) {
+	repo, db, filesystemDSN := newConcurrentTestRepository(t)
+	ns := seedNamespace(t, db)
+	node := rootFile(ns.ID, "concurrent")
+	require.NoError(t, repo.CreateNode(context.Background(), node))
+	revision, blob, replica := revisionFixture(t, node.ID, 1)
+
+	const callers = 4
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	wg.Add(callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			defer wg.Done()
+			_ = db.Exec("PRAGMA busy_timeout = 5000").Error
+			_ = db.Exec("ATTACH DATABASE ? AS filesystem", filesystemDSN).Error
+			<-start
+			errs <- repo.SaveRevision(context.Background(), revision, blob, replica)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	var count int64
+	require.NoError(t, db.Table("filesystem.blobs").Where("id = ?", blob.ID).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+	require.NoError(t, db.Table("filesystem.file_revisions").Where("id = ?", revision.ID()).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+	require.NoError(t, db.Table("filesystem.storage_replicas").Where("id = ?", replica.ID).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+}
+
 func TestListChildrenCursorHasStableExclusiveBoundary(t *testing.T) {
 	repo, db := newTestRepository(t)
 	ns := seedNamespace(t, db)
@@ -277,6 +316,33 @@ func newTestRepository(t *testing.T) (repository.FilesystemRepository, *gorm.DB)
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
 	require.NoError(t, AutoMigrate(db))
 	return NewRepository(db), db
+}
+
+func newConcurrentTestRepository(t *testing.T) (repository.FilesystemRepository, *gorm.DB, string) {
+	t.Helper()
+	filesystemDSN := filepath.Join(t.TempDir(), "filesystem.db")
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(4)
+	sqlDB.SetMaxIdleConns(4)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	require.NoError(t, db.Exec("ATTACH DATABASE ? AS filesystem", filesystemDSN).Error)
+	require.NoError(t, AutoMigrate(db))
+	var attachWG sync.WaitGroup
+	attachWG.Add(4)
+	for i := 0; i < 4; i++ {
+		go func() {
+			defer attachWG.Done()
+			_ = db.Exec("PRAGMA busy_timeout = 5000").Error
+			_ = db.Exec("ATTACH DATABASE ? AS filesystem", filesystemDSN).Error
+		}()
+	}
+	attachWG.Wait()
+	return NewRepository(db), db, filesystemDSN
 }
 
 func seedNamespace(t *testing.T, db *gorm.DB) *model.Namespace {
