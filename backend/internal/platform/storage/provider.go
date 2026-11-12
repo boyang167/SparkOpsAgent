@@ -13,7 +13,9 @@ var (
 	ErrObjectConflict   = errors.New("storage: object conflict")
 	ErrSizeMismatch     = errors.New("storage: size mismatch")
 	ErrChecksumMismatch = errors.New("storage: checksum mismatch")
+	ErrInvalidChecksum  = errors.New("storage: invalid checksum")
 	ErrInvalidObjectKey = errors.New("storage: invalid object key")
+	ErrInvalidRoot      = errors.New("storage: invalid root")
 	ErrInvalidRange     = errors.New("storage: invalid range")
 )
 
