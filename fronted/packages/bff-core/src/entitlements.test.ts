@@ -45,6 +45,7 @@ describe("apiPathEntitlement", () => {
     "/api/v1/workspaces/ws/transfers",
     "/api/v1/workspaces/ws/transfers/",
     "/api/v1/workspaces/ws/%66iles",
+    "/api/v1/workspaces%2Fws/files",
   ])("maps workspace filesystem API %s to filesystem", (path) => {
     expect(apiPathEntitlement(path)).toBe("filesystem");
   });
@@ -54,6 +55,7 @@ describe("apiPathEntitlement", () => {
     "/api/v1/workspaces/ws/namespaces-old",
     "/api/v1/workspaces/ws/transfers-v2",
     "/api/v1/workspaces/ws/%66iles-legacy",
+    "/api%2Fv1/workspaces/ws/files",
     "/api/v1/workspaces/ws/%ZZ",
     "/api/v1/workspaces/ws/files?sort=%ZZ",
     "/api/v1/files",

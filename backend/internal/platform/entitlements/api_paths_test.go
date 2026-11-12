@@ -18,6 +18,7 @@ func TestFilesystemAPIPathEntitlement(t *testing.T) {
 		"/api/v1/workspaces/ws-1/transfers",
 		"/api/v1/workspaces/ws-1/transfers/",
 		"/api/v1/workspaces/ws-1/%66iles",
+		"/api/v1/workspaces%2Fws-1/files",
 	} {
 		t.Run(path, func(t *testing.T) {
 			require.Equal(t, "filesystem", APIPathEntitlement(path))
@@ -31,6 +32,7 @@ func TestFilesystemAPIPathEntitlementRejectsSimilarAndNonWorkspacePaths(t *testi
 		"/api/v1/workspaces/ws-1/namespaces-old",
 		"/api/v1/workspaces/ws-1/transfers-v2",
 		"/api/v1/workspaces/ws-1/%66iles-legacy",
+		"/api%2Fv1/workspaces/ws-1/files",
 		"/api/v1/workspaces/ws-1/%ZZ",
 		"/api/v1/workspaces/ws-1/files?sort=%ZZ",
 		"/api/v1/files",

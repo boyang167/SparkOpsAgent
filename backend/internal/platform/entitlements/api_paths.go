@@ -7,6 +7,10 @@ import (
 
 // APIPathEntitlement maps an HTTP API path to a module key. Empty means no check.
 func APIPathEntitlement(path string) string {
+	rawPath := strings.SplitN(path, "?", 2)[0]
+	if !strings.HasPrefix(rawPath, "/api/v1/") {
+		return ""
+	}
 	normalized, ok := normalizeAPIPath(path)
 	if !ok || !strings.HasPrefix(normalized, "/api/v1/") {
 		return ""
