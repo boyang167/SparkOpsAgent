@@ -9,6 +9,7 @@ import (
 	runtimepersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime/infrastructure/persistence"
 	deployrunpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/deployrun/infrastructure/persistence"
 	deliverypersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/delivery/infrastructure/persistence"
+	filesystempersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
 	govpersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/persistence"
 	identitypersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/identity/infrastructure/persistence"
 	knowledgepersistence "github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge/infrastructure/persistence"
@@ -36,6 +37,7 @@ func AutoMigrate(db *gorm.DB) error {
 		fn   func(*gorm.DB) error
 	}{
 		{"identity", identitypersistence.AutoMigrate},
+		{"filesystem", filesystempersistence.AutoMigrate},
 		{"tenant", tenantpersistence.AutoMigrate},
 		{"governance", govpersistence.AutoMigrate},
 		{"workspace_app", wspersistence.AutoMigrate},

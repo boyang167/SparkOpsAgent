@@ -8,6 +8,14 @@ import (
 
 var ErrInvalidNodeName = errors.New("invalid node name")
 
+type Namespace struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	WorkspaceID    uuid.UUID
+	RootNodeID     *uuid.UUID
+	Status         string
+}
+
 type NodeType string
 
 const (
