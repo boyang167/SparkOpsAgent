@@ -157,7 +157,7 @@ apis:
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/chat/query
 mcp_tools:
   - name: list_kubernetes_clusters
-    description: List Kubernetes clusters available to the current workspace
+    description: List Kubernetes clusters authorized for the current workspace.
     tier: discovery
     permission: project:read
 frontend:
