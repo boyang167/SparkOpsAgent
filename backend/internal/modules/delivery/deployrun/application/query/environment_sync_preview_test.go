@@ -203,13 +203,16 @@ func TestCreateEnvironmentSyncPreviewDoesNotExposeSecretData(t *testing.T) {
 		TargetEnvironmentID: targetID,
 		Projects: []model.EnvironmentSyncProjectOption{{
 			ProjectID: projectID, SyncImage: false, SyncYAML: true,
+			SyncResourceKinds: []string{model.SyncManifestKindSecret},
 		}},
 	})
 	require.NoError(t, err)
 	view := ToEnvironmentSyncPreviewView(preview)
+	foundSecret := false
 	for _, project := range view.Projects {
 		for _, diff := range project.Diffs {
 			if diff.Kind == model.SyncManifestKindSecret {
+				foundSecret = true
 				require.NotContains(t, diff.After, "\ndata:")
 				require.NotContains(t, diff.After, "stringData:")
 				require.NotContains(t, diff.Before, "\ndata:")
@@ -217,4 +220,5 @@ func TestCreateEnvironmentSyncPreviewDoesNotExposeSecretData(t *testing.T) {
 			}
 		}
 	}
+	require.True(t, foundSecret)
 }

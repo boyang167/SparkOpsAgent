@@ -7,12 +7,20 @@ var environmentSyncSelectableKinds = []string{
 	SyncManifestKindDeployment,
 	SyncManifestKindService,
 	SyncManifestKindConfigMap,
+	SyncManifestKindSecret,
+	SyncManifestKindIngress,
+}
+
+var environmentSyncDefaultKinds = []string{
+	SyncManifestKindDeployment,
+	SyncManifestKindService,
+	SyncManifestKindConfigMap,
 	SyncManifestKindIngress,
 }
 
 func AllEnvironmentSyncResourceKinds() []string {
-	out := make([]string, len(environmentSyncSelectableKinds))
-	copy(out, environmentSyncSelectableKinds)
+	out := make([]string, len(environmentSyncDefaultKinds))
+	copy(out, environmentSyncDefaultKinds)
 	return out
 }
 
