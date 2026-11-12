@@ -28,9 +28,34 @@
 
 ## Commit
 
-`669bd1c feat(filesystem): add kernel persistence`
+`3a69cc3 feat(filesystem): add kernel persistence`
 
 ## Concerns
 
 - SQLite 运行时没有 PostgreSQL schema/FK 能力，测试 AutoMigrate 使用 attached `filesystem` 数据库与显式唯一索引；PostgreSQL 仍由 schema 与 SQL migration 提供完整 FK。
 - 当前 Task 2 仅映射 brief 所需 kernel 仓储表，未实现后续 Gate 的 quota、grant、link 功能。
+
+## 审查修复 RED/GREEN
+
+- RED：新增合法 revision 切换、跨 node revision、非法 parent、SaveRevision 冲突回滚测试；首次运行因稳定 sentinel 尚未定义而编译失败。
+- GREEN：增加 revision/parent/blob/replica/persistence 稳定错误；`SetCurrentRevision` 先分别确认 node、revision 及归属，再在事务内允许原子切换。
+- RED：新增 PG constraint 精确映射、ID 冲突不误报名称冲突、driver 错误不泄漏测试；迁移失败包装测试先观察到裸 `sql: database is closed`。
+- GREEN：按 `*pgconn.PgError` 的 Code/ConstraintName 与 SQLite 约束/列精确映射；unknown GORM/driver 错误统一包装 `domain.ErrPersistence`；SaveRevision 对 blob/revision/replica 做明确幂等比较，冲突回滚。
+- RED/GREEN：新增 SQLite cursor 独占边界、root/nested 重名、MoveNode 跨 namespace/非目录 parent 测试；实现 parent 存在性、目录类型、namespace 一致性及 NFC/trim/lower 规范化后通过。
+- RED/GREEN：新增 SQL migration 已应用的 AutoMigrate guard 与失败传播测试；`ShouldRunAutoMigrate` 为 false 时跳过，迁移失败包装为稳定错误。
+
+## 审查修复验证
+
+- `go test ./internal/modules/filesystem/infrastructure/persistence -count=1`：PASS。
+- `go test ./internal/modules/filesystem/infrastructure/persistence ./internal/bootstrap/... -count=1`：PASS。
+- `go test ./internal/modules/filesystem/... -count=1`：PASS。
+- `go test ./migrations/... -count=1`：PASS。
+- `git diff --check`：PASS（仅换行转换提示）。
+- lint：PASS，无诊断。
+- Backend 已重启，PID 为 `10332`。
+
+## 审查修复 Concerns
+
+- 本机无 PostgreSQL DSN，未宣称集成验证；PG 错误转换使用构造的 `*pgconn.PgError` 单测覆盖。
+- SQLite 使用 attached `filesystem` schema 并启用 `foreign_keys=1`；SQLite 不支持跨 attached database FK，测试 helper 保留该局限，SQLite DDL 已尽可能声明本 schema FK 与唯一约束。
+- 本修复仍未实现后续 Gate 功能。

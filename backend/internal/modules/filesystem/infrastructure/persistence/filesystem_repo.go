@@ -3,10 +3,13 @@ package persistence
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+	"golang.org/x/text/unicode/norm"
 	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
@@ -24,10 +27,10 @@ func (r *Repository) CreateNamespace(ctx context.Context, namespace *model.Names
 	if status == "" {
 		status = "ACTIVE"
 	}
-	return r.db.WithContext(ctx).Create(&namespaceRow{
+	return wrapPersistence(r.db.WithContext(ctx).Create(&namespaceRow{
 		ID: namespace.ID, OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID,
 		RootNodeID: namespace.RootNodeID, Status: status, CreatedAt: now, UpdatedAt: now,
-	}).Error
+	}).Error)
 }
 
 func (r *Repository) GetNamespaceByWorkspace(ctx context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
@@ -37,7 +40,7 @@ func (r *Repository) GetNamespaceByWorkspace(ctx context.Context, workspaceID uu
 		return nil, domain.ErrNamespaceNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, wrapPersistence(err)
 	}
 	return &model.Namespace{ID: row.ID, OrganizationID: row.OrganizationID, WorkspaceID: row.WorkspaceID, RootNodeID: row.RootNodeID, Status: row.Status}, nil
 }
@@ -51,7 +54,7 @@ func (r *Repository) CreateNode(ctx context.Context, node *model.Node) error {
 			return domain.ErrNodeNotFound
 		}
 		if err != nil {
-			return err
+			return wrapPersistence(err)
 		}
 	}
 	query := db.Where("namespace_id = ? AND normalized_name = ?", node.NamespaceID, node.NormalizedName)
@@ -64,7 +67,7 @@ func (r *Repository) CreateNode(ctx context.Context, node *model.Node) error {
 	if err := query.First(&existing).Error; err == nil {
 		return domain.ErrNodeNameConflict
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
+		return wrapPersistence(err)
 	}
 	now := time.Now().UTC()
 	err := db.Create(&nodeRow{
@@ -72,10 +75,10 @@ func (r *Repository) CreateNode(ctx context.Context, node *model.Node) error {
 		Name: node.Name, NormalizedName: node.NormalizedName, CurrentRevisionID: node.CurrentRevisionID,
 		State: node.State, OwnerID: node.OwnerID, CreatedAt: now, UpdatedAt: now,
 	}).Error
-	if isUniqueViolation(err) {
-		return domain.ErrNodeNameConflict
+	if conflict := mapUniqueConflict(err); conflict != nil {
+		return conflict
 	}
-	return err
+	return wrapPersistence(err)
 }
 
 func (r *Repository) GetNode(ctx context.Context, namespaceID, nodeID uuid.UUID) (*model.Node, error) {
@@ -85,7 +88,7 @@ func (r *Repository) GetNode(ctx context.Context, namespaceID, nodeID uuid.UUID)
 		return nil, domain.ErrNodeNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, wrapPersistence(err)
 	}
 	return nodeFromRow(row), nil
 }
@@ -105,7 +108,7 @@ func (r *Repository) ListChildren(ctx context.Context, namespaceID uuid.UUID, pa
 	}
 	var rows []nodeRow
 	if err := query.Order("id ASC").Limit(limit + 1).Find(&rows).Error; err != nil {
-		return nil, "", err
+		return nil, "", wrapPersistence(err)
 	}
 	next := ""
 	if len(rows) > limit {
@@ -120,57 +123,119 @@ func (r *Repository) ListChildren(ctx context.Context, namespaceID uuid.UUID, pa
 }
 
 func (r *Repository) SaveRevision(ctx context.Context, revision *model.FileRevision, blob *model.Blob, replica *model.StorageReplica) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return wrapPersistence(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
-		if err := tx.Create(&blobRow{ID: blob.ID, DedupDomain: blob.DedupDomain, SHA256: blob.SHA256, Size: blob.Size, EncryptionKeyRef: blob.EncryptionKeyRef, RefCount: blob.RefCount, State: blob.State, CreatedAt: now}).Error; err != nil {
-			if !isUniqueViolation(err) {
-				return err
+		var existingBlob blobRow
+		blobErr := tx.Where("id = ?", blob.ID).First(&existingBlob).Error
+		if errors.Is(blobErr, gorm.ErrRecordNotFound) {
+			if err := tx.Create(&blobRow{ID: blob.ID, DedupDomain: blob.DedupDomain, SHA256: blob.SHA256, Size: blob.Size, EncryptionKeyRef: blob.EncryptionKeyRef, RefCount: blob.RefCount, State: blob.State, CreatedAt: now}).Error; err != nil {
+				if conflict := mapUniqueConflict(err); conflict != nil {
+					return conflict
+				}
+				return wrapPersistence(err)
 			}
+		} else if blobErr != nil {
+			return wrapPersistence(blobErr)
+		} else if !sameBlob(existingBlob, blob) {
+			return domain.ErrBlobConflict
 		}
-		if err := tx.Create(&revisionRow{ID: revision.ID(), NodeID: revision.NodeID(), RevisionNo: revision.RevisionNo(), BlobID: revision.BlobID(), Size: revision.Size(), MIMEType: revision.MIMEType(), CreatedBy: revision.CreatedBy(), CreatedAt: now}).Error; err != nil {
-			return err
+
+		var existingRevision revisionRow
+		revisionErr := tx.Where("id = ?", revision.ID()).First(&existingRevision).Error
+		if errors.Is(revisionErr, gorm.ErrRecordNotFound) {
+			if err := tx.Create(&revisionRow{ID: revision.ID(), NodeID: revision.NodeID(), RevisionNo: revision.RevisionNo(), BlobID: revision.BlobID(), Size: revision.Size(), MIMEType: revision.MIMEType(), CreatedBy: revision.CreatedBy(), CreatedAt: now}).Error; err != nil {
+				if conflict := mapUniqueConflict(err); conflict != nil {
+					return conflict
+				}
+				return wrapPersistence(err)
+			}
+		} else if revisionErr != nil {
+			return wrapPersistence(revisionErr)
+		} else if !sameRevision(existingRevision, revision) {
+			return domain.ErrRevisionConflict
 		}
-		return tx.Create(&replicaRow{ID: replica.ID, BlobID: replica.BlobID, ProviderID: replica.ProviderID, ObjectKey: replica.ObjectKey, Checksum: replica.Checksum, State: replica.State, CreatedAt: now}).Error
-	})
+
+		var existingReplica replicaRow
+		replicaErr := tx.Where("id = ?", replica.ID).First(&existingReplica).Error
+		if errors.Is(replicaErr, gorm.ErrRecordNotFound) {
+			if err := tx.Create(&replicaRow{ID: replica.ID, BlobID: replica.BlobID, ProviderID: replica.ProviderID, ObjectKey: replica.ObjectKey, Checksum: replica.Checksum, State: replica.State, CreatedAt: now}).Error; err != nil {
+				if conflict := mapUniqueConflict(err); conflict != nil {
+					return conflict
+				}
+				return wrapPersistence(err)
+			}
+		} else if replicaErr != nil {
+			return wrapPersistence(replicaErr)
+		} else if !sameReplica(existingReplica, replica) {
+			return domain.ErrReplicaConflict
+		}
+		return nil
+	}))
 }
 
 func (r *Repository) SetCurrentRevision(ctx context.Context, nodeID, revisionID uuid.UUID) error {
-	result := r.db.WithContext(ctx).Model(&nodeRow{}).
-		Where("id = ? AND current_revision_id IS NULL", nodeID).
-		Where("EXISTS (SELECT 1 FROM filesystem.file_revisions WHERE id = ? AND node_id = ?)", revisionID, nodeID).
-		Update("current_revision_id", revisionID)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
+	return wrapPersistence(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var node nodeRow
-		if errors.Is(r.db.WithContext(ctx).Where("id = ?", nodeID).First(&node).Error, gorm.ErrRecordNotFound) {
+		if err := tx.Where("id = ?", nodeID).First(&node).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 			return domain.ErrNodeNotFound
+		} else if err != nil {
+			return wrapPersistence(err)
 		}
-		return domain.ErrNodeNotFound
-	}
-	return nil
+		var revision revisionRow
+		if err := tx.Where("id = ?", revisionID).First(&revision).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.ErrRevisionNotFound
+		} else if err != nil {
+			return wrapPersistence(err)
+		}
+		if revision.NodeID != nodeID {
+			return domain.ErrRevisionNodeMismatch
+		}
+		if err := tx.Model(&nodeRow{}).Where("id = ?", nodeID).Update("current_revision_id", revisionID).Error; err != nil {
+			return wrapPersistence(err)
+		}
+		return nil
+	}))
 }
 
 func (r *Repository) MoveNode(ctx context.Context, nodeID uuid.UUID, parentID *uuid.UUID, normalizedName string) error {
-	result := r.db.WithContext(ctx).Model(&nodeRow{}).Where("id = ?", nodeID).
-		Updates(map[string]any{"parent_id": parentID, "normalized_name": strings.ToLower(strings.TrimSpace(normalizedName)), "name": normalizedName, "updated_at": time.Now().UTC()})
-	if isUniqueViolation(result.Error) {
-		return domain.ErrNodeNameConflict
-	}
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return domain.ErrNodeNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var node nodeRow
+		if err := tx.Where("id = ?", nodeID).First(&node).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.ErrNodeNotFound
+		} else if err != nil {
+			return wrapPersistence(err)
+		}
+		if parentID != nil {
+			var parent nodeRow
+			if err := tx.Where("id = ?", *parentID).First(&parent).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrParentNotFound
+			} else if err != nil {
+				return wrapPersistence(err)
+			}
+			if parent.NamespaceID != node.NamespaceID {
+				return domain.ErrNamespaceMismatch
+			}
+			if parent.Type != model.NodeTypeDirectory {
+				return domain.ErrParentNotDirectory
+			}
+		}
+		canonical := strings.TrimSpace(norm.NFC.String(normalizedName))
+		if canonical == "" || strings.ContainsAny(canonical, `/\`) {
+			return model.ErrInvalidNodeName
+		}
+		result := tx.Model(&nodeRow{}).Where("id = ?", nodeID).
+			Updates(map[string]any{"parent_id": parentID, "normalized_name": strings.ToLower(canonical), "name": canonical, "updated_at": time.Now().UTC()})
+		if conflict := mapUniqueConflict(result.Error); conflict != nil {
+			return conflict
+		}
+		return wrapPersistence(result.Error)
+	})
 }
 
 func (r *Repository) TrashNode(ctx context.Context, nodeID uuid.UUID) error {
 	result := r.db.WithContext(ctx).Model(&nodeRow{}).Where("id = ?", nodeID).Update("state", model.NodeStateTrashed)
 	if result.Error != nil {
-		return result.Error
+		return wrapPersistence(result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return domain.ErrNodeNotFound
@@ -182,15 +247,82 @@ func nodeFromRow(row nodeRow) *model.Node {
 	return &model.Node{ID: row.ID, NamespaceID: row.NamespaceID, ParentID: row.ParentID, Type: row.Type, Name: row.Name, NormalizedName: row.NormalizedName, CurrentRevisionID: row.CurrentRevisionID, State: row.State, OwnerID: row.OwnerID}
 }
 
-func isUniqueViolation(err error) bool {
+func mapUniqueConflict(err error) error {
 	if err == nil {
-		return false
+		return nil
 	}
-	if errors.Is(err, gorm.ErrDuplicatedKey) {
-		return true
+	constraint := ""
+	message := strings.ToLower(err.Error())
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		constraint = strings.ToLower(pgErr.ConstraintName)
 	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "unique") || strings.Contains(msg, "duplicate") || strings.Contains(msg, "23505")
+	nameConflict := strings.Contains(constraint, "normalized_name") ||
+		strings.Contains(message, "ux_filesystem_nodes_root_name") ||
+		strings.Contains(message, "ux_filesystem_nodes_child_name") ||
+		(strings.Contains(message, "nodes") && strings.Contains(message, "normalized_name"))
+	if nameConflict {
+		return domain.ErrNodeNameConflict
+	}
+	if strings.Contains(constraint, "nodes_pkey") || strings.Contains(message, "nodes.id") {
+		return domain.ErrNodeIDConflict
+	}
+	if strings.Contains(constraint, "file_revisions") || strings.Contains(message, "file_revisions") {
+		return domain.ErrRevisionConflict
+	}
+	if strings.Contains(constraint, "blobs") || strings.Contains(message, "blobs") {
+		return domain.ErrBlobConflict
+	}
+	if strings.Contains(constraint, "storage_replicas") || strings.Contains(message, "storage_replicas") {
+		return domain.ErrReplicaConflict
+	}
+	return nil
+}
+
+func wrapPersistence(err error) error {
+	if err == nil {
+		return nil
+	}
+	if isDomainError(err) {
+		return err
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return domain.ErrPersistence
+	}
+	if conflict := mapUniqueConflict(err); conflict != nil {
+		return conflict
+	}
+	return fmt.Errorf("%w: operation failed", domain.ErrPersistence)
+}
+
+func isDomainError(err error) bool {
+	for _, sentinel := range []error{
+		domain.ErrNodeNameConflict, domain.ErrNodeNotFound, domain.ErrNodeIDConflict,
+		domain.ErrNamespaceNotFound, domain.ErrRevisionNotFound, domain.ErrRevisionConflict,
+		domain.ErrRevisionNodeMismatch, domain.ErrParentNotFound, domain.ErrParentNotDirectory,
+		domain.ErrNamespaceMismatch, domain.ErrBlobConflict, domain.ErrReplicaConflict,
+		domain.ErrPersistence, model.ErrInvalidNodeName,
+	} {
+		if errors.Is(err, sentinel) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameBlob(row blobRow, blob *model.Blob) bool {
+	return row.ID == blob.ID && row.DedupDomain == blob.DedupDomain && row.SHA256 == blob.SHA256 &&
+		row.Size == blob.Size && row.EncryptionKeyRef == blob.EncryptionKeyRef && row.RefCount == blob.RefCount && row.State == blob.State
+}
+
+func sameRevision(row revisionRow, revision *model.FileRevision) bool {
+	return row.ID == revision.ID() && row.NodeID == revision.NodeID() && row.RevisionNo == revision.RevisionNo() &&
+		row.BlobID == revision.BlobID() && row.Size == revision.Size() && row.MIMEType == revision.MIMEType() && row.CreatedBy == revision.CreatedBy()
+}
+
+func sameReplica(row replicaRow, replica *model.StorageReplica) bool {
+	return row.ID == replica.ID && row.BlobID == replica.BlobID && row.ProviderID == replica.ProviderID &&
+		row.ObjectKey == replica.ObjectKey && row.Checksum == replica.Checksum && row.State == replica.State
 }
 
 var _ repository.FilesystemRepository = (*Repository)(nil)
