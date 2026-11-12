@@ -52,7 +52,7 @@ function toLeaves(nodes: MenuTreeVM[]): NavLeafFromMenu[] {
 
 function toKubernetesLeaves(nodes: MenuTreeVM[]): NavLeafFromMenu[] {
   const visiblePaths = new Set(nodes.map((node) => node.path.trim()));
-  const fromMenu = nodes.flatMap((node) => {
+  const fromMenu: NavLeafFromMenu[] = nodes.flatMap((node) => {
     const nested = visibleChildren(node);
     const path = node.path.trim();
     if (nested.length > 0) {
