@@ -18,11 +18,12 @@ import (
 )
 
 type Provider struct {
-	root       string
-	guard      rootGuard
-	digest     func(string) string
-	syncDir    func() error
-	removeTemp func(string) error
+	root        string
+	guard       rootGuard
+	digest      func(string) string
+	syncDir     func() error
+	removeTemp  func(string) error
+	checkRootFn func() error
 }
 
 func New(root string) (*Provider, error) {
@@ -68,6 +69,7 @@ func New(root string) (*Provider, error) {
 	provider.removeTemp = func(path string) error {
 		return provider.guard.remove(filepath.Base(path))
 	}
+	provider.checkRootFn = guard.verify
 	return provider, nil
 }
 
@@ -164,7 +166,7 @@ func (p *Provider) Put(ctx context.Context, req storage.PutRequest) (storage.Obj
 	published = true
 	_ = p.removeTemp(tempPath)
 	if err := p.checkRoot(); err != nil {
-		return storage.ObjectInfo{}, err
+		return storage.ObjectInfo{}, fmt.Errorf("%w: %v", storage.ErrOutcomeUnknown, err)
 	}
 	if err := p.syncDir(); err != nil {
 		return storage.ObjectInfo{}, fmt.Errorf("%w: %v", storage.ErrOutcomeUnknown, err)
@@ -274,7 +276,7 @@ func (p *Provider) Delete(ctx context.Context, objectKey string) error {
 		return err
 	}
 	if err := p.checkRoot(); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", storage.ErrOutcomeUnknown, err)
 	}
 	if err := p.syncDir(); err != nil {
 		return fmt.Errorf("%w: %v", storage.ErrOutcomeUnknown, err)
@@ -318,7 +320,11 @@ func (p *Provider) objectPath(objectKey string) string {
 }
 
 func (p *Provider) checkRoot() error {
-	if err := p.guard.verify(); err != nil {
+	check := p.checkRootFn
+	if check == nil {
+		check = p.guard.verify
+	}
+	if err := check(); err != nil {
 		return storage.ErrInvalidRoot
 	}
 	return nil

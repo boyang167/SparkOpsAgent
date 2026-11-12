@@ -126,6 +126,51 @@ func TestLocalProviderSyncFailureIsOutcomeUnknownAndRetryConverges(t *testing.T)
 	require.Equal(t, int64(7), info.Size)
 }
 
+func TestLocalProviderPutPostPublishFailureIsOutcomeUnknownAndRetryConverges(t *testing.T) {
+	provider := newProvider(t, t.TempDir())
+	var checks int
+	provider.checkRootFn = func() error {
+		checks++
+		if checks >= 4 {
+			return errRootChanged
+		}
+		return nil
+	}
+	newRequest := func() storage.PutRequest {
+		return storage.PutRequest{
+			ObjectKey: "objects/post-publish", Body: bytes.NewReader([]byte("payload")), Size: 7,
+		}
+	}
+	_, err := provider.Put(context.Background(), newRequest())
+	require.ErrorIs(t, err, storage.ErrOutcomeUnknown)
+	provider.checkRootFn = provider.guard.verify
+	_, _, err = provider.Get(context.Background(), storage.GetRequest{ObjectKey: "objects/post-publish"})
+	require.NoError(t, err)
+	_, err = provider.Put(context.Background(), newRequest())
+	require.NoError(t, err)
+}
+
+func TestLocalProviderDeletePostUnlinkFailureIsOutcomeUnknownAndRetryConverges(t *testing.T) {
+	provider := newProvider(t, t.TempDir())
+	_, err := provider.Put(context.Background(), storage.PutRequest{
+		ObjectKey: "objects/post-delete", Body: bytes.NewReader([]byte("payload")), Size: 7,
+	})
+	require.NoError(t, err)
+	var checks int
+	provider.checkRootFn = func() error {
+		checks++
+		if checks >= 4 {
+			return errRootChanged
+		}
+		return nil
+	}
+	err = provider.Delete(context.Background(), "objects/post-delete")
+	require.ErrorIs(t, err, storage.ErrOutcomeUnknown)
+	provider.checkRootFn = provider.guard.verify
+	require.NoError(t, provider.Delete(context.Background(), "objects/post-delete"))
+	require.NoError(t, provider.Delete(context.Background(), "objects/post-delete"))
+}
+
 func TestLocalProviderIgnoresTempRemoveFailureAfterPublish(t *testing.T) {
 	provider := newProvider(t, t.TempDir())
 	provider.removeTemp = func(string) error { return os.ErrPermission }
