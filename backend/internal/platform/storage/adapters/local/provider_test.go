@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,8 +20,7 @@ import (
 )
 
 func TestLocalProviderContract(t *testing.T) {
-	provider, err := New(t.TempDir())
-	require.NoError(t, err)
+	provider := newProvider(t, t.TempDir())
 	contracttest.Run(t, provider)
 }
 
@@ -30,9 +30,8 @@ func TestLocalProviderRejectsSymlinkComponents(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
 		t.Skipf("symlink creation unavailable on this platform: %v", err)
 	}
-	provider, err := New(root)
-	require.NoError(t, err)
-	_, err = provider.Put(t.Context(), storage.PutRequest{
+	provider := newProvider(t, root)
+	_, err := provider.Put(t.Context(), storage.PutRequest{
 		ObjectKey: "link/escaped", Body: bytes.NewReader([]byte("x")), Size: 1,
 	})
 	require.ErrorIs(t, err, storage.ErrInvalidObjectKey)
@@ -41,13 +40,12 @@ func TestLocalProviderRejectsSymlinkComponents(t *testing.T) {
 func TestLocalProviderRejectsSymlinkAtOpaquePath(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
-	provider, err := New(root)
-	require.NoError(t, err)
+	provider := newProvider(t, root)
 	path := provider.objectPath("objects/opaque")
 	if err := os.Symlink(outside, path); err != nil {
 		t.Skipf("symlink creation unavailable on this platform: %v", err)
 	}
-	_, _, err = provider.Get(context.Background(), storage.GetRequest{ObjectKey: "objects/opaque"})
+	_, _, err := provider.Get(context.Background(), storage.GetRequest{ObjectKey: "objects/opaque"})
 	require.ErrorIs(t, err, storage.ErrInvalidObjectKey)
 }
 
@@ -61,23 +59,122 @@ func TestLocalProviderRejectsSymlinkRoot(t *testing.T) {
 	require.ErrorIs(t, err, storage.ErrInvalidRoot)
 }
 
-func TestLocalProviderPublishSyncFailurePropagates(t *testing.T) {
-	provider, err := New(t.TempDir())
+func TestLocalProviderRejectsRootReplacementWithoutTouchingOutside(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	provider := newProvider(t, root)
+	_, err := provider.Put(context.Background(), storage.PutRequest{
+		ObjectKey: "objects/safe", Body: bytes.NewReader([]byte("safe")), Size: 4,
+	})
 	require.NoError(t, err)
-	provider.syncDir = func(string) error { return os.ErrPermission }
+
+	replaced := root + "-old"
+	renameErr := os.Rename(root, replaced)
+	if renameErr != nil {
+		t.Skipf("root replacement is blocked by platform root guard: %v", renameErr)
+	}
+	defer os.Rename(replaced, root)
+	if err := os.Symlink(outside, root); err != nil {
+		t.Skipf("symlink creation unavailable on this platform: %v", err)
+	}
 	_, err = provider.Put(context.Background(), storage.PutRequest{
+		ObjectKey: "objects/escape", Body: bytes.NewReader([]byte("escape")), Size: 6,
+	})
+	require.ErrorIs(t, err, storage.ErrInvalidRoot)
+	_, _, err = provider.Get(context.Background(), storage.GetRequest{ObjectKey: "objects/safe"})
+	require.ErrorIs(t, err, storage.ErrInvalidRoot)
+	_, err = provider.Stat(context.Background(), "objects/safe")
+	require.ErrorIs(t, err, storage.ErrInvalidRoot)
+	require.ErrorIs(t, provider.Delete(context.Background(), "objects/safe"), storage.ErrInvalidRoot)
+	_, err = provider.Copy(context.Background(), "objects/safe", "objects/copy")
+	require.ErrorIs(t, err, storage.ErrInvalidRoot)
+	_, err = os.Stat(filepath.Join(outside, "escape"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestLocalProviderRejectsDigestCollisionByHeader(t *testing.T) {
+	provider := newProvider(t, t.TempDir())
+	provider.digest = func(string) string { return "forced-collision" }
+	_, err := provider.Put(context.Background(), storage.PutRequest{
+		ObjectKey: "logical/one", Body: bytes.NewReader([]byte("one")), Size: 3,
+	})
+	require.NoError(t, err)
+	_, _, err = provider.Get(context.Background(), storage.GetRequest{ObjectKey: "logical/two"})
+	require.ErrorIs(t, err, storage.ErrObjectKeyCollision)
+	_, err = provider.Stat(context.Background(), "logical/two")
+	require.ErrorIs(t, err, storage.ErrObjectKeyCollision)
+	require.ErrorIs(t, provider.Delete(context.Background(), "logical/two"), storage.ErrObjectKeyCollision)
+	_, err = provider.Put(context.Background(), storage.PutRequest{
+		ObjectKey: "logical/two", Body: bytes.NewReader([]byte("two")), Size: 3,
+	})
+	require.ErrorIs(t, err, storage.ErrObjectKeyCollision)
+}
+
+func TestLocalProviderSyncFailureIsOutcomeUnknownAndRetryConverges(t *testing.T) {
+	provider := newProvider(t, t.TempDir())
+	provider.syncDir = func() error { return os.ErrPermission }
+	newRequest := func() storage.PutRequest {
+		return storage.PutRequest{
+			ObjectKey: "objects/uncertain", Body: bytes.NewReader([]byte("payload")), Size: 7,
+		}
+	}
+	_, err := provider.Put(context.Background(), newRequest())
+	require.ErrorIs(t, err, storage.ErrOutcomeUnknown)
+	provider.syncDir = func() error { return nil }
+	info, err := provider.Put(context.Background(), newRequest())
+	require.NoError(t, err)
+	require.Equal(t, int64(7), info.Size)
+}
+
+func TestLocalProviderIgnoresTempRemoveFailureAfterPublish(t *testing.T) {
+	provider := newProvider(t, t.TempDir())
+	provider.removeTemp = func(string) error { return os.ErrPermission }
+	info, err := provider.Put(context.Background(), storage.PutRequest{
+		ObjectKey: "objects/remove-temp", Body: bytes.NewReader([]byte("payload")), Size: 7,
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(7), info.Size)
+	_, _, err = provider.Get(context.Background(), storage.GetRequest{ObjectKey: "objects/remove-temp"})
+	require.NoError(t, err)
+}
+
+func TestLocalProviderGetCloseDoesNotLeaveCancellationGoroutines(t *testing.T) {
+	provider := newProvider(t, t.TempDir())
+	body := []byte("payload")
+	_, err := provider.Put(context.Background(), storage.PutRequest{
+		ObjectKey: "objects/goroutine-check", Body: bytes.NewReader(body), Size: int64(len(body)),
+	})
+	require.NoError(t, err)
+	before := runtime.NumGoroutine()
+	readers := make([]io.ReadCloser, 100)
+	for i := range readers {
+		readers[i], _, err = provider.Get(context.Background(), storage.GetRequest{ObjectKey: "objects/goroutine-check"})
+		require.NoError(t, err)
+	}
+	for _, reader := range readers {
+		require.NoError(t, reader.Close())
+	}
+	require.Eventually(t, func() bool {
+		runtime.GC()
+		return runtime.NumGoroutine() <= before+2
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestLocalProviderPublishSyncFailurePropagates(t *testing.T) {
+	provider := newProvider(t, t.TempDir())
+	provider.syncDir = func() error { return os.ErrPermission }
+	_, err := provider.Put(context.Background(), storage.PutRequest{
 		ObjectKey: "objects/sync-failure", Body: bytes.NewReader([]byte("x")), Size: 1,
 	})
-	require.ErrorIs(t, err, os.ErrPermission)
+	require.ErrorIs(t, err, storage.ErrOutcomeUnknown)
 }
 
 func TestLocalProviderCancellationLeavesNoTemporaryFiles(t *testing.T) {
 	root := t.TempDir()
-	provider, err := New(root)
-	require.NoError(t, err)
+	provider := newProvider(t, root)
 	body := bytes.Repeat([]byte("x"), 4096)
 	ctx, cancel := context.WithCancel(context.Background())
-	_, err = provider.Put(ctx, storage.PutRequest{
+	_, err := provider.Put(ctx, storage.PutRequest{
 		ObjectKey: "objects/cancelled", Body: &localCancelReader{cancel: cancel, data: body}, Size: int64(len(body)),
 	})
 	require.ErrorIs(t, err, context.Canceled)
@@ -119,10 +216,8 @@ func (r *localCancelReader) Read(p []byte) (int, error) {
 
 func TestLocalProviderCrossInstanceConcurrentSamePutIsIdempotent(t *testing.T) {
 	root := t.TempDir()
-	first, err := New(root)
-	require.NoError(t, err)
-	second, err := New(root)
-	require.NoError(t, err)
+	first := newProvider(t, root)
+	second := newProvider(t, root)
 	body := bytes.Repeat([]byte("x"), 4096)
 	var start sync.WaitGroup
 	start.Add(1)
@@ -147,10 +242,8 @@ func TestLocalProviderCrossInstanceConcurrentSamePutIsIdempotent(t *testing.T) {
 
 func TestLocalProviderCrossInstanceConcurrentDifferentPutConflicts(t *testing.T) {
 	root := t.TempDir()
-	first, err := New(root)
-	require.NoError(t, err)
-	second, err := New(root)
-	require.NoError(t, err)
+	first := newProvider(t, root)
+	second := newProvider(t, root)
 	var start sync.WaitGroup
 	start.Add(1)
 	var successes, conflicts atomic.Int32
@@ -172,4 +265,12 @@ func TestLocalProviderCrossInstanceConcurrentDifferentPutConflicts(t *testing.T)
 	require.Eventually(t, func() bool { return successes.Load()+conflicts.Load() == 2 }, time.Second, time.Millisecond)
 	require.Equal(t, int32(1), successes.Load())
 	require.Equal(t, int32(1), conflicts.Load())
+}
+
+func newProvider(t *testing.T, root string) *Provider {
+	t.Helper()
+	provider, err := New(root)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, provider.Close()) })
+	return provider
 }

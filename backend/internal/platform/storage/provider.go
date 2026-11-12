@@ -9,14 +9,17 @@ import (
 )
 
 var (
-	ErrNotFound         = errors.New("storage: object not found")
-	ErrObjectConflict   = errors.New("storage: object conflict")
-	ErrSizeMismatch     = errors.New("storage: size mismatch")
-	ErrChecksumMismatch = errors.New("storage: checksum mismatch")
-	ErrInvalidChecksum  = errors.New("storage: invalid checksum")
-	ErrInvalidObjectKey = errors.New("storage: invalid object key")
-	ErrInvalidRoot      = errors.New("storage: invalid root")
-	ErrInvalidRange     = errors.New("storage: invalid range")
+	ErrNotFound           = errors.New("storage: object not found")
+	ErrObjectConflict     = errors.New("storage: object conflict")
+	ErrSizeMismatch       = errors.New("storage: size mismatch")
+	ErrChecksumMismatch   = errors.New("storage: checksum mismatch")
+	ErrInvalidChecksum    = errors.New("storage: invalid checksum")
+	ErrInvalidObjectKey   = errors.New("storage: invalid object key")
+	ErrObjectKeyCollision = errors.New("storage: object key collision")
+	ErrCorruptObject      = errors.New("storage: corrupt object")
+	ErrInvalidRoot        = errors.New("storage: invalid root")
+	ErrInvalidRange       = errors.New("storage: invalid range")
+	ErrOutcomeUnknown     = errors.New("storage: outcome unknown")
 )
 
 type Provider interface {

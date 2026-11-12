@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -17,8 +18,11 @@ import (
 )
 
 type Provider struct {
-	root    string
-	syncDir func(string) error
+	root       string
+	guard      rootGuard
+	digest     func(string) string
+	syncDir    func() error
+	removeTemp func(string) error
 }
 
 func New(root string) (*Provider, error) {
@@ -46,10 +50,30 @@ func New(root string) (*Provider, error) {
 	if isReparsePoint(absolute) {
 		return nil, storage.ErrInvalidRoot
 	}
-	return &Provider{root: filepath.Clean(absolute), syncDir: syncDirectory}, nil
+	absolute = filepath.Clean(absolute)
+	guard, err := openRoot(absolute)
+	if err != nil {
+		if errors.Is(err, errRootChanged) {
+			return nil, storage.ErrInvalidRoot
+		}
+		return nil, err
+	}
+	provider := &Provider{
+		root: absolute, guard: guard, digest: func(key string) string {
+			sum := sha256.Sum256([]byte(key))
+			return hex.EncodeToString(sum[:])
+		},
+		syncDir: guard.sync,
+	}
+	provider.removeTemp = func(path string) error {
+		return provider.guard.remove(filepath.Base(path))
+	}
+	return provider, nil
 }
 
 func (p *Provider) ID() string { return "local" }
+
+func (p *Provider) Close() error { return p.guard.close() }
 
 func (p *Provider) Capabilities() storage.Capabilities {
 	return storage.Capabilities{RangeRead: true, AtomicPublish: true, VerifiedCopy: true}
@@ -57,6 +81,9 @@ func (p *Provider) Capabilities() storage.Capabilities {
 
 func (p *Provider) Put(ctx context.Context, req storage.PutRequest) (storage.ObjectInfo, error) {
 	if err := ctx.Err(); err != nil {
+		return storage.ObjectInfo{}, err
+	}
+	if err := p.checkRoot(); err != nil {
 		return storage.ObjectInfo{}, err
 	}
 	if req.Body == nil || req.Size < 0 {
@@ -70,12 +97,12 @@ func (p *Provider) Put(ctx context.Context, req storage.PutRequest) (storage.Obj
 		return storage.ObjectInfo{}, err
 	}
 
-	existing, existingErr := p.statPath(ctx, req.ObjectKey, path)
+	existing, _, existingErr := p.statPath(ctx, req.ObjectKey, path)
 	if existingErr != nil && !errors.Is(existingErr, storage.ErrNotFound) {
 		return storage.ObjectInfo{}, existingErr
 	}
 
-	temp, err := os.CreateTemp(p.root, ".storage-*")
+	temp, tempName, err := p.guard.temp()
 	if err != nil {
 		return storage.ObjectInfo{}, err
 	}
@@ -84,10 +111,14 @@ func (p *Provider) Put(ctx context.Context, req storage.PutRequest) (storage.Obj
 	defer func() {
 		_ = temp.Close()
 		if !published {
-			_ = os.Remove(tempPath)
+			_ = p.removeTemp(tempPath)
 		}
 	}()
 
+	_, err = writeHeader(temp, req.ObjectKey)
+	if err != nil {
+		return storage.ObjectInfo{}, err
+	}
 	hash := sha256.New()
 	written, err := copyWithContext(ctx, io.MultiWriter(temp, hash), req.Body)
 	if err != nil {
@@ -112,10 +143,14 @@ func (p *Provider) Put(ctx context.Context, req storage.PutRequest) (storage.Obj
 	if err := temp.Close(); err != nil {
 		return storage.ObjectInfo{}, err
 	}
-	if err := os.Link(tempPath, path); err != nil {
+	if err := p.checkRoot(); err != nil {
+		return storage.ObjectInfo{}, err
+	}
+	objectName := filepath.Base(path)
+	if err := p.guard.link(tempName, objectName); err != nil {
 		if os.IsExist(err) {
-			_ = os.Remove(tempPath)
-			winner, statErr := p.statPath(ctx, req.ObjectKey, path)
+			_ = p.removeTemp(tempPath)
+			winner, _, statErr := p.statPath(ctx, req.ObjectKey, path)
 			if statErr != nil {
 				return storage.ObjectInfo{}, statErr
 			}
@@ -126,18 +161,22 @@ func (p *Provider) Put(ctx context.Context, req storage.PutRequest) (storage.Obj
 		}
 		return storage.ObjectInfo{}, err
 	}
-	if err := os.Remove(tempPath); err != nil {
+	published = true
+	_ = p.removeTemp(tempPath)
+	if err := p.checkRoot(); err != nil {
 		return storage.ObjectInfo{}, err
 	}
-	published = true
-	if err := p.syncDir(p.root); err != nil {
-		return storage.ObjectInfo{}, err
+	if err := p.syncDir(); err != nil {
+		return storage.ObjectInfo{}, fmt.Errorf("%w: %v", storage.ErrOutcomeUnknown, err)
 	}
 	return storage.ObjectInfo{ObjectKey: req.ObjectKey, Size: written, SHA256: checksum}, nil
 }
 
 func (p *Provider) Get(ctx context.Context, req storage.GetRequest) (io.ReadCloser, storage.ObjectInfo, error) {
 	if err := ctx.Err(); err != nil {
+		return nil, storage.ObjectInfo{}, err
+	}
+	if err := p.checkRoot(); err != nil {
 		return nil, storage.ObjectInfo{}, err
 	}
 	if req.Offset < 0 || req.Length < 0 {
@@ -147,14 +186,14 @@ func (p *Provider) Get(ctx context.Context, req storage.GetRequest) (io.ReadClos
 	if err != nil {
 		return nil, storage.ObjectInfo{}, err
 	}
-	info, err := p.statPath(ctx, req.ObjectKey, path)
+	info, payloadOffset, err := p.statPath(ctx, req.ObjectKey, path)
 	if err != nil {
 		return nil, storage.ObjectInfo{}, err
 	}
 	if req.Offset > info.Size || (req.Length > info.Size-req.Offset) {
 		return nil, storage.ObjectInfo{}, storage.ErrInvalidRange
 	}
-	file, err := openObject(path)
+	file, err := p.guard.open(filepath.Base(path))
 	if err != nil {
 		if errors.Is(err, errUnsafePath) {
 			return nil, storage.ObjectInfo{}, storage.ErrInvalidObjectKey
@@ -164,13 +203,34 @@ func (p *Provider) Get(ctx context.Context, req storage.GetRequest) (io.ReadClos
 		}
 		return nil, storage.ObjectInfo{}, err
 	}
-	if _, err := file.Seek(req.Offset, io.SeekStart); err != nil {
+	storedKey, reopenedOffset, err := readHeader(file)
+	if err != nil {
+		_ = file.Close()
+		return nil, storage.ObjectInfo{}, err
+	}
+	if storedKey != req.ObjectKey {
+		_ = file.Close()
+		return nil, storage.ObjectInfo{}, storage.ErrObjectKeyCollision
+	}
+	if reopenedOffset != payloadOffset {
+		_ = file.Close()
+		return nil, storage.ObjectInfo{}, storage.ErrCorruptObject
+	}
+	if req.Offset > int64(^uint64(0)>>1)-payloadOffset {
+		_ = file.Close()
+		return nil, storage.ObjectInfo{}, storage.ErrInvalidRange
+	}
+	if _, err := file.Seek(payloadOffset+req.Offset, io.SeekStart); err != nil {
 		_ = file.Close()
 		return nil, storage.ObjectInfo{}, err
 	}
 	var reader io.Reader = file
 	if req.Length > 0 {
 		reader = io.LimitReader(reader, req.Length)
+	}
+	if err := p.checkRoot(); err != nil {
+		_ = file.Close()
+		return nil, storage.ObjectInfo{}, err
 	}
 	return newContextReadCloser(ctx, reader, file), info, nil
 }
@@ -179,35 +239,54 @@ func (p *Provider) Stat(ctx context.Context, objectKey string) (storage.ObjectIn
 	if err := ctx.Err(); err != nil {
 		return storage.ObjectInfo{}, err
 	}
+	if err := p.checkRoot(); err != nil {
+		return storage.ObjectInfo{}, err
+	}
 	path, err := p.resolve(objectKey)
 	if err != nil {
 		return storage.ObjectInfo{}, err
 	}
-	return p.statPath(ctx, objectKey, path)
+	info, _, err := p.statPath(ctx, objectKey, path)
+	return info, err
 }
 
 func (p *Provider) Delete(ctx context.Context, objectKey string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := p.checkRoot(); err != nil {
+		return err
+	}
 	path, err := p.resolve(objectKey)
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(path); err != nil {
+	if _, _, err := p.statPath(ctx, objectKey, path); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if err := p.guard.remove(filepath.Base(path)); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
 		return err
 	}
-	if err := p.syncDir(p.root); err != nil {
+	if err := p.checkRoot(); err != nil {
 		return err
+	}
+	if err := p.syncDir(); err != nil {
+		return fmt.Errorf("%w: %v", storage.ErrOutcomeUnknown, err)
 	}
 	return nil
 }
 
 func (p *Provider) Copy(ctx context.Context, sourceKey, destinationKey string) (storage.ObjectInfo, error) {
 	if err := ctx.Err(); err != nil {
+		return storage.ObjectInfo{}, err
+	}
+	if err := p.checkRoot(); err != nil {
 		return storage.ObjectInfo{}, err
 	}
 	reader, info, err := p.Get(ctx, storage.GetRequest{ObjectKey: sourceKey})
@@ -235,39 +314,108 @@ func (p *Provider) resolve(objectKey string) (string, error) {
 }
 
 func (p *Provider) objectPath(objectKey string) string {
-	sum := sha256.Sum256([]byte(objectKey))
-	return filepath.Join(p.root, hex.EncodeToString(sum[:])+".object")
+	return filepath.Join(p.root, p.digest(objectKey)+".object")
 }
 
-func (p *Provider) statPath(ctx context.Context, objectKey, path string) (storage.ObjectInfo, error) {
-	if err := ctx.Err(); err != nil {
-		return storage.ObjectInfo{}, err
+func (p *Provider) checkRoot() error {
+	if err := p.guard.verify(); err != nil {
+		return storage.ErrInvalidRoot
 	}
-	file, err := openObject(path)
+	return nil
+}
+
+const (
+	headerMagic   = "SPARKOBJ\x01"
+	maxObjectKey  = 1 << 20
+	headerKeySize = 4
+)
+
+func writeHeader(dst io.Writer, objectKey string) (int64, error) {
+	if len(objectKey) > maxObjectKey {
+		return 0, storage.ErrInvalidObjectKey
+	}
+	if _, err := io.WriteString(dst, headerMagic); err != nil {
+		return 0, err
+	}
+	var size [headerKeySize]byte
+	binary.BigEndian.PutUint32(size[:], uint32(len(objectKey)))
+	if _, err := dst.Write(size[:]); err != nil {
+		return 0, err
+	}
+	if _, err := io.WriteString(dst, objectKey); err != nil {
+		return 0, err
+	}
+	return int64(len(headerMagic) + headerKeySize + len(objectKey)), nil
+}
+
+func readHeader(src io.Reader) (string, int64, error) {
+	magic := make([]byte, len(headerMagic))
+	if _, err := io.ReadFull(src, magic); err != nil {
+		return "", 0, storage.ErrCorruptObject
+	}
+	if string(magic) != headerMagic {
+		return "", 0, storage.ErrCorruptObject
+	}
+	var size [headerKeySize]byte
+	if _, err := io.ReadFull(src, size[:]); err != nil {
+		return "", 0, storage.ErrCorruptObject
+	}
+	keySize := binary.BigEndian.Uint32(size[:])
+	if keySize > maxObjectKey {
+		return "", 0, storage.ErrCorruptObject
+	}
+	key := make([]byte, keySize)
+	if _, err := io.ReadFull(src, key); err != nil {
+		return "", 0, storage.ErrCorruptObject
+	}
+	return string(key), int64(len(headerMagic)+headerKeySize) + int64(keySize), nil
+}
+
+func (p *Provider) statPath(ctx context.Context, objectKey, path string) (storage.ObjectInfo, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return storage.ObjectInfo{}, 0, err
+	}
+	if err := p.checkRoot(); err != nil {
+		return storage.ObjectInfo{}, 0, err
+	}
+	file, err := p.guard.open(filepath.Base(path))
 	if err != nil {
 		if errors.Is(err, errUnsafePath) {
-			return storage.ObjectInfo{}, storage.ErrInvalidObjectKey
+			return storage.ObjectInfo{}, 0, storage.ErrInvalidObjectKey
 		}
 		if errors.Is(err, os.ErrNotExist) {
-			return storage.ObjectInfo{}, storage.ErrNotFound
+			return storage.ObjectInfo{}, 0, storage.ErrNotFound
 		}
-		return storage.ObjectInfo{}, err
+		return storage.ObjectInfo{}, 0, err
 	}
 	fileInfo, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return storage.ObjectInfo{}, err
+		return storage.ObjectInfo{}, 0, err
 	}
 	if !fileInfo.Mode().IsRegular() {
 		_ = file.Close()
-		return storage.ObjectInfo{}, storage.ErrNotFound
+		return storage.ObjectInfo{}, 0, storage.ErrNotFound
 	}
 	defer file.Close()
+	storedKey, payloadOffset, err := readHeader(file)
+	if err != nil {
+		return storage.ObjectInfo{}, 0, err
+	}
+	if storedKey != objectKey {
+		return storage.ObjectInfo{}, 0, storage.ErrObjectKeyCollision
+	}
+	if fileInfo.Size() < payloadOffset {
+		return storage.ObjectInfo{}, 0, storage.ErrCorruptObject
+	}
 	hash := sha256.New()
 	if _, err := io.Copy(hash, &contextReader{ctx: ctx, reader: file}); err != nil {
-		return storage.ObjectInfo{}, err
+		return storage.ObjectInfo{}, 0, err
 	}
-	return storage.ObjectInfo{ObjectKey: objectKey, Size: fileInfo.Size(), SHA256: hex.EncodeToString(hash.Sum(nil))}, nil
+	if err := p.checkRoot(); err != nil {
+		return storage.ObjectInfo{}, 0, err
+	}
+	return storage.ObjectInfo{ObjectKey: objectKey, Size: fileInfo.Size() - payloadOffset, SHA256: hex.EncodeToString(hash.Sum(nil))}, payloadOffset, nil
 }
 
 func copyWithContext(ctx context.Context, dst io.Writer, src io.Reader) (int64, error) {
@@ -307,19 +455,13 @@ type contextReadCloser struct {
 	ctx    context.Context
 	reader io.Reader
 	closer io.Closer
-	done   chan struct{}
+	stop   func() bool
 	once   sync.Once
 }
 
 func newContextReadCloser(ctx context.Context, reader io.Reader, closer io.Closer) *contextReadCloser {
-	result := &contextReadCloser{ctx: ctx, reader: reader, closer: closer, done: make(chan struct{})}
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = result.Close()
-		case <-result.done:
-		}
-	}()
+	result := &contextReadCloser{ctx: ctx, reader: reader, closer: closer}
+	result.stop = context.AfterFunc(ctx, func() { _ = result.closeUnderlying() })
 	return result
 }
 
@@ -331,9 +473,15 @@ func (r *contextReadCloser) Read(p []byte) (int, error) {
 }
 
 func (r *contextReadCloser) Close() error {
+	if r.stop != nil {
+		r.stop()
+	}
+	return r.closeUnderlying()
+}
+
+func (r *contextReadCloser) closeUnderlying() error {
 	var err error
 	r.once.Do(func() {
-		close(r.done)
 		err = r.closer.Close()
 	})
 	return err
