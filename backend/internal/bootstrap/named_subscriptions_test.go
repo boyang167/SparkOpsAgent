@@ -26,6 +26,7 @@ func TestProductionNamedSubscriptionsAreCompleteAndUnique(t *testing.T) {
 		"notification.run-completed":                             "event.RunCompletedName",
 		"notification.workflow-run-completed":                    "workflowevent.WorkflowRunCompletedName",
 		"notification.build-completed":                           "deliveryevent.BuildCompletedName",
+		"notification.project-review-submitted":                  "workspaceevent.ProjectReviewSubmittedName",
 		"governance.workspace-created.bootstrap":                 "integration.EventWorkspaceCreated",
 	}
 	moduleFiles := []string{

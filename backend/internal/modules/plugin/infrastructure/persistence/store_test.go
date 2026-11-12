@@ -119,6 +119,10 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 		"app/(platform)/plugins/kubernetes/clusters/page.tsx",
 		"app/(platform)/plugins/kubernetes/nodes/page.tsx",
 		"app/(platform)/plugins/kubernetes/workloads/page.tsx",
+		"app/(platform)/plugins/kubernetes/openkruise/page.tsx",
+		"app/(platform)/plugins/kubernetes/kruise-rollouts/page.tsx",
+		"app/(platform)/plugins/kubernetes/kubeblocks/page.tsx",
+		"app/(platform)/plugins/kubernetes/kubevela/page.tsx",
 		"app/(platform)/plugins/kubernetes/namespaces/page.tsx",
 		"app/(platform)/plugins/kubernetes/networks/page.tsx",
 		"app/(platform)/plugins/kubernetes/gateway/page.tsx",
@@ -131,10 +135,6 @@ func TestAutoMigrateSeedsBundledKubernetesPlugin(t *testing.T) {
 		"app/(platform)/plugins/kubernetes/diagnosis/page.tsx",
 		"app/(platform)/plugins/kubernetes/chat/page.tsx",
 		"app/(platform)/plugins/kubernetes/cloudtty/page.tsx",
-		"app/(platform)/plugins/kubernetes/openkruise/page.tsx",
-		"app/(platform)/plugins/kubernetes/kruise-rollouts/page.tsx",
-		"app/(platform)/plugins/kubernetes/kubeblocks/page.tsx",
-		"app/(platform)/plugins/kubernetes/kubevela/page.tsx",
 		"app/(platform)/plugins/kubernetes/velaux/page.tsx",
 	}, spec.Frontend.Pages)
 

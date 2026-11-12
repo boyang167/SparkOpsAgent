@@ -4,15 +4,16 @@ import (
 	"context"
 	"testing"
 
+	"github.com/glebarez/sqlite"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 func TestDeploymentRunImageReaderFindByRunIDs(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS delivery").Error)
 	require.NoError(t, db.Exec(`CREATE TABLE delivery.deployment_runs (
 		id TEXT PRIMARY KEY,
 		image_repository TEXT NOT NULL DEFAULT '',

@@ -251,9 +251,26 @@ func TestExecPersistsRecordingWithoutCommandOrCredentials(t *testing.T) {
 	require.Equal(t, "exec", saved.Kind)
 	require.NotNil(t, saved.EndedAt)
 	recording := string(saved.Blob)
-	require.Contains(t, recording, `"stream":"stdout"`)
-	require.Contains(t, recording, `"data":"stdout token is allowed as terminal content\n"`)
-	require.Contains(t, recording, `"stream":"stderr"`)
+	var events []struct {
+		Stream string `json:"stream"`
+		Data   string `json:"data"`
+	}
+	for _, line := range strings.Split(strings.TrimSpace(recording), "\n") {
+		var event struct {
+			Stream string `json:"stream"`
+			Data   string `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(line), &event))
+		events = append(events, event)
+	}
+	require.Contains(t, events, struct {
+		Stream string `json:"stream"`
+		Data   string `json:"data"`
+	}{Stream: "stdout", Data: "stdout token is allowed as terminal content\nstderr line\n"})
+	require.Contains(t, events, struct {
+		Stream string `json:"stream"`
+		Data   string `json:"data"`
+	}{Stream: "exit", Data: "0"})
 	require.NotContains(t, recording, "cat /var/run/secrets/token")
 	require.NotContains(t, recording, "token-secret.example")
 }

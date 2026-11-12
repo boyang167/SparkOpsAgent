@@ -155,6 +155,11 @@ apis:
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/velaux/*
   - method: POST
     path: /api/v1/plugins/kubernetes/clusters/:clusterId/chat/query
+mcp_tools:
+  - name: list_kubernetes_clusters
+    description: List Kubernetes clusters available to the current workspace
+    tier: discovery
+    permission: project:read
 frontend:
   pages:
     - app/(platform)/plugins/kubernetes/page.tsx
