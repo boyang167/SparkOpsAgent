@@ -1,4 +1,4 @@
-.PHONY: run test build seed migrate migrate-up docker-up docker-down docker-logs check-deps run-dev
+.PHONY: run test build seed migrate migrate-up docker-up docker-down docker-logs check-deps run-dev filesystem-up filesystem-test
 
 run:
 	go run ./cmd/server
@@ -32,3 +32,9 @@ docker-down:
 
 docker-logs:
 	docker compose -f deployments/docker/docker-compose.yaml logs -f api
+
+filesystem-up:
+	docker compose -f deployments/docker/docker-compose.yaml up -d --build
+
+filesystem-test:
+	go test -tags=integration ./tests/filesystem/... -count=1

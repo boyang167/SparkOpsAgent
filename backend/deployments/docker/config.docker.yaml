@@ -48,3 +48,22 @@ llm:
     openai:
       api_key: ""
       base_url: https://api.openai.com/v1
+filesystem:
+  transfer_gateway:
+    listen: ":8082"
+    public_url: "http://localhost:8082"
+    capability_audience: "sparkops-file-transfer"
+    capability_secret: "docker-dev-filesystem-secret"
+    max_file_bytes: 21474836480
+    storage_root: "/var/lib/sparkops/filesystem"
+  reconciler:
+    interval: 30s
+    lease_ttl: 90s
+    batch_size: 100
+    gc_grace_period: 168h
+  sftp:
+    enabled: true
+    listen: ":2022"
+    host_key_secret_ref: ""
+    landing_zone: "/var/lib/sparkops/sftp"
+    idle_timeout: 15m

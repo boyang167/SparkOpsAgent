@@ -1,4 +1,4 @@
-.PHONY: test backend-test frontend-test helm-lint seed migrate server
+.PHONY: test backend-test frontend-test helm-lint seed migrate server filesystem-up filesystem-test
 
 test: backend-test frontend-test
 
@@ -34,3 +34,9 @@ docker-up:
 
 docker-down:
 	cd backend/deployments/docker && docker compose down
+
+filesystem-up:
+	docker compose -f backend/deployments/docker/docker-compose.yaml up -d --build
+
+filesystem-test:
+	cd backend && go test -tags=integration ./tests/filesystem/... -count=1

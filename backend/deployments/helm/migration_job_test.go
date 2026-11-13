@@ -32,7 +32,13 @@ func TestMigrationHookBlocksRolloutAndUsesPackagedRunner(t *testing.T) {
 
 	dockerfile, err := os.ReadFile(filepath.Join("..", "docker", "Dockerfile"))
 	require.NoError(t, err)
-	require.Contains(t, string(dockerfile), `-o /migrate-sql ./cmd/migrate-sql`)
+	for _, binary := range []string{
+		"server", "migrate-schema", "migrate-sql",
+		"file-transfer-gateway", "file-worker", "sftp-gateway", "file-reconciler",
+		"migrate-knowledge-inventory", "migrate-knowledge-precopy", "migrate-knowledge-switch",
+	} {
+		require.Contains(t, string(dockerfile), `-o /out/`+binary)
+	}
 	require.Contains(t, string(dockerfile), `COPY migrations ./migrations`)
 }
 
