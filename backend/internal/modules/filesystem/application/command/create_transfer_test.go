@@ -21,6 +21,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	filesystemevent "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
@@ -180,6 +181,16 @@ func TestCreateTransferReplaysAuthoritativeExpiredSession(t *testing.T) {
 	assertTransferSideEffectCounts(t, db, 1, 1, 1, 2)
 }
 
+func TestCreateTransferChecksIdempotencyInsideTransaction(t *testing.T) {
+	db, ns := newTransferTestDB(t)
+	wrapped := &lookupTransactionRepository{FilesystemRepository: persistence.NewRepository(db)}
+
+	_, err := newTransferHandlerWithRepository(db, wrapped).Handle(context.Background(), transferFixture(ns))
+
+	require.NoError(t, err)
+	require.True(t, wrapped.firstLookupInTransaction)
+}
+
 func TestCreateTransferPostgresReplaysAuthoritativeExpiredSessionWhenConfigured(t *testing.T) {
 	db := openTransferPostgres(t)
 	require.NoError(t, persistence.AutoMigrate(db))
@@ -222,6 +233,31 @@ func TestCreateTransferRejectsAuthorizationBoundToDifferentParent(t *testing.T) 
 	require.Contains(t, detail, `"decision":"DENY"`)
 	require.Contains(t, detail, `"reason":"authorization_scope_mismatch"`)
 	assertTransferSideEffectCounts(t, db, 0, 0, 0, 1)
+}
+
+func TestCreateTransferRejectsMismatchedAuthorizationScope(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*CreateTransfer)
+	}{
+		{"workspace", func(cmd *CreateTransfer) { cmd.Authorization.WorkspaceID = uuid.New() }},
+		{"permission", func(cmd *CreateTransfer) { cmd.Authorization.Permission = model.ResourcePermissionRead }},
+		{"unbound allowed", func(cmd *CreateTransfer) {
+			cmd.Authorization = Authorization{Allowed: true, TraceID: cmd.TraceID}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db, ns := newTransferTestDB(t)
+			cmd := transferFixture(ns)
+			test.mutate(&cmd)
+
+			_, err := newTransferHandler(db).Handle(context.Background(), cmd)
+
+			require.ErrorIs(t, err, domain.ErrUnauthorized)
+			assertTransferSideEffectCounts(t, db, 0, 0, 0, 1)
+		})
+	}
 }
 
 func TestCreateTransferRollsBackSessionQuotaReservationAuditAndOutbox(t *testing.T) {
@@ -282,15 +318,34 @@ func TestCreateTransferAuthorizationAndValidationFailuresAreAudited(t *testing.T
 }
 
 func newTransferHandler(db *gorm.DB) *CreateTransferHandler {
+	return newTransferHandlerWithRepository(db, persistence.NewRepository(db))
+}
+
+func newTransferHandlerWithRepository(db *gorm.DB, repo repository.FilesystemRepository) *CreateTransferHandler {
 	registry := sharedevents.NewRegistry()
 	if err := filesystemevent.Register(registry); err != nil {
 		panic(err)
 	}
 	bus := messaging.NewReliableBus(registry, messagingpersistence.NewOutboxStore(db), nil, nil, nil)
 	return NewCreateTransferHandler(
-		persistence.NewRepository(db), postgres.NewTransactor(db), bus,
+		repo, postgres.NewTransactor(db), bus,
 		auditService{store: audit.NewGormStore(db)},
 	)
+}
+
+type lookupTransactionRepository struct {
+	repository.FilesystemRepository
+	lookupChecked            bool
+	firstLookupInTransaction bool
+}
+
+func (r *lookupTransactionRepository) GetTransferByIdempotency(ctx context.Context, workspaceID uuid.UUID, key string) (*model.TransferSession, error) {
+	if !r.lookupChecked {
+		r.lookupChecked = true
+		_, err := postgres.RequireTx(ctx)
+		r.firstLookupInTransaction = err == nil
+	}
+	return r.FilesystemRepository.GetTransferByIdempotency(ctx, workspaceID, key)
 }
 
 func transferFixture(ns *model.Namespace) CreateTransfer {

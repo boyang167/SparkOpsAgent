@@ -44,8 +44,9 @@ func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) (err err
 	ctx = withResourceID(ctx, cmd.NodeID.String())
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename")
 	defer finishAudit(&err)
-	if authErr := requireAllowed(cmd.Authorization, cmd.WorkspaceID, cmd.NodeID, model.ResourcePermissionWrite); authErr != nil {
-		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename", authErr)
+	if !cmd.Allowed {
+		err := authorizationDenied(cmd.Reason)
+		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename", err)
 	}
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
 		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
@@ -128,6 +129,10 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) (err error) 
 	ctx = withAuditDetail(ctx, map[string]any{"source_node_id": cmd.NodeID.String(), "target_parent_id": targetParentID})
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move")
 	defer finishAudit(&err)
+	if !cmd.Allowed {
+		err := authorizationDenied(cmd.Reason)
+		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", err)
+	}
 	err = withinIdempotentMutationWithRetry(ctx, h.tx, func(txCtx context.Context) error {
 		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
 		if err != nil {
@@ -151,15 +156,6 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) (err error) 
 		targetParent := cmd.NewParentID
 		if targetParent == nil {
 			targetParent = ns.RootNodeID
-		}
-		if targetParent == nil {
-			return domain.ErrParentNotFound
-		}
-		if authErr := requireAllowed(cmd.Authorization, cmd.WorkspaceID, cmd.NodeID, model.ResourcePermissionWrite); authErr != nil {
-			return authErr
-		}
-		if authErr := requireAllowed(cmd.Authorization, cmd.WorkspaceID, *targetParent, model.ResourcePermissionWrite); authErr != nil {
-			return authErr
 		}
 		requestHash := mutationRequestHash("move", cmd.WorkspaceID, cmd.NamespaceID, cmd.NodeID, targetParent, name, cmd.ActorID)
 		completed, _, err := claimMutation(txCtx, h.repo, cmd.CommandID, cmd.WorkspaceID, "move", requestHash, &cmd.NodeID, nil)
@@ -212,8 +208,9 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) (err error
 	ctx = withResourceID(ctx, cmd.NodeID.String())
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash")
 	defer finishAudit(&err)
-	if authErr := requireAllowed(cmd.Authorization, cmd.WorkspaceID, cmd.NodeID, model.ResourcePermissionDelete); authErr != nil {
-		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash", authErr)
+	if !cmd.Allowed {
+		err := authorizationDenied(cmd.Reason)
+		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash", err)
 	}
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
 		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
@@ -286,8 +283,9 @@ func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision
 	ctx = withAuditDetail(ctx, map[string]any{"node_id": cmd.NodeID.String(), "revision_id": cmd.RevisionID.String()})
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.revision.restore")
 	defer finishAudit(&err)
-	if authErr := requireAllowed(cmd.Authorization, cmd.WorkspaceID, cmd.NodeID, model.ResourcePermissionWrite); authErr != nil {
-		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.revision.restore", authErr)
+	if !cmd.Allowed {
+		err := authorizationDenied(cmd.Reason)
+		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.revision.restore", err)
 	}
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
 		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)

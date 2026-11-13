@@ -61,6 +61,9 @@ func NewCreateTransferHandler(repo repository.FilesystemRepository, tx postgres.
 }
 
 func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) (out TransferDescriptor, err error) {
+	cmd.ExpiresAt = model.CanonicalTransferExpiry(cmd.ExpiresAt)
+	cmd.Name = strings.TrimSpace(cmd.Name)
+	cmd.SHA256 = strings.ToLower(strings.TrimSpace(cmd.SHA256))
 	ctx = withTraceID(ctx, cmd.TraceID)
 	if cmd.ParentID != nil {
 		ctx = withResourceID(ctx, cmd.ParentID.String())
@@ -87,18 +90,6 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 		return out, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.transfer.create", authErr)
 	}
 	requestHash := transferRequestHash(cmd, *parentID)
-	existing, existingErr := h.repo.GetTransferByIdempotency(ctx, cmd.WorkspaceID, cmd.IdempotencyKey)
-	if existingErr == nil {
-		ctx = withResourceID(ctx, existing.ID().String())
-		if existing.RequestHash() != requestHash {
-			return out, domain.ErrTransferIdempotencyConflict
-		}
-		markMutationReplay(ctx)
-		return descriptor(existing), nil
-	}
-	if !errors.Is(existingErr, domain.ErrTransferNotFound) {
-		return out, existingErr
-	}
 	parent, parentErr := h.repo.GetNode(ctx, cmd.NamespaceID, *parentID)
 	if parentErr != nil {
 		if errors.Is(parentErr, domain.ErrNodeNotFound) {
@@ -116,20 +107,31 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 	sessionID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer:"+cmd.WorkspaceID.String()+":"+cmd.IdempotencyKey))
 	temporaryObjectKey := fmt.Sprintf("transfers/%s/content", sessionID)
 	providerID := cmd.ProviderID
-	expiresAt := model.CanonicalTransferExpiry(cmd.ExpiresAt)
-	session, buildErr := model.NewTransferSession(model.TransferSessionInput{
-		ID: sessionID, WorkspaceID: cmd.WorkspaceID, NamespaceID: cmd.NamespaceID,
-		TargetParentID: parentID, TargetName: cmd.Name, CreatedBy: cmd.ActorID,
-		Protocol: cmd.Protocol, ExpectedSize: cmd.Size, ExpectedSHA256: strings.ToLower(strings.TrimSpace(cmd.SHA256)),
-		IdempotencyKey: cmd.IdempotencyKey, RequestHash: requestHash, TemporaryObjectKey: temporaryObjectKey,
-		ExpiresAt: expiresAt, ProviderID: &providerID, Classification: cmd.Classification,
-	})
-	if buildErr != nil {
-		return out, buildErr
-	}
-	ctx = withResourceID(ctx, session.ID().String())
+	ctx = withResourceID(ctx, sessionID.String())
 	var authoritative *model.TransferSession
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
+		existing, existingErr := h.repo.GetTransferByIdempotency(txCtx, cmd.WorkspaceID, cmd.IdempotencyKey)
+		if existingErr == nil {
+			if existing.RequestHash() != requestHash {
+				return domain.ErrTransferIdempotencyConflict
+			}
+			authoritative = existing
+			markMutationReplay(ctx)
+			return nil
+		}
+		if !errors.Is(existingErr, domain.ErrTransferNotFound) {
+			return existingErr
+		}
+		session, buildErr := model.NewTransferSession(model.TransferSessionInput{
+			ID: sessionID, WorkspaceID: cmd.WorkspaceID, NamespaceID: cmd.NamespaceID,
+			TargetParentID: parentID, TargetName: cmd.Name, CreatedBy: cmd.ActorID,
+			Protocol: cmd.Protocol, ExpectedSize: cmd.Size, ExpectedSHA256: cmd.SHA256,
+			IdempotencyKey: cmd.IdempotencyKey, RequestHash: requestHash, TemporaryObjectKey: temporaryObjectKey,
+			ExpiresAt: cmd.ExpiresAt, ProviderID: &providerID, Classification: cmd.Classification,
+		})
+		if buildErr != nil {
+			return buildErr
+		}
 		createErr := h.repo.CreateTransfer(txCtx, session)
 		if errors.Is(createErr, domain.ErrTransferConflict) {
 			existing, readErr := h.repo.GetTransferByIdempotency(txCtx, cmd.WorkspaceID, cmd.IdempotencyKey)

@@ -32,13 +32,6 @@ type Authorization struct {
 	WorkspaceID uuid.UUID
 	ResourceID  uuid.UUID
 	Permission  model.ResourcePermission
-	Additional  []AuthorizationScope
-}
-
-type AuthorizationScope struct {
-	WorkspaceID uuid.UUID
-	ResourceID  uuid.UUID
-	Permission  model.ResourcePermission
 }
 
 type authorizationError struct{ reason string }
@@ -58,15 +51,10 @@ func requireAllowed(authorization Authorization, workspaceID, resourceID uuid.UU
 	if !authorization.Allowed {
 		return authorizationDenied(authorization.Reason)
 	}
-	scopes := append([]AuthorizationScope{{
-		WorkspaceID: authorization.WorkspaceID,
-		ResourceID:  authorization.ResourceID,
-		Permission:  authorization.Permission,
-	}}, authorization.Additional...)
-	for _, scope := range scopes {
-		if scope.WorkspaceID == workspaceID && scope.ResourceID == resourceID && scope.Permission == permission {
-			return nil
-		}
+	if authorization.WorkspaceID == workspaceID &&
+		authorization.ResourceID == resourceID &&
+		authorization.Permission == permission {
+		return nil
 	}
 	return authorizationDenied("authorization_scope_mismatch")
 }
@@ -339,8 +327,9 @@ func (h *CreateNamespaceHandler) Handle(ctx context.Context, cmd CreateNamespace
 	ctx = withTraceID(ctx, cmd.TraceID)
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.namespace.create")
 	defer finishAudit(&err)
-	if authErr := requireAllowed(cmd.Authorization, cmd.WorkspaceID, cmd.WorkspaceID, model.ResourcePermissionAdmin); authErr != nil {
-		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.namespace.create", authErr)
+	if !cmd.Allowed {
+		err := authorizationDenied(cmd.Reason)
+		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.namespace.create", err)
 	}
 	if existing, lookupErr := h.repo.GetNamespaceByWorkspace(ctx, cmd.WorkspaceID); lookupErr == nil {
 		if existing.OrganizationID != cmd.OrganizationID {
@@ -427,8 +416,9 @@ func (h *CreateDirectoryHandler) Handle(ctx context.Context, cmd CreateDirectory
 	if scopeErr != nil {
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", scopeErr)
 	}
-	if authErr := requireAllowed(cmd.Authorization, cmd.WorkspaceID, parent, model.ResourcePermissionWrite); authErr != nil {
-		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", authErr)
+	if !cmd.Allowed {
+		err := authorizationDenied(cmd.Reason)
+		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", err)
 	}
 	if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", domain.ErrNamespaceMismatch)
@@ -520,6 +510,10 @@ func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (out
 	ctx = withTraceID(ctx, cmd.TraceID)
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local")
 	defer finishAudit(&err)
+	if !cmd.Allowed {
+		err := authorizationDenied(cmd.Reason)
+		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", err)
+	}
 	if cmd.CommandID == uuid.Nil {
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", domain.ErrIdempotencyConflict)
 	}
@@ -535,10 +529,6 @@ func (h *PutLocalFileHandler) Handle(ctx context.Context, cmd PutLocalFile) (out
 		parent = *cmd.ParentID
 	} else if ns.RootNodeID != nil {
 		parent = *ns.RootNodeID
-	}
-	ctx = withResourceID(ctx, parent.String())
-	if authErr := requireAllowed(cmd.Authorization, cmd.WorkspaceID, parent, model.ResourcePermissionWrite); authErr != nil {
-		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", authErr)
 	}
 	if len(cmd.SHA256) != 64 {
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.file.put_local", errors.New("invalid checksum"))
