@@ -7,12 +7,14 @@ import { governance } from "@sparkops/web-sdk";
 import type { MenuTreeVM } from "@sparkops/contracts/governance";
 import { NavGroup } from "@/components/layout/NavGroup";
 import {
+  filterSidebarNavEntries,
   menuTreeToNavEntries,
   type SidebarNavEntry,
 } from "@/components/layout/menu-tree-nav";
 import {
-  KNOWLEDGE_NAV_ITEM,
+  FILES_NAV_ITEM,
   WORKPLACE_NAV_ITEM,
+  filterBusinessDirectNavItems,
   filterBusinessNavGroups,
 } from "@/components/layout/nav-tree";
 import { useShellContext } from "@/components/layout/shell-context";
@@ -34,6 +36,11 @@ const icons = {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M4 5.5A2.5 2.5 0 016.5 3H11v16H6.5A2.5 2.5 0 004 21.5v-16Z" strokeLinejoin="round" />
       <path d="M20 5.5A2.5 2.5 0 0017.5 3H13v16h4.5a2.5 2.5 0 012.5 2.5v-16Z" strokeLinejoin="round" />
+    </svg>
+  ),
+  filesystem: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M4 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V6z" strokeLinejoin="round" />
     </svg>
   ),
   application: (
@@ -108,7 +115,13 @@ function directNavLink(
       className={`nav-group-trigger ${active ? "nav-group-trigger-active" : ""}`}
       aria-current={active ? "page" : undefined}
     >
-      <span className="nav-icon">{item.href === WORKPLACE_NAV_ITEM.href ? icons.dashboard : icons.knowledge}</span>
+      <span className="nav-icon">
+        {item.href === WORKPLACE_NAV_ITEM.href
+          ? icons.dashboard
+          : item.href === FILES_NAV_ITEM.href
+            ? icons.filesystem
+            : icons.knowledge}
+      </span>
       <span className="flex-1 text-left">{item.label}</span>
     </Link>
   );
@@ -167,12 +180,12 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
       items: group.items,
       defaultCollapsed: group.defaultCollapsed ?? false,
     }));
-    if (!entitlements || entitlements.knowledge) {
+    for (const item of filterBusinessDirectNavItems(entitlements)) {
       entries.push({
         type: "link",
-        id: KNOWLEDGE_NAV_ITEM.href,
-        href: KNOWLEDGE_NAV_ITEM.href,
-        label: KNOWLEDGE_NAV_ITEM.label,
+        id: item.href,
+        href: item.href,
+        label: item.label,
       });
     }
     entries.push(...settings.map((group) => ({
@@ -188,7 +201,11 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
     [entitlements],
   );
 
-  const entries = dynamicEntries ?? fallbackEntries;
+  const rawEntries = dynamicEntries ?? fallbackEntries;
+  const entries = useMemo(
+    () => filterSidebarNavEntries(rawEntries, entitlements),
+    [rawEntries, entitlements],
+  );
 
   return (
     <>

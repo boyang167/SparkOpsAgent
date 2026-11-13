@@ -7,6 +7,10 @@ describe("resolveRouteVisitMeta", () => {
       label: "知识库",
       group: "知识库",
     });
+    expect(resolveRouteVisitMeta("/files")).toEqual({
+      label: "文件",
+      group: "文件",
+    });
     expect(resolveRouteVisitMeta("/cronjobs")).toEqual({
       label: "定时构建",
       group: "产品交付",

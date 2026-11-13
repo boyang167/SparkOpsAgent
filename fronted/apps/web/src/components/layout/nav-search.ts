@@ -1,7 +1,7 @@
 import {
   ADMIN_NAV_SECTIONS,
   BUSINESS_NAV_TREE,
-  KNOWLEDGE_NAV_ITEM,
+  BUSINESS_DIRECT_NAV_ITEMS,
   PLATFORM_OPS_NAV_TREE,
 } from "./nav-tree";
 import type { WorkspaceEntitlementsVM } from "@sparkops/contracts/platform";
@@ -34,12 +34,11 @@ export function buildNavSearchItems(options?: {
       items.push({ href: item.href, label: item.label, group: group.label });
     }
   }
-  if (!entitlements || isPathEntitled(KNOWLEDGE_NAV_ITEM.href, entitlements)) {
-    items.push({
-      href: KNOWLEDGE_NAV_ITEM.href,
-      label: KNOWLEDGE_NAV_ITEM.label,
-      group: "知识库",
-    });
+  for (const direct of BUSINESS_DIRECT_NAV_ITEMS) {
+    if (!entitlements || isPathEntitled(direct.href, entitlements)) {
+      const group = direct.href === "/knowledge" ? "知识库" : direct.label;
+      items.push({ href: direct.href, label: direct.label, group });
+    }
   }
 
   if (showAdmin) {

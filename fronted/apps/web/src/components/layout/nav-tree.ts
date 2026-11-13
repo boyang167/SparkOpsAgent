@@ -7,7 +7,7 @@ export interface NavLeafConfig {
   /** 同一聚合入口覆盖的其他页面路径，用于保持导航激活态 */
   activeHrefs?: string[];
   /** 所需功能模块，未设置则始终可见 */
-  entitlement?: "agent" | "knowledge" | "delivery" | "k8s" | "observability" | "mcp";
+  entitlement?: "agent" | "knowledge" | "delivery" | "filesystem" | "k8s" | "observability" | "mcp";
 }
 
 export interface NavGroupConfig {
@@ -27,6 +27,27 @@ export const KNOWLEDGE_NAV_ITEM: NavLeafConfig = {
   label: "知识库",
   entitlement: "knowledge",
 };
+export const FILES_NAV_ITEM: NavLeafConfig = {
+  href: "/files",
+  label: "文件",
+  entitlement: "filesystem",
+};
+
+/** 业务控制台顶层直达入口（知识库、文件等），按 entitlement 过滤 */
+export const BUSINESS_DIRECT_NAV_ITEMS: NavLeafConfig[] = [
+  KNOWLEDGE_NAV_ITEM,
+  FILES_NAV_ITEM,
+];
+
+export function filterBusinessDirectNavItems(
+  entitlements?: WorkspaceEntitlementsVM,
+): NavLeafConfig[] {
+  if (!entitlements) return BUSINESS_DIRECT_NAV_ITEMS;
+  return BUSINESS_DIRECT_NAV_ITEMS.filter((item) => {
+    if (!item.entitlement) return true;
+    return entitlements[item.entitlement];
+  });
+}
 
 /** 业务控制台按用户任务分组，知识库作为顶层直达入口。 */
 export const BUSINESS_NAV_TREE: NavGroupConfig[] = [

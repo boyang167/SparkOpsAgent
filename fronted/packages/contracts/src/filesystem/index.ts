@@ -63,7 +63,7 @@ export const CreateTransferCommandSchema = z.object({
   size: z.number().int().nonnegative(),
   sha256: z.string().optional(),
   classification: TransferClassificationSchema.optional().default("INTERNAL"),
-  provider_id: z.string().uuid(),
+  provider_id: z.string().uuid().optional(),
   expires_at: z.string().datetime().optional(),
 });
 

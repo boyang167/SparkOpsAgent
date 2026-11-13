@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { BUSINESS_NAV_TREE, KNOWLEDGE_NAV_ITEM } from "./nav-tree";
+import { DEFAULT_ENTITLEMENTS } from "./entitlements";
+import { buildNavSearchItems } from "./nav-search";
+import {
+  BUSINESS_NAV_TREE,
+  FILES_NAV_ITEM,
+  KNOWLEDGE_NAV_ITEM,
+  filterBusinessDirectNavItems,
+} from "./nav-tree";
 
 describe("business navigation", () => {
   it("uses the product delivery information architecture", () => {
@@ -34,5 +41,25 @@ describe("business navigation", () => {
       label: "知识库",
       entitlement: "knowledge",
     });
+  });
+
+  it("exposes files as a direct entitled entry", () => {
+    expect(FILES_NAV_ITEM).toEqual({
+      href: "/files",
+      label: "文件",
+      entitlement: "filesystem",
+    });
+  });
+
+  it("hides files navigation when filesystem entitlement is disabled", () => {
+    const items = filterBusinessDirectNavItems({
+      ...DEFAULT_ENTITLEMENTS,
+      filesystem: false,
+    });
+    expect(items.some((item) => item.href === "/files")).toBe(false);
+    const search = buildNavSearchItems({
+      entitlements: { ...DEFAULT_ENTITLEMENTS, filesystem: false },
+    });
+    expect(search.some((item) => item.href === "/files")).toBe(false);
   });
 });

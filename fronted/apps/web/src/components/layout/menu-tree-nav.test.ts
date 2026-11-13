@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { MenuTreeVM } from "@sparkops/contracts/governance";
-import { isNavHrefActive, menuTreeToNavEntries, menuTreeToNavGroups } from "./menu-tree-nav";
+import { DEFAULT_ENTITLEMENTS } from "./entitlements";
+import {
+  filterSidebarNavEntries,
+  isNavHrefActive,
+  menuTreeToNavEntries,
+  menuTreeToNavGroups,
+} from "./menu-tree-nav";
 
 function node(partial: Partial<MenuTreeVM> & Pick<MenuTreeVM, "path" | "title">): MenuTreeVM {
   return {
@@ -25,6 +31,18 @@ describe("menuTreeToNavGroups", () => {
     expect(menuTreeToNavEntries(tree)).toEqual([
       { type: "link", id: "/knowledge", href: "/knowledge", label: "知识库" },
     ]);
+  });
+
+  it("drops files menu links when filesystem entitlement is disabled", () => {
+    const tree = [
+      node({ path: "/files", title: "文件", sort: 96 }),
+    ];
+    const entries = menuTreeToNavEntries(tree);
+    const filtered = filterSidebarNavEntries(entries, {
+      ...DEFAULT_ENTITLEMENTS,
+      filesystem: false,
+    });
+    expect(filtered).toEqual([]);
   });
 
   it("promotes kubernetes plugin root so children appear as sidebar items", () => {

@@ -1,4 +1,6 @@
 import type { MenuTreeVM } from "@sparkops/contracts/governance";
+import type { WorkspaceEntitlementsVM } from "@sparkops/contracts/platform";
+import { isPathEntitled } from "@/components/layout/entitlements";
 import { KUBERNETES_SECTIONS } from "@/modules/plugins/kubernetes/kubernetes-section-nav";
 
 export type NavGroupFromMenu = {
@@ -283,6 +285,40 @@ export function menuTreeToNavGroups(tree: MenuTreeVM[]): NavGroupFromMenu[] {
     .filter((entry): entry is { type: "group" } & NavGroupFromMenu => entry.type === "group")
     .map(({ type: _type, ...group }) => group)
     .filter((group) => group.items.length > 0);
+}
+
+function filterNavLeaves(
+  leaves: NavLeafFromMenu[],
+  entitlements: WorkspaceEntitlementsVM,
+): NavLeafFromMenu[] {
+  return leaves
+    .map((leaf) => {
+      if (leaf.children?.length) {
+        const children = filterNavLeaves(leaf.children, entitlements);
+        if (children.length === 0) return null;
+        return { ...leaf, children };
+      }
+      return isPathEntitled(leaf.href, entitlements) ? leaf : null;
+    })
+    .filter((leaf): leaf is NavLeafFromMenu => leaf !== null);
+}
+
+/** 按工作区模块授权过滤治理菜单生成的侧栏项 */
+export function filterSidebarNavEntries(
+  entries: SidebarNavEntry[],
+  entitlements?: WorkspaceEntitlementsVM,
+): SidebarNavEntry[] {
+  if (!entitlements) return entries;
+  return entries
+    .map((entry) => {
+      if (entry.type === "link") {
+        return isPathEntitled(entry.href, entitlements) ? entry : null;
+      }
+      const items = filterNavLeaves(entry.items, entitlements);
+      if (items.length === 0) return null;
+      return { ...entry, items };
+    })
+    .filter((entry): entry is SidebarNavEntry => entry !== null);
 }
 
 export function isNavHrefActive(

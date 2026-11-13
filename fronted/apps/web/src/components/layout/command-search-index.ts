@@ -8,6 +8,7 @@ export type CommandSearchKind =
   | "agent"
   | "workflow"
   | "knowledge"
+  | "filesystem"
   | "build"
   | "product"
   | "cluster";
@@ -79,7 +80,12 @@ export function buildStaticCommandItems(options: {
     entitlements: options.entitlements,
   }).map((item) => ({
     ...item,
-    kind: "menu" as const,
+    kind: item.href.startsWith("/files")
+      ? ("filesystem" as const)
+      : item.href.startsWith("/knowledge")
+        ? ("knowledge" as const)
+        : ("menu" as const),
+    keywords: item.href.startsWith("/files") ? "files 文件 上传 下载" : undefined,
   }));
 
   return [...buildQuickActions(options), ...menuItems];
@@ -142,6 +148,7 @@ export function groupCommandResults(items: CommandSearchItem[]) {
     "agent",
     "workflow",
     "knowledge",
+    "filesystem",
     "build",
     "product",
     "cluster",
@@ -154,6 +161,7 @@ export function groupCommandResults(items: CommandSearchItem[]) {
     agent: "智能体",
     workflow: "工作流",
     knowledge: "知识库",
+    filesystem: "文件",
     build: "构建",
     product: "产品",
     cluster: "集群",
@@ -177,6 +185,7 @@ export const COMMAND_KIND_LABELS: Record<CommandSearchKind, string> = {
   agent: "Agent",
   workflow: "工作流",
   knowledge: "知识库",
+  filesystem: "文件",
   build: "构建",
   product: "产品",
   cluster: "集群",
