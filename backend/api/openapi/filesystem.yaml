@@ -320,6 +320,101 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /api/v1/workspaces/{wsId}/transfers:
+    post:
+      tags: [filesystem]
+      summary: Create a transfer session
+      operationId: createFilesystemTransfer
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTransferRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/TransferSessionCreated"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/transfers/{sessionId}:
+    get:
+      tags: [filesystem]
+      summary: Get transfer session status and parts
+      operationId: getFilesystemTransfer
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/SessionID"
+      responses:
+        "200":
+          $ref: "#/components/responses/TransferSessionResponse"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      tags: [filesystem]
+      summary: Abort a transfer session
+      operationId: abortFilesystemTransfer
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Transfer aborted or already aborted
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
 components:
   parameters:
     WorkspaceID:
@@ -338,6 +433,13 @@ components:
         format: uuid
     RevisionID:
       name: revisionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SessionID:
+      name: sessionId
       in: path
       required: true
       schema:
@@ -495,6 +597,132 @@ components:
           nullable: true
         name:
           type: string
+    TransferStatus:
+      type: string
+      enum:
+        - INITIATED
+        - UPLOADING
+        - PAUSED
+        - VERIFYING
+        - SCANNING
+        - COMMITTING
+        - COMPLETED
+        - FAILED
+        - REJECTED
+        - ABORTED
+        - EXPIRED
+    TransferProtocol:
+      type: string
+      enum: [DIRECT, MULTIPART]
+    TransferClassification:
+      type: string
+      enum: [PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED]
+    CreateTransferRequest:
+      type: object
+      additionalProperties: false
+      required: [name, protocol, size, provider_id]
+      properties:
+        namespace_id:
+          type: string
+          format: uuid
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+          minLength: 1
+        protocol:
+          $ref: "#/components/schemas/TransferProtocol"
+        size:
+          type: integer
+          minimum: 0
+        sha256:
+          type: string
+        classification:
+          $ref: "#/components/schemas/TransferClassification"
+        provider_id:
+          type: string
+          format: uuid
+        expires_at:
+          type: string
+          format: date-time
+    TransferPart:
+      type: object
+      required: [part_number, offset, size]
+      properties:
+        part_number:
+          type: integer
+          minimum: 1
+        offset:
+          type: integer
+          minimum: 0
+        size:
+          type: integer
+          minimum: 1
+        etag:
+          type: string
+        checksum:
+          type: string
+        upload_url:
+          type: string
+          format: uri
+    TransferSession:
+      type: object
+      required:
+        - session_id
+        - workspace_id
+        - namespace_id
+        - target_name
+        - status
+        - protocol
+        - expected_size
+        - part_size
+        - total_parts
+        - expires_at
+        - parts
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        namespace_id:
+          type: string
+          format: uuid
+        target_parent_id:
+          type: string
+          format: uuid
+          nullable: true
+        target_name:
+          type: string
+        status:
+          $ref: "#/components/schemas/TransferStatus"
+        protocol:
+          $ref: "#/components/schemas/TransferProtocol"
+        expected_size:
+          type: integer
+        expected_sha256:
+          type: string
+        part_size:
+          type: integer
+        total_parts:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+        error_code:
+          type: string
+        upload_url:
+          type: string
+          format: uri
+        capability_token:
+          type: string
+        parts:
+          type: array
+          items:
+            $ref: "#/components/schemas/TransferPart"
     SuccessEnvelope:
       type: object
       required: [code, message, trace_id]
@@ -576,6 +804,28 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/SuccessEnvelope"
+    TransferSessionCreated:
+      description: Transfer session created
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/SuccessEnvelope"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/TransferSession"
+    TransferSessionResponse:
+      description: Transfer session details
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/SuccessEnvelope"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/TransferSession"
     InvalidRequest:
       description: Invalid request or idempotency key
       content:
@@ -631,4 +881,4 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
 
-# File content upload and download are intentionally deferred to the G2 Transfer Gateway.
+# File content upload and download bodies are served by the G2 Transfer Gateway; control-plane transfer routes manage sessions only.

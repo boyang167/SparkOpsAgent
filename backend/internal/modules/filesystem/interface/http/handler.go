@@ -30,6 +30,14 @@ import (
 
 const maxJSONBodyBytes = 64 << 10
 
+type TransferOptions struct {
+	Create  func(context.Context, command.CreateTransfer) (command.TransferDescriptor, error)
+	Get     func(context.Context, query.GetTransfer) (query.GetTransferResult, error)
+	Abort   func(context.Context, command.AbortTransfer) error
+	Peek    func(context.Context, uuid.UUID) (*model.TransferSession, error)
+	Gateway TransferGatewayView
+}
+
 type Handler struct {
 	namespaceForWorkspace func(context.Context, uuid.UUID) (*model.Namespace, error)
 	getNode               func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
@@ -43,6 +51,11 @@ type Handler struct {
 	restoreRevision       func(context.Context, command.RestoreRevision) error
 	authorizeResource     func(context.Context, resourceauth.Request) resourceauth.Decision
 	audit                 audit.Logger
+	createTransfer        func(context.Context, command.CreateTransfer) (command.TransferDescriptor, error)
+	getTransfer           func(context.Context, query.GetTransfer) (query.GetTransferResult, error)
+	abortTransfer         func(context.Context, command.AbortTransfer) error
+	peekTransfer          func(context.Context, uuid.UUID) (*model.TransferSession, error)
+	transferGatewayView   TransferGatewayView
 }
 
 func NewHandler(
@@ -57,8 +70,9 @@ func NewHandler(
 	restore *command.RestoreRevisionHandler,
 	authorizer *resourceauth.Service,
 	logger audit.Logger,
+	transfers *TransferOptions,
 ) *Handler {
-	return &Handler{
+	handler := &Handler{
 		namespaceForWorkspace: repo.GetNamespaceByWorkspace,
 		getNode:               repo.GetNode,
 		listChildren: func(ctx context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, limit int, cursor string) ([]model.Node, string, error) {
@@ -76,6 +90,14 @@ func NewHandler(
 		authorizeResource: authorizer.Authorize,
 		audit:             logger,
 	}
+	if transfers != nil {
+		handler.createTransfer = transfers.Create
+		handler.getTransfer = transfers.Get
+		handler.abortTransfer = transfers.Abort
+		handler.peekTransfer = transfers.Peek
+		handler.transferGatewayView = transfers.Gateway
+	}
+	return handler
 }
 
 func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.HandlerFunc, members authz.WorkspaceMemberChecker, permissions authz.PermissionChecker, h *Handler) {
@@ -94,6 +116,9 @@ func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.Ha
 	base.DELETE("/files/:nodeId", authz.RequirePermission(permissions, authz.PermFileDelete), requireIdempotencyKey(), h.TrashNode)
 	base.GET("/files/:nodeId/revisions", authz.RequirePermission(permissions, authz.PermFileRead), h.ListRevisions)
 	base.POST("/files/:nodeId/revisions/:revisionId/restore", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.RestoreRevision)
+	base.POST("/transfers", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.CreateTransfer)
+	base.GET("/transfers/:sessionId", authz.RequirePermission(permissions, authz.PermFileRead), h.GetTransfer)
+	base.DELETE("/transfers/:sessionId", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.AbortTransfer)
 }
 
 func (h *Handler) auditMiddlewareDenial() gin.HandlerFunc {
@@ -678,6 +703,17 @@ func filesystemError(c *gin.Context, err error) {
 		httpx.Fail(c, "FILESYSTEM_CONFLICT", "filesystem operation conflict", http.StatusConflict)
 	case errors.Is(err, domain.ErrQuotaExceeded):
 		httpx.Fail(c, "FILESYSTEM_QUOTA_EXCEEDED", "filesystem quota exceeded", http.StatusUnprocessableEntity)
+	case errors.Is(err, domain.ErrTransferNotFound):
+		httpx.Fail(c, "FILESYSTEM_NOT_FOUND", "filesystem resource not found", http.StatusNotFound)
+	case errors.Is(err, domain.ErrTransferIdempotencyConflict), errors.Is(err, domain.ErrTransferConflict),
+		errors.Is(err, domain.ErrTransferVersionConflict), errors.Is(err, domain.ErrTransferStatusConflict):
+		httpx.Fail(c, "FILESYSTEM_CONFLICT", "filesystem operation conflict", http.StatusConflict)
+	case errors.Is(err, domain.ErrTransferExpired):
+		httpx.Fail(c, "FILESYSTEM_UNSUPPORTED_OPERATION", "filesystem operation is unsupported", http.StatusUnprocessableEntity)
+	case errors.Is(err, model.ErrInvalidTransfer), errors.Is(err, model.ErrInvalidTransferSize),
+		errors.Is(err, model.ErrInvalidTransferChecksum), errors.Is(err, model.ErrInvalidTransferProtocol),
+		errors.Is(err, model.ErrInvalidTransferName), errors.Is(err, model.ErrInvalidTransferExpiry):
+		httpx.Fail(c, "FILESYSTEM_INVALID_REQUEST", "invalid request", http.StatusBadRequest)
 	case errors.Is(err, domain.ErrUnsupportedNodeType):
 		httpx.Fail(c, "FILESYSTEM_UNSUPPORTED_OPERATION", "filesystem operation is unsupported", http.StatusUnprocessableEntity)
 	case errors.Is(err, domain.ErrParentNotFound), errors.Is(err, domain.ErrParentNotDirectory), errors.Is(err, domain.ErrDirectoryCycle), errors.Is(err, model.ErrInvalidNodeName):

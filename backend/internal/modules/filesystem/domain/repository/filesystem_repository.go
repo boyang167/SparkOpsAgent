@@ -92,6 +92,7 @@ type FilesystemRepository interface {
 	ReserveTransferQuota(context.Context, uuid.UUID, int64, int64) (uuid.UUID, error)
 	CreateQuotaReservation(context.Context, QuotaReservation) error
 	CommitQuotaReservation(context.Context, uuid.UUID, uuid.UUID) error
+	ReleaseQuotaReservation(context.Context, uuid.UUID, uuid.UUID) error
 	GetTransferByID(context.Context, uuid.UUID) (*model.TransferSession, error)
 	GetTransferByIdempotency(context.Context, uuid.UUID, string) (*model.TransferSession, error)
 	LockTransfer(context.Context, uuid.UUID) (*model.TransferSession, error)

@@ -9,6 +9,8 @@ export * as governance from "./governance";
 export * as integration from "./integration";
 export * as workflow from "./workflow";
 export * as knowledge from "./knowledge";
+export * as filesystem from "./filesystem";
+export type { TransferProgress } from "./filesystem";
 export * as notification from "./notification";
 export * as delivery from "./delivery";
 export * as cluster from "./cluster";

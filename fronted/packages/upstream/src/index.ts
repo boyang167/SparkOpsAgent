@@ -23,6 +23,8 @@ export { createWorkflowUpstream } from "./workflow";
 export type { WorkflowUpstream } from "./workflow";
 export { createKnowledgeUpstream } from "./knowledge";
 export type { KnowledgeUpstream } from "./knowledge";
+export { createFilesystemUpstream } from "./filesystem";
+export type { FilesystemUpstream } from "./filesystem";
 export { createNotificationUpstream } from "./notification";
 export type { NotificationUpstream } from "./notification";
 export { createDeliveryUpstream } from "./delivery";

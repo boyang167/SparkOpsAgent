@@ -195,6 +195,10 @@ func transferRequestHash(cmd CreateTransfer, parentID uuid.UUID) string {
 	)
 }
 
+func DescriptorFromSession(session *model.TransferSession) TransferDescriptor {
+	return descriptor(session)
+}
+
 func descriptor(session *model.TransferSession) TransferDescriptor {
 	partSize := defaultPartSize
 	if session.Protocol() == model.TransferProtocolDirect || session.ExpectedSize() < partSize {

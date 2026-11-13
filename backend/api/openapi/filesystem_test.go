@@ -38,6 +38,8 @@ func TestFilesystemOpenAPIPathsMatchHTTPContract(t *testing.T) {
 		"/api/v1/workspaces/{wsId}/files/{nodeId}/copy":                           "post",
 		"/api/v1/workspaces/{wsId}/files/{nodeId}/revisions":                      "get",
 		"/api/v1/workspaces/{wsId}/files/{nodeId}/revisions/{revisionId}/restore": "post",
+		"/api/v1/workspaces/{wsId}/transfers":                                     "post",
+		"/api/v1/workspaces/{wsId}/transfers/{sessionId}":                         "get",
 	}
 	for path, method := range expected {
 		require.Contains(t, rootPaths, path)
@@ -51,7 +53,7 @@ func TestFilesystemOpenAPIPathsMatchHTTPContract(t *testing.T) {
 	specText := strings.ToLower(string(filesystemRaw))
 	require.NotContains(t, specText, "application/octet-stream")
 	require.NotContains(t, specText, "format: binary")
-	require.Contains(t, specText, "deferred to the g2 transfer gateway")
+	require.Contains(t, specText, "g2 transfer gateway")
 }
 
 func TestFilesystemOpenAPIIdempotencyAndLocalRefs(t *testing.T) {
@@ -95,6 +97,9 @@ func TestFilesystemRoutesDeclareImplementedStableErrors(t *testing.T) {
 		"DELETE /api/v1/workspaces/{wsId}/files/{nodeId}":                              {"400", "401", "403", "404", "409", "422", "500", "503"},
 		"GET /api/v1/workspaces/{wsId}/files/{nodeId}/revisions":                       {"400", "401", "403", "404", "422", "500", "503"},
 		"POST /api/v1/workspaces/{wsId}/files/{nodeId}/revisions/{revisionId}/restore": {"400", "401", "403", "404", "409", "422", "500", "503"},
+		"POST /api/v1/workspaces/{wsId}/transfers":                                     {"400", "401", "403", "404", "409", "415", "422", "500", "503"},
+		"GET /api/v1/workspaces/{wsId}/transfers/{sessionId}":                        {"400", "401", "403", "404", "422", "500", "503"},
+		"DELETE /api/v1/workspaces/{wsId}/transfers/{sessionId}":                     {"400", "401", "403", "404", "409", "422", "500", "503"},
 	}
 	for route, statuses := range expected {
 		parts := strings.SplitN(route, " ", 2)
@@ -185,7 +190,7 @@ func TestFilesystemSpecificationExactlyMatchesRouter(t *testing.T) {
 	filesystemhttp.RegisterRoutes(engine, pass, pass, openAPIMembers{}, openAPIPermissions{}, &filesystemhttp.Handler{})
 	actual := map[string]bool{}
 	for _, route := range engine.Routes() {
-		path := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(route.Path, ":wsId", "{wsId}"), ":nodeId", "{nodeId}"), ":revisionId", "{revisionId}")
+		path := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(route.Path, ":wsId", "{wsId}"), ":nodeId", "{nodeId}"), ":revisionId", "{revisionId}"), ":sessionId", "{sessionId}")
 		actual[route.Method+" "+path] = true
 	}
 	require.Equal(t, spec, actual)

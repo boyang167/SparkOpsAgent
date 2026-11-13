@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	resourceauth "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/authorization"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/capability"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/subscriber"
@@ -78,6 +79,14 @@ func (m *Module) Register(c *appctx.Container) error {
 	); err != nil {
 		return fmt.Errorf("subscribe filesystem workspace bootstrap: %w", err)
 	}
+	publicURL, secret, audience := transferGatewayDefaults(c)
+	issuer, issuerErr := capability.NewIssuer(secret, audience)
+	if issuerErr != nil {
+		return fmt.Errorf("filesystem transfer capability issuer: %w", issuerErr)
+	}
+	createTransfer := command.NewCreateTransferHandler(repo, c.Transactor, c.EventBus, c.AuditLogger)
+	getTransfer := query.NewGetTransferHandler(repo)
+	abortTransfer := command.NewAbortTransferHandler(repo, c.Transactor)
 	handler := filesystemhttp.NewHandler(
 		repo,
 		query.NewListChildrenHandler(repo),
@@ -90,6 +99,13 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewRestoreRevisionHandler(repo, c.Transactor, c.EventBus, c.AuditLogger),
 		resourceAuthorizer,
 		c.AuditLogger,
+		&filesystemhttp.TransferOptions{
+			Create: createTransfer.Handle,
+			Get:    getTransfer.Handle,
+			Abort:  abortTransfer.Handle,
+			Peek:   repo.GetTransferByID,
+			Gateway: filesystemhttp.NewTransferGatewayView(publicURL, issuer),
+		},
 	)
 	filesystemhttp.RegisterRoutes(
 		c.Engine,

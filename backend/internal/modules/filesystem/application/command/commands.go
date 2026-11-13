@@ -47,6 +47,10 @@ func (authorizationError) Is(target error) bool { return target == domain.ErrRes
 
 func authorizationDenied(reason string) error { return authorizationError{reason: reason} }
 
+func RequireResourceAllowed(authorization Authorization, workspaceID, resourceID uuid.UUID, permission model.ResourcePermission) error {
+	return requireAllowed(authorization, workspaceID, resourceID, permission)
+}
+
 func requireAllowed(authorization Authorization, workspaceID, resourceID uuid.UUID, permission model.ResourcePermission) error {
 	if !authorization.Allowed {
 		return authorizationDenied(authorization.Reason)

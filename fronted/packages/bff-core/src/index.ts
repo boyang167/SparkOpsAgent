@@ -30,6 +30,8 @@ import {
   type WorkflowUpstream,
   createKnowledgeUpstream,
   type KnowledgeUpstream,
+  createFilesystemUpstream,
+  type FilesystemUpstream,
   createNotificationUpstream,
   type NotificationUpstream,
   createDeliveryUpstream,
@@ -69,6 +71,7 @@ export interface BffContext {
     integration: IntegrationUpstream;
     workflow: WorkflowUpstream;
     knowledge: KnowledgeUpstream;
+    filesystem: FilesystemUpstream;
     notification: NotificationUpstream;
     delivery: DeliveryUpstream;
     cluster: ClusterUpstream;
@@ -374,6 +377,7 @@ function buildBffContext(input: {
       integration: createIntegrationUpstream(baseOptions),
       workflow: createWorkflowUpstream(baseOptions),
       knowledge: createKnowledgeUpstream(baseOptions),
+      filesystem: createFilesystemUpstream(baseOptions),
       notification: createNotificationUpstream(baseOptions),
       delivery: createDeliveryUpstream(baseOptions),
       cluster: createClusterUpstream(baseOptions),

@@ -160,6 +160,10 @@ paths:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1files~1{nodeId}~1revisions"
   /api/v1/workspaces/{wsId}/files/{nodeId}/revisions/{revisionId}/restore:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1files~1{nodeId}~1revisions~1{revisionId}~1restore"
+  /api/v1/workspaces/{wsId}/transfers:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1transfers"
+  /api/v1/workspaces/{wsId}/transfers/{sessionId}:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1transfers~1{sessionId}"
 
 components:
   securitySchemes:

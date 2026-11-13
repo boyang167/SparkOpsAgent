@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./identity": "./src/identity.ts",
     "./plugin": "./src/plugin.ts",
-    "./plugin-kubernetes": "./src/plugin-kubernetes.ts"
+    "./plugin-kubernetes": "./src/plugin-kubernetes.ts",
+    "./filesystem": "./src/filesystem.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit"
