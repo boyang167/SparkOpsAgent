@@ -34,7 +34,15 @@ type Config struct {
 }
 
 type FilesystemConfig struct {
-	TransferGateway TransferGatewayConfig `yaml:"transfer_gateway"`
+	TransferGateway TransferGatewayConfig      `yaml:"transfer_gateway"`
+	Reconciler      FilesystemReconcilerConfig `yaml:"reconciler"`
+}
+
+type FilesystemReconcilerConfig struct {
+	Interval      time.Duration `yaml:"interval"`
+	LeaseTTL      time.Duration `yaml:"lease_ttl"`
+	BatchSize     int           `yaml:"batch_size"`
+	GCGracePeriod time.Duration `yaml:"gc_grace_period"`
 }
 
 type TransferGatewayConfig struct {
@@ -403,6 +411,34 @@ func (c *Config) applyEnvOverrides() error {
 		}
 		c.Deploy.ReconcileInterval = duration
 	}
+	if v := os.Getenv("FILESYSTEM_RECONCILER_INTERVAL"); v != "" {
+		duration, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("FILESYSTEM_RECONCILER_INTERVAL: %w", err)
+		}
+		c.Filesystem.Reconciler.Interval = duration
+	}
+	if v := os.Getenv("FILESYSTEM_RECONCILER_LEASE_TTL"); v != "" {
+		duration, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("FILESYSTEM_RECONCILER_LEASE_TTL: %w", err)
+		}
+		c.Filesystem.Reconciler.LeaseTTL = duration
+	}
+	if v := os.Getenv("FILESYSTEM_RECONCILER_BATCH_SIZE"); v != "" {
+		batchSize, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("FILESYSTEM_RECONCILER_BATCH_SIZE: %w", err)
+		}
+		c.Filesystem.Reconciler.BatchSize = batchSize
+	}
+	if v := os.Getenv("FILESYSTEM_RECONCILER_GC_GRACE_PERIOD"); v != "" {
+		duration, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("FILESYSTEM_RECONCILER_GC_GRACE_PERIOD: %w", err)
+		}
+		c.Filesystem.Reconciler.GCGracePeriod = duration
+	}
 	return nil
 }
 
@@ -493,6 +529,18 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Filesystem.TransferGateway.StorageRoot == "" {
 		c.Filesystem.TransferGateway.StorageRoot = "./data/filesystem"
+	}
+	if c.Filesystem.Reconciler.Interval == 0 {
+		c.Filesystem.Reconciler.Interval = 30 * time.Second
+	}
+	if c.Filesystem.Reconciler.LeaseTTL == 0 {
+		c.Filesystem.Reconciler.LeaseTTL = 90 * time.Second
+	}
+	if c.Filesystem.Reconciler.BatchSize == 0 {
+		c.Filesystem.Reconciler.BatchSize = 100
+	}
+	if c.Filesystem.Reconciler.GCGracePeriod == 0 {
+		c.Filesystem.Reconciler.GCGracePeriod = 168 * time.Hour
 	}
 }
 

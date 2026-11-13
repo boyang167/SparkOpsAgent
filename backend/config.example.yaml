@@ -59,6 +59,11 @@ llm:
       api_key: ""
       base_url: https://api.openai.com/v1
 filesystem:
+  reconciler:
+    interval: 30s
+    lease_ttl: 90s
+    batch_size: 100
+    gc_grace_period: 168h
   transfer_gateway:
     listen: ":8082"
     public_url: "http://localhost:8082"
