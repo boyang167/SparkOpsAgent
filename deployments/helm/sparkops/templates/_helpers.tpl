@@ -64,3 +64,16 @@ app.kubernetes.io/component: web
 {{- define "sparkops.web.fullname" -}}
 {{- printf "%s-web" (include "sparkops.fullname" .) }}
 {{- end }}
+
+{{- define "sparkops.filesystem.fullname" -}}
+{{- printf "%s-%s" (include "sparkops.fullname" .root) .component | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "sparkops.filesystem.selectorLabels" -}}
+{{ include "sparkops.selectorLabels" .root }}
+app.kubernetes.io/component: {{ .component }}
+{{- end }}
+
+{{- define "sparkops.filesystem.secretName" -}}
+{{- default (printf "%s-secrets" (include "sparkops.fullname" .)) .Values.filesystem.existingSecret }}
+{{- end }}

@@ -1,0 +1,76 @@
+{{- if .Values.filesystem.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sparkops.filesystem.fullname" (dict "root" . "component" "file-reconciler") }}
+  labels:
+    {{- include "sparkops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: file-reconciler
+spec:
+  replicas: {{ .Values.fileReconciler.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "sparkops.filesystem.selectorLabels" (dict "root" . "component" "file-reconciler") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sparkops.filesystem.selectorLabels" (dict "root" . "component" "file-reconciler") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "sparkops.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "sparkops.filesystem.selectorLabels" (dict "root" . "component" "file-reconciler") | nindent 14 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: file-reconciler
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          command: ["/app/bin/file-reconciler"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          envFrom:
+            - secretRef:
+                name: {{ include "sparkops.filesystem.secretName" . }}
+            {{- range .Values.filesystem.providerSecretRefs }}
+            - secretRef:
+                name: {{ . | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.fileReconciler.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

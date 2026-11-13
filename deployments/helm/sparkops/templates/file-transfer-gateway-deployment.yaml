@@ -1,0 +1,93 @@
+{{- if .Values.filesystem.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sparkops.filesystem.fullname" (dict "root" . "component" "file-transfer-gateway") }}
+  labels:
+    {{- include "sparkops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: file-transfer-gateway
+spec:
+  replicas: {{ .Values.fileTransferGateway.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "sparkops.filesystem.selectorLabels" (dict "root" . "component" "file-transfer-gateway") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sparkops.filesystem.selectorLabels" (dict "root" . "component" "file-transfer-gateway") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "sparkops.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "sparkops.filesystem.selectorLabels" (dict "root" . "component" "file-transfer-gateway") | nindent 14 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: file-transfer-gateway
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          command: ["/app/bin/file-transfer-gateway"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8082
+          env:
+            - name: FILESYSTEM_MAX_FILE_BYTES
+              value: {{ .Values.filesystem.maxFileBytes | quote }}
+          envFrom:
+            - secretRef:
+                name: {{ include "sparkops.filesystem.secretName" . }}
+            {{- range .Values.filesystem.providerSecretRefs }}
+            - secretRef:
+                name: {{ . | quote }}
+            {{- end }}
+          readinessProbe:
+            tcpSocket:
+              port: http
+          livenessProbe:
+            tcpSocket:
+              port: http
+          resources:
+            {{- toYaml .Values.fileTransferGateway.resources | nindent 12 }}
+          volumeMounts:
+            - name: filesystem-data
+              mountPath: /var/lib/sparkops/filesystem
+      volumes:
+        - name: filesystem-data
+          {{- if .Values.filesystem.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.filesystem.persistence.existingClaim }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,19 @@
+{{- if and .Values.filesystem.enabled .Values.filesystemPdb.enabled }}
+{{- range $component := list "file-transfer-gateway" "file-worker" "sftp-gateway" "file-reconciler" }}
+{{- if or (ne $component "sftp-gateway") $.Values.sftpGateway.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "sparkops.filesystem.fullname" (dict "root" $ "component" $component) }}
+  labels:
+    {{- include "sparkops.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  minAvailable: {{ $.Values.filesystemPdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "sparkops.filesystem.selectorLabels" (dict "root" $ "component" $component) | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}

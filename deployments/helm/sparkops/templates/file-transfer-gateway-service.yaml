@@ -1,0 +1,18 @@
+{{- if .Values.filesystem.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sparkops.filesystem.fullname" (dict "root" . "component" "file-transfer-gateway") }}
+  labels:
+    {{- include "sparkops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: file-transfer-gateway
+spec:
+  type: {{ .Values.fileTransferGateway.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.fileTransferGateway.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "sparkops.filesystem.selectorLabels" (dict "root" . "component" "file-transfer-gateway") | nindent 4 }}
+{{- end }}

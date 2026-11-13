@@ -1,0 +1,18 @@
+{{- if and .Values.filesystem.enabled .Values.sftpGateway.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sparkops.filesystem.fullname" (dict "root" . "component" "sftp-gateway") }}
+  labels:
+    {{- include "sparkops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sftp-gateway
+spec:
+  type: {{ .Values.sftpGateway.service.type }}
+  ports:
+    - name: sftp
+      port: {{ .Values.sftpGateway.service.port }}
+      targetPort: sftp
+      protocol: TCP
+  selector:
+    {{- include "sparkops.filesystem.selectorLabels" (dict "root" . "component" "sftp-gateway") | nindent 4 }}
+{{- end }}

@@ -16,6 +16,38 @@ api:
     minReplicas: 2
     maxReplicas: 20
 
+filesystem:
+  enabled: true
+  maxFileBytes: 21474836480
+  providerSecretRefs: []
+  networkPolicy:
+    enabled: true
+
+fileTransferGateway:
+  replicaCount: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+
+fileWorker:
+  replicaCount: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 20
+
+sftpGateway:
+  enabled: true
+  replicaCount: 2
+
+fileReconciler:
+  replicaCount: 2
+
+filesystemPdb:
+  enabled: true
+  minAvailable: 1
+
 web:
   upstreamUrl: http://sparkops-api:8080
   autoscaling:

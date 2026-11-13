@@ -1,0 +1,23 @@
+{{- if and .Values.filesystem.enabled .Values.fileWorker.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "sparkops.filesystem.fullname" (dict "root" . "component" "file-worker") }}
+  labels:
+    {{- include "sparkops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: file-worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "sparkops.filesystem.fullname" (dict "root" . "component" "file-worker") }}
+  minReplicas: {{ .Values.fileWorker.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.fileWorker.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.fileWorker.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
