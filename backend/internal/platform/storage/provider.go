@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"time"
 )
 
 var (
@@ -21,6 +22,8 @@ var (
 	ErrInvalidRange        = errors.New("storage: invalid range")
 	ErrOutcomeUnknown      = errors.New("storage: outcome unknown")
 	ErrUnsupportedPlatform = errors.New("storage: unsupported platform")
+	ErrMultipartNotFound   = errors.New("storage: multipart upload not found")
+	ErrInvalidPart         = errors.New("storage: invalid multipart part")
 )
 
 type Provider interface {
@@ -50,6 +53,34 @@ type ObjectInfo struct {
 	ObjectKey string
 	Size      int64
 	SHA256    string
+}
+
+type MultipartUpload struct {
+	UploadID  string
+	ObjectKey string
+}
+
+type CompletedPart struct {
+	PartNumber int
+	ETag       string
+}
+
+type UploadedPart struct {
+	PartNumber int
+	ETag       string
+	Size       int64
+}
+
+type MultipartProvider interface {
+	CreateMultipart(ctx context.Context, objectKey string, size int64) (MultipartUpload, error)
+	ListParts(ctx context.Context, uploadID string) ([]UploadedPart, error)
+	PresignPart(ctx context.Context, uploadID string, partNumber int, expires time.Duration) (string, error)
+	CompleteMultipart(ctx context.Context, uploadID string, parts []CompletedPart) (ObjectInfo, error)
+	AbortMultipart(ctx context.Context, uploadID string) error
+}
+
+type PresignProvider interface {
+	PresignGet(ctx context.Context, objectKey string, expires time.Duration) (string, error)
 }
 
 func SHA256(data []byte) string {
