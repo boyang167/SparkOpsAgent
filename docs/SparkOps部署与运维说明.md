@@ -127,3 +127,10 @@ freeze writes
 `artifacts/filesystem-load-report.md` 与 JSON。报告不得提交环境 Token 或含敏感
 地址的原始日志；只有目标或等价容量环境报告可作为 20 GiB、200 并发和元数据
 分页 SLO 的发布证据。
+
+## v1.0 发布状态
+
+截至 2026-11-13，Chart、后端测试、前端类型检查和文件系统集成夹具已通过；
+目标环境容量、Knowledge 真库回滚、告警触发及 PITR RPO/RTO 尚未执行。运维人员
+不得仅依据镜像或 Helm 安装成功批准正式发布。当前阻塞项和签署条件见
+`docs/verification/unified-file-infrastructure-v1.0.md`。

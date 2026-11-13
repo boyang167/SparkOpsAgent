@@ -52,3 +52,7 @@ Prometheus 指标覆盖传输、字节、失败率、状态耗时、Scanner、�
 ## 验收边界
 
 代码、Chart 和测试通过不等同于生产发布证据。20 GiB 断点续传、200 并发、100 TB 元数据分布、Knowledge 真库迁移/回滚及 RPO/RTO 必须在目标或等价容量环境实测；缺少环境时在验证文档中标记 SKIP。
+
+截至 2026-11-13，生产候选架构与测试脚手架已完成，但上述现场硬条件仍为
+SKIP，v1.0 尚未获得正式发布签署。权威状态见
+`docs/verification/unified-file-infrastructure-v1.0.md`。
