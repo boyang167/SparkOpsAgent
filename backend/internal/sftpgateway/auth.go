@@ -35,22 +35,20 @@ func (UnconfiguredTokenValidator) ValidateSFTPPassword(context.Context, string, 
 
 // StaticTokenValidator maps a fixed token to a principal (tests and local dev).
 type StaticTokenValidator struct {
-	Token      string
-	Principal  Principal
+	Token     string
+	Principal Principal
 }
 
-func (v StaticTokenValidator) ValidateSFTPPassword(_ context.Context, username, password string) (Principal, error) {
+func (p Principal) bound() bool {
+	return p.OrganizationID != uuid.Nil && p.WorkspaceID != uuid.Nil && p.ActorID != uuid.Nil
+}
+
+func (v StaticTokenValidator) ValidateSFTPPassword(_ context.Context, _, password string) (Principal, error) {
 	if password == "" || password != v.Token {
 		return Principal{}, ErrAuthFailed
 	}
-	p := v.Principal
-	if username != "" {
-		if ws, err := uuid.Parse(username); err == nil {
-			p.WorkspaceID = ws
-		}
-	}
-	if p.OrganizationID == uuid.Nil || p.WorkspaceID == uuid.Nil || p.ActorID == uuid.Nil {
+	if !v.Principal.bound() {
 		return Principal{}, ErrInvalidPrincipal
 	}
-	return p, nil
+	return v.Principal, nil
 }

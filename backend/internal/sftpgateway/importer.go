@@ -2,9 +2,13 @@ package sftpgateway
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -16,6 +20,8 @@ type BeginUploadRequest struct {
 	Principal   Principal
 	SessionPath string
 	RelPath     string
+	Size        int64
+	SHA256      string
 }
 
 // CompleteUploadRequest completes a landing-zone upload after the file is closed.
@@ -62,29 +68,53 @@ func NewLandingImporter(control TransferControlPort, principal Principal, sessio
 	}
 }
 
-func (i *LandingImporter) OnFileClosed(ctx context.Context, relPath string, size int64) error {
+func (i *LandingImporter) OnFileClosed(ctx context.Context, relPath string) error {
 	if i == nil || i.control == nil {
-		return nil
+		return ErrControlUnavailable
 	}
-	req := CompleteUploadRequest{
-		Principal:   i.principal,
-		SessionPath: i.sessionRoot,
-		RelPath:     relPath,
-		Size:        size,
+	rel := cleanSFTPPath(relPath)
+	if rel == "" || rel == ".." || strings.HasPrefix(rel, "../") {
+		return ErrPathEscape
 	}
-	return i.control.CompleteUpload(ctx, req)
-}
-
-func (i *LandingImporter) OnFileOpen(ctx context.Context, relPath string) error {
-	if i == nil || i.control == nil {
-		return nil
+	size, sum, err := i.hashRel(rel)
+	if err != nil {
+		return err
 	}
 	req := BeginUploadRequest{
 		Principal:   i.principal,
 		SessionPath: i.sessionRoot,
-		RelPath:     relPath,
+		RelPath:     rel,
+		Size:        size,
+		SHA256:      sum,
 	}
-	return i.control.BeginUpload(ctx, req)
+	if err := i.control.BeginUpload(ctx, req); err != nil {
+		return err
+	}
+	return i.control.CompleteUpload(ctx, CompleteUploadRequest{
+		Principal:   req.Principal,
+		SessionPath: req.SessionPath,
+		RelPath:     req.RelPath,
+		Size:        req.Size,
+		SHA256:      req.SHA256,
+	})
+}
+
+func (i *LandingImporter) hashRel(rel string) (int64, string, error) {
+	vfs, err := NewVirtualFS(i.sessionRoot)
+	if err != nil {
+		return 0, "", err
+	}
+	file, err := vfs.Open(rel)
+	if err != nil {
+		return 0, "", err
+	}
+	defer file.Close()
+	digest := sha256.New()
+	size, err := io.Copy(digest, file)
+	if err != nil {
+		return 0, "", err
+	}
+	return size, hex.EncodeToString(digest.Sum(nil)), nil
 }
 
 // SessionLandingDir builds an isolated directory for one SFTP connection.

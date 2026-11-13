@@ -140,7 +140,7 @@ type sessionPrincipalKey struct{}
 
 func principalFromSession(sess glssh.Session) (Principal, error) {
 	if v := sess.Context().Value(sessionPrincipalKey{}); v != nil {
-		if p, ok := v.(Principal); ok && p.WorkspaceID != uuid.Nil {
+		if p, ok := v.(Principal); ok && p.bound() {
 			return p, nil
 		}
 	}
@@ -154,6 +154,9 @@ func NewFromConfig(cfg *config.Config) (*Server, error) {
 	sftpCfg := cfg.Filesystem.SFTP
 	if !sftpCfg.Enabled {
 		return nil, fmt.Errorf("%w: sftp gateway disabled", ErrInvalidGatewayConfig)
+	}
+	if pathsOverlap(sftpCfg.LandingZone, cfg.Filesystem.TransferGateway.StorageRoot) {
+		return nil, fmt.Errorf("%w: landing zone overlaps provider storage", ErrInvalidGatewayConfig)
 	}
 	signer, err := LoadHostKey(sftpCfg.HostKeySecretRef)
 	if err != nil {

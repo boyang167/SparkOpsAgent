@@ -41,34 +41,21 @@ type landingWriter struct {
 	*os.File
 	importer *LandingImporter
 	rel      string
-	size     int64
-}
-
-func (w *landingWriter) WriteAt(p []byte, off int64) (int, error) {
-	n, err := w.File.WriteAt(p, off)
-	w.size += int64(n)
-	return n, err
 }
 
 func (w *landingWriter) Close() error {
-	err := w.File.Close()
-	if err != nil {
+	if err := w.File.Close(); err != nil {
 		return err
 	}
-	if w.importer != nil {
-		return w.importer.OnFileClosed(context.Background(), w.rel, w.size)
+	if w.importer == nil {
+		return nil
 	}
-	return nil
+	return w.importer.OnFileClosed(context.Background(), w.rel)
 }
 
 func (h *sessionHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 	switch r.Method {
 	case "Open":
-		if h.importer != nil {
-			if err := h.importer.OnFileOpen(context.Background(), r.Filepath); err != nil {
-				return nil, err
-			}
-		}
 		f, err := h.fs.OpenFile(r.Filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 		if err != nil {
 			return nil, err

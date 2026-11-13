@@ -94,6 +94,21 @@ func pathCleanSegments(name string) string {
 	return strings.Join(out, "/")
 }
 
+func pathsOverlap(a, b string) bool {
+	if strings.TrimSpace(a) == "" || strings.TrimSpace(b) == "" {
+		return false
+	}
+	aa, err := filepath.Abs(a)
+	if err != nil {
+		return false
+	}
+	bb, err := filepath.Abs(b)
+	if err != nil {
+		return false
+	}
+	return withinRoot(aa, bb) || withinRoot(bb, aa)
+}
+
 func withinRoot(root, target string) bool {
 	root = filepath.Clean(root)
 	target = filepath.Clean(target)
