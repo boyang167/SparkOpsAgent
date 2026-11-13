@@ -1,15 +1,16 @@
 # G1 Unified File Infrastructure 验收证据
 
-> 状态：**PASS**。Copy 并发修复已在被测实现提交 `63e6fba` 上通过 fresh 验收；Backend `/ready` fresh HTTP 200。
+> 状态：**PASS**。当前被测实现提交的完整 G1 fresh 验收矩阵通过；Backend `/ready` fresh HTTP 200。
 
 ## 验收上下文
 
-- 验收时间：2026-11-13 08:54（UTC+8）
+- 验收时间：2026-11-13 10:17（UTC+8）
 - 工作树：`A:\21-Agent\SparkOpsAgent\.worktrees\unified-file-infrastructure`
-- 验收执行时被测实现提交 / verified implementation commit：`63e6fba866f5f39c3b24c05e0b96c41182d93456`
-- 被测实现提交 subject：`fix(filesystem): retry copy transaction conflicts`
+- 验收执行时被测实现提交 / verified implementation commit：`2e988bf69cfdc1f1984e080fc5044f658ea1d014`
+- 被测实现提交 subject：`fix(filesystem): harden mutation transaction retries`
 - 验收文档首次提交：`7fff6bae5e1acb99b7afd26bd33724e60ec2bfea`
-- Copy 修复证据：Task7 原失败并发组 fresh `-count=20` 通过，exit 0。
+- 本轮终审修复提交链：`990d9b1`、`84c15ad`、`8adc346`、`2e988bf`。
+- Task7 Copy 与 Rename 原失败并发测试均在本轮 `-count=20` 通过。
 - PostgreSQL 集成条件：当前验收 shell 的 `DATABASE_DSN` 未设置；专门依赖该环境变量的 PostgreSQL 集成测试标记为 **SKIP**，不声称通过。运行中的后端使用本机既有 `CONFIG_PATH`，其 readiness 数据库检查独立为 up。
 - 用户决策：G1 不提供 binary 传输端点；binary 上传/下载由 G2 承载。OpenAPI 只冻结 G1 元数据和操作接口。
 
@@ -17,14 +18,14 @@
 
 | 命令 | 结果 |
 |---|---|
-| `cd backend; go test ./internal/modules/filesystem/... -count=1` | PASS，exit 0；filesystem 各包均通过 |
+| `cd backend; go test ./internal/modules/filesystem/... -count=1` | PASS，exit 0；首次 Windows 临时文件清理出现 `Access is denied` 后，立即 fresh 重跑通过 |
 | `cd backend; go test ./internal/platform/storage/... -count=1` | PASS，exit 0；Local Provider contract 通过 |
 | `cd backend; go test ./internal/platform/authz ./internal/platform/entitlements -count=1` | PASS，exit 0 |
 | `cd backend; go test ./internal/platform/messaging/... -count=1` | PASS，exit 0 |
 | `cd backend; go test ./internal/platform/postgres/... -count=1` | PASS，exit 0 |
 | `cd backend; go test ./api/openapi ./migrations/... ./internal/bootstrap/... -count=1` | PASS，exit 0 |
 | `cd backend; go test ./... -count=1` | PASS，exit 0；全仓包级测试完成 |
-| `cd backend; go test ./internal/modules/filesystem/application/command -run "Test(CreateNamespaceConcurrentSameWorkspaceReturnsSingleNamespace\|PutLocalFileConcurrentQuotaAllowsOnlyOneWinner\|PutLocalFileConcurrentDifferentCommandsAllocateContinuousUniqueRevisions\|MoveConcurrentOppositeMovesCannotCreateCycle\|MetadataMutationsUseCommandDedup\|CopyCommandDedupConcurrentReturnsAuthoritativeResult\|RenameCommandDedupConcurrentAuditsOnce)" -count=20` | PASS，exit 0；Task7 原失败并发组通过 |
+| `cd backend; go test ./internal/modules/filesystem/application/command -run "Test(CreateNamespaceConcurrentSameWorkspaceReturnsSingleNamespace\|PutLocalFileConcurrentQuotaAllowsOnlyOneWinner\|PutLocalFileConcurrentDifferentCommandsAllocateContinuousUniqueRevisions\|MoveConcurrentOppositeMovesCannotCreateCycle\|MetadataMutationsUseCommandDedup\|CopyCommandDedupConcurrentReturnsAuthoritativeResult\|RenameCommandDedupConcurrentAuditsOnce)" -count=20` | PASS，exit 0；Copy/Rename 并发组通过 |
 | `cd backend; go test ./internal/modules/filesystem/infrastructure/persistence -run "Test(CreateNamespaceConcurrentSameWorkspaceReturnsSingleNamespace\|SaveRevisionConcurrentIdenticalRequestsAreIdempotent\|ClaimCommandConcurrentSQLiteSameAndDifferentHashesAreStable)" -count=20` | PASS，exit 0 |
 | `cd backend; go vet ./internal/modules/filesystem/... ./internal/platform/storage/... ./internal/platform/authz/... ./internal/platform/entitlements/... ./internal/platform/messaging/... ./internal/platform/postgres/... ./api/openapi/... ./migrations/... ./internal/bootstrap/...` | PASS，exit 0 |
 | `git diff --check` | PASS，exit 0 |
@@ -35,8 +36,8 @@
 ### PostgreSQL 集成与服务启动
 
 - PostgreSQL 专门集成：**SKIP**，原因是当前验收 shell 的 `DATABASE_DSN` 缺失。
-- 控制器使用本机既有 `CONFIG_PATH` 重启后端；进程链根 PID `22184`，本次 fresh listener PID `2056`。
-- Fresh `curl.exe -sS -i --max-time 10 http://localhost:8080/ready`：HTTP `200`，响应 `{"code":0,"message":"ok","data":{"checks":{"database":"up","redis":"up"},"status":"ready"}}`。
+- 控制器使用本机既有 `CONFIG_PATH` 重启后端；本次 fresh listener PID `14328`。
+- Fresh `curl.exe -sS -i --max-time 10 http://localhost:8080/ready`（10:17:17）：HTTP `200`，响应 `{"code":0,"message":"ok","data":{"checks":{"database":"up","redis":"up"},"status":"ready"}}`。
 - readiness 的 database `up` 证明运行中后端连接了本机配置数据库；不等同于 `DATABASE_DSN` 专门集成测试通过。
 
 ## Brief 六项证据
@@ -56,12 +57,12 @@
 - Idempotency：metadata mutation、copy、rename 及 persistence claim 有测试覆盖；persistence 并发幂等 `-count=20` 通过。
 - Outbox/audit：publish 失败回滚、成功/拒绝 mutation audit 和不泄露正文的测试通过。
 - OpenAPI：OpenAPI filesystem schema 与 bootstrap/openapi 测试通过；G1 不暴露 binary content endpoint。
-- Copy 修复复验：`63e6fba` 增加并发冲突后的完整事务重试；原失败 `TestCopyCommandDedupConcurrentReturnsAuthoritativeResult` 已在指定并发组 `-count=20` fresh 通过。
+- 终审修复项记录：
+  - Resource Grant：补齐 Grant 创建、校验与资源范围约束。
+  - mutation Outbox：补齐 mutation 事件写入与事务一致性路径。
+  - schema parity：补齐迁移、模型与约束的 schema parity。
+  - canonical dedup：补齐组织内 Blob canonical 去重与幂等冲突处理。
+  - Trash：补齐 Trash 隔离语义，避免被普通列表与父目录操作误纳入。
+  - Windows：补齐 Windows Local root identity guard 与路径安全校验。
+- Rename 修复复验：`2e988bf` 加固 mutation transaction retry；`TestRenameCommandDedupConcurrentAuditsOnce` 已在本轮 Task7 并发组 `-count=20` fresh 通过。
 - 本报告不做无法由本轮命令证明的性能、HA 或 PostgreSQL 集成结论。
-
-## 终审修复后待复验
-
-`32e7069` 之后的终审修复已补齐 Resource Grant、mutation Outbox、schema parity、
-组织内 Blob canonical 去重、Trash 隔离、Windows Local root identity guard，以及
-Copy 首版本号语义。本节不修改上方针对 `63e6fba` 的历史 fresh 证据；最终测试、
-readiness 与提交证据由终审修复报告和后续 Task 7 fresh rerun 单独记录。
