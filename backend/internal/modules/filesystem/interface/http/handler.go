@@ -238,9 +238,16 @@ func (h *Handler) CreateDirectory(c *gin.Context) {
 	if !decodeJSON(c, &body) {
 		return
 	}
-	if body.NamespaceID != "" && body.NamespaceID != rc.namespace.ID.String() {
-		filesystemError(c, domain.ErrNamespaceMismatch)
-		return
+	if body.NamespaceID != "" {
+		namespaceID, valid := canonicalUUID(body.NamespaceID)
+		if !valid {
+			invalidRequest(c)
+			return
+		}
+		if namespaceID != rc.namespace.ID {
+			filesystemError(c, domain.ErrNamespaceMismatch)
+			return
+		}
 	}
 	parentID, ok := optionalUUID(body.ParentID)
 	if !ok || strings.TrimSpace(body.Name) == "" {

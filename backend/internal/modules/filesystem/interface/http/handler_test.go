@@ -152,6 +152,44 @@ func TestCreateDirectoryReturnsCreatedAndContextIdentity(t *testing.T) {
 	require.NotEqual(t, uuid.Nil, captured.ActorID)
 }
 
+func TestCreateDirectoryValidatesBodyNamespaceID(t *testing.T) {
+	namespaceID := uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: namespaceID, OrganizationID: uuid.New(), WorkspaceID: workspaceID}, nil
+		},
+		createDirectory: func(context.Context, command.CreateDirectory) (*model.Node, error) {
+			t.Fatal("invalid namespace_id must not reach command handler")
+			return nil, nil
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileWrite: true}}, h)
+	tests := []struct {
+		name       string
+		namespace  string
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "uppercase", namespace: strings.ToUpper(namespaceID.String()), wantStatus: http.StatusBadRequest, wantCode: "FILESYSTEM_INVALID_REQUEST"},
+		{name: "nil", namespace: uuid.Nil.String(), wantStatus: http.StatusBadRequest, wantCode: "FILESYSTEM_INVALID_REQUEST"},
+		{name: "malformed", namespace: "not-a-uuid", wantStatus: http.StatusBadRequest, wantCode: "FILESYSTEM_INVALID_REQUEST"},
+		{name: "mismatch", namespace: uuid.NewString(), wantStatus: http.StatusNotFound, wantCode: "FILESYSTEM_NOT_FOUND"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{"namespace_id":"` + tt.namespace + `","name":"docs"}`
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+wsID.String()+"/directories", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Idempotency-Key", "namespace-"+tt.name)
+			res := httptest.NewRecorder()
+			router.ServeHTTP(res, req)
+			require.Equal(t, tt.wantStatus, res.Code, res.Body.String())
+			require.Contains(t, res.Body.String(), tt.wantCode)
+		})
+	}
+}
+
 func TestRoutesUseExpectedPermissions(t *testing.T) {
 	nodeID, revisionID := uuid.NewString(), uuid.NewString()
 	tests := []struct {

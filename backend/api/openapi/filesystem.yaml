@@ -11,10 +11,18 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/NamespaceResponse"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
   /api/v1/workspaces/{wsId}/files:
     get:
@@ -46,6 +54,14 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
   /api/v1/workspaces/{wsId}/directories:
     post:
@@ -72,6 +88,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
         "415":
@@ -263,6 +281,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
   /api/v1/workspaces/{wsId}/files/{nodeId}/revisions/{revisionId}/restore:
     post:
@@ -483,7 +507,7 @@ components:
         data: {}
         trace_id:
           type: string
-    ErrorEnvelope:
+    ErrorResponse:
       type: object
       required: [code, message, data, trace_id]
       properties:
@@ -553,54 +577,54 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
+            $ref: "#/components/schemas/ErrorResponse"
     Unauthorized:
       description: Authentication is required or invalid
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
+            $ref: "#/components/schemas/ErrorResponse"
     UnsupportedMediaType:
       description: JSON mutation body has an unsupported media type
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
+            $ref: "#/components/schemas/ErrorResponse"
     Forbidden:
       description: Membership, permission, or entitlement denied
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
+            $ref: "#/components/schemas/ErrorResponse"
     NotFound:
       description: Resource is absent or belongs to another workspace
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
+            $ref: "#/components/schemas/ErrorResponse"
     Conflict:
       description: Name, identity, root-mutation, command, or idempotency conflict
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
+            $ref: "#/components/schemas/ErrorResponse"
     Unprocessable:
       description: Valid request cannot be applied to this filesystem resource
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
+            $ref: "#/components/schemas/ErrorResponse"
     InternalError:
       description: Unexpected internal error
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
+            $ref: "#/components/schemas/ErrorResponse"
     Unavailable:
       description: Persistence, retry, or operation outcome is temporarily unavailable
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
+            $ref: "#/components/schemas/ErrorResponse"
 
 # File content upload and download are intentionally deferred to the G2 Transfer Gateway.

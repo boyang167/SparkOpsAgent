@@ -78,6 +78,43 @@ func TestFilesystemOpenAPIIdempotencyAndLocalRefs(t *testing.T) {
 	assertLocalRefsResolve(t, document, document)
 }
 
+func TestFilesystemRoutesDeclareImplementedStableErrors(t *testing.T) {
+	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &document))
+	paths := document["paths"].(map[string]any)
+
+	expected := map[string][]string{
+		"GET /api/v1/workspaces/{wsId}/namespaces":                                     {"400", "401", "403", "404", "500", "503"},
+		"GET /api/v1/workspaces/{wsId}/files":                                          {"400", "401", "403", "404", "422", "500", "503"},
+		"POST /api/v1/workspaces/{wsId}/directories":                                   {"400", "401", "403", "404", "409", "415", "422", "500", "503"},
+		"PATCH /api/v1/workspaces/{wsId}/files/{nodeId}/name":                          {"400", "401", "403", "404", "409", "415", "422", "500", "503"},
+		"POST /api/v1/workspaces/{wsId}/files/{nodeId}/move":                           {"400", "401", "403", "404", "409", "415", "422", "500", "503"},
+		"POST /api/v1/workspaces/{wsId}/files/{nodeId}/copy":                           {"400", "401", "403", "404", "409", "415", "422", "500", "503"},
+		"DELETE /api/v1/workspaces/{wsId}/files/{nodeId}":                              {"400", "401", "403", "404", "409", "422", "500", "503"},
+		"GET /api/v1/workspaces/{wsId}/files/{nodeId}/revisions":                       {"400", "401", "403", "404", "422", "500", "503"},
+		"POST /api/v1/workspaces/{wsId}/files/{nodeId}/revisions/{revisionId}/restore": {"400", "401", "403", "404", "409", "422", "500", "503"},
+	}
+	for route, statuses := range expected {
+		parts := strings.SplitN(route, " ", 2)
+		operation := paths[parts[1]].(map[string]any)[strings.ToLower(parts[0])].(map[string]any)
+		responses := operation["responses"].(map[string]any)
+		actualStatuses := make([]string, 0, len(responses))
+		for status := range responses {
+			if status >= "400" {
+				actualStatuses = append(actualStatuses, status)
+			}
+		}
+		require.ElementsMatchf(t, statuses, actualStatuses, "%s error response set", route)
+		for _, status := range statuses {
+			response, ok := responses[status]
+			require.Truef(t, ok, "%s must declare %s", route, status)
+			require.Equal(t, "#/components/schemas/ErrorResponse", responseSchemaRef(document, response), "%s %s", route, status)
+		}
+	}
+}
+
 func TestRootOpenAPILoadsExternalRefsAndValidates(t *testing.T) {
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = true
@@ -174,4 +211,16 @@ func resolveLocalRef(root map[string]any, ref string) any {
 		}
 	}
 	return current
+}
+
+func responseSchemaRef(root map[string]any, response any) string {
+	value := response.(map[string]any)
+	if ref, _ := value["$ref"].(string); strings.HasPrefix(ref, "#/") {
+		value = resolveLocalRef(root, ref).(map[string]any)
+	}
+	content := value["content"].(map[string]any)
+	media := content["application/json"].(map[string]any)
+	schema := media["schema"].(map[string]any)
+	ref, _ := schema["$ref"].(string)
+	return ref
 }
