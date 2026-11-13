@@ -8,6 +8,7 @@ export * from "./governance/index";
 export * from "./integration/index";
 export * from "./workflow/index";
 export * from "./knowledge/index";
+export * from "./filesystem/index";
 export * from "./notification/index";
 export * from "./k8s/index";
 export * from "./platform/index";

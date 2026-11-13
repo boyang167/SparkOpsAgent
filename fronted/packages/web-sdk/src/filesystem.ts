@@ -1,4 +1,13 @@
-import type { CreateTransferCommand, TransferSessionVM } from "@sparkops/contracts/filesystem";
+import type {
+  CreateDirectoryCommand,
+  CreateTransferCommand,
+  FileNamespaceVM,
+  FileNodePageVM,
+  FileNodeVM,
+  FileRevisionPageVM,
+  RenameFileNodeCommand,
+  TransferSessionVM,
+} from "@sparkops/contracts/filesystem";
 import { bffFetch, type BffFetchOptions } from "./client";
 
 export type TransferProgress = {
@@ -24,6 +33,97 @@ type UploadTransferResult = {
 
 function defaultIdempotencyKey() {
   return `transfer-${Date.now()}`;
+}
+
+function mutationIdempotencyKey(prefix: string) {
+  return `${prefix}-${Date.now()}`;
+}
+
+type ListFilesQuery = {
+  parentId?: string | null;
+  cursor?: string;
+  limit?: number;
+};
+
+function listFilesQuery(query: ListFilesQuery = {}) {
+  const params = new URLSearchParams();
+  if (query.parentId) params.set("parent_id", query.parentId);
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit != null) params.set("limit", String(query.limit));
+  const suffix = params.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
+export function getFileNamespace(workspaceId: string, options: BffFetchOptions = {}) {
+  return bffFetch<FileNamespaceVM>(`/workspaces/${workspaceId}/namespaces`, {
+    method: "GET",
+    workspaceId,
+    ...options,
+  });
+}
+
+export function listFileNodes(
+  workspaceId: string,
+  query: ListFilesQuery = {},
+  options: BffFetchOptions = {},
+) {
+  return bffFetch<FileNodePageVM>(`/workspaces/${workspaceId}/files${listFilesQuery(query)}`, {
+    method: "GET",
+    workspaceId,
+    ...options,
+  });
+}
+
+export function createDirectoryNode(
+  workspaceId: string,
+  input: CreateDirectoryCommand,
+  options: BffFetchOptions & { idempotencyKey?: string } = {},
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("directory");
+  return bffFetch<FileNodeVM>(`/workspaces/${workspaceId}/directories`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    workspaceId,
+    headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
+    ...options,
+  });
+}
+
+export function renameFileNode(
+  workspaceId: string,
+  nodeId: string,
+  input: RenameFileNodeCommand,
+  options: BffFetchOptions & { idempotencyKey?: string } = {},
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("rename");
+  return bffFetch<void>(`/workspaces/${workspaceId}/files/${nodeId}/name`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+    workspaceId,
+    headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
+    ...options,
+  });
+}
+
+export function listFileRevisions(
+  workspaceId: string,
+  nodeId: string,
+  query: { cursor?: string; limit?: number } = {},
+  options: BffFetchOptions = {},
+) {
+  const params = new URLSearchParams();
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit != null) params.set("limit", String(query.limit));
+  const suffix = params.toString();
+  const qs = suffix ? `?${suffix}` : "";
+  return bffFetch<FileRevisionPageVM>(
+    `/workspaces/${workspaceId}/files/${nodeId}/revisions${qs}`,
+    {
+      method: "GET",
+      workspaceId,
+      ...options,
+    },
+  );
 }
 
 export function createTransferSession(

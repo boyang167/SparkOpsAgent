@@ -44,6 +44,8 @@ describe("apiPathEntitlement", () => {
     "/api/v1/workspaces/ws/namespaces/",
     "/api/v1/workspaces/ws/transfers",
     "/api/v1/workspaces/ws/transfers/",
+    "/api/v1/workspaces/ws/directories",
+    "/api/v1/workspaces/ws/directories/",
     "/api/v1/workspaces/ws/%66iles",
     "/api/v1/workspaces%2Fws/files",
   ])("maps workspace filesystem API %s to filesystem", (path) => {

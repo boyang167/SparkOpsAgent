@@ -68,3 +68,101 @@ export const CreateTransferCommandSchema = z.object({
 });
 
 export type CreateTransferCommand = z.infer<typeof CreateTransferCommandSchema>;
+
+export const FileNodeTypeSchema = z.enum(["FILE", "DIRECTORY"]);
+export const FileNodeStateSchema = z.enum([
+  "ACTIVE",
+  "TRASHED",
+  "RETENTION_HOLD",
+  "PURGE_PENDING",
+  "PURGED",
+]);
+
+export const FileNodeVMSchema = z.object({
+  id: z.string().uuid(),
+  namespace_id: z.string().uuid(),
+  parent_id: z.string().uuid().nullable(),
+  type: FileNodeTypeSchema,
+  name: z.string(),
+  current_revision_id: z.string().uuid().nullable(),
+  state: FileNodeStateSchema,
+  owner_id: z.string().uuid(),
+});
+
+export type FileNodeVM = z.infer<typeof FileNodeVMSchema>;
+
+export const FileNamespaceVMSchema = z.object({
+  id: z.string().uuid(),
+  workspace_id: z.string().uuid(),
+  root_node_id: z.string().uuid().nullable(),
+  status: z.string(),
+});
+
+export type FileNamespaceVM = z.infer<typeof FileNamespaceVMSchema>;
+
+export const FileNodePageVMSchema = z.object({
+  items: z.array(FileNodeVMSchema),
+  next_cursor: z.string(),
+});
+
+export type FileNodePageVM = z.infer<typeof FileNodePageVMSchema>;
+
+export const FileRevisionVMSchema = z.object({
+  id: z.string().uuid(),
+  node_id: z.string().uuid(),
+  revision_no: z.number().int().positive(),
+  size: z.number().int().nonnegative(),
+  mime_type: z.string(),
+  created_by: z.string().uuid(),
+});
+
+export type FileRevisionVM = z.infer<typeof FileRevisionVMSchema>;
+
+export const FileRevisionPageVMSchema = z.object({
+  items: z.array(FileRevisionVMSchema),
+  next_cursor: z.string(),
+});
+
+export type FileRevisionPageVM = z.infer<typeof FileRevisionPageVMSchema>;
+
+export const CreateDirectoryCommandSchema = z.object({
+  namespace_id: z.string().uuid().optional(),
+  parent_id: z.string().uuid().nullable().optional(),
+  name: z.string().min(1),
+});
+
+export type CreateDirectoryCommand = z.infer<typeof CreateDirectoryCommandSchema>;
+
+export const RenameFileNodeCommandSchema = z.object({
+  name: z.string().min(1),
+});
+
+export type RenameFileNodeCommand = z.infer<typeof RenameFileNodeCommandSchema>;
+
+/** Placeholder VMs for later G4 tasks; no upstream routes in G3 yet. */
+export const FileShareVMSchema = z.object({
+  id: z.string().uuid(),
+  node_id: z.string().uuid(),
+  expires_at: z.string().nullable(),
+  max_downloads: z.number().int().nullable(),
+});
+
+export type FileShareVM = z.infer<typeof FileShareVMSchema>;
+
+export const FileArtifactVMSchema = z.object({
+  id: z.string().uuid(),
+  file_id: z.string().uuid(),
+  artifact_type: z.string(),
+  producer_id: z.string().uuid(),
+  run_id: z.string().uuid().optional(),
+});
+
+export type FileArtifactVM = z.infer<typeof FileArtifactVMSchema>;
+
+export const StoragePoolVMSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  status: z.string(),
+});
+
+export type StoragePoolVM = z.infer<typeof StoragePoolVMSchema>;

@@ -76,7 +76,12 @@ function isWorkspaceFilesystemApi(path: string): boolean {
   if (!normalized.startsWith(prefix)) return false;
   const parts = normalized.slice(prefix.length).split("/");
   if (parts.length < 2 || !parts[0]) return false;
-  return parts[1] === "files" || parts[1] === "namespaces" || parts[1] === "transfers";
+  return (
+    parts[1] === "files" ||
+    parts[1] === "namespaces" ||
+    parts[1] === "transfers" ||
+    parts[1] === "directories"
+  );
 }
 
 function isGovernanceWorkspaceApi(path: string): boolean {
