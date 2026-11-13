@@ -36,6 +36,15 @@ type Config struct {
 type FilesystemConfig struct {
 	TransferGateway TransferGatewayConfig      `yaml:"transfer_gateway"`
 	Reconciler      FilesystemReconcilerConfig `yaml:"reconciler"`
+	SFTP            SFTPGatewayConfig          `yaml:"sftp"`
+}
+
+type SFTPGatewayConfig struct {
+	Enabled          bool          `yaml:"enabled"`
+	Listen           string        `yaml:"listen"`
+	HostKeySecretRef string        `yaml:"host_key_secret_ref"`
+	LandingZone      string        `yaml:"landing_zone"`
+	IdleTimeout      time.Duration `yaml:"idle_timeout"`
 }
 
 type FilesystemReconcilerConfig struct {
@@ -541,6 +550,15 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Filesystem.Reconciler.GCGracePeriod == 0 {
 		c.Filesystem.Reconciler.GCGracePeriod = 168 * time.Hour
+	}
+	if c.Filesystem.SFTP.Listen == "" {
+		c.Filesystem.SFTP.Listen = ":2022"
+	}
+	if c.Filesystem.SFTP.LandingZone == "" {
+		c.Filesystem.SFTP.LandingZone = "./data/sftp-landing"
+	}
+	if c.Filesystem.SFTP.IdleTimeout == 0 {
+		c.Filesystem.SFTP.IdleTimeout = 15 * time.Minute
 	}
 }
 

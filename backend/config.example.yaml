@@ -71,3 +71,9 @@ filesystem:
     capability_secret: ""
     max_file_bytes: 21474836480
     storage_root: "./data/filesystem"
+  sftp:
+    enabled: true
+    listen: ":2022"
+    host_key_secret_ref: "secret://sparkops/sftp-host-key"
+    landing_zone: "/var/lib/sparkops/sftp"
+    idle_timeout: 15m
