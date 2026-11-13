@@ -854,4 +854,8 @@ func (r *Repository) UpsertTransferPart(context.Context, *model.TransferPart) er
 	return domain.ErrPersistence
 }
 
+func (r *Repository) SaveTransferStateCAS(context.Context, uuid.UUID, uuid.UUID, int64, repository.TransferStatePatch) error {
+	return domain.ErrPersistence
+}
+
 var _ repository.FilesystemRepository = (*Repository)(nil)

@@ -20,6 +20,9 @@ var (
 	ErrInvalidTransferExpiry     = errors.New("transfer expiry must be in the future")
 	ErrInvalidTransferTransition = errors.New("invalid transfer transition")
 	ErrTransferVersionConflict   = errors.New("transfer version conflict")
+	ErrTransferIntegrity         = errors.New("transfer integrity mismatch")
+	ErrTransferExpired           = errors.New("transfer expired")
+	ErrTransferScanRequired      = errors.New("transfer scan result required")
 	ErrInvalidTransferPart       = errors.New("invalid transfer part")
 )
 
@@ -36,6 +39,7 @@ const (
 	TransferFailed     TransferStatus = "FAILED"
 	TransferRejected   TransferStatus = "REJECTED"
 	TransferAborted    TransferStatus = "ABORTED"
+	TransferExpired    TransferStatus = "EXPIRED"
 )
 
 type TransferProtocol string
@@ -48,8 +52,10 @@ const (
 type TransferClassification string
 
 const (
-	TransferClassificationGeneral    TransferClassification = "GENERAL"
-	TransferClassificationRestricted TransferClassification = "RESTRICTED"
+	TransferClassificationPublic       TransferClassification = "PUBLIC"
+	TransferClassificationInternal     TransferClassification = "INTERNAL"
+	TransferClassificationConfidential TransferClassification = "CONFIDENTIAL"
+	TransferClassificationRestricted   TransferClassification = "RESTRICTED"
 )
 
 type TransferSessionInput struct {
@@ -93,10 +99,11 @@ type TransferSession struct {
 }
 
 type TransferScanResult struct {
-	Clean      bool
-	ThreatName string
-	Engine     string
-	Signature  string
+	Clean       bool
+	ThreatName  string
+	Engine      string
+	Signature   string
+	CompletedAt time.Time
 }
 
 var transferNamePattern = regexp.MustCompile(`^[^/\\\x00]+$`)
@@ -123,10 +130,10 @@ func NewTransferSession(input TransferSessionInput) (*TransferSession, error) {
 	if !input.ExpiresAt.After(time.Now()) {
 		return nil, ErrInvalidTransferExpiry
 	}
-	if input.Classification == "" {
-		input.Classification = TransferClassificationGeneral
-	}
-	if input.Classification != TransferClassificationGeneral && input.Classification != TransferClassificationRestricted {
+	if input.Classification != TransferClassificationPublic &&
+		input.Classification != TransferClassificationInternal &&
+		input.Classification != TransferClassificationConfidential &&
+		input.Classification != TransferClassificationRestricted {
 		return nil, ErrInvalidTransfer
 	}
 	var targetParentID, providerID *uuid.UUID
@@ -175,11 +182,11 @@ func (s *TransferSession) CreatedBy() uuid.UUID       { return s.createdBy }
 func (s *TransferSession) Protocol() TransferProtocol { return s.protocol }
 func (s *TransferSession) ExpectedSize() int64        { return s.expectedSize }
 func (s *TransferSession) ExpectedSHA256() string     { return s.expectedSHA256 }
-func (s *TransferSession) ActualSize() int64 {
+func (s *TransferSession) ActualSize() (int64, bool) {
 	if s.actualSize == nil {
-		return 0
+		return 0, false
 	}
-	return *s.actualSize
+	return *s.actualSize, true
 }
 func (s *TransferSession) ActualSHA256() string { return s.actualSHA256 }
 func (s *TransferSession) ProviderID() *uuid.UUID {
@@ -204,9 +211,15 @@ func (s *TransferSession) ScanResult() *TransferScanResult {
 func (s *TransferSession) ErrorCode() string { return s.errorCode }
 func (s *TransferSession) Version() int64    { return s.version }
 
-func (s *TransferSession) transition(expected []TransferStatus, next TransferStatus, versions []int64) error {
-	if len(versions) == 1 && s.version != versions[0] {
+func (s *TransferSession) transition(expected []TransferStatus, next TransferStatus, expectedVersion int64, now time.Time) error {
+	if s.version != expectedVersion {
 		return ErrTransferVersionConflict
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if !now.Before(s.expiresAt) && next != TransferFailed && next != TransferAborted && next != TransferExpired {
+		return ErrTransferExpired
 	}
 	for _, current := range expected {
 		if s.status == current {
@@ -218,92 +231,132 @@ func (s *TransferSession) transition(expected []TransferStatus, next TransferSta
 	return ErrInvalidTransferTransition
 }
 
-func (s *TransferSession) StartUpload(expectedVersion ...int64) error {
-	return s.transition([]TransferStatus{TransferInitiated, TransferPaused}, TransferUploading, expectedVersion)
+func (s *TransferSession) StartUpload(expectedVersion int64, now time.Time) error {
+	return s.transition([]TransferStatus{TransferInitiated, TransferPaused}, TransferUploading, expectedVersion, now)
 }
-func (s *TransferSession) Pause(expectedVersion ...int64) error {
-	return s.transition([]TransferStatus{TransferUploading}, TransferPaused, expectedVersion)
+func (s *TransferSession) Pause(expectedVersion int64, now time.Time) error {
+	return s.transition([]TransferStatus{TransferUploading}, TransferPaused, expectedVersion, now)
 }
-func (s *TransferSession) Resume(expectedVersion ...int64) error {
-	return s.StartUpload(expectedVersion...)
+func (s *TransferSession) Resume(expectedVersion int64, now time.Time) error {
+	return s.StartUpload(expectedVersion, now)
 }
-func (s *TransferSession) StartVerify(expectedVersion ...int64) error {
-	return s.transition([]TransferStatus{TransferUploading}, TransferVerifying, expectedVersion)
+func (s *TransferSession) StartVerify(expectedVersion int64, now time.Time) error {
+	return s.transition([]TransferStatus{TransferUploading}, TransferVerifying, expectedVersion, now)
 }
-func (s *TransferSession) StartScan(expectedVersion ...int64) error {
-	return s.transition([]TransferStatus{TransferVerifying}, TransferScanning, expectedVersion)
+func (s *TransferSession) StartScan(expectedVersion int64, now time.Time) error {
+	return s.transition([]TransferStatus{TransferVerifying}, TransferScanning, expectedVersion, now)
 }
-func (s *TransferSession) StartCommit(expectedVersion ...int64) error {
-	return s.transition([]TransferStatus{TransferScanning}, TransferCommitting, expectedVersion)
+func (s *TransferSession) StartCommit(expectedVersion int64, now time.Time) error {
+	if s.version != expectedVersion {
+		return ErrTransferVersionConflict
+	}
+	if s.status != TransferScanning {
+		return ErrInvalidTransferTransition
+	}
+	if s.scanResult == nil || !s.scanResult.Clean || s.scanResult.CompletedAt.IsZero() {
+		return ErrTransferScanRequired
+	}
+	return s.transition([]TransferStatus{TransferScanning}, TransferCommitting, expectedVersion, now)
 }
-func (s *TransferSession) Complete(expectedVersion ...int64) error {
-	return s.transition([]TransferStatus{TransferCommitting}, TransferCompleted, expectedVersion)
+func (s *TransferSession) Complete(expectedVersion int64, now time.Time) error {
+	return s.transition([]TransferStatus{TransferCommitting}, TransferCompleted, expectedVersion, now)
 }
-func (s *TransferSession) Fail(code string, expectedVersion ...int64) error {
+func (s *TransferSession) Fail(code string, expectedVersion int64, now time.Time) error {
 	if strings.TrimSpace(code) == "" {
 		return ErrInvalidTransfer
 	}
-	if err := s.transition([]TransferStatus{TransferInitiated, TransferUploading, TransferPaused, TransferVerifying, TransferScanning, TransferCommitting}, TransferFailed, expectedVersion); err != nil {
+	if err := s.transition([]TransferStatus{TransferInitiated, TransferUploading, TransferPaused, TransferVerifying, TransferScanning, TransferCommitting}, TransferFailed, expectedVersion, now); err != nil {
 		return err
 	}
 	s.errorCode = code
 	return nil
 }
-func (s *TransferSession) Reject(code string, expectedVersion ...int64) error {
+func (s *TransferSession) Reject(code string, expectedVersion int64, now time.Time) error {
 	if strings.TrimSpace(code) == "" {
 		return ErrInvalidTransfer
 	}
-	if err := s.transition([]TransferStatus{TransferInitiated, TransferUploading, TransferPaused, TransferVerifying, TransferScanning, TransferCommitting}, TransferRejected, expectedVersion); err != nil {
+	if err := s.transition([]TransferStatus{TransferScanning}, TransferRejected, expectedVersion, now); err != nil {
 		return err
 	}
 	s.errorCode = code
 	return nil
 }
-func (s *TransferSession) Abort(expectedVersion ...int64) error {
-	return s.transition([]TransferStatus{TransferInitiated, TransferUploading, TransferPaused, TransferVerifying}, TransferAborted, expectedVersion)
+func (s *TransferSession) Abort(expectedVersion int64, now time.Time) error {
+	return s.transition([]TransferStatus{TransferInitiated, TransferUploading, TransferPaused, TransferVerifying, TransferScanning, TransferCommitting}, TransferAborted, expectedVersion, now)
 }
 
-func (s *TransferSession) SetActual(size int64, checksum string, expectedVersion int64) error {
-	if size < 0 || size > maxTransferSize || !isSHA256(checksum) || s.version != expectedVersion {
-		if s.version != expectedVersion {
-			return ErrTransferVersionConflict
-		}
-		return ErrInvalidTransfer
+func (s *TransferSession) Expire(expectedVersion int64, now time.Time) error {
+	if !now.After(s.expiresAt) {
+		return ErrInvalidTransferExpiry
+	}
+	return s.transition([]TransferStatus{TransferInitiated, TransferUploading, TransferPaused, TransferVerifying, TransferScanning, TransferCommitting}, TransferExpired, expectedVersion, now)
+}
+
+func (s *TransferSession) SetActual(size int64, checksum string, expectedVersion int64, now time.Time) error {
+	if s.version != expectedVersion {
+		return ErrTransferVersionConflict
+	}
+	if err := s.ensureMutable(now); err != nil {
+		return err
+	}
+	if size != s.expectedSize || !isSHA256(checksum) ||
+		(s.expectedSHA256 != "" && !strings.EqualFold(checksum, s.expectedSHA256)) {
+		return ErrTransferIntegrity
 	}
 	s.actualSize, s.actualSHA256 = &size, checksum
 	s.version++
 	return nil
 }
 
-func (s *TransferSession) SetProvider(providerID uuid.UUID, expectedVersion int64) error {
+func (s *TransferSession) SetProvider(providerID uuid.UUID, expectedVersion int64, now time.Time) error {
 	if providerID == uuid.Nil {
 		return ErrInvalidTransfer
 	}
 	if s.version != expectedVersion {
 		return ErrTransferVersionConflict
 	}
+	if err := s.ensureMutable(now); err != nil {
+		return err
+	}
 	s.providerID = &providerID
 	s.version++
 	return nil
 }
 
-func (s *TransferSession) SetScanResult(result TransferScanResult, expectedVersion int64) error {
+func (s *TransferSession) SetScanResult(result TransferScanResult, expectedVersion int64, now time.Time) error {
 	if s.version != expectedVersion {
 		return ErrTransferVersionConflict
+	}
+	if err := s.ensureMutable(now); err != nil {
+		return err
+	}
+	if s.status != TransferScanning || result.CompletedAt.IsZero() {
+		return ErrInvalidTransferTransition
 	}
 	s.scanResult = &result
 	s.version++
 	return nil
 }
 
+func (s *TransferSession) ensureMutable(now time.Time) error {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if !now.Before(s.expiresAt) {
+		return ErrTransferExpired
+	}
+	return nil
+}
+
 type TransferPartInput struct {
-	ID         uuid.UUID
-	SessionID  uuid.UUID
-	PartNumber int
-	Offset     int64
-	Size       int64
-	Checksum   string
-	ETag       string
+	ID          uuid.UUID
+	SessionID   uuid.UUID
+	PartNumber  int
+	Offset      int64
+	Size        int64
+	SessionSize int64
+	Checksum    string
+	ETag        string
 }
 
 type TransferPart struct {
@@ -315,7 +368,9 @@ type TransferPart struct {
 
 func NewTransferPart(input TransferPartInput) (*TransferPart, error) {
 	if input.ID == uuid.Nil || input.SessionID == uuid.Nil || input.PartNumber <= 0 ||
-		input.Offset < 0 || input.Size < 0 || (input.Checksum != "" && !isSHA256(input.Checksum)) {
+		input.Offset < 0 || input.Size <= 0 || input.SessionSize < 0 ||
+		input.Offset > input.SessionSize || input.Size > input.SessionSize-input.Offset ||
+		input.ETag == "" || (input.Checksum != "" && !isSHA256(input.Checksum)) {
 		return nil, ErrInvalidTransferPart
 	}
 	return &TransferPart{id: input.ID, sessionID: input.SessionID, partNumber: input.PartNumber,

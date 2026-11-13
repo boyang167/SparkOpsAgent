@@ -1,10 +1,16 @@
 DROP INDEX IF EXISTS filesystem.ux_quota_reservations_session;
 
 ALTER TABLE filesystem.quota_reservations
+    DROP CONSTRAINT IF EXISTS fk_quota_reservations_account_workspace;
+ALTER TABLE filesystem.quota_reservations
     DROP CONSTRAINT IF EXISTS fk_quota_reservations_session;
 
 ALTER TABLE filesystem.quota_reservations
-    DROP COLUMN IF EXISTS session_id;
+    DROP COLUMN session_id,
+    DROP COLUMN workspace_id;
+
+ALTER TABLE filesystem.quota_accounts
+    DROP CONSTRAINT IF EXISTS uq_quota_accounts_id_workspace;
 
 DROP INDEX IF EXISTS filesystem.ix_transfer_parts_session_offset;
 DROP INDEX IF EXISTS filesystem.ix_transfer_sessions_expires_at;

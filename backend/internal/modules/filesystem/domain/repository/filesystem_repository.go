@@ -11,10 +11,13 @@ import (
 )
 
 var (
-	ErrNodeNameConflict = domain.ErrNodeNameConflict
-	ErrNodeNotFound     = domain.ErrNodeNotFound
-	ErrTransferNotFound = domain.ErrNodeNotFound
-	ErrTransferConflict = domain.ErrRevisionConflict
+	ErrNodeNameConflict        = domain.ErrNodeNameConflict
+	ErrNodeNotFound            = domain.ErrNodeNotFound
+	ErrTransferNotFound        = domain.ErrTransferNotFound
+	ErrTransferConflict        = domain.ErrTransferConflict
+	ErrTransferVersionConflict = domain.ErrTransferVersionConflict
+	ErrTransferIntegrity       = domain.ErrTransferIntegrity
+	ErrTransferExpired         = domain.ErrTransferExpired
 )
 
 type CommandDedup struct {
@@ -25,6 +28,16 @@ type CommandDedup struct {
 	NodeID      *uuid.UUID
 	RevisionID  *uuid.UUID
 	State       string
+}
+
+type TransferStatePatch struct {
+	StatusFrom   model.TransferStatus
+	StatusTo     model.TransferStatus
+	ActualSize   *int64
+	ActualSHA256 string
+	ProviderID   *uuid.UUID
+	ScanResult   *model.TransferScanResult
+	ErrorCode    *string
 }
 
 var (
@@ -67,4 +80,5 @@ type FilesystemRepository interface {
 	LockTransfer(context.Context, uuid.UUID) (*model.TransferSession, error)
 	ListTransferParts(context.Context, uuid.UUID) ([]model.TransferPart, error)
 	UpsertTransferPart(context.Context, *model.TransferPart) error
+	SaveTransferStateCAS(context.Context, uuid.UUID, uuid.UUID, int64, TransferStatePatch) error
 }
