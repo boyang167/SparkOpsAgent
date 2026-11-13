@@ -40,6 +40,10 @@ func TestFilesystemOpenAPIPathsMatchHTTPContract(t *testing.T) {
 		"/api/v1/workspaces/{wsId}/files/{nodeId}/revisions/{revisionId}/restore": "post",
 		"/api/v1/workspaces/{wsId}/transfers":                                     "post",
 		"/api/v1/workspaces/{wsId}/transfers/{sessionId}":                         "get",
+		"/api/v1/workspaces/{wsId}/storage-providers":                             "get",
+		"/api/v1/workspaces/{wsId}/storage-pools":                                 "post",
+		"/api/v1/workspaces/{wsId}/storage-bindings":                              "get",
+		"/api/v1/workspaces/{wsId}/lifecycle-policies":                            "get",
 	}
 	for path, method := range expected {
 		require.Contains(t, rootPaths, path)

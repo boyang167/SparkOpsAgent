@@ -192,6 +192,34 @@ func (p *StoragePool) Members() []StoragePoolMember {
 	return out
 }
 
+func RestoreStoragePool(snapshot StoragePoolSnapshot) *StoragePool {
+	pool := &StoragePool{
+		id:                     snapshot.ID,
+		name:                   snapshot.Name,
+		placementPolicyVersion: snapshot.PlacementPolicyVersion,
+		status:                 snapshot.Status,
+	}
+	for _, member := range snapshot.Members {
+		pool.members = append(pool.members, storagePoolMember{
+			providerID: member.ProviderID,
+			mode:       member.Mode,
+			priority:   member.Priority,
+		})
+	}
+	return pool
+}
+
+func (p *StoragePool) Snapshot() StoragePoolSnapshot {
+	snap := StoragePoolSnapshot{
+		ID:                     p.id,
+		Name:                   p.name,
+		PlacementPolicyVersion: p.placementPolicyVersion,
+		Status:                 p.status,
+		Members:                p.Members(),
+	}
+	return snap
+}
+
 func (p *StoragePool) AddProvider(providerID uuid.UUID, mode ProviderMode, priority int) error {
 	if providerID == uuid.Nil {
 		return ErrInvalidStoragePool

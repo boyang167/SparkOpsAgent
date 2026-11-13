@@ -56,6 +56,14 @@ type Handler struct {
 	abortTransfer         func(context.Context, command.AbortTransfer) error
 	peekTransfer          func(context.Context, uuid.UUID) (*model.TransferSession, error)
 	transferGatewayView   TransferGatewayView
+	registerProvider      func(context.Context, command.RegisterProvider) (command.RegisterProviderResult, error)
+	listStorageProviders  func(context.Context, query.StorageAdminList) ([]*model.StorageProvider, error)
+	createStoragePool     func(context.Context, command.CreateStoragePool) (command.CreateStoragePoolResult, error)
+	listStoragePools      func(context.Context, query.StorageAdminList) ([]model.StoragePoolSnapshot, error)
+	createStorageBinding  func(context.Context, command.CreateStorageBinding) (command.CreateStorageBindingResult, error)
+	listStorageBindings   func(context.Context, query.StorageAdminList) ([]model.StorageBinding, error)
+	upsertLifecyclePolicy func(context.Context, command.UpsertLifecyclePolicy) (command.UpsertLifecyclePolicyResult, error)
+	listLifecyclePolicies func(context.Context, query.StorageAdminList) ([]model.LifecyclePolicy, error)
 }
 
 func NewHandler(
@@ -71,6 +79,7 @@ func NewHandler(
 	authorizer *resourceauth.Service,
 	logger audit.Logger,
 	transfers *TransferOptions,
+	storageAdmin *StorageAdminOptions,
 ) *Handler {
 	handler := &Handler{
 		namespaceForWorkspace: repo.GetNamespaceByWorkspace,
@@ -97,6 +106,16 @@ func NewHandler(
 		handler.peekTransfer = transfers.Peek
 		handler.transferGatewayView = transfers.Gateway
 	}
+	if storageAdmin != nil {
+		handler.registerProvider = storageAdmin.RegisterProvider
+		handler.listStorageProviders = storageAdmin.ListStorageProviders
+		handler.createStoragePool = storageAdmin.CreateStoragePool
+		handler.listStoragePools = storageAdmin.ListStoragePools
+		handler.createStorageBinding = storageAdmin.CreateStorageBinding
+		handler.listStorageBindings = storageAdmin.ListStorageBindings
+		handler.upsertLifecyclePolicy = storageAdmin.UpsertLifecyclePolicy
+		handler.listLifecyclePolicies = storageAdmin.ListLifecyclePolicies
+	}
 	return handler
 }
 
@@ -119,6 +138,14 @@ func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.Ha
 	base.POST("/transfers", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.CreateTransfer)
 	base.GET("/transfers/:sessionId", authz.RequirePermission(permissions, authz.PermFileRead), h.GetTransfer)
 	base.DELETE("/transfers/:sessionId", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.AbortTransfer)
+	base.GET("/storage-providers", authz.RequirePermission(permissions, authz.PermStorageRead), h.ListStorageProviders)
+	base.POST("/storage-providers", authz.RequirePermission(permissions, authz.PermStorageAdmin), requireIdempotencyKey(), h.RegisterStorageProvider)
+	base.GET("/storage-pools", authz.RequirePermission(permissions, authz.PermStorageRead), h.ListStoragePools)
+	base.POST("/storage-pools", authz.RequirePermission(permissions, authz.PermStorageAdmin), requireIdempotencyKey(), h.CreateStoragePool)
+	base.GET("/storage-bindings", authz.RequirePermission(permissions, authz.PermStorageRead), h.ListStorageBindings)
+	base.POST("/storage-bindings", authz.RequirePermission(permissions, authz.PermStorageAdmin), requireIdempotencyKey(), h.CreateStorageBinding)
+	base.GET("/lifecycle-policies", authz.RequirePermission(permissions, authz.PermStorageRead), h.ListLifecyclePolicies)
+	base.POST("/lifecycle-policies", authz.RequirePermission(permissions, authz.PermLifecycleAdmin), requireIdempotencyKey(), h.UpsertLifecyclePolicy)
 }
 
 func (h *Handler) auditMiddlewareDenial() gin.HandlerFunc {
@@ -718,6 +745,14 @@ func filesystemError(c *gin.Context, err error) {
 		httpx.Fail(c, "FILESYSTEM_UNSUPPORTED_OPERATION", "filesystem operation is unsupported", http.StatusUnprocessableEntity)
 	case errors.Is(err, domain.ErrParentNotFound), errors.Is(err, domain.ErrParentNotDirectory), errors.Is(err, domain.ErrDirectoryCycle), errors.Is(err, model.ErrInvalidNodeName):
 		httpx.Fail(c, "FILESYSTEM_INVALID_REQUEST", "invalid filesystem request", http.StatusUnprocessableEntity)
+	case errors.Is(err, model.ErrInvalidStorageProvider), errors.Is(err, model.ErrInvalidStoragePool),
+		errors.Is(err, model.ErrInvalidStorageBinding), errors.Is(err, model.ErrInvalidLifecyclePolicy),
+		errors.Is(err, model.ErrAmbiguousPrimaryProvider):
+		httpx.Fail(c, "FILESYSTEM_INVALID_REQUEST", "invalid request", http.StatusBadRequest)
+	case errors.Is(err, domain.ErrStorageProviderConflict):
+		httpx.Fail(c, "FILESYSTEM_CONFLICT", "filesystem operation conflict", http.StatusConflict)
+	case errors.Is(err, domain.ErrStorageProviderNotFound):
+		httpx.Fail(c, "FILESYSTEM_NOT_FOUND", "filesystem resource not found", http.StatusNotFound)
 	case errors.Is(err, domain.ErrOutcomeUnknown), errors.Is(err, storage.ErrOutcomeUnknown):
 		httpx.Fail(c, "FILESYSTEM_OUTCOME_UNKNOWN", "filesystem operation outcome unknown", http.StatusServiceUnavailable)
 	case errors.Is(err, domain.ErrTransactionRetry), errors.Is(err, domain.ErrTransactionExhausted):

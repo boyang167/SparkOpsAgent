@@ -164,6 +164,14 @@ paths:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1transfers"
   /api/v1/workspaces/{wsId}/transfers/{sessionId}:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1transfers~1{sessionId}"
+  /api/v1/workspaces/{wsId}/storage-providers:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1storage-providers"
+  /api/v1/workspaces/{wsId}/storage-pools:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1storage-pools"
+  /api/v1/workspaces/{wsId}/storage-bindings:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1storage-bindings"
+  /api/v1/workspaces/{wsId}/lifecycle-policies:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1lifecycle-policies"
 
 components:
   securitySchemes:

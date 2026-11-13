@@ -220,3 +220,51 @@ type storageProviderRow struct {
 }
 
 func (storageProviderRow) TableName() string { return "filesystem.storage_providers" }
+
+type storagePoolRow struct {
+	ID                     uuid.UUID                `gorm:"column:id;primaryKey;type:uuid"`
+	OrganizationID         uuid.UUID                `gorm:"column:organization_id;not null;type:uuid;uniqueIndex:ux_storage_pool_org_name"`
+	Name                   string                   `gorm:"column:name;not null;uniqueIndex:ux_storage_pool_org_name"`
+	Status                 model.StoragePoolStatus  `gorm:"column:status;not null;type:varchar(32)"`
+	PlacementPolicyVersion int64                    `gorm:"column:placement_policy_version;not null"`
+	CreatedAt              time.Time                `gorm:"column:created_at;not null"`
+	UpdatedAt              time.Time                `gorm:"column:updated_at;not null"`
+}
+
+func (storagePoolRow) TableName() string { return "filesystem.storage_pools" }
+
+type storagePoolMemberRow struct {
+	ID         uuid.UUID           `gorm:"column:id;primaryKey;type:uuid"`
+	PoolID     uuid.UUID           `gorm:"column:pool_id;not null;type:uuid;uniqueIndex:ux_storage_pool_member"`
+	ProviderID uuid.UUID           `gorm:"column:provider_id;not null;type:uuid;uniqueIndex:ux_storage_pool_member"`
+	Priority   int                   `gorm:"column:priority;not null"`
+	Mode       model.ProviderMode    `gorm:"column:mode;not null;type:varchar(16)"`
+	CreatedAt  time.Time             `gorm:"column:created_at;not null"`
+}
+
+func (storagePoolMemberRow) TableName() string { return "filesystem.storage_pool_members" }
+
+type storageBindingRow struct {
+	ID             uuid.UUID       `gorm:"column:id;primaryKey;type:uuid"`
+	OrganizationID uuid.UUID       `gorm:"column:organization_id;not null;type:uuid;uniqueIndex:ux_storage_binding_scope"`
+	ScopeType      model.ScopeType `gorm:"column:scope_type;not null;type:varchar(16);uniqueIndex:ux_storage_binding_scope"`
+	ScopeID        uuid.UUID       `gorm:"column:scope_id;not null;type:uuid;uniqueIndex:ux_storage_binding_scope"`
+	PoolID         uuid.UUID       `gorm:"column:pool_id;not null;type:uuid"`
+	Priority       int             `gorm:"column:priority;not null;uniqueIndex:ux_storage_binding_scope"`
+	CreatedAt      time.Time       `gorm:"column:created_at;not null"`
+}
+
+func (storageBindingRow) TableName() string { return "filesystem.storage_bindings" }
+
+type lifecyclePolicyRow struct {
+	ID             uuid.UUID                   `gorm:"column:id;primaryKey;type:uuid"`
+	OrganizationID uuid.UUID                   `gorm:"column:organization_id;not null;type:uuid;uniqueIndex:ux_lifecycle_policy_org_name_version"`
+	Name           string                      `gorm:"column:name;not null;uniqueIndex:ux_lifecycle_policy_org_name_version"`
+	Version        int64                       `gorm:"column:version;not null;uniqueIndex:ux_lifecycle_policy_org_name_version"`
+	Rules          jsonObject                  `gorm:"column:rules;not null;type:text"`
+	Status         model.LifecyclePolicyStatus `gorm:"column:status;not null;type:varchar(32)"`
+	CreatedAt      time.Time                   `gorm:"column:created_at;not null"`
+	UpdatedAt      time.Time                   `gorm:"column:updated_at;not null"`
+}
+
+func (lifecyclePolicyRow) TableName() string { return "filesystem.lifecycle_policies" }

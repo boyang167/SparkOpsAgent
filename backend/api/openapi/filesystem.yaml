@@ -415,6 +415,306 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /api/v1/workspaces/{wsId}/storage-providers:
+    get:
+      tags: [filesystem, storage]
+      summary: List storage providers
+      operationId: listStorageProviders
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+      responses:
+        "200":
+          description: Storage providers
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/StorageProviderPage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    post:
+      tags: [filesystem, storage]
+      summary: Register a storage provider
+      operationId: registerStorageProvider
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterStorageProviderRequest"
+      responses:
+        "201":
+          description: Provider registered
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/StorageProviderCreated"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/storage-pools:
+    get:
+      tags: [filesystem, storage]
+      summary: List storage pools
+      operationId: listStoragePools
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+      responses:
+        "200":
+          description: Storage pools
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/StoragePoolPage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    post:
+      tags: [filesystem, storage]
+      summary: Create a storage pool
+      operationId: createStoragePool
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStoragePoolRequest"
+      responses:
+        "201":
+          description: Storage pool created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/StoragePoolCreated"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/storage-bindings:
+    get:
+      tags: [filesystem, storage]
+      summary: List storage scope bindings
+      operationId: listStorageBindings
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+      responses:
+        "200":
+          description: Storage bindings
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/StorageBindingPage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    post:
+      tags: [filesystem, storage]
+      summary: Create a storage scope binding
+      operationId: createStorageBinding
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStorageBindingRequest"
+      responses:
+        "201":
+          description: Storage binding created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/StorageBindingCreated"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/lifecycle-policies:
+    get:
+      tags: [filesystem, storage]
+      summary: List lifecycle policies
+      operationId: listLifecyclePolicies
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+      responses:
+        "200":
+          description: Lifecycle policies
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/LifecyclePolicyPage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    post:
+      tags: [filesystem, storage]
+      summary: Upsert a lifecycle policy version
+      operationId: upsertLifecyclePolicy
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertLifecyclePolicyRequest"
+      responses:
+        "201":
+          description: Lifecycle policy version saved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/LifecyclePolicyCreated"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
 components:
   parameters:
     WorkspaceID:
@@ -723,6 +1023,227 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TransferPart"
+    StorageProvider:
+      type: object
+      required: [id, organization_id, name, provider_type, secret_ref, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        provider_type:
+          type: string
+          enum: [LOCAL, NFS, S3]
+        endpoint:
+          type: string
+        secret_ref:
+          type: string
+        capabilities:
+          type: object
+          additionalProperties: true
+        config_version:
+          type: integer
+        status:
+          type: string
+    StorageProviderPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StorageProvider"
+    RegisterStorageProviderRequest:
+      type: object
+      required: [name, provider_type, secret_ref]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        provider_type:
+          type: string
+          enum: [LOCAL, NFS, S3]
+        endpoint:
+          type: string
+        secret_ref:
+          type: string
+        capabilities:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+    StorageProviderCreated:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+    StoragePoolMember:
+      type: object
+      required: [provider_id, mode, priority]
+      properties:
+        provider_id:
+          type: string
+          format: uuid
+        mode:
+          type: string
+          enum: [PRIMARY, REPLICA, ARCHIVE, DRAINING]
+        priority:
+          type: integer
+    StoragePool:
+      type: object
+      required: [id, name, status, placement_policy_version, members]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+        placement_policy_version:
+          type: integer
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoragePoolMember"
+    StoragePoolPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoragePool"
+    CreateStoragePoolRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoragePoolMember"
+    StoragePoolCreated:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    StorageBinding:
+      type: object
+      required: [id, organization_id, scope_type, scope_id, pool_id, priority]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        scope_type:
+          type: string
+          enum: [ORGANIZATION, WORKSPACE, PROJECT, USER]
+        scope_id:
+          type: string
+          format: uuid
+        pool_id:
+          type: string
+          format: uuid
+        priority:
+          type: integer
+    StorageBindingPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StorageBinding"
+    CreateStorageBindingRequest:
+      type: object
+      required: [scope_type, scope_id, pool_id]
+      properties:
+        scope_type:
+          type: string
+          enum: [ORGANIZATION, WORKSPACE, PROJECT, USER]
+        scope_id:
+          type: string
+          format: uuid
+        pool_id:
+          type: string
+          format: uuid
+        priority:
+          type: integer
+    StorageBindingCreated:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+    LifecyclePolicy:
+      type: object
+      required: [id, organization_id, name, version, rules, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        version:
+          type: integer
+        rules:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+    LifecyclePolicyPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LifecyclePolicy"
+    UpsertLifecyclePolicyRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        version:
+          type: integer
+        rules:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+    LifecyclePolicyCreated:
+      type: object
+      required: [id, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        version:
+          type: integer
     SuccessEnvelope:
       type: object
       required: [code, message, trace_id]

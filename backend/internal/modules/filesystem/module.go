@@ -106,6 +106,16 @@ func (m *Module) Register(c *appctx.Container) error {
 			Peek:   repo.GetTransferByID,
 			Gateway: filesystemhttp.NewTransferGatewayView(publicURL, issuer),
 		},
+		&filesystemhttp.StorageAdminOptions{
+			RegisterProvider:      command.NewRegisterProviderHandler(repo).Handle,
+			ListStorageProviders:  query.NewListStorageProvidersHandler(repo).Handle,
+			CreateStoragePool:     command.NewCreateStoragePoolHandler(repo).Handle,
+			ListStoragePools:      query.NewListStoragePoolsHandler(repo).Handle,
+			CreateStorageBinding:  command.NewCreateStorageBindingHandler(repo).Handle,
+			ListStorageBindings:   query.NewListStorageBindingsHandler(repo).Handle,
+			UpsertLifecyclePolicy: command.NewUpsertLifecyclePolicyHandler(repo).Handle,
+			ListLifecyclePolicies: query.NewListLifecyclePoliciesHandler(repo).Handle,
+		},
 	)
 	filesystemhttp.RegisterRoutes(
 		c.Engine,

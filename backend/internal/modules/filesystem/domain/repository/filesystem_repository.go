@@ -127,9 +127,13 @@ type FilesystemRepository interface {
 	SaveTransferStateCAS(context.Context, uuid.UUID, uuid.UUID, int64, TransferStatePatch) error
 	CreateStorageProvider(context.Context, *model.StorageProvider) error
 	GetStorageProvider(context.Context, uuid.UUID) (*model.StorageProvider, error)
-	SaveStoragePool(context.Context, *model.StoragePool) error
+	ListStorageProviders(context.Context, uuid.UUID) ([]*model.StorageProvider, error)
+	SaveStoragePool(context.Context, *model.StoragePool, uuid.UUID) error
 	GetStoragePool(context.Context, uuid.UUID) (*model.StoragePool, error)
+	ListStoragePools(context.Context, uuid.UUID) ([]model.StoragePoolSnapshot, error)
 	SaveStorageBinding(context.Context, *model.StorageBinding) error
+	ListStorageBindings(context.Context, uuid.UUID) ([]model.StorageBinding, error)
 	SaveLifecyclePolicy(context.Context, *model.LifecyclePolicy) error
+	ListLifecyclePolicies(context.Context, uuid.UUID) ([]model.LifecyclePolicy, error)
 	CreateLifecycleJob(context.Context, *model.LifecycleJob) error
 }

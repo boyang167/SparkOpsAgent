@@ -1236,21 +1236,6 @@ func (r *Repository) GetStorageProvider(ctx context.Context, id uuid.UUID) (*mod
 	return storageProviderResult(row, err)
 }
 
-func (r *Repository) SaveStoragePool(context.Context, *model.StoragePool) error {
-	return domain.ErrPersistence
-}
-
-func (r *Repository) GetStoragePool(context.Context, uuid.UUID) (*model.StoragePool, error) {
-	return nil, domain.ErrPersistence
-}
-
-func (r *Repository) SaveStorageBinding(context.Context, *model.StorageBinding) error {
-	return domain.ErrPersistence
-}
-
-func (r *Repository) SaveLifecyclePolicy(context.Context, *model.LifecyclePolicy) error {
-	return domain.ErrPersistence
-}
 
 func (r *Repository) CreateLifecycleJob(context.Context, *model.LifecycleJob) error {
 	return domain.ErrPersistence
@@ -1344,10 +1329,6 @@ func (r *Repository) MarkBlobGCPending(ctx context.Context, blobID uuid.UUID) er
 		return domain.ErrBlobConflict
 	}
 	return nil
-}
-
-func (r *Repository) GetLifecyclePolicy(context.Context, uuid.UUID, int64) (*model.LifecyclePolicy, error) {
-	return nil, domain.ErrPersistence
 }
 
 func (r *Repository) SaveLifecycleJobCheckpoint(context.Context, uuid.UUID, map[string]any) error {

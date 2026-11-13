@@ -119,7 +119,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return wrapPersistence(err)
 		}
 	}
-	if err := db.AutoMigrate(&namespaceRow{}, &nodeRow{}, &blobRow{}, &revisionRow{}, &replicaRow{}, &replicaMigrationRow{}, &quotaAccountRow{}, &transferSessionRow{}, &transferPartRow{}, &quotaReservationRow{}, &resourceGrantRow{}, &fileLinkRow{}, &commandDedupRow{}, &storageProviderRow{}); err != nil {
+	if err := db.AutoMigrate(&namespaceRow{}, &nodeRow{}, &blobRow{}, &revisionRow{}, &replicaRow{}, &replicaMigrationRow{}, &quotaAccountRow{}, &transferSessionRow{}, &transferPartRow{}, &quotaReservationRow{}, &resourceGrantRow{}, &fileLinkRow{}, &commandDedupRow{}, &storageProviderRow{}, &storagePoolRow{}, &storagePoolMemberRow{}, &storageBindingRow{}, &lifecyclePolicyRow{}); err != nil {
 		return wrapPersistence(err)
 	}
 	if db.Dialector.Name() == "postgres" {
