@@ -57,4 +57,5 @@ var (
 	ErrBlobStillReferenced          = errors.New("filesystem blob still referenced")
 	ErrRetentionHold                = errors.New("filesystem retention hold active")
 	ErrBlobGCNotReady               = errors.New("filesystem blob not ready for garbage collection")
+	ErrCrossWorkspaceReference      = errors.New("filesystem cross-workspace file reference rejected")
 )

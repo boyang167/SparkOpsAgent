@@ -65,6 +65,8 @@ type Handler struct {
 	upsertLifecyclePolicy func(context.Context, command.UpsertLifecyclePolicy) (command.UpsertLifecyclePolicyResult, error)
 	listLifecyclePolicies func(context.Context, query.StorageAdminList) ([]model.LifecyclePolicy, error)
 	access                ResourceAccess
+	createArtifact        func(context.Context, command.CreateArtifact) (model.Artifact, error)
+	listArtifacts         func(context.Context, query.ListArtifacts) ([]model.Artifact, string, error)
 }
 
 func NewHandler(
@@ -141,6 +143,8 @@ func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.Ha
 	base.DELETE("/files/:nodeId/grants/:grantId", authz.RequirePermission(permissions, authz.PermFileShare), requireIdempotencyKey(), h.RevokeGrant)
 	base.POST("/capabilities", authz.RequirePermission(permissions, authz.PermFileAdmin), requireIdempotencyKey(), h.IssueCapability)
 	base.POST("/capabilities/:capabilityId/revoke", authz.RequirePermission(permissions, authz.PermFileAdmin), requireIdempotencyKey(), h.RevokeCapability)
+	base.GET("/artifacts", authz.RequirePermission(permissions, authz.PermFileRead), h.ListArtifacts)
+	base.POST("/artifacts", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.CreateArtifact)
 	base.POST("/exports", authz.RequirePermission(permissions, authz.PermFileAdmin), requireIdempotencyKey(), h.StartControlledExport)
 	base.POST("/exports/:exportId/import", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.ImportExportedFile)
 	base.POST("/transfers", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.CreateTransfer)
@@ -730,6 +734,8 @@ func filesystemError(c *gin.Context, err error) {
 		httpx.Fail(c, "FILESYSTEM_RESOURCE_FORBIDDEN", "filesystem resource access denied", http.StatusForbidden)
 	case errors.Is(err, domain.ErrCrossOrganizationGrant):
 		httpx.Fail(c, "FILESYSTEM_CROSS_ORGANIZATION_GRANT", "cross-organization grant rejected", http.StatusForbidden)
+	case errors.Is(err, domain.ErrCrossWorkspaceReference):
+		httpx.Fail(c, "FILESYSTEM_CROSS_WORKSPACE", "file reference rejected", http.StatusUnprocessableEntity)
 	case errors.Is(err, domain.ErrAnonymousLinkDisabled):
 		httpx.Fail(c, "FILESYSTEM_ANONYMOUS_LINK_DISABLED", "anonymous links are disabled", http.StatusForbidden)
 	case errors.Is(err, domain.ErrCapabilityScopeEmpty):

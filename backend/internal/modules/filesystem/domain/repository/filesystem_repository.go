@@ -136,4 +136,7 @@ type FilesystemRepository interface {
 	SaveLifecyclePolicy(context.Context, *model.LifecyclePolicy) error
 	ListLifecyclePolicies(context.Context, uuid.UUID) ([]model.LifecyclePolicy, error)
 	CreateLifecycleJob(context.Context, *model.LifecycleJob) error
+	GetNodeByID(context.Context, uuid.UUID) (*model.Node, error)
+	CreateArtifact(context.Context, model.Artifact, model.FileLink) error
+	ListArtifacts(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Artifact, string, error)
 }

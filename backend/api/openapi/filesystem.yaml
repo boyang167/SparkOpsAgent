@@ -917,6 +917,82 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /api/v1/workspaces/{wsId}/artifacts:
+    get:
+      tags: [filesystem]
+      summary: List workspace artifacts
+      operationId: listFilesystemArtifacts
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - name: run_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: Artifacts
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ArtifactPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [filesystem]
+      summary: Create an artifact link to a file
+      operationId: createFilesystemArtifact
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateArtifactRequest"
+      responses:
+        "201":
+          description: Artifact created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Artifact"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+
   /api/v1/workspaces/{wsId}/exports:
     post:
       tags: [filesystem]
@@ -1286,6 +1362,83 @@ components:
         upload_url:
           type: string
           format: uri
+    Artifact:
+      type: object
+      required: [id, workspace_id, namespace_id, artifact_type, producer_type, producer_id, run_id, file_id, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        namespace_id:
+          type: string
+          format: uuid
+        artifact_type:
+          type: string
+        producer_type:
+          type: string
+        producer_id:
+          type: string
+          format: uuid
+        run_id:
+          type: string
+          format: uuid
+        input_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        file_id:
+          type: string
+          format: uuid
+        revision_id:
+          type: string
+          format: uuid
+          nullable: true
+        retention_policy_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    CreateArtifactRequest:
+      type: object
+      required: [artifact_type, producer_type, producer_id, run_id, file_id]
+      properties:
+        artifact_type:
+          type: string
+        producer_type:
+          type: string
+        producer_id:
+          type: string
+          format: uuid
+        run_id:
+          type: string
+          format: uuid
+        input_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        file_id:
+          type: string
+          format: uuid
+        retention_policy_id:
+          type: string
+          format: uuid
+    ArtifactPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+        next_cursor:
+          type: string
     TransferSession:
       type: object
       required:

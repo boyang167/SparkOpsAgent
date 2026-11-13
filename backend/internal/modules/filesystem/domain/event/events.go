@@ -19,6 +19,7 @@ const (
 	TransferInitiatedName   = "filesystem.transfer.initiated.v1"
 	TransferUploadedName    = "filesystem.transfer.uploaded.v1"
 	TransferCompletedName   = "filesystem.transfer.completed.v1"
+	ArtifactCreatedName     = "filesystem.artifact.created.v1"
 )
 
 type FileCreated struct {
@@ -75,6 +76,14 @@ type PermissionChanged struct {
 	NodeID  uuid.UUID `json:"node_id"`
 	GrantID uuid.UUID `json:"grant_id"`
 	Action  string    `json:"action"`
+}
+
+type ArtifactCreated struct {
+	events.BaseEvent
+	ArtifactID  uuid.UUID `json:"artifact_id"`
+	WorkspaceID uuid.UUID `json:"workspace_id"`
+	FileID      uuid.UUID `json:"file_id"`
+	RunID       uuid.UUID `json:"run_id"`
 }
 
 type TransferInitiated struct {
@@ -151,6 +160,11 @@ func Register(registry *events.Registry) error {
 		},
 		func() error {
 			return registerTransferEvent(registry, TransferCompletedName, func(event TransferCompleted) uuid.UUID { return event.SessionID })
+		},
+		func() error {
+			return events.RegisterJSON[ArtifactCreated](registry, ArtifactCreatedName, 1, func(ev ArtifactCreated) events.AggregateRef {
+				return events.AggregateRef{Type: "artifact", ID: ev.ArtifactID.String()}
+			})
 		},
 	}
 	for _, register := range registrations {

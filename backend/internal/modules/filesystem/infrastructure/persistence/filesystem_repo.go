@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -1335,6 +1336,77 @@ func (r *Repository) MarkBlobGCPending(ctx context.Context, blobID uuid.UUID) er
 
 func (r *Repository) SaveLifecycleJobCheckpoint(context.Context, uuid.UUID, map[string]any) error {
 	return domain.ErrPersistence
+}
+
+func (r *Repository) GetNodeByID(ctx context.Context, nodeID uuid.UUID) (*model.Node, error) {
+	var row nodeRow
+	err := postgres.DB(ctx, r.db).Where("id = ?", nodeID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrNodeNotFound
+	}
+	if err != nil {
+		return nil, wrapPersistence(err)
+	}
+	return nodeFromRow(row), nil
+}
+
+func (r *Repository) CreateArtifact(ctx context.Context, artifact model.Artifact, link model.FileLink) error {
+	refs, err := json.Marshal(artifact.InputRefs)
+	if err != nil {
+		return wrapPersistence(err)
+	}
+	row := artifactRow{
+		ID: artifact.ID, WorkspaceID: artifact.WorkspaceID, NamespaceID: artifact.NamespaceID,
+		ArtifactType: artifact.ArtifactType, ProducerType: artifact.ProducerType, ProducerID: artifact.ProducerID,
+		RunID: artifact.RunID, InputRefs: string(refs), FileID: artifact.FileID, RevisionID: artifact.RevisionID,
+		RetentionPolicyID: artifact.RetentionPolicyID, CreatedAt: artifact.CreatedAt,
+	}
+	linkRow := fileLinkRow{
+		ID: link.ID, NodeID: link.NodeID, RevisionID: link.RevisionID, LinkType: link.LinkType, LinkID: link.LinkID, CreatedAt: link.CreatedAt,
+	}
+	db := postgres.DB(ctx, r.db)
+	if err := db.Create(&row).Error; err != nil {
+		return wrapPersistence(err)
+	}
+	return db.Create(&linkRow).Error
+}
+
+func (r *Repository) ListArtifacts(ctx context.Context, workspaceID uuid.UUID, runID *uuid.UUID, limit int, cursor string) ([]model.Artifact, string, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := postgres.DB(ctx, r.db).Where("workspace_id = ?", workspaceID)
+	if runID != nil {
+		query = query.Where("run_id = ?", *runID)
+	}
+	if cursor != "" {
+		query = query.Where("id > ?", cursor)
+	}
+	var rows []artifactRow
+	if err := query.Order("id ASC").Limit(limit + 1).Find(&rows).Error; err != nil {
+		return nil, "", wrapPersistence(err)
+	}
+	next := ""
+	if len(rows) > limit {
+		next = rows[limit].ID.String()
+		rows = rows[:limit]
+	}
+	out := make([]model.Artifact, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, artifactFromRow(row))
+	}
+	return out, next, nil
+}
+
+func artifactFromRow(row artifactRow) model.Artifact {
+	refs := []uuid.UUID{}
+	_ = json.Unmarshal([]byte(row.InputRefs), &refs)
+	return model.Artifact{
+		ID: row.ID, WorkspaceID: row.WorkspaceID, NamespaceID: row.NamespaceID,
+		ArtifactType: row.ArtifactType, ProducerType: row.ProducerType, ProducerID: row.ProducerID,
+		RunID: row.RunID, InputRefs: refs, FileID: row.FileID, RevisionID: row.RevisionID,
+		RetentionPolicyID: row.RetentionPolicyID, CreatedAt: row.CreatedAt,
+	}
 }
 
 var _ repository.FilesystemRepository = (*Repository)(nil)

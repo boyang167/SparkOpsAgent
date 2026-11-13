@@ -302,3 +302,20 @@ type exportTaskRow struct {
 }
 
 func (exportTaskRow) TableName() string { return "filesystem.export_tasks" }
+
+type artifactRow struct {
+	ID                uuid.UUID  `gorm:"column:id;primaryKey;type:uuid"`
+	WorkspaceID       uuid.UUID  `gorm:"column:workspace_id;not null;type:uuid;index"`
+	NamespaceID       uuid.UUID  `gorm:"column:namespace_id;not null;type:uuid"`
+	ArtifactType      string     `gorm:"column:artifact_type;not null"`
+	ProducerType      string     `gorm:"column:producer_type;not null;index"`
+	ProducerID        uuid.UUID  `gorm:"column:producer_id;not null;type:uuid"`
+	RunID             uuid.UUID  `gorm:"column:run_id;not null;type:uuid;index"`
+	InputRefs         string     `gorm:"column:input_refs;not null;default:'[]'"`
+	FileID            uuid.UUID  `gorm:"column:file_id;not null;type:uuid;index"`
+	RevisionID        *uuid.UUID `gorm:"column:revision_id;type:uuid"`
+	RetentionPolicyID *uuid.UUID `gorm:"column:retention_policy_id;type:uuid"`
+	CreatedAt         time.Time  `gorm:"column:created_at;not null"`
+}
+
+func (artifactRow) TableName() string { return "filesystem.artifacts" }

@@ -126,6 +126,10 @@ func (m *Module) Register(c *appctx.Container) error {
 		return fmt.Errorf("filesystem agent capability signer: %w", agentSignerErr)
 	}
 	accessStore := persistence.NewCapabilityRepository(c.DB)
+	handler.BindArtifacts(filesystemhttp.ArtifactHandlers{
+		Create: command.NewCreateArtifactHandler(repo, c.Transactor, c.EventBus).Handle,
+		List:   query.NewListArtifactsHandler(repo).Handle,
+	})
 	handler.BindResourceAccess(filesystemhttp.ResourceAccess{
 		Grant:            grantCommands.Handle,
 		ListGrants:       grantCommands.List,
