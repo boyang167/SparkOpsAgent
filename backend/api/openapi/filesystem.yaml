@@ -538,8 +538,11 @@ components:
                 - AUTH_UNAUTHORIZED
                 - AUTH_INVALID_TOKEN
                 - AUTH_FORBIDDEN
+                - TENANT_WORKSPACE_REQUIRED
+                - TENANT_WORKSPACE_INVALID
                 - TENANT_NOT_WORKSPACE_MEMBER
                 - ENTITLEMENT_MODULE_DISABLED
+                - INTERNAL_ERROR
         trace_id:
           type: string
 

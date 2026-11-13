@@ -241,6 +241,7 @@ func TestMiddlewareShortCircuitOrder(t *testing.T) {
 	res = httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	require.Equal(t, http.StatusBadRequest, res.Code)
+	require.Contains(t, res.Body.String(), "TENANT_WORKSPACE_INVALID")
 	require.Zero(t, entitlementCalls)
 
 	nonMember := httpx.NewEngine()

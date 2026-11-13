@@ -115,6 +115,35 @@ func TestFilesystemRoutesDeclareImplementedStableErrors(t *testing.T) {
 	}
 }
 
+func TestErrorResponseAllowsAllFilesystemMiddlewareCodes(t *testing.T) {
+	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &document))
+	components := document["components"].(map[string]any)
+	schemas := components["schemas"].(map[string]any)
+	errorResponse := schemas["ErrorResponse"].(map[string]any)
+	properties := errorResponse["properties"].(map[string]any)
+	data := properties["data"].(map[string]any)
+	dataProperties := data["properties"].(map[string]any)
+	errorCode := dataProperties["error_code"].(map[string]any)
+	rawEnum := errorCode["enum"].([]any)
+	allowed := make([]string, 0, len(rawEnum))
+	for _, value := range rawEnum {
+		allowed = append(allowed, value.(string))
+	}
+	require.Subset(t, allowed, []string{
+		"AUTH_UNAUTHORIZED",
+		"AUTH_INVALID_TOKEN",
+		"TENANT_WORKSPACE_REQUIRED",
+		"TENANT_WORKSPACE_INVALID",
+		"TENANT_NOT_WORKSPACE_MEMBER",
+		"ENTITLEMENT_MODULE_DISABLED",
+		"AUTH_FORBIDDEN",
+		"INTERNAL_ERROR",
+	})
+}
+
 func TestRootOpenAPILoadsExternalRefsAndValidates(t *testing.T) {
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = true
