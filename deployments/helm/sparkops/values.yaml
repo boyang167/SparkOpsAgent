@@ -105,6 +105,26 @@ ingress:
           service: api
   tls: []
 
+observability:
+  filesystemAlerts:
+    enabled: true
+    namespace: ""
+    labels: {}
+    for: 5m
+    transferFailureRate: 0.05
+    providerErrorsPerSecond: 1
+    quotaReservationSeconds: 900
+    reconcileBacklog: 1000
+    outboxLagSeconds: 300
+  messagingAlerts:
+    enabled: true
+    namespace: ""
+    labels: {}
+    for: 5m
+    outboxOldestSeconds: 300
+    operationOldestSeconds: 300
+    pendingCount: 1000
+
 secrets:
   # Set via --set or external secret manager in production
   databaseDsn: postgres://sparkops:changeme@postgres:5432/sparkops?sslmode=disable

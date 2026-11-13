@@ -1,0 +1,71 @@
+{{- if .Values.observability.filesystemAlerts.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "sparkops.fullname" . }}-filesystem
+  {{- with .Values.observability.filesystemAlerts.namespace }}
+  namespace: {{ . }}
+  {{- end }}
+  labels:
+    {{- include "sparkops.labels" . | nindent 4 }}
+    {{- with .Values.observability.filesystemAlerts.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: sparkops.filesystem
+      rules:
+        - alert: FilesystemTransferFailureRateHigh
+          expr: |
+            sum(rate(sparkops_filesystem_transfer_operations_total{result="failed"}[5m]))
+            /
+            clamp_min(sum(rate(sparkops_filesystem_transfer_operations_total[5m])), 0.001)
+            > {{ .Values.observability.filesystemAlerts.transferFailureRate }}
+          for: {{ .Values.observability.filesystemAlerts.for }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Filesystem transfer failure rate is high
+        - alert: FilesystemScannerUnavailable
+          expr: absent_over_time(sparkops_filesystem_scanner_latency_seconds_count[10m]) == 1
+          for: {{ .Values.observability.filesystemAlerts.for }}
+          labels:
+            severity: critical
+          annotations:
+            summary: Filesystem scanner has produced no observations
+        - alert: FilesystemProviderErrorRateHigh
+          expr: sum(rate(sparkops_filesystem_provider_errors_total[5m])) > {{ .Values.observability.filesystemAlerts.providerErrorsPerSecond }}
+          for: {{ .Values.observability.filesystemAlerts.for }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Storage provider error rate is high
+        - alert: FilesystemQuotaReservationStuck
+          expr: sum(sparkops_filesystem_quota_reserved_bytes) > 0 and max(sparkops_filesystem_queue_lag_seconds{queue="transfer"}) > {{ .Values.observability.filesystemAlerts.quotaReservationSeconds }}
+          for: {{ .Values.observability.filesystemAlerts.for }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Filesystem quota reservations are not being released
+        - alert: FilesystemReconcileBacklogHigh
+          expr: sparkops_filesystem_reconcile_backlog > {{ .Values.observability.filesystemAlerts.reconcileBacklog }}
+          for: {{ .Values.observability.filesystemAlerts.for }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Filesystem reconciliation backlog is high
+        - alert: FilesystemReplicaMismatch
+          expr: sparkops_filesystem_replica_inconsistency > 0
+          for: {{ .Values.observability.filesystemAlerts.for }}
+          labels:
+            severity: critical
+          annotations:
+            summary: Filesystem replicas disagree with desired state
+        - alert: FilesystemOutboxLagHigh
+          expr: sparkops_filesystem_queue_lag_seconds{queue="outbox"} > {{ .Values.observability.filesystemAlerts.outboxLagSeconds }}
+          for: {{ .Values.observability.filesystemAlerts.for }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Filesystem Outbox dispatch is delayed
+{{- end }}
