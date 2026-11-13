@@ -22,6 +22,7 @@ import (
 	filesystemevent "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
@@ -264,7 +265,7 @@ func TestCreateTransferRollsBackSessionQuotaReservationAuditAndOutbox(t *testing
 	db, ns := newTransferTestDB(t)
 	handler := NewCreateTransferHandler(
 		persistence.NewRepository(db), postgres.NewTransactor(db), failingBus{},
-		auditService{store: audit.NewGormStore(db)},
+		auditService{store: audit.NewGormStore(db)}, nil,
 	)
 
 	_, err := handler.Handle(context.Background(), transferFixture(ns))
@@ -295,6 +296,60 @@ func TestCreateTransferRejectsCrossWorkspaceParentAndAuditsStableReason(t *testi
 	require.Contains(t, detail, `"reason":"parent_not_found"`)
 	require.NotContains(t, detail, "temporary_object_key")
 	require.NotContains(t, detail, "request_hash")
+}
+
+func TestCreateTransferPlacementSelectsProviderFromEngine(t *testing.T) {
+	db, ns := newTransferTestDB(t)
+	placedProvider := uuid.New()
+	poolID := uuid.New()
+	placer := &stubTransferPlacer{decision: service.PlacementDecision{
+		PoolID: poolID, ProviderID: placedProvider, PolicyVersion: 3,
+		MatchedRuleIDs: []string{"scope:WORKSPACE"}, DecisionReason: "test",
+	}}
+	handler := NewCreateTransferHandler(
+		persistence.NewRepository(db), postgres.NewTransactor(db), nil,
+		auditService{store: audit.NewGormStore(db)}, placer,
+	)
+	cmd := transferFixture(ns)
+	cmd.ProviderID = uuid.Nil
+
+	result, err := handler.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	require.NotEqual(t, uuid.Nil, result.SessionID)
+	internal, err := persistence.NewRepository(db).GetTransferByID(context.Background(), result.SessionID)
+	require.NoError(t, err)
+	require.NotNil(t, internal.ProviderID())
+	require.Equal(t, placedProvider, *internal.ProviderID())
+}
+
+func TestCreateTransferPlacementRejectsComplianceFailure(t *testing.T) {
+	db, ns := newTransferTestDB(t)
+	handler := NewCreateTransferHandler(
+		persistence.NewRepository(db), postgres.NewTransactor(db), nil,
+		auditService{store: audit.NewGormStore(db)},
+		&stubTransferPlacer{err: domain.ErrStorageComplianceUnsatisfied},
+	)
+	cmd := transferFixture(ns)
+	cmd.ProviderID = uuid.Nil
+	cmd.Classification = model.TransferClassificationRestricted
+
+	_, err := handler.Handle(context.Background(), cmd)
+
+	require.ErrorIs(t, err, domain.ErrStorageComplianceUnsatisfied)
+	assertTransferSideEffectCounts(t, db, 0, 0, 0, 1)
+}
+
+type stubTransferPlacer struct {
+	decision service.PlacementDecision
+	err      error
+}
+
+func (s *stubTransferPlacer) Place(context.Context, service.PlacementRequest) (service.PlacementDecision, error) {
+	if s.err != nil {
+		return service.PlacementDecision{}, s.err
+	}
+	return s.decision, nil
 }
 
 func TestCreateTransferAuthorizationAndValidationFailuresAreAudited(t *testing.T) {
@@ -329,7 +384,7 @@ func newTransferHandlerWithRepository(db *gorm.DB, repo repository.FilesystemRep
 	bus := messaging.NewReliableBus(registry, messagingpersistence.NewOutboxStore(db), nil, nil, nil)
 	return NewCreateTransferHandler(
 		repo, postgres.NewTransactor(db), bus,
-		auditService{store: audit.NewGormStore(db)},
+		auditService{store: audit.NewGormStore(db)}, nil,
 	)
 }
 

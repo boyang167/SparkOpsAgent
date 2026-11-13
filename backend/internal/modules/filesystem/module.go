@@ -84,7 +84,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	if issuerErr != nil {
 		return fmt.Errorf("filesystem transfer capability issuer: %w", issuerErr)
 	}
-	createTransfer := command.NewCreateTransferHandler(repo, c.Transactor, c.EventBus, c.AuditLogger)
+	createTransfer := command.NewCreateTransferHandler(repo, c.Transactor, c.EventBus, c.AuditLogger, nil)
 	getTransfer := query.NewGetTransferHandler(repo)
 	abortTransfer := command.NewAbortTransferHandler(repo, c.Transactor)
 	handler := filesystemhttp.NewHandler(

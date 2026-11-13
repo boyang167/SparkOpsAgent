@@ -13,6 +13,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	sharedevents "github.com/sparkops/sparkops-agent/backend/internal/shared/events"
@@ -48,16 +49,21 @@ type TransferDescriptor struct {
 	TotalParts int
 }
 
-type CreateTransferHandler struct {
-	repo  repository.FilesystemRepository
-	tx    postgres.Transactor
-	bus   messaging.Bus
-	audit auditPort
+type transferPlacer interface {
+	Place(context.Context, service.PlacementRequest) (service.PlacementDecision, error)
 }
 
-func NewCreateTransferHandler(repo repository.FilesystemRepository, tx postgres.Transactor, bus messaging.Bus, logger auditPort) *CreateTransferHandler {
+type CreateTransferHandler struct {
+	repo      repository.FilesystemRepository
+	tx        postgres.Transactor
+	bus       messaging.Bus
+	audit     auditPort
+	placement transferPlacer
+}
+
+func NewCreateTransferHandler(repo repository.FilesystemRepository, tx postgres.Transactor, bus messaging.Bus, logger auditPort, placement transferPlacer) *CreateTransferHandler {
 	requireMutationDependencies(repo, tx)
-	return &CreateTransferHandler{repo: repo, tx: tx, bus: bus, audit: logger}
+	return &CreateTransferHandler{repo: repo, tx: tx, bus: bus, audit: logger, placement: placement}
 }
 
 func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) (out TransferDescriptor, err error) {
@@ -89,7 +95,6 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 	if authErr := requireAllowed(cmd.Authorization, cmd.WorkspaceID, *parentID, model.ResourcePermissionWrite); authErr != nil {
 		return out, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.transfer.create", authErr)
 	}
-	requestHash := transferRequestHash(cmd, *parentID)
 	parent, parentErr := h.repo.GetNode(ctx, cmd.NamespaceID, *parentID)
 	if parentErr != nil {
 		if errors.Is(parentErr, domain.ErrNodeNotFound) {
@@ -100,13 +105,33 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 	if parent.Type != model.NodeTypeDirectory {
 		return out, domain.ErrParentNotDirectory
 	}
-	if cmd.ProviderID == uuid.Nil || strings.TrimSpace(cmd.IdempotencyKey) == "" {
+	if strings.TrimSpace(cmd.IdempotencyKey) == "" {
 		return out, model.ErrInvalidTransfer
 	}
 
+	var placementDecision *service.PlacementDecision
+	providerID := cmd.ProviderID
+	if h.placement != nil {
+		decision, placeErr := h.placement.Place(ctx, service.PlacementRequest{
+			OrganizationID:          cmd.OrganizationID,
+			WorkspaceID:             cmd.WorkspaceID,
+			UserID:                  cmd.ActorID,
+			Classification:          cmd.Classification,
+			Size:                    cmd.Size,
+			RequiresPresignedUpload: cmd.Protocol == model.TransferProtocolMultipart,
+		})
+		if placeErr != nil {
+			return out, placeErr
+		}
+		providerID = decision.ProviderID
+		placementDecision = &decision
+	} else if providerID == uuid.Nil {
+		return out, model.ErrInvalidTransfer
+	}
+
+	requestHash := transferRequestHash(cmd, *parentID, placementDecision)
 	sessionID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer:"+cmd.WorkspaceID.String()+":"+cmd.IdempotencyKey))
 	temporaryObjectKey := fmt.Sprintf("transfers/%s/content", sessionID)
-	providerID := cmd.ProviderID
 	ctx = withResourceID(ctx, sessionID.String())
 	var authoritative *model.TransferSession
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
@@ -187,11 +212,22 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 	return descriptor(authoritative), nil
 }
 
-func transferRequestHash(cmd CreateTransfer, parentID uuid.UUID) string {
+func transferRequestHash(cmd CreateTransfer, parentID uuid.UUID, placement *service.PlacementDecision) string {
+	providerID := cmd.ProviderID
+	poolID := uuid.Nil
+	policyVersion := int64(0)
+	matchedRules := ""
+	if placement != nil {
+		providerID = placement.ProviderID
+		poolID = placement.PoolID
+		policyVersion = placement.PolicyVersion
+		matchedRules = strings.Join(placement.MatchedRuleIDs, ",")
+	}
 	return mutationRequestHash(
 		"create_transfer", cmd.NamespaceID, parentID, strings.TrimSpace(cmd.Name), cmd.Protocol,
 		cmd.Size, strings.ToLower(strings.TrimSpace(cmd.SHA256)), cmd.Classification, cmd.ActorID,
-		model.CanonicalTransferExpiry(cmd.ExpiresAt).Format(time.RFC3339Nano), cmd.ProviderID,
+		model.CanonicalTransferExpiry(cmd.ExpiresAt).Format(time.RFC3339Nano), providerID,
+		poolID, policyVersion, matchedRules,
 	)
 }
 
