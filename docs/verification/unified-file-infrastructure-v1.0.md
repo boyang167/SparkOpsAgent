@@ -29,7 +29,7 @@
 | `REQUIRE_INTEGRATION=1 go test -tags=integration ./tests/filesystem/... -count=1` | PASS；`TwentyGiB` / `ConcurrentTransfer` / `MetadataCapacity` **SKIP** |
 | `go test ./deployments/helm -count=1` | PASS |
 | `helm lint deployments/helm/sparkops` | PASS；dependency 未 vendored 警告 |
-| `make test` / `make helm-lint` | **SKIP** — 本机无 `make`；已执行等价 `go test` + `helm lint` |
+| `mingw32-make test` / `mingw32-make helm-lint` | **PASS**；本机无 `make.exe`，使用 Make 兼容实现 |
 
 ## 主计划固定硬条件
 
