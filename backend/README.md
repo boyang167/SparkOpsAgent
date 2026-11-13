@@ -67,6 +67,12 @@ go run ./cmd/seed
 
 `GET /api/v1/auth/me` 返回 `is_super_admin` 字段，前端据此控制平台运维导航项。
 
+### Agent / Workflow / MCP 文件访问
+
+Agent 与 Workflow **Run** 通过 `agent/infrastructure/acl` 与 `workflow/infrastructure/acl` 中的 `RunFileAccess` 签发/撤销 **run-scoped capability**（`sparkops-agent-capability`），不得使用用户 JWT 或长期 API Token 读写字节。
+
+MCP 注册文件工具：`list_files`、`get_file_metadata`、`read_file`、`create_upload_session`、`write_file`、`create_artifact`。每个工具调用须携带 `capability_token`，并校验工作区边界与 capability 资源交集；超出 scope 返回 `filesystem capability scope denied`。
+
 授予 Super Admin（示例）：
 
 ```sql

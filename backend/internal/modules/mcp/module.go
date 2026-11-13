@@ -112,6 +112,9 @@ func (m *Module) Register(c *appctx.Container) error {
 		Clusters: sparkplugin.NewFactory(adminacl.NewClusterCredentialSource(adminRepo)),
 	}
 	application.RegisterPluginTools(registry, pluginContext)
+	if err := registerFilesystemTools(registry, c); err != nil {
+		return err
+	}
 
 	entsProvider := application.DBEntitlementsProvider{DB: c.DB}
 	toolExecutor := application.NewToolExecutor(registry, c.PermissionChecker, entsProvider)
