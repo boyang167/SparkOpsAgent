@@ -99,4 +99,11 @@ type FilesystemRepository interface {
 	ListTransferParts(context.Context, uuid.UUID) ([]model.TransferPart, error)
 	UpsertTransferPart(context.Context, *model.TransferPart) error
 	SaveTransferStateCAS(context.Context, uuid.UUID, uuid.UUID, int64, TransferStatePatch) error
+	CreateStorageProvider(context.Context, *model.StorageProvider) error
+	GetStorageProvider(context.Context, uuid.UUID) (*model.StorageProvider, error)
+	SaveStoragePool(context.Context, *model.StoragePool) error
+	GetStoragePool(context.Context, uuid.UUID) (*model.StoragePool, error)
+	SaveStorageBinding(context.Context, *model.StorageBinding) error
+	SaveLifecyclePolicy(context.Context, *model.LifecyclePolicy) error
+	CreateLifecycleJob(context.Context, *model.LifecycleJob) error
 }

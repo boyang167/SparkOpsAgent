@@ -1088,4 +1088,32 @@ func stringValueOrEmpty(value *string) string {
 	return *value
 }
 
+func (r *Repository) CreateStorageProvider(context.Context, *model.StorageProvider) error {
+	return domain.ErrPersistence
+}
+
+func (r *Repository) GetStorageProvider(context.Context, uuid.UUID) (*model.StorageProvider, error) {
+	return nil, domain.ErrPersistence
+}
+
+func (r *Repository) SaveStoragePool(context.Context, *model.StoragePool) error {
+	return domain.ErrPersistence
+}
+
+func (r *Repository) GetStoragePool(context.Context, uuid.UUID) (*model.StoragePool, error) {
+	return nil, domain.ErrPersistence
+}
+
+func (r *Repository) SaveStorageBinding(context.Context, *model.StorageBinding) error {
+	return domain.ErrPersistence
+}
+
+func (r *Repository) SaveLifecyclePolicy(context.Context, *model.LifecyclePolicy) error {
+	return domain.ErrPersistence
+}
+
+func (r *Repository) CreateLifecycleJob(context.Context, *model.LifecycleJob) error {
+	return domain.ErrPersistence
+}
+
 var _ repository.FilesystemRepository = (*Repository)(nil)

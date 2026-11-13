@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS filesystem.lifecycle_jobs;
+DROP TABLE IF EXISTS filesystem.lifecycle_policies;
+DROP TABLE IF EXISTS filesystem.mounts;
+DROP TABLE IF EXISTS filesystem.placement_policies;
+DROP TABLE IF EXISTS filesystem.storage_bindings;
+DROP INDEX IF EXISTS filesystem.ix_storage_pool_members_pool_priority;
+DROP TABLE IF EXISTS filesystem.storage_pool_members;
+DROP TABLE IF EXISTS filesystem.storage_pools;
+DROP TABLE IF EXISTS filesystem.storage_providers;
