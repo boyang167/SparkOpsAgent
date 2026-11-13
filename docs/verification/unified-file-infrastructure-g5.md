@@ -10,7 +10,7 @@
 - 验收文档提交：`58b2eb4500318b13a4875065187a85218e0f28ca`（含 G5/v1.0 公开文档）
 - G1–G4 证据：`docs/verification/unified-file-infrastructure-g1.md` … `g4.md`
 - 计划来源：`docs/superpowers/plans/2026-11-12-unified-file-infrastructure-g5-production.md` Task 7
-- 验收 shell：`DATABASE_DSN` **未设置**；`FS_LOAD_RUN` **未设置**；本机 **无 `make`**、**无 `docker`**；Helm dependency 未 vendored
+- 验收 shell：`DATABASE_DSN` **未设置**；`FS_LOAD_RUN` **未设置**；本机 **无 `make.exe`**、可用 `mingw32-make`、**无 `docker`**；Helm dependency 未 vendored
 
 ## Fresh 命令证据（Task 7 矩阵）
 
@@ -24,7 +24,7 @@
 | `helm lint deployments/helm/sparkops` | **PASS**；WARNING 缺少 postgresql/redis/rabbitmq 子 chart |
 | `cd fronted; pnpm --filter web typecheck` | **PASS** |
 | `cd fronted; pnpm vitest run apps/web/src/modules/filesystem … StoragePoolPanel.test.tsx` | **PASS**，4 files / 8 tests |
-| `make test` / `make helm-lint` | **SKIP** — Windows 无 `make`；已执行等价子命令 |
+| `mingw32-make test` / `mingw32-make helm-lint` | **PASS**；使用 Windows 可用的 Make 兼容实现执行同一 Makefile 目标 |
 
 ### Integration 明细（`REQUIRE_INTEGRATION=1`）
 
