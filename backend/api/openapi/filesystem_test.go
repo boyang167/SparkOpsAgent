@@ -102,8 +102,8 @@ func TestFilesystemRoutesDeclareImplementedStableErrors(t *testing.T) {
 		"GET /api/v1/workspaces/{wsId}/files/{nodeId}/revisions":                       {"400", "401", "403", "404", "422", "500", "503"},
 		"POST /api/v1/workspaces/{wsId}/files/{nodeId}/revisions/{revisionId}/restore": {"400", "401", "403", "404", "409", "422", "500", "503"},
 		"POST /api/v1/workspaces/{wsId}/transfers":                                     {"400", "401", "403", "404", "409", "415", "422", "500", "503"},
-		"GET /api/v1/workspaces/{wsId}/transfers/{sessionId}":                        {"400", "401", "403", "404", "422", "500", "503"},
-		"DELETE /api/v1/workspaces/{wsId}/transfers/{sessionId}":                     {"400", "401", "403", "404", "409", "422", "500", "503"},
+		"GET /api/v1/workspaces/{wsId}/transfers/{sessionId}":                          {"400", "401", "403", "404", "422", "500", "503"},
+		"DELETE /api/v1/workspaces/{wsId}/transfers/{sessionId}":                       {"400", "401", "403", "404", "409", "422", "500", "503"},
 	}
 	for route, statuses := range expected {
 		parts := strings.SplitN(route, " ", 2)
@@ -194,7 +194,13 @@ func TestFilesystemSpecificationExactlyMatchesRouter(t *testing.T) {
 	filesystemhttp.RegisterRoutes(engine, pass, pass, openAPIMembers{}, openAPIPermissions{}, &filesystemhttp.Handler{})
 	actual := map[string]bool{}
 	for _, route := range engine.Routes() {
-		path := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(route.Path, ":wsId", "{wsId}"), ":nodeId", "{nodeId}"), ":revisionId", "{revisionId}"), ":sessionId", "{sessionId}")
+		path := strings.ReplaceAll(route.Path, ":wsId", "{wsId}")
+		path = strings.ReplaceAll(path, ":nodeId", "{nodeId}")
+		path = strings.ReplaceAll(path, ":revisionId", "{revisionId}")
+		path = strings.ReplaceAll(path, ":sessionId", "{sessionId}")
+		path = strings.ReplaceAll(path, ":grantId", "{grantId}")
+		path = strings.ReplaceAll(path, ":capabilityId", "{capabilityId}")
+		path = strings.ReplaceAll(path, ":exportId", "{exportId}")
 		actual[route.Method+" "+path] = true
 	}
 	require.Equal(t, spec, actual)

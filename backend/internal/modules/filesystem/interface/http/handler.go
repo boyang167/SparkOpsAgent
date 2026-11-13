@@ -64,6 +64,7 @@ type Handler struct {
 	listStorageBindings   func(context.Context, query.StorageAdminList) ([]model.StorageBinding, error)
 	upsertLifecyclePolicy func(context.Context, command.UpsertLifecyclePolicy) (command.UpsertLifecyclePolicyResult, error)
 	listLifecyclePolicies func(context.Context, query.StorageAdminList) ([]model.LifecyclePolicy, error)
+	access                ResourceAccess
 }
 
 func NewHandler(
@@ -135,6 +136,13 @@ func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.Ha
 	base.DELETE("/files/:nodeId", authz.RequirePermission(permissions, authz.PermFileDelete), requireIdempotencyKey(), h.TrashNode)
 	base.GET("/files/:nodeId/revisions", authz.RequirePermission(permissions, authz.PermFileRead), h.ListRevisions)
 	base.POST("/files/:nodeId/revisions/:revisionId/restore", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.RestoreRevision)
+	base.GET("/files/:nodeId/grants", authz.RequirePermission(permissions, authz.PermFileShare), h.ListGrants)
+	base.POST("/files/:nodeId/grants", authz.RequirePermission(permissions, authz.PermFileShare), requireIdempotencyKey(), h.CreateGrant)
+	base.DELETE("/files/:nodeId/grants/:grantId", authz.RequirePermission(permissions, authz.PermFileShare), requireIdempotencyKey(), h.RevokeGrant)
+	base.POST("/capabilities", authz.RequirePermission(permissions, authz.PermFileAdmin), requireIdempotencyKey(), h.IssueCapability)
+	base.POST("/capabilities/:capabilityId/revoke", authz.RequirePermission(permissions, authz.PermFileAdmin), requireIdempotencyKey(), h.RevokeCapability)
+	base.POST("/exports", authz.RequirePermission(permissions, authz.PermFileAdmin), requireIdempotencyKey(), h.StartControlledExport)
+	base.POST("/exports/:exportId/import", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.ImportExportedFile)
 	base.POST("/transfers", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.CreateTransfer)
 	base.GET("/transfers/:sessionId", authz.RequirePermission(permissions, authz.PermFileRead), h.GetTransfer)
 	base.DELETE("/transfers/:sessionId", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.AbortTransfer)
@@ -720,6 +728,22 @@ func filesystemError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, domain.ErrResourceDenied):
 		httpx.Fail(c, "FILESYSTEM_RESOURCE_FORBIDDEN", "filesystem resource access denied", http.StatusForbidden)
+	case errors.Is(err, domain.ErrCrossOrganizationGrant):
+		httpx.Fail(c, "FILESYSTEM_CROSS_ORGANIZATION_GRANT", "cross-organization grant rejected", http.StatusForbidden)
+	case errors.Is(err, domain.ErrAnonymousLinkDisabled):
+		httpx.Fail(c, "FILESYSTEM_ANONYMOUS_LINK_DISABLED", "anonymous links are disabled", http.StatusForbidden)
+	case errors.Is(err, domain.ErrCapabilityScopeEmpty):
+		httpx.Fail(c, "FILESYSTEM_CAPABILITY_SCOPE_EMPTY", "capability scope is empty", http.StatusForbidden)
+	case errors.Is(err, domain.ErrCapabilityRevoked):
+		httpx.Fail(c, "FILESYSTEM_CAPABILITY_REVOKED", "capability revoked", http.StatusForbidden)
+	case errors.Is(err, domain.ErrCapabilityExpired):
+		httpx.Fail(c, "FILESYSTEM_CAPABILITY_EXPIRED", "capability expired", http.StatusForbidden)
+	case errors.Is(err, domain.ErrCapabilityInvalid):
+		httpx.Fail(c, "FILESYSTEM_CAPABILITY_INVALID", "capability token invalid", http.StatusBadRequest)
+	case errors.Is(err, domain.ErrControlledExportScope):
+		httpx.Fail(c, "FILESYSTEM_EXPORT_SCOPE", "controlled export scope rejected", http.StatusUnprocessableEntity)
+	case errors.Is(err, domain.ErrCapabilityNotFound), errors.Is(err, domain.ErrExportNotFound):
+		httpx.Fail(c, "FILESYSTEM_NOT_FOUND", "filesystem resource not found", http.StatusNotFound)
 	case errors.Is(err, domain.ErrNamespaceNotFound), errors.Is(err, domain.ErrNodeNotFound), errors.Is(err, domain.ErrRevisionNotFound):
 		httpx.Fail(c, "FILESYSTEM_NOT_FOUND", "filesystem resource not found", http.StatusNotFound)
 	case errors.Is(err, domain.ErrNamespaceMismatch):

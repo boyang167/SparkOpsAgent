@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
+	domainservice "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/service"
 )
 
 type Repository interface {
@@ -51,10 +52,7 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 	if err != nil {
 		return Decision{Reason: "resource_not_found"}
 	}
-	owner := node.OwnerID == request.ActorID
-	allowed := false
-	exactDeny := false
-	adminDeny := false
+	relations := make([]domainservice.Relation, 0)
 	for current := node; current != nil; {
 		permissions := []model.ResourcePermission{request.Permission}
 		if request.Permission != model.ResourcePermissionAdmin {
@@ -66,16 +64,10 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 				return Decision{Reason: "authorization_unavailable"}
 			}
 			for _, grant := range grants {
-				if grant.Effect == model.GrantEffectDeny {
-					if grant.Permission == model.ResourcePermissionAdmin {
-						adminDeny = true
-					} else {
-						exactDeny = true
-					}
-				}
-				if grant.Effect == model.GrantEffectAllow {
-					allowed = true
-				}
+				relations = append(relations, domainservice.Relation{
+					ResourceID: current.ID, Effect: grant.Effect, Inherited: current.ID != node.ID,
+					Permission: grant.Permission, Source: domainservice.SourceGrant, PolicyID: grant.ID.String(),
+				})
 			}
 		}
 		if current.ParentID == nil {
@@ -89,17 +81,11 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 			return Decision{Reason: "authorization_unavailable"}
 		}
 	}
-	if adminDeny {
-		return Decision{Reason: "admin_deny"}
-	}
-	if exactDeny {
-		return Decision{Reason: "explicit_deny"}
-	}
-	if owner {
-		return Decision{Allowed: true, Reason: "owner"}
-	}
-	if allowed {
-		return Decision{Allowed: true, Reason: "grant_allow"}
+	if node.OwnerID == request.ActorID {
+		relations = append(relations, domainservice.Relation{
+			ResourceID: node.ID, Effect: model.GrantEffectAllow, Permission: request.Permission,
+			Source: domainservice.SourceOwner, PolicyID: "owner",
+		})
 	}
 	if s.adminBypass != nil {
 		admin, adminErr := s.adminBypass(ctx, request.WorkspaceID, request.ActorID)
@@ -107,8 +93,15 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 			return Decision{Reason: "authorization_unavailable"}
 		}
 		if admin {
-			return Decision{Allowed: true, Reason: "admin_bypass"}
+			relations = append(relations, domainservice.Relation{
+				ResourceID: node.ID, Effect: model.GrantEffectAllow, Permission: request.Permission,
+				Source: domainservice.SourceAdminBypass, PolicyID: "admin_bypass",
+			})
 		}
 	}
-	return Decision{Reason: "default_deny"}
+	decided := domainservice.Decide(domainservice.Subject{
+		ActorID: request.ActorID, WorkspaceID: request.WorkspaceID,
+		Authenticated: true, Entitled: true, RBACAllowed: true,
+	}, request.Permission, domainservice.Resource{ID: node.ID, WorkspaceID: request.WorkspaceID}, relations...)
+	return Decision{Allowed: decided.Result == domainservice.DecisionAllow, Reason: decided.ReasonCode}
 }

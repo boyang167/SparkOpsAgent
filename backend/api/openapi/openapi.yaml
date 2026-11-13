@@ -172,6 +172,18 @@ paths:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1storage-bindings"
   /api/v1/workspaces/{wsId}/lifecycle-policies:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1lifecycle-policies"
+  /api/v1/workspaces/{wsId}/files/{nodeId}/grants:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1files~1{nodeId}~1grants"
+  /api/v1/workspaces/{wsId}/files/{nodeId}/grants/{grantId}:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1files~1{nodeId}~1grants~1{grantId}"
+  /api/v1/workspaces/{wsId}/capabilities:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1capabilities"
+  /api/v1/workspaces/{wsId}/capabilities/{capabilityId}/revoke:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1capabilities~1{capabilityId}~1revoke"
+  /api/v1/workspaces/{wsId}/exports:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1exports"
+  /api/v1/workspaces/{wsId}/exports/{exportId}/import:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1exports~1{exportId}~1import"
 
 components:
   securitySchemes:

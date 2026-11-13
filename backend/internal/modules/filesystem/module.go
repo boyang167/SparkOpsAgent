@@ -8,9 +8,12 @@ import (
 	resourceauth "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/authorization"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/capability"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/command"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/operation"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/subscriber"
 	filesystemevent "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
+	domainservice "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/service"
+	agentsign "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/capability"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
 	filesystemhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
@@ -100,10 +103,10 @@ func (m *Module) Register(c *appctx.Container) error {
 		resourceAuthorizer,
 		c.AuditLogger,
 		&filesystemhttp.TransferOptions{
-			Create: createTransfer.Handle,
-			Get:    getTransfer.Handle,
-			Abort:  abortTransfer.Handle,
-			Peek:   repo.GetTransferByID,
+			Create:  createTransfer.Handle,
+			Get:     getTransfer.Handle,
+			Abort:   abortTransfer.Handle,
+			Peek:    repo.GetTransferByID,
 			Gateway: filesystemhttp.NewTransferGatewayView(publicURL, issuer),
 		},
 		&filesystemhttp.StorageAdminOptions{
@@ -117,6 +120,21 @@ func (m *Module) Register(c *appctx.Container) error {
 			ListLifecyclePolicies: query.NewListLifecyclePoliciesHandler(repo).Handle,
 		},
 	)
+	grantCommands := command.NewGrantResourceHandler(c.FilesystemGrantPort)
+	agentSigner, agentSignerErr := agentsign.NewSigner(secret, domainservice.AgentCapabilityAudience)
+	if agentSignerErr != nil {
+		return fmt.Errorf("filesystem agent capability signer: %w", agentSignerErr)
+	}
+	accessStore := persistence.NewCapabilityRepository(c.DB)
+	handler.BindResourceAccess(filesystemhttp.ResourceAccess{
+		Grant:            grantCommands.Handle,
+		ListGrants:       grantCommands.List,
+		RevokeGrant:      grantCommands.Revoke,
+		IssueCapability:  command.NewIssueCapabilityHandler(domainservice.NewCapabilityIssuer(agentSigner), accessStore).Handle,
+		RevokeCapability: command.NewRevokeCapabilityHandler(accessStore).Handle,
+		StartExport:      command.NewStartControlledExportHandler(accessStore, c.AuditLogger).Handle,
+		ImportExported:   operation.NewImportExportedFileHandler(repo, accessStore).Handle,
+	})
 	filesystemhttp.RegisterRoutes(
 		c.Engine,
 		entitlements.Middleware(c.DB),

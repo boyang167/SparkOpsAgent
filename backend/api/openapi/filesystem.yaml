@@ -715,6 +715,304 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /api/v1/workspaces/{wsId}/files/{nodeId}/grants:
+    get:
+      tags: [filesystem]
+      summary: List resource grants on a node
+      operationId: listFilesystemGrants
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+      responses:
+        "200":
+          description: Resource grants
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ResourceGrantPage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    post:
+      tags: [filesystem]
+      summary: Grant a resource to a principal in the same organization
+      operationId: createFilesystemGrant
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateResourceGrantRequest"
+      responses:
+        "201":
+          description: Resource grant created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ResourceGrant"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/files/{nodeId}/grants/{grantId}:
+    delete:
+      tags: [filesystem]
+      summary: Revoke a resource grant
+      operationId: revokeFilesystemGrant
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+        - $ref: "#/components/parameters/GrantID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Resource grant revoked
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/capabilities:
+    post:
+      tags: [filesystem]
+      summary: Issue an agent capability for the intersection of user, run, and requested scope
+      operationId: issueFilesystemCapability
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueCapabilityRequest"
+      responses:
+        "200":
+          description: Replayed capability metadata without the original token
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/IssuedCapability"
+        "201":
+          description: Capability issued once; the token is not stored
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/IssuedCapability"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/capabilities/{capabilityId}/revoke:
+    post:
+      tags: [filesystem]
+      summary: Revoke an agent capability
+      operationId: revokeFilesystemCapability
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/CapabilityID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Capability revoked
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/exports:
+    post:
+      tags: [filesystem]
+      summary: Start a controlled cross-organization export
+      description: Creates an audited export task and a new file identity on import. It does not create a resource grant.
+      operationId: startFilesystemExport
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartControlledExportRequest"
+      responses:
+        "201":
+          description: Export task created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ExportTask"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/exports/{exportId}/import:
+    post:
+      tags: [filesystem]
+      summary: Import an exported file as a new file identity
+      operationId: importExportedFilesystemFile
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ExportID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportExportedFileRequest"
+      responses:
+        "201":
+          description: Imported file identity
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ImportedFile"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
 components:
   parameters:
     WorkspaceID:
@@ -726,6 +1024,27 @@ components:
         format: uuid
     NodeID:
       name: nodeId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    GrantID:
+      name: grantId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CapabilityID:
+      name: capabilityId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ExportID:
+      name: exportId
       in: path
       required: true
       schema:
@@ -1256,6 +1575,169 @@ components:
         data: {}
         trace_id:
           type: string
+    ResourceGrant:
+      type: object
+      required: [id, node_id, grantee_id, permission, effect]
+      properties:
+        id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+          format: uuid
+        grantee_id:
+          type: string
+          format: uuid
+        permission:
+          type: string
+          enum: [READ, WRITE, DELETE, SHARE, ADMIN]
+        effect:
+          type: string
+          enum: [ALLOW, DENY]
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    ResourceGrantPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResourceGrant"
+    CreateResourceGrantRequest:
+      type: object
+      required: [grantee_id, grantee_organization_id, permission, effect]
+      properties:
+        grantee_id:
+          type: string
+          format: uuid
+        grantee_organization_id:
+          type: string
+          format: uuid
+        permission:
+          type: string
+          enum: [READ, WRITE, DELETE, SHARE, ADMIN]
+        effect:
+          type: string
+          enum: [ALLOW, DENY]
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        anonymous:
+          type: boolean
+    IssueCapabilityRequest:
+      type: object
+      required: [run_id, resource_ids, run_resource_ids, actions, expires_at]
+      properties:
+        agent_id:
+          type: string
+          format: uuid
+          nullable: true
+        run_id:
+          type: string
+          format: uuid
+        resource_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        run_resource_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        actions:
+          type: array
+          items:
+            type: string
+        expires_at:
+          type: string
+          format: date-time
+    IssuedCapability:
+      type: object
+      required: [id, resource_ids, expires_at, replayed]
+      properties:
+        id:
+          type: string
+          format: uuid
+        token:
+          type: string
+        token_hash:
+          type: string
+        resource_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        expires_at:
+          type: string
+          format: date-time
+        replayed:
+          type: boolean
+    StartControlledExportRequest:
+      type: object
+      required: [target_organization_id, target_workspace_id, source_node_id]
+      properties:
+        target_organization_id:
+          type: string
+          format: uuid
+        target_workspace_id:
+          type: string
+          format: uuid
+        source_node_id:
+          type: string
+          format: uuid
+    ExportTask:
+      type: object
+      required: [id, source_organization_id, target_organization_id, source_node_id, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        source_organization_id:
+          type: string
+          format: uuid
+        target_organization_id:
+          type: string
+          format: uuid
+        source_workspace_id:
+          type: string
+          format: uuid
+        target_workspace_id:
+          type: string
+          format: uuid
+        source_node_id:
+          type: string
+          format: uuid
+        target_node_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          enum: [PENDING, IMPORTED]
+    ImportExportedFileRequest:
+      type: object
+      required: [parent_id, name]
+      properties:
+        parent_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    ImportedFile:
+      type: object
+      required: [node_id, source_node_id]
+      properties:
+        node_id:
+          type: string
+          format: uuid
+        source_node_id:
+          type: string
+          format: uuid
     ErrorResponse:
       type: object
       required: [code, message, data, trace_id]
@@ -1278,6 +1760,13 @@ components:
                 - FILESYSTEM_UNSUPPORTED_MEDIA_TYPE
                 - FILESYSTEM_NOT_FOUND
                 - FILESYSTEM_RESOURCE_FORBIDDEN
+                - FILESYSTEM_CROSS_ORGANIZATION_GRANT
+                - FILESYSTEM_ANONYMOUS_LINK_DISABLED
+                - FILESYSTEM_CAPABILITY_SCOPE_EMPTY
+                - FILESYSTEM_CAPABILITY_REVOKED
+                - FILESYSTEM_CAPABILITY_EXPIRED
+                - FILESYSTEM_CAPABILITY_INVALID
+                - FILESYSTEM_EXPORT_SCOPE
                 - FILESYSTEM_CONFLICT
                 - FILESYSTEM_QUOTA_EXCEEDED
                 - FILESYSTEM_UNSUPPORTED_OPERATION

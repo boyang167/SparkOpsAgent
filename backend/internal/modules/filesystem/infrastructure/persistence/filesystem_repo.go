@@ -416,7 +416,7 @@ func (r *Repository) GetBlob(ctx context.Context, blobID uuid.UUID) (*model.Blob
 		ID: row.ID, DedupDomain: row.DedupDomain, SHA256: row.SHA256, Size: row.Size,
 		EncryptionKeyRef: row.EncryptionKeyRef, RefCount: row.RefCount, State: row.State,
 		PreferredProviderID: row.PreferredProviderID,
-		TombstonedAt: row.TombstonedAt, LegalHold: row.LegalHold,
+		TombstonedAt:        row.TombstonedAt, LegalHold: row.LegalHold,
 	}, nil
 }
 
@@ -464,7 +464,7 @@ func (r *Repository) InsertBlob(ctx context.Context, blob *model.Blob) error {
 		ID: blob.ID, DedupDomain: blob.DedupDomain, SHA256: blob.SHA256, Size: blob.Size,
 		EncryptionKeyRef: blob.EncryptionKeyRef, RefCount: blob.RefCount, State: blob.State,
 		PreferredProviderID: blob.PreferredProviderID,
-		TombstonedAt: blob.TombstonedAt, LegalHold: blob.LegalHold,
+		TombstonedAt:        blob.TombstonedAt, LegalHold: blob.LegalHold,
 		CreatedAt: now,
 	}).Error)
 }
@@ -485,10 +485,10 @@ func (r *Repository) SetPreferredProvider(ctx context.Context, blobID, providerI
 
 func (r *Repository) UpdateReplica(ctx context.Context, replica *model.StorageReplica) error {
 	updates := map[string]any{
-		"object_key": replica.ObjectKey,
-		"checksum":   replica.Checksum,
-		"state":      replica.State,
-		"verified_at": replica.VerifiedAt,
+		"object_key":   replica.ObjectKey,
+		"checksum":     replica.Checksum,
+		"state":        replica.State,
+		"verified_at":  replica.VerifiedAt,
 		"delete_after": replica.DeleteAfter,
 	}
 	return wrapPersistence(postgres.DB(ctx, r.db).Model(&replicaRow{}).Where("id = ?", replica.ID).Updates(updates).Error)
@@ -916,7 +916,10 @@ func isDomainError(err error) bool {
 		domain.ErrIdempotencyConflict, domain.ErrOutcomeUnknown, domain.ErrCommandInProgress, model.ErrInvalidNodeName,
 		domain.ErrCommandNotFound, domain.ErrTransactionRetry,
 		domain.ErrTransactionExhausted, domain.ErrUnsupportedNodeType, domain.ErrRootMutation,
-		domain.ErrResourceDenied,
+		domain.ErrResourceDenied, domain.ErrCrossOrganizationGrant, domain.ErrAnonymousLinkDisabled,
+		domain.ErrCapabilityScopeEmpty, domain.ErrCapabilityInvalid, domain.ErrCapabilityNotFound,
+		domain.ErrCapabilityRevoked, domain.ErrCapabilityExpired, domain.ErrExportNotFound,
+		domain.ErrControlledExportScope,
 		domain.ErrGrantNotFound, domain.ErrNodeStateConflict,
 		domain.ErrTransferNotFound, domain.ErrTransferConflict, domain.ErrTransferIdempotencyConflict,
 		domain.ErrTransferVersionConflict, domain.ErrTransferStatusConflict,
@@ -1235,7 +1238,6 @@ func (r *Repository) GetStorageProvider(ctx context.Context, id uuid.UUID) (*mod
 	err := postgres.DB(ctx, r.db).Where("id = ?", id).First(&row).Error
 	return storageProviderResult(row, err)
 }
-
 
 func (r *Repository) CreateLifecycleJob(context.Context, *model.LifecycleJob) error {
 	return domain.ErrPersistence

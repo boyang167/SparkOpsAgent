@@ -40,13 +40,13 @@ type blobRow struct {
 	DedupDomain         uuid.UUID       `gorm:"column:dedup_domain;not null;type:uuid"`
 	SHA256              string          `gorm:"column:sha256;not null;size:64"`
 	Size                int64           `gorm:"not null"`
-	EncryptionKeyRef      string          `gorm:"column:encryption_key_ref"`
-	RefCount              int64           `gorm:"column:ref_count;not null"`
-	State                 model.BlobState `gorm:"not null;type:varchar(32)"`
-	PreferredProviderID   *uuid.UUID      `gorm:"column:preferred_provider_id;type:uuid"`
-	TombstonedAt          *time.Time      `gorm:"column:tombstoned_at"`
-	LegalHold             bool            `gorm:"column:legal_hold;not null;default:false"`
-	CreatedAt             time.Time       `gorm:"not null"`
+	EncryptionKeyRef    string          `gorm:"column:encryption_key_ref"`
+	RefCount            int64           `gorm:"column:ref_count;not null"`
+	State               model.BlobState `gorm:"not null;type:varchar(32)"`
+	PreferredProviderID *uuid.UUID      `gorm:"column:preferred_provider_id;type:uuid"`
+	TombstonedAt        *time.Time      `gorm:"column:tombstoned_at"`
+	LegalHold           bool            `gorm:"column:legal_hold;not null;default:false"`
+	CreatedAt           time.Time       `gorm:"not null"`
 }
 
 func (blobRow) TableName() string { return "filesystem.blobs" }
@@ -77,14 +77,14 @@ type replicaRow struct {
 }
 
 type replicaMigrationRow struct {
-	BlobID             uuid.UUID `gorm:"column:blob_id;primaryKey;type:uuid"`
-	TargetProviderID   uuid.UUID `gorm:"column:target_provider_id;primaryKey;type:uuid"`
-	TargetReplicaID    uuid.UUID `gorm:"column:target_replica_id;not null;type:uuid"`
-	SourceProviderID   uuid.UUID `gorm:"column:source_provider_id;not null;type:uuid"`
-	BytesCopied        int64     `gorm:"column:bytes_copied;not null"`
-	TargetObjectKey    string    `gorm:"column:target_object_key;not null"`
-	PolicyVersion      int64     `gorm:"column:policy_version;not null"`
-	UpdatedAt          time.Time `gorm:"column:updated_at;not null"`
+	BlobID           uuid.UUID `gorm:"column:blob_id;primaryKey;type:uuid"`
+	TargetProviderID uuid.UUID `gorm:"column:target_provider_id;primaryKey;type:uuid"`
+	TargetReplicaID  uuid.UUID `gorm:"column:target_replica_id;not null;type:uuid"`
+	SourceProviderID uuid.UUID `gorm:"column:source_provider_id;not null;type:uuid"`
+	BytesCopied      int64     `gorm:"column:bytes_copied;not null"`
+	TargetObjectKey  string    `gorm:"column:target_object_key;not null"`
+	PolicyVersion    int64     `gorm:"column:policy_version;not null"`
+	UpdatedAt        time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (replicaMigrationRow) TableName() string { return "filesystem.replica_migrations" }
@@ -205,41 +205,41 @@ type transferPartRow struct {
 func (transferPartRow) TableName() string { return "filesystem.transfer_parts" }
 
 type storageProviderRow struct {
-	ID             uuid.UUID           `gorm:"column:id;primaryKey;type:uuid"`
-	OrganizationID uuid.UUID           `gorm:"column:organization_id;not null;type:uuid;uniqueIndex:ux_storage_provider_org_name"`
-	Name           string              `gorm:"column:name;not null;uniqueIndex:ux_storage_provider_org_name"`
-	ProviderType   model.ProviderType  `gorm:"column:provider_type;not null;type:varchar(16)"`
-	Endpoint       string              `gorm:"column:endpoint;not null"`
-	SecretRef      string              `gorm:"column:secret_ref;not null"`
-	Capabilities   jsonObject          `gorm:"column:capabilities;not null;type:text"`
-	Health         jsonObject          `gorm:"column:health;not null;type:text"`
-	ConfigVersion  int64               `gorm:"column:config_version;not null"`
-	Status         string              `gorm:"column:status;not null;type:varchar(32)"`
-	CreatedAt      time.Time           `gorm:"column:created_at;not null"`
-	UpdatedAt      time.Time           `gorm:"column:updated_at;not null"`
+	ID             uuid.UUID          `gorm:"column:id;primaryKey;type:uuid"`
+	OrganizationID uuid.UUID          `gorm:"column:organization_id;not null;type:uuid;uniqueIndex:ux_storage_provider_org_name"`
+	Name           string             `gorm:"column:name;not null;uniqueIndex:ux_storage_provider_org_name"`
+	ProviderType   model.ProviderType `gorm:"column:provider_type;not null;type:varchar(16)"`
+	Endpoint       string             `gorm:"column:endpoint;not null"`
+	SecretRef      string             `gorm:"column:secret_ref;not null"`
+	Capabilities   jsonObject         `gorm:"column:capabilities;not null;type:text"`
+	Health         jsonObject         `gorm:"column:health;not null;type:text"`
+	ConfigVersion  int64              `gorm:"column:config_version;not null"`
+	Status         string             `gorm:"column:status;not null;type:varchar(32)"`
+	CreatedAt      time.Time          `gorm:"column:created_at;not null"`
+	UpdatedAt      time.Time          `gorm:"column:updated_at;not null"`
 }
 
 func (storageProviderRow) TableName() string { return "filesystem.storage_providers" }
 
 type storagePoolRow struct {
-	ID                     uuid.UUID                `gorm:"column:id;primaryKey;type:uuid"`
-	OrganizationID         uuid.UUID                `gorm:"column:organization_id;not null;type:uuid;uniqueIndex:ux_storage_pool_org_name"`
-	Name                   string                   `gorm:"column:name;not null;uniqueIndex:ux_storage_pool_org_name"`
-	Status                 model.StoragePoolStatus  `gorm:"column:status;not null;type:varchar(32)"`
-	PlacementPolicyVersion int64                    `gorm:"column:placement_policy_version;not null"`
-	CreatedAt              time.Time                `gorm:"column:created_at;not null"`
-	UpdatedAt              time.Time                `gorm:"column:updated_at;not null"`
+	ID                     uuid.UUID               `gorm:"column:id;primaryKey;type:uuid"`
+	OrganizationID         uuid.UUID               `gorm:"column:organization_id;not null;type:uuid;uniqueIndex:ux_storage_pool_org_name"`
+	Name                   string                  `gorm:"column:name;not null;uniqueIndex:ux_storage_pool_org_name"`
+	Status                 model.StoragePoolStatus `gorm:"column:status;not null;type:varchar(32)"`
+	PlacementPolicyVersion int64                   `gorm:"column:placement_policy_version;not null"`
+	CreatedAt              time.Time               `gorm:"column:created_at;not null"`
+	UpdatedAt              time.Time               `gorm:"column:updated_at;not null"`
 }
 
 func (storagePoolRow) TableName() string { return "filesystem.storage_pools" }
 
 type storagePoolMemberRow struct {
-	ID         uuid.UUID           `gorm:"column:id;primaryKey;type:uuid"`
-	PoolID     uuid.UUID           `gorm:"column:pool_id;not null;type:uuid;uniqueIndex:ux_storage_pool_member"`
-	ProviderID uuid.UUID           `gorm:"column:provider_id;not null;type:uuid;uniqueIndex:ux_storage_pool_member"`
-	Priority   int                   `gorm:"column:priority;not null"`
-	Mode       model.ProviderMode    `gorm:"column:mode;not null;type:varchar(16)"`
-	CreatedAt  time.Time             `gorm:"column:created_at;not null"`
+	ID         uuid.UUID          `gorm:"column:id;primaryKey;type:uuid"`
+	PoolID     uuid.UUID          `gorm:"column:pool_id;not null;type:uuid;uniqueIndex:ux_storage_pool_member"`
+	ProviderID uuid.UUID          `gorm:"column:provider_id;not null;type:uuid;uniqueIndex:ux_storage_pool_member"`
+	Priority   int                `gorm:"column:priority;not null"`
+	Mode       model.ProviderMode `gorm:"column:mode;not null;type:varchar(16)"`
+	CreatedAt  time.Time          `gorm:"column:created_at;not null"`
 }
 
 func (storagePoolMemberRow) TableName() string { return "filesystem.storage_pool_members" }
@@ -268,3 +268,37 @@ type lifecyclePolicyRow struct {
 }
 
 func (lifecyclePolicyRow) TableName() string { return "filesystem.lifecycle_policies" }
+
+type capabilityRow struct {
+	ID             uuid.UUID  `gorm:"column:id;primaryKey;type:uuid"`
+	TokenHash      string     `gorm:"column:token_hash;not null;uniqueIndex"`
+	OrganizationID uuid.UUID  `gorm:"column:organization_id;not null;type:uuid"`
+	WorkspaceID    uuid.UUID  `gorm:"column:workspace_id;not null;type:uuid"`
+	ActorID        uuid.UUID  `gorm:"column:actor_id;not null;type:uuid"`
+	AgentID        *uuid.UUID `gorm:"column:agent_id;type:uuid"`
+	RunID          uuid.UUID  `gorm:"column:run_id;not null;type:uuid"`
+	ResourceIDs    string     `gorm:"column:resource_ids;not null;type:text"`
+	Actions        string     `gorm:"column:actions;not null;type:text"`
+	Audience       string     `gorm:"column:audience;not null"`
+	ExpiresAt      time.Time  `gorm:"column:expires_at;not null"`
+	RevokedAt      *time.Time `gorm:"column:revoked_at"`
+	CreatedAt      time.Time  `gorm:"column:created_at;not null"`
+}
+
+func (capabilityRow) TableName() string { return "filesystem.capabilities" }
+
+type exportTaskRow struct {
+	ID                   uuid.UUID  `gorm:"column:id;primaryKey;type:uuid"`
+	SourceOrganizationID uuid.UUID  `gorm:"column:source_organization_id;not null;type:uuid"`
+	TargetOrganizationID uuid.UUID  `gorm:"column:target_organization_id;not null;type:uuid"`
+	SourceWorkspaceID    uuid.UUID  `gorm:"column:source_workspace_id;not null;type:uuid"`
+	TargetWorkspaceID    uuid.UUID  `gorm:"column:target_workspace_id;not null;type:uuid"`
+	SourceNodeID         uuid.UUID  `gorm:"column:source_node_id;not null;type:uuid"`
+	TargetNodeID         *uuid.UUID `gorm:"column:target_node_id;type:uuid"`
+	Status               string     `gorm:"column:status;not null"`
+	ActorID              uuid.UUID  `gorm:"column:actor_id;not null;type:uuid"`
+	CreatedAt            time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt            time.Time  `gorm:"column:updated_at;not null"`
+}
+
+func (exportTaskRow) TableName() string { return "filesystem.export_tasks" }

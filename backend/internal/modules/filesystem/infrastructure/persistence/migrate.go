@@ -99,6 +99,8 @@ func AutoMigrate(db *gorm.DB) error {
 			`CREATE TABLE IF NOT EXISTS filesystem.file_links (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, revision_id BLOB, link_type TEXT NOT NULL, link_id BLOB NOT NULL, created_at DATETIME, UNIQUE(link_type, link_id, node_id, revision_id), FOREIGN KEY(node_id) REFERENCES nodes(id), FOREIGN KEY(revision_id) REFERENCES file_revisions(id))`,
 			`CREATE TABLE IF NOT EXISTS filesystem.command_dedup (command_id BLOB PRIMARY KEY, workspace_id BLOB NOT NULL, operation TEXT NOT NULL, request_hash TEXT NOT NULL, node_id BLOB, revision_id BLOB, state TEXT NOT NULL, created_at DATETIME, updated_at DATETIME)`,
 			`CREATE TABLE IF NOT EXISTS filesystem.storage_providers (id BLOB PRIMARY KEY, organization_id BLOB NOT NULL, name TEXT NOT NULL CHECK (length(trim(name)) > 0), provider_type TEXT NOT NULL CHECK (provider_type IN ('LOCAL','NFS','S3')), endpoint TEXT NOT NULL DEFAULT '', secret_ref TEXT NOT NULL CHECK (length(trim(secret_ref)) > 0), capabilities TEXT NOT NULL DEFAULT '{}', health TEXT NOT NULL DEFAULT '{}', config_version INTEGER NOT NULL DEFAULT 1 CHECK (config_version > 0), status TEXT NOT NULL DEFAULT 'ACTIVE', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, UNIQUE(organization_id, name))`,
+			`CREATE TABLE IF NOT EXISTS filesystem.capabilities (id BLOB PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, organization_id BLOB NOT NULL, workspace_id BLOB NOT NULL, actor_id BLOB NOT NULL, agent_id BLOB, run_id BLOB NOT NULL, resource_ids TEXT NOT NULL, actions TEXT NOT NULL, audience TEXT NOT NULL, expires_at DATETIME NOT NULL, revoked_at DATETIME, created_at DATETIME NOT NULL)`,
+			`CREATE TABLE IF NOT EXISTS filesystem.export_tasks (id BLOB PRIMARY KEY, source_organization_id BLOB NOT NULL, target_organization_id BLOB NOT NULL, source_workspace_id BLOB NOT NULL, target_workspace_id BLOB NOT NULL, source_node_id BLOB NOT NULL, target_node_id BLOB, status TEXT NOT NULL CHECK (status IN ('PENDING','IMPORTED')), actor_id BLOB NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)`,
 		} {
 			if err := db.Exec(statement).Error; err != nil {
 				return wrapPersistence(err)
@@ -119,7 +121,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return wrapPersistence(err)
 		}
 	}
-	if err := db.AutoMigrate(&namespaceRow{}, &nodeRow{}, &blobRow{}, &revisionRow{}, &replicaRow{}, &replicaMigrationRow{}, &quotaAccountRow{}, &transferSessionRow{}, &transferPartRow{}, &quotaReservationRow{}, &resourceGrantRow{}, &fileLinkRow{}, &commandDedupRow{}, &storageProviderRow{}, &storagePoolRow{}, &storagePoolMemberRow{}, &storageBindingRow{}, &lifecyclePolicyRow{}); err != nil {
+	if err := db.AutoMigrate(&namespaceRow{}, &nodeRow{}, &blobRow{}, &revisionRow{}, &replicaRow{}, &replicaMigrationRow{}, &quotaAccountRow{}, &transferSessionRow{}, &transferPartRow{}, &quotaReservationRow{}, &resourceGrantRow{}, &fileLinkRow{}, &commandDedupRow{}, &storageProviderRow{}, &storagePoolRow{}, &storagePoolMemberRow{}, &storageBindingRow{}, &lifecyclePolicyRow{}, &capabilityRow{}, &exportTaskRow{}); err != nil {
 		return wrapPersistence(err)
 	}
 	if db.Dialector.Name() == "postgres" {
