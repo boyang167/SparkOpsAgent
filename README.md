@@ -180,6 +180,16 @@ Windows PowerShell 可将 `cp` 换成 `Copy-Item`。
 - 工作负载与 Pod
 - 日志与终端
 
+### 统一文件基础设施
+
+- 以 Namespace、Node、Revision、Blob 和 Replica 管理统一文件身份与版本
+- 支持 Local/PVC、NFS、S3 Compatible 原生 Provider
+- Transfer Session、配额预留、恶意文件扫描、幂等 Commit 与断点续传协议
+- File Explorer、Knowledge、Artifact、Agent、Workflow、MCP 和 SFTP 统一使用 File ID
+- 生产数据面可拆分为 Transfer Gateway、Worker、SFTP Gateway 和 Reconciler
+
+COS、OSS 和 Azure Blob 为 Adapter 扩展路线，不属于 v1.0 原生 Provider。
+
 ### 集成
 
 - REST / OpenAPI
@@ -216,6 +226,11 @@ make test
 make backend-test
 make frontend-test
 ```
+
+文件系统生产部署、Knowledge 迁移和灾备操作分别见
+[部署与运维说明](docs/SparkOps部署与运维说明.md)、
+[Knowledge 迁移 Runbook](docs/runbooks/filesystem-knowledge-migration.md) 和
+[备份恢复 Runbook](docs/runbooks/filesystem-backup-restore.md)。
 
 OpenAPI 界面：http://localhost:8080/api/docs
 
