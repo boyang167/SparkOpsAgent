@@ -5,9 +5,13 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
+	filesystemport "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/port"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
@@ -101,6 +105,21 @@ func TestRegisterExposesMetadataRoutesWithoutLocalProvider(t *testing.T) {
 	require.True(t, routes["GET /api/v1/workspaces/:wsId/files"])
 	require.True(t, routes["POST /api/v1/workspaces/:wsId/directories"])
 	require.False(t, routes["POST /api/v1/workspaces/:wsId/files"], "upload is deferred to G2")
+	require.NotNil(t, container.FilesystemGrantPort)
+	repo := persistence.NewRepository(db)
+	owner := uuid.New()
+	namespace := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	require.NoError(t, repo.CreateNamespace(context.Background(), namespace))
+	root, err := model.NewRootDirectory(namespace.ID, owner, ".root")
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(context.Background(), root))
+	require.NoError(t, repo.SetNamespaceRoot(context.Background(), namespace.WorkspaceID, root.ID))
+	grants, err := container.FilesystemGrantPort.List(context.Background(), filesystemport.GrantRequest{
+		ActorID: owner, OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID,
+		NamespaceID: namespace.ID, NodeID: root.ID,
+	})
+	require.NoError(t, err)
+	require.Empty(t, grants)
 
 	err = module.Register(container)
 	require.ErrorContains(t, err, "duplicate event descriptor")

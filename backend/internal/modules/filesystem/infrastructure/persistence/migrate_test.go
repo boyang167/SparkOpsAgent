@@ -1,6 +1,8 @@
 package persistence
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,13 +13,39 @@ import (
 )
 
 func TestPostgresFallbackConstraintsMatchKernelInvariants(t *testing.T) {
-	sql := strings.Join(postgresFallbackConstraints, "\n")
-	for _, invariant := range []string{
-		"(dedup_domain, sha256, size)", "(namespace_id, normalized_name)", "(namespace_id, parent_id, normalized_name)",
-		"(node_id, revision_no)", "(blob_id, provider_id, object_key)", "fk_nodes_parent_namespace",
-		"fk_nodes_current_revision", "fk_namespaces_root_node", "effect IN ('ALLOW','DENY')",
+	fallbackSQL := strings.Join(postgresFallbackConstraints, "\n")
+	migrationBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "..", "migrations", "000077_filesystem_kernel.up.sql"))
+	require.NoError(t, err)
+	migrationSQL := string(migrationBytes)
+	for _, invariant := range []struct {
+		migration string
+		fallback  string
+	}{
+		{"UNIQUE(dedup_domain, sha256, size)", "(dedup_domain, sha256, size)"},
+		{"UNIQUE(node_id, revision_no)", "(node_id, revision_no)"},
+		{"UNIQUE(blob_id, provider_id, object_key)", "(blob_id, provider_id, object_key)"},
+		{"fk_nodes_parent_namespace", "fk_nodes_parent_namespace"},
+		{"fk_nodes_current_revision", "fk_nodes_current_revision"},
+		{"fk_namespaces_root_node", "fk_namespaces_root_node"},
+		{"namespace_id UUID NOT NULL REFERENCES filesystem.namespaces(id)", "fk_nodes_namespace"},
+		{"node_id UUID NOT NULL REFERENCES filesystem.nodes(id)", "fk_revisions_node"},
+		{"blob_id UUID NOT NULL REFERENCES filesystem.blobs(id)", "fk_revisions_blob"},
+		{"blob_id UUID NOT NULL REFERENCES filesystem.blobs(id)", "fk_replicas_blob"},
+		{"quota_account_id UUID NOT NULL REFERENCES filesystem.quota_accounts(id)", "fk_reservations_quota"},
+		{"node_id UUID NOT NULL REFERENCES filesystem.nodes(id)", "fk_grants_node"},
+		{"node_id UUID NOT NULL REFERENCES filesystem.nodes(id)", "fk_file_links_node"},
+		{"revision_id UUID REFERENCES filesystem.file_revisions(id)", "fk_file_links_revision"},
+		{"node_type VARCHAR(16) NOT NULL CHECK (node_type IN ('FILE','DIRECTORY'))", "ck_filesystem_node_type"},
+		{"state VARCHAR(32) NOT NULL CHECK (state IN ('ACTIVE'", "ck_filesystem_node_state"},
+		{"state VARCHAR(32) NOT NULL CHECK (state IN ('PENDING'", "ck_filesystem_blob_state"},
+		{"state VARCHAR(32) NOT NULL CHECK (state IN ('CREATING'", "ck_filesystem_replica_state"},
+		{"revision_no INT NOT NULL CHECK (revision_no > 0)", "ck_filesystem_revision_values"},
+		{"bytes BIGINT NOT NULL CHECK (bytes >= 0)", "ck_filesystem_reservation_values"},
+		{"effect VARCHAR(8) NOT NULL CHECK (effect IN ('ALLOW','DENY'))", "effect IN ('ALLOW','DENY')"},
+		{"used_bytes BIGINT NOT NULL DEFAULT 0 CHECK (used_bytes >= 0)", "ck_filesystem_quota_values"},
 	} {
-		require.Contains(t, sql, invariant)
+		require.Contains(t, migrationSQL, invariant.migration)
+		require.Contains(t, fallbackSQL, invariant.fallback)
 	}
 }
 
@@ -32,7 +60,14 @@ func TestPostgresFallbackConstraintCatalog(t *testing.T) {
 		require.NoError(t, db.Raw("SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'filesystem' AND indexname = ?", index).Scan(&count).Error)
 		require.Equal(t, int64(1), count, index)
 	}
-	for _, constraint := range []string{"fk_nodes_parent_namespace", "fk_nodes_current_revision", "fk_namespaces_root_node", "ck_filesystem_grant_values"} {
+	for _, constraint := range []string{
+		"fk_nodes_namespace", "fk_nodes_parent_namespace", "fk_nodes_current_revision", "fk_namespaces_root_node",
+		"fk_revisions_node", "fk_revisions_blob", "fk_replicas_blob", "fk_reservations_quota",
+		"fk_grants_node", "fk_file_links_node", "fk_file_links_revision",
+		"ck_filesystem_node_type", "ck_filesystem_node_state", "ck_filesystem_blob_size", "ck_filesystem_blob_state",
+		"ck_filesystem_revision_values", "ck_filesystem_replica_state", "ck_filesystem_reservation_values",
+		"ck_filesystem_grant_values", "ck_filesystem_quota_values",
+	} {
 		var count int64
 		require.NoError(t, db.Raw("SELECT COUNT(*) FROM pg_constraint WHERE conname = ?", constraint).Scan(&count).Error)
 		require.Equal(t, int64(1), count, constraint)

@@ -81,7 +81,7 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 		if current.ParentID == nil {
 			break
 		}
-		current, err = s.repo.GetNode(ctx, request.NamespaceID, *current.ParentID)
+		current, err = getNode(ctx, request.NamespaceID, *current.ParentID)
 		if errors.Is(err, domain.ErrNodeNotFound) {
 			return Decision{Reason: "resource_not_found"}
 		}

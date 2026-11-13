@@ -345,24 +345,27 @@ func NewCreateDirectoryHandler(repo repository.FilesystemRepository, tx postgres
 
 func (h *CreateDirectoryHandler) Handle(ctx context.Context, cmd CreateDirectory) (out *model.Node, err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ns, scopeErr := h.repo.GetNamespaceByWorkspace(ctx, cmd.WorkspaceID)
+	parent := uuid.Nil
+	if cmd.ParentID != nil {
+		parent = *cmd.ParentID
+	} else if scopeErr == nil && ns.RootNodeID != nil {
+		parent = *ns.RootNodeID
+	}
+	if parent != uuid.Nil {
+		ctx = withResourceID(ctx, parent.String())
+	}
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create")
 	defer finishAudit(&err)
+	if scopeErr != nil {
+		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", scopeErr)
+	}
 	if !cmd.Allowed {
 		err := authorizationDenied(cmd.Reason)
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", err)
 	}
-	ns, err := h.repo.GetNamespaceByWorkspace(ctx, cmd.WorkspaceID)
-	if err != nil {
-		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", err)
-	}
 	if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", domain.ErrNamespaceMismatch)
-	}
-	parent := uuid.Nil
-	if cmd.ParentID != nil {
-		parent = *cmd.ParentID
-	} else if ns.RootNodeID != nil {
-		parent = *ns.RootNodeID
 	}
 	node, err := model.NewDirectory(cmd.NamespaceID, cmd.ActorID, cmd.Name, parent)
 	if err != nil {

@@ -262,6 +262,20 @@ func TestCreateDirectoryValidationFailureIsAudited(t *testing.T) {
 	require.Equal(t, []string{"DENY"}, logs.decisions())
 }
 
+func TestCreateDirectoryDenialAuditsResolvedParent(t *testing.T) {
+	_, repo, ns := newPutTestRepository(t)
+	require.NotNil(t, ns.RootNodeID)
+	logs := &recordingAudit{}
+	_, err := NewCreateDirectoryHandler(repo, postgres.NewDirectTransactor(), nil, logs).Handle(context.Background(), CreateDirectory{
+		ActorID: uuid.New(), OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID,
+		NamespaceID: ns.ID, Name: "denied", Authorization: Authorization{Reason: "explicit_deny"},
+	})
+
+	require.ErrorIs(t, err, domain.ErrResourceDenied)
+	require.Len(t, logs.entries, 1)
+	require.Equal(t, ns.RootNodeID.String(), logs.entries[0].ResourceID)
+}
+
 func TestCreateDirectoryRollsBackWhenOutboxPublishFails(t *testing.T) {
 	db, repo, ns := newPutTestRepository(t)
 	command := CreateDirectory{

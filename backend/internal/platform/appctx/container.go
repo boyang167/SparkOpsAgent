@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	filesystemport "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/port"
 	integrationport "github.com/sparkops/sparkops-agent/backend/internal/modules/integration/domain/port"
 	runtimeport "github.com/sparkops/sparkops-agent/backend/internal/modules/runtime/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
@@ -63,6 +64,7 @@ type Container struct {
 	SprintProcessPort          SprintProcessPort
 	ManifestDeployer           runtimeport.ManifestDeployer
 	APIPolicyChecker           authz.WorkspaceAPIPolicyChecker
+	FilesystemGrantPort        filesystemport.FilesystemGrantPort
 	LLMClient                  integrationport.LLMClient
 	Server                     *http.Server
 }

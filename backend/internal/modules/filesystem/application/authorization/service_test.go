@@ -19,14 +19,34 @@ type grantRepositoryStub struct {
 
 func (r grantRepositoryStub) GetNode(_ context.Context, namespaceID, nodeID uuid.UUID) (*model.Node, error) {
 	node := r.nodes[nodeID]
+	if node == nil || node.NamespaceID != namespaceID || node.State != model.NodeStateActive {
+		return nil, domain.ErrNodeNotFound
+	}
+	return node, nil
+}
+
+func (r grantRepositoryStub) GetNodeIncludingTrashed(_ context.Context, namespaceID, nodeID uuid.UUID) (*model.Node, error) {
+	node := r.nodes[nodeID]
 	if node == nil || node.NamespaceID != namespaceID {
 		return nil, domain.ErrNodeNotFound
 	}
 	return node, nil
 }
 
-func (r grantRepositoryStub) GetNodeIncludingTrashed(ctx context.Context, namespaceID, nodeID uuid.UUID) (*model.Node, error) {
-	return r.GetNode(ctx, namespaceID, nodeID)
+func TestAuthorizeDeleteReplayTraversesTrashedAncestors(t *testing.T) {
+	namespaceID, owner := uuid.New(), uuid.New()
+	root := node(namespaceID, uuid.Nil, owner)
+	root.State = model.NodeStateTrashed
+	child := node(namespaceID, root.ID, owner)
+	child.State = model.NodeStateTrashed
+	service := NewService(grantRepositoryStub{nodes: map[uuid.UUID]*model.Node{root.ID: root, child.ID: child}}, nil)
+
+	require.True(t, service.Authorize(context.Background(), Request{
+		ActorID: owner, NamespaceID: namespaceID, NodeID: child.ID, Permission: model.ResourcePermissionDelete,
+	}).Allowed)
+	require.Equal(t, "resource_not_found", service.Authorize(context.Background(), Request{
+		ActorID: owner, NamespaceID: namespaceID, NodeID: child.ID, Permission: model.ResourcePermissionRead,
+	}).Reason)
 }
 
 func (r grantRepositoryStub) ListResourceGrants(_ context.Context, nodeID, granteeID uuid.UUID, permission model.ResourcePermission, at time.Time) ([]model.ResourceGrant, error) {
