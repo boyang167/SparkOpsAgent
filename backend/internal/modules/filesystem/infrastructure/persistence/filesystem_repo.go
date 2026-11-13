@@ -54,6 +54,18 @@ func (r *Repository) GetNamespaceByWorkspace(ctx context.Context, workspaceID uu
 	return &model.Namespace{ID: row.ID, OrganizationID: row.OrganizationID, WorkspaceID: row.WorkspaceID, RootNodeID: row.RootNodeID, Status: row.Status}, nil
 }
 
+func (r *Repository) GetNamespace(ctx context.Context, namespaceID uuid.UUID) (*model.Namespace, error) {
+	var row namespaceRow
+	err := postgres.DB(ctx, r.db).Where("id = ?", namespaceID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrNamespaceNotFound
+	}
+	if err != nil {
+		return nil, wrapPersistence(err)
+	}
+	return &model.Namespace{ID: row.ID, OrganizationID: row.OrganizationID, WorkspaceID: row.WorkspaceID, RootNodeID: row.RootNodeID, Status: row.Status}, nil
+}
+
 func (r *Repository) SetNamespaceRoot(ctx context.Context, workspaceID, rootNodeID uuid.UUID) error {
 	result := postgres.DB(ctx, r.db).Model(&namespaceRow{}).
 		Where("workspace_id = ?", workspaceID).
@@ -1419,6 +1431,70 @@ func artifactFromRow(row artifactRow) model.Artifact {
 		RunID: row.RunID, InputRefs: refs, FileID: row.FileID, RevisionID: row.RevisionID,
 		RetentionPolicyID: row.RetentionPolicyID, CreatedAt: row.CreatedAt,
 	}
+}
+
+func (r *Repository) SearchFileNodes(ctx context.Context, filter repository.FileSearchFilter) ([]uuid.UUID, string, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	query := postgres.DB(ctx, r.db).Model(&nodeRow{}).
+		Where("namespace_id = ?", filter.NamespaceID).
+		Where("state = ?", model.NodeStateActive)
+	if filter.OwnerID != nil {
+		query = query.Where("owner_id = ?", *filter.OwnerID)
+	}
+	needle := strings.ToLower(strings.TrimSpace(norm.NFC.String(filter.Query)))
+	if needle != "" {
+		query = query.Where("normalized_name LIKE ?", "%"+needle+"%")
+	}
+	if cursor, err := uuid.Parse(strings.TrimSpace(filter.Cursor)); err == nil && cursor != uuid.Nil {
+		query = query.Where("id > ?", cursor)
+	}
+	var rows []nodeRow
+	if err := query.Order("id ASC").Limit(limit + 1).Find(&rows).Error; err != nil {
+		return nil, "", wrapPersistence(err)
+	}
+	next := ""
+	if len(rows) > limit {
+		next = rows[limit].ID.String()
+		rows = rows[:limit]
+	}
+	ids := make([]uuid.UUID, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids, next, nil
+}
+
+func (r *Repository) CreateFileLink(ctx context.Context, link model.FileLink) error {
+	row := fileLinkRow{
+		ID: link.ID, NodeID: link.NodeID, RevisionID: link.RevisionID,
+		LinkType: link.LinkType, LinkID: link.LinkID, CreatedAt: link.CreatedAt,
+	}
+	return wrapPersistence(postgres.DB(ctx, r.db).Create(&row).Error)
+}
+
+func (r *Repository) GetFileLink(ctx context.Context, nodeID uuid.UUID, revisionID *uuid.UUID, linkType string) (*model.FileLink, error) {
+	query := postgres.DB(ctx, r.db).Where("node_id = ? AND link_type = ?", nodeID, linkType)
+	if revisionID != nil {
+		query = query.Where("revision_id = ?", *revisionID)
+	}
+	var row fileLinkRow
+	err := query.Order("created_at DESC").First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrNodeNotFound
+	}
+	if err != nil {
+		return nil, wrapPersistence(err)
+	}
+	return &model.FileLink{
+		ID: row.ID, NodeID: row.NodeID, RevisionID: row.RevisionID,
+		LinkType: row.LinkType, LinkID: row.LinkID, CreatedAt: row.CreatedAt,
+	}, nil
 }
 
 var _ repository.FilesystemRepository = (*Repository)(nil)

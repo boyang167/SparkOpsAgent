@@ -19,9 +19,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf(
-		"file-worker listening config at %s; mount %s via messaging bootstrap",
+		"file-worker listening config at %s; subscribers %s %s",
 		cfg.Server.Addr,
 		subscriber.TransferVerifyCommitSubscriber,
+		subscriber.PreviewGenerationSubscriber,
 	)
 	<-ctx.Done()
 }

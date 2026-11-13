@@ -130,6 +130,16 @@ func (m *Module) Register(c *appctx.Container) error {
 		Create: command.NewCreateArtifactHandler(repo, c.Transactor, c.EventBus).Handle,
 		List:   query.NewListArtifactsHandler(repo).Handle,
 	})
+	previewReader := query.NewPreviewBlobReader(repo)
+	searchIndex := query.NewRepositorySearchIndex(repo)
+	handler.BindSearch(filesystemhttp.SearchHandlers{
+		Search: query.NewSearchFilesHandler(
+			searchIndex,
+			nil,
+			query.NewAuthorizationSearchAuthorizer(resourceAuthorizer),
+		).Handle,
+		GetPreviewBlob: previewReader.BlobID,
+	})
 	handler.BindResourceAccess(filesystemhttp.ResourceAccess{
 		Grant:            grantCommands.Handle,
 		ListGrants:       grantCommands.List,

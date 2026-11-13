@@ -63,6 +63,110 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /api/v1/workspaces/{wsId}/files/search:
+    get:
+      tags: [filesystem]
+      summary: Search files and directories with post-authorization filtering
+      operationId: searchFilesystemNodes
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: owner_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: fulltext
+          in: query
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Authorized filesystem search results
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/NodePage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/files/{nodeId}/preview:
+    get:
+      tags: [filesystem]
+      summary: Get derived preview metadata for a file revision
+      operationId: getFilesystemFilePreview
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+        - name: revision_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Preview metadata
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [node_id, revision_id, preview_blob_id]
+                        properties:
+                          node_id:
+                            type: string
+                            format: uuid
+                          revision_id:
+                            type: string
+                            format: uuid
+                          preview_blob_id:
+                            type: string
+                            format: uuid
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /api/v1/workspaces/{wsId}/directories:
     post:
       tags: [filesystem]

@@ -16,3 +16,12 @@ func registerFilesystemTransferWorker(
 ) error {
 	return subscriber.RegisterVerifyCommit(db, bus, providers, scanner)
 }
+
+func registerFilesystemPreviewWorker(
+	db *gorm.DB,
+	bus messaging.Bus,
+	providers command.StorageProviderCatalog,
+	previewer port.Previewer,
+) error {
+	return subscriber.RegisterPreviewGeneration(db, bus, providers, previewer)
+}

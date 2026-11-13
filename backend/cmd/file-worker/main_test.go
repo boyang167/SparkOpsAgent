@@ -9,4 +9,5 @@ import (
 
 func TestFileWorkerUsesStableSubscriberName(t *testing.T) {
 	require.Equal(t, "filesystem.transfer.verify-commit", subscriber.TransferVerifyCommitSubscriber)
+	require.Equal(t, "filesystem.revision.generate-preview", subscriber.PreviewGenerationSubscriber)
 }

@@ -67,6 +67,8 @@ type Handler struct {
 	access                ResourceAccess
 	createArtifact        func(context.Context, command.CreateArtifact) (model.Artifact, error)
 	listArtifacts         func(context.Context, query.ListArtifacts) ([]model.Artifact, string, error)
+	searchFiles           func(context.Context, query.SearchFiles) ([]query.SearchHit, string, error)
+	getPreviewBlob        func(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID) (uuid.UUID, error)
 }
 
 func NewHandler(
@@ -131,6 +133,8 @@ func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.Ha
 	base.Use(h.auditMiddlewareDenial())
 	base.GET("/namespaces", authz.RequirePermission(permissions, authz.PermFileRead), h.GetNamespace)
 	base.GET("/files", authz.RequirePermission(permissions, authz.PermFileRead), h.ListFiles)
+	base.GET("/files/search", authz.RequirePermission(permissions, authz.PermFileRead), h.SearchFiles)
+	base.GET("/files/:nodeId/preview", authz.RequirePermission(permissions, authz.PermFileRead), h.GetFilePreview)
 	base.POST("/directories", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.CreateDirectory)
 	base.PATCH("/files/:nodeId/name", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.RenameNode)
 	base.POST("/files/:nodeId/move", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.MoveNode)

@@ -80,6 +80,7 @@ var (
 type FilesystemRepository interface {
 	CreateNamespace(context.Context, *model.Namespace) error
 	GetNamespaceByWorkspace(context.Context, uuid.UUID) (*model.Namespace, error)
+	GetNamespace(context.Context, uuid.UUID) (*model.Namespace, error)
 	SetNamespaceRoot(context.Context, uuid.UUID, uuid.UUID) error
 	CreateNode(context.Context, *model.Node) error
 	GetNode(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
@@ -140,4 +141,15 @@ type FilesystemRepository interface {
 	CreateArtifact(context.Context, model.Artifact, model.FileLink) error
 	GetArtifact(context.Context, uuid.UUID) (model.Artifact, error)
 	ListArtifacts(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Artifact, string, error)
+	SearchFileNodes(context.Context, FileSearchFilter) ([]uuid.UUID, string, error)
+	CreateFileLink(context.Context, model.FileLink) error
+	GetFileLink(context.Context, uuid.UUID, *uuid.UUID, string) (*model.FileLink, error)
+}
+
+type FileSearchFilter struct {
+	NamespaceID uuid.UUID
+	Query       string
+	OwnerID     *uuid.UUID
+	Limit       int
+	Cursor      string
 }
