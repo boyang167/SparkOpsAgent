@@ -232,6 +232,10 @@ make frontend-test
 [Knowledge 迁移 Runbook](docs/runbooks/filesystem-knowledge-migration.md) 和
 [备份恢复 Runbook](docs/runbooks/filesystem-backup-restore.md)。
 
+验收证据：
+[G5](docs/verification/unified-file-infrastructure-g5.md)、
+[v1.0 总评](docs/verification/unified-file-infrastructure-v1.0.md)。
+
 OpenAPI 界面：http://localhost:8080/api/docs
 
 ## 安全

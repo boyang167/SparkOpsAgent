@@ -19,16 +19,17 @@
 - `docs/verification/unified-file-infrastructure-g5.md`
 - `docs/verification/unified-file-infrastructure-disaster-recovery.md`
 
-## 2026-11-13 Fresh 检查
+## 2026-11-13 Fresh 检查（G5 Task 7 复跑 22:10 UTC+8）
 
 | 检查 | 结果 |
 |---|---|
-| `go test ./...`（backend） | PASS |
+| `go test ./...`（backend） | PASS，约 189s |
 | `pnpm --filter web typecheck`（fronted） | PASS |
-| `REQUIRE_INTEGRATION=1 go test -tags=integration ./tests/filesystem/... -count=1` | PASS；现场容量用例因 `FS_LOAD_RUN` 未设置而 SKIP |
+| `pnpm vitest run`（filesystem 4 files / 8 tests） | PASS |
+| `REQUIRE_INTEGRATION=1 go test -tags=integration ./tests/filesystem/... -count=1` | PASS；`TwentyGiB` / `ConcurrentTransfer` / `MetadataCapacity` **SKIP** |
 | `go test ./deployments/helm -count=1` | PASS |
 | `helm lint deployments/helm/sparkops` | PASS；dependency 未 vendored 警告 |
-| `make test` / `make helm-lint` | SKIP：Windows 执行环境未安装 `make`；上述等价子命令已分别执行 |
+| `make test` / `make helm-lint` | **SKIP** — 本机无 `make`；已执行等价 `go test` + `helm lint` |
 
 ## 主计划固定硬条件
 
