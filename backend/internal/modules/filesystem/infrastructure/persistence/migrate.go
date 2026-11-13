@@ -62,6 +62,10 @@ var postgresFallbackConstraints = []string{
 	`CREATE OR REPLACE FUNCTION filesystem.validate_transfer_part_bounds() RETURNS TRIGGER LANGUAGE plpgsql AS $$ DECLARE expected BIGINT; BEGIN SELECT expected_size INTO expected FROM filesystem.transfer_sessions WHERE id = NEW.session_id; IF NOT FOUND THEN RAISE EXCEPTION 'transfer session does not exist' USING ERRCODE = '23503'; END IF; IF NEW.offset_bytes > expected OR NEW.size_bytes > expected - NEW.offset_bytes THEN RAISE EXCEPTION 'transfer part exceeds expected session size' USING ERRCODE = '23514'; END IF; RETURN NEW; END; $$`,
 	`DROP TRIGGER IF EXISTS trg_transfer_parts_validate_bounds ON filesystem.transfer_parts`,
 	`CREATE TRIGGER trg_transfer_parts_validate_bounds BEFORE INSERT OR UPDATE ON filesystem.transfer_parts FOR EACH ROW EXECUTE FUNCTION filesystem.validate_transfer_part_bounds()`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_storage_providers_org_name ON filesystem.storage_providers(organization_id, name)`,
+	`DO $$ BEGIN ALTER TABLE filesystem.storage_providers ADD CONSTRAINT ck_storage_provider_type CHECK (provider_type IN ('LOCAL','NFS','S3')); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.storage_providers ADD CONSTRAINT ck_storage_provider_secret CHECK (length(btrim(secret_ref)) > 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.storage_providers ADD CONSTRAINT ck_storage_provider_version CHECK (config_version > 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 }
 
 func AutoMigrate(db *gorm.DB) error {
@@ -91,6 +95,7 @@ func AutoMigrate(db *gorm.DB) error {
 			`CREATE TABLE IF NOT EXISTS filesystem.resource_grants (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, grantee_id BLOB NOT NULL, permission TEXT NOT NULL CHECK (permission IN ('READ','WRITE','DELETE','SHARE','ADMIN')), effect TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY')), expires_at DATETIME, created_at DATETIME, UNIQUE(node_id, grantee_id, permission, effect), FOREIGN KEY(node_id) REFERENCES nodes(id))`,
 			`CREATE TABLE IF NOT EXISTS filesystem.file_links (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, revision_id BLOB, link_type TEXT NOT NULL, link_id BLOB NOT NULL, created_at DATETIME, UNIQUE(link_type, link_id, node_id, revision_id), FOREIGN KEY(node_id) REFERENCES nodes(id), FOREIGN KEY(revision_id) REFERENCES file_revisions(id))`,
 			`CREATE TABLE IF NOT EXISTS filesystem.command_dedup (command_id BLOB PRIMARY KEY, workspace_id BLOB NOT NULL, operation TEXT NOT NULL, request_hash TEXT NOT NULL, node_id BLOB, revision_id BLOB, state TEXT NOT NULL, created_at DATETIME, updated_at DATETIME)`,
+			`CREATE TABLE IF NOT EXISTS filesystem.storage_providers (id BLOB PRIMARY KEY, organization_id BLOB NOT NULL, name TEXT NOT NULL CHECK (length(trim(name)) > 0), provider_type TEXT NOT NULL CHECK (provider_type IN ('LOCAL','NFS','S3')), endpoint TEXT NOT NULL DEFAULT '', secret_ref TEXT NOT NULL CHECK (length(trim(secret_ref)) > 0), capabilities TEXT NOT NULL DEFAULT '{}', health TEXT NOT NULL DEFAULT '{}', config_version INTEGER NOT NULL DEFAULT 1 CHECK (config_version > 0), status TEXT NOT NULL DEFAULT 'ACTIVE', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, UNIQUE(organization_id, name))`,
 		} {
 			if err := db.Exec(statement).Error; err != nil {
 				return wrapPersistence(err)
@@ -103,7 +108,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return wrapPersistence(err)
 		}
 	}
-	if err := db.AutoMigrate(&namespaceRow{}, &nodeRow{}, &blobRow{}, &revisionRow{}, &replicaRow{}, &quotaAccountRow{}, &transferSessionRow{}, &transferPartRow{}, &quotaReservationRow{}, &resourceGrantRow{}, &fileLinkRow{}, &commandDedupRow{}); err != nil {
+	if err := db.AutoMigrate(&namespaceRow{}, &nodeRow{}, &blobRow{}, &revisionRow{}, &replicaRow{}, &quotaAccountRow{}, &transferSessionRow{}, &transferPartRow{}, &quotaReservationRow{}, &resourceGrantRow{}, &fileLinkRow{}, &commandDedupRow{}, &storageProviderRow{}); err != nil {
 		return wrapPersistence(err)
 	}
 	if db.Dialector.Name() == "postgres" {

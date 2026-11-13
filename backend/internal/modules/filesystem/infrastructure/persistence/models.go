@@ -186,3 +186,20 @@ type transferPartRow struct {
 }
 
 func (transferPartRow) TableName() string { return "filesystem.transfer_parts" }
+
+type storageProviderRow struct {
+	ID             uuid.UUID           `gorm:"column:id;primaryKey;type:uuid"`
+	OrganizationID uuid.UUID           `gorm:"column:organization_id;not null;type:uuid;uniqueIndex:ux_storage_provider_org_name"`
+	Name           string              `gorm:"column:name;not null;uniqueIndex:ux_storage_provider_org_name"`
+	ProviderType   model.ProviderType  `gorm:"column:provider_type;not null;type:varchar(16)"`
+	Endpoint       string              `gorm:"column:endpoint;not null"`
+	SecretRef      string              `gorm:"column:secret_ref;not null"`
+	Capabilities   jsonObject          `gorm:"column:capabilities;not null;type:text"`
+	Health         jsonObject          `gorm:"column:health;not null;type:text"`
+	ConfigVersion  int64               `gorm:"column:config_version;not null"`
+	Status         string              `gorm:"column:status;not null;type:varchar(32)"`
+	CreatedAt      time.Time           `gorm:"column:created_at;not null"`
+	UpdatedAt      time.Time           `gorm:"column:updated_at;not null"`
+}
+
+func (storageProviderRow) TableName() string { return "filesystem.storage_providers" }

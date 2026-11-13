@@ -41,4 +41,6 @@ var (
 	ErrTransferPartOverlap         = errors.New("filesystem transfer part overlap")
 	ErrTransferIntegrity           = errors.New("filesystem transfer integrity mismatch")
 	ErrTransferExpired             = errors.New("filesystem transfer expired")
+	ErrStorageProviderNotFound     = errors.New("filesystem storage provider not found")
+	ErrStorageProviderConflict     = errors.New("filesystem storage provider conflict")
 )

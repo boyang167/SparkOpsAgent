@@ -720,6 +720,8 @@ func mapUniqueConflict(err error) error {
 			return domain.ErrBlobConflict
 		case "storage_replicas_pkey", "storage_replicas_blob_id_provider_id_object_key_key":
 			return domain.ErrReplicaConflict
+		case "storage_providers_pkey", "storage_providers_organization_id_name_key":
+			return domain.ErrStorageProviderConflict
 		default:
 			return domain.ErrPersistence
 		}
@@ -751,6 +753,9 @@ func mapUniqueConflict(err error) error {
 		strings.Contains(message, "storage_replicas.blob_id, storage_replicas.provider_id, storage_replicas.object_key"),
 		strings.Contains(message, "storage_replicas.blob_id, filesystem.storage_replicas.provider_id, filesystem.storage_replicas.object_key"):
 		return domain.ErrReplicaConflict
+	case strings.Contains(message, "storage_providers.id"),
+		strings.Contains(message, "storage_providers.organization_id, storage_providers.name"):
+		return domain.ErrStorageProviderConflict
 	default:
 		return domain.ErrPersistence
 	}
@@ -798,6 +803,8 @@ func isDomainError(err error) bool {
 		domain.ErrTransferNotFound, domain.ErrTransferConflict, domain.ErrTransferIdempotencyConflict,
 		domain.ErrTransferVersionConflict, domain.ErrTransferStatusConflict,
 		domain.ErrTransferPartConflict, domain.ErrTransferPartOverlap,
+		domain.ErrStorageProviderNotFound, domain.ErrStorageProviderConflict,
+		model.ErrInvalidStorageProvider,
 	} {
 		if errors.Is(err, sentinel) {
 			return true
@@ -1088,12 +1095,19 @@ func stringValueOrEmpty(value *string) string {
 	return *value
 }
 
-func (r *Repository) CreateStorageProvider(context.Context, *model.StorageProvider) error {
-	return domain.ErrPersistence
+func (r *Repository) CreateStorageProvider(ctx context.Context, provider *model.StorageProvider) error {
+	now := time.Now().UTC()
+	row := storageProviderRowFromModel(provider, now)
+	if err := postgres.DB(ctx, r.db).Create(&row).Error; err != nil {
+		return wrapPersistence(err)
+	}
+	return nil
 }
 
-func (r *Repository) GetStorageProvider(context.Context, uuid.UUID) (*model.StorageProvider, error) {
-	return nil, domain.ErrPersistence
+func (r *Repository) GetStorageProvider(ctx context.Context, id uuid.UUID) (*model.StorageProvider, error) {
+	var row storageProviderRow
+	err := postgres.DB(ctx, r.db).Where("id = ?", id).First(&row).Error
+	return storageProviderResult(row, err)
 }
 
 func (r *Repository) SaveStoragePool(context.Context, *model.StoragePool) error {
