@@ -72,3 +72,24 @@ func TestRegisterCoversEveryG1MutationEvent(t *testing.T) {
 		require.NoError(t, err, name)
 	}
 }
+
+func TestRegisterEncodesTransferInitiatedV1(t *testing.T) {
+	registry := events.NewRegistry()
+	require.NoError(t, Register(registry))
+	sessionID := uuid.New()
+	ev := TransferInitiated{
+		BaseEvent: events.NewBaseEvent(TransferInitiatedName),
+		SessionID: sessionID, WorkspaceID: uuid.New(), NamespaceID: uuid.New(),
+	}
+
+	envelope, err := registry.Encode(t.Context(), ev)
+
+	require.NoError(t, err)
+	require.Equal(t, "filesystem.transfer.initiated.v1", envelope.Type)
+	require.Equal(t, 1, envelope.Version)
+	require.Equal(t, "transfer", envelope.AggregateType)
+	require.Equal(t, sessionID.String(), envelope.AggregateID)
+	decoded, err := registry.Decode(envelope)
+	require.NoError(t, err)
+	require.Equal(t, ev, decoded)
+}

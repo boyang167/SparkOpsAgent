@@ -106,6 +106,16 @@ type TransferScanResult struct {
 	CompletedAt time.Time
 }
 
+type PersistedTransferSession struct {
+	Input        TransferSessionInput
+	Status       TransferStatus
+	ActualSize   *int64
+	ActualSHA256 string
+	ScanResult   *TransferScanResult
+	ErrorCode    string
+	Version      int64
+}
+
 var transferNamePattern = regexp.MustCompile(`^[^/\\\x00]+$`)
 
 func NewTransferSession(input TransferSessionInput) (*TransferSession, error) {
@@ -153,6 +163,41 @@ func NewTransferSession(input TransferSessionInput) (*TransferSession, error) {
 		status: TransferInitiated, idempotencyKey: input.IdempotencyKey, expiresAt: input.ExpiresAt,
 		classification: input.Classification, version: 1,
 	}, nil
+}
+
+func RestoreTransferSession(state PersistedTransferSession) (*TransferSession, error) {
+	persistedExpiry := state.Input.ExpiresAt
+	if persistedExpiry.IsZero() {
+		return nil, ErrInvalidTransferExpiry
+	}
+	if !state.Input.ExpiresAt.After(time.Now()) {
+		state.Input.ExpiresAt = time.Now().Add(time.Hour)
+	}
+	session, err := NewTransferSession(state.Input)
+	if err != nil {
+		return nil, err
+	}
+	if state.Version < 1 || !validTransferStatus(state.Status) {
+		return nil, ErrInvalidTransfer
+	}
+	session.status = state.Status
+	session.actualSize = state.ActualSize
+	session.actualSHA256 = state.ActualSHA256
+	session.scanResult = state.ScanResult
+	session.errorCode = state.ErrorCode
+	session.version = state.Version
+	session.expiresAt = persistedExpiry
+	return session, nil
+}
+
+func validTransferStatus(status TransferStatus) bool {
+	switch status {
+	case TransferInitiated, TransferUploading, TransferPaused, TransferVerifying, TransferScanning,
+		TransferCommitting, TransferCompleted, TransferFailed, TransferRejected, TransferAborted, TransferExpired:
+		return true
+	default:
+		return false
+	}
 }
 
 func isSHA256(value string) bool {

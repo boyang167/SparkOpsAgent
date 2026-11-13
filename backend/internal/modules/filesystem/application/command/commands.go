@@ -171,6 +171,22 @@ func reasonCode(err error) string {
 		return "namespace_mismatch"
 	case errors.Is(err, domain.ErrIdempotencyConflict):
 		return "idempotency_conflict"
+	case errors.Is(err, domain.ErrTransferIdempotencyConflict):
+		return "transfer_idempotency_conflict"
+	case errors.Is(err, domain.ErrParentNotFound):
+		return "parent_not_found"
+	case errors.Is(err, domain.ErrParentNotDirectory):
+		return "parent_not_directory"
+	case errors.Is(err, model.ErrInvalidTransferSize):
+		return "invalid_transfer_size"
+	case errors.Is(err, model.ErrInvalidTransferName):
+		return "invalid_transfer_name"
+	case errors.Is(err, model.ErrInvalidTransferChecksum):
+		return "invalid_transfer_checksum"
+	case errors.Is(err, model.ErrInvalidTransferProtocol):
+		return "invalid_transfer_protocol"
+	case errors.Is(err, model.ErrInvalidTransferExpiry):
+		return "invalid_transfer_expiry"
 	case errors.Is(err, model.ErrInvalidNodeName):
 		return "invalid_name"
 	case errors.Is(err, domain.ErrOutcomeUnknown):

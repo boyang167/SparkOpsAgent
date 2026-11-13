@@ -795,6 +795,9 @@ func isDomainError(err error) bool {
 		domain.ErrTransactionExhausted, domain.ErrUnsupportedNodeType, domain.ErrRootMutation,
 		domain.ErrResourceDenied,
 		domain.ErrGrantNotFound, domain.ErrNodeStateConflict,
+		domain.ErrTransferNotFound, domain.ErrTransferConflict, domain.ErrTransferIdempotencyConflict,
+		domain.ErrTransferVersionConflict, domain.ErrTransferStatusConflict,
+		domain.ErrTransferPartConflict, domain.ErrTransferPartOverlap,
 	} {
 		if errors.Is(err, sentinel) {
 			return true
@@ -826,32 +829,258 @@ func equalTimePointers(left, right *time.Time) bool {
 	return left.Equal(*right)
 }
 
-func (r *Repository) CreateTransfer(context.Context, *model.TransferSession) error {
-	return domain.ErrPersistence
+func (r *Repository) CreateTransfer(ctx context.Context, session *model.TransferSession) error {
+	now := time.Now().UTC()
+	row := transferRowFromModel(session, now)
+	db := postgres.DB(ctx, r.db)
+	result := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+	if result.Error != nil {
+		if db.Dialector.Name() == "sqlite" && isSQLiteBusy(result.Error) {
+			return domain.ErrTransactionRetry
+		}
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrTransferConflict
+	}
+	return nil
 }
 
-func (r *Repository) GetTransferByID(context.Context, uuid.UUID) (*model.TransferSession, error) {
-	return nil, domain.ErrPersistence
+func (r *Repository) GetTransferByID(ctx context.Context, id uuid.UUID) (*model.TransferSession, error) {
+	var row transferSessionRow
+	err := postgres.DB(ctx, r.db).Where("id = ?", id).First(&row).Error
+	return transferResult(row, err)
 }
 
-func (r *Repository) GetTransferByIdempotency(context.Context, uuid.UUID, string) (*model.TransferSession, error) {
-	return nil, domain.ErrPersistence
+func (r *Repository) GetTransferByIdempotency(ctx context.Context, workspaceID uuid.UUID, key string) (*model.TransferSession, error) {
+	var row transferSessionRow
+	err := postgres.DB(ctx, r.db).Where("workspace_id = ? AND idempotency_key = ?", workspaceID, key).First(&row).Error
+	return transferResult(row, err)
 }
 
-func (r *Repository) LockTransfer(context.Context, uuid.UUID) (*model.TransferSession, error) {
-	return nil, domain.ErrPersistence
+func (r *Repository) LockTransfer(ctx context.Context, id uuid.UUID) (*model.TransferSession, error) {
+	tx, err := postgres.RequireTx(ctx)
+	if err != nil {
+		return nil, domain.ErrPersistence
+	}
+	if tx.Dialector.Name() == "sqlite" {
+		result := tx.Exec("UPDATE filesystem.transfer_sessions SET updated_at = updated_at WHERE id = ?", id)
+		if isSQLiteBusy(result.Error) {
+			return nil, domain.ErrTransactionRetry
+		}
+		if result.Error != nil {
+			return nil, wrapPersistence(result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return nil, domain.ErrTransferNotFound
+		}
+	}
+	var row transferSessionRow
+	query := tx.Where("id = ?", id)
+	if tx.Dialector.Name() == "postgres" {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err = query.First(&row).Error
+	return transferResult(row, err)
 }
 
-func (r *Repository) ListTransferParts(context.Context, uuid.UUID) ([]model.TransferPart, error) {
-	return nil, domain.ErrPersistence
+func (r *Repository) ListTransferParts(ctx context.Context, sessionID uuid.UUID) ([]model.TransferPart, error) {
+	db := postgres.DB(ctx, r.db)
+	var session transferSessionRow
+	if err := db.Select("id", "expected_size").Where("id = ?", sessionID).First(&session).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrTransferNotFound
+	} else if err != nil {
+		return nil, wrapPersistence(err)
+	}
+	var rows []transferPartRow
+	if err := db.Where("session_id = ?", sessionID).Order("part_number ASC").Find(&rows).Error; err != nil {
+		return nil, wrapPersistence(err)
+	}
+	parts := make([]model.TransferPart, 0, len(rows))
+	for _, row := range rows {
+		part, err := model.NewTransferPart(model.TransferPartInput{
+			ID: row.ID, SessionID: row.SessionID, PartNumber: row.PartNumber,
+			Offset: row.Offset, Size: row.Size, SessionSize: session.ExpectedSize,
+			Checksum: row.Checksum, ETag: row.ETag,
+		})
+		if err != nil {
+			return nil, domain.ErrPersistence
+		}
+		parts = append(parts, *part)
+	}
+	return parts, nil
 }
 
-func (r *Repository) UpsertTransferPart(context.Context, *model.TransferPart) error {
-	return domain.ErrPersistence
+func (r *Repository) UpsertTransferPart(ctx context.Context, part *model.TransferPart) error {
+	save := func(txCtx context.Context) error {
+		session, err := r.LockTransfer(txCtx, part.SessionID())
+		if err != nil {
+			return err
+		}
+		if part.Offset() > session.ExpectedSize() || part.Size() > session.ExpectedSize()-part.Offset() {
+			return model.ErrInvalidTransferPart
+		}
+		db := postgres.DB(txCtx, r.db)
+		var existing transferPartRow
+		err = db.Where("session_id = ? AND part_number = ?", part.SessionID(), part.PartNumber()).First(&existing).Error
+		if err == nil {
+			if existing.Offset == part.Offset() && existing.Size == part.Size() &&
+				existing.Checksum == part.Checksum() && existing.ETag == part.ETag() {
+				return nil
+			}
+			return domain.ErrTransferPartConflict
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return wrapPersistence(err)
+		}
+		var overlap int64
+		if err := db.Model(&transferPartRow{}).
+			Where("session_id = ? AND offset_bytes < ? AND offset_bytes + size_bytes > ?",
+				part.SessionID(), part.Offset()+part.Size(), part.Offset()).
+			Count(&overlap).Error; err != nil {
+			return wrapPersistence(err)
+		}
+		if overlap > 0 {
+			return domain.ErrTransferPartOverlap
+		}
+		now := time.Now().UTC()
+		err = db.Create(&transferPartRow{
+			ID: part.ID(), SessionID: part.SessionID(), PartNumber: part.PartNumber(),
+			Offset: part.Offset(), Size: part.Size(), Checksum: part.Checksum(), ETag: part.ETag(),
+			CreatedAt: now, UpdatedAt: now,
+		}).Error
+		if isSQLiteBusy(err) {
+			return domain.ErrTransactionRetry
+		}
+		var pgErr *pgconn.PgError
+		if errors.Is(err, gorm.ErrDuplicatedKey) ||
+			(errors.As(err, &pgErr) && pgErr.Code == "23505") ||
+			strings.Contains(strings.ToLower(fmt.Sprint(err)), "unique constraint failed") {
+			return domain.ErrTransferPartConflict
+		}
+		return wrapPersistence(err)
+	}
+	if _, err := postgres.RequireTx(ctx); err == nil {
+		return save(ctx)
+	}
+	return postgres.NewTransactor(r.db).WithinTransaction(ctx, save)
 }
 
-func (r *Repository) SaveTransferStateCAS(context.Context, uuid.UUID, uuid.UUID, int64, repository.TransferStatePatch) error {
-	return domain.ErrPersistence
+func (r *Repository) SaveTransferStateCAS(ctx context.Context, workspaceID, id uuid.UUID, expectedVersion int64, patch repository.TransferStatePatch) error {
+	updates := map[string]any{
+		"status":     patch.StatusTo,
+		"version":    gorm.Expr("version + 1"),
+		"updated_at": time.Now().UTC(),
+	}
+	if patch.ActualSize != nil {
+		updates["actual_size"] = *patch.ActualSize
+	}
+	if patch.ActualSHA256 != "" {
+		updates["actual_sha256"] = patch.ActualSHA256
+	}
+	if patch.ProviderID != nil {
+		updates["provider_id"] = *patch.ProviderID
+	}
+	if patch.ScanResult != nil {
+		updates["scan_clean"] = patch.ScanResult.Clean
+		updates["scan_threat_name"] = patch.ScanResult.ThreatName
+		updates["scan_engine"] = patch.ScanResult.Engine
+		updates["scan_signature"] = patch.ScanResult.Signature
+		updates["scan_completed_at"] = patch.ScanResult.CompletedAt
+	}
+	if patch.ErrorCode != nil {
+		updates["error_code"] = *patch.ErrorCode
+	}
+	db := postgres.DB(ctx, r.db)
+	result := db.Model(&transferSessionRow{}).
+		Where("workspace_id = ? AND id = ? AND version = ? AND status = ?", workspaceID, id, expectedVersion, patch.StatusFrom).
+		Updates(updates)
+	if result.Error != nil {
+		if db.Dialector.Name() == "sqlite" && isSQLiteBusy(result.Error) {
+			return domain.ErrTransactionRetry
+		}
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 1 {
+		return nil
+	}
+	var row transferSessionRow
+	err := db.Select("id", "version", "status").Where("workspace_id = ? AND id = ?", workspaceID, id).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return domain.ErrTransferNotFound
+	}
+	if err != nil {
+		return wrapPersistence(err)
+	}
+	if row.Version != expectedVersion {
+		return domain.ErrTransferVersionConflict
+	}
+	return domain.ErrTransferStatusConflict
+}
+
+func transferRowFromModel(session *model.TransferSession, now time.Time) transferSessionRow {
+	row := transferSessionRow{
+		ID: session.ID(), WorkspaceID: session.WorkspaceID(), NamespaceID: session.NamespaceID(),
+		TargetParentID: session.TargetParentID(), TargetName: session.TargetName(), Protocol: session.Protocol(),
+		ExpectedSize: session.ExpectedSize(),
+		ProviderID:   session.ProviderID(), TemporaryObjectKey: session.TemporaryObjectKey(),
+		Status: session.Status(), Classification: session.Classification(), ErrorCode: session.ErrorCode(),
+		IdempotencyKey: session.IdempotencyKey(), ExpiresAt: session.ExpiresAt(), Version: session.Version(),
+		CreatedBy: session.CreatedBy(), CreatedAt: now, UpdatedAt: now,
+	}
+	if size, ok := session.ActualSize(); ok {
+		row.ActualSize = &size
+	}
+	if checksum := session.ExpectedSHA256(); checksum != "" {
+		row.ExpectedSHA256 = &checksum
+	}
+	if checksum := session.ActualSHA256(); checksum != "" {
+		row.ActualSHA256 = &checksum
+	}
+	if scan := session.ScanResult(); scan != nil {
+		row.ScanClean = &scan.Clean
+		row.ScanThreatName, row.ScanEngine, row.ScanSignature = scan.ThreatName, scan.Engine, scan.Signature
+		row.ScanCompletedAt = &scan.CompletedAt
+	}
+	return row
+}
+
+func transferResult(row transferSessionRow, err error) (*model.TransferSession, error) {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrTransferNotFound
+	}
+	if err != nil {
+		return nil, wrapPersistence(err)
+	}
+	var scan *model.TransferScanResult
+	if row.ScanClean != nil {
+		completed := time.Time{}
+		if row.ScanCompletedAt != nil {
+			completed = *row.ScanCompletedAt
+		}
+		scan = &model.TransferScanResult{
+			Clean: *row.ScanClean, ThreatName: row.ScanThreatName, Engine: row.ScanEngine,
+			Signature: row.ScanSignature, CompletedAt: completed,
+		}
+	}
+	return model.RestoreTransferSession(model.PersistedTransferSession{
+		Input: model.TransferSessionInput{
+			ID: row.ID, WorkspaceID: row.WorkspaceID, NamespaceID: row.NamespaceID,
+			TargetParentID: row.TargetParentID, TargetName: row.TargetName, CreatedBy: row.CreatedBy,
+			Protocol: row.Protocol, ExpectedSize: row.ExpectedSize, ExpectedSHA256: stringValueOrEmpty(row.ExpectedSHA256),
+			IdempotencyKey: row.IdempotencyKey, TemporaryObjectKey: row.TemporaryObjectKey,
+			ExpiresAt: row.ExpiresAt, ProviderID: row.ProviderID, Classification: row.Classification,
+		},
+		Status: row.Status, ActualSize: row.ActualSize, ActualSHA256: stringValueOrEmpty(row.ActualSHA256),
+		ScanResult: scan, ErrorCode: row.ErrorCode, Version: row.Version,
+	})
+}
+
+func stringValueOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 var _ repository.FilesystemRepository = (*Repository)(nil)

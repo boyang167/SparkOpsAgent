@@ -551,6 +551,29 @@ func TestClaimCommandPostgresConflictDoesNotAbortTransaction(t *testing.T) {
 	}
 }
 
+func TestCreateTransferPostgresConflictDoesNotAbortTransaction(t *testing.T) {
+	db := openFilesystemPostgres(t)
+	migration, err := os.ReadFile("../../../../../migrations/000078_filesystem_transfer.up.sql")
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(string(migration)).Error)
+	repo := NewRepository(db)
+	ns := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	require.NoError(t, repo.CreateNamespace(context.Background(), ns))
+	parent := rootDirectory(ns.ID, "parent")
+	require.NoError(t, repo.CreateNode(context.Background(), parent))
+	session := transferSessionFixture(t, ns, &parent.ID, 10)
+	require.NoError(t, postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+		return repo.CreateTransfer(ctx, session)
+	}))
+
+	require.NoError(t, postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+		require.ErrorIs(t, repo.CreateTransfer(ctx, session), domain.ErrTransferConflict)
+		tx, txErr := postgres.RequireTx(ctx)
+		require.NoError(t, txErr)
+		return tx.Exec("SELECT 1").Error
+	}))
+}
+
 func TestPersistenceErrorsDoNotExposeDriverType(t *testing.T) {
 	err := wrapPersistence(errors.New("driver-specific failure"))
 
@@ -581,6 +604,130 @@ func TestAutoMigratePropagatesDatabaseFailure(t *testing.T) {
 	require.NoError(t, sqlDB.Close())
 
 	require.ErrorIs(t, AutoMigrate(db), domain.ErrPersistence)
+}
+
+func TestTransferRepositoryRoundTripCASAndPartIdempotency(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	parent := seedDirectory(t, db, ns.ID)
+	session := transferSessionFixture(t, ns, &parent.ID, 10)
+
+	require.NoError(t, repo.CreateTransfer(context.Background(), session))
+	got, err := repo.GetTransferByID(context.Background(), session.ID())
+	require.NoError(t, err)
+	require.Equal(t, session.ID(), got.ID())
+	require.Equal(t, session.TemporaryObjectKey(), got.TemporaryObjectKey())
+	byKey, err := repo.GetTransferByIdempotency(context.Background(), ns.WorkspaceID, session.IdempotencyKey())
+	require.NoError(t, err)
+	require.Equal(t, session.ID(), byKey.ID())
+
+	require.NoError(t, repo.SaveTransferStateCAS(context.Background(), ns.WorkspaceID, session.ID(), 1, repository.TransferStatePatch{
+		StatusFrom: model.TransferInitiated, StatusTo: model.TransferUploading,
+	}))
+	require.ErrorIs(t, repo.SaveTransferStateCAS(context.Background(), ns.WorkspaceID, session.ID(), 1, repository.TransferStatePatch{
+		StatusFrom: model.TransferUploading, StatusTo: model.TransferPaused,
+	}), domain.ErrTransferVersionConflict)
+	require.ErrorIs(t, repo.SaveTransferStateCAS(context.Background(), ns.WorkspaceID, session.ID(), 2, repository.TransferStatePatch{
+		StatusFrom: model.TransferInitiated, StatusTo: model.TransferPaused,
+	}), domain.ErrTransferStatusConflict)
+	require.ErrorIs(t, repo.SaveTransferStateCAS(context.Background(), ns.WorkspaceID, uuid.New(), 1, repository.TransferStatePatch{
+		StatusFrom: model.TransferInitiated, StatusTo: model.TransferUploading,
+	}), domain.ErrTransferNotFound)
+	actualSize, providerID, errorCode := int64(10), uuid.New(), "verify_pending"
+	scanCompleted := time.Now().UTC()
+	require.NoError(t, repo.SaveTransferStateCAS(context.Background(), ns.WorkspaceID, session.ID(), 2, repository.TransferStatePatch{
+		StatusFrom: model.TransferUploading, StatusTo: model.TransferVerifying,
+		ActualSize: &actualSize, ActualSHA256: strings.Repeat("a", 64), ProviderID: &providerID,
+		ScanResult: &model.TransferScanResult{Clean: true, Engine: "fixture", CompletedAt: scanCompleted},
+		ErrorCode:  &errorCode,
+	}))
+	patched, err := repo.GetTransferByID(context.Background(), session.ID())
+	require.NoError(t, err)
+	require.Equal(t, model.TransferVerifying, patched.Status())
+	require.Equal(t, int64(3), patched.Version())
+	require.Equal(t, providerID, *patched.ProviderID())
+	require.Equal(t, actualSize, mustActualSize(t, patched))
+	require.Equal(t, strings.Repeat("a", 64), patched.ActualSHA256())
+	require.Equal(t, "fixture", patched.ScanResult().Engine)
+	require.Equal(t, errorCode, patched.ErrorCode())
+
+	first, err := model.NewTransferPart(model.TransferPartInput{
+		ID: uuid.New(), SessionID: session.ID(), PartNumber: 1, Offset: 0, Size: 5,
+		SessionSize: 10, Checksum: strings.Repeat("a", 64), ETag: "etag-1",
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.UpsertTransferPart(context.Background(), first))
+	require.NoError(t, repo.UpsertTransferPart(context.Background(), first))
+	overlap, err := model.NewTransferPart(model.TransferPartInput{
+		ID: uuid.New(), SessionID: session.ID(), PartNumber: 2, Offset: 4, Size: 5,
+		SessionSize: 10, Checksum: strings.Repeat("b", 64), ETag: "etag-2",
+	})
+	require.NoError(t, err)
+	require.ErrorIs(t, repo.UpsertTransferPart(context.Background(), overlap), domain.ErrTransferPartOverlap)
+	conflict, err := model.NewTransferPart(model.TransferPartInput{
+		ID: uuid.New(), SessionID: session.ID(), PartNumber: 1, Offset: 0, Size: 5,
+		SessionSize: 10, Checksum: strings.Repeat("b", 64), ETag: "changed",
+	})
+	require.NoError(t, err)
+	require.ErrorIs(t, repo.UpsertTransferPart(context.Background(), conflict), domain.ErrTransferPartConflict)
+	parts, err := repo.ListTransferParts(context.Background(), session.ID())
+	require.NoError(t, err)
+	require.Len(t, parts, 1)
+}
+
+func TestReserveQuotaHandlesNullBoundariesFilesAndOverflow(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	account := quotaAccountRow{
+		ID: uuid.New(), OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID,
+		UsedBytes: 40, ReservedBytes: 50, UsedFiles: 1, ReservedFiles: 1,
+		MaxBytes: ptrInt64(100), MaxFiles: ptrInt64(3), UpdatedAt: time.Now(),
+	}
+	require.NoError(t, db.Create(&account).Error)
+
+	accountID, err := repo.ReserveTransferQuota(context.Background(), ns.WorkspaceID, 10, 1)
+	require.NoError(t, err)
+	require.Equal(t, account.ID, accountID)
+	_, err = repo.ReserveTransferQuota(context.Background(), ns.WorkspaceID, 1, 1)
+	require.ErrorIs(t, err, domain.ErrQuotaExceeded)
+
+	require.NoError(t, db.Model(&quotaAccountRow{}).Where("id = ?", account.ID).
+		Updates(map[string]any{"max_bytes": nil, "max_files": nil, "used_bytes": 0, "reserved_bytes": 0, "used_files": 0, "reserved_files": 0}).Error)
+	_, err = repo.ReserveTransferQuota(context.Background(), ns.WorkspaceID, 20, 2)
+	require.NoError(t, err)
+
+	require.NoError(t, db.Model(&quotaAccountRow{}).Where("id = ?", account.ID).
+		Updates(map[string]any{"max_bytes": nil, "max_files": int64(2), "used_bytes": 0, "reserved_bytes": 0, "used_files": 1, "reserved_files": 1}).Error)
+	_, err = repo.ReserveTransferQuota(context.Background(), ns.WorkspaceID, 0, 1)
+	require.ErrorIs(t, err, domain.ErrQuotaExceeded)
+
+	require.NoError(t, db.Model(&quotaAccountRow{}).Where("id = ?", account.ID).
+		Updates(map[string]any{"max_bytes": nil, "max_files": nil, "used_bytes": int64(^uint64(0) >> 1), "reserved_bytes": 0, "used_files": 0, "reserved_files": 0}).Error)
+	_, err = repo.ReserveTransferQuota(context.Background(), ns.WorkspaceID, 1, 1)
+	require.ErrorIs(t, err, domain.ErrQuotaExceeded)
+}
+
+func transferSessionFixture(t *testing.T, ns *model.Namespace, parentID *uuid.UUID, size int64) *model.TransferSession {
+	t.Helper()
+	session, err := model.NewTransferSession(model.TransferSessionInput{
+		ID: uuid.New(), WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, TargetParentID: parentID,
+		TargetName: "payload.bin", CreatedBy: uuid.New(), Protocol: model.TransferProtocolMultipart,
+		ExpectedSize: size, ExpectedSHA256: strings.Repeat("a", 64), IdempotencyKey: uuid.NewString(),
+		TemporaryObjectKey: "transfers/" + uuid.NewString(), ExpiresAt: time.Now().Add(time.Hour),
+		ProviderID: ptrUUID(uuid.New()), Classification: model.TransferClassificationInternal,
+	})
+	require.NoError(t, err)
+	return session
+}
+
+func ptrInt64(value int64) *int64        { return &value }
+func ptrUUID(value uuid.UUID) *uuid.UUID { return &value }
+
+func mustActualSize(t *testing.T, session *model.TransferSession) int64 {
+	t.Helper()
+	size, ok := session.ActualSize()
+	require.True(t, ok)
+	return size
 }
 
 func newTestRepository(t *testing.T) (repository.FilesystemRepository, *gorm.DB) {

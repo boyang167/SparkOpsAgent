@@ -16,6 +16,7 @@ const (
 	NodeTrashedName         = "filesystem.file.trashed.v1"
 	RevisionRestoredName    = "filesystem.revision.restored.v1"
 	PermissionChangedName   = "filesystem.file.permission-changed.v1"
+	TransferInitiatedName   = "filesystem.transfer.initiated.v1"
 )
 
 type FileCreated struct {
@@ -74,6 +75,13 @@ type PermissionChanged struct {
 	Action  string    `json:"action"`
 }
 
+type TransferInitiated struct {
+	events.BaseEvent
+	SessionID   uuid.UUID `json:"session_id"`
+	WorkspaceID uuid.UUID `json:"workspace_id"`
+	NamespaceID uuid.UUID `json:"namespace_id"`
+}
+
 func Register(registry *events.Registry) error {
 	if err := events.RegisterJSON[FileCreated](
 		registry,
@@ -116,6 +124,14 @@ func Register(registry *events.Registry) error {
 		},
 		func() error {
 			return registerNodeEvent(registry, PermissionChangedName, func(event PermissionChanged) uuid.UUID { return event.NodeID })
+		},
+		func() error {
+			return events.RegisterJSON[TransferInitiated](
+				registry, TransferInitiatedName, 1,
+				func(event TransferInitiated) events.AggregateRef {
+					return events.AggregateRef{Type: "transfer", ID: event.SessionID.String()}
+				},
+			)
 		},
 	}
 	for _, register := range registrations {

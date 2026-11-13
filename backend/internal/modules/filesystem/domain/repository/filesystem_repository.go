@@ -11,13 +11,17 @@ import (
 )
 
 var (
-	ErrNodeNameConflict        = domain.ErrNodeNameConflict
-	ErrNodeNotFound            = domain.ErrNodeNotFound
-	ErrTransferNotFound        = domain.ErrTransferNotFound
-	ErrTransferConflict        = domain.ErrTransferConflict
-	ErrTransferVersionConflict = domain.ErrTransferVersionConflict
-	ErrTransferIntegrity       = domain.ErrTransferIntegrity
-	ErrTransferExpired         = domain.ErrTransferExpired
+	ErrNodeNameConflict            = domain.ErrNodeNameConflict
+	ErrNodeNotFound                = domain.ErrNodeNotFound
+	ErrTransferNotFound            = domain.ErrTransferNotFound
+	ErrTransferConflict            = domain.ErrTransferConflict
+	ErrTransferIdempotencyConflict = domain.ErrTransferIdempotencyConflict
+	ErrTransferVersionConflict     = domain.ErrTransferVersionConflict
+	ErrTransferStatusConflict      = domain.ErrTransferStatusConflict
+	ErrTransferPartConflict        = domain.ErrTransferPartConflict
+	ErrTransferPartOverlap         = domain.ErrTransferPartOverlap
+	ErrTransferIntegrity           = domain.ErrTransferIntegrity
+	ErrTransferExpired             = domain.ErrTransferExpired
 )
 
 type CommandDedup struct {
@@ -38,6 +42,17 @@ type TransferStatePatch struct {
 	ProviderID   *uuid.UUID
 	ScanResult   *model.TransferScanResult
 	ErrorCode    *string
+}
+
+type QuotaReservation struct {
+	ID             uuid.UUID
+	QuotaAccountID uuid.UUID
+	WorkspaceID    uuid.UUID
+	SessionID      uuid.UUID
+	Bytes          int64
+	Files          int64
+	State          string
+	ExpiresAt      time.Time
 }
 
 var (
@@ -74,6 +89,8 @@ type FilesystemRepository interface {
 	CompleteCommand(context.Context, uuid.UUID, *uuid.UUID, *uuid.UUID) error
 	GetCommand(context.Context, uuid.UUID) (*CommandDedup, error)
 	CreateTransfer(context.Context, *model.TransferSession) error
+	ReserveTransferQuota(context.Context, uuid.UUID, int64, int64) (uuid.UUID, error)
+	CreateQuotaReservation(context.Context, QuotaReservation) error
 	GetTransferByID(context.Context, uuid.UUID) (*model.TransferSession, error)
 	GetTransferByIdempotency(context.Context, uuid.UUID, string) (*model.TransferSession, error)
 	LockTransfer(context.Context, uuid.UUID) (*model.TransferSession, error)

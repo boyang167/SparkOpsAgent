@@ -20,6 +20,7 @@ CREATE TABLE filesystem.transfer_sessions (
     scan_threat_name TEXT,
     scan_engine TEXT,
     scan_signature TEXT,
+    scan_completed_at TIMESTAMPTZ,
     error_code TEXT,
     idempotency_key TEXT NOT NULL CHECK (length(btrim(idempotency_key)) > 0),
     expires_at TIMESTAMPTZ NOT NULL,

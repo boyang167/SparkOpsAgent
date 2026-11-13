@@ -91,13 +91,15 @@ type quotaAccountRow struct {
 func (quotaAccountRow) TableName() string { return "filesystem.quota_accounts" }
 
 type quotaReservationRow struct {
-	ID             uuid.UUID `gorm:"column:id;primaryKey;type:uuid"`
-	QuotaAccountID uuid.UUID `gorm:"column:quota_account_id;not null;type:uuid;index"`
-	Bytes          int64     `gorm:"not null"`
-	Files          int64     `gorm:"not null"`
-	State          string    `gorm:"not null;type:varchar(32)"`
-	ExpiresAt      time.Time `gorm:"column:expires_at;not null"`
-	CreatedAt      time.Time `gorm:"column:created_at;not null"`
+	ID             uuid.UUID  `gorm:"column:id;primaryKey;type:uuid"`
+	QuotaAccountID uuid.UUID  `gorm:"column:quota_account_id;not null;type:uuid;index"`
+	WorkspaceID    uuid.UUID  `gorm:"column:workspace_id;not null;type:uuid;index"`
+	SessionID      *uuid.UUID `gorm:"column:session_id;type:uuid;uniqueIndex"`
+	Bytes          int64      `gorm:"not null"`
+	Files          int64      `gorm:"not null"`
+	State          string     `gorm:"not null;type:varchar(32)"`
+	ExpiresAt      time.Time  `gorm:"column:expires_at;not null"`
+	CreatedAt      time.Time  `gorm:"column:created_at;not null"`
 }
 
 func (quotaReservationRow) TableName() string { return "filesystem.quota_reservations" }
@@ -138,3 +140,48 @@ type commandDedupRow struct {
 }
 
 func (commandDedupRow) TableName() string { return "filesystem.command_dedup" }
+
+type transferSessionRow struct {
+	ID                 uuid.UUID                    `gorm:"column:id;primaryKey;type:uuid"`
+	WorkspaceID        uuid.UUID                    `gorm:"column:workspace_id;not null;type:uuid;uniqueIndex:ux_transfer_idempotency"`
+	NamespaceID        uuid.UUID                    `gorm:"column:namespace_id;not null;type:uuid"`
+	TargetParentID     *uuid.UUID                   `gorm:"column:target_parent_id;type:uuid"`
+	TargetName         string                       `gorm:"column:target_name;not null"`
+	Protocol           model.TransferProtocol       `gorm:"column:protocol;not null;type:varchar(24)"`
+	ExpectedSize       int64                        `gorm:"column:expected_size;not null"`
+	ExpectedSHA256     *string                      `gorm:"column:expected_sha256;size:64"`
+	ActualSize         *int64                       `gorm:"column:actual_size"`
+	ActualSHA256       *string                      `gorm:"column:actual_sha256;size:64"`
+	ProviderID         *uuid.UUID                   `gorm:"column:provider_id;type:uuid"`
+	TemporaryObjectKey string                       `gorm:"column:temporary_object_key;not null"`
+	Status             model.TransferStatus         `gorm:"column:status;not null;type:varchar(24)"`
+	Classification     model.TransferClassification `gorm:"column:classification;not null;type:varchar(16)"`
+	ScanClean          *bool                        `gorm:"column:scan_clean"`
+	ScanThreatName     string                       `gorm:"column:scan_threat_name"`
+	ScanEngine         string                       `gorm:"column:scan_engine"`
+	ScanSignature      string                       `gorm:"column:scan_signature"`
+	ScanCompletedAt    *time.Time                   `gorm:"column:scan_completed_at"`
+	ErrorCode          string                       `gorm:"column:error_code"`
+	IdempotencyKey     string                       `gorm:"column:idempotency_key;not null;uniqueIndex:ux_transfer_idempotency"`
+	ExpiresAt          time.Time                    `gorm:"column:expires_at;not null"`
+	Version            int64                        `gorm:"column:version;not null"`
+	CreatedBy          uuid.UUID                    `gorm:"column:created_by;not null;type:uuid"`
+	CreatedAt          time.Time                    `gorm:"column:created_at;not null"`
+	UpdatedAt          time.Time                    `gorm:"column:updated_at;not null"`
+}
+
+func (transferSessionRow) TableName() string { return "filesystem.transfer_sessions" }
+
+type transferPartRow struct {
+	ID         uuid.UUID `gorm:"column:id;primaryKey;type:uuid"`
+	SessionID  uuid.UUID `gorm:"column:session_id;not null;type:uuid;uniqueIndex:ux_transfer_part_number"`
+	PartNumber int       `gorm:"column:part_number;not null;uniqueIndex:ux_transfer_part_number"`
+	Offset     int64     `gorm:"column:offset_bytes;not null"`
+	Size       int64     `gorm:"column:size_bytes;not null"`
+	Checksum   string    `gorm:"column:checksum;size:64"`
+	ETag       string    `gorm:"column:etag;not null"`
+	CreatedAt  time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt  time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (transferPartRow) TableName() string { return "filesystem.transfer_parts" }
