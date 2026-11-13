@@ -31,9 +31,10 @@ type CreateArtifact struct {
 }
 
 type CreateArtifactHandler struct {
-	repo artifactRepo
-	tx   postgres.Transactor
-	bus  messaging.Bus
+	repo     artifactRepo
+	commands repository.FilesystemRepository
+	tx       postgres.Transactor
+	bus      messaging.Bus
 }
 
 type artifactRepo interface {
@@ -44,7 +45,7 @@ type artifactRepo interface {
 
 func NewCreateArtifactHandler(repo repository.FilesystemRepository, tx postgres.Transactor, bus messaging.Bus) *CreateArtifactHandler {
 	requireMutationDependencies(repo, tx)
-	return &CreateArtifactHandler{repo: repo, tx: tx, bus: bus}
+	return &CreateArtifactHandler{repo: repo, commands: repo, tx: tx, bus: bus}
 }
 
 func NewCreateArtifactHandlerWithRepo(repo artifactRepo, tx postgres.Transactor, bus messaging.Bus) *CreateArtifactHandler {
@@ -73,7 +74,11 @@ func (h *CreateArtifactHandler) Handle(ctx context.Context, cmd CreateArtifact) 
 		return model.Artifact{}, domain.ErrUnsupportedNodeType
 	}
 	artifactID := uuid.New()
+	if cmd.CommandID != uuid.Nil {
+		artifactID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-artifact:"+cmd.CommandID.String()))
+	}
 	now := time.Now().UTC()
+	inputRefs := append([]uuid.UUID{}, cmd.InputRefs...)
 	artifact := model.Artifact{
 		ID:                artifactID,
 		WorkspaceID:       cmd.WorkspaceID,
@@ -82,7 +87,7 @@ func (h *CreateArtifactHandler) Handle(ctx context.Context, cmd CreateArtifact) 
 		ProducerType:      cmd.ProducerType,
 		ProducerID:        cmd.ProducerID,
 		RunID:             cmd.RunID,
-		InputRefs:         append([]uuid.UUID(nil), cmd.InputRefs...),
+		InputRefs:         inputRefs,
 		FileID:            cmd.FileID,
 		RevisionID:        node.CurrentRevisionID,
 		RetentionPolicyID: cmd.RetentionPolicyID,
@@ -97,32 +102,43 @@ func (h *CreateArtifactHandler) Handle(ctx context.Context, cmd CreateArtifact) 
 		CreatedAt:  now,
 	}
 	if h.tx == nil {
-		if err := h.repo.CreateArtifact(ctx, artifact, link); err != nil {
-			return model.Artifact{}, err
-		}
-		if h.bus != nil {
-			_ = h.bus.Publish(ctx, event.ArtifactCreated{
-				BaseEvent:   events.NewBaseEvent(event.ArtifactCreatedName),
-				ArtifactID:  artifactID,
-				WorkspaceID: cmd.WorkspaceID,
-				FileID:      cmd.FileID,
-				RunID:       cmd.RunID,
-			})
-		}
-		return artifact, nil
+		return model.Artifact{}, domain.ErrPersistence
 	}
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
+		if h.commands != nil {
+			requestHash := mutationRequestHash("create_artifact", cmd.WorkspaceID, cmd.OrganizationID, cmd.FileID, cmd.RunID, cmd.ArtifactType, cmd.ProducerType, cmd.ProducerID, inputRefs, cmd.RetentionPolicyID)
+			completed, claimed, claimErr := claimMutation(txCtx, h.commands, cmd.CommandID, cmd.WorkspaceID, "create_artifact", requestHash, &artifact.ID, artifact.RevisionID)
+			if claimErr != nil {
+				return claimErr
+			}
+			if completed {
+				if claimed == nil || claimed.NodeID == nil {
+					return domain.ErrOutcomeUnknown
+				}
+				loaded, loadErr := h.commands.GetArtifact(txCtx, *claimed.NodeID)
+				if loadErr != nil {
+					return loadErr
+				}
+				artifact = loaded
+				return nil
+			}
+		}
 		if err := h.repo.CreateArtifact(txCtx, artifact, link); err != nil {
 			return err
 		}
 		if h.bus != nil {
-			return h.bus.Publish(txCtx, event.ArtifactCreated{
+			if err := h.bus.Publish(txCtx, event.ArtifactCreated{
 				BaseEvent:   events.NewBaseEvent(event.ArtifactCreatedName),
-				ArtifactID:  artifactID,
+				ArtifactID:  artifact.ID,
 				WorkspaceID: cmd.WorkspaceID,
 				FileID:      cmd.FileID,
 				RunID:       cmd.RunID,
-			})
+			}); err != nil {
+				return err
+			}
+		}
+		if h.commands != nil {
+			return completeMutation(txCtx, h.commands, cmd.CommandID, &artifact.ID, artifact.RevisionID)
 		}
 		return nil
 	})

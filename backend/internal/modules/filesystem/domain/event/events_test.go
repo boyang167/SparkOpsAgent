@@ -93,3 +93,27 @@ func TestRegisterEncodesTransferInitiatedV1(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ev, decoded)
 }
+
+func TestRegisterEncodesArtifactCreatedV1(t *testing.T) {
+	registry := events.NewRegistry()
+	require.NoError(t, Register(registry))
+	artifactID := uuid.New()
+	ev := ArtifactCreated{
+		BaseEvent:   events.NewBaseEvent(ArtifactCreatedName),
+		ArtifactID:  artifactID,
+		WorkspaceID: uuid.New(),
+		FileID:      uuid.New(),
+		RunID:       uuid.New(),
+	}
+
+	envelope, err := registry.Encode(t.Context(), ev)
+
+	require.NoError(t, err)
+	require.Equal(t, "filesystem.artifact.created.v1", envelope.Type)
+	require.Equal(t, 1, envelope.Version)
+	require.Equal(t, "artifact", envelope.AggregateType)
+	require.Equal(t, artifactID.String(), envelope.AggregateID)
+	decoded, err := registry.Decode(envelope)
+	require.NoError(t, err)
+	require.Equal(t, ev, decoded)
+}

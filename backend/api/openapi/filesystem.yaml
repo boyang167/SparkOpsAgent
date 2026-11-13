@@ -953,10 +953,20 @@ paths:
                     properties:
                       data:
                         $ref: "#/components/schemas/ArtifactPage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
     post:
       tags: [filesystem]
       summary: Create an artifact link to a file
@@ -990,8 +1000,18 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
         "422":
           $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
   /api/v1/workspaces/{wsId}/exports:
     post:
@@ -1914,6 +1934,7 @@ components:
                 - FILESYSTEM_NOT_FOUND
                 - FILESYSTEM_RESOURCE_FORBIDDEN
                 - FILESYSTEM_CROSS_ORGANIZATION_GRANT
+                - FILESYSTEM_CROSS_WORKSPACE
                 - FILESYSTEM_ANONYMOUS_LINK_DISABLED
                 - FILESYSTEM_CAPABILITY_SCOPE_EMPTY
                 - FILESYSTEM_CAPABILITY_REVOKED

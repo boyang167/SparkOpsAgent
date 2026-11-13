@@ -1368,7 +1368,19 @@ func (r *Repository) CreateArtifact(ctx context.Context, artifact model.Artifact
 	if err := db.Create(&row).Error; err != nil {
 		return wrapPersistence(err)
 	}
-	return db.Create(&linkRow).Error
+	return wrapPersistence(db.Create(&linkRow).Error)
+}
+
+func (r *Repository) GetArtifact(ctx context.Context, id uuid.UUID) (model.Artifact, error) {
+	var row artifactRow
+	err := postgres.DB(ctx, r.db).Where("id = ?", id).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.Artifact{}, domain.ErrOutcomeUnknown
+	}
+	if err != nil {
+		return model.Artifact{}, wrapPersistence(err)
+	}
+	return artifactFromRow(row), nil
 }
 
 func (r *Repository) ListArtifacts(ctx context.Context, workspaceID uuid.UUID, runID *uuid.UUID, limit int, cursor string) ([]model.Artifact, string, error) {

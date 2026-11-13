@@ -33,6 +33,7 @@ var (
 	ErrCrossOrganizationGrant       = errors.New("filesystem cross-organization grant rejected")
 	ErrAnonymousLinkDisabled        = errors.New("filesystem anonymous links are disabled")
 	ErrCapabilityScopeEmpty         = errors.New("filesystem capability scope is empty")
+	ErrCapabilityScopeDenied        = errors.New("filesystem capability scope denied")
 	ErrCapabilityInvalid            = errors.New("filesystem capability token invalid")
 	ErrCapabilityNotFound           = errors.New("filesystem capability not found")
 	ErrCapabilityRevoked            = errors.New("filesystem capability revoked")

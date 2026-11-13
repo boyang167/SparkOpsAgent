@@ -138,5 +138,6 @@ type FilesystemRepository interface {
 	CreateLifecycleJob(context.Context, *model.LifecycleJob) error
 	GetNodeByID(context.Context, uuid.UUID) (*model.Node, error)
 	CreateArtifact(context.Context, model.Artifact, model.FileLink) error
+	GetArtifact(context.Context, uuid.UUID) (model.Artifact, error)
 	ListArtifacts(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Artifact, string, error)
 }

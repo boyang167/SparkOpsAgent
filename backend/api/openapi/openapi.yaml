@@ -180,6 +180,8 @@ paths:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1capabilities"
   /api/v1/workspaces/{wsId}/capabilities/{capabilityId}/revoke:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1capabilities~1{capabilityId}~1revoke"
+  /api/v1/workspaces/{wsId}/artifacts:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1artifacts"
   /api/v1/workspaces/{wsId}/exports:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1exports"
   /api/v1/workspaces/{wsId}/exports/{exportId}/import:
