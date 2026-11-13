@@ -65,6 +65,8 @@ type Blob struct {
 	RefCount            int64
 	State               BlobState
 	PreferredProviderID *uuid.UUID
+	TombstonedAt        *time.Time
+	LegalHold           bool
 }
 
 type StorageReplica struct {

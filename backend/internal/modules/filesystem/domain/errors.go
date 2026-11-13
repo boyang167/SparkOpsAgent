@@ -45,4 +45,7 @@ var (
 	ErrStorageProviderConflict        = errors.New("filesystem storage provider conflict")
 	ErrStorageComplianceUnsatisfied   = errors.New("STORAGE_COMPLIANCE_UNSATISFIED")
 	ErrStoragePlacementUnsatisfied    = errors.New("filesystem storage placement unsatisfied")
+	ErrBlobStillReferenced          = errors.New("filesystem blob still referenced")
+	ErrRetentionHold                = errors.New("filesystem retention hold active")
+	ErrBlobGCNotReady               = errors.New("filesystem blob not ready for garbage collection")
 )

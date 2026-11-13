@@ -1,6 +1,8 @@
 package persistence
 
 import (
+	"strings"
+
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"gorm.io/gorm"
 )
@@ -78,7 +80,7 @@ func AutoMigrate(db *gorm.DB) error {
 			`CREATE TABLE IF NOT EXISTS filesystem.nodes (id BLOB PRIMARY KEY, namespace_id BLOB NOT NULL, parent_id BLOB, node_type TEXT NOT NULL CHECK (node_type IN ('FILE','DIRECTORY')), name TEXT NOT NULL, normalized_name TEXT NOT NULL, current_revision_id BLOB, state TEXT NOT NULL CHECK (state IN ('ACTIVE','TRASHED','RETENTION_HOLD','PURGE_PENDING','PURGED')), owner_id BLOB NOT NULL, created_at DATETIME, updated_at DATETIME, UNIQUE(id, namespace_id), FOREIGN KEY(namespace_id) REFERENCES namespaces(id), FOREIGN KEY(parent_id, namespace_id) REFERENCES nodes(id, namespace_id), FOREIGN KEY(current_revision_id, id) REFERENCES file_revisions(id, node_id))`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_nodes_root_name ON nodes(namespace_id, normalized_name) WHERE parent_id IS NULL`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_nodes_child_name ON nodes(namespace_id, parent_id, normalized_name) WHERE parent_id IS NOT NULL`,
-			`CREATE TABLE IF NOT EXISTS filesystem.blobs (id BLOB PRIMARY KEY, dedup_domain BLOB NOT NULL, sha256 TEXT NOT NULL, size INTEGER NOT NULL CHECK (size >= 0), encryption_key_ref TEXT, ref_count INTEGER NOT NULL CHECK (ref_count >= 0), state TEXT NOT NULL CHECK (state IN ('PENDING','AVAILABLE','QUARANTINED','TOMBSTONED','GC_PENDING','DELETED')), preferred_provider_id BLOB, created_at DATETIME)`,
+			`CREATE TABLE IF NOT EXISTS filesystem.blobs (id BLOB PRIMARY KEY, dedup_domain BLOB NOT NULL, sha256 TEXT NOT NULL, size INTEGER NOT NULL CHECK (size >= 0), encryption_key_ref TEXT, ref_count INTEGER NOT NULL CHECK (ref_count >= 0), state TEXT NOT NULL CHECK (state IN ('PENDING','AVAILABLE','QUARANTINED','TOMBSTONED','GC_PENDING','DELETED')), preferred_provider_id BLOB, tombstoned_at DATETIME, legal_hold INTEGER NOT NULL DEFAULT 0 CHECK (legal_hold IN (0, 1)), created_at DATETIME)`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_blobs_dedup ON blobs(dedup_domain, sha256, size)`,
 			`CREATE TABLE IF NOT EXISTS filesystem.file_revisions (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, revision_no INTEGER NOT NULL CHECK (revision_no > 0), blob_id BLOB NOT NULL, size INTEGER NOT NULL CHECK (size >= 0), mime_type TEXT NOT NULL, created_by BLOB NOT NULL, created_at DATETIME, UNIQUE(id, node_id), UNIQUE(node_id, revision_no), FOREIGN KEY(node_id) REFERENCES nodes(id), FOREIGN KEY(blob_id) REFERENCES blobs(id))`,
 			`CREATE TABLE IF NOT EXISTS filesystem.storage_replicas (id BLOB PRIMARY KEY, blob_id BLOB NOT NULL, provider_id BLOB NOT NULL, object_key TEXT NOT NULL, checksum TEXT, state TEXT NOT NULL CHECK (state IN ('CREATING','VERIFYING','AVAILABLE','DRAINING','FAILED','DELETED')), verified_at DATETIME, delete_after DATETIME, created_at DATETIME, UNIQUE(blob_id, provider_id, object_key), FOREIGN KEY(blob_id) REFERENCES blobs(id))`,
@@ -102,6 +104,14 @@ func AutoMigrate(db *gorm.DB) error {
 				return wrapPersistence(err)
 			}
 		}
+		for _, statement := range []string{
+			`ALTER TABLE filesystem.blobs ADD COLUMN tombstoned_at DATETIME`,
+			`ALTER TABLE filesystem.blobs ADD COLUMN legal_hold INTEGER NOT NULL DEFAULT 0 CHECK (legal_hold IN (0, 1))`,
+		} {
+			if err := db.Exec(statement).Error; err != nil && !isSQLiteDuplicateColumn(err) {
+				return wrapPersistence(err)
+			}
+		}
 		return nil
 	}
 	if postgres.ShouldRunAutoMigrate(db) && db.Dialector.Name() == "postgres" {
@@ -120,4 +130,12 @@ func AutoMigrate(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+func isSQLiteDuplicateColumn(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "duplicate column") || strings.Contains(message, "duplicate column name")
 }

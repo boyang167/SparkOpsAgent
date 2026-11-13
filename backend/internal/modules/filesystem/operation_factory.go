@@ -9,8 +9,10 @@ import (
 )
 
 type OperationFactory struct {
-	Replicator *operation.ReplicateBlobHandler
-	Promoter   *command.PromoteReplicaHandler
+	Replicator       *operation.ReplicateBlobHandler
+	Promoter         *command.PromoteReplicaHandler
+	LifecycleRunner  *operation.RunLifecycleHandler
+	GarbageCollector *operation.GarbageCollector
 }
 
 func (f OperationFactory) Validate() error {
@@ -19,6 +21,10 @@ func (f OperationFactory) Validate() error {
 		return fmt.Errorf("filesystem replicate operation handler is required")
 	case f.Promoter == nil:
 		return fmt.Errorf("filesystem promote replica handler is required")
+	case f.LifecycleRunner == nil:
+		return fmt.Errorf("filesystem lifecycle operation handler is required")
+	case f.GarbageCollector == nil:
+		return fmt.Errorf("filesystem garbage collect operation handler is required")
 	default:
 		return nil
 	}
@@ -30,6 +36,8 @@ func (f OperationFactory) Descriptors() ([]messaging.OperationDescriptor, error)
 	}
 	return []messaging.OperationDescriptor{
 		{Type: operation.OperationTypeReplicateBlob, Handler: f.Replicator.Handle},
+		{Type: operation.OperationTypeRunLifecycle, Handler: f.LifecycleRunner.Handle},
+		{Type: operation.OperationTypeGarbageCollect, Handler: f.GarbageCollector.Handle},
 	}, nil
 }
 

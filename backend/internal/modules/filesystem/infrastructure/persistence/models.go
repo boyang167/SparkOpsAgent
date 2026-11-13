@@ -44,6 +44,8 @@ type blobRow struct {
 	RefCount              int64           `gorm:"column:ref_count;not null"`
 	State                 model.BlobState `gorm:"not null;type:varchar(32)"`
 	PreferredProviderID   *uuid.UUID      `gorm:"column:preferred_provider_id;type:uuid"`
+	TombstonedAt          *time.Time      `gorm:"column:tombstoned_at"`
+	LegalHold             bool            `gorm:"column:legal_hold;not null;default:false"`
 	CreatedAt             time.Time       `gorm:"not null"`
 }
 

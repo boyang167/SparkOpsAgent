@@ -416,6 +416,7 @@ func (r *Repository) GetBlob(ctx context.Context, blobID uuid.UUID) (*model.Blob
 		ID: row.ID, DedupDomain: row.DedupDomain, SHA256: row.SHA256, Size: row.Size,
 		EncryptionKeyRef: row.EncryptionKeyRef, RefCount: row.RefCount, State: row.State,
 		PreferredProviderID: row.PreferredProviderID,
+		TombstonedAt: row.TombstonedAt, LegalHold: row.LegalHold,
 	}, nil
 }
 
@@ -462,7 +463,9 @@ func (r *Repository) InsertBlob(ctx context.Context, blob *model.Blob) error {
 	return wrapPersistence(postgres.DB(ctx, r.db).Create(&blobRow{
 		ID: blob.ID, DedupDomain: blob.DedupDomain, SHA256: blob.SHA256, Size: blob.Size,
 		EncryptionKeyRef: blob.EncryptionKeyRef, RefCount: blob.RefCount, State: blob.State,
-		PreferredProviderID: blob.PreferredProviderID, CreatedAt: now,
+		PreferredProviderID: blob.PreferredProviderID,
+		TombstonedAt: blob.TombstonedAt, LegalHold: blob.LegalHold,
+		CreatedAt: now,
 	}).Error)
 }
 
@@ -1250,6 +1253,104 @@ func (r *Repository) SaveLifecyclePolicy(context.Context, *model.LifecyclePolicy
 }
 
 func (r *Repository) CreateLifecycleJob(context.Context, *model.LifecycleJob) error {
+	return domain.ErrPersistence
+}
+
+func (r *Repository) ConfirmBlobGCEligible(ctx context.Context, blobID uuid.UUID, grace time.Duration, now time.Time) (repository.BlobGCContext, error) {
+	var snapshot repository.BlobGCContext
+	err := postgres.DB(ctx, r.db).Transaction(func(tx *gorm.DB) error {
+		var row blobRow
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", blobID).First(&row).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrBlobConflict
+			}
+			return err
+		}
+		var liveRevisionCount int64
+		if err := tx.Table(revisionRow{}.TableName()).
+			Joins("INNER JOIN "+nodeRow{}.TableName()+" n ON n.id = "+revisionRow{}.TableName()+".node_id").
+			Where(revisionRow{}.TableName()+".blob_id = ? AND n.state <> ?", blobID, model.NodeStatePurged).
+			Count(&liveRevisionCount).Error; err != nil {
+			return err
+		}
+		var activeLinkCount int64
+		if err := tx.Table(fileLinkRow{}.TableName()).
+			Joins("INNER JOIN "+revisionRow{}.TableName()+" fr ON fr.id = "+fileLinkRow{}.TableName()+".revision_id").
+			Where("fr.blob_id = ?", blobID).
+			Count(&activeLinkCount).Error; err != nil {
+			return err
+		}
+		var retentionHoldCount int64
+		if err := tx.Table(revisionRow{}.TableName()).
+			Joins("INNER JOIN "+nodeRow{}.TableName()+" n ON n.id = "+revisionRow{}.TableName()+".node_id").
+			Where(revisionRow{}.TableName()+".blob_id = ? AND n.state = ?", blobID, model.NodeStateRetentionHold).
+			Count(&retentionHoldCount).Error; err != nil {
+			return err
+		}
+		tombstonedAt := time.Time{}
+		if row.TombstonedAt != nil {
+			tombstonedAt = row.TombstonedAt.UTC()
+		}
+		snapshot = repository.BlobGCContext{
+			BlobID: blobID, State: row.State, RefCount: row.RefCount,
+			TombstonedAt: tombstonedAt, LegalHold: row.LegalHold || retentionHoldCount > 0,
+			LiveRevisionCount: liveRevisionCount, ActiveLinkCount: activeLinkCount,
+		}
+		return repository.ValidateBlobGCEligible(snapshot, grace, now)
+	})
+	return snapshot, wrapPersistence(err)
+}
+
+func (r *Repository) ListReplicasForGC(ctx context.Context, blobID uuid.UUID) ([]model.StorageReplica, error) {
+	var rows []replicaRow
+	err := postgres.DB(ctx, r.db).
+		Where("blob_id = ? AND state <> ?", blobID, model.ReplicaStateDeleted).
+		Order("id ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, wrapPersistence(err)
+	}
+	out := make([]model.StorageReplica, len(rows))
+	for i, row := range rows {
+		out[i] = *replicaModelFromRow(row)
+	}
+	return out, nil
+}
+
+func (r *Repository) FinalizeBlobGC(ctx context.Context, blobID uuid.UUID) error {
+	now := time.Now().UTC()
+	return wrapPersistence(postgres.DB(ctx, r.db).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&blobRow{}).Where("id = ?", blobID).Updates(map[string]any{
+			"state": model.BlobStateDeleted,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return domain.ErrBlobConflict
+		}
+		return tx.Model(&replicaRow{}).Where("blob_id = ? AND state <> ?", blobID, model.ReplicaStateDeleted).
+			Updates(map[string]any{"state": model.ReplicaStateDeleted, "verified_at": now}).Error
+	}))
+}
+
+func (r *Repository) MarkBlobGCPending(ctx context.Context, blobID uuid.UUID) error {
+	result := postgres.DB(ctx, r.db).Model(&blobRow{}).Where("id = ?", blobID).
+		Update("state", model.BlobStateGCPending)
+	if result.Error != nil {
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrBlobConflict
+	}
+	return nil
+}
+
+func (r *Repository) GetLifecyclePolicy(context.Context, uuid.UUID, int64) (*model.LifecyclePolicy, error) {
+	return nil, domain.ErrPersistence
+}
+
+func (r *Repository) SaveLifecycleJobCheckpoint(context.Context, uuid.UUID, map[string]any) error {
 	return domain.ErrPersistence
 }
 
