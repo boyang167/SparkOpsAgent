@@ -1,0 +1,508 @@
+paths:
+  /api/v1/workspaces/{wsId}/namespaces:
+    get:
+      tags: [filesystem]
+      summary: Get the workspace filesystem namespace
+      operationId: getFilesystemNamespace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+      responses:
+        "200":
+          $ref: "#/components/responses/NamespaceResponse"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/workspaces/{wsId}/files:
+    get:
+      tags: [filesystem]
+      summary: List files and directories
+      operationId: listFilesystemNodes
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ParentID"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Filesystem nodes
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/NodePage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/workspaces/{wsId}/directories:
+    post:
+      tags: [filesystem]
+      summary: Create a directory
+      operationId: createFilesystemDirectory
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDirectoryRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/NodeCreated"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/workspaces/{wsId}/files/{nodeId}/name:
+    patch:
+      tags: [filesystem]
+      summary: Rename a filesystem node
+      operationId: renameFilesystemNode
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MutationOK"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/workspaces/{wsId}/files/{nodeId}/move:
+    post:
+      tags: [filesystem]
+      summary: Move a filesystem node
+      operationId: moveFilesystemNode
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveOrCopyRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MutationOK"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/workspaces/{wsId}/files/{nodeId}/copy:
+    post:
+      tags: [filesystem]
+      summary: Copy a file
+      operationId: copyFilesystemNode
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveOrCopyRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/NodeCreated"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/workspaces/{wsId}/files/{nodeId}:
+    delete:
+      tags: [filesystem]
+      summary: Move a filesystem node to trash
+      operationId: trashFilesystemNode
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          $ref: "#/components/responses/MutationOK"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/workspaces/{wsId}/files/{nodeId}/revisions:
+    get:
+      tags: [filesystem]
+      summary: List file revisions
+      operationId: listFilesystemRevisions
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: File revisions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/RevisionPage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/workspaces/{wsId}/files/{nodeId}/revisions/{revisionId}/restore:
+    post:
+      tags: [filesystem]
+      summary: Restore a file revision
+      operationId: restoreFilesystemRevision
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+        - $ref: "#/components/parameters/RevisionID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          $ref: "#/components/responses/MutationOK"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+components:
+  parameters:
+    WorkspaceID:
+      name: wsId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    NodeID:
+      name: nodeId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RevisionID:
+      name: revisionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ParentID:
+      name: parent_id
+      in: query
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+        format: uuid
+        maxLength: 128
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 100
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+
+  schemas:
+    Namespace:
+      type: object
+      required: [id, workspace_id, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        root_node_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+    Node:
+      type: object
+      required: [id, namespace_id, type, name, state, owner_id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        namespace_id:
+          type: string
+          format: uuid
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+        type:
+          type: string
+          enum: [FILE, DIRECTORY]
+        name:
+          type: string
+        current_revision_id:
+          type: string
+          format: uuid
+          nullable: true
+        state:
+          type: string
+          enum: [ACTIVE, TRASHED, RETENTION_HOLD, PURGE_PENDING, PURGED]
+        owner_id:
+          type: string
+          format: uuid
+    Revision:
+      type: object
+      required: [id, node_id, revision_no, size, mime_type, created_by]
+      properties:
+        id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+          format: uuid
+        revision_no:
+          type: integer
+          minimum: 1
+        size:
+          type: integer
+          format: int64
+          minimum: 0
+        mime_type:
+          type: string
+        created_by:
+          type: string
+          format: uuid
+    NodePage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Node"
+        next_cursor:
+          type: string
+    RevisionPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Revision"
+        next_cursor:
+          type: string
+    CreateDirectoryRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        namespace_id:
+          type: string
+          format: uuid
+          description: If supplied, it must be the namespace owned by wsId.
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+          minLength: 1
+    RenameRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+    MoveOrCopyRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+    SuccessEnvelope:
+      type: object
+      required: [code, message, trace_id]
+      properties:
+        code:
+          type: integer
+          enum: [0]
+        message:
+          type: string
+        data: {}
+        trace_id:
+          type: string
+    ErrorEnvelope:
+      type: object
+      required: [code, message, data, trace_id]
+      properties:
+        code:
+          type: integer
+          enum: [1]
+        message:
+          type: string
+        data:
+          type: object
+          required: [error_code]
+          properties:
+            error_code:
+              type: string
+              enum:
+                - FILESYSTEM_INVALID_REQUEST
+                - FILESYSTEM_IDEMPOTENCY_KEY_REQUIRED
+                - FILESYSTEM_IDEMPOTENCY_KEY_INVALID
+                - FILESYSTEM_NOT_FOUND
+                - FILESYSTEM_CONFLICT
+                - FILESYSTEM_QUOTA_EXCEEDED
+                - FILESYSTEM_OUTCOME_UNKNOWN
+                - FILESYSTEM_INTERNAL_ERROR
+                - AUTH_FORBIDDEN
+                - TENANT_NOT_WORKSPACE_MEMBER
+                - ENTITLEMENT_MODULE_DISABLED
+        trace_id:
+          type: string
+
+  responses:
+    NamespaceResponse:
+      description: Workspace filesystem namespace
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/SuccessEnvelope"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Namespace"
+    NodeCreated:
+      description: Created
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/SuccessEnvelope"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Node"
+    MutationOK:
+      description: Mutation completed or already completed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SuccessEnvelope"
+    InvalidRequest:
+      description: Invalid request or idempotency key
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Forbidden:
+      description: Membership, permission, or entitlement denied
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    NotFound:
+      description: Resource is absent or belongs to another workspace
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Conflict:
+      description: Name, idempotency, or quota conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+# File content upload and download are intentionally deferred to the G2 Transfer Gateway.

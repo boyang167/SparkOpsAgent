@@ -15,6 +15,8 @@ func TestFilesystemAPIPathEntitlement(t *testing.T) {
 		"/api/v1/workspaces/ws-1/files////?sort=name",
 		"/api/v1/workspaces/ws-1/namespaces",
 		"/api/v1/workspaces/ws-1/namespaces/",
+		"/api/v1/workspaces/ws-1/directories",
+		"/api/v1/workspaces/ws-1/directories/",
 		"/api/v1/workspaces/ws-1/transfers",
 		"/api/v1/workspaces/ws-1/transfers/",
 		"/api/v1/workspaces/ws-1/%66iles",

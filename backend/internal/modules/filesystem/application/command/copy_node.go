@@ -14,6 +14,7 @@ import (
 )
 
 type CopyNode struct {
+	CommandID      uuid.UUID
 	ActorID        uuid.UUID
 	OrganizationID uuid.UUID
 	WorkspaceID    uuid.UUID
@@ -75,6 +76,21 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.
 		result, err = model.NewFile(cmd.NamespaceID, cmd.ActorID, name, parent)
 		if err != nil {
 			return err
+		}
+		if cmd.CommandID != uuid.Nil {
+			result.ID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-copy:"+cmd.CommandID.String()))
+			existing, existingErr := h.repo.GetNode(txCtx, cmd.NamespaceID, result.ID)
+			if existingErr == nil {
+				if existing.Type != result.Type || existing.Name != result.Name ||
+					existing.OwnerID != result.OwnerID || !sameUUIDPointer(existing.ParentID, result.ParentID) {
+					return domain.ErrIdempotencyConflict
+				}
+				result = existing
+				return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy", true, nil)
+			}
+			if !errors.Is(existingErr, domain.ErrNodeNotFound) {
+				return existingErr
+			}
 		}
 		txCtx = withResourceID(txCtx, result.ID.String())
 		revision, err := h.repo.GetRevision(txCtx, source.ID, *source.CurrentRevisionID)

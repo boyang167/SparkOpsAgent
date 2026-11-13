@@ -15,6 +15,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/agent_runtime"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/delivery"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/identity"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/integration"
@@ -167,6 +168,7 @@ func Run(ctx context.Context) error {
 			identity.New(tokens),
 			tenant.New(tokens),
 			governance.New(tokens),
+			filesystem.New(tokens),
 			workspace_app.New(tokens),
 			platform_admin.New(tokens),
 			runtime.New(tokens),

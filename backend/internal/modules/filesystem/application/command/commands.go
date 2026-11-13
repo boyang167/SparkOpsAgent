@@ -225,6 +225,7 @@ func (h *CreateNamespaceHandler) Handle(ctx context.Context, cmd CreateNamespace
 }
 
 type CreateDirectory struct {
+	CommandID      uuid.UUID
 	ActorID        uuid.UUID
 	OrganizationID uuid.UUID
 	WorkspaceID    uuid.UUID
@@ -274,6 +275,9 @@ func (h *CreateDirectoryHandler) Handle(ctx context.Context, cmd CreateDirectory
 	if err != nil {
 		return nil, err
 	}
+	if cmd.CommandID != uuid.Nil {
+		node.ID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-directory:"+cmd.CommandID.String()))
+	}
 	ctx = withResourceID(ctx, node.ID.String())
 	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		if err := h.repo.CreateNode(txCtx, node); err != nil {
@@ -281,6 +285,17 @@ func (h *CreateDirectoryHandler) Handle(ctx context.Context, cmd CreateDirectory
 		}
 		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", true, nil)
 	})
+	if err != nil && cmd.CommandID != uuid.Nil &&
+		(errors.Is(err, domain.ErrNodeNameConflict) || errors.Is(err, domain.ErrNodeIDConflict)) {
+		existing, readErr := h.repo.GetNode(ctx, cmd.NamespaceID, node.ID)
+		if readErr == nil && existing.Type == node.Type && existing.Name == node.Name &&
+			existing.OwnerID == node.OwnerID && sameUUIDPointer(existing.ParentID, node.ParentID) {
+			return existing, nil
+		}
+		if readErr == nil {
+			return nil, domain.ErrIdempotencyConflict
+		}
+	}
 	return node, err
 }
 

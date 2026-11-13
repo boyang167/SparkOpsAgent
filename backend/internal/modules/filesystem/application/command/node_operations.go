@@ -17,6 +17,7 @@ import (
 )
 
 type RenameNode struct {
+	CommandID      uuid.UUID
 	ActorID        uuid.UUID
 	OrganizationID uuid.UUID
 	WorkspaceID    uuid.UUID
@@ -77,6 +78,7 @@ func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) (err err
 }
 
 type MoveNode struct {
+	CommandID      uuid.UUID
 	ActorID        uuid.UUID
 	OrganizationID uuid.UUID
 	WorkspaceID    uuid.UUID
@@ -172,6 +174,7 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) (err error) 
 }
 
 type TrashNode struct {
+	CommandID      uuid.UUID
 	ActorID        uuid.UUID
 	OrganizationID uuid.UUID
 	WorkspaceID    uuid.UUID
@@ -231,6 +234,7 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) (err error
 }
 
 type RestoreRevision struct {
+	CommandID      uuid.UUID
 	ActorID        uuid.UUID
 	OrganizationID uuid.UUID
 	WorkspaceID    uuid.UUID

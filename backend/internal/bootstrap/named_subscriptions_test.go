@@ -28,6 +28,7 @@ func TestProductionNamedSubscriptionsAreCompleteAndUnique(t *testing.T) {
 		"notification.build-completed":                           "deliveryevent.BuildCompletedName",
 		"notification.project-review-submitted":                  "workspaceevent.ProjectReviewSubmittedName",
 		"governance.workspace-created.bootstrap":                 "integration.EventWorkspaceCreated",
+		"filesystem.workspace-created.create-namespace":          "integration.EventWorkspaceCreated",
 	}
 	moduleFiles := []string{
 		"../modules/product/module.go",
@@ -35,6 +36,7 @@ func TestProductionNamedSubscriptionsAreCompleteAndUnique(t *testing.T) {
 		"../modules/delivery/module.go",
 		"../modules/workspace_app/module.go",
 		"../modules/governance/module.go",
+		"../modules/filesystem/module.go",
 		"../modules/notification/module.go",
 	}
 	subscribe := regexp.MustCompile(`(?s)\.Subscribe\(\s*([^,]+),\s*"([^"]+)"`)
