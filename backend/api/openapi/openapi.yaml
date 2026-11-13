@@ -163,4 +163,7 @@ paths:
 
 components:
   securitySchemes:
-    $ref: "./components.yaml#/components/securitySchemes"
+    bearerAuth:
+      $ref: "./components.yaml#/components/securitySchemes/bearerAuth"
+    workspaceHeader:
+      $ref: "./components.yaml#/components/securitySchemes/workspaceHeader"

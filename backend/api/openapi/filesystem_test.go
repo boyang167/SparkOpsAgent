@@ -1,17 +1,25 @@
-package openapi
+package openapi_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+
+	specopenapi "github.com/sparkops/sparkops-agent/backend/api/openapi"
+	filesystemhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/interface/http"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 func TestFilesystemOpenAPIPathsMatchHTTPContract(t *testing.T) {
-	rootRaw, err := Files.ReadFile("openapi.yaml")
+	rootRaw, err := specopenapi.Files.ReadFile("openapi.yaml")
 	require.NoError(t, err)
-	filesystemRaw, err := Files.ReadFile("filesystem.yaml")
+	filesystemRaw, err := specopenapi.Files.ReadFile("filesystem.yaml")
 	require.NoError(t, err)
 
 	var root, filesystem map[string]any
@@ -47,7 +55,7 @@ func TestFilesystemOpenAPIPathsMatchHTTPContract(t *testing.T) {
 }
 
 func TestFilesystemOpenAPIIdempotencyAndLocalRefs(t *testing.T) {
-	raw, err := Files.ReadFile("filesystem.yaml")
+	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
 	require.NoError(t, err)
 	var document map[string]any
 	require.NoError(t, yaml.Unmarshal(raw, &document))
@@ -61,10 +69,64 @@ func TestFilesystemOpenAPIIdempotencyAndLocalRefs(t *testing.T) {
 				continue
 			}
 			require.Truef(t, operationHasRef(operation, "#/components/parameters/IdempotencyKey"), "%s %s must require Idempotency-Key", method, path)
+			responses := operation["responses"].(map[string]any)
+			for _, status := range []string{"401", "403", "409", "422", "500", "503"} {
+				require.Containsf(t, responses, status, "%s %s must document %s", method, path, status)
+			}
 		}
 	}
 	assertLocalRefsResolve(t, document, document)
 }
+
+func TestRootOpenAPILoadsExternalRefsAndValidates(t *testing.T) {
+	loader := openapi3.NewLoader()
+	loader.IsExternalRefsAllowed = true
+	document, err := loader.LoadFromFile("openapi.yaml")
+	require.NoError(t, err)
+	require.NoError(t, document.Validate(context.Background()))
+}
+
+type openAPIPermissions struct{}
+
+func (openAPIPermissions) RequirePermission(context.Context, kernel.WorkspaceID, kernel.MemberID, string) error {
+	return nil
+}
+func (openAPIPermissions) HasPermission(context.Context, kernel.WorkspaceID, kernel.MemberID, string) (bool, error) {
+	return true, nil
+}
+
+type openAPIMembers struct{}
+
+func (openAPIMembers) IsWorkspaceMember(context.Context, kernel.WorkspaceID, kernel.MemberID) (bool, error) {
+	return true, nil
+}
+
+func TestFilesystemSpecificationExactlyMatchesRouter(t *testing.T) {
+	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
+	require.NoError(t, err)
+	var fragment map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &fragment))
+	specPaths := fragment["paths"].(map[string]any)
+	spec := map[string]bool{}
+	for path, rawItem := range specPaths {
+		for method := range rawItem.(map[string]any) {
+			spec[strings.ToUpper(method)+" "+path] = true
+		}
+	}
+
+	engine := gin.New()
+	pass := func(c *gin.Context) { c.Next() }
+	filesystemhttp.RegisterRoutes(engine, pass, pass, openAPIMembers{}, openAPIPermissions{}, &filesystemhttp.Handler{})
+	actual := map[string]bool{}
+	for _, route := range engine.Routes() {
+		path := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(route.Path, ":wsId", "{wsId}"), ":nodeId", "{nodeId}"), ":revisionId", "{revisionId}")
+		actual[route.Method+" "+path] = true
+	}
+	require.Equal(t, spec, actual)
+}
+
+var _ authz.PermissionChecker = openAPIPermissions{}
+var _ authz.WorkspaceMemberChecker = openAPIMembers{}
 
 func operationHasRef(operation map[string]any, ref string) bool {
 	parameters, _ := operation["parameters"].([]any)

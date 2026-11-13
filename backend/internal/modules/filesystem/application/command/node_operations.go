@@ -3,7 +3,6 @@ package command
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/rand/v2"
 	"time"
 
@@ -49,7 +48,7 @@ func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) (err err
 		}
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename", err)
 	}
-	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
 		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
 		if err != nil {
 			return err
@@ -64,9 +63,17 @@ func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) (err err
 			return domain.ErrNamespaceMismatch
 		}
 		if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
-			return fmt.Errorf("filesystem root cannot be renamed")
+			return domain.ErrRootMutation
+		}
+		requestHash := mutationRequestHash("rename", cmd.WorkspaceID, cmd.NamespaceID, cmd.NodeID, cmd.Name, cmd.ActorID)
+		completed, _, err := claimMutation(txCtx, h.repo, cmd.CommandID, cmd.WorkspaceID, "rename", requestHash, &cmd.NodeID, nil)
+		if err != nil || completed {
+			return err
 		}
 		if err := h.repo.RenameNode(txCtx, cmd.NodeID, cmd.Name); err != nil {
+			return err
+		}
+		if err := completeMutation(txCtx, h.repo, cmd.CommandID, &cmd.NodeID, nil); err != nil {
 			return err
 		}
 		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename", true, nil)
@@ -144,7 +151,7 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) (err error) 
 				return domain.ErrNamespaceMismatch
 			}
 			if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
-				return fmt.Errorf("filesystem root cannot be moved")
+				return domain.ErrRootMutation
 			}
 			name := cmd.NewName
 			if name == "" {
@@ -154,18 +161,30 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) (err error) 
 			if targetParent == nil {
 				targetParent = ns.RootNodeID
 			}
+			requestHash := mutationRequestHash("move", cmd.WorkspaceID, cmd.NamespaceID, cmd.NodeID, targetParent, name, cmd.ActorID)
+			completed, _, err := claimMutation(txCtx, h.repo, cmd.CommandID, cmd.WorkspaceID, "move", requestHash, &cmd.NodeID, nil)
+			if err != nil || completed {
+				return err
+			}
 			if err := h.repo.MoveNodeSafely(txCtx, cmd.NamespaceID, node.ID, targetParent, name); err != nil {
+				return err
+			}
+			if err := completeMutation(txCtx, h.repo, cmd.CommandID, &cmd.NodeID, nil); err != nil {
 				return err
 			}
 			return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", true, nil)
 		})
-		if !errors.Is(err, domain.ErrTransactionRetry) || attempt == 4 {
+		retryable := errors.Is(err, domain.ErrTransactionRetry) || errors.Is(err, domain.ErrCommandInProgress)
+		if !retryable || attempt == 4 {
 			break
 		}
 		if waitErr := h.retryWait(ctx, h.retryBackoff(attempt)); waitErr != nil {
 			err = waitErr
 			break
 		}
+	}
+	if errors.Is(err, domain.ErrTransactionRetry) || errors.Is(err, domain.ErrCommandInProgress) {
+		err = domain.ErrTransactionExhausted
 	}
 	if err != nil {
 		return errors.Join(err, logMutation(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", false, err))
@@ -205,11 +224,7 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) (err error
 		}
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash", err)
 	}
-	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
-		if err != nil {
-			return err
-		}
+	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
 		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
 		if err != nil {
 			return err
@@ -217,13 +232,25 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) (err error
 		if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
 			return domain.ErrNamespaceMismatch
 		}
+		requestHash := mutationRequestHash("trash", cmd.WorkspaceID, cmd.NamespaceID, cmd.NodeID, cmd.ActorID)
+		completed, _, err := claimMutation(txCtx, h.repo, cmd.CommandID, cmd.WorkspaceID, "trash", requestHash, &cmd.NodeID, nil)
+		if err != nil || completed {
+			return err
+		}
+		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
+		if err != nil {
+			return err
+		}
 		if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
-			return fmt.Errorf("filesystem root cannot be trashed")
+			return domain.ErrRootMutation
 		}
 		if node.State != model.NodeStateTrashed {
 			if err := h.repo.TrashNode(txCtx, node.ID); err != nil {
 				return err
 			}
+		}
+		if err := completeMutation(txCtx, h.repo, cmd.CommandID, &cmd.NodeID, nil); err != nil {
+			return err
 		}
 		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash", true, nil)
 	})
@@ -266,13 +293,18 @@ func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision
 		}
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.revision.restore", err)
 	}
-	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
 		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
 		if err != nil {
 			return err
 		}
 		if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
 			return domain.ErrNamespaceMismatch
+		}
+		requestHash := mutationRequestHash("restore", cmd.WorkspaceID, cmd.NamespaceID, cmd.NodeID, cmd.RevisionID, cmd.ActorID)
+		completed, _, err := claimMutation(txCtx, h.repo, cmd.CommandID, cmd.WorkspaceID, "restore", requestHash, &cmd.NodeID, &cmd.RevisionID)
+		if err != nil || completed {
+			return err
 		}
 		if _, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID); err != nil {
 			return err
@@ -282,6 +314,9 @@ func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision
 			return err
 		}
 		if err := h.repo.SetCurrentRevision(txCtx, cmd.NodeID, cmd.RevisionID); err != nil {
+			return err
+		}
+		if err := completeMutation(txCtx, h.repo, cmd.CommandID, &cmd.NodeID, &cmd.RevisionID); err != nil {
 			return err
 		}
 		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.revision.restore", true, nil)

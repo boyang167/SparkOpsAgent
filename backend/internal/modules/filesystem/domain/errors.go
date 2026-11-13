@@ -25,4 +25,7 @@ var (
 	ErrCommandInProgress    = errors.New("filesystem command in progress")
 	ErrCommandNotFound      = errors.New("filesystem command not found")
 	ErrTransactionRetry     = errors.New("filesystem transaction should be retried")
+	ErrTransactionExhausted = errors.New("filesystem transaction retries exhausted")
+	ErrUnsupportedNodeType  = errors.New("filesystem node type is unsupported")
+	ErrRootMutation         = errors.New("filesystem root mutation is forbidden")
 )

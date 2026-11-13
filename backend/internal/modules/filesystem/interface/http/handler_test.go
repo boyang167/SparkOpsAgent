@@ -2,6 +2,8 @@ package http
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,11 +14,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/command"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -74,12 +78,13 @@ func TestCreateDirectoryRequiresMembershipPermissionAndIdempotencyKey(t *testing
 
 func TestListFilesUsesReadPermissionAndDoesNotRequireIdempotencyKey(t *testing.T) {
 	nsID := uuid.New()
+	rootID := uuid.New()
 	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileRead: true}}, &Handler{
 		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Node, string, error) {
 			return []model.Node{}, "", nil
 		},
 		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
-			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID}, nil
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
 		},
 	})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID.String()+"/files?limit=20", nil)
@@ -135,7 +140,7 @@ func TestCreateDirectoryReturnsCreatedAndContextIdentity(t *testing.T) {
 	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileWrite: true}}, h)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+wsID.String()+"/directories", strings.NewReader(`{"namespace_id":"`+nsID.String()+`","name":"docs"}`))
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	req.Header.Set("Idempotency-Key", "create-docs")
 	req.Header.Set("X-Trace-Id", "trace-123")
 	res := httptest.NewRecorder()
@@ -176,18 +181,169 @@ func TestRoutesUseExpectedPermissions(t *testing.T) {
 	}
 }
 
-func TestEntitlementRunsBeforeAuthentication(t *testing.T) {
+func TestMiddlewareShortCircuitOrder(t *testing.T) {
 	router := httpx.NewEngine()
 	tokens := authn.NewTokenProvider(config.JWTConfig{})
+	entitlementCalls := 0
 	RegisterRoutes(router, func(c *gin.Context) {
+		entitlementCalls++
 		httpx.Fail(c, "ENTITLEMENT_MODULE_DISABLED", "disabled", http.StatusForbidden)
 		c.Abort()
-	}, authn.RequireAuth(tokens), memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileRead: true}}, &Handler{})
+	}, authn.RequireAuth(tokens), memberStub(true), permissionStub{allowed: map[string]bool{}}, &Handler{})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+uuid.NewString()+"/files", nil)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusUnauthorized, res.Code)
+	require.Zero(t, entitlementCalls)
+
+	token, err := tokens.Issue(kernel.NewMemberID())
+	require.NoError(t, err)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/not-a-uuid/files", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res = httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusBadRequest, res.Code)
+	require.Zero(t, entitlementCalls)
+
+	nonMember := httpx.NewEngine()
+	RegisterRoutes(nonMember, func(c *gin.Context) {
+		entitlementCalls++
+		c.Next()
+	}, authn.RequireAuth(tokens), memberStub(false), permissionStub{allowed: map[string]bool{}}, &Handler{})
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+uuid.NewString()+"/files", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res = httptest.NewRecorder()
+	nonMember.ServeHTTP(res, req)
+	require.Equal(t, http.StatusForbidden, res.Code)
+	require.Zero(t, entitlementCalls)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+uuid.NewString()+"/files", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res = httptest.NewRecorder()
+	router.ServeHTTP(res, req)
 	require.Equal(t, http.StatusForbidden, res.Code)
 	require.Contains(t, res.Body.String(), "ENTITLEMENT_MODULE_DISABLED")
+	require.Equal(t, 1, entitlementCalls)
+}
+
+func TestListFilesDefaultsToNamespaceRootAndNeverReturnsHiddenRoot(t *testing.T) {
+	rootID, childID, nsID := uuid.New(), uuid.New(), uuid.New()
+	var capturedParent *uuid.UUID
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		getNode: func(_ context.Context, namespaceID, nodeID uuid.UUID) (*model.Node, error) {
+			require.Equal(t, nsID, namespaceID)
+			require.Equal(t, rootID, nodeID)
+			return &model.Node{ID: rootID, NamespaceID: nsID, Type: model.NodeTypeDirectory}, nil
+		},
+		listChildren: func(_ context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, _ int, _ string) ([]model.Node, string, error) {
+			require.Equal(t, nsID, namespaceID)
+			capturedParent = parentID
+			return []model.Node{{ID: childID, NamespaceID: nsID, ParentID: &rootID, Name: "docs", Type: model.NodeTypeDirectory}}, "", nil
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileRead: true}}, h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID.String()+"/files", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.NotNil(t, capturedParent)
+	require.Equal(t, rootID, *capturedParent)
+	require.NotContains(t, res.Body.String(), ".root")
+	require.Contains(t, res.Body.String(), "docs")
+}
+
+func TestListFilesRejectsForeignExplicitParent(t *testing.T) {
+	rootID, nsID, foreignNS, parentID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		getNode: func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error) {
+			return &model.Node{ID: parentID, NamespaceID: foreignNS, Type: model.NodeTypeDirectory}, nil
+		},
+		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Node, string, error) {
+			t.Fatal("list must not run for a foreign parent")
+			return nil, "", nil
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileRead: true}}, h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID.String()+"/files?parent_id="+parentID.String(), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusNotFound, res.Code, res.Body.String())
+}
+
+func TestMutationJSONAndEmptyBodyContracts(t *testing.T) {
+	nsID := uuid.New()
+	h := &Handler{namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+		return &model.Namespace{ID: nsID, WorkspaceID: workspaceID}, nil
+	}}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{
+		authz.PermFileWrite: true, authz.PermFileDelete: true,
+	}}, h)
+	for _, contentType := range []string{"", "text/plain", "application/jsonp"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+wsID.String()+"/directories", strings.NewReader(`{"name":"docs"}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Idempotency-Key", "key")
+		req.Header.Set("Content-Type", contentType)
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		require.Equal(t, http.StatusUnsupportedMediaType, res.Code, res.Body.String())
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/workspaces/"+wsID.String()+"/files/"+uuid.NewString(), io.NopCloser(strings.NewReader(`{}`)))
+	req.ContentLength = -1
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", "key")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
+}
+
+func TestUUIDsMustBeCanonicalNonNil(t *testing.T) {
+	nsID := uuid.New()
+	h := &Handler{namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+		return &model.Namespace{ID: nsID, WorkspaceID: workspaceID}, nil
+	}}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileRead: true}}, h)
+	for _, nodeID := range []string{strings.ToUpper(uuid.NewString()), strings.ReplaceAll(uuid.NewString(), "-", ""), uuid.Nil.String()} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID.String()+"/files/"+nodeID+"/revisions", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
+	}
+}
+
+func TestStableFilesystemErrorMapping(t *testing.T) {
+	tests := []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{domain.ErrUnsupportedNodeType, http.StatusUnprocessableEntity, "FILESYSTEM_UNSUPPORTED_OPERATION"},
+		{domain.ErrRootMutation, http.StatusConflict, "FILESYSTEM_CONFLICT"},
+		{domain.ErrNodeIDConflict, http.StatusConflict, "FILESYSTEM_CONFLICT"},
+		{domain.ErrCommandInProgress, http.StatusConflict, "FILESYSTEM_CONFLICT"},
+		{domain.ErrQuotaExceeded, http.StatusUnprocessableEntity, "FILESYSTEM_QUOTA_EXCEEDED"},
+		{storage.ErrOutcomeUnknown, http.StatusServiceUnavailable, "FILESYSTEM_OUTCOME_UNKNOWN"},
+		{domain.ErrTransactionRetry, http.StatusServiceUnavailable, "FILESYSTEM_RETRY_EXHAUSTED"},
+		{domain.ErrTransactionExhausted, http.StatusServiceUnavailable, "FILESYSTEM_RETRY_EXHAUSTED"},
+		{domain.ErrPersistence, http.StatusServiceUnavailable, "FILESYSTEM_UNAVAILABLE"},
+		{errors.New("provider object-key secret"), http.StatusInternalServerError, "FILESYSTEM_INTERNAL_ERROR"},
+	}
+	for _, tt := range tests {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		filesystemError(c, tt.err)
+		require.Equal(t, tt.status, recorder.Code, recorder.Body.String())
+		require.Contains(t, recorder.Body.String(), tt.code)
+		require.NotContains(t, recorder.Body.String(), "object-key secret")
+	}
 }
 
 func TestCrossWorkspaceNamespaceIsNotVisible(t *testing.T) {

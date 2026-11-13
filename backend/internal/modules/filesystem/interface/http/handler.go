@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,12 +22,14 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage"
 )
 
 const maxJSONBodyBytes = 64 << 10
 
 type Handler struct {
 	namespaceForWorkspace func(context.Context, uuid.UUID) (*model.Namespace, error)
+	getNode               func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
 	listChildren          func(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Node, string, error)
 	listRevisions         func(context.Context, uuid.UUID, uuid.UUID, int, string) ([]model.FileRevision, string, error)
 	createDirectory       func(context.Context, command.CreateDirectory) (*model.Node, error)
@@ -50,6 +53,7 @@ func NewHandler(
 ) *Handler {
 	return &Handler{
 		namespaceForWorkspace: repo.GetNamespaceByWorkspace,
+		getNode:               repo.GetNode,
 		listChildren: func(ctx context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, limit int, cursor string) ([]model.Node, string, error) {
 			return list.Handle(ctx, query.ListChildren{NamespaceID: namespaceID, ParentID: parentID, Limit: limit, Cursor: cursor})
 		},
@@ -67,10 +71,10 @@ func NewHandler(
 
 func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.HandlerFunc, members authz.WorkspaceMemberChecker, permissions authz.PermissionChecker, h *Handler) {
 	base := engine.Group("/api/v1/workspaces/:wsId")
+	base.Use(auth, httpx.RequireWorkspace(), requireCanonicalWorkspacePath(), authz.RequireWorkspaceMember(members))
 	if entitlement != nil {
 		base.Use(entitlement)
 	}
-	base.Use(auth, httpx.RequireWorkspace(), authz.RequireWorkspaceMember(members))
 	base.GET("/namespaces", authz.RequirePermission(permissions, authz.PermFileRead), h.GetNamespace)
 	base.GET("/files", authz.RequirePermission(permissions, authz.PermFileRead), h.ListFiles)
 	base.POST("/directories", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.CreateDirectory)
@@ -80,6 +84,17 @@ func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.Ha
 	base.DELETE("/files/:nodeId", authz.RequirePermission(permissions, authz.PermFileDelete), requireIdempotencyKey(), h.TrashNode)
 	base.GET("/files/:nodeId/revisions", authz.RequirePermission(permissions, authz.PermFileRead), h.ListRevisions)
 	base.POST("/files/:nodeId/revisions/:revisionId/restore", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.RestoreRevision)
+}
+
+func requireCanonicalWorkspacePath() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, ok := canonicalUUID(c.Param("wsId")); !ok {
+			invalidRequest(c)
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }
 
 const idempotencyContextKey = "filesystem_idempotency_key"
@@ -171,6 +186,30 @@ func (h *Handler) ListFiles(c *gin.Context) {
 	if h.listChildren == nil {
 		filesystemError(c, domain.ErrPersistence)
 		return
+	}
+	if parentID == nil {
+		if rc.namespace.RootNodeID == nil {
+			filesystemError(c, domain.ErrNamespaceNotFound)
+			return
+		}
+		parentID = rc.namespace.RootNodeID
+	} else {
+		if h.getNode == nil {
+			filesystemError(c, domain.ErrPersistence)
+			return
+		}
+		parent, err := h.getNode(c.Request.Context(), rc.namespace.ID, *parentID)
+		if err != nil || parent.NamespaceID != rc.namespace.ID {
+			if err == nil {
+				err = domain.ErrNamespaceMismatch
+			}
+			filesystemError(c, err)
+			return
+		}
+		if parent.Type != model.NodeTypeDirectory {
+			filesystemError(c, domain.ErrParentNotDirectory)
+			return
+		}
 	}
 	items, next, err := h.listChildren(c.Request.Context(), rc.namespace.ID, parentID, limit, c.Query("cursor"))
 	if err != nil {
@@ -297,8 +336,7 @@ func (h *Handler) CopyNode(c *gin.Context) {
 
 func (h *Handler) TrashNode(c *gin.Context) {
 	h.withNodeMutation(c, func(rc requestContext, nodeID uuid.UUID) error {
-		if c.Request.Body != nil && c.Request.ContentLength > 0 {
-			invalidRequest(c)
+		if !requireEmptyBody(c) {
 			return errResponseWritten
 		}
 		if h.trashNode == nil {
@@ -313,8 +351,8 @@ func (h *Handler) ListRevisions(c *gin.Context) {
 	if !ok {
 		return
 	}
-	nodeID, err := uuid.Parse(c.Param("nodeId"))
-	if err != nil {
+	nodeID, ok := canonicalUUID(c.Param("nodeId"))
+	if !ok {
 		invalidRequest(c)
 		return
 	}
@@ -343,20 +381,19 @@ func (h *Handler) RestoreRevision(c *gin.Context) {
 	if !ok {
 		return
 	}
-	revisionID, err := uuid.Parse(c.Param("revisionId"))
-	if err != nil {
+	revisionID, ok := canonicalUUID(c.Param("revisionId"))
+	if !ok {
 		invalidRequest(c)
 		return
 	}
-	if c.Request.Body != nil && c.Request.ContentLength > 0 {
-		invalidRequest(c)
+	if !requireEmptyBody(c) {
 		return
 	}
 	if h.restoreRevision == nil {
 		filesystemError(c, domain.ErrPersistence)
 		return
 	}
-	err = h.restoreRevision(c.Request.Context(), command.RestoreRevision{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, NodeID: nodeID, RevisionID: revisionID, Authorization: command.Authorization{Allowed: true, TraceID: rc.traceID}})
+	err := h.restoreRevision(c.Request.Context(), command.RestoreRevision{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, NodeID: nodeID, RevisionID: revisionID, Authorization: command.Authorization{Allowed: true, TraceID: rc.traceID}})
 	if err != nil {
 		filesystemError(c, err)
 		return
@@ -371,8 +408,8 @@ func (h *Handler) nodeRequest(c *gin.Context) (requestContext, uuid.UUID, bool) 
 	if !ok {
 		return requestContext{}, uuid.Nil, false
 	}
-	nodeID, err := uuid.Parse(c.Param("nodeId"))
-	if err != nil {
+	nodeID, ok := canonicalUUID(c.Param("nodeId"))
+	if !ok {
 		invalidRequest(c)
 		return requestContext{}, uuid.Nil, false
 	}
@@ -394,6 +431,11 @@ func (h *Handler) withNodeMutation(c *gin.Context, mutate func(requestContext, u
 }
 
 func decodeJSON(c *gin.Context, dst any) bool {
+	mediaType, _, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		httpx.Fail(c, "FILESYSTEM_UNSUPPORTED_MEDIA_TYPE", "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return false
+	}
 	if c.Request.ContentLength > maxJSONBodyBytes {
 		invalidRequest(c)
 		return false
@@ -406,6 +448,20 @@ func decodeJSON(c *gin.Context, dst any) bool {
 		return false
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		invalidRequest(c)
+		return false
+	}
+	return true
+}
+
+func requireEmptyBody(c *gin.Context) bool {
+	if c.Request.Body == nil {
+		return true
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxJSONBodyBytes)
+	var one [1]byte
+	n, err := c.Request.Body.Read(one[:])
+	if n != 0 || (err != nil && !errors.Is(err, io.EOF)) {
 		invalidRequest(c)
 		return false
 	}
@@ -427,7 +483,7 @@ func pagination(c *gin.Context) (int, bool) {
 			invalidRequest(c)
 			return 0, false
 		}
-		if _, err := uuid.Parse(cursor); err != nil {
+		if _, ok := canonicalUUID(cursor); !ok {
 			invalidRequest(c)
 			return 0, false
 		}
@@ -447,11 +503,22 @@ func optionalUUID(raw *string) (*uuid.UUID, bool) {
 	if raw == nil {
 		return nil, true
 	}
-	id, err := uuid.Parse(strings.TrimSpace(*raw))
-	if err != nil {
+	id, ok := canonicalUUID(*raw)
+	if !ok {
 		return nil, false
 	}
 	return &id, true
+}
+
+func canonicalUUID(raw string) (uuid.UUID, bool) {
+	if raw == "" || strings.TrimSpace(raw) != raw || raw != strings.ToLower(raw) || len(raw) != 36 {
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil || id == uuid.Nil || id.String() != raw {
+		return uuid.Nil, false
+	}
+	return id, true
 }
 
 func invalidRequest(c *gin.Context) {
@@ -464,14 +531,22 @@ func filesystemError(c *gin.Context, err error) {
 		httpx.Fail(c, "FILESYSTEM_NOT_FOUND", "filesystem resource not found", http.StatusNotFound)
 	case errors.Is(err, domain.ErrNamespaceMismatch):
 		httpx.Fail(c, "FILESYSTEM_NOT_FOUND", "filesystem resource not found", http.StatusNotFound)
-	case errors.Is(err, domain.ErrNodeNameConflict), errors.Is(err, domain.ErrIdempotencyConflict), errors.Is(err, domain.ErrCommandInProgress):
+	case errors.Is(err, domain.ErrNodeNameConflict), errors.Is(err, domain.ErrNodeIDConflict),
+		errors.Is(err, domain.ErrRevisionConflict), errors.Is(err, domain.ErrIdempotencyConflict),
+		errors.Is(err, domain.ErrCommandInProgress), errors.Is(err, domain.ErrRootMutation):
 		httpx.Fail(c, "FILESYSTEM_CONFLICT", "filesystem operation conflict", http.StatusConflict)
 	case errors.Is(err, domain.ErrQuotaExceeded):
-		httpx.Fail(c, "FILESYSTEM_QUOTA_EXCEEDED", "filesystem quota exceeded", http.StatusConflict)
+		httpx.Fail(c, "FILESYSTEM_QUOTA_EXCEEDED", "filesystem quota exceeded", http.StatusUnprocessableEntity)
+	case errors.Is(err, domain.ErrUnsupportedNodeType):
+		httpx.Fail(c, "FILESYSTEM_UNSUPPORTED_OPERATION", "filesystem operation is unsupported", http.StatusUnprocessableEntity)
 	case errors.Is(err, domain.ErrParentNotFound), errors.Is(err, domain.ErrParentNotDirectory), errors.Is(err, domain.ErrDirectoryCycle), errors.Is(err, model.ErrInvalidNodeName):
-		httpx.Fail(c, "FILESYSTEM_INVALID_REQUEST", "invalid filesystem request", http.StatusBadRequest)
-	case errors.Is(err, domain.ErrOutcomeUnknown):
+		httpx.Fail(c, "FILESYSTEM_INVALID_REQUEST", "invalid filesystem request", http.StatusUnprocessableEntity)
+	case errors.Is(err, domain.ErrOutcomeUnknown), errors.Is(err, storage.ErrOutcomeUnknown):
 		httpx.Fail(c, "FILESYSTEM_OUTCOME_UNKNOWN", "filesystem operation outcome unknown", http.StatusServiceUnavailable)
+	case errors.Is(err, domain.ErrTransactionRetry), errors.Is(err, domain.ErrTransactionExhausted):
+		httpx.Fail(c, "FILESYSTEM_RETRY_EXHAUSTED", "filesystem operation temporarily unavailable", http.StatusServiceUnavailable)
+	case errors.Is(err, domain.ErrPersistence):
+		httpx.Fail(c, "FILESYSTEM_UNAVAILABLE", "filesystem service unavailable", http.StatusServiceUnavailable)
 	default:
 		httpx.Fail(c, "FILESYSTEM_INTERNAL_ERROR", "filesystem operation failed", http.StatusInternalServerError)
 	}

@@ -679,6 +679,7 @@ func isDomainError(err error) bool {
 		domain.ErrPersistence, domain.ErrQuotaExceeded, domain.ErrDirectoryCycle,
 		domain.ErrIdempotencyConflict, domain.ErrOutcomeUnknown, domain.ErrCommandInProgress, model.ErrInvalidNodeName,
 		domain.ErrCommandNotFound, domain.ErrTransactionRetry,
+		domain.ErrTransactionExhausted, domain.ErrUnsupportedNodeType, domain.ErrRootMutation,
 	} {
 		if errors.Is(err, sentinel) {
 			return true

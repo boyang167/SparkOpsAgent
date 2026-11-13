@@ -459,3 +459,192 @@ func TestDeniedWithAuditFailureAttemptsAuditOnceAndPreservesBusinessError(t *tes
 	require.ErrorIs(t, err, auditErr)
 	require.Equal(t, 1, logs.calls)
 }
+
+func TestMetadataMutationsUseCommandDedup(t *testing.T) {
+	db, repo, ns := newPutTestRepository(t)
+	tx := postgres.NewTransactor(db)
+	actor := uuid.New()
+
+	t.Run("rename", func(t *testing.T) {
+		node, err := model.NewDirectory(ns.ID, actor, "before", *ns.RootNodeID)
+		require.NoError(t, err)
+		require.NoError(t, repo.CreateNode(context.Background(), node))
+		logs := &recordingAudit{}
+		handler := NewRenameNodeHandler(repo, tx, nil, logs)
+		cmd := RenameNode{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: node.ID, Name: "after", Authorization: Authorization{Allowed: true}}
+		require.NoError(t, handler.Handle(context.Background(), cmd))
+		require.NoError(t, handler.Handle(context.Background(), cmd))
+		require.Equal(t, []string{"ALLOW"}, logs.decisions())
+		cmd.Name = "different"
+		require.ErrorIs(t, handler.Handle(context.Background(), cmd), domain.ErrIdempotencyConflict)
+	})
+
+	t.Run("move", func(t *testing.T) {
+		left, err := model.NewDirectory(ns.ID, actor, "move-source", *ns.RootNodeID)
+		require.NoError(t, err)
+		right, err := model.NewDirectory(ns.ID, actor, "move-target", *ns.RootNodeID)
+		require.NoError(t, err)
+		require.NoError(t, repo.CreateNode(context.Background(), left))
+		require.NoError(t, repo.CreateNode(context.Background(), right))
+		logs := &recordingAudit{}
+		handler := NewMoveNodeHandler(repo, tx, nil, logs)
+		cmd := MoveNode{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: left.ID, NewParentID: &right.ID, Authorization: Authorization{Allowed: true}}
+		require.NoError(t, handler.Handle(context.Background(), cmd))
+		require.NoError(t, handler.Handle(context.Background(), cmd))
+		require.Equal(t, []string{"ALLOW"}, logs.decisions())
+		cmd.NewName = "different"
+		require.ErrorIs(t, handler.Handle(context.Background(), cmd), domain.ErrIdempotencyConflict)
+	})
+
+	t.Run("trash", func(t *testing.T) {
+		node, err := model.NewDirectory(ns.ID, actor, "trash-source", *ns.RootNodeID)
+		require.NoError(t, err)
+		require.NoError(t, repo.CreateNode(context.Background(), node))
+		logs := &recordingAudit{}
+		handler := NewTrashNodeHandler(repo, tx, nil, logs)
+		cmd := TrashNode{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: node.ID, Authorization: Authorization{Allowed: true}}
+		require.NoError(t, handler.Handle(context.Background(), cmd))
+		require.NoError(t, handler.Handle(context.Background(), cmd))
+		require.Equal(t, []string{"ALLOW"}, logs.decisions())
+		cmd.NodeID = uuid.New()
+		require.ErrorIs(t, handler.Handle(context.Background(), cmd), domain.ErrIdempotencyConflict)
+	})
+
+	t.Run("restore", func(t *testing.T) {
+		provider, err := local.New(t.TempDir())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = provider.Close() })
+		source, err := NewPutLocalFileHandler(repo, provider, tx, nil, nil).Handle(context.Background(), putFixture(ns))
+		require.NoError(t, err)
+		logs := &recordingAudit{}
+		handler := NewRestoreRevisionHandler(repo, tx, nil, logs)
+		cmd := RestoreRevision{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: source.ID, RevisionID: *source.CurrentRevisionID, Authorization: Authorization{Allowed: true}}
+		require.NoError(t, handler.Handle(context.Background(), cmd))
+		require.NoError(t, handler.Handle(context.Background(), cmd))
+		require.Equal(t, []string{"ALLOW"}, logs.decisions())
+		cmd.RevisionID = uuid.New()
+		require.ErrorIs(t, handler.Handle(context.Background(), cmd), domain.ErrIdempotencyConflict)
+	})
+}
+
+func TestCopyCommandDedupDoesNotRepeatQuotaBlobOrAudit(t *testing.T) {
+	db, repo, ns := newPutTestRepository(t)
+	provider, err := local.New(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = provider.Close() })
+	tx := postgres.NewTransactor(db)
+	source, err := NewPutLocalFileHandler(repo, provider, tx, nil, nil).Handle(context.Background(), putFixture(ns))
+	require.NoError(t, err)
+	logs := &recordingAudit{}
+	handler := NewCopyNodeHandler(repo, tx, logs)
+	cmd := CopyNode{CommandID: uuid.New(), ActorID: source.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, SourceNodeID: source.ID, Name: "dedup-copy.txt", Authorization: Authorization{Allowed: true}}
+	first, err := handler.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+	second, err := handler.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, second.ID)
+	require.Equal(t, []string{"ALLOW"}, logs.decisions())
+
+	revision, err := repo.GetRevision(context.Background(), source.ID, *source.CurrentRevisionID)
+	require.NoError(t, err)
+	blob, err := repo.GetBlob(context.Background(), revision.BlobID())
+	require.NoError(t, err)
+	require.Equal(t, int64(2), blob.RefCount)
+	var quota struct{ UsedBytes, UsedFiles int64 }
+	require.NoError(t, db.Table("filesystem.quota_accounts").Where("workspace_id = ?", ns.WorkspaceID).Take(&quota).Error)
+	require.Equal(t, int64(30), quota.UsedBytes)
+	require.Equal(t, int64(2), quota.UsedFiles)
+
+	cmd.Name = "different.txt"
+	_, err = handler.Handle(context.Background(), cmd)
+	require.ErrorIs(t, err, domain.ErrIdempotencyConflict)
+}
+
+func TestCopyCommandDedupConcurrentReturnsAuthoritativeResult(t *testing.T) {
+	db, repo, ns, mainDSN, filesystemDSN := newConcurrentPutTestRepository(t)
+	provider, err := local.New(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = provider.Close() })
+	source, err := NewPutLocalFileHandler(repo, provider, postgres.NewTransactor(db), nil, nil).Handle(context.Background(), putFixture(ns))
+	require.NoError(t, err)
+	logs := &recordingAudit{}
+	cmd := CopyNode{CommandID: uuid.New(), ActorID: source.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, SourceNodeID: source.ID, Name: "concurrent-copy.txt", Authorization: Authorization{Allowed: true}}
+
+	start := make(chan struct{})
+	ready := make(chan error, 2)
+	results := make(chan *model.Node, 2)
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			workerDB, openErr := openPutWorkerDB(mainDSN, filesystemDSN)
+			ready <- openErr
+			if openErr != nil {
+				results <- nil
+				errs <- openErr
+				return
+			}
+			sqlDB, _ := workerDB.DB()
+			defer sqlDB.Close()
+			<-start
+			result, copyErr := NewCopyNodeHandler(persistence.NewRepository(workerDB), postgres.NewTransactor(workerDB), logs).Handle(context.Background(), cmd)
+			results <- result
+			errs <- copyErr
+		}()
+	}
+	require.NoError(t, <-ready)
+	require.NoError(t, <-ready)
+	close(start)
+	first, second := <-results, <-results
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+	require.NotNil(t, first)
+	require.NotNil(t, second)
+	require.Equal(t, first.ID, second.ID)
+	require.Equal(t, []string{"ALLOW"}, logs.decisions())
+
+	revision, err := repo.GetRevision(context.Background(), source.ID, *source.CurrentRevisionID)
+	require.NoError(t, err)
+	blob, err := repo.GetBlob(context.Background(), revision.BlobID())
+	require.NoError(t, err)
+	require.Equal(t, int64(2), blob.RefCount)
+	var quota struct{ UsedBytes, UsedFiles int64 }
+	require.NoError(t, db.Table("filesystem.quota_accounts").Where("workspace_id = ?", ns.WorkspaceID).Take(&quota).Error)
+	require.Equal(t, int64(30), quota.UsedBytes)
+	require.Equal(t, int64(2), quota.UsedFiles)
+}
+
+func TestRenameCommandDedupConcurrentAuditsOnce(t *testing.T) {
+	_, repo, ns, mainDSN, filesystemDSN := newConcurrentPutTestRepository(t)
+	node, err := model.NewDirectory(ns.ID, uuid.New(), "rename-concurrent-before", *ns.RootNodeID)
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(context.Background(), node))
+	logs := &recordingAudit{}
+	cmd := RenameNode{CommandID: uuid.New(), ActorID: node.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: node.ID, Name: "rename-concurrent-after", Authorization: Authorization{Allowed: true}}
+
+	start := make(chan struct{})
+	ready := make(chan error, 2)
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			workerDB, openErr := openPutWorkerDB(mainDSN, filesystemDSN)
+			ready <- openErr
+			if openErr != nil {
+				errs <- openErr
+				return
+			}
+			sqlDB, _ := workerDB.DB()
+			defer sqlDB.Close()
+			<-start
+			errs <- NewRenameNodeHandler(persistence.NewRepository(workerDB), postgres.NewTransactor(workerDB), nil, logs).Handle(context.Background(), cmd)
+		}()
+	}
+	require.NoError(t, <-ready)
+	require.NoError(t, <-ready)
+	close(start)
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+	require.Equal(t, []string{"ALLOW"}, logs.decisions())
+	persisted, err := repo.GetNode(context.Background(), ns.ID, node.ID)
+	require.NoError(t, err)
+	require.Equal(t, cmd.Name, persisted.Name)
+}

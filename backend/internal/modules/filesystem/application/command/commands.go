@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -149,6 +150,75 @@ func reasonCode(err error) string {
 	}
 }
 
+func mutationRequestHash(operation string, values ...any) string {
+	var value strings.Builder
+	value.WriteString(operation)
+	for _, item := range values {
+		part := fmt.Sprint(item)
+		fmt.Fprintf(&value, "|%d:%s", len(part), part)
+	}
+	sum := sha256.Sum256([]byte(value.String()))
+	return hex.EncodeToString(sum[:])
+}
+
+func claimMutation(
+	ctx context.Context,
+	repo repository.FilesystemRepository,
+	commandID, workspaceID uuid.UUID,
+	operation, requestHash string,
+	nodeID, revisionID *uuid.UUID,
+) (bool, *repository.CommandDedup, error) {
+	if commandID == uuid.Nil {
+		return false, nil, nil
+	}
+	claimed, err := repo.ClaimCommand(ctx, repository.CommandDedup{
+		CommandID: commandID, WorkspaceID: workspaceID, Operation: operation, RequestHash: requestHash,
+		NodeID: nodeID, RevisionID: revisionID,
+	})
+	if err != nil {
+		return false, nil, err
+	}
+	if claimed.State == "COMPLETED" {
+		markMutationReplay(ctx)
+		return true, claimed, nil
+	}
+	return false, claimed, nil
+}
+
+func markMutationReplay(ctx context.Context) {
+	if state, ok := ctx.Value(auditStateContextKey{}).(*mutationAuditState); ok {
+		state.attempted = true
+		state.decision = "ALLOW"
+	}
+}
+
+func completeMutation(ctx context.Context, repo repository.FilesystemRepository, commandID uuid.UUID, nodeID, revisionID *uuid.UUID) error {
+	if commandID == uuid.Nil {
+		return nil
+	}
+	return repo.CompleteCommand(ctx, commandID, nodeID, revisionID)
+}
+
+func withinIdempotentMutation(ctx context.Context, tx postgres.Transactor, mutate func(context.Context) error) error {
+	for attempt := 0; attempt < 5; attempt++ {
+		err := tx.WithinTransaction(ctx, mutate)
+		if !errors.Is(err, domain.ErrTransactionRetry) && !errors.Is(err, domain.ErrCommandInProgress) {
+			return err
+		}
+		if attempt == 4 {
+			return domain.ErrTransactionExhausted
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return domain.ErrTransactionExhausted
+}
+
 type CreateNamespace struct {
 	ActorID        uuid.UUID
 	OrganizationID uuid.UUID
@@ -193,7 +263,7 @@ func (h *CreateNamespaceHandler) Handle(ctx context.Context, cmd CreateNamespace
 	if err != nil {
 		return nil, err
 	}
-	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
 		if err := h.repo.CreateNamespace(txCtx, ns); err != nil {
 			return err
 		}
@@ -278,24 +348,28 @@ func (h *CreateDirectoryHandler) Handle(ctx context.Context, cmd CreateDirectory
 	if cmd.CommandID != uuid.Nil {
 		node.ID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-directory:"+cmd.CommandID.String()))
 	}
+	requestHash := mutationRequestHash("create_directory", cmd.WorkspaceID, cmd.NamespaceID, parent, node.Name, cmd.ActorID)
 	ctx = withResourceID(ctx, node.ID.String())
-	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
+		completed, claimed, err := claimMutation(txCtx, h.repo, cmd.CommandID, cmd.WorkspaceID, "create_directory", requestHash, &node.ID, nil)
+		if err != nil {
+			return err
+		}
+		if completed {
+			if claimed.NodeID == nil {
+				return domain.ErrOutcomeUnknown
+			}
+			node, err = h.repo.GetNode(txCtx, cmd.NamespaceID, *claimed.NodeID)
+			return err
+		}
 		if err := h.repo.CreateNode(txCtx, node); err != nil {
+			return err
+		}
+		if err := completeMutation(txCtx, h.repo, cmd.CommandID, &node.ID, nil); err != nil {
 			return err
 		}
 		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", true, nil)
 	})
-	if err != nil && cmd.CommandID != uuid.Nil &&
-		(errors.Is(err, domain.ErrNodeNameConflict) || errors.Is(err, domain.ErrNodeIDConflict)) {
-		existing, readErr := h.repo.GetNode(ctx, cmd.NamespaceID, node.ID)
-		if readErr == nil && existing.Type == node.Type && existing.Name == node.Name &&
-			existing.OwnerID == node.OwnerID && sameUUIDPointer(existing.ParentID, node.ParentID) {
-			return existing, nil
-		}
-		if readErr == nil {
-			return nil, domain.ErrIdempotencyConflict
-		}
-	}
 	return node, err
 }
 

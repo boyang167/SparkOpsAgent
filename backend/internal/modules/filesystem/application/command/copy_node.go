@@ -3,7 +3,7 @@ package command
 import (
 	"context"
 	"errors"
-	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -48,6 +48,7 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy", err)
 	}
 	var result *model.Node
+	var requestHash string
 	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
 		if err != nil {
@@ -61,7 +62,7 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.
 			return err
 		}
 		if source.Type != model.NodeTypeFile || source.CurrentRevisionID == nil {
-			return fmt.Errorf("filesystem only file copy is supported")
+			return domain.ErrUnsupportedNodeType
 		}
 		parent := uuid.Nil
 		if cmd.ParentID != nil {
@@ -79,25 +80,33 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.
 		}
 		if cmd.CommandID != uuid.Nil {
 			result.ID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-copy:"+cmd.CommandID.String()))
-			existing, existingErr := h.repo.GetNode(txCtx, cmd.NamespaceID, result.ID)
-			if existingErr == nil {
-				if existing.Type != result.Type || existing.Name != result.Name ||
-					existing.OwnerID != result.OwnerID || !sameUUIDPointer(existing.ParentID, result.ParentID) {
-					return domain.ErrIdempotencyConflict
-				}
-				result = existing
-				return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy", true, nil)
-			}
-			if !errors.Is(existingErr, domain.ErrNodeNotFound) {
-				return existingErr
-			}
 		}
-		txCtx = withResourceID(txCtx, result.ID.String())
-		revision, err := h.repo.GetRevision(txCtx, source.ID, *source.CurrentRevisionID)
+		revisionID := uuid.New()
+		if cmd.CommandID != uuid.Nil {
+			revisionID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-copy-revision:"+cmd.CommandID.String()))
+		}
+		requestHash = mutationRequestHash("copy", cmd.WorkspaceID, cmd.NamespaceID, source.ID, *source.CurrentRevisionID, parent, result.Name, cmd.ActorID)
+		completed, claimed, err := claimMutation(txCtx, h.repo, cmd.CommandID, cmd.WorkspaceID, "copy", requestHash, &result.ID, &revisionID)
 		if err != nil {
 			return err
 		}
-		blob, err := h.repo.GetBlob(txCtx, revision.BlobID())
+		if completed {
+			if claimed.NodeID == nil || claimed.RevisionID == nil {
+				return domain.ErrOutcomeUnknown
+			}
+			result, err = h.repo.GetNode(txCtx, cmd.NamespaceID, *claimed.NodeID)
+			if err != nil {
+				return err
+			}
+			_, err = h.repo.GetRevision(txCtx, result.ID, *claimed.RevisionID)
+			return err
+		}
+		txCtx = withResourceID(txCtx, result.ID.String())
+		sourceRevision, err := h.repo.GetRevision(txCtx, source.ID, *source.CurrentRevisionID)
+		if err != nil {
+			return err
+		}
+		blob, err := h.repo.GetBlob(txCtx, sourceRevision.BlobID())
 		if err != nil {
 			return err
 		}
@@ -108,7 +117,7 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.
 		if err := h.repo.CreateNode(txCtx, result); err != nil {
 			return err
 		}
-		newRevision, err := model.NewRevision(result.ID, revision.RevisionNo(), blob.ID, revision.Size(), revision.MIMEType(), cmd.ActorID)
+		newRevision, err := model.NewRevisionWithID(revisionID, result.ID, sourceRevision.RevisionNo(), blob.ID, sourceRevision.Size(), sourceRevision.MIMEType(), cmd.ActorID)
 		if err != nil {
 			return err
 		}
@@ -121,12 +130,35 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.
 		if err := h.repo.IncrementBlobRef(txCtx, blob.ID); err != nil {
 			return err
 		}
-		if err := h.repo.ApplyQuotaUsage(txCtx, cmd.WorkspaceID, revision.Size(), 1); err != nil {
+		if err := h.repo.ApplyQuotaUsage(txCtx, cmd.WorkspaceID, sourceRevision.Size(), 1); err != nil {
+			return err
+		}
+		if err := completeMutation(txCtx, h.repo, cmd.CommandID, &result.ID, &revisionID); err != nil {
 			return err
 		}
 		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy", true, nil)
 	})
 	if err != nil {
+		if cmd.CommandID != uuid.Nil && (errors.Is(err, domain.ErrNodeIDConflict) || errors.Is(err, domain.ErrCommandInProgress) || errors.Is(err, domain.ErrTransactionRetry)) {
+			for attempt := 0; attempt < 5; attempt++ {
+				claimed, readErr := h.repo.GetCommand(ctx, cmd.CommandID)
+				if readErr == nil {
+					if claimed.WorkspaceID != cmd.WorkspaceID || claimed.Operation != "copy" || claimed.RequestHash != requestHash {
+						return nil, domain.ErrIdempotencyConflict
+					}
+					if claimed.State == "COMPLETED" && claimed.NodeID != nil && claimed.RevisionID != nil {
+						authoritative, nodeErr := h.repo.GetNode(ctx, cmd.NamespaceID, *claimed.NodeID)
+						if nodeErr == nil {
+							if _, revisionErr := h.repo.GetRevision(ctx, authoritative.ID, *claimed.RevisionID); revisionErr == nil {
+								markMutationReplay(ctx)
+								return authoritative, nil
+							}
+						}
+					}
+				}
+				time.Sleep(time.Duration(attempt+1) * time.Millisecond)
+			}
+		}
 		return nil, errors.Join(err, logMutation(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy", false, err))
 	}
 	return result, err

@@ -42,6 +42,8 @@ paths:
                         $ref: "#/components/schemas/NodePage"
         "400":
           $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
 
@@ -66,10 +68,20 @@ paths:
           $ref: "#/components/responses/NodeCreated"
         "400":
           $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
   /api/v1/workspaces/{wsId}/files/{nodeId}/name:
     patch:
@@ -93,12 +105,22 @@ paths:
           $ref: "#/components/responses/MutationOK"
         "400":
           $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
   /api/v1/workspaces/{wsId}/files/{nodeId}/move:
     post:
@@ -122,12 +144,22 @@ paths:
           $ref: "#/components/responses/MutationOK"
         "400":
           $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
   /api/v1/workspaces/{wsId}/files/{nodeId}/copy:
     post:
@@ -151,12 +183,22 @@ paths:
           $ref: "#/components/responses/NodeCreated"
         "400":
           $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
   /api/v1/workspaces/{wsId}/files/{nodeId}:
     delete:
@@ -174,10 +216,20 @@ paths:
           $ref: "#/components/responses/MutationOK"
         "400":
           $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
   /api/v1/workspaces/{wsId}/files/{nodeId}/revisions:
     get:
@@ -205,6 +257,8 @@ paths:
                         $ref: "#/components/schemas/RevisionPage"
         "400":
           $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
@@ -227,12 +281,20 @@ paths:
           $ref: "#/components/responses/MutationOK"
         "400":
           $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
 components:
   parameters:
@@ -440,11 +502,17 @@ components:
                 - FILESYSTEM_INVALID_REQUEST
                 - FILESYSTEM_IDEMPOTENCY_KEY_REQUIRED
                 - FILESYSTEM_IDEMPOTENCY_KEY_INVALID
+                - FILESYSTEM_UNSUPPORTED_MEDIA_TYPE
                 - FILESYSTEM_NOT_FOUND
                 - FILESYSTEM_CONFLICT
                 - FILESYSTEM_QUOTA_EXCEEDED
+                - FILESYSTEM_UNSUPPORTED_OPERATION
                 - FILESYSTEM_OUTCOME_UNKNOWN
+                - FILESYSTEM_RETRY_EXHAUSTED
+                - FILESYSTEM_UNAVAILABLE
                 - FILESYSTEM_INTERNAL_ERROR
+                - AUTH_UNAUTHORIZED
+                - AUTH_INVALID_TOKEN
                 - AUTH_FORBIDDEN
                 - TENANT_NOT_WORKSPACE_MEMBER
                 - ENTITLEMENT_MODULE_DISABLED
@@ -486,6 +554,18 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
+    Unauthorized:
+      description: Authentication is required or invalid
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    UnsupportedMediaType:
+      description: JSON mutation body has an unsupported media type
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
     Forbidden:
       description: Membership, permission, or entitlement denied
       content:
@@ -499,7 +579,25 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
     Conflict:
-      description: Name, idempotency, or quota conflict
+      description: Name, identity, root-mutation, command, or idempotency conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Unprocessable:
+      description: Valid request cannot be applied to this filesystem resource
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    InternalError:
+      description: Unexpected internal error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Unavailable:
+      description: Persistence, retry, or operation outcome is temporarily unavailable
       content:
         application/json:
           schema:
