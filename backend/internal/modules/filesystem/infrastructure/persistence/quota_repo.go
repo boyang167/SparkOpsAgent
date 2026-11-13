@@ -64,6 +64,63 @@ func (r *Repository) ReserveTransferQuota(ctx context.Context, workspaceID uuid.
 	return uuid.Nil, domain.ErrQuotaExceeded
 }
 
+func (r *Repository) CommitQuotaReservation(ctx context.Context, workspaceID, sessionID uuid.UUID) error {
+	if workspaceID == uuid.Nil || sessionID == uuid.Nil {
+		return domain.ErrPersistence
+	}
+	db := postgres.DB(ctx, r.db)
+	var reservation quotaReservationRow
+	err := db.Where("workspace_id = ? AND session_id = ?", workspaceID, sessionID).First(&reservation).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return domain.ErrPersistence
+	}
+	if err != nil {
+		return wrapPersistence(err)
+	}
+	if reservation.State == "COMMITTED" {
+		return nil
+	}
+	if reservation.State != "RESERVED" {
+		return domain.ErrPersistence
+	}
+	result := db.Model(&quotaReservationRow{}).
+		Where("id = ? AND state = ?", reservation.ID, "RESERVED").
+		Updates(map[string]any{"state": "COMMITTED"})
+	if result.Error != nil {
+		if db.Dialector.Name() == "sqlite" && isSQLiteBusy(result.Error) {
+			return domain.ErrTransactionRetry
+		}
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		var current quotaReservationRow
+		if err := db.Where("id = ?", reservation.ID).First(&current).Error; err != nil {
+			return wrapPersistence(err)
+		}
+		if current.State == "COMMITTED" {
+			return nil
+		}
+		return domain.ErrPersistence
+	}
+	accountResult := db.Model(&quotaAccountRow{}).
+		Where("workspace_id = ? AND reserved_bytes >= ? AND reserved_files >= ?", workspaceID, reservation.Bytes, reservation.Files).
+		Updates(map[string]any{
+			"reserved_bytes": gorm.Expr("reserved_bytes - ?", reservation.Bytes),
+			"reserved_files": gorm.Expr("reserved_files - ?", reservation.Files),
+			"used_bytes":     gorm.Expr("used_bytes + ?", reservation.Bytes),
+			"used_files":     gorm.Expr("used_files + ?", reservation.Files),
+			"version":        gorm.Expr("version + 1"),
+			"updated_at":     time.Now().UTC(),
+		})
+	if accountResult.Error != nil {
+		return wrapPersistence(accountResult.Error)
+	}
+	if accountResult.RowsAffected == 0 {
+		return domain.ErrQuotaExceeded
+	}
+	return nil
+}
+
 func (r *Repository) CreateQuotaReservation(ctx context.Context, reservation repository.QuotaReservation) error {
 	if reservation.ID == uuid.Nil || reservation.QuotaAccountID == uuid.Nil ||
 		reservation.WorkspaceID == uuid.Nil || reservation.SessionID == uuid.Nil ||

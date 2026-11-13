@@ -17,6 +17,8 @@ const (
 	RevisionRestoredName    = "filesystem.revision.restored.v1"
 	PermissionChangedName   = "filesystem.file.permission-changed.v1"
 	TransferInitiatedName   = "filesystem.transfer.initiated.v1"
+	TransferUploadedName    = "filesystem.transfer.uploaded.v1"
+	TransferCompletedName   = "filesystem.transfer.completed.v1"
 )
 
 type FileCreated struct {
@@ -82,6 +84,22 @@ type TransferInitiated struct {
 	NamespaceID uuid.UUID `json:"namespace_id"`
 }
 
+type TransferUploaded struct {
+	events.BaseEvent
+	SessionID   uuid.UUID `json:"session_id"`
+	WorkspaceID uuid.UUID `json:"workspace_id"`
+	NamespaceID uuid.UUID `json:"namespace_id"`
+}
+
+type TransferCompleted struct {
+	events.BaseEvent
+	SessionID   uuid.UUID `json:"session_id"`
+	WorkspaceID uuid.UUID `json:"workspace_id"`
+	NamespaceID uuid.UUID `json:"namespace_id"`
+	NodeID      uuid.UUID `json:"node_id"`
+	RevisionID  uuid.UUID `json:"revision_id"`
+}
+
 func Register(registry *events.Registry) error {
 	if err := events.RegisterJSON[FileCreated](
 		registry,
@@ -126,12 +144,13 @@ func Register(registry *events.Registry) error {
 			return registerNodeEvent(registry, PermissionChangedName, func(event PermissionChanged) uuid.UUID { return event.NodeID })
 		},
 		func() error {
-			return events.RegisterJSON[TransferInitiated](
-				registry, TransferInitiatedName, 1,
-				func(event TransferInitiated) events.AggregateRef {
-					return events.AggregateRef{Type: "transfer", ID: event.SessionID.String()}
-				},
-			)
+			return registerTransferEvent(registry, TransferInitiatedName, func(event TransferInitiated) uuid.UUID { return event.SessionID })
+		},
+		func() error {
+			return registerTransferEvent(registry, TransferUploadedName, func(event TransferUploaded) uuid.UUID { return event.SessionID })
+		},
+		func() error {
+			return registerTransferEvent(registry, TransferCompletedName, func(event TransferCompleted) uuid.UUID { return event.SessionID })
 		},
 	}
 	for _, register := range registrations {
@@ -145,5 +164,11 @@ func Register(registry *events.Registry) error {
 func registerNodeEvent[T events.Event](registry *events.Registry, name string, nodeID func(T) uuid.UUID) error {
 	return events.RegisterJSON[T](registry, name, 1, func(event T) events.AggregateRef {
 		return events.AggregateRef{Type: "file", ID: nodeID(event).String()}
+	})
+}
+
+func registerTransferEvent[T events.Event](registry *events.Registry, name string, sessionID func(T) uuid.UUID) error {
+	return events.RegisterJSON[T](registry, name, 1, func(event T) events.AggregateRef {
+		return events.AggregateRef{Type: "transfer", ID: sessionID(event).String()}
 	})
 }
