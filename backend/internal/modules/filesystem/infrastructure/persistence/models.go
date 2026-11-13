@@ -68,6 +68,7 @@ type replicaRow struct {
 	ObjectKey  string             `gorm:"column:object_key;not null"`
 	Checksum   string             `gorm:"column:checksum"`
 	State      model.ReplicaState `gorm:"not null;type:varchar(32)"`
+	VerifiedAt *time.Time         `gorm:"column:verified_at"`
 	CreatedAt  time.Time          `gorm:"not null"`
 }
 
@@ -88,6 +89,41 @@ type quotaAccountRow struct {
 }
 
 func (quotaAccountRow) TableName() string { return "filesystem.quota_accounts" }
+
+type quotaReservationRow struct {
+	ID             uuid.UUID `gorm:"column:id;primaryKey;type:uuid"`
+	QuotaAccountID uuid.UUID `gorm:"column:quota_account_id;not null;type:uuid;index"`
+	Bytes          int64     `gorm:"not null"`
+	Files          int64     `gorm:"not null"`
+	State          string    `gorm:"not null;type:varchar(32)"`
+	ExpiresAt      time.Time `gorm:"column:expires_at;not null"`
+	CreatedAt      time.Time `gorm:"column:created_at;not null"`
+}
+
+func (quotaReservationRow) TableName() string { return "filesystem.quota_reservations" }
+
+type resourceGrantRow struct {
+	ID         uuid.UUID                `gorm:"column:id;primaryKey;type:uuid"`
+	NodeID     uuid.UUID                `gorm:"column:node_id;not null;type:uuid;index"`
+	GranteeID  uuid.UUID                `gorm:"column:grantee_id;not null;type:uuid;index"`
+	Permission model.ResourcePermission `gorm:"not null;type:varchar(32)"`
+	Effect     model.GrantEffect        `gorm:"not null;type:varchar(8)"`
+	ExpiresAt  *time.Time               `gorm:"column:expires_at"`
+	CreatedAt  time.Time                `gorm:"column:created_at;not null"`
+}
+
+func (resourceGrantRow) TableName() string { return "filesystem.resource_grants" }
+
+type fileLinkRow struct {
+	ID         uuid.UUID  `gorm:"column:id;primaryKey;type:uuid"`
+	NodeID     uuid.UUID  `gorm:"column:node_id;not null;type:uuid;index"`
+	RevisionID *uuid.UUID `gorm:"column:revision_id;type:uuid"`
+	LinkType   string     `gorm:"column:link_type;not null;type:varchar(64)"`
+	LinkID     uuid.UUID  `gorm:"column:link_id;not null;type:uuid"`
+	CreatedAt  time.Time  `gorm:"column:created_at;not null"`
+}
+
+func (fileLinkRow) TableName() string { return "filesystem.file_links" }
 
 type commandDedupRow struct {
 	CommandID   uuid.UUID  `gorm:"column:command_id;primaryKey;type:uuid"`

@@ -115,6 +115,65 @@ func TestGetNodeConvertsNotFound(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrNodeNotFound)
 }
 
+func TestTrashedDirectoryHidesSubtreeAndListChildren(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	parent := rootDirectory(ns.ID, "parent")
+	require.NoError(t, repo.CreateNode(context.Background(), parent))
+	child := mustFile(ns.ID, parent.ID, "child")
+	require.NoError(t, repo.CreateNode(context.Background(), child))
+	require.NoError(t, repo.TrashNode(context.Background(), parent.ID))
+
+	_, err := repo.GetNode(context.Background(), ns.ID, parent.ID)
+	require.ErrorIs(t, err, domain.ErrNodeNotFound)
+	_, err = repo.GetNode(context.Background(), ns.ID, child.ID)
+	require.ErrorIs(t, err, domain.ErrNodeNotFound)
+	_, _, err = repo.ListChildren(context.Background(), ns.ID, &parent.ID, 100, "")
+	require.ErrorIs(t, err, domain.ErrNodeNotFound)
+	included, err := repo.GetNodeIncludingTrashed(context.Background(), ns.ID, parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.NodeStateTrashed, included.State)
+}
+
+func TestAcquireBlobReusesCanonicalWithinOrganizationButNotAcrossOrganizations(t *testing.T) {
+	repo, db := newTestRepository(t)
+	organizationID := uuid.New()
+	var first, second, foreign *model.Blob
+	require.NoError(t, postgres.NewTransactor(db).WithinTransaction(context.Background(), func(ctx context.Context) error {
+		var err error
+		first, err = repo.AcquireBlob(ctx, organizationID, strings.Repeat("a", 64), 42)
+		if err != nil {
+			return err
+		}
+		second, err = repo.AcquireBlob(ctx, organizationID, strings.Repeat("a", 64), 42)
+		if err != nil {
+			return err
+		}
+		foreign, err = repo.AcquireBlob(ctx, uuid.New(), strings.Repeat("a", 64), 42)
+		return err
+	}))
+
+	require.Equal(t, first.ID, second.ID)
+	require.Equal(t, int64(2), second.RefCount)
+	require.NotEqual(t, first.ID, foreign.ID)
+}
+
+func TestResourceGrantEffectAndExpiryRoundTrip(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	node := rootDirectory(ns.ID, "shared")
+	require.NoError(t, repo.CreateNode(context.Background(), node))
+	granteeID := uuid.New()
+	expired := time.Now().Add(-time.Hour)
+	require.NoError(t, db.Create(&resourceGrantRow{ID: uuid.New(), NodeID: node.ID, GranteeID: granteeID, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow}).Error)
+	require.NoError(t, db.Create(&resourceGrantRow{ID: uuid.New(), NodeID: node.ID, GranteeID: granteeID, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectDeny, ExpiresAt: &expired}).Error)
+
+	grants, err := repo.ListResourceGrants(context.Background(), node.ID, granteeID, model.ResourcePermissionRead, time.Now())
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	require.Equal(t, model.GrantEffectAllow, grants[0].Effect)
+}
+
 func TestGetCommandConvertsNotFoundPrecisely(t *testing.T) {
 	repo, _ := newTestRepository(t)
 

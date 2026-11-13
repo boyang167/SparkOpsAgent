@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -35,15 +36,18 @@ type FilesystemRepository interface {
 	SetNamespaceRoot(context.Context, uuid.UUID, uuid.UUID) error
 	CreateNode(context.Context, *model.Node) error
 	GetNode(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
+	GetNodeIncludingTrashed(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
 	ListChildren(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Node, string, error)
 	NextRevisionNumber(context.Context, uuid.UUID) (int, error)
 	SaveRevision(context.Context, *model.FileRevision, *model.Blob, *model.StorageReplica) error
+	AcquireBlob(context.Context, uuid.UUID, string, int64) (*model.Blob, error)
 	GetRevision(context.Context, uuid.UUID, uuid.UUID) (*model.FileRevision, error)
 	ListRevisions(context.Context, uuid.UUID, uuid.UUID, int, string) ([]model.FileRevision, string, error)
 	SetCurrentRevision(context.Context, uuid.UUID, uuid.UUID) error
 	IncrementBlobRef(context.Context, uuid.UUID) error
 	GetBlob(context.Context, uuid.UUID) (*model.Blob, error)
 	GetAvailableReplica(context.Context, uuid.UUID, uuid.UUID) (*model.StorageReplica, error)
+	ListResourceGrants(context.Context, uuid.UUID, uuid.UUID, model.ResourcePermission, time.Time) ([]model.ResourceGrant, error)
 	ApplyQuotaUsage(context.Context, uuid.UUID, int64, int64) error
 	RenameNode(context.Context, uuid.UUID, string) error
 	MoveNodeSafely(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID, string) error

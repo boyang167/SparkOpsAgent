@@ -28,4 +28,5 @@ var (
 	ErrTransactionExhausted = errors.New("filesystem transaction retries exhausted")
 	ErrUnsupportedNodeType  = errors.New("filesystem node type is unsupported")
 	ErrRootMutation         = errors.New("filesystem root mutation is forbidden")
+	ErrResourceDenied       = errors.New("filesystem resource authorization denied")
 )

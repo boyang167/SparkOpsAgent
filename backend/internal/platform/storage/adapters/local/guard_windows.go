@@ -46,14 +46,23 @@ func sameWindowsIdentity(a, b windows.ByHandleFileInformation) bool {
 }
 
 func (g rootGuard) verify() error {
-	var current windows.ByHandleFileInformation
-	if err := windows.GetFileInformationByHandle(g.handle, &current); err != nil ||
-		current.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 ||
-		!sameWindowsIdentity(g.info, current) {
+	currentHandle, err := windows.CreateFile(
+		windows.StringToUTF16Ptr(g.path),
+		windows.GENERIC_READ|windows.GENERIC_WRITE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT,
+		0,
+	)
+	if err != nil {
 		return errRootChanged
 	}
-	attrs, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(g.path))
-	if err != nil || attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+	defer windows.CloseHandle(currentHandle)
+	var current windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(currentHandle, &current); err != nil ||
+		current.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 ||
+		!sameWindowsIdentity(g.info, current) {
 		return errRootChanged
 	}
 	return nil

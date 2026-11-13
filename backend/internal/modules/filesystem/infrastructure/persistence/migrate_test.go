@@ -46,6 +46,11 @@ func TestSQLiteKernelConstraintsRejectInvalidWrites(t *testing.T) {
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
 	require.NoError(t, AutoMigrate(db))
+	for _, table := range []string{"quota_reservations", "resource_grants", "file_links"} {
+		var count int64
+		require.NoError(t, db.Raw("SELECT COUNT(*) FROM filesystem.sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&count).Error)
+		require.Equal(t, int64(1), count, table)
+	}
 
 	namespaceID := uuid.New()
 	require.NoError(t, db.Create(&namespaceRow{ID: namespaceID, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}).Error)
@@ -84,6 +89,10 @@ func TestSQLiteKernelConstraintsRejectInvalidWrites(t *testing.T) {
 	require.Error(t, db.Exec(
 		"INSERT INTO filesystem.storage_replicas (id, blob_id, provider_id, object_key, state) VALUES (?, ?, ?, ?, ?)",
 		uuid.New(), uuid.New(), uuid.New(), "bad", "INVALID",
+	).Error)
+	require.Error(t, db.Exec(
+		"INSERT INTO filesystem.resource_grants (id, node_id, grantee_id, permission, effect) VALUES (?, ?, ?, ?, ?)",
+		uuid.New(), nodeID, uuid.New(), "READ", "INVALID",
 	).Error)
 
 	var violations []struct {

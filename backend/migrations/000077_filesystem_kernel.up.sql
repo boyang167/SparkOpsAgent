@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS filesystem.nodes (
     name TEXT NOT NULL,
     normalized_name TEXT NOT NULL,
     current_revision_id UUID,
-    state VARCHAR(32) NOT NULL,
+    state VARCHAR(32) NOT NULL CHECK (state IN ('ACTIVE','TRASHED','RETENTION_HOLD','PURGE_PENDING','PURGED')),
     owner_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS filesystem.blobs (
     size BIGINT NOT NULL CHECK (size >= 0),
     encryption_key_ref TEXT,
     ref_count BIGINT NOT NULL DEFAULT 0 CHECK (ref_count >= 0),
-    state VARCHAR(32) NOT NULL,
+    state VARCHAR(32) NOT NULL CHECK (state IN ('PENDING','AVAILABLE','QUARANTINED','TOMBSTONED','GC_PENDING','DELETED')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(dedup_domain, sha256, size)
 );
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS filesystem.storage_replicas (
     provider_id UUID NOT NULL,
     object_key TEXT NOT NULL,
     checksum VARCHAR(128),
-    state VARCHAR(32) NOT NULL,
+    state VARCHAR(32) NOT NULL CHECK (state IN ('CREATING','VERIFYING','AVAILABLE','DRAINING','FAILED','DELETED')),
     verified_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(blob_id, provider_id, object_key)
@@ -97,10 +97,11 @@ CREATE TABLE IF NOT EXISTS filesystem.resource_grants (
     id UUID PRIMARY KEY,
     node_id UUID NOT NULL REFERENCES filesystem.nodes(id),
     grantee_id UUID NOT NULL,
-    permission VARCHAR(32) NOT NULL,
+    permission VARCHAR(32) NOT NULL CHECK (permission IN ('READ','WRITE','DELETE','ADMIN')),
+    effect VARCHAR(8) NOT NULL CHECK (effect IN ('ALLOW','DENY')),
     expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(node_id, grantee_id, permission)
+    UNIQUE(node_id, grantee_id, permission, effect)
 );
 
 CREATE TABLE IF NOT EXISTS filesystem.file_links (

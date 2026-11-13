@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -131,7 +132,14 @@ func TestCopyNilParentResolvesNamespaceRoot(t *testing.T) {
 	put := NewPutLocalFileHandler(repo, provider, tx, nil, nil)
 	source, err := put.Handle(context.Background(), putFixture(ns))
 	require.NoError(t, err)
-	copyHandler := NewCopyNodeHandler(repo, tx, nil)
+	secondBlob := &model.Blob{ID: uuid.New(), DedupDomain: ns.OrganizationID, SHA256: strings.Repeat("b", 64), Size: 15, RefCount: 1, State: model.BlobStateAvailable}
+	secondRevision, err := model.NewRevision(source.ID, 2, secondBlob.ID, 15, "text/plain", source.OwnerID)
+	require.NoError(t, err)
+	verifiedAt := time.Now().UTC()
+	secondReplica := &model.StorageReplica{ID: uuid.New(), BlobID: secondBlob.ID, ProviderID: uuid.New(), ObjectKey: "second", Checksum: secondBlob.SHA256, State: model.ReplicaStateAvailable, VerifiedAt: &verifiedAt}
+	require.NoError(t, repo.SaveRevision(context.Background(), secondRevision, secondBlob, secondReplica))
+	require.NoError(t, repo.SetCurrentRevision(context.Background(), source.ID, secondRevision.ID()))
+	copyHandler := NewCopyNodeHandler(repo, tx, nil, nil)
 
 	copied, err := copyHandler.Handle(context.Background(), CopyNode{
 		ActorID: source.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID,
@@ -147,6 +155,11 @@ func TestCopyNilParentResolvesNamespaceRoot(t *testing.T) {
 	require.NotNil(t, persistedSource.CurrentRevisionID)
 	sourceRevision, err := repo.GetRevision(context.Background(), source.ID, *persistedSource.CurrentRevisionID)
 	require.NoError(t, err)
+	persistedCopy, err := repo.GetNode(context.Background(), ns.ID, copied.ID)
+	require.NoError(t, err)
+	copiedRevision, err := repo.GetRevision(context.Background(), copied.ID, *persistedCopy.CurrentRevisionID)
+	require.NoError(t, err)
+	require.Equal(t, 1, copiedRevision.RevisionNo())
 	blob, err := repo.GetBlob(context.Background(), sourceRevision.BlobID())
 	require.NoError(t, err)
 	require.Equal(t, int64(2), blob.RefCount)
@@ -181,7 +194,7 @@ func TestEveryMutationAuthorizationRejectionIsAudited(t *testing.T) {
 	_, _ = NewPutLocalFileHandler(repo, provider, tx, nil, logs).Handle(context.Background(), put)
 	_ = NewRenameNodeHandler(repo, tx, nil, logs).Handle(context.Background(), RenameNode{WorkspaceID: ns.WorkspaceID, Authorization: auth})
 	_ = NewMoveNodeHandler(repo, tx, nil, logs).Handle(context.Background(), MoveNode{WorkspaceID: ns.WorkspaceID, Authorization: auth})
-	_, _ = NewCopyNodeHandler(repo, tx, logs).Handle(context.Background(), CopyNode{WorkspaceID: ns.WorkspaceID, Authorization: auth})
+	_, _ = NewCopyNodeHandler(repo, tx, nil, logs).Handle(context.Background(), CopyNode{WorkspaceID: ns.WorkspaceID, Authorization: auth})
 	_ = NewTrashNodeHandler(repo, tx, nil, logs).Handle(context.Background(), TrashNode{WorkspaceID: ns.WorkspaceID, Authorization: auth})
 	_ = NewRestoreRevisionHandler(repo, tx, nil, logs).Handle(context.Background(), RestoreRevision{WorkspaceID: ns.WorkspaceID, Authorization: auth})
 
@@ -198,6 +211,25 @@ func TestCreateDirectoryValidationFailureIsAudited(t *testing.T) {
 
 	require.ErrorIs(t, err, model.ErrInvalidNodeName)
 	require.Equal(t, []string{"DENY"}, logs.decisions())
+}
+
+func TestCreateDirectoryRollsBackWhenOutboxPublishFails(t *testing.T) {
+	db, repo, ns := newPutTestRepository(t)
+	command := CreateDirectory{
+		CommandID: uuid.New(), ActorID: uuid.New(), OrganizationID: ns.OrganizationID,
+		WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, Name: "outbox-rollback",
+		Authorization: Authorization{Allowed: true},
+	}
+	_, err := NewCreateDirectoryHandler(repo, postgres.NewTransactor(db), failingBus{}, nil).Handle(context.Background(), command)
+	require.Error(t, err)
+
+	children, _, listErr := repo.ListChildren(context.Background(), ns.ID, ns.RootNodeID, 100, "")
+	require.NoError(t, listErr)
+	for _, child := range children {
+		require.NotEqual(t, "outbox-rollback", child.Name)
+	}
+	_, claimErr := repo.GetCommand(context.Background(), command.CommandID)
+	require.ErrorIs(t, claimErr, domain.ErrCommandNotFound)
 }
 
 func TestCreateNamespaceIdempotentSuccessIsAuditedAsAllow(t *testing.T) {
@@ -549,7 +581,7 @@ func TestCopyCommandDedupDoesNotRepeatQuotaBlobOrAudit(t *testing.T) {
 	source, err := NewPutLocalFileHandler(repo, provider, tx, nil, nil).Handle(context.Background(), putFixture(ns))
 	require.NoError(t, err)
 	logs := &recordingAudit{}
-	handler := NewCopyNodeHandler(repo, tx, logs)
+	handler := NewCopyNodeHandler(repo, tx, nil, logs)
 	cmd := CopyNode{CommandID: uuid.New(), ActorID: source.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, SourceNodeID: source.ID, Name: "dedup-copy.txt", Authorization: Authorization{Allowed: true}}
 	first, err := handler.Handle(context.Background(), cmd)
 	require.NoError(t, err)
@@ -582,7 +614,7 @@ func TestCopyRetriesWholeTransactionAfterTransactionRetry(t *testing.T) {
 	require.NoError(t, err)
 	logs := &recordingAudit{}
 	tx := &retryOnceTransactor{inner: postgres.NewTransactor(db)}
-	handler := NewCopyNodeHandler(repo, tx, logs)
+	handler := NewCopyNodeHandler(repo, tx, nil, logs)
 	var waits []time.Duration
 	handler.retryBackoff = func(attempt int) time.Duration {
 		return time.Duration(attempt+1) * 7 * time.Millisecond
@@ -641,7 +673,7 @@ func TestCopyCommandDedupConcurrentReturnsAuthoritativeResult(t *testing.T) {
 			sqlDB, _ := workerDB.DB()
 			defer sqlDB.Close()
 			<-start
-			result, copyErr := NewCopyNodeHandler(persistence.NewRepository(workerDB), postgres.NewTransactor(workerDB), logs).Handle(context.Background(), cmd)
+			result, copyErr := NewCopyNodeHandler(persistence.NewRepository(workerDB), postgres.NewTransactor(workerDB), nil, logs).Handle(context.Background(), cmd)
 			results <- result
 			errs <- copyErr
 		}()

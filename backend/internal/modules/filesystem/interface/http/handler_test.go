@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	resourceauth "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/authorization"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
@@ -94,6 +95,31 @@ func TestListFilesUsesReadPermissionAndDoesNotRequireIdempotencyKey(t *testing.T
 	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
 }
 
+func TestListFilesDeniesWhenResourceAuthorizerDeniesAfterRBAC(t *testing.T) {
+	nsID, rootID := uuid.New(), uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, OrganizationID: uuid.New(), WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			require.Equal(t, rootID, request.NodeID)
+			require.Equal(t, model.ResourcePermissionRead, request.Permission)
+			return resourceauth.Decision{Reason: "default_deny"}
+		},
+		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Node, string, error) {
+			t.Fatal("resource denial must stop query")
+			return nil, "", nil
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileRead: true}}, h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID.String()+"/files", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusForbidden, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), "FILESYSTEM_RESOURCE_FORBIDDEN")
+}
+
 func TestCreateDirectoryRejectsUnknownIdentityAndOversizedBodies(t *testing.T) {
 	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileWrite: true}}, &Handler{
 		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
@@ -127,10 +153,11 @@ func TestMutationCommandIDIsDeterministicAndWorkspaceScoped(t *testing.T) {
 
 func TestCreateDirectoryReturnsCreatedAndContextIdentity(t *testing.T) {
 	nsID := uuid.New()
+	rootID := uuid.New()
 	var captured command.CreateDirectory
 	h := &Handler{
 		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
-			return &model.Namespace{ID: nsID, OrganizationID: uuid.New(), WorkspaceID: workspaceID}, nil
+			return &model.Namespace{ID: nsID, OrganizationID: uuid.New(), WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
 		},
 		createDirectory: func(_ context.Context, cmd command.CreateDirectory) (*model.Node, error) {
 			captured = cmd
@@ -422,6 +449,11 @@ func testRouter(t *testing.T, members authz.WorkspaceMemberChecker, permissions 
 	require.NoError(t, err)
 	wsID := kernel.NewWorkspaceID()
 	router := httpx.NewEngine()
+	if h.authorizeResource == nil {
+		h.authorizeResource = func(context.Context, resourceauth.Request) resourceauth.Decision {
+			return resourceauth.Decision{Allowed: true, Reason: "test"}
+		}
+	}
 	RegisterRoutes(router, nil, authn.RequireAuth(tokens), members, permissions, h)
 	return router, token, wsID
 }

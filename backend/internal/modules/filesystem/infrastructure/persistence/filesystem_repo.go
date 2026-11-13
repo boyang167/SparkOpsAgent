@@ -80,6 +80,9 @@ func (r *Repository) CreateNode(ctx context.Context, node *model.Node) error {
 		if parent.NamespaceID != node.NamespaceID {
 			return domain.ErrNamespaceMismatch
 		}
+		if parent.State != model.NodeStateActive {
+			return domain.ErrParentNotFound
+		}
 		if parent.Type != model.NodeTypeDirectory {
 			return domain.ErrParentNotDirectory
 		}
@@ -109,6 +112,25 @@ func (r *Repository) CreateNode(ctx context.Context, node *model.Node) error {
 }
 
 func (r *Repository) GetNode(ctx context.Context, namespaceID, nodeID uuid.UUID) (*model.Node, error) {
+	node, err := r.GetNodeIncludingTrashed(ctx, namespaceID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	if node.State != model.NodeStateActive {
+		return nil, domain.ErrNodeNotFound
+	}
+	current := node
+	for current.ParentID != nil {
+		parent, parentErr := r.GetNodeIncludingTrashed(ctx, namespaceID, *current.ParentID)
+		if parentErr != nil || parent.State != model.NodeStateActive {
+			return nil, domain.ErrNodeNotFound
+		}
+		current = parent
+	}
+	return node, nil
+}
+
+func (r *Repository) GetNodeIncludingTrashed(ctx context.Context, namespaceID, nodeID uuid.UUID) (*model.Node, error) {
 	var row nodeRow
 	err := postgres.DB(ctx, r.db).Where("namespace_id = ? AND id = ?", namespaceID, nodeID).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -121,7 +143,12 @@ func (r *Repository) GetNode(ctx context.Context, namespaceID, nodeID uuid.UUID)
 }
 
 func (r *Repository) ListChildren(ctx context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, limit int, cursor string) ([]model.Node, string, error) {
-	query := postgres.DB(ctx, r.db).Where("namespace_id = ?", namespaceID)
+	if parentID != nil {
+		if _, err := r.GetNode(ctx, namespaceID, *parentID); err != nil {
+			return nil, "", err
+		}
+	}
+	query := postgres.DB(ctx, r.db).Where("namespace_id = ? AND state = ?", namespaceID, model.NodeStateActive)
 	if parentID == nil {
 		query = query.Where("parent_id IS NULL")
 	} else {
@@ -187,8 +214,12 @@ func (r *Repository) SaveRevision(ctx context.Context, revision *model.FileRevis
 	if revision.BlobID() != blob.ID {
 		return domain.ErrRevisionBlobMismatch
 	}
-	if replica.BlobID != blob.ID {
+	if replica != nil && replica.BlobID != blob.ID {
 		return domain.ErrReplicaBlobMismatch
+	}
+	if replica != nil && replica.State == model.ReplicaStateAvailable && replica.VerifiedAt == nil {
+		verifiedAt := time.Now().UTC()
+		replica.VerifiedAt = &verifiedAt
 	}
 	var node nodeRow
 	nodeErr := postgres.DB(ctx, r.db).Where("id = ?", revision.NodeID()).First(&node).Error
@@ -210,10 +241,12 @@ func (r *Repository) SaveRevision(ctx context.Context, revision *model.FileRevis
 			return err
 		}
 		var existingBlob blobRow
-		if err := tx.Where("id = ?", blob.ID).First(&existingBlob).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		if err := tx.Where("dedup_domain = ? AND sha256 = ? AND size = ?", blob.DedupDomain, blob.SHA256, blob.Size).First(&existingBlob).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 			return domain.ErrBlobConflict
 		} else if err != nil {
 			return err
+		} else if existingBlob.ID != blob.ID {
+			return domain.ErrRevisionBlobMismatch
 		} else if !sameBlob(existingBlob, blob) {
 			return domain.ErrBlobConflict
 		}
@@ -236,9 +269,12 @@ func (r *Repository) SaveRevision(ctx context.Context, revision *model.FileRevis
 			return domain.ErrRevisionConflict
 		}
 
+		if replica == nil {
+			return nil
+		}
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&replicaRow{
 			ID: replica.ID, BlobID: replica.BlobID, ProviderID: replica.ProviderID, ObjectKey: replica.ObjectKey,
-			Checksum: replica.Checksum, State: replica.State, CreatedAt: now,
+			Checksum: replica.Checksum, State: replica.State, VerifiedAt: replica.VerifiedAt, CreatedAt: now,
 		}).Error; err != nil {
 			if conflict := mapUniqueConflict(err); conflict != nil && !errors.Is(conflict, domain.ErrPersistence) {
 				return conflict
@@ -270,6 +306,35 @@ func (r *Repository) SaveRevision(ctx context.Context, revision *model.FileRevis
 	return domain.ErrPersistence
 }
 
+func (r *Repository) AcquireBlob(ctx context.Context, dedupDomain uuid.UUID, checksum string, size int64) (*model.Blob, error) {
+	db := postgres.DB(ctx, r.db)
+	candidate := blobRow{
+		ID: uuid.New(), DedupDomain: dedupDomain, SHA256: strings.ToLower(checksum), Size: size,
+		RefCount: 0, State: model.BlobStateAvailable, CreatedAt: time.Now().UTC(),
+	}
+	if err := db.Clauses(clause.OnConflict{Columns: []clause.Column{
+		{Name: "dedup_domain"}, {Name: "sha256"}, {Name: "size"},
+	}, DoNothing: true}).Create(&candidate).Error; err != nil {
+		if db.Dialector.Name() == "sqlite" && isSQLiteBusy(err) {
+			return nil, domain.ErrTransactionRetry
+		}
+		return nil, wrapPersistence(err)
+	}
+	var canonical blobRow
+	if err := db.Where("dedup_domain = ? AND sha256 = ? AND size = ?", dedupDomain, strings.ToLower(checksum), size).First(&canonical).Error; err != nil {
+		return nil, wrapPersistence(err)
+	}
+	result := db.Model(&blobRow{}).Where("id = ?", canonical.ID).UpdateColumn("ref_count", gorm.Expr("ref_count + 1"))
+	if result.Error != nil {
+		return nil, wrapPersistence(result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return nil, domain.ErrBlobConflict
+	}
+	canonical.RefCount++
+	return &model.Blob{ID: canonical.ID, DedupDomain: canonical.DedupDomain, SHA256: canonical.SHA256, Size: canonical.Size, EncryptionKeyRef: canonical.EncryptionKeyRef, RefCount: canonical.RefCount, State: canonical.State}, nil
+}
+
 func (r *Repository) GetRevision(ctx context.Context, nodeID, revisionID uuid.UUID) (*model.FileRevision, error) {
 	var row revisionRow
 	err := postgres.DB(ctx, r.db).Where("node_id = ? AND id = ?", nodeID, revisionID).First(&row).Error
@@ -287,6 +352,9 @@ func (r *Repository) GetRevision(ctx context.Context, nodeID, revisionID uuid.UU
 }
 
 func (r *Repository) ListRevisions(ctx context.Context, nodeID, namespaceID uuid.UUID, limit int, cursor string) ([]model.FileRevision, string, error) {
+	if _, err := r.GetNode(ctx, namespaceID, nodeID); err != nil {
+		return nil, "", err
+	}
 	query := postgres.DB(ctx, r.db).Table("filesystem.file_revisions").
 		Joins("JOIN filesystem.nodes ON filesystem.nodes.id = filesystem.file_revisions.node_id").
 		Where("filesystem.file_revisions.node_id = ? AND filesystem.nodes.namespace_id = ?", nodeID, namespaceID)
@@ -357,7 +425,22 @@ func (r *Repository) GetAvailableReplica(ctx context.Context, blobID, providerID
 	} else if err != nil {
 		return nil, wrapPersistence(err)
 	}
-	return &model.StorageReplica{ID: row.ID, BlobID: row.BlobID, ProviderID: row.ProviderID, ObjectKey: row.ObjectKey, Checksum: row.Checksum, State: row.State}, nil
+	return &model.StorageReplica{ID: row.ID, BlobID: row.BlobID, ProviderID: row.ProviderID, ObjectKey: row.ObjectKey, Checksum: row.Checksum, State: row.State, VerifiedAt: row.VerifiedAt}, nil
+}
+
+func (r *Repository) ListResourceGrants(ctx context.Context, nodeID, granteeID uuid.UUID, permission model.ResourcePermission, at time.Time) ([]model.ResourceGrant, error) {
+	var rows []resourceGrantRow
+	err := postgres.DB(ctx, r.db).
+		Where("node_id = ? AND grantee_id = ? AND permission = ? AND (expires_at IS NULL OR expires_at > ?)", nodeID, granteeID, permission, at).
+		Find(&rows).Error
+	if err != nil {
+		return nil, wrapPersistence(err)
+	}
+	grants := make([]model.ResourceGrant, len(rows))
+	for index, row := range rows {
+		grants[index] = model.ResourceGrant{ID: row.ID, NodeID: row.NodeID, GranteeID: row.GranteeID, Permission: row.Permission, Effect: row.Effect, ExpiresAt: row.ExpiresAt}
+	}
+	return grants, nil
 }
 
 func (r *Repository) ApplyQuotaUsage(ctx context.Context, workspaceID uuid.UUID, bytesDelta, filesDelta int64) error {
@@ -680,6 +763,7 @@ func isDomainError(err error) bool {
 		domain.ErrIdempotencyConflict, domain.ErrOutcomeUnknown, domain.ErrCommandInProgress, model.ErrInvalidNodeName,
 		domain.ErrCommandNotFound, domain.ErrTransactionRetry,
 		domain.ErrTransactionExhausted, domain.ErrUnsupportedNodeType, domain.ErrRootMutation,
+		domain.ErrResourceDenied,
 	} {
 		if errors.Is(err, sentinel) {
 			return true
@@ -690,7 +774,7 @@ func isDomainError(err error) bool {
 
 func sameBlob(row blobRow, blob *model.Blob) bool {
 	return row.ID == blob.ID && row.DedupDomain == blob.DedupDomain && row.SHA256 == blob.SHA256 &&
-		row.Size == blob.Size && row.EncryptionKeyRef == blob.EncryptionKeyRef && row.RefCount == blob.RefCount && row.State == blob.State
+		row.Size == blob.Size && row.EncryptionKeyRef == blob.EncryptionKeyRef && row.State == blob.State
 }
 
 func sameRevision(row revisionRow, revision *model.FileRevision) bool {
@@ -700,7 +784,15 @@ func sameRevision(row revisionRow, revision *model.FileRevision) bool {
 
 func sameReplica(row replicaRow, replica *model.StorageReplica) bool {
 	return row.ID == replica.ID && row.BlobID == replica.BlobID && row.ProviderID == replica.ProviderID &&
-		row.ObjectKey == replica.ObjectKey && row.Checksum == replica.Checksum && row.State == replica.State
+		row.ObjectKey == replica.ObjectKey && row.Checksum == replica.Checksum && row.State == replica.State &&
+		equalTimePointers(row.VerifiedAt, replica.VerifiedAt)
+}
+
+func equalTimePointers(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
 }
 
 var _ repository.FilesystemRepository = (*Repository)(nil)

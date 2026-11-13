@@ -9,10 +9,12 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
 type RenameNode struct {
@@ -30,11 +32,12 @@ type RenameNodeHandler struct {
 	repo  repository.FilesystemRepository
 	tx    postgres.Transactor
 	audit auditPort
+	bus   messaging.Bus
 }
 
-func NewRenameNodeHandler(repo repository.FilesystemRepository, tx postgres.Transactor, _ messaging.Bus, logger auditPort) *RenameNodeHandler {
+func NewRenameNodeHandler(repo repository.FilesystemRepository, tx postgres.Transactor, bus messaging.Bus, logger auditPort) *RenameNodeHandler {
 	requireMutationDependencies(repo, tx)
-	return &RenameNodeHandler{repo: repo, tx: tx, audit: logger}
+	return &RenameNodeHandler{repo: repo, tx: tx, bus: bus, audit: logger}
 }
 
 func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) (err error) {
@@ -42,10 +45,7 @@ func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) (err err
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename")
 	defer finishAudit(&err)
 	if !cmd.Allowed {
-		err := errors.New(cmd.Reason)
-		if err.Error() == "" {
-			err = errors.New("authorization denied")
-		}
+		err := authorizationDenied(cmd.Reason)
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename", err)
 	}
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
@@ -72,6 +72,11 @@ func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) (err err
 		}
 		if err := h.repo.RenameNode(txCtx, cmd.NodeID, cmd.Name); err != nil {
 			return err
+		}
+		if h.bus != nil {
+			if err := h.bus.Publish(txCtx, event.NodeRenamed{BaseEvent: events.NewBaseEvent(event.NodeRenamedName), NodeID: cmd.NodeID}); err != nil {
+				return err
+			}
 		}
 		if err := completeMutation(txCtx, h.repo, cmd.CommandID, &cmd.NodeID, nil); err != nil {
 			return err
@@ -100,14 +105,15 @@ type MoveNodeHandler struct {
 	repo         repository.FilesystemRepository
 	tx           postgres.Transactor
 	audit        auditPort
+	bus          messaging.Bus
 	retryBackoff func(int) time.Duration
 	retryWait    func(context.Context, time.Duration) error
 }
 
-func NewMoveNodeHandler(repo repository.FilesystemRepository, tx postgres.Transactor, _ messaging.Bus, logger auditPort) *MoveNodeHandler {
+func NewMoveNodeHandler(repo repository.FilesystemRepository, tx postgres.Transactor, bus messaging.Bus, logger auditPort) *MoveNodeHandler {
 	requireMutationDependencies(repo, tx)
 	return &MoveNodeHandler{
-		repo: repo, tx: tx, audit: logger,
+		repo: repo, tx: tx, bus: bus, audit: logger,
 		retryBackoff: func(attempt int) time.Duration {
 			base := time.Duration(attempt+1) * time.Millisecond
 			return base + time.Duration(rand.Int64N(int64(time.Millisecond)))
@@ -130,10 +136,7 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) (err error) 
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move")
 	defer finishAudit(&err)
 	if !cmd.Allowed {
-		err := errors.New(cmd.Reason)
-		if err.Error() == "" {
-			err = errors.New("authorization denied")
-		}
+		err := authorizationDenied(cmd.Reason)
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", err)
 	}
 	for attempt := 0; attempt < 5; attempt++ {
@@ -168,6 +171,11 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) (err error) 
 			}
 			if err := h.repo.MoveNodeSafely(txCtx, cmd.NamespaceID, node.ID, targetParent, name); err != nil {
 				return err
+			}
+			if h.bus != nil {
+				if err := h.bus.Publish(txCtx, event.NodeMoved{BaseEvent: events.NewBaseEvent(event.NodeMovedName), NodeID: node.ID, ParentID: *targetParent}); err != nil {
+					return err
+				}
 			}
 			if err := completeMutation(txCtx, h.repo, cmd.CommandID, &cmd.NodeID, nil); err != nil {
 				return err
@@ -206,11 +214,12 @@ type TrashNodeHandler struct {
 	repo  repository.FilesystemRepository
 	tx    postgres.Transactor
 	audit auditPort
+	bus   messaging.Bus
 }
 
-func NewTrashNodeHandler(repo repository.FilesystemRepository, tx postgres.Transactor, _ messaging.Bus, logger auditPort) *TrashNodeHandler {
+func NewTrashNodeHandler(repo repository.FilesystemRepository, tx postgres.Transactor, bus messaging.Bus, logger auditPort) *TrashNodeHandler {
 	requireMutationDependencies(repo, tx)
-	return &TrashNodeHandler{repo: repo, tx: tx, audit: logger}
+	return &TrashNodeHandler{repo: repo, tx: tx, bus: bus, audit: logger}
 }
 
 func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) (err error) {
@@ -218,10 +227,7 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) (err error
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash")
 	defer finishAudit(&err)
 	if !cmd.Allowed {
-		err := errors.New(cmd.Reason)
-		if err.Error() == "" {
-			err = errors.New("authorization denied")
-		}
+		err := authorizationDenied(cmd.Reason)
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash", err)
 	}
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
@@ -237,7 +243,7 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) (err error
 		if err != nil || completed {
 			return err
 		}
-		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
+		node, err := h.repo.GetNodeIncludingTrashed(txCtx, cmd.NamespaceID, cmd.NodeID)
 		if err != nil {
 			return err
 		}
@@ -247,6 +253,11 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) (err error
 		if node.State != model.NodeStateTrashed {
 			if err := h.repo.TrashNode(txCtx, node.ID); err != nil {
 				return err
+			}
+			if h.bus != nil {
+				if err := h.bus.Publish(txCtx, event.NodeTrashed{BaseEvent: events.NewBaseEvent(event.NodeTrashedName), NodeID: node.ID}); err != nil {
+					return err
+				}
 			}
 		}
 		if err := completeMutation(txCtx, h.repo, cmd.CommandID, &cmd.NodeID, nil); err != nil {
@@ -275,11 +286,12 @@ type RestoreRevisionHandler struct {
 	repo  repository.FilesystemRepository
 	tx    postgres.Transactor
 	audit auditPort
+	bus   messaging.Bus
 }
 
-func NewRestoreRevisionHandler(repo repository.FilesystemRepository, tx postgres.Transactor, _ messaging.Bus, logger auditPort) *RestoreRevisionHandler {
+func NewRestoreRevisionHandler(repo repository.FilesystemRepository, tx postgres.Transactor, bus messaging.Bus, logger auditPort) *RestoreRevisionHandler {
 	requireMutationDependencies(repo, tx)
-	return &RestoreRevisionHandler{repo: repo, tx: tx, audit: logger}
+	return &RestoreRevisionHandler{repo: repo, tx: tx, bus: bus, audit: logger}
 }
 
 func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision) (err error) {
@@ -287,10 +299,7 @@ func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.revision.restore")
 	defer finishAudit(&err)
 	if !cmd.Allowed {
-		err := errors.New(cmd.Reason)
-		if err.Error() == "" {
-			err = errors.New("authorization denied")
-		}
+		err := authorizationDenied(cmd.Reason)
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.revision.restore", err)
 	}
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
@@ -315,6 +324,11 @@ func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision
 		}
 		if err := h.repo.SetCurrentRevision(txCtx, cmd.NodeID, cmd.RevisionID); err != nil {
 			return err
+		}
+		if h.bus != nil {
+			if err := h.bus.Publish(txCtx, event.RevisionRestored{BaseEvent: events.NewBaseEvent(event.RevisionRestoredName), NodeID: cmd.NodeID, RevisionID: cmd.RevisionID}); err != nil {
+				return err
+			}
 		}
 		if err := completeMutation(txCtx, h.repo, cmd.CommandID, &cmd.NodeID, &cmd.RevisionID); err != nil {
 			return err

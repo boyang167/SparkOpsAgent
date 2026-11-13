@@ -58,3 +58,10 @@
 - OpenAPI：OpenAPI filesystem schema 与 bootstrap/openapi 测试通过；G1 不暴露 binary content endpoint。
 - Copy 修复复验：`63e6fba` 增加并发冲突后的完整事务重试；原失败 `TestCopyCommandDedupConcurrentReturnsAuthoritativeResult` 已在指定并发组 `-count=20` fresh 通过。
 - 本报告不做无法由本轮命令证明的性能、HA 或 PostgreSQL 集成结论。
+
+## 终审修复后待复验
+
+`32e7069` 之后的终审修复已补齐 Resource Grant、mutation Outbox、schema parity、
+组织内 Blob canonical 去重、Trash 隔离、Windows Local root identity guard，以及
+Copy 首版本号语义。本节不修改上方针对 `63e6fba` 的历史 fresh 证据；最终测试、
+readiness 与提交证据由终审修复报告和后续 Task 7 fresh rerun 单独记录。

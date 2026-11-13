@@ -9,9 +9,12 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
 type CopyNode struct {
@@ -30,14 +33,15 @@ type CopyNodeHandler struct {
 	repo         repository.FilesystemRepository
 	tx           postgres.Transactor
 	audit        auditPort
+	bus          messaging.Bus
 	retryBackoff func(int) time.Duration
 	retryWait    func(context.Context, time.Duration) error
 }
 
-func NewCopyNodeHandler(repo repository.FilesystemRepository, tx postgres.Transactor, logger auditPort) *CopyNodeHandler {
+func NewCopyNodeHandler(repo repository.FilesystemRepository, tx postgres.Transactor, bus messaging.Bus, logger auditPort) *CopyNodeHandler {
 	requireMutationDependencies(repo, tx)
 	return &CopyNodeHandler{
-		repo: repo, tx: tx, audit: logger,
+		repo: repo, tx: tx, bus: bus, audit: logger,
 		retryBackoff: func(attempt int) time.Duration {
 			base := time.Duration(attempt+1) * time.Millisecond
 			return base + time.Duration(rand.Int64N(int64(time.Millisecond)))
@@ -60,10 +64,7 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy")
 	defer finishAudit(&err)
 	if !cmd.Allowed {
-		err := errors.New(cmd.Reason)
-		if err.Error() == "" {
-			err = errors.New("authorization denied")
-		}
+		err := authorizationDenied(cmd.Reason)
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy", err)
 	}
 	var result *model.Node
@@ -137,7 +138,7 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.
 			if err := h.repo.CreateNode(txCtx, result); err != nil {
 				return err
 			}
-			newRevision, err := model.NewRevisionWithID(revisionID, result.ID, sourceRevision.RevisionNo(), blob.ID, sourceRevision.Size(), sourceRevision.MIMEType(), cmd.ActorID)
+			newRevision, err := model.NewRevisionWithID(revisionID, result.ID, 1, blob.ID, sourceRevision.Size(), sourceRevision.MIMEType(), cmd.ActorID)
 			if err != nil {
 				return err
 			}
@@ -152,6 +153,14 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.
 			}
 			if err := h.repo.ApplyQuotaUsage(txCtx, cmd.WorkspaceID, sourceRevision.Size(), 1); err != nil {
 				return err
+			}
+			if h.bus != nil {
+				if err := h.bus.Publish(txCtx, event.NodeCopied{
+					BaseEvent: events.NewBaseEvent(event.NodeCopiedName), SourceNodeID: source.ID,
+					NodeID: result.ID, RevisionID: revisionID,
+				}); err != nil {
+					return err
+				}
 			}
 			if err := completeMutation(txCtx, h.repo, cmd.CommandID, &result.ID, &revisionID); err != nil {
 				return err

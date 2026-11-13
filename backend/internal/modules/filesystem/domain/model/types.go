@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -72,4 +73,30 @@ type StorageReplica struct {
 	ObjectKey  string
 	Checksum   string
 	State      ReplicaState
+	VerifiedAt *time.Time
+}
+
+type GrantEffect string
+
+const (
+	GrantEffectAllow GrantEffect = "ALLOW"
+	GrantEffectDeny  GrantEffect = "DENY"
+)
+
+type ResourcePermission string
+
+const (
+	ResourcePermissionRead   ResourcePermission = "READ"
+	ResourcePermissionWrite  ResourcePermission = "WRITE"
+	ResourcePermissionDelete ResourcePermission = "DELETE"
+	ResourcePermissionAdmin  ResourcePermission = "ADMIN"
+)
+
+type ResourceGrant struct {
+	ID         uuid.UUID
+	NodeID     uuid.UUID
+	GranteeID  uuid.UUID
+	Permission ResourcePermission
+	Effect     GrantEffect
+	ExpiresAt  *time.Time
 }

@@ -47,3 +47,25 @@ func TestRegisterEncodesAndDecodesVersionedFileEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, revision, decodedRevision)
 }
+
+func TestRegisterCoversEveryG1MutationEvent(t *testing.T) {
+	registry := events.NewRegistry()
+	require.NoError(t, Register(registry))
+	nodeID := uuid.New()
+	for name, event := range map[string]events.Event{
+		DirectoryCreatedName: DirectoryCreated{BaseEvent: events.NewBaseEvent(DirectoryCreatedName), NodeID: nodeID},
+		NodeRenamedName:      NodeRenamed{BaseEvent: events.NewBaseEvent(NodeRenamedName), NodeID: nodeID},
+		NodeMovedName:        NodeMoved{BaseEvent: events.NewBaseEvent(NodeMovedName), NodeID: nodeID},
+		NodeCopiedName:       NodeCopied{BaseEvent: events.NewBaseEvent(NodeCopiedName), NodeID: nodeID},
+		NodeTrashedName:      NodeTrashed{BaseEvent: events.NewBaseEvent(NodeTrashedName), NodeID: nodeID},
+		RevisionRestoredName: RevisionRestored{BaseEvent: events.NewBaseEvent(RevisionRestoredName), NodeID: nodeID},
+	} {
+		envelope, err := registry.Encode(t.Context(), event)
+		require.NoError(t, err, name)
+		require.Equal(t, name, envelope.Type)
+		require.Equal(t, 1, envelope.Version)
+		require.Equal(t, nodeID.String(), envelope.AggregateID)
+		_, err = registry.Decode(envelope)
+		require.NoError(t, err, name)
+	}
+}

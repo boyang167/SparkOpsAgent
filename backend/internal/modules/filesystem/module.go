@@ -1,8 +1,11 @@
 package filesystem
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/google/uuid"
+	resourceauth "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/authorization"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/subscriber"
@@ -11,8 +14,10 @@ import (
 	filesystemhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/entitlements"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type Module struct {
@@ -61,6 +66,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 
 	repo := persistence.NewRepository(c.DB)
+	resourceAuthorizer := resourceauth.NewService(repo, func(ctx context.Context, workspaceID, actorID uuid.UUID) (bool, error) {
+		return c.PermissionChecker.HasPermission(ctx, kernel.WorkspaceID{UUID: workspaceID}, kernel.MemberID{UUID: actorID}, authz.PermFileAdmin)
+	})
 	createNamespace := command.NewCreateNamespaceHandler(repo, c.Transactor, c.EventBus, c.AuditLogger)
 	if err := c.EventBus.Subscribe(
 		integration.EventWorkspaceCreated,
@@ -76,9 +84,11 @@ func (m *Module) Register(c *appctx.Container) error {
 		command.NewCreateDirectoryHandler(repo, c.Transactor, c.EventBus, c.AuditLogger),
 		command.NewRenameNodeHandler(repo, c.Transactor, c.EventBus, c.AuditLogger),
 		command.NewMoveNodeHandler(repo, c.Transactor, c.EventBus, c.AuditLogger),
-		command.NewCopyNodeHandler(repo, c.Transactor, c.AuditLogger),
+		command.NewCopyNodeHandler(repo, c.Transactor, c.EventBus, c.AuditLogger),
 		command.NewTrashNodeHandler(repo, c.Transactor, c.EventBus, c.AuditLogger),
 		command.NewRestoreRevisionHandler(repo, c.Transactor, c.EventBus, c.AuditLogger),
+		resourceAuthorizer,
+		c.AuditLogger,
 	)
 	filesystemhttp.RegisterRoutes(
 		c.Engine,
