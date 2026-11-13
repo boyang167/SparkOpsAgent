@@ -826,4 +826,32 @@ func equalTimePointers(left, right *time.Time) bool {
 	return left.Equal(*right)
 }
 
+func (r *Repository) CreateTransfer(context.Context, *model.TransferSession) error {
+	return domain.ErrPersistence
+}
+
+func (r *Repository) GetTransferByID(context.Context, uuid.UUID) (*model.TransferSession, error) {
+	return nil, domain.ErrPersistence
+}
+
+func (r *Repository) GetTransferByIdempotency(context.Context, uuid.UUID, string) (*model.TransferSession, error) {
+	return nil, domain.ErrPersistence
+}
+
+func (r *Repository) CASTransferStatus(context.Context, uuid.UUID, model.TransferStatus, model.TransferStatus, int64) error {
+	return domain.ErrPersistence
+}
+
+func (r *Repository) LockTransfer(context.Context, uuid.UUID) (*model.TransferSession, error) {
+	return nil, domain.ErrPersistence
+}
+
+func (r *Repository) ListTransferParts(context.Context, uuid.UUID) ([]model.TransferPart, error) {
+	return nil, domain.ErrPersistence
+}
+
+func (r *Repository) UpsertTransferPart(context.Context, *model.TransferPart) error {
+	return domain.ErrPersistence
+}
+
 var _ repository.FilesystemRepository = (*Repository)(nil)
