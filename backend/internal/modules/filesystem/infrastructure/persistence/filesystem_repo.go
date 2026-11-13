@@ -274,7 +274,8 @@ func (r *Repository) SaveRevision(ctx context.Context, revision *model.FileRevis
 		}
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&replicaRow{
 			ID: replica.ID, BlobID: replica.BlobID, ProviderID: replica.ProviderID, ObjectKey: replica.ObjectKey,
-			Checksum: replica.Checksum, State: replica.State, VerifiedAt: replica.VerifiedAt, CreatedAt: now,
+			Checksum: replica.Checksum, State: replica.State, VerifiedAt: replica.VerifiedAt, DeleteAfter: replica.DeleteAfter,
+			CreatedAt: now,
 		}).Error; err != nil {
 			if conflict := mapUniqueConflict(err); conflict != nil && !errors.Is(conflict, domain.ErrPersistence) {
 				return conflict
@@ -411,7 +412,11 @@ func (r *Repository) GetBlob(ctx context.Context, blobID uuid.UUID) (*model.Blob
 	if err != nil {
 		return nil, wrapPersistence(err)
 	}
-	return &model.Blob{ID: row.ID, DedupDomain: row.DedupDomain, SHA256: row.SHA256, Size: row.Size, EncryptionKeyRef: row.EncryptionKeyRef, RefCount: row.RefCount, State: row.State}, nil
+	return &model.Blob{
+		ID: row.ID, DedupDomain: row.DedupDomain, SHA256: row.SHA256, Size: row.Size,
+		EncryptionKeyRef: row.EncryptionKeyRef, RefCount: row.RefCount, State: row.State,
+		PreferredProviderID: row.PreferredProviderID,
+	}, nil
 }
 
 func (r *Repository) GetAvailableReplica(ctx context.Context, blobID, providerID uuid.UUID) (*model.StorageReplica, error) {
@@ -425,7 +430,117 @@ func (r *Repository) GetAvailableReplica(ctx context.Context, blobID, providerID
 	} else if err != nil {
 		return nil, wrapPersistence(err)
 	}
-	return &model.StorageReplica{ID: row.ID, BlobID: row.BlobID, ProviderID: row.ProviderID, ObjectKey: row.ObjectKey, Checksum: row.Checksum, State: row.State, VerifiedAt: row.VerifiedAt}, nil
+	return replicaModelFromRow(row), nil
+}
+
+func (r *Repository) GetPreferredReplica(ctx context.Context, blobID uuid.UUID) (*model.StorageReplica, error) {
+	blob, err := r.GetBlob(ctx, blobID)
+	if err != nil {
+		return nil, err
+	}
+	providerID := uuid.Nil
+	if blob.PreferredProviderID != nil {
+		providerID = *blob.PreferredProviderID
+	}
+	return r.GetAvailableReplica(ctx, blobID, providerID)
+}
+
+func (r *Repository) GetReplicaByProvider(ctx context.Context, blobID, providerID uuid.UUID) (*model.StorageReplica, error) {
+	var row replicaRow
+	err := postgres.DB(ctx, r.db).Where("blob_id = ? AND provider_id = ?", blobID, providerID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrReplicaConflict
+	}
+	if err != nil {
+		return nil, wrapPersistence(err)
+	}
+	return replicaModelFromRow(row), nil
+}
+
+func (r *Repository) InsertBlob(ctx context.Context, blob *model.Blob) error {
+	now := time.Now().UTC()
+	return wrapPersistence(postgres.DB(ctx, r.db).Create(&blobRow{
+		ID: blob.ID, DedupDomain: blob.DedupDomain, SHA256: blob.SHA256, Size: blob.Size,
+		EncryptionKeyRef: blob.EncryptionKeyRef, RefCount: blob.RefCount, State: blob.State,
+		PreferredProviderID: blob.PreferredProviderID, CreatedAt: now,
+	}).Error)
+}
+
+func (r *Repository) InsertReplica(ctx context.Context, replica *model.StorageReplica) error {
+	now := time.Now().UTC()
+	return wrapPersistence(postgres.DB(ctx, r.db).Create(&replicaRow{
+		ID: replica.ID, BlobID: replica.BlobID, ProviderID: replica.ProviderID, ObjectKey: replica.ObjectKey,
+		Checksum: replica.Checksum, State: replica.State, VerifiedAt: replica.VerifiedAt, DeleteAfter: replica.DeleteAfter,
+		CreatedAt: now,
+	}).Error)
+}
+
+func (r *Repository) SetPreferredProvider(ctx context.Context, blobID, providerID uuid.UUID) error {
+	return wrapPersistence(postgres.DB(ctx, r.db).Model(&blobRow{}).Where("id = ?", blobID).
+		Update("preferred_provider_id", providerID).Error)
+}
+
+func (r *Repository) UpdateReplica(ctx context.Context, replica *model.StorageReplica) error {
+	updates := map[string]any{
+		"object_key": replica.ObjectKey,
+		"checksum":   replica.Checksum,
+		"state":      replica.State,
+		"verified_at": replica.VerifiedAt,
+		"delete_after": replica.DeleteAfter,
+	}
+	return wrapPersistence(postgres.DB(ctx, r.db).Model(&replicaRow{}).Where("id = ?", replica.ID).Updates(updates).Error)
+}
+
+func (r *Repository) GetReplicaMigrationCheckpoint(ctx context.Context, blobID, targetProviderID uuid.UUID) (int64, error) {
+	var row replicaMigrationRow
+	err := postgres.DB(ctx, r.db).Where("blob_id = ? AND target_provider_id = ?", blobID, targetProviderID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, wrapPersistence(err)
+	}
+	return row.BytesCopied, nil
+}
+
+func (r *Repository) SaveReplicaMigrationCheckpoint(ctx context.Context, checkpoint repository.ReplicaMigrationCheckpoint) error {
+	now := time.Now().UTC()
+	row := replicaMigrationRow{
+		BlobID: checkpoint.BlobID, TargetProviderID: checkpoint.TargetProviderID,
+		TargetReplicaID: checkpoint.TargetReplicaID, SourceProviderID: checkpoint.SourceProviderID,
+		BytesCopied: checkpoint.BytesCopied, TargetObjectKey: checkpoint.TargetObjectKey,
+		PolicyVersion: checkpoint.PolicyVersion, UpdatedAt: now,
+	}
+	return wrapPersistence(postgres.DB(ctx, r.db).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "blob_id"}, {Name: "target_provider_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"target_replica_id", "source_provider_id", "bytes_copied", "target_object_key", "policy_version", "updated_at"}),
+	}).Create(&row).Error)
+}
+
+func (r *Repository) PromoteReplica(ctx context.Context, promotion repository.ReplicaPromotion) error {
+	return wrapPersistence(postgres.DB(ctx, r.db).Transaction(func(tx *gorm.DB) error {
+		var target replicaRow
+		if err := tx.Where("blob_id = ? AND provider_id = ?", promotion.BlobID, promotion.TargetProviderID).First(&target).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrReplicaConflict
+			}
+			return err
+		}
+		if target.State != model.ReplicaStateAvailable {
+			return domain.ErrReplicaConflict
+		}
+		deleteAfter := promotion.DeleteAfter
+		result := tx.Model(&replicaRow{}).Where("blob_id = ? AND provider_id = ?", promotion.BlobID, promotion.SourceProviderID).
+			Updates(map[string]any{"state": model.ReplicaStateDraining, "delete_after": deleteAfter})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return domain.ErrReplicaConflict
+		}
+		return tx.Model(&blobRow{}).Where("id = ?", promotion.BlobID).
+			Update("preferred_provider_id", promotion.TargetProviderID).Error
+	}))
 }
 
 func (r *Repository) ListResourceGrants(ctx context.Context, nodeID, granteeID uuid.UUID, permission model.ResourcePermission, at time.Time) ([]model.ResourceGrant, error) {
@@ -826,7 +941,15 @@ func sameRevision(row revisionRow, revision *model.FileRevision) bool {
 func sameReplica(row replicaRow, replica *model.StorageReplica) bool {
 	return row.ID == replica.ID && row.BlobID == replica.BlobID && row.ProviderID == replica.ProviderID &&
 		row.ObjectKey == replica.ObjectKey && row.Checksum == replica.Checksum && row.State == replica.State &&
-		equalTimePointers(row.VerifiedAt, replica.VerifiedAt)
+		equalTimePointers(row.VerifiedAt, replica.VerifiedAt) &&
+		equalTimePointers(row.DeleteAfter, replica.DeleteAfter)
+}
+
+func replicaModelFromRow(row replicaRow) *model.StorageReplica {
+	return &model.StorageReplica{
+		ID: row.ID, BlobID: row.BlobID, ProviderID: row.ProviderID, ObjectKey: row.ObjectKey,
+		Checksum: row.Checksum, State: row.State, VerifiedAt: row.VerifiedAt, DeleteAfter: row.DeleteAfter,
+	}
 }
 
 func equalTimePointers(left, right *time.Time) bool {

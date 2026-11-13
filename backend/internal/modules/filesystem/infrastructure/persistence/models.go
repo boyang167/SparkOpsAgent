@@ -36,14 +36,15 @@ type nodeRow struct {
 func (nodeRow) TableName() string { return "filesystem.nodes" }
 
 type blobRow struct {
-	ID               uuid.UUID       `gorm:"column:id;primaryKey;type:uuid"`
-	DedupDomain      uuid.UUID       `gorm:"column:dedup_domain;not null;type:uuid"`
-	SHA256           string          `gorm:"column:sha256;not null;size:64"`
-	Size             int64           `gorm:"not null"`
-	EncryptionKeyRef string          `gorm:"column:encryption_key_ref"`
-	RefCount         int64           `gorm:"column:ref_count;not null"`
-	State            model.BlobState `gorm:"not null;type:varchar(32)"`
-	CreatedAt        time.Time       `gorm:"not null"`
+	ID                  uuid.UUID       `gorm:"column:id;primaryKey;type:uuid"`
+	DedupDomain         uuid.UUID       `gorm:"column:dedup_domain;not null;type:uuid"`
+	SHA256              string          `gorm:"column:sha256;not null;size:64"`
+	Size                int64           `gorm:"not null"`
+	EncryptionKeyRef      string          `gorm:"column:encryption_key_ref"`
+	RefCount              int64           `gorm:"column:ref_count;not null"`
+	State                 model.BlobState `gorm:"not null;type:varchar(32)"`
+	PreferredProviderID   *uuid.UUID      `gorm:"column:preferred_provider_id;type:uuid"`
+	CreatedAt             time.Time       `gorm:"not null"`
 }
 
 func (blobRow) TableName() string { return "filesystem.blobs" }
@@ -62,15 +63,29 @@ type revisionRow struct {
 func (revisionRow) TableName() string { return "filesystem.file_revisions" }
 
 type replicaRow struct {
-	ID         uuid.UUID          `gorm:"column:id;primaryKey;type:uuid"`
-	BlobID     uuid.UUID          `gorm:"column:blob_id;not null;type:uuid"`
-	ProviderID uuid.UUID          `gorm:"column:provider_id;not null;type:uuid"`
-	ObjectKey  string             `gorm:"column:object_key;not null"`
-	Checksum   string             `gorm:"column:checksum"`
-	State      model.ReplicaState `gorm:"not null;type:varchar(32)"`
-	VerifiedAt *time.Time         `gorm:"column:verified_at"`
-	CreatedAt  time.Time          `gorm:"not null"`
+	ID          uuid.UUID          `gorm:"column:id;primaryKey;type:uuid"`
+	BlobID      uuid.UUID          `gorm:"column:blob_id;not null;type:uuid"`
+	ProviderID  uuid.UUID          `gorm:"column:provider_id;not null;type:uuid"`
+	ObjectKey   string             `gorm:"column:object_key;not null"`
+	Checksum    string             `gorm:"column:checksum"`
+	State       model.ReplicaState `gorm:"not null;type:varchar(32)"`
+	VerifiedAt  *time.Time         `gorm:"column:verified_at"`
+	DeleteAfter *time.Time         `gorm:"column:delete_after"`
+	CreatedAt   time.Time          `gorm:"not null"`
 }
+
+type replicaMigrationRow struct {
+	BlobID             uuid.UUID `gorm:"column:blob_id;primaryKey;type:uuid"`
+	TargetProviderID   uuid.UUID `gorm:"column:target_provider_id;primaryKey;type:uuid"`
+	TargetReplicaID    uuid.UUID `gorm:"column:target_replica_id;not null;type:uuid"`
+	SourceProviderID   uuid.UUID `gorm:"column:source_provider_id;not null;type:uuid"`
+	BytesCopied        int64     `gorm:"column:bytes_copied;not null"`
+	TargetObjectKey    string    `gorm:"column:target_object_key;not null"`
+	PolicyVersion      int64     `gorm:"column:policy_version;not null"`
+	UpdatedAt          time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (replicaMigrationRow) TableName() string { return "filesystem.replica_migrations" }
 
 func (replicaRow) TableName() string { return "filesystem.storage_replicas" }
 

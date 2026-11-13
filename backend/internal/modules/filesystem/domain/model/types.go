@@ -57,13 +57,14 @@ const (
 )
 
 type Blob struct {
-	ID               uuid.UUID
-	DedupDomain      uuid.UUID
-	SHA256           string
-	Size             int64
-	EncryptionKeyRef string
-	RefCount         int64
-	State            BlobState
+	ID                  uuid.UUID
+	DedupDomain         uuid.UUID
+	SHA256              string
+	Size                int64
+	EncryptionKeyRef    string
+	RefCount            int64
+	State               BlobState
+	PreferredProviderID *uuid.UUID
 }
 
 type StorageReplica struct {
@@ -74,6 +75,7 @@ type StorageReplica struct {
 	Checksum   string
 	State      ReplicaState
 	VerifiedAt *time.Time
+	DeleteAfter *time.Time
 }
 
 type GrantEffect string

@@ -44,6 +44,23 @@ type TransferStatePatch struct {
 	ErrorCode    *string
 }
 
+type ReplicaMigrationCheckpoint struct {
+	BlobID           uuid.UUID
+	TargetProviderID uuid.UUID
+	TargetReplicaID  uuid.UUID
+	SourceProviderID uuid.UUID
+	BytesCopied      int64
+	TargetObjectKey  string
+	PolicyVersion    int64
+}
+
+type ReplicaPromotion struct {
+	BlobID           uuid.UUID
+	SourceProviderID uuid.UUID
+	TargetProviderID uuid.UUID
+	DeleteAfter      time.Time
+}
+
 type QuotaReservation struct {
 	ID             uuid.UUID
 	QuotaAccountID uuid.UUID
@@ -77,6 +94,15 @@ type FilesystemRepository interface {
 	IncrementBlobRef(context.Context, uuid.UUID) error
 	GetBlob(context.Context, uuid.UUID) (*model.Blob, error)
 	GetAvailableReplica(context.Context, uuid.UUID, uuid.UUID) (*model.StorageReplica, error)
+	GetPreferredReplica(context.Context, uuid.UUID) (*model.StorageReplica, error)
+	GetReplicaByProvider(context.Context, uuid.UUID, uuid.UUID) (*model.StorageReplica, error)
+	InsertBlob(context.Context, *model.Blob) error
+	InsertReplica(context.Context, *model.StorageReplica) error
+	SetPreferredProvider(context.Context, uuid.UUID, uuid.UUID) error
+	UpdateReplica(context.Context, *model.StorageReplica) error
+	GetReplicaMigrationCheckpoint(context.Context, uuid.UUID, uuid.UUID) (int64, error)
+	SaveReplicaMigrationCheckpoint(context.Context, ReplicaMigrationCheckpoint) error
+	PromoteReplica(context.Context, ReplicaPromotion) error
 	ListResourceGrants(context.Context, uuid.UUID, uuid.UUID, model.ResourcePermission, time.Time) ([]model.ResourceGrant, error)
 	CreateResourceGrant(context.Context, model.ResourceGrant) error
 	RevokeResourceGrant(context.Context, uuid.UUID, uuid.UUID) error
