@@ -670,9 +670,22 @@ func TestTransferRepositoryRoundTripCASAndPartIdempotency(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.ErrorIs(t, repo.UpsertTransferPart(context.Background(), conflict), domain.ErrTransferPartConflict)
+	emptyChecksum, err := model.NewTransferPart(model.TransferPartInput{
+		ID: uuid.New(), SessionID: session.ID(), PartNumber: 2, Offset: 5, Size: 5,
+		SessionSize: 10, Checksum: "", ETag: "etag-no-checksum",
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.UpsertTransferPart(context.Background(), emptyChecksum))
+	require.NoError(t, repo.UpsertTransferPart(context.Background(), emptyChecksum))
 	parts, err := repo.ListTransferParts(context.Background(), session.ID())
 	require.NoError(t, err)
-	require.Len(t, parts, 1)
+	require.Len(t, parts, 2)
+	require.Empty(t, parts[1].Checksum())
+	var storedChecksum *string
+	require.NoError(t, db.Table("filesystem.transfer_parts").
+		Select("checksum").Where("session_id = ? AND part_number = ?", session.ID(), 2).
+		Scan(&storedChecksum).Error)
+	require.Nil(t, storedChecksum)
 }
 
 func TestReserveQuotaHandlesNullBoundariesFilesAndOverflow(t *testing.T) {
@@ -713,6 +726,7 @@ func transferSessionFixture(t *testing.T, ns *model.Namespace, parentID *uuid.UU
 		ID: uuid.New(), WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, TargetParentID: parentID,
 		TargetName: "payload.bin", CreatedBy: uuid.New(), Protocol: model.TransferProtocolMultipart,
 		ExpectedSize: size, ExpectedSHA256: strings.Repeat("a", 64), IdempotencyKey: uuid.NewString(),
+		RequestHash:        strings.Repeat("b", 64),
 		TemporaryObjectKey: "transfers/" + uuid.NewString(), ExpiresAt: time.Now().Add(time.Hour),
 		ProviderID: ptrUUID(uuid.New()), Classification: model.TransferClassificationInternal,
 	})

@@ -138,8 +138,9 @@ func TestPutLocalFileRollsBackWhenEventPublishFails(t *testing.T) {
 		CommandID: uuid.New(), ActorID: uuid.New(), OrganizationID: ns.OrganizationID,
 		WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, Name: "fixture.txt",
 		MIMEType: "text/plain", Size: int64(len("fixture-content")),
-		SHA256: storage.SHA256([]byte("fixture-content")),
-		Body:   bytes.NewBufferString("fixture-content"), Authorization: Authorization{Allowed: true},
+		SHA256:            storage.SHA256([]byte("fixture-content")),
+		Body:              bytes.NewBufferString("fixture-content"),
+		Authorization:     allowScope(ns.WorkspaceID, *ns.RootNodeID, model.ResourcePermissionWrite),
 		ReplicaProviderID: uuid.New(),
 	}
 
@@ -457,7 +458,8 @@ func putFixture(ns *model.Namespace) PutLocalFile {
 		CommandID: uuid.New(), ActorID: uuid.New(), OrganizationID: ns.OrganizationID,
 		WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, Name: "fixture.txt",
 		MIMEType: "text/plain", Size: int64(len(body)), SHA256: storage.SHA256(body),
-		Body: bytes.NewReader(body), Authorization: Authorization{Allowed: true},
+		Body:              bytes.NewReader(body),
+		Authorization:     allowScope(ns.WorkspaceID, *ns.RootNodeID, model.ResourcePermissionWrite),
 		ReplicaProviderID: uuid.New(),
 	}
 }

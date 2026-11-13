@@ -26,6 +26,8 @@ func TestFilesystemTransferMigrationDefinesTransferSchema(t *testing.T) {
 		"CHECK (actual_sha256 IS NULL OR actual_sha256 ~ '^[0-9A-Fa-f]{64}$')",
 		"CHECK (actual_size IS NULL OR (actual_size >= 0 AND actual_size <= 21474836480))",
 		"CHECK (version > 0)",
+		"request_hash CHAR(64) NOT NULL",
+		"checksum CHAR(64) CHECK (checksum IS NULL OR checksum ~ '^[0-9A-Fa-f]{64}$')",
 		"UNIQUE (session_id, part_number)",
 		"CHECK (offset_bytes >= 0 AND size_bytes > 0)",
 		"etag TEXT NOT NULL CHECK (length(btrim(etag)) > 0)",
@@ -44,6 +46,9 @@ func TestFilesystemTransferMigrationDefinesTransferSchema(t *testing.T) {
 	require.Contains(t, up, "FOREIGN KEY (quota_account_id, workspace_id)")
 	require.Contains(t, up, "UNIQUE (workspace_id, id)")
 	require.Contains(t, up, "CREATE UNIQUE INDEX ux_quota_reservations_session")
+	require.Contains(t, up, "CREATE INDEX ix_transfer_sessions_workspace_status")
+	require.Contains(t, up, "CREATE INDEX ix_transfer_sessions_expires_at")
+	require.Contains(t, up, "CREATE INDEX ix_transfer_parts_session_offset")
 	require.Contains(t, up, "CREATE OR REPLACE FUNCTION filesystem.validate_transfer_part_bounds()")
 	require.Contains(t, up, "CREATE TRIGGER trg_transfer_parts_validate_bounds")
 	require.Contains(t, up, "BEFORE INSERT OR UPDATE")
@@ -86,12 +91,19 @@ func TestTransferPartBoundsAreEnforcedByPostgresWhenConfigured(t *testing.T) {
 	require.NoError(t, db.Exec(
 		`INSERT INTO filesystem.transfer_sessions
 		 (id, workspace_id, namespace_id, target_name, protocol, expected_size,
-		  temporary_object_key, status, classification, idempotency_key, expires_at, created_by)
+		  temporary_object_key, status, classification, idempotency_key, request_hash, expires_at, created_by)
 		 VALUES (?, ?, ?, 'file.bin', 'DIRECT', 10, 'tmp/file', 'INITIATED',
-		  'PUBLIC', 'idempotency-1', ?, ?)`,
-		sessionID, workspaceID, namespaceID, time.Now().Add(time.Hour), creatorID,
+		  'PUBLIC', 'idempotency-1', ?, ?, ?)`,
+		sessionID, workspaceID, namespaceID, strings.Repeat("a", 64), time.Now().Add(time.Hour), creatorID,
 	).Error)
 	err := db.Exec(
+		`INSERT INTO filesystem.transfer_parts
+		 (id, session_id, part_number, offset_bytes, size_bytes, checksum, etag)
+		 VALUES (?, ?, 1, 0, 1, '', 'etag-empty-checksum')`,
+		uuid.New(), sessionID,
+	).Error
+	require.Error(t, err)
+	err = db.Exec(
 		`INSERT INTO filesystem.transfer_parts
 		 (id, session_id, part_number, offset_bytes, size_bytes, etag)
 		 VALUES (?, ?, 1, 9, 2, 'etag')`,

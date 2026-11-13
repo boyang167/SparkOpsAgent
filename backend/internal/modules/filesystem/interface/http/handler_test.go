@@ -85,6 +85,54 @@ func TestCreateDirectoryRequiresMembershipPermissionAndIdempotencyKey(t *testing
 	}
 }
 
+func TestMoveAndCopyBindTrustedAuthorizationToSourceAndTarget(t *testing.T) {
+	namespaceID, rootID := uuid.New(), uuid.New()
+	sourceID, targetID := uuid.New(), uuid.New()
+	var moved command.MoveNode
+	var copied command.CopyNode
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: namespaceID, OrganizationID: uuid.New(), WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			return resourceauth.Decision{Allowed: true, Reason: "trusted"}
+		},
+		moveNode: func(_ context.Context, cmd command.MoveNode) error {
+			moved = cmd
+			return nil
+		},
+		copyNode: func(_ context.Context, cmd command.CopyNode) (*model.Node, error) {
+			copied = cmd
+			return &model.Node{ID: uuid.New(), NamespaceID: namespaceID, Name: "copy"}, nil
+		},
+	}
+	router, token, workspaceID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileWrite: true}}, h)
+	send := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+workspaceID.String()+path,
+			strings.NewReader(`{"parent_id":"`+targetID.String()+`","name":"result"}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "scope-"+path)
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		return res
+	}
+
+	require.Equal(t, http.StatusOK, send("/files/"+sourceID.String()+"/move").Code)
+	require.Equal(t, http.StatusCreated, send("/files/"+sourceID.String()+"/copy").Code)
+	require.Equal(t, workspaceID.UUID, moved.Authorization.WorkspaceID)
+	require.Equal(t, sourceID, moved.Authorization.ResourceID)
+	require.Equal(t, model.ResourcePermissionWrite, moved.Authorization.Permission)
+	require.Equal(t, []command.AuthorizationScope{{
+		WorkspaceID: workspaceID.UUID, ResourceID: targetID, Permission: model.ResourcePermissionWrite,
+	}}, moved.Authorization.Additional)
+	require.Equal(t, sourceID, copied.Authorization.ResourceID)
+	require.Equal(t, model.ResourcePermissionRead, copied.Authorization.Permission)
+	require.Equal(t, []command.AuthorizationScope{{
+		WorkspaceID: workspaceID.UUID, ResourceID: targetID, Permission: model.ResourcePermissionWrite,
+	}}, copied.Authorization.Additional)
+}
+
 func TestListFilesUsesReadPermissionAndDoesNotRequireIdempotencyKey(t *testing.T) {
 	nsID := uuid.New()
 	rootID := uuid.New()

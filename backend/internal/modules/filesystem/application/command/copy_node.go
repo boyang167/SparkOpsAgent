@@ -56,10 +56,6 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.
 	ctx = withAuditDetail(ctx, map[string]any{"source_node_id": cmd.SourceNodeID.String(), "target_parent_id": targetParentID})
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy")
 	defer finishAudit(&err)
-	if !cmd.Allowed {
-		err := authorizationDenied(cmd.Reason)
-		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy", err)
-	}
 	var result *model.Node
 	var requestHash string
 	err = withinIdempotentMutationWithRetry(ctx, h.tx, func(txCtx context.Context) error {
@@ -82,6 +78,12 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.
 			parent = *cmd.ParentID
 		} else if ns.RootNodeID != nil {
 			parent = *ns.RootNodeID
+		}
+		if authErr := requireAllowed(cmd.Authorization, cmd.WorkspaceID, cmd.SourceNodeID, model.ResourcePermissionRead); authErr != nil {
+			return authErr
+		}
+		if authErr := requireAllowed(cmd.Authorization, cmd.WorkspaceID, parent, model.ResourcePermissionWrite); authErr != nil {
+			return authErr
 		}
 		name := cmd.Name
 		if name == "" {

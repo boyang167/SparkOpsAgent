@@ -69,6 +69,7 @@ type TransferSessionInput struct {
 	ExpectedSize       int64
 	ExpectedSHA256     string
 	IdempotencyKey     string
+	RequestHash        string
 	TemporaryObjectKey string
 	ExpiresAt          time.Time
 	ProviderID         *uuid.UUID
@@ -91,6 +92,7 @@ type TransferSession struct {
 	temporaryObjectKey string
 	status             TransferStatus
 	idempotencyKey     string
+	requestHash        string
 	expiresAt          time.Time
 	classification     TransferClassification
 	scanResult         *TransferScanResult
@@ -119,9 +121,10 @@ type PersistedTransferSession struct {
 var transferNamePattern = regexp.MustCompile(`^[^/\\\x00]+$`)
 
 func NewTransferSession(input TransferSessionInput) (*TransferSession, error) {
+	input.ExpiresAt = CanonicalTransferExpiry(input.ExpiresAt)
 	if input.ID == uuid.Nil || input.WorkspaceID == uuid.Nil || input.NamespaceID == uuid.Nil ||
 		input.CreatedBy == uuid.Nil || strings.TrimSpace(input.IdempotencyKey) == "" ||
-		strings.TrimSpace(input.TemporaryObjectKey) == "" {
+		!isSHA256(input.RequestHash) || strings.TrimSpace(input.TemporaryObjectKey) == "" {
 		return nil, ErrInvalidTransfer
 	}
 	input.TargetName = strings.TrimSpace(input.TargetName)
@@ -161,8 +164,12 @@ func NewTransferSession(input TransferSessionInput) (*TransferSession, error) {
 		protocol: input.Protocol, expectedSize: input.ExpectedSize, expectedSHA256: input.ExpectedSHA256,
 		providerID: providerID, temporaryObjectKey: input.TemporaryObjectKey,
 		status: TransferInitiated, idempotencyKey: input.IdempotencyKey, expiresAt: input.ExpiresAt,
-		classification: input.Classification, version: 1,
+		requestHash: input.RequestHash, classification: input.Classification, version: 1,
 	}, nil
+}
+
+func CanonicalTransferExpiry(value time.Time) time.Time {
+	return value.UTC().Truncate(time.Microsecond)
 }
 
 func RestoreTransferSession(state PersistedTransferSession) (*TransferSession, error) {
@@ -244,6 +251,7 @@ func (s *TransferSession) ProviderID() *uuid.UUID {
 func (s *TransferSession) TemporaryObjectKey() string             { return s.temporaryObjectKey }
 func (s *TransferSession) Status() TransferStatus                 { return s.status }
 func (s *TransferSession) IdempotencyKey() string                 { return s.idempotencyKey }
+func (s *TransferSession) RequestHash() string                    { return s.requestHash }
 func (s *TransferSession) ExpiresAt() time.Time                   { return s.expiresAt }
 func (s *TransferSession) Classification() TransferClassification { return s.classification }
 func (s *TransferSession) ScanResult() *TransferScanResult {

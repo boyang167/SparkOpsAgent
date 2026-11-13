@@ -171,13 +171,33 @@ type requestContext struct {
 
 func (h *Handler) resourceDecision(c *gin.Context, rc requestContext, nodeID uuid.UUID, permission model.ResourcePermission) command.Authorization {
 	if h.authorizeResource == nil {
-		return command.Authorization{Reason: "authorization_unavailable", TraceID: rc.traceID}
+		return command.Authorization{
+			Reason: "authorization_unavailable", TraceID: rc.traceID,
+			WorkspaceID: rc.workspaceID, ResourceID: nodeID, Permission: permission,
+		}
 	}
 	decision := h.authorizeResource(c.Request.Context(), resourceauth.Request{
 		ActorID: rc.actorID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID,
 		NodeID: nodeID, Permission: permission,
 	})
-	return command.Authorization{Allowed: decision.Allowed, Reason: decision.Reason, TraceID: rc.traceID}
+	return command.Authorization{
+		Allowed: decision.Allowed, Reason: decision.Reason, TraceID: rc.traceID,
+		WorkspaceID: rc.workspaceID, ResourceID: nodeID, Permission: permission,
+	}
+}
+
+func combineAuthorization(base, additional command.Authorization) command.Authorization {
+	base.Additional = append(base.Additional, command.AuthorizationScope{
+		WorkspaceID: additional.WorkspaceID,
+		ResourceID:  additional.ResourceID,
+		Permission:  additional.Permission,
+	})
+	base.Additional = append(base.Additional, additional.Additional...)
+	if !additional.Allowed {
+		base.Allowed = false
+		base.Reason = additional.Reason
+	}
+	return base
 }
 
 func (h *Handler) requireResource(c *gin.Context, rc requestContext, nodeID uuid.UUID, permission model.ResourcePermission) bool {
@@ -417,7 +437,7 @@ func (h *Handler) MoveNode(c *gin.Context) {
 		}
 		authorization := h.resourceDecision(c, rc, nodeID, model.ResourcePermissionWrite)
 		if authorization.Allowed && targetParent != nil {
-			authorization = h.resourceDecision(c, rc, *targetParent, model.ResourcePermissionWrite)
+			authorization = combineAuthorization(authorization, h.resourceDecision(c, rc, *targetParent, model.ResourcePermissionWrite))
 		}
 		return h.moveNode(c.Request.Context(), command.MoveNode{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, NodeID: nodeID, NewParentID: targetParent, NewName: body.Name, Authorization: authorization})
 	})
@@ -452,7 +472,7 @@ func (h *Handler) CopyNode(c *gin.Context) {
 	}
 	authorization := h.resourceDecision(c, rc, nodeID, model.ResourcePermissionRead)
 	if authorization.Allowed && targetParent != nil {
-		authorization = h.resourceDecision(c, rc, *targetParent, model.ResourcePermissionWrite)
+		authorization = combineAuthorization(authorization, h.resourceDecision(c, rc, *targetParent, model.ResourcePermissionWrite))
 	}
 	node, err := h.copyNode(c.Request.Context(), command.CopyNode{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, SourceNodeID: nodeID, ParentID: targetParent, Name: body.Name, Authorization: authorization})
 	if err != nil {

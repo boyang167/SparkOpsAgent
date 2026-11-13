@@ -23,6 +23,7 @@ CREATE TABLE filesystem.transfer_sessions (
     scan_completed_at TIMESTAMPTZ,
     error_code TEXT,
     idempotency_key TEXT NOT NULL CHECK (length(btrim(idempotency_key)) > 0),
+    request_hash CHAR(64) NOT NULL CHECK (request_hash ~ '^[0-9A-Fa-f]{64}$'),
     expires_at TIMESTAMPTZ NOT NULL,
     version BIGINT NOT NULL DEFAULT 1 CHECK (version > 0),
     created_by UUID NOT NULL,

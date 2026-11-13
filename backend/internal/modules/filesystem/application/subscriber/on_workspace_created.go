@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/command"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
 )
@@ -25,7 +26,10 @@ func (s *OnWorkspaceCreated) Handle(ctx context.Context, event events.Event) err
 		ActorID:        created.OwnerID.UUID,
 		OrganizationID: created.OrgID.UUID,
 		WorkspaceID:    created.WorkspaceID.UUID,
-		Authorization:  command.Authorization{Allowed: true},
+		Authorization: command.Authorization{
+			Allowed: true, WorkspaceID: created.WorkspaceID.UUID,
+			ResourceID: created.WorkspaceID.UUID, Permission: model.ResourcePermissionAdmin,
+		},
 	})
 	return err
 }

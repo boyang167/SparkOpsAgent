@@ -32,6 +32,23 @@ type recordingAudit struct {
 	entries []audit.Entry
 }
 
+func allowScope(workspaceID, resourceID uuid.UUID, permission model.ResourcePermission) Authorization {
+	return Authorization{
+		Allowed: true, WorkspaceID: workspaceID, ResourceID: resourceID, Permission: permission,
+	}
+}
+
+func allowScopes(workspaceID uuid.UUID, first AuthorizationScope, additional ...AuthorizationScope) Authorization {
+	return Authorization{
+		Allowed: true, WorkspaceID: workspaceID, ResourceID: first.ResourceID,
+		Permission: first.Permission, Additional: additional,
+	}
+}
+
+func authorizationScope(workspaceID, resourceID uuid.UUID, permission model.ResourcePermission) AuthorizationScope {
+	return AuthorizationScope{WorkspaceID: workspaceID, ResourceID: resourceID, Permission: permission}
+}
+
 type failingAudit struct {
 	calls int
 	err   error
@@ -163,7 +180,9 @@ func TestCopyNilParentResolvesNamespaceRoot(t *testing.T) {
 	copied, err := copyHandler.Handle(context.Background(), CopyNode{
 		ActorID: source.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID,
 		NamespaceID: ns.ID, SourceNodeID: source.ID, Name: "copied.txt",
-		Authorization: Authorization{Allowed: true},
+		Authorization: allowScopes(ns.WorkspaceID,
+			authorizationScope(ns.WorkspaceID, source.ID, model.ResourcePermissionRead),
+			authorizationScope(ns.WorkspaceID, *ns.RootNodeID, model.ResourcePermissionWrite)),
 	})
 
 	require.NoError(t, err)
@@ -269,7 +288,8 @@ func TestCreateDirectoryValidationFailureIsAudited(t *testing.T) {
 	logs := &recordingAudit{}
 	_, err := NewCreateDirectoryHandler(repo, postgres.NewTransactor(db), nil, logs).Handle(context.Background(), CreateDirectory{
 		ActorID: uuid.New(), OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID,
-		NamespaceID: ns.ID, Name: "../invalid", Authorization: Authorization{Allowed: true},
+		NamespaceID: ns.ID, Name: "../invalid",
+		Authorization: allowScope(ns.WorkspaceID, *ns.RootNodeID, model.ResourcePermissionWrite),
 	})
 
 	require.ErrorIs(t, err, model.ErrInvalidNodeName)
@@ -295,7 +315,7 @@ func TestCreateDirectoryRollsBackWhenOutboxPublishFails(t *testing.T) {
 	command := CreateDirectory{
 		CommandID: uuid.New(), ActorID: uuid.New(), OrganizationID: ns.OrganizationID,
 		WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, Name: "outbox-rollback",
-		Authorization: Authorization{Allowed: true},
+		Authorization: allowScope(ns.WorkspaceID, *ns.RootNodeID, model.ResourcePermissionWrite),
 	}
 	_, err := NewCreateDirectoryHandler(repo, postgres.NewTransactor(db), failingBus{}, nil).Handle(context.Background(), command)
 	require.Error(t, err)
@@ -315,8 +335,8 @@ func TestCreateNamespaceIdempotentSuccessIsAuditedAsAllow(t *testing.T) {
 	handler := NewCreateNamespaceHandler(repo, postgres.NewTransactor(db), nil, logs)
 	cmd := CreateNamespace{
 		ActorID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(),
-		Authorization: Authorization{Allowed: true},
 	}
+	cmd.Authorization = allowScope(cmd.WorkspaceID, cmd.WorkspaceID, model.ResourcePermissionAdmin)
 	_, err := handler.Handle(context.Background(), cmd)
 	require.NoError(t, err)
 	_, err = handler.Handle(context.Background(), cmd)
@@ -329,8 +349,8 @@ func TestCreateNamespaceConcurrentSameWorkspaceReturnsSingleNamespace(t *testing
 	handler := NewCreateNamespaceHandler(repo, postgres.NewTransactor(db), nil, nil)
 	cmd := CreateNamespace{
 		ActorID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(),
-		Authorization: Authorization{Allowed: true},
 	}
+	cmd.Authorization = allowScope(cmd.WorkspaceID, cmd.WorkspaceID, model.ResourcePermissionAdmin)
 	start := make(chan struct{})
 	results := make(chan *model.Namespace, 2)
 	errs := make(chan error, 2)
@@ -417,11 +437,17 @@ func TestMoveConcurrentOppositeMovesCannotCreateCycle(t *testing.T) {
 	moves := []MoveNode{
 		{
 			ActorID: first.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID,
-			NamespaceID: ns.ID, NodeID: first.ID, NewParentID: &second.ID, Authorization: Authorization{Allowed: true},
+			NamespaceID: ns.ID, NodeID: first.ID, NewParentID: &second.ID,
+			Authorization: allowScopes(ns.WorkspaceID,
+				authorizationScope(ns.WorkspaceID, first.ID, model.ResourcePermissionWrite),
+				authorizationScope(ns.WorkspaceID, second.ID, model.ResourcePermissionWrite)),
 		},
 		{
 			ActorID: second.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID,
-			NamespaceID: ns.ID, NodeID: second.ID, NewParentID: &first.ID, Authorization: Authorization{Allowed: true},
+			NamespaceID: ns.ID, NodeID: second.ID, NewParentID: &first.ID,
+			Authorization: allowScopes(ns.WorkspaceID,
+				authorizationScope(ns.WorkspaceID, second.ID, model.ResourcePermissionWrite),
+				authorizationScope(ns.WorkspaceID, first.ID, model.ResourcePermissionWrite)),
 		},
 	}
 	for _, move := range moves {
@@ -501,7 +527,10 @@ func TestMoveRetriesWholeTransactionWithInjectedBackoffAndAuditsOnce(t *testing.
 
 	err = handler.Handle(context.Background(), MoveNode{
 		ActorID: node.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID,
-		NamespaceID: ns.ID, NodeID: node.ID, Authorization: Authorization{Allowed: true},
+		NamespaceID: ns.ID, NodeID: node.ID,
+		Authorization: allowScopes(ns.WorkspaceID,
+			authorizationScope(ns.WorkspaceID, node.ID, model.ResourcePermissionWrite),
+			authorizationScope(ns.WorkspaceID, *ns.RootNodeID, model.ResourcePermissionWrite)),
 	})
 
 	require.NoError(t, err)
@@ -515,10 +544,10 @@ func TestCreateNamespaceRepositoryFailureIsAuditedAndDoesNotStartTransaction(t *
 	repo := namespaceReadErrorRepository{FilesystemRepository: baseRepo}
 	tx := &countingTransactor{}
 	logs := &recordingAudit{}
+	workspaceID := uuid.New()
 	_, err := NewCreateNamespaceHandler(repo, tx, nil, logs).Handle(context.Background(), CreateNamespace{
-		ActorID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(),
-		Authorization: Authorization{Allowed: true},
-	})
+		ActorID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: workspaceID,
+		Authorization: allowScope(workspaceID, workspaceID, model.ResourcePermissionAdmin)})
 
 	require.ErrorIs(t, err, domain.ErrPersistence)
 	require.Zero(t, tx.calls)
@@ -529,10 +558,10 @@ func TestCreateNamespaceTransactionFailureIsAudited(t *testing.T) {
 	_, repo, _ := newPutTestRepository(t)
 	tx := &countingTransactor{}
 	logs := &recordingAudit{}
+	workspaceID := uuid.New()
 	_, err := NewCreateNamespaceHandler(repo, tx, nil, logs).Handle(context.Background(), CreateNamespace{
-		ActorID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(),
-		Authorization: Authorization{Allowed: true},
-	})
+		ActorID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: workspaceID,
+		Authorization: allowScope(workspaceID, workspaceID, model.ResourcePermissionAdmin)})
 
 	require.ErrorContains(t, err, "transaction unavailable")
 	require.Equal(t, 1, tx.calls)
@@ -574,7 +603,8 @@ func TestDeniedWithAuditFailureAttemptsAuditOnceAndPreservesBusinessError(t *tes
 	logs := &failingAudit{err: auditErr}
 	_, err := NewCreateDirectoryHandler(repo, postgres.NewTransactor(db), nil, logs).Handle(context.Background(), CreateDirectory{
 		ActorID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: ns.WorkspaceID,
-		NamespaceID: ns.ID, Name: "child", Authorization: Authorization{Allowed: true},
+		NamespaceID: ns.ID, Name: "child",
+		Authorization: allowScope(ns.WorkspaceID, *ns.RootNodeID, model.ResourcePermissionWrite),
 	})
 
 	require.ErrorIs(t, err, domain.ErrNamespaceMismatch)
@@ -598,7 +628,7 @@ func TestMetadataMutationsUseCommandDedup(t *testing.T) {
 		require.NoError(t, repo.CreateNode(context.Background(), node))
 		logs := &recordingAudit{}
 		handler := NewRenameNodeHandler(repo, tx, bus, logs)
-		cmd := RenameNode{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: node.ID, Name: "after", Authorization: Authorization{Allowed: true}}
+		cmd := RenameNode{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: node.ID, Name: "after", Authorization: allowScope(ns.WorkspaceID, node.ID, model.ResourcePermissionWrite)}
 		require.NoError(t, handler.Handle(context.Background(), cmd))
 		require.NoError(t, handler.Handle(context.Background(), cmd))
 		require.Equal(t, []string{"ALLOW"}, logs.decisions())
@@ -615,7 +645,13 @@ func TestMetadataMutationsUseCommandDedup(t *testing.T) {
 		require.NoError(t, repo.CreateNode(context.Background(), right))
 		logs := &recordingAudit{}
 		handler := NewMoveNodeHandler(repo, tx, bus, logs)
-		cmd := MoveNode{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: left.ID, NewParentID: &right.ID, Authorization: Authorization{Allowed: true}}
+		cmd := MoveNode{
+			CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID,
+			NamespaceID: ns.ID, NodeID: left.ID, NewParentID: &right.ID,
+			Authorization: allowScopes(ns.WorkspaceID,
+				authorizationScope(ns.WorkspaceID, left.ID, model.ResourcePermissionWrite),
+				authorizationScope(ns.WorkspaceID, right.ID, model.ResourcePermissionWrite)),
+		}
 		require.NoError(t, handler.Handle(context.Background(), cmd))
 		require.NoError(t, handler.Handle(context.Background(), cmd))
 		require.Equal(t, []string{"ALLOW"}, logs.decisions())
@@ -629,7 +665,7 @@ func TestMetadataMutationsUseCommandDedup(t *testing.T) {
 		require.NoError(t, repo.CreateNode(context.Background(), node))
 		logs := &recordingAudit{}
 		handler := NewTrashNodeHandler(repo, tx, bus, logs)
-		cmd := TrashNode{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: node.ID, Authorization: Authorization{Allowed: true}}
+		cmd := TrashNode{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: node.ID, Authorization: allowScope(ns.WorkspaceID, node.ID, model.ResourcePermissionDelete)}
 		require.NoError(t, handler.Handle(context.Background(), cmd))
 		require.NoError(t, handler.Handle(context.Background(), cmd))
 		require.Equal(t, []string{"ALLOW"}, logs.decisions())
@@ -637,6 +673,7 @@ func TestMetadataMutationsUseCommandDedup(t *testing.T) {
 		newCommand.CommandID = uuid.New()
 		require.ErrorIs(t, handler.Handle(context.Background(), newCommand), domain.ErrNodeStateConflict)
 		cmd.NodeID = uuid.New()
+		cmd.Authorization = allowScope(ns.WorkspaceID, cmd.NodeID, model.ResourcePermissionDelete)
 		require.ErrorIs(t, handler.Handle(context.Background(), cmd), domain.ErrIdempotencyConflict)
 	})
 
@@ -648,7 +685,7 @@ func TestMetadataMutationsUseCommandDedup(t *testing.T) {
 		require.NoError(t, err)
 		logs := &recordingAudit{}
 		handler := NewRestoreRevisionHandler(repo, tx, bus, logs)
-		cmd := RestoreRevision{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: source.ID, RevisionID: *source.CurrentRevisionID, Authorization: Authorization{Allowed: true}}
+		cmd := RestoreRevision{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: source.ID, RevisionID: *source.CurrentRevisionID, Authorization: allowScope(ns.WorkspaceID, source.ID, model.ResourcePermissionWrite)}
 		require.NoError(t, handler.Handle(context.Background(), cmd))
 		require.NoError(t, handler.Handle(context.Background(), cmd))
 		require.Equal(t, []string{"ALLOW"}, logs.decisions())
@@ -676,7 +713,13 @@ func TestCopyCommandDedupDoesNotRepeatQuotaBlobOrAudit(t *testing.T) {
 	require.NoError(t, err)
 	logs := &recordingAudit{}
 	handler := NewCopyNodeHandler(repo, tx, bus, logs)
-	cmd := CopyNode{CommandID: uuid.New(), ActorID: source.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, SourceNodeID: source.ID, Name: "dedup-copy.txt", Authorization: Authorization{Allowed: true}}
+	cmd := CopyNode{
+		CommandID: uuid.New(), ActorID: source.OwnerID, OrganizationID: ns.OrganizationID,
+		WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, SourceNodeID: source.ID, Name: "dedup-copy.txt",
+		Authorization: allowScopes(ns.WorkspaceID,
+			authorizationScope(ns.WorkspaceID, source.ID, model.ResourcePermissionRead),
+			authorizationScope(ns.WorkspaceID, *ns.RootNodeID, model.ResourcePermissionWrite)),
+	}
 	first, err := handler.Handle(context.Background(), cmd)
 	require.NoError(t, err)
 	second, err := handler.Handle(context.Background(), cmd)
@@ -706,7 +749,11 @@ func TestCreateDirectoryReplayWritesOneOutboxEvent(t *testing.T) {
 	db, repo, ns := newPutTestRepository(t)
 	bus := newFilesystemOutboxBus(t, db)
 	handler := NewCreateDirectoryHandler(repo, postgres.NewTransactor(db), bus, nil)
-	cmd := CreateDirectory{CommandID: uuid.New(), ActorID: uuid.New(), OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, Name: "outbox-once", Authorization: Authorization{Allowed: true}}
+	cmd := CreateDirectory{
+		CommandID: uuid.New(), ActorID: uuid.New(), OrganizationID: ns.OrganizationID,
+		WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, Name: "outbox-once",
+		Authorization: allowScope(ns.WorkspaceID, *ns.RootNodeID, model.ResourcePermissionWrite),
+	}
 	_, err := handler.Handle(context.Background(), cmd)
 	require.NoError(t, err)
 	_, err = handler.Handle(context.Background(), cmd)
@@ -766,7 +813,10 @@ func TestCopyRetriesWholeTransactionAfterTransactionRetry(t *testing.T) {
 	cmd := CopyNode{
 		CommandID: uuid.New(), ActorID: source.OwnerID, OrganizationID: ns.OrganizationID,
 		WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, SourceNodeID: source.ID,
-		Name: "retry-copy.txt", Authorization: Authorization{Allowed: true},
+		Name: "retry-copy.txt",
+		Authorization: allowScopes(ns.WorkspaceID,
+			authorizationScope(ns.WorkspaceID, source.ID, model.ResourcePermissionRead),
+			authorizationScope(ns.WorkspaceID, *ns.RootNodeID, model.ResourcePermissionWrite)),
 	}
 
 	copied, err := handler.Handle(context.Background(), cmd)
@@ -829,7 +879,13 @@ func TestCopyCommandDedupConcurrentReturnsAuthoritativeResult(t *testing.T) {
 	source, err := NewPutLocalFileHandler(repo, provider, postgres.NewTransactor(db), nil, nil).Handle(context.Background(), putFixture(ns))
 	require.NoError(t, err)
 	logs := &recordingAudit{}
-	cmd := CopyNode{CommandID: uuid.New(), ActorID: source.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, SourceNodeID: source.ID, Name: "concurrent-copy.txt", Authorization: Authorization{Allowed: true}}
+	cmd := CopyNode{
+		CommandID: uuid.New(), ActorID: source.OwnerID, OrganizationID: ns.OrganizationID,
+		WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, SourceNodeID: source.ID, Name: "concurrent-copy.txt",
+		Authorization: allowScopes(ns.WorkspaceID,
+			authorizationScope(ns.WorkspaceID, source.ID, model.ResourcePermissionRead),
+			authorizationScope(ns.WorkspaceID, *ns.RootNodeID, model.ResourcePermissionWrite)),
+	}
 
 	start := make(chan struct{})
 	ready := make(chan error, 2)
@@ -883,7 +939,11 @@ func TestRenameCommandDedupConcurrentAuditsOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateNode(context.Background(), node))
 	logs := &recordingAudit{}
-	cmd := RenameNode{CommandID: uuid.New(), ActorID: node.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: node.ID, Name: "rename-concurrent-after", Authorization: Authorization{Allowed: true}}
+	cmd := RenameNode{
+		CommandID: uuid.New(), ActorID: node.OwnerID, OrganizationID: ns.OrganizationID,
+		WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: node.ID, Name: "rename-concurrent-after",
+		Authorization: allowScope(ns.WorkspaceID, node.ID, model.ResourcePermissionWrite),
+	}
 	registry := sharedevents.NewRegistry()
 	require.NoError(t, filesystemevent.Register(registry))
 

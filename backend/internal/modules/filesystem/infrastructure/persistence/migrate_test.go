@@ -58,6 +58,7 @@ func TestPostgresFallbackConstraintCatalog(t *testing.T) {
 		"ux_filesystem_revisions_node_no", "ux_filesystem_replicas_identity", "ux_filesystem_grants_identity",
 		"ux_transfer_sessions_workspace_id", "ux_transfer_sessions_idempotency",
 		"ux_transfer_parts_number", "ux_quota_reservations_session",
+		"ix_transfer_sessions_workspace_status", "ix_transfer_sessions_expires_at", "ix_transfer_parts_session_offset",
 	} {
 		var count int64
 		require.NoError(t, db.Raw("SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'filesystem' AND indexname = ?", index).Scan(&count).Error)
@@ -74,7 +75,8 @@ func TestPostgresFallbackConstraintCatalog(t *testing.T) {
 		"fk_reservation_transfer", "fk_reservation_account_workspace",
 		"ck_transfer_protocol", "ck_transfer_expected_size", "ck_transfer_actual_size",
 		"ck_transfer_status", "ck_transfer_classification", "ck_transfer_version",
-		"ck_transfer_expected_sha", "ck_transfer_actual_sha", "ck_transfer_part_values", "ck_transfer_part_sha",
+		"ck_transfer_expected_sha", "ck_transfer_actual_sha", "ck_transfer_request_hash",
+		"ck_transfer_part_values", "ck_transfer_part_sha",
 	} {
 		var count int64
 		require.NoError(t, db.Raw("SELECT COUNT(*) FROM pg_constraint WHERE conname = ?", constraint).Scan(&count).Error)
@@ -124,6 +126,15 @@ func TestSQLiteKernelConstraintsRejectInvalidWrites(t *testing.T) {
 		require.NoError(t, db.Raw("SELECT COUNT(*) FROM filesystem.sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&count).Error)
 		require.Equal(t, int64(1), count, table)
 	}
+	for _, index := range []string{
+		"ix_transfer_sessions_workspace_status",
+		"ix_transfer_sessions_expires_at",
+		"ix_transfer_parts_session_offset",
+	} {
+		var count int64
+		require.NoError(t, db.Raw("SELECT COUNT(*) FROM filesystem.sqlite_master WHERE type = 'index' AND name = ?", index).Scan(&count).Error)
+		require.Equal(t, int64(1), count, index)
+	}
 
 	namespaceID, workspaceID := uuid.New(), uuid.New()
 	require.NoError(t, db.Create(&namespaceRow{ID: namespaceID, OrganizationID: uuid.New(), WorkspaceID: workspaceID, Status: "ACTIVE"}).Error)
@@ -154,17 +165,25 @@ func TestSQLiteKernelConstraintsRejectInvalidWrites(t *testing.T) {
 		nodeID, namespaceID, "FILE", "valid", "valid", "ACTIVE", uuid.New(),
 	).Error)
 	require.Error(t, db.Exec(
-		"INSERT INTO filesystem.transfer_sessions (id, workspace_id, namespace_id, target_name, protocol, expected_size, temporary_object_key, status, classification, idempotency_key, expires_at, version, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		uuid.New(), uuid.New(), namespaceID, "bad", "INVALID", 1, "temp", "INITIATED", "PUBLIC", "bad", time.Now().Add(time.Hour), 1, uuid.New(), time.Now(), time.Now(),
+		"INSERT INTO filesystem.transfer_sessions (id, workspace_id, namespace_id, target_name, protocol, expected_size, temporary_object_key, status, classification, idempotency_key, request_hash, expires_at, version, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		uuid.New(), uuid.New(), namespaceID, "bad", "INVALID", 1, "temp", "INITIATED", "PUBLIC", "bad", strings.Repeat("a", 64), time.Now().Add(time.Hour), 1, uuid.New(), time.Now(), time.Now(),
 	).Error)
 	sessionID := uuid.New()
 	require.NoError(t, db.Exec(
-		"INSERT INTO filesystem.transfer_sessions (id, workspace_id, namespace_id, target_name, protocol, expected_size, temporary_object_key, status, classification, idempotency_key, expires_at, version, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		sessionID, workspaceID, namespaceID, "valid", "DIRECT", 10, "temp", "INITIATED", "PUBLIC", "valid", time.Now().Add(time.Hour), 1, uuid.New(), time.Now(), time.Now(),
+		"INSERT INTO filesystem.transfer_sessions (id, workspace_id, namespace_id, target_name, protocol, expected_size, temporary_object_key, status, classification, idempotency_key, request_hash, expires_at, version, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		sessionID, workspaceID, namespaceID, "valid", "DIRECT", 10, "temp", "INITIATED", "PUBLIC", "valid", strings.Repeat("a", 64), time.Now().Add(time.Hour), 1, uuid.New(), time.Now(), time.Now(),
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO filesystem.transfer_parts (id, session_id, part_number, offset_bytes, size_bytes, etag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		uuid.New(), sessionID, 1, 0, 1, "etag-null-checksum", time.Now(), time.Now(),
+	).Error)
+	require.Error(t, db.Exec(
+		"INSERT INTO filesystem.transfer_parts (id, session_id, part_number, offset_bytes, size_bytes, checksum, etag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		uuid.New(), sessionID, 2, 1, 1, "", "etag-empty-checksum", time.Now(), time.Now(),
 	).Error)
 	require.Error(t, db.Exec(
 		"INSERT INTO filesystem.transfer_parts (id, session_id, part_number, offset_bytes, size_bytes, etag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		uuid.New(), sessionID, 1, 9, 2, "etag", time.Now(), time.Now(),
+		uuid.New(), sessionID, 3, 9, 2, "etag", time.Now(), time.Now(),
 	).Error)
 	require.Error(t, db.Exec("UPDATE filesystem.namespaces SET root_node_id = ? WHERE id = ?", uuid.New(), namespaceID).Error)
 	require.Error(t, db.Exec("UPDATE filesystem.nodes SET current_revision_id = ? WHERE id = ?", uuid.New(), nodeID).Error)

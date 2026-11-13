@@ -901,7 +901,7 @@ func (r *Repository) ListTransferParts(ctx context.Context, sessionID uuid.UUID)
 		part, err := model.NewTransferPart(model.TransferPartInput{
 			ID: row.ID, SessionID: row.SessionID, PartNumber: row.PartNumber,
 			Offset: row.Offset, Size: row.Size, SessionSize: session.ExpectedSize,
-			Checksum: row.Checksum, ETag: row.ETag,
+			Checksum: stringValueOrEmpty(row.Checksum), ETag: row.ETag,
 		})
 		if err != nil {
 			return nil, domain.ErrPersistence
@@ -925,7 +925,7 @@ func (r *Repository) UpsertTransferPart(ctx context.Context, part *model.Transfe
 		err = db.Where("session_id = ? AND part_number = ?", part.SessionID(), part.PartNumber()).First(&existing).Error
 		if err == nil {
 			if existing.Offset == part.Offset() && existing.Size == part.Size() &&
-				existing.Checksum == part.Checksum() && existing.ETag == part.ETag() {
+				stringValueOrEmpty(existing.Checksum) == part.Checksum() && existing.ETag == part.ETag() {
 				return nil
 			}
 			return domain.ErrTransferPartConflict
@@ -944,11 +944,15 @@ func (r *Repository) UpsertTransferPart(ctx context.Context, part *model.Transfe
 			return domain.ErrTransferPartOverlap
 		}
 		now := time.Now().UTC()
-		err = db.Create(&transferPartRow{
+		row := transferPartRow{
 			ID: part.ID(), SessionID: part.SessionID(), PartNumber: part.PartNumber(),
-			Offset: part.Offset(), Size: part.Size(), Checksum: part.Checksum(), ETag: part.ETag(),
+			Offset: part.Offset(), Size: part.Size(), ETag: part.ETag(),
 			CreatedAt: now, UpdatedAt: now,
-		}).Error
+		}
+		if checksum := part.Checksum(); checksum != "" {
+			row.Checksum = &checksum
+		}
+		err = db.Create(&row).Error
 		if isSQLiteBusy(err) {
 			return domain.ErrTransactionRetry
 		}
@@ -1025,7 +1029,8 @@ func transferRowFromModel(session *model.TransferSession, now time.Time) transfe
 		ExpectedSize: session.ExpectedSize(),
 		ProviderID:   session.ProviderID(), TemporaryObjectKey: session.TemporaryObjectKey(),
 		Status: session.Status(), Classification: session.Classification(), ErrorCode: session.ErrorCode(),
-		IdempotencyKey: session.IdempotencyKey(), ExpiresAt: session.ExpiresAt(), Version: session.Version(),
+		IdempotencyKey: session.IdempotencyKey(), RequestHash: session.RequestHash(),
+		ExpiresAt: model.CanonicalTransferExpiry(session.ExpiresAt()), Version: session.Version(),
 		CreatedBy: session.CreatedBy(), CreatedAt: now, UpdatedAt: now,
 	}
 	if size, ok := session.ActualSize(); ok {
@@ -1068,7 +1073,7 @@ func transferResult(row transferSessionRow, err error) (*model.TransferSession, 
 			ID: row.ID, WorkspaceID: row.WorkspaceID, NamespaceID: row.NamespaceID,
 			TargetParentID: row.TargetParentID, TargetName: row.TargetName, CreatedBy: row.CreatedBy,
 			Protocol: row.Protocol, ExpectedSize: row.ExpectedSize, ExpectedSHA256: stringValueOrEmpty(row.ExpectedSHA256),
-			IdempotencyKey: row.IdempotencyKey, TemporaryObjectKey: row.TemporaryObjectKey,
+			IdempotencyKey: row.IdempotencyKey, RequestHash: row.RequestHash, TemporaryObjectKey: row.TemporaryObjectKey,
 			ExpiresAt: row.ExpiresAt, ProviderID: row.ProviderID, Classification: row.Classification,
 		},
 		Status: row.Status, ActualSize: row.ActualSize, ActualSHA256: stringValueOrEmpty(row.ActualSHA256),

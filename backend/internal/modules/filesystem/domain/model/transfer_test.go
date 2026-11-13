@@ -20,6 +20,7 @@ func validTransferInput() TransferSessionInput {
 		ExpectedSize:       1024,
 		ExpectedSHA256:     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		IdempotencyKey:     "upload-1",
+		RequestHash:        "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
 		TemporaryObjectKey: "tmp/upload-1",
 		ExpiresAt:          time.Now().Add(time.Hour),
 		Classification:     TransferClassificationPublic,

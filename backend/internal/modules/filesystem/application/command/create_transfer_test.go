@@ -4,13 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
+	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	gormpostgres "gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	filesystemevent "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
@@ -112,7 +118,7 @@ func TestCreateTransferConcurrentSameKeyHasOneSideEffectSet(t *testing.T) {
 	internal, err := persistence.NewRepository(db).GetTransferByID(context.Background(), first.SessionID)
 	require.NoError(t, err)
 	require.NotEmpty(t, internal.TemporaryObjectKey())
-	require.Equal(t, cmd.ExpiresAt.UTC(), internal.ExpiresAt().UTC())
+	require.Equal(t, model.CanonicalTransferExpiry(cmd.ExpiresAt), internal.ExpiresAt().UTC())
 }
 
 func TestCreateTransferSameKeyDifferentParametersConflicts(t *testing.T) {
@@ -127,6 +133,95 @@ func TestCreateTransferSameKeyDifferentParametersConflicts(t *testing.T) {
 
 	require.ErrorIs(t, err, domain.ErrTransferIdempotencyConflict)
 	assertTransferSideEffectCounts(t, db, 1, 1, 1, 2)
+}
+
+func TestCreateTransferCanonicalizesExpiryToPostgresMicroseconds(t *testing.T) {
+	db, ns := newTransferTestDB(t)
+	cmd := transferFixture(ns)
+	cmd.ExpiresAt = time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond).Add(789 * time.Nanosecond)
+
+	first, err := newTransferHandler(db).Handle(context.Background(), cmd)
+	require.NoError(t, err)
+	cmd.ExpiresAt = cmd.ExpiresAt.UTC().Truncate(time.Microsecond).Add(999 * time.Nanosecond)
+	second, err := newTransferHandler(db).Handle(context.Background(), cmd)
+	require.NoError(t, err)
+
+	want := cmd.ExpiresAt.UTC().Truncate(time.Microsecond)
+	require.Equal(t, first.SessionID, second.SessionID)
+	require.Equal(t, want, first.ExpiresAt)
+	require.Equal(t, want, second.ExpiresAt)
+	var row struct {
+		ExpiresAt   time.Time
+		RequestHash string
+	}
+	require.NoError(t, db.Table("filesystem.transfer_sessions").Take(&row).Error)
+	require.Equal(t, want, row.ExpiresAt.UTC())
+	require.Len(t, row.RequestHash, 64)
+	assertTransferSideEffectCounts(t, db, 1, 1, 1, 1)
+}
+
+func TestCreateTransferReplaysAuthoritativeExpiredSession(t *testing.T) {
+	db, ns := newTransferTestDB(t)
+	cmd := transferFixture(ns)
+	cmd.ExpiresAt = time.Now().UTC().Add(30 * time.Millisecond).Truncate(time.Microsecond)
+	first, err := newTransferHandler(db).Handle(context.Background(), cmd)
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	second, err := newTransferHandler(db).Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	require.Equal(t, first, second)
+	assertTransferSideEffectCounts(t, db, 1, 1, 1, 1)
+
+	cmd.Size++
+	_, err = newTransferHandler(db).Handle(context.Background(), cmd)
+	require.ErrorIs(t, err, domain.ErrTransferIdempotencyConflict)
+	assertTransferSideEffectCounts(t, db, 1, 1, 1, 2)
+}
+
+func TestCreateTransferPostgresReplaysAuthoritativeExpiredSessionWhenConfigured(t *testing.T) {
+	db := openTransferPostgres(t)
+	require.NoError(t, persistence.AutoMigrate(db))
+	require.NoError(t, messagingpersistence.AutoMigrate(db))
+	require.NoError(t, audit.NewGormStore(db).AutoMigrate())
+	repo := persistence.NewRepository(db)
+	ns := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	require.NoError(t, repo.CreateNamespace(context.Background(), ns))
+	seedPutNamespaceRoot(t, repo, ns)
+	cmd := transferFixture(ns)
+	cmd.ExpiresAt = time.Now().UTC().Add(100 * time.Millisecond).Truncate(time.Microsecond).Add(789 * time.Nanosecond)
+
+	first, err := newTransferHandler(db).Handle(context.Background(), cmd)
+	require.NoError(t, err)
+	time.Sleep(150 * time.Millisecond)
+	cmd.ExpiresAt = cmd.ExpiresAt.UTC().Truncate(time.Microsecond).Add(999 * time.Nanosecond)
+	second, err := newTransferHandler(db).Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	require.Equal(t, first, second)
+	require.Equal(t, cmd.ExpiresAt.UTC().Truncate(time.Microsecond), second.ExpiresAt)
+	assertTransferSideEffectCounts(t, db, 1, 1, 1, 1)
+}
+
+func TestCreateTransferRejectsAuthorizationBoundToDifferentParent(t *testing.T) {
+	db, ns := newTransferTestDB(t)
+	repo := persistence.NewRepository(db)
+	otherParent, err := model.NewDirectory(ns.ID, uuid.New(), "other", *ns.RootNodeID)
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(context.Background(), otherParent))
+	cmd := transferFixture(ns)
+	require.Equal(t, *ns.RootNodeID, cmd.Authorization.ResourceID)
+	cmd.ParentID = &otherParent.ID
+
+	_, err = newTransferHandler(db).Handle(context.Background(), cmd)
+
+	require.ErrorIs(t, err, domain.ErrResourceDenied)
+	var detail string
+	require.NoError(t, db.Table("platform.audit_logs").Select("detail").Take(&detail).Error)
+	require.Contains(t, detail, `"decision":"DENY"`)
+	require.Contains(t, detail, `"reason":"authorization_scope_mismatch"`)
+	assertTransferSideEffectCounts(t, db, 0, 0, 0, 1)
 }
 
 func TestCreateTransferRollsBackSessionQuotaReservationAuditAndOutbox(t *testing.T) {
@@ -154,6 +249,7 @@ func TestCreateTransferRejectsCrossWorkspaceParentAndAuditsStableReason(t *testi
 	seedPutNamespaceRoot(t, repo, other)
 	cmd := transferFixture(ns)
 	cmd.ParentID = other.RootNodeID
+	cmd.Authorization.ResourceID = *other.RootNodeID
 
 	_, err := newTransferHandler(db).Handle(context.Background(), cmd)
 
@@ -204,7 +300,10 @@ func transferFixture(ns *model.Namespace) CreateTransfer {
 		Protocol: model.TransferProtocolMultipart, Size: 60,
 		SHA256: strings64("a"), Classification: model.TransferClassificationInternal,
 		IdempotencyKey: "upload-1", ExpiresAt: time.Now().UTC().Add(time.Hour),
-		ProviderID: uuid.New(), Authorization: Authorization{Allowed: true, TraceID: "trace-create"},
+		ProviderID: uuid.New(), Authorization: Authorization{
+			Allowed: true, TraceID: "trace-create", WorkspaceID: ns.WorkspaceID,
+			ResourceID: *ns.RootNodeID, Permission: model.ResourcePermissionWrite,
+		},
 	}
 }
 
@@ -271,4 +370,44 @@ func assertTransferSideEffectCounts(t *testing.T, db *gorm.DB, sessions, reserva
 		require.NoError(t, db.Table(table).Count(&count).Error, table)
 		require.Equal(t, want, count, table)
 	}
+}
+
+func openTransferPostgres(t *testing.T) *gorm.DB {
+	t.Helper()
+	dsn := os.Getenv("DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("DATABASE_DSN is not set")
+	}
+	admin, err := gorm.Open(gormpostgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	databaseName := "sparkops_g2_transfer_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if err := admin.Exec("CREATE DATABASE " + databaseName).Error; err != nil {
+		t.Skipf("cannot create isolated PostgreSQL test database: %v", err)
+	}
+	testDSN := dsn
+	if strings.Contains(dsn, "://") {
+		parsed, parseErr := url.Parse(dsn)
+		require.NoError(t, parseErr)
+		parsed.Path = "/" + databaseName
+		testDSN = parsed.String()
+	} else {
+		databaseSetting := regexp.MustCompile(`(?i)\b(?:dbname|database)\s*=\s*(?:'[^']*'|\S+)`)
+		if databaseSetting.MatchString(dsn) {
+			testDSN = databaseSetting.ReplaceAllString(dsn, "dbname="+databaseName)
+		} else {
+			testDSN = dsn + " dbname=" + databaseName
+		}
+	}
+	db, err := gorm.Open(gormpostgres.Open(testDSN), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		sqlDB, dbErr := db.DB()
+		require.NoError(t, dbErr)
+		require.NoError(t, sqlDB.Close())
+		require.NoError(t, admin.Exec("DROP DATABASE "+databaseName).Error)
+		adminDB, adminErr := admin.DB()
+		require.NoError(t, adminErr)
+		require.NoError(t, adminDB.Close())
+	})
+	return db
 }

@@ -143,7 +143,7 @@ func (commandDedupRow) TableName() string { return "filesystem.command_dedup" }
 
 type transferSessionRow struct {
 	ID                 uuid.UUID                    `gorm:"column:id;primaryKey;type:uuid"`
-	WorkspaceID        uuid.UUID                    `gorm:"column:workspace_id;not null;type:uuid;uniqueIndex:ux_transfer_idempotency"`
+	WorkspaceID        uuid.UUID                    `gorm:"column:workspace_id;not null;type:uuid;uniqueIndex:ux_transfer_idempotency;index:ix_transfer_sessions_workspace_status,priority:1"`
 	NamespaceID        uuid.UUID                    `gorm:"column:namespace_id;not null;type:uuid"`
 	TargetParentID     *uuid.UUID                   `gorm:"column:target_parent_id;type:uuid"`
 	TargetName         string                       `gorm:"column:target_name;not null"`
@@ -154,7 +154,7 @@ type transferSessionRow struct {
 	ActualSHA256       *string                      `gorm:"column:actual_sha256;size:64"`
 	ProviderID         *uuid.UUID                   `gorm:"column:provider_id;type:uuid"`
 	TemporaryObjectKey string                       `gorm:"column:temporary_object_key;not null"`
-	Status             model.TransferStatus         `gorm:"column:status;not null;type:varchar(24)"`
+	Status             model.TransferStatus         `gorm:"column:status;not null;type:varchar(24);index:ix_transfer_sessions_workspace_status,priority:2"`
 	Classification     model.TransferClassification `gorm:"column:classification;not null;type:varchar(16)"`
 	ScanClean          *bool                        `gorm:"column:scan_clean"`
 	ScanThreatName     string                       `gorm:"column:scan_threat_name"`
@@ -163,7 +163,8 @@ type transferSessionRow struct {
 	ScanCompletedAt    *time.Time                   `gorm:"column:scan_completed_at"`
 	ErrorCode          string                       `gorm:"column:error_code"`
 	IdempotencyKey     string                       `gorm:"column:idempotency_key;not null;uniqueIndex:ux_transfer_idempotency"`
-	ExpiresAt          time.Time                    `gorm:"column:expires_at;not null"`
+	RequestHash        string                       `gorm:"column:request_hash;not null;size:64"`
+	ExpiresAt          time.Time                    `gorm:"column:expires_at;not null;index:ix_transfer_sessions_expires_at"`
 	Version            int64                        `gorm:"column:version;not null"`
 	CreatedBy          uuid.UUID                    `gorm:"column:created_by;not null;type:uuid"`
 	CreatedAt          time.Time                    `gorm:"column:created_at;not null"`
@@ -174,11 +175,11 @@ func (transferSessionRow) TableName() string { return "filesystem.transfer_sessi
 
 type transferPartRow struct {
 	ID         uuid.UUID `gorm:"column:id;primaryKey;type:uuid"`
-	SessionID  uuid.UUID `gorm:"column:session_id;not null;type:uuid;uniqueIndex:ux_transfer_part_number"`
+	SessionID  uuid.UUID `gorm:"column:session_id;not null;type:uuid;uniqueIndex:ux_transfer_part_number;index:ix_transfer_parts_session_offset,priority:1"`
 	PartNumber int       `gorm:"column:part_number;not null;uniqueIndex:ux_transfer_part_number"`
-	Offset     int64     `gorm:"column:offset_bytes;not null"`
+	Offset     int64     `gorm:"column:offset_bytes;not null;index:ix_transfer_parts_session_offset,priority:2"`
 	Size       int64     `gorm:"column:size_bytes;not null"`
-	Checksum   string    `gorm:"column:checksum;size:64"`
+	Checksum   *string   `gorm:"column:checksum;size:64"`
 	ETag       string    `gorm:"column:etag;not null"`
 	CreatedAt  time.Time `gorm:"column:created_at;not null"`
 	UpdatedAt  time.Time `gorm:"column:updated_at;not null"`
