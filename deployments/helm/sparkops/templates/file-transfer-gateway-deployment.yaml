@@ -51,7 +51,7 @@ spec:
               containerPort: 8082
           env:
             - name: FILESYSTEM_MAX_FILE_BYTES
-              value: {{ .Values.filesystem.maxFileBytes | quote }}
+              value: {{ .Values.filesystem.maxFileBytes | printf "%.0f" | quote }}
           envFrom:
             - secretRef:
                 name: {{ include "sparkops.filesystem.secretName" . }}

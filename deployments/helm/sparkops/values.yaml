@@ -79,12 +79,12 @@ filesystem:
     existingClaim: ""
   networkPolicy:
     enabled: true
-    ingressNamespaceSelector:
-      kubernetes.io/metadata.name: ingress-nginx
+    # External DB, Redis, RabbitMQ, object storage, and scanner. DNS is 53.
     dependencyPorts:
       - 53
       - 5432
       - 5672
+      - 6379
       - 9000
       - 3310
 

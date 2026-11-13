@@ -7,6 +7,8 @@ metadata:
     {{- include "sparkops.labels" . | nindent 4 }}
 spec:
   podSelector:
+    matchLabels:
+      {{- include "sparkops.selectorLabels" . | nindent 6 }}
     matchExpressions:
       - key: app.kubernetes.io/component
         operator: In
@@ -38,6 +40,9 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "sparkops.api.selectorLabels" . | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "sparkops.web.selectorLabels" . | nindent 14 }}
       ports:
         - protocol: TCP
           port: 8082
@@ -52,6 +57,7 @@ spec:
         {{- end }}
         - protocol: UDP
           port: 53
+{{- if .Values.sftpGateway.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -68,11 +74,7 @@ spec:
     - Ingress
     - Egress
   ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              {{- toYaml .Values.filesystem.networkPolicy.ingressNamespaceSelector | nindent 14 }}
-      ports:
+    - ports:
         - protocol: TCP
           port: 2022
   egress:
@@ -86,6 +88,7 @@ spec:
         {{- end }}
         - protocol: UDP
           port: 53
+{{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -95,6 +98,8 @@ metadata:
     {{- include "sparkops.labels" . | nindent 4 }}
 spec:
   podSelector:
+    matchLabels:
+      {{- include "sparkops.selectorLabels" . | nindent 6 }}
     matchExpressions:
       - key: app.kubernetes.io/component
         operator: In
