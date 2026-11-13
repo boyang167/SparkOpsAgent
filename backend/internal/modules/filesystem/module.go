@@ -69,6 +69,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	resourceAuthorizer := resourceauth.NewService(repo, func(ctx context.Context, workspaceID, actorID uuid.UUID) (bool, error) {
 		return c.PermissionChecker.HasPermission(ctx, kernel.WorkspaceID{UUID: workspaceID}, kernel.MemberID{UUID: actorID}, authz.PermFileAdmin)
 	})
+	_ = resourceauth.NewGrantService(repo, resourceAuthorizer, c.Transactor, c.EventBus, c.AuditLogger)
 	createNamespace := command.NewCreateNamespaceHandler(repo, c.Transactor, c.EventBus, c.AuditLogger)
 	if err := c.EventBus.Subscribe(
 		integration.EventWorkspaceCreated,

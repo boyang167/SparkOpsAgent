@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -8,6 +9,35 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestPostgresFallbackConstraintsMatchKernelInvariants(t *testing.T) {
+	sql := strings.Join(postgresFallbackConstraints, "\n")
+	for _, invariant := range []string{
+		"(dedup_domain, sha256, size)", "(namespace_id, normalized_name)", "(namespace_id, parent_id, normalized_name)",
+		"(node_id, revision_no)", "(blob_id, provider_id, object_key)", "fk_nodes_parent_namespace",
+		"fk_nodes_current_revision", "fk_namespaces_root_node", "effect IN ('ALLOW','DENY')",
+	} {
+		require.Contains(t, sql, invariant)
+	}
+}
+
+func TestPostgresFallbackConstraintCatalog(t *testing.T) {
+	db := openFilesystemPostgres(t)
+	require.NoError(t, AutoMigrate(db))
+	for _, index := range []string{
+		"ux_filesystem_nodes_root_name", "ux_filesystem_nodes_child_name", "ux_filesystem_blobs_dedup",
+		"ux_filesystem_revisions_node_no", "ux_filesystem_replicas_identity", "ux_filesystem_grants_identity",
+	} {
+		var count int64
+		require.NoError(t, db.Raw("SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'filesystem' AND indexname = ?", index).Scan(&count).Error)
+		require.Equal(t, int64(1), count, index)
+	}
+	for _, constraint := range []string{"fk_nodes_parent_namespace", "fk_nodes_current_revision", "fk_namespaces_root_node", "ck_filesystem_grant_values"} {
+		var count int64
+		require.NoError(t, db.Raw("SELECT COUNT(*) FROM pg_constraint WHERE conname = ?", constraint).Scan(&count).Error)
+		require.Equal(t, int64(1), count, constraint)
+	}
+}
 
 type postgresNamedSQLite struct {
 	gorm.Dialector

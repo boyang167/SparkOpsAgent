@@ -42,6 +42,7 @@ func NewRenameNodeHandler(repo repository.FilesystemRepository, tx postgres.Tran
 
 func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) (err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ctx = withResourceID(ctx, cmd.NodeID.String())
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename")
 	defer finishAudit(&err)
 	if !cmd.Allowed {
@@ -133,6 +134,12 @@ func NewMoveNodeHandler(repo repository.FilesystemRepository, tx postgres.Transa
 
 func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) (err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ctx = withResourceID(ctx, cmd.NodeID.String())
+	targetParentID := ""
+	if cmd.NewParentID != nil {
+		targetParentID = cmd.NewParentID.String()
+	}
+	ctx = withAuditDetail(ctx, map[string]any{"source_node_id": cmd.NodeID.String(), "target_parent_id": targetParentID})
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move")
 	defer finishAudit(&err)
 	if !cmd.Allowed {
@@ -224,6 +231,7 @@ func NewTrashNodeHandler(repo repository.FilesystemRepository, tx postgres.Trans
 
 func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) (err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ctx = withResourceID(ctx, cmd.NodeID.String())
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash")
 	defer finishAudit(&err)
 	if !cmd.Allowed {
@@ -250,14 +258,15 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) (err error
 		if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
 			return domain.ErrRootMutation
 		}
-		if node.State != model.NodeStateTrashed {
-			if err := h.repo.TrashNode(txCtx, node.ID); err != nil {
+		if node.State == model.NodeStateTrashed || node.State == model.NodeStatePurged {
+			return domain.ErrNodeStateConflict
+		}
+		if err := h.repo.TrashNode(txCtx, node.ID); err != nil {
+			return err
+		}
+		if h.bus != nil {
+			if err := h.bus.Publish(txCtx, event.NodeTrashed{BaseEvent: events.NewBaseEvent(event.NodeTrashedName), NodeID: node.ID}); err != nil {
 				return err
-			}
-			if h.bus != nil {
-				if err := h.bus.Publish(txCtx, event.NodeTrashed{BaseEvent: events.NewBaseEvent(event.NodeTrashedName), NodeID: node.ID}); err != nil {
-					return err
-				}
 			}
 		}
 		if err := completeMutation(txCtx, h.repo, cmd.CommandID, &cmd.NodeID, nil); err != nil {
@@ -296,6 +305,8 @@ func NewRestoreRevisionHandler(repo repository.FilesystemRepository, tx postgres
 
 func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision) (err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ctx = withResourceID(ctx, cmd.NodeID.String())
+	ctx = withAuditDetail(ctx, map[string]any{"node_id": cmd.NodeID.String(), "revision_id": cmd.RevisionID.String()})
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.revision.restore")
 	defer finishAudit(&err)
 	if !cmd.Allowed {
@@ -318,7 +329,6 @@ func (h *RestoreRevisionHandler) Handle(ctx context.Context, cmd RestoreRevision
 		if _, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID); err != nil {
 			return err
 		}
-		txCtx = withResourceID(txCtx, cmd.RevisionID.String())
 		if _, err := h.repo.GetRevision(txCtx, cmd.NodeID, cmd.RevisionID); err != nil {
 			return err
 		}

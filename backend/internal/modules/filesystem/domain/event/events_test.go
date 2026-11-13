@@ -49,16 +49,19 @@ func TestRegisterEncodesAndDecodesVersionedFileEvents(t *testing.T) {
 }
 
 func TestRegisterCoversEveryG1MutationEvent(t *testing.T) {
+	require.Equal(t, "filesystem.file.moved.v1", NodeMovedName)
+	require.Equal(t, "filesystem.file.trashed.v1", NodeTrashedName)
 	registry := events.NewRegistry()
 	require.NoError(t, Register(registry))
 	nodeID := uuid.New()
 	for name, event := range map[string]events.Event{
-		DirectoryCreatedName: DirectoryCreated{BaseEvent: events.NewBaseEvent(DirectoryCreatedName), NodeID: nodeID},
-		NodeRenamedName:      NodeRenamed{BaseEvent: events.NewBaseEvent(NodeRenamedName), NodeID: nodeID},
-		NodeMovedName:        NodeMoved{BaseEvent: events.NewBaseEvent(NodeMovedName), NodeID: nodeID},
-		NodeCopiedName:       NodeCopied{BaseEvent: events.NewBaseEvent(NodeCopiedName), NodeID: nodeID},
-		NodeTrashedName:      NodeTrashed{BaseEvent: events.NewBaseEvent(NodeTrashedName), NodeID: nodeID},
-		RevisionRestoredName: RevisionRestored{BaseEvent: events.NewBaseEvent(RevisionRestoredName), NodeID: nodeID},
+		DirectoryCreatedName:  DirectoryCreated{BaseEvent: events.NewBaseEvent(DirectoryCreatedName), NodeID: nodeID},
+		NodeRenamedName:       NodeRenamed{BaseEvent: events.NewBaseEvent(NodeRenamedName), NodeID: nodeID},
+		NodeMovedName:         NodeMoved{BaseEvent: events.NewBaseEvent(NodeMovedName), NodeID: nodeID},
+		NodeCopiedName:        NodeCopied{BaseEvent: events.NewBaseEvent(NodeCopiedName), NodeID: nodeID},
+		NodeTrashedName:       NodeTrashed{BaseEvent: events.NewBaseEvent(NodeTrashedName), NodeID: nodeID},
+		RevisionRestoredName:  RevisionRestored{BaseEvent: events.NewBaseEvent(RevisionRestoredName), NodeID: nodeID},
+		PermissionChangedName: PermissionChanged{BaseEvent: events.NewBaseEvent(PermissionChangedName), NodeID: nodeID},
 	} {
 		envelope, err := registry.Encode(t.Context(), event)
 		require.NoError(t, err, name)

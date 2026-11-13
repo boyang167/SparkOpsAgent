@@ -45,6 +45,7 @@ func authorizationDenied(reason string) error { return authorizationError{reason
 
 type traceContextKey struct{}
 type resourceContextKey struct{}
+type auditDetailContextKey struct{}
 type auditStateContextKey struct{}
 
 type mutationAuditState struct {
@@ -58,6 +59,10 @@ func withTraceID(ctx context.Context, traceID string) context.Context {
 
 func withResourceID(ctx context.Context, resourceID string) context.Context {
 	return context.WithValue(ctx, resourceContextKey{}, resourceID)
+}
+
+func withAuditDetail(ctx context.Context, detail map[string]any) context.Context {
+	return context.WithValue(ctx, auditDetailContextKey{}, detail)
 }
 
 type auditPort interface {
@@ -116,6 +121,11 @@ func logMutation(ctx context.Context, logger auditPort, actor, organization uuid
 	}
 	if reason != nil {
 		detail["reason"] = reasonCode(reason)
+	}
+	if extra, ok := ctx.Value(auditDetailContextKey{}).(map[string]any); ok {
+		for key, value := range extra {
+			detail[key] = value
+		}
 	}
 	if state, ok := ctx.Value(auditStateContextKey{}).(*mutationAuditState); ok {
 		state.attempted = true

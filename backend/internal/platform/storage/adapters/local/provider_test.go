@@ -71,6 +71,12 @@ func TestLocalProviderRejectsRootReplacementWithoutTouchingOutside(t *testing.T)
 	replaced := root + "-old"
 	renameErr := os.Rename(root, replaced)
 	if renameErr != nil {
+		if runtime.GOOS == "windows" {
+			require.Error(t, renameErr)
+			_, statErr := os.Stat(filepath.Join(outside, "escape"))
+			require.ErrorIs(t, statErr, os.ErrNotExist)
+			return
+		}
 		t.Skipf("root replacement is blocked by platform root guard: %v", renameErr)
 	}
 	defer os.Rename(replaced, root)

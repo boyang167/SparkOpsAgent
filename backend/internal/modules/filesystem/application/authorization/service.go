@@ -13,6 +13,7 @@ import (
 
 type Repository interface {
 	GetNode(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
+	GetNodeIncludingTrashed(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
 	ListResourceGrants(context.Context, uuid.UUID, uuid.UUID, model.ResourcePermission, time.Time) ([]model.ResourceGrant, error)
 }
 
@@ -42,23 +43,39 @@ func NewService(repo Repository, adminBypass AdminBypass) *Service {
 }
 
 func (s *Service) Authorize(ctx context.Context, request Request) Decision {
-	node, err := s.repo.GetNode(ctx, request.NamespaceID, request.NodeID)
+	getNode := s.repo.GetNode
+	if request.Permission == model.ResourcePermissionDelete {
+		getNode = s.repo.GetNodeIncludingTrashed
+	}
+	node, err := getNode(ctx, request.NamespaceID, request.NodeID)
 	if err != nil {
 		return Decision{Reason: "resource_not_found"}
 	}
 	owner := node.OwnerID == request.ActorID
 	allowed := false
+	exactDeny := false
+	adminDeny := false
 	for current := node; current != nil; {
-		grants, grantErr := s.repo.ListResourceGrants(ctx, current.ID, request.ActorID, request.Permission, s.now())
-		if grantErr != nil {
-			return Decision{Reason: "authorization_unavailable"}
+		permissions := []model.ResourcePermission{request.Permission}
+		if request.Permission != model.ResourcePermissionAdmin {
+			permissions = append(permissions, model.ResourcePermissionAdmin)
 		}
-		for _, grant := range grants {
-			if grant.Effect == model.GrantEffectDeny {
-				return Decision{Reason: "explicit_deny"}
+		for _, permission := range permissions {
+			grants, grantErr := s.repo.ListResourceGrants(ctx, current.ID, request.ActorID, permission, s.now())
+			if grantErr != nil {
+				return Decision{Reason: "authorization_unavailable"}
 			}
-			if grant.Effect == model.GrantEffectAllow {
-				allowed = true
+			for _, grant := range grants {
+				if grant.Effect == model.GrantEffectDeny {
+					if grant.Permission == model.ResourcePermissionAdmin {
+						adminDeny = true
+					} else {
+						exactDeny = true
+					}
+				}
+				if grant.Effect == model.GrantEffectAllow {
+					allowed = true
+				}
 			}
 		}
 		if current.ParentID == nil {
@@ -71,6 +88,12 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 		if err != nil {
 			return Decision{Reason: "authorization_unavailable"}
 		}
+	}
+	if adminDeny {
+		return Decision{Reason: "admin_deny"}
+	}
+	if exactDeny {
+		return Decision{Reason: "explicit_deny"}
 	}
 	if owner {
 		return Decision{Allowed: true, Reason: "owner"}

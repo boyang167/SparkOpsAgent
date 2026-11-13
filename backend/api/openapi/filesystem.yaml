@@ -230,8 +230,8 @@ paths:
         - $ref: "#/components/parameters/NodeID"
         - $ref: "#/components/parameters/IdempotencyKey"
       responses:
-        "200":
-          $ref: "#/components/responses/MutationOK"
+        "204":
+          description: Node moved to trash
         "400":
           $ref: "#/components/responses/InvalidRequest"
         "401":

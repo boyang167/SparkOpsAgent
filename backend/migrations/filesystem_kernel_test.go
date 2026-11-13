@@ -28,7 +28,7 @@ func TestFilesystemKernelMigrationDefinesCoreTablesAndInvariants(t *testing.T) {
 	require.Contains(t, up, "CHECK (size >= 0)")
 	require.Contains(t, up, "verified_at TIMESTAMPTZ")
 	require.Contains(t, up, "effect VARCHAR(8) NOT NULL CHECK (effect IN ('ALLOW','DENY'))")
-	require.Contains(t, up, "CHECK (permission IN ('READ','WRITE','DELETE','ADMIN'))")
+	require.Contains(t, up, "CHECK (permission IN ('READ','WRITE','DELETE','SHARE','ADMIN'))")
 	require.Contains(t, up, "REFERENCES filesystem.file_revisions(id)")
 	require.Contains(t, down, "DROP CONSTRAINT IF EXISTS fk_namespaces_root_node")
 	require.Contains(t, down, "DROP CONSTRAINT IF EXISTS fk_nodes_parent_namespace")

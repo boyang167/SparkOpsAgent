@@ -17,6 +17,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
@@ -44,6 +45,13 @@ type memberStub bool
 
 func (s memberStub) IsWorkspaceMember(context.Context, kernel.WorkspaceID, kernel.MemberID) (bool, error) {
 	return bool(s), nil
+}
+
+type auditStub struct{ entries []audit.Entry }
+
+func (s *auditStub) Log(_ context.Context, entry audit.Entry) error {
+	s.entries = append(s.entries, entry)
+	return nil
 }
 
 func TestCreateDirectoryRequiresMembershipPermissionAndIdempotencyKey(t *testing.T) {
@@ -118,6 +126,71 @@ func TestListFilesDeniesWhenResourceAuthorizerDeniesAfterRBAC(t *testing.T) {
 	router.ServeHTTP(res, req)
 	require.Equal(t, http.StatusForbidden, res.Code, res.Body.String())
 	require.Contains(t, res.Body.String(), "FILESYSTEM_RESOURCE_FORBIDDEN")
+}
+
+func TestListFilesFiltersDeniedChildrenAndFillsAcrossPages(t *testing.T) {
+	nsID, rootID := uuid.New(), uuid.New()
+	ids := []uuid.UUID{
+		uuid.MustParse("00000000-0000-0000-0000-000000000001"),
+		uuid.MustParse("00000000-0000-0000-0000-000000000002"),
+		uuid.MustParse("00000000-0000-0000-0000-000000000003"),
+		uuid.MustParse("00000000-0000-0000-0000-000000000004"),
+		uuid.MustParse("00000000-0000-0000-0000-000000000005"),
+	}
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		listChildren: func(_ context.Context, _ uuid.UUID, _ *uuid.UUID, _ int, cursor string) ([]model.Node, string, error) {
+			if cursor == "" {
+				return []model.Node{{ID: ids[0], Name: "deny-1"}, {ID: ids[1], Name: "allow-2"}, {ID: ids[2], Name: "deny-3"}}, ids[2].String(), nil
+			}
+			return []model.Node{{ID: ids[3], Name: "allow-4"}, {ID: ids[4], Name: "deny-5"}}, "", nil
+		},
+		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			if request.NodeID == rootID || request.NodeID == ids[1] || request.NodeID == ids[3] {
+				return resourceauth.Decision{Allowed: true}
+			}
+			return resourceauth.Decision{Reason: "explicit_deny"}
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileRead: true}}, h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID.String()+"/files?limit=2", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), "allow-2")
+	require.Contains(t, res.Body.String(), "allow-4")
+	require.NotContains(t, res.Body.String(), "deny-")
+	require.Contains(t, res.Body.String(), ids[3].String())
+}
+
+func TestListFilesReturnsEmptyWhenAllChildrenDenied(t *testing.T) {
+	nsID, rootID, deniedID := uuid.New(), uuid.New(), uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Node, string, error) {
+			return []model.Node{{ID: deniedID, Name: "hidden"}}, "", nil
+		},
+		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			if request.NodeID == rootID {
+				return resourceauth.Decision{Allowed: true}
+			}
+			return resourceauth.Decision{Reason: "explicit_deny"}
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileRead: true}}, h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID.String()+"/files?limit=2", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusOK, res.Code)
+	require.NotContains(t, res.Body.String(), "hidden")
+	require.Contains(t, res.Body.String(), `"items":[]`)
 }
 
 func TestCreateDirectoryRejectsUnknownIdentityAndOversizedBodies(t *testing.T) {
@@ -292,6 +365,26 @@ func TestMiddlewareShortCircuitOrder(t *testing.T) {
 	require.Equal(t, 1, entitlementCalls)
 }
 
+func TestRBACMiddlewareDenialAuditIncludesOrganization(t *testing.T) {
+	organizationID := uuid.New()
+	logs := &auditStub{}
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: uuid.New(), OrganizationID: organizationID, WorkspaceID: workspaceID}, nil
+		},
+		audit: logs,
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{}}, h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID.String()+"/files", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusForbidden, res.Code)
+	require.Len(t, logs.entries, 1)
+	require.NotNil(t, logs.entries[0].OrgID)
+	require.Equal(t, organizationID, logs.entries[0].OrgID.UUID)
+}
+
 func TestListFilesDefaultsToNamespaceRootAndNeverReturnsHiddenRoot(t *testing.T) {
 	rootID, childID, nsID := uuid.New(), uuid.New(), uuid.New()
 	var capturedParent *uuid.UUID
@@ -368,6 +461,46 @@ func TestMutationJSONAndEmptyBodyContracts(t *testing.T) {
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
+}
+
+func TestTrashHTTPReplayReturnsNoContentAndConflictsOnSameKeyDifferentTarget(t *testing.T) {
+	nsID, rootID, firstNode, secondNode := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	claims := map[uuid.UUID]uuid.UUID{}
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, OrganizationID: uuid.New(), WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		authorizeResource: func(context.Context, resourceauth.Request) resourceauth.Decision {
+			return resourceauth.Decision{Allowed: true, Reason: "owner"}
+		},
+		trashNode: func(_ context.Context, cmd command.TrashNode) error {
+			if !cmd.Allowed {
+				return domain.ErrResourceDenied
+			}
+			if claimed, ok := claims[cmd.CommandID]; ok && claimed != cmd.NodeID {
+				return domain.ErrIdempotencyConflict
+			}
+			claims[cmd.CommandID] = cmd.NodeID
+			return nil
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileDelete: true}}, h)
+	send := func(nodeID uuid.UUID, key string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/workspaces/"+wsID.String()+"/files/"+nodeID.String(), nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Idempotency-Key", key)
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		return res
+	}
+	require.Equal(t, http.StatusNoContent, send(firstNode, "same").Code)
+	require.Equal(t, http.StatusNoContent, send(firstNode, "same").Code)
+	require.Equal(t, http.StatusConflict, send(secondNode, "same").Code)
+
+	h.authorizeResource = func(context.Context, resourceauth.Request) resourceauth.Decision {
+		return resourceauth.Decision{Reason: "default_deny"}
+	}
+	require.Equal(t, http.StatusForbidden, send(firstNode, "other").Code)
 }
 
 func TestUUIDsMustBeCanonicalNonNil(t *testing.T) {

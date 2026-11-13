@@ -25,6 +25,10 @@ func (r grantRepositoryStub) GetNode(_ context.Context, namespaceID, nodeID uuid
 	return node, nil
 }
 
+func (r grantRepositoryStub) GetNodeIncludingTrashed(ctx context.Context, namespaceID, nodeID uuid.UUID) (*model.Node, error) {
+	return r.GetNode(ctx, namespaceID, nodeID)
+}
+
 func (r grantRepositoryStub) ListResourceGrants(_ context.Context, nodeID, granteeID uuid.UUID, permission model.ResourcePermission, at time.Time) ([]model.ResourceGrant, error) {
 	var result []model.ResourceGrant
 	for _, grant := range r.grants[nodeID] {
@@ -68,6 +72,32 @@ func TestAuthorizeExplicitDenyWinsAcrossAncestors(t *testing.T) {
 
 	require.False(t, decision.Allowed)
 	require.Equal(t, "explicit_deny", decision.Reason)
+}
+
+func TestAuthorizeAdminGrantCoversEveryPermissionAndAdminDenyWins(t *testing.T) {
+	namespaceID, owner, actor := uuid.New(), uuid.New(), uuid.New()
+	root := node(namespaceID, uuid.Nil, owner)
+	child := node(namespaceID, root.ID, owner)
+	repo := grantRepositoryStub{
+		nodes: map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
+		grants: map[uuid.UUID][]model.ResourceGrant{
+			root.ID: {{NodeID: root.ID, GranteeID: actor, Permission: model.ResourcePermissionAdmin, Effect: model.GrantEffectAllow}},
+		},
+	}
+	service := NewService(repo, nil)
+	for _, permission := range []model.ResourcePermission{
+		model.ResourcePermissionRead, model.ResourcePermissionWrite, model.ResourcePermissionDelete,
+		model.ResourcePermissionShare, model.ResourcePermissionAdmin,
+	} {
+		require.True(t, service.Authorize(context.Background(), Request{ActorID: actor, NamespaceID: namespaceID, NodeID: child.ID, Permission: permission}).Allowed, permission)
+	}
+	repo.grants[child.ID] = []model.ResourceGrant{
+		{NodeID: child.ID, GranteeID: actor, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow},
+		{NodeID: child.ID, GranteeID: actor, Permission: model.ResourcePermissionAdmin, Effect: model.GrantEffectDeny},
+	}
+	decision := NewService(repo, nil).Authorize(context.Background(), Request{ActorID: actor, NamespaceID: namespaceID, NodeID: child.ID, Permission: model.ResourcePermissionRead})
+	require.False(t, decision.Allowed)
+	require.Equal(t, "admin_deny", decision.Reason)
 }
 
 func TestAuthorizeOwnerAdminDefaultDenyAndNamespaceBoundary(t *testing.T) {

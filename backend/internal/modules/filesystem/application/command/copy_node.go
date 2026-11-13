@@ -61,6 +61,12 @@ func NewCopyNodeHandler(repo repository.FilesystemRepository, tx postgres.Transa
 
 func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.Node, err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
+	ctx = withResourceID(ctx, cmd.SourceNodeID.String())
+	targetParentID := ""
+	if cmd.ParentID != nil {
+		targetParentID = cmd.ParentID.String()
+	}
+	ctx = withAuditDetail(ctx, map[string]any{"source_node_id": cmd.SourceNodeID.String(), "target_parent_id": targetParentID})
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.copy")
 	defer finishAudit(&err)
 	if !cmd.Allowed {

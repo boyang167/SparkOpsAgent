@@ -11,10 +11,11 @@ const (
 	FileRevisionCreatedName = "filesystem.file.revision-created.v1"
 	DirectoryCreatedName    = "filesystem.directory.created.v1"
 	NodeRenamedName         = "filesystem.node.renamed.v1"
-	NodeMovedName           = "filesystem.node.moved.v1"
+	NodeMovedName           = "filesystem.file.moved.v1"
 	NodeCopiedName          = "filesystem.node.copied.v1"
-	NodeTrashedName         = "filesystem.node.trashed.v1"
+	NodeTrashedName         = "filesystem.file.trashed.v1"
 	RevisionRestoredName    = "filesystem.revision.restored.v1"
+	PermissionChangedName   = "filesystem.file.permission-changed.v1"
 )
 
 type FileCreated struct {
@@ -66,6 +67,13 @@ type RevisionRestored struct {
 	RevisionID uuid.UUID `json:"revision_id"`
 }
 
+type PermissionChanged struct {
+	events.BaseEvent
+	NodeID  uuid.UUID `json:"node_id"`
+	GrantID uuid.UUID `json:"grant_id"`
+	Action  string    `json:"action"`
+}
+
 func Register(registry *events.Registry) error {
 	if err := events.RegisterJSON[FileCreated](
 		registry,
@@ -105,6 +113,9 @@ func Register(registry *events.Registry) error {
 		},
 		func() error {
 			return registerNodeEvent(registry, RevisionRestoredName, func(event RevisionRestored) uuid.UUID { return event.NodeID })
+		},
+		func() error {
+			return registerNodeEvent(registry, PermissionChangedName, func(event PermissionChanged) uuid.UUID { return event.NodeID })
 		},
 	}
 	for _, register := range registrations {

@@ -48,6 +48,9 @@ type FilesystemRepository interface {
 	GetBlob(context.Context, uuid.UUID) (*model.Blob, error)
 	GetAvailableReplica(context.Context, uuid.UUID, uuid.UUID) (*model.StorageReplica, error)
 	ListResourceGrants(context.Context, uuid.UUID, uuid.UUID, model.ResourcePermission, time.Time) ([]model.ResourceGrant, error)
+	CreateResourceGrant(context.Context, model.ResourceGrant) error
+	RevokeResourceGrant(context.Context, uuid.UUID, uuid.UUID) error
+	ListNodeResourceGrants(context.Context, uuid.UUID) ([]model.ResourceGrant, error)
 	ApplyQuotaUsage(context.Context, uuid.UUID, int64, int64) error
 	RenameNode(context.Context, uuid.UUID, string) error
 	MoveNodeSafely(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID, string) error

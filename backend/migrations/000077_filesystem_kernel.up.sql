@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS filesystem.resource_grants (
     id UUID PRIMARY KEY,
     node_id UUID NOT NULL REFERENCES filesystem.nodes(id),
     grantee_id UUID NOT NULL,
-    permission VARCHAR(32) NOT NULL CHECK (permission IN ('READ','WRITE','DELETE','ADMIN')),
+    permission VARCHAR(32) NOT NULL CHECK (permission IN ('READ','WRITE','DELETE','SHARE','ADMIN')),
     effect VARCHAR(8) NOT NULL CHECK (effect IN ('ALLOW','DENY')),
     expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

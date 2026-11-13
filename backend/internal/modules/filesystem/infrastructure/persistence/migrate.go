@@ -5,6 +5,25 @@ import (
 	"gorm.io/gorm"
 )
 
+var postgresFallbackConstraints = []string{
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_id_namespace ON filesystem.nodes(id, namespace_id)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_root_name ON filesystem.nodes(namespace_id, normalized_name) WHERE parent_id IS NULL`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_child_name ON filesystem.nodes(namespace_id, parent_id, normalized_name) WHERE parent_id IS NOT NULL`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_blobs_dedup ON filesystem.blobs(dedup_domain, sha256, size)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_revisions_node_no ON filesystem.file_revisions(node_id, revision_no)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_revisions_id_node ON filesystem.file_revisions(id, node_id)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_replicas_identity ON filesystem.storage_replicas(blob_id, provider_id, object_key)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_grants_identity ON filesystem.resource_grants(node_id, grantee_id, permission, effect)`,
+	`DO $$ BEGIN ALTER TABLE filesystem.nodes ADD CONSTRAINT fk_nodes_parent_namespace FOREIGN KEY (parent_id, namespace_id) REFERENCES filesystem.nodes(id, namespace_id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.nodes ADD CONSTRAINT fk_nodes_current_revision FOREIGN KEY (current_revision_id, id) REFERENCES filesystem.file_revisions(id, node_id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.namespaces ADD CONSTRAINT fk_namespaces_root_node FOREIGN KEY (root_node_id, id) REFERENCES filesystem.nodes(id, namespace_id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.nodes ADD CONSTRAINT ck_filesystem_node_type CHECK (node_type IN ('FILE','DIRECTORY')); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.blobs ADD CONSTRAINT ck_filesystem_blob_size CHECK (size >= 0 AND ref_count >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.file_revisions ADD CONSTRAINT ck_filesystem_revision_values CHECK (revision_no > 0 AND size >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.resource_grants ADD CONSTRAINT ck_filesystem_grant_values CHECK (permission IN ('READ','WRITE','DELETE','SHARE','ADMIN') AND effect IN ('ALLOW','DENY')); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.quota_accounts ADD CONSTRAINT ck_filesystem_quota_values CHECK (used_bytes >= 0 AND reserved_bytes >= 0 AND used_files >= 0 AND reserved_files >= 0 AND (max_bytes IS NULL OR max_bytes >= 0) AND (max_files IS NULL OR max_files >= 0)); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+}
+
 func AutoMigrate(db *gorm.DB) error {
 	if !postgres.ShouldRunAutoMigrate(db) {
 		return nil
@@ -21,7 +40,7 @@ func AutoMigrate(db *gorm.DB) error {
 			`CREATE TABLE IF NOT EXISTS filesystem.storage_replicas (id BLOB PRIMARY KEY, blob_id BLOB NOT NULL, provider_id BLOB NOT NULL, object_key TEXT NOT NULL, checksum TEXT, state TEXT NOT NULL CHECK (state IN ('CREATING','VERIFYING','AVAILABLE','DRAINING','FAILED','DELETED')), verified_at DATETIME, created_at DATETIME, UNIQUE(blob_id, provider_id, object_key), FOREIGN KEY(blob_id) REFERENCES blobs(id))`,
 			`CREATE TABLE IF NOT EXISTS filesystem.quota_accounts (id BLOB PRIMARY KEY, organization_id BLOB NOT NULL, workspace_id BLOB NOT NULL UNIQUE, used_bytes INTEGER NOT NULL DEFAULT 0 CHECK (used_bytes >= 0), reserved_bytes INTEGER NOT NULL DEFAULT 0 CHECK (reserved_bytes >= 0), used_files INTEGER NOT NULL DEFAULT 0 CHECK (used_files >= 0), reserved_files INTEGER NOT NULL DEFAULT 0 CHECK (reserved_files >= 0), max_bytes INTEGER CHECK (max_bytes IS NULL OR max_bytes >= 0), max_files INTEGER CHECK (max_files IS NULL OR max_files >= 0), version INTEGER NOT NULL DEFAULT 0, updated_at DATETIME)`,
 			`CREATE TABLE IF NOT EXISTS filesystem.quota_reservations (id BLOB PRIMARY KEY, quota_account_id BLOB NOT NULL, bytes INTEGER NOT NULL CHECK (bytes >= 0), files INTEGER NOT NULL CHECK (files >= 0), state TEXT NOT NULL, expires_at DATETIME NOT NULL, created_at DATETIME, FOREIGN KEY(quota_account_id) REFERENCES quota_accounts(id))`,
-			`CREATE TABLE IF NOT EXISTS filesystem.resource_grants (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, grantee_id BLOB NOT NULL, permission TEXT NOT NULL CHECK (permission IN ('READ','WRITE','DELETE','ADMIN')), effect TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY')), expires_at DATETIME, created_at DATETIME, UNIQUE(node_id, grantee_id, permission, effect), FOREIGN KEY(node_id) REFERENCES nodes(id))`,
+			`CREATE TABLE IF NOT EXISTS filesystem.resource_grants (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, grantee_id BLOB NOT NULL, permission TEXT NOT NULL CHECK (permission IN ('READ','WRITE','DELETE','SHARE','ADMIN')), effect TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY')), expires_at DATETIME, created_at DATETIME, UNIQUE(node_id, grantee_id, permission, effect), FOREIGN KEY(node_id) REFERENCES nodes(id))`,
 			`CREATE TABLE IF NOT EXISTS filesystem.file_links (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, revision_id BLOB, link_type TEXT NOT NULL, link_id BLOB NOT NULL, created_at DATETIME, UNIQUE(link_type, link_id, node_id, revision_id), FOREIGN KEY(node_id) REFERENCES nodes(id), FOREIGN KEY(revision_id) REFERENCES file_revisions(id))`,
 			`CREATE TABLE IF NOT EXISTS filesystem.command_dedup (command_id BLOB PRIMARY KEY, workspace_id BLOB NOT NULL, operation TEXT NOT NULL, request_hash TEXT NOT NULL, node_id BLOB, revision_id BLOB, state TEXT NOT NULL, created_at DATETIME, updated_at DATETIME)`,
 		} {
@@ -36,5 +55,15 @@ func AutoMigrate(db *gorm.DB) error {
 			return wrapPersistence(err)
 		}
 	}
-	return wrapPersistence(db.AutoMigrate(&namespaceRow{}, &nodeRow{}, &blobRow{}, &revisionRow{}, &replicaRow{}, &quotaAccountRow{}, &quotaReservationRow{}, &resourceGrantRow{}, &fileLinkRow{}, &commandDedupRow{}))
+	if err := db.AutoMigrate(&namespaceRow{}, &nodeRow{}, &blobRow{}, &revisionRow{}, &replicaRow{}, &quotaAccountRow{}, &quotaReservationRow{}, &resourceGrantRow{}, &fileLinkRow{}, &commandDedupRow{}); err != nil {
+		return wrapPersistence(err)
+	}
+	if db.Dialector.Name() == "postgres" {
+		for _, statement := range postgresFallbackConstraints {
+			if err := db.Exec(statement).Error; err != nil {
+				return wrapPersistence(err)
+			}
+		}
+	}
+	return nil
 }

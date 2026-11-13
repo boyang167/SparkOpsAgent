@@ -111,10 +111,16 @@ func (h *Handler) auditMiddlewareDenial() gin.HandlerFunc {
 		if resourceID == "" {
 			resourceID = workspaceID.String()
 		}
+		var orgID *kernel.OrgID
+		if h.namespaceForWorkspace != nil {
+			if namespace, err := h.namespaceForWorkspace(c.Request.Context(), workspaceID.UUID); err == nil && namespace.WorkspaceID == workspaceID.UUID {
+				orgID = &kernel.OrgID{UUID: namespace.OrganizationID}
+			}
+		}
 		_ = h.audit.Log(c.Request.Context(), audit.Entry{
 			ActorID: actorID, Action: "filesystem.middleware.authorize", ResourceType: "filesystem",
-			ResourceID: resourceID,
-			Detail:     map[string]any{"workspace_id": workspaceID.String(), "decision": "DENY", "reason": "middleware_denied", "trace_id": httpx.GetTraceID(c)},
+			ResourceID: resourceID, OrgID: orgID,
+			Detail: map[string]any{"workspace_id": workspaceID.String(), "decision": "DENY", "reason": "middleware_denied", "trace_id": httpx.GetTraceID(c)},
 		})
 	}
 }
@@ -179,16 +185,20 @@ func (h *Handler) requireResource(c *gin.Context, rc requestContext, nodeID uuid
 	if decision.Allowed {
 		return true
 	}
+	h.auditResourceDeny(c, rc, nodeID, decision.Reason)
+	filesystemError(c, domain.ErrResourceDenied)
+	return false
+}
+
+func (h *Handler) auditResourceDeny(c *gin.Context, rc requestContext, nodeID uuid.UUID, reason string) {
 	if h.audit != nil {
 		_ = h.audit.Log(c.Request.Context(), audit.Entry{
 			ActorID: kernel.MemberID{UUID: rc.actorID}, Action: "filesystem.resource.authorize",
 			ResourceType: "filesystem", ResourceID: nodeID.String(),
 			OrgID:  &kernel.OrgID{UUID: rc.namespace.OrganizationID},
-			Detail: map[string]any{"workspace_id": rc.workspaceID.String(), "decision": "DENY", "reason": decision.Reason, "trace_id": rc.traceID},
+			Detail: map[string]any{"workspace_id": rc.workspaceID.String(), "decision": "DENY", "reason": reason, "trace_id": rc.traceID},
 		})
 	}
-	filesystemError(c, domain.ErrResourceDenied)
-	return false
 }
 
 func (h *Handler) requestContext(c *gin.Context, mutation bool) (requestContext, bool) {
@@ -278,16 +288,36 @@ func (h *Handler) ListFiles(c *gin.Context) {
 	if !h.requireResource(c, rc, *parentID, model.ResourcePermissionRead) {
 		return
 	}
-	items, next, err := h.listChildren(c.Request.Context(), rc.namespace.ID, parentID, limit, c.Query("cursor"))
-	if err != nil {
-		filesystemError(c, err)
-		return
+	views := make([]gin.H, 0, limit)
+	scanCursor := c.Query("cursor")
+	nextCursor := ""
+	for len(views) < limit {
+		items, rawNext, err := h.listChildren(c.Request.Context(), rc.namespace.ID, parentID, 200, scanCursor)
+		if err != nil {
+			filesystemError(c, err)
+			return
+		}
+		for i := range items {
+			scanCursor = items[i].ID.String()
+			decision := h.resourceDecision(c, rc, items[i].ID, model.ResourcePermissionRead)
+			if !decision.Allowed {
+				h.auditResourceDeny(c, rc, items[i].ID, decision.Reason)
+				continue
+			}
+			views = append(views, nodeView(&items[i]))
+			if len(views) == limit {
+				if i < len(items)-1 || rawNext != "" {
+					nextCursor = scanCursor
+				}
+				break
+			}
+		}
+		if len(views) == limit || rawNext == "" {
+			break
+		}
+		scanCursor = rawNext
 	}
-	views := make([]gin.H, 0, len(items))
-	for i := range items {
-		views = append(views, nodeView(&items[i]))
-	}
-	httpx.OK(c, gin.H{"items": views, "next_cursor": next})
+	httpx.OK(c, gin.H{"items": views, "next_cursor": nextCursor})
 }
 
 type createDirectoryRequest struct {
@@ -389,7 +419,7 @@ func (h *Handler) MoveNode(c *gin.Context) {
 		if authorization.Allowed && targetParent != nil {
 			authorization = h.resourceDecision(c, rc, *targetParent, model.ResourcePermissionWrite)
 		}
-		return h.moveNode(c.Request.Context(), command.MoveNode{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, NodeID: nodeID, NewParentID: parentID, NewName: body.Name, Authorization: authorization})
+		return h.moveNode(c.Request.Context(), command.MoveNode{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, NodeID: nodeID, NewParentID: targetParent, NewName: body.Name, Authorization: authorization})
 	})
 }
 
@@ -424,7 +454,7 @@ func (h *Handler) CopyNode(c *gin.Context) {
 	if authorization.Allowed && targetParent != nil {
 		authorization = h.resourceDecision(c, rc, *targetParent, model.ResourcePermissionWrite)
 	}
-	node, err := h.copyNode(c.Request.Context(), command.CopyNode{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, SourceNodeID: nodeID, ParentID: parentID, Name: body.Name, Authorization: authorization})
+	node, err := h.copyNode(c.Request.Context(), command.CopyNode{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, SourceNodeID: nodeID, ParentID: targetParent, Name: body.Name, Authorization: authorization})
 	if err != nil {
 		filesystemError(c, err)
 		return
@@ -433,15 +463,23 @@ func (h *Handler) CopyNode(c *gin.Context) {
 }
 
 func (h *Handler) TrashNode(c *gin.Context) {
-	h.withNodeMutation(c, func(rc requestContext, nodeID uuid.UUID) error {
-		if !requireEmptyBody(c) {
-			return errResponseWritten
-		}
-		if h.trashNode == nil {
-			return domain.ErrPersistence
-		}
-		return h.trashNode(c.Request.Context(), command.TrashNode{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, NodeID: nodeID, Authorization: h.resourceDecision(c, rc, nodeID, model.ResourcePermissionDelete)})
-	})
+	rc, nodeID, ok := h.nodeRequest(c)
+	if !ok {
+		return
+	}
+	if !requireEmptyBody(c) {
+		return
+	}
+	if h.trashNode == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	err := h.trashNode(c.Request.Context(), command.TrashNode{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, NodeID: nodeID, Authorization: h.resourceDecision(c, rc, nodeID, model.ResourcePermissionDelete)})
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *Handler) ListRevisions(c *gin.Context) {
@@ -636,7 +674,7 @@ func filesystemError(c *gin.Context, err error) {
 		httpx.Fail(c, "FILESYSTEM_NOT_FOUND", "filesystem resource not found", http.StatusNotFound)
 	case errors.Is(err, domain.ErrNodeNameConflict), errors.Is(err, domain.ErrNodeIDConflict),
 		errors.Is(err, domain.ErrRevisionConflict), errors.Is(err, domain.ErrIdempotencyConflict),
-		errors.Is(err, domain.ErrCommandInProgress), errors.Is(err, domain.ErrRootMutation):
+		errors.Is(err, domain.ErrCommandInProgress), errors.Is(err, domain.ErrRootMutation), errors.Is(err, domain.ErrNodeStateConflict):
 		httpx.Fail(c, "FILESYSTEM_CONFLICT", "filesystem operation conflict", http.StatusConflict)
 	case errors.Is(err, domain.ErrQuotaExceeded):
 		httpx.Fail(c, "FILESYSTEM_QUOTA_EXCEEDED", "filesystem quota exceeded", http.StatusUnprocessableEntity)

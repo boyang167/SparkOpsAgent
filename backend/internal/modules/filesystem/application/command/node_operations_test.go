@@ -10,15 +10,20 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
+	filesystemevent "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	messagingpersistence "github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage/adapters/local"
+	sharedevents "github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
 type recordingAudit struct {
@@ -199,6 +204,50 @@ func TestEveryMutationAuthorizationRejectionIsAudited(t *testing.T) {
 	_ = NewRestoreRevisionHandler(repo, tx, nil, logs).Handle(context.Background(), RestoreRevision{WorkspaceID: ns.WorkspaceID, Authorization: auth})
 
 	require.Equal(t, []string{"DENY", "DENY", "DENY", "DENY", "DENY", "DENY", "DENY", "DENY"}, logs.decisions())
+}
+
+func TestDeniedResourceMutationsAuditActualResourcesAndRelationships(t *testing.T) {
+	_, repo, ns := newPutTestRepository(t)
+	nodeID, targetID, revisionID := uuid.New(), uuid.New(), uuid.New()
+	tests := []struct {
+		name string
+		run  func(*recordingAudit)
+	}{
+		{"move", func(logs *recordingAudit) {
+			_ = NewMoveNodeHandler(repo, postgres.NewDirectTransactor(), nil, logs).Handle(context.Background(), MoveNode{
+				ActorID: uuid.New(), OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID,
+				NodeID: nodeID, NewParentID: &targetID, Authorization: Authorization{Reason: "explicit_deny"},
+			})
+		}},
+		{"copy", func(logs *recordingAudit) {
+			_, _ = NewCopyNodeHandler(repo, postgres.NewDirectTransactor(), nil, logs).Handle(context.Background(), CopyNode{
+				ActorID: uuid.New(), OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID,
+				SourceNodeID: nodeID, ParentID: &targetID, Authorization: Authorization{Reason: "explicit_deny"},
+			})
+		}},
+		{"restore", func(logs *recordingAudit) {
+			_ = NewRestoreRevisionHandler(repo, postgres.NewDirectTransactor(), nil, logs).Handle(context.Background(), RestoreRevision{
+				ActorID: uuid.New(), OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID,
+				NodeID: nodeID, RevisionID: revisionID, Authorization: Authorization{Reason: "explicit_deny"},
+			})
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			logs := &recordingAudit{}
+			test.run(logs)
+			require.Len(t, logs.entries, 1)
+			require.Equal(t, nodeID.String(), logs.entries[0].ResourceID)
+			require.NotContains(t, logs.entries[0].Detail, "object_key")
+			require.NotContains(t, logs.entries[0].Detail, "content")
+			if test.name != "restore" {
+				require.Equal(t, nodeID.String(), logs.entries[0].Detail["source_node_id"])
+				require.Equal(t, targetID.String(), logs.entries[0].Detail["target_parent_id"])
+			} else {
+				require.Equal(t, revisionID.String(), logs.entries[0].Detail["revision_id"])
+			}
+		})
+	}
 }
 
 func TestCreateDirectoryValidationFailureIsAudited(t *testing.T) {
@@ -509,13 +558,18 @@ func TestMetadataMutationsUseCommandDedup(t *testing.T) {
 	db, repo, ns := newPutTestRepository(t)
 	tx := postgres.NewTransactor(db)
 	actor := uuid.New()
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+	require.NoError(t, messagingpersistence.AutoMigrate(db))
+	registry := sharedevents.NewRegistry()
+	require.NoError(t, filesystemevent.Register(registry))
+	bus := messaging.NewReliableBus(registry, messagingpersistence.NewOutboxStore(db), nil, nil, nil)
 
 	t.Run("rename", func(t *testing.T) {
 		node, err := model.NewDirectory(ns.ID, actor, "before", *ns.RootNodeID)
 		require.NoError(t, err)
 		require.NoError(t, repo.CreateNode(context.Background(), node))
 		logs := &recordingAudit{}
-		handler := NewRenameNodeHandler(repo, tx, nil, logs)
+		handler := NewRenameNodeHandler(repo, tx, bus, logs)
 		cmd := RenameNode{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: node.ID, Name: "after", Authorization: Authorization{Allowed: true}}
 		require.NoError(t, handler.Handle(context.Background(), cmd))
 		require.NoError(t, handler.Handle(context.Background(), cmd))
@@ -532,7 +586,7 @@ func TestMetadataMutationsUseCommandDedup(t *testing.T) {
 		require.NoError(t, repo.CreateNode(context.Background(), left))
 		require.NoError(t, repo.CreateNode(context.Background(), right))
 		logs := &recordingAudit{}
-		handler := NewMoveNodeHandler(repo, tx, nil, logs)
+		handler := NewMoveNodeHandler(repo, tx, bus, logs)
 		cmd := MoveNode{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: left.ID, NewParentID: &right.ID, Authorization: Authorization{Allowed: true}}
 		require.NoError(t, handler.Handle(context.Background(), cmd))
 		require.NoError(t, handler.Handle(context.Background(), cmd))
@@ -546,11 +600,14 @@ func TestMetadataMutationsUseCommandDedup(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, repo.CreateNode(context.Background(), node))
 		logs := &recordingAudit{}
-		handler := NewTrashNodeHandler(repo, tx, nil, logs)
+		handler := NewTrashNodeHandler(repo, tx, bus, logs)
 		cmd := TrashNode{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: node.ID, Authorization: Authorization{Allowed: true}}
 		require.NoError(t, handler.Handle(context.Background(), cmd))
 		require.NoError(t, handler.Handle(context.Background(), cmd))
 		require.Equal(t, []string{"ALLOW"}, logs.decisions())
+		newCommand := cmd
+		newCommand.CommandID = uuid.New()
+		require.ErrorIs(t, handler.Handle(context.Background(), newCommand), domain.ErrNodeStateConflict)
 		cmd.NodeID = uuid.New()
 		require.ErrorIs(t, handler.Handle(context.Background(), cmd), domain.ErrIdempotencyConflict)
 	})
@@ -562,7 +619,7 @@ func TestMetadataMutationsUseCommandDedup(t *testing.T) {
 		source, err := NewPutLocalFileHandler(repo, provider, tx, nil, nil).Handle(context.Background(), putFixture(ns))
 		require.NoError(t, err)
 		logs := &recordingAudit{}
-		handler := NewRestoreRevisionHandler(repo, tx, nil, logs)
+		handler := NewRestoreRevisionHandler(repo, tx, bus, logs)
 		cmd := RestoreRevision{CommandID: uuid.New(), ActorID: actor, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: source.ID, RevisionID: *source.CurrentRevisionID, Authorization: Authorization{Allowed: true}}
 		require.NoError(t, handler.Handle(context.Background(), cmd))
 		require.NoError(t, handler.Handle(context.Background(), cmd))
@@ -570,10 +627,19 @@ func TestMetadataMutationsUseCommandDedup(t *testing.T) {
 		cmd.RevisionID = uuid.New()
 		require.ErrorIs(t, handler.Handle(context.Background(), cmd), domain.ErrIdempotencyConflict)
 	})
+	for _, eventType := range []string{
+		filesystemevent.NodeRenamedName, filesystemevent.NodeMovedName,
+		filesystemevent.NodeTrashedName, filesystemevent.RevisionRestoredName,
+	} {
+		var count int64
+		require.NoError(t, db.Table("platform.event_outbox").Where("event_type = ?", eventType).Count(&count).Error)
+		require.Equal(t, int64(1), count, eventType)
+	}
 }
 
 func TestCopyCommandDedupDoesNotRepeatQuotaBlobOrAudit(t *testing.T) {
 	db, repo, ns := newPutTestRepository(t)
+	bus := newFilesystemOutboxBus(t, db)
 	provider, err := local.New(t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = provider.Close() })
@@ -581,7 +647,7 @@ func TestCopyCommandDedupDoesNotRepeatQuotaBlobOrAudit(t *testing.T) {
 	source, err := NewPutLocalFileHandler(repo, provider, tx, nil, nil).Handle(context.Background(), putFixture(ns))
 	require.NoError(t, err)
 	logs := &recordingAudit{}
-	handler := NewCopyNodeHandler(repo, tx, nil, logs)
+	handler := NewCopyNodeHandler(repo, tx, bus, logs)
 	cmd := CopyNode{CommandID: uuid.New(), ActorID: source.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, SourceNodeID: source.ID, Name: "dedup-copy.txt", Authorization: Authorization{Allowed: true}}
 	first, err := handler.Handle(context.Background(), cmd)
 	require.NoError(t, err)
@@ -603,6 +669,52 @@ func TestCopyCommandDedupDoesNotRepeatQuotaBlobOrAudit(t *testing.T) {
 	cmd.Name = "different.txt"
 	_, err = handler.Handle(context.Background(), cmd)
 	require.ErrorIs(t, err, domain.ErrIdempotencyConflict)
+	var eventCount int64
+	require.NoError(t, db.Table("platform.event_outbox").Where("event_type = ?", filesystemevent.NodeCopiedName).Count(&eventCount).Error)
+	require.Equal(t, int64(1), eventCount)
+}
+
+func TestCreateDirectoryReplayWritesOneOutboxEvent(t *testing.T) {
+	db, repo, ns := newPutTestRepository(t)
+	bus := newFilesystemOutboxBus(t, db)
+	handler := NewCreateDirectoryHandler(repo, postgres.NewTransactor(db), bus, nil)
+	cmd := CreateDirectory{CommandID: uuid.New(), ActorID: uuid.New(), OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, Name: "outbox-once", Authorization: Authorization{Allowed: true}}
+	_, err := handler.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+	_, err = handler.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+	var count int64
+	require.NoError(t, db.Table("platform.event_outbox").Where("event_type = ?", filesystemevent.DirectoryCreatedName).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+}
+
+func TestPutReplayWritesEachOutboxEventOnce(t *testing.T) {
+	db, repo, ns := newPutTestRepository(t)
+	provider, err := local.New(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = provider.Close() })
+	bus := newFilesystemOutboxBus(t, db)
+	handler := NewPutLocalFileHandler(repo, provider, postgres.NewTransactor(db), bus, nil)
+	cmd := putFixture(ns)
+	_, err = handler.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+	cmd.Body = strings.NewReader("fixture-content")
+	_, err = handler.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+	for _, eventType := range []string{filesystemevent.FileCreatedName, filesystemevent.FileRevisionCreatedName} {
+		var count int64
+		require.NoError(t, db.Table("platform.event_outbox").Where("event_type = ?", eventType).Count(&count).Error)
+		require.Equal(t, int64(1), count, eventType)
+	}
+}
+
+func newFilesystemOutboxBus(t *testing.T, db *gorm.DB) messaging.Bus {
+	t.Helper()
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+	require.NoError(t, messagingpersistence.AutoMigrate(db))
+	registry := sharedevents.NewRegistry()
+	require.NoError(t, filesystemevent.Register(registry))
+	return messaging.NewReliableBus(registry, messagingpersistence.NewOutboxStore(db), nil, nil, nil)
 }
 
 func TestCopyRetriesWholeTransactionAfterTransactionRetry(t *testing.T) {

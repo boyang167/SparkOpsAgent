@@ -89,6 +89,7 @@ const (
 	ResourcePermissionRead   ResourcePermission = "READ"
 	ResourcePermissionWrite  ResourcePermission = "WRITE"
 	ResourcePermissionDelete ResourcePermission = "DELETE"
+	ResourcePermissionShare  ResourcePermission = "SHARE"
 	ResourcePermissionAdmin  ResourcePermission = "ADMIN"
 )
 

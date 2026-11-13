@@ -443,6 +443,36 @@ func (r *Repository) ListResourceGrants(ctx context.Context, nodeID, granteeID u
 	return grants, nil
 }
 
+func (r *Repository) CreateResourceGrant(ctx context.Context, grant model.ResourceGrant) error {
+	return wrapPersistence(postgres.DB(ctx, r.db).Create(&resourceGrantRow{
+		ID: grant.ID, NodeID: grant.NodeID, GranteeID: grant.GranteeID, Permission: grant.Permission,
+		Effect: grant.Effect, ExpiresAt: grant.ExpiresAt, CreatedAt: time.Now().UTC(),
+	}).Error)
+}
+
+func (r *Repository) RevokeResourceGrant(ctx context.Context, nodeID, grantID uuid.UUID) error {
+	result := postgres.DB(ctx, r.db).Where("id = ? AND node_id = ?", grantID, nodeID).Delete(&resourceGrantRow{})
+	if result.Error != nil {
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrGrantNotFound
+	}
+	return nil
+}
+
+func (r *Repository) ListNodeResourceGrants(ctx context.Context, nodeID uuid.UUID) ([]model.ResourceGrant, error) {
+	var rows []resourceGrantRow
+	if err := postgres.DB(ctx, r.db).Where("node_id = ?", nodeID).Order("id ASC").Find(&rows).Error; err != nil {
+		return nil, wrapPersistence(err)
+	}
+	result := make([]model.ResourceGrant, len(rows))
+	for i, row := range rows {
+		result[i] = model.ResourceGrant{ID: row.ID, NodeID: row.NodeID, GranteeID: row.GranteeID, Permission: row.Permission, Effect: row.Effect, ExpiresAt: row.ExpiresAt}
+	}
+	return result, nil
+}
+
 func (r *Repository) ApplyQuotaUsage(ctx context.Context, workspaceID uuid.UUID, bytesDelta, filesDelta int64) error {
 	if bytesDelta < 0 || filesDelta < 0 {
 		return domain.ErrPersistence
@@ -764,6 +794,7 @@ func isDomainError(err error) bool {
 		domain.ErrCommandNotFound, domain.ErrTransactionRetry,
 		domain.ErrTransactionExhausted, domain.ErrUnsupportedNodeType, domain.ErrRootMutation,
 		domain.ErrResourceDenied,
+		domain.ErrGrantNotFound, domain.ErrNodeStateConflict,
 	} {
 		if errors.Is(err, sentinel) {
 			return true
