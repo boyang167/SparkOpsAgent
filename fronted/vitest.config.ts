@@ -18,6 +18,7 @@ export default defineConfig({
     },
   },
   test: {
+    setupFiles: ["./vitest.setup.ts"],
     environment: "node",
     tsconfig: "./vitest.tsconfig.json",
     environmentMatchGlobs: [

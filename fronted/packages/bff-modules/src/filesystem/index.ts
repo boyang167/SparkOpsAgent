@@ -1,19 +1,34 @@
 import type { BffContext } from "@sparkops/bff-core";
 import type {
   CreateDirectoryCommand,
+  CreateStorageBindingCommand,
+  CreateStoragePoolCommand,
   CreateTransferCommand,
+  FileAuditEventPageVM,
+  FileAuditQuery,
   FileNamespaceVM,
   FileNodePageVM,
   FileNodeVM,
   FileRevisionPageVM,
+  LifecyclePolicyPageVM,
+  RegisterStorageProviderCommand,
   RenameFileNodeCommand,
+  StorageBindingPageVM,
+  StoragePoolPageVM,
+  StorageProviderPageVM,
   TransferSessionVM,
+  UpsertLifecyclePolicyCommand,
 } from "@sparkops/contracts/filesystem";
 import {
+  FileAuditEventPageVMSchema,
   FileNamespaceVMSchema,
   FileNodePageVMSchema,
   FileNodeVMSchema,
   FileRevisionPageVMSchema,
+  LifecyclePolicyPageVMSchema,
+  StorageBindingPageVMSchema,
+  StoragePoolPageVMSchema,
+  StorageProviderPageVMSchema,
   TransferSessionVMSchema,
 } from "@sparkops/contracts/filesystem";
 
@@ -110,4 +125,81 @@ export async function abortTransferSession(
   idempotencyKey: string,
 ): Promise<void> {
   await ctx.upstream.filesystem.abortTransfer(workspaceId, sessionId, idempotencyKey);
+}
+
+export async function listStorageProviders(
+  ctx: BffContext,
+  workspaceId: string,
+): Promise<StorageProviderPageVM> {
+  const data = await ctx.upstream.filesystem.listStorageProviders(workspaceId);
+  return StorageProviderPageVMSchema.parse(data);
+}
+
+export async function registerStorageProvider(
+  ctx: BffContext,
+  workspaceId: string,
+  input: RegisterStorageProviderCommand,
+  idempotencyKey: string,
+): Promise<{ id: string }> {
+  return ctx.upstream.filesystem.registerStorageProvider(workspaceId, input, idempotencyKey);
+}
+
+export async function listStoragePools(
+  ctx: BffContext,
+  workspaceId: string,
+): Promise<StoragePoolPageVM> {
+  const data = await ctx.upstream.filesystem.listStoragePools(workspaceId);
+  return StoragePoolPageVMSchema.parse(data);
+}
+
+export async function createStoragePool(
+  ctx: BffContext,
+  workspaceId: string,
+  input: CreateStoragePoolCommand,
+  idempotencyKey: string,
+): Promise<{ id: string; name: string }> {
+  return ctx.upstream.filesystem.createStoragePool(workspaceId, input, idempotencyKey);
+}
+
+export async function listStorageBindings(
+  ctx: BffContext,
+  workspaceId: string,
+): Promise<StorageBindingPageVM> {
+  const data = await ctx.upstream.filesystem.listStorageBindings(workspaceId);
+  return StorageBindingPageVMSchema.parse(data);
+}
+
+export async function createStorageBinding(
+  ctx: BffContext,
+  workspaceId: string,
+  input: CreateStorageBindingCommand,
+  idempotencyKey: string,
+): Promise<{ id: string }> {
+  return ctx.upstream.filesystem.createStorageBinding(workspaceId, input, idempotencyKey);
+}
+
+export async function listLifecyclePolicies(
+  ctx: BffContext,
+  workspaceId: string,
+): Promise<LifecyclePolicyPageVM> {
+  const data = await ctx.upstream.filesystem.listLifecyclePolicies(workspaceId);
+  return LifecyclePolicyPageVMSchema.parse(data);
+}
+
+export async function upsertLifecyclePolicy(
+  ctx: BffContext,
+  workspaceId: string,
+  input: UpsertLifecyclePolicyCommand,
+  idempotencyKey: string,
+): Promise<{ id: string; version: number }> {
+  return ctx.upstream.filesystem.upsertLifecyclePolicy(workspaceId, input, idempotencyKey);
+}
+
+export async function listFileAuditEvents(
+  ctx: BffContext,
+  workspaceId: string,
+  query: FileAuditQuery = {},
+): Promise<FileAuditEventPageVM> {
+  const data = await ctx.upstream.filesystem.listFileAuditEvents(workspaceId, query);
+  return FileAuditEventPageVMSchema.parse(data);
 }

@@ -1,12 +1,22 @@
 import type {
   CreateDirectoryCommand,
+  CreateStorageBindingCommand,
+  CreateStoragePoolCommand,
   CreateTransferCommand,
+  FileAuditEventPageVM,
+  FileAuditQuery,
   FileNamespaceVM,
   FileNodePageVM,
   FileNodeVM,
   FileRevisionPageVM,
+  LifecyclePolicyPageVM,
+  RegisterStorageProviderCommand,
   RenameFileNodeCommand,
+  StorageBindingPageVM,
+  StoragePoolPageVM,
+  StorageProviderPageVM,
   TransferSessionVM,
+  UpsertLifecyclePolicyCommand,
 } from "@sparkops/contracts/filesystem";
 import { bffFetch, type BffFetchOptions } from "./client";
 
@@ -231,4 +241,128 @@ export async function uploadTransfer(
     throw new Error("transfer session required");
   }
   return uploadTransferParts(file, options.session, options);
+}
+
+function fileAuditQuery(query: FileAuditQuery = {}) {
+  const params = new URLSearchParams();
+  if (query.actor_id) params.set("actor_id", query.actor_id);
+  if (query.action) params.set("action", query.action);
+  if (query.resource_id) params.set("resource_id", query.resource_id);
+  if (query.result) params.set("result", query.result);
+  if (query.from) params.set("from", query.from);
+  if (query.to) params.set("to", query.to);
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit != null) params.set("limit", String(query.limit));
+  const suffix = params.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
+export function listStorageProviders(workspaceId: string, options: BffFetchOptions = {}) {
+  return bffFetch<StorageProviderPageVM>(`/workspaces/${workspaceId}/storage-providers`, {
+    method: "GET",
+    workspaceId,
+    ...options,
+  });
+}
+
+export function registerStorageProvider(
+  workspaceId: string,
+  input: RegisterStorageProviderCommand,
+  options: BffFetchOptions & { idempotencyKey?: string } = {},
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("storage-provider");
+  return bffFetch<{ id: string }>(`/workspaces/${workspaceId}/storage-providers`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    workspaceId,
+    headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
+    ...options,
+  });
+}
+
+export function listStoragePools(workspaceId: string, options: BffFetchOptions = {}) {
+  return bffFetch<StoragePoolPageVM>(`/workspaces/${workspaceId}/storage-pools`, {
+    method: "GET",
+    workspaceId,
+    ...options,
+  });
+}
+
+export function createStoragePool(
+  workspaceId: string,
+  input: CreateStoragePoolCommand,
+  options: BffFetchOptions & { idempotencyKey?: string } = {},
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("storage-pool");
+  return bffFetch<{ id: string; name: string }>(`/workspaces/${workspaceId}/storage-pools`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    workspaceId,
+    headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
+    ...options,
+  });
+}
+
+export function listStorageBindings(workspaceId: string, options: BffFetchOptions = {}) {
+  return bffFetch<StorageBindingPageVM>(`/workspaces/${workspaceId}/storage-bindings`, {
+    method: "GET",
+    workspaceId,
+    ...options,
+  });
+}
+
+export function createStorageBinding(
+  workspaceId: string,
+  input: CreateStorageBindingCommand,
+  options: BffFetchOptions & { idempotencyKey?: string } = {},
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("storage-binding");
+  return bffFetch<{ id: string }>(`/workspaces/${workspaceId}/storage-bindings`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    workspaceId,
+    headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
+    ...options,
+  });
+}
+
+export function listLifecyclePolicies(workspaceId: string, options: BffFetchOptions = {}) {
+  return bffFetch<LifecyclePolicyPageVM>(`/workspaces/${workspaceId}/lifecycle-policies`, {
+    method: "GET",
+    workspaceId,
+    ...options,
+  });
+}
+
+export function upsertLifecyclePolicy(
+  workspaceId: string,
+  input: UpsertLifecyclePolicyCommand,
+  options: BffFetchOptions & { idempotencyKey?: string } = {},
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("lifecycle-policy");
+  return bffFetch<{ id: string; version: number }>(
+    `/workspaces/${workspaceId}/lifecycle-policies`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+      workspaceId,
+      headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
+      ...options,
+    },
+  );
+}
+
+export function listFileAuditEvents(
+  workspaceId: string,
+  query: FileAuditQuery = {},
+  options: BffFetchOptions = {},
+) {
+  return bffFetch<FileAuditEventPageVM>(
+    `/workspaces/${workspaceId}/filesystem-audits${fileAuditQuery(query)}`,
+    {
+      method: "GET",
+      workspaceId,
+      ...options,
+    },
+  );
 }

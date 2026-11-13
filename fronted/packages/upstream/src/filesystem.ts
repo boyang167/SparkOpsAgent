@@ -1,12 +1,22 @@
 import type {
   CreateDirectoryCommand,
+  CreateStorageBindingCommand,
+  CreateStoragePoolCommand,
   CreateTransferCommand,
+  FileAuditEventPageVM,
+  FileAuditQuery,
   FileNamespaceVM,
   FileNodePageVM,
   FileNodeVM,
   FileRevisionPageVM,
+  LifecyclePolicyPageVM,
+  RegisterStorageProviderCommand,
   RenameFileNodeCommand,
+  StorageBindingPageVM,
+  StoragePoolPageVM,
+  StorageProviderPageVM,
   TransferSessionVM,
+  UpsertLifecyclePolicyCommand,
 } from "@sparkops/contracts/filesystem";
 import type { UpstreamRequestOptions } from "./core";
 import { upstreamFetch } from "./core";
@@ -33,6 +43,20 @@ function filesQuery(query: ListFilesQuery = {}) {
 
 function revisionsQuery(query: ListRevisionsQuery = {}) {
   const params = new URLSearchParams();
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit != null) params.set("limit", String(query.limit));
+  const suffix = params.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
+function fileAuditQuery(query: FileAuditQuery = {}) {
+  const params = new URLSearchParams();
+  if (query.actor_id) params.set("actor_id", query.actor_id);
+  if (query.action) params.set("action", query.action);
+  if (query.resource_id) params.set("resource_id", query.resource_id);
+  if (query.result) params.set("result", query.result);
+  if (query.from) params.set("from", query.from);
+  if (query.to) params.set("to", query.to);
   if (query.cursor) params.set("cursor", query.cursor);
   if (query.limit != null) params.set("limit", String(query.limit));
   const suffix = params.toString();
@@ -100,6 +124,92 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
         headers: { "Idempotency-Key": idempotencyKey },
         options: { ...options, workspaceId },
       });
+    },
+    listStorageProviders(workspaceId: string) {
+      return upstreamFetch<StorageProviderPageVM>(
+        `/api/v1/workspaces/${workspaceId}/storage-providers`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+    registerStorageProvider(
+      workspaceId: string,
+      input: RegisterStorageProviderCommand,
+      idempotencyKey: string,
+    ) {
+      return upstreamFetch<{ id: string }>(
+        `/api/v1/workspaces/${workspaceId}/storage-providers`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+    listStoragePools(workspaceId: string) {
+      return upstreamFetch<StoragePoolPageVM>(`/api/v1/workspaces/${workspaceId}/storage-pools`, {
+        method: "GET",
+        options: { ...options, workspaceId },
+      });
+    },
+    createStoragePool(workspaceId: string, input: CreateStoragePoolCommand, idempotencyKey: string) {
+      return upstreamFetch<{ id: string; name: string }>(
+        `/api/v1/workspaces/${workspaceId}/storage-pools`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+    listStorageBindings(workspaceId: string) {
+      return upstreamFetch<StorageBindingPageVM>(
+        `/api/v1/workspaces/${workspaceId}/storage-bindings`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+    createStorageBinding(
+      workspaceId: string,
+      input: CreateStorageBindingCommand,
+      idempotencyKey: string,
+    ) {
+      return upstreamFetch<{ id: string }>(
+        `/api/v1/workspaces/${workspaceId}/storage-bindings`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+    listLifecyclePolicies(workspaceId: string) {
+      return upstreamFetch<LifecyclePolicyPageVM>(
+        `/api/v1/workspaces/${workspaceId}/lifecycle-policies`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+    upsertLifecyclePolicy(
+      workspaceId: string,
+      input: UpsertLifecyclePolicyCommand,
+      idempotencyKey: string,
+    ) {
+      return upstreamFetch<{ id: string; version: number }>(
+        `/api/v1/workspaces/${workspaceId}/lifecycle-policies`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+    listFileAuditEvents(workspaceId: string, query: FileAuditQuery = {}) {
+      return upstreamFetch<FileAuditEventPageVM>(
+        `/api/v1/workspaces/${workspaceId}/filesystem-audits${fileAuditQuery(query)}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
     },
   };
 }

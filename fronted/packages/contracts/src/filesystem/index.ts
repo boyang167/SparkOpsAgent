@@ -159,10 +159,182 @@ export const FileArtifactVMSchema = z.object({
 
 export type FileArtifactVM = z.infer<typeof FileArtifactVMSchema>;
 
-export const StoragePoolVMSchema = z.object({
+export const StorageProviderTypeSchema = z.enum(["LOCAL", "NFS", "S3"]);
+export type StorageProviderType = z.infer<typeof StorageProviderTypeSchema>;
+
+export const StorageProviderVMSchema = z.object({
   id: z.string().uuid(),
+  organization_id: z.string().uuid(),
   name: z.string(),
+  provider_type: StorageProviderTypeSchema,
+  endpoint: z.string().optional().default(""),
+  secret_ref: z.string(),
+  capabilities: z.record(z.unknown()).optional().default({}),
+  config_version: z.number().int().nonnegative(),
   status: z.string(),
 });
 
+export type StorageProviderVM = z.infer<typeof StorageProviderVMSchema>;
+
+export const StorageProviderPageVMSchema = z.object({
+  items: z.array(StorageProviderVMSchema),
+});
+
+export type StorageProviderPageVM = z.infer<typeof StorageProviderPageVMSchema>;
+
+export const RegisterStorageProviderCommandSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1),
+  provider_type: StorageProviderTypeSchema,
+  endpoint: z.string().optional(),
+  secret_ref: z.string().min(1),
+  capabilities: z.record(z.unknown()).optional(),
+  status: z.string().optional(),
+});
+
+export type RegisterStorageProviderCommand = z.infer<typeof RegisterStorageProviderCommandSchema>;
+
+export const StoragePoolMemberModeSchema = z.enum(["PRIMARY", "REPLICA", "ARCHIVE", "DRAINING"]);
+export type StoragePoolMemberMode = z.infer<typeof StoragePoolMemberModeSchema>;
+
+export const StoragePoolMemberVMSchema = z.object({
+  provider_id: z.string().uuid(),
+  mode: StoragePoolMemberModeSchema,
+  priority: z.number().int(),
+});
+
+export type StoragePoolMemberVM = z.infer<typeof StoragePoolMemberVMSchema>;
+
+export const StoragePoolStatusSchema = z.enum(["ACTIVE", "DISABLED"]);
+export type StoragePoolStatus = z.infer<typeof StoragePoolStatusSchema>;
+
+export const StoragePoolVMSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  status: StoragePoolStatusSchema,
+  placement_policy_version: z.number().int().nonnegative(),
+  members: z.array(StoragePoolMemberVMSchema).default([]),
+});
+
 export type StoragePoolVM = z.infer<typeof StoragePoolVMSchema>;
+
+export const StoragePoolPageVMSchema = z.object({
+  items: z.array(StoragePoolVMSchema),
+});
+
+export type StoragePoolPageVM = z.infer<typeof StoragePoolPageVMSchema>;
+
+export const CreateStoragePoolCommandSchema = z.object({
+  name: z.string().min(1),
+  members: z.array(StoragePoolMemberVMSchema).default([]),
+});
+
+export type CreateStoragePoolCommand = z.infer<typeof CreateStoragePoolCommandSchema>;
+
+export const StorageBindingScopeTypeSchema = z.enum([
+  "ORGANIZATION",
+  "WORKSPACE",
+  "PROJECT",
+  "USER",
+]);
+
+export type StorageBindingScopeType = z.infer<typeof StorageBindingScopeTypeSchema>;
+
+export const StorageBindingVMSchema = z.object({
+  id: z.string().uuid(),
+  organization_id: z.string().uuid(),
+  scope_type: StorageBindingScopeTypeSchema,
+  scope_id: z.string().uuid(),
+  pool_id: z.string().uuid(),
+  priority: z.number().int(),
+});
+
+export type StorageBindingVM = z.infer<typeof StorageBindingVMSchema>;
+
+export const StorageBindingPageVMSchema = z.object({
+  items: z.array(StorageBindingVMSchema),
+});
+
+export type StorageBindingPageVM = z.infer<typeof StorageBindingPageVMSchema>;
+
+export const CreateStorageBindingCommandSchema = z.object({
+  scope_type: StorageBindingScopeTypeSchema,
+  scope_id: z.string().uuid(),
+  pool_id: z.string().uuid(),
+  priority: z.number().int().optional().default(0),
+});
+
+export type CreateStorageBindingCommand = z.infer<typeof CreateStorageBindingCommandSchema>;
+
+export const LifecyclePolicyStatusSchema = z.enum(["ACTIVE", "DISABLED"]);
+export type LifecyclePolicyStatus = z.infer<typeof LifecyclePolicyStatusSchema>;
+
+export const LifecyclePolicyVMSchema = z.object({
+  id: z.string().uuid(),
+  organization_id: z.string().uuid(),
+  name: z.string(),
+  version: z.number().int().positive(),
+  rules: z.record(z.unknown()),
+  status: LifecyclePolicyStatusSchema,
+});
+
+export type LifecyclePolicyVM = z.infer<typeof LifecyclePolicyVMSchema>;
+
+export const LifecyclePolicyPageVMSchema = z.object({
+  items: z.array(LifecyclePolicyVMSchema),
+});
+
+export type LifecyclePolicyPageVM = z.infer<typeof LifecyclePolicyPageVMSchema>;
+
+export const UpsertLifecyclePolicyCommandSchema = z.object({
+  name: z.string().min(1),
+  version: z.number().int().positive().optional(),
+  rules: z.record(z.unknown()).optional().default({}),
+  status: LifecyclePolicyStatusSchema.optional().default("ACTIVE"),
+});
+
+export type UpsertLifecyclePolicyCommand = z.infer<typeof UpsertLifecyclePolicyCommandSchema>;
+
+export const LifecycleRuleActionSchema = z.enum([
+  "replicate",
+  "archive",
+  "trash",
+  "purge",
+  "rescan",
+]);
+
+export type LifecycleRuleAction = z.infer<typeof LifecycleRuleActionSchema>;
+
+export const FileAuditEventVMSchema = z.object({
+  id: z.string().uuid(),
+  actor_id: z.string().uuid(),
+  action: z.string(),
+  resource_type: z.string(),
+  resource_id: z.string(),
+  result: z.string(),
+  trace_id: z.string().optional(),
+  created_at: z.string(),
+  detail: z.record(z.unknown()).optional().default({}),
+});
+
+export type FileAuditEventVM = z.infer<typeof FileAuditEventVMSchema>;
+
+export const FileAuditEventPageVMSchema = z.object({
+  items: z.array(FileAuditEventVMSchema),
+  next_cursor: z.string().optional().default(""),
+});
+
+export type FileAuditEventPageVM = z.infer<typeof FileAuditEventPageVMSchema>;
+
+export const FileAuditQuerySchema = z.object({
+  actor_id: z.string().uuid().optional(),
+  action: z.string().optional(),
+  resource_id: z.string().optional(),
+  result: z.string().optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  cursor: z.string().optional(),
+  limit: z.number().int().positive().max(100).optional(),
+});
+
+export type FileAuditQuery = z.infer<typeof FileAuditQuerySchema>;
