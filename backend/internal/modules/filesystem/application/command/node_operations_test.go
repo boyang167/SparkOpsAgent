@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -82,6 +83,19 @@ func (t *retryOnceTransactor) WithinTransaction(ctx context.Context, fn func(con
 		return domain.ErrTransactionRetry
 	}
 	return t.inner.WithinTransaction(ctx, fn)
+}
+
+type retryNTransactor struct {
+	failures int
+	calls    int
+}
+
+func (t *retryNTransactor) WithinTransaction(ctx context.Context, fn func(context.Context) error) error {
+	t.calls++
+	if t.calls <= t.failures {
+		return domain.ErrTransactionRetry
+	}
+	return fn(ctx)
 }
 
 func (r *retryMoveRepository) MoveNodeSafely(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID, string) error {
@@ -773,6 +787,40 @@ func TestCopyRetriesWholeTransactionAfterTransactionRetry(t *testing.T) {
 	require.Equal(t, int64(2), quota.UsedFiles)
 }
 
+func TestIdempotentMutationAllowsNormalSQLiteContentionToClear(t *testing.T) {
+	tx := &retryNTransactor{failures: 5}
+	mutations := 0
+
+	err := withinIdempotentMutation(context.Background(), tx, func(context.Context) error {
+		mutations++
+		return nil
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 6, tx.calls)
+	require.Equal(t, 1, mutations)
+}
+
+func TestIdempotentMutationRetryIsBounded(t *testing.T) {
+	tx := &retryNTransactor{failures: idempotentMutationAttempts}
+	waits := 0
+
+	err := withinIdempotentMutationWithRetry(
+		context.Background(),
+		tx,
+		func(context.Context) error { return nil },
+		func(int) time.Duration { return 0 },
+		func(context.Context, time.Duration) error {
+			waits++
+			return nil
+		},
+	)
+
+	require.ErrorIs(t, err, domain.ErrTransactionExhausted)
+	require.Equal(t, idempotentMutationAttempts, tx.calls)
+	require.Equal(t, idempotentMutationAttempts-1, waits)
+}
+
 func TestCopyCommandDedupConcurrentReturnsAuthoritativeResult(t *testing.T) {
 	db, repo, ns, mainDSN, filesystemDSN := newConcurrentPutTestRepository(t)
 	provider, err := local.New(t.TempDir())
@@ -827,12 +875,17 @@ func TestCopyCommandDedupConcurrentReturnsAuthoritativeResult(t *testing.T) {
 }
 
 func TestRenameCommandDedupConcurrentAuditsOnce(t *testing.T) {
-	_, repo, ns, mainDSN, filesystemDSN := newConcurrentPutTestRepository(t)
+	db, repo, ns, mainDSN, filesystemDSN := newConcurrentPutTestRepository(t)
+	platformDSN := filepath.Join(t.TempDir(), "platform.db")
+	require.NoError(t, db.Exec("ATTACH DATABASE ? AS platform", platformDSN).Error)
+	require.NoError(t, messagingpersistence.AutoMigrate(db))
 	node, err := model.NewDirectory(ns.ID, uuid.New(), "rename-concurrent-before", *ns.RootNodeID)
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateNode(context.Background(), node))
 	logs := &recordingAudit{}
 	cmd := RenameNode{CommandID: uuid.New(), ActorID: node.OwnerID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, NodeID: node.ID, Name: "rename-concurrent-after", Authorization: Authorization{Allowed: true}}
+	registry := sharedevents.NewRegistry()
+	require.NoError(t, filesystemevent.Register(registry))
 
 	start := make(chan struct{})
 	ready := make(chan error, 2)
@@ -847,8 +900,13 @@ func TestRenameCommandDedupConcurrentAuditsOnce(t *testing.T) {
 			}
 			sqlDB, _ := workerDB.DB()
 			defer sqlDB.Close()
+			if attachErr := workerDB.Exec("ATTACH DATABASE ? AS platform", platformDSN).Error; attachErr != nil {
+				errs <- attachErr
+				return
+			}
 			<-start
-			errs <- NewRenameNodeHandler(persistence.NewRepository(workerDB), postgres.NewTransactor(workerDB), nil, logs).Handle(context.Background(), cmd)
+			bus := messaging.NewReliableBus(registry, messagingpersistence.NewOutboxStore(workerDB), nil, nil, nil)
+			errs <- NewRenameNodeHandler(persistence.NewRepository(workerDB), postgres.NewTransactor(workerDB), bus, logs).Handle(context.Background(), cmd)
 		}()
 	}
 	require.NoError(t, <-ready)
@@ -860,4 +918,14 @@ func TestRenameCommandDedupConcurrentAuditsOnce(t *testing.T) {
 	persisted, err := repo.GetNode(context.Background(), ns.ID, node.ID)
 	require.NoError(t, err)
 	require.Equal(t, cmd.Name, persisted.Name)
+	var outboxCount int64
+	require.NoError(t, db.Table("platform.event_outbox").Where("event_type = ?", filesystemevent.NodeRenamedName).Count(&outboxCount).Error)
+	require.Equal(t, int64(1), outboxCount)
+
+	cmd.Name = "rename-concurrent-different"
+	bus := messaging.NewReliableBus(registry, messagingpersistence.NewOutboxStore(db), nil, nil, nil)
+	require.ErrorIs(t, NewRenameNodeHandler(repo, postgres.NewTransactor(db), bus, logs).Handle(context.Background(), cmd), domain.ErrIdempotencyConflict)
+	require.Equal(t, []string{"ALLOW", "DENY"}, logs.decisions())
+	require.NoError(t, db.Table("platform.event_outbox").Where("event_type = ?", filesystemevent.NodeRenamedName).Count(&outboxCount).Error)
+	require.Equal(t, int64(1), outboxCount)
 }

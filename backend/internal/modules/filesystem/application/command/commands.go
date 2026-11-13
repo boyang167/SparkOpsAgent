@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -228,21 +229,45 @@ func completeMutation(ctx context.Context, repo repository.FilesystemRepository,
 	return repo.CompleteCommand(ctx, commandID, nodeID, revisionID)
 }
 
+const idempotentMutationAttempts = 8
+
+func mutationRetryBackoff(attempt int) time.Duration {
+	base := time.Millisecond << attempt
+	return base + time.Duration(rand.Int64N(int64(base)))
+}
+
+func waitForMutationRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func withinIdempotentMutation(ctx context.Context, tx postgres.Transactor, mutate func(context.Context) error) error {
-	for attempt := 0; attempt < 5; attempt++ {
+	return withinIdempotentMutationWithRetry(ctx, tx, mutate, mutationRetryBackoff, waitForMutationRetry)
+}
+
+func withinIdempotentMutationWithRetry(
+	ctx context.Context,
+	tx postgres.Transactor,
+	mutate func(context.Context) error,
+	retryBackoff func(int) time.Duration,
+	retryWait func(context.Context, time.Duration) error,
+) error {
+	for attempt := 0; attempt < idempotentMutationAttempts; attempt++ {
 		err := tx.WithinTransaction(ctx, mutate)
 		if !errors.Is(err, domain.ErrTransactionRetry) && !errors.Is(err, domain.ErrCommandInProgress) {
 			return err
 		}
-		if attempt == 4 {
+		if attempt == idempotentMutationAttempts-1 {
 			return domain.ErrTransactionExhausted
 		}
-		timer := time.NewTimer(time.Duration(attempt+1) * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
+		if err := retryWait(ctx, retryBackoff(attempt)); err != nil {
+			return err
 		}
 	}
 	return domain.ErrTransactionExhausted

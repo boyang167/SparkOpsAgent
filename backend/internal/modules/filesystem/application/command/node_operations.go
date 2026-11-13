@@ -3,7 +3,6 @@ package command
 import (
 	"context"
 	"errors"
-	"math/rand/v2"
 	"time"
 
 	"github.com/google/uuid"
@@ -115,20 +114,8 @@ func NewMoveNodeHandler(repo repository.FilesystemRepository, tx postgres.Transa
 	requireMutationDependencies(repo, tx)
 	return &MoveNodeHandler{
 		repo: repo, tx: tx, bus: bus, audit: logger,
-		retryBackoff: func(attempt int) time.Duration {
-			base := time.Duration(attempt+1) * time.Millisecond
-			return base + time.Duration(rand.Int64N(int64(time.Millisecond)))
-		},
-		retryWait: func(ctx context.Context, delay time.Duration) error {
-			timer := time.NewTimer(delay)
-			defer timer.Stop()
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-timer.C:
-				return nil
-			}
-		},
+		retryBackoff: mutationRetryBackoff,
+		retryWait:    waitForMutationRetry,
 	}
 }
 
@@ -146,61 +133,48 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) (err error) 
 		err := authorizationDenied(cmd.Reason)
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", err)
 	}
-	for attempt := 0; attempt < 5; attempt++ {
-		err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-			node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
-			if err != nil {
-				return err
-			}
-			txCtx = withResourceID(txCtx, node.ID.String())
-			ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
-			if err != nil {
-				return err
-			}
-			if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
-				return domain.ErrNamespaceMismatch
-			}
-			if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
-				return domain.ErrRootMutation
-			}
-			name := cmd.NewName
-			if name == "" {
-				name = node.Name
-			}
-			targetParent := cmd.NewParentID
-			if targetParent == nil {
-				targetParent = ns.RootNodeID
-			}
-			requestHash := mutationRequestHash("move", cmd.WorkspaceID, cmd.NamespaceID, cmd.NodeID, targetParent, name, cmd.ActorID)
-			completed, _, err := claimMutation(txCtx, h.repo, cmd.CommandID, cmd.WorkspaceID, "move", requestHash, &cmd.NodeID, nil)
-			if err != nil || completed {
-				return err
-			}
-			if err := h.repo.MoveNodeSafely(txCtx, cmd.NamespaceID, node.ID, targetParent, name); err != nil {
-				return err
-			}
-			if h.bus != nil {
-				if err := h.bus.Publish(txCtx, event.NodeMoved{BaseEvent: events.NewBaseEvent(event.NodeMovedName), NodeID: node.ID, ParentID: *targetParent}); err != nil {
-					return err
-				}
-			}
-			if err := completeMutation(txCtx, h.repo, cmd.CommandID, &cmd.NodeID, nil); err != nil {
-				return err
-			}
-			return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", true, nil)
-		})
-		retryable := errors.Is(err, domain.ErrTransactionRetry) || errors.Is(err, domain.ErrCommandInProgress)
-		if !retryable || attempt == 4 {
-			break
+	err = withinIdempotentMutationWithRetry(ctx, h.tx, func(txCtx context.Context) error {
+		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
+		if err != nil {
+			return err
 		}
-		if waitErr := h.retryWait(ctx, h.retryBackoff(attempt)); waitErr != nil {
-			err = waitErr
-			break
+		txCtx = withResourceID(txCtx, node.ID.String())
+		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
+		if err != nil {
+			return err
 		}
-	}
-	if errors.Is(err, domain.ErrTransactionRetry) || errors.Is(err, domain.ErrCommandInProgress) {
-		err = domain.ErrTransactionExhausted
-	}
+		if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
+			return domain.ErrNamespaceMismatch
+		}
+		if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
+			return domain.ErrRootMutation
+		}
+		name := cmd.NewName
+		if name == "" {
+			name = node.Name
+		}
+		targetParent := cmd.NewParentID
+		if targetParent == nil {
+			targetParent = ns.RootNodeID
+		}
+		requestHash := mutationRequestHash("move", cmd.WorkspaceID, cmd.NamespaceID, cmd.NodeID, targetParent, name, cmd.ActorID)
+		completed, _, err := claimMutation(txCtx, h.repo, cmd.CommandID, cmd.WorkspaceID, "move", requestHash, &cmd.NodeID, nil)
+		if err != nil || completed {
+			return err
+		}
+		if err := h.repo.MoveNodeSafely(txCtx, cmd.NamespaceID, node.ID, targetParent, name); err != nil {
+			return err
+		}
+		if h.bus != nil {
+			if err := h.bus.Publish(txCtx, event.NodeMoved{BaseEvent: events.NewBaseEvent(event.NodeMovedName), NodeID: node.ID, ParentID: *targetParent}); err != nil {
+				return err
+			}
+		}
+		if err := completeMutation(txCtx, h.repo, cmd.CommandID, &cmd.NodeID, nil); err != nil {
+			return err
+		}
+		return logMutation(txCtx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", true, nil)
+	}, h.retryBackoff, h.retryWait)
 	if err != nil {
 		return errors.Join(err, logMutation(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", false, err))
 	}
