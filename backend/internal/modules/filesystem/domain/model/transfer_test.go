@@ -33,14 +33,80 @@ func TestTransferStateMachine(t *testing.T) {
 	require.NoError(t, session.StartUpload(1, time.Now()))
 	require.NoError(t, session.Pause(2, time.Now()))
 	require.NoError(t, session.Resume(3, time.Now()))
-	require.NoError(t, session.StartVerify(4, time.Now()))
-	require.NoError(t, session.StartScan(5, time.Now()))
-	require.NoError(t, session.SetScanResult(TransferScanResult{Clean: true, CompletedAt: time.Now()}, 6, time.Now()))
-	require.NoError(t, session.StartCommit(7, time.Now()))
-	require.NoError(t, session.Complete(8, time.Now()))
+	require.NoError(t, session.SetActual(1024, validTransferInput().ExpectedSHA256, 4, time.Now()))
+	require.NoError(t, session.StartVerify(5, time.Now()))
+	require.NoError(t, session.StartScan(6, time.Now()))
+	require.NoError(t, session.SetScanResult(TransferScanResult{Clean: true, CompletedAt: time.Now()}, 7, time.Now()))
+	require.NoError(t, session.StartCommit(8, time.Now()))
+	require.NoError(t, session.Complete(9, time.Now()))
 
-	require.ErrorIs(t, session.StartUpload(9, time.Now()), ErrInvalidTransferTransition)
-	require.ErrorIs(t, session.Fail("late", 9, time.Now()), ErrInvalidTransferTransition)
+	require.ErrorIs(t, session.StartUpload(10, time.Now()), ErrInvalidTransferTransition)
+	require.ErrorIs(t, session.Fail("late", 10, time.Now()), ErrInvalidTransferTransition)
+}
+
+func TestStartCommitRequiresActualIntegrityButAllowsVerifiedZeroByteFile(t *testing.T) {
+	session, err := NewTransferSession(validTransferInput())
+	require.NoError(t, err)
+	require.NoError(t, session.StartUpload(1, time.Now()))
+	require.NoError(t, session.StartVerify(2, time.Now()))
+	require.NoError(t, session.StartScan(3, time.Now()))
+	require.NoError(t, session.SetScanResult(TransferScanResult{Clean: true, CompletedAt: time.Now()}, 4, time.Now()))
+	require.ErrorIs(t, session.StartCommit(5, time.Now()), ErrTransferIntegrity)
+
+	zeroInput := validTransferInput()
+	zeroInput.ExpectedSize = 0
+	zeroSession, err := NewTransferSession(zeroInput)
+	require.NoError(t, err)
+	require.NoError(t, zeroSession.StartUpload(1, time.Now()))
+	require.NoError(t, zeroSession.SetActual(0, zeroInput.ExpectedSHA256, 2, time.Now()))
+	require.NoError(t, zeroSession.StartVerify(3, time.Now()))
+	require.NoError(t, zeroSession.StartScan(4, time.Now()))
+	require.NoError(t, zeroSession.SetScanResult(TransferScanResult{Clean: true, CompletedAt: time.Now()}, 5, time.Now()))
+	require.NoError(t, zeroSession.StartCommit(6, time.Now()))
+}
+
+func TestTransferAllowedTransitionMatrix(t *testing.T) {
+	tests := []struct {
+		name   string
+		ready  func(*TransferSession)
+		apply  func(*TransferSession) error
+		status TransferStatus
+	}{
+		{"initiated to uploading", func(*TransferSession) {}, func(s *TransferSession) error {
+			return s.StartUpload(1, time.Now())
+		}, TransferUploading},
+		{"uploading to paused", func(s *TransferSession) {
+			require.NoError(t, s.StartUpload(1, time.Now()))
+		}, func(s *TransferSession) error {
+			return s.Pause(2, time.Now())
+		}, TransferPaused},
+		{"paused to uploading", func(s *TransferSession) {
+			require.NoError(t, s.StartUpload(1, time.Now()))
+			require.NoError(t, s.Pause(2, time.Now()))
+		}, func(s *TransferSession) error {
+			return s.Resume(3, time.Now())
+		}, TransferUploading},
+		{"uploading to verifying", func(s *TransferSession) {
+			require.NoError(t, s.StartUpload(1, time.Now()))
+		}, func(s *TransferSession) error {
+			return s.StartVerify(2, time.Now())
+		}, TransferVerifying},
+		{"verifying to scanning", func(s *TransferSession) {
+			require.NoError(t, s.StartUpload(1, time.Now()))
+			require.NoError(t, s.StartVerify(2, time.Now()))
+		}, func(s *TransferSession) error {
+			return s.StartScan(3, time.Now())
+		}, TransferScanning},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			session, err := NewTransferSession(validTransferInput())
+			require.NoError(t, err)
+			test.ready(session)
+			require.NoError(t, test.apply(session))
+			require.Equal(t, test.status, session.Status())
+		})
+	}
 }
 
 func TestTransferStateMachineAllowsTerminalOutcomes(t *testing.T) {
@@ -144,22 +210,24 @@ func TestRestrictedTransferFailsClosedUntilCleanScan(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, session.StartUpload(1, time.Now()))
-	require.NoError(t, session.StartVerify(2, time.Now()))
-	require.NoError(t, session.StartScan(3, time.Now()))
-	require.ErrorIs(t, session.StartCommit(4, time.Now()), ErrTransferScanRequired)
-	require.ErrorIs(t, session.Reject("threat", 4, time.Now()), nil)
+	require.NoError(t, session.SetActual(1024, input.ExpectedSHA256, 2, time.Now()))
+	require.NoError(t, session.StartVerify(3, time.Now()))
+	require.NoError(t, session.StartScan(4, time.Now()))
+	require.ErrorIs(t, session.StartCommit(5, time.Now()), ErrTransferScanRequired)
+	require.ErrorIs(t, session.Reject("threat", 5, time.Now()), nil)
 }
 
 func TestUncleanScanCanOnlyReject(t *testing.T) {
 	session, err := NewTransferSession(validTransferInput())
 	require.NoError(t, err)
 	require.NoError(t, session.StartUpload(1, time.Now()))
-	require.NoError(t, session.StartVerify(2, time.Now()))
-	require.NoError(t, session.StartScan(3, time.Now()))
-	require.NoError(t, session.SetScanResult(TransferScanResult{Clean: false, ThreatName: "EICAR", CompletedAt: time.Now()}, 4, time.Now()))
-	require.ErrorIs(t, session.StartCommit(5, time.Now()), ErrTransferScanRequired)
-	require.NoError(t, session.Reject("malware", 5, time.Now()))
-	require.ErrorIs(t, session.Reject("again", 6, time.Now()), ErrInvalidTransferTransition)
+	require.NoError(t, session.SetActual(1024, session.ExpectedSHA256(), 2, time.Now()))
+	require.NoError(t, session.StartVerify(3, time.Now()))
+	require.NoError(t, session.StartScan(4, time.Now()))
+	require.NoError(t, session.SetScanResult(TransferScanResult{Clean: false, ThreatName: "EICAR", CompletedAt: time.Now()}, 5, time.Now()))
+	require.ErrorIs(t, session.StartCommit(6, time.Now()), ErrTransferScanRequired)
+	require.NoError(t, session.Reject("malware", 6, time.Now()))
+	require.ErrorIs(t, session.Reject("again", 7, time.Now()), ErrInvalidTransferTransition)
 }
 
 func TestTransferIntegrityMustMatchExpected(t *testing.T) {

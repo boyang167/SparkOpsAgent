@@ -253,6 +253,9 @@ func (s *TransferSession) StartCommit(expectedVersion int64, now time.Time) erro
 	if s.status != TransferScanning {
 		return ErrInvalidTransferTransition
 	}
+	if s.actualSize == nil || s.actualSHA256 == "" {
+		return ErrTransferIntegrity
+	}
 	if s.scanResult == nil || !s.scanResult.Clean || s.scanResult.CompletedAt.IsZero() {
 		return ErrTransferScanRequired
 	}

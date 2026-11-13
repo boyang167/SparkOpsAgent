@@ -16,6 +16,10 @@ DROP INDEX IF EXISTS filesystem.ix_transfer_parts_session_offset;
 DROP INDEX IF EXISTS filesystem.ix_transfer_sessions_expires_at;
 DROP INDEX IF EXISTS filesystem.ix_transfer_sessions_workspace_status;
 
+DROP TRIGGER IF EXISTS trg_transfer_parts_validate_bounds
+    ON filesystem.transfer_parts;
+DROP FUNCTION IF EXISTS filesystem.validate_transfer_part_bounds();
+
 ALTER TABLE IF EXISTS filesystem.transfer_parts
     DROP CONSTRAINT IF EXISTS fk_transfer_parts_session;
 ALTER TABLE IF EXISTS filesystem.transfer_sessions

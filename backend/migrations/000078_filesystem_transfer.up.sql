@@ -49,10 +49,10 @@ CREATE TABLE filesystem.transfer_parts (
     offset_bytes BIGINT NOT NULL,
     size_bytes BIGINT NOT NULL,
     checksum CHAR(64) CHECK (checksum IS NULL OR checksum ~ '^[0-9A-Fa-f]{64}$'),
-    etag TEXT,
+    etag TEXT NOT NULL CHECK (length(btrim(etag)) > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CHECK (offset_bytes >= 0 AND size_bytes >= 0),
+    CHECK (offset_bytes >= 0 AND size_bytes > 0),
     UNIQUE (session_id, part_number),
     CONSTRAINT fk_transfer_parts_session
         FOREIGN KEY (session_id) REFERENCES filesystem.transfer_sessions(id)
@@ -60,6 +60,37 @@ CREATE TABLE filesystem.transfer_parts (
 
 CREATE INDEX ix_transfer_parts_session_offset
     ON filesystem.transfer_parts(session_id, offset_bytes);
+
+CREATE OR REPLACE FUNCTION filesystem.validate_transfer_part_bounds()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    session_row filesystem.transfer_sessions%ROWTYPE;
+BEGIN
+    SELECT *
+    INTO session_row
+    FROM filesystem.transfer_sessions
+    WHERE id = NEW.session_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'transfer session % does not exist', NEW.session_id
+            USING ERRCODE = '23503';
+    END IF;
+
+    IF NEW.offset_bytes > session_row.expected_size
+       OR NEW.size_bytes > session_row.expected_size - NEW.offset_bytes THEN
+        RAISE EXCEPTION 'transfer part exceeds expected session size'
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_transfer_parts_validate_bounds
+BEFORE INSERT OR UPDATE ON filesystem.transfer_parts
+FOR EACH ROW
+EXECUTE FUNCTION filesystem.validate_transfer_part_bounds();
 
 ALTER TABLE filesystem.quota_reservations
     ADD COLUMN workspace_id UUID NULL,

@@ -838,10 +838,6 @@ func (r *Repository) GetTransferByIdempotency(context.Context, uuid.UUID, string
 	return nil, domain.ErrPersistence
 }
 
-func (r *Repository) CASTransferStatus(context.Context, uuid.UUID, model.TransferStatus, model.TransferStatus, int64) error {
-	return domain.ErrPersistence
-}
-
 func (r *Repository) LockTransfer(context.Context, uuid.UUID) (*model.TransferSession, error) {
 	return nil, domain.ErrPersistence
 }

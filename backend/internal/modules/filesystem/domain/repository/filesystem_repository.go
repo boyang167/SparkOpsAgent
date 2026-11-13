@@ -76,7 +76,6 @@ type FilesystemRepository interface {
 	CreateTransfer(context.Context, *model.TransferSession) error
 	GetTransferByID(context.Context, uuid.UUID) (*model.TransferSession, error)
 	GetTransferByIdempotency(context.Context, uuid.UUID, string) (*model.TransferSession, error)
-	CASTransferStatus(context.Context, uuid.UUID, model.TransferStatus, model.TransferStatus, int64) error
 	LockTransfer(context.Context, uuid.UUID) (*model.TransferSession, error)
 	ListTransferParts(context.Context, uuid.UUID) ([]model.TransferPart, error)
 	UpsertTransferPart(context.Context, *model.TransferPart) error
