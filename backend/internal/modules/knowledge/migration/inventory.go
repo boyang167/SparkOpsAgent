@@ -5,20 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"unicode/utf8"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge/domain/repository"
 )
 
 type InventoryReport struct {
-	TotalDocuments       int64               `json:"total_documents"`
-	EmptyContent         int64               `json:"empty_content"`
-	TotalBytes           int64               `json:"total_bytes"`
-	MaxDocumentBytes     int64               `json:"max_document_bytes"`
-	EncodingAnomalies    int64               `json:"encoding_anomalies"`
-	DuplicateSHA256      int64               `json:"duplicate_sha256"`
-	MissingWorkspace     int64               `json:"missing_workspace"`
-	EstimatedBlobCount   int64               `json:"estimated_blob_count"`
-	DuplicateSHA256Items []string            `json:"duplicate_sha256_items,omitempty"`
+	TotalDocuments       int64    `json:"total_documents"`
+	EmptyContent         int64    `json:"empty_content"`
+	TotalBytes           int64    `json:"total_bytes"`
+	MaxDocumentBytes     int64    `json:"max_document_bytes"`
+	EncodingAnomalies    int64    `json:"encoding_anomalies"`
+	DuplicateSHA256      int64    `json:"duplicate_sha256"`
+	MissingWorkspace     int64    `json:"missing_workspace"`
+	EstimatedBlobCount   int64    `json:"estimated_blob_count"`
+	DuplicateSHA256Items []string `json:"duplicate_sha256_items,omitempty"`
 }
 
 type InventoryRunner struct {
@@ -46,6 +47,9 @@ func (r *InventoryRunner) Run(ctx context.Context) (InventoryReport, error) {
 		}
 		if n > report.MaxDocumentBytes {
 			report.MaxDocumentBytes = n
+		}
+		if !utf8.ValidString(content) {
+			report.EncodingAnomalies++
 		}
 		sha := SHA256Hex([]byte(content))
 		shaCounts[sha]++

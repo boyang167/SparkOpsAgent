@@ -23,6 +23,7 @@ func (payloadRow) TableName() string { return "knowledge._migration_payloads" }
 type FilesystemACL struct {
 	db       *gorm.DB
 	payloads sync.Map
+	byDoc    sync.Map
 }
 
 func NewFilesystemACL(db *gorm.DB) *FilesystemACL {
@@ -44,24 +45,65 @@ func NewFilesystemACL(db *gorm.DB) *FilesystemACL {
 var _ port.KnowledgeFileStore = (*FilesystemACL)(nil)
 
 func (a *FilesystemACL) StoreDocument(ctx context.Context, in port.StoreDocumentInput) (port.StoredDocument, error) {
-	mem := NewMemoryFileStore()
-	stored, err := mem.StoreDocument(ctx, in)
-	if err != nil {
-		return port.StoredDocument{}, err
+	payload := append([]byte(nil), in.Content...)
+	if fileID, ok := a.fileIDForDocument(ctx, in.DocumentID); ok {
+		if a.db != nil {
+			if err := a.db.WithContext(ctx).Save(&payloadRow{FileID: fileID, Payload: payload}).Error; err != nil {
+				return port.StoredDocument{}, err
+			}
+		}
+		a.remember(in.DocumentID, fileID, payload)
+		return port.StoredDocument{FileID: fileID, RevisionID: uuid.New()}, nil
 	}
-	a.payloads.Store(stored.FileID, append([]byte(nil), in.Content...))
+	fileID := uuid.New()
 	if a.db != nil {
 		now := time.Now().UTC()
 		linkID := uuid.New()
-		_ = a.db.WithContext(ctx).Exec(
+		if err := a.db.WithContext(ctx).Exec(
 			`INSERT INTO filesystem.file_links (id, node_id, link_type, link_id, created_at)
 			 VALUES (?, ?, ?, ?, ?)`,
-			linkID.String(), stored.FileID.String(), port.FileLinkTypeKnowledgeDocument,
+			linkID.String(), fileID.String(), port.FileLinkTypeKnowledgeDocument,
 			in.DocumentID.String(), now,
-		).Error
-		_ = a.db.WithContext(ctx).Save(&payloadRow{FileID: stored.FileID, Payload: in.Content}).Error
+		).Error; err != nil {
+			return port.StoredDocument{}, err
+		}
+		if err := a.db.WithContext(ctx).Save(&payloadRow{FileID: fileID, Payload: payload}).Error; err != nil {
+			return port.StoredDocument{}, err
+		}
 	}
-	return stored, nil
+	a.remember(in.DocumentID, fileID, payload)
+	return port.StoredDocument{FileID: fileID, RevisionID: uuid.New()}, nil
+}
+
+func (a *FilesystemACL) remember(documentID, fileID uuid.UUID, payload []byte) {
+	a.byDoc.Store(documentID, fileID)
+	a.payloads.Store(fileID, append([]byte(nil), payload...))
+}
+
+func (a *FilesystemACL) fileIDForDocument(ctx context.Context, documentID uuid.UUID) (uuid.UUID, bool) {
+	if raw, ok := a.byDoc.Load(documentID); ok {
+		id, _ := raw.(uuid.UUID)
+		if id != uuid.Nil {
+			return id, true
+		}
+	}
+	if a.db == nil {
+		return uuid.Nil, false
+	}
+	var nodeID string
+	err := a.db.WithContext(ctx).Raw(
+		`SELECT node_id FROM filesystem.file_links WHERE link_type = ? AND link_id = ? LIMIT 1`,
+		port.FileLinkTypeKnowledgeDocument, documentID.String(),
+	).Scan(&nodeID).Error
+	if err != nil || nodeID == "" {
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(nodeID)
+	if err != nil {
+		return uuid.Nil, false
+	}
+	a.byDoc.Store(documentID, id)
+	return id, true
 }
 
 func (a *FilesystemACL) ReadDocumentBytes(ctx context.Context, fileID uuid.UUID) ([]byte, error) {

@@ -46,7 +46,13 @@ func (r *PrecopyRunner) PrecopyDocument(ctx context.Context, documentID kernel.D
 		return err
 	}
 	if existing != nil && existing.Status == model.FileMigrationStatusVerified && existing.SourceSHA256 == sourceSHA {
-		return nil
+		if optsDryRun(ctx) {
+			return nil
+		}
+		if existing.FileID == nil {
+			return fmt.Errorf("verified migration missing file_id")
+		}
+		return r.repo.SetDocumentMigrationFields(ctx, documentID, existing.FileID, model.DocumentMigrationStatusPrecopy)
 	}
 	if existing != nil && existing.FileID != nil {
 		return r.verifyExisting(ctx, documentID, existing, sourceSHA)

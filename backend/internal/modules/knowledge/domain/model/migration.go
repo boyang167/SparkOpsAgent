@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	DocumentMigrationStatusLegacy  = "LEGACY"
-	DocumentMigrationStatusPrecopy = "PRECOPY"
+	DocumentMigrationStatusLegacy   = "LEGACY"
+	DocumentMigrationStatusPrecopy  = "PRECOPY"
 	DocumentMigrationStatusSwitched = "SWITCHED"
 	DocumentMigrationStatusRollback = "ROLLBACK"
 )
