@@ -58,3 +58,11 @@ llm:
     openai:
       api_key: ""
       base_url: https://api.openai.com/v1
+filesystem:
+  transfer_gateway:
+    listen: ":8082"
+    public_url: "http://localhost:8082"
+    capability_audience: "sparkops-file-transfer"
+    capability_secret: ""
+    max_file_bytes: 21474836480
+    storage_root: "./data/filesystem"

@@ -30,6 +30,20 @@ type Config struct {
 	Observability ObservabilityConfig `yaml:"observability"`
 	Notify        NotifyConfig        `yaml:"notify"`
 	Vault         VaultConfig         `yaml:"vault"`
+	Filesystem    FilesystemConfig    `yaml:"filesystem"`
+}
+
+type FilesystemConfig struct {
+	TransferGateway TransferGatewayConfig `yaml:"transfer_gateway"`
+}
+
+type TransferGatewayConfig struct {
+	Listen             string `yaml:"listen"`
+	PublicURL          string `yaml:"public_url"`
+	CapabilityAudience string `yaml:"capability_audience"`
+	CapabilitySecret   string `yaml:"capability_secret"`
+	MaxFileBytes       int64  `yaml:"max_file_bytes"`
+	StorageRoot        string `yaml:"storage_root"`
 }
 
 type PolicyConfig struct {
@@ -464,6 +478,21 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Auth.LDAP.NameAttribute == "" {
 		c.Auth.LDAP.NameAttribute = "cn"
+	}
+	if c.Filesystem.TransferGateway.Listen == "" {
+		c.Filesystem.TransferGateway.Listen = ":8082"
+	}
+	if c.Filesystem.TransferGateway.CapabilityAudience == "" {
+		c.Filesystem.TransferGateway.CapabilityAudience = "sparkops-file-transfer"
+	}
+	if c.Filesystem.TransferGateway.MaxFileBytes == 0 {
+		c.Filesystem.TransferGateway.MaxFileBytes = 21474836480
+	}
+	if c.Filesystem.TransferGateway.CapabilitySecret == "" {
+		c.Filesystem.TransferGateway.CapabilitySecret = c.JWT.Secret
+	}
+	if c.Filesystem.TransferGateway.StorageRoot == "" {
+		c.Filesystem.TransferGateway.StorageRoot = "./data/filesystem"
 	}
 }
 
