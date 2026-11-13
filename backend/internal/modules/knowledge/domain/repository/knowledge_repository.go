@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 
+	"github.com/google/uuid"
+
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -20,4 +22,12 @@ type KnowledgeBaseRepository interface {
 	FindDocumentByKBAndTitle(ctx context.Context, kbID kernel.KnowledgeBaseID, title model.DocumentTitle) (*model.Document, error)
 	ListDocumentsByKnowledgeBase(ctx context.Context, kbID kernel.KnowledgeBaseID) ([]*model.Document, error)
 	SearchDocumentsByKnowledgeBase(ctx context.Context, kbID kernel.KnowledgeBaseID, query string, limit int) ([]*model.Document, error)
+
+	FindDocumentMigrationByID(ctx context.Context, documentID kernel.DocumentID) (*model.DocumentFileMigration, error)
+	SaveDocumentMigration(ctx context.Context, row model.DocumentFileMigration) error
+	ListDocumentsForMigration(ctx context.Context, afterID *kernel.DocumentID, limit int) ([]*model.Document, error)
+	CountLegacyDocuments(ctx context.Context) (int64, error)
+	CountDocumentMigrationsByStatus(ctx context.Context, status string) (int64, error)
+	SetDocumentMigrationFields(ctx context.Context, documentID kernel.DocumentID, fileID *uuid.UUID, migrationStatus string) error
+	FindWorkspaceIDForDocument(ctx context.Context, documentID kernel.DocumentID) (kernel.WorkspaceID, error)
 }

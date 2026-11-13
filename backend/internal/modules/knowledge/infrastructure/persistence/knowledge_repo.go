@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge/domain"
@@ -23,7 +24,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return db.AutoMigrate(&knowledgeBaseModel{}, &documentModel{})
+	return db.AutoMigrate(&knowledgeBaseModel{}, &documentModel{}, &documentFileMigrationModel{})
 }
 
 type knowledgeBaseModel struct {
@@ -42,6 +43,8 @@ type documentModel struct {
 	KnowledgeBaseID string
 	Title           string
 	Content         string `gorm:"type:text"`
+	FileID          *string
+	MigrationStatus string
 	Status          string
 	postgres.AuditColumns
 }
@@ -122,12 +125,20 @@ func (r *KnowledgeRepository) SaveDocument(ctx context.Context, doc *model.Docum
 }
 
 func (r *KnowledgeRepository) UpdateDocument(ctx context.Context, doc *model.Document) error {
-	return r.db.WithContext(ctx).Model(&documentModel{}).Where("id = ?", doc.ID.String()).Updates(map[string]any{
+	updates := map[string]any{
 		"title":      doc.Title.String(),
 		"content":    doc.Content,
 		"status":     string(doc.Status),
 		"updated_at": time.Now().UTC(),
-	}).Error
+	}
+	if doc.FileID != nil {
+		v := doc.FileID.String()
+		updates["file_id"] = v
+	}
+	if doc.MigrationStatus != "" {
+		updates["migration_status"] = doc.MigrationStatus
+	}
+	return r.db.WithContext(ctx).Model(&documentModel{}).Where("id = ?", doc.ID.String()).Updates(updates).Error
 }
 
 func (r *KnowledgeRepository) FindDocumentByID(ctx context.Context, id kernel.DocumentID) (*model.Document, error) {
@@ -225,11 +236,16 @@ func kbRowToModel(row knowledgeBaseModel) (*model.KnowledgeBase, error) {
 }
 
 func docToRow(doc *model.Document) documentModel {
-	return documentModel{
+	row := documentModel{
 		ID: doc.ID.String(), KnowledgeBaseID: doc.KnowledgeBaseID.String(),
 		Title: doc.Title.String(), Content: doc.Content,
-		Status: string(doc.Status),
+		Status: string(doc.Status), MigrationStatus: doc.MigrationStatus,
 	}
+	if doc.FileID != nil {
+		v := doc.FileID.String()
+		row.FileID = &v
+	}
+	return row
 }
 
 func docRowToModel(row documentModel) (*model.Document, error) {
@@ -239,11 +255,19 @@ func docRowToModel(row documentModel) (*model.Document, error) {
 	}
 	id, _ := kernel.ParseDocumentID(row.ID)
 	kbID, _ := kernel.ParseKnowledgeBaseID(row.KnowledgeBaseID)
-	return &model.Document{
+	doc := &model.Document{
 		ID: id, KnowledgeBaseID: kbID, Title: title,
 		Content: row.Content, Status: model.DocumentStatus(row.Status),
-		CreatedAt: row.CreatedAt,
-	}, nil
+		MigrationStatus: row.MigrationStatus,
+		CreatedAt:       row.CreatedAt,
+	}
+	if row.FileID != nil && *row.FileID != "" {
+		parsed, err := uuid.Parse(*row.FileID)
+		if err == nil {
+			doc.FileID = &parsed
+		}
+	}
+	return doc, nil
 }
 
 var _ repository.KnowledgeBaseRepository = (*KnowledgeRepository)(nil)

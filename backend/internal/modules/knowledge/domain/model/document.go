@@ -4,6 +4,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/knowledge/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
@@ -34,6 +36,8 @@ type Document struct {
 	KnowledgeBaseID kernel.KnowledgeBaseID
 	Title           DocumentTitle
 	Content         string
+	FileID          *uuid.UUID
+	MigrationStatus string
 	Status          DocumentStatus
 	CreatedAt       time.Time
 }
