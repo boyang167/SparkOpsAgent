@@ -65,6 +65,19 @@ type retryMoveRepository struct {
 	calls int
 }
 
+type retryOnceTransactor struct {
+	inner postgres.Transactor
+	calls int
+}
+
+func (t *retryOnceTransactor) WithinTransaction(ctx context.Context, fn func(context.Context) error) error {
+	t.calls++
+	if t.calls == 1 {
+		return domain.ErrTransactionRetry
+	}
+	return t.inner.WithinTransaction(ctx, fn)
+}
+
 func (r *retryMoveRepository) MoveNodeSafely(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID, string) error {
 	r.calls++
 	if r.calls == 1 {
@@ -558,6 +571,48 @@ func TestCopyCommandDedupDoesNotRepeatQuotaBlobOrAudit(t *testing.T) {
 	cmd.Name = "different.txt"
 	_, err = handler.Handle(context.Background(), cmd)
 	require.ErrorIs(t, err, domain.ErrIdempotencyConflict)
+}
+
+func TestCopyRetriesWholeTransactionAfterTransactionRetry(t *testing.T) {
+	db, repo, ns := newPutTestRepository(t)
+	provider, err := local.New(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = provider.Close() })
+	source, err := NewPutLocalFileHandler(repo, provider, postgres.NewTransactor(db), nil, nil).Handle(context.Background(), putFixture(ns))
+	require.NoError(t, err)
+	logs := &recordingAudit{}
+	tx := &retryOnceTransactor{inner: postgres.NewTransactor(db)}
+	handler := NewCopyNodeHandler(repo, tx, logs)
+	var waits []time.Duration
+	handler.retryBackoff = func(attempt int) time.Duration {
+		return time.Duration(attempt+1) * 7 * time.Millisecond
+	}
+	handler.retryWait = func(_ context.Context, delay time.Duration) error {
+		waits = append(waits, delay)
+		return nil
+	}
+	cmd := CopyNode{
+		CommandID: uuid.New(), ActorID: source.OwnerID, OrganizationID: ns.OrganizationID,
+		WorkspaceID: ns.WorkspaceID, NamespaceID: ns.ID, SourceNodeID: source.ID,
+		Name: "retry-copy.txt", Authorization: Authorization{Allowed: true},
+	}
+
+	copied, err := handler.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	require.NotNil(t, copied)
+	require.Equal(t, 2, tx.calls)
+	require.Equal(t, []time.Duration{7 * time.Millisecond}, waits)
+	require.Equal(t, []string{"ALLOW"}, logs.decisions())
+	revision, err := repo.GetRevision(context.Background(), source.ID, *source.CurrentRevisionID)
+	require.NoError(t, err)
+	blob, err := repo.GetBlob(context.Background(), revision.BlobID())
+	require.NoError(t, err)
+	require.Equal(t, int64(2), blob.RefCount)
+	var quota struct{ UsedBytes, UsedFiles int64 }
+	require.NoError(t, db.Table("filesystem.quota_accounts").Where("workspace_id = ?", ns.WorkspaceID).Take(&quota).Error)
+	require.Equal(t, int64(30), quota.UsedBytes)
+	require.Equal(t, int64(2), quota.UsedFiles)
 }
 
 func TestCopyCommandDedupConcurrentReturnsAuthoritativeResult(t *testing.T) {
