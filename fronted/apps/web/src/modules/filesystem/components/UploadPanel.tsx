@@ -7,6 +7,7 @@ import {
   type TransferProgress,
 } from "@sparkops/web-sdk/filesystem";
 import { TransferProgress as TransferProgressBar } from "./TransferProgress";
+import { getUploadGate } from "./upload-panel-gate";
 
 interface UploadPanelProps {
   workspaceId: string;
@@ -28,11 +29,12 @@ export function UploadPanel({
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const { uploadEnabled, helperText } = getUploadGate(providerId);
+
   async function handleFiles(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
-    if (!providerId) {
-      setError("未配置存储 Provider，无法发起上传。");
+    if (!uploadEnabled || !providerId) {
       return;
     }
     setBusy(true);
@@ -69,17 +71,22 @@ export function UploadPanel({
         ref={inputRef}
         type="file"
         className="hidden"
-        disabled={busy}
+        disabled={busy || !uploadEnabled}
         onChange={(event) => void handleFiles(event.target.files)}
       />
       <button
         type="button"
         className="btn btn-secondary"
-        disabled={busy}
-        onClick={() => inputRef.current?.click()}
+        disabled={busy || !uploadEnabled}
+        aria-disabled={!uploadEnabled}
+        onClick={() => {
+          if (!uploadEnabled) return;
+          inputRef.current?.click();
+        }}
       >
         {busy ? "上传中…" : "上传文件"}
       </button>
+      {helperText ? <p className="text-sm text-muted">{helperText}</p> : null}
       {progress ? <TransferProgressBar progress={progress} /> : null}
       {error ? <p className="text-sm text-danger">{error}</p> : null}
     </div>

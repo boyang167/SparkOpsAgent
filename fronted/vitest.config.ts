@@ -19,8 +19,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    tsconfig: "./vitest.tsconfig.json",
     environmentMatchGlobs: [
-      ["apps/web/src/modules/filesystem/**/*.test.ts", "jsdom"],
+      ["apps/web/src/modules/filesystem/**/*.test.{ts,tsx}", "jsdom"],
     ],
   },
 });

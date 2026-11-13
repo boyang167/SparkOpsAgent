@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
-import { createDirectoryNode, renameFileNode } from "@sparkops/web-sdk/filesystem";
-import { renameNodeKeepingIdentity } from "./file-explorer-rename";
+import { createDirectoryNode } from "@sparkops/web-sdk/filesystem";
+import { createPanelRenameHandler, submitPanelRename } from "./file-explorer-panel-rename";
 import { UploadPanel } from "./UploadPanel";
 
 export type BreadcrumbItem = {
@@ -43,19 +43,14 @@ export function FileExplorerPanel({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // MVP lists the full directory page; cursor pagination is deferred to a later G4 task.
   const sortedNodes = useMemo(
     () => [...nodes].sort((a, b) => a.name.localeCompare(b.name, "zh-CN")),
     [nodes],
   );
 
-  const doRename = useCallback(
-    async (nodeId: string, name: string) => {
-      if (onRename) {
-        await onRename(nodeId, name);
-        return;
-      }
-      await renameFileNode(workspaceId, nodeId, { name });
-    },
+  const doRename = useMemo(
+    () => createPanelRenameHandler(workspaceId, onRename),
     [onRename, workspaceId],
   );
 
@@ -79,8 +74,7 @@ export function FileExplorerPanel({
     setPending(true);
     setError(null);
     try {
-      const nextName = renameValue.trim();
-      await renameNodeKeepingIdentity(renameTarget.id, nextName, doRename);
+      const nextName = await submitPanelRename(renameTarget.id, renameValue, doRename);
       setNodes((current) =>
         current.map((node) => (node.id === renameTarget.id ? { ...node, name: nextName } : node)),
       );
