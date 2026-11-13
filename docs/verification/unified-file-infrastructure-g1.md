@@ -1,13 +1,14 @@
 # G1 Unified File Infrastructure 验收证据
 
-> 状态：**PASS**。Copy 并发修复已在当前 HEAD 通过 fresh 验收；Backend `/ready` fresh HTTP 200。
+> 状态：**PASS**。Copy 并发修复已在被测实现提交 `63e6fba` 上通过 fresh 验收；Backend `/ready` fresh HTTP 200。
 
 ## 验收上下文
 
 - 验收时间：2026-11-13 08:54（UTC+8）
 - 工作树：`A:\21-Agent\SparkOpsAgent\.worktrees\unified-file-infrastructure`
-- HEAD：`63e6fba866f5f39c3b24c05e0b96c41182d93456`
-- HEAD subject：`fix(filesystem): retry copy transaction conflicts`
+- 验收执行时被测实现提交 / verified implementation commit：`63e6fba866f5f39c3b24c05e0b96c41182d93456`
+- 被测实现提交 subject：`fix(filesystem): retry copy transaction conflicts`
+- 验收文档首次提交：`7fff6bae5e1acb99b7afd26bd33724e60ec2bfea`
 - Copy 修复证据：Task7 原失败并发组 fresh `-count=20` 通过，exit 0。
 - PostgreSQL 集成条件：当前验收 shell 的 `DATABASE_DSN` 未设置；专门依赖该环境变量的 PostgreSQL 集成测试标记为 **SKIP**，不声称通过。运行中的后端使用本机既有 `CONFIG_PATH`，其 readiness 数据库检查独立为 up。
 - 用户决策：G1 不提供 binary 传输端点；binary 上传/下载由 G2 承载。OpenAPI 只冻结 G1 元数据和操作接口。
