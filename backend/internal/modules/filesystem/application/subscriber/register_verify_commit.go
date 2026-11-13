@@ -34,6 +34,6 @@ func RegisterVerifyCommit(
 	return bus.Subscribe(
 		filesystemevent.TransferUploadedName,
 		TransferVerifyCommitSubscriber,
-		NewOnTransferUploaded(verify, commit).Handle,
+		NewOnTransferUploaded(verify, commit, repo).Handle,
 	)
 }
