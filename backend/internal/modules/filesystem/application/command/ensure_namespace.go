@@ -23,13 +23,21 @@ type EnsureNamespace struct {
 }
 
 type EnsureNamespaceHandler struct {
-	repo              repository.FilesystemRepository
+	repo              namespaceEnsureRepository
 	tx                postgres.Transactor
 	localStorageRoot  string
 	ensureDefaultProv *EnsureDefaultLocalProviderHandler
 }
 
-func NewEnsureNamespaceHandler(repo repository.FilesystemRepository, tx postgres.Transactor) *EnsureNamespaceHandler {
+type namespaceEnsureRepository interface {
+	repository.FilesystemRepository
+	CreateNamespaceIfAbsent(context.Context, *model.Namespace) error
+	CreateNamespaceRootNodeIfAbsent(context.Context, *model.Node) error
+	SetNamespaceRootByID(context.Context, uuid.UUID, uuid.UUID) error
+	CreateNamespaceRootLink(context.Context, model.FileLink) error
+}
+
+func NewEnsureNamespaceHandler(repo namespaceEnsureRepository, tx postgres.Transactor) *EnsureNamespaceHandler {
 	requireMutationDependencies(repo, tx)
 	return &EnsureNamespaceHandler{repo: repo, tx: tx}
 }
@@ -68,20 +76,14 @@ func (h *EnsureNamespaceHandler) Handle(ctx context.Context, cmd EnsureNamespace
 		return nil, err
 	}
 	if existing != nil {
+		if existing.OrganizationID != cmd.OrganizationID {
+			return nil, domain.ErrNamespaceMismatch
+		}
 		namespace = existing
 	}
 
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
-		idempotentRepo, ok := h.repo.(interface {
-			CreateNamespaceIfAbsent(context.Context, *model.Namespace) error
-			CreateNamespaceRootNodeIfAbsent(context.Context, *model.Node) error
-			SetNamespaceRootByID(context.Context, uuid.UUID, uuid.UUID) error
-			CreateNamespaceRootLink(context.Context, model.FileLink) error
-		})
-		if !ok {
-			return domain.ErrPersistence
-		}
-		if err := idempotentRepo.CreateNamespaceIfAbsent(txCtx, namespace); err != nil {
+		if err := h.repo.CreateNamespaceIfAbsent(txCtx, namespace); err != nil {
 			return err
 		}
 		canonical, err := h.repo.GetNamespace(txCtx, namespace.ID)
@@ -96,13 +98,13 @@ func (h *EnsureNamespaceHandler) Handle(ctx context.Context, cmd EnsureNamespace
 			return rootErr
 		}
 		root.ID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-namespace-root:"+namespace.ID.String()))
-		if err := idempotentRepo.CreateNamespaceRootNodeIfAbsent(txCtx, root); err != nil {
+		if err := h.repo.CreateNamespaceRootNodeIfAbsent(txCtx, root); err != nil {
 			return err
 		}
-		if err := idempotentRepo.SetNamespaceRootByID(txCtx, namespace.ID, root.ID); err != nil {
+		if err := h.repo.SetNamespaceRootByID(txCtx, namespace.ID, root.ID); err != nil {
 			return err
 		}
-		if err := idempotentRepo.CreateNamespaceRootLink(txCtx, model.FileLink{
+		if err := h.repo.CreateNamespaceRootLink(txCtx, model.FileLink{
 			ID:        uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-namespace-root-link:"+namespace.ID.String())),
 			NodeID:    root.ID,
 			LinkType:  model.FileLinkTypeNamespaceRoot,

@@ -23,7 +23,7 @@ import (
 
 type Repository struct{ db *gorm.DB }
 
-func NewRepository(db *gorm.DB) repository.FilesystemRepository { return &Repository{db: db} }
+func NewRepository(db *gorm.DB) *Repository { return &Repository{db: db} }
 
 func (r *Repository) CreateNamespace(ctx context.Context, namespace *model.Namespace) error {
 	if err := namespace.Validate(); err != nil {
@@ -1706,7 +1706,8 @@ func (r *Repository) CreateFileLink(ctx context.Context, link model.FileLink) er
 }
 
 func (r *Repository) CreateNamespaceRootLink(ctx context.Context, link model.FileLink) error {
-	if link.LinkType != model.FileLinkTypeNamespaceRoot {
+	if link.LinkType != model.FileLinkTypeNamespaceRoot ||
+		link.LinkID == uuid.Nil || link.NodeID == uuid.Nil {
 		return domain.ErrPersistence
 	}
 	row := fileLinkRow{

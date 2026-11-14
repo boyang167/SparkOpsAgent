@@ -120,6 +120,12 @@ func TestNamespaceRootLinkIsIdempotentOnlyThroughDedicatedMethod(t *testing.T) {
 		CreateNamespaceRootLink(context.Context, model.FileLink) error
 	})
 	require.True(t, ok)
+	require.ErrorIs(t, dedicated.CreateNamespaceRootLink(context.Background(), model.FileLink{
+		LinkType: model.FileLinkTypeNamespaceRoot, NodeID: root.ID, LinkID: uuid.Nil,
+	}), domain.ErrPersistence)
+	require.ErrorIs(t, dedicated.CreateNamespaceRootLink(context.Background(), model.FileLink{
+		LinkType: model.FileLinkTypeNamespaceRoot, NodeID: uuid.Nil, LinkID: namespace.ID,
+	}), domain.ErrPersistence)
 	require.NoError(t, dedicated.CreateNamespaceRootLink(context.Background(), link))
 	require.NoError(t, dedicated.CreateNamespaceRootLink(context.Background(), link))
 	var count int64

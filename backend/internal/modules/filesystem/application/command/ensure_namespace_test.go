@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
@@ -153,6 +154,45 @@ func TestEnsureWorkspacePreservesDefaultLocalProviderBootstrap(t *testing.T) {
 	require.NoError(t, db.Table("filesystem.storage_providers").
 		Where("name = ?", DefaultLocalProviderName).Count(&providers).Error)
 	require.Equal(t, int64(1), providers)
+}
+
+func TestEnsureWorkspaceRejectsExistingNamespaceFromAnotherOrganization(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
+	require.NoError(t, persistence.AutoMigrate(db))
+	repo := persistence.NewRepository(db)
+	handler := NewEnsureNamespaceHandler(repo, postgres.NewTransactor(db)).
+		WithDefaultLocalProvider(t.TempDir(), NewEnsureDefaultLocalProviderHandler(repo))
+	workspaceID := uuid.New()
+	first, err := handler.Handle(context.Background(), EnsureNamespace{
+		OrganizationID: uuid.New(), WorkspaceID: workspaceID,
+		NamespaceType: model.NamespaceTypeWorkspace, ActorID: uuid.New(),
+	})
+	require.NoError(t, err)
+	var rootsBefore, quotasBefore, providersBefore int64
+	require.NoError(t, db.Table("filesystem.nodes").Where("namespace_id = ?", first.ID).Count(&rootsBefore).Error)
+	require.NoError(t, db.Table("filesystem.quota_accounts").Where("workspace_id = ?", workspaceID).Count(&quotasBefore).Error)
+	require.NoError(t, db.Table("filesystem.storage_providers").Count(&providersBefore).Error)
+
+	_, err = handler.Handle(context.Background(), EnsureNamespace{
+		OrganizationID: uuid.New(), WorkspaceID: workspaceID,
+		NamespaceType: model.NamespaceTypeWorkspace, ActorID: uuid.New(),
+	})
+	require.ErrorIs(t, err, domain.ErrNamespaceMismatch)
+	var rootsAfter, quotasAfter, providersAfter int64
+	require.NoError(t, db.Table("filesystem.nodes").Where("namespace_id = ?", first.ID).Count(&rootsAfter).Error)
+	require.NoError(t, db.Table("filesystem.quota_accounts").Where("workspace_id = ?", workspaceID).Count(&quotasAfter).Error)
+	require.NoError(t, db.Table("filesystem.storage_providers").Count(&providersAfter).Error)
+	require.Equal(t, rootsBefore, rootsAfter)
+	require.Equal(t, quotasBefore, quotasAfter)
+	require.Equal(t, providersBefore, providersAfter)
 }
 
 func TestNamespaceIDNormalizesUnusedScopeFields(t *testing.T) {
