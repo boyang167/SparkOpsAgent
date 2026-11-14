@@ -11,18 +11,20 @@ import (
 )
 
 type Options struct {
-	CapabilitySecret   string
-	CapabilityAudience string
+	CapabilitySecret         string
+	CapabilityAudience       string
 	CapabilitySecretFallback string
-	MaxFileBytes       int64
-	Control            ControlPort
-	NonceStore         NonceStore
+	MaxFileBytes             int64
+	Control                  ControlPort
+	NonceStore               NonceStore
+	AllowedOrigins           []string
 }
 
 type Server struct {
-	auth           *CapabilityAuth
-	control        ControlPort
-	maxFileBytes   int64
+	auth         *CapabilityAuth
+	control      ControlPort
+	maxFileBytes int64
+	origins      map[string]struct{}
 }
 
 func New(opts Options) (*Server, error) {
@@ -48,10 +50,28 @@ func New(opts Options) (*Server, error) {
 		auth:         auth,
 		control:      opts.Control,
 		maxFileBytes: opts.MaxFileBytes,
+		origins:      allowedOriginSet(opts.AllowedOrigins),
 	}, nil
 }
 
 func (s *Server) RegisterRoutes(engine *gin.Engine) {
+	engine.Use(func(c *gin.Context) {
+		if origin := strings.TrimSpace(c.GetHeader("Origin")); origin != "" {
+			if _, allowed := s.origins[origin]; !allowed {
+				c.AbortWithStatus(http.StatusForbidden)
+				return
+			}
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
+			c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			c.Header("Vary", "Origin")
+		}
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	})
 	engine.GET("/health", func(c *gin.Context) {
 		httpx.OK(c, gin.H{"status": "up"})
 	})
@@ -64,6 +84,16 @@ func (s *Server) RegisterRoutes(engine *gin.Engine) {
 	})
 	engine.PUT("/v1/transfers/:sessionId/content", s.handleUpload)
 	engine.GET("/v1/files/:fileId/content", s.handleDownload)
+}
+
+func allowedOriginSet(origins []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(origins))
+	for _, origin := range origins {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			result[origin] = struct{}{}
+		}
+	}
+	return result
 }
 
 func (s *Server) failCapability(c *gin.Context, err error) {

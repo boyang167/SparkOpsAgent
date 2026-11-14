@@ -988,7 +988,7 @@ func equalTimePointers(left, right *time.Time) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
 	}
-	return left.Equal(*right)
+	return left.Truncate(time.Microsecond).Equal(right.Truncate(time.Microsecond))
 }
 
 func (r *Repository) CreateTransfer(ctx context.Context, session *model.TransferSession) error {

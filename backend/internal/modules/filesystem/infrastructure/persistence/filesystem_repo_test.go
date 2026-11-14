@@ -39,6 +39,16 @@ func TestCreateChildRejectsDuplicateNormalizedName(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrNodeNameConflict)
 }
 
+func TestEqualTimePointersUsesPostgresMicrosecondPrecision(t *testing.T) {
+	original := time.Date(2026, time.November, 14, 16, 8, 33, 123456789, time.UTC)
+	persisted := original.Truncate(time.Microsecond)
+
+	require.True(t, equalTimePointers(&persisted, &original))
+
+	different := persisted.Add(2 * time.Microsecond)
+	require.False(t, equalTimePointers(&persisted, &different))
+}
+
 func TestRepositoryUsesAmbientTransactionContext(t *testing.T) {
 	repo, db := newTestRepository(t)
 	ns := seedNamespace(t, db)

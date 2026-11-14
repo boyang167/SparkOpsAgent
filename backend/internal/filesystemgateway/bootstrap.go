@@ -3,6 +3,7 @@ package filesystemgateway
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -26,8 +27,20 @@ func (UnconfiguredControlPort) RecordUploaded(context.Context, string, int64, st
 	return fmt.Errorf("%w", ErrControlUnavailable)
 }
 
+type Engine struct {
+	*gin.Engine
+	provider io.Closer
+}
+
+func (e *Engine) Close() error {
+	if e == nil || e.provider == nil {
+		return nil
+	}
+	return e.provider.Close()
+}
+
 // NewEngineFromConfig builds a gin engine for the transfer gateway binary.
-func NewEngineFromConfig(cfg *config.Config) (*gin.Engine, error) {
+func NewEngineFromConfig(cfg *config.Config) (*Engine, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("%w: nil config", ErrInvalidGatewayConfig)
 	}
@@ -44,24 +57,26 @@ func NewEngineFromConfig(cfg *config.Config) (*gin.Engine, error) {
 		}
 		httpControl, err := NewHTTPControlPort(baseURL, token, provider)
 		if err != nil {
+			_ = provider.Close()
 			return nil, err
 		}
 		control = httpControl
 	}
-	_ = provider.Close()
 
 	server, err := New(Options{
-		CapabilitySecret:           tg.CapabilitySecret,
-		CapabilityAudience:         tg.CapabilityAudience,
-		CapabilitySecretFallback:   cfg.JWT.Secret,
-		MaxFileBytes:               tg.MaxFileBytes,
-		Control:                    control,
+		CapabilitySecret:         tg.CapabilitySecret,
+		CapabilityAudience:       tg.CapabilityAudience,
+		CapabilitySecretFallback: cfg.JWT.Secret,
+		MaxFileBytes:             tg.MaxFileBytes,
+		Control:                  control,
+		AllowedOrigins:           tg.AllowedOrigins,
 	})
 	if err != nil {
+		_ = provider.Close()
 		return nil, err
 	}
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 	server.RegisterRoutes(engine)
-	return engine, nil
+	return &Engine{Engine: engine, provider: provider}, nil
 }

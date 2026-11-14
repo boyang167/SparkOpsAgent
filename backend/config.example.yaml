@@ -73,6 +73,8 @@ filesystem:
     storage_root: "./data/filesystem"
     control_base_url: "http://localhost:8080"
     internal_token: ""
+    allowed_origins:
+      - "http://localhost:3000"
   sftp:
     enabled: true
     listen: ":2022"

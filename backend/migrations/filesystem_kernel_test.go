@@ -17,7 +17,11 @@ func TestFilesystemKernelMigrationDefinesCoreTablesAndInvariants(t *testing.T) {
 	} {
 		require.Contains(t, up, "CREATE TABLE IF NOT EXISTS filesystem."+table)
 	}
-	require.Contains(t, up, "UNIQUE NULLS NOT DISTINCT (namespace_id, parent_id, normalized_name)")
+	require.NotContains(t, up, "NULLS NOT DISTINCT")
+	require.Contains(t, up, "CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_root_name")
+	require.Contains(t, up, "ON filesystem.nodes(namespace_id, normalized_name) WHERE parent_id IS NULL")
+	require.Contains(t, up, "CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_child_name")
+	require.Contains(t, up, "ON filesystem.nodes(namespace_id, parent_id, normalized_name) WHERE parent_id IS NOT NULL")
 	require.Contains(t, up, "UNIQUE(dedup_domain, sha256, size)")
 	require.Contains(t, up, "CHECK (node_type IN ('FILE','DIRECTORY'))")
 	require.Contains(t, up, "fk_nodes_current_revision")
@@ -68,4 +72,22 @@ func TestFilesystemKernelMigrationDownIsReverseOfUpDependencies(t *testing.T) {
 	} {
 		require.Contains(t, down, "DROP TABLE IF EXISTS filesystem."+table)
 	}
+}
+
+func TestFilesystemBlobLifecycleMigrationMatchesRuntimeModel(t *testing.T) {
+	up := readMigration(t, "000082_filesystem_blob_lifecycle.up.sql")
+	down := readMigration(t, "000082_filesystem_blob_lifecycle.down.sql")
+
+	require.Contains(t, up, "preferred_provider_id UUID")
+	require.Contains(t, up, "tombstoned_at TIMESTAMPTZ")
+	require.Contains(t, up, "legal_hold BOOLEAN NOT NULL DEFAULT FALSE")
+	require.Contains(t, up, "REFERENCES filesystem.storage_providers(id)")
+	require.Contains(t, up, "ALTER TABLE filesystem.storage_replicas")
+	require.Contains(t, up, "delete_after TIMESTAMPTZ")
+	requireInOrder(t, down,
+		"DROP COLUMN IF EXISTS delete_after",
+		"DROP COLUMN IF EXISTS legal_hold",
+		"DROP COLUMN IF EXISTS tombstoned_at",
+		"DROP COLUMN IF EXISTS preferred_provider_id",
+	)
 }

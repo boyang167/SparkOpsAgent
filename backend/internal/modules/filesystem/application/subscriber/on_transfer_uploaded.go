@@ -3,6 +3,7 @@ package subscriber
 import (
 	"context"
 	"errors"
+	"log"
 
 	"github.com/google/uuid"
 
@@ -53,6 +54,7 @@ func (s *OnTransferUploaded) Handle(ctx context.Context, event events.Event) err
 	if err := s.verify.Handle(ctx, command.VerifyTransfer{
 		SessionID: uploaded.SessionID, WorkspaceID: uploaded.WorkspaceID,
 	}); err != nil {
+		log.Printf("filesystem verify transfer %s: %v", uploaded.SessionID, err)
 		if errors.Is(err, model.ErrTransferIntegrity) || errors.Is(err, domain.ErrTransferStatusConflict) {
 			return messaging.Permanent(err)
 		}
@@ -76,6 +78,7 @@ func (s *OnTransferUploaded) Handle(ctx context.Context, event events.Event) err
 	if _, err := s.commit.Handle(ctx, command.CommitTransfer{
 		SessionID: uploaded.SessionID, WorkspaceID: uploaded.WorkspaceID,
 	}); err != nil {
+		log.Printf("filesystem commit transfer %s: %v", uploaded.SessionID, err)
 		if errors.Is(err, domain.ErrTransferStatusConflict) {
 			return messaging.Permanent(err)
 		}

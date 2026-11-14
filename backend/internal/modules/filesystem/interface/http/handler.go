@@ -259,13 +259,19 @@ type requestContext struct {
 
 func (h *Handler) resourceDecision(c *gin.Context, rc requestContext, nodeID uuid.UUID, permission model.ResourcePermission) command.Authorization {
 	if h.authorizeResource == nil {
-		return command.Authorization{Reason: "authorization_unavailable", TraceID: rc.traceID}
+		return command.Authorization{
+			Reason: "authorization_unavailable", TraceID: rc.traceID,
+			WorkspaceID: rc.workspaceID, ResourceID: nodeID, Permission: permission,
+		}
 	}
 	decision := h.authorizeResource(c.Request.Context(), resourceauth.Request{
 		ActorID: rc.actorID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID,
 		NodeID: nodeID, Permission: permission,
 	})
-	return command.Authorization{Allowed: decision.Allowed, Reason: decision.Reason, TraceID: rc.traceID}
+	return command.Authorization{
+		Allowed: decision.Allowed, Reason: decision.Reason, TraceID: rc.traceID,
+		WorkspaceID: rc.workspaceID, ResourceID: nodeID, Permission: permission,
+	}
 }
 
 func (h *Handler) requireResource(c *gin.Context, rc requestContext, nodeID uuid.UUID, permission model.ResourcePermission) bool {

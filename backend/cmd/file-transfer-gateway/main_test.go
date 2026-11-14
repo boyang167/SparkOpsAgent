@@ -28,6 +28,7 @@ func TestNewEngineFromConfigAppliesTransferGatewayDefaults(t *testing.T) {
 
 	engine, err := filesystemgateway.NewEngineFromConfig(cfg)
 	require.NoError(t, err)
+	defer engine.Close()
 	require.NotNil(t, engine)
 }
 

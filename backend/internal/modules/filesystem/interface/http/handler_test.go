@@ -1000,6 +1000,36 @@ func TestListFilesValidatesLimitAndCursor(t *testing.T) {
 	}
 }
 
+func TestResourceDecisionCarriesAuthorizationScope(t *testing.T) {
+	workspaceID, namespaceID, actorID, nodeID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	handler := &Handler{
+		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			require.Equal(t, workspaceID, request.WorkspaceID)
+			require.Equal(t, namespaceID, request.NamespaceID)
+			require.Equal(t, actorID, request.ActorID)
+			require.Equal(t, nodeID, request.NodeID)
+			require.Equal(t, model.ResourcePermissionWrite, request.Permission)
+			return resourceauth.Decision{Allowed: true, Reason: "owner"}
+		},
+	}
+	recorder := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(recorder)
+	ginContext.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+
+	decision := handler.resourceDecision(ginContext, requestContext{
+		workspaceID: workspaceID,
+		actorID:     actorID,
+		namespace:   &model.Namespace{ID: namespaceID},
+		traceID:     "trace-1",
+	}, nodeID, model.ResourcePermissionWrite)
+
+	require.True(t, decision.Allowed)
+	require.Equal(t, workspaceID, decision.WorkspaceID)
+	require.Equal(t, nodeID, decision.ResourceID)
+	require.Equal(t, model.ResourcePermissionWrite, decision.Permission)
+	require.Equal(t, "trace-1", decision.TraceID)
+}
+
 func testRouter(t *testing.T, members authz.WorkspaceMemberChecker, permissions authz.PermissionChecker, h *Handler) (*gin.Engine, string, kernel.WorkspaceID) {
 	t.Helper()
 	tokens := authn.NewTokenProvider(config.JWTConfig{Secret: "filesystem-test"})

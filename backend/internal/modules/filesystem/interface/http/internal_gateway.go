@@ -1,6 +1,7 @@
 package http
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -54,6 +55,7 @@ func RegisterInternalGatewayRoutes(
 			return
 		}
 		if err := handlers.Control.RecordUploaded(c.Request.Context(), c.Param("sessionId"), body.Size, body.SHA256); err != nil {
+			log.Printf("filesystem record uploaded %s: %v", c.Param("sessionId"), err)
 			filesystemError(c, err)
 			return
 		}

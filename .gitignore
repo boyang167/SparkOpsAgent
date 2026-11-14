@@ -29,6 +29,7 @@ backend/vendor/
 backend/config.yaml
 backend/coverage.out
 backend/coverage.html
+backend/data/
 backend/*.exe
 backend/*.test
 backend/*.out

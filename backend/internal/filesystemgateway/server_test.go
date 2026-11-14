@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -69,6 +72,81 @@ func TestUploadStreamsAndReturnsChecksum(t *testing.T) {
 	assert.Equal(t, envelope.Data.SHA256, info.SHA256)
 }
 
+func TestUploadStartsProviderBeforeRequestBodyEOF(t *testing.T) {
+	gin.SetMode(gin.ReleaseMode)
+	provider := &signalingProvider{started: make(chan struct{})}
+	control := &mockControlPort{
+		provider: provider,
+		uploads: map[string]UploadGrant{
+			"session-stream": {
+				Provider:           provider,
+				TemporaryObjectKey: "tmp/session-stream",
+				ExpectedSize:       2,
+			},
+		},
+		downloads: map[string]DownloadGrant{},
+	}
+	server, err := New(Options{
+		CapabilitySecret:   testCapabilitySecret,
+		CapabilityAudience: testCapabilityAudience,
+		MaxFileBytes:       1024,
+		Control:            control,
+		NonceStore:         NewMemoryNonceStore(),
+	})
+	require.NoError(t, err)
+	engine := gin.New()
+	server.RegisterRoutes(engine)
+
+	reader, writer := io.Pipe()
+	req := httptest.NewRequest(http.MethodPut, "/v1/transfers/session-stream/content", reader)
+	req.Header.Set("Authorization", "Bearer "+capabilityToken(t, capabilityOptions{
+		sessionID: "session-stream",
+		action:    ActionTransferWrite,
+	}))
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		engine.ServeHTTP(recorder, req)
+		close(done)
+	}()
+
+	_, err = writer.Write([]byte("a"))
+	require.NoError(t, err)
+	startedBeforeEOF := false
+	select {
+	case <-provider.started:
+		startedBeforeEOF = true
+	case <-time.After(250 * time.Millisecond):
+	}
+	_, err = writer.Write([]byte("b"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	<-done
+
+	require.True(t, startedBeforeEOF, "provider must start consuming before the request body reaches EOF")
+	require.Equal(t, http.StatusOK, recorder.Code)
+}
+
+func TestUploadCanRetryAfterControlNotificationFails(t *testing.T) {
+	body := []byte("retry-me")
+	h := newTestHarness(t, capabilityToken(t, capabilityOptions{
+		sessionID: "session-retry",
+		action:    ActionTransferWrite,
+	}), withUploadGrant("session-retry", UploadGrant{
+		TemporaryObjectKey: "tmp/session-retry",
+		ExpectedSize:       int64(len(body)),
+	}), withRecordUploadedError(errors.New("control unavailable")))
+
+	first := h.put("/v1/transfers/session-retry/content", body)
+	require.Equal(t, http.StatusBadGateway, first.Code)
+
+	h.control.recordUploadedErr = nil
+	second := h.put("/v1/transfers/session-retry/content", body)
+	require.Equal(t, http.StatusOK, second.Code)
+	_, err := h.provider.Stat(context.Background(), "tmp/session-retry")
+	require.NoError(t, err)
+}
+
 func TestDownloadRejectsCapabilityForAnotherFile(t *testing.T) {
 	h := newTestHarness(t, capabilityToken(t, capabilityOptions{
 		fileID: "file-a",
@@ -123,11 +201,68 @@ func TestHealthAndReady(t *testing.T) {
 	require.Equal(t, http.StatusOK, ready.Code)
 }
 
+func TestCORSPreflightAllowsBrowserUpload(t *testing.T) {
+	h := newTestHarness(t, "")
+	req, err := http.NewRequest(http.MethodOptions, h.server.URL+"/v1/transfers/session-a/content", nil)
+	require.NoError(t, err)
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPut)
+	req.Header.Set("Access-Control-Request-Headers", "authorization")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Equal(t, "http://localhost:3000", resp.Header.Get("Access-Control-Allow-Origin"))
+	assert.Contains(t, resp.Header.Get("Access-Control-Allow-Methods"), http.MethodPut)
+	assert.Contains(t, strings.ToLower(resp.Header.Get("Access-Control-Allow-Headers")), "authorization")
+}
+
+func TestCORSAllowsBrowserToReadUploadResponse(t *testing.T) {
+	body := []byte("browser-upload")
+	token := capabilityToken(t, capabilityOptions{
+		sessionID: "session-cors",
+		action:    ActionTransferWrite,
+	})
+	h := newTestHarness(t, token, withUploadGrant("session-cors", UploadGrant{
+		TemporaryObjectKey: "tmp/session-cors",
+		ExpectedSize:       int64(len(body)),
+	}))
+	req, err := http.NewRequest(http.MethodPut, h.server.URL+"/v1/transfers/session-cors/content", bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "http://localhost:3000", resp.Header.Get("Access-Control-Allow-Origin"))
+}
+
+func TestCORSRejectsUntrustedOrigin(t *testing.T) {
+	h := newTestHarness(t, "")
+	req, err := http.NewRequest(http.MethodOptions, h.server.URL+"/v1/transfers/session-a/content", nil)
+	require.NoError(t, err)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPut)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
+}
+
 type testHarness struct {
 	t        *testing.T
 	server   *httptest.Server
 	token    string
 	provider storage.Provider
+	control  *mockControlPort
 }
 
 type harnessOption func(*mockControlPort)
@@ -143,6 +278,12 @@ func withDownloadGrant(fileID string, grant DownloadGrant) harnessOption {
 	return func(port *mockControlPort) {
 		grant.Provider = port.provider
 		port.downloads[fileID] = grant
+	}
+}
+
+func withRecordUploadedError(err error) harnessOption {
+	return func(port *mockControlPort) {
+		port.recordUploadedErr = err
 	}
 }
 
@@ -171,6 +312,7 @@ func newTestHarness(t *testing.T, token string, opts ...harnessOption) *testHarn
 		MaxFileBytes:       20 * 1024 * 1024 * 1024,
 		Control:            port,
 		NonceStore:         NewMemoryNonceStore(),
+		AllowedOrigins:     []string{"http://localhost:3000"},
 	})
 	require.NoError(t, err)
 
@@ -180,7 +322,7 @@ func newTestHarness(t *testing.T, token string, opts ...harnessOption) *testHarn
 	httpServer := httptest.NewServer(engine)
 	t.Cleanup(httpServer.Close)
 
-	return &testHarness{t: t, server: httpServer, token: token, provider: provider}
+	return &testHarness{t: t, server: httpServer, token: token, provider: provider, control: port}
 }
 
 func (h *testHarness) put(path string, body []byte) *httptest.ResponseRecorder {
@@ -231,9 +373,10 @@ func readBody(r io.Reader) (*bytes.Buffer, error) {
 }
 
 type mockControlPort struct {
-	provider  storage.Provider
-	uploads   map[string]UploadGrant
-	downloads map[string]DownloadGrant
+	provider          storage.Provider
+	uploads           map[string]UploadGrant
+	downloads         map[string]DownloadGrant
+	recordUploadedErr error
 }
 
 func (m *mockControlPort) ResolveUpload(_ context.Context, sessionID string) (UploadGrant, error) {
@@ -259,5 +402,40 @@ func (m *mockControlPort) ResolveDownload(_ context.Context, fileID string) (Dow
 }
 
 func (m *mockControlPort) RecordUploaded(context.Context, string, int64, string) error {
-	return nil
+	return m.recordUploadedErr
+}
+
+type signalingProvider struct {
+	started chan struct{}
+}
+
+func (*signalingProvider) ID() string { return "signaling" }
+
+func (*signalingProvider) Capabilities() storage.Capabilities { return storage.Capabilities{} }
+
+func (p *signalingProvider) Put(_ context.Context, req storage.PutRequest) (storage.ObjectInfo, error) {
+	close(p.started)
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return storage.ObjectInfo{}, err
+	}
+	return storage.ObjectInfo{
+		ObjectKey: req.ObjectKey,
+		Size:      int64(len(body)),
+		SHA256:    storage.SHA256(body),
+	}, nil
+}
+
+func (*signalingProvider) Get(context.Context, storage.GetRequest) (io.ReadCloser, storage.ObjectInfo, error) {
+	return nil, storage.ObjectInfo{}, storage.ErrNotFound
+}
+
+func (*signalingProvider) Stat(context.Context, string) (storage.ObjectInfo, error) {
+	return storage.ObjectInfo{}, storage.ErrNotFound
+}
+
+func (*signalingProvider) Delete(context.Context, string) error { return nil }
+
+func (*signalingProvider) Copy(context.Context, string, string) (storage.ObjectInfo, error) {
+	return storage.ObjectInfo{}, storage.ErrNotFound
 }

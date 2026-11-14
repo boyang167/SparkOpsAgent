@@ -6,9 +6,9 @@ import (
 	"log"
 
 	filesystemevent "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
-	fsstorage "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/storage"
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/port"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
+	fsstorage "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/storage"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
@@ -53,6 +53,9 @@ func runWorker(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	if err := registerFilesystemPreviewWorker(db, factory.Bus, catalog, nil); err != nil {
+		return err
+	}
+	if err := factory.Start(ctx); err != nil {
 		return err
 	}
 	log.Printf("file-worker subscribers registered; waiting")

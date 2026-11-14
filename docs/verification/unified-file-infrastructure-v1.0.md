@@ -28,6 +28,8 @@
 | 工作区默认 LOCAL Provider（`default-local`） | **PASS**（`EnsureDefaultLocalProvider` + CreateTransfer 默认解析） |
 | `GET /filesystem-audits` 后端路由 | **PASS**（`ListFilesystemAudits` + query 过滤 `filesystem.`） |
 | file-worker 订阅 verify/commit | **PASS**（`cmd/file-worker` 启动注册 AMQP 订阅） |
+| LOCAL 数据面端到端 | **PASS**（浏览器创建 Transfer Session → Gateway PUT → AMQP verify/commit → Session `COMPLETED` → 文件详情/版本可见；131072 B fixture） |
+| Gateway 浏览器边界 | **PASS**（请求体流式交给 Provider；CORS 仅允许配置来源；通知失败释放 nonce，可用同 capability 幂等重试） |
 | SFTP `HTTPTransferControl` → Begin/Copy/RecordUploaded | **PASS**（控制面 HTTP + 共享卷落盘；需 `SPARKOPS_SFTP_DEV_*` 做真 SSH 抽查） |
 | Export 字节 Worker | **SKIP**（Import 仍为元数据节点，无跨组织字节复制 Worker） |
 | Knowledge / 20GiB / 200 并发 / RPO/RTO | **SKIP**（无归档现场报告） |
@@ -38,12 +40,13 @@ Compose：`filesystem.transfer_gateway.control_base_url=http://api:8080`，网�
 
 | 项 | 结果 |
 |---|---|
-| Filesystem 前端矩阵 | **PASS** — Important 修复后 fresh 结果为 19 files / 132 tests，exit 0 |
+| Filesystem 前端矩阵 | **PASS** — fresh 结果为 19 files / 139 tests，exit 0 |
 | Monorepo 前端类型检查 | **PASS** — 6 packages，exit 0 |
-| Filesystem 后端 brief 回归 | **PASS** — filesystem、filesystemgateway、sftpgateway、OpenAPI 指定包全部 exit 0 |
+| 后端全量回归 | **PASS** — 清除 shell 中残留 `DATABASE_DSN` / `DATABASE_URL` 后执行 `go test ./... -count=1`，exit 0 |
 | 响应式与无障碍自动契约 | **PASS** — tab/tree/list/grid、键盘移动替代、Drawer Esc、progressbar、窄屏布局、横向滚动；tabs/选择 label/关键按钮为 44px 触控目标，checkbox 保持 16px；focus-visible 使用高对比 `--primary` 的 2px outline + 2px offset并自动验证 token 对比度 ≥4.5 |
 | 主动作与 landmark 契约 | **PASS（组件/源码契约）** — 编辑/Modal 打开时背景主动作降为 secondary，当前提交保持唯一 primary；文件浏览不再嵌套 `main`，保留 tab `aria-labelledby` |
-| 浏览器手工矩阵 | **SKIP / PENDING** — 本轮按约束未启动或重启根工作区服务，也未执行真实浏览器端到端验收 |
+| 浏览器手工矩阵 | **PASS（LOCAL 环境）** — 管理员四标签、新建目录、懒加载树、键盘移动、列表/网格保留选择、窄屏目录 Drawer、Esc 关闭、存储治理、审计、传输取消、4 文件 Gateway PUT（实测最大并发 3）、完成态文件详情与版本均通过 |
+| MinIO / S3 Compatible | **SKIP** — 本轮未配置真实 MinIO endpoint；不以 LOCAL Provider 结果替代 |
 | 实时容量曲线 | **不在范围** — Task 8 未实现容量曲线；不作为发布能力声明 |
 
 上述 PASS 仅证明本轮自动执行范围，不改变 20 GiB、200 并发、Knowledge 真库迁移、RPO/RTO 与其他现场验收项的 SKIP 状态；发布判定仍为 **NOT ACCEPTED / RELEASE BLOCKED**。
@@ -101,4 +104,4 @@ Compose：`filesystem.transfer_gateway.control_base_url=http://api:8080`，网�
 5. 关闭 G4 仍影响发布的数据面 defer；
 6. 发布负责人和运维负责人共同签署。
 
-当前结论：**Unified File Infrastructure v1.0 不可正式发布；分支仍是待合并的生产候选。**
+当前结论：**Unified File Infrastructure v1.0 已合入 `master`，但在容量、迁移与灾备硬条件完成前仍不可正式发布。**

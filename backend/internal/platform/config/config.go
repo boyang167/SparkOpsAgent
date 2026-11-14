@@ -57,14 +57,15 @@ type FilesystemReconcilerConfig struct {
 }
 
 type TransferGatewayConfig struct {
-	Listen             string `yaml:"listen"`
-	PublicURL          string `yaml:"public_url"`
-	CapabilityAudience string `yaml:"capability_audience"`
-	CapabilitySecret   string `yaml:"capability_secret"`
-	MaxFileBytes       int64  `yaml:"max_file_bytes"`
-	StorageRoot        string `yaml:"storage_root"`
-	ControlBaseURL     string `yaml:"control_base_url"`
-	InternalToken      string `yaml:"internal_token"`
+	Listen             string   `yaml:"listen"`
+	PublicURL          string   `yaml:"public_url"`
+	CapabilityAudience string   `yaml:"capability_audience"`
+	CapabilitySecret   string   `yaml:"capability_secret"`
+	MaxFileBytes       int64    `yaml:"max_file_bytes"`
+	StorageRoot        string   `yaml:"storage_root"`
+	ControlBaseURL     string   `yaml:"control_base_url"`
+	InternalToken      string   `yaml:"internal_token"`
+	AllowedOrigins     []string `yaml:"allowed_origins"`
 }
 
 type PolicyConfig struct {

@@ -1,11 +1,9 @@
 package filesystemgateway
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -21,10 +19,17 @@ func (s *Server) handleUpload(c *gin.Context) {
 		httpx.Fail(c, "UNAUTHORIZED", "missing capability token", http.StatusUnauthorized)
 		return
 	}
-	if _, err := s.auth.VerifyUpload(token, sessionID); err != nil {
+	claims, err := s.auth.VerifyUpload(token, sessionID)
+	if err != nil {
 		s.failCapability(c, err)
 		return
 	}
+	completed := false
+	defer func() {
+		if !completed {
+			s.auth.Release(claims)
+		}
+	}()
 
 	grant, err := s.control.ResolveUpload(c.Request.Context(), sessionID)
 	if err != nil {
@@ -39,36 +44,43 @@ func (s *Server) handleUpload(c *gin.Context) {
 		httpx.Fail(c, "PAYLOAD_TOO_LARGE", "declared transfer size exceeds limit", http.StatusRequestEntityTooLarge)
 		return
 	}
-
-	limit := grant.ExpectedSize + 1
-	hasher := sha256.New()
-	var buf bytes.Buffer
-	written, err := io.Copy(io.MultiWriter(&buf, hasher), io.LimitReader(c.Request.Body, limit))
-	if err != nil {
-		httpx.Fail(c, "UPLOAD_FAILED", "failed to read upload body", http.StatusBadRequest)
-		return
-	}
-	if written > grant.ExpectedSize {
+	if c.Request.ContentLength > grant.ExpectedSize {
 		httpx.Fail(c, "PAYLOAD_TOO_LARGE", ErrPayloadTooLarge.Error(), http.StatusRequestEntityTooLarge)
 		return
 	}
-	checksum := hex.EncodeToString(hasher.Sum(nil))
 
-	_, err = grant.Provider.Put(c.Request.Context(), storage.PutRequest{
+	body := &countingReader{reader: io.LimitReader(c.Request.Body, grant.ExpectedSize+1)}
+	info, err := grant.Provider.Put(c.Request.Context(), storage.PutRequest{
 		ObjectKey: grant.TemporaryObjectKey,
-		Body:      bytes.NewReader(buf.Bytes()),
-		Size:      written,
-		SHA256:    checksum,
+		Body:      body,
+		Size:      grant.ExpectedSize,
 	})
 	if err != nil {
+		if body.count > grant.ExpectedSize {
+			httpx.Fail(c, "PAYLOAD_TOO_LARGE", ErrPayloadTooLarge.Error(), http.StatusRequestEntityTooLarge)
+			return
+		}
 		httpx.Fail(c, "UPLOAD_FAILED", fmt.Sprintf("provider put failed: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	if err := s.control.RecordUploaded(c.Request.Context(), sessionID, written, checksum); err != nil {
+	if err := s.control.RecordUploaded(c.Request.Context(), sessionID, info.Size, info.SHA256); err != nil {
+		log.Printf("record uploaded session %s: %v", sessionID, err)
 		httpx.Fail(c, "UPLOAD_NOTIFY_FAILED", "control plane upload notification failed", http.StatusBadGateway)
 		return
 	}
+	completed = true
 
-	httpx.OK(c, gin.H{"size": written, "sha256": checksum})
+	httpx.OK(c, gin.H{"size": info.Size, "sha256": info.SHA256})
+}
+
+type countingReader struct {
+	reader io.Reader
+	count  int64
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.count += int64(n)
+	return n, err
 }

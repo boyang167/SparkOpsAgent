@@ -58,6 +58,8 @@ filesystem:
     storage_root: "/var/lib/sparkops/filesystem"
     control_base_url: "http://api:8080"
     internal_token: "docker-dev-filesystem-secret"
+    allowed_origins:
+      - "http://localhost:3000"
   reconciler:
     interval: 30s
     lease_ttl: 90s

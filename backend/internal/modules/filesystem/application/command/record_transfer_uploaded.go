@@ -43,9 +43,10 @@ func (h *RecordTransferUploadedHandler) Handle(ctx context.Context, cmd RecordTr
 	if cmd.SessionID == uuid.Nil {
 		return model.ErrInvalidTransfer
 	}
+	if h.bus == nil {
+		return errors.New("filesystem record transfer uploaded requires event bus")
+	}
 	cmd.SHA256 = strings.ToLower(strings.TrimSpace(cmd.SHA256))
-	var workspaceID uuid.UUID
-	var namespaceID uuid.UUID
 	err := h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		session, err := h.repo.LockTransfer(txCtx, cmd.SessionID)
 		if err != nil {
@@ -54,8 +55,6 @@ func (h *RecordTransferUploadedHandler) Handle(ctx context.Context, cmd RecordTr
 		if cmd.WorkspaceID != uuid.Nil && session.WorkspaceID() != cmd.WorkspaceID {
 			return domain.ErrNamespaceMismatch
 		}
-		workspaceID = session.WorkspaceID()
-		namespaceID = session.NamespaceID()
 		switch session.Status() {
 		case model.TransferCompleted, model.TransferRejected, model.TransferFailed,
 			model.TransferAborted, model.TransferExpired:
@@ -70,7 +69,7 @@ func (h *RecordTransferUploadedHandler) Handle(ctx context.Context, cmd RecordTr
 			if err := session.StartUpload(version, now); err != nil {
 				return err
 			}
-			if err := h.repo.SaveTransferStateCAS(txCtx, workspaceID, session.ID(), version, repository.TransferStatePatch{
+			if err := h.repo.SaveTransferStateCAS(txCtx, session.WorkspaceID(), session.ID(), version, repository.TransferStatePatch{
 				StatusFrom: from,
 				StatusTo:   model.TransferUploading,
 			}); err != nil {
@@ -87,18 +86,12 @@ func (h *RecordTransferUploadedHandler) Handle(ctx context.Context, cmd RecordTr
 		}
 		_ = cmd.Size
 		_ = cmd.SHA256
-		return nil
+		return h.bus.Publish(txCtx, event.TransferUploaded{
+			BaseEvent:   sharedevents.NewBaseEvent(event.TransferUploadedName),
+			SessionID:   cmd.SessionID,
+			WorkspaceID: session.WorkspaceID(),
+			NamespaceID: session.NamespaceID(),
+		})
 	})
-	if err != nil {
-		return err
-	}
-	if h.bus == nil {
-		return errors.New("filesystem record transfer uploaded requires event bus")
-	}
-	return h.bus.Publish(ctx, event.TransferUploaded{
-		BaseEvent:   sharedevents.NewBaseEvent(event.TransferUploadedName),
-		SessionID:   cmd.SessionID,
-		WorkspaceID: workspaceID,
-		NamespaceID: namespaceID,
-	})
+	return err
 }

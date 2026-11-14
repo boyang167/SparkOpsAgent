@@ -107,5 +107,14 @@ func (c *HTTPControlPort) getJSON(ctx context.Context, url string, dest any) err
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("control get %s: status %d: %s", url, resp.StatusCode, strings.TrimSpace(string(snippet)))
 	}
-	return json.NewDecoder(resp.Body).Decode(dest)
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return err
+	}
+	if len(envelope.Data) == 0 {
+		return fmt.Errorf("control get %s: missing data envelope", url)
+	}
+	return json.Unmarshal(envelope.Data, dest)
 }

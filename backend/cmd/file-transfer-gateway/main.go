@@ -24,6 +24,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer func() {
+		if err := engine.Close(); err != nil {
+			log.Printf("close transfer gateway storage: %v", err)
+		}
+	}()
 
 	addr := cfg.Filesystem.TransferGateway.Listen
 	server := &http.Server{

@@ -29,16 +29,18 @@
 
 | 项 | 结果 |
 |---|---|
-| Filesystem 前端完整矩阵 | **PASS** — `pnpm vitest run apps/web/src/modules/filesystem packages/web-sdk/src/filesystem.test.ts`，Important 修复后 fresh 结果为 19 files / 132 tests，exit 0 |
+| Filesystem 前端完整矩阵 | **PASS** — `pnpm vitest run apps/web/src/modules/filesystem packages/web-sdk/src/filesystem.test.ts`，fresh 结果为 19 files / 139 tests，exit 0 |
 | 前端类型检查 | **PASS** — `pnpm typecheck`，6 packages，exit 0 |
-| Filesystem / Gateway / SFTP / OpenAPI 后端回归 | **PASS** — `go test ./internal/modules/filesystem/... ./internal/filesystemgateway/... ./internal/sftpgateway/... ./api/openapi -count=1`，exit 0 |
+| 后端全量回归 | **PASS** — 清除 shell 中残留 `DATABASE_DSN` / `DATABASE_URL` 后执行 `go test ./... -count=1`，exit 0 |
 | 自动无障碍与响应式契约 | **PASS** — 覆盖 tab / tree / list / grid、键盘“移动到…”，Drawer Esc、progressbar、窄屏侧栏 Drawer、横向溢出；tabs/选择 label/关键按钮具备 44px 触控目标，checkbox 视觉尺寸保持 16px；focus-visible 具体断言为 `2px solid var(--primary)` + 2px offset，并自动验证 token 对比度 ≥4.5 |
 | 单主动作与 landmark | **PASS（组件/源码契约）** — 文件编辑态上传降为 secondary、提交为唯一 primary；治理 Modal 打开时背景触发器降级；文件浏览容器已移除嵌套 `main` 并保留 tab `aria-labelledby` |
 | loading / error / empty / forbidden | **PASS（组件自动测试）** — Filesystem 组件矩阵覆盖独立状态，不以空态替代加载或权限拒绝 |
-| 浏览器手工矩阵 | **SKIP / PENDING** — 未启动或重启根工作区服务，未执行真实浏览器权限、拖拽、窄屏和键盘端到端矩阵 |
+| 浏览器手工矩阵 | **PASS（LOCAL 环境）** — 管理员四标签、新建目录、懒加载树、键盘移动、列表/网格保留选择、窄屏目录 Drawer、Esc 关闭、LOCAL Provider 治理、审计 ALLOW/DENY、传输取消、详情与版本均通过 |
+| 多文件上传数据面 | **PASS（LOCAL 环境）** — 4 个文件经 Gateway PUT 返回 200，执行池实测最大并发 3；干净会话最终为 `COMPLETED`，文件详情显示版本 #1、131072 B |
+| MinIO / S3 Compatible | **SKIP** — 未配置真实 MinIO endpoint，不把 LOCAL Provider 验收结果外推为 S3 通过 |
 | 实时容量曲线 | **不在范围** — 未实现、未展示，也未伪造容量数据 |
 
-Task 8 本轮只将上述真实自动执行项记为 PASS；20 GiB、200 并发、Knowledge 真库迁移、灾备与浏览器手工项状态不变。
+Task 8 本轮只将上述真实自动和 LOCAL 浏览器执行项记为 PASS；20 GiB、200 并发、Knowledge 真库迁移、MinIO 与灾备状态不变。
 
 ### 迁移 CLI 演练（计划 Step 2）
 
@@ -90,7 +92,7 @@ Task 8 本轮只将上述真实自动执行项记为 PASS；20 GiB、200 并发�
 - [ ] **Agent / Workflow `infrastructure/acl/filesystem.go`** — 无 dedicated 单元测试；仅依赖模块其余包级 PASS
 - [ ] **Preview 派生 Blob** — `GeneratePreviewHandler` + subscriber 注册存在；**无** `generate_preview` 专项测试或 file-worker 集成证据
 - [ ] **OpenSearch 全文投影** — 计划为可选；本轮未跑 OpenSearch 依赖测试
-- [ ] **File Explorer 浏览器 E2E**（上传/下载/回收站全链路）— 仅组件/契约 vitest，无 Playwright
+- [ ] **File Explorer 下载/回收站浏览器 E2E** — LOCAL 上传、浏览、移动、详情与版本已手工通过；下载和回收站仍无端到端证据
 
 ## 服务重启
 

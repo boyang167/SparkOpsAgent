@@ -23,9 +23,14 @@ CREATE TABLE IF NOT EXISTS filesystem.nodes (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,
-    UNIQUE(id, namespace_id),
-    UNIQUE NULLS NOT DISTINCT (namespace_id, parent_id, normalized_name)
+    UNIQUE(id, namespace_id)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_root_name
+    ON filesystem.nodes(namespace_id, normalized_name) WHERE parent_id IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_child_name
+    ON filesystem.nodes(namespace_id, parent_id, normalized_name) WHERE parent_id IS NOT NULL;
 
 ALTER TABLE filesystem.nodes
     ADD CONSTRAINT fk_nodes_parent_namespace

@@ -28,6 +28,7 @@ type CapabilityClaims struct {
 
 type NonceStore interface {
 	Consume(nonce string, expiresAt time.Time) error
+	Release(nonce string)
 }
 
 type MemoryNonceStore struct {
@@ -55,6 +56,12 @@ func (s *MemoryNonceStore) Consume(nonce string, expiresAt time.Time) error {
 	}
 	s.seen[nonce] = expiresAt
 	return nil
+}
+
+func (s *MemoryNonceStore) Release(nonce string) {
+	s.mu.Lock()
+	delete(s.seen, nonce)
+	s.mu.Unlock()
 }
 
 func (s *MemoryNonceStore) purgeLocked(now time.Time) {
@@ -104,6 +111,12 @@ func (a *CapabilityAuth) VerifyUpload(tokenString, sessionID string) (*Capabilit
 		return nil, err
 	}
 	return claims, nil
+}
+
+func (a *CapabilityAuth) Release(claims *CapabilityClaims) {
+	if claims != nil {
+		a.nonces.Release(claims.Nonce)
+	}
 }
 
 func (a *CapabilityAuth) VerifyDownload(tokenString, fileID string) (*CapabilityClaims, error) {
