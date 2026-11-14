@@ -1813,7 +1813,7 @@ components:
     GovernanceCursor:
       name: cursor
       in: query
-      description: Opaque, versioned continuation cursor returned by this endpoint.
+      description: Versioned, authenticated encrypted opaque continuation token bound to the caller and query context.
       schema:
         type: string
         maxLength: 512

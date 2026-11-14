@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	filesystemquery "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	filesystemport "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
@@ -142,6 +143,15 @@ func TestRegisterValidatesDependencies(t *testing.T) {
 			require.ErrorContains(t, err, tt.want)
 		})
 	}
+}
+
+func TestDefaultConfigurationConstructsSharedCursorCodec(t *testing.T) {
+	_, secret, _ := transferGatewayDefaults(&appctx.Container{Config: &config.Config{}})
+
+	codec, err := filesystemquery.NewSharedCursorCodec(secret, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, codec)
 }
 
 func TestRegisterExposesMetadataRoutesWithoutLocalProvider(t *testing.T) {

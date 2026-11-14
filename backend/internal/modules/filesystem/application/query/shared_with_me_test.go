@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	resourceauth "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/authorization"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 )
@@ -24,15 +25,20 @@ func TestSharedWithMeUsesTypedPrincipalsAndForwardsStableFilters(t *testing.T) {
 		{Type: model.PrincipalWorkspace, ID: workspaceID},
 		{Type: model.PrincipalRole, ID: roleID},
 	}}
+	cursorCodec := testSharedCursorCodec(t)
 	handler := NewSharedWithMeHandler(repo, resolver, effectiveAuthorizerStub{decisions: map[model.ResourcePermission]resourceauth.Decision{
 		model.ResourcePermissionRead:  {Allowed: true, Reason: "grant_allow", SourceGrantIDs: []uuid.UUID{grantID}},
 		model.ResourcePermissionWrite: {Allowed: true, Reason: "grant_allow", SourceGrantIDs: []uuid.UUID{grantID}},
-	}})
+	}}, cursorCodec)
 
 	rawCursor := uuid.NewString()
+	cursor, err := cursorCodec.Encode(rawCursor, SharedCursorContext{
+		OrganizationID: orgID, ActorID: actorID, WorkspaceID: workspaceID, Query: "quarter",
+	})
+	require.NoError(t, err)
 	items, next, err := handler.Handle(context.Background(), SharedWithMe{
 		ActorID: actorID, OrganizationID: orgID, WorkspaceID: workspaceID,
-		Query: "quarter", Cursor: encodeGovernanceCursor(rawCursor), Limit: 17,
+		Query: "quarter", Cursor: cursor, Limit: 17,
 	})
 
 	require.NoError(t, err)
@@ -49,13 +55,33 @@ func TestSharedWithMeUsesTypedPrincipalsAndForwardsStableFilters(t *testing.T) {
 }
 
 func TestSharedWithMeRejectsResolverScopeMismatch(t *testing.T) {
-	handler := NewSharedWithMeHandler(&governanceRepositoryStub{}, principalResolverErrorStub{err: resourceauth.ErrPrincipalScopeMismatch}, effectiveAuthorizerStub{})
+	handler := NewSharedWithMeHandler(&governanceRepositoryStub{}, principalResolverErrorStub{err: resourceauth.ErrPrincipalScopeMismatch}, effectiveAuthorizerStub{}, testSharedCursorCodec(t))
 
 	_, _, err := handler.Handle(context.Background(), SharedWithMe{
 		ActorID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(),
 	})
 
 	require.ErrorIs(t, err, resourceauth.ErrPrincipalScopeMismatch)
+}
+
+func TestSharedWithMeRejectsCursorReplayWithoutRestartingScan(t *testing.T) {
+	orgID, actorID := uuid.New(), uuid.New()
+	repo := &governanceRepositoryStub{}
+	codec := testSharedCursorCodec(t)
+	cursor, err := codec.Encode(uuid.NewString(), SharedCursorContext{
+		OrganizationID: orgID, ActorID: actorID, Query: "quarterly",
+	})
+	require.NoError(t, err)
+	handler := NewSharedWithMeHandler(repo, namespacePrincipalResolver{
+		principals: []repository.PrincipalRef{{Type: model.PrincipalUser, ID: actorID}},
+	}, effectiveAuthorizerStub{}, codec)
+
+	_, _, err = handler.Handle(context.Background(), SharedWithMe{
+		ActorID: actorID, OrganizationID: orgID, Query: "annual", Cursor: cursor,
+	})
+
+	require.ErrorIs(t, err, domain.ErrInvalidGovernanceCursor)
+	require.Zero(t, repo.listCalls)
 }
 
 func TestSharedWithMeDropsChildAllowWhenAncestorDenyWins(t *testing.T) {
@@ -71,7 +97,7 @@ func TestSharedWithMeDropsChildAllowWhenAncestorDenyWins(t *testing.T) {
 		model.ResourcePermissionRead: {
 			Allowed: false, Reason: "explicit_deny", SourceGrantIDs: []uuid.UUID{denyID, allowID},
 		},
-	}})
+	}}, testSharedCursorCodec(t))
 
 	items, next, err := handler.Handle(context.Background(), SharedWithMe{
 		ActorID: actorID, OrganizationID: orgID, WorkspaceID: workspaceID, Limit: 10,
@@ -95,7 +121,7 @@ func TestSharedWithMeIncludesAllowAndDenySourcesThatShapeEffectiveActions(t *tes
 		model.ResourcePermissionWrite: {
 			Allowed: false, Reason: "explicit_deny", SourceGrantIDs: []uuid.UUID{writeAllow, writeDeny},
 		},
-	}})
+	}}, testSharedCursorCodec(t))
 
 	items, _, err := handler.Handle(context.Background(), SharedWithMe{
 		ActorID: actorID, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Limit: 10,
@@ -139,7 +165,7 @@ func (a *countingBatchAuthorizer) AuthorizeMany(_ context.Context, request resou
 }
 
 func TestSharedWithMeUsesBoundedBatchEvaluationAndOpaqueContinuation(t *testing.T) {
-	actorID, namespaceID := uuid.New(), uuid.New()
+	actorID, organizationID, namespaceID := uuid.New(), uuid.New(), uuid.New()
 	candidates := make([]SharedNode, 300)
 	for index := range candidates {
 		candidates[index].Node = model.Node{
@@ -174,10 +200,10 @@ func TestSharedWithMeUsesBoundedBatchEvaluationAndOpaqueContinuation(t *testing.
 	}}
 	handler := NewSharedWithMeHandler(repo, namespacePrincipalResolver{
 		principals: []repository.PrincipalRef{{Type: model.PrincipalUser, ID: actorID}},
-	}, authorizer)
+	}, authorizer, testSharedCursorCodec(t))
 
 	first, cursor, err := handler.Handle(context.Background(), SharedWithMe{
-		ActorID: actorID, OrganizationID: uuid.New(), NamespaceID: namespaceID, Limit: 1,
+		ActorID: actorID, OrganizationID: organizationID, NamespaceID: namespaceID, Limit: 1,
 	})
 
 	require.NoError(t, err)
@@ -189,7 +215,7 @@ func TestSharedWithMeUsesBoundedBatchEvaluationAndOpaqueContinuation(t *testing.
 	require.LessOrEqual(t, authorizer.maxBatch, SharedCandidateChunkSize)
 
 	second, next, err := handler.Handle(context.Background(), SharedWithMe{
-		ActorID: actorID, OrganizationID: uuid.New(), NamespaceID: namespaceID,
+		ActorID: actorID, OrganizationID: organizationID, NamespaceID: namespaceID,
 		Limit: 1, Cursor: cursor,
 	})
 	require.NoError(t, err)
@@ -198,7 +224,7 @@ func TestSharedWithMeUsesBoundedBatchEvaluationAndOpaqueContinuation(t *testing.
 	require.NotEmpty(t, next)
 
 	third, finalCursor, err := handler.Handle(context.Background(), SharedWithMe{
-		ActorID: actorID, OrganizationID: uuid.New(), NamespaceID: namespaceID,
+		ActorID: actorID, OrganizationID: organizationID, NamespaceID: namespaceID,
 		Limit: 1, Cursor: next,
 	})
 	require.NoError(t, err)
@@ -207,6 +233,13 @@ func TestSharedWithMeUsesBoundedBatchEvaluationAndOpaqueContinuation(t *testing.
 	require.NotEqual(t, second[0].Node.ID, third[0].Node.ID)
 	require.Empty(t, finalCursor)
 	require.LessOrEqual(t, repo.listCalls, 9)
+}
+
+func testSharedCursorCodec(t *testing.T) *SharedCursorCodec {
+	t.Helper()
+	codec, err := NewSharedCursorCodec("shared-cursor-test-secret", nil)
+	require.NoError(t, err)
+	return codec
 }
 
 func (s principalResolverErrorStub) Resolve(context.Context, resourceauth.ResolvePrincipalsInput) ([]repository.PrincipalRef, error) {

@@ -175,6 +175,10 @@ func (m *Module) Register(c *appctx.Container) error {
 		return fmt.Errorf("subscribe filesystem workspace bootstrap: %w", err)
 	}
 	publicURL, secret, audience := transferGatewayDefaults(c)
+	sharedCursorCodec, cursorErr := query.NewSharedCursorCodec(secret, nil)
+	if cursorErr != nil {
+		return fmt.Errorf("filesystem shared cursor codec: %w", cursorErr)
+	}
 	issuer, issuerErr := capability.NewIssuer(secret, audience)
 	if issuerErr != nil {
 		return fmt.Errorf("filesystem transfer capability issuer: %w", issuerErr)
@@ -267,7 +271,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	governanceHandler := filesystemhttp.NewGovernanceHandler(
 		repo,
 		query.NewListNamespacesHandler(repo, principalResolver, resourceAuthorizer),
-		query.NewSharedWithMeHandler(repo, principalResolver, resourceAuthorizer),
+		query.NewSharedWithMeHandler(repo, principalResolver, resourceAuthorizer, sharedCursorCodec),
 		query.NewEffectiveAccessHandler(resourceAuthorizer),
 		resourceAuthorizer,
 	)

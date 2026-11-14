@@ -2,8 +2,6 @@ package query
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"sort"
 	"time"
 
@@ -42,6 +40,7 @@ type SharedWithMeHandler struct {
 	repo       SharedWithMeRepository
 	principals resourceauth.PrincipalResolver
 	authorizer GovernanceAuthorizer
+	cursor     *SharedCursorCodec
 	now        func() time.Time
 }
 
@@ -54,8 +53,8 @@ type GovernanceAuthorizer interface {
 	BatchResourceAuthorizer
 }
 
-func NewSharedWithMeHandler(repo SharedWithMeRepository, principals resourceauth.PrincipalResolver, authorizer GovernanceAuthorizer) *SharedWithMeHandler {
-	return &SharedWithMeHandler{repo: repo, principals: principals, authorizer: authorizer, now: func() time.Time { return time.Now().UTC() }}
+func NewSharedWithMeHandler(repo SharedWithMeRepository, principals resourceauth.PrincipalResolver, authorizer GovernanceAuthorizer, cursor *SharedCursorCodec) *SharedWithMeHandler {
+	return &SharedWithMeHandler{repo: repo, principals: principals, authorizer: authorizer, cursor: cursor, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (h *SharedWithMeHandler) Handle(ctx context.Context, q SharedWithMe) ([]SharedNode, string, error) {
@@ -73,7 +72,17 @@ func (h *SharedWithMeHandler) Handle(ctx context.Context, q SharedWithMe) ([]Sha
 		limit = 200
 	}
 	visible := make([]SharedNode, 0, limit+1)
-	scanCursor, err := decodeGovernanceCursor(q.Cursor)
+	cursorContext := SharedCursorContext{
+		OrganizationID: q.OrganizationID,
+		ActorID:        q.ActorID,
+		WorkspaceID:    q.WorkspaceID,
+		NamespaceID:    q.NamespaceID,
+		Query:          q.Query,
+	}
+	if h.cursor == nil {
+		return nil, "", domain.ErrPersistence
+	}
+	scanCursor, err := h.cursor.Decode(q.Cursor, cursorContext)
 	if err != nil {
 		return nil, "", err
 	}
@@ -111,10 +120,13 @@ func (h *SharedWithMeHandler) Handle(ctx context.Context, q SharedWithMe) ([]Sha
 	}
 	next := ""
 	if len(visible) > limit {
-		next = encodeGovernanceCursor(visible[limit-1].Node.ID.String())
+		next, err = h.cursor.Encode(visible[limit-1].Node.ID.String(), cursorContext)
 		visible = visible[:limit]
 	} else if scanned == SharedCandidateScanBudget && hasMore {
-		next = encodeGovernanceCursor(scanCursor)
+		next, err = h.cursor.Encode(scanCursor, cursorContext)
+	}
+	if err != nil {
+		return nil, "", err
 	}
 	return visible, next, nil
 }
@@ -161,33 +173,4 @@ func authorizeSharedCandidates(ctx context.Context, authorizer BatchResourceAuth
 		})
 	}
 	return results
-}
-
-type governanceCursor struct {
-	Version int    `json:"v"`
-	After   string `json:"after"`
-}
-
-func encodeGovernanceCursor(after string) string {
-	payload, _ := json.Marshal(governanceCursor{Version: 1, After: after})
-	return base64.RawURLEncoding.EncodeToString(payload)
-}
-
-func decodeGovernanceCursor(value string) (string, error) {
-	if value == "" {
-		return "", nil
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(value)
-	if err != nil {
-		return "", domain.ErrInvalidGovernanceCursor
-	}
-	var cursor governanceCursor
-	if json.Unmarshal(payload, &cursor) != nil || cursor.Version != 1 {
-		return "", domain.ErrInvalidGovernanceCursor
-	}
-	id, err := uuid.Parse(cursor.After)
-	if err != nil || id == uuid.Nil {
-		return "", domain.ErrInvalidGovernanceCursor
-	}
-	return id.String(), nil
 }

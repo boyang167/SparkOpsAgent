@@ -9,8 +9,8 @@
 - Organization root 仅在 root 有 `READ` 时公开；隐藏 root 时 `root_node_id=null`，省略 `parent_id` 的 children 查询由服务端从 root 开始过滤。
 - children 在授权后补页，cursor 只取最后一个已返回的可见节点。
 - SharedWithMe 先以 typed principals 做稳定、有界 DB 候选查询，再按 64 节点 chunk 调用 Task 4 批量 Authorizer；每次请求最多扫描 256 个 raw candidates。
-- continuation cursor 为版本化 base64 opaque token；预算分页回归覆盖续页无遗漏、无重复。
-- 批量 Authorizer 每个 namespace/chunk 各批量加载一次节点祖先和相关 typed-principal grants，在内存复用 Deny、继承、owner/admin 语义；300 节点回归验证仓储调用固定为 1+1，而非 node×action×depth。
+- continuation cursor 为版本化 AES-GCM authenticated encrypted opaque token，并绑定组织、用户、Workspace 与规范化查询上下文；预算分页回归覆盖续页无遗漏、无重复。
+- 批量 Authorizer 每个 namespace/chunk 批量加载节点祖先和相关 typed-principal grants，在内存复用 Deny、继承、owner/admin 语义；300 节点回归验证 batch ancestor/grant data loads 为 1+1，不将其表述为总 query count。
 - Allow/Deny 决策来源均进入 `source_grant_ids`；祖先 Deny 压过子节点 Allow。
 - Organization namespace 发现同样受 256 扫描预算约束；无法判定时返回 domain budget error/HTTP 503。入口最多 32 个，并返回 `entry_nodes_truncated`；capabilities 仅合并实际返回入口的有效 actions。
 - 数据库和未知错误映射 500，仅明确 not-found/forbidden 映射 404/403。
@@ -32,6 +32,12 @@
 - 完整 `go test ./internal/modules/filesystem/... -count=1` 通过。
 - OpenAPI 解析、治理 header、stable error、local refs 等专项测试通过。
 - `git diff --check` 通过。
+
+### Opaque cursor security review
+
+- RED：新增加密、篡改、跨上下文重放、版本/格式与 nonce 回归后，query 测试因缺少 `NewSharedCursorCodec`/`SharedCursorContext` 编译失败。
+- GREEN：使用 transfer capability secret 经 SHA-256 和 `filesystem-shared-cursor-v1` domain separation 派生 AES-256-GCM key；token 不包含明文 secret/UUID，篡改或上下文不匹配统一返回 invalid cursor 400。
+- 本轮 query、HTTP、module、完整 filesystem、完整 OpenAPI 与 `git diff --check` 均通过。
 
 ## Concerns
 

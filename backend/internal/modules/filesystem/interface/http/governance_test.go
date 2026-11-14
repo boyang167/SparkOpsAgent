@@ -274,6 +274,25 @@ func TestGovernanceNamespaceBudgetExceededReturnsServiceUnavailable(t *testing.T
 	require.Contains(t, res.Body.String(), "FILESYSTEM_AUTHORIZATION_SCAN_BUDGET_EXCEEDED")
 }
 
+func TestGovernanceInvalidEncryptedCursorReturnsBadRequest(t *testing.T) {
+	orgID := uuid.New()
+	handler := &GovernanceHandler{
+		sharedWithMe: func(context.Context, query.SharedWithMe) ([]repository.SharedNode, string, error) {
+			return nil, "", domain.ErrInvalidGovernanceCursor
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{}, handler)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/shared-with-me?cursor=tampered", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Organization-ID", orgID.String())
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), "FILESYSTEM_INVALID_REQUEST")
+}
+
 func governanceRouter(t *testing.T, orgs authz.OrgPermissionChecker, workspaces authz.WorkspaceAccessResolver, handler *GovernanceHandler) (*gin.Engine, string, uuid.UUID, kernel.MemberID) {
 	return governanceRouterWithIDs(t, uuid.New(), orgs, workspaces, handler)
 }
