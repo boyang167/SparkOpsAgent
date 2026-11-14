@@ -97,6 +97,8 @@
 ## 首轮审查修复
 
 - 审查修复起点 HEAD：`a92c841aa28e6cb430704b5de5d93644073f7d5f`。
+- 首轮审查修复实现提交：`c7bc4869520fe52d21f35bc17b4990d7a310a1aa`
+  （`test(filesystem): address governance verification review`）。
 - migration helper 统一识别 `1`、`true`、`TRUE`（忽略首尾空格）；默认无 DSN 仍 SKIP，
   integration required 时缺 DSN 必须失败。子进程测试证明 `1/true/TRUE` 均 exit nonzero。
 - 安全矩阵不再使用 map membership/role/admin 判定。SQLite authority adapter 从真实
