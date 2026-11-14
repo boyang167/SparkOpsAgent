@@ -1,16 +1,36 @@
-import { describe, expect, it } from "vitest";
-import { getUploadGate, UPLOAD_DISABLED_HINT } from "./upload-panel-gate";
+// @vitest-environment jsdom
+
+import "@testing-library/jest-dom/vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createElement } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { UploadPanel } from "./UploadPanel";
 
 describe("UploadPanel", () => {
-  it("disables upload when providerId is missing", () => {
-    const gate = getUploadGate(undefined);
-    expect(gate.uploadEnabled).toBe(false);
-    expect(gate.helperText).toBe(UPLOAD_DISABLED_HINT);
+  afterEach(cleanup);
+
+  it("passes all selected files to the workbench queue without requiring a provider", () => {
+    const onFilesSelected = vi.fn();
+    const { container } = render(
+      createElement(UploadPanel, { onFilesSelected }),
+    );
+    const input = container.querySelector("input[type=file]") as HTMLInputElement;
+    const files = [new File(["a"], "a.txt"), new File(["b"], "b.txt")];
+
+    expect(screen.getByRole("button", { name: "上传文件" })).toBeEnabled();
+    fireEvent.change(input, { target: { files } });
+
+    expect(onFilesSelected).toHaveBeenCalledWith(files);
   });
 
-  it("enables upload when providerId is present", () => {
-    const gate = getUploadGate("provider-1");
-    expect(gate.uploadEnabled).toBe(true);
-    expect(gate.helperText).toBeNull();
+  it("stays disabled when write permission is absent", () => {
+    render(
+      createElement(UploadPanel, {
+        onFilesSelected: vi.fn(),
+        disabled: true,
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "上传文件" })).toBeDisabled();
   });
 });

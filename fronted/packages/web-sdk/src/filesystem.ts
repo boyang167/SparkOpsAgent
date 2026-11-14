@@ -34,6 +34,7 @@ type UploadTransferOptions = {
   idempotencyKey?: string;
   onProgress?: (progress: TransferProgress) => void;
   fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
 };
 
 type UploadTransferResult = {
@@ -276,6 +277,30 @@ export async function uploadTransfer(
 ): Promise<UploadTransferResult> {
   if (!options.session) {
     throw new Error("transfer session required");
+  }
+  if (options.session.protocol === "DIRECT") {
+    if (!options.session.upload_url || !options.session.capability_token) {
+      throw new Error("direct transfer upload capability required");
+    }
+    const response = await (options.fetchImpl ?? fetch)(options.session.upload_url, {
+      method: "PUT",
+      body: file,
+      headers: { Authorization: `Bearer ${options.session.capability_token}` },
+      signal: options.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`transfer upload failed: ${response.status}`);
+    }
+    options.onProgress?.({
+      uploadedBytes: file.size,
+      totalBytes: file.size,
+      completedParts: file.size > 0 ? 1 : 0,
+      totalParts: file.size > 0 ? 1 : 0,
+    });
+    return {
+      session: options.session,
+      requestedParts: file.size > 0 ? [1] : [],
+    };
   }
   return uploadTransferParts(file, options.session, options);
 }

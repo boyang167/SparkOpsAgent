@@ -23,8 +23,8 @@ export type FileExplorerPanelProps = {
   parentId: string;
   initialNodes: FileNodeVM[];
   breadcrumb?: BreadcrumbItem[];
-  providerId?: string;
   view?: FileView;
+  onFilesSelected?: (files: File[]) => void;
   onRename?: (nodeId: string, name: string) => Promise<void>;
   onMove?: (nodes: FileNodeVM[]) => void;
   canMove?: boolean;
@@ -38,8 +38,8 @@ export function FileExplorerPanel({
   parentId,
   initialNodes,
   breadcrumb = [],
-  providerId,
   view = "list",
+  onFilesSelected,
   onRename,
   onMove,
   canMove = false,
@@ -143,13 +143,7 @@ export function FileExplorerPanel({
         >
           新建目录
         </button>
-        <UploadPanel
-          workspaceId={workspaceId}
-          parentId={parentId}
-          namespaceId={namespaceId}
-          providerId={providerId}
-          onUploaded={onNavigate}
-        />
+        {onFilesSelected ? <UploadPanel onFilesSelected={onFilesSelected} /> : null}
       </div>
 
       <FileBrowser

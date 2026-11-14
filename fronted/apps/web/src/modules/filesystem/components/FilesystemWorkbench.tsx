@@ -4,11 +4,20 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createElement, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { FileNamespaceVM, FileNodeVM } from "@sparkops/contracts/filesystem";
-import { moveFileNode } from "@sparkops/web-sdk/filesystem";
+import {
+  abortTransfer,
+  createTransferSession,
+  getTransferSession,
+  moveFileNode,
+  uploadTransfer,
+} from "@sparkops/web-sdk/filesystem";
 import { Drawer } from "@/components/ui/Drawer";
 import { DirectoryTree } from "./DirectoryTree";
+import { FileDropZone } from "./FileDropZone";
 import { FileExplorerPanel } from "./FileExplorerPanel";
 import { MoveNodesModal } from "./MoveNodesModal";
+import { TransferCenter, TransferSummary } from "./TransferCenter";
+import { createTransferQueue } from "./transfer-queue";
 import type { FileView, WorkbenchState, WorkbenchTab } from "./workbench-state";
 
 export type FilesystemWorkbenchProps = {
@@ -45,6 +54,47 @@ export function FilesystemWorkbench({
   const [moveNodes, setMoveNodes] = useState<FileNodeVM[]>([]);
   const [treeVersion, setTreeVersion] = useState(0);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [transferQueue] = useState(() =>
+    createTransferQueue({
+      concurrency: 3,
+      abort: (session) => abortTransfer(session.session_id, workspaceId),
+      upload: async (file, targetParentId, controls) => {
+        const session = await createTransferSession(workspaceId, {
+          parent_id: targetParentId,
+          namespace_id: namespace.id,
+          name: file.name,
+          protocol: "DIRECT",
+          size: file.size,
+          classification: "INTERNAL",
+        });
+        controls.setSession(session);
+        controls.setStatus("uploading");
+        await uploadTransfer(file, {
+          workspaceId,
+          session,
+          signal: controls.signal,
+          onProgress: (progress) =>
+            controls.setProgress({
+              uploadedBytes: progress.uploadedBytes,
+              totalBytes: progress.totalBytes,
+            }),
+        });
+        controls.setStatus("verifying");
+        while (!controls.signal.aborted) {
+          const current = await getTransferSession(session.session_id, workspaceId);
+          if (current.status === "COMPLETED") {
+            router.refresh();
+            return;
+          }
+          if (["FAILED", "REJECTED", "ABORTED", "EXPIRED"].includes(current.status)) {
+            throw new Error(current.error_code || "上传处理失败");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        throw new Error("上传已取消");
+      },
+    }),
+  );
   const visibleTabs = tabs.filter(
     (tab) => !tab.permission || permissions.includes(tab.permission),
   );
@@ -177,8 +227,17 @@ export function FilesystemWorkbench({
           view,
           canMove: permissions.includes("file:write"),
           onMove: setMoveNodes,
+          onFilesSelected: permissions.includes("file:write")
+            ? (files: File[]) =>
+                transferQueue.enqueue(
+                  files,
+                  initialState.parent ?? namespace.root_node_id!,
+                )
+            : undefined,
         })
-      : createElement("div", { className: "empty-state" }, "此功能将在后续任务中接入。");
+      : activeTab === "transfers"
+        ? createElement(TransferCenter, { queue: transferQueue })
+        : createElement("div", { className: "empty-state" }, "此功能将在后续任务中接入。");
 
   return createElement(
     "div",
@@ -247,10 +306,28 @@ export function FilesystemWorkbench({
               },
               renderDirectoryTree(),
             ),
-            createElement("div", { className: "min-w-0 flex-1" }, panel),
+            createElement(
+              FileDropZone,
+              {
+                targetParentId: initialState.parent ?? namespace.root_node_id ?? "",
+                targetName: "当前目录",
+                canWrite:
+                  Boolean(initialState.parent ?? namespace.root_node_id) &&
+                  permissions.includes("file:write"),
+                onFiles: (files: File[], targetParentId: string) =>
+                  transferQueue.enqueue(files, targetParentId),
+              },
+              createElement("div", { className: "min-w-0 flex-1" }, panel),
+            ),
           )
         : panel,
     ),
+    activeTab === "files"
+      ? createElement(TransferSummary, {
+          queue: transferQueue,
+          onViewAll: () => selectTab("transfers"),
+        })
+      : null,
     moveError
       ? createElement(
           "p",

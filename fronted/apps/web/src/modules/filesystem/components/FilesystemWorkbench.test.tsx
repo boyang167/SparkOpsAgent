@@ -9,6 +9,10 @@ import { FilesystemWorkbench } from "./FilesystemWorkbench";
 
 const sdk = vi.hoisted(() => ({
   moveFileNode: vi.fn(),
+  abortTransfer: vi.fn(),
+  createTransferSession: vi.fn(),
+  getTransferSession: vi.fn(),
+  uploadTransfer: vi.fn(),
 }));
 
 const navigation = vi.hoisted(() => ({
@@ -34,6 +38,10 @@ const directoryTree = vi.hoisted(() => ({
 
 vi.mock("@sparkops/web-sdk/filesystem", () => ({
   moveFileNode: sdk.moveFileNode,
+  abortTransfer: sdk.abortTransfer,
+  createTransferSession: sdk.createTransferSession,
+  getTransferSession: sdk.getTransferSession,
+  uploadTransfer: sdk.uploadTransfer,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -137,6 +145,10 @@ describe("FilesystemWorkbench", () => {
     navigation.push.mockReset();
     navigation.refresh.mockReset();
     sdk.moveFileNode.mockReset();
+    sdk.abortTransfer.mockReset();
+    sdk.createTransferSession.mockReset();
+    sdk.getTransferSession.mockReset();
+    sdk.uploadTransfer.mockReset();
     navigation.searchParams = new URLSearchParams();
     explorer.views = [];
     explorer.canMoves = [];
@@ -279,6 +291,62 @@ describe("FilesystemWorkbench", () => {
         movableNode.name,
       ),
     );
+    expect(navigation.refresh).toHaveBeenCalled();
+  });
+
+  it("keeps an upload running when switching from files to transfers", async () => {
+    let finishUpload!: () => void;
+    sdk.createTransferSession.mockResolvedValue({
+      session_id: "00000000-0000-4000-8000-000000000099",
+      workspace_id: namespace.workspace_id,
+      namespace_id: namespace.id,
+      status: "UPLOADING",
+      protocol: "DIRECT",
+      target_name: "报告.txt",
+      expected_size: 7,
+      part_size: 7,
+      total_parts: 1,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      upload_url: "https://gateway.example/upload",
+      capability_token: "token",
+      parts: [],
+    });
+    sdk.uploadTransfer.mockImplementation(
+      async (_file: File, options: { onProgress?: (value: never) => void }) => {
+        options.onProgress?.({
+          uploadedBytes: 3,
+          totalBytes: 7,
+          completedParts: 0,
+          totalParts: 1,
+        } as never);
+        await new Promise<void>((resolve) => {
+          finishUpload = resolve;
+        });
+      },
+    );
+    sdk.getTransferSession.mockResolvedValue({ status: "COMPLETED" });
+    const rendered = renderWorkbench(["file:read", "file:write"]);
+    const file = new File(["payload"], "报告.txt");
+
+    fireEvent.drop(screen.getByTestId("file-drop-zone"), {
+      dataTransfer: { files: [file], types: ["Files"], items: [] },
+    });
+    await waitFor(() => expect(sdk.uploadTransfer).toHaveBeenCalled());
+
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "transfers", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+    expect(screen.getByText("报告.txt")).toBeInTheDocument();
+    expect(screen.getByText("正在上传")).toBeInTheDocument();
+
+    finishUpload();
+    await waitFor(() => expect(screen.getByText("已完成")).toBeInTheDocument());
     expect(navigation.refresh).toHaveBeenCalled();
   });
 });

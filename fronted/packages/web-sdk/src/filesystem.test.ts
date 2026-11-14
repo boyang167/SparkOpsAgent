@@ -36,6 +36,43 @@ describe("filesystem transfer sdk", () => {
     vi.restoreAllMocks();
   });
 
+  it("uploads a direct transfer through the gateway capability contract", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const session: TransferSessionVM = {
+      ...sessionWithCompletedParts([]),
+      protocol: "DIRECT",
+      upload_url: "https://gateway.example/v1/transfers/session/content",
+      capability_token: "upload-capability",
+      parts: [],
+      total_parts: 1,
+    };
+    const progress = vi.fn();
+    const fileFixture = new Blob(["payload"]);
+
+    const uploaded = await uploadTransfer(fileFixture, {
+      session,
+      workspaceId: session.workspace_id,
+      fetchImpl: fetchMock,
+      onProgress: progress,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      session.upload_url,
+      expect.objectContaining({
+        method: "PUT",
+        body: fileFixture,
+        headers: { Authorization: "Bearer upload-capability" },
+      }),
+    );
+    expect(progress).toHaveBeenLastCalledWith({
+      uploadedBytes: fileFixture.size,
+      totalBytes: fileFixture.size,
+      completedParts: 1,
+      totalParts: 1,
+    });
+    expect(uploaded.requestedParts).toEqual([1]);
+  });
+
   it("uploads only missing parts when resuming", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

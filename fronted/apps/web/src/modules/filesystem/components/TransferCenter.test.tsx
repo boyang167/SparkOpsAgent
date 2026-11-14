@@ -1,0 +1,77 @@
+// @vitest-environment jsdom
+
+import "@testing-library/jest-dom/vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createElement } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createTransferQueue } from "./transfer-queue";
+import { TransferCenter, TransferSummary } from "./TransferCenter";
+
+describe("TransferCenter", () => {
+  afterEach(cleanup);
+
+  it("shows clear empty and transfer states with item actions", async () => {
+    const queue = createTransferQueue({
+      concurrency: 1,
+      upload: async () => {
+        throw new Error("网络中断");
+      },
+    });
+    const { rerender } = render(createElement(TransferCenter, { queue }));
+    expect(screen.getByText("暂无传输任务")).toBeInTheDocument();
+
+    queue.enqueue([new File(["payload"], "报告.txt")], "parent-1");
+    await queue.whenIdle();
+    rerender(createElement(TransferCenter, { queue }));
+
+    expect(screen.getByText("报告.txt")).toBeInTheDocument();
+    expect(screen.getByText("上传失败")).toBeInTheDocument();
+    expect(screen.getByText("网络中断")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试 报告.txt" })).toBeInTheDocument();
+  });
+
+  it("wires retry and cancel actions to the queue", async () => {
+    let finish!: () => void;
+    let attempts = 0;
+    const queue = createTransferQueue({
+      concurrency: 1,
+      upload: async (_file, _parent, controls) => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("失败");
+        controls.setStatus("uploading");
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+      },
+    });
+    queue.enqueue([new File(["payload"], "报告.txt")], "parent-1");
+    await queue.whenIdle();
+    const { rerender } = render(createElement(TransferCenter, { queue }));
+
+    fireEvent.click(screen.getByRole("button", { name: "重试 报告.txt" }));
+    await vi.waitFor(() => expect(attempts).toBe(2));
+    rerender(createElement(TransferCenter, { queue }));
+    fireEvent.click(screen.getByRole("button", { name: "取消 报告.txt" }));
+    finish();
+    await queue.whenIdle();
+    rerender(createElement(TransferCenter, { queue }));
+
+    expect(screen.getByText("已取消")).toBeInTheDocument();
+  });
+
+  it("limits the file-tab summary to three active transfers", async () => {
+    const queue = createTransferQueue({
+      concurrency: 3,
+      upload: async () => new Promise<void>(() => undefined),
+    });
+    queue.enqueue(
+      Array.from({ length: 5 }, (_, index) => new File(["x"], `${index}.txt`)),
+      "parent-1",
+    );
+
+    render(createElement(TransferSummary, { queue, onViewAll: vi.fn() }));
+
+    expect(screen.getAllByRole("progressbar")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "查看全部传输" })).toBeInTheDocument();
+  });
+});
