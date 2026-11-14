@@ -425,6 +425,54 @@ paths:
           $ref: "#/components/responses/Unavailable"
 
   /api/v1/workspaces/{wsId}/transfers:
+    get:
+      tags: [filesystem]
+      summary: List workspace transfer sessions
+      operationId: listFilesystemTransfers
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/TransferStatus"
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            maxLength: 256
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+      responses:
+        "200":
+          description: Workspace transfer sessions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/TransferSessionPage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
     post:
       tags: [filesystem]
       summary: Create a transfer session
@@ -1690,6 +1738,16 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TransferPart"
+    TransferSessionPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TransferSession"
+        next_cursor:
+          type: string
     StorageProvider:
       type: object
       required: [id, organization_id, name, provider_type, secret_ref, status]

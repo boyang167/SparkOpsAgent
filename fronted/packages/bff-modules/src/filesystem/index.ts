@@ -16,6 +16,8 @@ import type {
   StorageBindingPageVM,
   StoragePoolPageVM,
   StorageProviderPageVM,
+  TransferListQuery,
+  TransferSessionPageVM,
   TransferSessionVM,
   UpsertLifecyclePolicyCommand,
 } from "@sparkops/contracts/filesystem";
@@ -29,6 +31,7 @@ import {
   StorageBindingPageVMSchema,
   StoragePoolPageVMSchema,
   StorageProviderPageVMSchema,
+  TransferSessionPageVMSchema,
   TransferSessionVMSchema,
 } from "@sparkops/contracts/filesystem";
 
@@ -107,6 +110,15 @@ export async function createTransferSession(
 ): Promise<TransferSessionVM> {
   const data = await ctx.upstream.filesystem.createTransfer(workspaceId, input, idempotencyKey);
   return mapTransfer(data);
+}
+
+export async function listTransferSessions(
+  ctx: BffContext,
+  workspaceId: string,
+  query: TransferListQuery = {},
+): Promise<TransferSessionPageVM> {
+  const data = await ctx.upstream.filesystem.listTransfers(workspaceId, query);
+  return TransferSessionPageVMSchema.parse(data);
 }
 
 export async function getTransferSession(

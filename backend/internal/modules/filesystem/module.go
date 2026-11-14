@@ -15,8 +15,8 @@ import (
 	domainservice "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/service"
 	agentsign "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/capability"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/gatewaycontrol"
-	fsstorage "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/storage"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
+	fsstorage "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/storage"
 	filesystemhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
@@ -99,6 +99,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 	createTransfer := command.NewCreateTransferHandler(repo, c.Transactor, c.EventBus, c.AuditLogger, nil)
 	getTransfer := query.NewGetTransferHandler(repo)
+	listTransfers := query.NewListTransfersHandler(repo)
 	abortTransfer := command.NewAbortTransferHandler(repo, c.Transactor)
 	handler := filesystemhttp.NewHandler(
 		repo,
@@ -115,6 +116,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		&filesystemhttp.TransferOptions{
 			Create:  createTransfer.Handle,
 			Get:     getTransfer.Handle,
+			List:    listTransfers.Handle,
 			Abort:   abortTransfer.Handle,
 			Peek:    repo.GetTransferByID,
 			Gateway: filesystemhttp.NewTransferGatewayView(publicURL, issuer),

@@ -15,6 +15,8 @@ import type {
   StorageBindingPageVM,
   StoragePoolPageVM,
   StorageProviderPageVM,
+  TransferListQuery,
+  TransferSessionPageVM,
   TransferSessionVM,
   UpsertLifecyclePolicyCommand,
 } from "@sparkops/contracts/filesystem";
@@ -43,6 +45,15 @@ function filesQuery(query: ListFilesQuery = {}) {
 
 function revisionsQuery(query: ListRevisionsQuery = {}) {
   const params = new URLSearchParams();
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit != null) params.set("limit", String(query.limit));
+  const suffix = params.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
+function transfersQuery(query: TransferListQuery = {}) {
+  const params = new URLSearchParams();
+  if (query.status) params.set("status", query.status);
   if (query.cursor) params.set("cursor", query.cursor);
   if (query.limit != null) params.set("limit", String(query.limit));
   const suffix = params.toString();
@@ -111,6 +122,12 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
         headers: { "Idempotency-Key": idempotencyKey },
         options: { ...options, workspaceId },
       });
+    },
+    listTransfers(workspaceId: string, query: TransferListQuery = {}) {
+      return upstreamFetch<TransferSessionPageVM>(
+        `/api/v1/workspaces/${workspaceId}/transfers${transfersQuery(query)}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
     },
     getTransfer(workspaceId: string, sessionId: string) {
       return upstreamFetch<TransferSessionVM>(

@@ -12,6 +12,7 @@ const sdk = vi.hoisted(() => ({
   abortTransfer: vi.fn(),
   createTransferSession: vi.fn(),
   getTransferSession: vi.fn(),
+  listTransferSessions: vi.fn(),
   uploadTransfer: vi.fn(),
 }));
 
@@ -41,6 +42,7 @@ vi.mock("@sparkops/web-sdk/filesystem", () => ({
   abortTransfer: sdk.abortTransfer,
   createTransferSession: sdk.createTransferSession,
   getTransferSession: sdk.getTransferSession,
+  listTransferSessions: sdk.listTransferSessions,
   uploadTransfer: sdk.uploadTransfer,
 }));
 
@@ -167,6 +169,8 @@ describe("FilesystemWorkbench", () => {
     sdk.abortTransfer.mockReset();
     sdk.createTransferSession.mockReset();
     sdk.getTransferSession.mockReset();
+    sdk.listTransferSessions.mockReset();
+    sdk.listTransferSessions.mockResolvedValue({ items: [], next_cursor: "" });
     sdk.uploadTransfer.mockReset();
     navigation.searchParams = new URLSearchParams();
     explorer.views = [];

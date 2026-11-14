@@ -33,6 +33,7 @@ const maxJSONBodyBytes = 64 << 10
 type TransferOptions struct {
 	Create  func(context.Context, command.CreateTransfer) (command.TransferDescriptor, error)
 	Get     func(context.Context, query.GetTransfer) (query.GetTransferResult, error)
+	List    func(context.Context, query.ListTransfers) ([]*model.TransferSession, string, error)
 	Abort   func(context.Context, command.AbortTransfer) error
 	Peek    func(context.Context, uuid.UUID) (*model.TransferSession, error)
 	Gateway TransferGatewayView
@@ -53,6 +54,7 @@ type Handler struct {
 	audit                 audit.Logger
 	createTransfer        func(context.Context, command.CreateTransfer) (command.TransferDescriptor, error)
 	getTransfer           func(context.Context, query.GetTransfer) (query.GetTransferResult, error)
+	listTransfers         func(context.Context, query.ListTransfers) ([]*model.TransferSession, string, error)
 	abortTransfer         func(context.Context, command.AbortTransfer) error
 	peekTransfer          func(context.Context, uuid.UUID) (*model.TransferSession, error)
 	transferGatewayView   TransferGatewayView
@@ -108,6 +110,7 @@ func NewHandler(
 	if transfers != nil {
 		handler.createTransfer = transfers.Create
 		handler.getTransfer = transfers.Get
+		handler.listTransfers = transfers.List
 		handler.abortTransfer = transfers.Abort
 		handler.peekTransfer = transfers.Peek
 		handler.transferGatewayView = transfers.Gateway
@@ -153,6 +156,7 @@ func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.Ha
 	base.POST("/exports", authz.RequirePermission(permissions, authz.PermFileAdmin), requireIdempotencyKey(), h.StartControlledExport)
 	base.POST("/exports/:exportId/import", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.ImportExportedFile)
 	base.POST("/transfers", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.CreateTransfer)
+	base.GET("/transfers", authz.RequirePermission(permissions, authz.PermFileRead), h.ListTransfers)
 	base.GET("/transfers/:sessionId", authz.RequirePermission(permissions, authz.PermFileRead), h.GetTransfer)
 	base.DELETE("/transfers/:sessionId", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.AbortTransfer)
 	base.GET("/storage-providers", authz.RequirePermission(permissions, authz.PermStorageRead), h.ListStorageProviders)

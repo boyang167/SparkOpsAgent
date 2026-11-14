@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 
 	resourceauth "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/authorization"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/command"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
@@ -101,6 +103,71 @@ func TestListFilesUsesReadPermissionAndDoesNotRequireIdempotencyKey(t *testing.T
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+}
+
+func TestListTransfersUsesReadPermissionAndPassesFilters(t *testing.T) {
+	nsID, rootID := uuid.New(), uuid.New()
+	var captured query.ListTransfers
+	workspaceSession := func(workspaceID uuid.UUID) *model.TransferSession {
+		session, err := model.NewTransferSession(model.TransferSessionInput{
+			ID: uuid.New(), WorkspaceID: workspaceID, NamespaceID: nsID,
+			TargetParentID: &rootID, TargetName: "payload.bin", CreatedBy: uuid.New(),
+			Protocol: model.TransferProtocolDirect, ExpectedSize: 7,
+			IdempotencyKey: uuid.NewString(), RequestHash: strings.Repeat("a", 64),
+			TemporaryObjectKey: "transfers/payload", ExpiresAt: time.Now().Add(time.Hour),
+			Classification: model.TransferClassificationInternal,
+		})
+		require.NoError(t, err)
+		return session
+	}
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		listTransfers: func(_ context.Context, input query.ListTransfers) ([]*model.TransferSession, string, error) {
+			captured = input
+			return []*model.TransferSession{workspaceSession(input.WorkspaceID)}, "next-page", nil
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{
+		allowed: map[string]bool{authz.PermFileRead: true},
+	}, h)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/workspaces/"+wsID.String()+"/transfers?status=FAILED&limit=20&cursor=opaque",
+		nil,
+	)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.Equal(t, wsID.UUID, captured.WorkspaceID)
+	require.Equal(t, model.TransferFailed, captured.Status)
+	require.Equal(t, 20, captured.Limit)
+	require.Equal(t, "opaque", captured.Cursor)
+	require.Contains(t, res.Body.String(), "next-page")
+	require.Contains(t, res.Body.String(), "payload.bin")
+}
+
+func TestListTransfersRejectsInvalidStatus(t *testing.T) {
+	nsID := uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID}, nil
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{
+		allowed: map[string]bool{authz.PermFileRead: true},
+	}, h)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/workspaces/"+wsID.String()+"/transfers?status=UNKNOWN",
+		nil,
+	)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
 }
 
 func TestListFilesValidatesAndPassesNodeTypeBeforeQuery(t *testing.T) {

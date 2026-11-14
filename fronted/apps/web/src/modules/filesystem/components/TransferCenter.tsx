@@ -1,6 +1,8 @@
 "use client";
 
-import { createElement, useSyncExternalStore } from "react";
+import { createElement, useEffect, useState, useSyncExternalStore } from "react";
+import type { TransferSessionVM, TransferStatus as PersistedStatus } from "@sparkops/contracts/filesystem";
+import { listTransferSessions } from "@sparkops/web-sdk/filesystem";
 import type { TransferItem, TransferQueue, TransferStatus } from "./transfer-queue";
 
 const statusLabels: Record<TransferStatus, string> = {
@@ -11,6 +13,20 @@ const statusLabels: Record<TransferStatus, string> = {
   completed: "已完成",
   failed: "上传失败",
   canceled: "已取消",
+};
+
+const persistedStatusLabels: Record<PersistedStatus, string> = {
+  INITIATED: "等待上传",
+  UPLOADING: "正在上传",
+  PAUSED: "已暂停",
+  VERIFYING: "正在校验",
+  SCANNING: "正在扫描",
+  COMMITTING: "正在提交",
+  COMPLETED: "已完成",
+  FAILED: "上传失败",
+  REJECTED: "已拒绝",
+  ABORTED: "已取消",
+  EXPIRED: "已过期",
 };
 
 function useTransfers(queue: TransferQueue) {
@@ -55,9 +71,98 @@ function Progress({ item }: { item: TransferItem }) {
   );
 }
 
-export function TransferCenter({ queue }: { queue: TransferQueue }) {
+function PersistedTransferCard({ session }: { session: TransferSessionVM }) {
+  const completed = session.status === "COMPLETED";
+  return createElement(
+    "article",
+    { className: "card stack-sm" },
+    createElement(
+      "div",
+      { className: "flex flex-wrap items-start justify-between gap-3" },
+      createElement(
+        "div",
+        { className: "min-w-0" },
+        createElement("h3", { className: "truncate font-medium" }, session.target_name),
+        createElement(
+          "p",
+          { className: "text-sm text-muted" },
+          persistedStatusLabels[session.status],
+        ),
+      ),
+    ),
+    createElement(
+      "div",
+      {
+        role: "progressbar",
+        "aria-label": `${session.target_name} 上传进度`,
+        "aria-valuemin": 0,
+        "aria-valuemax": 100,
+        "aria-valuenow": completed ? 100 : 0,
+        className: "h-1.5 overflow-hidden rounded-full bg-surface-muted",
+      },
+      createElement("div", {
+        className: "h-full bg-primary transition-[width] duration-200",
+        style: { width: completed ? "100%" : "0%" },
+      }),
+    ),
+    createElement(
+      "p",
+      { className: "text-xs text-muted" },
+      `${completed ? session.expected_size : 0} / ${session.expected_size} 字节`,
+    ),
+    session.error_code
+      ? createElement(
+          "p",
+          { role: "alert", className: "text-sm text-danger" },
+          session.error_code,
+        )
+      : null,
+  );
+}
+
+export function TransferCenter({
+  queue,
+  workspaceId,
+}: {
+  queue: TransferQueue;
+  workspaceId?: string;
+}) {
   const items = useTransfers(queue);
-  if (items.length === 0) {
+  const [persisted, setPersisted] = useState<TransferSessionVM[]>([]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(
+    workspaceId ? "loading" : "ready",
+  );
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    let active = true;
+    setLoadState("loading");
+    void listTransferSessions(workspaceId, { limit: 100 })
+      .then((page) => {
+        if (!active) return;
+        setPersisted(page.items);
+        setNextCursor(page.next_cursor);
+        setLoadState("ready");
+      })
+      .catch(() => {
+        if (active) setLoadState("error");
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
+
+  const localSessionIDs = new Set(
+    items
+      .map((item) => item.session?.session_id)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const visiblePersisted = persisted.filter(
+    (session) => !localSessionIDs.has(session.session_id),
+  );
+
+  if (items.length === 0 && visiblePersisted.length === 0 && loadState === "ready") {
     return createElement(
       "div",
       { className: "empty-state stack-sm" },
@@ -68,6 +173,22 @@ export function TransferCenter({ queue }: { queue: TransferQueue }) {
         "上传文件后，可在这里查看进度并处理失败任务。",
       ),
     );
+  }
+
+  async function loadMore() {
+    if (!workspaceId || !nextCursor) return;
+    setLoadState("loading");
+    try {
+      const page = await listTransferSessions(workspaceId, {
+        cursor: nextCursor,
+        limit: 100,
+      });
+      setPersisted((current) => [...current, ...page.items]);
+      setNextCursor(page.next_cursor);
+      setLoadState("ready");
+    } catch {
+      setLoadState("error");
+    }
   }
 
   return createElement(
@@ -145,6 +266,37 @@ export function TransferCenter({ queue }: { queue: TransferQueue }) {
           : null,
       ),
     ),
+    visiblePersisted.map((session) =>
+      createElement(PersistedTransferCard, {
+        key: session.session_id,
+        session,
+      }),
+    ),
+    loadState === "loading"
+      ? createElement(
+          "p",
+          { role: "status", className: "text-sm text-muted" },
+          "正在加载持久传输任务…",
+        )
+      : null,
+    loadState === "error"
+      ? createElement(
+          "p",
+          { role: "alert", className: "text-sm text-danger" },
+          "无法加载持久传输任务，请稍后重试。",
+        )
+      : null,
+    nextCursor && loadState !== "loading"
+      ? createElement(
+          "button",
+          {
+            type: "button",
+            className: "btn btn-secondary btn-sm self-start",
+            onClick: () => void loadMore(),
+          },
+          "加载更多",
+        )
+      : null,
   );
 }
 

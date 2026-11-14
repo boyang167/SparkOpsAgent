@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1008,6 +1009,87 @@ func (r *Repository) GetTransferByIdempotency(ctx context.Context, workspaceID u
 	var row transferSessionRow
 	err := postgres.DB(ctx, r.db).Where("workspace_id = ? AND idempotency_key = ?", workspaceID, key).First(&row).Error
 	return transferResult(row, err)
+}
+
+type transferCursor struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        uuid.UUID `json:"id"`
+}
+
+func (r *Repository) ListTransfers(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	status *model.TransferStatus,
+	limit int,
+	cursor string,
+) ([]*model.TransferSession, string, error) {
+	if workspaceID == uuid.Nil {
+		return nil, "", model.ErrInvalidTransfer
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	query := postgres.DB(ctx, r.db).Where("workspace_id = ?", workspaceID)
+	if status != nil {
+		query = query.Where("status = ?", *status)
+	}
+	if cursor != "" {
+		boundary, err := decodeTransferCursor(cursor)
+		if err != nil {
+			return nil, "", err
+		}
+		query = query.Where(
+			"(created_at < ?) OR (created_at = ? AND id < ?)",
+			boundary.CreatedAt, boundary.CreatedAt, boundary.ID,
+		)
+	}
+	var rows []transferSessionRow
+	if err := query.Order("created_at DESC, id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
+		return nil, "", wrapPersistence(err)
+	}
+	next := ""
+	if len(rows) > limit {
+		var err error
+		next, err = encodeTransferCursor(rows[limit-1])
+		if err != nil {
+			return nil, "", err
+		}
+		rows = rows[:limit]
+	}
+	out := make([]*model.TransferSession, 0, len(rows))
+	for _, row := range rows {
+		session, err := transferResult(row, nil)
+		if err != nil {
+			return nil, "", err
+		}
+		out = append(out, session)
+	}
+	return out, next, nil
+}
+
+func encodeTransferCursor(row transferSessionRow) (string, error) {
+	payload, err := json.Marshal(transferCursor{
+		CreatedAt: row.CreatedAt.UTC(),
+		ID:        row.ID,
+	})
+	if err != nil {
+		return "", domain.ErrPersistence
+	}
+	return base64.RawURLEncoding.EncodeToString(payload), nil
+}
+
+func decodeTransferCursor(value string) (transferCursor, error) {
+	var cursor transferCursor
+	payload, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || json.Unmarshal(payload, &cursor) != nil ||
+		cursor.CreatedAt.IsZero() || cursor.ID == uuid.Nil {
+		return transferCursor{}, model.ErrInvalidTransfer
+	}
+	cursor.CreatedAt = cursor.CreatedAt.UTC()
+	return cursor, nil
 }
 
 func (r *Repository) LockTransfer(ctx context.Context, id uuid.UUID) (*model.TransferSession, error) {

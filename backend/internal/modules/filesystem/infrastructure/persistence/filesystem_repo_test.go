@@ -709,6 +709,50 @@ func TestTransferRepositoryRoundTripCASAndPartIdempotency(t *testing.T) {
 	require.Nil(t, storedChecksum)
 }
 
+func TestListTransfersScopesFiltersAndPaginatesWithStableBoundary(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	parent := seedDirectory(t, db, ns.ID)
+	foreignNS := seedNamespace(t, db)
+	foreignParent := seedDirectory(t, db, foreignNS.ID)
+	createdAt := time.Now().UTC().Truncate(time.Microsecond)
+
+	first := transferSessionFixture(t, ns, &parent.ID, 1)
+	second := transferSessionFixture(t, ns, &parent.ID, 2)
+	third := transferSessionFixture(t, ns, &parent.ID, 3)
+	foreign := transferSessionFixture(t, foreignNS, &foreignParent.ID, 4)
+	for index, session := range []*model.TransferSession{first, second, third, foreign} {
+		require.NoError(t, repo.CreateTransfer(context.Background(), session))
+		require.NoError(t, db.Model(&transferSessionRow{}).Where("id = ?", session.ID()).
+			Updates(map[string]any{
+				"created_at": createdAt.Add(time.Duration(index/2) * time.Second),
+				"status":     model.TransferFailed,
+			}).Error)
+	}
+
+	status := model.TransferFailed
+	page, next, err := repo.ListTransfers(context.Background(), ns.WorkspaceID, &status, 2, "")
+	require.NoError(t, err)
+	require.Len(t, page, 2)
+	require.NotEmpty(t, next)
+	require.Equal(t, third.ID(), page[0].ID())
+	tieFirst, tieLast := first.ID(), second.ID()
+	if tieFirst.String() < tieLast.String() {
+		tieFirst, tieLast = tieLast, tieFirst
+	}
+	require.Equal(t, tieFirst, page[1].ID())
+
+	last, end, err := repo.ListTransfers(context.Background(), ns.WorkspaceID, &status, 2, next)
+	require.NoError(t, err)
+	require.Len(t, last, 1)
+	require.Empty(t, end)
+	require.Equal(t, tieLast, last[0].ID())
+	for _, session := range append(page, last...) {
+		require.Equal(t, ns.WorkspaceID, session.WorkspaceID())
+		require.Equal(t, model.TransferFailed, session.Status())
+	}
+}
+
 func TestReserveQuotaHandlesNullBoundariesFilesAndOverflow(t *testing.T) {
 	repo, db := newTestRepository(t)
 	ns := seedNamespace(t, db)

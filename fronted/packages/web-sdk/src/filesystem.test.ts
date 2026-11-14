@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TransferSessionVM } from "@sparkops/contracts/filesystem";
-import { listFileNodes, moveFileNode, uploadTransfer } from "./filesystem";
+import {
+  listFileNodes,
+  listTransferSessions,
+  moveFileNode,
+  uploadTransfer,
+} from "./filesystem";
 
 function sessionWithCompletedParts(partNumbers: number[]): TransferSessionVM {
   const partSize = 5;
@@ -71,6 +76,35 @@ describe("filesystem transfer sdk", () => {
       totalParts: 1,
     });
     expect(uploaded.requestedParts).toEqual([1]);
+  });
+
+  it("lists persisted workspace transfers with filters and cursor", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 0,
+          message: "ok",
+          data: { items: [], next_cursor: "next-page" },
+          trace_id: "trace-1",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const page = await listTransferSessions("workspace-1", {
+      status: "FAILED",
+      cursor: "opaque-cursor",
+      limit: 20,
+    });
+
+    expect(page.next_cursor).toBe("next-page");
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "/workspaces/workspace-1/transfers?status=FAILED&cursor=opaque-cursor&limit=20",
+      ),
+      expect.objectContaining({ method: "GET" }),
+    );
   });
 
   it("uploads only missing parts when resuming", async () => {

@@ -15,6 +15,8 @@ import type {
   StorageBindingPageVM,
   StoragePoolPageVM,
   StorageProviderPageVM,
+  TransferListQuery,
+  TransferSessionPageVM,
   TransferSessionVM,
   UpsertLifecyclePolicyCommand,
 } from "@sparkops/contracts/filesystem";
@@ -185,6 +187,24 @@ export function createTransferSession(
     body: JSON.stringify(input),
     workspaceId,
     headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
+    ...options,
+  });
+}
+
+export function listTransferSessions(
+  workspaceId: string,
+  query: TransferListQuery = {},
+  options: BffFetchOptions = {},
+) {
+  const params = new URLSearchParams();
+  if (query.status) params.set("status", query.status);
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit != null) params.set("limit", String(query.limit));
+  const suffix = params.toString();
+  const qs = suffix ? `?${suffix}` : "";
+  return bffFetch<TransferSessionPageVM>(`/workspaces/${workspaceId}/transfers${qs}`, {
+    method: "GET",
+    workspaceId,
     ...options,
   });
 }

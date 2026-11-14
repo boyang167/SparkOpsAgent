@@ -449,7 +449,7 @@ export function FilesystemWorkbench({
         tab.id === "files"
           ? filesContent
           : tab.id === "transfers"
-            ? createElement(TransferCenter, { queue: transferQueue })
+            ? createElement(TransferCenter, { queue: transferQueue, workspaceId })
             : createElement("div", { className: "empty-state" }, "此功能将在后续任务中接入。"),
       ),
     ),

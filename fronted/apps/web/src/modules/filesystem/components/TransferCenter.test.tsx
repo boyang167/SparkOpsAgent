@@ -4,11 +4,72 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { TransferSessionVM } from "@sparkops/contracts/filesystem";
 import { createTransferQueue } from "./transfer-queue";
 import { TransferCenter, TransferSummary } from "./TransferCenter";
 
+const listTransferSessionsMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@sparkops/web-sdk/filesystem", () => ({
+  listTransferSessions: listTransferSessionsMock,
+}));
+
 describe("TransferCenter", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    listTransferSessionsMock.mockReset();
+  });
+
+  it("merges persisted sessions with local work and deduplicates by session id", async () => {
+    const duplicateId = "00000000-0000-0000-0000-000000000099";
+    const persisted = (sessionId: string, name: string): TransferSessionVM => ({
+      session_id: sessionId,
+      workspace_id: "00000000-0000-0000-0000-000000000001",
+      namespace_id: "00000000-0000-0000-0000-000000000002",
+      target_parent_id: "00000000-0000-0000-0000-000000000003",
+      target_name: name,
+      status: "FAILED",
+      protocol: "DIRECT",
+      expected_size: 7,
+      part_size: 7,
+      total_parts: 1,
+      expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+      parts: [],
+    });
+    listTransferSessionsMock.mockResolvedValue({
+      items: [
+        persisted(duplicateId, "远端重复.txt"),
+        persisted("00000000-0000-0000-0000-000000000100", "历史任务.txt"),
+      ],
+      next_cursor: "",
+    });
+    const queue = createTransferQueue({
+      concurrency: 1,
+      upload: async (_file, _parent, controls) => {
+        controls.setSession({ session_id: duplicateId });
+        await new Promise<void>(() => undefined);
+      },
+    });
+    queue.enqueue([new File(["payload"], "本地任务.txt")], "parent-1");
+    await vi.waitFor(() =>
+      expect(queue.getSnapshot()[0]?.session?.session_id).toBe(duplicateId),
+    );
+
+    render(
+      createElement(TransferCenter, {
+        queue,
+        workspaceId: "00000000-0000-0000-0000-000000000001",
+      }),
+    );
+
+    expect(await screen.findByText("历史任务.txt")).toBeInTheDocument();
+    expect(screen.getByText("本地任务.txt")).toBeInTheDocument();
+    expect(screen.queryByText("远端重复.txt")).not.toBeInTheDocument();
+    expect(listTransferSessionsMock).toHaveBeenCalledWith(
+      "00000000-0000-0000-0000-000000000001",
+      { limit: 100 },
+    );
+  });
 
   it("shows clear empty and transfer states with item actions", async () => {
     const queue = createTransferQueue({

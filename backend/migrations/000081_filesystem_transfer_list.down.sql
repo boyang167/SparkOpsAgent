@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS filesystem.ix_transfer_sessions_workspace_status_created;
+DROP INDEX IF EXISTS filesystem.ix_transfer_sessions_workspace_created;

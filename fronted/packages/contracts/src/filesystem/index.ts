@@ -13,6 +13,7 @@ export const TransferStatusSchema = z.enum([
   "ABORTED",
   "EXPIRED",
 ]);
+export type TransferStatus = z.infer<typeof TransferStatusSchema>;
 
 export const TransferProtocolSchema = z.enum(["DIRECT", "MULTIPART"]);
 
@@ -54,6 +55,21 @@ export const TransferSessionVMSchema = z.object({
 });
 
 export type TransferSessionVM = z.infer<typeof TransferSessionVMSchema>;
+
+export const TransferSessionPageVMSchema = z.object({
+  items: z.array(TransferSessionVMSchema),
+  next_cursor: z.string().default(""),
+});
+
+export type TransferSessionPageVM = z.infer<typeof TransferSessionPageVMSchema>;
+
+export const TransferListQuerySchema = z.object({
+  status: TransferStatusSchema.optional(),
+  cursor: z.string().max(256).optional(),
+  limit: z.number().int().positive().max(100).optional(),
+});
+
+export type TransferListQuery = z.infer<typeof TransferListQuerySchema>;
 
 export const CreateTransferCommandSchema = z.object({
   namespace_id: z.string().uuid().optional(),
