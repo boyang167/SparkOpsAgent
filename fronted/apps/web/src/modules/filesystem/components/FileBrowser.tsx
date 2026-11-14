@@ -11,6 +11,7 @@ import type { FileView } from "./workbench-state";
 export type FileBrowserProps = {
   nodes: FileNodeVM[];
   workspaceId?: string;
+  namespaceId?: string;
   view: FileView;
   selectedIds: string[];
   onSelectionChange: (selectedIds: string[]) => void;
@@ -31,6 +32,7 @@ export function sortFileNodes(nodes: FileNodeVM[]) {
 export function FileBrowser({
   nodes,
   workspaceId,
+  namespaceId,
   view,
   selectedIds,
   onSelectionChange,
@@ -83,7 +85,7 @@ export function FileBrowser({
 
   function handleDragStart(event: DragEvent<HTMLElement>, node: FileNodeVM) {
     clearNodeDragSession();
-    if (!workspaceId || !canMove || node.state !== "ACTIVE") {
+    if (!workspaceId || !namespaceId || !canMove || node.state !== "ACTIVE") {
       event.preventDefault();
       return;
     }
@@ -91,6 +93,7 @@ export function FileBrowser({
     writeNodeDragPayload(
       event.dataTransfer,
       workspaceId,
+      namespaceId,
       draggedNodes,
     );
   }

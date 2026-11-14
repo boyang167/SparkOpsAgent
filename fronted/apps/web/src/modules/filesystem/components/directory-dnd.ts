@@ -8,6 +8,7 @@ export type DraggedNode = Pick<FileNodeVM, "id" | "type" | "state"> & {
 
 export type FileNodeDragPayload = {
   workspaceId: string;
+  namespace_id: string;
   nodes: DraggedNode[];
 };
 
@@ -18,6 +19,7 @@ export type DropInput = {
   targetId: string;
   descendantIds: ReadonlySet<string>;
   sameWorkspace: boolean;
+  sameNamespace: boolean;
   canWrite: boolean;
   allActive: boolean;
 };
@@ -28,6 +30,9 @@ export type DropDecision =
 
 export function validateNodeDrop(input: DropInput): DropDecision {
   if (!input.canWrite) return { allowed: false, reason: "没有移动权限" };
+  if (!input.sameNamespace) {
+    return { allowed: false, reason: "跨空间请使用复制、转存或采纳" };
+  }
   if (!input.sameWorkspace) return { allowed: false, reason: "不能跨工作区移动" };
   if (!input.allActive) return { allowed: false, reason: "不能移动不可用的项目" };
   if (input.draggedIds.includes(input.targetId)) {
@@ -45,6 +50,7 @@ export function readNodeDragPayload(dataTransfer: DataTransfer): FileNodeDragPay
     const value = JSON.parse(dataTransfer.getData(FILE_NODE_DRAG_TYPE)) as FileNodeDragPayload;
     if (
       typeof value.workspaceId !== "string" ||
+      typeof value.namespace_id !== "string" ||
       !Array.isArray(value.nodes) ||
       value.nodes.some((node) => typeof node.id !== "string")
     ) {
@@ -67,10 +73,12 @@ export function clearNodeDragSession() {
 export function writeNodeDragPayload(
   dataTransfer: DataTransfer,
   workspaceId: string,
+  namespaceId: string,
   nodes: FileNodeVM[],
 ) {
   const payload: FileNodeDragPayload = {
     workspaceId,
+    namespace_id: namespaceId,
     nodes: nodes.map((node) => ({
       id: node.id,
       parentId: node.parent_id,

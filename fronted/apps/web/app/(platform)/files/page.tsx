@@ -3,6 +3,7 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FileSpaceNav } from "@/modules/filesystem/components/FileSpaceNav";
 import { FilesystemWorkbench } from "@/modules/filesystem/components/FilesystemWorkbench";
+import { SharedWithMePanel } from "@/modules/filesystem/components/SharedWithMePanel";
 import { resolveFileSpaceView } from "@/modules/filesystem/components/file-space-view";
 import {
   hasFilesystemPageAccess,
@@ -154,16 +155,15 @@ export default async function FilesPage({
         limit: 100,
       }),
     );
-    const sharedMessage =
+    const sharedItems = sharedLoad.kind === "loaded" ? sharedLoad.value.items : [];
+    const sharedState =
       sharedLoad.kind === "loaded"
-        ? sharedLoad.value.items.length === 0
-          ? "当前没有与你共享的文件。"
-          : `已加载 ${sharedLoad.value.items.length} 个共享入口。`
+        ? sharedItems.length > 0
+          ? "ready"
+          : "empty"
         : sharedLoad.kind === "forbidden"
-          ? "无权读取与我共享。"
-          : sharedLoad.kind === "not-found"
-            ? "共享视图不可用。"
-            : "共享内容加载失败，请稍后重试。";
+          ? "forbidden"
+          : "error";
     return (
       <div className="stack-lg">
         <PageHeader eyebrow="Filesystem" title="文件中心" description="浏览已授权的文件空间。" />
@@ -174,7 +174,11 @@ export default async function FilesPage({
           workspaceId={workspaceId}
           view={initialState.view}
         />
-        <div className="empty-state" role="status">{sharedMessage}</div>
+        <SharedWithMePanel
+          workspaceId={workspaceId}
+          items={sharedItems}
+          state={sharedState}
+        />
       </div>
     );
   }

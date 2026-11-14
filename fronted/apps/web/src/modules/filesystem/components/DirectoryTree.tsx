@@ -19,7 +19,9 @@ import {
 
 export type DirectoryTreeProps = {
   workspaceId: string;
-  root: FileNodeVM;
+  namespaceId: string;
+  rootNode: FileNodeVM;
+  space?: string;
   currentId?: string;
   onNavigate: (node: FileNodeVM) => void;
   onDropNodes: (nodeIds: string[], target: FileNodeVM) => void;
@@ -27,7 +29,6 @@ export type DirectoryTreeProps = {
   canWrite?: boolean;
   selectionOnly?: boolean;
   organizationId?: string;
-  namespaceId?: string;
 };
 
 type NodeState = {
@@ -46,8 +47,17 @@ const initialNodeState: NodeState = {
 };
 
 export function DirectoryTree({
+  space = "workspace",
+  ...props
+}: DirectoryTreeProps) {
+  const scopeKey = `${space}:${props.workspaceId}:${props.namespaceId}:${props.rootNode.id}`;
+  return createElement(ScopedDirectoryTree, { key: scopeKey, ...props });
+}
+
+function ScopedDirectoryTree({
   workspaceId,
-  root,
+  namespaceId,
+  rootNode,
   currentId,
   onNavigate,
   onDropNodes,
@@ -55,10 +65,9 @@ export function DirectoryTree({
   canWrite = false,
   selectionOnly = false,
   organizationId,
-  namespaceId,
 }: DirectoryTreeProps) {
   const [states, setStates] = useState<Record<string, NodeState>>({});
-  const [focusedId, setFocusedId] = useState(root.id);
+  const [focusedId, setFocusedId] = useState(rootNode.id);
   const [dropTarget, setDropTarget] = useState<{
     id: string;
     decision: DropDecision;
@@ -99,12 +108,12 @@ export function DirectoryTree({
         state.children.forEach(append);
       }
     }
-    append(root);
+    append(rootNode);
     return visible;
   }
 
   function ancestorIdsFor(node: FileNodeVM): ReadonlySet<string> {
-    const knownNodes = new Map<string, FileNodeVM>([[root.id, root]]);
+    const knownNodes = new Map<string, FileNodeVM>([[rootNode.id, rootNode]]);
     Object.values(states).forEach((state) => {
       state.children.forEach((child) => knownNodes.set(child.id, child));
     });
@@ -118,7 +127,7 @@ export function DirectoryTree({
   }
 
   function dropDecision(payload: FileNodeDragPayload, target: FileNodeVM): DropDecision {
-    const knownNodes = new Map<string, FileNodeVM>([[root.id, root]]);
+    const knownNodes = new Map<string, FileNodeVM>([[rootNode.id, rootNode]]);
     Object.values(states).forEach((state) => {
       state.children.forEach((child) => knownNodes.set(child.id, child));
     });
@@ -138,6 +147,7 @@ export function DirectoryTree({
       targetId: target.id,
       descendantIds,
       sameWorkspace: payload.workspaceId === workspaceId,
+      sameNamespace: payload.namespace_id === namespaceId,
       canWrite,
       allActive: payload.nodes.every((node) => node.state === "ACTIVE"),
     });
@@ -233,7 +243,7 @@ export function DirectoryTree({
       let cursor = "";
       do {
         const page =
-          organizationId && namespaceId
+          organizationId
             ? await listGovernedChildren(
                 namespaceId,
                 {
@@ -429,6 +439,6 @@ export function DirectoryTree({
   return createElement(
     "div",
     { role: "tree", "aria-label": "目录", className: "filesystem-directory-tree stack-xs" },
-    renderNode(root),
+    renderNode(rootNode),
   );
 }

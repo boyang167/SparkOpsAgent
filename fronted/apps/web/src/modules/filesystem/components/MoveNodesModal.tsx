@@ -52,6 +52,9 @@ export function MoveNodesModal({
           nodes.some((node) => targetAncestorIds.has(node.id)) ? [target.id] : [],
         ),
         sameWorkspace: true,
+        sameNamespace:
+          target.namespace_id === root.namespace_id &&
+          nodes.every((node) => node.namespace_id === root.namespace_id),
         canWrite: true,
         allActive: nodes.every((node) => node.state === "ACTIVE"),
       })
@@ -106,7 +109,8 @@ export function MoveNodesModal({
     { className: "stack-sm" },
     createElement(DirectoryTree, {
       workspaceId,
-      root,
+      namespaceId: root.namespace_id,
+      rootNode: root,
       currentId: target?.id,
       onNavigate: (node: FileNodeVM) => {
         setTarget(node);

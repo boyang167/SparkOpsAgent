@@ -34,6 +34,7 @@ const explorer = vi.hoisted(() => ({
 
 const directoryTree = vi.hoisted(() => ({
   roots: [] as string[],
+  namespaceIds: [] as string[],
   canWrites: [] as boolean[],
   onNavigate: undefined as undefined | ((node: { id: string }) => void),
   onDropNodes: undefined as
@@ -142,17 +143,20 @@ vi.mock("./FileExplorerPanel", () => ({
 
 vi.mock("./DirectoryTree", () => ({
   DirectoryTree: ({
-    root,
+    rootNode,
+    namespaceId,
     canWrite,
     onNavigate,
     onDropNodes,
   }: {
-    root: { id: string };
+    rootNode: { id: string };
+    namespaceId: string;
     canWrite: boolean;
     onNavigate: (node: { id: string }) => void;
     onDropNodes: (nodeIds: string[], target: FileNodeVM) => void;
   }) => {
-    directoryTree.roots.push(root.id);
+    directoryTree.roots.push(rootNode.id);
+    directoryTree.namespaceIds.push(namespaceId);
     directoryTree.canWrites.push(canWrite);
     directoryTree.onNavigate = onNavigate;
     directoryTree.onDropNodes = onDropNodes;
@@ -266,6 +270,7 @@ describe("FilesystemWorkbench", () => {
     explorer.parentIds = [];
     explorer.onOpen = undefined;
     directoryTree.roots = [];
+    directoryTree.namespaceIds = [];
     directoryTree.canWrites = [];
     directoryTree.onNavigate = undefined;
     directoryTree.onDropNodes = undefined;
@@ -535,6 +540,28 @@ describe("FilesystemWorkbench", () => {
     expect(screen.getByRole("dialog", { name: "目录" })).toBeInTheDocument();
     expect(screen.getAllByRole("tree")).toHaveLength(2);
     expect(directoryTree.roots.every((rootId) => rootId === namespace.root_node_id)).toBe(true);
+    expect(directoryTree.namespaceIds.every((id) => id === namespace.id)).toBe(true);
+  });
+
+  it("isolates equal root node ids when switching namespaces in one workspace", () => {
+    const namespaceWithEqualRoot = {
+      ...namespace,
+      id: "00000000-0000-4000-8000-000000000099",
+    };
+    const rendered = renderWorkbench();
+
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace: namespaceWithEqualRoot,
+        initialNodes: [],
+        initialState: { tab: "files", view: "list", query: "" },
+        permissions: ["file:read"],
+      }),
+    );
+
+    expect(directoryTree.namespaceIds.at(-1)).toBe(namespaceWithEqualRoot.id);
+    expect(directoryTree.roots.at(-1)).toBe(namespace.root_node_id);
   });
 
   it("navigates a directory through the supported parent query", () => {
@@ -664,6 +691,24 @@ describe("FilesystemWorkbench", () => {
       ),
     );
     expect(navigation.refresh).toHaveBeenCalled();
+  });
+
+  it("rejects a cross-namespace drop in the mutation handler", async () => {
+    renderWorkbench(["file:read", "file:write"], [movableNode]);
+    const target = {
+      ...movableNode,
+      id: "00000000-0000-4000-8000-000000000014",
+      namespace_id: "00000000-0000-4000-8000-000000000099",
+      type: "DIRECTORY" as const,
+      name: "其他空间",
+    };
+
+    directoryTree.onDropNodes?.([movableNode.id], target);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "跨空间请使用复制、转存或采纳",
+    );
+    expect(sdk.moveFileNode).not.toHaveBeenCalled();
   });
 
   it("keeps an upload running when switching from files to transfers", async () => {

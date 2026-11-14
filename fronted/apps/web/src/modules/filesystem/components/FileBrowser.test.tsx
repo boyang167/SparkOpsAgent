@@ -142,7 +142,11 @@ describe("FileBrowser", () => {
 
   it("writes the selected active nodes to the internal drag payload", async () => {
     const user = userEvent.setup();
-    const props = { ...createProps(), workspaceId: "workspace-1" };
+    const props = {
+      ...createProps(),
+      workspaceId: "workspace-1",
+      namespaceId: nodes[0].namespace_id,
+    };
     render(createElement(FileBrowser, props));
     await user.click(screen.getByRole("checkbox", { name: "选择 规格说明.md" }));
     await user.click(screen.getByRole("checkbox", { name: "选择 资料" }));
@@ -190,6 +194,7 @@ describe("FileBrowser", () => {
       createElement(FileBrowser, {
         ...createProps(),
         workspaceId: "workspace-1",
+        namespaceId: nodes[0].namespace_id,
       }),
     );
     const row = screen.getByRole("row", { name: /规格说明\.md/ });

@@ -22,6 +22,8 @@ export type FileDetailDrawerProps = {
   onClose: () => void;
   loadError?: "forbidden" | "not-found" | "error";
   onRetry?: () => void;
+  projectionOnly?: boolean;
+  projectionDetails?: Array<{ label: string; value: string }>;
 };
 
 type DetailTab = "details" | "revisions" | "audit";
@@ -34,6 +36,8 @@ export function FileDetailDrawer({
   onClose,
   loadError,
   onRetry,
+  projectionOnly = false,
+  projectionDetails = [],
 }: FileDetailDrawerProps): React.ReactElement | null {
   const [tab, setTab] = useState<DetailTab>("details");
   const detailTabsId = useId();
@@ -61,7 +65,7 @@ export function FileDetailDrawer({
 
   useEffect(() => {
     const generation = ++revisionGeneration.current;
-    if (!open || !node) {
+    if (!open || !node || projectionOnly) {
       setRevisionData({ key: detailKey, items: [], state: "idle" });
       return;
     }
@@ -81,11 +85,11 @@ export function FileDetailDrawer({
         });
       });
     return () => controller.abort();
-  }, [detailKey, node, open, revisionRetry, workspaceId]);
+  }, [detailKey, node, open, projectionOnly, revisionRetry, workspaceId]);
 
   useEffect(() => {
     const generation = ++auditGeneration.current;
-    if (!open || !node) {
+    if (!open || !node || projectionOnly) {
       setAuditData({ key: detailKey, items: [], state: "idle" });
       return;
     }
@@ -110,7 +114,7 @@ export function FileDetailDrawer({
         });
       });
     return () => controller.abort();
-  }, [auditRetry, detailKey, node, open, tab, workspaceId]);
+  }, [auditRetry, detailKey, node, open, projectionOnly, tab, workspaceId]);
 
   useEffect(() => {
     if (!open) setTab("details");
@@ -174,18 +178,21 @@ export function FileDetailDrawer({
       onClose,
       title: node?.name ?? "文件详情",
       description: node?.type === "DIRECTORY" ? "目录详情" : "文件详情",
-      tabs: node ? tabs : undefined,
+      tabs: node && !projectionOnly ? tabs : undefined,
       panelClassName: "w-full max-w-xl",
       children: node
         ? createElement(
             "div",
             {
-              id: panelID(tab),
-              role: "tabpanel",
-              "aria-labelledby": tabID(tab),
+              id: projectionOnly ? undefined : panelID(tab),
+              role: projectionOnly ? "region" : "tabpanel",
+              "aria-label": projectionOnly ? "共享文件详情" : undefined,
+              "aria-labelledby": projectionOnly ? undefined : tabID(tab),
             },
-            tab === "details"
-              ? createElement(Details, { node })
+            projectionOnly
+              ? createElement(ProjectionDetails, { node, details: projectionDetails })
+              : tab === "details"
+                ? createElement(Details, { node })
               : tab === "revisions"
                 ? createElement(RevisionList, {
                     state: revisionState,
@@ -200,6 +207,40 @@ export function FileDetailDrawer({
           )
         : createElement(SelectionLoadState, { error: loadError, onRetry }),
     },
+  );
+}
+
+function ProjectionDetails({
+  node,
+  details,
+}: {
+  node: FileNodeVM;
+  details: Array<{ label: string; value: string }>;
+}) {
+  return createElement(
+    "div",
+    { className: "stack-lg" },
+    createElement(
+      "p",
+      { className: "text-sm text-muted" },
+      "此详情来自共享授权投影，不会请求源空间的工作区接口。",
+    ),
+    createElement(
+      "dl",
+      { className: "grid gap-4 sm:grid-cols-2" },
+      createElement(Detail, {
+        label: "类型",
+        value: node.type === "DIRECTORY" ? "目录" : "文件",
+      }),
+      createElement(Detail, { label: "状态", value: node.state }),
+      ...details.map((detail) =>
+        createElement(Detail, {
+          key: detail.label,
+          label: detail.label,
+          value: detail.value,
+        }),
+      ),
+    ),
   );
 }
 

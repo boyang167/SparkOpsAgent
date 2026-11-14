@@ -58,10 +58,14 @@ export function FileExplorerPanel({
   const [createName, setCreateName] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const scopeKey = `${workspaceId}:${namespaceId ?? ""}:${parentId}`;
 
   useEffect(() => {
     setNodes(initialNodes);
-  }, [initialNodes]);
+    setSelectedIds([]);
+    setDialog(null);
+    setError(null);
+  }, [initialNodes, scopeKey]);
 
   const doRename = useMemo(
     () => createPanelRenameHandler(workspaceId, onRename),
@@ -160,6 +164,7 @@ export function FileExplorerPanel({
       <FileBrowser
         nodes={nodes}
         workspaceId={workspaceId}
+        namespaceId={namespaceId}
         view={view}
         selectedIds={selectedIds}
         onSelectionChange={setSelectedIds}

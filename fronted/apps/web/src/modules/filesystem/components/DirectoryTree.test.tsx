@@ -69,7 +69,8 @@ function itemFor(name: string) {
 function props(overrides: Partial<DirectoryTreeProps> = {}): DirectoryTreeProps {
   return {
     workspaceId,
-    root,
+    namespaceId: root.namespace_id,
+    rootNode: root,
     currentId: root.id,
     onNavigate: vi.fn(),
     onDropNodes: vi.fn(),
@@ -128,6 +129,37 @@ describe("DirectoryTree", () => {
       });
     });
     expect(screen.getByText("设计稿")).toBeInTheDocument();
+  });
+
+  it("does not reuse equal node ids after the namespace scope changes", async () => {
+    const user = userEvent.setup();
+    const namespaceBRoot = {
+      ...root,
+      namespace_id: "00000000-0000-4000-8000-000000000099",
+      name: "空间 B",
+    };
+    sdk.listFileNodes
+      .mockResolvedValueOnce({ items: [directory], next_cursor: "" })
+      .mockResolvedValueOnce({ items: [secondDirectory], next_cursor: "" });
+    const rendered = render(createElement(DirectoryTree, props()));
+
+    await user.click(screen.getByRole("button", { name: "展开 全部文件" }));
+    expect(await screen.findByText("项目资料")).toBeInTheDocument();
+
+    rendered.rerender(createElement(DirectoryTree, props({
+      namespaceId: namespaceBRoot.namespace_id,
+      rootNode: namespaceBRoot,
+      currentId: namespaceBRoot.id,
+    })));
+
+    expect(screen.queryByText("项目资料")).not.toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: "空间 B" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await user.click(screen.getByRole("button", { name: "展开 空间 B" }));
+    expect(await screen.findByText("团队资料")).toBeInTheDocument();
+    expect(sdk.listFileNodes).toHaveBeenCalledTimes(2);
   });
 
   it("implements roving focus and tree arrow-key navigation", async () => {
@@ -261,6 +293,7 @@ describe("DirectoryTree", () => {
       getData: vi.fn().mockReturnValue(
         JSON.stringify({
           workspaceId,
+          namespace_id: root.namespace_id,
           nodes: [{ id: "file-1", parentId: "source-1", type: "FILE", state: "ACTIVE" }],
         }),
       ),
@@ -286,6 +319,7 @@ describe("DirectoryTree", () => {
       getData: vi.fn().mockReturnValue(
         JSON.stringify({
           workspaceId,
+          namespace_id: root.namespace_id,
           nodes: [{ id: root.id, parentId: null, type: "DIRECTORY", state: "ACTIVE" }],
         }),
       ),
@@ -309,6 +343,7 @@ describe("DirectoryTree", () => {
         getData: vi.fn().mockReturnValue(
           JSON.stringify({
             workspaceId,
+            namespace_id: root.namespace_id,
             nodes: [{ id: "file-1", type: "FILE", state: "ACTIVE" }],
           }),
         ),
@@ -330,6 +365,7 @@ describe("DirectoryTree", () => {
       getData: vi.fn().mockReturnValue(
         JSON.stringify({
           workspaceId,
+          namespace_id: root.namespace_id,
           nodes: [{ id: "file-1", type: "FILE", state: "ACTIVE" }],
         }),
       ),
@@ -364,6 +400,7 @@ describe("DirectoryTree", () => {
     writeNodeDragPayload(
       { setData: vi.fn(), effectAllowed: "none" } as unknown as DataTransfer,
       workspaceId,
+      root.namespace_id,
       [draggedNode],
     );
     const protectedTransfer = {
@@ -394,6 +431,7 @@ describe("DirectoryTree", () => {
     writeNodeDragPayload(
       { setData: vi.fn(), effectAllowed: "none" } as unknown as DataTransfer,
       workspaceId,
+      root.namespace_id,
       [
         {
           ...root,
@@ -418,5 +456,26 @@ describe("DirectoryTree", () => {
 
     expect(sdk.listFileNodes).not.toHaveBeenCalled();
     vi.useRealTimers();
+  });
+
+  it("rejects a cross-namespace drop before invoking mutation", () => {
+    const onDropNodes = vi.fn();
+    render(createElement(DirectoryTree, props({ canWrite: true, onDropNodes })));
+    const rootItem = screen.getByRole("treeitem", { name: "全部文件" });
+    const dataTransfer = {
+      getData: vi.fn().mockReturnValue(
+        JSON.stringify({
+          workspaceId,
+          namespace_id: "another-namespace",
+          nodes: [{ id: "file-1", type: "FILE", state: "ACTIVE" }],
+        }),
+      ),
+      dropEffect: "none",
+    };
+
+    fireEvent.dragEnter(rootItem, { dataTransfer });
+    expect(screen.getByText("跨空间请使用复制、转存或采纳")).toBeInTheDocument();
+    fireEvent.drop(rootItem, { dataTransfer });
+    expect(onDropNodes).not.toHaveBeenCalled();
   });
 });

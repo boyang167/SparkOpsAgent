@@ -32333,6 +32333,20 @@ button.sprint-board-column-wf:hover:not(:disabled) {
   min-width: 0;
 }
 
+.filesystem-shared-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.filesystem-shared-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
 .filesystem-touch-target {
   min-height: 2.75rem;
   min-width: 2.75rem;
@@ -32374,6 +32388,10 @@ button.sprint-board-column-wf:hover:not(:disabled) {
   .filesystem-file-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .filesystem-shared-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 560px) {
@@ -32383,6 +32401,10 @@ button.sprint-board-column-wf:hover:not(:disabled) {
   }
 
   .filesystem-file-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filesystem-shared-metadata {
     grid-template-columns: minmax(0, 1fr);
   }
 }

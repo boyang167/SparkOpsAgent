@@ -102,7 +102,7 @@ export function FilesystemWorkbench({
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const scopeKey = `${workspaceId}:${namespace.id}:${namespace.root_node_id ?? ""}`;
+  const scopeKey = `${fileSpace ?? "workspace"}:${workspaceId}:${namespace.id}:${namespace.root_node_id ?? ""}`;
   const effectiveState = initialState;
   const scopedInitialSelectedNode = initialSelectedNode;
   const scopedInitialSelectedNodeError = initialSelectedNodeError;
@@ -117,7 +117,7 @@ export function FilesystemWorkbench({
   const [treeVersion, setTreeVersion] = useState(0);
   const [moveError, setMoveError] = useState<string | null>(null);
   const serverSelectionKey = [
-    workspaceId,
+    scopeKey,
     effectiveState.node ?? "",
     scopedInitialSelectedNode?.id ?? "",
     scopedInitialSelectedNodeError ?? "",
@@ -158,7 +158,7 @@ export function FilesystemWorkbench({
   }, [initialState.view, scopeKey]);
   const transferQueues = useRef(new Map<string, TransferQueue>());
   const queueLifecycleGeneration = useRef(0);
-  const transferQueueKey = `${workspaceId}:${namespace.id}`;
+  const transferQueueKey = scopeKey;
   let transferQueue = transferQueues.current.get(transferQueueKey);
   if (!transferQueue) {
     const scopedWorkspaceId = workspaceId;
@@ -431,6 +431,13 @@ export function FilesystemWorkbench({
       refreshDirectories();
       return;
     }
+    if (
+      target.namespace_id !== namespace.id ||
+      nodes.some((node) => node.namespace_id !== namespace.id)
+    ) {
+      setMoveError("跨空间请使用复制、转存或采纳");
+      return;
+    }
     setMoveError(null);
     try {
       for (const node of nodes) {
@@ -469,7 +476,9 @@ export function FilesystemWorkbench({
     return createElement(DirectoryTree, {
       key: `${scopeKey}:${treeVersion}`,
       workspaceId,
-      root: rootNode,
+      namespaceId: namespace.id,
+      rootNode,
+      space: fileSpace ?? "workspace",
       currentId: effectiveState.parent ?? rootNode.id,
       onNavigate: navigateDirectory,
       onDropNodes: (nodeIds: string[], target: FileNodeVM) => {

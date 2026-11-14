@@ -96,6 +96,27 @@ describe("FileDetailDrawer", () => {
     sdk.listFileAuditEvents.mockResolvedValue({ items: [], next_cursor: "" });
   });
 
+  it("renders shared projection details without workspace-scoped reads or raw ids", () => {
+    render(createElement(FileDetailDrawer, {
+      open: true,
+      node: file,
+      workspaceId: "workspace-that-does-not-own-source",
+      projectionOnly: true,
+      projectionDetails: [
+        { label: "来源", value: "研发共享" },
+        { label: "原路径", value: "/项目/规格说明.md" },
+      ],
+      onClose: vi.fn(),
+    }));
+
+    expect(screen.getByText("研发共享")).toBeInTheDocument();
+    expect(screen.getByText("/项目/规格说明.md")).toBeInTheDocument();
+    expect(screen.queryByText(file.id)).not.toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(sdk.listFileRevisions).not.toHaveBeenCalled();
+    expect(sdk.listFileAuditEvents).not.toHaveBeenCalled();
+  });
+
   afterEach(() => cleanup());
 
   it("loads real revisions when opened and closes with Escape", async () => {
