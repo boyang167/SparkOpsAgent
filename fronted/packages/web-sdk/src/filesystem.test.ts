@@ -106,4 +106,29 @@ describe("filesystem node sdk", () => {
     const options = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(new Headers(options.headers).get("Idempotency-Key")).toBe("move-key-1");
   });
+
+  it("generates non-empty distinct idempotency keys for concurrent moves", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ code: 0, message: "ok", data: null, trace_id: "trace-1" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await Promise.all([
+      moveFileNode("workspace-1", "node-1", "target-1", "A.txt"),
+      moveFileNode("workspace-1", "node-2", "target-1", "B.txt"),
+    ]);
+
+    const keys = fetchMock.mock.calls.map(([, init]) =>
+      new Headers((init as RequestInit).headers).get("Idempotency-Key"),
+    );
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBeTruthy();
+    expect(keys[0]).not.toBe(keys[1]);
+  });
 });

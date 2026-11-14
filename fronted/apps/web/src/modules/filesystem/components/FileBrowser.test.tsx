@@ -7,6 +7,7 @@ import { createElement } from "react";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileBrowser, type FileBrowserProps } from "./FileBrowser";
+import { clearNodeDragSession, getActiveNodeDragPayload } from "./directory-dnd";
 
 const nodes: FileNodeVM[] = [
   {
@@ -54,7 +55,10 @@ function createProps(): FileBrowserProps {
 }
 
 describe("FileBrowser", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    clearNodeDragSession();
+    cleanup();
+  });
 
   it("preserves selection when switching from list to grid", async () => {
     const user = userEvent.setup();
@@ -138,29 +142,48 @@ describe("FileBrowser", () => {
     expect(dataTransfer.setData.mock.calls[0]?.[1]).toContain(nodes[1].id);
   });
 
-  it("keeps inactive selected nodes in the drag payload so the drop rule rejects the whole move", async () => {
-    const user = userEvent.setup();
-    const mixedNodes = [
-      nodes[0],
-      { ...nodes[1], state: "TRASHED" as const },
-    ];
+  it("converges selection to active nodes that still exist after refresh", async () => {
+    const onSelectionChange = vi.fn();
+    const onMove = vi.fn();
+    const { rerender } = render(
+      createElement(FileBrowser, {
+        ...createProps(),
+        selectedIds: [nodes[0].id, nodes[1].id],
+        onSelectionChange,
+        onMove,
+      }),
+    );
+
+    rerender(
+      createElement(FileBrowser, {
+        ...createProps(),
+        nodes: [{ ...nodes[0] }, { ...nodes[1], state: "TRASHED" }],
+        selectedIds: [nodes[0].id, nodes[1].id],
+        onSelectionChange,
+        onMove,
+      }),
+    );
+
+    expect(await screen.findByText("已选择 1 项")).toBeInTheDocument();
+    expect(onSelectionChange).toHaveBeenLastCalledWith([nodes[0].id]);
+    await userEvent.click(screen.getByRole("button", { name: "移动所选 1 项到…" }));
+    expect(onMove).toHaveBeenCalledWith([{ ...nodes[0] }]);
+  });
+
+  it("clears the internal drag session on dragend", () => {
     render(
       createElement(FileBrowser, {
         ...createProps(),
-        nodes: mixedNodes,
         workspaceId: "workspace-1",
       }),
     );
-    await user.click(screen.getByRole("checkbox", { name: "选择 规格说明.md" }));
-    await user.click(screen.getByRole("checkbox", { name: "选择 资料" }));
+    const row = screen.getByRole("row", { name: /规格说明\.md/ });
     const dataTransfer = { setData: vi.fn(), effectAllowed: "none" };
 
-    fireEvent.dragStart(screen.getByRole("row", { name: /规格说明\.md/ }), { dataTransfer });
+    fireEvent.dragStart(row, { dataTransfer });
+    expect(getActiveNodeDragPayload()?.nodes[0]?.id).toBe(nodes[0].id);
 
-    const payload = JSON.parse(dataTransfer.setData.mock.calls[0]?.[1] as string);
-    expect(payload.nodes.map((node: FileNodeVM) => node.id)).toEqual([
-      nodes[0].id,
-      nodes[1].id,
-    ]);
+    fireEvent.dragEnd(row, { dataTransfer });
+    expect(getActiveNodeDragPayload()).toBeNull();
   });
 });

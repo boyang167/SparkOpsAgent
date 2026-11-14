@@ -6,6 +6,8 @@ import { BffError } from "@sparkops/contracts";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
 import { listFileNodes } from "@sparkops/web-sdk/filesystem";
 import {
+  clearNodeDragSession,
+  getActiveNodeDragPayload,
   readNodeDragPayload,
   validateNodeDrop,
   type DropDecision,
@@ -64,7 +66,13 @@ export function DirectoryTree({
     }
   }
 
-  useEffect(() => clearExpandTimer, []);
+  useEffect(
+    () => () => {
+      clearExpandTimer();
+      clearNodeDragSession();
+    },
+    [],
+  );
 
   function stateFor(nodeId: string): NodeState {
     return states[nodeId] ?? initialNodeState;
@@ -133,14 +141,37 @@ export function DirectoryTree({
     event.stopPropagation();
     clearExpandTimer();
     const payload = readNodeDragPayload(event.dataTransfer);
-    if (!payload) return;
+    if (!payload) {
+      setDropTarget(null);
+      return;
+    }
     const decision = dropDecision(payload, node);
     setDropTarget({ id: node.id, decision });
     if (decision.allowed && !stateFor(node.id).expanded) {
+      const internalPayload = getActiveNodeDragPayload();
       expandTimer.current = setTimeout(() => {
         expandTimer.current = null;
+        if (internalPayload && getActiveNodeDragPayload() !== internalPayload) return;
         void expand(node);
       }, 700);
+    }
+  }
+
+  function handleDragOver(event: DragEvent<HTMLDivElement>, node: FileNodeVM) {
+    event.preventDefault();
+    event.stopPropagation();
+    const payload = readNodeDragPayload(event.dataTransfer);
+    if (!payload) {
+      clearExpandTimer();
+      setDropTarget(null);
+      return;
+    }
+    const decision = dropDecision(payload, node);
+    setDropTarget({ id: node.id, decision });
+    if (decision.allowed) {
+      event.dataTransfer.dropEffect = "move";
+    } else {
+      clearExpandTimer();
     }
   }
 
@@ -162,6 +193,7 @@ export function DirectoryTree({
     clearExpandTimer();
     const payload = readNodeDragPayload(event.dataTransfer);
     const decision = payload ? dropDecision(payload, node) : null;
+    clearNodeDragSession();
     setDropTarget(null);
     if (payload && decision?.allowed) {
       onDropNodes(payload.nodes.map((item) => item.id), node);
@@ -359,11 +391,7 @@ export function DirectoryTree({
         },
         onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => handleKeyDown(event, node),
         onDragEnter: (event: DragEvent<HTMLDivElement>) => handleDragEnter(event, node),
-        onDragOver: (event: DragEvent<HTMLDivElement>) => {
-          event.preventDefault();
-          event.stopPropagation();
-          if (activeDrop?.allowed) event.dataTransfer.dropEffect = "move";
-        },
+        onDragOver: (event: DragEvent<HTMLDivElement>) => handleDragOver(event, node),
         onDragLeave: (event: DragEvent<HTMLDivElement>) => handleDragLeave(event, node),
         onDrop: (event: DragEvent<HTMLDivElement>) => handleDrop(event, node),
       },

@@ -11,6 +11,8 @@ export type FileNodeDragPayload = {
   nodes: DraggedNode[];
 };
 
+let activeNodeDragPayload: FileNodeDragPayload | null = null;
+
 export type DropInput = {
   draggedIds: string[];
   targetId: string;
@@ -38,6 +40,7 @@ export function validateNodeDrop(input: DropInput): DropDecision {
 }
 
 export function readNodeDragPayload(dataTransfer: DataTransfer): FileNodeDragPayload | null {
+  if (activeNodeDragPayload) return activeNodeDragPayload;
   try {
     const value = JSON.parse(dataTransfer.getData(FILE_NODE_DRAG_TYPE)) as FileNodeDragPayload;
     if (
@@ -51,6 +54,14 @@ export function readNodeDragPayload(dataTransfer: DataTransfer): FileNodeDragPay
   } catch {
     return null;
   }
+}
+
+export function getActiveNodeDragPayload(): FileNodeDragPayload | null {
+  return activeNodeDragPayload;
+}
+
+export function clearNodeDragSession() {
+  activeNodeDragPayload = null;
 }
 
 export function writeNodeDragPayload(
@@ -67,6 +78,7 @@ export function writeNodeDragPayload(
       state: node.state,
     })),
   };
+  activeNodeDragPayload = payload;
   dataTransfer.effectAllowed = "move";
   dataTransfer.setData(FILE_NODE_DRAG_TYPE, JSON.stringify(payload));
 }

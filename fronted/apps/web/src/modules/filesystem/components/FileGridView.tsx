@@ -11,6 +11,7 @@ export type FileGridViewProps = {
   onRename: (node: FileNodeVM) => void;
   onMove: (nodes: FileNodeVM[]) => void;
   onDragStart: (event: DragEvent<HTMLElement>, node: FileNodeVM) => void;
+  onDragEnd: () => void;
   canMove: boolean;
 };
 
@@ -22,6 +23,7 @@ export function FileGridView({
   onRename,
   onMove,
   onDragStart,
+  onDragEnd,
   canMove,
 }: FileGridViewProps) {
   return createElement(
@@ -35,6 +37,7 @@ export function FileGridView({
           className: "card card-hover stack-sm",
           draggable: canMove && node.state === "ACTIVE",
           onDragStart: (event: DragEvent<HTMLLIElement>) => onDragStart(event, node),
+          onDragEnd,
         },
         createElement(
           "div",
@@ -53,6 +56,7 @@ export function FileGridView({
             type: "checkbox",
             "aria-label": `选择 ${node.name}`,
             checked: selectedIds.has(node.id),
+            disabled: node.state !== "ACTIVE",
             onChange: (event) => onSelectionChange(node.id, event.currentTarget.checked),
           }),
         ),
@@ -66,7 +70,7 @@ export function FileGridView({
           { className: "flex flex-wrap justify-end gap-2" },
           createElement(FileActionMenu, {
             node,
-            canMove,
+            canMove: canMove && node.state === "ACTIVE",
             onRename,
             onMove,
           }),

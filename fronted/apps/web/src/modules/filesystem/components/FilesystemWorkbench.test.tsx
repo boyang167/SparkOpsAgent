@@ -1,14 +1,20 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createElement } from "react";
+import type { FileNodeVM } from "@sparkops/contracts/filesystem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilesystemWorkbench } from "./FilesystemWorkbench";
+
+const sdk = vi.hoisted(() => ({
+  moveFileNode: vi.fn(),
+}));
 
 const navigation = vi.hoisted(() => ({
   replace: vi.fn(),
   push: vi.fn(),
+  refresh: vi.fn(),
   searchParams: new URLSearchParams(),
 }));
 
@@ -21,11 +27,22 @@ const directoryTree = vi.hoisted(() => ({
   roots: [] as string[],
   canWrites: [] as boolean[],
   onNavigate: undefined as undefined | ((node: { id: string }) => void),
+  onDropNodes: undefined as
+    | undefined
+    | ((nodeIds: string[], target: FileNodeVM) => void),
+}));
+
+vi.mock("@sparkops/web-sdk/filesystem", () => ({
+  moveFileNode: sdk.moveFileNode,
 }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/files",
-  useRouter: () => ({ replace: navigation.replace, push: navigation.push }),
+  useRouter: () => ({
+    replace: navigation.replace,
+    push: navigation.push,
+    refresh: navigation.refresh,
+  }),
   useSearchParams: () => navigation.searchParams,
 }));
 
@@ -61,14 +78,17 @@ vi.mock("./DirectoryTree", () => ({
     root,
     canWrite,
     onNavigate,
+    onDropNodes,
   }: {
     root: { id: string };
     canWrite: boolean;
     onNavigate: (node: { id: string }) => void;
+    onDropNodes: (nodeIds: string[], target: FileNodeVM) => void;
   }) => {
     directoryTree.roots.push(root.id);
     directoryTree.canWrites.push(canWrite);
     directoryTree.onNavigate = onNavigate;
+    directoryTree.onDropNodes = onDropNodes;
     return createElement("div", { role: "tree" });
   },
 }));
@@ -80,12 +100,26 @@ const namespace = {
   status: "ACTIVE",
 };
 
-function renderWorkbench(permissions: string[] = ["file:read"]) {
+const movableNode: FileNodeVM = {
+  id: "00000000-0000-4000-8000-000000000011",
+  namespace_id: namespace.id,
+  parent_id: namespace.root_node_id,
+  type: "FILE",
+  name: "报告.md",
+  current_revision_id: null,
+  state: "ACTIVE",
+  owner_id: "00000000-0000-4000-8000-000000000012",
+};
+
+function renderWorkbench(
+  permissions: string[] = ["file:read"],
+  initialNodes: FileNodeVM[] = [],
+) {
   return render(
     createElement(FilesystemWorkbench, {
       workspaceId: "00000000-0000-4000-8000-000000000001",
       namespace,
-      initialNodes: [],
+      initialNodes,
       initialState: { tab: "files", view: "list", query: "" },
       permissions,
     }),
@@ -101,12 +135,15 @@ describe("FilesystemWorkbench", () => {
   beforeEach(() => {
     navigation.replace.mockReset();
     navigation.push.mockReset();
+    navigation.refresh.mockReset();
+    sdk.moveFileNode.mockReset();
     navigation.searchParams = new URLSearchParams();
     explorer.views = [];
     explorer.canMoves = [];
     directoryTree.roots = [];
     directoryTree.canWrites = [];
     directoryTree.onNavigate = undefined;
+    directoryTree.onDropNodes = undefined;
   });
 
   it("selects files and hides governance without storage read permission", () => {
@@ -220,5 +257,28 @@ describe("FilesystemWorkbench", () => {
 
     expect(explorer.canMoves.at(-1)).toBe(true);
     expect(directoryTree.canWrites.at(-1)).toBe(true);
+  });
+
+  it("executes a tree drop and refreshes the workbench", async () => {
+    sdk.moveFileNode.mockResolvedValue(undefined);
+    renderWorkbench(["file:read", "file:write"], [movableNode]);
+    const target = {
+      ...movableNode,
+      id: "00000000-0000-4000-8000-000000000013",
+      type: "DIRECTORY" as const,
+      name: "归档",
+    };
+
+    directoryTree.onDropNodes?.([movableNode.id], target);
+
+    await waitFor(() =>
+      expect(sdk.moveFileNode).toHaveBeenCalledWith(
+        "00000000-0000-4000-8000-000000000001",
+        movableNode.id,
+        target.id,
+        movableNode.name,
+      ),
+    );
+    expect(navigation.refresh).toHaveBeenCalled();
   });
 });

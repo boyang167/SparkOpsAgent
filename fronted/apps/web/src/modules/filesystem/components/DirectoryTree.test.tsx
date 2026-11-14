@@ -8,6 +8,11 @@ import { BffError } from "@sparkops/contracts";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DirectoryTree, type DirectoryTreeProps } from "./DirectoryTree";
+import {
+  clearNodeDragSession,
+  getActiveNodeDragPayload,
+  writeNodeDragPayload,
+} from "./directory-dnd";
 
 const sdk = vi.hoisted(() => ({
   listFileNodes: vi.fn(),
@@ -77,7 +82,10 @@ describe("DirectoryTree", () => {
     sdk.listFileNodes.mockReset();
   });
 
-  afterEach(cleanup);
+  afterEach(() => {
+    clearNodeDragSession();
+    cleanup();
+  });
 
   it("loads every page of directory children when a node expands", async () => {
     const user = userEvent.setup();
@@ -338,6 +346,77 @@ describe("DirectoryTree", () => {
     await act(() => vi.advanceTimersByTimeAsync(700));
     expect(sdk.listFileNodes).not.toHaveBeenCalled();
     expect(onDropNodes).toHaveBeenCalledWith(["file-1"], root);
+    vi.useRealTimers();
+  });
+
+  it("uses the internal drag session when DataTransfer is protected", async () => {
+    vi.useFakeTimers();
+    const onDropNodes = vi.fn();
+    sdk.listFileNodes.mockResolvedValueOnce({ items: [], next_cursor: "" });
+    render(createElement(DirectoryTree, props({ canWrite: true, onDropNodes })));
+    const draggedNode: FileNodeVM = {
+      ...root,
+      id: "file-protected",
+      parent_id: "source-1",
+      type: "FILE",
+      name: "受保护数据.txt",
+    };
+    writeNodeDragPayload(
+      { setData: vi.fn(), effectAllowed: "none" } as unknown as DataTransfer,
+      workspaceId,
+      [draggedNode],
+    );
+    const protectedTransfer = {
+      getData: vi.fn(() => {
+        throw new Error("protected mode");
+      }),
+      dropEffect: "none",
+    };
+    const rootItem = screen.getByRole("treeitem", { name: "全部文件" });
+
+    fireEvent.dragEnter(rootItem, { dataTransfer: protectedTransfer });
+    expect(rootItem).toHaveAttribute("data-drop-state", "allowed");
+    fireEvent.dragOver(rootItem, { dataTransfer: protectedTransfer });
+    expect(protectedTransfer.dropEffect).toBe("move");
+    expect(protectedTransfer.getData).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(700));
+    expect(sdk.listFileNodes).toHaveBeenCalledOnce();
+
+    fireEvent.drop(rootItem, { dataTransfer: protectedTransfer });
+    expect(onDropNodes).toHaveBeenCalledWith(["file-protected"], root);
+    expect(getActiveNodeDragPayload()).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("does not expand after dragend clears the internal session", async () => {
+    vi.useFakeTimers();
+    render(createElement(DirectoryTree, props({ canWrite: true })));
+    writeNodeDragPayload(
+      { setData: vi.fn(), effectAllowed: "none" } as unknown as DataTransfer,
+      workspaceId,
+      [
+        {
+          ...root,
+          id: "file-ended",
+          parent_id: "source-1",
+          type: "FILE",
+          name: "已结束拖拽.txt",
+        },
+      ],
+    );
+    const rootItem = screen.getByRole("treeitem", { name: "全部文件" });
+    fireEvent.dragEnter(rootItem, {
+      dataTransfer: {
+        getData: vi.fn(() => {
+          throw new Error("protected mode");
+        }),
+      },
+    });
+
+    clearNodeDragSession();
+    await act(() => vi.advanceTimersByTimeAsync(700));
+
+    expect(sdk.listFileNodes).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 });

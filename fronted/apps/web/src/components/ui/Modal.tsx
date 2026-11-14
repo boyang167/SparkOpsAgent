@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useModalFocus } from "./modal-focus";
 
 interface ModalProps {
   open: boolean;
@@ -35,6 +36,7 @@ export function Modal({
   const titleId = useId();
   const descId = useId();
   const onCloseRef = useRef(onClose);
+  const panelRef = useModalFocus<HTMLDivElement>(open);
   onCloseRef.current = onClose;
 
   useEffect(() => {
@@ -70,8 +72,10 @@ export function Modal({
         onClick={() => onCloseRef.current()}
       />
       <div
+        ref={panelRef}
         className={`modal-panel modal-panel-${size}${panelClassName ? ` ${panelClassName}` : ""}`}
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={description ? descId : undefined}

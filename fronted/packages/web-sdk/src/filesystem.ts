@@ -41,12 +41,30 @@ type UploadTransferResult = {
   requestedParts: number[];
 };
 
+let idempotencySequence = 0;
+
+function uniqueIdempotencySuffix() {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const values = new Uint32Array(4);
+    cryptoApi.getRandomValues(values);
+    return [...values].map((value) => value.toString(36)).join("-");
+  }
+  idempotencySequence += 1;
+  return `${Date.now().toString(36)}-${idempotencySequence.toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
+}
+
 function defaultIdempotencyKey() {
-  return `transfer-${Date.now()}`;
+  return `transfer-${uniqueIdempotencySuffix()}`;
 }
 
 function mutationIdempotencyKey(prefix: string) {
-  return `${prefix}-${Date.now()}`;
+  return `${prefix}-${uniqueIdempotencySuffix()}`;
 }
 
 type ListFilesQuery = {

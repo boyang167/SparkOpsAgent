@@ -69,3 +69,44 @@
 
 - Vitest 仍输出仓库既有的 Vite/Rolldown deprecated 配置警告，不影响测试结果。
 - CLI lint 无法在当前仓库非交互执行；需由独立工具链任务补齐 ESLint 配置后恢复该质量门。
+
+## Important / Minor 审查修复
+
+### 修复内容
+
+- 新增模块内站内拖拽 session。`dragstart` 建立 session，`dragenter` 与 `dragover` 不再依赖 protected mode 下不可读的 `DataTransfer.getData()`；`drop` 在没有 session 时仍兼容 DataTransfer 降级读取。
+- `dragend`、`drop`、文件浏览器卸载和目录树卸载均清理 session；700ms 展开定时器在触发前校验原 session 仍有效，避免 dragend 后陈旧展开。
+- 文件节点刷新时，将选择收敛到仍存在且处于 `ACTIVE` 的节点，并同步通知 owner；工具栏计数、拖拽集合与 Modal 提交集合使用同一有效选择。
+- 通用 `Modal` 接入无依赖焦点管理：打开聚焦面板内首个控件，Tab/Shift+Tab 在面板内循环，关闭时恢复原触发点。
+- 默认幂等键优先使用 `crypto.randomUUID()`，其次使用 `crypto.getRandomValues()`，最终使用时间、进程内序列和随机值组合；并发调用不会复用键。
+- 工作台测试补齐目录树 drop 到 SDK 调用与刷新链路。
+
+### RED
+
+1. `pnpm vitest run apps/web/src/modules/filesystem/components/directory-dnd.test.ts apps/web/src/modules/filesystem/components/DirectoryTree.test.tsx apps/web/src/modules/filesystem/components/FileBrowser.test.tsx apps/web/src/components/ui/Modal.test.tsx apps/web/src/modules/filesystem/components/FilesystemWorkbench.test.tsx packages/web-sdk/src/filesystem.test.ts`
+   - 退出码：1。
+   - 摘要：内部拖拽 session API 尚不存在；并发移动生成相同幂等键；选择刷新未收敛；Modal 尚无焦点管理。
+2. `pnpm vitest run apps/web/src/modules/filesystem/components/DirectoryTree.test.tsx`
+   - 退出码：1。
+   - 摘要：dragend 清除 session 后，已启动的 700ms 定时器仍会错误展开目录。
+
+### GREEN
+
+1. `pnpm vitest run apps/web/src/modules/filesystem apps/web/src/components/ui/Modal.test.tsx packages/web-sdk/src/filesystem.test.ts`
+   - 退出码：0。
+   - 摘要：13 个测试文件、64 项测试全部通过。
+2. `pnpm --filter web typecheck`
+   - 退出码：0。
+   - 摘要：Web TypeScript 检查通过。
+3. IDE diagnostics
+   - 摘要：本次修改文件无 linter errors。
+4. `git diff --check`
+   - 退出码：0。
+
+### Lint
+
+`CI=1 pnpm --filter web lint` 仍因仓库没有 ESLint 配置进入 `next lint` 交互式初始化并以退出码 1 结束；未越界新增全局 lint 配置。
+
+### 提交
+
+- Message: `fix(filesystem-ui): address Task 4 review`

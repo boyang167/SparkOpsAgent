@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { validateNodeDrop } from "./directory-dnd";
+import { describe, expect, it, vi } from "vitest";
+import {
+  clearNodeDragSession,
+  getActiveNodeDragPayload,
+  readNodeDragPayload,
+  validateNodeDrop,
+  writeNodeDragPayload,
+} from "./directory-dnd";
 
 const validInput = {
   draggedIds: ["dir-a"],
@@ -40,5 +46,34 @@ describe("validateNodeDrop", () => {
 
   it("allows an active same-workspace move with write permission", () => {
     expect(validateNodeDrop(validInput)).toEqual({ allowed: true });
+  });
+});
+
+describe("internal node drag session", () => {
+  it("keeps the payload available while DataTransfer is protected and clears it explicitly", () => {
+    const dataTransfer = {
+      effectAllowed: "none",
+      setData: vi.fn(),
+      getData: vi.fn(() => {
+        throw new Error("protected");
+      }),
+    } as unknown as DataTransfer;
+    const node = {
+      id: "file-a",
+      namespace_id: "namespace-1",
+      parent_id: "source-a",
+      type: "FILE",
+      name: "A.txt",
+      current_revision_id: null,
+      state: "ACTIVE",
+      owner_id: "owner-1",
+    } as const;
+
+    writeNodeDragPayload(dataTransfer, "workspace-1", [node]);
+
+    expect(readNodeDragPayload(dataTransfer)).toEqual(getActiveNodeDragPayload());
+    expect(getActiveNodeDragPayload()?.nodes.map((item) => item.id)).toEqual(["file-a"]);
+    clearNodeDragSession();
+    expect(getActiveNodeDragPayload()).toBeNull();
   });
 });

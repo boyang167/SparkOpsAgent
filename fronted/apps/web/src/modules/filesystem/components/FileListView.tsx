@@ -11,6 +11,7 @@ export type FileListViewProps = {
   onRename: (node: FileNodeVM) => void;
   onMove: (nodes: FileNodeVM[]) => void;
   onDragStart: (event: DragEvent<HTMLElement>, node: FileNodeVM) => void;
+  onDragEnd: () => void;
   canMove: boolean;
 };
 
@@ -22,6 +23,7 @@ export function FileListView({
   onRename,
   onMove,
   onDragStart,
+  onDragEnd,
   canMove,
 }: FileListViewProps) {
   return createElement(
@@ -53,6 +55,7 @@ export function FileListView({
               draggable: canMove && node.state === "ACTIVE",
               onDragStart: (event: DragEvent<HTMLTableRowElement>) =>
                 onDragStart(event, node),
+              onDragEnd,
             },
             createElement(
               "td",
@@ -61,6 +64,7 @@ export function FileListView({
                 type: "checkbox",
                 "aria-label": `选择 ${node.name}`,
                 checked: selectedIds.has(node.id),
+                disabled: node.state !== "ACTIVE",
                 onChange: (event) => onSelectionChange(node.id, event.currentTarget.checked),
               }),
             ),
@@ -88,7 +92,7 @@ export function FileListView({
               { className: "text-right" },
               createElement(FileActionMenu, {
                 node,
-                canMove,
+                canMove: canMove && node.state === "ACTIVE",
                 onRename,
                 onMove,
               }),

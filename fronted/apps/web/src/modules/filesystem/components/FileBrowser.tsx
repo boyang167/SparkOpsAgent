@@ -5,7 +5,7 @@ import type { DragEvent } from "react";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
 import { FileGridView } from "./FileGridView";
 import { FileListView } from "./FileListView";
-import { writeNodeDragPayload } from "./directory-dnd";
+import { clearNodeDragSession, writeNodeDragPayload } from "./directory-dnd";
 import type { FileView } from "./workbench-state";
 
 export type FileBrowserProps = {
@@ -40,13 +40,30 @@ export function FileBrowser({
 }: FileBrowserProps) {
   const [selection, setSelection] = useState(() => new Set(selectedIds));
   const sortedNodes = useMemo(() => sortFileNodes(nodes), [nodes]);
+  const activeNodeIds = useMemo(
+    () => new Set(nodes.filter((node) => node.state === "ACTIVE").map((node) => node.id)),
+    [nodes],
+  );
+  const effectiveSelection = useMemo(
+    () => new Set([...selection].filter((nodeId) => activeNodeIds.has(nodeId))),
+    [activeNodeIds, selection],
+  );
 
   useEffect(() => {
-    setSelection(new Set(selectedIds));
-  }, [selectedIds]);
+    const nextSelection = new Set(selectedIds.filter((nodeId) => activeNodeIds.has(nodeId)));
+    setSelection(nextSelection);
+    if (
+      nextSelection.size !== selectedIds.length ||
+      selectedIds.some((nodeId) => !nextSelection.has(nodeId))
+    ) {
+      onSelectionChange([...nextSelection]);
+    }
+  }, [activeNodeIds, onSelectionChange, selectedIds]);
+
+  useEffect(() => clearNodeDragSession, []);
 
   function changeSelection(nodeId: string, selected: boolean) {
-    const nextSelection = new Set(selection);
+    const nextSelection = new Set(effectiveSelection);
     if (selected) {
       nextSelection.add(nodeId);
     } else {
@@ -57,15 +74,18 @@ export function FileBrowser({
   }
 
   function selectedNodes() {
-    return nodes.filter((node) => selection.has(node.id));
+    return nodes.filter(
+      (node) => node.state === "ACTIVE" && effectiveSelection.has(node.id),
+    );
   }
 
   function handleDragStart(event: DragEvent<HTMLElement>, node: FileNodeVM) {
+    clearNodeDragSession();
     if (!workspaceId || !canMove || node.state !== "ACTIVE") {
       event.preventDefault();
       return;
     }
-    const draggedNodes = selection.has(node.id) ? selectedNodes() : [node];
+    const draggedNodes = effectiveSelection.has(node.id) ? selectedNodes() : [node];
     writeNodeDragPayload(
       event.dataTransfer,
       workspaceId,
@@ -79,19 +99,20 @@ export function FileBrowser({
 
   const viewProps = {
     nodes: sortedNodes,
-    selectedIds: selection,
+    selectedIds: effectiveSelection,
     onSelectionChange: changeSelection,
     onOpen,
     onRename,
     onMove,
     onDragStart: handleDragStart,
+    onDragEnd: clearNodeDragSession,
     canMove,
   };
 
   return createElement(
     "div",
     { className: "stack-sm" },
-    canMove && selection.size > 0
+    canMove && effectiveSelection.size > 0
       ? createElement(
           "div",
           {
@@ -102,14 +123,14 @@ export function FileBrowser({
           createElement(
             "span",
             { className: "text-sm text-muted" },
-            `已选择 ${selection.size} 项`,
+            `已选择 ${effectiveSelection.size} 项`,
           ),
           createElement(
             "button",
             {
               type: "button",
               className: "btn btn-secondary btn-sm",
-              "aria-label": `移动所选 ${selection.size} 项到…`,
+              "aria-label": `移动所选 ${effectiveSelection.size} 项到…`,
               onClick: () => onMove(selectedNodes()),
             },
             "移动到…",
