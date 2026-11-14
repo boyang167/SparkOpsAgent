@@ -1,5 +1,7 @@
 import { createElement } from "react";
+import type { DragEvent } from "react";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
+import { FileActionMenu } from "./FileActionMenu";
 
 export type FileListViewProps = {
   nodes: FileNodeVM[];
@@ -7,7 +9,8 @@ export type FileListViewProps = {
   onSelectionChange: (nodeId: string, selected: boolean) => void;
   onOpen: (node: FileNodeVM) => void;
   onRename: (node: FileNodeVM) => void;
-  onMove: (node: FileNodeVM) => void;
+  onMove: (nodes: FileNodeVM[]) => void;
+  onDragStart: (event: DragEvent<HTMLElement>, node: FileNodeVM) => void;
   canMove: boolean;
 };
 
@@ -18,6 +21,7 @@ export function FileListView({
   onOpen,
   onRename,
   onMove,
+  onDragStart,
   canMove,
 }: FileListViewProps) {
   return createElement(
@@ -44,7 +48,12 @@ export function FileListView({
         nodes.map((node) =>
           createElement(
             "tr",
-            { key: node.id },
+            {
+              key: node.id,
+              draggable: canMove && node.state === "ACTIVE",
+              onDragStart: (event: DragEvent<HTMLTableRowElement>) =>
+                onDragStart(event, node),
+            },
             createElement(
               "td",
               null,
@@ -77,28 +86,12 @@ export function FileListView({
             createElement(
               "td",
               { className: "text-right" },
-              createElement(
-                "button",
-                {
-                  type: "button",
-                  className: "btn btn-ghost btn-sm",
-                  "aria-label": `重命名 ${node.name}`,
-                  onClick: () => onRename(node),
-                },
-                "重命名",
-              ),
-              canMove
-                ? createElement(
-                    "button",
-                    {
-                      type: "button",
-                      className: "btn btn-ghost btn-sm",
-                      "aria-label": `移动 ${node.name}`,
-                      onClick: () => onMove(node),
-                    },
-                    "移动",
-                  )
-                : null,
+              createElement(FileActionMenu, {
+                node,
+                canMove,
+                onRename,
+                onMove,
+              }),
             ),
           ),
         ),

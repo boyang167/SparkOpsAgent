@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
 import { BffError } from "@sparkops/contracts";
@@ -241,5 +241,103 @@ describe("DirectoryTree", () => {
 
     expect(outside).toHaveFocus();
     outside.remove();
+  });
+
+  it("expands a valid drag target after 700ms and drops the dragged nodes", async () => {
+    vi.useFakeTimers();
+    const onDropNodes = vi.fn();
+    sdk.listFileNodes.mockResolvedValueOnce({ items: [directory], next_cursor: "" });
+    render(createElement(DirectoryTree, props({ onDropNodes, canWrite: true })));
+    const rootItem = screen.getByRole("treeitem", { name: "全部文件" });
+    const dataTransfer = {
+      getData: vi.fn().mockReturnValue(
+        JSON.stringify({
+          workspaceId,
+          nodes: [{ id: "file-1", parentId: "source-1", type: "FILE", state: "ACTIVE" }],
+        }),
+      ),
+      dropEffect: "none",
+    };
+
+    fireEvent.dragEnter(rootItem, { dataTransfer });
+    await act(() => vi.advanceTimersByTimeAsync(699));
+    expect(sdk.listFileNodes).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(sdk.listFileNodes).toHaveBeenCalledOnce();
+
+    fireEvent.drop(rootItem, { dataTransfer });
+    expect(onDropNodes).toHaveBeenCalledWith(["file-1"], root);
+    vi.useRealTimers();
+  });
+
+  it("shows a rejected target and never drops a node onto itself", () => {
+    const onDropNodes = vi.fn();
+    render(createElement(DirectoryTree, props({ onDropNodes, canWrite: true })));
+    const rootItem = screen.getByRole("treeitem", { name: "全部文件" });
+    const dataTransfer = {
+      getData: vi.fn().mockReturnValue(
+        JSON.stringify({
+          workspaceId,
+          nodes: [{ id: root.id, parentId: null, type: "DIRECTORY", state: "ACTIVE" }],
+        }),
+      ),
+      dropEffect: "none",
+    };
+
+    fireEvent.dragEnter(rootItem, { dataTransfer });
+    expect(rootItem).toHaveAttribute("data-drop-state", "rejected");
+    expect(screen.getByText("不能移动到自身")).toBeInTheDocument();
+    fireEvent.drop(rootItem, { dataTransfer });
+    expect(onDropNodes).not.toHaveBeenCalled();
+  });
+
+  it("clears the delayed expansion timer when unmounted", () => {
+    vi.useFakeTimers();
+    const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+    const { unmount } = render(createElement(DirectoryTree, props({ canWrite: true })));
+    const rootItem = screen.getByRole("treeitem", { name: "全部文件" });
+    fireEvent.dragEnter(rootItem, {
+      dataTransfer: {
+        getData: vi.fn().mockReturnValue(
+          JSON.stringify({
+            workspaceId,
+            nodes: [{ id: "file-1", type: "FILE", state: "ACTIVE" }],
+          }),
+        ),
+      },
+    });
+
+    unmount();
+
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("cancels delayed expansion on dragleave and drop", async () => {
+    vi.useFakeTimers();
+    const onDropNodes = vi.fn();
+    render(createElement(DirectoryTree, props({ canWrite: true, onDropNodes })));
+    const rootItem = screen.getByRole("treeitem", { name: "全部文件" });
+    const dataTransfer = {
+      getData: vi.fn().mockReturnValue(
+        JSON.stringify({
+          workspaceId,
+          nodes: [{ id: "file-1", type: "FILE", state: "ACTIVE" }],
+        }),
+      ),
+      dropEffect: "none",
+    };
+
+    fireEvent.dragEnter(rootItem, { dataTransfer });
+    fireEvent.dragLeave(rootItem, { dataTransfer });
+    await act(() => vi.advanceTimersByTimeAsync(700));
+    expect(sdk.listFileNodes).not.toHaveBeenCalled();
+
+    fireEvent.dragEnter(rootItem, { dataTransfer });
+    fireEvent.drop(rootItem, { dataTransfer });
+    await act(() => vi.advanceTimersByTimeAsync(700));
+    expect(sdk.listFileNodes).not.toHaveBeenCalled();
+    expect(onDropNodes).toHaveBeenCalledWith(["file-1"], root);
+    vi.useRealTimers();
   });
 });

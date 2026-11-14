@@ -14,10 +14,12 @@ const navigation = vi.hoisted(() => ({
 
 const explorer = vi.hoisted(() => ({
   views: [] as string[],
+  canMoves: [] as boolean[],
 }));
 
 const directoryTree = vi.hoisted(() => ({
   roots: [] as string[],
+  canWrites: [] as boolean[],
   onNavigate: undefined as undefined | ((node: { id: string }) => void),
 }));
 
@@ -42,9 +44,14 @@ vi.mock("@/components/ui/Drawer", () => ({
       : null,
 }));
 
+vi.mock("./MoveNodesModal", () => ({
+  MoveNodesModal: () => null,
+}));
+
 vi.mock("./FileExplorerPanel", () => ({
-  FileExplorerPanel: ({ view }: { view: string }) => {
+  FileExplorerPanel: ({ view, canMove }: { view: string; canMove: boolean }) => {
     explorer.views.push(view);
+    explorer.canMoves.push(canMove);
     return null;
   },
 }));
@@ -52,12 +59,15 @@ vi.mock("./FileExplorerPanel", () => ({
 vi.mock("./DirectoryTree", () => ({
   DirectoryTree: ({
     root,
+    canWrite,
     onNavigate,
   }: {
     root: { id: string };
+    canWrite: boolean;
     onNavigate: (node: { id: string }) => void;
   }) => {
     directoryTree.roots.push(root.id);
+    directoryTree.canWrites.push(canWrite);
     directoryTree.onNavigate = onNavigate;
     return createElement("div", { role: "tree" });
   },
@@ -93,7 +103,9 @@ describe("FilesystemWorkbench", () => {
     navigation.push.mockReset();
     navigation.searchParams = new URLSearchParams();
     explorer.views = [];
+    explorer.canMoves = [];
     directoryTree.roots = [];
+    directoryTree.canWrites = [];
     directoryTree.onNavigate = undefined;
   });
 
@@ -188,5 +200,25 @@ describe("FilesystemWorkbench", () => {
     directoryTree.onNavigate?.({ id: "directory-1" });
 
     expect(navigation.push).toHaveBeenCalledWith("/files?parent=directory-1");
+  });
+
+  it("gates drag and keyboard move entry points with file write permission", () => {
+    const { rerender } = renderWorkbench();
+
+    expect(explorer.canMoves.at(-1)).toBe(false);
+    expect(directoryTree.canWrites.every((canWrite) => !canWrite)).toBe(true);
+
+    rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "files", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+
+    expect(explorer.canMoves.at(-1)).toBe(true);
+    expect(directoryTree.canWrites.at(-1)).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
@@ -95,17 +95,72 @@ describe("FileBrowser", () => {
 
     await user.click(screen.getByRole("button", { name: "打开 资料" }));
     await user.click(screen.getByRole("button", { name: "重命名 资料" }));
-    await user.click(screen.getByRole("button", { name: "移动 资料" }));
+    await user.click(screen.getByRole("button", { name: "移动到… 资料" }));
 
     expect(props.onOpen).toHaveBeenCalledWith(nodes[1]);
     expect(props.onRename).toHaveBeenCalledWith(nodes[1]);
-    expect(props.onMove).toHaveBeenCalledWith(nodes[1]);
+    expect(props.onMove).toHaveBeenCalledWith([nodes[1]]);
   });
 
   it("hides move actions when the compatibility adapter disables the capability", () => {
     const props = createProps();
     render(createElement(FileBrowser, { ...props, canMove: false }));
 
-    expect(screen.queryByRole("button", { name: /^移动 / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^移动到… / })).not.toBeInTheDocument();
+  });
+
+  it("offers one keyboard-accessible move action for the current selection", async () => {
+    const user = userEvent.setup();
+    const props = createProps();
+    render(createElement(FileBrowser, props));
+
+    await user.click(screen.getByRole("checkbox", { name: "选择 规格说明.md" }));
+    await user.click(screen.getByRole("checkbox", { name: "选择 资料" }));
+    await user.click(screen.getByRole("button", { name: "移动所选 2 项到…" }));
+
+    expect(props.onMove).toHaveBeenCalledWith([nodes[0], nodes[1]]);
+  });
+
+  it("writes the selected active nodes to the internal drag payload", async () => {
+    const user = userEvent.setup();
+    const props = { ...createProps(), workspaceId: "workspace-1" };
+    render(createElement(FileBrowser, props));
+    await user.click(screen.getByRole("checkbox", { name: "选择 规格说明.md" }));
+    await user.click(screen.getByRole("checkbox", { name: "选择 资料" }));
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "none" };
+
+    fireEvent.dragStart(screen.getByRole("row", { name: /规格说明\.md/ }), { dataTransfer });
+
+    expect(dataTransfer.setData).toHaveBeenCalledWith(
+      "application/x-sparkops-file-nodes",
+      expect.stringContaining('"workspaceId":"workspace-1"'),
+    );
+    expect(dataTransfer.setData.mock.calls[0]?.[1]).toContain(nodes[1].id);
+  });
+
+  it("keeps inactive selected nodes in the drag payload so the drop rule rejects the whole move", async () => {
+    const user = userEvent.setup();
+    const mixedNodes = [
+      nodes[0],
+      { ...nodes[1], state: "TRASHED" as const },
+    ];
+    render(
+      createElement(FileBrowser, {
+        ...createProps(),
+        nodes: mixedNodes,
+        workspaceId: "workspace-1",
+      }),
+    );
+    await user.click(screen.getByRole("checkbox", { name: "选择 规格说明.md" }));
+    await user.click(screen.getByRole("checkbox", { name: "选择 资料" }));
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "none" };
+
+    fireEvent.dragStart(screen.getByRole("row", { name: /规格说明\.md/ }), { dataTransfer });
+
+    const payload = JSON.parse(dataTransfer.setData.mock.calls[0]?.[1] as string);
+    expect(payload.nodes.map((node: FileNodeVM) => node.id)).toEqual([
+      nodes[0].id,
+      nodes[1].id,
+    ]);
   });
 });

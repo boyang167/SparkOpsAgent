@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TransferSessionVM } from "@sparkops/contracts/filesystem";
-import { listFileNodes, uploadTransfer } from "./filesystem";
+import { listFileNodes, moveFileNode, uploadTransfer } from "./filesystem";
 
 function sessionWithCompletedParts(partNumbers: number[]): TransferSessionVM {
   const partSize = 5;
@@ -80,5 +80,30 @@ describe("filesystem node sdk", () => {
       expect.stringContaining("parent_id=parent-1&type=DIRECTORY"),
       expect.anything(),
     );
+  });
+
+  it("moves a node with the backend request fields and an idempotency key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 0, message: "ok", data: null, trace_id: "trace-1" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await moveFileNode("workspace-1", "node-1", "target-1", "报告.md", {
+      idempotencyKey: "move-key-1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/bff/v1/workspaces/workspace-1/files/node-1/move",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ parent_id: "target-1", name: "报告.md" }),
+        headers: expect.any(Headers),
+      }),
+    );
+    const options = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(options.headers).get("Idempotency-Key")).toBe("move-key-1");
   });
 });

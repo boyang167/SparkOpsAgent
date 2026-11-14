@@ -2,17 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
 import { createDirectoryNode } from "@sparkops/web-sdk/filesystem";
 import { FileBrowser } from "./FileBrowser";
 import { createPanelRenameHandler, submitPanelRename } from "./file-explorer-panel-rename";
-import {
-  createFileBrowserMoveAdapter,
-  type FileExplorerDialog,
-  showCreateDialog,
-  showRenameDialog,
-} from "./file-explorer-panel-state";
+import type { FileExplorerDialog } from "./file-explorer-panel-state";
+import { showCreateDialog, showRenameDialog } from "./file-explorer-panel-state";
 import { UploadPanel } from "./UploadPanel";
 import type { FileView } from "./workbench-state";
 
@@ -30,7 +26,8 @@ export type FileExplorerPanelProps = {
   providerId?: string;
   view?: FileView;
   onRename?: (nodeId: string, name: string) => Promise<void>;
-  onMove?: (nodeId: string) => void;
+  onMove?: (nodes: FileNodeVM[]) => void;
+  canMove?: boolean;
   onCreateDirectory?: (name: string) => Promise<void>;
   onNavigate?: () => void;
 };
@@ -45,6 +42,7 @@ export function FileExplorerPanel({
   view = "list",
   onRename,
   onMove,
+  canMove = false,
   onCreateDirectory,
   onNavigate,
 }: FileExplorerPanelProps) {
@@ -57,12 +55,14 @@ export function FileExplorerPanel({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    setNodes(initialNodes);
+  }, [initialNodes]);
+
   const doRename = useMemo(
     () => createPanelRenameHandler(workspaceId, onRename),
     [onRename, workspaceId],
   );
-  const moveAdapter = useMemo(() => createFileBrowserMoveAdapter(onMove), [onMove]);
-
   const doCreateDirectory = useCallback(
     async (name: string): Promise<FileNodeVM | void> => {
       if (onCreateDirectory) {
@@ -154,6 +154,7 @@ export function FileExplorerPanel({
 
       <FileBrowser
         nodes={nodes}
+        workspaceId={workspaceId}
         view={view}
         selectedIds={selectedIds}
         onSelectionChange={setSelectedIds}
@@ -168,8 +169,8 @@ export function FileExplorerPanel({
           setDialog(showRenameDialog(node));
           setRenameValue(node.name);
         }}
-        onMove={moveAdapter.onMove}
-        canMove={moveAdapter.canMove}
+        onMove={(moveNodes) => onMove?.(moveNodes)}
+        canMove={canMove && Boolean(onMove)}
       />
 
       {dialog?.type === "rename" ? (

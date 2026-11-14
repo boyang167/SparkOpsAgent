@@ -117,6 +117,23 @@ export function renameFileNode(
   });
 }
 
+export function moveFileNode(
+  workspaceId: string,
+  nodeId: string,
+  targetParentId: string,
+  nodeName: string,
+  options: BffFetchOptions & { idempotencyKey?: string } = {},
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("move");
+  return bffFetch<void>(`/workspaces/${workspaceId}/files/${nodeId}/move`, {
+    ...options,
+    method: "POST",
+    body: JSON.stringify({ parent_id: targetParentId, name: nodeName }),
+    workspaceId,
+    headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
+  });
+}
+
 export function listFileRevisions(
   workspaceId: string,
   nodeId: string,

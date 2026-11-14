@@ -4,9 +4,11 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createElement, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { FileNamespaceVM, FileNodeVM } from "@sparkops/contracts/filesystem";
+import { moveFileNode } from "@sparkops/web-sdk/filesystem";
 import { Drawer } from "@/components/ui/Drawer";
 import { DirectoryTree } from "./DirectoryTree";
 import { FileExplorerPanel } from "./FileExplorerPanel";
+import { MoveNodesModal } from "./MoveNodesModal";
 import type { FileView, WorkbenchState, WorkbenchTab } from "./workbench-state";
 
 export type FilesystemWorkbenchProps = {
@@ -40,6 +42,9 @@ export function FilesystemWorkbench({
   const searchParams = useSearchParams();
   const [view, setView] = useState<FileView>(initialState.view);
   const [directoryDrawerOpen, setDirectoryDrawerOpen] = useState(false);
+  const [moveNodes, setMoveNodes] = useState<FileNodeVM[]>([]);
+  const [treeVersion, setTreeVersion] = useState(0);
+  const [moveError, setMoveError] = useState<string | null>(null);
   const visibleTabs = tabs.filter(
     (tab) => !tab.permission || permissions.includes(tab.permission),
   );
@@ -86,14 +91,42 @@ export function FilesystemWorkbench({
     router.push(query ? `${pathname}?${query}` : pathname);
   }
 
+  function refreshDirectories() {
+    setTreeVersion((value) => value + 1);
+    router.refresh();
+  }
+
+  async function dropNodes(nodeIds: string[], target: FileNodeVM) {
+    const nodes = initialNodes.filter((node) => nodeIds.includes(node.id));
+    if (nodes.length !== nodeIds.length) {
+      setMoveError("无法确认待移动项目，请刷新后重试。");
+      refreshDirectories();
+      return;
+    }
+    setMoveError(null);
+    try {
+      for (const node of nodes) {
+        await moveFileNode(workspaceId, node.id, target.id, node.name);
+      }
+      refreshDirectories();
+    } catch {
+      setMoveError("移动失败，已刷新源目录和目标目录，请重试。");
+      refreshDirectories();
+    }
+  }
+
   function renderDirectoryTree() {
     if (!rootNode) return null;
     return createElement(DirectoryTree, {
+      key: treeVersion,
       workspaceId,
       root: rootNode,
       currentId: initialState.parent ?? rootNode.id,
       onNavigate: navigateDirectory,
-      onDropNodes: () => {},
+      onDropNodes: (nodeIds: string[], target: FileNodeVM) => {
+        void dropNodes(nodeIds, target);
+      },
+      canWrite: permissions.includes("file:write"),
     });
   }
 
@@ -142,6 +175,8 @@ export function FilesystemWorkbench({
           parentId: initialState.parent ?? namespace.root_node_id,
           initialNodes,
           view,
+          canMove: permissions.includes("file:write"),
+          onMove: setMoveNodes,
         })
       : createElement("div", { className: "empty-state" }, "此功能将在后续任务中接入。");
 
@@ -216,6 +251,33 @@ export function FilesystemWorkbench({
           )
         : panel,
     ),
+    moveError
+      ? createElement(
+          "p",
+          { role: "alert", className: "text-sm text-danger" },
+          moveError,
+        )
+      : null,
+    rootNode
+      ? createElement(MoveNodesModal, {
+          open: moveNodes.length > 0,
+          workspaceId,
+          root: rootNode,
+          nodes: moveNodes,
+          onClose: () => setMoveNodes([]),
+          onMoved: (nodes: FileNodeVM[], target: FileNodeVM) => {
+            const directories = new Set(
+              nodes
+                .map((node) => node.parent_id)
+                .filter((id): id is string => Boolean(id)),
+            );
+            directories.add(target.id);
+            refreshDirectories();
+            setMoveNodes([]);
+          },
+          onRefreshDirectories: refreshDirectories,
+        })
+      : null,
     activeTab === "files"
       ? createElement(
           Drawer,

@@ -1,5 +1,7 @@
 import { createElement } from "react";
+import type { DragEvent } from "react";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
+import { FileActionMenu } from "./FileActionMenu";
 
 export type FileGridViewProps = {
   nodes: FileNodeVM[];
@@ -7,7 +9,8 @@ export type FileGridViewProps = {
   onSelectionChange: (nodeId: string, selected: boolean) => void;
   onOpen: (node: FileNodeVM) => void;
   onRename: (node: FileNodeVM) => void;
-  onMove: (node: FileNodeVM) => void;
+  onMove: (nodes: FileNodeVM[]) => void;
+  onDragStart: (event: DragEvent<HTMLElement>, node: FileNodeVM) => void;
   canMove: boolean;
 };
 
@@ -18,6 +21,7 @@ export function FileGridView({
   onOpen,
   onRename,
   onMove,
+  onDragStart,
   canMove,
 }: FileGridViewProps) {
   return createElement(
@@ -26,7 +30,12 @@ export function FileGridView({
     nodes.map((node) =>
       createElement(
         "li",
-        { key: node.id, className: "card card-hover stack-sm" },
+        {
+          key: node.id,
+          className: "card card-hover stack-sm",
+          draggable: canMove && node.state === "ACTIVE",
+          onDragStart: (event: DragEvent<HTMLLIElement>) => onDragStart(event, node),
+        },
         createElement(
           "div",
           { className: "flex items-start justify-between gap-3" },
@@ -55,28 +64,12 @@ export function FileGridView({
         createElement(
           "div",
           { className: "flex flex-wrap justify-end gap-2" },
-          createElement(
-            "button",
-            {
-              type: "button",
-              className: "btn btn-ghost btn-sm",
-              "aria-label": `重命名 ${node.name}`,
-              onClick: () => onRename(node),
-            },
-            "重命名",
-          ),
-          canMove
-            ? createElement(
-                "button",
-                {
-                  type: "button",
-                  className: "btn btn-ghost btn-sm",
-                  "aria-label": `移动 ${node.name}`,
-                  onClick: () => onMove(node),
-                },
-                "移动",
-              )
-            : null,
+          createElement(FileActionMenu, {
+            node,
+            canMove,
+            onRename,
+            onMove,
+          }),
         ),
       ),
     ),
