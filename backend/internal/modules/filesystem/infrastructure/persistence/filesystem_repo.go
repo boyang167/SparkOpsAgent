@@ -1707,7 +1707,7 @@ func (r *Repository) CreateFileLink(ctx context.Context, link model.FileLink) er
 
 func (r *Repository) CreateNamespaceRootLink(ctx context.Context, link model.FileLink) error {
 	if link.LinkType != model.FileLinkTypeNamespaceRoot ||
-		link.LinkID == uuid.Nil || link.NodeID == uuid.Nil {
+		link.ID == uuid.Nil || link.LinkID == uuid.Nil || link.NodeID == uuid.Nil {
 		return domain.ErrPersistence
 	}
 	row := fileLinkRow{

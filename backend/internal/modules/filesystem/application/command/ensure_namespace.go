@@ -76,10 +76,10 @@ func (h *EnsureNamespaceHandler) Handle(ctx context.Context, cmd EnsureNamespace
 		return nil, err
 	}
 	if existing != nil {
-		if existing.OrganizationID != cmd.OrganizationID {
-			return nil, domain.ErrNamespaceMismatch
+		namespace, err = canonicalNamespace(existing, cmd)
+		if err != nil {
+			return nil, err
 		}
-		namespace = existing
 	}
 
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
@@ -117,8 +117,14 @@ func (h *EnsureNamespaceHandler) Handle(ctx context.Context, cmd EnsureNamespace
 		return nil
 	})
 	if err != nil {
-		if repaired, readErr := h.lookup(ctx, cmd); readErr == nil && repaired.RootNodeID != nil {
-			return repaired, nil
+		if repaired, readErr := h.lookup(ctx, cmd); readErr == nil {
+			canonical, canonicalErr := canonicalNamespace(repaired, cmd)
+			if canonicalErr != nil {
+				return nil, canonicalErr
+			}
+			if canonical.RootNodeID != nil {
+				return canonical, nil
+			}
 		}
 		return nil, err
 	}
@@ -144,6 +150,16 @@ func (h *EnsureNamespaceHandler) lookup(ctx context.Context, cmd EnsureNamespace
 	default:
 		return nil, model.ErrInvalidNamespace
 	}
+}
+
+func canonicalNamespace(namespace *model.Namespace, cmd EnsureNamespace) (*model.Namespace, error) {
+	if namespace == nil {
+		return nil, domain.ErrNamespaceNotFound
+	}
+	if namespace.OrganizationID != cmd.OrganizationID {
+		return nil, domain.ErrNamespaceMismatch
+	}
+	return namespace, nil
 }
 
 func namespaceID(cmd EnsureNamespace) uuid.UUID {

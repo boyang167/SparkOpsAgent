@@ -195,6 +195,78 @@ func TestEnsureWorkspaceRejectsExistingNamespaceFromAnotherOrganization(t *testi
 	require.Equal(t, providersBefore, providersAfter)
 }
 
+func TestEnsureNamespaceRepairLookupRejectsCrossOrganizationRace(t *testing.T) {
+	mainDSN := "file:" + filepath.Join(t.TempDir(), "main.db") + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
+	filesystemPath := filepath.Join(t.TempDir(), "filesystem.db")
+	db, err := gorm.Open(sqlite.Open(mainDSN), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	require.NoError(t, db.Exec("ATTACH DATABASE ? AS filesystem", filesystemPath).Error)
+	require.NoError(t, persistence.AutoMigrate(db))
+
+	organizationA, organizationB, workspaceID := uuid.New(), uuid.New(), uuid.New()
+	ownerID := uuid.New()
+	aDB, err := openEnsureWorkerDB(mainDSN, filesystemPath)
+	require.NoError(t, err)
+	bDB, err := openEnsureWorkerDB(mainDSN, filesystemPath)
+	require.NoError(t, err)
+	aSQLDB, err := aDB.DB()
+	require.NoError(t, err)
+	bSQLDB, err := bDB.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = aSQLDB.Close()
+		_ = bSQLDB.Close()
+	})
+
+	reachedCreate := make(chan struct{})
+	continueCreate := make(chan struct{})
+	bRepo := &gatedNamespaceEnsureRepository{
+		namespaceEnsureRepository: persistence.NewRepository(bDB),
+		reached:                   reachedCreate,
+		continueCreate:            continueCreate,
+	}
+	bResult := make(chan struct {
+		namespace *model.Namespace
+		err       error
+	}, 1)
+	go func() {
+		namespace, ensureErr := NewEnsureNamespaceHandler(bRepo, postgres.NewTransactor(bDB)).Handle(context.Background(), EnsureNamespace{
+			OrganizationID: organizationB, WorkspaceID: workspaceID,
+			NamespaceType: model.NamespaceTypeWorkspace, ActorID: ownerID,
+		})
+		bResult <- struct {
+			namespace *model.Namespace
+			err       error
+		}{namespace: namespace, err: ensureErr}
+	}()
+
+	<-reachedCreate
+	aNamespace, err := NewEnsureNamespaceHandler(
+		persistence.NewRepository(aDB), postgres.NewTransactor(aDB),
+	).Handle(context.Background(), EnsureNamespace{
+		OrganizationID: organizationA, WorkspaceID: workspaceID,
+		NamespaceType: model.NamespaceTypeWorkspace, ActorID: ownerID,
+	})
+	require.NoError(t, err)
+	close(continueCreate)
+	result := <-bResult
+	require.ErrorIs(t, result.err, domain.ErrNamespaceMismatch)
+	require.Nil(t, result.namespace)
+
+	var namespaceCount, rootCount, linkCount, quotaCount int64
+	require.NoError(t, db.Table("filesystem.namespaces").Where("workspace_id = ?", workspaceID).Count(&namespaceCount).Error)
+	require.NoError(t, db.Table("filesystem.nodes").Where("namespace_id = ?", aNamespace.ID).Count(&rootCount).Error)
+	require.NoError(t, db.Table("filesystem.file_links").Where("link_type = ? AND link_id = ?", model.FileLinkTypeNamespaceRoot, aNamespace.ID).Count(&linkCount).Error)
+	require.NoError(t, db.Table("filesystem.quota_accounts").Where("workspace_id = ?", workspaceID).Count(&quotaCount).Error)
+	require.Equal(t, int64(1), namespaceCount)
+	require.Equal(t, int64(1), rootCount)
+	require.Equal(t, int64(1), linkCount)
+	require.Equal(t, int64(1), quotaCount)
+}
+
 func TestNamespaceIDNormalizesUnusedScopeFields(t *testing.T) {
 	organizationID, workspaceID, ownerID := uuid.New(), uuid.New(), uuid.New()
 	organization := namespaceID(EnsureNamespace{
@@ -224,4 +296,16 @@ func openEnsureWorkerDB(mainDSN, filesystemPath string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("attach filesystem: %w", err)
 	}
 	return db, nil
+}
+
+type gatedNamespaceEnsureRepository struct {
+	namespaceEnsureRepository
+	reached        chan<- struct{}
+	continueCreate <-chan struct{}
+}
+
+func (r *gatedNamespaceEnsureRepository) CreateNamespaceIfAbsent(ctx context.Context, namespace *model.Namespace) error {
+	close(r.reached)
+	<-r.continueCreate
+	return r.namespaceEnsureRepository.CreateNamespaceIfAbsent(ctx, namespace)
 }
