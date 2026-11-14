@@ -37,7 +37,7 @@ func TestGrantServiceOwnerCanCreateListAndRevokeTransactionally(t *testing.T) {
 	require.NoError(t, messagingpersistence.AutoMigrate(db))
 	repo := persistence.NewRepository(db)
 	owner := uuid.New()
-	namespace := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	namespace := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
 	require.NoError(t, repo.CreateNamespace(context.Background(), namespace))
 	node, err := model.NewRootDirectory(namespace.ID, owner, ".root")
 	require.NoError(t, err)
@@ -89,8 +89,8 @@ func TestGrantServiceRejectsForgedCrossTenantScope(t *testing.T) {
 	require.NoError(t, messagingpersistence.AutoMigrate(db))
 	repo := persistence.NewRepository(db)
 	owner := uuid.New()
-	first := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
-	second := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	first := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	second := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
 	require.NoError(t, repo.CreateNamespace(context.Background(), first))
 	require.NoError(t, repo.CreateNamespace(context.Background(), second))
 	node, err := model.NewRootDirectory(first.ID, owner, ".root")

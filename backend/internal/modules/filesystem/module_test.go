@@ -122,7 +122,7 @@ func TestRegisterExposesMetadataRoutesWithoutLocalProvider(t *testing.T) {
 	require.NotNil(t, container.FilesystemGrantPort)
 	repo := persistence.NewRepository(db)
 	owner := uuid.New()
-	namespace := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	namespace := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
 	require.NoError(t, repo.CreateNamespace(context.Background(), namespace))
 	root, err := model.NewRootDirectory(namespace.ID, owner, ".root")
 	require.NoError(t, err)
