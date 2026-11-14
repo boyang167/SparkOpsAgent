@@ -61,31 +61,37 @@ func TestGormStoreFindsAllowedCapabilityAuditWithinWorkspaceBeforeLimit(t *testi
 
 	orgID := uuid.New()
 	workspaceID := uuid.New()
+	otherWorkspaceID := uuid.New()
 	actorID := kernel.MemberID{UUID: uuid.New()}
-	require.NoError(t, store.Append(context.Background(), Entry{
-		ActorID: actorID, OrgID: &kernel.OrgID{UUID: orgID},
-		Action: "filesystem.node.rename", ResourceType: "filesystem", ResourceID: uuid.NewString(),
-		Detail: map[string]any{
-			"workspace_id": workspaceID.String(),
-			"decision":     "DENY",
-		},
-	}))
 	require.NoError(t, store.Append(context.Background(), Entry{
 		ActorID: actorID, OrgID: &kernel.OrgID{UUID: orgID},
 		Action: "filesystem.capability.issued", ResourceType: "filesystem", ResourceID: uuid.NewString(),
 		Detail: map[string]any{
 			"workspace_id": workspaceID.String(),
-			"decision":     "ALLOW",
 		},
+	}))
+	require.NoError(t, store.Append(context.Background(), Entry{
+		ActorID: actorID, OrgID: &kernel.OrgID{UUID: orgID},
+		Action: "filesystem.node.rename", ResourceType: "filesystem", ResourceID: uuid.NewString(),
+		Detail: map[string]any{
+			"workspace_id": workspaceID.String(),
+		},
+	}))
+	require.NoError(t, store.Append(context.Background(), Entry{
+		ActorID: actorID, OrgID: &kernel.OrgID{UUID: orgID},
+		Action: "filesystem.capability.issued", ResourceType: "filesystem", ResourceID: uuid.NewString(),
+		Detail: map[string]any{"workspace_id": otherWorkspaceID.String()},
 	}))
 
 	rows, err := store.List(context.Background(), ListFilter{
 		OrgID: &kernel.OrgID{UUID: orgID}, WorkspaceID: workspaceID.String(),
-		Decision: "ALLOW", Action: "filesystem.capability.issued", Limit: 1,
+		Decision: "ALLOW", AllowMissingDecisionAction: "filesystem.capability.issued",
+		Limit: 1,
 	})
 
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "filesystem.capability.issued", rows[0].Action)
-	require.Equal(t, "ALLOW", rows[0].Detail["decision"])
+	require.NotContains(t, rows[0].Detail, "decision")
+	require.Equal(t, workspaceID.String(), rows[0].Detail["workspace_id"])
 }

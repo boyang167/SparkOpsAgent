@@ -4,10 +4,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type auditListStub struct {
@@ -41,6 +44,45 @@ func TestListFileAuditEventsScopesWorkspaceAndDecisionBeforePagination(t *testin
 	require.Equal(t, "DENY", store.filter.Decision)
 	require.Len(t, result.Items, 1)
 	require.Equal(t, "DENY", result.Items[0].Result)
+}
+
+func TestListFileAuditEventsTreatsOnlyLegacyCapabilityWithoutDecisionAsAllow(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:audit-query-legacy-allow?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+	store := audit.NewGormStore(db)
+	require.NoError(t, store.AutoMigrate())
+
+	orgID := uuid.New()
+	workspaceID := uuid.New()
+	otherWorkspaceID := uuid.New()
+	actorID := kernel.MemberID{UUID: uuid.New()}
+	for _, fixture := range []struct {
+		action      string
+		workspaceID uuid.UUID
+	}{
+		{action: "filesystem.capability.issued", workspaceID: workspaceID},
+		{action: "filesystem.node.rename", workspaceID: workspaceID},
+		{action: "filesystem.capability.issued", workspaceID: otherWorkspaceID},
+	} {
+		require.NoError(t, store.Append(context.Background(), audit.Entry{
+			ActorID: actorID, OrgID: &kernel.OrgID{UUID: orgID},
+			Action: fixture.action, ResourceType: "filesystem", ResourceID: uuid.NewString(),
+			Detail: map[string]any{"workspace_id": fixture.workspaceID.String()},
+		}))
+	}
+
+	result, err := NewListFileAuditEventsHandler(store).Handle(context.Background(), ListFileAuditEvents{
+		OrganizationID: orgID,
+		WorkspaceID:    workspaceID,
+		Result:         "ALLOW",
+		Limit:          1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, "filesystem.capability.issued", result.Items[0].Action)
+	require.Equal(t, "ALLOW", result.Items[0].Result)
 }
 
 func TestListFileAuditEventsRecursivelyRedactsSensitiveDetail(t *testing.T) {
@@ -88,17 +130,23 @@ func TestListFileAuditEventsUsesNormalizedExactSensitiveKeysWithoutHidingMetadat
 		"Token": "x", "TOKEN-HASH": "x", "password": "x", "clientSecret": "x",
 		"apiKey": "x", "X-Access-Key": "x", "privateKey": "x",
 		"Authorization": "x", "session-cookie": "x", "databaseCredential": "x",
+		"PasswordHash": "x", "API-KEY-HASH": "x", "secretValue": "x",
+		"AuthorizationHeader": "x", "refreshTokenValue": "x",
 	}
 	safe := map[string]any{
 		"token_count": 7, "tokenizer": "bpe", "credential_id": "credential-1",
 		"access_key_id": "public-id", "private_key_algorithm": "ed25519",
+		"password_algorithm": "argon2id", "capability_id": "capability-1",
 	}
 	detail := map[string]any{
 		"workspace_id": workspaceID.String(),
 		"sensitive":    sensitive,
 		"safe":         safe,
 		"nested": []any{
-			map[string]any{"API_KEY": "x", "token_count": 2},
+			map[string]any{
+				"API_KEY": "x", "token_count": 2,
+				"Secret-Value": "x", "CREDENTIAL_ID": "safe-id",
+			},
 		},
 	}
 	store := &auditListStub{rows: []audit.LogView{{
@@ -119,5 +167,7 @@ func TestListFileAuditEventsUsesNormalizedExactSensitiveKeysWithoutHidingMetadat
 	require.Equal(t, safe, result.Items[0].Detail["safe"])
 	nested := result.Items[0].Detail["nested"].([]any)[0].(map[string]any)
 	require.Equal(t, "[REDACTED]", nested["API_KEY"])
+	require.Equal(t, "[REDACTED]", nested["Secret-Value"])
 	require.Equal(t, 2, nested["token_count"])
+	require.Equal(t, "safe-id", nested["CREDENTIAL_ID"])
 }

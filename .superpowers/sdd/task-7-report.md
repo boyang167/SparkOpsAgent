@@ -146,3 +146,35 @@
 
 - Message: `fix(filesystem): close task 7 audit review`
 - Commit: 本追加报告所在提交。
+
+---
+
+## 最后 2 个 Important
+
+### RED
+
+`go test ./internal/modules/filesystem/application/query`
+
+- 退出码 1。
+- `result=ALLOW` 查询无法返回历史上缺少 decision 的 `filesystem.capability.issued`。
+- `PasswordHash`、`API-KEY-HASH`、`secretValue`、`AuthorizationHeader` 等敏感复合键未被脱敏。
+
+### GREEN
+
+1. 定向 query 与 repository：`go test ./internal/modules/filesystem/application/query ./internal/platform/audit` 通过。
+2. 相关 Go/OpenAPI：`go test ./internal/modules/filesystem/... ./internal/platform/audit ./api/openapi` 全部通过。
+3. 前端必要回归：AuditWorkspace 与 filesystem web SDK 共 2 个文件、17 项测试通过。
+4. Web typecheck、IDE diagnostics、`git diff --check` 通过。
+
+### 实现取舍
+
+- audit `ListFilter` 增加显式 `AllowMissingDecisionAction` 兼容开关。仅 filesystem query 在 `result=ALLOW` 时设置为 `filesystem.capability.issued`；repository 在 workspace 条件之后、limit/offset 之前应用：
+  `decision=ALLOW OR (action=filesystem.capability.issued AND decision missing)`。
+- 因此历史 capability issued 可见；其他缺 decision 的未知、失败或其他 filesystem 事件不会被归入 ALLOW，跨 workspace 记录也不会混入。
+- 脱敏改为规范化后的 segment 模式，不使用 substring/Contains。敏感 segment/pattern 可位于键名前部、中部或末尾；仅当其后恰好是允许元数据后缀 `id`、`count`、`algorithm` 时保留。
+- 覆盖 password_hash、api_key_hash、secret_value、authorization_header、refresh_token_value 等复合形式；保留 token_count、tokenizer、credential_id、access_key_id、private_key_algorithm 等元数据，并继续递归处理嵌套对象/数组、大小写、连字符和驼峰。
+
+### 提交
+
+- Message: `fix(filesystem): support legacy audit allow`
+- Commit: 本追加报告所在提交。

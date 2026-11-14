@@ -92,6 +92,9 @@ func (h *ListFileAuditEventsHandler) Handle(ctx context.Context, q ListFileAudit
 	}
 	if q.Result != "" {
 		filter.Decision = strings.ToUpper(strings.TrimSpace(q.Result))
+		if filter.Decision == "ALLOW" {
+			filter.AllowMissingDecisionAction = "filesystem.capability.issued"
+		}
 	}
 	if q.From != nil {
 		filter.CreatedAtAfter = q.From.UTC()
@@ -159,25 +162,47 @@ func sanitizeAuditValue(value any) any {
 }
 
 func sensitiveAuditKey(key string) bool {
-	normalized := normalizeAuditKey(key)
-	for _, sensitive := range []string{
-		"token",
-		"token_hash",
-		"password",
-		"secret",
-		"api_key",
-		"access_key",
-		"private_key",
-		"authorization",
-		"cookie",
-		"credential",
-		"capability",
-	} {
-		if normalized == sensitive || strings.HasSuffix(normalized, "_"+sensitive) {
+	segments := strings.Split(normalizeAuditKey(key), "_")
+	sensitivePatterns := [][]string{
+		{"api", "key"},
+		{"access", "key"},
+		{"private", "key"},
+		{"token"},
+		{"password"},
+		{"secret"},
+		{"authorization"},
+		{"cookie"},
+		{"credential"},
+		{"capability"},
+	}
+	allowedMetadataSuffixes := map[string]bool{
+		"id": true, "count": true, "algorithm": true,
+	}
+	for start := range segments {
+		for _, pattern := range sensitivePatterns {
+			if !segmentsMatch(segments[start:], pattern) {
+				continue
+			}
+			remaining := segments[start+len(pattern):]
+			if len(remaining) == 1 && allowedMetadataSuffixes[remaining[0]] {
+				continue
+			}
 			return true
 		}
 	}
 	return false
+}
+
+func segmentsMatch(segments, pattern []string) bool {
+	if len(segments) < len(pattern) {
+		return false
+	}
+	for index := range pattern {
+		if segments[index] != pattern[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeAuditKey(key string) string {

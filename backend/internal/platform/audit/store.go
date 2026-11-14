@@ -96,10 +96,25 @@ func (s *GormStore) List(ctx context.Context, filter ListFilter) ([]LogView, err
 		}
 	}
 	if decision := strings.TrimSpace(filter.Decision); decision != "" {
+		legacyAllowAction := strings.TrimSpace(filter.AllowMissingDecisionAction)
 		if s.db.Dialector.Name() == "postgres" {
-			q = q.Where("detail ->> 'decision' = ?", decision)
+			if strings.EqualFold(decision, "ALLOW") && legacyAllowAction != "" {
+				q = q.Where(
+					"(detail ->> 'decision' = ? OR (action = ? AND detail ->> 'decision' IS NULL))",
+					decision, legacyAllowAction,
+				)
+			} else {
+				q = q.Where("detail ->> 'decision' = ?", decision)
+			}
 		} else {
-			q = q.Where("json_extract(detail, '$.decision') = ?", decision)
+			if strings.EqualFold(decision, "ALLOW") && legacyAllowAction != "" {
+				q = q.Where(
+					"(json_extract(detail, '$.decision') = ? OR (action = ? AND json_extract(detail, '$.decision') IS NULL))",
+					decision, legacyAllowAction,
+				)
+			} else {
+				q = q.Where("json_extract(detail, '$.decision') = ?", decision)
+			}
 		}
 	}
 	if !filter.CreatedAtAfter.IsZero() {
