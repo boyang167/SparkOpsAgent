@@ -137,6 +137,86 @@ func TestCreateTransferSameKeyDifferentParametersConflicts(t *testing.T) {
 	assertTransferSideEffectCounts(t, db, 1, 1, 1, 2)
 }
 
+func TestCreateTransferRejectsDirectUploadToNonLocalProvider(t *testing.T) {
+	tests := []struct {
+		name         string
+		providerID   func(uuid.UUID) uuid.UUID
+		organization func(uuid.UUID) uuid.UUID
+		providerType model.ProviderType
+		status       string
+	}{
+		{
+			name: "S3 provider", providerID: DefaultLocalProviderID,
+			organization: func(id uuid.UUID) uuid.UUID { return id },
+			providerType: model.ProviderTypeS3, status: "ACTIVE",
+		},
+		{
+			name: "custom LOCAL provider", providerID: func(uuid.UUID) uuid.UUID { return uuid.New() },
+			organization: func(id uuid.UUID) uuid.UUID { return id },
+			providerType: model.ProviderTypeLocal, status: "ACTIVE",
+		},
+		{
+			name: "inactive default LOCAL provider", providerID: DefaultLocalProviderID,
+			organization: func(id uuid.UUID) uuid.UUID { return id },
+			providerType: model.ProviderTypeLocal, status: "DISABLED",
+		},
+		{
+			name: "cross-organization default LOCAL provider", providerID: DefaultLocalProviderID,
+			organization: func(uuid.UUID) uuid.UUID { return uuid.New() },
+			providerType: model.ProviderTypeLocal, status: "ACTIVE",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, ns := newTransferTestDB(t)
+			repo := persistence.NewRepository(db)
+			providerID := tt.providerID(ns.OrganizationID)
+			provider, err := model.NewStorageProvider(model.StorageProviderInput{
+				ID: providerID, OrganizationID: tt.organization(ns.OrganizationID),
+				Name: "direct-provider", ProviderType: tt.providerType,
+				Endpoint: t.TempDir(), SecretRef: "secret://filesystem/provider", Status: tt.status,
+			})
+			require.NoError(t, err)
+			require.NoError(t, repo.CreateStorageProvider(context.Background(), provider))
+			cmd := transferFixture(ns)
+			cmd.Protocol = model.TransferProtocolDirect
+			cmd.ProviderID = provider.ID
+			cmd.IdempotencyKey = "direct-provider"
+
+			_, err = newTransferHandler(db).Handle(context.Background(), cmd)
+
+			require.ErrorIs(t, err, model.ErrInvalidTransfer)
+		})
+	}
+}
+
+func TestCreateTransferAllowsDirectUploadOnlyWhenGatewayRootMatches(t *testing.T) {
+	db, ns := newTransferTestDB(t)
+	root := t.TempDir()
+	repo := persistence.NewRepository(db)
+	provider, err := model.NewStorageProvider(model.StorageProviderInput{
+		ID: DefaultLocalProviderID(ns.OrganizationID), OrganizationID: ns.OrganizationID,
+		Name: DefaultLocalProviderName, ProviderType: model.ProviderTypeLocal,
+		Endpoint: root, SecretRef: "local://default", Status: "ACTIVE",
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateStorageProvider(context.Background(), provider))
+	handler := newTransferHandler(db)
+	configurer, ok := any(handler).(interface {
+		WithDirectLocalProvider(string) *CreateTransferHandler
+	})
+	require.True(t, ok)
+	handler = configurer.WithDirectLocalProvider(root)
+	cmd := transferFixture(ns)
+	cmd.Protocol = model.TransferProtocolDirect
+	cmd.ProviderID = provider.ID
+	cmd.IdempotencyKey = "direct-default-local"
+
+	_, err = handler.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+}
+
 func TestCreateTransferCanonicalizesExpiryToPostgresMicroseconds(t *testing.T) {
 	db, ns := newTransferTestDB(t)
 	cmd := transferFixture(ns)

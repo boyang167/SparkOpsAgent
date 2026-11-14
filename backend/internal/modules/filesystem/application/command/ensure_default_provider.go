@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/google/uuid"
@@ -49,6 +51,9 @@ func (h *EnsureDefaultLocalProviderHandler) Handle(ctx context.Context, cmd Ensu
 	}
 	id := DefaultLocalProviderID(cmd.OrganizationID)
 	if existing, err := h.repo.GetStorageProvider(ctx, id); err == nil && existing != nil {
+		if !matchesDefaultLocalProvider(existing, cmd.OrganizationID, root) {
+			return uuid.Nil, domain.ErrStorageProviderConflict
+		}
 		return existing.ID, nil
 	} else if err != nil && !errors.Is(err, domain.ErrStorageProviderNotFound) {
 		return uuid.Nil, err
@@ -63,9 +68,42 @@ func (h *EnsureDefaultLocalProviderHandler) Handle(ctx context.Context, cmd Ensu
 	}
 	if err := h.repo.CreateStorageProvider(ctx, provider); err != nil {
 		if errors.Is(err, domain.ErrStorageProviderConflict) {
+			existing, readErr := h.repo.GetStorageProvider(ctx, id)
+			if readErr != nil {
+				return uuid.Nil, readErr
+			}
+			if !matchesDefaultLocalProvider(existing, cmd.OrganizationID, root) {
+				return uuid.Nil, domain.ErrStorageProviderConflict
+			}
 			return id, nil
 		}
 		return uuid.Nil, err
 	}
 	return id, nil
+}
+
+func matchesDefaultLocalProvider(provider *model.StorageProvider, organizationID uuid.UUID, root string) bool {
+	if provider == nil ||
+		provider.ID != DefaultLocalProviderID(organizationID) ||
+		provider.OrganizationID != organizationID ||
+		provider.Name != DefaultLocalProviderName ||
+		provider.ProviderType != model.ProviderTypeLocal ||
+		strings.TrimSpace(provider.SecretRef) != "local://default" ||
+		strings.TrimSpace(provider.Status) != "ACTIVE" {
+		return false
+	}
+	return sameLocalRoot(provider.Endpoint, root)
+}
+
+func sameLocalRoot(leftRoot, rightRoot string) bool {
+	left, leftErr := filepath.Abs(strings.TrimSpace(leftRoot))
+	right, rightErr := filepath.Abs(strings.TrimSpace(rightRoot))
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	left, right = filepath.Clean(left), filepath.Clean(right)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }

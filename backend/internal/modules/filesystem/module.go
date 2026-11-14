@@ -28,7 +28,8 @@ import (
 )
 
 type Module struct {
-	tokens *authn.TokenProvider
+	tokens         *authn.TokenProvider
+	runtimeCatalog *fsstorage.RuntimeCatalog
 }
 
 func New(tokens *authn.TokenProvider) *Module {
@@ -36,6 +37,15 @@ func New(tokens *authn.TokenProvider) *Module {
 }
 
 func (m *Module) Name() string { return "filesystem" }
+
+func (m *Module) Close() error {
+	if m == nil || m.runtimeCatalog == nil {
+		return nil
+	}
+	catalog := m.runtimeCatalog
+	m.runtimeCatalog = nil
+	return catalog.Close()
+}
 
 func (m *Module) Register(c *appctx.Container) error {
 	if c == nil {
@@ -97,7 +107,8 @@ func (m *Module) Register(c *appctx.Container) error {
 	if issuerErr != nil {
 		return fmt.Errorf("filesystem transfer capability issuer: %w", issuerErr)
 	}
-	createTransfer := command.NewCreateTransferHandler(repo, c.Transactor, c.EventBus, c.AuditLogger, nil)
+	createTransfer := command.NewCreateTransferHandler(repo, c.Transactor, c.EventBus, c.AuditLogger, nil).
+		WithDirectLocalProvider(storageRoot)
 	getTransfer := query.NewGetTransferHandler(repo)
 	listTransfers := query.NewListTransfersHandler(repo)
 	abortTransfer := command.NewAbortTransferHandler(repo, c.Transactor)
@@ -160,6 +171,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	if err != nil {
 		return fmt.Errorf("filesystem runtime catalog: %w", err)
 	}
+	m.runtimeCatalog = runtimeCatalog
 	gatewayControl := gatewaycontrol.NewService(repo, runtimeCatalog, recordUploaded.Handle)
 	beginSFTP := command.NewBeginSFTPUploadHandler(repo, createTransfer, storageRoot, ensureDefault)
 	filesystemhttp.RegisterInternalGatewayRoutes(c.Engine, c.Config, filesystemhttp.InternalGatewayHandlers{

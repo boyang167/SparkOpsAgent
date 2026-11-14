@@ -37,7 +37,7 @@ func TestRegisterProviderPersistsMetadataWithoutPlaintextSecret(t *testing.T) {
 	result, err := handler.Handle(context.Background(), RegisterProvider{
 		ID: id, OrganizationID: orgID, Name: "local-primary",
 		ProviderType: model.ProviderTypeLocal, Endpoint: t.TempDir(),
-		SecretRef: "vault://filesystem/local-primary",
+		SecretRef:    "vault://filesystem/local-primary",
 		Capabilities: map[string]any{"encryption": true},
 	})
 	require.NoError(t, err)
@@ -53,4 +53,34 @@ func TestRegisterProviderRejectsEmptySecretRef(t *testing.T) {
 		ProviderType: model.ProviderTypeLocal, Endpoint: t.TempDir(), SecretRef: " ",
 	})
 	require.ErrorIs(t, err, model.ErrInvalidStorageProvider)
+}
+
+func TestRegisterProviderRejectsSystemReservedID(t *testing.T) {
+	orgID := uuid.New()
+	handler := NewRegisterProviderHandler(&providerRepoStub{})
+
+	_, err := handler.Handle(context.Background(), RegisterProvider{
+		ID: DefaultLocalProviderID(orgID), OrganizationID: orgID, Name: "reserved",
+		ProviderType: model.ProviderTypeLocal, Endpoint: t.TempDir(),
+		SecretRef: "vault://filesystem/reserved",
+	})
+
+	require.ErrorIs(t, err, model.ErrInvalidStorageProvider)
+}
+
+func TestEnsureDefaultLocalProviderRejectsMismatchedExistingProvider(t *testing.T) {
+	orgID := uuid.New()
+	repo := &providerRepoStub{saved: &model.StorageProvider{
+		ID: DefaultLocalProviderID(orgID), OrganizationID: orgID,
+		Name: DefaultLocalProviderName, ProviderType: model.ProviderTypeLocal,
+		Endpoint: t.TempDir(), SecretRef: "local://default", Status: "ACTIVE",
+	}}
+	handler := NewEnsureDefaultLocalProviderHandler(repo)
+
+	_, err := handler.Handle(context.Background(), EnsureDefaultLocalProvider{
+		OrganizationID: orgID,
+		StorageRoot:    t.TempDir(),
+	})
+
+	require.ErrorIs(t, err, domain.ErrStorageProviderConflict)
 }

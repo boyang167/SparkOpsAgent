@@ -39,6 +39,9 @@ func NewRegisterProviderHandler(repo storageProviderWriter) *RegisterProviderHan
 }
 
 func (h *RegisterProviderHandler) Handle(ctx context.Context, cmd RegisterProvider) (RegisterProviderResult, error) {
+	if cmd.ID.Version() == 5 {
+		return RegisterProviderResult{}, model.ErrInvalidStorageProvider
+	}
 	provider, err := model.NewStorageProvider(model.StorageProviderInput{
 		ID: cmd.ID, OrganizationID: cmd.OrganizationID, Name: cmd.Name,
 		ProviderType: cmd.ProviderType, Endpoint: cmd.Endpoint, SecretRef: cmd.SecretRef,

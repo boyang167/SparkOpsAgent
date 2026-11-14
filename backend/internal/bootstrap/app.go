@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -189,6 +190,7 @@ func Run(ctx context.Context) error {
 		logger.Warn("database unavailable, skipping business modules")
 	}
 
+	defer closeModules(modules, logger)
 	for _, m := range modules {
 		if err := m.Register(c); err != nil {
 			return fmt.Errorf("register module %s: %w", m.Name(), err)
@@ -261,6 +263,18 @@ func Run(ctx context.Context) error {
 		closeErr := msgFactory.Close()
 		factoryClosed = true
 		return errors.Join(err, closeErr)
+	}
+}
+
+func closeModules(modules []appctx.Module, logger *zap.Logger) {
+	for i := len(modules) - 1; i >= 0; i-- {
+		closer, ok := modules[i].(io.Closer)
+		if !ok {
+			continue
+		}
+		if err := closer.Close(); err != nil && logger != nil {
+			logger.Error("module close failed", zap.String("module", modules[i].Name()), zap.Error(err))
+		}
 	}
 }
 

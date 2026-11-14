@@ -2,6 +2,7 @@ package filesystem
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -136,6 +137,9 @@ func TestRegisterExposesMetadataRoutesWithoutLocalProvider(t *testing.T) {
 
 	err = module.Register(container)
 	require.ErrorContains(t, err, "duplicate event descriptor")
+	closer, ok := any(module).(io.Closer)
+	require.True(t, ok, "filesystem module must release its runtime catalog")
+	require.NoError(t, closer.Close())
 }
 
 var _ authz.PermissionChecker = allowPermissions{}

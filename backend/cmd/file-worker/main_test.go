@@ -23,3 +23,9 @@ func TestRunWorkerStartsMessagingAfterRegisteringSubscribers(t *testing.T) {
 	require.NotEqual(t, -1, startAt)
 	require.Greater(t, startAt, registerAt)
 }
+
+func TestRunWorkerClosesRuntimeCatalog(t *testing.T) {
+	source, err := os.ReadFile("run.go")
+	require.NoError(t, err)
+	require.Contains(t, string(source), "catalog.Close()")
+}

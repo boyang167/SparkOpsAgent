@@ -54,16 +54,22 @@ type transferPlacer interface {
 }
 
 type CreateTransferHandler struct {
-	repo      repository.FilesystemRepository
-	tx        postgres.Transactor
-	bus       messaging.Bus
-	audit     auditPort
-	placement transferPlacer
+	repo            repository.FilesystemRepository
+	tx              postgres.Transactor
+	bus             messaging.Bus
+	audit           auditPort
+	placement       transferPlacer
+	directLocalRoot string
 }
 
 func NewCreateTransferHandler(repo repository.FilesystemRepository, tx postgres.Transactor, bus messaging.Bus, logger auditPort, placement transferPlacer) *CreateTransferHandler {
 	requireMutationDependencies(repo, tx)
 	return &CreateTransferHandler{repo: repo, tx: tx, bus: bus, audit: logger, placement: placement}
+}
+
+func (h *CreateTransferHandler) WithDirectLocalProvider(root string) *CreateTransferHandler {
+	h.directLocalRoot = strings.TrimSpace(root)
+	return h
 }
 
 func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) (out TransferDescriptor, err error) {
@@ -129,6 +135,22 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 		providerID, err = h.defaultProviderID(ctx, cmd.OrganizationID)
 		if err != nil {
 			return out, err
+		}
+	}
+	if cmd.Protocol == model.TransferProtocolDirect {
+		if providerID != DefaultLocalProviderID(cmd.OrganizationID) {
+			return out, model.ErrInvalidTransfer
+		}
+		provider, providerErr := h.repo.GetStorageProvider(ctx, providerID)
+		if providerErr != nil {
+			return out, providerErr
+		}
+		if provider.OrganizationID != cmd.OrganizationID ||
+			provider.ProviderType != model.ProviderTypeLocal ||
+			strings.TrimSpace(provider.Status) != "ACTIVE" ||
+			h.directLocalRoot == "" ||
+			!sameLocalRoot(provider.Endpoint, h.directLocalRoot) {
+			return out, model.ErrInvalidTransfer
 		}
 	}
 

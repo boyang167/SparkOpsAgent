@@ -2,7 +2,9 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
@@ -21,7 +23,9 @@ import (
 type RuntimeCatalog struct {
 	repo       repository.FilesystemRepository
 	fallback   storage.Provider
-	cache      sync.Map
+	mu         sync.Mutex
+	cache      map[uuid.UUID]storage.Provider
+	closed     bool
 	localRoot  string
 	s3Defaults s3storage.Config
 }
@@ -35,7 +39,10 @@ func NewRuntimeCatalog(repo repository.FilesystemRepository, cfg RuntimeCatalogC
 	if repo == nil {
 		return nil, fmt.Errorf("filesystem runtime catalog requires repository")
 	}
-	catalog := &RuntimeCatalog{repo: repo, localRoot: cfg.LocalFallbackRoot, s3Defaults: cfg.S3}
+	catalog := &RuntimeCatalog{
+		repo: repo, cache: make(map[uuid.UUID]storage.Provider),
+		localRoot: cfg.LocalFallbackRoot, s3Defaults: cfg.S3,
+	}
 	if root := strings.TrimSpace(cfg.LocalFallbackRoot); root != "" {
 		provider, err := local.New(root)
 		if err != nil {
@@ -53,10 +60,13 @@ func (c *RuntimeCatalog) Provider(ctx context.Context, id uuid.UUID) (storage.Pr
 	if id == uuid.Nil {
 		return nil, fmt.Errorf("storage provider id is required")
 	}
-	if cached, ok := c.cache.Load(id); ok {
-		if provider, ok := cached.(storage.Provider); ok && provider != nil {
-			return provider, nil
-		}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, fmt.Errorf("storage provider catalog is closed")
+	}
+	if provider := c.cache[id]; provider != nil {
+		return provider, nil
 	}
 	meta, err := c.repo.GetStorageProvider(ctx, id)
 	if err != nil {
@@ -66,8 +76,38 @@ func (c *RuntimeCatalog) Provider(ctx context.Context, id uuid.UUID) (storage.Pr
 	if err != nil {
 		return nil, err
 	}
-	c.cache.Store(id, provider)
+	c.cache[id] = provider
 	return provider, nil
+}
+
+func (c *RuntimeCatalog) Close() error {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
+	}
+	c.closed = true
+	providers := make([]storage.Provider, 0, len(c.cache)+1)
+	if c.fallback != nil {
+		providers = append(providers, c.fallback)
+		c.fallback = nil
+	}
+	for id, provider := range c.cache {
+		providers = append(providers, provider)
+		delete(c.cache, id)
+	}
+	c.mu.Unlock()
+
+	var closeErr error
+	for _, provider := range providers {
+		if closer, ok := provider.(io.Closer); ok {
+			closeErr = errors.Join(closeErr, closer.Close())
+		}
+	}
+	return closeErr
 }
 
 func (c *RuntimeCatalog) openProvider(meta *model.StorageProvider) (storage.Provider, error) {

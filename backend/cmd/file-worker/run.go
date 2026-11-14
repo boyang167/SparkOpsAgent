@@ -24,6 +24,15 @@ func runWorker(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := sqlDB.Close(); closeErr != nil {
+			log.Printf("database close: %v", closeErr)
+		}
+	}()
 	if err := persistence.AutoMigrate(db); err != nil {
 		return err
 	}
@@ -36,13 +45,19 @@ func runWorker(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
+	var catalog *fsstorage.RuntimeCatalog
 	defer func() {
 		if closeErr := factory.Close(); closeErr != nil {
 			log.Printf("messaging close: %v", closeErr)
 		}
+		if catalog != nil {
+			if closeErr := catalog.Close(); closeErr != nil {
+				log.Printf("storage catalog close: %v", closeErr)
+			}
+		}
 	}()
 	repo := persistence.NewRepository(db)
-	catalog, err := fsstorage.NewRuntimeCatalog(repo, fsstorage.RuntimeCatalogConfig{
+	catalog, err = fsstorage.NewRuntimeCatalog(repo, fsstorage.RuntimeCatalogConfig{
 		LocalFallbackRoot: cfg.Filesystem.TransferGateway.StorageRoot,
 	})
 	if err != nil {
