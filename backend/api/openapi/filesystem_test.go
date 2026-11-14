@@ -301,6 +301,7 @@ func TestFilesystemSpecificationExactlyMatchesRouter(t *testing.T) {
 		path = strings.ReplaceAll(path, ":revisionId", "{revisionId}")
 		path = strings.ReplaceAll(path, ":sessionId", "{sessionId}")
 		path = strings.ReplaceAll(path, ":grantId", "{grantId}")
+		path = strings.ReplaceAll(path, ":requestId", "{requestId}")
 		path = strings.ReplaceAll(path, ":capabilityId", "{capabilityId}")
 		path = strings.ReplaceAll(path, ":exportId", "{exportId}")
 		path = strings.ReplaceAll(path, ":providerId", "{providerId}")

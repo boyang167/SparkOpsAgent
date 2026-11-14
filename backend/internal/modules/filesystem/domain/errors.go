@@ -34,6 +34,11 @@ var (
 	ErrUnauthorized                    = ErrResourceDenied
 	ErrCrossOrganizationGrant          = errors.New("filesystem cross-organization grant rejected")
 	ErrAnonymousLinkDisabled           = errors.New("filesystem anonymous links are disabled")
+	ErrUnsupportedPrincipal            = errors.New("filesystem principal type is unsupported")
+	ErrSharePolicyDenied               = errors.New("filesystem sharing policy denied")
+	ErrShareRequestNotFound            = errors.New("filesystem share request not found")
+	ErrShareRequestConflict            = errors.New("filesystem share request status conflict")
+	ErrShareSelfApproval               = errors.New("filesystem high-risk share request requires another approver")
 	ErrCapabilityScopeEmpty            = errors.New("filesystem capability scope is empty")
 	ErrCapabilityScopeDenied           = errors.New("filesystem capability scope denied")
 	ErrCapabilityInvalid               = errors.New("filesystem capability token invalid")

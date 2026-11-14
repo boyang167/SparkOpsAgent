@@ -43,7 +43,10 @@ var postgresFallbackConstraints = []string{
 	`DO $$ BEGIN ALTER TABLE filesystem.file_revisions ADD CONSTRAINT ck_filesystem_revision_values CHECK (revision_no > 0 AND size >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.storage_replicas ADD CONSTRAINT ck_filesystem_replica_state CHECK (state IN ('CREATING','VERIFYING','AVAILABLE','DRAINING','FAILED','DELETED')); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.quota_reservations ADD CONSTRAINT ck_filesystem_reservation_values CHECK (bytes >= 0 AND files >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
-	`DO $$ BEGIN ALTER TABLE filesystem.resource_grants ADD CONSTRAINT ck_filesystem_grant_values CHECK (permission IN ('READ','WRITE','DELETE','SHARE','ADMIN') AND effect IN ('ALLOW','DENY')); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.resource_grants ADD CONSTRAINT ck_filesystem_grant_values CHECK (permission IN ('READ','DOWNLOAD','WRITE','DELETE','SHARE','ADMIN') AND effect IN ('ALLOW','DENY')); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`CREATE INDEX IF NOT EXISTS ix_filesystem_share_requests_org_status ON filesystem.share_requests(organization_id, status, created_at)`,
+	`CREATE INDEX IF NOT EXISTS ix_filesystem_share_requests_node ON filesystem.share_requests(node_id, created_at)`,
+	`DO $$ BEGIN ALTER TABLE filesystem.share_requests ADD CONSTRAINT ck_filesystem_share_request_status CHECK (status IN ('PENDING','APPROVED','REJECTED','CANCELLED')); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.quota_accounts ADD CONSTRAINT ck_filesystem_quota_values CHECK (used_bytes >= 0 AND reserved_bytes >= 0 AND used_files >= 0 AND reserved_files >= 0 AND (max_bytes IS NULL OR max_bytes >= 0) AND (max_files IS NULL OR max_files >= 0)); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_transfer_sessions_workspace_id ON filesystem.transfer_sessions(workspace_id, id)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_transfer_sessions_idempotency ON filesystem.transfer_sessions(workspace_id, idempotency_key)`,
@@ -109,7 +112,10 @@ func AutoMigrate(db *gorm.DB) error {
 			`CREATE TRIGGER IF NOT EXISTS filesystem.trg_transfer_parts_update_bounds BEFORE UPDATE ON transfer_parts BEGIN SELECT CASE WHEN NEW.offset_bytes > (SELECT expected_size FROM transfer_sessions WHERE id = NEW.session_id) OR NEW.size_bytes > (SELECT expected_size FROM transfer_sessions WHERE id = NEW.session_id) - NEW.offset_bytes THEN RAISE(ABORT, 'transfer part exceeds expected session size') END; END`,
 			`CREATE TABLE IF NOT EXISTS filesystem.quota_reservations (id BLOB PRIMARY KEY, quota_account_id BLOB NOT NULL, workspace_id BLOB NOT NULL, session_id BLOB, bytes INTEGER NOT NULL CHECK (bytes >= 0), files INTEGER NOT NULL CHECK (files >= 0), state TEXT NOT NULL, expires_at DATETIME NOT NULL, created_at DATETIME, FOREIGN KEY(quota_account_id, workspace_id) REFERENCES quota_accounts(id, workspace_id), FOREIGN KEY(workspace_id, session_id) REFERENCES transfer_sessions(workspace_id, id))`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_quota_reservations_session ON quota_reservations(workspace_id, session_id) WHERE session_id IS NOT NULL`,
-			`CREATE TABLE IF NOT EXISTS filesystem.resource_grants (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, organization_id BLOB NOT NULL, grantee_id BLOB NOT NULL, principal_type TEXT NOT NULL CHECK (principal_type IN ('USER','WORKSPACE','ORGANIZATION','ROLE','SERVICE_ACCOUNT','AGENT')), principal_id BLOB NOT NULL, permission TEXT NOT NULL CHECK (permission IN ('READ','WRITE','DELETE','SHARE','ADMIN')), effect TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY')), inherit_to_children INTEGER NOT NULL DEFAULT 1 CHECK (inherit_to_children IN (0, 1)), expires_at DATETIME, revoked_at DATETIME, policy_version INTEGER NOT NULL DEFAULT 1, created_at DATETIME, FOREIGN KEY(node_id) REFERENCES nodes(id))`,
+			`CREATE TABLE IF NOT EXISTS filesystem.resource_grants (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, organization_id BLOB NOT NULL, grantee_id BLOB NOT NULL, principal_type TEXT NOT NULL CHECK (principal_type IN ('USER','WORKSPACE','ORGANIZATION','ROLE','SERVICE_ACCOUNT','AGENT')), principal_id BLOB NOT NULL, permission TEXT NOT NULL CHECK (permission IN ('READ','DOWNLOAD','WRITE','DELETE','SHARE','ADMIN')), effect TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY')), inherit_to_children INTEGER NOT NULL DEFAULT 1 CHECK (inherit_to_children IN (0, 1)), expires_at DATETIME, revoked_at DATETIME, policy_version INTEGER NOT NULL DEFAULT 1, created_at DATETIME, FOREIGN KEY(node_id) REFERENCES nodes(id))`,
+			`CREATE TABLE IF NOT EXISTS filesystem.share_requests (id BLOB PRIMARY KEY, organization_id BLOB NOT NULL, namespace_id BLOB NOT NULL, node_id BLOB NOT NULL, requested_by BLOB NOT NULL, principal_type TEXT NOT NULL CHECK (principal_type IN ('USER','WORKSPACE','ORGANIZATION','ROLE')), principal_ids TEXT NOT NULL, actions TEXT NOT NULL, inherit_to_children INTEGER NOT NULL DEFAULT 1 CHECK (inherit_to_children IN (0, 1)), expires_at DATETIME, classification TEXT NOT NULL CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED')), status TEXT NOT NULL CHECK (status IN ('PENDING','APPROVED','REJECTED','CANCELLED')), reviewed_by BLOB, reviewed_at DATETIME, rejection_reason TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL, FOREIGN KEY(namespace_id) REFERENCES namespaces(id), FOREIGN KEY(node_id) REFERENCES nodes(id))`,
+			`CREATE INDEX IF NOT EXISTS filesystem.ix_filesystem_share_requests_org_status ON share_requests(organization_id, status, created_at)`,
+			`CREATE INDEX IF NOT EXISTS filesystem.ix_filesystem_share_requests_node ON share_requests(node_id, created_at)`,
 			`CREATE TABLE IF NOT EXISTS filesystem.file_links (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, revision_id BLOB, link_type TEXT NOT NULL, link_id BLOB NOT NULL, created_at DATETIME, UNIQUE(link_type, link_id, node_id, revision_id), FOREIGN KEY(node_id) REFERENCES nodes(id), FOREIGN KEY(revision_id) REFERENCES file_revisions(id))`,
 			`CREATE TABLE IF NOT EXISTS filesystem.command_dedup (command_id BLOB PRIMARY KEY, workspace_id BLOB NOT NULL, operation TEXT NOT NULL, request_hash TEXT NOT NULL, node_id BLOB, revision_id BLOB, state TEXT NOT NULL, created_at DATETIME, updated_at DATETIME)`,
 			`CREATE TABLE IF NOT EXISTS filesystem.storage_providers (id BLOB PRIMARY KEY, organization_id BLOB NOT NULL, name TEXT NOT NULL CHECK (length(trim(name)) > 0), provider_type TEXT NOT NULL CHECK (provider_type IN ('LOCAL','NFS','S3')), endpoint TEXT NOT NULL DEFAULT '', secret_ref TEXT NOT NULL CHECK (length(trim(secret_ref)) > 0), capabilities TEXT NOT NULL DEFAULT '{}', health TEXT NOT NULL DEFAULT '{}', config_version INTEGER NOT NULL DEFAULT 1 CHECK (config_version > 0), status TEXT NOT NULL DEFAULT 'ACTIVE', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, UNIQUE(organization_id, name))`,
@@ -139,7 +145,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return wrapPersistence(err)
 		}
 	}
-	if err := db.AutoMigrate(&namespaceRow{}, &nodeRow{}, &blobRow{}, &revisionRow{}, &replicaRow{}, &replicaMigrationRow{}, &quotaAccountRow{}, &transferSessionRow{}, &transferPartRow{}, &quotaReservationRow{}, &resourceGrantRow{}, &fileLinkRow{}, &commandDedupRow{}, &storageProviderRow{}, &storagePoolRow{}, &storagePoolMemberRow{}, &storageBindingRow{}, &lifecyclePolicyRow{}, &capabilityRow{}, &exportTaskRow{}, &artifactRow{}); err != nil {
+	if err := db.AutoMigrate(&namespaceRow{}, &nodeRow{}, &blobRow{}, &revisionRow{}, &replicaRow{}, &replicaMigrationRow{}, &quotaAccountRow{}, &transferSessionRow{}, &transferPartRow{}, &quotaReservationRow{}, &resourceGrantRow{}, &shareRequestRow{}, &fileLinkRow{}, &commandDedupRow{}, &storageProviderRow{}, &storagePoolRow{}, &storagePoolMemberRow{}, &storageBindingRow{}, &lifecyclePolicyRow{}, &capabilityRow{}, &exportTaskRow{}, &artifactRow{}); err != nil {
 		return wrapPersistence(err)
 	}
 	if db.Dialector.Name() == "postgres" {
@@ -157,8 +163,13 @@ func upgradeSQLiteResourceGrants(db *gorm.DB) error {
 	if err != nil {
 		return err
 	}
+	var tableSQL string
+	if err := db.Raw("SELECT sql FROM filesystem.sqlite_master WHERE type = 'table' AND name = 'resource_grants'").Scan(&tableSQL).Error; err != nil {
+		return wrapPersistence(err)
+	}
 	if !columns["organization_id"] || !columns["principal_type"] || !columns["principal_id"] ||
-		!notNull["organization_id"] || !notNull["principal_type"] || !notNull["principal_id"] {
+		!notNull["organization_id"] || !notNull["principal_type"] || !notNull["principal_id"] ||
+		!strings.Contains(tableSQL, "'DOWNLOAD'") {
 		if err := rebuildSQLiteResourceGrants(db, columns); err != nil {
 			return err
 		}
@@ -226,7 +237,7 @@ func rebuildSQLiteResourceGrants(db *gorm.DB, columns map[string]bool) error {
 		grantee_id BLOB NOT NULL,
 		principal_type TEXT NOT NULL CHECK (principal_type IN ('USER','WORKSPACE','ORGANIZATION','ROLE','SERVICE_ACCOUNT','AGENT')),
 		principal_id BLOB NOT NULL,
-		permission TEXT NOT NULL CHECK (permission IN ('READ','WRITE','DELETE','SHARE','ADMIN')),
+		permission TEXT NOT NULL CHECK (permission IN ('READ','DOWNLOAD','WRITE','DELETE','SHARE','ADMIN')),
 		effect TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY')),
 		inherit_to_children INTEGER NOT NULL DEFAULT 1 CHECK (inherit_to_children IN (0, 1)),
 		expires_at DATETIME,

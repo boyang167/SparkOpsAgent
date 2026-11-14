@@ -21,6 +21,7 @@ import (
 
 type ResourceAccess struct {
 	Grant            func(ctx context.Context, cmd command.GrantResource) (model.ResourceGrant, error)
+	Share            func(ctx context.Context, cmd command.SubmitShare) (command.ShareResult, error)
 	ListGrants       func(ctx context.Context, cmd command.GrantResource) ([]model.ResourceGrant, error)
 	RevokeGrant      func(ctx context.Context, cmd command.GrantResource, grantID uuid.UUID) error
 	IssueCapability  func(ctx context.Context, cmd command.IssueCapability) (command.IssuedCapability, error)
@@ -41,6 +42,10 @@ type grantBody struct {
 	GranteeOrganizationID string     `json:"grantee_organization_id"`
 	Permission            string     `json:"permission"`
 	Effect                string     `json:"effect"`
+	PrincipalType         string     `json:"principal_type"`
+	PrincipalIDs          []string   `json:"principal_ids"`
+	Actions               []string   `json:"actions"`
+	InheritToChildren     *bool      `json:"inherit_to_children"`
 	ExpiresAt             *time.Time `json:"expires_at"`
 	Anonymous             bool       `json:"anonymous"`
 }
@@ -52,6 +57,27 @@ func (h *Handler) CreateGrant(c *gin.Context) {
 	}
 	var body grantBody
 	if !decodeJSON(c, &body) {
+		return
+	}
+	if h.access.Share != nil {
+		submit, legacy, valid := shareCommand(c, rc, nodeID, body)
+		if !valid {
+			return
+		}
+		result, err := h.access.Share(c.Request.Context(), submit)
+		if err != nil {
+			filesystemError(c, err)
+			return
+		}
+		if result.Request.Status == model.ShareRequestPending {
+			c.JSON(http.StatusAccepted, gin.H{"data": shareRequestView(result.Request)})
+			return
+		}
+		if legacy && len(result.Grants) == 1 {
+			created(c, grantView(result.Grants[0]))
+			return
+		}
+		created(c, shareResultView(result))
 		return
 	}
 	cmd, ok := grantCommand(c, rc, nodeID, body)
@@ -334,11 +360,7 @@ func grantCommand(c *gin.Context, rc requestContext, nodeID uuid.UUID, body gran
 		invalidRequest(c)
 		return command.GrantResource{}, false
 	}
-	granteeOrg, ok := canonicalUUID(body.GranteeOrganizationID)
-	if !ok {
-		invalidRequest(c)
-		return command.GrantResource{}, false
-	}
+	granteeOrg := rc.namespace.OrganizationID
 	permission, ok := resourcePermission(body.Permission)
 	if !ok {
 		invalidRequest(c)
@@ -355,6 +377,46 @@ func grantCommand(c *gin.Context, rc requestContext, nodeID uuid.UUID, body gran
 		NodeID: nodeID, GranteeID: granteeID, Permission: permission, Effect: effect, ExpiresAt: body.ExpiresAt,
 		TraceID: rc.traceID, Anonymous: body.Anonymous,
 	}, true
+}
+
+func shareCommand(c *gin.Context, rc requestContext, nodeID uuid.UUID, body grantBody) (command.SubmitShare, bool, bool) {
+	inherit := true
+	if body.InheritToChildren != nil {
+		inherit = *body.InheritToChildren
+	}
+	principalType := model.PrincipalType(strings.ToUpper(strings.TrimSpace(body.PrincipalType)))
+	principalIDs, ok := parseUUIDs(body.PrincipalIDs)
+	actions := make([]model.ResourcePermission, 0, len(body.Actions))
+	legacy := principalType == "" && len(body.PrincipalIDs) == 0 && len(body.Actions) == 0
+	if legacy {
+		principalType = model.PrincipalUser
+		principalID, valid := canonicalUUID(body.GranteeID)
+		permission, permissionValid := resourcePermission(strings.ToUpper(strings.TrimSpace(body.Permission)))
+		if !valid || !permissionValid || model.GrantEffect(strings.ToUpper(strings.TrimSpace(body.Effect))) != model.GrantEffectAllow || body.Anonymous {
+			invalidRequest(c)
+			return command.SubmitShare{}, true, false
+		}
+		principalIDs = []uuid.UUID{principalID}
+		actions = []model.ResourcePermission{permission}
+	} else {
+		if !ok || len(principalIDs) == 0 || len(body.Actions) == 0 {
+			invalidRequest(c)
+			return command.SubmitShare{}, false, false
+		}
+		for _, raw := range body.Actions {
+			action, valid := resourcePermission(strings.ToUpper(strings.TrimSpace(raw)))
+			if !valid {
+				invalidRequest(c)
+				return command.SubmitShare{}, false, false
+			}
+			actions = append(actions, action)
+		}
+	}
+	return command.SubmitShare{
+		CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID,
+		WorkspaceID: rc.workspaceID, NodeID: nodeID, PrincipalType: principalType, PrincipalIDs: principalIDs,
+		Actions: actions, InheritToChildren: inherit, ExpiresAt: body.ExpiresAt,
+	}, legacy, true
 }
 
 func (h *Handler) resourceAllowed(c *gin.Context, rc requestContext, resourceID uuid.UUID, permissions []model.ResourcePermission) bool {
@@ -394,6 +456,25 @@ func grantView(grant model.ResourceGrant) gin.H {
 	}
 }
 
+func shareResultView(result command.ShareResult) gin.H {
+	grants := make([]gin.H, 0, len(result.Grants))
+	for _, grant := range result.Grants {
+		grants = append(grants, grantView(grant))
+	}
+	return gin.H{"request": shareRequestView(result.Request), "grants": grants}
+}
+
+func shareRequestView(request model.ShareRequest) gin.H {
+	return gin.H{
+		"id": request.ID, "organization_id": request.OrganizationID, "namespace_id": request.NamespaceID,
+		"node_id": request.NodeID, "requested_by": request.RequestedBy, "principal_type": request.PrincipalType,
+		"principal_ids": request.PrincipalIDs, "actions": request.Actions, "inherit_to_children": request.InheritToChildren,
+		"expires_at": request.ExpiresAt, "classification": request.Classification, "status": request.Status,
+		"reviewed_by": request.ReviewedBy, "reviewed_at": request.ReviewedAt, "rejection_reason": request.RejectionReason,
+		"created_at": request.CreatedAt,
+	}
+}
+
 func exportView(task model.ExportTask) gin.H {
 	return gin.H{
 		"id": task.ID, "source_organization_id": task.SourceOrganizationID, "target_organization_id": task.TargetOrganizationID,
@@ -404,7 +485,7 @@ func exportView(task model.ExportTask) gin.H {
 
 func resourcePermission(raw string) (model.ResourcePermission, bool) {
 	switch model.ResourcePermission(raw) {
-	case model.ResourcePermissionRead, model.ResourcePermissionWrite, model.ResourcePermissionDelete, model.ResourcePermissionShare, model.ResourcePermissionAdmin:
+	case model.ResourcePermissionRead, model.ResourcePermissionDownload, model.ResourcePermissionWrite, model.ResourcePermissionDelete, model.ResourcePermissionShare, model.ResourcePermissionAdmin:
 		return model.ResourcePermission(raw), true
 	default:
 		return "", false
@@ -426,6 +507,8 @@ func actionPermissions(actions []string) ([]model.ResourcePermission, bool) {
 		switch action {
 		case "file:read":
 			out = append(out, model.ResourcePermissionRead)
+		case "file:download":
+			out = append(out, model.ResourcePermissionDownload)
 		case "file:write":
 			out = append(out, model.ResourcePermissionWrite)
 		case "file:delete":

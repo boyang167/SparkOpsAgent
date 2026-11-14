@@ -8,6 +8,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/service"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/subscriber"
+	governancerepository "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/acl"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/infrastructure/persistence"
 	govhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/interface/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/policy"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/integration"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type Module struct {
@@ -31,6 +33,18 @@ func New(tokens *authn.TokenProvider) *Module {
 }
 
 func (m *Module) Name() string { return "governance" }
+
+type roleScopeResolver struct {
+	roles governancerepository.RoleRepository
+}
+
+func (r roleScopeResolver) ResolveRoleWorkspace(ctx context.Context, roleID kernel.RoleID) (kernel.WorkspaceID, error) {
+	role, err := r.roles.FindByID(ctx, roleID)
+	if err != nil {
+		return kernel.WorkspaceID{}, err
+	}
+	return role.WorkspaceID, nil
+}
 
 func (m *Module) Register(c *appctx.Container) error {
 	if c.DB == nil {
@@ -56,6 +70,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.PermissionChecker = checker
 	c.WorkspaceRoleReader = checker
 	c.WorkspaceRolePermissions = checker
+	c.RoleScopeResolver = roleScopeResolver{roles: roleRepo}
 
 	engine, err := policy.NewEngine(c.Config.Policy, c.DB)
 	if err != nil {

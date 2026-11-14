@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	resourceauth "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/authorization"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
@@ -291,6 +293,68 @@ func TestGovernanceInvalidEncryptedCursorReturnsBadRequest(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
 	require.Contains(t, res.Body.String(), "FILESYSTEM_INVALID_REQUEST")
+}
+
+func TestGovernedShareHTTPRequiresIdempotencyAndForwardsTypedDownload(t *testing.T) {
+	orgID, workspaceID, namespaceID, nodeID, principalID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	var captured command.SubmitShare
+	handler := &GovernanceHandler{
+		nodeByID: func(context.Context, uuid.UUID) (*model.Node, error) {
+			return &model.Node{ID: nodeID, NamespaceID: namespaceID}, nil
+		},
+		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: orgID, WorkspaceID: workspaceID}, nil
+		},
+		submitShare: func(_ context.Context, cmd command.SubmitShare) (command.ShareResult, error) {
+			captured = cmd
+			return command.ShareResult{Request: model.ShareRequest{
+				ID: uuid.New(), Status: model.ShareRequestPending, PrincipalType: cmd.PrincipalType,
+				PrincipalIDs: cmd.PrincipalIDs, Actions: cmd.Actions,
+			}}, nil
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{orgID: orgID, active: true}, handler)
+	body := `{"principal_type":"WORKSPACE","principal_ids":["` + principalID.String() + `"],"actions":["READ","DOWNLOAD"]}`
+	send := func(key string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/filesystem/nodes/"+nodeID.String()+"/share-requests", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Organization-ID", orgID.String())
+		req.Header.Set("X-Workspace-ID", workspaceID.String())
+		req.Header.Set("Content-Type", "application/json")
+		if key != "" {
+			req.Header.Set("Idempotency-Key", key)
+		}
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		return res
+	}
+	require.Equal(t, http.StatusBadRequest, send("").Code)
+	response := send("share-1")
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	require.Equal(t, model.PrincipalWorkspace, captured.PrincipalType)
+	require.Equal(t, []model.ResourcePermission{model.ResourcePermissionRead, model.ResourcePermissionDownload}, captured.Actions)
+}
+
+func TestApproveShareRequestHTTPForwardsAuthoritativeOrganization(t *testing.T) {
+	orgID, requestID := uuid.New(), uuid.New()
+	var captured command.ReviewShareRequest
+	handler := &GovernanceHandler{
+		approveShare: func(_ context.Context, cmd command.ReviewShareRequest) (model.ShareRequest, error) {
+			captured = cmd
+			return model.ShareRequest{ID: cmd.RequestID, OrganizationID: cmd.OrganizationID, Status: model.ShareRequestApproved}, nil
+		},
+	}
+	router, token, _, memberID := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{}, handler)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/filesystem/share-requests/"+requestID.String()+"/approve", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Organization-ID", orgID.String())
+	req.Header.Set("Idempotency-Key", "approve-1")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.Equal(t, orgID, captured.OrganizationID)
+	require.Equal(t, memberID.UUID, captured.ActorID)
+	require.Equal(t, requestID, captured.RequestID)
 }
 
 func governanceRouter(t *testing.T, orgs authz.OrgPermissionChecker, workspaces authz.WorkspaceAccessResolver, handler *GovernanceHandler) (*gin.Engine, string, uuid.UUID, kernel.MemberID) {

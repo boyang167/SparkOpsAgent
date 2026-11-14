@@ -839,6 +839,14 @@ func filesystemError(c *gin.Context, err error) {
 		httpx.Fail(c, "FILESYSTEM_CROSS_WORKSPACE", "file reference rejected", http.StatusUnprocessableEntity)
 	case errors.Is(err, domain.ErrAnonymousLinkDisabled):
 		httpx.Fail(c, "FILESYSTEM_ANONYMOUS_LINK_DISABLED", "anonymous links are disabled", http.StatusForbidden)
+	case errors.Is(err, domain.ErrUnsupportedPrincipal), errors.Is(err, domain.ErrSharePolicyDenied):
+		httpx.Fail(c, "FILESYSTEM_SHARE_POLICY_DENIED", "sharing policy denied", http.StatusUnprocessableEntity)
+	case errors.Is(err, domain.ErrShareSelfApproval):
+		httpx.Fail(c, "FILESYSTEM_SHARE_SELF_APPROVAL", "another approver is required", http.StatusForbidden)
+	case errors.Is(err, domain.ErrShareRequestNotFound):
+		httpx.Fail(c, "FILESYSTEM_NOT_FOUND", "filesystem resource not found", http.StatusNotFound)
+	case errors.Is(err, domain.ErrShareRequestConflict):
+		httpx.Fail(c, "FILESYSTEM_CONFLICT", "filesystem operation conflict", http.StatusConflict)
 	case errors.Is(err, domain.ErrCapabilityScopeEmpty):
 		httpx.Fail(c, "FILESYSTEM_CAPABILITY_SCOPE_EMPTY", "capability scope is empty", http.StatusForbidden)
 	case errors.Is(err, domain.ErrCapabilityRevoked):

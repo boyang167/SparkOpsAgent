@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	resourceauth "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/authorization"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
@@ -39,6 +40,9 @@ type GovernanceHandler struct {
 	sharedWithMe    func(context.Context, query.SharedWithMe) ([]repository.SharedNode, string, error)
 	effectiveAccess func(context.Context, query.EffectiveAccess) query.EffectiveAccessResult
 	authorize       func(context.Context, resourceauth.Request) resourceauth.Decision
+	submitShare     func(context.Context, command.SubmitShare) (command.ShareResult, error)
+	approveShare    func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error)
+	rejectShare     func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error)
 }
 
 func NewGovernanceHandler(
@@ -60,6 +64,14 @@ func NewGovernanceHandler(
 	}
 }
 
+func (h *GovernanceHandler) BindShareWorkflow(
+	submit func(context.Context, command.SubmitShare) (command.ShareResult, error),
+	approve func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error),
+	reject func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error),
+) {
+	h.submitShare, h.approveShare, h.rejectShare = submit, approve, reject
+}
+
 func RegisterGovernanceRoutes(
 	engine *gin.Engine,
 	entitlement gin.HandlerFunc,
@@ -77,6 +89,10 @@ func RegisterGovernanceRoutes(
 	base.GET("/namespaces/:namespaceId/children", handler.ListChildren)
 	base.GET("/shared-with-me", handler.SharedWithMe)
 	base.GET("/nodes/:nodeId/effective-access", handler.EffectiveAccess)
+	base.POST("/nodes/:nodeId/grants", requireIdempotencyKey(), handler.CreateGovernedGrant)
+	base.POST("/nodes/:nodeId/share-requests", requireIdempotencyKey(), handler.CreateShareRequest)
+	base.POST("/share-requests/:requestId/approve", requireIdempotencyKey(), handler.ApproveShareRequest)
+	base.POST("/share-requests/:requestId/reject", requireIdempotencyKey(), handler.RejectShareRequest)
 }
 
 type governanceContext struct {
@@ -342,6 +358,134 @@ func (h *GovernanceHandler) EffectiveAccess(c *gin.Context) {
 		ActorID: rc.actorID, WorkspaceID: rc.workspaceID, NamespaceID: namespace.ID, NodeID: nodeID,
 	})
 	httpx.OK(c, effectiveAccessView(result))
+}
+
+func (h *GovernanceHandler) CreateGovernedGrant(c *gin.Context) {
+	h.submitGovernedShare(c)
+}
+
+func (h *GovernanceHandler) CreateShareRequest(c *gin.Context) {
+	h.submitGovernedShare(c)
+}
+
+func (h *GovernanceHandler) submitGovernedShare(c *gin.Context) {
+	rc, ok := governanceRequestContext(c)
+	if !ok || h == nil || h.nodeByID == nil || h.namespaceByID == nil || h.submitShare == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	nodeID, ok := canonicalUUID(c.Param("nodeId"))
+	if !ok {
+		invalidRequest(c)
+		return
+	}
+	node, err := h.nodeByID(c.Request.Context(), nodeID)
+	if err != nil {
+		governanceError(c, err)
+		return
+	}
+	namespace, err := h.namespaceByID(c.Request.Context(), node.NamespaceID)
+	if err != nil {
+		governanceError(c, err)
+		return
+	}
+	if !validNamespaceAudience(rc, namespace) {
+		notFound(c)
+		return
+	}
+	var body grantBody
+	if !decodeJSON(c, &body) {
+		return
+	}
+	scopeID := rc.workspaceID
+	if scopeID == uuid.Nil {
+		scopeID = rc.organizationID
+	}
+	request := requestContext{
+		workspaceID: rc.workspaceID, actorID: rc.actorID, namespace: namespace,
+		commandID: commandID(scopeID, c.GetString(idempotencyContextKey)), traceID: httpx.GetTraceID(c),
+	}
+	submit, _, valid := shareCommand(c, request, nodeID, body)
+	if !valid {
+		return
+	}
+	if submit.WorkspaceID == uuid.Nil {
+		submit.WorkspaceID = scopeID
+	}
+	result, err := h.submitShare(c.Request.Context(), submit)
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	if result.Request.Status == model.ShareRequestPending {
+		c.JSON(http.StatusAccepted, httpx.Envelope{Code: 0, Message: "ok", Data: shareRequestView(result.Request), TraceID: httpx.GetTraceID(c)})
+		return
+	}
+	created(c, shareResultView(result))
+}
+
+func (h *GovernanceHandler) ApproveShareRequest(c *gin.Context) {
+	if !requireEmptyBody(c) {
+		return
+	}
+	h.reviewShareRequest(c, true, "")
+}
+
+func (h *GovernanceHandler) RejectShareRequest(c *gin.Context) {
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if !decodeJSON(c, &body) {
+		return
+	}
+	if strings.TrimSpace(body.Reason) == "" {
+		invalidRequest(c)
+		return
+	}
+	h.reviewShareRequest(c, false, strings.TrimSpace(body.Reason))
+}
+
+func (h *GovernanceHandler) reviewShareRequest(c *gin.Context, approve bool, reason string) {
+	rc, ok := governanceRequestContext(c)
+	if !ok || h == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	requestID, ok := canonicalUUID(c.Param("requestId"))
+	if !ok {
+		invalidRequest(c)
+		return
+	}
+	scopeID := rc.workspaceID
+	if scopeID == uuid.Nil {
+		scopeID = rc.organizationID
+	}
+	cmd := command.ReviewShareRequest{
+		CommandID: commandID(scopeID, c.GetString(idempotencyContextKey)), ActorID: rc.actorID,
+		OrganizationID: rc.organizationID, RequestID: requestID, RejectionReason: reason,
+	}
+	var (
+		request model.ShareRequest
+		err     error
+	)
+	if approve {
+		if h.approveShare == nil {
+			filesystemError(c, domain.ErrPersistence)
+			return
+		}
+		request, err = h.approveShare(c.Request.Context(), cmd)
+	} else {
+		if h.rejectShare == nil {
+			filesystemError(c, domain.ErrPersistence)
+			return
+		}
+		request, err = h.rejectShare(c.Request.Context(), cmd)
+	}
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	httpx.OK(c, shareRequestView(request))
 }
 
 func (h *GovernanceHandler) namespaceContext(c *gin.Context) (governanceContext, *model.Namespace, bool) {

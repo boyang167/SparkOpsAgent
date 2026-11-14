@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -28,16 +29,24 @@ func (allowGrantPort) List(context.Context, filesystemport.GrantRequest) ([]mode
 	return nil, nil
 }
 
-func TestGrantEndpointRejectsCrossOrganization(t *testing.T) {
+func TestLegacyGrantEndpointIgnoresClientPrincipalOrganizationAndNormalizesUser(t *testing.T) {
 	org := uuid.New()
 	namespaceID := uuid.New()
 	nodeID := uuid.New()
-	grants := command.NewGrantResourceHandler(allowGrantPort{})
+	var captured command.SubmitShare
 	h := &Handler{
 		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
 			return &model.Namespace{ID: namespaceID, OrganizationID: org, WorkspaceID: workspaceID, Status: "ACTIVE"}, nil
 		},
-		access: ResourceAccess{Grant: grants.Handle},
+		access: ResourceAccess{Share: func(_ context.Context, cmd command.SubmitShare) (command.ShareResult, error) {
+			captured = cmd
+			grant := model.ResourceGrant{
+				ID: uuid.New(), NodeID: cmd.NodeID, OrganizationID: cmd.OrganizationID,
+				PrincipalType: cmd.PrincipalType, PrincipalID: cmd.PrincipalIDs[0], GranteeID: cmd.PrincipalIDs[0],
+				Permission: cmd.Actions[0], Effect: model.GrantEffectAllow,
+			}
+			return command.ShareResult{Request: model.ShareRequest{Status: model.ShareRequestApproved}, Grants: []model.ResourceGrant{grant}}, nil
+		}},
 	}
 	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileShare: true}}, h)
 	body := `{"grantee_id":"` + uuid.NewString() + `","grantee_organization_id":"` + uuid.NewString() + `","permission":"READ","effect":"ALLOW"}`
@@ -47,8 +56,28 @@ func TestGrantEndpointRejectsCrossOrganization(t *testing.T) {
 	req.Header.Set("Idempotency-Key", "grant-1")
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
-	require.Equal(t, http.StatusForbidden, res.Code, res.Body.String())
-	require.Contains(t, res.Body.String(), "FILESYSTEM_CROSS_ORGANIZATION_GRANT")
+	require.Equal(t, http.StatusCreated, res.Code, res.Body.String())
+	require.Equal(t, org, captured.OrganizationID)
+	require.Equal(t, model.PrincipalUser, captured.PrincipalType)
+	require.Equal(t, []model.ResourcePermission{model.ResourcePermissionRead}, captured.Actions)
+	require.Len(t, captured.PrincipalIDs, 1)
+}
+
+func TestTypedGrantBodyPreservesDownloadAsDistinctPermission(t *testing.T) {
+	org, workspaceID := uuid.New(), uuid.New()
+	rc := requestContext{
+		workspaceID: workspaceID, actorID: uuid.New(), commandID: uuid.New(),
+		namespace: &model.Namespace{ID: uuid.New(), OrganizationID: org, WorkspaceID: workspaceID},
+	}
+	principalID := uuid.New()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	submit, legacy, ok := shareCommand(c, rc, uuid.New(), grantBody{
+		PrincipalType: string(model.PrincipalWorkspace), PrincipalIDs: []string{principalID.String()},
+		Actions: []string{string(model.ResourcePermissionRead), string(model.ResourcePermissionDownload)},
+	})
+	require.True(t, ok)
+	require.False(t, legacy)
+	require.Equal(t, []model.ResourcePermission{model.ResourcePermissionRead, model.ResourcePermissionDownload}, submit.Actions)
 }
 
 func TestGrantViewIncludesConsistentTypedPrincipalFields(t *testing.T) {

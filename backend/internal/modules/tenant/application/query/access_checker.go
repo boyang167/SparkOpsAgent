@@ -32,3 +32,11 @@ func (a *AccessChecker) ResolveWorkspaceAccess(ctx context.Context, workspaceID 
 	}
 	return workspace.OrgID, member && workspace.Status == "active", nil
 }
+
+func (a *AccessChecker) ResolveWorkspaceOrganization(ctx context.Context, workspaceID kernel.WorkspaceID) (kernel.OrgID, bool, error) {
+	workspace, err := a.store.FindWorkspaceByID(ctx, workspaceID)
+	if err != nil {
+		return kernel.OrgID{}, false, err
+	}
+	return workspace.OrgID, workspace.Status == "active", nil
+}

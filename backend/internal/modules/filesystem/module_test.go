@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	filesystemquery "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/query"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	filesystemport "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
@@ -45,11 +46,23 @@ func (*allowMembers) IsWorkspaceMember(context.Context, kernel.WorkspaceID, kern
 func (a *allowMembers) ResolveWorkspaceAccess(_ context.Context, _ kernel.WorkspaceID, _ kernel.MemberID) (kernel.OrgID, bool, error) {
 	return kernel.OrgID{UUID: a.organizationID}, true, nil
 }
+func (a *allowMembers) ResolveWorkspaceOrganization(_ context.Context, _ kernel.WorkspaceID) (kernel.OrgID, bool, error) {
+	return kernel.OrgID{UUID: a.organizationID}, true, nil
+}
 
 type noRoles struct{}
 
 func (noRoles) ListWorkspaceRoleIDs(context.Context, kernel.WorkspaceID, kernel.MemberID) ([]kernel.RoleID, error) {
 	return nil, nil
+}
+func (noRoles) ResolveRoleWorkspace(context.Context, kernel.RoleID) (kernel.WorkspaceID, error) {
+	return kernel.WorkspaceID{}, nil
+}
+
+type fixedRoleScope struct{ workspaceID uuid.UUID }
+
+func (s fixedRoleScope) ResolveRoleWorkspace(context.Context, kernel.RoleID) (kernel.WorkspaceID, error) {
+	return kernel.WorkspaceID{UUID: s.workspaceID}, nil
 }
 
 type workspaceRolePermissions struct{ allowed bool }
@@ -89,6 +102,31 @@ type discardAudit struct{}
 
 func (discardAudit) Log(context.Context, audit.Entry) error { return nil }
 
+func TestPrincipalScopeAdapterUsesAuthoritativeTenantAndGovernanceScopes(t *testing.T) {
+	organizationID, workspaceID := uuid.New(), uuid.New()
+	adapter := principalScopeAdapter{
+		workspaces: &allowMembers{organizationID: organizationID},
+		roles:      fixedRoleScope{workspaceID: workspaceID}, organizations: allowOrgPermissions{},
+	}
+	for _, item := range []struct {
+		principalType model.PrincipalType
+		principalID   uuid.UUID
+		wantWorkspace uuid.UUID
+	}{
+		{model.PrincipalUser, uuid.New(), uuid.Nil},
+		{model.PrincipalWorkspace, workspaceID, workspaceID},
+		{model.PrincipalOrganization, organizationID, uuid.Nil},
+		{model.PrincipalRole, uuid.New(), workspaceID},
+	} {
+		scope, err := adapter.Resolve(context.Background(), item.principalType, item.principalID, organizationID)
+		require.NoError(t, err)
+		require.Equal(t, organizationID, scope.OrganizationID)
+		require.Equal(t, item.wantWorkspace, scope.WorkspaceID)
+	}
+	_, err := adapter.Resolve(context.Background(), model.PrincipalServiceAccount, uuid.New(), organizationID)
+	require.ErrorIs(t, err, domain.ErrUnsupportedPrincipal)
+}
+
 func TestRegisterValidatesDependencies(t *testing.T) {
 	registry := events.NewRegistry()
 	base := appctx.Container{
@@ -99,7 +137,9 @@ func TestRegisterValidatesDependencies(t *testing.T) {
 		PermissionChecker:        allowPermissions{},
 		WorkspaceMemberChecker:   &allowMembers{},
 		WorkspaceAccessResolver:  &allowMembers{},
+		WorkspaceScopeResolver:   &allowMembers{},
 		WorkspaceRoleReader:      noRoles{},
+		RoleScopeResolver:        noRoles{},
 		WorkspaceRolePermissions: workspaceRolePermissions{allowed: true},
 		OrgPermissionChecker:     allowOrgPermissions{},
 		AuditLogger:              discardAudit{},
@@ -117,7 +157,9 @@ func TestRegisterValidatesDependencies(t *testing.T) {
 		{name: "permission checker", drop: func(c *appctx.Container) { c.PermissionChecker = nil }, want: "requires permission checker"},
 		{name: "member checker", drop: func(c *appctx.Container) { c.WorkspaceMemberChecker = nil }, want: "requires workspace member checker"},
 		{name: "workspace access resolver", drop: func(c *appctx.Container) { c.WorkspaceAccessResolver = nil }, want: "requires workspace access resolver"},
+		{name: "workspace scope resolver", drop: func(c *appctx.Container) { c.WorkspaceScopeResolver = nil }, want: "requires workspace scope resolver"},
 		{name: "workspace role reader", drop: func(c *appctx.Container) { c.WorkspaceRoleReader = nil }, want: "requires workspace role reader"},
+		{name: "role scope resolver", drop: func(c *appctx.Container) { c.RoleScopeResolver = nil }, want: "requires role scope resolver"},
 		{name: "workspace role permission checker", drop: func(c *appctx.Container) { c.WorkspaceRolePermissions = nil }, want: "requires workspace role permission checker"},
 		{name: "organization permission checker", drop: func(c *appctx.Container) { c.OrgPermissionChecker = nil }, want: "requires organization permission checker"},
 		{name: "audit logger auto provision", drop: func(c *appctx.Container) {
@@ -169,7 +211,9 @@ func TestRegisterExposesMetadataRoutesWithoutLocalProvider(t *testing.T) {
 		PermissionChecker:        allowPermissions{},
 		WorkspaceMemberChecker:   memberAccess,
 		WorkspaceAccessResolver:  memberAccess,
+		WorkspaceScopeResolver:   memberAccess,
 		WorkspaceRoleReader:      noRoles{},
+		RoleScopeResolver:        noRoles{},
 		WorkspaceRolePermissions: workspaceRolePermissions{allowed: true},
 		OrgPermissionChecker:     allowOrgPermissions{},
 		AuditLogger:              discardAudit{},

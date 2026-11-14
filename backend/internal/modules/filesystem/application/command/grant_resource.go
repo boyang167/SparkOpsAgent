@@ -39,9 +39,10 @@ func (h *GrantResourceHandler) Handle(ctx context.Context, cmd GrantResource) (m
 	if cmd.Anonymous {
 		return model.ResourceGrant{}, domain.ErrAnonymousLinkDisabled
 	}
-	if cmd.OrganizationID == uuid.Nil || cmd.GranteeOrganizationID == uuid.Nil || cmd.OrganizationID != cmd.GranteeOrganizationID {
+	if cmd.OrganizationID == uuid.Nil {
 		return model.ResourceGrant{}, domain.ErrCrossOrganizationGrant
 	}
+	cmd.GranteeOrganizationID = cmd.OrganizationID
 	if h == nil || h.port == nil {
 		return model.ResourceGrant{}, domain.ErrPersistence
 	}

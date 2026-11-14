@@ -802,6 +802,95 @@ func resourceGrantFromRow(row resourceGrantRow) model.ResourceGrant {
 	}
 }
 
+func (r *Repository) GetNodeClassification(ctx context.Context, nodeID uuid.UUID) (model.TransferClassification, error) {
+	node, err := r.GetNodeByID(ctx, nodeID)
+	if err != nil {
+		return "", err
+	}
+	if node.Type != model.NodeTypeFile {
+		return model.TransferClassificationInternal, nil
+	}
+	var rows []struct {
+		ID             uuid.UUID
+		Classification model.TransferClassification
+	}
+	if err := postgres.DB(ctx, r.db).Table("filesystem.transfer_sessions").
+		Select("id, classification").Where("namespace_id = ? AND status = ?", node.NamespaceID, model.TransferCompleted).
+		Find(&rows).Error; err != nil {
+		return "", wrapPersistence(err)
+	}
+	for _, row := range rows {
+		candidate := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer-node:"+row.ID.String()))
+		if candidate == nodeID {
+			return row.Classification, nil
+		}
+	}
+	return model.TransferClassificationInternal, nil
+}
+
+func (r *Repository) CreateShareRequest(ctx context.Context, request model.ShareRequest) error {
+	row := shareRequestRow{
+		ID: request.ID, OrganizationID: request.OrganizationID, NamespaceID: request.NamespaceID,
+		NodeID: request.NodeID, RequestedBy: request.RequestedBy, PrincipalType: request.PrincipalType,
+		PrincipalIDs: request.PrincipalIDs, Actions: request.Actions, InheritToChildren: request.InheritToChildren,
+		ExpiresAt: request.ExpiresAt, Classification: request.Classification, Status: request.Status,
+		ReviewedBy: request.ReviewedBy, ReviewedAt: request.ReviewedAt,
+		RejectionReason: request.RejectionReason, CreatedAt: request.CreatedAt,
+	}
+	return wrapPersistence(postgres.DB(ctx, r.db).Create(&row).Error)
+}
+
+func (r *Repository) GetShareRequest(ctx context.Context, id uuid.UUID) (model.ShareRequest, error) {
+	var row shareRequestRow
+	err := postgres.DB(ctx, r.db).Where("id = ?", id).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.ShareRequest{}, domain.ErrShareRequestNotFound
+	}
+	if err != nil {
+		return model.ShareRequest{}, wrapPersistence(err)
+	}
+	return shareRequestFromRow(row), nil
+}
+
+func (r *Repository) ReviewShareRequestCAS(ctx context.Context, request model.ShareRequest, from model.ShareRequestStatus) error {
+	result := postgres.DB(ctx, r.db).Model(&shareRequestRow{}).
+		Where("id = ? AND status = ?", request.ID, from).
+		Updates(map[string]any{
+			"status": request.Status, "reviewed_by": request.ReviewedBy, "reviewed_at": request.ReviewedAt,
+			"rejection_reason": request.RejectionReason,
+		})
+	if result.Error != nil {
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrShareRequestConflict
+	}
+	return nil
+}
+
+func (r *Repository) CreateResourceGrants(ctx context.Context, grants []model.ResourceGrant) error {
+	if _, err := postgres.RequireTx(ctx); err != nil {
+		return domain.ErrPersistence
+	}
+	for _, grant := range grants {
+		if err := r.CreateResourceGrant(ctx, grant); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func shareRequestFromRow(row shareRequestRow) model.ShareRequest {
+	return model.ShareRequest{
+		ID: row.ID, OrganizationID: row.OrganizationID, NamespaceID: row.NamespaceID, NodeID: row.NodeID,
+		RequestedBy: row.RequestedBy, PrincipalType: row.PrincipalType,
+		PrincipalIDs: append([]uuid.UUID(nil), row.PrincipalIDs...), Actions: append([]model.ResourcePermission(nil), row.Actions...),
+		InheritToChildren: row.InheritToChildren, ExpiresAt: row.ExpiresAt, Classification: row.Classification,
+		Status: row.Status, ReviewedBy: row.ReviewedBy, ReviewedAt: row.ReviewedAt,
+		RejectionReason: row.RejectionReason, CreatedAt: row.CreatedAt,
+	}
+}
+
 func (r *Repository) ApplyQuotaUsage(ctx context.Context, workspaceID uuid.UUID, bytesDelta, filesDelta int64) error {
 	if bytesDelta < 0 || filesDelta < 0 {
 		return domain.ErrPersistence

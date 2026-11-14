@@ -29,12 +29,12 @@ func (s *grantPortStub) List(context.Context, filesystemport.GrantRequest) ([]mo
 	return nil, nil
 }
 
-func TestCrossOrganizationGrantIsRejected(t *testing.T) {
+func TestClientDeclaredGrantOrganizationIsIgnored(t *testing.T) {
 	stub := &grantPortStub{}
 	grantHandler := NewGrantResourceHandler(stub)
 	_, err := grantHandler.Handle(context.Background(), grantFromOrganizationAtoB())
-	require.ErrorIs(t, err, domain.ErrCrossOrganizationGrant)
-	require.Zero(t, stub.created)
+	require.NoError(t, err)
+	require.Equal(t, 1, stub.created)
 }
 
 func TestSameOrganizationGrantUsesExistingGrantPort(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 
 var resourceActions = []model.ResourcePermission{
 	model.ResourcePermissionRead,
+	model.ResourcePermissionDownload,
 	model.ResourcePermissionWrite,
 	model.ResourcePermissionDelete,
 	model.ResourcePermissionShare,

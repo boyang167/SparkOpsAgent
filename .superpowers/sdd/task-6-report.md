@@ -1,3 +1,54 @@
+# Task 6 Report: Grant write API and sharing approval workflow
+
+## Status
+
+Implemented on `master` from base `6d75050b13efbbd602c9f8f9b5f83fc0996f1396`.
+
+## Delivered
+
+- Added migration `000085_filesystem_share_requests` with approval states, JSON principal/action batches, authoritative classification snapshot, review metadata, indexes, and `DOWNLOAD` grant support.
+- Added governed typed Grant/share request APIs plus approve/reject routes. Every new POST requires `Idempotency-Key`.
+- Preserved the legacy workspace Grant body and normalized it to one `USER` principal without trusting `grantee_organization_id`.
+- Added authoritative principal scope resolution:
+  - `USER` membership from the tenant organization checker.
+  - `WORKSPACE` organization from the tenant workspace scope resolver.
+  - `ROLE` workspace from governance, then organization from tenant.
+  - `ORGANIZATION` must equal the authoritative source organization.
+  - `SERVICE_ACCOUNT` and `AGENT` are rejected as unsupported.
+- Implemented the policy matrix for immediate grants, pending requests, forbidden organization actions, restricted publication, organization namespace publishing, confidential separation of duties, and target-scope approval authority.
+- Implemented batch atomicity, approval status CAS, command replay/conflict semantics, transactional Grant creation, and transactional Outbox publication.
+- Added `DOWNLOAD` as a distinct domain permission through HTTP validation, persistence constraints, effective-action projections, and OpenAPI.
+- Added migration, command, persistence, Outbox, HTTP compatibility, route, OpenAPI, principal scope, and authoritative classification tests.
+
+## TDD evidence
+
+Initial RED:
+
+- `go test ./migrations -run ShareRequest -count=1` failed because migration `000085` did not exist.
+- `go test ./internal/modules/filesystem/application/command -run ShareRequest -count=1` failed because the ShareRequest model and commands did not exist.
+- The submit replay test exposed a time-dependent request hash and failed with an idempotency conflict before the hash was corrected.
+
+Final verification:
+
+- `go test ./migrations -run ShareRequest -count=1`
+- `go test ./internal/modules/filesystem/application/command -run "Grant|ShareRequest" -count=1`
+- `go test ./internal/modules/filesystem/interface/http -run "Grant|ShareRequest|GovernedShare" -count=1`
+- `go test ./internal/modules/filesystem/... -count=1`
+- `go test ./api/openapi ./internal/modules/tenant/... ./internal/modules/governance/... -count=1`
+- IDE lint diagnostics: none.
+- Backend restarted successfully on `http://localhost:8080` with PID `20592`.
+
+## Self-review
+
+- No client-supplied organization or classification participates in authorization decisions.
+- Principal batches are fully resolved before mutation; Grant writes remain inside one database transaction.
+- Approval updates use `WHERE status = 'PENDING'`; same command replay returns the stored result, while a different command conflicts.
+- Rejection never calls Grant creation.
+
+## Concerns
+
+- The existing transfer schema has no direct node-to-transfer classification link. `GetNodeClassification` therefore scans completed transfers in the node namespace and matches the existing deterministic transfer node ID. This is authoritative and tested, but should be replaced by a persisted node/revision classification link if namespace transfer volume becomes large.
+- On Windows, the migration test process occasionally logs a harmless temporary executable cleanup warning (`unlinkat ... Access is denied`) after reporting `ok`; all commands still exit successfully.
 # Task 6 报告：Workspace 传输列表与持久任务
 
 ## 状态

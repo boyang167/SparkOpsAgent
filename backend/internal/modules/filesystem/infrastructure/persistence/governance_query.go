@@ -120,7 +120,7 @@ func effectiveGrantActions(grants []resourceGrantRow) ([]model.ResourcePermissio
 		allowed[grant.Permission] = append(allowed[grant.Permission], grant.ID)
 	}
 	actions := []model.ResourcePermission{
-		model.ResourcePermissionRead, model.ResourcePermissionWrite, model.ResourcePermissionDelete,
+		model.ResourcePermissionRead, model.ResourcePermissionDownload, model.ResourcePermissionWrite, model.ResourcePermissionDelete,
 		model.ResourcePermissionShare, model.ResourcePermissionAdmin,
 	}
 	effective := make([]model.ResourcePermission, 0, len(actions))

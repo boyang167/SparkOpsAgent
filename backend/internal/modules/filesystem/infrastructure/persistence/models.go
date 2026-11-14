@@ -142,6 +142,27 @@ type resourceGrantRow struct {
 
 func (resourceGrantRow) TableName() string { return "filesystem.resource_grants" }
 
+type shareRequestRow struct {
+	ID                uuid.UUID                    `gorm:"column:id;primaryKey;type:uuid"`
+	OrganizationID    uuid.UUID                    `gorm:"column:organization_id;not null;type:uuid;index"`
+	NamespaceID       uuid.UUID                    `gorm:"column:namespace_id;not null;type:uuid"`
+	NodeID            uuid.UUID                    `gorm:"column:node_id;not null;type:uuid;index"`
+	RequestedBy       uuid.UUID                    `gorm:"column:requested_by;not null;type:uuid"`
+	PrincipalType     model.PrincipalType          `gorm:"column:principal_type;not null;type:varchar(32)"`
+	PrincipalIDs      []uuid.UUID                  `gorm:"column:principal_ids;not null;type:jsonb;serializer:json"`
+	Actions           []model.ResourcePermission   `gorm:"column:actions;not null;type:jsonb;serializer:json"`
+	InheritToChildren bool                         `gorm:"column:inherit_to_children;not null;default:true"`
+	ExpiresAt         *time.Time                   `gorm:"column:expires_at"`
+	Classification    model.TransferClassification `gorm:"column:classification;not null;type:varchar(16)"`
+	Status            model.ShareRequestStatus     `gorm:"column:status;not null;type:varchar(16);index"`
+	ReviewedBy        *uuid.UUID                   `gorm:"column:reviewed_by;type:uuid"`
+	ReviewedAt        *time.Time                   `gorm:"column:reviewed_at"`
+	RejectionReason   string                       `gorm:"column:rejection_reason;not null;default:''"`
+	CreatedAt         time.Time                    `gorm:"column:created_at;not null"`
+}
+
+func (shareRequestRow) TableName() string { return "filesystem.share_requests" }
+
 type fileLinkRow struct {
 	ID         uuid.UUID  `gorm:"column:id;primaryKey;type:uuid"`
 	NodeID     uuid.UUID  `gorm:"column:node_id;not null;type:uuid;index"`

@@ -51,6 +51,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	access := query.NewAccessChecker(store, orgRepo)
 	c.WorkspaceMemberChecker = access
 	c.WorkspaceAccessResolver = access
+	c.WorkspaceScopeResolver = access
 	c.OrgWorkspaceCreatorChecker = access
 	c.OrgPermissionChecker = access
 

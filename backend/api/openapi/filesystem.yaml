@@ -161,6 +161,154 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /api/v1/filesystem/nodes/{nodeId}/grants:
+    post:
+      tags: [filesystem]
+      summary: Create governed grants or an approval request
+      operationId: createGovernedFilesystemGrant
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - $ref: "#/components/parameters/WorkspaceHeader"
+        - $ref: "#/components/parameters/NodeID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGovernedGrantRequest"
+      responses:
+        "201":
+          description: Grants created immediately
+        "202":
+          description: Share request pending approval
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/filesystem/nodes/{nodeId}/share-requests:
+    post:
+      tags: [filesystem]
+      summary: Submit a governed file share
+      operationId: createFilesystemShareRequest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - $ref: "#/components/parameters/WorkspaceHeader"
+        - $ref: "#/components/parameters/NodeID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGovernedGrantRequest"
+      responses:
+        "201":
+          description: Share approved immediately
+        "202":
+          description: Share request pending approval
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/filesystem/share-requests/{requestId}/approve:
+    post:
+      tags: [filesystem]
+      summary: Approve a pending file share request
+      operationId: approveFilesystemShareRequest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - $ref: "#/components/parameters/WorkspaceHeader"
+        - $ref: "#/components/parameters/ShareRequestID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Share request approved
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/filesystem/share-requests/{requestId}/reject:
+    post:
+      tags: [filesystem]
+      summary: Reject a pending file share request
+      operationId: rejectFilesystemShareRequest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - $ref: "#/components/parameters/WorkspaceHeader"
+        - $ref: "#/components/parameters/ShareRequestID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RejectShareRequest"
+      responses:
+        "200":
+          description: Share request rejected
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /api/v1/workspaces/{wsId}/namespaces:
     get:
       tags: [filesystem]
@@ -1769,6 +1917,13 @@ components:
       schema:
         type: string
         format: uuid
+    ShareRequestID:
+      name: requestId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     CapabilityID:
       name: capabilityId
       in: path
@@ -2600,7 +2755,7 @@ components:
           type: string
     ResourceGrant:
       type: object
-      required: [id, node_id, grantee_id, permission, effect]
+      required: [id, node_id, grantee_id, principal_type, principal_id, permission, effect]
       properties:
         id:
           type: string
@@ -2611,9 +2766,15 @@ components:
         grantee_id:
           type: string
           format: uuid
+        principal_type:
+          type: string
+          enum: [USER, WORKSPACE, ORGANIZATION, ROLE]
+        principal_id:
+          type: string
+          format: uuid
         permission:
           type: string
-          enum: [READ, WRITE, DELETE, SHARE, ADMIN]
+          enum: [READ, DOWNLOAD, WRITE, DELETE, SHARE, ADMIN]
         effect:
           type: string
           enum: [ALLOW, DENY]
@@ -2641,7 +2802,7 @@ components:
           format: uuid
         permission:
           type: string
-          enum: [READ, WRITE, DELETE, SHARE, ADMIN]
+          enum: [READ, DOWNLOAD, WRITE, DELETE, SHARE, ADMIN]
         effect:
           type: string
           enum: [ALLOW, DENY]
@@ -2651,6 +2812,87 @@ components:
           nullable: true
         anonymous:
           type: boolean
+    CreateGovernedGrantRequest:
+      oneOf:
+        - $ref: "#/components/schemas/CreateTypedGrantRequest"
+        - $ref: "#/components/schemas/CreateResourceGrantRequest"
+    CreateTypedGrantRequest:
+      type: object
+      required: [principal_type, principal_ids, actions]
+      properties:
+        principal_type:
+          type: string
+          enum: [USER, WORKSPACE, ORGANIZATION, ROLE]
+        principal_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        actions:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [READ, DOWNLOAD, WRITE, DELETE, SHARE, ADMIN]
+        inherit_to_children:
+          type: boolean
+          default: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    RejectShareRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    ShareRequest:
+      type: object
+      required: [id, organization_id, namespace_id, node_id, requested_by, principal_type, principal_ids, actions, classification, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        namespace_id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+          format: uuid
+        requested_by:
+          type: string
+          format: uuid
+        principal_type:
+          type: string
+          enum: [USER, WORKSPACE, ORGANIZATION, ROLE]
+        principal_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        actions:
+          type: array
+          items:
+            type: string
+            enum: [READ, DOWNLOAD, WRITE, DELETE, SHARE, ADMIN]
+        classification:
+          type: string
+          enum: [PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED]
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+        created_at:
+          type: string
+          format: date-time
     IssueCapabilityRequest:
       type: object
       required: [run_id, resource_ids, run_resource_ids, actions, expires_at]

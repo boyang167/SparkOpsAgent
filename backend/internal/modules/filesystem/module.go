@@ -11,7 +11,9 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/operation"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/query"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/subscriber"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	filesystemevent "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	domainservice "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/service"
 	agentsign "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/capability"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/gatewaycontrol"
@@ -65,6 +67,53 @@ type namespaceAuthorityAdapter struct {
 	workspaces      authz.WorkspaceAccessResolver
 	rolePermissions authz.WorkspaceRolePermissionChecker
 	organizations   authz.OrgPermissionChecker
+}
+
+type principalScopeAdapter struct {
+	workspaces    authz.WorkspaceScopeResolver
+	roles         authz.RoleScopeResolver
+	organizations authz.OrgPermissionChecker
+}
+
+func (a principalScopeAdapter) Resolve(ctx context.Context, principalType model.PrincipalType, principalID, expectedOrganizationID uuid.UUID) (command.PrincipalScope, error) {
+	scope := command.PrincipalScope{OrganizationID: expectedOrganizationID}
+	switch principalType {
+	case model.PrincipalUser:
+		member, err := a.organizations.IsOrgMember(ctx, kernel.OrgID{UUID: expectedOrganizationID}, kernel.MemberID{UUID: principalID})
+		if err != nil {
+			return command.PrincipalScope{}, err
+		}
+		if !member {
+			return command.PrincipalScope{}, domain.ErrCrossOrganizationGrant
+		}
+		return scope, nil
+	case model.PrincipalOrganization:
+		if principalID != expectedOrganizationID {
+			return command.PrincipalScope{}, domain.ErrCrossOrganizationGrant
+		}
+		return scope, nil
+	case model.PrincipalWorkspace:
+		return a.resolveWorkspace(ctx, principalID, expectedOrganizationID)
+	case model.PrincipalRole:
+		workspaceID, err := a.roles.ResolveRoleWorkspace(ctx, kernel.RoleID{UUID: principalID})
+		if err != nil {
+			return command.PrincipalScope{}, err
+		}
+		return a.resolveWorkspace(ctx, workspaceID.UUID, expectedOrganizationID)
+	default:
+		return command.PrincipalScope{}, domain.ErrUnsupportedPrincipal
+	}
+}
+
+func (a principalScopeAdapter) resolveWorkspace(ctx context.Context, workspaceID, expectedOrganizationID uuid.UUID) (command.PrincipalScope, error) {
+	organizationID, active, err := a.workspaces.ResolveWorkspaceOrganization(ctx, kernel.WorkspaceID{UUID: workspaceID})
+	if err != nil {
+		return command.PrincipalScope{}, err
+	}
+	if !active || organizationID.UUID != expectedOrganizationID {
+		return command.PrincipalScope{}, domain.ErrCrossOrganizationGrant
+	}
+	return command.PrincipalScope{OrganizationID: organizationID.UUID, WorkspaceID: workspaceID}, nil
 }
 
 func (a namespaceAuthorityAdapter) HasWorkspaceFileAdmin(ctx context.Context, workspaceID, actorID uuid.UUID) (bool, error) {
@@ -125,11 +174,17 @@ func (m *Module) Register(c *appctx.Container) error {
 	if c.WorkspaceAccessResolver == nil {
 		return fmt.Errorf("filesystem module requires workspace access resolver")
 	}
+	if c.WorkspaceScopeResolver == nil {
+		return fmt.Errorf("filesystem module requires workspace scope resolver")
+	}
 	if c.WorkspaceRoleReader == nil {
 		return fmt.Errorf("filesystem module requires workspace role reader")
 	}
 	if c.WorkspaceRolePermissions == nil {
 		return fmt.Errorf("filesystem module requires workspace role permission checker")
+	}
+	if c.RoleScopeResolver == nil {
+		return fmt.Errorf("filesystem module requires role scope resolver")
 	}
 	if c.OrgPermissionChecker == nil {
 		return fmt.Errorf("filesystem module requires organization permission checker")
@@ -224,6 +279,14 @@ func (m *Module) Register(c *appctx.Container) error {
 		},
 	)
 	grantCommands := command.NewGrantResourceHandler(c.FilesystemGrantPort)
+	shareAuthority := namespaceAuthorityAdapter{
+		workspaces: c.WorkspaceAccessResolver, rolePermissions: c.WorkspaceRolePermissions, organizations: c.OrgPermissionChecker,
+	}
+	shareCommands := command.NewShareRequestHandler(
+		repo, c.Transactor, c.EventBus,
+		principalScopeAdapter{workspaces: c.WorkspaceScopeResolver, roles: c.RoleScopeResolver, organizations: c.OrgPermissionChecker},
+		shareAuthority,
+	)
 	agentSigner, agentSignerErr := agentsign.NewSigner(secret, domainservice.AgentCapabilityAudience)
 	if agentSignerErr != nil {
 		return fmt.Errorf("filesystem agent capability signer: %w", agentSignerErr)
@@ -260,6 +323,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	}, filesystemhttp.InternalSFTPHandlers{BeginSFTP: beginSFTP.Handle})
 	handler.BindResourceAccess(filesystemhttp.ResourceAccess{
 		Grant:            grantCommands.Handle,
+		Share:            shareCommands.Submit,
 		ListGrants:       grantCommands.List,
 		RevokeGrant:      grantCommands.Revoke,
 		IssueCapability:  command.NewIssueCapabilityHandler(domainservice.NewCapabilityIssuer(agentSigner), accessStore).Handle,
@@ -275,6 +339,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewEffectiveAccessHandler(resourceAuthorizer),
 		resourceAuthorizer,
 	)
+	governanceHandler.BindShareWorkflow(shareCommands.Submit, shareCommands.Approve, shareCommands.Reject)
 	filesystemhttp.RegisterGovernanceRoutes(
 		c.Engine,
 		entitlementMiddleware,
