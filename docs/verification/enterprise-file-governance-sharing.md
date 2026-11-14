@@ -36,6 +36,34 @@ always-allow/deny 或 map 判定。production tenant/governance persistence SQL 
 
 这套矩阵证明应用授权链路和持久化过滤行为；它不替代 PostgreSQL migration 演练。
 
+精确复现命令（即使调用者环境残留 `REQUIRE_INTEGRATION=1` 也可稳定 exit 0）：
+
+```powershell
+cd backend
+$previousDatabaseDsn = [Environment]::GetEnvironmentVariable("DATABASE_DSN", "Process")
+$previousRequireIntegration = [Environment]::GetEnvironmentVariable("REQUIRE_INTEGRATION", "Process")
+try {
+  $env:REQUIRE_INTEGRATION = "1"
+  $env:DATABASE_DSN = "sqlite-authority-fixture"
+  go test -tags=integration ./tests/filesystem/security -run EnterpriseAuthorizationMatrix -count=1 -v
+} finally {
+  if ($null -eq $previousDatabaseDsn) {
+    Remove-Item Env:DATABASE_DSN -ErrorAction SilentlyContinue
+  } else {
+    $env:DATABASE_DSN = $previousDatabaseDsn
+  }
+  if ($null -eq $previousRequireIntegration) {
+    Remove-Item Env:REQUIRE_INTEGRATION -ErrorAction SilentlyContinue
+  } else {
+    $env:REQUIRE_INTEGRATION = $previousRequireIntegration
+  }
+}
+```
+
+这里的 `sqlite-authority-fixture` 只是启用 security harness 的 SQLite authority fixture 的 sentinel，
+不是 PostgreSQL DSN，绝不能用于 migration test。命令的 `finally` 会清除本次设置或恢复调用前的
+`DATABASE_DSN` / `REQUIRE_INTEGRATION`，避免污染后续命令。
+
 ## 2026-11-15 命令记录
 
 - `go test ./internal/modules/filesystem/... -count=1`：exit 0，filesystem 全量 PASS。
@@ -45,6 +73,7 @@ always-allow/deny 或 map 判定。production tenant/governance persistence SQL 
   exit 1，明确报错 `DATABASE_DSN is required when REQUIRE_INTEGRATION=1`；真实 PostgreSQL security
   集成未运行，发布阻断。
 - 使用隔离 SQLite authority rows 并设置非连接用途的 harness sentinel 后运行矩阵聚焦命令：
+  按上方命令显式设置 `DATABASE_DSN=sqlite-authority-fixture` 后执行
   `go test -tags=integration ./tests/filesystem/security -run EnterpriseAuthorizationMatrix -count=1 -v`，
   exit 0，11 行 authorization matrix PASS；该结果不冒充 PostgreSQL。
 - `go vet -tags=integration ./tests/filesystem/integration ./tests/filesystem/security ./migrations`：
@@ -80,8 +109,17 @@ fixture counts 不能冒充现场结果。发布前必须在提供 `DATABASE_DSN
 
 ```powershell
 cd backend
-$env:REQUIRE_INTEGRATION="1"
-go test ./migrations -run TestFilesystemEnterpriseGovernanceMigratesExistingDataFrom82To87AndBack -count=1 -v
+$previousRequireIntegration = [Environment]::GetEnvironmentVariable("REQUIRE_INTEGRATION", "Process")
+try {
+  $env:REQUIRE_INTEGRATION = "1"
+  go test ./migrations -run TestFilesystemEnterpriseGovernanceMigratesExistingDataFrom82To87AndBack -count=1 -v
+} finally {
+  if ($null -eq $previousRequireIntegration) {
+    Remove-Item Env:REQUIRE_INTEGRATION -ErrorAction SilentlyContinue
+  } else {
+    $env:REQUIRE_INTEGRATION = $previousRequireIntegration
+  }
+}
 ```
 
 真实输出中的 row counts 必须归档后，才能解除 release blocker。
@@ -89,14 +127,29 @@ go test ./migrations -run TestFilesystemEnterpriseGovernanceMigratesExistingData
 迁移门禁聚焦命令：
 
 ```powershell
-# 默认：缺 DSN 时 exit 0 且明确 SKIP
-Remove-Item Env:REQUIRE_INTEGRATION -ErrorAction SilentlyContinue
-Remove-Item Env:DATABASE_DSN -ErrorAction SilentlyContinue
-go test ./migrations -run TestFilesystemEnterpriseGovernanceMigratesExistingDataFrom82To87AndBack -count=1 -v
+$previousDatabaseDsn = [Environment]::GetEnvironmentVariable("DATABASE_DSN", "Process")
+$previousRequireIntegration = [Environment]::GetEnvironmentVariable("REQUIRE_INTEGRATION", "Process")
+try {
+  # 默认：缺 DSN 时 exit 0 且明确 SKIP
+  Remove-Item Env:REQUIRE_INTEGRATION -ErrorAction SilentlyContinue
+  Remove-Item Env:DATABASE_DSN -ErrorAction SilentlyContinue
+  go test ./migrations -run TestFilesystemEnterpriseGovernanceMigratesExistingDataFrom82To87AndBack -count=1 -v
 
-# 强制：缺 DSN 时预期 exit nonzero
-$env:REQUIRE_INTEGRATION="1"
-go test ./migrations -run TestFilesystemEnterpriseGovernanceMigratesExistingDataFrom82To87AndBack -count=1 -v
+  # 强制：缺 DSN 时预期 exit nonzero
+  $env:REQUIRE_INTEGRATION = "1"
+  go test ./migrations -run TestFilesystemEnterpriseGovernanceMigratesExistingDataFrom82To87AndBack -count=1 -v
+} finally {
+  if ($null -eq $previousDatabaseDsn) {
+    Remove-Item Env:DATABASE_DSN -ErrorAction SilentlyContinue
+  } else {
+    $env:DATABASE_DSN = $previousDatabaseDsn
+  }
+  if ($null -eq $previousRequireIntegration) {
+    Remove-Item Env:REQUIRE_INTEGRATION -ErrorAction SilentlyContinue
+  } else {
+    $env:REQUIRE_INTEGRATION = $previousRequireIntegration
+  }
+}
 ```
 
 ## 兼容性证据边界
@@ -118,6 +171,9 @@ approval panel loading/action/reject Modal、文件详情 Drawer tabs、loading/
 ARIA，以及既有 tree/list/grid、触控目标、focus-visible、reduced-motion 和对比度契约。
 `EnterpriseGovernanceModal.accessibility.test.tsx` 不 mock `Modal`，直接验证生产 `Modal.tsx` 的
 `aria-modal`、`aria-labelledby`、`aria-describedby`、打开焦点、Tab trap、Esc 和触发点焦点恢复。
+本包也调整了生产 `Modal.tsx`：为兼容真实 a11y 测试链路对 `inert` 属性语法的处理，将 Modal 标记从
+JSX 等价改写为 `createElement`；组件没有新增 `inert` 行为，DOM 属性与交互语义不变。上述真实组件测试
+覆盖并验证了这项等价调整。
 仓库未安装 axe，因此沿用 Testing Library 的 role/name/state 查询与真实组件渲染；未削弱规则或屏蔽失败。
 
 ## Rollout 顺序

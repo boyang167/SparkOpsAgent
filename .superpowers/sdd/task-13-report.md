@@ -7,6 +7,12 @@
 - 基线：`5fa4680a6b8c395b30eee32b6dfa3fdc8d3fa7f6`。
 - 开始时工作树干净。
 - 仅增加测试、测试 harness 门禁与验证文档；未新增产品行为。
+- 已验证代码 HEAD：`c7bc4869520fe52d21f35bc17b4990d7a310a1aa`，其直接 base 为
+  `a92c841aa28e6cb430704b5de5d93644073f7d5f`，提交时间为
+  `2026-11-15T05:39:10+08:00`。本报告“审查修复验证”所列命令均针对该代码 HEAD 执行。
+- 后续 `bf5b7972bf75ebd911c967be08b1c8cd0cfeba13` 及本次 docs fix 只补充报告元数据或修正文档，
+  不改变被验证代码。包含报告自身的 commit hash 无法写入同一 commit（会形成不可能的自引用）；
+  最终 docs commit hash 由提交后的交付回复记录。
 
 ## 实施
 
@@ -111,7 +117,9 @@
   admin-only 用例同时持久化 admin Role ALLOW 和当前 USER 显式 DENY，断言 `explicit_deny`。
 - 新增真实 `Modal.tsx` 渲染测试，覆盖 ShareFileModal 与 approval Reject Modal 的 dialog ARIA、
   labelledby/description、打开焦点、Tab trap、Esc 与触发点焦点恢复。为适配现有 Vitest/Vite 组合，
-  `Modal.tsx` 仅做 JSX → `createElement` 的等价语法重写，无行为变化。
+  生产 `Modal.tsx` 也做了与真实 a11y 测试链路 `inert` 属性语法处理兼容相关的
+  JSX → `createElement` 等价重写。组件没有新增 `inert` 行为，DOM 属性和交互语义不变；
+  `EnterpriseGovernanceModal.accessibility.test.tsx` 的真实 Modal 测试覆盖该调整。
 - 删除本报告误追加的无关任务内容。
 
 ### 安全矩阵精确复现
@@ -120,9 +128,24 @@
 
 ```powershell
 cd backend
-$env:REQUIRE_INTEGRATION="1"
-$env:DATABASE_DSN="sqlite-authority-fixture"
-go test -tags=integration ./tests/filesystem/security -run EnterpriseAuthorizationMatrix -count=1 -v
+$previousDatabaseDsn = [Environment]::GetEnvironmentVariable("DATABASE_DSN", "Process")
+$previousRequireIntegration = [Environment]::GetEnvironmentVariable("REQUIRE_INTEGRATION", "Process")
+try {
+  $env:REQUIRE_INTEGRATION = "1"
+  $env:DATABASE_DSN = "sqlite-authority-fixture"
+  go test -tags=integration ./tests/filesystem/security -run EnterpriseAuthorizationMatrix -count=1 -v
+} finally {
+  if ($null -eq $previousDatabaseDsn) {
+    Remove-Item Env:DATABASE_DSN -ErrorAction SilentlyContinue
+  } else {
+    $env:DATABASE_DSN = $previousDatabaseDsn
+  }
+  if ($null -eq $previousRequireIntegration) {
+    Remove-Item Env:REQUIRE_INTEGRATION -ErrorAction SilentlyContinue
+  } else {
+    $env:REQUIRE_INTEGRATION = $previousRequireIntegration
+  }
+}
 ```
 
 结果：exit 0，以下 11 个 case 全部 PASS：
@@ -139,8 +162,9 @@ go test -tags=integration ./tests/filesystem/security -run EnterpriseAuthorizati
 10. `revoked_recipient_is_denied_immediately`
 11. `cross_organization_workspace_recipient_is_denied`
 
-`DATABASE_DSN` 在此命令只是 security harness 的 required sentinel；矩阵本身使用 SQLite authority rows，
-不应被解释为真实 PostgreSQL 证据。
+`DATABASE_DSN=sqlite-authority-fixture` 在此命令只用于启用 security harness 的 SQLite authority
+fixture；它不是 PostgreSQL DSN，不得用于 migration test，也不应被解释为真实 PostgreSQL 证据。
+`finally` 会清除本次设置或恢复调用前的 `DATABASE_DSN` / `REQUIRE_INTEGRATION`，避免污染后续命令。
 
 ### Migration gate 精确复现
 
@@ -162,5 +186,6 @@ go test -tags=integration ./tests/filesystem/security -run EnterpriseAuthorizati
 
 ## 交付状态
 
-实现与自动验证完成；真实 PostgreSQL 验证保持 release blocker。最终 fix commit hash 与提交后工作树
-状态记录在交付回复中。
+实现与自动验证完成；真实 PostgreSQL 验证保持 release blocker。被验证代码固定为
+`c7bc4869520fe52d21f35bc17b4990d7a310a1aa`；后续提交仅承载报告元数据或文档修正，不改变该代码。
+本次 docs fix 的 commit hash 与提交后工作树状态记录在交付回复中，而不在提交自身内容中预填。
