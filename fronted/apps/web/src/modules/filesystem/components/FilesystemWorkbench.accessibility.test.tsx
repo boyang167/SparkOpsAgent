@@ -233,7 +233,11 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
     expect(explorerSource).toMatch(
       /className="btn btn-secondary filesystem-touch-target"[\s\S]{0,180}showCreateDialog\(\)/,
     );
-    expect(poolSource).toContain("dialogOpen={providerOpen || poolOpen}");
+    expect(poolSource).toMatch(/const dialogOpen\s*=/);
+    expect(poolSource).toMatch(
+      /providerOpen \|\| poolOpen \|\| providerEditOpen \|\| poolEditOpen \|\| deleteTarget !== null/,
+    );
+    expect(poolSource).toMatch(/<PanelHeader[\s\S]*?dialogOpen=\{dialogOpen\}/);
     expect(bindingSource).toContain('className={open ? "btn btn-secondary" : "btn btn-primary"}');
   });
 
