@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TransferSessionVM } from "@sparkops/contracts/filesystem";
 import {
+  CreateGovernedGrantCommandSchema,
   NamespaceSummaryVMSchema,
   ShareRequestVMSchema,
 } from "@sparkops/contracts/filesystem";
 import {
   createGovernedGrant,
+  createShareRequest,
+  getEffectiveAccess,
   getFileNode,
   listGovernedChildren,
   listGovernedNamespaces,
@@ -318,7 +321,7 @@ describe("governed filesystem sdk", () => {
       owner_user_id: "00000000-0000-4000-8000-000000000003",
       root_node_id: "00000000-0000-4000-8000-000000000004",
       status: "ACTIVE",
-      capabilities: ["READ", "WRITE", "SHARE"],
+      capabilities: ["READ", "DOWNLOAD", "WRITE", "SHARE"],
       entry_node_ids: [],
       entry_nodes_truncated: false,
     };
@@ -344,6 +347,29 @@ describe("governed filesystem sdk", () => {
         created_at: "2026-11-15T00:00:00Z",
       }).status,
     ).toBe("PENDING");
+  });
+
+  it("rejects duplicate governed principals and actions with clear errors", () => {
+    const principal = "00000000-0000-4000-8000-000000000011";
+    const duplicatePrincipals = CreateGovernedGrantCommandSchema.safeParse({
+      principal_type: "USER",
+      principal_ids: [principal, principal],
+      actions: ["READ"],
+    });
+    const duplicateActions = CreateGovernedGrantCommandSchema.safeParse({
+      principal_type: "USER",
+      principal_ids: [principal],
+      actions: ["DOWNLOAD", "DOWNLOAD"],
+    });
+
+    expect(duplicatePrincipals.success).toBe(false);
+    expect(!duplicatePrincipals.success && duplicatePrincipals.error.issues[0]?.message).toBe(
+      "principal_ids must contain unique values",
+    );
+    expect(duplicateActions.success).toBe(false);
+    expect(!duplicateActions.success && duplicateActions.error.issues[0]?.message).toBe(
+      "actions must contain unique values",
+    );
   });
 
   it("uses one top-level BFF path and forwards complete read context", async () => {
@@ -377,6 +403,7 @@ describe("governed filesystem sdk", () => {
       options,
     );
     await listSharedWithMe({ query: "共享 文档", cursor: "opaque+/=", limit: 10 }, options);
+    await getEffectiveAccess("node/with space", options);
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/bff/v1/filesystem/namespaces");
     expect(fetchMock.mock.calls[1]?.[0]).toContain(
@@ -384,6 +411,9 @@ describe("governed filesystem sdk", () => {
     );
     expect(fetchMock.mock.calls[2]?.[0]).toContain(
       "/api/bff/v1/filesystem/shared-with-me?q=%E5%85%B1%E4%BA%AB+%E6%96%87%E6%A1%A3&cursor=opaque%2B%2F%3D&limit=10",
+    );
+    expect(fetchMock.mock.calls[3]?.[0]).toBe(
+      "/api/bff/v1/filesystem/nodes/node%2Fwith%20space/effective-access",
     );
     for (const [, init] of fetchMock.mock.calls) {
       const headers = new Headers((init as RequestInit).headers);
@@ -436,5 +466,52 @@ describe("governed filesystem sdk", () => {
     expect(headers.get("X-Organization-ID")).toBe("00000000-0000-4000-8000-000000000002");
     expect(headers.get("Idempotency-Key")).toBe("grant-key-1");
     expect(headers.get("X-Actor-ID")).toBeNull();
+  });
+
+  it("posts share requests through the governed route with idempotency", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 0,
+          message: "ok",
+          data: {
+            id: "00000000-0000-4000-8000-000000000010",
+            organization_id: "00000000-0000-4000-8000-000000000002",
+            namespace_id: "00000000-0000-4000-8000-000000000011",
+            node_id: "00000000-0000-4000-8000-000000000012",
+            requested_by: "00000000-0000-4000-8000-000000000013",
+            principal_type: "USER",
+            principal_ids: ["00000000-0000-4000-8000-000000000014"],
+            actions: ["DOWNLOAD"],
+            classification: "CONFIDENTIAL",
+            effect: "ALLOW",
+            status: "PENDING",
+            created_at: "2026-11-15T00:00:00Z",
+          },
+          trace_id: "trace-1",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      principal_type: "USER" as const,
+      principal_ids: ["00000000-0000-4000-8000-000000000014"],
+      actions: ["DOWNLOAD" as const],
+    };
+
+    await createShareRequest("node-1", input, {
+      organizationId: "00000000-0000-4000-8000-000000000002",
+      workspaceId: "00000000-0000-4000-8000-000000000003",
+      idempotencyKey: "share-key-1",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/bff/v1/filesystem/nodes/node-1/share-requests");
+    expect(init).toEqual(expect.objectContaining({ method: "POST", body: JSON.stringify(input) }));
+    const headers = new Headers(init.headers);
+    expect(headers.get("X-Organization-ID")).toBe("00000000-0000-4000-8000-000000000002");
+    expect(headers.get("X-Workspace-ID")).toBe("00000000-0000-4000-8000-000000000003");
+    expect(headers.get("Idempotency-Key")).toBe("share-key-1");
   });
 });

@@ -2,8 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { BffContext } from "@sparkops/bff-core";
 import {
   createGovernedGrant,
+  createShareRequest,
+  getEffectiveAccess,
   listFileNodes,
   listGovernedChildren,
+  listGovernedNamespaces,
+  listSharedWithMe,
   moveFileNode,
 } from "./index";
 
@@ -132,6 +136,130 @@ describe("filesystem BFF module", () => {
       "00000000-0000-4000-8000-000000000012",
       input,
       "grant-key-1",
+    );
+  });
+
+  it("validates and forwards all governed read transports including DOWNLOAD", async () => {
+    const listNamespaces = vi.fn().mockResolvedValue({
+      items: [{
+        id: "00000000-0000-4000-8000-000000000001",
+        namespace_type: "WORKSPACE",
+        organization_id: "00000000-0000-4000-8000-000000000002",
+        workspace_id: "00000000-0000-4000-8000-000000000003",
+        owner_user_id: null,
+        root_node_id: "00000000-0000-4000-8000-000000000004",
+        status: "ACTIVE",
+        capabilities: ["READ", "DOWNLOAD"],
+        entry_node_ids: [],
+        entry_nodes_truncated: false,
+      }],
+    });
+    const listShared = vi.fn().mockResolvedValue({
+      items: [{
+        node: {
+          id: "00000000-0000-4000-8000-000000000005",
+          namespace_id: "00000000-0000-4000-8000-000000000001",
+          parent_id: null,
+          type: "FILE",
+          name: "shared.pdf",
+          current_revision_id: null,
+          state: "ACTIVE",
+          owner_id: "00000000-0000-4000-8000-000000000006",
+        },
+        effective_actions: ["READ", "DOWNLOAD"],
+        source_grant_ids: ["00000000-0000-4000-8000-000000000007"],
+      }],
+      next_cursor: "",
+    });
+    const effectiveAccess = vi.fn().mockResolvedValue({
+      decision: "ALLOW",
+      effective_actions: ["READ", "DOWNLOAD"],
+      reason_code: "EXPLICIT_ALLOW",
+      source_grant_ids: ["00000000-0000-4000-8000-000000000007"],
+      policy_version: 2,
+      cache_key: {
+        organization_id: "00000000-0000-4000-8000-000000000002",
+        workspace_id: "00000000-0000-4000-8000-000000000003",
+        actor_id: "00000000-0000-4000-8000-000000000008",
+        node_id: "00000000-0000-4000-8000-000000000005",
+        action: "DOWNLOAD",
+        policy_version: 2,
+      },
+    });
+    const ctx = context({
+      listGovernedNamespaces: listNamespaces,
+      listSharedWithMe: listShared,
+      getEffectiveAccess: effectiveAccess,
+    });
+    const organizationId = "00000000-0000-4000-8000-000000000002";
+    const workspaceId = "00000000-0000-4000-8000-000000000003";
+
+    const namespaces = await listGovernedNamespaces(ctx, organizationId, workspaceId);
+    const shared = await listSharedWithMe(ctx, organizationId, workspaceId, {
+      q: "shared",
+      cursor: "opaque",
+      limit: 20,
+    });
+    const access = await getEffectiveAccess(
+      ctx,
+      organizationId,
+      workspaceId,
+      "00000000-0000-4000-8000-000000000005",
+    );
+
+    expect(namespaces.items[0]?.capabilities).toContain("DOWNLOAD");
+    expect(shared.items[0]?.effective_actions).toContain("DOWNLOAD");
+    expect(access.effective_actions).toContain("DOWNLOAD");
+    expect(listNamespaces).toHaveBeenCalledWith({ organizationId, workspaceId });
+    expect(listShared).toHaveBeenCalledWith(
+      { organizationId, workspaceId },
+      { q: "shared", cursor: "opaque", limit: 20 },
+    );
+    expect(effectiveAccess).toHaveBeenCalledWith(
+      { organizationId, workspaceId },
+      "00000000-0000-4000-8000-000000000005",
+    );
+  });
+
+  it("validates and forwards governed share requests unchanged", async () => {
+    const submitShare = vi.fn().mockResolvedValue({
+      id: "00000000-0000-4000-8000-000000000010",
+      organization_id: "00000000-0000-4000-8000-000000000002",
+      namespace_id: "00000000-0000-4000-8000-000000000011",
+      node_id: "00000000-0000-4000-8000-000000000012",
+      requested_by: "00000000-0000-4000-8000-000000000013",
+      principal_type: "USER",
+      principal_ids: ["00000000-0000-4000-8000-000000000014"],
+      actions: ["DOWNLOAD"],
+      classification: "CONFIDENTIAL",
+      effect: "ALLOW",
+      status: "PENDING",
+      created_at: "2026-11-15T00:00:00Z",
+    });
+    const input = {
+      principal_type: "USER" as const,
+      principal_ids: ["00000000-0000-4000-8000-000000000014"],
+      actions: ["DOWNLOAD" as const],
+    };
+
+    const result = await createShareRequest(
+      context({ createShareRequest: submitShare }),
+      "00000000-0000-4000-8000-000000000002",
+      "00000000-0000-4000-8000-000000000003",
+      "00000000-0000-4000-8000-000000000012",
+      input,
+      "share-key-1",
+    );
+
+    expect("status" in result && result.status).toBe("PENDING");
+    expect(submitShare).toHaveBeenCalledWith(
+      {
+        organizationId: "00000000-0000-4000-8000-000000000002",
+        workspaceId: "00000000-0000-4000-8000-000000000003",
+      },
+      "00000000-0000-4000-8000-000000000012",
+      input,
+      "share-key-1",
     );
   });
 });

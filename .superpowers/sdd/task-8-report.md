@@ -192,3 +192,54 @@ Task 8 代码与自动验收完成。未启动或重启根工作区服务；浏�
 
 - 未做真实登录态浏览器/后端联调；本任务仅完成 contracts 与传输层自动测试。
 - 未实现 OpenAPI 中尚未落到本 Task 8 六条 route 的 approve/reject UI/client，也未提前实现 Task 9–12。
+
+---
+
+# Task 8 首轮审查修复追加
+
+## 修复内容
+
+- `ResourceAction` 前端 Zod 与 `backend/api/openapi/filesystem.yaml` 同步加入 `DOWNLOAD`，覆盖 Namespace capabilities、shared item、effective access/cache key。
+- `CreateGovernedGrantCommandSchema` 的 `principal_ids`、`actions` 增加唯一性 refinement，分别返回清晰错误：
+  - `principal_ids must contain unique values`
+  - `actions must contain unique values`
+- upstream 补齐 namespaces、shared-with-me、effective-access、grant 的路径、方法、query/header/body/idempotency 测试；原 children/share-request 测试保留。
+- BFF module 补齐 namespaces、shared-with-me、effective-access、share-request 的 schema 校验与参数转发测试；原 children/grant 测试保留。
+- 新增六条 Next BFF route 的直接契约测试，覆盖全部 route 的组织 header 必填、可选 workspace、动态参数/query、写 body/idempotency、即时 `201`、待审批 `202` 和 `403` 错误映射。
+- 未实现或修改任何 UI。
+
+## TDD 证据
+
+### RED
+
+1. 前端：
+   `pnpm vitest run packages/upstream/src/filesystem.test.ts packages/bff-modules/src/filesystem/index.test.ts packages/web-sdk/src/filesystem.test.ts apps/web/app/api/bff/v1/filesystem/governed-routes.test.ts`
+   - 退出码 1；4 files / 3 failed / 30 passed。
+   - 失败明确对应 `DOWNLOAD` 被 `ResourceActionSchema` 拒绝，以及重复 `principal_ids` 未被拒绝。
+2. 后端 OpenAPI：
+   `go test ./api/openapi -run TestFilesystemResourceActionIncludesDownload -count=1`
+   - 退出码 1；`ResourceAction` 枚举缺少 `DOWNLOAD`。
+
+### GREEN / 回归
+
+1. 全部新增、修改及受影响 filesystem route/loader 测试：
+   `pnpm vitest run packages/upstream/src/filesystem.test.ts packages/bff-modules/src/filesystem/index.test.ts packages/web-sdk/src/filesystem.test.ts apps/web/app/api/bff/v1/filesystem/governed-routes.test.ts "apps/web/app/api/bff/v1/workspaces/[wsId]/filesystem-forwarding.test.ts" apps/web/src/server/loaders/filesystem.test.ts`
+   - 退出码 0；6 files / 48 tests。
+2. 前端类型检查：
+   `pnpm typecheck`
+   - 退出码 0；6 packages successful。
+3. 后端 OpenAPI 完整契约/引用/路由检查：
+   `go test ./api/openapi -count=1`
+   - 退出码 0。
+4. Go 格式化后复验：
+   `gofmt -w api/openapi/filesystem_test.go; go test ./api/openapi -count=1`
+   - 退出码 0。
+5. IDE diagnostics：本次修改范围无 linter errors。
+6. `git diff --check`：退出码 0。
+7. Vitest 仅有仓库既有 Vite/esbuild/oxc deprecation warning。
+
+## 提交与未验证项
+
+- 修复基线：`98e8c96588c49bc9337720afb21b3abb8a1c55d8`。
+- 修复提交 message：`fix(filesystem-ui): align governed transport contracts`；最终 hash 在包含本报告后生成，并在任务交接中返回。
+- 未做真实登录态浏览器/后端联调；未运行 UI 浏览器矩阵。

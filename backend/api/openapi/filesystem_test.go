@@ -150,6 +150,20 @@ func TestFilesystemGrantCompatibilityAndRejectReasonSchemas(t *testing.T) {
 	require.EqualValues(t, 1000, reason["maxLength"])
 }
 
+func TestFilesystemResourceActionIncludesDownload(t *testing.T) {
+	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &document))
+
+	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+	resourceAction := schemas["ResourceAction"].(map[string]any)
+	require.ElementsMatch(t,
+		[]any{"READ", "DOWNLOAD", "WRITE", "DELETE", "SHARE", "ADMIN"},
+		resourceAction["enum"].([]any),
+	)
+}
+
 func TestFilesystemAuditOpenAPISchemaMatchesSDKContract(t *testing.T) {
 	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
 	require.NoError(t, err)

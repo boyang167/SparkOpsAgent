@@ -375,7 +375,14 @@ export type FileAuditQuery = z.infer<typeof FileAuditQuerySchema>;
 export const NamespaceTypeSchema = z.enum(["USER", "WORKSPACE", "ORGANIZATION"]);
 export type NamespaceType = z.infer<typeof NamespaceTypeSchema>;
 
-export const ResourceActionSchema = z.enum(["READ", "WRITE", "DELETE", "SHARE", "ADMIN"]);
+export const ResourceActionSchema = z.enum([
+  "READ",
+  "DOWNLOAD",
+  "WRITE",
+  "DELETE",
+  "SHARE",
+  "ADMIN",
+]);
 export type ResourceAction = z.infer<typeof ResourceActionSchema>;
 
 export const GovernedPermissionSchema = z.enum([
@@ -465,8 +472,18 @@ export type SharedItemPageVM = z.infer<typeof SharedItemPageVMSchema>;
 
 export const CreateGovernedGrantCommandSchema = z.object({
   principal_type: PrincipalTypeSchema,
-  principal_ids: z.array(z.string().uuid()).min(1),
-  actions: z.array(GovernedPermissionSchema).min(1),
+  principal_ids: z
+    .array(z.string().uuid())
+    .min(1)
+    .refine((items) => new Set(items).size === items.length, {
+      message: "principal_ids must contain unique values",
+    }),
+  actions: z
+    .array(GovernedPermissionSchema)
+    .min(1)
+    .refine((items) => new Set(items).size === items.length, {
+      message: "actions must contain unique values",
+    }),
   effect: GrantEffectSchema.optional(),
   inherit_to_children: z.boolean().optional(),
   expires_at: z.string().datetime({ offset: true }).nullable().optional(),

@@ -2039,7 +2039,7 @@ components:
             $ref: "#/components/schemas/NamespaceSummary"
     ResourceAction:
       type: string
-      enum: [READ, WRITE, DELETE, SHARE, ADMIN]
+      enum: [READ, DOWNLOAD, WRITE, DELETE, SHARE, ADMIN]
     SharedNode:
       type: object
       required: [node, effective_actions, source_grant_ids]
