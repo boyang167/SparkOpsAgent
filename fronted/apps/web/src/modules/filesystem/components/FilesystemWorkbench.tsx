@@ -4,6 +4,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createElement, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { FileNamespaceVM, FileNodeVM } from "@sparkops/contracts/filesystem";
+import { Drawer } from "@/components/ui/Drawer";
+import { DirectoryTree } from "./DirectoryTree";
 import { FileExplorerPanel } from "./FileExplorerPanel";
 import type { FileView, WorkbenchState, WorkbenchTab } from "./workbench-state";
 
@@ -37,6 +39,7 @@ export function FilesystemWorkbench({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [view, setView] = useState<FileView>(initialState.view);
+  const [directoryDrawerOpen, setDirectoryDrawerOpen] = useState(false);
   const visibleTabs = tabs.filter(
     (tab) => !tab.permission || permissions.includes(tab.permission),
   );
@@ -55,6 +58,35 @@ export function FilesystemWorkbench({
     nextSearchParams.set("view", nextView);
     setView(nextView);
     window.history.replaceState(null, "", `${pathname}?${nextSearchParams.toString()}`);
+  }
+
+  const rootNode: FileNodeVM | null = namespace.root_node_id
+    ? {
+        id: namespace.root_node_id,
+        namespace_id: namespace.id,
+        parent_id: null,
+        type: "DIRECTORY",
+        name: "全部文件",
+        current_revision_id: null,
+        state: "ACTIVE",
+        owner_id: namespace.id,
+      }
+    : null;
+
+  function navigateDirectory(node: FileNodeVM) {
+    setDirectoryDrawerOpen(false);
+    router.push(node.id === namespace.root_node_id ? "/files" : `/files/${node.id}`);
+  }
+
+  function renderDirectoryTree() {
+    if (!rootNode) return null;
+    return createElement(DirectoryTree, {
+      workspaceId,
+      root: rootNode,
+      currentId: initialState.parent ?? rootNode.id,
+      onNavigate: navigateDirectory,
+      onDropNodes: () => {},
+    });
   }
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, tabIndex: number) {
@@ -141,6 +173,16 @@ export function FilesystemWorkbench({
             },
             createElement("span", { "aria-hidden": true }, "▦"),
           ),
+          createElement(
+            "button",
+            {
+              type: "button",
+              className: "btn btn-ghost btn-sm lg:hidden",
+              "aria-label": "打开目录",
+              onClick: () => setDirectoryDrawerOpen(true),
+            },
+            "目录",
+          ),
         )
       : null,
     createElement(
@@ -150,7 +192,32 @@ export function FilesystemWorkbench({
         role: "tabpanel",
         "aria-labelledby": `workbench-tab-${activeTab}`,
       },
-      panel,
+      activeTab === "files"
+        ? createElement(
+            "div",
+            { className: "flex items-start gap-6" },
+            createElement(
+              "aside",
+              {
+                "aria-label": "目录",
+                className: "hidden w-64 shrink-0 lg:block",
+              },
+              renderDirectoryTree(),
+            ),
+            createElement("div", { className: "min-w-0 flex-1" }, panel),
+          )
+        : panel,
     ),
+    activeTab === "files"
+      ? createElement(
+          Drawer,
+          {
+            open: directoryDrawerOpen,
+            onClose: () => setDirectoryDrawerOpen(false),
+            title: "目录",
+            children: renderDirectoryTree(),
+          },
+        )
+      : null,
   );
 }

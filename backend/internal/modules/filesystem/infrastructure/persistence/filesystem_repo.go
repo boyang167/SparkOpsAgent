@@ -155,7 +155,7 @@ func (r *Repository) GetNodeIncludingTrashed(ctx context.Context, namespaceID, n
 	return nodeFromRow(row), nil
 }
 
-func (r *Repository) ListChildren(ctx context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, limit int, cursor string) ([]model.Node, string, error) {
+func (r *Repository) ListChildren(ctx context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, nodeType *model.NodeType, limit int, cursor string) ([]model.Node, string, error) {
 	if parentID != nil {
 		if _, err := r.GetNode(ctx, namespaceID, *parentID); err != nil {
 			return nil, "", err
@@ -166,6 +166,9 @@ func (r *Repository) ListChildren(ctx context.Context, namespaceID uuid.UUID, pa
 		query = query.Where("parent_id IS NULL")
 	} else {
 		query = query.Where("parent_id = ?", *parentID)
+	}
+	if nodeType != nil {
+		query = query.Where("node_type = ?", *nodeType)
 	}
 	if cursor != "" {
 		query = query.Where("id > ?", cursor)

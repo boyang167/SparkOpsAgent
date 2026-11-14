@@ -300,7 +300,7 @@ func TestCreateDirectoryRollsBackWhenOutboxPublishFails(t *testing.T) {
 	_, err := NewCreateDirectoryHandler(repo, postgres.NewTransactor(db), failingBus{}, nil).Handle(context.Background(), command)
 	require.Error(t, err)
 
-	children, _, listErr := repo.ListChildren(context.Background(), ns.ID, ns.RootNodeID, 100, "")
+	children, _, listErr := repo.ListChildren(context.Background(), ns.ID, ns.RootNodeID, nil, 100, "")
 	require.NoError(t, listErr)
 	for _, child := range children {
 		require.NotEqual(t, "outbox-rollback", child.Name)

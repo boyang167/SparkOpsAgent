@@ -53,11 +53,13 @@ type ListFilesQuery = {
   parentId?: string | null;
   cursor?: string;
   limit?: number;
+  nodeType?: "FILE" | "DIRECTORY";
 };
 
 function listFilesQuery(query: ListFilesQuery = {}) {
   const params = new URLSearchParams();
   if (query.parentId) params.set("parent_id", query.parentId);
+  if (query.nodeType) params.set("type", query.nodeType);
   if (query.cursor) params.set("cursor", query.cursor);
   if (query.limit != null) params.set("limit", String(query.limit));
   const suffix = params.toString();

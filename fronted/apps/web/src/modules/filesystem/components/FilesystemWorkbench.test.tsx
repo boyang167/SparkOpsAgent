@@ -15,16 +15,42 @@ const explorer = vi.hoisted(() => ({
   views: [] as string[],
 }));
 
+const directoryTree = vi.hoisted(() => ({
+  roots: [] as string[],
+}));
+
 vi.mock("next/navigation", () => ({
   usePathname: () => "/files",
-  useRouter: () => ({ replace: navigation.replace }),
+  useRouter: () => ({ replace: navigation.replace, push: vi.fn() }),
   useSearchParams: () => navigation.searchParams,
+}));
+
+vi.mock("@/components/ui/Drawer", () => ({
+  Drawer: ({
+    open,
+    title,
+    children,
+  }: {
+    open: boolean;
+    title: string;
+    children: React.ReactNode;
+  }) =>
+    open
+      ? createElement("div", { role: "dialog", "aria-label": title }, children)
+      : null,
 }));
 
 vi.mock("./FileExplorerPanel", () => ({
   FileExplorerPanel: ({ view }: { view: string }) => {
     explorer.views.push(view);
     return null;
+  },
+}));
+
+vi.mock("./DirectoryTree", () => ({
+  DirectoryTree: ({ root }: { root: { id: string } }) => {
+    directoryTree.roots.push(root.id);
+    return createElement("div", { role: "tree" });
   },
 }));
 
@@ -57,6 +83,7 @@ describe("FilesystemWorkbench", () => {
     navigation.replace.mockReset();
     navigation.searchParams = new URLSearchParams();
     explorer.views = [];
+    directoryTree.roots = [];
   });
 
   it("selects files and hides governance without storage read permission", () => {
@@ -131,5 +158,16 @@ describe("FilesystemWorkbench", () => {
     fireEvent.keyDown(screen.getByRole("tab", { name: "文件" }), { key: "ArrowLeft" });
 
     expect(navigation.replace).toHaveBeenCalledWith("/files?tab=transfers");
+  });
+
+  it("reuses the directory tree in the desktop sidebar and narrow-screen drawer", () => {
+    renderWorkbench();
+
+    expect(screen.getByRole("complementary", { name: "目录" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+
+    expect(screen.getByRole("dialog", { name: "目录" })).toBeInTheDocument();
+    expect(screen.getAllByRole("tree")).toHaveLength(2);
+    expect(directoryTree.roots.every((rootId) => rootId === namespace.root_node_id)).toBe(true);
   });
 });

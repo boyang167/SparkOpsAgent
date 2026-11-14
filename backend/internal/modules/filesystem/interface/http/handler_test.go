@@ -89,7 +89,7 @@ func TestListFilesUsesReadPermissionAndDoesNotRequireIdempotencyKey(t *testing.T
 	nsID := uuid.New()
 	rootID := uuid.New()
 	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileRead: true}}, &Handler{
-		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Node, string, error) {
+		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, int, string) ([]model.Node, string, error) {
 			return []model.Node{}, "", nil
 		},
 		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
@@ -103,6 +103,38 @@ func TestListFilesUsesReadPermissionAndDoesNotRequireIdempotencyKey(t *testing.T
 	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
 }
 
+func TestListFilesValidatesAndPassesNodeTypeBeforeQuery(t *testing.T) {
+	nsID, rootID := uuid.New(), uuid.New()
+	var capturedType *model.NodeType
+	h := &Handler{
+		listChildren: func(_ context.Context, _ uuid.UUID, _ *uuid.UUID, nodeType *model.NodeType, _ int, _ string) ([]model.Node, string, error) {
+			capturedType = nodeType
+			return []model.Node{}, "", nil
+		},
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileRead: true}}, h)
+
+	valid := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID.String()+"/files?type=DIRECTORY", nil)
+	valid.Header.Set("Authorization", "Bearer "+token)
+	validResponse := httptest.NewRecorder()
+	router.ServeHTTP(validResponse, valid)
+	require.Equal(t, http.StatusOK, validResponse.Code, validResponse.Body.String())
+	require.NotNil(t, capturedType)
+	require.Equal(t, model.NodeTypeDirectory, *capturedType)
+
+	capturedType = nil
+	invalid := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID.String()+"/files?type=SYMLINK", nil)
+	invalid.Header.Set("Authorization", "Bearer "+token)
+	invalidResponse := httptest.NewRecorder()
+	router.ServeHTTP(invalidResponse, invalid)
+	require.Equal(t, http.StatusBadRequest, invalidResponse.Code, invalidResponse.Body.String())
+	require.Contains(t, invalidResponse.Body.String(), "FILESYSTEM_INVALID_REQUEST")
+	require.Nil(t, capturedType)
+}
+
 func TestListFilesDeniesWhenResourceAuthorizerDeniesAfterRBAC(t *testing.T) {
 	nsID, rootID := uuid.New(), uuid.New()
 	h := &Handler{
@@ -114,7 +146,7 @@ func TestListFilesDeniesWhenResourceAuthorizerDeniesAfterRBAC(t *testing.T) {
 			require.Equal(t, model.ResourcePermissionRead, request.Permission)
 			return resourceauth.Decision{Reason: "default_deny"}
 		},
-		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Node, string, error) {
+		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, int, string) ([]model.Node, string, error) {
 			t.Fatal("resource denial must stop query")
 			return nil, "", nil
 		},
@@ -141,7 +173,7 @@ func TestListFilesFiltersDeniedChildrenAndFillsAcrossPages(t *testing.T) {
 		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
 			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
 		},
-		listChildren: func(_ context.Context, _ uuid.UUID, _ *uuid.UUID, _ int, cursor string) ([]model.Node, string, error) {
+		listChildren: func(_ context.Context, _ uuid.UUID, _ *uuid.UUID, _ *model.NodeType, _ int, cursor string) ([]model.Node, string, error) {
 			if cursor == "" {
 				return []model.Node{{ID: ids[0], Name: "deny-1"}, {ID: ids[1], Name: "allow-2"}, {ID: ids[2], Name: "deny-3"}}, ids[2].String(), nil
 			}
@@ -173,7 +205,7 @@ func TestListFilesReturnsEmptyWhenAllChildrenDenied(t *testing.T) {
 		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
 			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
 		},
-		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Node, string, error) {
+		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, int, string) ([]model.Node, string, error) {
 			return []model.Node{{ID: deniedID, Name: "hidden"}}, "", nil
 		},
 		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
@@ -397,7 +429,7 @@ func TestListFilesDefaultsToNamespaceRootAndNeverReturnsHiddenRoot(t *testing.T)
 			require.Equal(t, rootID, nodeID)
 			return &model.Node{ID: rootID, NamespaceID: nsID, Type: model.NodeTypeDirectory}, nil
 		},
-		listChildren: func(_ context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, _ int, _ string) ([]model.Node, string, error) {
+		listChildren: func(_ context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, _ *model.NodeType, _ int, _ string) ([]model.Node, string, error) {
 			require.Equal(t, nsID, namespaceID)
 			capturedParent = parentID
 			return []model.Node{{ID: childID, NamespaceID: nsID, ParentID: &rootID, Name: "docs", Type: model.NodeTypeDirectory}}, "", nil
@@ -424,7 +456,7 @@ func TestListFilesRejectsForeignExplicitParent(t *testing.T) {
 		getNode: func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error) {
 			return &model.Node{ID: parentID, NamespaceID: foreignNS, Type: model.NodeTypeDirectory}, nil
 		},
-		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Node, string, error) {
+		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, int, string) ([]model.Node, string, error) {
 			t.Fatal("list must not run for a foreign parent")
 			return nil, "", nil
 		},

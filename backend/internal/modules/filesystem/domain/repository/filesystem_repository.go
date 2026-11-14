@@ -85,7 +85,7 @@ type FilesystemRepository interface {
 	CreateNode(context.Context, *model.Node) error
 	GetNode(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
 	GetNodeIncludingTrashed(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
-	ListChildren(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Node, string, error)
+	ListChildren(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, int, string) ([]model.Node, string, error)
 	NextRevisionNumber(context.Context, uuid.UUID) (int, error)
 	SaveRevision(context.Context, *model.FileRevision, *model.Blob, *model.StorageReplica) error
 	AcquireBlob(context.Context, uuid.UUID, string, int64) (*model.Blob, error)

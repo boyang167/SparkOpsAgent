@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TransferSessionVM } from "@sparkops/contracts/filesystem";
-import { uploadTransfer } from "./filesystem";
+import { listFileNodes, uploadTransfer } from "./filesystem";
 
 function sessionWithCompletedParts(partNumbers: number[]): TransferSessionVM {
   const partSize = 5;
@@ -49,5 +49,36 @@ describe("filesystem transfer sdk", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://storage.example/parts/3");
     expect(fetchMock.mock.calls[1]?.[0]).toBe("https://storage.example/parts/4");
+  });
+});
+
+describe("filesystem node sdk", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("encodes a directory type filter after the parent id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 0,
+          message: "ok",
+          data: { items: [], next_cursor: "" },
+          trace_id: "trace-1",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listFileNodes("workspace-1", {
+      parentId: "parent-1",
+      nodeType: "DIRECTORY",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("parent_id=parent-1&type=DIRECTORY"),
+      expect.anything(),
+    );
   });
 });

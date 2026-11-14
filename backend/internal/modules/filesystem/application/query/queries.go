@@ -12,6 +12,7 @@ import (
 type ListChildren struct {
 	NamespaceID uuid.UUID
 	ParentID    *uuid.UUID
+	NodeType    *model.NodeType
 	Limit       int
 	Cursor      string
 }
@@ -25,7 +26,7 @@ func NewListChildrenHandler(repo repository.FilesystemRepository) *ListChildrenH
 }
 
 func (h *ListChildrenHandler) Handle(ctx context.Context, q ListChildren) ([]model.Node, string, error) {
-	return h.repo.ListChildren(ctx, q.NamespaceID, q.ParentID, q.Limit, q.Cursor)
+	return h.repo.ListChildren(ctx, q.NamespaceID, q.ParentID, q.NodeType, q.Limit, q.Cursor)
 }
 
 type ListRevisions struct {

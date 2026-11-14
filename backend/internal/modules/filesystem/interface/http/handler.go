@@ -41,7 +41,7 @@ type TransferOptions struct {
 type Handler struct {
 	namespaceForWorkspace func(context.Context, uuid.UUID) (*model.Namespace, error)
 	getNode               func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
-	listChildren          func(context.Context, uuid.UUID, *uuid.UUID, int, string) ([]model.Node, string, error)
+	listChildren          func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, int, string) ([]model.Node, string, error)
 	listRevisions         func(context.Context, uuid.UUID, uuid.UUID, int, string) ([]model.FileRevision, string, error)
 	createDirectory       func(context.Context, command.CreateDirectory) (*model.Node, error)
 	renameNode            func(context.Context, command.RenameNode) error
@@ -90,8 +90,8 @@ func NewHandler(
 	handler := &Handler{
 		namespaceForWorkspace: repo.GetNamespaceByWorkspace,
 		getNode:               repo.GetNode,
-		listChildren: func(ctx context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, limit int, cursor string) ([]model.Node, string, error) {
-			return list.Handle(ctx, query.ListChildren{NamespaceID: namespaceID, ParentID: parentID, Limit: limit, Cursor: cursor})
+		listChildren: func(ctx context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, nodeType *model.NodeType, limit int, cursor string) ([]model.Node, string, error) {
+			return list.Handle(ctx, query.ListChildren{NamespaceID: namespaceID, ParentID: parentID, NodeType: nodeType, Limit: limit, Cursor: cursor})
 		},
 		listRevisions: func(ctx context.Context, namespaceID, nodeID uuid.UUID, limit int, cursor string) ([]model.FileRevision, string, error) {
 			return revisions.Handle(ctx, query.ListRevisions{NamespaceID: namespaceID, NodeID: nodeID, Limit: limit, Cursor: cursor})
@@ -334,6 +334,10 @@ func (h *Handler) ListFiles(c *gin.Context) {
 	if !ok {
 		return
 	}
+	nodeType, ok := optionalNodeTypeQuery(c)
+	if !ok {
+		return
+	}
 	if h.listChildren == nil {
 		filesystemError(c, domain.ErrPersistence)
 		return
@@ -369,7 +373,7 @@ func (h *Handler) ListFiles(c *gin.Context) {
 	scanCursor := c.Query("cursor")
 	nextCursor := ""
 	for len(views) < limit {
-		items, rawNext, err := h.listChildren(c.Request.Context(), rc.namespace.ID, parentID, 200, scanCursor)
+		items, rawNext, err := h.listChildren(c.Request.Context(), rc.namespace.ID, parentID, nodeType, 200, scanCursor)
 		if err != nil {
 			filesystemError(c, err)
 			return
@@ -713,6 +717,19 @@ func optionalUUIDQuery(c *gin.Context, name string) (*uuid.UUID, bool) {
 		return nil, true
 	}
 	return optionalUUID(&raw)
+}
+
+func optionalNodeTypeQuery(c *gin.Context) (*model.NodeType, bool) {
+	raw := c.Query("type")
+	if raw == "" {
+		return nil, true
+	}
+	nodeType := model.NodeType(raw)
+	if nodeType != model.NodeTypeFile && nodeType != model.NodeTypeDirectory {
+		invalidRequest(c)
+		return nil, false
+	}
+	return &nodeType, true
 }
 
 func optionalUUID(raw *string) (*uuid.UUID, bool) {

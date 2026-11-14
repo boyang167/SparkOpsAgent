@@ -128,7 +128,7 @@ func TestTrashedDirectoryHidesSubtreeAndListChildren(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrNodeNotFound)
 	_, err = repo.GetNode(context.Background(), ns.ID, child.ID)
 	require.ErrorIs(t, err, domain.ErrNodeNotFound)
-	_, _, err = repo.ListChildren(context.Background(), ns.ID, &parent.ID, 100, "")
+	_, _, err = repo.ListChildren(context.Background(), ns.ID, &parent.ID, nil, 100, "")
 	require.ErrorIs(t, err, domain.ErrNodeNotFound)
 	included, err := repo.GetNodeIncludingTrashed(context.Background(), ns.ID, parent.ID)
 	require.NoError(t, err)
@@ -391,15 +391,36 @@ func TestListChildrenCursorHasStableExclusiveBoundary(t *testing.T) {
 		require.NoError(t, repo.CreateNode(context.Background(), rootFile(ns.ID, name)))
 	}
 
-	first, cursor, err := repo.ListChildren(context.Background(), ns.ID, nil, 2, "")
+	first, cursor, err := repo.ListChildren(context.Background(), ns.ID, nil, nil, 2, "")
 	require.NoError(t, err)
 	require.Len(t, first, 2)
 	require.NotEmpty(t, cursor)
-	second, next, err := repo.ListChildren(context.Background(), ns.ID, nil, 2, cursor)
+	second, next, err := repo.ListChildren(context.Background(), ns.ID, nil, nil, 2, cursor)
 	require.NoError(t, err)
 	require.Len(t, second, 1)
 	require.Empty(t, next)
 	require.NotEqual(t, first[1].ID, second[0].ID)
+}
+
+func TestListChildrenFiltersNodeTypeBeforePagination(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	for _, node := range []*model.Node{
+		rootDirectory(ns.ID, "docs"),
+		rootFile(ns.ID, "notes.txt"),
+		rootDirectory(ns.ID, "projects"),
+	} {
+		require.NoError(t, repo.CreateNode(context.Background(), node))
+	}
+	nodeType := model.NodeTypeDirectory
+
+	items, next, err := repo.ListChildren(context.Background(), ns.ID, nil, &nodeType, 2, "")
+
+	require.NoError(t, err)
+	require.Empty(t, next)
+	require.Len(t, items, 2)
+	require.Equal(t, model.NodeTypeDirectory, items[0].Type)
+	require.Equal(t, model.NodeTypeDirectory, items[1].Type)
 }
 
 func TestUniqueConflictMappingIsConstraintSpecific(t *testing.T) {
