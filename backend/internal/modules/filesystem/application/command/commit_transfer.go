@@ -118,6 +118,7 @@ func (h *CommitTransferHandler) Handle(ctx context.Context, cmd CommitTransfer) 
 			return nodeErr
 		}
 		fileNode.ID = nodeID
+		fileNode.Classification = session.Classification()
 		_, existingErr := h.repo.GetNodeIncludingTrashed(txCtx, session.NamespaceID(), nodeID)
 		if errors.Is(existingErr, domain.ErrNodeNotFound) {
 			if err := h.repo.CreateNode(txCtx, fileNode); err != nil && !errors.Is(err, domain.ErrNodeIDConflict) {
@@ -132,7 +133,7 @@ func (h *CommitTransferHandler) Handle(ctx context.Context, cmd CommitTransfer) 
 		}
 		verifiedAt := now
 		replica := &model.StorageReplica{
-			ID: uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer-replica:"+session.ID().String())),
+			ID:     uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer-replica:"+session.ID().String())),
 			BlobID: blob.ID, ProviderID: *providerID, ObjectKey: session.TemporaryObjectKey(), Checksum: checksum,
 			State: model.ReplicaStateAvailable, VerifiedAt: &verifiedAt,
 		}
@@ -187,14 +188,14 @@ func commitTransferEvents(session *model.TransferSession, node *model.Node, revi
 			event.FileCreated{BaseEvent: sharedevents.NewBaseEvent(event.FileCreatedName), FileID: node.ID, NamespaceID: node.NamespaceID},
 			event.FileRevisionCreated{
 				BaseEvent: sharedevents.NewBaseEvent(event.FileRevisionCreatedName),
-				FileID: node.ID, RevisionID: revision.ID(), RevisionNo: revision.RevisionNo(),
+				FileID:    node.ID, RevisionID: revision.ID(), RevisionNo: revision.RevisionNo(),
 			},
 		}, out...)
 	} else {
 		out = append([]sharedevents.Event{
 			event.FileRevisionCreated{
 				BaseEvent: sharedevents.NewBaseEvent(event.FileRevisionCreatedName),
-				FileID: node.ID, RevisionID: revision.ID(), RevisionNo: revision.RevisionNo(),
+				FileID:    node.ID, RevisionID: revision.ID(), RevisionNo: revision.RevisionNo(),
 			},
 		}, out...)
 	}

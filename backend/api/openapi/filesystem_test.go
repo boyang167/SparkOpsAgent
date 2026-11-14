@@ -128,6 +128,21 @@ func TestFilesystemOpenAPIIdempotencyAndLocalRefs(t *testing.T) {
 	assertLocalRefsResolve(t, document, document)
 }
 
+func TestFilesystemGrantCompatibilityAndRejectReasonSchemas(t *testing.T) {
+	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &document))
+	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+	legacy := schemas["CreateResourceGrantRequest"].(map[string]any)
+	require.ElementsMatch(t, []any{"grantee_id", "permission", "effect"}, legacy["required"].([]any))
+	effect := legacy["properties"].(map[string]any)["effect"].(map[string]any)
+	require.ElementsMatch(t, []any{"ALLOW", "DENY"}, effect["enum"].([]any))
+	reason := schemas["RejectShareRequest"].(map[string]any)["properties"].(map[string]any)["reason"].(map[string]any)
+	require.EqualValues(t, 1, reason["minLength"])
+	require.EqualValues(t, 1000, reason["maxLength"])
+}
+
 func TestFilesystemAuditOpenAPISchemaMatchesSDKContract(t *testing.T) {
 	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
 	require.NoError(t, err)

@@ -23,17 +23,18 @@ type namespaceRow struct {
 func (namespaceRow) TableName() string { return "filesystem.namespaces" }
 
 type nodeRow struct {
-	ID                uuid.UUID       `gorm:"column:id;primaryKey;type:uuid"`
-	NamespaceID       uuid.UUID       `gorm:"column:namespace_id;not null;type:uuid;index"`
-	ParentID          *uuid.UUID      `gorm:"column:parent_id;type:uuid"`
-	Type              model.NodeType  `gorm:"column:node_type;not null;type:varchar(16)"`
-	Name              string          `gorm:"not null"`
-	NormalizedName    string          `gorm:"column:normalized_name;not null;index"`
-	CurrentRevisionID *uuid.UUID      `gorm:"column:current_revision_id;type:uuid"`
-	State             model.NodeState `gorm:"not null;type:varchar(32)"`
-	OwnerID           uuid.UUID       `gorm:"column:owner_id;not null;type:uuid"`
-	CreatedAt         time.Time       `gorm:"not null"`
-	UpdatedAt         time.Time       `gorm:"not null"`
+	ID                uuid.UUID                    `gorm:"column:id;primaryKey;type:uuid"`
+	NamespaceID       uuid.UUID                    `gorm:"column:namespace_id;not null;type:uuid;index"`
+	ParentID          *uuid.UUID                   `gorm:"column:parent_id;type:uuid"`
+	Type              model.NodeType               `gorm:"column:node_type;not null;type:varchar(16)"`
+	Name              string                       `gorm:"not null"`
+	NormalizedName    string                       `gorm:"column:normalized_name;not null;index"`
+	CurrentRevisionID *uuid.UUID                   `gorm:"column:current_revision_id;type:uuid"`
+	State             model.NodeState              `gorm:"not null;type:varchar(32)"`
+	OwnerID           uuid.UUID                    `gorm:"column:owner_id;not null;type:uuid"`
+	Classification    model.TransferClassification `gorm:"column:classification;not null;default:'INTERNAL';type:varchar(16)"`
+	CreatedAt         time.Time                    `gorm:"not null"`
+	UpdatedAt         time.Time                    `gorm:"not null"`
 }
 
 func (nodeRow) TableName() string { return "filesystem.nodes" }
@@ -154,6 +155,7 @@ type shareRequestRow struct {
 	InheritToChildren bool                         `gorm:"column:inherit_to_children;not null;default:true"`
 	ExpiresAt         *time.Time                   `gorm:"column:expires_at"`
 	Classification    model.TransferClassification `gorm:"column:classification;not null;type:varchar(16)"`
+	Effect            model.GrantEffect            `gorm:"column:effect;not null;default:'ALLOW';type:varchar(8)"`
 	Status            model.ShareRequestStatus     `gorm:"column:status;not null;type:varchar(16);index"`
 	ReviewedBy        *uuid.UUID                   `gorm:"column:reviewed_by;type:uuid"`
 	ReviewedAt        *time.Time                   `gorm:"column:reviewed_at"`

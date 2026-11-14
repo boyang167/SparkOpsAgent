@@ -55,6 +55,14 @@ func TestSQLiteAutoMigrateUpgradesLegacyGrantRows(t *testing.T) {
 	require.Equal(t, granteeID, got.PrincipalID)
 	require.True(t, got.Inherit)
 	require.EqualValues(t, 1, got.PolicyVersion)
+	var nodeClassification model.TransferClassification
+	require.NoError(t, db.Table("filesystem.nodes").Select("classification").Where("id = ?", nodeID).Scan(&nodeClassification).Error)
+	require.Equal(t, model.TransferClassificationInternal, nodeClassification)
+	var classificationColumn struct {
+		NotNull int `gorm:"column:notnull"`
+	}
+	require.NoError(t, db.Raw(`SELECT "notnull" FROM filesystem.pragma_table_info('nodes') WHERE name = 'classification'`).Scan(&classificationColumn).Error)
+	require.Equal(t, 1, classificationColumn.NotNull)
 
 	repo := NewRepository(db)
 	grants, err := repo.ListResourceGrants(context.Background(), []uuid.UUID{nodeID}, []repository.PrincipalRef{{Type: model.PrincipalUser, ID: granteeID}}, model.ResourcePermissionRead, time.Now())

@@ -5,6 +5,15 @@ ALTER TABLE filesystem.resource_grants
     ADD CONSTRAINT ck_filesystem_grant_values
     CHECK (permission IN ('READ','DOWNLOAD','WRITE','DELETE','SHARE','ADMIN') AND effect IN ('ALLOW','DENY'));
 
+ALTER TABLE filesystem.nodes
+    ADD COLUMN classification VARCHAR(16);
+UPDATE filesystem.nodes SET classification = 'INTERNAL' WHERE classification IS NULL;
+ALTER TABLE filesystem.nodes
+    ALTER COLUMN classification SET DEFAULT 'INTERNAL',
+    ALTER COLUMN classification SET NOT NULL,
+    ADD CONSTRAINT ck_filesystem_node_classification
+        CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED'));
+
 CREATE TABLE IF NOT EXISTS filesystem.share_requests (
     id UUID PRIMARY KEY,
     organization_id UUID NOT NULL,
@@ -17,6 +26,7 @@ CREATE TABLE IF NOT EXISTS filesystem.share_requests (
     inherit_to_children BOOLEAN NOT NULL DEFAULT TRUE,
     expires_at TIMESTAMPTZ,
     classification VARCHAR(16) NOT NULL,
+    effect VARCHAR(8) NOT NULL DEFAULT 'ALLOW',
     status VARCHAR(16) NOT NULL,
     reviewed_by UUID,
     reviewed_at TIMESTAMPTZ,
@@ -30,6 +40,7 @@ CREATE TABLE IF NOT EXISTS filesystem.share_requests (
         AND jsonb_array_length(actions) > 0
     ),
     CONSTRAINT ck_share_requests_classification CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED')),
+    CONSTRAINT ck_share_requests_effect CHECK (effect IN ('ALLOW','DENY')),
     CONSTRAINT ck_share_requests_status CHECK (status IN ('PENDING','APPROVED','REJECTED','CANCELLED'))
 );
 

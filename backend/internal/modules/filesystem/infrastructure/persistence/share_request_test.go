@@ -2,7 +2,6 @@ package persistence
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -78,13 +77,13 @@ func TestCreateResourceGrantsRequiresTransactionAndWritesWholeBatch(t *testing.T
 	require.Len(t, stored, 2)
 }
 
-func TestGetNodeClassificationUsesAuthoritativeTransferState(t *testing.T) {
+func TestNodeClassificationUsesSingleAuthoritativeNodeRowAndFailsClosed(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
 	require.NoError(t, AutoMigrate(db))
 	repo := NewRepository(db)
-	owner, sessionID := uuid.New(), uuid.New()
+	owner := uuid.New()
 	namespace := &model.Namespace{
 		ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(),
 		WorkspaceID: uuid.New(), Status: "ACTIVE",
@@ -94,23 +93,65 @@ func TestGetNodeClassificationUsesAuthoritativeTransferState(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateNode(context.Background(), root))
 	require.NoError(t, repo.SetNamespaceRoot(context.Background(), namespace.WorkspaceID, root.ID))
-	session, err := model.NewTransferSession(model.TransferSessionInput{
-		ID: sessionID, WorkspaceID: namespace.WorkspaceID, NamespaceID: namespace.ID, TargetParentID: &root.ID,
-		TargetName: "restricted.bin", CreatedBy: owner, Protocol: model.TransferProtocolMultipart,
-		ExpectedSize: 1, ExpectedSHA256: strings.Repeat("a", 64), IdempotencyKey: "classification-1",
-		RequestHash: strings.Repeat("b", 64), TemporaryObjectKey: "transfers/restricted",
-		ExpiresAt: time.Now().UTC().Add(time.Hour), Classification: model.TransferClassificationRestricted,
-	})
-	require.NoError(t, err)
-	require.NoError(t, repo.CreateTransfer(context.Background(), session))
-	require.NoError(t, db.Table("filesystem.transfer_sessions").Where("id = ?", sessionID).Update("status", model.TransferCompleted).Error)
-	nodeID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer-node:"+sessionID.String()))
 	node, err := model.NewFile(namespace.ID, owner, "restricted.bin", root.ID)
 	require.NoError(t, err)
-	node.ID = nodeID
+	node.Classification = model.TransferClassificationRestricted
 	require.NoError(t, repo.CreateNode(context.Background(), node))
 
-	classification, err := repo.GetNodeClassification(context.Background(), nodeID)
+	classification, err := repo.GetNodeClassification(context.Background(), node.ID)
 	require.NoError(t, err)
 	require.Equal(t, model.TransferClassificationRestricted, classification)
+
+	_, err = repo.GetNodeClassification(context.Background(), uuid.New())
+	require.ErrorIs(t, err, domain.ErrNodeNotFound)
+
+	require.NoError(t, db.Exec("PRAGMA ignore_check_constraints = ON").Error)
+	require.NoError(t, db.Table("filesystem.nodes").Where("id = ?", node.ID).Update("classification", "").Error)
+	_, err = repo.GetNodeClassification(context.Background(), node.ID)
+	require.Error(t, err)
+}
+
+func TestSubtreeHighestClassificationUsesOneRecursiveQuerySQLite(t *testing.T) {
+	testSubtreeHighestClassification(t, openShareSQLite(t))
+}
+
+func TestSubtreeHighestClassificationUsesOneRecursiveQueryPostgres(t *testing.T) {
+	db := openFilesystemPostgres(t)
+	require.NoError(t, AutoMigrate(db))
+	testSubtreeHighestClassification(t, db)
+}
+
+func testSubtreeHighestClassification(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	repo := NewRepository(db)
+	owner := uuid.New()
+	namespace := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(),
+		WorkspaceID: uuid.New(), Status: "ACTIVE",
+	}
+	require.NoError(t, repo.CreateNamespace(context.Background(), namespace))
+	root, err := model.NewRootDirectory(namespace.ID, owner, ".root")
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(context.Background(), root))
+	confidential, err := model.NewFile(namespace.ID, owner, "confidential.bin", root.ID)
+	require.NoError(t, err)
+	confidential.Classification = model.TransferClassificationConfidential
+	require.NoError(t, repo.CreateNode(context.Background(), confidential))
+	restricted, err := model.NewFile(namespace.ID, owner, "restricted.bin", root.ID)
+	require.NoError(t, err)
+	restricted.Classification = model.TransferClassificationRestricted
+	require.NoError(t, repo.CreateNode(context.Background(), restricted))
+
+	classification, err := repo.GetSubtreeHighestClassification(context.Background(), namespace.ID, root.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.TransferClassificationRestricted, classification)
+}
+
+func openShareSQLite(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
+	require.NoError(t, AutoMigrate(db))
+	return db
 }

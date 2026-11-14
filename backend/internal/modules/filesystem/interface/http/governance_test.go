@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -355,6 +356,35 @@ func TestApproveShareRequestHTTPForwardsAuthoritativeOrganization(t *testing.T) 
 	require.Equal(t, orgID, captured.OrganizationID)
 	require.Equal(t, memberID.UUID, captured.ActorID)
 	require.Equal(t, requestID, captured.RequestID)
+}
+
+func TestRejectShareRequestHTTPTrimsAndBoundsReason(t *testing.T) {
+	orgID, requestID := uuid.New(), uuid.New()
+	calls := 0
+	var captured command.ReviewShareRequest
+	handler := &GovernanceHandler{
+		rejectShare: func(_ context.Context, cmd command.ReviewShareRequest) (model.ShareRequest, error) {
+			calls++
+			captured = cmd
+			return model.ShareRequest{ID: cmd.RequestID, Status: model.ShareRequestRejected}, nil
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{}, handler)
+	send := func(reason string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/filesystem/share-requests/"+requestID.String()+"/reject", strings.NewReader(`{"reason":`+strconv.Quote(reason)+`}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Organization-ID", orgID.String())
+		req.Header.Set("Idempotency-Key", uuid.NewString())
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		return res
+	}
+	require.Equal(t, http.StatusBadRequest, send("   ").Code)
+	require.Equal(t, http.StatusBadRequest, send(strings.Repeat("x", 1001)).Code)
+	require.Zero(t, calls)
+	require.Equal(t, http.StatusOK, send("  policy violation  ").Code)
+	require.Equal(t, "policy violation", captured.RejectionReason)
 }
 
 func governanceRouter(t *testing.T, orgs authz.OrgPermissionChecker, workspaces authz.WorkspaceAccessResolver, handler *GovernanceHandler) (*gin.Engine, string, uuid.UUID, kernel.MemberID) {

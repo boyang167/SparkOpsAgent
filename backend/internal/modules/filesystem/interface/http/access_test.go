@@ -60,7 +60,25 @@ func TestLegacyGrantEndpointIgnoresClientPrincipalOrganizationAndNormalizesUser(
 	require.Equal(t, org, captured.OrganizationID)
 	require.Equal(t, model.PrincipalUser, captured.PrincipalType)
 	require.Equal(t, []model.ResourcePermission{model.ResourcePermissionRead}, captured.Actions)
+	require.Equal(t, model.GrantEffectAllow, captured.Effect)
 	require.Len(t, captured.PrincipalIDs, 1)
+}
+
+func TestLegacyDenyGrantNormalizesWithoutDeclaredOrganization(t *testing.T) {
+	org, workspaceID := uuid.New(), uuid.New()
+	rc := requestContext{
+		workspaceID: workspaceID, actorID: uuid.New(), commandID: uuid.New(),
+		namespace: &model.Namespace{ID: uuid.New(), OrganizationID: org, WorkspaceID: workspaceID},
+	}
+	principalID := uuid.New()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	submit, legacy, ok := shareCommand(c, rc, uuid.New(), grantBody{
+		GranteeID: principalID.String(), Permission: "READ", Effect: "DENY",
+	})
+	require.True(t, ok)
+	require.True(t, legacy)
+	require.Equal(t, model.GrantEffectDeny, submit.Effect)
+	require.Equal(t, org, submit.OrganizationID)
 }
 
 func TestTypedGrantBodyPreservesDownloadAsDistinctPermission(t *testing.T) {

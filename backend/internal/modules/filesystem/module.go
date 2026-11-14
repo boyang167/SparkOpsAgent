@@ -69,6 +69,21 @@ type namespaceAuthorityAdapter struct {
 	organizations   authz.OrgPermissionChecker
 }
 
+type shareSourceAuthorizerAdapter struct {
+	authorizer *resourceauth.Service
+}
+
+func (a shareSourceAuthorizerAdapter) AuthorizeShare(ctx context.Context, actorID, workspaceID, namespaceID, nodeID uuid.UUID) (bool, error) {
+	if a.authorizer == nil {
+		return false, nil
+	}
+	decision := a.authorizer.Authorize(ctx, resourceauth.Request{
+		ActorID: actorID, WorkspaceID: workspaceID, NamespaceID: namespaceID,
+		NodeID: nodeID, Permission: model.ResourcePermissionShare,
+	})
+	return decision.Allowed, nil
+}
+
 type principalScopeAdapter struct {
 	workspaces    authz.WorkspaceScopeResolver
 	roles         authz.RoleScopeResolver
@@ -286,6 +301,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		repo, c.Transactor, c.EventBus,
 		principalScopeAdapter{workspaces: c.WorkspaceScopeResolver, roles: c.RoleScopeResolver, organizations: c.OrgPermissionChecker},
 		shareAuthority,
+		shareSourceAuthorizerAdapter{authorizer: resourceAuthorizer},
 	)
 	agentSigner, agentSignerErr := agentsign.NewSigner(secret, domainservice.AgentCapabilityAudience)
 	if agentSignerErr != nil {

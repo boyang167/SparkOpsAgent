@@ -28,6 +28,20 @@ func TestNodeConstructorRejectsInvalidName(t *testing.T) {
 	require.ErrorIs(t, err, model.ErrInvalidNodeName)
 }
 
+func TestNodeConstructorsDefaultToInternalClassification(t *testing.T) {
+	for _, constructor := range []func() (*model.Node, error){
+		func() (*model.Node, error) { return model.NewFile(uuid.New(), uuid.New(), "file.txt", uuid.New()) },
+		func() (*model.Node, error) {
+			return model.NewDirectory(uuid.New(), uuid.New(), "directory", uuid.New())
+		},
+		func() (*model.Node, error) { return model.NewRootDirectory(uuid.New(), uuid.New(), ".root") },
+	} {
+		node, err := constructor()
+		require.NoError(t, err)
+		require.Equal(t, model.TransferClassificationInternal, node.Classification)
+	}
+}
+
 func TestNodeStatesIncludeRetentionLifecycle(t *testing.T) {
 	assert.Equal(t, model.NodeState("ACTIVE"), model.NodeStateActive)
 	assert.Equal(t, model.NodeState("TRASHED"), model.NodeStateTrashed)

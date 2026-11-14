@@ -235,7 +235,7 @@ func (r *Repository) CreateNode(ctx context.Context, node *model.Node) error {
 	err := db.Create(&nodeRow{
 		ID: node.ID, NamespaceID: node.NamespaceID, ParentID: node.ParentID, Type: node.Type,
 		Name: node.Name, NormalizedName: node.NormalizedName, CurrentRevisionID: node.CurrentRevisionID,
-		State: node.State, OwnerID: node.OwnerID, CreatedAt: now, UpdatedAt: now,
+		State: node.State, OwnerID: node.OwnerID, Classification: node.Classification, CreatedAt: now, UpdatedAt: now,
 	}).Error
 	if conflict := mapUniqueConflict(err); conflict != nil {
 		return conflict
@@ -247,7 +247,7 @@ func (r *Repository) CreateNamespaceRootNodeIfAbsent(ctx context.Context, node *
 	err := postgres.DB(ctx, r.db).Clauses(clause.OnConflict{DoNothing: true}).Create(&nodeRow{
 		ID: node.ID, NamespaceID: node.NamespaceID, ParentID: node.ParentID, Type: node.Type,
 		Name: node.Name, NormalizedName: node.NormalizedName, CurrentRevisionID: node.CurrentRevisionID,
-		State: node.State, OwnerID: node.OwnerID, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		State: node.State, OwnerID: node.OwnerID, Classification: node.Classification, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}).Error
 	if isSQLiteBusy(err) {
 		return domain.ErrTransactionRetry
@@ -803,29 +803,61 @@ func resourceGrantFromRow(row resourceGrantRow) model.ResourceGrant {
 }
 
 func (r *Repository) GetNodeClassification(ctx context.Context, nodeID uuid.UUID) (model.TransferClassification, error) {
-	node, err := r.GetNodeByID(ctx, nodeID)
-	if err != nil {
-		return "", err
-	}
-	if node.Type != model.NodeTypeFile {
-		return model.TransferClassificationInternal, nil
-	}
-	var rows []struct {
-		ID             uuid.UUID
+	var row struct {
 		Classification model.TransferClassification
 	}
-	if err := postgres.DB(ctx, r.db).Table("filesystem.transfer_sessions").
-		Select("id, classification").Where("namespace_id = ? AND status = ?", node.NamespaceID, model.TransferCompleted).
-		Find(&rows).Error; err != nil {
+	err := postgres.DB(ctx, r.db).Table(nodeRow{}.TableName()).Select("classification").Where("id = ?", nodeID).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", domain.ErrNodeNotFound
+	}
+	if err != nil {
 		return "", wrapPersistence(err)
 	}
-	for _, row := range rows {
-		candidate := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer-node:"+row.ID.String()))
-		if candidate == nodeID {
-			return row.Classification, nil
-		}
+	if !validClassification(row.Classification) {
+		return "", domain.ErrPersistence
 	}
-	return model.TransferClassificationInternal, nil
+	return row.Classification, nil
+}
+
+func (r *Repository) GetSubtreeHighestClassification(ctx context.Context, namespaceID, nodeID uuid.UUID) (model.TransferClassification, error) {
+	var result struct {
+		Total   int64
+		Invalid int64
+		Highest int
+	}
+	err := postgres.DB(ctx, r.db).Raw(`
+WITH RECURSIVE subtree AS (
+	SELECT id, classification FROM filesystem.nodes WHERE namespace_id = ? AND id = ?
+	UNION ALL
+	SELECT child.id, child.classification
+	FROM filesystem.nodes child JOIN subtree parent ON child.parent_id = parent.id
+	WHERE child.namespace_id = ?
+)
+SELECT COUNT(*) AS total,
+	SUM(CASE WHEN classification NOT IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED') OR classification IS NULL THEN 1 ELSE 0 END) AS invalid,
+	MAX(CASE classification WHEN 'PUBLIC' THEN 1 WHEN 'INTERNAL' THEN 2 WHEN 'CONFIDENTIAL' THEN 3 WHEN 'RESTRICTED' THEN 4 ELSE 0 END) AS highest
+FROM subtree`, namespaceID, nodeID, namespaceID).Scan(&result).Error
+	if err != nil {
+		return "", wrapPersistence(err)
+	}
+	if result.Total == 0 {
+		return "", domain.ErrNodeNotFound
+	}
+	if result.Invalid != 0 {
+		return "", domain.ErrPersistence
+	}
+	switch result.Highest {
+	case 1:
+		return model.TransferClassificationPublic, nil
+	case 2:
+		return model.TransferClassificationInternal, nil
+	case 3:
+		return model.TransferClassificationConfidential, nil
+	case 4:
+		return model.TransferClassificationRestricted, nil
+	default:
+		return "", domain.ErrPersistence
+	}
 }
 
 func (r *Repository) CreateShareRequest(ctx context.Context, request model.ShareRequest) error {
@@ -833,7 +865,7 @@ func (r *Repository) CreateShareRequest(ctx context.Context, request model.Share
 		ID: request.ID, OrganizationID: request.OrganizationID, NamespaceID: request.NamespaceID,
 		NodeID: request.NodeID, RequestedBy: request.RequestedBy, PrincipalType: request.PrincipalType,
 		PrincipalIDs: request.PrincipalIDs, Actions: request.Actions, InheritToChildren: request.InheritToChildren,
-		ExpiresAt: request.ExpiresAt, Classification: request.Classification, Status: request.Status,
+		ExpiresAt: request.ExpiresAt, Classification: request.Classification, Effect: request.Effect, Status: request.Status,
 		ReviewedBy: request.ReviewedBy, ReviewedAt: request.ReviewedAt,
 		RejectionReason: request.RejectionReason, CreatedAt: request.CreatedAt,
 	}
@@ -886,6 +918,7 @@ func shareRequestFromRow(row shareRequestRow) model.ShareRequest {
 		RequestedBy: row.RequestedBy, PrincipalType: row.PrincipalType,
 		PrincipalIDs: append([]uuid.UUID(nil), row.PrincipalIDs...), Actions: append([]model.ResourcePermission(nil), row.Actions...),
 		InheritToChildren: row.InheritToChildren, ExpiresAt: row.ExpiresAt, Classification: row.Classification,
+		Effect: row.Effect,
 		Status: row.Status, ReviewedBy: row.ReviewedBy, ReviewedAt: row.ReviewedAt,
 		RejectionReason: row.RejectionReason, CreatedAt: row.CreatedAt,
 	}
@@ -1112,7 +1145,17 @@ func commandFromRow(row commandDedupRow) *repository.CommandDedup {
 }
 
 func nodeFromRow(row nodeRow) *model.Node {
-	return &model.Node{ID: row.ID, NamespaceID: row.NamespaceID, ParentID: row.ParentID, Type: row.Type, Name: row.Name, NormalizedName: row.NormalizedName, CurrentRevisionID: row.CurrentRevisionID, State: row.State, OwnerID: row.OwnerID}
+	return &model.Node{ID: row.ID, NamespaceID: row.NamespaceID, ParentID: row.ParentID, Type: row.Type, Name: row.Name, NormalizedName: row.NormalizedName, CurrentRevisionID: row.CurrentRevisionID, State: row.State, OwnerID: row.OwnerID, Classification: row.Classification}
+}
+
+func validClassification(classification model.TransferClassification) bool {
+	switch classification {
+	case model.TransferClassificationPublic, model.TransferClassificationInternal,
+		model.TransferClassificationConfidential, model.TransferClassificationRestricted:
+		return true
+	default:
+		return false
+	}
 }
 
 func mapUniqueConflict(err error) error {

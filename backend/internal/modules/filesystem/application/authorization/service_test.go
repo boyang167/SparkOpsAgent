@@ -387,6 +387,7 @@ func TestAuthorizeOwnerAdminDefaultDenyAndNamespaceBoundary(t *testing.T) {
 	}, nil, authorityStub{organizationAdmin: true})
 
 	require.Equal(t, "owner", userService.Authorize(context.Background(), Request{ActorID: owner, NamespaceID: namespaceID, NodeID: target.ID, Permission: model.ResourcePermissionWrite}).Reason)
+	require.Equal(t, "owner", userService.Authorize(context.Background(), Request{ActorID: owner, NamespaceID: namespaceID, NodeID: target.ID, Permission: model.ResourcePermissionShare}).Reason)
 	require.Equal(t, "default_deny", userService.Authorize(context.Background(), Request{ActorID: stranger, NamespaceID: namespaceID, NodeID: target.ID, Permission: model.ResourcePermissionAdmin}).Reason)
 
 	workspaceNS := &model.Namespace{
@@ -400,12 +401,16 @@ func TestAuthorizeOwnerAdminDefaultDenyAndNamespaceBoundary(t *testing.T) {
 	require.Equal(t, "admin_bypass", workspaceService.Authorize(context.Background(), Request{
 		ActorID: stranger, WorkspaceID: workspaceID, NamespaceID: namespaceID, NodeID: target.ID, Permission: model.ResourcePermissionAdmin,
 	}).Reason)
+	require.Equal(t, "admin_bypass", workspaceService.Authorize(context.Background(), Request{
+		ActorID: stranger, WorkspaceID: workspaceID, NamespaceID: namespaceID, NodeID: target.ID, Permission: model.ResourcePermissionShare,
+	}).Reason)
 
 	withoutAdmin := NewService(grantRepositoryStub{
 		nodes:      map[uuid.UUID]*model.Node{target.ID: target},
 		namespaces: map[uuid.UUID]*model.Namespace{namespaceID: userNS},
 	}, nil, nil)
 	require.Equal(t, "default_deny", withoutAdmin.Authorize(context.Background(), Request{ActorID: stranger, NamespaceID: namespaceID, NodeID: target.ID, Permission: model.ResourcePermissionRead}).Reason)
+	require.Equal(t, "default_deny", withoutAdmin.Authorize(context.Background(), Request{ActorID: stranger, NamespaceID: namespaceID, NodeID: target.ID, Permission: model.ResourcePermissionShare}).Reason)
 	require.Equal(t, "resource_not_found", withoutAdmin.Authorize(context.Background(), Request{ActorID: owner, NamespaceID: uuid.New(), NodeID: target.ID, Permission: model.ResourcePermissionRead}).Reason)
 }
 

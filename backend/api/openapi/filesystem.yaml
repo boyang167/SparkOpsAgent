@@ -2792,7 +2792,7 @@ components:
             $ref: "#/components/schemas/ResourceGrant"
     CreateResourceGrantRequest:
       type: object
-      required: [grantee_id, grantee_organization_id, permission, effect]
+      required: [grantee_id, permission, effect]
       properties:
         grantee_id:
           type: string
@@ -2800,6 +2800,7 @@ components:
         grantee_organization_id:
           type: string
           format: uuid
+          description: Deprecated compatibility field; ignored for authorization.
         permission:
           type: string
           enum: [READ, DOWNLOAD, WRITE, DELETE, SHARE, ADMIN]

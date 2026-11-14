@@ -392,12 +392,14 @@ func shareCommand(c *gin.Context, rc requestContext, nodeID uuid.UUID, body gran
 		principalType = model.PrincipalUser
 		principalID, valid := canonicalUUID(body.GranteeID)
 		permission, permissionValid := resourcePermission(strings.ToUpper(strings.TrimSpace(body.Permission)))
-		if !valid || !permissionValid || model.GrantEffect(strings.ToUpper(strings.TrimSpace(body.Effect))) != model.GrantEffectAllow || body.Anonymous {
+		effect := model.GrantEffect(strings.ToUpper(strings.TrimSpace(body.Effect)))
+		if !valid || !permissionValid || (effect != model.GrantEffectAllow && effect != model.GrantEffectDeny) || body.Anonymous {
 			invalidRequest(c)
 			return command.SubmitShare{}, true, false
 		}
 		principalIDs = []uuid.UUID{principalID}
 		actions = []model.ResourcePermission{permission}
+		body.Effect = string(effect)
 	} else {
 		if !ok || len(principalIDs) == 0 || len(body.Actions) == 0 {
 			invalidRequest(c)
@@ -415,7 +417,8 @@ func shareCommand(c *gin.Context, rc requestContext, nodeID uuid.UUID, body gran
 	return command.SubmitShare{
 		CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID,
 		WorkspaceID: rc.workspaceID, NodeID: nodeID, PrincipalType: principalType, PrincipalIDs: principalIDs,
-		Actions: actions, InheritToChildren: inherit, ExpiresAt: body.ExpiresAt,
+		Actions: actions, Effect: model.GrantEffect(strings.ToUpper(strings.TrimSpace(body.Effect))),
+		InheritToChildren: inherit, ExpiresAt: body.ExpiresAt,
 	}, legacy, true
 }
 

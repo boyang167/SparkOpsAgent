@@ -8,18 +8,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	filesystemevent "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/port"
-	filesystemevent "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	messagingpersistence "github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
-	sharedevents "github.com/sparkops/sparkops-agent/backend/internal/shared/events"
-	"gorm.io/gorm"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage/adapters/local"
+	sharedevents "github.com/sparkops/sparkops-agent/backend/internal/shared/events"
+	"gorm.io/gorm"
 )
 
 func TestCommitTransferIsAtomicAndIdempotent(t *testing.T) {
@@ -70,6 +70,9 @@ func TestCommitTransferIsAtomicAndIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first.RevisionID, second.RevisionID)
 	require.Equal(t, first.NodeID, second.NodeID)
+	node, err := repo.GetNodeByID(ctx, first.NodeID)
+	require.NoError(t, err)
+	require.Equal(t, cmd.Classification, node.Classification)
 
 	assertQuotaCommittedOnce(t, db, ns.WorkspaceID, cmd.Size)
 	assertOutboxEventCount(t, db, filesystemevent.TransferCompletedName, 1)
@@ -109,4 +112,3 @@ func assertOutboxEventCount(t *testing.T, db *gorm.DB, eventType string, want in
 	require.NoError(t, db.Table("platform.event_outbox").Where("event_type = ?", eventType).Count(&count).Error)
 	require.Equal(t, want, count, eventType)
 }
-

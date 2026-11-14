@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,10 +34,15 @@ type ShareAuthority interface {
 	HasOrganizationFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error)
 }
 
+type ShareSourceAuthorizer interface {
+	AuthorizeShare(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID) (bool, error)
+}
+
 type ShareRequestStore interface {
 	GetNodeByID(context.Context, uuid.UUID) (*model.Node, error)
 	GetNamespace(context.Context, uuid.UUID) (*model.Namespace, error)
 	GetNodeClassification(context.Context, uuid.UUID) (model.TransferClassification, error)
+	GetSubtreeHighestClassification(context.Context, uuid.UUID, uuid.UUID) (model.TransferClassification, error)
 	CreateShareRequest(context.Context, model.ShareRequest) error
 	GetShareRequest(context.Context, uuid.UUID) (model.ShareRequest, error)
 	ReviewShareRequestCAS(context.Context, model.ShareRequest, model.ShareRequestStatus) error
@@ -54,6 +60,7 @@ type SubmitShare struct {
 	PrincipalType     model.PrincipalType
 	PrincipalIDs      []uuid.UUID
 	Actions           []model.ResourcePermission
+	Effect            model.GrantEffect
 	InheritToChildren bool
 	ExpiresAt         *time.Time
 }
@@ -72,20 +79,24 @@ type ReviewShareRequest struct {
 }
 
 type ShareRequestHandler struct {
-	store     ShareRequestStore
-	tx        postgres.Transactor
-	bus       messaging.Bus
-	scopes    PrincipalScopeResolver
-	authority ShareAuthority
-	now       func() time.Time
+	store            ShareRequestStore
+	tx               postgres.Transactor
+	bus              messaging.Bus
+	scopes           PrincipalScopeResolver
+	authority        ShareAuthority
+	sourceAuthorizer ShareSourceAuthorizer
+	now              func() time.Time
 }
 
-func NewShareRequestHandler(store ShareRequestStore, tx postgres.Transactor, bus messaging.Bus, scopes PrincipalScopeResolver, authority ShareAuthority) *ShareRequestHandler {
-	return &ShareRequestHandler{store: store, tx: tx, bus: bus, scopes: scopes, authority: authority, now: func() time.Time { return time.Now().UTC() }}
+func NewShareRequestHandler(store ShareRequestStore, tx postgres.Transactor, bus messaging.Bus, scopes PrincipalScopeResolver, authority ShareAuthority, sourceAuthorizer ShareSourceAuthorizer) *ShareRequestHandler {
+	return &ShareRequestHandler{store: store, tx: tx, bus: bus, scopes: scopes, authority: authority, sourceAuthorizer: sourceAuthorizer, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (h *ShareRequestHandler) Submit(ctx context.Context, cmd SubmitShare) (ShareResult, error) {
 	var result ShareResult
+	if cmd.Effect == "" {
+		cmd.Effect = model.GrantEffectAllow
+	}
 	if err := validateSubmitShare(cmd); err != nil {
 		return result, err
 	}
@@ -100,9 +111,25 @@ func (h *ShareRequestHandler) Submit(ctx context.Context, cmd SubmitShare) (Shar
 	if namespace.OrganizationID != cmd.OrganizationID {
 		return result, domain.ErrResourceDenied
 	}
+	if h.sourceAuthorizer == nil {
+		return result, domain.ErrResourceDenied
+	}
+	allowed, err := h.sourceAuthorizer.AuthorizeShare(ctx, cmd.ActorID, cmd.WorkspaceID, namespace.ID, node.ID)
+	if err != nil {
+		return result, err
+	}
+	if !allowed {
+		return result, domain.ErrResourceDenied
+	}
 	classification, err := h.store.GetNodeClassification(ctx, cmd.NodeID)
 	if err != nil {
 		return result, err
+	}
+	if node.Type == model.NodeTypeDirectory && cmd.InheritToChildren {
+		classification, err = h.store.GetSubtreeHighestClassification(ctx, namespace.ID, node.ID)
+		if err != nil {
+			return result, err
+		}
 	}
 	scopes, err := h.resolveScopes(ctx, cmd.PrincipalType, cmd.PrincipalIDs, namespace.OrganizationID)
 	if err != nil {
@@ -120,7 +147,7 @@ func (h *ShareRequestHandler) Submit(ctx context.Context, cmd SubmitShare) (Shar
 	request := model.ShareRequest{
 		ID: requestID, OrganizationID: namespace.OrganizationID, NamespaceID: namespace.ID, NodeID: node.ID,
 		RequestedBy: cmd.ActorID, PrincipalType: cmd.PrincipalType, PrincipalIDs: append([]uuid.UUID(nil), cmd.PrincipalIDs...),
-		Actions: append([]model.ResourcePermission(nil), cmd.Actions...), InheritToChildren: cmd.InheritToChildren,
+		Actions: append([]model.ResourcePermission(nil), cmd.Actions...), Effect: cmd.Effect, InheritToChildren: cmd.InheritToChildren,
 		ExpiresAt: cmd.ExpiresAt, Classification: classification, Status: status, CreatedAt: h.now(),
 	}
 	hash := shareHash("submit", request, cmd.ActorID, "")
@@ -164,6 +191,10 @@ func (h *ShareRequestHandler) review(ctx context.Context, cmd ReviewShareRequest
 	if cmd.CommandID == uuid.Nil || cmd.ActorID == uuid.Nil || cmd.RequestID == uuid.Nil {
 		return model.ShareRequest{}, domain.ErrIdempotencyConflict
 	}
+	cmd.RejectionReason = strings.TrimSpace(cmd.RejectionReason)
+	if !approve && (len(cmd.RejectionReason) < 1 || len(cmd.RejectionReason) > 1000) {
+		return model.ShareRequest{}, domain.ErrSharePolicyDenied
+	}
 	request, err := h.store.GetShareRequest(ctx, cmd.RequestID)
 	if err != nil {
 		return model.ShareRequest{}, err
@@ -175,7 +206,7 @@ func (h *ShareRequestHandler) review(ctx context.Context, cmd ReviewShareRequest
 	if err != nil {
 		return model.ShareRequest{}, err
 	}
-	if approve && request.Classification == model.TransferClassificationConfidential && request.RequestedBy == cmd.ActorID {
+	if approve && request.RequestedBy == cmd.ActorID {
 		return model.ShareRequest{}, domain.ErrShareSelfApproval
 	}
 	if err := h.requireApprovalAuthority(ctx, cmd.ActorID, request.PrincipalType, request.OrganizationID, scopes); err != nil {
@@ -357,6 +388,9 @@ func validateSubmitShare(cmd SubmitShare) error {
 	if len(cmd.PrincipalIDs) == 0 || len(cmd.Actions) == 0 {
 		return domain.ErrSharePolicyDenied
 	}
+	if cmd.Effect != model.GrantEffectAllow && cmd.Effect != model.GrantEffectDeny {
+		return domain.ErrSharePolicyDenied
+	}
 	switch cmd.PrincipalType {
 	case model.PrincipalUser, model.PrincipalWorkspace, model.PrincipalOrganization, model.PrincipalRole:
 	default:
@@ -405,7 +439,7 @@ func grantsForRequest(request model.ShareRequest, commandID uuid.UUID) []model.R
 			grants = append(grants, model.ResourceGrant{
 				ID: uuid.NewSHA1(uuid.NameSpaceOID, []byte(key)), NodeID: request.NodeID, OrganizationID: request.OrganizationID,
 				GranteeID: principalID, PrincipalType: request.PrincipalType, PrincipalID: principalID,
-				Permission: action, Effect: model.GrantEffectAllow, InheritToChildren: request.InheritToChildren,
+				Permission: action, Effect: request.Effect, InheritToChildren: request.InheritToChildren,
 				ExpiresAt: request.ExpiresAt, PolicyVersion: 1,
 			})
 		}
@@ -424,12 +458,13 @@ func shareHash(operation string, request model.ShareRequest, actorID uuid.UUID, 
 		PrincipalType     model.PrincipalType
 		PrincipalIDs      []uuid.UUID
 		Actions           []model.ResourcePermission
+		Effect            model.GrantEffect
 		InheritToChildren bool
 		ExpiresAt         *time.Time
 		Reason            string
 	}{
 		operation, request.ID, request.OrganizationID, request.NamespaceID, request.NodeID, actorID,
-		request.PrincipalType, request.PrincipalIDs, request.Actions, request.InheritToChildren, request.ExpiresAt, reason,
+		request.PrincipalType, request.PrincipalIDs, request.Actions, request.Effect, request.InheritToChildren, request.ExpiresAt, reason,
 	})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])

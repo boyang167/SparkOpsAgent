@@ -17,6 +17,7 @@ type Node struct {
 	CurrentRevisionID *uuid.UUID
 	State             NodeState
 	OwnerID           uuid.UUID
+	Classification    TransferClassification
 }
 
 func NewFile(namespaceID, ownerID uuid.UUID, name string, parentID uuid.UUID) (*Node, error) {
@@ -38,12 +39,13 @@ func NewRootDirectory(namespaceID, ownerID uuid.UUID, name string) (*Node, error
 
 func newNode(namespaceID, ownerID uuid.UUID, name string, parentID uuid.UUID, nodeType NodeType) (*Node, error) {
 	node := &Node{
-		ID:          uuid.New(),
-		NamespaceID: namespaceID,
-		ParentID:    &parentID,
-		Type:        nodeType,
-		State:       NodeStateActive,
-		OwnerID:     ownerID,
+		ID:             uuid.New(),
+		NamespaceID:    namespaceID,
+		ParentID:       &parentID,
+		Type:           nodeType,
+		State:          NodeStateActive,
+		OwnerID:        ownerID,
+		Classification: TransferClassificationInternal,
 	}
 	if err := node.Rename(name); err != nil {
 		return nil, err

@@ -24,6 +24,7 @@ type ShareRequest struct {
 	PrincipalType     PrincipalType
 	PrincipalIDs      []uuid.UUID
 	Actions           []ResourcePermission
+	Effect            GrantEffect
 	InheritToChildren bool
 	ExpiresAt         *time.Time
 	Classification    TransferClassification

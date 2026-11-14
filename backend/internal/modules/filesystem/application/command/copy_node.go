@@ -91,6 +91,7 @@ func (h *CopyNodeHandler) Handle(ctx context.Context, cmd CopyNode) (out *model.
 		if err != nil {
 			return err
 		}
+		result.Classification = source.Classification
 		if cmd.CommandID != uuid.Nil {
 			result.ID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-copy:"+cmd.CommandID.String()))
 		}

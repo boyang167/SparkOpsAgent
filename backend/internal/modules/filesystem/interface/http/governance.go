@@ -438,11 +438,12 @@ func (h *GovernanceHandler) RejectShareRequest(c *gin.Context) {
 	if !decodeJSON(c, &body) {
 		return
 	}
-	if strings.TrimSpace(body.Reason) == "" {
+	reason := strings.TrimSpace(body.Reason)
+	if len(reason) < 1 || len(reason) > 1000 {
 		invalidRequest(c)
 		return
 	}
-	h.reviewShareRequest(c, false, strings.TrimSpace(body.Reason))
+	h.reviewShareRequest(c, false, reason)
 }
 
 func (h *GovernanceHandler) reviewShareRequest(c *gin.Context, approve bool, reason string) {

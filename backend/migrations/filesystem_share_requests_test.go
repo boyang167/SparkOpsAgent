@@ -23,6 +23,13 @@ func TestFilesystemShareRequestMigrationDefinesGovernedApprovalState(t *testing.
 	require.Contains(t, up, "REJECTED")
 	require.Contains(t, up, "CANCELLED")
 	require.Contains(t, up, "DOWNLOAD")
+	require.Contains(t, up, "ALTER TABLE filesystem.nodes")
+	require.Contains(t, up, "classification")
+	require.Contains(t, up, "UPDATE filesystem.nodes")
+	require.Contains(t, up, "SET classification = 'INTERNAL'")
 	require.Contains(t, up, "CREATE INDEX")
+	require.Contains(t, down, "DELETE FROM filesystem.resource_grants")
+	require.Contains(t, down, "permission = 'DOWNLOAD'")
+	require.Contains(t, down, "DROP COLUMN IF EXISTS classification")
 	require.Contains(t, down, "DROP TABLE")
 }
