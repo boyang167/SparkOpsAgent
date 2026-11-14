@@ -5,7 +5,7 @@ import { createElement } from "react";
 import type { KeyboardEvent } from "react";
 import type { FileNamespaceVM, FileNodeVM } from "@sparkops/contracts/filesystem";
 import { FileExplorerPanel } from "./FileExplorerPanel";
-import type { WorkbenchState, WorkbenchTab } from "./workbench-state";
+import type { FileView, WorkbenchState, WorkbenchTab } from "./workbench-state";
 
 export type FilesystemWorkbenchProps = {
   workspaceId: string;
@@ -49,6 +49,12 @@ export function FilesystemWorkbench({
     router.replace(`${pathname}?${nextSearchParams.toString()}`);
   }
 
+  function selectView(view: FileView) {
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.set("view", view);
+    router.replace(`${pathname}?${nextSearchParams.toString()}`);
+  }
+
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, tabIndex: number) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
 
@@ -74,7 +80,7 @@ export function FilesystemWorkbench({
           type: "button",
           role: "tab",
           "aria-selected": activeTab === tab.id,
-          "aria-controls": `workbench-panel-${tab.id}`,
+          "aria-controls": activeTab === tab.id ? `workbench-panel-${tab.id}` : undefined,
           tabIndex: activeTab === tab.id ? 0 : -1,
           className: activeTab === tab.id ? "btn btn-secondary" : "btn btn-ghost",
           onClick: () => selectTab(tab.id),
@@ -93,6 +99,7 @@ export function FilesystemWorkbench({
           namespaceId: namespace.id,
           parentId: initialState.parent ?? namespace.root_node_id,
           initialNodes,
+          view: initialState.view,
         })
       : createElement("div", { className: "empty-state" }, "此功能将在后续任务中接入。");
 
@@ -100,6 +107,40 @@ export function FilesystemWorkbench({
     "div",
     { className: "stack-lg" },
     tabList,
+    activeTab === "files"
+      ? createElement(
+          "div",
+          {
+            role: "toolbar",
+            "aria-label": "文件视图",
+            className: "flex justify-end gap-2",
+          },
+          createElement(
+            "button",
+            {
+              type: "button",
+              className:
+                initialState.view === "list" ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm",
+              "aria-label": "列表视图",
+              "aria-pressed": initialState.view === "list",
+              onClick: () => selectView("list"),
+            },
+            createElement("span", { "aria-hidden": true }, "☰"),
+          ),
+          createElement(
+            "button",
+            {
+              type: "button",
+              className:
+                initialState.view === "grid" ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm",
+              "aria-label": "网格视图",
+              "aria-pressed": initialState.view === "grid",
+              onClick: () => selectView("grid"),
+            },
+            createElement("span", { "aria-hidden": true }, "▦"),
+          ),
+        )
+      : null,
     createElement(
       "div",
       {

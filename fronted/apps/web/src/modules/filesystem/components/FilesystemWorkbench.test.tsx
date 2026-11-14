@@ -80,6 +80,22 @@ describe("FilesystemWorkbench", () => {
     expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "workbench-panel-files");
     expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "workbench-tab-files");
     expect(screen.getByRole("tab", { name: "传输" })).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("tab", { name: "传输" })).not.toHaveAttribute("aria-controls");
+  });
+
+  it("changes only the view query parameter from the files toolbar", () => {
+    navigation.searchParams = new URLSearchParams("q=report&tab=files");
+    renderWorkbench();
+
+    expect(screen.getByRole("button", { name: "列表视图" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    const gridButton = screen.getByRole("button", { name: "网格视图" });
+    expect(gridButton).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(gridButton);
+
+    expect(navigation.replace).toHaveBeenCalledWith("/files?q=report&tab=files&view=grid");
   });
 
   it("selects the next visible tab with ArrowRight", () => {

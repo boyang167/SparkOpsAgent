@@ -1,11 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
 import { createDirectoryNode } from "@sparkops/web-sdk/filesystem";
+import { FileBrowser } from "./FileBrowser";
 import { createPanelRenameHandler, submitPanelRename } from "./file-explorer-panel-rename";
 import { UploadPanel } from "./UploadPanel";
+import type { FileView } from "./workbench-state";
 
 export type BreadcrumbItem = {
   id: string;
@@ -19,7 +22,9 @@ export type FileExplorerPanelProps = {
   initialNodes: FileNodeVM[];
   breadcrumb?: BreadcrumbItem[];
   providerId?: string;
+  view?: FileView;
   onRename?: (nodeId: string, name: string) => Promise<void>;
+  onMove?: (nodeId: string) => void;
   onCreateDirectory?: (name: string) => Promise<void>;
   onNavigate?: () => void;
 };
@@ -31,23 +36,21 @@ export function FileExplorerPanel({
   initialNodes,
   breadcrumb = [],
   providerId,
+  view = "list",
   onRename,
+  onMove,
   onCreateDirectory,
   onNavigate,
 }: FileExplorerPanelProps) {
+  const router = useRouter();
   const [nodes, setNodes] = useState(initialNodes);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [renameTarget, setRenameTarget] = useState<FileNodeVM | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // MVP lists the full directory page; cursor pagination is deferred to a later G4 task.
-  const sortedNodes = useMemo(
-    () => [...nodes].sort((a, b) => a.name.localeCompare(b.name, "zh-CN")),
-    [nodes],
-  );
 
   const doRename = useMemo(
     () => createPanelRenameHandler(workspaceId, onRename),
@@ -143,52 +146,24 @@ export function FileExplorerPanel({
         />
       </div>
 
-      {sortedNodes.length === 0 ? (
-        <div className="empty-state">此目录为空。</div>
-      ) : (
-        <div className="card overflow-hidden">
-          <table className="data-table w-full">
-            <thead>
-              <tr>
-                <th className="text-left">名称</th>
-                <th className="text-left">类型</th>
-                <th className="text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedNodes.map((node) => (
-                <tr key={node.id}>
-                  <td>
-                    <Link
-                      href={
-                        node.type === "DIRECTORY"
-                          ? `/files/${node.id}`
-                          : `/files/${node.id}?mode=revisions`
-                      }
-                      className="font-medium link"
-                    >
-                      {node.name}
-                    </Link>
-                  </td>
-                  <td className="text-muted">{node.type === "DIRECTORY" ? "目录" : "文件"}</td>
-                  <td className="text-right">
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => {
-                        setRenameTarget(node);
-                        setRenameValue(node.name);
-                      }}
-                    >
-                      重命名
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <FileBrowser
+        nodes={nodes}
+        view={view}
+        selectedIds={selectedIds}
+        onSelectionChange={setSelectedIds}
+        onOpen={(node) =>
+          router.push(
+            node.type === "DIRECTORY"
+              ? `/files/${node.id}`
+              : `/files/${node.id}?mode=revisions`,
+          )
+        }
+        onRename={(node) => {
+          setRenameTarget(node);
+          setRenameValue(node.name);
+        }}
+        onMove={onMove ? (node) => onMove(node.id) : undefined}
+      />
 
       {renameTarget ? (
         <div className="card stack-sm max-w-md" role="dialog" aria-labelledby="rename-title">
