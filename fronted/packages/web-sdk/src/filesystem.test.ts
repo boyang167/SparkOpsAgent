@@ -77,15 +77,36 @@ describe("filesystem transfer sdk", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const fileFixture = new Blob([..."abcdefghijklmnop".split("")]);
+    const controller = new AbortController();
     const uploaded = await uploadTransfer(fileFixture, {
       session: sessionWithCompletedParts([1, 2]),
       partSize: 5,
       workspaceId: "00000000-0000-0000-0000-000000000001",
+      signal: controller.signal,
     });
     expect(uploaded.requestedParts).toEqual([3, 4]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://storage.example/parts/3");
     expect(fetchMock.mock.calls[1]?.[0]).toBe("https://storage.example/parts/4");
+    expect(fetchMock.mock.calls.every(([, init]) => init?.signal === controller.signal)).toBe(true);
+  });
+
+  it("stops multipart upload on a non-successful PUT without reporting progress", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("failed", { status: 503 }));
+    const progress = vi.fn();
+
+    await expect(
+      uploadTransfer(new Blob([..."abcdefghijklmnop".split("")]), {
+        session: sessionWithCompletedParts([1, 2]),
+        partSize: 5,
+        workspaceId: "00000000-0000-0000-0000-000000000001",
+        fetchImpl: fetchMock,
+        onProgress: progress,
+      }),
+    ).rejects.toThrow("transfer upload failed: 503");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(progress).not.toHaveBeenCalled();
   });
 });
 

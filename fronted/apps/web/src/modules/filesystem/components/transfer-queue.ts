@@ -24,6 +24,7 @@ export type TransferItem = {
   progress: TransferProgress;
   session?: TransferSessionRef;
   error?: string;
+  cancelRequested?: boolean;
 };
 
 export type TransferControls = {
@@ -51,8 +52,25 @@ export type TransferQueue = {
 type TransferQueueOptions = {
   concurrency: number;
   upload: TransferUpload;
-  abort?: (session: TransferSessionRef) => Promise<void>;
+  abort?: (
+    session: TransferSessionRef,
+  ) => Promise<"canceled" | "completed" | void>;
 };
+
+type ActiveTransfer = {
+  controller: AbortController;
+  cancelRequested: boolean;
+  abortPromise?: Promise<"canceled" | "completed">;
+};
+
+function isAbortError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "AbortError"
+  );
+}
 
 export function createTransferQueue({
   concurrency,
@@ -63,7 +81,7 @@ export function createTransferQueue({
   let active = 0;
   let snapshot: TransferItem[] = [];
   const listeners = new Set<() => void>();
-  const controllers = new Map<string, AbortController>();
+  const activeTransfers = new Map<string, ActiveTransfer>();
   const idleResolvers = new Set<() => void>();
 
   function publish() {
@@ -86,47 +104,116 @@ export function createTransferQueue({
     idleResolvers.clear();
   }
 
-  function mutateActive(
+  function mutateActive(id: string, change: (item: TransferItem) => TransferItem) {
+    const item = snapshot.find((candidate) => candidate.id === id);
+    if (!item || ["completed", "failed", "canceled"].includes(item.status)) return;
+    update(id, change);
+  }
+
+  function startAbort(
+    session: TransferSessionRef,
+    transfer: ActiveTransfer,
+  ) {
+    if (!transfer.abortPromise) {
+      transfer.abortPromise = abort
+        ? abort(session).then((outcome) => outcome ?? "canceled")
+        : Promise.resolve("canceled");
+    }
+    return transfer.abortPromise;
+  }
+
+  async function finishCancellation(
     id: string,
-    change: (item: TransferItem) => TransferItem,
+    transfer: ActiveTransfer,
+    cause?: unknown,
   ) {
     const item = snapshot.find((candidate) => candidate.id === id);
-    if (!item || item.status === "canceled") return;
-    update(id, change);
+    try {
+      if (!item?.session && cause && !isAbortError(cause)) throw cause;
+      const outcome = item?.session
+        ? await startAbort(item.session, transfer)
+        : "canceled";
+      update(id, (current) =>
+        outcome === "completed"
+          ? {
+              ...current,
+              status: "completed",
+              cancelRequested: false,
+              error: undefined,
+              progress: {
+                uploadedBytes: current.file.size,
+                totalBytes: current.file.size,
+              },
+            }
+          : {
+              ...current,
+              status: "canceled",
+              cancelRequested: false,
+              error: undefined,
+            },
+      );
+    } catch (error) {
+      update(id, (current) => ({
+        ...current,
+        status: "failed",
+        cancelRequested: false,
+        error: `取消失败：${error instanceof Error ? error.message : "后端状态未知"}`,
+      }));
+    }
   }
 
   async function run(item: TransferItem) {
     active += 1;
     const controller = new AbortController();
-    controllers.set(item.id, controller);
+    const transfer: ActiveTransfer = { controller, cancelRequested: false };
+    activeTransfers.set(item.id, transfer);
     update(item.id, (current) => ({ ...current, status: "creating", error: undefined }));
     try {
       await upload(item.file, item.targetParentId, {
         signal: controller.signal,
         setStatus: (status) =>
+          !transfer.cancelRequested &&
           mutateActive(item.id, (current) => ({ ...current, status })),
         setProgress: (progress) =>
+          !transfer.cancelRequested &&
           mutateActive(item.id, (current) => ({ ...current, progress })),
-        setSession: (session) =>
-          mutateActive(item.id, (current) => ({ ...current, session })),
-      });
-      mutateActive(item.id, (current) => ({
-        ...current,
-        status: "completed",
-        progress: {
-          uploadedBytes: current.file.size,
-          totalBytes: current.file.size,
+        setSession: (session) => {
+          mutateActive(item.id, (current) => ({ ...current, session }));
+          if (transfer.cancelRequested) {
+            void startAbort(session, transfer).catch(() => undefined);
+          }
         },
-      }));
+      });
+      if (transfer.cancelRequested) {
+        await finishCancellation(item.id, transfer);
+      } else {
+        mutateActive(item.id, (current) => ({
+          ...current,
+          status: "completed",
+          progress: {
+            uploadedBytes: current.file.size,
+            totalBytes: current.file.size,
+          },
+        }));
+      }
     } catch (error) {
-      mutateActive(item.id, (current) => ({
-        ...current,
-        status: "failed",
-        error: error instanceof Error ? error.message : "上传失败",
-      }));
+      if (transfer.cancelRequested) {
+        await finishCancellation(item.id, transfer, error);
+      } else {
+        mutateActive(item.id, (current) => ({
+          ...current,
+          status: "failed",
+          error:
+            isAbortError(error)
+              ? "上传已中止，请重试"
+              : error instanceof Error
+                ? error.message
+                : "上传失败",
+        }));
+      }
     } finally {
       active -= 1;
-      controllers.delete(item.id);
+      activeTransfers.delete(item.id);
       pump();
       resolveIdle();
     }
@@ -160,10 +247,23 @@ export function createTransferQueue({
     cancel(id) {
       const item = snapshot.find((candidate) => candidate.id === id);
       if (!item || ["completed", "failed", "canceled"].includes(item.status)) return;
-      update(id, (current) => ({ ...current, status: "canceled" }));
-      controllers.get(id)?.abort();
-      if (item.session && abort) void abort(item.session).catch(() => undefined);
-      resolveIdle();
+      const transfer = activeTransfers.get(id);
+      if (!transfer) {
+        update(id, (current) => ({ ...current, status: "canceled" }));
+        resolveIdle();
+        return;
+      }
+      if (transfer.cancelRequested) return;
+      transfer.cancelRequested = true;
+      update(id, (current) => ({
+        ...current,
+        cancelRequested: true,
+        error: undefined,
+      }));
+      transfer.controller.abort();
+      if (item.session) {
+        void startAbort(item.session, transfer).catch(() => undefined);
+      }
     },
     retry(id) {
       const item = snapshot.find((candidate) => candidate.id === id);
@@ -173,6 +273,7 @@ export function createTransferQueue({
         status: "queued",
         error: undefined,
         session: undefined,
+        cancelRequested: false,
         progress: { uploadedBytes: 0, totalBytes: current.file.size },
       }));
       pump();

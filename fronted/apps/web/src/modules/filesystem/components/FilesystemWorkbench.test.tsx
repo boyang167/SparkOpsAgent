@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -119,6 +119,24 @@ const movableNode: FileNodeVM = {
   owner_id: "00000000-0000-4000-8000-000000000012",
 };
 
+function transferSession(sessionId: string) {
+  return {
+    session_id: sessionId,
+    workspace_id: namespace.workspace_id,
+    namespace_id: namespace.id,
+    status: "UPLOADING",
+    protocol: "DIRECT",
+    target_name: "报告.txt",
+    expected_size: 7,
+    part_size: 7,
+    total_parts: 1,
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+    upload_url: "https://gateway.example/upload",
+    capability_token: "token",
+    parts: [],
+  };
+}
+
 function renderWorkbench(
   permissions: string[] = ["file:read"],
   initialNodes: FileNodeVM[] = [],
@@ -138,6 +156,7 @@ describe("FilesystemWorkbench", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   beforeEach(() => {
@@ -185,12 +204,21 @@ describe("FilesystemWorkbench", () => {
     renderWorkbench();
 
     const filesTab = screen.getByRole("tab", { name: "文件" });
+    const transfersTab = screen.getByRole("tab", { name: "传输" });
     expect(filesTab).toHaveAttribute("tabindex", "0");
     expect(filesTab).toHaveAttribute("aria-controls", "workbench-panel-files");
-    expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "workbench-panel-files");
-    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "workbench-tab-files");
-    expect(screen.getByRole("tab", { name: "传输" })).toHaveAttribute("tabindex", "-1");
-    expect(screen.getByRole("tab", { name: "传输" })).not.toHaveAttribute("aria-controls");
+    expect(transfersTab).toHaveAttribute("tabindex", "-1");
+    expect(transfersTab).toHaveAttribute("aria-controls", "workbench-panel-transfers");
+    expect(document.getElementById("workbench-panel-files")).toHaveAttribute(
+      "aria-labelledby",
+      "workbench-tab-files",
+    );
+    expect(document.getElementById("workbench-panel-files")).not.toHaveAttribute("hidden");
+    expect(document.getElementById("workbench-panel-transfers")).toHaveAttribute(
+      "aria-labelledby",
+      "workbench-tab-transfers",
+    );
+    expect(document.getElementById("workbench-panel-transfers")).toHaveAttribute("hidden");
   });
 
   it("changes only the view query parameter from the files toolbar", () => {
@@ -296,21 +324,9 @@ describe("FilesystemWorkbench", () => {
 
   it("keeps an upload running when switching from files to transfers", async () => {
     let finishUpload!: () => void;
-    sdk.createTransferSession.mockResolvedValue({
-      session_id: "00000000-0000-4000-8000-000000000099",
-      workspace_id: namespace.workspace_id,
-      namespace_id: namespace.id,
-      status: "UPLOADING",
-      protocol: "DIRECT",
-      target_name: "报告.txt",
-      expected_size: 7,
-      part_size: 7,
-      total_parts: 1,
-      expires_at: new Date(Date.now() + 60_000).toISOString(),
-      upload_url: "https://gateway.example/upload",
-      capability_token: "token",
-      parts: [],
-    });
+    sdk.createTransferSession.mockResolvedValue(
+      transferSession("00000000-0000-4000-8000-000000000099"),
+    );
     sdk.uploadTransfer.mockImplementation(
       async (_file: File, options: { onProgress?: (value: never) => void }) => {
         options.onProgress?.({
@@ -348,5 +364,201 @@ describe("FilesystemWorkbench", () => {
     finishUpload();
     await waitFor(() => expect(screen.getByText("已完成")).toBeInTheDocument());
     expect(navigation.refresh).toHaveBeenCalled();
+  });
+
+  it("aborts a late session when canceled during session creation", async () => {
+    let resolveSession!: (session: ReturnType<typeof transferSession>) => void;
+    let createSignal: AbortSignal | undefined;
+    sdk.createTransferSession.mockImplementation(
+      (
+        _workspaceId: string,
+        _input: unknown,
+        options?: { signal?: AbortSignal },
+      ) => {
+        createSignal = options?.signal;
+        return new Promise((resolve) => {
+          resolveSession = resolve;
+        });
+      },
+    );
+    sdk.abortTransfer.mockResolvedValue(undefined);
+    sdk.uploadTransfer.mockImplementation(
+      async (_file: File, options: { signal?: AbortSignal }) => {
+        if (options.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      },
+    );
+    const rendered = renderWorkbench(["file:read", "file:write"]);
+    fireEvent.drop(screen.getByTestId("file-drop-zone"), {
+      dataTransfer: {
+        files: [new File(["payload"], "报告.txt")],
+        types: ["Files"],
+        items: [],
+      },
+    });
+    await waitFor(() => expect(sdk.createTransferSession).toHaveBeenCalled());
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "transfers", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "取消 报告.txt" }));
+    expect(createSignal?.aborted).toBe(true);
+    resolveSession(transferSession("00000000-0000-4000-8000-000000000098"));
+
+    await waitFor(() =>
+      expect(sdk.abortTransfer).toHaveBeenCalledWith(
+        "00000000-0000-4000-8000-000000000098",
+        namespace.workspace_id,
+      ),
+    );
+    expect(screen.getByText("已取消")).toBeInTheDocument();
+  });
+
+  it("recovers an unknown create outcome with the same key before aborting", async () => {
+    sdk.createTransferSession
+      .mockImplementationOnce(
+        (
+          _workspaceId: string,
+          _input: unknown,
+          options?: { signal?: AbortSignal },
+        ) =>
+          new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener(
+              "abort",
+              () => reject(new Error("network outcome unknown")),
+              { once: true },
+            );
+          }),
+      )
+      .mockResolvedValueOnce(
+        transferSession("00000000-0000-4000-8000-000000000095"),
+      );
+    sdk.abortTransfer.mockResolvedValue(undefined);
+    const rendered = renderWorkbench(["file:read", "file:write"]);
+    fireEvent.drop(screen.getByTestId("file-drop-zone"), {
+      dataTransfer: {
+        files: [new File(["payload"], "报告.txt")],
+        types: ["Files"],
+        items: [],
+      },
+    });
+    await waitFor(() => expect(sdk.createTransferSession).toHaveBeenCalledTimes(1));
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "transfers", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "取消 报告.txt" }));
+
+    await waitFor(() => expect(sdk.createTransferSession).toHaveBeenCalledTimes(2));
+    expect(sdk.createTransferSession.mock.calls[0]?.[2].idempotencyKey).toBe(
+      sdk.createTransferSession.mock.calls[1]?.[2].idempotencyKey,
+    );
+    expect(sdk.createTransferSession.mock.calls[1]?.[2].signal).toBeUndefined();
+    await waitFor(() =>
+      expect(sdk.abortTransfer).toHaveBeenCalledWith(
+        "00000000-0000-4000-8000-000000000095",
+        namespace.workspace_id,
+      ),
+    );
+  });
+
+  it("reconciles completion when backend abort loses the cancel race", async () => {
+    sdk.createTransferSession.mockResolvedValue(
+      transferSession("00000000-0000-4000-8000-000000000097"),
+    );
+    sdk.uploadTransfer.mockImplementation(
+      async (_file: File, options: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          options.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    sdk.abortTransfer.mockRejectedValue(new Error("already completed"));
+    sdk.getTransferSession.mockResolvedValue({
+      ...transferSession("00000000-0000-4000-8000-000000000097"),
+      status: "COMPLETED",
+    });
+    const rendered = renderWorkbench(["file:read", "file:write"]);
+    fireEvent.drop(screen.getByTestId("file-drop-zone"), {
+      dataTransfer: {
+        files: [new File(["payload"], "报告.txt")],
+        types: ["Files"],
+        items: [],
+      },
+    });
+    await waitFor(() => expect(sdk.uploadTransfer).toHaveBeenCalled());
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "transfers", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "取消 报告.txt" }));
+
+    await waitFor(() => expect(screen.getByText("已完成")).toBeInTheDocument());
+    expect(sdk.getTransferSession).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000097",
+      namespace.workspace_id,
+    );
+  });
+
+  it("clears the polling timer immediately when canceled", async () => {
+    vi.useFakeTimers();
+    sdk.createTransferSession.mockResolvedValue(
+      transferSession("00000000-0000-4000-8000-000000000096"),
+    );
+    sdk.uploadTransfer.mockResolvedValue(undefined);
+    sdk.getTransferSession.mockResolvedValue({
+      ...transferSession("00000000-0000-4000-8000-000000000096"),
+      status: "VERIFYING",
+    });
+    sdk.abortTransfer.mockResolvedValue(undefined);
+    const rendered = renderWorkbench(["file:read", "file:write"]);
+    fireEvent.drop(screen.getByTestId("file-drop-zone"), {
+      dataTransfer: {
+        files: [new File(["payload"], "报告.txt")],
+        types: ["Files"],
+        items: [],
+      },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(sdk.getTransferSession).toHaveBeenCalled();
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "transfers", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "取消 报告.txt" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(screen.getByText("已取消")).toBeInTheDocument();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

@@ -189,10 +189,15 @@ export function createTransferSession(
   });
 }
 
-export function getTransferSession(sessionId: string, workspaceId: string) {
+export function getTransferSession(
+  sessionId: string,
+  workspaceId: string,
+  options: BffFetchOptions = {},
+) {
   return bffFetch<TransferSessionVM>(`/workspaces/${workspaceId}/transfers/${sessionId}`, {
     method: "GET",
     workspaceId,
+    ...options,
   });
 }
 
@@ -228,7 +233,10 @@ function partUploadURL(session: TransferSessionVM, partNumber: number): string |
 export async function uploadTransferParts(
   file: Blob,
   session: TransferSessionVM,
-  options: Pick<UploadTransferOptions, "partSize" | "onProgress" | "fetchImpl"> = {},
+  options: Pick<
+    UploadTransferOptions,
+    "partSize" | "onProgress" | "fetchImpl" | "signal"
+  > = {},
 ): Promise<UploadTransferResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const partSize = options.partSize ?? session.part_size;
@@ -257,7 +265,14 @@ export async function uploadTransferParts(
     }
     requestedParts.push(partNumber);
     const chunk = file.slice(offset, offset + size);
-    await fetchImpl(uploadUrl, { method: "PUT", body: chunk });
+    const response = await fetchImpl(uploadUrl, {
+      method: "PUT",
+      body: chunk,
+      signal: options.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`transfer upload failed: ${response.status}`);
+    }
     uploadedBytes += size;
     completedParts += 1;
     options.onProgress?.({

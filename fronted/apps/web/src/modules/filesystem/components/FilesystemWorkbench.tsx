@@ -39,6 +39,31 @@ const tabs: Array<{
   { id: "audit", label: "审计", permission: "file:admin" },
 ];
 
+function uploadIdempotencyKey() {
+  return `workbench-upload-${
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  }`;
+}
+
+function abortableDelay(milliseconds: number, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export function FilesystemWorkbench({
   workspaceId,
   namespace,
@@ -57,17 +82,46 @@ export function FilesystemWorkbench({
   const [transferQueue] = useState(() =>
     createTransferQueue({
       concurrency: 3,
-      abort: (session) => abortTransfer(session.session_id, workspaceId),
+      abort: async (session) => {
+        try {
+          await abortTransfer(session.session_id, workspaceId);
+          return "canceled";
+        } catch (abortError) {
+          const current = await getTransferSession(session.session_id, workspaceId);
+          if (current.status === "COMPLETED") {
+            router.refresh();
+            return "completed";
+          }
+          if (current.status === "ABORTED") return "canceled";
+          throw abortError;
+        }
+      },
       upload: async (file, targetParentId, controls) => {
-        const session = await createTransferSession(workspaceId, {
+        const input = {
           parent_id: targetParentId,
           namespace_id: namespace.id,
           name: file.name,
           protocol: "DIRECT",
           size: file.size,
           classification: "INTERNAL",
-        });
+        } as const;
+        const idempotencyKey = uploadIdempotencyKey();
+        let session;
+        try {
+          session = await createTransferSession(workspaceId, input, {
+            idempotencyKey,
+            signal: controls.signal,
+          });
+        } catch (error) {
+          if (!controls.signal.aborted) throw error;
+          session = await createTransferSession(workspaceId, input, {
+            idempotencyKey,
+          });
+        }
         controls.setSession(session);
+        if (controls.signal.aborted) {
+          throw new DOMException("Aborted", "AbortError");
+        }
         controls.setStatus("uploading");
         await uploadTransfer(file, {
           workspaceId,
@@ -81,7 +135,9 @@ export function FilesystemWorkbench({
         });
         controls.setStatus("verifying");
         while (!controls.signal.aborted) {
-          const current = await getTransferSession(session.session_id, workspaceId);
+          const current = await getTransferSession(session.session_id, workspaceId, {
+            signal: controls.signal,
+          });
           if (current.status === "COMPLETED") {
             router.refresh();
             return;
@@ -89,7 +145,7 @@ export function FilesystemWorkbench({
           if (["FAILED", "REJECTED", "ABORTED", "EXPIRED"].includes(current.status)) {
             throw new Error(current.error_code || "上传处理失败");
           }
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          await abortableDelay(500, controls.signal);
         }
         throw new Error("上传已取消");
       },
@@ -205,7 +261,7 @@ export function FilesystemWorkbench({
           type: "button",
           role: "tab",
           "aria-selected": activeTab === tab.id,
-          "aria-controls": activeTab === tab.id ? `workbench-panel-${tab.id}` : undefined,
+          "aria-controls": `workbench-panel-${tab.id}`,
           tabIndex: activeTab === tab.id ? 0 : -1,
           className: activeTab === tab.id ? "btn btn-secondary" : "btn btn-ghost",
           onClick: () => selectTab(tab.id),
@@ -217,8 +273,8 @@ export function FilesystemWorkbench({
     ),
   );
 
-  const panel =
-    activeTab === "files" && namespace.root_node_id
+  const filesPanel =
+    namespace.root_node_id
       ? createElement(FileExplorerPanel, {
           workspaceId,
           namespaceId: namespace.id,
@@ -235,9 +291,32 @@ export function FilesystemWorkbench({
                 )
             : undefined,
         })
-      : activeTab === "transfers"
-        ? createElement(TransferCenter, { queue: transferQueue })
-        : createElement("div", { className: "empty-state" }, "此功能将在后续任务中接入。");
+      : createElement("div", { className: "empty-state" }, "文件命名空间尚未初始化。");
+  const filesContent = createElement(
+    "div",
+    { className: "flex items-start gap-6" },
+    createElement(
+      "aside",
+      {
+        "aria-label": "目录",
+        className: "hidden w-64 shrink-0 lg:block",
+      },
+      renderDirectoryTree(),
+    ),
+    createElement(
+      FileDropZone,
+      {
+        targetParentId: initialState.parent ?? namespace.root_node_id ?? "",
+        targetName: "当前目录",
+        canWrite:
+          Boolean(initialState.parent ?? namespace.root_node_id) &&
+          permissions.includes("file:write"),
+        onFiles: (files: File[], targetParentId: string) =>
+          transferQueue.enqueue(files, targetParentId),
+      },
+      createElement("div", { className: "min-w-0 flex-1" }, filesPanel),
+    ),
+  );
 
   return createElement(
     "div",
@@ -287,40 +366,22 @@ export function FilesystemWorkbench({
           ),
         )
       : null,
-    createElement(
-      "div",
-      {
-        id: `workbench-panel-${activeTab}`,
-        role: "tabpanel",
-        "aria-labelledby": `workbench-tab-${activeTab}`,
-      },
-      activeTab === "files"
-        ? createElement(
-            "div",
-            { className: "flex items-start gap-6" },
-            createElement(
-              "aside",
-              {
-                "aria-label": "目录",
-                className: "hidden w-64 shrink-0 lg:block",
-              },
-              renderDirectoryTree(),
-            ),
-            createElement(
-              FileDropZone,
-              {
-                targetParentId: initialState.parent ?? namespace.root_node_id ?? "",
-                targetName: "当前目录",
-                canWrite:
-                  Boolean(initialState.parent ?? namespace.root_node_id) &&
-                  permissions.includes("file:write"),
-                onFiles: (files: File[], targetParentId: string) =>
-                  transferQueue.enqueue(files, targetParentId),
-              },
-              createElement("div", { className: "min-w-0 flex-1" }, panel),
-            ),
-          )
-        : panel,
+    visibleTabs.map((tab) =>
+      createElement(
+        "div",
+        {
+          key: tab.id,
+          id: `workbench-panel-${tab.id}`,
+          role: "tabpanel",
+          "aria-labelledby": `workbench-tab-${tab.id}`,
+          hidden: activeTab !== tab.id,
+        },
+        tab.id === "files"
+          ? filesContent
+          : tab.id === "transfers"
+            ? createElement(TransferCenter, { queue: transferQueue })
+            : createElement("div", { className: "empty-state" }, "此功能将在后续任务中接入。"),
+      ),
     ),
     activeTab === "files"
       ? createElement(TransferSummary, {

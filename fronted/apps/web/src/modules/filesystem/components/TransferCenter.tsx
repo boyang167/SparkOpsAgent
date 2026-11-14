@@ -21,10 +21,19 @@ function percent(item: TransferItem) {
   if (item.progress.totalBytes === 0) {
     return item.status === "completed" ? 100 : 0;
   }
-  return Math.min(
+  const value = Math.min(
     100,
     Math.round((item.progress.uploadedBytes / item.progress.totalBytes) * 100),
   );
+  return item.status === "verifying" ? Math.min(99, value) : value;
+}
+
+function statusLabel(item: TransferItem) {
+  if (item.cancelRequested) return "正在取消";
+  if (item.status === "failed" && item.error?.startsWith("取消失败：")) {
+    return "取消失败";
+  }
+  return statusLabels[item.status];
 }
 
 function Progress({ item }: { item: TransferItem }) {
@@ -88,7 +97,7 @@ export function TransferCenter({ queue }: { queue: TransferQueue }) {
             createElement(
               "p",
               { className: "text-sm text-muted" },
-              statusLabels[item.status],
+              statusLabel(item),
             ),
           ),
           createElement(
@@ -106,6 +115,7 @@ export function TransferCenter({ queue }: { queue: TransferQueue }) {
                   "重试",
                 )
               : null,
+            !item.cancelRequested &&
             ["queued", "creating", "uploading", "verifying"].includes(item.status)
               ? createElement(
                   "button",

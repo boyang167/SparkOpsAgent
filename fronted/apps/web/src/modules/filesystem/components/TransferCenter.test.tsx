@@ -74,4 +74,24 @@ describe("TransferCenter", () => {
     expect(screen.getAllByRole("progressbar")).toHaveLength(3);
     expect(screen.getByRole("button", { name: "查看全部传输" })).toBeInTheDocument();
   });
+
+  it("keeps verifying work visibly below completion", async () => {
+    const queue = createTransferQueue({
+      concurrency: 1,
+      upload: async (_file, _parent, controls) => {
+        controls.setProgress({ uploadedBytes: 7, totalBytes: 7 });
+        controls.setStatus("verifying");
+        await new Promise<void>(() => undefined);
+      },
+    });
+    queue.enqueue([new File(["payload"], "报告.txt")], "parent-1");
+    await vi.waitFor(() => expect(queue.getSnapshot()[0]?.status).toBe("verifying"));
+    const { unmount } = render(createElement(TransferCenter, { queue }));
+
+    expect(screen.getByText("正在校验")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "99");
+    unmount();
+    render(createElement(TransferSummary, { queue, onViewAll: vi.fn() }));
+    expect(screen.getByText("99%")).toBeInTheDocument();
+  });
 });

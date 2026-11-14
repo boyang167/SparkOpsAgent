@@ -19,6 +19,17 @@ function deferred() {
   return { promise, resolve };
 }
 
+function abortError() {
+  return new DOMException("Aborted", "AbortError");
+}
+
+function waitForAbort(signal: AbortSignal) {
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise<never>((_resolve, reject) => {
+    signal.addEventListener("abort", () => reject(abortError()), { once: true });
+  });
+}
+
 describe("createTransferQueue", () => {
   it("runs at most three uploads", async () => {
     let active = 0;
@@ -125,5 +136,155 @@ describe("createTransferQueue", () => {
       error: undefined,
     });
     expect(attempts).toBe(2);
+  });
+
+  it("aborts a session returned after cancellation during creation", async () => {
+    const created = deferred();
+    const abort = vi.fn().mockResolvedValue("canceled");
+    const queue = createTransferQueue({
+      concurrency: 1,
+      abort,
+      upload: async (_file, _parentId, controls) => {
+        await created.promise;
+        controls.setSession({ session_id: "late-session" });
+        await waitForAbort(controls.signal);
+      },
+    });
+    const [id] = queue.enqueue(files(1), "parent-1");
+    await vi.waitFor(() => expect(queue.getSnapshot()[0]?.status).toBe("creating"));
+
+    queue.cancel(id!);
+    created.resolve();
+    await queue.whenIdle();
+
+    expect(abort).toHaveBeenCalledWith({ session_id: "late-session" });
+    expect(queue.getSnapshot()[0]).toMatchObject({
+      status: "canceled",
+      session: { session_id: "late-session" },
+    });
+  });
+
+  it("fails cancellation when a canceled create has an unknown outcome", async () => {
+    const creating = deferred();
+    const queue = createTransferQueue({
+      concurrency: 1,
+      upload: async () => {
+        await creating.promise;
+        throw new Error("create outcome unknown");
+      },
+    });
+    const [id] = queue.enqueue(files(1), "parent-1");
+    await vi.waitFor(() => expect(queue.getSnapshot()[0]?.status).toBe("creating"));
+
+    queue.cancel(id!);
+    creating.resolve();
+    await queue.whenIdle();
+
+    expect(queue.getSnapshot()[0]).toMatchObject({
+      status: "failed",
+      error: "取消失败：create outcome unknown",
+    });
+  });
+
+  it("reports a failed cancellation when backend abort fails", async () => {
+    const abort = vi.fn().mockRejectedValue(new Error("abort unavailable"));
+    let attempt = 0;
+    const queue = createTransferQueue({
+      concurrency: 1,
+      abort,
+      upload: async (_file, _parentId, controls) => {
+        attempt += 1;
+        controls.setSession({ session_id: `session-${attempt}` });
+        controls.setStatus("uploading");
+        if (attempt > 1) return;
+        await waitForAbort(controls.signal);
+      },
+    });
+    const [id] = queue.enqueue(files(1), "parent-1");
+    await vi.waitFor(() => expect(queue.getSnapshot()[0]?.status).toBe("uploading"));
+
+    queue.cancel(id!);
+    await queue.whenIdle();
+
+    expect(queue.getSnapshot()[0]).toMatchObject({
+      status: "failed",
+      error: "取消失败：abort unavailable",
+    });
+
+    queue.retry(id!);
+    await queue.whenIdle();
+    expect(queue.getSnapshot()[0]).toMatchObject({
+      status: "completed",
+      session: { session_id: "session-2" },
+    });
+  });
+
+  it("uses the reconciled completed state when cancel races with completion", async () => {
+    const abort = vi.fn().mockResolvedValue("completed");
+    const queue = createTransferQueue({
+      concurrency: 1,
+      abort,
+      upload: async (_file, _parentId, controls) => {
+        controls.setSession({ session_id: "session-1" });
+        controls.setStatus("verifying");
+        await waitForAbort(controls.signal);
+      },
+    });
+    const completedSnapshots: string[] = [];
+    queue.subscribe(() => {
+      if (queue.getSnapshot()[0]?.status === "completed") {
+        completedSnapshots.push("completed");
+      }
+    });
+    const [id] = queue.enqueue(files(1), "parent-1");
+    await vi.waitFor(() => expect(queue.getSnapshot()[0]?.status).toBe("verifying"));
+
+    queue.cancel(id!);
+    await queue.whenIdle();
+
+    expect(queue.getSnapshot()[0]?.status).toBe("completed");
+    expect(completedSnapshots).toHaveLength(1);
+  });
+
+  it("retry after polling failure creates and keeps a new session", async () => {
+    let attempt = 0;
+    const queue = createTransferQueue({
+      concurrency: 1,
+      upload: async (_file, _parentId, controls) => {
+        attempt += 1;
+        controls.setSession({ session_id: `session-${attempt}` });
+        controls.setStatus("verifying");
+        if (attempt === 1) throw new Error("poll failed");
+      },
+    });
+    const [id] = queue.enqueue(files(1), "parent-1");
+    await queue.whenIdle();
+
+    queue.retry(id!);
+    await queue.whenIdle();
+
+    expect(queue.getSnapshot()[0]).toMatchObject({
+      status: "completed",
+      session: { session_id: "session-2" },
+    });
+  });
+
+  it("classifies an unexpected AbortError as retryable failure", async () => {
+    const namedAbortError = new Error("Aborted");
+    namedAbortError.name = "AbortError";
+    const queue = createTransferQueue({
+      concurrency: 1,
+      upload: async () => {
+        throw namedAbortError;
+      },
+    });
+
+    queue.enqueue(files(1), "parent-1");
+    await queue.whenIdle();
+
+    expect(queue.getSnapshot()[0]).toMatchObject({
+      status: "failed",
+      error: "上传已中止，请重试",
+    });
   });
 });
