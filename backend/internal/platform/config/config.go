@@ -45,6 +45,8 @@ type SFTPGatewayConfig struct {
 	HostKeySecretRef string        `yaml:"host_key_secret_ref"`
 	LandingZone      string        `yaml:"landing_zone"`
 	IdleTimeout      time.Duration `yaml:"idle_timeout"`
+	ControlBaseURL   string        `yaml:"control_base_url"`
+	InternalToken    string        `yaml:"internal_token"`
 }
 
 type FilesystemReconcilerConfig struct {

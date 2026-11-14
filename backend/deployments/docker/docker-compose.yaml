@@ -193,6 +193,8 @@ services:
     ports:
       - "2022:2022"
     depends_on:
+      api:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
       postgres:
@@ -212,6 +214,7 @@ services:
       SPARKOPS_SFTP_HOST_KEY_PEM: ${SPARKOPS_SFTP_HOST_KEY_PEM:-}
     volumes:
       - sparkops_sftp:/var/lib/sparkops/sftp
+      - sparkops_filesystem:/var/lib/sparkops/filesystem
 
   file-reconciler:
     build:

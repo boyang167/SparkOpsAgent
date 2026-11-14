@@ -162,13 +162,17 @@ func NewFromConfig(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	control, err := controlFromConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 	return New(Options{
 		Listen:      sftpCfg.Listen,
 		HostKey:     signer,
 		LandingZone: sftpCfg.LandingZone,
 		IdleTimeout: sftpCfg.IdleTimeout,
-		Auth:        UnconfiguredTokenValidator{},
-		Control:     UnconfiguredTransferControl{},
+		Auth:        authFromConfig(cfg),
+		Control:     control,
 	})
 }
 

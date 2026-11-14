@@ -28,7 +28,8 @@
 | 工作区默认 LOCAL Provider（`default-local`） | **PASS**（`EnsureDefaultLocalProvider` + CreateTransfer 默认解析） |
 | `GET /filesystem-audits` 后端路由 | **PASS**（`ListFilesystemAudits` + query 过滤 `filesystem.`） |
 | file-worker 订阅 verify/commit | **PASS**（`cmd/file-worker` 启动注册 AMQP 订阅） |
-| SFTP `HTTPTransferControl` / Export 字节 Worker | **SKIP**（仍为 landing/API 占位；Import 仅元数据节点） |
+| SFTP `HTTPTransferControl` → Begin/Copy/RecordUploaded | **PASS**（控制面 HTTP + 共享卷落盘；需 `SPARKOPS_SFTP_DEV_*` 做真 SSH 抽查） |
+| Export 字节 Worker | **SKIP**（Import 仍为元数据节点，无跨组织字节复制 Worker） |
 | Knowledge / 20GiB / 200 并发 / RPO/RTO | **SKIP**（无归档现场报告） |
 
 Compose：`filesystem.transfer_gateway.control_base_url=http://api:8080`，网关依赖 `api` healthy。

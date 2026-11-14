@@ -159,10 +159,11 @@ func (m *Module) Register(c *appctx.Container) error {
 		return fmt.Errorf("filesystem runtime catalog: %w", err)
 	}
 	gatewayControl := gatewaycontrol.NewService(repo, runtimeCatalog, recordUploaded.Handle)
+	beginSFTP := command.NewBeginSFTPUploadHandler(repo, createTransfer, storageRoot, ensureDefault)
 	filesystemhttp.RegisterInternalGatewayRoutes(c.Engine, c.Config, filesystemhttp.InternalGatewayHandlers{
 		Control: gatewayControl,
 		Token:   c.Config.Filesystem.TransferGateway.InternalToken,
-	})
+	}, filesystemhttp.InternalSFTPHandlers{BeginSFTP: beginSFTP.Handle})
 	handler.BindResourceAccess(filesystemhttp.ResourceAccess{
 		Grant:            grantCommands.Handle,
 		ListGrants:       grantCommands.List,

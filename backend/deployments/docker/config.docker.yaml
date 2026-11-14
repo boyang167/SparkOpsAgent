@@ -69,3 +69,5 @@ filesystem:
     host_key_secret_ref: ""
     landing_zone: "/var/lib/sparkops/sftp"
     idle_timeout: 15m
+    control_base_url: "http://api:8080"
+    internal_token: "docker-dev-filesystem-secret"

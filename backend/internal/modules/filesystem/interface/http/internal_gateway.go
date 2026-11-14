@@ -15,7 +15,12 @@ type InternalGatewayHandlers struct {
 	Token   string
 }
 
-func RegisterInternalGatewayRoutes(engine *gin.Engine, cfg *config.Config, handlers InternalGatewayHandlers) {
+func RegisterInternalGatewayRoutes(
+	engine *gin.Engine,
+	cfg *config.Config,
+	handlers InternalGatewayHandlers,
+	sftp InternalSFTPHandlers,
+) {
 	if engine == nil || handlers.Control == nil {
 		return
 	}
@@ -54,6 +59,7 @@ func RegisterInternalGatewayRoutes(engine *gin.Engine, cfg *config.Config, handl
 		}
 		httpx.OK(c, gin.H{"recorded": true})
 	})
+	RegisterInternalSFTPRoutes(group, sftp)
 }
 
 func requireInternalToken(expected string) gin.HandlerFunc {
