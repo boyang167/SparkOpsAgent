@@ -51,10 +51,10 @@ func (r *Repository) CreateNamespace(ctx context.Context, namespace *model.Names
 		}).Error; err != nil {
 			return err
 		}
-		if namespace.NamespaceType != model.NamespaceTypeWorkspace {
-			return nil
-		}
-		return tx.Create(&quotaAccountRow{ID: uuid.New(), OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID, UpdatedAt: now}).Error
+		return tx.Create(&quotaAccountRow{
+			ID: uuid.New(), OrganizationID: namespace.OrganizationID,
+			NamespaceID: namespace.ID, WorkspaceID: workspaceID, UpdatedAt: now,
+		}).Error
 	})
 	if isSQLiteBusy(err) {
 		return domain.ErrTransactionRetry
@@ -83,11 +83,9 @@ func (r *Repository) CreateNamespaceIfAbsent(ctx context.Context, namespace *mod
 		}).Error; err != nil {
 			return err
 		}
-		if namespace.NamespaceType != model.NamespaceTypeWorkspace {
-			return nil
-		}
 		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&quotaAccountRow{
-			ID: uuid.New(), OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID, UpdatedAt: now,
+			ID: uuid.New(), OrganizationID: namespace.OrganizationID,
+			NamespaceID: namespace.ID, WorkspaceID: workspaceID, UpdatedAt: now,
 		}).Error
 	})
 	if isSQLiteBusy(err) {

@@ -1,3 +1,41 @@
+# Task 7 实施报告
+
+## 改动
+
+- Placement 按 Namespace 类型执行固定优先级：
+  - `USER > ORGANIZATION > SYSTEM`
+  - `WORKSPACE > ORGANIZATION > SYSTEM`
+  - `ORGANIZATION > SYSTEM`
+- Placement 忽略跨 Organization 绑定和指向禁用 Pool 的绑定；`module.go` 接入 repository-backed Placement。
+- CreateTransfer 按目标 Namespace 解析 Provider/Pool，并将选择结果纳入 session request hash。
+- direct-local 上传在 Placement 选中的 LOCAL Provider 与配置网关不一致时返回明确的 `ErrStorageGatewayMismatch`。
+- 共享读取测试证明不会调用 Placement，也不会创建 Replica。
+- 新增 `000086_filesystem_namespace_quota` PostgreSQL up/down migration：
+  - quota account 以 `namespace_id` 为隔离边界；
+  - 兼容保留 nullable `workspace_id`；
+  - Organization/User Namespace 可在没有 workspace ownership 的情况下拥有独立配额账户；
+  - down migration 遇到非 Workspace 配额活动或 Transfer 时拒绝回滚，避免静默数据丢失。
+- SQLite/fallback schema 与 repository 同步为 Namespace-aware quota；旧 workspace quota API 保持兼容。
+
+## 测试
+
+- `go test ./internal/modules/filesystem/domain/service -run Placement -count=1`：PASS
+- `go test ./internal/modules/filesystem/application/command -run CreateTransfer -count=1`：PASS
+- `go test ./internal/modules/filesystem/... -count=1`：PASS
+- `go test ./migrations -run NamespaceQuota -count=1`：PASS
+- `go test ./internal/modules/filesystem/infrastructure/persistence -count=1`：PASS
+- `go vet ./internal/modules/filesystem/...`：PASS
+- IDE lint：无错误
+- `.\scripts\dev-restart.ps1 -Backend`：PASS，后端已以 PID `25568` 监听 `:8080`
+
+## Commit
+
+- Commit message：`feat(filesystem): place uploads by namespace scope`
+- Commit hash：本报告与实现位于同一提交；精确 hash 记录在最终交付回复中（Git commit hash 无法在不改变自身 hash 的情况下写入同一提交内容）。
+
+## 未验证项
+
+- `DATABASE_DSN` 未设置，因此未执行真实 PostgreSQL migration up/down；仅验证了 migration 定义测试以及 SQLite/fallback schema 与持久化测试。
 # Task 7 报告：文件详情、存储治理与审计工作区
 
 ## 状态

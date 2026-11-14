@@ -253,7 +253,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	if issuerErr != nil {
 		return fmt.Errorf("filesystem transfer capability issuer: %w", issuerErr)
 	}
-	createTransfer := command.NewCreateTransferHandler(repo, c.Transactor, c.EventBus, c.AuditLogger, nil).
+	createTransfer := command.NewCreateTransferHandler(
+		repo, c.Transactor, c.EventBus, c.AuditLogger, domainservice.NewRepositoryPlacement(repo),
+	).
 		WithDirectLocalProvider(storageRoot)
 	getTransfer := query.NewGetTransferHandler(repo)
 	listTransfers := query.NewListTransfersHandler(repo)

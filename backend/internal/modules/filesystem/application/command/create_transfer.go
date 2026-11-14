@@ -83,11 +83,12 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 	ctx, finishAudit := beginMutationAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.transfer.create")
 	defer finishAudit(&err)
 
-	ns, scopeErr := h.repo.GetNamespaceByWorkspace(ctx, cmd.WorkspaceID)
+	ns, scopeErr := h.repo.GetNamespace(ctx, cmd.NamespaceID)
 	if scopeErr != nil {
 		return out, scopeErr
 	}
-	if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
+	if ns.OrganizationID != cmd.OrganizationID ||
+		(ns.NamespaceType == model.NamespaceTypeWorkspace && ns.WorkspaceID != cmd.WorkspaceID) {
 		return out, domain.ErrNamespaceMismatch
 	}
 	parentID := cmd.ParentID
@@ -120,8 +121,9 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 	if h.placement != nil {
 		decision, placeErr := h.placement.Place(ctx, service.PlacementRequest{
 			OrganizationID:          cmd.OrganizationID,
-			WorkspaceID:             cmd.WorkspaceID,
-			UserID:                  cmd.ActorID,
+			NamespaceType:           ns.NamespaceType,
+			WorkspaceID:             ns.WorkspaceID,
+			UserID:                  ns.OwnerUserID,
 			Classification:          cmd.Classification,
 			Size:                    cmd.Size,
 			RequiresPresignedUpload: cmd.Protocol == model.TransferProtocolMultipart,
@@ -138,18 +140,20 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 		}
 	}
 	if cmd.Protocol == model.TransferProtocolDirect {
-		if providerID != DefaultLocalProviderID(cmd.OrganizationID) {
-			return out, model.ErrInvalidTransfer
-		}
 		provider, providerErr := h.repo.GetStorageProvider(ctx, providerID)
 		if providerErr != nil {
 			return out, providerErr
 		}
-		if provider.OrganizationID != cmd.OrganizationID ||
-			provider.ProviderType != model.ProviderTypeLocal ||
+		if provider.OrganizationID != cmd.OrganizationID || provider.ProviderType != model.ProviderTypeLocal {
+			return out, model.ErrInvalidTransfer
+		}
+		if providerID != DefaultLocalProviderID(cmd.OrganizationID) ||
 			strings.TrimSpace(provider.Status) != "ACTIVE" ||
 			h.directLocalRoot == "" ||
 			!sameLocalRoot(provider.Endpoint, h.directLocalRoot) {
+			if placementDecision != nil {
+				return out, domain.ErrStorageGatewayMismatch
+			}
 			return out, model.ErrInvalidTransfer
 		}
 	}
@@ -198,13 +202,14 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 		if createErr != nil {
 			return createErr
 		}
-		accountID, reserveErr := h.repo.ReserveTransferQuota(txCtx, cmd.WorkspaceID, cmd.Size, 1)
+		accountID, reserveErr := h.repo.ReserveNamespaceQuota(txCtx, cmd.NamespaceID, cmd.Size, 1)
 		if reserveErr != nil {
 			return reserveErr
 		}
 		if reserveErr = h.repo.CreateQuotaReservation(txCtx, repository.QuotaReservation{
 			ID:             uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer-reservation:"+session.ID().String())),
-			QuotaAccountID: accountID, WorkspaceID: cmd.WorkspaceID, SessionID: session.ID(),
+			QuotaAccountID: accountID, NamespaceID: cmd.NamespaceID,
+			WorkspaceID: cmd.WorkspaceID, SessionID: session.ID(),
 			Bytes: cmd.Size, Files: 1, State: "RESERVED", ExpiresAt: session.ExpiresAt(),
 		}); reserveErr != nil {
 			return reserveErr

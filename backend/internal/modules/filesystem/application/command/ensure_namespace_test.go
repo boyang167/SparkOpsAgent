@@ -126,7 +126,7 @@ func TestEnsureOrganizationAndUserNamespacesDoNotCreateWorkspaceQuota(t *testing
 	require.Equal(t, int64(2), namespaceCount)
 	require.Equal(t, int64(2), rootCount)
 	require.Equal(t, int64(2), linkCount)
-	require.Zero(t, quotaCount)
+	require.Equal(t, int64(2), quotaCount)
 }
 
 func TestEnsureWorkspacePreservesDefaultLocalProviderBootstrap(t *testing.T) {

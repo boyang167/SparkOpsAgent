@@ -123,7 +123,7 @@ func TestPlacementPrefersHealthyPrimaryOverUnhealthy(t *testing.T) {
 	sickID := uuid.New()
 	snapshot := PlacementSnapshot{
 		OrganizationID: orgID,
-		WorkspaceID:  workspaceID,
+		WorkspaceID:    workspaceID,
 		Bindings: []model.StorageBinding{
 			{ID: uuid.New(), ScopeType: model.ScopeWorkspace, ScopeID: workspaceID, PoolID: poolID, Priority: 1, OrganizationID: orgID},
 		},
@@ -162,7 +162,7 @@ func TestPlacementUsesExplicitFallbackPoolWhenNoBinding(t *testing.T) {
 	providerID := uuid.New()
 	snapshot := PlacementSnapshot{
 		OrganizationID: orgID,
-		WorkspaceID:  workspaceID,
+		WorkspaceID:    workspaceID,
 		FallbackPoolID: fallbackPoolID,
 		Pools: map[uuid.UUID]PoolSnapshot{
 			fallbackPoolID: {
@@ -188,6 +188,117 @@ func TestPlacementUsesExplicitFallbackPoolWhenNoBinding(t *testing.T) {
 	require.Contains(t, decision.MatchedRuleIDs, "fallback:explicit")
 }
 
+func TestPlacementNamespaceScopePrecedence(t *testing.T) {
+	orgID := uuid.New()
+	workspaceID := uuid.New()
+	userID := uuid.New()
+	orgPoolID := uuid.New()
+	workspacePoolID := uuid.New()
+	userPoolID := uuid.New()
+	systemPoolID := uuid.New()
+	pools := map[uuid.UUID]PoolSnapshot{}
+	providers := map[uuid.UUID]model.StorageProvider{}
+	for _, poolID := range []uuid.UUID{orgPoolID, workspacePoolID, userPoolID, systemPoolID} {
+		providerID := uuid.New()
+		pools[poolID] = PoolSnapshot{
+			ID: poolID, Status: model.StoragePoolActive,
+			Members: []model.StoragePoolMember{{ProviderID: providerID, Mode: model.ProviderModePrimary}},
+		}
+		providers[providerID] = mustProvider(t, providerID, orgID, model.ProviderTypeS3, map[string]any{})
+	}
+	snapshot := PlacementSnapshot{
+		OrganizationID: orgID,
+		FallbackPoolID: systemPoolID,
+		Bindings: []model.StorageBinding{
+			{ID: uuid.New(), OrganizationID: orgID, ScopeType: model.ScopeOrganization, ScopeID: orgID, PoolID: orgPoolID},
+			{ID: uuid.New(), OrganizationID: orgID, ScopeType: model.ScopeWorkspace, ScopeID: workspaceID, PoolID: workspacePoolID},
+			{ID: uuid.New(), OrganizationID: orgID, ScopeType: model.ScopeUser, ScopeID: userID, PoolID: userPoolID},
+		},
+		Pools: pools, Providers: providers,
+	}
+	engine := NewPlacementEngine(snapshot)
+
+	tests := []struct {
+		name          string
+		namespaceType model.NamespaceType
+		workspaceID   uuid.UUID
+		userID        uuid.UUID
+		wantPoolID    uuid.UUID
+		wantRule      string
+	}{
+		{"user uses user binding", model.NamespaceTypeUser, uuid.Nil, userID, userPoolID, "scope:USER"},
+		{"workspace uses workspace binding", model.NamespaceTypeWorkspace, workspaceID, uuid.Nil, workspacePoolID, "scope:WORKSPACE"},
+		{"organization uses organization binding", model.NamespaceTypeOrganization, uuid.Nil, uuid.Nil, orgPoolID, "scope:ORGANIZATION"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decision, err := engine.Place(context.Background(), PlacementRequest{
+				OrganizationID: orgID, NamespaceType: tt.namespaceType,
+				WorkspaceID: tt.workspaceID, UserID: tt.userID,
+				Classification: model.TransferClassificationInternal,
+			})
+			require.NoError(t, err)
+			require.Equal(t, tt.wantPoolID, decision.PoolID)
+			require.Contains(t, decision.MatchedRuleIDs, tt.wantRule)
+		})
+	}
+}
+
+func TestPlacementSkipsDisabledAndWrongOrganizationBindingsThenFallsBack(t *testing.T) {
+	orgID := uuid.New()
+	workspaceID := uuid.New()
+	disabledPoolID := uuid.New()
+	orgPoolID := uuid.New()
+	systemPoolID := uuid.New()
+	wrongPoolID := uuid.New()
+	pools := map[uuid.UUID]PoolSnapshot{}
+	providers := map[uuid.UUID]model.StorageProvider{}
+	for poolID, status := range map[uuid.UUID]model.StoragePoolStatus{
+		disabledPoolID: model.StoragePoolDisabled,
+		orgPoolID:      model.StoragePoolActive,
+		systemPoolID:   model.StoragePoolActive,
+		wrongPoolID:    model.StoragePoolActive,
+	} {
+		providerID := uuid.New()
+		pools[poolID] = PoolSnapshot{
+			ID: poolID, Status: status,
+			Members: []model.StoragePoolMember{{ProviderID: providerID, Mode: model.ProviderModePrimary}},
+		}
+		providers[providerID] = mustProvider(t, providerID, orgID, model.ProviderTypeS3, map[string]any{})
+	}
+	engine := NewPlacementEngine(PlacementSnapshot{
+		OrganizationID: orgID, FallbackPoolID: systemPoolID,
+		Bindings: []model.StorageBinding{
+			{ID: uuid.New(), OrganizationID: orgID, ScopeType: model.ScopeWorkspace, ScopeID: workspaceID, PoolID: disabledPoolID},
+			{ID: uuid.New(), OrganizationID: uuid.New(), ScopeType: model.ScopeWorkspace, ScopeID: workspaceID, PoolID: wrongPoolID},
+			{ID: uuid.New(), OrganizationID: orgID, ScopeType: model.ScopeOrganization, ScopeID: orgID, PoolID: orgPoolID},
+		},
+		Pools: pools, Providers: providers,
+	})
+	decision, err := engine.Place(context.Background(), PlacementRequest{
+		OrganizationID: orgID, NamespaceType: model.NamespaceTypeWorkspace,
+		WorkspaceID: workspaceID, Classification: model.TransferClassificationInternal,
+	})
+	require.NoError(t, err)
+	require.Equal(t, orgPoolID, decision.PoolID)
+	require.Contains(t, decision.MatchedRuleIDs, "scope:ORGANIZATION")
+
+	engine = NewPlacementEngine(PlacementSnapshot{
+		OrganizationID: orgID, FallbackPoolID: systemPoolID,
+		Bindings: []model.StorageBinding{
+			{ID: uuid.New(), OrganizationID: orgID, ScopeType: model.ScopeWorkspace, ScopeID: workspaceID, PoolID: disabledPoolID},
+		},
+		Pools: pools, Providers: providers,
+	})
+	decision, err = engine.Place(context.Background(), PlacementRequest{
+		OrganizationID: orgID, NamespaceType: model.NamespaceTypeWorkspace,
+		WorkspaceID: workspaceID, Classification: model.TransferClassificationInternal,
+	})
+	require.NoError(t, err)
+	require.Equal(t, systemPoolID, decision.PoolID)
+	require.Contains(t, decision.MatchedRuleIDs, "fallback:explicit")
+}
+
 func mustProvider(t *testing.T, id, orgID uuid.UUID, providerType model.ProviderType, caps map[string]any) model.StorageProvider {
 	t.Helper()
 	provider, err := model.NewStorageProvider(model.StorageProviderInput{
@@ -206,7 +317,7 @@ func restrictedWorkspaceSnapshot(t *testing.T) PlacementSnapshot {
 	providerID := uuid.New()
 	return PlacementSnapshot{
 		OrganizationID: orgID,
-		WorkspaceID:  workspaceID,
+		WorkspaceID:    workspaceID,
 		Bindings: []model.StorageBinding{
 			{ID: uuid.New(), ScopeType: model.ScopeWorkspace, ScopeID: workspaceID, PoolID: poolID, Priority: 1, OrganizationID: orgID},
 		},

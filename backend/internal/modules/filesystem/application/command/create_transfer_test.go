@@ -403,6 +403,99 @@ func TestCreateTransferPlacementSelectsProviderFromEngine(t *testing.T) {
 	require.Equal(t, placedProvider, *internal.ProviderID())
 }
 
+func TestCreateTransferPlacesAndReservesQuotaByNamespaceType(t *testing.T) {
+	tests := []struct {
+		name          string
+		namespaceType model.NamespaceType
+	}{
+		{"organization", model.NamespaceTypeOrganization},
+		{"workspace", model.NamespaceTypeWorkspace},
+		{"user", model.NamespaceTypeUser},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, workspaceNamespace := newTransferTestDB(t)
+			repo := persistence.NewRepository(db)
+			namespace := workspaceNamespace
+			if tt.namespaceType != model.NamespaceTypeWorkspace {
+				namespace = &model.Namespace{
+					ID: uuid.New(), NamespaceType: tt.namespaceType,
+					OrganizationID: workspaceNamespace.OrganizationID, Status: "ACTIVE",
+				}
+				if tt.namespaceType == model.NamespaceTypeUser {
+					namespace.OwnerUserID = uuid.New()
+				}
+				require.NoError(t, repo.CreateNamespace(context.Background(), namespace))
+				root, err := model.NewRootDirectory(namespace.ID, uuid.New(), ".root")
+				require.NoError(t, err)
+				require.NoError(t, repo.CreateNode(context.Background(), root))
+				require.NoError(t, repo.SetNamespaceRootByID(context.Background(), namespace.ID, root.ID))
+				namespace.RootNodeID = &root.ID
+			}
+			decision := service.PlacementDecision{
+				PoolID: uuid.New(), ProviderID: uuid.New(), PolicyVersion: 7,
+				MatchedRuleIDs: []string{"scope:" + string(tt.namespaceType)}, DecisionReason: "namespace test",
+			}
+			placer := &stubTransferPlacer{decision: decision}
+			handler := NewCreateTransferHandler(
+				repo, postgres.NewTransactor(db), nil,
+				auditService{store: audit.NewGormStore(db)}, placer,
+			)
+			cmd := transferFixture(workspaceNamespace)
+			cmd.NamespaceID = namespace.ID
+			cmd.ParentID = namespace.RootNodeID
+			cmd.Authorization.ResourceID = *namespace.RootNodeID
+			cmd.IdempotencyKey = "namespace-" + tt.name
+
+			result, err := handler.Handle(context.Background(), cmd)
+
+			require.NoError(t, err)
+			require.Len(t, placer.requests, 1)
+			require.Equal(t, tt.namespaceType, placer.requests[0].NamespaceType)
+			require.Equal(t, namespace.WorkspaceID, placer.requests[0].WorkspaceID)
+			require.Equal(t, namespace.OwnerUserID, placer.requests[0].UserID)
+			session, err := repo.GetTransferByID(context.Background(), result.SessionID)
+			require.NoError(t, err)
+			require.Equal(t, decision.ProviderID, *session.ProviderID())
+			require.Equal(t, transferRequestHash(cmd, *namespace.RootNodeID, &decision), session.RequestHash())
+			var reservation struct{ NamespaceID uuid.UUID }
+			require.NoError(t, db.Table("filesystem.quota_reservations").
+				Where("session_id = ?", result.SessionID).Take(&reservation).Error)
+			require.Equal(t, namespace.ID, reservation.NamespaceID)
+			var account struct{ ReservedBytes int64 }
+			require.NoError(t, db.Table("filesystem.quota_accounts").
+				Where("namespace_id = ?", namespace.ID).Take(&account).Error)
+			require.Equal(t, cmd.Size, account.ReservedBytes)
+		})
+	}
+}
+
+func TestCreateTransferRejectsPlacedLocalProviderOutsideConfiguredGateway(t *testing.T) {
+	db, ns := newTransferTestDB(t)
+	repo := persistence.NewRepository(db)
+	selectedRoot := t.TempDir()
+	configuredRoot := t.TempDir()
+	provider, err := model.NewStorageProvider(model.StorageProviderInput{
+		ID: uuid.New(), OrganizationID: ns.OrganizationID, Name: "other-local",
+		ProviderType: model.ProviderTypeLocal, Endpoint: selectedRoot,
+		SecretRef: "local://other", Status: "ACTIVE",
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateStorageProvider(context.Background(), provider))
+	handler := NewCreateTransferHandler(
+		repo, postgres.NewTransactor(db), nil, auditService{store: audit.NewGormStore(db)},
+		&stubTransferPlacer{decision: service.PlacementDecision{
+			PoolID: uuid.New(), ProviderID: provider.ID, MatchedRuleIDs: []string{"scope:WORKSPACE"},
+		}},
+	).WithDirectLocalProvider(configuredRoot)
+	cmd := transferFixture(ns)
+	cmd.Protocol = model.TransferProtocolDirect
+
+	_, err = handler.Handle(context.Background(), cmd)
+
+	require.ErrorIs(t, err, domain.ErrStorageGatewayMismatch)
+}
+
 func TestCreateTransferPlacementRejectsComplianceFailure(t *testing.T) {
 	db, ns := newTransferTestDB(t)
 	handler := NewCreateTransferHandler(
@@ -423,9 +516,11 @@ func TestCreateTransferPlacementRejectsComplianceFailure(t *testing.T) {
 type stubTransferPlacer struct {
 	decision service.PlacementDecision
 	err      error
+	requests []service.PlacementRequest
 }
 
-func (s *stubTransferPlacer) Place(context.Context, service.PlacementRequest) (service.PlacementDecision, error) {
+func (s *stubTransferPlacer) Place(_ context.Context, request service.PlacementRequest) (service.PlacementDecision, error) {
+	s.requests = append(s.requests, request)
 	if s.err != nil {
 		return service.PlacementDecision{}, s.err
 	}

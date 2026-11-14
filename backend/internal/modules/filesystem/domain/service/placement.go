@@ -14,15 +14,16 @@ import (
 )
 
 const (
-	ruleScopePrefix      = "scope:"
-	ruleComplianceEnc    = "compliance:encryption"
+	ruleScopePrefix       = "scope:"
+	ruleComplianceEnc     = "compliance:encryption"
 	ruleCapabilityPresign = "capability:presigned_upload"
-	ruleHealthPrefer     = "health:prefer_healthy"
-	ruleFallbackExplicit = "fallback:explicit"
+	ruleHealthPrefer      = "health:prefer_healthy"
+	ruleFallbackExplicit  = "fallback:explicit"
 )
 
 type PlacementRequest struct {
 	OrganizationID          uuid.UUID
+	NamespaceType           model.NamespaceType
 	WorkspaceID             uuid.UUID
 	ProjectID               *uuid.UUID
 	UserID                  uuid.UUID
@@ -70,9 +71,69 @@ func NewPlacementEngine(snapshot PlacementSnapshot) *Engine {
 	return &Engine{snapshot: snapshot}
 }
 
+type placementRepository interface {
+	ListStorageBindings(context.Context, uuid.UUID) ([]model.StorageBinding, error)
+	ListStoragePools(context.Context, uuid.UUID) ([]model.StoragePoolSnapshot, error)
+	ListStorageProviders(context.Context, uuid.UUID) ([]*model.StorageProvider, error)
+}
+
+type RepositoryPlacement struct {
+	repo placementRepository
+}
+
+func NewRepositoryPlacement(repo placementRepository) *RepositoryPlacement {
+	return &RepositoryPlacement{repo: repo}
+}
+
+func (p *RepositoryPlacement) Place(ctx context.Context, req PlacementRequest) (PlacementDecision, error) {
+	if p == nil || p.repo == nil {
+		return PlacementDecision{}, domain.ErrStoragePlacementUnsatisfied
+	}
+	bindings, err := p.repo.ListStorageBindings(ctx, req.OrganizationID)
+	if err != nil {
+		return PlacementDecision{}, err
+	}
+	poolModels, err := p.repo.ListStoragePools(ctx, req.OrganizationID)
+	if err != nil {
+		return PlacementDecision{}, err
+	}
+	providerModels, err := p.repo.ListStorageProviders(ctx, req.OrganizationID)
+	if err != nil {
+		return PlacementDecision{}, err
+	}
+	snapshot := PlacementSnapshot{
+		OrganizationID: req.OrganizationID,
+		WorkspaceID:    req.WorkspaceID,
+		Bindings:       bindings,
+		Pools:          make(map[uuid.UUID]PoolSnapshot, len(poolModels)),
+		Providers:      make(map[uuid.UUID]model.StorageProvider, len(providerModels)),
+		Health:         map[uuid.UUID]ProviderHealthSnapshot{},
+	}
+	boundPoolIDs := make(map[uuid.UUID]struct{}, len(bindings))
+	for _, binding := range bindings {
+		boundPoolIDs[binding.PoolID] = struct{}{}
+	}
+	for _, pool := range poolModels {
+		snapshot.Pools[pool.ID] = PoolSnapshot{
+			ID: pool.ID, PolicyVersion: pool.PlacementPolicyVersion,
+			Status: pool.Status, Members: append([]model.StoragePoolMember(nil), pool.Members...),
+		}
+		_, bound := boundPoolIDs[pool.ID]
+		if snapshot.FallbackPoolID == uuid.Nil && pool.Status == model.StoragePoolActive && !bound {
+			snapshot.FallbackPoolID = pool.ID
+		}
+	}
+	for _, provider := range providerModels {
+		if provider != nil {
+			snapshot.Providers[provider.ID] = *provider
+		}
+	}
+	return NewPlacementEngine(snapshot).Place(ctx, req)
+}
+
 func (e *Engine) Place(_ context.Context, req PlacementRequest) (PlacementDecision, error) {
 	var empty PlacementDecision
-	if req.OrganizationID == uuid.Nil || req.WorkspaceID == uuid.Nil {
+	if req.OrganizationID == uuid.Nil || !validPlacementNamespace(req) {
 		return empty, domain.ErrStoragePlacementUnsatisfied
 	}
 	poolID, scopeRules, err := e.resolvePool(req)
@@ -134,6 +195,10 @@ func (e *Engine) bestScopeBinding(req PlacementRequest) (model.StorageBinding, [
 		if !scopeMatches(binding, req) {
 			continue
 		}
+		pool, ok := e.snapshot.Pools[binding.PoolID]
+		if !ok || pool.Status != model.StoragePoolActive {
+			continue
+		}
 		matches = append(matches, candidate{
 			binding: binding,
 			rank:    scopeSpecificity(binding.ScopeType),
@@ -160,11 +225,31 @@ func scopeMatches(binding model.StorageBinding, req PlacementRequest) bool {
 	case model.ScopeOrganization:
 		return binding.ScopeID == req.OrganizationID
 	case model.ScopeWorkspace:
-		return binding.ScopeID == req.WorkspaceID
+		return placementNamespaceType(req) == model.NamespaceTypeWorkspace && binding.ScopeID == req.WorkspaceID
 	case model.ScopeProject:
-		return req.ProjectID != nil && binding.ScopeID == *req.ProjectID
+		return false
 	case model.ScopeUser:
-		return binding.ScopeID == req.UserID
+		return placementNamespaceType(req) == model.NamespaceTypeUser && binding.ScopeID == req.UserID
+	default:
+		return false
+	}
+}
+
+func placementNamespaceType(req PlacementRequest) model.NamespaceType {
+	if req.NamespaceType == "" && req.WorkspaceID != uuid.Nil {
+		return model.NamespaceTypeWorkspace
+	}
+	return req.NamespaceType
+}
+
+func validPlacementNamespace(req PlacementRequest) bool {
+	switch placementNamespaceType(req) {
+	case model.NamespaceTypeOrganization:
+		return req.WorkspaceID == uuid.Nil && req.UserID == uuid.Nil
+	case model.NamespaceTypeWorkspace:
+		return req.WorkspaceID != uuid.Nil
+	case model.NamespaceTypeUser:
+		return req.WorkspaceID == uuid.Nil && req.UserID != uuid.Nil
 	default:
 		return false
 	}

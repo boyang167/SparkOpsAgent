@@ -84,6 +84,7 @@ type SharedNodeFilter struct {
 type QuotaReservation struct {
 	ID             uuid.UUID
 	QuotaAccountID uuid.UUID
+	NamespaceID    uuid.UUID
 	WorkspaceID    uuid.UUID
 	SessionID      uuid.UUID
 	Bytes          int64
@@ -140,9 +141,12 @@ type FilesystemRepository interface {
 	GetCommand(context.Context, uuid.UUID) (*CommandDedup, error)
 	CreateTransfer(context.Context, *model.TransferSession) error
 	ReserveTransferQuota(context.Context, uuid.UUID, int64, int64) (uuid.UUID, error)
+	ReserveNamespaceQuota(context.Context, uuid.UUID, int64, int64) (uuid.UUID, error)
 	CreateQuotaReservation(context.Context, QuotaReservation) error
 	CommitQuotaReservation(context.Context, uuid.UUID, uuid.UUID) error
+	CommitNamespaceQuotaReservation(context.Context, uuid.UUID, uuid.UUID) error
 	ReleaseQuotaReservation(context.Context, uuid.UUID, uuid.UUID) error
+	ReleaseNamespaceQuotaReservation(context.Context, uuid.UUID, uuid.UUID) error
 	GetTransferByID(context.Context, uuid.UUID) (*model.TransferSession, error)
 	GetTransferByIdempotency(context.Context, uuid.UUID, string) (*model.TransferSession, error)
 	ListTransfers(context.Context, uuid.UUID, *model.TransferStatus, int, string) ([]*model.TransferSession, string, error)

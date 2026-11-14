@@ -54,6 +54,42 @@ func TestSharedWithMeUsesTypedPrincipalsAndForwardsStableFilters(t *testing.T) {
 	require.Equal(t, model.PrincipalRole, repo.filter.Principals[2].Type)
 }
 
+func TestSharedWithMeReadDoesNotInvokePlacementOrCreateReplica(t *testing.T) {
+	actorID := uuid.New()
+	repo := &sharedReadSideEffectProbe{governanceRepositoryStub: governanceRepositoryStub{
+		shared: []SharedNode{{Node: model.Node{ID: uuid.New(), NamespaceID: uuid.New()}}},
+	}}
+	handler := NewSharedWithMeHandler(repo, namespacePrincipalResolver{
+		principals: []repository.PrincipalRef{{Type: model.PrincipalUser, ID: actorID}},
+	}, effectiveAuthorizerStub{decisions: map[model.ResourcePermission]resourceauth.Decision{
+		model.ResourcePermissionRead: {Allowed: true},
+	}}, testSharedCursorCodec(t))
+
+	items, _, err := handler.Handle(context.Background(), SharedWithMe{
+		ActorID: actorID, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Limit: 10,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Zero(t, repo.placementCalls)
+	require.Zero(t, repo.replicaCreates)
+}
+
+type sharedReadSideEffectProbe struct {
+	governanceRepositoryStub
+	placementCalls int
+	replicaCreates int
+}
+
+func (r *sharedReadSideEffectProbe) Place(context.Context, any) {
+	r.placementCalls++
+}
+
+func (r *sharedReadSideEffectProbe) InsertReplica(context.Context, *model.StorageReplica) error {
+	r.replicaCreates++
+	return nil
+}
+
 func TestSharedWithMeRejectsResolverScopeMismatch(t *testing.T) {
 	handler := NewSharedWithMeHandler(&governanceRepositoryStub{}, principalResolverErrorStub{err: resourceauth.ErrPrincipalScopeMismatch}, effectiveAuthorizerStub{}, testSharedCursorCodec(t))
 

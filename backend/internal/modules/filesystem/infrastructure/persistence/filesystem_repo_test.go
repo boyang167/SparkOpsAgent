@@ -46,7 +46,7 @@ func TestCreateNamespaceRejectsInvalidTypedNamespace(t *testing.T) {
 	require.ErrorIs(t, err, model.ErrInvalidNamespace)
 }
 
-func TestCreateNamespaceCreatesQuotaOnlyForWorkspace(t *testing.T) {
+func TestCreateNamespaceCreatesQuotaForEveryNamespace(t *testing.T) {
 	repo, db := newTestRepository(t)
 	organizationID := uuid.New()
 	workspaceID := uuid.New()
@@ -72,11 +72,11 @@ func TestCreateNamespaceCreatesQuotaOnlyForWorkspace(t *testing.T) {
 
 	var quotaCount int64
 	require.NoError(t, db.Table("filesystem.quota_accounts").Where("organization_id = ?", organizationID).Count(&quotaCount).Error)
-	require.Equal(t, int64(1), quotaCount)
+	require.Equal(t, int64(3), quotaCount)
 	require.NoError(t, db.Table("filesystem.quota_accounts").Where("workspace_id = ?", workspaceID).Count(&quotaCount).Error)
 	require.Equal(t, int64(1), quotaCount)
 	require.NoError(t, db.Table("filesystem.quota_accounts").Where("workspace_id IS NULL").Count(&quotaCount).Error)
-	require.Zero(t, quotaCount)
+	require.Equal(t, int64(2), quotaCount)
 }
 
 func TestGetNamespaceByWorkspaceRequiresWorkspaceType(t *testing.T) {
@@ -1047,7 +1047,7 @@ func TestReserveQuotaHandlesNullBoundariesFilesAndOverflow(t *testing.T) {
 	repo, db := newTestRepository(t)
 	ns := seedNamespace(t, db)
 	account := quotaAccountRow{
-		ID: uuid.New(), OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID,
+		ID: uuid.New(), OrganizationID: ns.OrganizationID, NamespaceID: ns.ID, WorkspaceID: &ns.WorkspaceID,
 		UsedBytes: 40, ReservedBytes: 50, UsedFiles: 1, ReservedFiles: 1,
 		MaxBytes: ptrInt64(100), MaxFiles: ptrInt64(3), UpdatedAt: time.Now(),
 	}

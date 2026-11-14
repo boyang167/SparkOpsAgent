@@ -65,6 +65,7 @@ var (
 	ErrStorageResourceInUse            = errors.New("filesystem storage resource in use")
 	ErrStorageComplianceUnsatisfied    = errors.New("STORAGE_COMPLIANCE_UNSATISFIED")
 	ErrStoragePlacementUnsatisfied     = errors.New("filesystem storage placement unsatisfied")
+	ErrStorageGatewayMismatch          = errors.New("filesystem selected provider is not served by configured gateway")
 	ErrBlobStillReferenced             = errors.New("filesystem blob still referenced")
 	ErrRetentionHold                   = errors.New("filesystem retention hold active")
 	ErrBlobGCNotReady                  = errors.New("filesystem blob not ready for garbage collection")
