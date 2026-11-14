@@ -34,6 +34,19 @@
 
 Compose：`filesystem.transfer_gateway.control_base_url=http://api:8080`，网关依赖 `api` healthy。
 
+## 2026-11-14 Task 8 统一工作台自动验收（UTC+8）
+
+| 项 | 结果 |
+|---|---|
+| Filesystem 前端矩阵 | **PASS** — 19 files / 131 tests，exit 0 |
+| Monorepo 前端类型检查 | **PASS** — 6 packages，exit 0 |
+| Filesystem 后端 brief 回归 | **PASS** — filesystem、filesystemgateway、sftpgateway、OpenAPI 指定包全部 exit 0 |
+| 响应式与无障碍自动契约 | **PASS** — tab/tree/list/grid、键盘移动替代、Drawer Esc、progressbar、窄屏布局、横向滚动、触控目标、focus-visible、reduced-motion |
+| 浏览器手工矩阵 | **SKIP / PENDING** — 本轮按约束未启动或重启根工作区服务，也未执行真实浏览器端到端验收 |
+| 实时容量曲线 | **不在范围** — Task 8 未实现容量曲线；不作为发布能力声明 |
+
+上述 PASS 仅证明本轮自动执行范围，不改变 20 GiB、200 并发、Knowledge 真库迁移、RPO/RTO 与其他现场验收项的 SKIP 状态；发布判定仍为 **NOT ACCEPTED / RELEASE BLOCKED**。
+
 ## 2026-11-13 Fresh 检查（G5 Task 7 复跑 22:10 UTC+8）
 
 | 检查 | 结果 |

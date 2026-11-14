@@ -1,0 +1,79 @@
+# Task 8 报告：视觉、响应式、无障碍与自动验收
+
+## 状态
+
+Task 8 代码与自动验收完成。未启动或重启根工作区服务，未生成 review package；浏览器手工矩阵保持 SKIP / PENDING，实时容量曲线明确不在范围。
+
+## TDD 记录
+
+### RED
+
+1. 新增 `FilesystemWorkbench.accessibility.test.tsx` 后运行：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/FilesystemWorkbench.accessibility.test.tsx`
+   - 退出码 1；4 项中 3 项按预期失败、1 项通过。
+   - 失败原因分别为：缺少名为“文件系统功能”的 tablist、列表容器缺少横向溢出语义类、全局样式缺少工作台响应式/触控/focus/reduced-motion 契约。
+2. 增加进度动效契约后复跑同一命令：
+   - 退出码 1；4 项中 1 项按预期失败。
+   - 失败原因：进度条仍使用 `duration-200`，没有统一到工作台 150ms 克制过渡类。
+
+### GREEN
+
+1. Task 8 定向测试：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/FilesystemWorkbench.accessibility.test.tsx`
+   - 退出码 0；1 file / 4 tests。
+2. Filesystem 前端完整矩阵：
+   `pnpm vitest run apps/web/src/modules/filesystem packages/web-sdk/src/filesystem.test.ts`
+   - 退出码 0；19 files / 131 tests。
+   - 无 React act warning 或未处理 Promise；存在仓库测试工具链既有的 Vite/esbuild/oxc deprecation warning。
+3. Monorepo 类型检查：
+   `pnpm typecheck`
+   - 首次退出码 2：新测试把 Drawer children 作为 `createElement` 第三参数传入，不满足显式 props 类型。
+   - 修正后退出码 0；6 packages。
+4. 后端 brief 完整回归：
+   `go test ./internal/modules/filesystem/... ./internal/filesystemgateway/... ./internal/sftpgateway/... ./api/openapi -count=1`
+   - 退出码 0；18 个有测试的包通过，6 个包为 `[no test files]`。
+5. IDE diagnostics：Task 8 修改范围无 linter errors。
+6. `git diff --check`：退出码 0。
+
+## 实现摘要
+
+- 工作台使用语义化 CSS 类和既有 `--surface-*`、`--primary-soft`、`--border-strong`、shadow/radius token；未增加依赖或散落硬编码颜色。
+- 桌面为 `14rem–18rem` 目录侧栏加弹性主区；900px 以下隐藏侧栏并通过现有 Drawer 打开目录，主区与表格均限制横向页面溢出。
+- 列表表格在自身容器横向滚动；网格从三列降为两列、单列。关键图标和文件操作具备 44px 触控目标。
+- tablist、tree/treeitem、list/grid、tabpanel、Drawer、progressbar 保持可访问语义；视图切换有明确 `aria-pressed` 与“切换到…”名称。
+- 拖拽移动继续提供“移动到…”键盘替代流程；Drawer 保持 Esc、焦点圈和焦点管理。
+- 工作台交互统一为 150ms ease；`prefers-reduced-motion` 下关闭动画和过渡。
+- 近乎无色、内容优先；“上传文件”仍是文件区唯一 primary 视觉焦点，其余操作沿用 secondary/ghost。
+- loading / error / empty / forbidden 继续由现有组件独立表达，自动矩阵覆盖相关分支。
+
+## 自动验收与未执行项
+
+### PASS
+
+- tab / tabpanel 权限裁剪与键盘切换。
+- tree / treeitem、列表 / 网格共享状态与键盘“移动到…”入口。
+- Drawer Esc、焦点管理、上传 progressbar。
+- 窄屏目录 Drawer、表格横向滚动、网格断点、44px 触控目标。
+- focus-visible、reduced-motion、150ms 过渡、token 用色约束。
+- Filesystem 前端完整矩阵、pnpm typecheck、后端 brief 回归。
+
+### SKIP / PENDING（浏览器手工矩阵）
+
+1. 普通成员只看到“文件”和“传输”；
+2. 管理员看到四个标签；
+3. 列表选择文件后切换网格，选择保持；
+4. 目录树懒加载，拖入自身和子目录被拒绝；
+5. 拖动文件到另一目录成功，失败时恢复；
+6. 桌面拖入 4 个文件时最大 3 个并发；
+7. 失败任务可重试，活跃任务可取消；
+8. 文件详情 Drawer 显示版本，Esc 关闭；
+9. 窄屏目录树通过 Drawer 使用；
+10. 不使用鼠标通过“移动到…”完成移动。
+
+以上项目有组件级自动测试证据，但本轮未运行真实浏览器矩阵，因此不记浏览器 PASS。
+
+## 明确不在范围与未提升项
+
+- 实时容量曲线：不在范围，未实现、未展示、未伪造。
+- 20 GiB 断点续传、200 并发、Knowledge 真库迁移、RPO/RTO、灾备恢复：本轮无现场证据，验收文档继续保持 SKIP / PENDING。
+- 根工作区服务重启与 `/ready`、`/files` 运行态探测：依用户约束未执行。

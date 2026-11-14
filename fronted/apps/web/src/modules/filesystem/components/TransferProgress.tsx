@@ -19,9 +19,16 @@ export function TransferProgress({ progress, label = "上传进度" }: TransferP
           {percent}% ({progress.completedParts}/{progress.totalParts} 分片)
         </span>
       </div>
-      <div className="h-2 rounded-full bg-surface-2 overflow-hidden">
+      <div
+        className="h-2 rounded-full bg-surface-2 overflow-hidden"
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent}
+      >
         <div
-          className="h-full bg-primary transition-[width] duration-200"
+          className="filesystem-progress-fill h-full bg-primary"
           style={{ width: `${percent}%` }}
         />
       </div>

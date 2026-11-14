@@ -386,11 +386,11 @@ describe("FilesystemWorkbench", () => {
     const replaceState = vi.spyOn(window.history, "replaceState");
     renderWorkbench();
 
-    expect(screen.getByRole("button", { name: "列表视图" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "切换到列表视图" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    const gridButton = screen.getByRole("button", { name: "网格视图" });
+    const gridButton = screen.getByRole("button", { name: "切换到网格视图" });
     expect(gridButton).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(gridButton);
 

@@ -32251,3 +32251,133 @@ button.sprint-board-column-wf:hover:not(:disabled) {
     min-width: 0;
   }
 }
+
+/* ---- Filesystem unified workbench ---- */
+
+.filesystem-workbench {
+  display: grid;
+  min-width: 0;
+}
+
+.filesystem-browser-layout {
+  display: grid;
+  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+  align-items: start;
+  min-width: 0;
+}
+
+.filesystem-directory-sidebar,
+.filesystem-browser-main {
+  min-width: 0;
+}
+
+.filesystem-directory-sidebar {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding: 0.75rem;
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+  box-shadow: var(--shadow-sm);
+}
+
+.filesystem-workbench-tabs,
+.filesystem-workbench-toolbar,
+.filesystem-tree-item,
+.filesystem-file-grid > li,
+.filesystem-progress-fill {
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease,
+    opacity 150ms ease,
+    transform 150ms ease,
+    width 150ms ease;
+}
+
+.filesystem-workbench-toolbar {
+  min-width: 0;
+}
+
+.filesystem-directory-trigger {
+  display: none;
+}
+
+.filesystem-tree-item {
+  border-radius: var(--radius-md);
+  outline: none;
+}
+
+.filesystem-tree-item[aria-current="page"],
+.filesystem-tree-item[aria-selected="true"] {
+  background: var(--primary-soft);
+}
+
+.filesystem-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.filesystem-table-wrap .data-table {
+  min-width: 36rem;
+}
+
+.filesystem-file-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.filesystem-file-grid > li {
+  min-width: 0;
+}
+
+.filesystem-touch-target {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
+.filesystem-workbench :focus-visible {
+  outline: 2px solid var(--border-strong);
+  outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+  .filesystem-browser-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filesystem-directory-sidebar {
+    display: none;
+  }
+
+  .filesystem-directory-trigger {
+    display: inline-flex;
+  }
+
+  .filesystem-file-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .filesystem-workbench-tabs,
+  .filesystem-workbench-toolbar {
+    justify-content: flex-start;
+  }
+
+  .filesystem-file-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .filesystem-workbench,
+  .filesystem-workbench *,
+  .filesystem-progress-fill {
+    animation: none;
+    scroll-behavior: auto;
+    transition: none;
+  }
+}

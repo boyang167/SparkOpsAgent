@@ -129,7 +129,7 @@ export function FileBrowser({
             "button",
             {
               type: "button",
-              className: "btn btn-secondary btn-sm",
+              className: "btn btn-secondary btn-sm filesystem-touch-target",
               "aria-label": `移动所选 ${effectiveSelection.size} 项到…`,
               onClick: () => onMove(selectedNodes()),
             },

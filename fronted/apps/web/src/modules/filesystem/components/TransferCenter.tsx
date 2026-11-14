@@ -74,7 +74,7 @@ function Progress({ item }: { item: TransferItem }) {
       className: "h-1.5 overflow-hidden rounded-full bg-surface-muted",
     },
     createElement("div", {
-      className: "h-full bg-primary transition-[width] duration-200",
+      className: "filesystem-progress-fill h-full bg-primary",
       style: { width: `${value}%` },
     }),
   );
@@ -110,7 +110,7 @@ function PersistedTransferCard({ session }: { session: TransferSessionVM }) {
         className: "h-1.5 overflow-hidden rounded-full bg-surface-muted",
       },
       createElement("div", {
-        className: "h-full bg-primary transition-[width] duration-200",
+        className: "filesystem-progress-fill h-full bg-primary",
         style: { width: completed ? "100%" : "0%" },
       }),
     ),

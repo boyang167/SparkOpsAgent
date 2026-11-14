@@ -25,6 +25,20 @@
 | `cd fronted; pnpm vitest run apps/web/src/modules/filesystem/components/StoragePoolPanel.test.tsx` | **PASS**，2 tests |
 | `cd fronted; pnpm typecheck` | **PASS**，6 packages（turbo cache hit） |
 
+## 2026-11-14 Task 8 统一工作台自动验收（UTC+8）
+
+| 项 | 结果 |
+|---|---|
+| Filesystem 前端完整矩阵 | **PASS** — `pnpm vitest run apps/web/src/modules/filesystem packages/web-sdk/src/filesystem.test.ts`，19 files / 131 tests，exit 0 |
+| 前端类型检查 | **PASS** — `pnpm typecheck`，6 packages，exit 0 |
+| Filesystem / Gateway / SFTP / OpenAPI 后端回归 | **PASS** — `go test ./internal/modules/filesystem/... ./internal/filesystemgateway/... ./internal/sftpgateway/... ./api/openapi -count=1`，exit 0 |
+| 自动无障碍与响应式契约 | **PASS** — 覆盖 tab / tree / list / grid、键盘“移动到…”，Drawer Esc、progressbar、窄屏侧栏 Drawer、横向溢出、44px 触控目标、focus-visible、reduced-motion 与 150ms 过渡 |
+| loading / error / empty / forbidden | **PASS（组件自动测试）** — Filesystem 组件矩阵覆盖独立状态，不以空态替代加载或权限拒绝 |
+| 浏览器手工矩阵 | **SKIP / PENDING** — 未启动或重启根工作区服务，未执行真实浏览器权限、拖拽、窄屏和键盘端到端矩阵 |
+| 实时容量曲线 | **不在范围** — 未实现、未展示，也未伪造容量数据 |
+
+Task 8 本轮只将上述真实自动执行项记为 PASS；20 GiB、200 并发、Knowledge 真库迁移、灾备与浏览器手工项状态不变。
+
 ### 迁移 CLI 演练（计划 Step 2）
 
 | 步骤 | 结果 |

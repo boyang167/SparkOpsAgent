@@ -28,7 +28,7 @@ export function FileListView({
 }: FileListViewProps) {
   return createElement(
     "div",
-    { className: "card overflow-hidden" },
+    { className: "card filesystem-table-wrap" },
     createElement(
       "table",
       { className: "data-table w-full" },
@@ -75,7 +75,7 @@ export function FileListView({
                 "button",
                 {
                   type: "button",
-                  className: "font-medium link",
+                  className: "font-medium link filesystem-touch-target",
                   "aria-label": `打开 ${node.name}`,
                   onClick: () => onOpen(node),
                 },

@@ -28,7 +28,7 @@ export function FileGridView({
 }: FileGridViewProps) {
   return createElement(
     "ul",
-    { className: "grid gap-3 sm:grid-cols-2 lg:grid-cols-3", "aria-label": "文件网格" },
+    { className: "filesystem-file-grid", "aria-label": "文件网格" },
     nodes.map((node) =>
       createElement(
         "li",
@@ -46,7 +46,7 @@ export function FileGridView({
             "button",
             {
               type: "button",
-              className: "font-medium link text-left",
+              className: "font-medium link text-left filesystem-touch-target",
               "aria-label": `打开 ${node.name}`,
               onClick: () => onOpen(node),
             },

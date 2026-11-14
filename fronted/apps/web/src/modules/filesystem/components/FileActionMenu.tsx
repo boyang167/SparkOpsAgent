@@ -21,7 +21,7 @@ export function FileActionMenu({
       "button",
       {
         type: "button",
-        className: "btn btn-ghost btn-sm",
+        className: "btn btn-ghost btn-sm filesystem-touch-target",
         "aria-label": `重命名 ${node.name}`,
         onClick: () => onRename(node),
       },
@@ -32,7 +32,7 @@ export function FileActionMenu({
           "button",
           {
             type: "button",
-            className: "btn btn-ghost btn-sm",
+            className: "btn btn-ghost btn-sm filesystem-touch-target",
             "aria-label": `移动到… ${node.name}`,
             onClick: () => onMove([node]),
           },

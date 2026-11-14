@@ -324,7 +324,7 @@ export function DirectoryTree({
       "button",
       {
         type: "button",
-        className: "btn btn-ghost btn-sm",
+        className: "btn btn-ghost btn-sm filesystem-touch-target",
         "aria-label": `${current.expanded ? "收起" : "展开"} ${node.name}`,
         tabIndex: -1,
         onClick: (event: MouseEvent) => {
@@ -377,7 +377,7 @@ export function DirectoryTree({
             : "rejected"
           : undefined,
         tabIndex: focusedId === node.id ? 0 : -1,
-        className: `rounded-md outline-none transition focus-visible:ring-2 focus-visible:ring-primary${
+        className: `filesystem-tree-item${
           activeDrop ? (activeDrop.allowed ? " bg-surface-muted" : " opacity-60") : ""
         }`,
         ref: (element: HTMLDivElement | null) => {
@@ -410,7 +410,7 @@ export function DirectoryTree({
 
   return createElement(
     "div",
-    { role: "tree", "aria-label": "目录树", className: "stack-xs" },
+    { role: "tree", "aria-label": "目录", className: "filesystem-directory-tree stack-xs" },
     renderNode(root),
   );
 }

@@ -386,7 +386,11 @@ export function FilesystemWorkbench({
 
   const tabList = createElement(
     "div",
-    { role: "tablist", "aria-label": "文件工作台", className: "flex flex-wrap gap-2" },
+    {
+      role: "tablist",
+      "aria-label": "文件系统功能",
+      className: "filesystem-workbench-tabs flex flex-wrap gap-2",
+    },
     visibleTabs.map((tab, tabIndex) =>
       createElement(
         "button",
@@ -430,12 +434,15 @@ export function FilesystemWorkbench({
       : createElement("div", { className: "empty-state" }, "文件命名空间尚未初始化。");
   const filesContent = createElement(
     "div",
-    { className: "flex items-start gap-6" },
+    {
+      className: "filesystem-browser-layout gap-6",
+      "data-testid": "filesystem-browser-layout",
+    },
     createElement(
       "aside",
       {
         "aria-label": "目录",
-        className: "hidden w-64 shrink-0 lg:block",
+        className: "filesystem-directory-sidebar",
       },
       renderDirectoryTree(),
     ),
@@ -450,13 +457,13 @@ export function FilesystemWorkbench({
         onFiles: (files: File[], targetParentId: string) =>
           transferQueue.enqueue(files, targetParentId),
       },
-      createElement("div", { className: "min-w-0 flex-1" }, filesPanel),
+      createElement("main", { className: "filesystem-browser-main" }, filesPanel),
     ),
   );
 
   return createElement(
     "div",
-    { className: "stack-lg" },
+    { className: "filesystem-workbench stack-lg" },
     tabList,
     activeTab === "files"
       ? createElement(
@@ -464,15 +471,17 @@ export function FilesystemWorkbench({
           {
             role: "toolbar",
             "aria-label": "文件视图",
-            className: "flex justify-end gap-2",
+            className: "filesystem-workbench-toolbar flex flex-wrap justify-end gap-2",
           },
           createElement(
             "button",
             {
               type: "button",
               className:
-                view === "list" ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm",
-              "aria-label": "列表视图",
+                view === "list"
+                  ? "btn btn-secondary btn-sm filesystem-touch-target"
+                  : "btn btn-ghost btn-sm filesystem-touch-target",
+              "aria-label": "切换到列表视图",
               "aria-pressed": view === "list",
               onClick: () => selectView("list"),
             },
@@ -483,8 +492,10 @@ export function FilesystemWorkbench({
             {
               type: "button",
               className:
-                view === "grid" ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm",
-              "aria-label": "网格视图",
+                view === "grid"
+                  ? "btn btn-secondary btn-sm filesystem-touch-target"
+                  : "btn btn-ghost btn-sm filesystem-touch-target",
+              "aria-label": "切换到网格视图",
               "aria-pressed": view === "grid",
               onClick: () => selectView("grid"),
             },
@@ -494,7 +505,8 @@ export function FilesystemWorkbench({
             "button",
             {
               type: "button",
-              className: "btn btn-ghost btn-sm lg:hidden",
+              className:
+                "btn btn-ghost btn-sm filesystem-directory-trigger filesystem-touch-target",
               "aria-label": "打开目录",
               onClick: () => setDirectoryDrawerOpen(true),
             },
