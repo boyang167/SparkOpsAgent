@@ -134,8 +134,12 @@ func (m *Module) Register(c *appctx.Container) error {
 		},
 		&filesystemhttp.StorageAdminOptions{
 			RegisterProvider:      command.NewRegisterProviderHandler(repo).Handle,
+			UpdateProvider:        command.NewUpdateProviderHandler(repo).Handle,
+			DeleteProvider:        command.NewDeleteProviderHandler(repo).Handle,
 			ListStorageProviders:  query.NewListStorageProvidersHandler(repo).Handle,
 			CreateStoragePool:     command.NewCreateStoragePoolHandler(repo).Handle,
+			UpdateStoragePool:     command.NewUpdateStoragePoolHandler(repo).Handle,
+			DeleteStoragePool:     command.NewDeleteStoragePoolHandler(repo).Handle,
 			ListStoragePools:      query.NewListStoragePoolsHandler(repo).Handle,
 			CreateStorageBinding:  command.NewCreateStorageBindingHandler(repo).Handle,
 			ListStorageBindings:   query.NewListStorageBindingsHandler(repo).Handle,

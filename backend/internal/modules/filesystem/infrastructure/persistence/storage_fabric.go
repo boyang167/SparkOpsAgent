@@ -65,13 +65,22 @@ func (r *Repository) SaveStoragePool(ctx context.Context, pool *model.StoragePoo
 }
 
 func (r *Repository) GetStoragePool(ctx context.Context, id uuid.UUID) (*model.StoragePool, error) {
+	return r.loadStoragePool(ctx, postgres.DB(ctx, r.db).Where("id = ?", id))
+}
+
+func (r *Repository) GetStoragePoolForOrganization(ctx context.Context, organizationID, id uuid.UUID) (*model.StoragePool, error) {
+	return r.loadStoragePool(ctx, postgres.DB(ctx, r.db).Where("id = ? AND organization_id = ?", id, organizationID))
+}
+
+func (r *Repository) loadStoragePool(ctx context.Context, query *gorm.DB) (*model.StoragePool, error) {
 	var row storagePoolRow
-	if err := postgres.DB(ctx, r.db).Where("id = ?", id).First(&row).Error; err != nil {
+	if err := query.First(&row).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, domain.ErrStorageProviderNotFound
+			return nil, domain.ErrStoragePoolNotFound
 		}
 		return nil, wrapPersistence(err)
 	}
+	id := row.ID
 	var memberRows []storagePoolMemberRow
 	if err := postgres.DB(ctx, r.db).Where("pool_id = ?", id).Order("priority ASC, provider_id ASC").Find(&memberRows).Error; err != nil {
 		return nil, wrapPersistence(err)
@@ -86,6 +95,73 @@ func (r *Repository) GetStoragePool(ctx context.Context, id uuid.UUID) (*model.S
 		}
 	}
 	return model.RestoreStoragePool(snapshot), nil
+}
+
+func (r *Repository) UpdateStorageProvider(ctx context.Context, provider *model.StorageProvider) error {
+	if provider == nil {
+		return domain.ErrPersistence
+	}
+	now := time.Now().UTC()
+	result := postgres.DB(ctx, r.db).Model(&storageProviderRow{}).
+		Where("id = ? AND organization_id = ?", provider.ID, provider.OrganizationID).
+		Updates(map[string]any{
+			"name":           provider.Name,
+			"endpoint":       provider.Endpoint,
+			"secret_ref":     provider.SecretRef,
+			"status":         provider.Status,
+			"config_version": gorm.Expr("config_version + 1"),
+			"updated_at":     now,
+		})
+	if result.Error != nil {
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrStorageProviderNotFound
+	}
+	return nil
+}
+
+func (r *Repository) DeleteStorageProvider(ctx context.Context, organizationID, providerID uuid.UUID) error {
+	var memberCount int64
+	if err := postgres.DB(ctx, r.db).Model(&storagePoolMemberRow{}).Where("provider_id = ?", providerID).Count(&memberCount).Error; err != nil {
+		return wrapPersistence(err)
+	}
+	if memberCount > 0 {
+		return domain.ErrStorageResourceInUse
+	}
+	result := postgres.DB(ctx, r.db).Where("id = ? AND organization_id = ?", providerID, organizationID).Delete(&storageProviderRow{})
+	if result.Error != nil {
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrStorageProviderNotFound
+	}
+	return nil
+}
+
+func (r *Repository) DeleteStoragePool(ctx context.Context, organizationID, poolID uuid.UUID) error {
+	var bindingCount int64
+	if err := postgres.DB(ctx, r.db).Model(&storageBindingRow{}).
+		Where("organization_id = ? AND pool_id = ?", organizationID, poolID).
+		Count(&bindingCount).Error; err != nil {
+		return wrapPersistence(err)
+	}
+	if bindingCount > 0 {
+		return domain.ErrStorageResourceInUse
+	}
+	return wrapPersistence(postgres.DB(ctx, r.db).Transaction(func(tx *gorm.DB) error {
+		var row storagePoolRow
+		if err := tx.Where("id = ? AND organization_id = ?", poolID, organizationID).First(&row).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrStoragePoolNotFound
+			}
+			return err
+		}
+		if err := tx.Where("pool_id = ?", poolID).Delete(&storagePoolMemberRow{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&row).Error
+	}))
 }
 
 func (r *Repository) ListStoragePools(ctx context.Context, organizationID uuid.UUID) ([]model.StoragePoolSnapshot, error) {

@@ -46,8 +46,12 @@ func TestStorageRoutesUseExpectedPermissions(t *testing.T) {
 	}{
 		{http.MethodGet, "/storage-providers", authz.PermStorageRead},
 		{http.MethodPost, "/storage-providers", authz.PermStorageAdmin},
+		{http.MethodPatch, "/storage-providers/"+uuid.NewString(), authz.PermStorageAdmin},
+		{http.MethodDelete, "/storage-providers/"+uuid.NewString(), authz.PermStorageAdmin},
 		{http.MethodGet, "/storage-pools", authz.PermStorageRead},
 		{http.MethodPost, "/storage-pools", authz.PermStorageAdmin},
+		{http.MethodPatch, "/storage-pools/"+uuid.NewString(), authz.PermStorageAdmin},
+		{http.MethodDelete, "/storage-pools/"+uuid.NewString(), authz.PermStorageAdmin},
 		{http.MethodGet, "/storage-bindings", authz.PermStorageRead},
 		{http.MethodPost, "/storage-bindings", authz.PermStorageAdmin},
 		{http.MethodGet, "/lifecycle-policies", authz.PermStorageRead},

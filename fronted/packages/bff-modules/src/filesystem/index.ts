@@ -16,6 +16,8 @@ import type {
   StorageBindingPageVM,
   StoragePoolPageVM,
   StorageProviderPageVM,
+  UpdateStoragePoolCommand,
+  UpdateStorageProviderCommand,
   TransferListQuery,
   TransferSessionPageVM,
   TransferSessionVM,
@@ -186,6 +188,25 @@ export async function registerStorageProvider(
   return ctx.upstream.filesystem.registerStorageProvider(workspaceId, input, idempotencyKey);
 }
 
+export async function updateStorageProvider(
+  ctx: BffContext,
+  workspaceId: string,
+  providerId: string,
+  input: UpdateStorageProviderCommand,
+  idempotencyKey: string,
+): Promise<{ updated: true }> {
+  return ctx.upstream.filesystem.updateStorageProvider(workspaceId, providerId, input, idempotencyKey);
+}
+
+export async function deleteStorageProvider(
+  ctx: BffContext,
+  workspaceId: string,
+  providerId: string,
+  idempotencyKey: string,
+): Promise<{ deleted: true }> {
+  return ctx.upstream.filesystem.deleteStorageProvider(workspaceId, providerId, idempotencyKey);
+}
+
 export async function listStoragePools(
   ctx: BffContext,
   workspaceId: string,
@@ -201,6 +222,25 @@ export async function createStoragePool(
   idempotencyKey: string,
 ): Promise<{ id: string; name: string }> {
   return ctx.upstream.filesystem.createStoragePool(workspaceId, input, idempotencyKey);
+}
+
+export async function updateStoragePool(
+  ctx: BffContext,
+  workspaceId: string,
+  poolId: string,
+  input: UpdateStoragePoolCommand,
+  idempotencyKey: string,
+): Promise<{ id: string; name: string }> {
+  return ctx.upstream.filesystem.updateStoragePool(workspaceId, poolId, input, idempotencyKey);
+}
+
+export async function deleteStoragePool(
+  ctx: BffContext,
+  workspaceId: string,
+  poolId: string,
+  idempotencyKey: string,
+): Promise<{ deleted: true }> {
+  return ctx.upstream.filesystem.deleteStoragePool(workspaceId, poolId, idempotencyKey);
 }
 
 export async function listStorageBindings(

@@ -16,8 +16,12 @@ import (
 
 type StorageAdminOptions struct {
 	RegisterProvider      func(context.Context, command.RegisterProvider) (command.RegisterProviderResult, error)
+	UpdateProvider        func(context.Context, command.UpdateProvider) error
+	DeleteProvider        func(context.Context, command.DeleteProvider) error
 	ListStorageProviders  func(context.Context, query.StorageAdminList) ([]*model.StorageProvider, error)
 	CreateStoragePool     func(context.Context, command.CreateStoragePool) (command.CreateStoragePoolResult, error)
+	UpdateStoragePool     func(context.Context, command.UpdateStoragePool) (command.UpdateStoragePoolResult, error)
+	DeleteStoragePool     func(context.Context, command.DeleteStoragePool) error
 	ListStoragePools      func(context.Context, query.StorageAdminList) ([]model.StoragePoolSnapshot, error)
 	CreateStorageBinding  func(context.Context, command.CreateStorageBinding) (command.CreateStorageBindingResult, error)
 	ListStorageBindings   func(context.Context, query.StorageAdminList) ([]model.StorageBinding, error)
@@ -44,6 +48,19 @@ type registerStorageProviderRequest struct {
 	SecretRef    string         `json:"secret_ref"`
 	Capabilities map[string]any `json:"capabilities"`
 	Status       string         `json:"status"`
+}
+
+type updateStorageProviderRequest struct {
+	Name      string `json:"name"`
+	Endpoint  string `json:"endpoint"`
+	SecretRef string `json:"secret_ref"`
+	Status    string `json:"status"`
+}
+
+type updateStoragePoolRequest struct {
+	Name    string                         `json:"name"`
+	Status  string                         `json:"status"`
+	Members []storageProviderMemberRequest `json:"members"`
 }
 
 type createStorageBindingRequest struct {
@@ -126,6 +143,68 @@ func (h *Handler) RegisterStorageProvider(c *gin.Context) {
 	created(c, gin.H{"id": result.ID})
 }
 
+func (h *Handler) UpdateStorageProvider(c *gin.Context) {
+	rc, ok := h.adminContext(c, true)
+	if !ok {
+		return
+	}
+	providerID, valid := canonicalUUID(c.Param("providerId"))
+	if !valid {
+		invalidRequest(c)
+		return
+	}
+	var body updateStorageProviderRequest
+	if !decodeJSON(c, &body) {
+		return
+	}
+	if h.updateProvider == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	status := strings.TrimSpace(body.Status)
+	if status == "" {
+		status = "ACTIVE"
+	}
+	err := h.updateProvider(c.Request.Context(), command.UpdateProvider{
+		OrganizationID: rc.namespace.OrganizationID,
+		ProviderID:     providerID,
+		Name:           body.Name,
+		Endpoint:       body.Endpoint,
+		SecretRef:      strings.TrimSpace(body.SecretRef),
+		Status:         status,
+	})
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"updated": true})
+}
+
+func (h *Handler) DeleteStorageProvider(c *gin.Context) {
+	rc, ok := h.adminContext(c, true)
+	if !ok {
+		return
+	}
+	providerID, valid := canonicalUUID(c.Param("providerId"))
+	if !valid {
+		invalidRequest(c)
+		return
+	}
+	if h.deleteProvider == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	err := h.deleteProvider(c.Request.Context(), command.DeleteProvider{
+		OrganizationID: rc.namespace.OrganizationID,
+		ProviderID:     providerID,
+	})
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"deleted": true})
+}
+
 func (h *Handler) ListStoragePools(c *gin.Context) {
 	rc, ok := h.adminContext(c, false)
 	if !ok || h.listStoragePools == nil {
@@ -179,6 +258,78 @@ func (h *Handler) CreateStoragePool(c *gin.Context) {
 		return
 	}
 	created(c, gin.H{"id": result.ID, "name": result.Name})
+}
+
+func (h *Handler) UpdateStoragePool(c *gin.Context) {
+	rc, ok := h.adminContext(c, true)
+	if !ok {
+		return
+	}
+	poolID, valid := canonicalUUID(c.Param("poolId"))
+	if !valid {
+		invalidRequest(c)
+		return
+	}
+	var body updateStoragePoolRequest
+	if !decodeJSON(c, &body) {
+		return
+	}
+	members := make([]command.CreateStoragePoolMember, 0, len(body.Members))
+	for _, member := range body.Members {
+		providerID, memberValid := canonicalUUID(member.ProviderID)
+		if !memberValid {
+			invalidRequest(c)
+			return
+		}
+		members = append(members, command.CreateStoragePoolMember{
+			ProviderID: providerID, Mode: model.ProviderMode(member.Mode), Priority: member.Priority,
+		})
+	}
+	status := model.StoragePoolActive
+	if strings.TrimSpace(body.Status) != "" {
+		status = model.StoragePoolStatus(body.Status)
+	}
+	if h.updateStoragePool == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	result, err := h.updateStoragePool(c.Request.Context(), command.UpdateStoragePool{
+		OrganizationID: rc.namespace.OrganizationID,
+		PoolID:         poolID,
+		Name:           body.Name,
+		Status:         status,
+		Members:        members,
+	})
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"id": result.ID, "name": result.Name})
+}
+
+func (h *Handler) DeleteStoragePool(c *gin.Context) {
+	rc, ok := h.adminContext(c, true)
+	if !ok {
+		return
+	}
+	poolID, valid := canonicalUUID(c.Param("poolId"))
+	if !valid {
+		invalidRequest(c)
+		return
+	}
+	if h.deleteStoragePool == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	err := h.deleteStoragePool(c.Request.Context(), command.DeleteStoragePool{
+		OrganizationID: rc.namespace.OrganizationID,
+		PoolID:         poolID,
+	})
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"deleted": true})
 }
 
 func (h *Handler) ListStorageBindings(c *gin.Context) {

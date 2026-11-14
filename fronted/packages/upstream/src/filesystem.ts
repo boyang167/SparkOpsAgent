@@ -15,6 +15,8 @@ import type {
   StorageBindingPageVM,
   StoragePoolPageVM,
   StorageProviderPageVM,
+  UpdateStoragePoolCommand,
+  UpdateStorageProviderCommand,
   TransferListQuery,
   TransferSessionPageVM,
   TransferSessionVM,
@@ -191,6 +193,32 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
         },
       );
     },
+    updateStorageProvider(
+      workspaceId: string,
+      providerId: string,
+      input: UpdateStorageProviderCommand,
+      idempotencyKey: string,
+    ) {
+      return upstreamFetch<{ updated: true }>(
+        `/api/v1/workspaces/${workspaceId}/storage-providers/${providerId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(input),
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+    deleteStorageProvider(workspaceId: string, providerId: string, idempotencyKey: string) {
+      return upstreamFetch<{ deleted: true }>(
+        `/api/v1/workspaces/${workspaceId}/storage-providers/${providerId}`,
+        {
+          method: "DELETE",
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
+    },
     listStoragePools(workspaceId: string) {
       return upstreamFetch<StoragePoolPageVM>(`/api/v1/workspaces/${workspaceId}/storage-pools`, {
         method: "GET",
@@ -203,6 +231,32 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
         {
           method: "POST",
           body: JSON.stringify(input),
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+    updateStoragePool(
+      workspaceId: string,
+      poolId: string,
+      input: UpdateStoragePoolCommand,
+      idempotencyKey: string,
+    ) {
+      return upstreamFetch<{ id: string; name: string }>(
+        `/api/v1/workspaces/${workspaceId}/storage-pools/${poolId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(input),
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+    deleteStoragePool(workspaceId: string, poolId: string, idempotencyKey: string) {
+      return upstreamFetch<{ deleted: true }>(
+        `/api/v1/workspaces/${workspaceId}/storage-pools/${poolId}`,
+        {
+          method: "DELETE",
           headers: { "Idempotency-Key": idempotencyKey },
           options: { ...options, workspaceId },
         },

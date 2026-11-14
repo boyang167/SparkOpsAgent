@@ -1,20 +1,38 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CreateStorageBindingCommand, StorageBindingVM, StoragePoolVM } from "@sparkops/contracts/filesystem";
+import type { OrganizationVM, WorkspaceVM } from "@sparkops/contracts/tenant";
+import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { BffError } from "@sparkops/contracts";
 import { createStorageBinding, listStorageBindings, listStoragePools } from "@sparkops/web-sdk/filesystem";
+import { tenant, workspace } from "@sparkops/web-sdk";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { canMutateStorage } from "./storage-admin-permissions";
-
-const SCOPE_TYPES = ["ORGANIZATION", "WORKSPACE", "PROJECT", "USER"] as const;
+import {
+  defaultScopeIdForType,
+  formatBindingScopeRow,
+  scopeTargetOptions,
+  STORAGE_BINDING_SCOPE_LABELS,
+  STORAGE_BINDING_SCOPE_TYPES,
+  validateStorageBindingForm,
+} from "./storage-binding-panel-view";
 
 export type StorageBindingPanelProps = {
   workspaceId: string;
   permissions: string[];
   bindings?: StorageBindingVM[];
 };
+
+function initialBindingForm(workspaceId: string): CreateStorageBindingCommand {
+  return {
+    scope_type: "WORKSPACE",
+    scope_id: workspaceId,
+    pool_id: "",
+    priority: 0,
+  };
+}
 
 export function StorageBindingPanel({
   workspaceId,
@@ -24,27 +42,42 @@ export function StorageBindingPanel({
   const canAdmin = canMutateStorage(permissions);
   const [bindings, setBindings] = useState<StorageBindingVM[]>(initialBindings ?? []);
   const [pools, setPools] = useState<StoragePoolVM[]>([]);
+  const [organizations, setOrganizations] = useState<OrganizationVM[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceVM[]>([]);
+  const [projects, setProjects] = useState<ProjectVM[]>([]);
   const [loading, setLoading] = useState(!initialBindings);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState<CreateStorageBindingCommand>({
-    scope_type: "WORKSPACE",
-    scope_id: workspaceId,
-    pool_id: "",
-    priority: 0,
-  });
+  const [formError, setFormError] = useState<string | null>(null);
+  const [form, setForm] = useState<CreateStorageBindingCommand>(() => initialBindingForm(workspaceId));
+
+  const catalog = useMemo(
+    () => ({ organizations, workspaces, projects }),
+    [organizations, workspaces, projects],
+  );
+
+  const scopeOptions = useMemo(
+    () => scopeTargetOptions(form.scope_type, catalog),
+    [form.scope_type, catalog],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [bindingPage, poolPage] = await Promise.all([
+      const [bindingPage, poolPage, orgItems, workspaceItems, projectItems] = await Promise.all([
         listStorageBindings(workspaceId),
         listStoragePools(workspaceId),
+        tenant.listOrganizations(),
+        tenant.listWorkspaces(),
+        workspace.listProjects(workspaceId),
       ]);
       setBindings(bindingPage.items);
       setPools(poolPage.items);
+      setOrganizations(orgItems);
+      setWorkspaces(workspaceItems);
+      setProjects(projectItems);
       if (poolPage.items[0]) {
         setForm((current) =>
           current.pool_id ? current : { ...current, pool_id: poolPage.items[0].id },
@@ -63,8 +96,31 @@ export function StorageBindingPanel({
     }
   }, [initialBindings, load]);
 
+  useEffect(() => {
+    setForm((current) =>
+      current.scope_type === "WORKSPACE" && current.scope_id !== workspaceId
+        ? { ...current, scope_id: workspaceId }
+        : current,
+    );
+  }, [workspaceId]);
+
+  function openCreateModal() {
+    setFormError(null);
+    setForm({
+      ...initialBindingForm(workspaceId),
+      pool_id: pools[0]?.id ?? "",
+    });
+    setOpen(true);
+  }
+
   async function submit() {
-    if (!canAdmin || !form.pool_id || !form.scope_id) return;
+    if (!canAdmin) return;
+    const validationError = validateStorageBindingForm(form);
+    if (validationError) {
+      setFormError(validationError);
+      return;
+    }
+    setFormError(null);
     setSubmitting(true);
     setError(null);
     try {
@@ -85,13 +141,13 @@ export function StorageBindingPanel({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">存储作用域绑定</h2>
-          <p className="text-sm text-muted">将存储池绑定到 Organization / Workspace / Project / User。</p>
+          <p className="text-sm text-muted">将存储池绑定到租户、工作区、项目或用户；按名称选择，无需手填 UUID。</p>
         </div>
         {canAdmin ? (
           <button
             type="button"
             className={open ? "btn btn-secondary" : "btn btn-primary"}
-            onClick={() => setOpen(true)}
+            onClick={openCreateModal}
           >
             新增绑定
           </button>
@@ -110,20 +166,23 @@ export function StorageBindingPanel({
             <thead>
               <tr>
                 <th>作用域</th>
-                <th>Scope ID</th>
+                <th>绑定目标</th>
                 <th>存储池</th>
                 <th>优先级</th>
               </tr>
             </thead>
             <tbody>
-              {bindings.map((binding) => (
-                <tr key={binding.id}>
-                  <td>{binding.scope_type}</td>
-                  <td className="font-mono text-xs">{binding.scope_id}</td>
-                  <td>{poolNameById.get(binding.pool_id) ?? binding.pool_id.slice(0, 8)}</td>
-                  <td>{binding.priority}</td>
-                </tr>
-              ))}
+              {bindings.map((binding) => {
+                const row = formatBindingScopeRow(binding, catalog);
+                return (
+                  <tr key={binding.id}>
+                    <td>{row.scopeLabel}</td>
+                    <td>{row.targetLabel}</td>
+                    <td>{poolNameById.get(binding.pool_id) ?? binding.pool_id.slice(0, 8)}</td>
+                    <td>{binding.priority}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -131,39 +190,74 @@ export function StorageBindingPanel({
 
       <Modal open={open} title="新增存储绑定" onClose={() => setOpen(false)}>
         <div className="stack-md">
+          {formError ? <InlineAlert tone="error">{formError}</InlineAlert> : null}
           <label className="stack-xs">
             <span>作用域类型</span>
             <select
               className="input"
               value={form.scope_type}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  scope_type: e.target.value as CreateStorageBindingCommand["scope_type"],
-                }))
-              }
+              onChange={(e) => {
+                const scopeType = e.target.value as CreateStorageBindingCommand["scope_type"];
+                setFormError(null);
+                setForm((current) => ({
+                  ...current,
+                  scope_type: scopeType,
+                  scope_id: defaultScopeIdForType(scopeType, workspaceId, catalog),
+                }));
+              }}
             >
-              {SCOPE_TYPES.map((type) => (
+              {STORAGE_BINDING_SCOPE_TYPES.map((type) => (
                 <option key={type} value={type}>
-                  {type}
+                  {STORAGE_BINDING_SCOPE_LABELS[type]}
                 </option>
               ))}
             </select>
           </label>
           <label className="stack-xs">
-            <span>Scope ID</span>
-            <input
-              className="input font-mono text-xs"
-              value={form.scope_id}
-              onChange={(e) => setForm((f) => ({ ...f, scope_id: e.target.value }))}
-            />
+            <span>{form.scope_type === "USER" ? "用户 ID" : "绑定目标"}</span>
+            {form.scope_type === "USER" ? (
+              <>
+                <input
+                  className="input font-mono text-xs"
+                  placeholder="用户 UUID"
+                  value={form.scope_id}
+                  onChange={(e) => {
+                    setFormError(null);
+                    setForm((f) => ({ ...f, scope_id: e.target.value }));
+                  }}
+                />
+                <span className="text-xs text-muted">用户级绑定暂仅支持按 ID 指定。</span>
+              </>
+            ) : scopeOptions.length === 0 ? (
+              <span className="text-sm text-muted">
+                {form.scope_type === "PROJECT" ? "当前工作区下暂无项目，请先创建项目。" : "暂无可选目标。"}
+              </span>
+            ) : (
+              <select
+                className="input"
+                value={form.scope_id}
+                onChange={(e) => {
+                  setFormError(null);
+                  setForm((f) => ({ ...f, scope_id: e.target.value }));
+                }}
+              >
+                {scopeOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.detail ? `${option.label}（${option.detail}）` : option.label}
+                  </option>
+                ))}
+              </select>
+            )}
           </label>
           <label className="stack-xs">
             <span>存储池</span>
             <select
               className="input"
               value={form.pool_id}
-              onChange={(e) => setForm((f) => ({ ...f, pool_id: e.target.value }))}
+              onChange={(e) => {
+                setFormError(null);
+                setForm((f) => ({ ...f, pool_id: e.target.value }));
+              }}
             >
               <option value="">选择存储池</option>
               {pools.map((pool) => (
@@ -181,6 +275,7 @@ export function StorageBindingPanel({
               value={form.priority ?? 0}
               onChange={(e) => setForm((f) => ({ ...f, priority: Number(e.target.value) }))}
             />
+            <span className="text-xs text-muted">同一作用域多条绑定时，数字越大越优先。</span>
           </label>
           <div className="flex justify-end gap-2">
             <button type="button" className="btn btn-ghost" disabled={submitting} onClick={() => setOpen(false)}>

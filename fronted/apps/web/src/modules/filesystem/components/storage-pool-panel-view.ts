@@ -1,9 +1,25 @@
-import type { StorageProviderVM } from "@sparkops/contracts/filesystem";
+import type {
+  CreateStoragePoolCommand,
+  RegisterStorageProviderCommand,
+  StoragePoolMemberVM,
+  StoragePoolVM,
+  StorageProviderVM,
+  UpdateStorageProviderCommand,
+} from "@sparkops/contracts/filesystem";
 import { canMutateStorage } from "./storage-admin-permissions";
+
+export const LOCAL_PROVIDER_DEFAULT_SECRET_REF = "local://default";
+export const DEFAULT_LOCAL_PROVIDER_NAME = "default-local";
 
 export const PROVIDER_CREDENTIAL_LABEL = "已通过密钥引用配置";
 export const STORAGE_POOL_CREATE_LABEL = "新增存储池";
 export const STORAGE_PROVIDER_REGISTER_LABEL = "注册 Provider";
+
+export type StoragePoolDraftMember = {
+  provider_id: string;
+  mode: StoragePoolMemberVM["mode"];
+  priority: number;
+};
 
 export type ProviderTableRow = {
   id: string;
@@ -51,4 +67,122 @@ export function visibleMutationButtons(permissions: string[]) {
     return [];
   }
   return [STORAGE_PROVIDER_REGISTER_LABEL, STORAGE_POOL_CREATE_LABEL];
+}
+
+export function validateRegisterProviderForm(
+  form: Pick<RegisterStorageProviderCommand, "name" | "secret_ref" | "provider_type">,
+): string | null {
+  if (!form.name.trim()) {
+    return "请填写 Provider 名称";
+  }
+  if (!form.secret_ref.trim() && form.provider_type !== "LOCAL") {
+    return "请填写 Secret 引用（仅提交引用路径，界面不会回显明文）";
+  }
+  return null;
+}
+
+export function normalizeRegisterProviderCommand(
+  form: RegisterStorageProviderCommand,
+): RegisterStorageProviderCommand {
+  const secretRef =
+    form.secret_ref.trim() ||
+    (form.provider_type === "LOCAL" ? LOCAL_PROVIDER_DEFAULT_SECRET_REF : "");
+  return {
+    ...form,
+    name: form.name.trim(),
+    secret_ref: secretRef,
+    endpoint: form.endpoint?.trim() || undefined,
+  };
+}
+
+export function registerProviderSecretPlaceholder(providerType: RegisterStorageProviderCommand["provider_type"]) {
+  return providerType === "LOCAL"
+    ? `${LOCAL_PROVIDER_DEFAULT_SECRET_REF}（留空则使用默认）`
+    : "secret://...";
+}
+
+export function createDefaultStoragePoolMembers(
+  providers: StorageProviderVM[],
+): StoragePoolDraftMember[] {
+  const provider = providers.find((item) => item.status === "ACTIVE");
+  return provider
+    ? [{ provider_id: provider.id, mode: "PRIMARY", priority: 100 }]
+    : [];
+}
+
+export function validateCreateStoragePoolForm(
+  name: string,
+  members: StoragePoolDraftMember[],
+  providers: StorageProviderVM[],
+): string | null {
+  if (!name.trim()) {
+    return "请填写存储池名称";
+  }
+  if (members.length === 0) {
+    return "请至少添加一个 Provider 成员";
+  }
+  const activeProviderIds = new Set(
+    providers.filter((provider) => provider.status === "ACTIVE").map((provider) => provider.id),
+  );
+  if (members.some((member) => !activeProviderIds.has(member.provider_id))) {
+    return "请选择可用的 Provider";
+  }
+  if (new Set(members.map((member) => member.provider_id)).size !== members.length) {
+    return "同一个 Provider 不能重复添加";
+  }
+  const primaryMembers = members.filter((member) => member.mode === "PRIMARY");
+  if (primaryMembers.length === 0) {
+    return "存储池至少需要一个 PRIMARY 成员";
+  }
+  if (
+    new Set(primaryMembers.map((member) => member.priority)).size !== primaryMembers.length
+  ) {
+    return "PRIMARY 成员的优先级不能重复";
+  }
+  return null;
+}
+
+export function normalizeCreateStoragePoolCommand(
+  name: string,
+  members: StoragePoolDraftMember[],
+): CreateStoragePoolCommand {
+  return {
+    name: name.trim(),
+    members: members.map((member) => ({
+      provider_id: member.provider_id,
+      mode: member.mode,
+      priority: member.priority,
+    })),
+  };
+}
+
+export function canDeleteProvider(provider: Pick<StorageProviderVM, "name">) {
+  return provider.name !== DEFAULT_LOCAL_PROVIDER_NAME;
+}
+
+export function validateUpdateProviderForm(form: UpdateStorageProviderCommand): string | null {
+  if (!form.name.trim()) {
+    return "请填写 Provider 名称";
+  }
+  return null;
+}
+
+export function normalizeUpdateProviderCommand(
+  form: UpdateStorageProviderCommand,
+): UpdateStorageProviderCommand {
+  const secretRef = form.secret_ref?.trim();
+  return {
+    name: form.name.trim(),
+    endpoint: form.endpoint?.trim() || undefined,
+    status: form.status?.trim() || "ACTIVE",
+    ...(secretRef ? { secret_ref: secretRef } : {}),
+  };
+}
+
+export function membersFromPool(pool: StoragePoolVM): StoragePoolDraftMember[] {
+  return pool.members.map((member) => ({
+    provider_id: member.provider_id,
+    mode: member.mode,
+    priority: member.priority,
+  }));
 }

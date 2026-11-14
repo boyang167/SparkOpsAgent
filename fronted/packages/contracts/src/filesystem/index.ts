@@ -247,6 +247,23 @@ export const CreateStoragePoolCommandSchema = z.object({
 
 export type CreateStoragePoolCommand = z.infer<typeof CreateStoragePoolCommandSchema>;
 
+export const UpdateStorageProviderCommandSchema = z.object({
+  name: z.string().min(1),
+  endpoint: z.string().optional(),
+  secret_ref: z.string().optional(),
+  status: z.string().optional(),
+});
+
+export type UpdateStorageProviderCommand = z.infer<typeof UpdateStorageProviderCommandSchema>;
+
+export const UpdateStoragePoolCommandSchema = z.object({
+  name: z.string().min(1),
+  status: StoragePoolStatusSchema.optional(),
+  members: z.array(StoragePoolMemberVMSchema).default([]),
+});
+
+export type UpdateStoragePoolCommand = z.infer<typeof UpdateStoragePoolCommandSchema>;
+
 export const StorageBindingScopeTypeSchema = z.enum([
   "ORGANIZATION",
   "WORKSPACE",

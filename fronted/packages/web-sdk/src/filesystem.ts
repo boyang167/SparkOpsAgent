@@ -15,6 +15,8 @@ import type {
   StorageBindingPageVM,
   StoragePoolPageVM,
   StorageProviderPageVM,
+  UpdateStoragePoolCommand,
+  UpdateStorageProviderCommand,
   TransferListQuery,
   TransferSessionPageVM,
   TransferSessionVM,
@@ -391,6 +393,36 @@ export function registerStorageProvider(
   });
 }
 
+export function updateStorageProvider(
+  workspaceId: string,
+  providerId: string,
+  input: UpdateStorageProviderCommand,
+  options: BffFetchOptions & { idempotencyKey?: string } = {},
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("storage-provider-update");
+  return bffFetch<{ updated: true }>(`/workspaces/${workspaceId}/storage-providers/${providerId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+    workspaceId,
+    headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
+    ...options,
+  });
+}
+
+export function deleteStorageProvider(
+  workspaceId: string,
+  providerId: string,
+  options: BffFetchOptions & { idempotencyKey?: string } = {},
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("storage-provider-delete");
+  return bffFetch<{ deleted: true }>(`/workspaces/${workspaceId}/storage-providers/${providerId}`, {
+    method: "DELETE",
+    workspaceId,
+    headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
+    ...options,
+  });
+}
+
 export function listStoragePools(workspaceId: string, options: BffFetchOptions = {}) {
   return bffFetch<StoragePoolPageVM>(`/workspaces/${workspaceId}/storage-pools`, {
     method: "GET",
@@ -408,6 +440,36 @@ export function createStoragePool(
   return bffFetch<{ id: string; name: string }>(`/workspaces/${workspaceId}/storage-pools`, {
     method: "POST",
     body: JSON.stringify(input),
+    workspaceId,
+    headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
+    ...options,
+  });
+}
+
+export function updateStoragePool(
+  workspaceId: string,
+  poolId: string,
+  input: UpdateStoragePoolCommand,
+  options: BffFetchOptions & { idempotencyKey?: string } = {},
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("storage-pool-update");
+  return bffFetch<{ id: string; name: string }>(`/workspaces/${workspaceId}/storage-pools/${poolId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+    workspaceId,
+    headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
+    ...options,
+  });
+}
+
+export function deleteStoragePool(
+  workspaceId: string,
+  poolId: string,
+  options: BffFetchOptions & { idempotencyKey?: string } = {},
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("storage-pool-delete");
+  return bffFetch<{ deleted: true }>(`/workspaces/${workspaceId}/storage-pools/${poolId}`, {
+    method: "DELETE",
     workspaceId,
     headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
     ...options,
