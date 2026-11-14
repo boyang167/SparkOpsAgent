@@ -27,6 +27,7 @@ import { FileSpaceNav } from "./FileSpaceNav";
 import { GovernanceWorkspace } from "./GovernanceWorkspace";
 import { MoveNodesModal } from "./MoveNodesModal";
 import { ShareFileModal } from "./ShareFileModal";
+import { ShareApprovalPanel } from "./ShareApprovalPanel";
 import { TransferCenter, TransferSummary } from "./TransferCenter";
 import { createTransferQueue } from "./transfer-queue";
 import type { TransferQueue } from "./transfer-queue";
@@ -63,6 +64,7 @@ const tabs: Array<{
   { id: "files", label: "文件" },
   { id: "transfers", label: "传输" },
   { id: "governance", label: "存储治理", permission: "storage:read" },
+  { id: "approvals", label: "共享审批", permission: "org:file:admin" },
   { id: "audit", label: "审计", permission: "file:admin" },
 ];
 
@@ -732,7 +734,11 @@ export function FilesystemWorkbench({
                 })
               : tab.id === "governance"
                 ? createElement(GovernanceWorkspace, { workspaceId, permissions })
-                : createElement(AuditWorkspace, { workspaceId, permissions }),
+                : tab.id === "approvals"
+                  ? organizationId
+                    ? createElement(ShareApprovalPanel, { organizationId, workspaceId })
+                    : null
+                  : createElement(AuditWorkspace, { workspaceId, permissions }),
       ),
     ),
     activeTab === "files"

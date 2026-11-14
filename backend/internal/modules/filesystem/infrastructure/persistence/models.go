@@ -95,6 +95,23 @@ func (replicaMigrationRow) TableName() string { return "filesystem.replica_migra
 
 func (replicaRow) TableName() string { return "filesystem.storage_replicas" }
 
+type fileLineageRow struct {
+	ID                uuid.UUID `gorm:"column:id;primaryKey;type:uuid"`
+	OrganizationID    uuid.UUID `gorm:"column:organization_id;not null;type:uuid;index"`
+	SourceNamespaceID uuid.UUID `gorm:"column:source_namespace_id;not null;type:uuid"`
+	SourceNodeID      uuid.UUID `gorm:"column:source_node_id;not null;type:uuid"`
+	SourceRevisionID  uuid.UUID `gorm:"column:source_revision_id;not null;type:uuid"`
+	TargetNamespaceID uuid.UUID `gorm:"column:target_namespace_id;not null;type:uuid"`
+	TargetNodeID      uuid.UUID `gorm:"column:target_node_id;not null;type:uuid;uniqueIndex"`
+	TargetRevisionID  uuid.UUID `gorm:"column:target_revision_id;not null;type:uuid"`
+	Relation          string    `gorm:"column:relation;not null;type:varchar(64)"`
+	CommandID         uuid.UUID `gorm:"column:command_id;not null;type:uuid;uniqueIndex"`
+	CreatedBy         uuid.UUID `gorm:"column:created_by;not null;type:uuid"`
+	CreatedAt         time.Time `gorm:"column:created_at;not null"`
+}
+
+func (fileLineageRow) TableName() string { return "filesystem.file_lineage" }
+
 type quotaAccountRow struct {
 	ID             uuid.UUID  `gorm:"column:id;primaryKey;type:uuid"`
 	OrganizationID uuid.UUID  `gorm:"column:organization_id;not null;type:uuid"`

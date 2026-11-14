@@ -20,6 +20,16 @@ describe("resolveWorkbenchPermissions", () => {
       "file:admin",
     ]);
   });
+
+  it("uses authoritative organization permissions for approval management", () => {
+    expect(resolveWorkbenchPermissions(["file:read"], false, ["org:file:admin"])).toEqual([
+      "file:read",
+      "org:file:admin",
+    ]);
+    expect(resolveWorkbenchPermissions(["file:read", "file:admin"], false)).not.toContain(
+      "org:file:admin",
+    );
+  });
 });
 
 describe("hasFilesystemPageAccess", () => {

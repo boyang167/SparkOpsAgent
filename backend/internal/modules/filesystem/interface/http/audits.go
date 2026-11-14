@@ -30,6 +30,17 @@ func (h *Handler) ListFilesystemAudits(c *gin.Context) {
 		}
 		actorID = &id
 	}
+	metadataIDs := map[string]string{}
+	for _, key := range []string{"namespace_id", "node_id", "principal_id"} {
+		if raw := c.Query(key); raw != "" {
+			id, valid := canonicalUUID(raw)
+			if !valid {
+				invalidRequest(c)
+				return
+			}
+			metadataIDs[key] = id.String()
+		}
+	}
 	var from, to *time.Time
 	if raw := c.Query("from"); raw != "" {
 		parsed, err := time.Parse(time.RFC3339, raw)
@@ -62,6 +73,9 @@ func (h *Handler) ListFilesystemAudits(c *gin.Context) {
 		ActorID:        actorID,
 		Action:         c.Query("action"),
 		ResourceID:     c.Query("resource_id"),
+		NamespaceID:    metadataIDs["namespace_id"],
+		NodeID:         metadataIDs["node_id"],
+		PrincipalID:    metadataIDs["principal_id"],
 		Result:         c.Query("result"),
 		From:           from,
 		To:             to,

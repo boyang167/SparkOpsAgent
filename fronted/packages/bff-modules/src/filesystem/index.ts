@@ -18,7 +18,9 @@ import type {
   EffectiveAccessVM,
   LifecyclePolicyPageVM,
   NamespaceSummaryPageVM,
+  OrganizationShareRequestQuery,
   RegisterStorageProviderCommand,
+  RejectShareRequestCommand,
   RenameFileNodeCommand,
   StorageBindingPageVM,
   StoragePoolPageVM,
@@ -26,6 +28,7 @@ import type {
   SharedItemPageVM,
   SharePreviewVM,
   ShareRequestPageVM,
+  ShareRequestVM,
   SharedWithMeQuery,
   UpdateStoragePoolCommand,
   UpdateStorageProviderCommand,
@@ -48,6 +51,7 @@ import {
   SharedItemPageVMSchema,
   SharePreviewVMSchema,
   ShareRequestPageVMSchema,
+  ShareRequestVMSchema,
   StorageBindingPageVMSchema,
   StoragePoolPageVMSchema,
   StorageProviderPageVMSchema,
@@ -390,6 +394,44 @@ export async function listShareRequests(
   return ShareRequestPageVMSchema.parse(data);
 }
 
+export async function listOrganizationShareRequests(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId: string | undefined,
+  query: OrganizationShareRequestQuery = { status: "PENDING" },
+): Promise<ShareRequestPageVM> {
+  const data = await ctx.upstream.filesystem.listOrganizationShareRequests(
+    governedContext(organizationId, workspaceId),
+    query,
+  );
+  return ShareRequestPageVMSchema.parse(data);
+}
+
+export async function approveShareRequest(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId: string | undefined,
+  requestId: string,
+  idempotencyKey: string,
+): Promise<ShareRequestVM> {
+  return ShareRequestVMSchema.parse(await ctx.upstream.filesystem.approveShareRequest(
+    governedContext(organizationId, workspaceId), requestId, idempotencyKey,
+  ));
+}
+
+export async function rejectShareRequest(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId: string | undefined,
+  requestId: string,
+  input: RejectShareRequestCommand,
+  idempotencyKey: string,
+): Promise<ShareRequestVM> {
+  return ShareRequestVMSchema.parse(await ctx.upstream.filesystem.rejectShareRequest(
+    governedContext(organizationId, workspaceId), requestId, input, idempotencyKey,
+  ));
+}
+
 export async function createGovernedGrant(
   ctx: BffContext,
   organizationId: string,
@@ -405,6 +447,19 @@ export async function createGovernedGrant(
     idempotencyKey,
   );
   return GovernedShareSubmissionVMSchema.parse(data);
+}
+
+export async function revokeGovernedGrant(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId: string | undefined,
+  nodeId: string,
+  grantId: string,
+  idempotencyKey: string,
+): Promise<void> {
+  await ctx.upstream.filesystem.revokeGovernedGrant(
+    governedContext(organizationId, workspaceId), nodeId, grantId, idempotencyKey,
+  );
 }
 
 export async function previewGovernedShare(

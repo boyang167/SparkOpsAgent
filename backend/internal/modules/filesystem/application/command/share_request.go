@@ -18,9 +18,11 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	sharedevents "github.com/sparkops/sparkops-agent/backend/internal/shared/events"
+	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
 type PrincipalScope struct {
@@ -75,6 +77,7 @@ type SubmitShare struct {
 	ExpiresAt         *time.Time
 	Reshare           bool
 	SourceGrantIDs    []uuid.UUID
+	TraceID           string
 }
 
 type ShareResult struct {
@@ -110,6 +113,7 @@ type ReviewShareRequest struct {
 	OrganizationID  uuid.UUID
 	RequestID       uuid.UUID
 	RejectionReason string
+	TraceID         string
 }
 
 type ShareRequestHandler struct {
@@ -120,6 +124,12 @@ type ShareRequestHandler struct {
 	authority        ShareAuthority
 	sourceAuthorizer ShareSourceAuthorizer
 	now              func() time.Time
+	audit            auditPort
+}
+
+func (h *ShareRequestHandler) WithAudit(logger auditPort) *ShareRequestHandler {
+	h.audit = logger
+	return h
 }
 
 func NewShareRequestHandler(store ShareRequestStore, tx postgres.Transactor, bus messaging.Bus, scopes PrincipalScopeResolver, authority ShareAuthority, sourceAuthorizer ShareSourceAuthorizer) *ShareRequestHandler {
@@ -183,7 +193,10 @@ func (h *ShareRequestHandler) Submit(ctx context.Context, cmd SubmitShare) (Shar
 				return err
 			}
 		}
-		return h.store.CompleteCommand(txCtx, cmd.CommandID, &node.ID, &request.ID)
+		if err := h.store.CompleteCommand(txCtx, cmd.CommandID, &node.ID, &request.ID); err != nil {
+			return err
+		}
+		return h.logShareAudit(txCtx, cmd.ActorID, request, "REQUEST", cmd.TraceID, "")
 	})
 	return result, err
 }
@@ -334,10 +347,45 @@ func (h *ShareRequestHandler) review(ctx context.Context, cmd ReviewShareRequest
 		if err := h.store.CompleteCommand(txCtx, cmd.CommandID, &current.NodeID, &current.ID); err != nil {
 			return err
 		}
+		action := "REJECT"
+		if approve {
+			action = "APPROVE"
+		}
+		if err := h.logShareAudit(txCtx, cmd.ActorID, current, action, cmd.TraceID, cmd.RejectionReason); err != nil {
+			return err
+		}
 		reviewed = current
 		return nil
 	})
 	return reviewed, err
+}
+
+func (h *ShareRequestHandler) logShareAudit(ctx context.Context, actorID uuid.UUID, request model.ShareRequest, action, traceID, reason string) error {
+	if h.audit == nil {
+		return nil
+	}
+	before, after := "NONE", string(request.Status)
+	if action == "APPROVE" || action == "REJECT" {
+		before = string(model.ShareRequestPending)
+	}
+	detail := map[string]any{
+		"namespace_id": request.NamespaceID.String(), "node_id": request.NodeID.String(),
+		"principal_before": before,
+		"principal_after": map[string]any{
+			"status": after, "type": request.PrincipalType, "ids": request.PrincipalIDs, "actions": request.Actions,
+		},
+		"reason": reason, "trace_id": traceID, "action": action, "decision": "ALLOW",
+		"share_request_id": request.ID.String(),
+	}
+	if len(request.PrincipalIDs) > 0 {
+		detail["principal_id"] = request.PrincipalIDs[0].String()
+	}
+	return h.audit.Log(ctx, audit.Entry{
+		ActorID: kernel.MemberID{UUID: actorID}, OrgID: &kernel.OrgID{UUID: request.OrganizationID},
+		Action: "filesystem.share." + strings.ToLower(action), ResourceType: "filesystem",
+		ResourceID: request.NodeID.String(),
+		Detail:     detail,
+	})
 }
 
 func (h *ShareRequestHandler) resolveScopes(ctx context.Context, principalType model.PrincipalType, ids []uuid.UUID, organizationID uuid.UUID) ([]PrincipalScope, error) {

@@ -1,4 +1,4 @@
-export type WorkbenchTab = "files" | "transfers" | "governance" | "audit";
+export type WorkbenchTab = "files" | "transfers" | "governance" | "approvals" | "audit";
 export type FileView = "list" | "grid";
 export type FileSpace = "my" | "workspace" | "organization" | "shared";
 export type SharedSource = "organization" | "workspace" | "user" | "agent";
@@ -22,7 +22,7 @@ function firstValue(value: SearchParamValue): string | undefined {
 }
 
 export function parseWorkbenchState(input: Record<string, SearchParamValue>): ParsedWorkbenchState {
-  const tabs: WorkbenchTab[] = ["files", "transfers", "governance", "audit"];
+  const tabs: WorkbenchTab[] = ["files", "transfers", "governance", "approvals", "audit"];
   const tab = firstValue(input.tab);
   const view = firstValue(input.view);
   const parent = firstValue(input.parent);

@@ -469,6 +469,23 @@ func (h *Handler) GetFileNode(c *gin.Context) {
 		filesystemError(c, domain.ErrNamespaceMismatch)
 		return
 	}
+	if h.audit != nil && (node.Classification == model.TransferClassificationConfidential ||
+		node.Classification == model.TransferClassificationRestricted) {
+		if err := h.audit.Log(c.Request.Context(), audit.Entry{
+			ActorID: kernel.MemberID{UUID: rc.actorID}, OrgID: &kernel.OrgID{UUID: rc.namespace.OrganizationID},
+			Action: "filesystem.file.sensitive_read", ResourceType: "filesystem", ResourceID: node.ID.String(),
+			Detail: map[string]any{
+				"workspace_id": rc.workspaceID.String(), "namespace_id": rc.namespace.ID.String(),
+				"node_id": node.ID.String(), "principal_id": rc.actorID.String(),
+				"principal_before": "AUTHORIZED", "principal_after": "READ",
+				"reason": "sensitive_classification", "trace_id": rc.traceID,
+				"action": "READ", "decision": "ALLOW", "classification": node.Classification,
+			},
+		}); err != nil {
+			filesystemError(c, err)
+			return
+		}
+	}
 	httpx.OK(c, nodeView(node))
 }
 

@@ -58,6 +58,9 @@ type ListFilter struct {
 	ResourceID                 string
 	ResourceType               string
 	WorkspaceID                string
+	NamespaceID                string
+	NodeID                     string
+	PrincipalID                string
 	Decision                   string
 	AllowMissingDecisionAction string
 	CreatedAtAfter             time.Time

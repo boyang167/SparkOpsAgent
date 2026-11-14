@@ -48,8 +48,11 @@ type GovernanceHandler struct {
 	submitShare           func(context.Context, command.SubmitShare) (command.ShareResult, error)
 	approveShare          func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error)
 	rejectShare           func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error)
+	adoptFile             func(context.Context, command.AdoptFile) (*model.Node, error)
+	revokeGrant           func(context.Context, command.GrantResource, uuid.UUID) error
 	listGovernanceGrants  func(context.Context, repository.GovernanceGrantPageQuery) ([]repository.GovernanceGrantRecord, error)
 	listNodeShareRequests func(context.Context, repository.ShareRequestPageQuery) ([]model.ShareRequest, error)
+	organizations         authz.OrgPermissionChecker
 	cursor                *query.SharedCursorCodec
 }
 
@@ -85,6 +88,14 @@ func (h *GovernanceHandler) BindShareWorkflow(
 	h.previewShare, h.submitShare, h.approveShare, h.rejectShare = preview, submit, approve, reject
 }
 
+func (h *GovernanceHandler) BindAdoption(adopt func(context.Context, command.AdoptFile) (*model.Node, error)) {
+	h.adoptFile = adopt
+}
+
+func (h *GovernanceHandler) BindGrantRevocation(revoke func(context.Context, command.GrantResource, uuid.UUID) error) {
+	h.revokeGrant = revoke
+}
+
 func RegisterGovernanceRoutes(
 	engine *gin.Engine,
 	entitlement gin.HandlerFunc,
@@ -104,11 +115,15 @@ func RegisterGovernanceRoutes(
 	base.GET("/nodes/:nodeId/effective-access", handler.EffectiveAccess)
 	base.GET("/nodes/:nodeId/grants", handler.ListGovernedGrants)
 	base.GET("/nodes/:nodeId/share-requests", handler.ListShareRequests)
+	base.GET("/share-requests", handler.ListOrganizationShareRequests)
 	base.POST("/nodes/:nodeId/share-preview", requireIdempotencyKey(), handler.PreviewShare)
 	base.POST("/nodes/:nodeId/grants", requireIdempotencyKey(), handler.CreateGovernedGrant)
+	base.DELETE("/nodes/:nodeId/grants/:grantId", requireIdempotencyKey(), handler.RevokeGovernedGrant)
 	base.POST("/nodes/:nodeId/share-requests", requireIdempotencyKey(), handler.CreateShareRequest)
 	base.POST("/share-requests/:requestId/approve", requireIdempotencyKey(), handler.ApproveShareRequest)
 	base.POST("/share-requests/:requestId/reject", requireIdempotencyKey(), handler.RejectShareRequest)
+	base.POST("/nodes/:nodeId/adopt", requireIdempotencyKey(), handler.AdoptFile)
+	handler.organizations = organizations
 }
 
 type governanceContext struct {
@@ -516,6 +531,68 @@ func (h *GovernanceHandler) ListShareRequests(c *gin.Context) {
 	httpx.OK(c, gin.H{"items": items, "next_cursor": next, "truncated": next != ""})
 }
 
+func (h *GovernanceHandler) ListOrganizationShareRequests(c *gin.Context) {
+	rc, ok := governanceRequestContext(c)
+	if !ok || h == nil || h.listNodeShareRequests == nil || h.organizations == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	allowed, err := h.organizations.HasOrgPermission(
+		c.Request.Context(), kernel.OrgID{UUID: rc.organizationID},
+		kernel.MemberID{UUID: rc.actorID}, authz.PermOrgFileAdmin,
+	)
+	if err != nil {
+		governanceError(c, err)
+		return
+	}
+	if !allowed {
+		httpx.Fail(c, "FILESYSTEM_RESOURCE_FORBIDDEN", "organization file administration required", http.StatusForbidden)
+		return
+	}
+	status := model.ShareRequestStatus(strings.ToUpper(strings.TrimSpace(c.DefaultQuery("status", string(model.ShareRequestPending)))))
+	if status != model.ShareRequestPending && status != model.ShareRequestApproved &&
+		status != model.ShareRequestRejected && status != model.ShareRequestCancelled {
+		invalidRequest(c)
+		return
+	}
+	limit, valid := governanceListLimit(c)
+	if !valid {
+		return
+	}
+	cursorContext := query.GovernanceCursorContext{
+		OrganizationID: rc.organizationID, Kind: "organization-share-requests-" + string(status),
+	}
+	position, err := h.decodeGovernanceCursor(c.Query("cursor"), cursorContext)
+	if err != nil {
+		governanceError(c, err)
+		return
+	}
+	requests, err := h.listNodeShareRequests(c.Request.Context(), repository.ShareRequestPageQuery{
+		OrganizationID: rc.organizationID, Status: status,
+		AfterCreatedAt: position.CreatedAt, AfterID: position.ID, Limit: limit + 1,
+	})
+	if err != nil {
+		governanceError(c, err)
+		return
+	}
+	next := ""
+	if len(requests) > limit {
+		next, err = h.cursor.EncodeGovernance(query.GovernanceCursorPosition{
+			CreatedAt: requests[limit-1].CreatedAt, ID: requests[limit-1].ID,
+		}, cursorContext)
+		if err != nil {
+			governanceError(c, err)
+			return
+		}
+		requests = requests[:limit]
+	}
+	items := make([]gin.H, 0, len(requests))
+	for _, request := range requests {
+		items = append(items, shareRequestView(request))
+	}
+	httpx.OK(c, gin.H{"items": items, "next_cursor": next, "truncated": next != ""})
+}
+
 func (h *GovernanceHandler) decodeGovernanceCursor(value string, context query.GovernanceCursorContext) (query.GovernanceCursorPosition, error) {
 	if value == "" {
 		return query.GovernanceCursorPosition{}, nil
@@ -572,6 +649,36 @@ func (h *GovernanceHandler) governanceMetadataNode(c *gin.Context) (governanceCo
 
 func (h *GovernanceHandler) CreateGovernedGrant(c *gin.Context) {
 	h.submitGovernedShare(c)
+}
+
+func (h *GovernanceHandler) RevokeGovernedGrant(c *gin.Context) {
+	rc, node, namespace, ok := h.governanceMetadataNode(c)
+	if !ok {
+		return
+	}
+	grantID, valid := canonicalUUID(c.Param("grantId"))
+	if !valid {
+		invalidRequest(c)
+		return
+	}
+	if h.revokeGrant == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	scopeID := rc.workspaceID
+	if scopeID == uuid.Nil {
+		scopeID = rc.organizationID
+	}
+	err := h.revokeGrant(c.Request.Context(), command.GrantResource{
+		CommandID: commandID(scopeID, c.GetString(idempotencyContextKey)),
+		ActorID:   rc.actorID, OrganizationID: rc.organizationID, WorkspaceID: rc.workspaceID,
+		NamespaceID: namespace.ID, NodeID: node.ID, TraceID: httpx.GetTraceID(c),
+	}, grantID)
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *GovernanceHandler) CreateShareRequest(c *gin.Context) {
@@ -709,6 +816,46 @@ func (h *GovernanceHandler) RejectShareRequest(c *gin.Context) {
 	h.reviewShareRequest(c, false, reason)
 }
 
+func (h *GovernanceHandler) AdoptFile(c *gin.Context) {
+	rc, ok := governanceRequestContext(c)
+	if !ok || h == nil || h.adoptFile == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	sourceNodeID, ok := canonicalUUID(c.Param("nodeId"))
+	if !ok {
+		invalidRequest(c)
+		return
+	}
+	var body struct {
+		ParentID string `json:"parent_id"`
+		Name     string `json:"name"`
+	}
+	if !decodeJSON(c, &body) {
+		return
+	}
+	parentID, valid := canonicalUUID(body.ParentID)
+	if !valid || strings.TrimSpace(body.Name) == "" {
+		invalidRequest(c)
+		return
+	}
+	scopeID := rc.workspaceID
+	if scopeID == uuid.Nil {
+		scopeID = rc.organizationID
+	}
+	node, err := h.adoptFile(c.Request.Context(), command.AdoptFile{
+		CommandID: commandID(scopeID, c.GetString(idempotencyContextKey)),
+		ActorID:   rc.actorID, OrganizationID: rc.organizationID, WorkspaceID: rc.workspaceID,
+		SourceNodeID: sourceNodeID, TargetParentID: parentID, Name: strings.TrimSpace(body.Name),
+		TraceID: httpx.GetTraceID(c),
+	})
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	created(c, nodeView(node))
+}
+
 func (h *GovernanceHandler) reviewShareRequest(c *gin.Context, approve bool, reason string) {
 	rc, ok := governanceRequestContext(c)
 	if !ok || h == nil {
@@ -727,6 +874,7 @@ func (h *GovernanceHandler) reviewShareRequest(c *gin.Context, approve bool, rea
 	cmd := command.ReviewShareRequest{
 		CommandID: commandID(scopeID, c.GetString(idempotencyContextKey)), ActorID: rc.actorID,
 		OrganizationID: rc.organizationID, RequestID: requestID, RejectionReason: reason,
+		TraceID: httpx.GetTraceID(c),
 	}
 	var (
 		request model.ShareRequest

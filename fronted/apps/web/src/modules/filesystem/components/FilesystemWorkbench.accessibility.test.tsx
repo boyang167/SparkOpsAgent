@@ -60,6 +60,9 @@ vi.mock("./MoveNodesModal", () => ({
 vi.mock("./ShareFileModal", () => ({
   ShareFileModal: () => null,
 }));
+vi.mock("./ShareApprovalPanel", () => ({
+  ShareApprovalPanel: () => null,
+}));
 
 const namespace = {
   id: "namespace-1",

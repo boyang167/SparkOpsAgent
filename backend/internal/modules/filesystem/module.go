@@ -73,6 +73,20 @@ type shareSourceAuthorizerAdapter struct {
 	authorizer *resourceauth.Service
 }
 
+type adoptionAuthorizerAdapter struct {
+	authorizer *resourceauth.Service
+}
+
+func (a adoptionAuthorizerAdapter) Authorize(ctx context.Context, request command.AdoptionAuthorizationRequest) bool {
+	if a.authorizer == nil {
+		return false
+	}
+	return a.authorizer.Authorize(ctx, resourceauth.Request{
+		ActorID: request.ActorID, WorkspaceID: request.WorkspaceID,
+		NamespaceID: request.NamespaceID, NodeID: request.NodeID, Permission: request.Permission,
+	}).Allowed
+}
+
 func (a shareSourceAuthorizerAdapter) AuthorizeShare(ctx context.Context, actorID, workspaceID, namespaceID, nodeID uuid.UUID) (command.ShareAuthorization, error) {
 	if a.authorizer == nil {
 		return command.ShareAuthorization{}, nil
@@ -324,7 +338,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		principalScopeAdapter{workspaces: c.WorkspaceScopeResolver, roles: c.RoleScopeResolver, organizations: c.OrgPermissionChecker},
 		shareAuthority,
 		shareSourceAuthorizerAdapter{authorizer: resourceAuthorizer},
-	)
+	).WithAudit(c.AuditLogger)
 	agentSigner, agentSignerErr := agentsign.NewSigner(secret, domainservice.AgentCapabilityAudience)
 	if agentSignerErr != nil {
 		return fmt.Errorf("filesystem agent capability signer: %w", agentSignerErr)
@@ -379,6 +393,10 @@ func (m *Module) Register(c *appctx.Container) error {
 		sharedCursorCodec,
 	)
 	governanceHandler.BindShareWorkflow(shareCommands.Preview, shareCommands.Submit, shareCommands.Approve, shareCommands.Reject)
+	governanceHandler.BindAdoption(
+		command.NewAdoptFileHandler(repo, c.Transactor, adoptionAuthorizerAdapter{authorizer: resourceAuthorizer}, c.AuditLogger).Handle,
+	)
+	governanceHandler.BindGrantRevocation(grantCommands.Revoke)
 	filesystemhttp.RegisterGovernanceRoutes(
 		c.Engine,
 		entitlementMiddleware,

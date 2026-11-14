@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -128,6 +129,26 @@ func (s *GrantService) Revoke(ctx context.Context, request GrantRequest, grantID
 		s.log(ctx, request, grantID, "revoke", "DENY", "principal_organization_mismatch")
 		return err
 	}
+	grants, err := s.repo.ListNodeResourceGrants(ctx, request.NodeID)
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, grant := range grants {
+		if grant.ID == grantID {
+			request.Grant = grant
+			found = true
+			break
+		}
+	}
+	if !found {
+		if completed, commandErr := s.repo.GetCommand(ctx, request.CommandID); commandErr == nil &&
+			completed.State == "COMPLETED" && completed.Operation == "grant_revoke" &&
+			completed.RevisionID != nil && *completed.RevisionID == grantID {
+			return nil
+		}
+		return domain.ErrGrantNotFound
+	}
 	return s.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		replayed, claimErr := s.claim(txCtx, request, "grant_revoke", grantRequestHash("grant_revoke", request, grantID), grantID)
 		if claimErr != nil || replayed {
@@ -173,7 +194,7 @@ func validateGrantOrganization(request GrantRequest) error {
 func (s *GrantService) authoritativeRequest(ctx context.Context, request GrantRequest) (GrantRequest, error) {
 	requestedOrganizationID := request.OrganizationID
 	requestedNamespaceID := request.NamespaceID
-	namespace, err := s.repo.GetNamespaceByWorkspace(ctx, request.WorkspaceID)
+	namespace, err := s.repo.GetNamespace(ctx, requestedNamespaceID)
 	if err != nil {
 		request.OrganizationID = uuid.Nil
 		request.NamespaceID = uuid.Nil
@@ -181,6 +202,13 @@ func (s *GrantService) authoritativeRequest(ctx context.Context, request GrantRe
 	}
 	request.OrganizationID = namespace.OrganizationID
 	request.NamespaceID = namespace.ID
+	if namespace.NamespaceType == model.NamespaceTypeWorkspace && namespace.WorkspaceID != request.WorkspaceID {
+		if authoritative, workspaceErr := s.repo.GetNamespaceByWorkspace(ctx, request.WorkspaceID); workspaceErr == nil {
+			request.OrganizationID = authoritative.OrganizationID
+			request.NamespaceID = authoritative.ID
+		}
+		return request, domain.ErrNamespaceMismatch
+	}
 	if requestedNamespaceID != namespace.ID || requestedOrganizationID != namespace.OrganizationID {
 		return request, domain.ErrNamespaceMismatch
 	}
@@ -227,7 +255,23 @@ func (s *GrantService) log(ctx context.Context, request GrantRequest, grantID uu
 	if s.audit == nil {
 		return nil
 	}
-	detail := map[string]any{"workspace_id": request.WorkspaceID.String(), "decision": decision, "trace_id": request.TraceID, "grant_id": grantID.String()}
+	principal := map[string]any{
+		"type": request.Grant.PrincipalType, "id": request.Grant.PrincipalID.String(),
+		"permission": request.Grant.Permission, "effect": request.Grant.Effect,
+	}
+	detail := map[string]any{
+		"workspace_id": request.WorkspaceID.String(), "namespace_id": request.NamespaceID.String(),
+		"node_id": request.NodeID.String(), "principal_id": request.Grant.PrincipalID.String(),
+		"decision": decision, "trace_id": request.TraceID, "grant_id": grantID.String(),
+		"action":           strings.ToUpper(operation),
+		"principal_before": principal, "principal_after": principal,
+	}
+	if operation == "create" {
+		detail["principal_before"] = "NONE"
+	}
+	if operation == "revoke" {
+		detail["principal_after"] = "REVOKED"
+	}
 	if reason != "" {
 		detail["reason"] = reason
 	}

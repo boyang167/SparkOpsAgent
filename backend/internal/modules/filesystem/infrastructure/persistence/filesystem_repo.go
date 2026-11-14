@@ -1026,7 +1026,13 @@ func (r *Repository) ListShareRequestsForNodeLimited(ctx context.Context, nodeID
 func (r *Repository) ListShareRequestsPage(ctx context.Context, query repository.ShareRequestPageQuery) ([]model.ShareRequest, error) {
 	var rows []shareRequestRow
 	dbQuery := postgres.DB(ctx, r.db).
-		Where("organization_id = ? AND node_id = ?", query.OrganizationID, query.NodeID)
+		Where("organization_id = ?", query.OrganizationID)
+	if query.NodeID != uuid.Nil {
+		dbQuery = dbQuery.Where("node_id = ?", query.NodeID)
+	}
+	if query.Status != "" {
+		dbQuery = dbQuery.Where("status = ?", query.Status)
+	}
 	if !query.AfterCreatedAt.IsZero() && query.AfterID != uuid.Nil {
 		dbQuery = dbQuery.Where(
 			"(created_at < ?) OR (created_at = ? AND id < ?)",
@@ -1110,6 +1116,50 @@ func (r *Repository) ApplyQuotaUsage(ctx context.Context, workspaceID uuid.UUID,
 		return domain.ErrQuotaExceeded
 	}
 	return nil
+}
+
+func (r *Repository) ApplyNamespaceQuotaUsage(ctx context.Context, namespaceID uuid.UUID, bytesDelta, filesDelta int64) error {
+	if bytesDelta < 0 || filesDelta < 0 {
+		return domain.ErrPersistence
+	}
+	db := postgres.DB(ctx, r.db)
+	result := db.Model(&quotaAccountRow{}).
+		Where("namespace_id = ? AND (max_bytes IS NULL OR (max_bytes >= used_bytes AND max_bytes - used_bytes >= reserved_bytes AND max_bytes - used_bytes - reserved_bytes >= ?)) AND (max_files IS NULL OR (max_files >= used_files AND max_files - used_files >= reserved_files AND max_files - used_files - reserved_files >= ?))", namespaceID, bytesDelta, filesDelta).
+		Updates(map[string]any{
+			"used_bytes": gorm.Expr("used_bytes + ?", bytesDelta),
+			"used_files": gorm.Expr("used_files + ?", filesDelta),
+			"version":    gorm.Expr("version + 1"),
+			"updated_at": time.Now().UTC(),
+		})
+	if result.Error != nil {
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		var count int64
+		if err := db.Model(&quotaAccountRow{}).Where("namespace_id = ?", namespaceID).Count(&count).Error; err != nil {
+			return wrapPersistence(err)
+		}
+		if count == 0 {
+			return domain.ErrNamespaceNotFound
+		}
+		return domain.ErrQuotaExceeded
+	}
+	return nil
+}
+
+func (r *Repository) CreateFileLineage(ctx context.Context, lineage model.FileLineage) error {
+	err := postgres.DB(ctx, r.db).Create(&fileLineageRow{
+		ID: lineage.ID, OrganizationID: lineage.OrganizationID,
+		SourceNamespaceID: lineage.SourceNamespaceID, SourceNodeID: lineage.SourceNodeID,
+		SourceRevisionID: lineage.SourceRevisionID, TargetNamespaceID: lineage.TargetNamespaceID,
+		TargetNodeID: lineage.TargetNodeID, TargetRevisionID: lineage.TargetRevisionID,
+		Relation: lineage.Relation, CommandID: lineage.CommandID,
+		CreatedBy: lineage.CreatedBy, CreatedAt: lineage.CreatedAt,
+	}).Error
+	if conflict := mapUniqueConflict(err); conflict != nil {
+		return conflict
+	}
+	return wrapPersistence(err)
 }
 
 func (r *Repository) RenameNode(ctx context.Context, nodeID uuid.UUID, name string) error {

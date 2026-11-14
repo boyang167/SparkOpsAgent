@@ -21,6 +21,9 @@ function queryFromURL(params: URLSearchParams): FileAuditQuery {
     actor_id: params.get("actor_id") || undefined,
     action: params.get("action") || undefined,
     resource_id: params.get("resource_id") || undefined,
+    namespace_id: params.get("namespace_id") || undefined,
+    node_id: params.get("node_id") || undefined,
+    principal_id: params.get("principal_id") || undefined,
     result: params.get("result") || undefined,
     from: params.get("from") || undefined,
     to: params.get("to") || undefined,
@@ -53,6 +56,9 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
     query.actor_id ?? "",
     query.action ?? "",
     query.resource_id ?? "",
+    query.namespace_id ?? "",
+    query.node_id ?? "",
+    query.principal_id ?? "",
     query.result ?? "",
     query.from ?? "",
     query.to ?? "",
@@ -90,6 +96,9 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
     query.actor_id ?? "",
     query.action ?? "",
     query.resource_id ?? "",
+    query.namespace_id ?? "",
+    query.node_id ?? "",
+    query.principal_id ?? "",
     query.result ?? "",
     query.from ?? "",
     query.to ?? "",
@@ -162,7 +171,7 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
 
   function writeQuery(next: FileAuditQuery) {
     const params = new URLSearchParams(searchParams.toString());
-    for (const key of ["actor_id", "action", "resource_id", "result", "from", "to"] as const) {
+    for (const key of ["actor_id", "action", "resource_id", "namespace_id", "node_id", "principal_id", "result", "from", "to"] as const) {
       const value = next[key];
       if (value) params.set(key, String(value));
       else params.delete(key);
@@ -240,6 +249,9 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
           { className: "grid gap-3 sm:grid-cols-2 lg:grid-cols-3" },
           createElement(TextFilter, { label: "操作者 ID", value: draft.actor_id, onChange: (actor_id) => setDraftState((current) => ({ source: urlSignature, value: { ...current.value, actor_id } })), mono: true }),
           createElement(TextFilter, { label: "资源 ID", value: draft.resource_id, onChange: (resource_id) => setDraftState((current) => ({ source: urlSignature, value: { ...current.value, resource_id } })), mono: true }),
+          createElement(TextFilter, { label: "命名空间 ID", value: draft.namespace_id, onChange: (namespace_id) => setDraftState((current) => ({ source: urlSignature, value: { ...current.value, namespace_id } })), mono: true }),
+          createElement(TextFilter, { label: "节点 ID", value: draft.node_id, onChange: (node_id) => setDraftState((current) => ({ source: urlSignature, value: { ...current.value, node_id } })), mono: true }),
+          createElement(TextFilter, { label: "主体 ID", value: draft.principal_id, onChange: (principal_id) => setDraftState((current) => ({ source: urlSignature, value: { ...current.value, principal_id } })), mono: true }),
           createElement(DateFilter, { label: "起始时间", value: draft.from, onChange: (from) => setDraftState((current) => ({ source: urlSignature, value: { ...current.value, from } })) }),
           createElement(DateFilter, { label: "结束时间", value: draft.to, onChange: (to) => setDraftState((current) => ({ source: urlSignature, value: { ...current.value, to } })) }),
         )

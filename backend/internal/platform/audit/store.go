@@ -95,6 +95,38 @@ func (s *GormStore) List(ctx context.Context, filter ListFilter) ([]LogView, err
 			q = q.Where("json_extract(detail, '$.workspace_id') = ?", workspaceID)
 		}
 	}
+	for key, value := range map[string]string{
+		"namespace_id": filter.NamespaceID,
+		"node_id":      filter.NodeID,
+	} {
+		if value = strings.TrimSpace(value); value != "" {
+			if s.db.Dialector.Name() == "postgres" {
+				q = q.Where("detail ->> ? = ?", key, value)
+			} else {
+				q = q.Where("json_extract(detail, ?) = ?", "$."+key, value)
+			}
+		}
+	}
+	if principalID := strings.TrimSpace(filter.PrincipalID); principalID != "" {
+		if s.db.Dialector.Name() == "postgres" {
+			q = q.Where(`(
+				detail ->> 'principal_id' = ?
+				OR EXISTS (
+					SELECT 1 FROM jsonb_array_elements_text(
+						COALESCE(detail -> 'principal_after' -> 'ids', '[]'::jsonb)
+					) principal WHERE principal = ?
+				)
+			)`, principalID, principalID)
+		} else {
+			q = q.Where(`(
+				json_extract(detail, '$.principal_id') = ?
+				OR EXISTS (
+					SELECT 1 FROM json_each(detail, '$.principal_after.ids')
+					WHERE json_each.value = ?
+				)
+			)`, principalID, principalID)
+		}
+	}
 	if decision := strings.TrimSpace(filter.Decision); decision != "" {
 		legacyAllowAction := strings.TrimSpace(filter.AllowMissingDecisionAction)
 		if s.db.Dialector.Name() == "postgres" {

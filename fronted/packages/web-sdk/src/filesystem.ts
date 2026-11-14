@@ -16,7 +16,9 @@ import type {
   EffectiveAccessVM,
   LifecyclePolicyPageVM,
   NamespaceSummaryPageVM,
+  OrganizationShareRequestQuery,
   RegisterStorageProviderCommand,
+  RejectShareRequestCommand,
   RenameFileNodeCommand,
   StorageBindingPageVM,
   StoragePoolPageVM,
@@ -24,6 +26,7 @@ import type {
   SharedItemPageVM,
   SharePreviewVM,
   ShareRequestPageVM,
+  ShareRequestVM,
   UpdateStoragePoolCommand,
   UpdateStorageProviderCommand,
   TransferListQuery,
@@ -234,6 +237,18 @@ export function createGovernedGrant(
   );
 }
 
+export function revokeGovernedGrant(
+  nodeId: string,
+  grantId: string,
+  options: GovernedFilesystemWriteOptions,
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("grant-revoke");
+  return bffFetch<void>(
+    `/filesystem/nodes/${encodeURIComponent(nodeId)}/grants/${encodeURIComponent(grantId)}`,
+    { ...governedFetchOptions(options, idempotencyKey), method: "DELETE" },
+  );
+}
+
 export function createShareRequest(
   nodeId: string,
   input: CreateGovernedGrantCommand,
@@ -298,6 +313,46 @@ export function listShareRequests(
     {
       ...governedFetchOptions(options),
       method: "GET",
+    },
+  );
+}
+
+export function listOrganizationShareRequests(
+  query: OrganizationShareRequestQuery = { status: "PENDING" },
+  options: GovernedFilesystemFetchOptions,
+) {
+  const params = new URLSearchParams({ status: query.status ?? "PENDING" });
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit) params.set("limit", String(query.limit));
+  return bffFetch<ShareRequestPageVM>(
+    `/filesystem/share-requests?${params.toString()}`,
+    { ...governedFetchOptions(options), method: "GET" },
+  );
+}
+
+export function approveShareRequest(
+  requestId: string,
+  options: GovernedFilesystemWriteOptions,
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("share-approve");
+  return bffFetch<ShareRequestVM>(
+    `/filesystem/share-requests/${encodeURIComponent(requestId)}/approve`,
+    { ...governedFetchOptions(options, idempotencyKey), method: "POST" },
+  );
+}
+
+export function rejectShareRequest(
+  requestId: string,
+  input: RejectShareRequestCommand,
+  options: GovernedFilesystemWriteOptions,
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("share-reject");
+  return bffFetch<ShareRequestVM>(
+    `/filesystem/share-requests/${encodeURIComponent(requestId)}/reject`,
+    {
+      ...governedFetchOptions(options, idempotencyKey),
+      method: "POST",
+      body: JSON.stringify(input),
     },
   );
 }
@@ -564,6 +619,9 @@ function fileAuditQuery(query: FileAuditQuery = {}) {
   if (query.actor_id) params.set("actor_id", query.actor_id);
   if (query.action) params.set("action", query.action);
   if (query.resource_id) params.set("resource_id", query.resource_id);
+  if (query.namespace_id) params.set("namespace_id", query.namespace_id);
+  if (query.node_id) params.set("node_id", query.node_id);
+  if (query.principal_id) params.set("principal_id", query.principal_id);
   if (query.result) params.set("result", query.result);
   if (query.from) params.set("from", query.from);
   if (query.to) params.set("to", query.to);

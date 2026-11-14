@@ -17,7 +17,9 @@ import type {
   EffectiveAccessVM,
   LifecyclePolicyPageVM,
   NamespaceSummaryPageVM,
+  OrganizationShareRequestQuery,
   RegisterStorageProviderCommand,
+  RejectShareRequestCommand,
   RenameFileNodeCommand,
   StorageBindingPageVM,
   StoragePoolPageVM,
@@ -25,6 +27,7 @@ import type {
   SharedItemPageVM,
   SharePreviewVM,
   ShareRequestPageVM,
+  ShareRequestVM,
   SharedWithMeQuery,
   UpdateStoragePoolCommand,
   UpdateStorageProviderCommand,
@@ -137,6 +140,9 @@ function fileAuditQuery(query: FileAuditQuery = {}) {
   if (query.actor_id) params.set("actor_id", query.actor_id);
   if (query.action) params.set("action", query.action);
   if (query.resource_id) params.set("resource_id", query.resource_id);
+  if (query.namespace_id) params.set("namespace_id", query.namespace_id);
+  if (query.node_id) params.set("node_id", query.node_id);
+  if (query.principal_id) params.set("principal_id", query.principal_id);
   if (query.result) params.set("result", query.result);
   if (query.from) params.set("from", query.from);
   if (query.to) params.set("to", query.to);
@@ -220,6 +226,44 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
         },
       );
     },
+    listOrganizationShareRequests(
+      context: GovernedFilesystemContext,
+      query: OrganizationShareRequestQuery = { status: "PENDING" },
+    ) {
+      const params = new URLSearchParams({ status: query.status ?? "PENDING" });
+      if (query.cursor) params.set("cursor", query.cursor);
+      if (query.limit) params.set("limit", String(query.limit));
+      return upstreamFetch<ShareRequestPageVM>(
+        `/api/v1/filesystem/share-requests?${params.toString()}`,
+        { method: "GET", headers: governedHeaders(context), options: governedOptions(options, context) },
+      );
+    },
+    approveShareRequest(context: GovernedFilesystemContext, requestId: string, idempotencyKey: string) {
+      return upstreamFetch<ShareRequestVM>(
+        `/api/v1/filesystem/share-requests/${encodeURIComponent(requestId)}/approve`,
+        {
+          method: "POST",
+          headers: governedHeaders(context, { "Idempotency-Key": idempotencyKey }),
+          options: governedOptions(options, context),
+        },
+      );
+    },
+    rejectShareRequest(
+      context: GovernedFilesystemContext,
+      requestId: string,
+      input: RejectShareRequestCommand,
+      idempotencyKey: string,
+    ) {
+      return upstreamFetch<ShareRequestVM>(
+        `/api/v1/filesystem/share-requests/${encodeURIComponent(requestId)}/reject`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          headers: governedHeaders(context, { "Idempotency-Key": idempotencyKey }),
+          options: governedOptions(options, context),
+        },
+      );
+    },
     createGovernedGrant(
       context: GovernedFilesystemContext,
       nodeId: string,
@@ -231,6 +275,21 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
         {
           method: "POST",
           body: JSON.stringify(input),
+          headers: governedHeaders(context, { "Idempotency-Key": idempotencyKey }),
+          options: governedOptions(options, context),
+        },
+      );
+    },
+    revokeGovernedGrant(
+      context: GovernedFilesystemContext,
+      nodeId: string,
+      grantId: string,
+      idempotencyKey: string,
+    ) {
+      return upstreamFetch<void>(
+        `/api/v1/filesystem/nodes/${encodeURIComponent(nodeId)}/grants/${encodeURIComponent(grantId)}`,
+        {
+          method: "DELETE",
           headers: governedHeaders(context, { "Idempotency-Key": idempotencyKey }),
           options: governedOptions(options, context),
         },

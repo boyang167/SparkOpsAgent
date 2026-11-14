@@ -60,6 +60,7 @@ func (h *GrantResourceHandler) Revoke(ctx context.Context, cmd GrantResource, gr
 	if h == nil || h.port == nil {
 		return domain.ErrPersistence
 	}
+	cmd.GranteeOrganizationID = cmd.OrganizationID
 	return h.port.Revoke(ctx, grantRequest(cmd), grantID)
 }
 

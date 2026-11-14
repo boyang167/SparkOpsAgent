@@ -423,6 +423,7 @@ func shareCommand(c *gin.Context, rc requestContext, nodeID uuid.UUID, body gran
 		Actions: actions, Effect: model.GrantEffect(strings.ToUpper(strings.TrimSpace(body.Effect))),
 		InheritToChildren: inherit, ExpiresAt: body.ExpiresAt,
 		Reshare: body.Reshare, SourceGrantIDs: sourceGrantIDs,
+		TraceID: rc.traceID,
 	}, legacy, true
 }
 

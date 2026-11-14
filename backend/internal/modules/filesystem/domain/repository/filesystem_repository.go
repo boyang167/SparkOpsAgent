@@ -92,6 +92,7 @@ type GovernanceGrantPageQuery struct {
 type ShareRequestPageQuery struct {
 	OrganizationID uuid.UUID
 	NodeID         uuid.UUID
+	Status         model.ShareRequestStatus
 	AfterCreatedAt time.Time
 	AfterID        uuid.UUID
 	Limit          int

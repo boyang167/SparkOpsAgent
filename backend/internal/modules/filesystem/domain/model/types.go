@@ -112,6 +112,21 @@ type StorageReplica struct {
 	DeleteAfter *time.Time
 }
 
+type FileLineage struct {
+	ID                uuid.UUID
+	OrganizationID    uuid.UUID
+	SourceNamespaceID uuid.UUID
+	SourceNodeID      uuid.UUID
+	SourceRevisionID  uuid.UUID
+	TargetNamespaceID uuid.UUID
+	TargetNodeID      uuid.UUID
+	TargetRevisionID  uuid.UUID
+	Relation          string
+	CommandID         uuid.UUID
+	CreatedBy         uuid.UUID
+	CreatedAt         time.Time
+}
+
 type GrantEffect string
 
 const (

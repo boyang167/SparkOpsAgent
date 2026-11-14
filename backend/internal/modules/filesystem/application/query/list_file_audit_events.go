@@ -20,6 +20,9 @@ type ListFileAuditEvents struct {
 	ActorID        *uuid.UUID
 	Action         string
 	ResourceID     string
+	NamespaceID    string
+	NodeID         string
+	PrincipalID    string
 	Result         string
 	From           *time.Time
 	To             *time.Time
@@ -79,6 +82,9 @@ func (h *ListFileAuditEventsHandler) Handle(ctx context.Context, q ListFileAudit
 		ActionPrefix: "filesystem.",
 		ResourceType: "filesystem",
 		WorkspaceID:  q.WorkspaceID.String(),
+		NamespaceID:  strings.TrimSpace(q.NamespaceID),
+		NodeID:       strings.TrimSpace(q.NodeID),
+		PrincipalID:  strings.TrimSpace(q.PrincipalID),
 	}
 	if q.Action != "" {
 		filter.ActionPrefix = ""

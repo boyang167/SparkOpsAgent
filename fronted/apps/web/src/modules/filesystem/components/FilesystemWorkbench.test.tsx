@@ -83,6 +83,9 @@ vi.mock("./MoveNodesModal", () => ({
 vi.mock("./ShareFileModal", () => ({
   ShareFileModal: () => null,
 }));
+vi.mock("./ShareApprovalPanel", () => ({
+  ShareApprovalPanel: () => createElement("div", null, "共享审批面板"),
+}));
 
 vi.mock("./GovernanceWorkspace", () => ({
   GovernanceWorkspace: () => createElement("div", null, "治理工作区"),
@@ -285,7 +288,17 @@ describe("FilesystemWorkbench", () => {
 
     expect(screen.getByRole("tab", { name: "文件" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("tab", { name: "存储治理" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "共享审批" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "审计" })).not.toBeInTheDocument();
+  });
+
+  it("shows approval management only with authoritative organization permission", () => {
+    renderWorkbench(["file:read", "file:admin"]);
+    expect(screen.queryByRole("tab", { name: "共享审批" })).not.toBeInTheDocument();
+
+    cleanup();
+    renderWorkbench(["file:read", "org:file:admin"]);
+    expect(screen.getByRole("tab", { name: "共享审批" })).toBeInTheDocument();
   });
 
   it("shows audit only with file admin permission", () => {

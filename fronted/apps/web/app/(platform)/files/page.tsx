@@ -14,6 +14,7 @@ import { loadSession } from "@/server/loaders/session";
 import { loadMyPermissions } from "@/server/loaders/governance";
 import { loadMembers } from "@/server/loaders/governance";
 import { loadTenantContext } from "@/server/loaders/tenant-context";
+import { loadMyOrganizationPermissions } from "@/server/loaders/organization-permissions";
 import {
   loadAccessibleFileNamespaces,
   loadGovernedFileChildren,
@@ -69,9 +70,16 @@ export default async function FilesPage({
   } catch {
     workspacePermissions = undefined;
   }
+  let organizationPermissions: string[] = [];
+  try {
+    organizationPermissions = await loadMyOrganizationPermissions(currentOrganization.id);
+  } catch {
+    organizationPermissions = [];
+  }
   const permissions = resolveWorkbenchPermissions(
     workspacePermissions,
     session.is_super_admin ?? false,
+    organizationPermissions,
   );
   let members: WorkspaceMemberVM[] = [];
   let memberDirectoryAvailable = false;

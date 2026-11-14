@@ -364,6 +364,9 @@ export const FileAuditQuerySchema = z.object({
   actor_id: z.string().uuid().optional(),
   action: z.string().optional(),
   resource_id: z.string().optional(),
+  namespace_id: z.string().uuid().optional(),
+  node_id: z.string().uuid().optional(),
+  principal_id: z.string().uuid().optional(),
   result: z.string().optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
@@ -571,6 +574,16 @@ export const GovernanceMetadataQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).transform((value) => Math.min(value, 200)).optional(),
 });
 export type GovernanceMetadataQuery = z.infer<typeof GovernanceMetadataQuerySchema>;
+
+export const OrganizationShareRequestQuerySchema = GovernanceMetadataQuerySchema.extend({
+  status: ShareRequestStatusSchema.optional().default("PENDING"),
+});
+export type OrganizationShareRequestQuery = z.infer<typeof OrganizationShareRequestQuerySchema>;
+
+export const RejectShareRequestCommandSchema = z.object({
+  reason: z.string().trim().min(1).max(1000),
+});
+export type RejectShareRequestCommand = z.infer<typeof RejectShareRequestCommandSchema>;
 
 export const GovernedShareResultVMSchema = z.object({
   request: ShareRequestVMSchema,

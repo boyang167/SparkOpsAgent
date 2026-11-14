@@ -294,6 +294,104 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /api/v1/filesystem/nodes/{nodeId}/grants/{grantId}:
+    delete:
+      tags: [filesystem]
+      summary: Revoke a governed resource grant
+      operationId: revokeGovernedFilesystemGrant
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - $ref: "#/components/parameters/WorkspaceHeader"
+        - $ref: "#/components/parameters/NodeID"
+        - name: grantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Grant revoked
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/filesystem/share-requests:
+    get:
+      tags: [filesystem]
+      summary: List organization-scoped share requests
+      operationId: listOrganizationFilesystemShareRequests
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - $ref: "#/components/parameters/WorkspaceHeader"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+            default: PENDING
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            maxLength: 512
+      responses:
+        "200":
+          description: Organization share requests
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ShareRequestPage"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/filesystem/nodes/{nodeId}/adopt:
+    post:
+      tags: [filesystem]
+      summary: Adopt a file into the organization namespace
+      operationId: adoptFilesystemFile
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - $ref: "#/components/parameters/WorkspaceHeader"
+        - $ref: "#/components/parameters/NodeID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdoptFileRequest"
+      responses:
+        "201":
+          description: Adopted file node
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /api/v1/filesystem/nodes/{nodeId}/share-requests:
     get:
       tags: [filesystem]
@@ -1747,6 +1845,21 @@ paths:
           in: query
           schema:
             type: string
+        - name: namespace_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: node_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: principal_id
+          in: query
+          schema:
+            type: string
+            format: uuid
         - name: result
           in: query
           schema:
@@ -3087,6 +3200,17 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
+    AdoptFileRequest:
+      type: object
+      required: [parent_id, name]
+      properties:
+        parent_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
     ShareRequest:
       type: object
       required: [id, organization_id, namespace_id, node_id, requested_by, principal_type, principal_ids, actions, classification, effect, status, created_at]
