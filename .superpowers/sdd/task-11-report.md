@@ -146,3 +146,35 @@ Attempted full backend regression:
 - Docker and Helm CLIs are unavailable locally. Image build, Compose startup, `helm lint`, and rendered chart checks are therefore CI-owned. Go static Helm contract tests passed locally, and CI renders with a private `global.imagePullSecrets` value and asserts the Job output.
 - Windows race builds are not claimed; CI/Linux should run race coverage if required.
 - Delivery remains at-least-once across external-success/mark windows, so stable idempotency keys and receiver reconciliation remain required.
+
+# Task 11 首轮审查修复（2026-11-15）
+
+## 范围与提交
+
+- 修复起点：`6c64714f8300a36760cf8b5ca8b2469885268480`。
+- 实现提交：`b435d1da81a2a6c17f074182da9d4aea0447210b`（`feat(filesystem-ui): share files with governed audiences`）。
+- 仅修复 Task 11 首轮审查项；未实现 Task 12 租户治理、审批管理页或采纳流程。
+
+## 修复结果
+
+1. Shared reshare：移除 source Workspace 与当前 actor Workspace 必须相同的错误约束；保留组织绑定和 Node/Namespace 权威授权。当前 Workspace 管理员不能越权 source Workspace。Shared source 投影新增有效 `ALLOW` Grant 的 `permission/effect`，前端仅在 source Grant 显式包含 `SHARE` 时展示和执行转分享，`ADMIN` 不视为显式 `SHARE`。
+2. 审批预览：将正式分享策略提取为可复用纯策略输入，并新增无副作用 `POST /api/v1/filesystem/nodes/{nodeId}/share-preview`。预览与正式命令共用组织/节点绑定、SHARE 授权、classification、principal scope 和策略判定；前端等待真实 `ACTIVE/PENDING_APPROVAL` 结果后才启用准确按钮。
+3. 治理读取上限：grants 与 share-requests 默认最多 50、最大 200，数据库查询使用 `limit + 1` 检测截断并返回 `truncated`；抽屉明确提示“仅显示前 50 项治理记录”。补齐普通读者 403、跨组织 404、默认/最大 limit 和数据库硬上限测试。
+4. Organization 受众：非 `RESTRICTED` 时使用当前权威 organization id 提供唯一可选项；影响文案为“将共享给当前租户（所有具备租户成员资格的用户）”。Workspace 仅在成员目录成功时使用真实成员数，目录失败时禁用且不以 0 冒充。
+5. 幂等：按 canonical logical payload（受众、actions、effect、inherit、expiry）管理提交 key；同 payload 失败重试复用，任一字段变化刷新，成功/关闭重置；同步 in-flight ref 阻止快速双击重复提交。
+
+## TDD 与验证
+
+- RED 已确认：跨 source Workspace Grant 被 `organization_boundary` 拒绝；Preview API/handler 缺失；Shared source 缺 `permission/effect`；Organization 被永久禁用；逻辑 payload 编辑不刷新 key。
+- `go test ./internal/modules/filesystem/... ./api/openapi -count=1`：通过。
+- `pnpm vitest run apps/web/src/modules/filesystem/components`：25 files / 186 tests，通过（含 accessibility）。
+- `pnpm vitest run apps/web/app/api/bff/v1/filesystem packages/contracts/src/filesystem/index.test.ts packages/upstream/src/filesystem.test.ts packages/bff-modules/src/filesystem/index.test.ts packages/web-sdk/src/filesystem.test.ts`：5 files / 42 tests，通过。
+- `pnpm typecheck`：6 packages，通过。
+- IDE diagnostics：无新增 linter errors。
+- `git diff --check`：通过。
+- `.\scripts\dev-restart.ps1 -Backend`：通过，后端已重新监听 `:8080`。
+
+## 未验证项
+
+- 未执行真实登录态浏览器端到端测试。
+- 未连接生产成员目录或外部 PostgreSQL；Workspace 真实计数链路以现有成员加载契约及组件测试验证，数据库边界以 repository 测试验证。
