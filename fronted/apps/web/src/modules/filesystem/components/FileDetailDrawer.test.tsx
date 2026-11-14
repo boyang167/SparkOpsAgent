@@ -12,11 +12,17 @@ import { FileDetailDrawer } from "./FileDetailDrawer";
 const sdk = vi.hoisted(() => ({
   listFileRevisions: vi.fn(),
   listFileAuditEvents: vi.fn(),
+  getEffectiveAccess: vi.fn(),
+  listGovernedGrants: vi.fn(),
+  listShareRequests: vi.fn(),
 }));
 
 vi.mock("@sparkops/web-sdk/filesystem", () => ({
   listFileRevisions: sdk.listFileRevisions,
   listFileAuditEvents: sdk.listFileAuditEvents,
+  getEffectiveAccess: sdk.getEffectiveAccess,
+  listGovernedGrants: sdk.listGovernedGrants,
+  listShareRequests: sdk.listShareRequests,
 }));
 
 vi.mock("@/components/ui/Drawer", () => ({
@@ -72,6 +78,7 @@ function drawer(
     open,
     node,
     workspaceId,
+    organizationId: "00000000-0000-4000-8000-000000000071",
     onClose,
   });
 }
@@ -80,6 +87,9 @@ describe("FileDetailDrawer", () => {
   beforeEach(() => {
     sdk.listFileRevisions.mockReset();
     sdk.listFileAuditEvents.mockReset();
+    sdk.getEffectiveAccess.mockReset();
+    sdk.listGovernedGrants.mockReset();
+    sdk.listShareRequests.mockReset();
     sdk.listFileRevisions.mockResolvedValue({
       items: [
         {
@@ -94,6 +104,62 @@ describe("FileDetailDrawer", () => {
       next_cursor: "",
     });
     sdk.listFileAuditEvents.mockResolvedValue({ items: [], next_cursor: "" });
+    sdk.getEffectiveAccess.mockResolvedValue({
+      decision: "ALLOW",
+      effective_actions: ["READ", "DOWNLOAD", "SHARE"],
+      reason_code: "resource_grant",
+      source_grant_ids: ["00000000-0000-4000-8000-000000000061"],
+      policy_version: 2,
+      cache_key: {
+        organization_id: "00000000-0000-4000-8000-000000000071",
+        workspace_id: "00000000-0000-4000-8000-000000000001",
+        actor_id: "00000000-0000-4000-8000-000000000072",
+        node_id: file.id,
+        action: "READ",
+        policy_version: 2,
+      },
+    });
+    sdk.listGovernedGrants.mockResolvedValue({
+      items: [{
+        id: "00000000-0000-4000-8000-000000000061",
+        node_id: file.id,
+        grantee_id: "00000000-0000-4000-8000-000000000073",
+        principal_type: "WORKSPACE",
+        principal_id: "00000000-0000-4000-8000-000000000073",
+        permission: "READ",
+        effect: "ALLOW",
+        inherit_to_children: false,
+        source: "DIRECT",
+        expires_at: "2026-12-31T16:00:00Z",
+      }, {
+        id: "00000000-0000-4000-8000-000000000062",
+        node_id: "00000000-0000-4000-8000-000000000003",
+        grantee_id: "00000000-0000-4000-8000-000000000074",
+        principal_type: "USER",
+        principal_id: "00000000-0000-4000-8000-000000000074",
+        permission: "DELETE",
+        effect: "DENY",
+        inherit_to_children: true,
+        source: "INHERITED",
+      }],
+    });
+    sdk.listShareRequests.mockResolvedValue({
+      items: [{
+        id: "00000000-0000-4000-8000-000000000081",
+        organization_id: "00000000-0000-4000-8000-000000000071",
+        namespace_id: file.namespace_id,
+        node_id: file.id,
+        requested_by: file.owner_id,
+        principal_type: "WORKSPACE",
+        principal_ids: ["00000000-0000-4000-8000-000000000073"],
+        actions: ["WRITE"],
+        inherit_to_children: false,
+        classification: "CONFIDENTIAL",
+        effect: "ALLOW",
+        status: "PENDING",
+        created_at: "2026-11-15T00:00:00Z",
+      }],
+    });
   });
 
   it("renders shared projection details without workspace-scoped reads or raw ids", () => {
@@ -143,6 +209,34 @@ describe("FileDetailDrawer", () => {
 
     expect(screen.getByText("当前后端未提供可直接展示的预览内容。")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "下载" })).not.toBeInTheDocument();
+  });
+
+  it("shows effective access, grant source, audience, expiry, pending approval and deny", async () => {
+    render(drawer());
+    await userEvent.click(screen.getByRole("tab", { name: "共享与权限" }));
+
+    expect(await screen.findByText("READ、DOWNLOAD、SHARE")).toBeInTheDocument();
+    expect(screen.getByText("直接授权")).toBeInTheDocument();
+    expect(screen.getByText("继承授权")).toBeInTheDocument();
+    expect(screen.getByText("WORKSPACE")).toBeInTheDocument();
+    expect(screen.getByText(/2026-12-31/)).toBeInTheDocument();
+    expect(screen.getByText("等待审批")).toBeInTheDocument();
+    expect(screen.getByText("显式拒绝 · DELETE")).toBeInTheDocument();
+  });
+
+  it("shows governance metadata as restricted on 403 without leaking grants", async () => {
+    sdk.listGovernedGrants.mockRejectedValue(
+      new BffError("forbidden", "FILESYSTEM_RESOURCE_FORBIDDEN", 403),
+    );
+    sdk.listShareRequests.mockRejectedValue(
+      new BffError("forbidden", "FILESYSTEM_RESOURCE_FORBIDDEN", 403),
+    );
+    render(drawer());
+    await userEvent.click(screen.getByRole("tab", { name: "共享与权限" }));
+
+    expect(await screen.findByText("治理元数据受限")).toBeInTheDocument();
+    expect(screen.queryByText("00000000-0000-4000-8000-000000000073")).not.toBeInTheDocument();
+    expect(screen.getByText("READ、DOWNLOAD、SHARE")).toBeInTheDocument();
   });
 
   it("separates loading, empty, error and forbidden revision states", async () => {
@@ -265,15 +359,15 @@ describe("FileDetailDrawer", () => {
   it("implements roving tabs with arrow keys and linked tabpanels", async () => {
     render(drawer());
     const detailTab = screen.getByRole("tab", { name: "详情" });
-    const revisionTab = screen.getByRole("tab", { name: "版本" });
-    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    const accessTab = screen.getByRole("tab", { name: "共享与权限" });
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
     expect(
       screen
         .getAllByRole("tab")
         .every((tab) => tab.classList.contains("filesystem-touch-target")),
     ).toBe(true);
     expect(detailTab).toHaveAttribute("tabindex", "0");
-    expect(revisionTab).toHaveAttribute("tabindex", "-1");
+    expect(accessTab).toHaveAttribute("tabindex", "-1");
     expect(detailTab).toHaveAttribute("aria-controls");
     expect(screen.getByRole("tabpanel")).toHaveAttribute(
       "aria-labelledby",
@@ -282,11 +376,11 @@ describe("FileDetailDrawer", () => {
 
     detailTab.focus();
     fireEvent.keyDown(detailTab, { key: "ArrowRight" });
-    expect(revisionTab).toHaveFocus();
-    expect(revisionTab).toHaveAttribute("tabindex", "0");
+    expect(accessTab).toHaveFocus();
+    expect(accessTab).toHaveAttribute("tabindex", "0");
     expect(screen.getByRole("tabpanel")).toHaveAttribute(
       "aria-labelledby",
-      revisionTab.getAttribute("id"),
+      accessTab.getAttribute("id"),
     );
   });
 });

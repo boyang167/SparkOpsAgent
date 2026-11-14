@@ -10,6 +10,7 @@ import type {
   FileNodePageVM,
   FileNodeVM,
   FileRevisionPageVM,
+  GovernedGrantPageVM,
   GovernedShareSubmissionVM,
   EffectiveAccessVM,
   LifecyclePolicyPageVM,
@@ -20,6 +21,7 @@ import type {
   StoragePoolPageVM,
   StorageProviderPageVM,
   SharedItemPageVM,
+  ShareRequestPageVM,
   UpdateStoragePoolCommand,
   UpdateStorageProviderCommand,
   TransferListQuery,
@@ -242,6 +244,32 @@ export function createShareRequest(
       ...governedFetchOptions(options, idempotencyKey),
       method: "POST",
       body: JSON.stringify(input),
+    },
+  );
+}
+
+export function listGovernedGrants(
+  nodeId: string,
+  options: GovernedFilesystemFetchOptions,
+) {
+  return bffFetch<GovernedGrantPageVM>(
+    `/filesystem/nodes/${encodeURIComponent(nodeId)}/grants`,
+    {
+      ...governedFetchOptions(options),
+      method: "GET",
+    },
+  );
+}
+
+export function listShareRequests(
+  nodeId: string,
+  options: GovernedFilesystemFetchOptions,
+) {
+  return bffFetch<ShareRequestPageVM>(
+    `/filesystem/nodes/${encodeURIComponent(nodeId)}/share-requests`,
+    {
+      ...governedFetchOptions(options),
+      method: "GET",
     },
   );
 }

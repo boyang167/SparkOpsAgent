@@ -882,6 +882,21 @@ func (r *Repository) GetShareRequest(ctx context.Context, id uuid.UUID) (model.S
 	return shareRequestFromRow(row), nil
 }
 
+func (r *Repository) ListShareRequestsForNode(ctx context.Context, nodeID uuid.UUID) ([]model.ShareRequest, error) {
+	var rows []shareRequestRow
+	if err := postgres.DB(ctx, r.db).
+		Where("node_id = ?", nodeID).
+		Order("created_at DESC").
+		Find(&rows).Error; err != nil {
+		return nil, wrapPersistence(err)
+	}
+	result := make([]model.ShareRequest, len(rows))
+	for index, row := range rows {
+		result[index] = shareRequestFromRow(row)
+	}
+	return result, nil
+}
+
 func (r *Repository) ReviewShareRequestCAS(ctx context.Context, request model.ShareRequest, from model.ShareRequestStatus) error {
 	result := postgres.DB(ctx, r.db).Model(&shareRequestRow{}).
 		Where("id = ? AND status = ?", request.ID, from).

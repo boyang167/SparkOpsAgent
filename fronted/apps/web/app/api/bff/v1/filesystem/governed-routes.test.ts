@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   listGovernedChildren: vi.fn(),
   listSharedWithMe: vi.fn(),
   getEffectiveAccess: vi.fn(),
+  listGovernedGrants: vi.fn(),
+  listShareRequests: vi.fn(),
   createGovernedGrant: vi.fn(),
   createShareRequest: vi.fn(),
 }));
@@ -27,6 +29,8 @@ vi.mock("@sparkops/bff-modules/filesystem", () => ({
   listGovernedChildren: mocks.listGovernedChildren,
   listSharedWithMe: mocks.listSharedWithMe,
   getEffectiveAccess: mocks.getEffectiveAccess,
+  listGovernedGrants: mocks.listGovernedGrants,
+  listShareRequests: mocks.listShareRequests,
   createGovernedGrant: mocks.createGovernedGrant,
   createShareRequest: mocks.createShareRequest,
 }));
@@ -119,6 +123,34 @@ describe("governed filesystem Next BFF routes", () => {
       undefined,
     );
     expect(response).toMatchObject({ data: page, status: 200 });
+  });
+
+  it("forwards governance metadata reads without idempotency headers", async () => {
+    mocks.listGovernedGrants.mockResolvedValue({ items: [], classification: "INTERNAL" });
+    mocks.listShareRequests.mockResolvedValue({ items: [] });
+    const grants = await import("./nodes/[nodeId]/grants/route");
+    const requests = await import("./nodes/[nodeId]/share-requests/route");
+    const req = request("/api/bff/v1/filesystem/nodes/node-1", {
+      organization: organizationId,
+      workspace: workspaceId,
+    });
+    const params = { params: Promise.resolve({ nodeId: "node-1" }) };
+
+    await grants.GET(req as never, params);
+    await requests.GET(req as never, params);
+
+    expect(mocks.listGovernedGrants).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId }),
+      organizationId,
+      workspaceId,
+      "node-1",
+    );
+    expect(mocks.listShareRequests).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId }),
+      organizationId,
+      workspaceId,
+      "node-1",
+    );
   });
 
   it("forwards namespace params and every children query field", async () => {

@@ -30,20 +30,30 @@ type GovernanceRepository interface {
 	GetNode(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
 	GetNodeByID(context.Context, uuid.UUID) (*model.Node, error)
 	ListChildrenFiltered(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, string, int, string) ([]model.Node, string, error)
+	GetNodesWithAncestors(context.Context, uuid.UUID, []uuid.UUID) ([]model.Node, error)
+	ListNodeResourceGrants(context.Context, uuid.UUID) ([]model.ResourceGrant, error)
+	ListShareRequestsForNode(context.Context, uuid.UUID) ([]model.ShareRequest, error)
+}
+
+type governanceGrant struct {
+	Grant  model.ResourceGrant
+	Source string
 }
 
 type GovernanceHandler struct {
-	namespaceByID   func(context.Context, uuid.UUID) (*model.Namespace, error)
-	nodeByID        func(context.Context, uuid.UUID) (*model.Node, error)
-	getNode         func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
-	listChildren    func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, string, int, string) ([]model.Node, string, error)
-	listNamespaces  func(context.Context, query.ListNamespaces) ([]query.NamespaceSummary, error)
-	sharedWithMe    func(context.Context, query.SharedWithMe) ([]repository.SharedNode, string, error)
-	effectiveAccess func(context.Context, query.EffectiveAccess) query.EffectiveAccessResult
-	authorize       func(context.Context, resourceauth.Request) resourceauth.Decision
-	submitShare     func(context.Context, command.SubmitShare) (command.ShareResult, error)
-	approveShare    func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error)
-	rejectShare     func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error)
+	namespaceByID         func(context.Context, uuid.UUID) (*model.Namespace, error)
+	nodeByID              func(context.Context, uuid.UUID) (*model.Node, error)
+	getNode               func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
+	listChildren          func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, string, int, string) ([]model.Node, string, error)
+	listNamespaces        func(context.Context, query.ListNamespaces) ([]query.NamespaceSummary, error)
+	sharedWithMe          func(context.Context, query.SharedWithMe) ([]repository.SharedNode, string, error)
+	effectiveAccess       func(context.Context, query.EffectiveAccess) query.EffectiveAccessResult
+	authorize             func(context.Context, resourceauth.Request) resourceauth.Decision
+	submitShare           func(context.Context, command.SubmitShare) (command.ShareResult, error)
+	approveShare          func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error)
+	rejectShare           func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error)
+	listGovernanceGrants  func(context.Context, uuid.UUID) ([]governanceGrant, error)
+	listNodeShareRequests func(context.Context, uuid.UUID) ([]model.ShareRequest, error)
 }
 
 func NewGovernanceHandler(
@@ -53,16 +63,46 @@ func NewGovernanceHandler(
 	effective *query.EffectiveAccessHandler,
 	authorizer query.ResourceAuthorizer,
 ) *GovernanceHandler {
-	return &GovernanceHandler{
-		namespaceByID:   repo.GetNamespace,
-		nodeByID:        repo.GetNodeByID,
-		getNode:         repo.GetNode,
-		listChildren:    repo.ListChildrenFiltered,
-		listNamespaces:  namespaces.Handle,
-		sharedWithMe:    shared.Handle,
-		effectiveAccess: effective.Handle,
-		authorize:       authorizer.Authorize,
+	handler := &GovernanceHandler{
+		namespaceByID:         repo.GetNamespace,
+		nodeByID:              repo.GetNodeByID,
+		getNode:               repo.GetNode,
+		listChildren:          repo.ListChildrenFiltered,
+		listNamespaces:        namespaces.Handle,
+		sharedWithMe:          shared.Handle,
+		effectiveAccess:       effective.Handle,
+		authorize:             authorizer.Authorize,
+		listNodeShareRequests: repo.ListShareRequestsForNode,
 	}
+	handler.listGovernanceGrants = func(ctx context.Context, nodeID uuid.UUID) ([]governanceGrant, error) {
+		node, err := repo.GetNodeByID(ctx, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		nodes, err := repo.GetNodesWithAncestors(ctx, node.NamespaceID, []uuid.UUID{nodeID})
+		if err != nil {
+			return nil, err
+		}
+		result := make([]governanceGrant, 0)
+		for _, sourceNode := range nodes {
+			grants, listErr := repo.ListNodeResourceGrants(ctx, sourceNode.ID)
+			if listErr != nil {
+				return nil, listErr
+			}
+			for _, grant := range grants {
+				if sourceNode.ID != nodeID && !grant.InheritToChildren {
+					continue
+				}
+				source := "INHERITED"
+				if sourceNode.ID == nodeID {
+					source = "DIRECT"
+				}
+				result = append(result, governanceGrant{Grant: grant, Source: source})
+			}
+		}
+		return result, nil
+	}
+	return handler
 }
 
 func (h *GovernanceHandler) BindShareWorkflow(
@@ -90,6 +130,8 @@ func RegisterGovernanceRoutes(
 	base.GET("/namespaces/:namespaceId/children", handler.ListChildren)
 	base.GET("/shared-with-me", handler.SharedWithMe)
 	base.GET("/nodes/:nodeId/effective-access", handler.EffectiveAccess)
+	base.GET("/nodes/:nodeId/grants", handler.ListGovernedGrants)
+	base.GET("/nodes/:nodeId/share-requests", handler.ListShareRequests)
 	base.POST("/nodes/:nodeId/grants", requireIdempotencyKey(), handler.CreateGovernedGrant)
 	base.POST("/nodes/:nodeId/share-requests", requireIdempotencyKey(), handler.CreateShareRequest)
 	base.POST("/share-requests/:requestId/approve", requireIdempotencyKey(), handler.ApproveShareRequest)
@@ -381,6 +423,97 @@ func (h *GovernanceHandler) EffectiveAccess(c *gin.Context) {
 		ActorID: rc.actorID, WorkspaceID: rc.workspaceID, NamespaceID: namespace.ID, NodeID: nodeID,
 	})
 	httpx.OK(c, effectiveAccessView(result))
+}
+
+func (h *GovernanceHandler) ListGovernedGrants(c *gin.Context) {
+	rc, node, namespace, ok := h.governanceMetadataNode(c)
+	if !ok {
+		return
+	}
+	if h.listGovernanceGrants == nil {
+		governanceError(c, domain.ErrPersistence)
+		return
+	}
+	if !h.authorize(c.Request.Context(), resourceauth.Request{
+		ActorID: rc.actorID, WorkspaceID: rc.workspaceID, NamespaceID: namespace.ID,
+		NodeID: node.ID, Permission: model.ResourcePermissionAdmin,
+	}).Allowed {
+		httpx.Fail(c, "FILESYSTEM_RESOURCE_FORBIDDEN", "governance metadata access denied", http.StatusForbidden)
+		return
+	}
+	grants, err := h.listGovernanceGrants(c.Request.Context(), node.ID)
+	if err != nil {
+		governanceError(c, err)
+		return
+	}
+	items := make([]gin.H, 0, len(grants))
+	for _, item := range grants {
+		grant := item.Grant
+		items = append(items, gin.H{
+			"id": grant.ID, "node_id": grant.NodeID, "grantee_id": grant.GranteeID,
+			"principal_type": grant.PrincipalType, "principal_id": grant.PrincipalID,
+			"permission": grant.Permission, "effect": grant.Effect,
+			"inherit_to_children": grant.InheritToChildren, "expires_at": grant.ExpiresAt,
+			"source": item.Source,
+		})
+	}
+	httpx.OK(c, gin.H{"items": items, "classification": node.Classification})
+}
+
+func (h *GovernanceHandler) ListShareRequests(c *gin.Context) {
+	rc, node, namespace, ok := h.governanceMetadataNode(c)
+	if !ok {
+		return
+	}
+	if h.listNodeShareRequests == nil {
+		governanceError(c, domain.ErrPersistence)
+		return
+	}
+	if !h.authorize(c.Request.Context(), resourceauth.Request{
+		ActorID: rc.actorID, WorkspaceID: rc.workspaceID, NamespaceID: namespace.ID,
+		NodeID: node.ID, Permission: model.ResourcePermissionAdmin,
+	}).Allowed {
+		httpx.Fail(c, "FILESYSTEM_RESOURCE_FORBIDDEN", "governance metadata access denied", http.StatusForbidden)
+		return
+	}
+	requests, err := h.listNodeShareRequests(c.Request.Context(), node.ID)
+	if err != nil {
+		governanceError(c, err)
+		return
+	}
+	items := make([]gin.H, 0, len(requests))
+	for _, request := range requests {
+		items = append(items, shareRequestView(request))
+	}
+	httpx.OK(c, gin.H{"items": items})
+}
+
+func (h *GovernanceHandler) governanceMetadataNode(c *gin.Context) (governanceContext, *model.Node, *model.Namespace, bool) {
+	rc, ok := governanceRequestContext(c)
+	if !ok || h == nil || h.nodeByID == nil || h.namespaceByID == nil || h.authorize == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return governanceContext{}, nil, nil, false
+	}
+	nodeID, valid := canonicalUUID(c.Param("nodeId"))
+	if !valid {
+		invalidRequest(c)
+		return governanceContext{}, nil, nil, false
+	}
+	node, err := h.nodeByID(c.Request.Context(), nodeID)
+	if err != nil {
+		governanceError(c, err)
+		return governanceContext{}, nil, nil, false
+	}
+	namespace, err := h.namespaceByID(c.Request.Context(), node.NamespaceID)
+	if err != nil {
+		governanceError(c, err)
+		return governanceContext{}, nil, nil, false
+	}
+	if !validNamespaceAudience(rc, namespace) {
+		notFound(c)
+		return governanceContext{}, nil, nil, false
+	}
+	return rc, node, namespace, true
 }
 
 func (h *GovernanceHandler) CreateGovernedGrant(c *gin.Context) {

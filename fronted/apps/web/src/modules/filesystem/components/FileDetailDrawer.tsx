@@ -3,14 +3,20 @@
 import { createElement, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type {
+  EffectiveAccessVM,
   FileAuditEventVM,
   FileNodeVM,
   FileRevisionVM,
+  GovernedGrantVM,
+  ShareRequestVM,
 } from "@sparkops/contracts/filesystem";
 import { BffError } from "@sparkops/contracts";
 import {
   listFileAuditEvents,
   listFileRevisions,
+  getEffectiveAccess,
+  listGovernedGrants,
+  listShareRequests,
 } from "@sparkops/web-sdk/filesystem";
 import { Drawer } from "@/components/ui/Drawer";
 import { InlineAlert } from "@/components/ui/InlineAlert";
@@ -18,6 +24,7 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 export type FileDetailDrawerProps = {
   node: FileNodeVM | null;
   workspaceId: string;
+  organizationId?: string;
   open: boolean;
   onClose: () => void;
   loadError?: "forbidden" | "not-found" | "error";
@@ -26,12 +33,13 @@ export type FileDetailDrawerProps = {
   projectionDetails?: Array<{ label: string; value: string }>;
 };
 
-type DetailTab = "details" | "revisions" | "audit";
+type DetailTab = "details" | "access" | "revisions" | "audit";
 type LoadState = "idle" | "loading" | "ready" | "error" | "forbidden";
 
 export function FileDetailDrawer({
   node,
   workspaceId,
+  organizationId,
   open,
   onClose,
   loadError,
@@ -54,6 +62,15 @@ export function FileDetailDrawer({
   }>({ key: detailKey, items: [], state: "idle" });
   const [revisionRetry, setRevisionRetry] = useState(0);
   const [auditRetry, setAuditRetry] = useState(0);
+  const [accessRetry, setAccessRetry] = useState(0);
+  const [accessData, setAccessData] = useState<{
+    key: string;
+    access?: EffectiveAccessVM;
+    grants: GovernedGrantVM[];
+    requests: ShareRequestVM[];
+    state: LoadState;
+    metadataRestricted: boolean;
+  }>({ key: detailKey, grants: [], requests: [], state: "idle", metadataRestricted: false });
   const revisionGeneration = useRef(0);
   const auditGeneration = useRef(0);
   const revisions = revisionData.key === detailKey ? revisionData.items : [];
@@ -62,6 +79,9 @@ export function FileDetailDrawer({
   const audits = auditData.key === detailKey ? auditData.items : [];
   const auditState =
     auditData.key === detailKey ? auditData.state : open && node ? "loading" : "idle";
+  const scopedAccess = accessData.key === detailKey
+    ? accessData
+    : { key: detailKey, grants: [], requests: [], state: "loading" as const, metadataRestricted: false };
 
   useEffect(() => {
     const generation = ++revisionGeneration.current;
@@ -117,11 +137,82 @@ export function FileDetailDrawer({
   }, [auditRetry, detailKey, node, open, projectionOnly, tab, workspaceId]);
 
   useEffect(() => {
+    if (!open || !node || projectionOnly || tab !== "access") return;
+    if (!organizationId) {
+      setAccessData({
+        key: detailKey,
+        grants: [],
+        requests: [],
+        state: "error",
+        metadataRestricted: false,
+      });
+      return;
+    }
+    const controller = new AbortController();
+    const key = detailKey;
+    setAccessData({
+      key,
+      grants: [],
+      requests: [],
+      state: "loading",
+      metadataRestricted: false,
+    });
+    const options = { organizationId, workspaceId, signal: controller.signal };
+    void Promise.allSettled([
+      getEffectiveAccess(node.id, options),
+      listGovernedGrants(node.id, options),
+      listShareRequests(node.id, options),
+    ]).then(([accessResult, grantsResult, requestsResult]) => {
+      if (controller.signal.aborted) return;
+      if (accessResult.status === "rejected") {
+        setAccessData({
+          key,
+          grants: [],
+          requests: [],
+          state: accessResult.reason instanceof BffError && accessResult.reason.status === 403
+            ? "forbidden"
+            : "error",
+          metadataRestricted: false,
+        });
+        return;
+      }
+      const metadataErrors = [grantsResult, requestsResult].filter(
+        (result) => result.status === "rejected",
+      );
+      const metadataRestricted = metadataErrors.some(
+        (result) =>
+          result.status === "rejected" &&
+          result.reason instanceof BffError &&
+          result.reason.status === 403,
+      );
+      setAccessData({
+        key,
+        access: accessResult.value,
+        grants: grantsResult.status === "fulfilled" ? grantsResult.value.items : [],
+        requests: requestsResult.status === "fulfilled" ? requestsResult.value.items : [],
+        state: metadataErrors.length > 0 && !metadataRestricted ? "error" : "ready",
+        metadataRestricted,
+      });
+    });
+    return () => controller.abort();
+  }, [
+    accessRetry,
+    detailKey,
+    node,
+    open,
+    organizationId,
+    projectionOnly,
+    tab,
+    workspaceId,
+  ]);
+
+  useEffect(() => {
     if (!open) setTab("details");
   }, [open]);
 
   const tabDefinitions = [
     ["details", "详情"],
+    ["access", "共享与权限"],
     ["revisions", "版本"],
     ["audit", "审计"],
   ] as const;
@@ -193,6 +284,11 @@ export function FileDetailDrawer({
               ? createElement(ProjectionDetails, { node, details: projectionDetails })
               : tab === "details"
                 ? createElement(Details, { node })
+              : tab === "access"
+                ? createElement(AccessDetails, {
+                    data: scopedAccess,
+                    onRetry: () => setAccessRetry((value) => value + 1),
+                  })
               : tab === "revisions"
                 ? createElement(RevisionList, {
                     state: revisionState,
@@ -261,6 +357,118 @@ function Details({ node }: { node: FileNodeVM }) {
     node.type === "FILE"
       ? createElement("div", { className: "empty-state" }, "当前后端未提供可直接展示的预览内容。")
       : null,
+  );
+}
+
+function AccessDetails({
+  data,
+  onRetry,
+}: {
+  data: {
+    access?: EffectiveAccessVM;
+    grants: GovernedGrantVM[];
+    requests: ShareRequestVM[];
+    state: LoadState;
+    metadataRestricted: boolean;
+  };
+  onRetry: () => void;
+}) {
+  if (data.state === "loading" || data.state === "idle") {
+    return createElement("div", { role: "status", className: "empty-state" }, "正在加载共享与权限…");
+  }
+  if (data.state === "forbidden") {
+    return createElement("div", { className: "empty-state" }, "无权查看有效权限。");
+  }
+  if (data.state === "error") {
+    return createElement(
+      InlineAlert,
+      {
+        tone: "error",
+        children: createElement(
+          "div",
+          { className: "flex flex-wrap items-center gap-2" },
+          createElement("span", { role: "alert" }, "加载共享与权限失败，请稍后重试。"),
+          createElement(
+            "button",
+            { type: "button", className: "btn btn-ghost btn-sm", onClick: onRetry },
+            "重试加载权限",
+          ),
+        ),
+      },
+    );
+  }
+  const pending = data.requests.filter((request) => request.status === "PENDING");
+  return createElement(
+    "div",
+    { className: "stack-lg" },
+    createElement(
+      "section",
+      { className: "stack-sm", "aria-labelledby": "effective-access-title" },
+      createElement("h3", { id: "effective-access-title", className: "font-semibold" }, "我的有效权限"),
+      createElement(
+        "p",
+        null,
+        data.access?.effective_actions.length
+          ? data.access.effective_actions.join("、")
+          : "无有效操作权限",
+      ),
+      data.access?.decision === "DENY"
+        ? createElement("p", { className: "text-sm text-muted" }, "当前访问结果：拒绝")
+        : null,
+    ),
+    data.metadataRestricted
+      ? createElement(
+          "div",
+          { className: "empty-state" },
+          "治理元数据受限",
+        )
+      : createElement(
+          "section",
+          { className: "stack-sm", "aria-labelledby": "grant-list-title" },
+          createElement("h3", { id: "grant-list-title", className: "font-semibold" }, "授权来源"),
+          data.grants.length === 0
+            ? createElement("div", { className: "empty-state" }, "暂无可查看的授权记录。")
+            : data.grants.map((grant) =>
+                createElement(
+                  "article",
+                  { key: grant.id, className: "card stack-xs" },
+                  createElement(
+                    "p",
+                    { className: "font-medium" },
+                    grant.effect === "DENY"
+                      ? `显式拒绝 · ${grant.permission}`
+                      : grant.permission,
+                  ),
+                  createElement(
+                    "p",
+                    { className: "text-sm text-muted" },
+                    grant.source === "INHERITED" ? "继承授权" : "直接授权",
+                  ),
+                  createElement("p", { className: "text-sm" }, grant.principal_type),
+                  createElement(
+                    "p",
+                    { className: "text-sm text-muted" },
+                    grant.expires_at
+                      ? new Date(grant.expires_at).toISOString().slice(0, 10)
+                      : "永久有效",
+                  ),
+                ),
+              ),
+          pending.length > 0
+            ? createElement(
+                "div",
+                { className: "stack-sm" },
+                createElement("h3", { className: "font-semibold" }, "等待审批"),
+                ...pending.map((request) =>
+                  createElement(
+                    "p",
+                    { key: request.id, className: "text-sm text-muted" },
+                    `${request.principal_type} · ${request.actions.join("、")}`,
+                  ),
+                ),
+              )
+            : null,
+        ),
   );
 }
 

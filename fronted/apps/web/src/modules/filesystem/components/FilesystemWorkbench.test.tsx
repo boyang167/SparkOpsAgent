@@ -80,6 +80,10 @@ vi.mock("./MoveNodesModal", () => ({
   MoveNodesModal: () => null,
 }));
 
+vi.mock("./ShareFileModal", () => ({
+  ShareFileModal: () => null,
+}));
+
 vi.mock("./GovernanceWorkspace", () => ({
   GovernanceWorkspace: () => createElement("div", null, "治理工作区"),
 }));

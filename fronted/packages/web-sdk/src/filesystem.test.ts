@@ -12,6 +12,8 @@ import {
   getFileNode,
   listGovernedChildren,
   listGovernedNamespaces,
+  listGovernedGrants,
+  listShareRequests,
   listSharedWithMe,
   listFileAuditEvents,
   listFileNodes,
@@ -520,6 +522,35 @@ describe("governed filesystem sdk", () => {
     expect(headers.get("X-Organization-ID")).toBe("00000000-0000-4000-8000-000000000002");
     expect(headers.get("Idempotency-Key")).toBe("grant-key-1");
     expect(headers.get("X-Actor-ID")).toBeNull();
+  });
+
+  it("reads governed grants and share requests with encoded node ids", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        code: 0,
+        message: "ok",
+        data: { items: [], classification: "INTERNAL" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        code: 0,
+        message: "ok",
+        data: { items: [] },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const options = {
+      organizationId: "00000000-0000-4000-8000-000000000002",
+      workspaceId: "00000000-0000-4000-8000-000000000003",
+    };
+
+    await listGovernedGrants("node/with space", options);
+    await listShareRequests("node/with space", options);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/bff/v1/filesystem/nodes/node%2Fwith%20space/grants",
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "/api/bff/v1/filesystem/nodes/node%2Fwith%20space/share-requests",
+    );
   });
 
   it("posts share requests through the governed route with idempotency", async () => {

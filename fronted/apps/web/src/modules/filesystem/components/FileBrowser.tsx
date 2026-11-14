@@ -2,7 +2,7 @@
 
 import { createElement, useEffect, useMemo, useState } from "react";
 import type { DragEvent } from "react";
-import type { FileNodeVM } from "@sparkops/contracts/filesystem";
+import type { FileNodeVM, GovernedPermission } from "@sparkops/contracts/filesystem";
 import { FileGridView } from "./FileGridView";
 import { FileListView } from "./FileListView";
 import { clearNodeDragSession, writeNodeDragPayload } from "./directory-dnd";
@@ -20,6 +20,8 @@ export type FileBrowserProps = {
   onMove: (nodes: FileNodeVM[]) => void;
   canRename?: boolean;
   canMove?: boolean;
+  organizationId?: string;
+  onShare?: (node: FileNodeVM, effectiveActions: GovernedPermission[]) => void;
 };
 
 export function sortFileNodes(nodes: FileNodeVM[]) {
@@ -41,6 +43,8 @@ export function FileBrowser({
   onMove,
   canRename = true,
   canMove = true,
+  organizationId,
+  onShare,
 }: FileBrowserProps) {
   const [selection, setSelection] = useState(() => new Set(selectedIds));
   const sortedNodes = useMemo(() => sortFileNodes(nodes), [nodes]);
@@ -113,6 +117,9 @@ export function FileBrowser({
     onDragEnd: clearNodeDragSession,
     canRename,
     canMove,
+    organizationId,
+    workspaceId,
+    onShare,
   };
 
   return createElement(

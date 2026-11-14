@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import type { DragEvent } from "react";
-import type { FileNodeVM } from "@sparkops/contracts/filesystem";
+import type { FileNodeVM, GovernedPermission } from "@sparkops/contracts/filesystem";
 import { FileActionMenu } from "./FileActionMenu";
 
 export type FileListViewProps = {
@@ -14,6 +14,9 @@ export type FileListViewProps = {
   onDragEnd: () => void;
   canRename: boolean;
   canMove: boolean;
+  organizationId?: string;
+  workspaceId?: string;
+  onShare?: (node: FileNodeVM, effectiveActions: GovernedPermission[]) => void;
 };
 
 export function FileListView({
@@ -27,6 +30,9 @@ export function FileListView({
   onDragEnd,
   canRename,
   canMove,
+  organizationId,
+  workspaceId,
+  onShare,
 }: FileListViewProps) {
   return createElement(
     "div",
@@ -102,6 +108,9 @@ export function FileListView({
                 node,
                 canRename: canRename && node.state === "ACTIVE",
                 canMove: canMove && node.state === "ACTIVE",
+                organizationId,
+                workspaceId,
+                onShare,
                 onRename,
                 onMove,
               }),

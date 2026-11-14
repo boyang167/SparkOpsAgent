@@ -216,6 +216,64 @@ func TestGovernanceSharedWithMeRejectsUnknownSourceType(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
 }
 
+func TestGovernanceMetadataRequiresAdminAndReturnsRealClassification(t *testing.T) {
+	orgID, workspaceID, namespaceID, nodeID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	grantID, principalID, requestID := uuid.New(), uuid.New(), uuid.New()
+	handler := &GovernanceHandler{
+		nodeByID: func(context.Context, uuid.UUID) (*model.Node, error) {
+			return &model.Node{
+				ID: nodeID, NamespaceID: namespaceID, Type: model.NodeTypeFile,
+				Classification: model.TransferClassificationConfidential,
+			}, nil
+		},
+		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace,
+				OrganizationID: orgID, WorkspaceID: workspaceID,
+			}, nil
+		},
+		authorize: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			return resourceauth.Decision{Allowed: request.Permission == model.ResourcePermissionAdmin}
+		},
+		listGovernanceGrants: func(context.Context, uuid.UUID) ([]governanceGrant, error) {
+			return []governanceGrant{{
+				Grant: model.ResourceGrant{
+					ID: grantID, NodeID: nodeID, PrincipalType: model.PrincipalWorkspace,
+					PrincipalID: principalID, GranteeID: principalID,
+					Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow,
+				},
+				Source: "DIRECT",
+			}}, nil
+		},
+		listNodeShareRequests: func(context.Context, uuid.UUID) ([]model.ShareRequest, error) {
+			return []model.ShareRequest{{
+				ID: requestID, OrganizationID: orgID, NamespaceID: namespaceID, NodeID: nodeID,
+				RequestedBy: principalID, PrincipalType: model.PrincipalWorkspace,
+				PrincipalIDs: []uuid.UUID{workspaceID}, Actions: []model.ResourcePermission{model.ResourcePermissionRead},
+				Classification: model.TransferClassificationConfidential,
+				Status:         model.ShareRequestPending, CreatedAt: time.Now().UTC(),
+			}}, nil
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(
+		t, orgID, governanceOrgStub{active: true},
+		governanceWorkspaceStub{orgID: orgID, active: true}, handler,
+	)
+	for _, path := range []string{
+		"/api/v1/filesystem/nodes/" + nodeID.String() + "/grants",
+		"/api/v1/filesystem/nodes/" + nodeID.String() + "/share-requests",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Organization-ID", orgID.String())
+		req.Header.Set("X-Workspace-ID", workspaceID.String())
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+		require.Contains(t, res.Body.String(), `"classification":"CONFIDENTIAL"`)
+	}
+}
+
 func TestGovernanceChildrenPaginatesAfterAuthorizationWithoutLeakingHiddenCursor(t *testing.T) {
 	orgID, workspaceID := uuid.New(), uuid.New()
 	namespaceID, rootID := uuid.New(), uuid.New()

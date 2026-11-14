@@ -12,6 +12,7 @@ import type {
   FileNodeVM,
   FileRevisionPageVM,
   GovernedChildrenQuery,
+  GovernedGrantPageVM,
   GovernedShareSubmissionVM,
   EffectiveAccessVM,
   LifecyclePolicyPageVM,
@@ -22,6 +23,7 @@ import type {
   StoragePoolPageVM,
   StorageProviderPageVM,
   SharedItemPageVM,
+  ShareRequestPageVM,
   SharedWithMeQuery,
   UpdateStoragePoolCommand,
   UpdateStorageProviderCommand,
@@ -38,9 +40,11 @@ import {
   FileNodeVMSchema,
   FileRevisionPageVMSchema,
   LifecyclePolicyPageVMSchema,
+  GovernedGrantPageVMSchema,
   GovernedShareSubmissionVMSchema,
   NamespaceSummaryPageVMSchema,
   SharedItemPageVMSchema,
+  ShareRequestPageVMSchema,
   StorageBindingPageVMSchema,
   StoragePoolPageVMSchema,
   StorageProviderPageVMSchema,
@@ -351,6 +355,32 @@ export async function getEffectiveAccess(
     nodeId,
   );
   return EffectiveAccessVMSchema.parse(data);
+}
+
+export async function listGovernedGrants(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId: string | undefined,
+  nodeId: string,
+): Promise<GovernedGrantPageVM> {
+  const data = await ctx.upstream.filesystem.listGovernedGrants(
+    governedContext(organizationId, workspaceId),
+    nodeId,
+  );
+  return GovernedGrantPageVMSchema.parse(data);
+}
+
+export async function listShareRequests(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId: string | undefined,
+  nodeId: string,
+): Promise<ShareRequestPageVM> {
+  const data = await ctx.upstream.filesystem.listShareRequests(
+    governedContext(organizationId, workspaceId),
+    nodeId,
+  );
+  return ShareRequestPageVMSchema.parse(data);
 }
 
 export async function createGovernedGrant(

@@ -57,6 +57,10 @@ vi.mock("./MoveNodesModal", () => ({
   MoveNodesModal: () => null,
 }));
 
+vi.mock("./ShareFileModal", () => ({
+  ShareFileModal: () => null,
+}));
+
 const namespace = {
   id: "namespace-1",
   workspace_id: "workspace-1",

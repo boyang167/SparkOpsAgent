@@ -168,6 +168,32 @@ paths:
           $ref: "#/components/responses/Unavailable"
 
   /api/v1/filesystem/nodes/{nodeId}/grants:
+    get:
+      tags: [filesystem]
+      summary: List governance grants for an authorized administrator
+      operationId: listGovernedFilesystemGrants
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - $ref: "#/components/parameters/WorkspaceHeader"
+        - $ref: "#/components/parameters/NodeID"
+      responses:
+        "200":
+          description: Direct and inherited governance grants
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ResourceGrantPage"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     post:
       tags: [filesystem]
       summary: Create governed grants or an approval request
@@ -208,6 +234,38 @@ paths:
           $ref: "#/components/responses/Unavailable"
 
   /api/v1/filesystem/nodes/{nodeId}/share-requests:
+    get:
+      tags: [filesystem]
+      summary: List share requests for an authorized administrator
+      operationId: listFilesystemShareRequests
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - $ref: "#/components/parameters/WorkspaceHeader"
+        - $ref: "#/components/parameters/NodeID"
+      responses:
+        "200":
+          description: Share requests for the node
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items]
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/ShareRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     post:
       tags: [filesystem]
       summary: Submit a governed file share
@@ -2206,6 +2264,8 @@ components:
         owner_id:
           type: string
           format: uuid
+        classification:
+          $ref: "#/components/schemas/TransferClassification"
     Revision:
       type: object
       required: [id, node_id, revision_no, size, mime_type, created_by]
@@ -2829,6 +2889,11 @@ components:
         effect:
           type: string
           enum: [ALLOW, DENY]
+        inherit_to_children:
+          type: boolean
+        source:
+          type: string
+          enum: [DIRECT, INHERITED]
         expires_at:
           type: string
           format: date-time
@@ -2841,6 +2906,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ResourceGrant"
+        classification:
+          $ref: "#/components/schemas/TransferClassification"
     CreateResourceGrantRequest:
       type: object
       required: [grantee_id, permission, effect]

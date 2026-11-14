@@ -6,8 +6,10 @@ import type { ChangeEvent, FormEvent, KeyboardEvent } from "react";
 import type {
   FileNamespaceVM,
   FileNodeVM,
+  GovernedPermission,
   NamespaceSummaryVM,
 } from "@sparkops/contracts/filesystem";
+import type { WorkspaceMemberVM } from "@sparkops/contracts/governance";
 import {
   abortTransfer,
   createTransferSession,
@@ -24,6 +26,7 @@ import { FileExplorerPanel } from "./FileExplorerPanel";
 import { FileSpaceNav } from "./FileSpaceNav";
 import { GovernanceWorkspace } from "./GovernanceWorkspace";
 import { MoveNodesModal } from "./MoveNodesModal";
+import { ShareFileModal } from "./ShareFileModal";
 import { TransferCenter, TransferSummary } from "./TransferCenter";
 import { createTransferQueue } from "./transfer-queue";
 import type { TransferQueue } from "./transfer-queue";
@@ -47,6 +50,9 @@ export type FilesystemWorkbenchProps = {
   namespaceSummary?: NamespaceSummaryVM;
   organizationLabel?: string;
   workspaceLabel?: string;
+  organizationId?: string;
+  members?: WorkspaceMemberVM[];
+  memberDirectoryAvailable?: boolean;
 };
 
 const tabs: Array<{
@@ -98,6 +104,9 @@ export function FilesystemWorkbench({
   namespaceSummary,
   organizationLabel,
   workspaceLabel,
+  organizationId,
+  members = [],
+  memberDirectoryAvailable = false,
 }: FilesystemWorkbenchProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -116,6 +125,10 @@ export function FilesystemWorkbench({
   const [moveNodes, setMoveNodes] = useState<FileNodeVM[]>([]);
   const [treeVersion, setTreeVersion] = useState(0);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [shareTarget, setShareTarget] = useState<{
+    node: FileNodeVM;
+    effectiveActions: GovernedPermission[];
+  } | null>(null);
   const serverSelectionKey = [
     scopeKey,
     effectiveState.node ?? "",
@@ -545,6 +558,9 @@ export function FilesystemWorkbench({
           canMove: legacyWorkspaceWriteEnabled,
           onMove: setMoveNodes,
           onOpen: openNode,
+          organizationId,
+          onShare: (node: FileNodeVM, effectiveActions: GovernedPermission[]) =>
+            setShareTarget({ node, effectiveActions }),
           onFilesSelected: legacyWorkspaceWriteEnabled
             ? (files: File[]) =>
                 transferQueue.enqueue(
@@ -769,8 +785,23 @@ export function FilesystemWorkbench({
           node: selected.node,
           loadError: selected.error,
           workspaceId,
+          organizationId,
           onClose: closeNode,
           onRetry: () => router.refresh(),
+        })
+      : null,
+    shareTarget && organizationId && organizationLabel && workspaceLabel
+      ? createElement(ShareFileModal, {
+          open: true,
+          node: shareTarget.node,
+          organizationId,
+          organizationLabel,
+          workspaceId,
+          workspaceLabel,
+          members,
+          memberDirectoryAvailable,
+          effectiveActions: shareTarget.effectiveActions,
+          onClose: () => setShareTarget(null),
         })
       : null,
   );

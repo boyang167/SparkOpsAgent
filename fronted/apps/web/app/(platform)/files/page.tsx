@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { WorkspaceMemberVM } from "@sparkops/contracts/governance";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FileSpaceNav } from "@/modules/filesystem/components/FileSpaceNav";
@@ -11,6 +12,7 @@ import {
 } from "@/modules/filesystem/components/workbench-permissions";
 import { loadSession } from "@/server/loaders/session";
 import { loadMyPermissions } from "@/server/loaders/governance";
+import { loadMembers } from "@/server/loaders/governance";
 import { loadTenantContext } from "@/server/loaders/tenant-context";
 import {
   loadAccessibleFileNamespaces,
@@ -71,6 +73,22 @@ export default async function FilesPage({
     workspacePermissions,
     session.is_super_admin ?? false,
   );
+  let members: WorkspaceMemberVM[] = [];
+  let memberDirectoryAvailable = false;
+  try {
+    members = await loadMembers(workspaceId);
+    memberDirectoryAvailable = true;
+  } catch {
+    members = [];
+  }
+  if (!members.some((member) => member.member_id === session.id)) {
+    members.push({
+      member_id: session.id,
+      email: session.email,
+      display_name: session.display_name,
+      roles: [],
+    });
+  }
 
   if (!hasFilesystemPageAccess(permissions)) {
     return (
@@ -182,6 +200,8 @@ export default async function FilesPage({
           source={initialState.source}
           items={sharedItems}
           state={sharedState}
+          members={members}
+          memberDirectoryAvailable={memberDirectoryAvailable}
         />
       </div>
     );
@@ -274,6 +294,9 @@ export default async function FilesPage({
         namespaceSummary={namespaceSummary}
         organizationLabel={organizationLabel}
         workspaceLabel={workspaceLabel}
+        organizationId={currentOrganization.id}
+        members={members}
+        memberDirectoryAvailable={memberDirectoryAvailable}
       />
     </div>
   );

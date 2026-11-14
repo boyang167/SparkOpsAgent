@@ -914,7 +914,7 @@ func namespaceView(namespace *model.Namespace) gin.H {
 }
 
 func nodeView(node *model.Node) gin.H {
-	return gin.H{"id": node.ID, "namespace_id": node.NamespaceID, "parent_id": node.ParentID, "type": node.Type, "name": node.Name, "current_revision_id": node.CurrentRevisionID, "state": node.State, "owner_id": node.OwnerID}
+	return gin.H{"id": node.ID, "namespace_id": node.NamespaceID, "parent_id": node.ParentID, "type": node.Type, "name": node.Name, "current_revision_id": node.CurrentRevisionID, "state": node.State, "owner_id": node.OwnerID, "classification": node.Classification}
 }
 
 func revisionView(revision *model.FileRevision) gin.H {

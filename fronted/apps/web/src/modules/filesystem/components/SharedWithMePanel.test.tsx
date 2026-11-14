@@ -11,6 +11,7 @@ const detail = vi.hoisted(() => ({
   nodeId: "",
   projectionOnly: false,
 }));
+const share = vi.hoisted(() => ({ nodeId: "" }));
 
 vi.mock("./FileDetailDrawer", () => ({
   FileDetailDrawer: ({
@@ -35,6 +36,13 @@ vi.mock("./FileDetailDrawer", () => ({
         createElement("span", { key: entry.label }, entry.value),
       ),
     );
+  },
+}));
+vi.mock("./ShareFileModal", () => ({
+  ShareFileModal: ({ open, node }: { open: boolean; node: { id: string } }) => {
+    if (!open) return null;
+    share.nodeId = node.id;
+    return createElement("div", { role: "dialog", "aria-label": "共享文件" });
   },
 }));
 
@@ -86,6 +94,27 @@ describe("SharedWithMePanel", () => {
     cleanup();
     detail.nodeId = "";
     detail.projectionOnly = false;
+    share.nodeId = "";
+  });
+
+  it("renders reshare only when the projection has effective SHARE", () => {
+    const denied = item(1, "WORKSPACE");
+    const allowed = {
+      ...item(2, "USER"),
+      effective_actions: ["READ", "SHARE"] as SharedItemVM["effective_actions"],
+    };
+    render(createElement(SharedWithMePanel, {
+      workspaceId: "workspace-1",
+      organizationId: "organization-1",
+      organizationLabel: "星火科技",
+      workspaceLabel: "研发平台",
+      items: [denied, allowed],
+      state: "ready",
+    }));
+
+    expect(screen.queryByRole("button", { name: `共享 ${denied.node.name}` })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: `共享 ${allowed.node.name}` }));
+    expect(share.nodeId).toBe(allowed.node.id);
   });
 
   it("groups shared projections by source and shows authorized metadata", () => {

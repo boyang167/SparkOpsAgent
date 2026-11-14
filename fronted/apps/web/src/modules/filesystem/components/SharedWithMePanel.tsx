@@ -2,7 +2,9 @@
 
 import { createElement, useEffect, useState } from "react";
 import type { SharedItemVM } from "@sparkops/contracts/filesystem";
+import type { WorkspaceMemberVM } from "@sparkops/contracts/governance";
 import { FileDetailDrawer } from "./FileDetailDrawer";
+import { ShareFileModal } from "./ShareFileModal";
 
 export type SharedWithMePanelProps = {
   workspaceId: string;
@@ -12,6 +14,8 @@ export type SharedWithMePanelProps = {
   source?: "organization" | "workspace" | "user" | "agent";
   items: SharedItemVM[];
   state: "loading" | "ready" | "empty" | "error" | "forbidden";
+  members?: WorkspaceMemberVM[];
+  memberDirectoryAvailable?: boolean;
 };
 
 const groups = [
@@ -144,6 +148,8 @@ export function SharedWithMePanel({
   source,
   items,
   state,
+  members = [],
+  memberDirectoryAvailable = false,
 }: SharedWithMePanelProps) {
   const [selection, setSelection] = useState<{
     scopeKey: string;
@@ -151,6 +157,7 @@ export function SharedWithMePanel({
     nodeId: string;
   } | null>(null);
   const scopeKey = `${workspaceId}:${source ?? "all"}`;
+  const [shareSelection, setShareSelection] = useState<SharedItemVM | null>(null);
   const selected =
     selection?.scopeKey === scopeKey
       ? items.find(
@@ -245,6 +252,20 @@ export function SharedWithMePanel({
                   },
                   "查看详情",
                 ),
+                item.effective_actions.includes("SHARE")
+                  ? createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "btn btn-ghost btn-sm filesystem-touch-target",
+                        "aria-label": `共享 ${item.node.name}`,
+                        onClick: () => {
+                          if (item.effective_actions.includes("SHARE")) setShareSelection(item);
+                        },
+                      },
+                      "共享",
+                    )
+                  : null,
               ),
               createElement(
                 "dl",
@@ -318,6 +339,20 @@ export function SharedWithMePanel({
             { label: "原路径", value: selected.original_path },
           ],
           onClose: () => setSelection(null),
+        })
+      : null,
+    shareSelection && organizationId
+      ? createElement(ShareFileModal, {
+          open: true,
+          node: shareSelection.node,
+          organizationId,
+          organizationLabel,
+          workspaceId,
+          workspaceLabel,
+          members,
+          memberDirectoryAvailable,
+          effectiveActions: shareSelection.effective_actions,
+          onClose: () => setShareSelection(null),
         })
       : null,
   );

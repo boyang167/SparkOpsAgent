@@ -11,6 +11,7 @@ import type {
   FileNodeVM,
   FileRevisionPageVM,
   GovernedChildrenQuery,
+  GovernedGrantPageVM,
   GovernedShareSubmissionVM,
   EffectiveAccessVM,
   LifecyclePolicyPageVM,
@@ -21,6 +22,7 @@ import type {
   StoragePoolPageVM,
   StorageProviderPageVM,
   SharedItemPageVM,
+  ShareRequestPageVM,
   SharedWithMeQuery,
   UpdateStoragePoolCommand,
   UpdateStorageProviderCommand,
@@ -173,6 +175,26 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
     getEffectiveAccess(context: GovernedFilesystemContext, nodeId: string) {
       return upstreamFetch<EffectiveAccessVM>(
         `/api/v1/filesystem/nodes/${encodeURIComponent(nodeId)}/effective-access`,
+        {
+          method: "GET",
+          headers: governedHeaders(context),
+          options: governedOptions(options, context),
+        },
+      );
+    },
+    listGovernedGrants(context: GovernedFilesystemContext, nodeId: string) {
+      return upstreamFetch<GovernedGrantPageVM>(
+        `/api/v1/filesystem/nodes/${encodeURIComponent(nodeId)}/grants`,
+        {
+          method: "GET",
+          headers: governedHeaders(context),
+          options: governedOptions(options, context),
+        },
+      );
+    },
+    listShareRequests(context: GovernedFilesystemContext, nodeId: string) {
+      return upstreamFetch<ShareRequestPageVM>(
+        `/api/v1/filesystem/nodes/${encodeURIComponent(nodeId)}/share-requests`,
         {
           method: "GET",
           headers: governedHeaders(context),

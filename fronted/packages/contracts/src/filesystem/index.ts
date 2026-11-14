@@ -103,6 +103,7 @@ export const FileNodeVMSchema = z.object({
   current_revision_id: z.string().uuid().nullable(),
   state: FileNodeStateSchema,
   owner_id: z.string().uuid(),
+  classification: TransferClassificationSchema.optional(),
 });
 
 export type FileNodeVM = z.infer<typeof FileNodeVMSchema>;
@@ -428,12 +429,15 @@ export const GovernedGrantVMSchema = z.object({
   principal_id: z.string().uuid(),
   permission: GovernedPermissionSchema,
   effect: GrantEffectSchema,
+  inherit_to_children: z.boolean().optional(),
+  source: z.enum(["DIRECT", "INHERITED"]).optional(),
   expires_at: z.string().datetime({ offset: true }).nullable().optional(),
 });
 export type GovernedGrantVM = z.infer<typeof GovernedGrantVMSchema>;
 
 export const GovernedGrantPageVMSchema = z.object({
   items: z.array(GovernedGrantVMSchema),
+  classification: TransferClassificationSchema.optional(),
 });
 export type GovernedGrantPageVM = z.infer<typeof GovernedGrantPageVMSchema>;
 
@@ -534,6 +538,11 @@ export const ShareRequestVMSchema = z.object({
   created_at: z.string().datetime({ offset: true }),
 });
 export type ShareRequestVM = z.infer<typeof ShareRequestVMSchema>;
+
+export const ShareRequestPageVMSchema = z.object({
+  items: z.array(ShareRequestVMSchema),
+});
+export type ShareRequestPageVM = z.infer<typeof ShareRequestPageVMSchema>;
 
 export const GovernedShareResultVMSchema = z.object({
   request: ShareRequestVMSchema,

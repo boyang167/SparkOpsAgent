@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import type { DragEvent } from "react";
-import type { FileNodeVM } from "@sparkops/contracts/filesystem";
+import type { FileNodeVM, GovernedPermission } from "@sparkops/contracts/filesystem";
 import { FileActionMenu } from "./FileActionMenu";
 
 export type FileGridViewProps = {
@@ -14,6 +14,9 @@ export type FileGridViewProps = {
   onDragEnd: () => void;
   canRename: boolean;
   canMove: boolean;
+  organizationId?: string;
+  workspaceId?: string;
+  onShare?: (node: FileNodeVM, effectiveActions: GovernedPermission[]) => void;
 };
 
 export function FileGridView({
@@ -27,6 +30,9 @@ export function FileGridView({
   onDragEnd,
   canRename,
   canMove,
+  organizationId,
+  workspaceId,
+  onShare,
 }: FileGridViewProps) {
   return createElement(
     "ul",
@@ -79,6 +85,9 @@ export function FileGridView({
             node,
             canRename: canRename && node.state === "ACTIVE",
             canMove: canMove && node.state === "ACTIVE",
+            organizationId,
+            workspaceId,
+            onShare,
             onRename,
             onMove,
           }),

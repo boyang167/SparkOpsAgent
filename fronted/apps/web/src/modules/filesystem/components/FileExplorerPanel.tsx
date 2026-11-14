@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { FileNodeVM } from "@sparkops/contracts/filesystem";
+import type { FileNodeVM, GovernedPermission } from "@sparkops/contracts/filesystem";
 import { createDirectoryNode } from "@sparkops/web-sdk/filesystem";
 import { FileBrowser } from "./FileBrowser";
 import { createPanelRenameHandler, submitPanelRename } from "./file-explorer-panel-rename";
@@ -32,6 +32,8 @@ export type FileExplorerPanelProps = {
   onNavigate?: () => void;
   onOpen?: (node: FileNodeVM) => void;
   canWrite?: boolean;
+  organizationId?: string;
+  onShare?: (node: FileNodeVM, effectiveActions: GovernedPermission[]) => void;
 };
 
 export function FileExplorerPanel({
@@ -49,6 +51,8 @@ export function FileExplorerPanel({
   onNavigate,
   onOpen,
   canWrite = true,
+  organizationId,
+  onShare,
 }: FileExplorerPanelProps) {
   const router = useRouter();
   const [nodes, setNodes] = useState(initialNodes);
@@ -186,6 +190,8 @@ export function FileExplorerPanel({
         onMove={(moveNodes) => onMove?.(moveNodes)}
         canRename={canWrite}
         canMove={canMove && Boolean(onMove)}
+        organizationId={organizationId}
+        onShare={onShare}
       />
 
       {dialog?.type === "rename" ? (
