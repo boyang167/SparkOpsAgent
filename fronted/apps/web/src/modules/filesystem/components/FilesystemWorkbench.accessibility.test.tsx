@@ -128,6 +128,18 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
     expect(screen.getAllByRole("tab").every((tab) =>
       tab.classList.contains("filesystem-touch-target"),
     )).toBe(true);
+    expect(screen.getByRole("button", { name: "切换到列表视图" })).toHaveClass(
+      "filesystem-touch-target",
+    );
+    expect(screen.getByRole("button", { name: "切换到网格视图" })).toHaveClass(
+      "filesystem-touch-target",
+    );
+    expect(screen.getByRole("button", { name: "打开目录" })).toHaveClass(
+      "filesystem-touch-target",
+    );
+    expect(screen.getByRole("button", { name: "展开 全部文件" })).toHaveClass(
+      "filesystem-touch-target",
+    );
     expect(container.querySelector(".filesystem-browser-main")).toHaveAttribute(
       "aria-labelledby",
       "workbench-tab-files",
@@ -155,7 +167,18 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
     expect(listCheckbox).toHaveClass("filesystem-selection-checkbox");
     expect(listCheckbox.parentElement).toHaveClass("filesystem-selection-target");
     fireEvent.click(listCheckbox.parentElement!);
-    fireEvent.click(screen.getByRole("button", { name: "移动所选 1 项到…" }));
+    const selectedMove = screen.getByRole("button", { name: "移动所选 1 项到…" });
+    expect(selectedMove).toHaveClass("filesystem-touch-target");
+    expect(screen.getByRole("button", { name: "打开 报告.md" })).toHaveClass(
+      "filesystem-touch-target",
+    );
+    expect(screen.getByRole("button", { name: "重命名 报告.md" })).toHaveClass(
+      "filesystem-touch-target",
+    );
+    expect(screen.getByRole("button", { name: "移动到… 报告.md" })).toHaveClass(
+      "filesystem-touch-target",
+    );
+    fireEvent.click(selectedMove);
     expect(onMove).toHaveBeenCalledWith([file]);
 
     rendered.rerender(createElement(FileBrowser, { ...common, view: "grid" }));
@@ -180,6 +203,9 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
       }),
     );
     expect(screen.getByRole("button", { name: "上传文件" })).toHaveClass("btn-primary");
+    expect(screen.getByRole("button", { name: "上传文件" })).toHaveClass(
+      "filesystem-touch-target",
+    );
 
     rendered.rerender(
       createElement(SelectableUploadPanel, {
@@ -204,6 +230,9 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
       "utf8",
     );
     expect(explorerSource).toContain('emphasis={dialog ? "secondary" : "primary"}');
+    expect(explorerSource).toMatch(
+      /className="btn btn-secondary filesystem-touch-target"[\s\S]{0,180}showCreateDialog\(\)/,
+    );
     expect(poolSource).toContain("dialogOpen={providerOpen || poolOpen}");
     expect(bindingSource).toContain('className={open ? "btn btn-secondary" : "btn btn-primary"}');
   });

@@ -29,6 +29,12 @@ describe("GovernanceWorkspace", () => {
       }),
     );
 
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(
+      screen
+        .getAllByRole("tab")
+        .every((tab) => tab.classList.contains("filesystem-touch-target")),
+    ).toBe(true);
     expect(screen.getByText("Provider 与存储池内容")).toBeInTheDocument();
     expect(screen.queryByText("作用域绑定内容")).not.toBeInTheDocument();
     expect(screen.queryByText("生命周期策略内容")).not.toBeInTheDocument();

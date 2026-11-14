@@ -154,7 +154,10 @@ export function FileDetailDrawer({
           "aria-selected": tab === id,
           "aria-controls": panelID(id),
           tabIndex: tab === id ? 0 : -1,
-          className: tab === id ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm",
+          className:
+            tab === id
+              ? "btn btn-secondary btn-sm filesystem-touch-target"
+              : "btn btn-ghost btn-sm filesystem-touch-target",
           onClick: () => setTab(id),
           onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) =>
             onTabKeyDown(event, index),

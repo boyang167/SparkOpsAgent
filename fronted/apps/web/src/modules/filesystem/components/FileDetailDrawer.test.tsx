@@ -245,6 +245,12 @@ describe("FileDetailDrawer", () => {
     render(drawer());
     const detailTab = screen.getByRole("tab", { name: "详情" });
     const revisionTab = screen.getByRole("tab", { name: "版本" });
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(
+      screen
+        .getAllByRole("tab")
+        .every((tab) => tab.classList.contains("filesystem-touch-target")),
+    ).toBe(true);
     expect(detailTab).toHaveAttribute("tabindex", "0");
     expect(revisionTab).toHaveAttribute("tabindex", "-1");
     expect(detailTab).toHaveAttribute("aria-controls");

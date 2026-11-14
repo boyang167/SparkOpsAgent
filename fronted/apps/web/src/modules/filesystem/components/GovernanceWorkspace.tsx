@@ -54,7 +54,9 @@ export function GovernanceWorkspace({
             role: "tab",
             "aria-selected": section === item.id,
             className:
-              section === item.id ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm",
+              section === item.id
+                ? "btn btn-secondary btn-sm filesystem-touch-target"
+                : "btn btn-ghost btn-sm filesystem-touch-target",
             onClick: () => setSection(item.id),
           },
           item.label,

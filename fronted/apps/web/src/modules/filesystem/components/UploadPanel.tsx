@@ -37,7 +37,7 @@ export function UploadPanel({
       "button",
       {
         type: "button",
-        className: `btn btn-${emphasis}`,
+        className: `btn btn-${emphasis} filesystem-touch-target`,
         disabled,
         onClick: () => inputRef.current?.click(),
       },

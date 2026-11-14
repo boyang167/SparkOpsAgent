@@ -2,7 +2,7 @@
 
 ## 状态
 
-Task 8 代码与自动验收完成。未启动或重启根工作区服务，未生成 review package；浏览器手工矩阵保持 SKIP / PENDING，实时容量曲线明确不在范围。
+Task 8 代码与自动验收完成。未启动或重启根工作区服务；浏览器手工矩阵保持 SKIP / PENDING，实时容量曲线明确不在范围。
 
 ## TDD 记录
 
@@ -113,3 +113,36 @@ Task 8 代码与自动验收完成。未启动或重启根工作区服务，未�
 - 文件 tab：无编辑面板时“上传文件”为唯一 primary；新建/重命名面板打开后上传降为 secondary，面板提交成为唯一 primary。
 - 治理 tab：Provider/存储池默认仅“新增存储池”为 primary；任一 Modal 打开后背景触发器降为 secondary，Modal 提交成为唯一 primary。作用域绑定同理；传输、审计无 competing primary，生命周期仅保存动作使用 primary。
 - tabs、视图切换、目录入口、树展开和文件操作均有至少 44px 触控目标。列表/网格 checkbox 保持 16px 视觉尺寸，由 44px `label` 扩大点击区域，label 点击行为由 DOM 测试验证。
+
+---
+
+## 剩余核心触控目标修复追加
+
+### RED
+
+运行：
+`pnpm vitest run apps/web/src/modules/filesystem/components/FilesystemWorkbench.accessibility.test.tsx apps/web/src/modules/filesystem/components/FileDetailDrawer.test.tsx apps/web/src/modules/filesystem/components/GovernanceWorkspace.test.tsx`
+
+- 退出码 1；3 files 中各有 1 项失败，合计 3 failed / 10 passed。
+- 失败具体对应：UploadPanel 上传按钮缺少 44px utility；FileDetailDrawer 的 3 个内层 tabs 缺少该 utility；GovernanceWorkspace 的 3 个 tabs 缺少该 utility。
+- FileExplorerPanel 新建目录按钮由源码契约测试单独定位（该 JSX panel 在现有 Vitest 工具链中不能直接组件渲染）；同级打开、选择、重命名、单项移动和多选移动均由 FileBrowser DOM 测试逐项检查。
+
+### GREEN
+
+1. Task 8 定向：
+   - 上述命令退出码 0；3 files / 13 tests。
+2. Filesystem 完整矩阵：
+   `pnpm vitest run apps/web/src/modules/filesystem packages/web-sdk/src/filesystem.test.ts`
+   - 退出码 0；19 files / 132 tests。
+3. `pnpm typecheck`
+   - 退出码 0；6 packages。
+4. IDE diagnostics
+   - 本次修改范围无 linter errors。
+
+### 已自动覆盖的核心交互清单
+
+- DOM：工作台一级 tabs、列表/网格切换、移动端目录入口、目录树展开、上传按钮。
+- DOM：列表/网格选择 label、文件打开、重命名、单项“移动到…”、多选“移动到…”。
+- DOM：FileDetailDrawer 详情/版本/审计 tabs；GovernanceWorkspace 三个二级 tabs。
+- 源码契约：FileExplorerPanel 新建目录按钮应用 `filesystem-touch-target`。
+- CSS 契约：`filesystem-touch-target` 的 `min-height` 与 `min-width` 均为 `2.75rem`；未声明所有 Task 8 按钮均已覆盖，只声明上述清单中的核心交互。

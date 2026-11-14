@@ -137,7 +137,7 @@ export function FileExplorerPanel({
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          className="btn btn-secondary"
+          className="btn btn-secondary filesystem-touch-target"
           onClick={() => {
             setDialog(showCreateDialog());
             setCreateName("");
