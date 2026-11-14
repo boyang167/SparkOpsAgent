@@ -303,6 +303,8 @@ func TestFilesystemSpecificationExactlyMatchesRouter(t *testing.T) {
 		path = strings.ReplaceAll(path, ":grantId", "{grantId}")
 		path = strings.ReplaceAll(path, ":capabilityId", "{capabilityId}")
 		path = strings.ReplaceAll(path, ":exportId", "{exportId}")
+		path = strings.ReplaceAll(path, ":providerId", "{providerId}")
+		path = strings.ReplaceAll(path, ":poolId", "{poolId}")
 		actual[route.Method+" "+path] = true
 	}
 	require.Equal(t, spec, actual)

@@ -35,4 +35,11 @@
 
 ## Concerns
 
-- 完整 `go test ./api/openapi -count=1` 仍有且仅有既有 `TestFilesystemSpecificationExactlyMatchesRouter` 失败：在指定 Base commit `b094ee35e5648d2c70d94d96d621e057f777ebca` 中，`handler.go` 已注册 storage provider/pool PATCH/DELETE 四条路由，而同 commit 的 OpenAPI fragment 不含对应 path。Task 5 先前新增的 ignore 已撤回；按审查要求未修改这些非本任务 mutation 契约。
+- 无。
+
+## Pre-existing baseline contract repair
+
+- 在指定 Base commit `b094ee35e5648d2c70d94d96d621e057f777ebca` 中，运行时已注册 storage provider/pool PATCH/DELETE 四条路由，但同 commit 的 OpenAPI fragment 与根文档缺少对应 path。
+- 复审前单独补齐了这四条既有路由、path parameters 及与当前 handler 一致的请求/响应 schema，并保留 exact router/spec 校验；这属于既有基线契约修复，不归因于 Task 5 统一读取 API 功能。
+- RED：`go test ./api/openapi -count=1` 仅因四条路由缺失失败。
+- GREEN：完整 OpenAPI、完整 filesystem 与 `git diff --check` 均通过。
