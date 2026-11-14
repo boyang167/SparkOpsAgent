@@ -91,7 +91,10 @@ func isWorkspaceFilesystemAPI(path string) bool {
 		return false
 	}
 	switch parts[1] {
-	case "files", "directories", "namespaces", "transfers":
+	case "files", "directories", "namespaces", "transfers",
+		"storage-providers", "storage-pools", "storage-bindings",
+		"lifecycle-policies", "filesystem-audits", "artifacts",
+		"capabilities", "exports":
 		return true
 	default:
 		return false

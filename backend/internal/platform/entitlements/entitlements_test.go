@@ -32,6 +32,11 @@ func TestFilesystemFeaturePrecedence(t *testing.T) {
 	}
 }
 
+func TestFilesystemMenuPathEntitlement(t *testing.T) {
+	require.Equal(t, "filesystem", PathEntitlement("/files"))
+	require.Equal(t, "filesystem", PathEntitlement("/files/node-1"))
+}
+
 func TestWorkspaceEntitlementsUnmarshalMergesIntoExistingDefaults(t *testing.T) {
 	ents := Default()
 	ents.Agent = false
