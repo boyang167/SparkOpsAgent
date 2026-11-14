@@ -1,7 +1,7 @@
 export type WorkbenchTab = "files" | "transfers" | "governance" | "audit";
 export type FileView = "list" | "grid";
 export type FileSpace = "my" | "workspace" | "organization" | "shared";
-export type SharedSource = "my" | "workspace" | "organization";
+export type SharedSource = "organization" | "workspace" | "user" | "agent";
 
 export type WorkbenchState = {
   tab: WorkbenchTab;
@@ -35,7 +35,7 @@ export function parseWorkbenchState(input: Record<string, SearchParamValue>): Pa
     ? (requestedSpace as FileSpace)
     : "workspace";
   const requestedSource = firstValue(input.source);
-  const sources: SharedSource[] = ["my", "workspace", "organization"];
+  const sources: SharedSource[] = ["organization", "workspace", "user", "agent"];
   const source =
     space === "shared" && sources.includes(requestedSource as SharedSource)
       ? (requestedSource as SharedSource)

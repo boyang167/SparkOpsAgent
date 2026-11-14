@@ -53,5 +53,8 @@ describe("parseWorkbenchState", () => {
       space: "my",
       source: undefined,
     });
+    expect(parseWorkbenchState({ space: "shared", source: "user" }).source).toBe("user");
+    expect(parseWorkbenchState({ space: "shared", source: "agent" }).source).toBe("agent");
+    expect(parseWorkbenchState({ space: "shared", source: "my" }).source).toBeUndefined();
   });
 });

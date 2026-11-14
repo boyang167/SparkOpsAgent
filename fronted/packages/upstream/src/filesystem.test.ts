@@ -130,12 +130,17 @@ describe("filesystem upstream", () => {
     };
 
     await upstream.listGovernedNamespaces(context);
-    await upstream.listSharedWithMe(context, { q: "共享 文档", cursor: "opaque+/=", limit: 10 });
+    await upstream.listSharedWithMe(context, {
+      source_type: "agent",
+      q: "共享 文档",
+      cursor: "opaque+/=",
+      limit: 10,
+    });
     await upstream.getEffectiveAccess(context, "node/with space");
 
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/v1/filesystem/namespaces");
     expect(fetchMock.mock.calls[1]?.[0]).toContain(
-      "/api/v1/filesystem/shared-with-me?q=%E5%85%B1%E4%BA%AB+%E6%96%87%E6%A1%A3&cursor=opaque%2B%2F%3D&limit=10",
+      "/api/v1/filesystem/shared-with-me?source_type=agent&q=%E5%85%B1%E4%BA%AB+%E6%96%87%E6%A1%A3&cursor=opaque%2B%2F%3D&limit=10",
     );
     expect(fetchMock.mock.calls[2]?.[0]).toContain(
       "/api/v1/filesystem/nodes/node%2Fwith%20space/effective-access",

@@ -28,6 +28,7 @@ export function FileSpaceNav({
   workspaceId,
   view,
   currentId,
+  canWrite = false,
   onNavigate = () => undefined,
   onDropNodes = () => undefined,
 }: {
@@ -38,6 +39,7 @@ export function FileSpaceNav({
   workspaceId: string;
   view: FileView;
   currentId?: string;
+  canWrite?: boolean;
   onNavigate?: (node: FileNodeVM) => void;
   onDropNodes?: (nodeIds: string[], target: FileNodeVM) => void;
 }) {
@@ -91,7 +93,7 @@ export function FileSpaceNav({
           currentId: currentId ?? root.id,
           onNavigate,
           onDropNodes,
-          canWrite: namespace!.capabilities.includes("WRITE"),
+          canWrite,
         })
       : null,
   );

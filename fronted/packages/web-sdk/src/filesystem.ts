@@ -102,6 +102,7 @@ type GovernedChildrenQuery = {
 };
 
 type SharedWithMeQuery = {
+  sourceType?: "organization" | "workspace" | "user" | "agent";
   query?: string;
   cursor?: string;
   limit?: number;
@@ -136,6 +137,7 @@ function governedChildrenSearch(query: GovernedChildrenQuery = {}) {
 
 function sharedWithMeSearch(query: SharedWithMeQuery = {}) {
   const params = new URLSearchParams();
+  if (query.sourceType) params.set("source_type", query.sourceType);
   if (query.query) params.set("q", query.query);
   if (query.cursor) params.set("cursor", query.cursor);
   if (query.limit != null) params.set("limit", String(query.limit));

@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
     const search = req.nextUrl.searchParams;
     const rawLimit = search.get("limit");
     const query = SharedWithMeQuerySchema.parse({
+      source_type: search.get("source_type") || undefined,
       q: search.get("q") || undefined,
       cursor: search.get("cursor") || undefined,
       limit: rawLimit == null ? undefined : Number(rawLimit),

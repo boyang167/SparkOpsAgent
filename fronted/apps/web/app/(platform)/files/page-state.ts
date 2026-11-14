@@ -35,7 +35,7 @@ export function fileSpacePath(
     space,
     source:
       space === "shared" &&
-      ["my", "workspace", "organization"].includes(requestedSource ?? "")
+      ["organization", "workspace", "user", "agent"].includes(requestedSource ?? "")
         ? (requestedSource as SharedSource)
         : undefined,
     parent: undefined,

@@ -37,3 +37,36 @@
 
 - 未连接真实后端进行浏览器端端到端验证。
 - Task 10 才负责共享与多 Namespace 的正式浏览表格，本任务仅显示明确加载/空/错误状态。
+
+## 首轮审查修复
+
+- 修复起点：`a28ec72f21fd4e2468b0dc3dc2dbaa64e6d9e2a1`。
+- `shared` source 白名单与 transport 统一为
+  `organization / workspace / user / agent`，并以 `source_type` 精确转发
+  loader、Next BFF、web-sdk 和 upstream。
+- 节点详情加载后校验 `node.namespace_id` 必须等于当前解析出的真实
+  Namespace；跨 Namespace 节点按 `not-found` 处理。
+- 旧 workspace mutation 链路增加组合门禁：当前空间和 summary 均为当前
+  Workspace Namespace、summary 包含 `WRITE`、全局权限包含 `file:write`
+  时，才允许 upload/create/move/drag。
+- 删除 Namespace 变化时主动清理 URL 的 effect；服务端确认的
+  `parent / node / cursor` 在 history-like rerender 中保持，主动切空间仍由
+  URL builder 清理这些参数并保留 `view`。
+
+### 审查修复 TDD 与验证
+
+- RED：7 个聚焦测试文件共观察到 13 个预期失败，分别覆盖 source 转发、
+  跨 Namespace 节点、旧写入口和 history 状态。
+- `pnpm vitest run "apps/web/src/modules/filesystem/components/workbench-state.test.ts" "apps/web/app/(platform)/files/page-state.test.ts" "apps/web/src/server/loaders/filesystem.test.ts" "apps/web/src/modules/filesystem/components/FilesystemWorkbench.test.tsx" "packages/web-sdk/src/filesystem.test.ts" "packages/upstream/src/filesystem.test.ts" "apps/web/app/api/bff/v1/filesystem/governed-routes.test.ts"`
+  - 7 个文件、88 个测试通过。
+- `pnpm vitest run "apps/web/src/modules/filesystem" "apps/web/src/server/loaders/filesystem.test.ts" "apps/web/app/(platform)/files/page-state.test.ts" "apps/web/app/api/bff/v1/filesystem/governed-routes.test.ts" "packages/web-sdk/src/filesystem.test.ts" "packages/upstream/src/filesystem.test.ts"`
+  - 26 个文件、201 个测试通过，包含 accessibility。
+- `pnpm typecheck`
+  - 6 个 workspace package 全部通过，无缓存复用。
+- IDE lint 与 `git diff --check`
+  - 无诊断、无 whitespace 错误。
+
+### 审查修复未验证项
+
+- 未执行真实后端端到端浏览器验证。
+- 未实现 Task 10 的多 Namespace 完整浏览、拖拽或 shared panel。

@@ -73,7 +73,7 @@ export async function loadSharedFileItems(
   organizationId: string,
   workspaceId: string | undefined,
   query: {
-    source?: "my" | "workspace" | "organization";
+    source?: "organization" | "workspace" | "user" | "agent";
     cursor?: string;
     query?: string;
     limit?: number;
@@ -81,6 +81,7 @@ export async function loadSharedFileItems(
 ): Promise<SharedItemPageVM> {
   const ctx = await loadBffContext(workspaceId);
   return listSharedWithMe(ctx, organizationId, workspaceId, {
+    source_type: query.source,
     cursor: query.cursor,
     q: query.query,
     limit: query.limit,
@@ -123,10 +124,14 @@ export function isInvalidFilesystemScopeError(error: unknown): boolean {
 }
 
 export async function resolveFileNodeSelection(
+  namespaceId: string,
   load: () => Promise<FileNodeVM>,
 ): Promise<FileNodeSelection> {
   try {
-    return { node: await load() };
+    const node = await load();
+    return node.namespace_id === namespaceId
+      ? { node }
+      : { error: "not-found" };
   } catch (error) {
     if (error instanceof BffError && error.status === 403) return { error: "forbidden" };
     if (error instanceof BffError && error.status === 404) return { error: "not-found" };

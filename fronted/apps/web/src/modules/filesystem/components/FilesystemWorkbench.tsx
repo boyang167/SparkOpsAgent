@@ -103,43 +103,9 @@ export function FilesystemWorkbench({
   const router = useRouter();
   const searchParams = useSearchParams();
   const scopeKey = `${workspaceId}:${namespace.id}:${namespace.root_node_id ?? ""}`;
-  const scopeKeyRef = useRef(scopeKey);
-  const scopeCleanupRef = useRef<{
-    key: string;
-    parent?: string;
-    node?: string;
-    cursor?: string;
-  } | null>(null);
-  const scopeChanged = scopeKeyRef.current !== scopeKey;
-  if (scopeChanged) {
-    scopeCleanupRef.current = {
-      key: scopeKey,
-      parent: initialState.parent,
-      node: initialState.node,
-      cursor: initialState.cursor,
-    };
-  }
-  const cleanup =
-    scopeCleanupRef.current?.key === scopeKey ? scopeCleanupRef.current : null;
-  const staleParent = Boolean(
-    cleanup?.parent && cleanup.parent === initialState.parent,
-  );
-  const staleNode = Boolean(cleanup?.node && cleanup.node === initialState.node);
-  const staleCursor = Boolean(
-    cleanup?.cursor && cleanup.cursor === initialState.cursor,
-  );
-  const effectiveState = {
-    ...initialState,
-    parent: staleParent ? undefined : initialState.parent,
-    node: staleNode ? undefined : initialState.node,
-    cursor: staleCursor ? undefined : initialState.cursor,
-  };
-  const scopedInitialSelectedNode = staleNode
-    ? undefined
-    : initialSelectedNode;
-  const scopedInitialSelectedNodeError = staleNode
-    ? undefined
-    : initialSelectedNodeError;
+  const effectiveState = initialState;
+  const scopedInitialSelectedNode = initialSelectedNode;
+  const scopedInitialSelectedNodeError = initialSelectedNodeError;
   const [view, setView] = useState<FileView>(initialState.view);
   const [searchValue, setSearchValue] = useState(initialState.query);
   const cursorTrail = useRef<string[]>([]);
@@ -179,17 +145,6 @@ export function FilesystemWorkbench({
       error: scopedInitialSelectedNodeError,
     });
   }, [scopedInitialSelectedNode, scopedInitialSelectedNodeError, serverSelectionKey]);
-  useLayoutEffect(() => {
-    if (scopeKeyRef.current === scopeKey) return;
-    scopeKeyRef.current = scopeKey;
-    setView(initialState.view);
-    const nextSearchParams = new URLSearchParams(searchParams.toString());
-    nextSearchParams.delete("parent");
-    nextSearchParams.delete("node");
-    nextSearchParams.delete("cursor");
-    const query = nextSearchParams.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname);
-  }, [initialState.view, pathname, router, scopeKey, searchParams]);
   useLayoutEffect(() => {
     setSearchValue(initialState.query);
     const cursorScope = `${scopeKey}:${initialState.parent ?? ""}:${initialState.query}`;
@@ -367,6 +322,15 @@ export function FilesystemWorkbench({
   const activeTab = visibleTabs.some((tab) => tab.id === effectiveState.tab)
     ? effectiveState.tab
     : "files";
+  const legacyWorkspaceWriteEnabled =
+    permissions.includes("file:write") &&
+    (!fileSpace && !namespaceSummary
+      ? true
+      : fileSpace === "workspace" &&
+        namespaceSummary?.namespace_type === "WORKSPACE" &&
+        namespaceSummary.id === namespace.id &&
+        namespaceSummary.workspace_id === workspaceId &&
+        namespaceSummary.capabilities.includes("WRITE"));
 
   function selectTab(tab: WorkbenchTab) {
     const nextSearchParams = new URLSearchParams(searchParams.toString());
@@ -495,6 +459,7 @@ export function FilesystemWorkbench({
         workspaceId,
         view,
         currentId: effectiveState.parent ?? rootNode.id,
+        canWrite: legacyWorkspaceWriteEnabled,
         onNavigate: navigateDirectory,
         onDropNodes: (nodeIds: string[], target: FileNodeVM) => {
           void dropNodes(nodeIds, target);
@@ -510,7 +475,7 @@ export function FilesystemWorkbench({
       onDropNodes: (nodeIds: string[], target: FileNodeVM) => {
         void dropNodes(nodeIds, target);
       },
-      canWrite: permissions.includes("file:write"),
+      canWrite: legacyWorkspaceWriteEnabled,
     });
   }
 
@@ -567,11 +532,11 @@ export function FilesystemWorkbench({
           parentId: effectiveState.parent ?? namespace.root_node_id,
           initialNodes,
           view,
-          canWrite: permissions.includes("file:write"),
-          canMove: permissions.includes("file:write"),
+          canWrite: legacyWorkspaceWriteEnabled,
+          canMove: legacyWorkspaceWriteEnabled,
           onMove: setMoveNodes,
           onOpen: openNode,
-          onFilesSelected: permissions.includes("file:write")
+          onFilesSelected: legacyWorkspaceWriteEnabled
             ? (files: File[]) =>
                 transferQueue.enqueue(
                   files,
@@ -601,7 +566,7 @@ export function FilesystemWorkbench({
         targetName: "当前目录",
         canWrite:
           Boolean(effectiveState.parent ?? namespace.root_node_id) &&
-          permissions.includes("file:write"),
+          legacyWorkspaceWriteEnabled,
         onFiles: (files: File[], targetParentId: string) =>
           transferQueue.enqueue(files, targetParentId),
       },
@@ -738,7 +703,7 @@ export function FilesystemWorkbench({
               ? createElement(TransferCenter, {
                   queue: transferQueue,
                   workspaceId,
-                  canWrite: permissions.includes("file:write"),
+                  canWrite: legacyWorkspaceWriteEnabled,
                 })
               : tab.id === "governance"
                 ? createElement(GovernanceWorkspace, { workspaceId, permissions })

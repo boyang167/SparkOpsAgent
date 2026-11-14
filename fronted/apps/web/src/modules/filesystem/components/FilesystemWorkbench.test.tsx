@@ -26,6 +26,8 @@ const navigation = vi.hoisted(() => ({
 const explorer = vi.hoisted(() => ({
   views: [] as string[],
   canMoves: [] as boolean[],
+  canWrites: [] as boolean[],
+  uploadEnabled: [] as boolean[],
   parentIds: [] as string[],
   onOpen: undefined as undefined | ((node: FileNodeVM) => void),
 }));
@@ -116,16 +118,22 @@ vi.mock("./FileExplorerPanel", () => ({
   FileExplorerPanel: ({
     view,
     canMove,
+    canWrite,
     parentId,
     onOpen,
+    onFilesSelected,
   }: {
     view: string;
     canMove: boolean;
+    canWrite: boolean;
     parentId: string;
     onOpen?: (node: FileNodeVM) => void;
+    onFilesSelected?: (files: File[]) => void;
   }) => {
     explorer.views.push(view);
     explorer.canMoves.push(canMove);
+    explorer.canWrites.push(canWrite);
+    explorer.uploadEnabled.push(Boolean(onFilesSelected));
     explorer.parentIds.push(parentId);
     explorer.onOpen = onOpen;
     return null;
@@ -165,6 +173,24 @@ const namespaceB = {
   root_node_id: "00000000-0000-4000-8000-000000000023",
   status: "ACTIVE",
 };
+
+function namespaceSummary(
+  namespaceType: "WORKSPACE" | "ORGANIZATION",
+  capabilities: Array<"READ" | "WRITE">,
+) {
+  return {
+    id: namespace.id,
+    namespace_type: namespaceType,
+    organization_id: "00000000-0000-4000-8000-000000000004",
+    workspace_id: namespaceType === "WORKSPACE" ? namespace.workspace_id : null,
+    owner_user_id: null,
+    root_node_id: namespace.root_node_id,
+    status: "ACTIVE",
+    capabilities,
+    entry_node_ids: [],
+    entry_nodes_truncated: false,
+  };
+}
 
 const movableNode: FileNodeVM = {
   id: "00000000-0000-4000-8000-000000000011",
@@ -235,6 +261,8 @@ describe("FilesystemWorkbench", () => {
     navigation.searchParams = new URLSearchParams();
     explorer.views = [];
     explorer.canMoves = [];
+    explorer.canWrites = [];
+    explorer.uploadEnabled = [];
     explorer.parentIds = [];
     explorer.onOpen = undefined;
     directoryTree.roots = [];
@@ -343,7 +371,14 @@ describe("FilesystemWorkbench", () => {
     expect(screen.getByRole("dialog", { name: "文件详情" })).toHaveTextContent("B.md");
   });
 
-  it("normalizes stale parent node and cursor in the workspace switch frame", () => {
+  it("preserves server-confirmed parent node and cursor across history-like namespace changes", () => {
+    const nodeB = {
+      ...movableNode,
+      id: "00000000-0000-4000-8000-000000000031",
+      namespace_id: namespaceB.id,
+      parent_id: namespaceB.root_node_id,
+      name: "B.md",
+    };
     navigation.searchParams = new URLSearchParams(
       `parent=${namespace.root_node_id}&node=${movableNode.id}&cursor=old-cursor&view=grid`,
     );
@@ -369,22 +404,23 @@ describe("FilesystemWorkbench", () => {
       createElement(FilesystemWorkbench, {
         workspaceId: namespaceB.workspace_id,
         namespace: namespaceB,
-        initialNodes: [],
+        initialNodes: [nodeB],
+        initialSelectedNode: nodeB,
         initialState: {
           tab: "files",
           view: "grid",
           query: "",
-          parent: namespace.root_node_id,
-          node: movableNode.id,
-          cursor: "old-cursor",
+          parent: namespaceB.root_node_id,
+          node: nodeB.id,
+          cursor: "new-cursor",
         },
         permissions: ["file:read"],
       }),
     );
 
     expect(explorer.parentIds.at(-1)).toBe(namespaceB.root_node_id);
-    expect(screen.queryByRole("dialog", { name: "文件详情" })).not.toBeInTheDocument();
-    expect(navigation.replace).toHaveBeenCalledWith("/files?view=grid");
+    expect(screen.getByRole("dialog", { name: "文件详情" })).toHaveTextContent("B.md");
+    expect(navigation.replace).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -578,6 +614,34 @@ describe("FilesystemWorkbench", () => {
     expect(explorer.canMoves.at(-1)).toBe(true);
     expect(directoryTree.canWrites.at(-1)).toBe(true);
   });
+
+  it.each([
+    ["organization", namespaceSummary("ORGANIZATION", ["READ", "WRITE"]), false],
+    ["workspace", namespaceSummary("WORKSPACE", ["READ"]), false],
+    ["workspace", namespaceSummary("WORKSPACE", ["READ", "WRITE"]), true],
+  ] as const)(
+    "gates legacy writes for %s space with namespace capabilities",
+    (fileSpace, summary, expected) => {
+      render(
+        createElement(FilesystemWorkbench, {
+          workspaceId: namespace.workspace_id,
+          namespace,
+          namespaceSummary: summary,
+          fileSpace,
+          organizationLabel: "星火科技",
+          workspaceLabel: "研发平台",
+          initialNodes: [],
+          initialState: { tab: "files", view: "list", query: "", space: fileSpace },
+          permissions: ["file:read", "file:write"],
+        }),
+      );
+
+      expect(explorer.canWrites.at(-1)).toBe(expected);
+      expect(explorer.canMoves.at(-1)).toBe(expected);
+      expect(explorer.uploadEnabled.at(-1)).toBe(expected);
+      expect(directoryTree.canWrites.at(-1)).toBe(expected);
+    },
+  );
 
   it("executes a tree drop and refreshes the workbench", async () => {
     sdk.moveFileNode.mockResolvedValue(undefined);

@@ -150,7 +150,7 @@ describe("governed filesystem Next BFF routes", () => {
     mocks.listSharedWithMe.mockResolvedValue({ items: [], next_cursor: "" });
     const { GET } = await import("./shared-with-me/route");
     const req = request(
-      "/api/bff/v1/filesystem/shared-with-me?q=%E5%85%B1%E4%BA%AB&cursor=opaque%2B%2F%3D&limit=10",
+      "/api/bff/v1/filesystem/shared-with-me?source_type=agent&q=%E5%85%B1%E4%BA%AB&cursor=opaque%2B%2F%3D&limit=10",
       { organization: organizationId, workspace: workspaceId },
     );
 
@@ -160,7 +160,7 @@ describe("governed filesystem Next BFF routes", () => {
       expect.objectContaining({ workspaceId }),
       organizationId,
       workspaceId,
-      { q: "共享", cursor: "opaque+/=", limit: 10 },
+      { source_type: "agent", q: "共享", cursor: "opaque+/=", limit: 10 },
     );
   });
 

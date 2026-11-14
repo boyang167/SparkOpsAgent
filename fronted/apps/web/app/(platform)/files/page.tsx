@@ -238,7 +238,10 @@ export default async function FilesPage({
   }
   const listing = listingLoad.value;
   const selection = initialState.node
-    ? await resolveFileNodeSelection(() => loadFileNode(workspaceId, initialState.node!))
+    ? await resolveFileNodeSelection(
+        namespaceSummary.id,
+        () => loadFileNode(workspaceId, initialState.node!),
+      )
     : {};
   const namespace = {
     id: namespaceSummary.id,

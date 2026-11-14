@@ -541,6 +541,7 @@ export const GovernedChildrenQuerySchema = z.object({
 export type GovernedChildrenQuery = z.infer<typeof GovernedChildrenQuerySchema>;
 
 export const SharedWithMeQuerySchema = z.object({
+  source_type: z.enum(["organization", "workspace", "user", "agent"]).optional(),
   q: z.string().max(200).optional(),
   cursor: z.string().max(512).optional(),
   limit: z.number().int().positive().max(200).optional(),

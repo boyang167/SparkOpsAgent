@@ -40,9 +40,18 @@ const node: FileNodeVM = {
 
 describe("resolveFileNodeSelection", () => {
   it("returns a loaded node", async () => {
-    await expect(resolveFileNodeSelection(() => Promise.resolve(node))).resolves.toEqual({
+    await expect(resolveFileNodeSelection(node.namespace_id, () => Promise.resolve(node))).resolves.toEqual({
       node,
     });
+  });
+
+  it("rejects a node loaded from another namespace", async () => {
+    await expect(
+      resolveFileNodeSelection(
+        "00000000-0000-4000-8000-000000000099",
+        () => Promise.resolve(node),
+      ),
+    ).resolves.toEqual({ error: "not-found" });
   });
 
   it.each([
@@ -51,14 +60,14 @@ describe("resolveFileNodeSelection", () => {
     [500, "error"],
   ] as const)("maps a %s load failure into drawer state", async (status, error) => {
     await expect(
-      resolveFileNodeSelection(() =>
+      resolveFileNodeSelection(node.namespace_id, () =>
         Promise.reject(new BffError("failed", "FILESYSTEM_ERROR", status))),
     ).resolves.toEqual({ error });
   });
 
   it("maps an unknown load failure into a retryable drawer error", async () => {
     await expect(
-      resolveFileNodeSelection(() => Promise.reject(new Error("offline"))),
+      resolveFileNodeSelection(node.namespace_id, () => Promise.reject(new Error("offline"))),
     ).resolves.toEqual({ error: "error" });
   });
 });
@@ -103,9 +112,24 @@ describe("governed filesystem loaders", () => {
     await loadGovernedFileChildren("org-1", "workspace-1", "namespace-1", {
       parentId: "parent-1",
     });
-    await loadSharedFileItems("org-1", "workspace-1", { source: "organization" });
+    await loadSharedFileItems("org-1", "workspace-1", {
+      source: "agent",
+      cursor: "cursor-1",
+      query: "report",
+      limit: 25,
+    });
     expect(governed.children).toHaveBeenCalledTimes(1);
-    expect(governed.shared).toHaveBeenCalledTimes(1);
+    expect(governed.shared).toHaveBeenCalledWith(
+      {},
+      "org-1",
+      "workspace-1",
+      {
+        source_type: "agent",
+        cursor: "cursor-1",
+        q: "report",
+        limit: 25,
+      },
+    );
   });
 
   it.each([

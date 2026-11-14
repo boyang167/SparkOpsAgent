@@ -84,6 +84,7 @@ function governedChildrenQuery(query: GovernedChildrenQuery = {}) {
 
 function sharedWithMeQuery(query: SharedWithMeQuery = {}) {
   const params = new URLSearchParams();
+  if (query.source_type) params.set("source_type", query.source_type);
   if (query.q) params.set("q", query.q);
   if (query.cursor) params.set("cursor", query.cursor);
   if (query.limit != null) params.set("limit", String(query.limit));

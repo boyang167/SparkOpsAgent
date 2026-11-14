@@ -69,5 +69,11 @@ describe("normalizeFilesPageSearch", () => {
       source: undefined,
       query: "",
     }, "external")).toBe("/files?space=shared");
+    expect(fileSpacePath("shared", {
+      tab: "files",
+      view: "list",
+      space: "workspace",
+      query: "",
+    }, "agent")).toBe("/files?space=shared&source=agent");
   });
 });

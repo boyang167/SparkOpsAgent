@@ -402,7 +402,12 @@ describe("governed filesystem sdk", () => {
       },
       options,
     );
-    await listSharedWithMe({ query: "共享 文档", cursor: "opaque+/=", limit: 10 }, options);
+    await listSharedWithMe({
+      sourceType: "agent",
+      query: "共享 文档",
+      cursor: "opaque+/=",
+      limit: 10,
+    }, options);
     await getEffectiveAccess("node/with space", options);
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/bff/v1/filesystem/namespaces");
@@ -410,7 +415,7 @@ describe("governed filesystem sdk", () => {
       "/api/bff/v1/filesystem/namespaces/namespace%2Fwith%20space/children?parent_id=00000000-0000-4000-8000-000000000004&type=DIRECTORY&q=%E8%AE%BE%E8%AE%A1+%E6%96%87%E6%A1%A3&cursor=00000000-0000-4000-8000-000000000005&limit=20",
     );
     expect(fetchMock.mock.calls[2]?.[0]).toContain(
-      "/api/bff/v1/filesystem/shared-with-me?q=%E5%85%B1%E4%BA%AB+%E6%96%87%E6%A1%A3&cursor=opaque%2B%2F%3D&limit=10",
+      "/api/bff/v1/filesystem/shared-with-me?source_type=agent&q=%E5%85%B1%E4%BA%AB+%E6%96%87%E6%A1%A3&cursor=opaque%2B%2F%3D&limit=10",
     );
     expect(fetchMock.mock.calls[3]?.[0]).toBe(
       "/api/bff/v1/filesystem/nodes/node%2Fwith%20space/effective-access",
