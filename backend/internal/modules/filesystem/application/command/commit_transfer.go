@@ -79,9 +79,12 @@ func (h *CommitTransferHandler) Handle(ctx context.Context, cmd CommitTransfer) 
 		if session.Status() != model.TransferScanning {
 			return domain.ErrTransferStatusConflict
 		}
-		ns, nsErr := h.repo.GetNamespaceByWorkspace(txCtx, session.WorkspaceID())
+		ns, nsErr := h.repo.GetNamespace(txCtx, session.NamespaceID())
 		if nsErr != nil {
 			return nsErr
+		}
+		if ns.NamespaceType == model.NamespaceTypeWorkspace && ns.WorkspaceID != session.WorkspaceID() {
+			return domain.ErrNamespaceMismatch
 		}
 		now := time.Now().UTC()
 		version := session.Version()
@@ -147,7 +150,7 @@ func (h *CommitTransferHandler) Handle(ctx context.Context, cmd CommitTransfer) 
 		if err := h.repo.SetCurrentRevision(txCtx, nodeID, revisionID); err != nil {
 			return err
 		}
-		if err := h.repo.CommitQuotaReservation(txCtx, session.WorkspaceID(), session.ID()); err != nil {
+		if err := h.repo.CommitNamespaceQuotaReservation(txCtx, session.NamespaceID(), session.ID()); err != nil {
 			return err
 		}
 		if h.bus != nil {

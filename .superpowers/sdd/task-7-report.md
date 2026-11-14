@@ -216,3 +216,32 @@
 
 - Message: `fix(filesystem): support legacy audit allow`
 - Commit: 本追加报告所在提交。
+
+---
+
+## Task 7 Namespace 配额复审修复
+
+### 修复
+
+- 调整 `000086` up migration 顺序：先移除 quota account、transfer session、quota reservation 的 `workspace_id NOT NULL` 与旧复合 FK，再为 Organization/User Namespace 插入 `workspace_id = NULL` 的 quota account。
+- Transfer session 与 quota reservation 的 `workspace_id` 改为可空；`namespace_id` 成为幂等查找、配额预留和 reservation account FK 的真实隔离边界。
+- reservation 改为通过全局唯一 `session_id` 关联 transfer；新增 `(namespace_id, idempotency_key)` 唯一约束，保留旧 workspace 查询/API。
+- down migration 在存在非 Workspace transfer 或活跃配额时明确拒绝回滚；无活动数据时按 FK、索引、nullable、数据删除、旧约束恢复的安全顺序执行。
+- CreateTransfer 的 Organization/User 测试现在真实传入 `workspace_id = NULL`，并通过 SQLite repository 验证 session、quota account 和 reservation；Workspace Namespace 仍持久化 workspace 关联。
+- commit/abort 路径改为按 Namespace 提交或释放 reservation，兼容无 Workspace transfer。
+
+### 测试
+
+- `go test ./internal/modules/filesystem/application/command -run CreateTransfer -count=1`：PASS
+- `go test ./internal/modules/filesystem/infrastructure/persistence -run NamespaceQuotaReservationAllowsMissingWorkspace -count=1`：PASS
+- `go test ./internal/modules/filesystem/infrastructure/persistence -count=1`：PASS
+- `go test ./migrations/... -count=1`：PASS
+- `go test ./internal/modules/filesystem/... -count=1`：PASS
+- `go vet ./internal/modules/filesystem/...`：PASS
+- IDE lint：无错误
+- `.\scripts\dev-restart.ps1 -Backend`：PASS，后端 PID `2308`
+
+### Commit 与未验证项
+
+- Fix commit：本追加报告所在提交；精确 hash 记录在最终交付回复。
+- `DATABASE_DSN` 未设置，未执行真实 PostgreSQL up/down；migration 顺序测试、完整 migration 测试和 SQLite/fallback 行为测试已通过。

@@ -28,15 +28,15 @@ END
 $$;
 
 DROP INDEX IF EXISTS filesystem.ix_quota_reservations_namespace;
+DROP INDEX IF EXISTS filesystem.ux_quota_reservations_session;
 
 ALTER TABLE filesystem.quota_reservations
-    DROP CONSTRAINT IF EXISTS fk_quota_reservations_account_namespace;
+    DROP CONSTRAINT IF EXISTS fk_quota_reservations_account_namespace,
+    DROP CONSTRAINT IF EXISTS fk_quota_reservations_session;
 
 ALTER TABLE filesystem.transfer_sessions
     DROP CONSTRAINT IF EXISTS fk_transfer_sessions_namespace,
-    ADD CONSTRAINT fk_transfer_sessions_namespace_workspace
-        FOREIGN KEY (workspace_id, namespace_id)
-        REFERENCES filesystem.namespaces(workspace_id, id);
+    DROP CONSTRAINT IF EXISTS uq_transfer_sessions_namespace_idempotency;
 
 DELETE FROM filesystem.quota_accounts account
 USING filesystem.namespaces namespace
@@ -51,11 +51,25 @@ ALTER TABLE filesystem.quota_accounts
     ADD CONSTRAINT quota_accounts_workspace_id_key UNIQUE (workspace_id),
     ADD CONSTRAINT uq_quota_accounts_id_workspace UNIQUE (id, workspace_id);
 
+ALTER TABLE filesystem.transfer_sessions
+    ALTER COLUMN workspace_id SET NOT NULL,
+    ADD CONSTRAINT fk_transfer_sessions_namespace_workspace
+        FOREIGN KEY (workspace_id, namespace_id)
+        REFERENCES filesystem.namespaces(workspace_id, id);
+
 ALTER TABLE filesystem.quota_reservations
+    ALTER COLUMN workspace_id SET NOT NULL,
     ADD CONSTRAINT fk_quota_reservations_account_workspace
         FOREIGN KEY (quota_account_id, workspace_id)
         REFERENCES filesystem.quota_accounts(id, workspace_id),
+    ADD CONSTRAINT fk_quota_reservations_session
+        FOREIGN KEY (workspace_id, session_id)
+        REFERENCES filesystem.transfer_sessions(workspace_id, id),
     DROP COLUMN IF EXISTS namespace_id;
+
+CREATE UNIQUE INDEX ux_quota_reservations_session
+    ON filesystem.quota_reservations(workspace_id, session_id)
+    WHERE session_id IS NOT NULL;
 
 ALTER TABLE filesystem.quota_accounts
     DROP COLUMN IF EXISTS namespace_id;

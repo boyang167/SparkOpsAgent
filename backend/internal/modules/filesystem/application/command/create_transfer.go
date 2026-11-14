@@ -159,12 +159,12 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 	}
 
 	requestHash := transferRequestHash(cmd, *parentID, placementDecision)
-	sessionID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer:"+cmd.WorkspaceID.String()+":"+cmd.IdempotencyKey))
+	sessionID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer:"+cmd.NamespaceID.String()+":"+cmd.IdempotencyKey))
 	temporaryObjectKey := fmt.Sprintf("transfers/%s/content", sessionID)
 	ctx = withResourceID(ctx, sessionID.String())
 	var authoritative *model.TransferSession
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
-		existing, existingErr := h.repo.GetTransferByIdempotency(txCtx, cmd.WorkspaceID, cmd.IdempotencyKey)
+		existing, existingErr := h.repo.GetTransferByNamespaceIdempotency(txCtx, cmd.NamespaceID, cmd.IdempotencyKey)
 		if existingErr == nil {
 			if existing.RequestHash() != requestHash {
 				return domain.ErrTransferIdempotencyConflict
@@ -188,7 +188,7 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 		}
 		createErr := h.repo.CreateTransfer(txCtx, session)
 		if errors.Is(createErr, domain.ErrTransferConflict) {
-			existing, readErr := h.repo.GetTransferByIdempotency(txCtx, cmd.WorkspaceID, cmd.IdempotencyKey)
+			existing, readErr := h.repo.GetTransferByNamespaceIdempotency(txCtx, cmd.NamespaceID, cmd.IdempotencyKey)
 			if readErr != nil {
 				return readErr
 			}
@@ -206,10 +206,14 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 		if reserveErr != nil {
 			return reserveErr
 		}
+		var workspaceID *uuid.UUID
+		if cmd.WorkspaceID != uuid.Nil {
+			workspaceID = &cmd.WorkspaceID
+		}
 		if reserveErr = h.repo.CreateQuotaReservation(txCtx, repository.QuotaReservation{
 			ID:             uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer-reservation:"+session.ID().String())),
 			QuotaAccountID: accountID, NamespaceID: cmd.NamespaceID,
-			WorkspaceID: cmd.WorkspaceID, SessionID: session.ID(),
+			WorkspaceID: workspaceID, SessionID: session.ID(),
 			Bytes: cmd.Size, Files: 1, State: "RESERVED", ExpiresAt: session.ExpiresAt(),
 		}); reserveErr != nil {
 			return reserveErr
@@ -230,7 +234,7 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 	})
 	if err != nil {
 		if errors.Is(err, postgres.ErrCommitOutcomeUnknown) {
-			existing, readErr := h.repo.GetTransferByIdempotency(ctx, cmd.WorkspaceID, cmd.IdempotencyKey)
+			existing, readErr := h.repo.GetTransferByNamespaceIdempotency(ctx, cmd.NamespaceID, cmd.IdempotencyKey)
 			if readErr == nil && existing.RequestHash() == requestHash {
 				markMutationReplay(ctx)
 				return descriptor(existing), nil

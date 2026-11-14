@@ -85,7 +85,7 @@ type QuotaReservation struct {
 	ID             uuid.UUID
 	QuotaAccountID uuid.UUID
 	NamespaceID    uuid.UUID
-	WorkspaceID    uuid.UUID
+	WorkspaceID    *uuid.UUID
 	SessionID      uuid.UUID
 	Bytes          int64
 	Files          int64
@@ -149,6 +149,7 @@ type FilesystemRepository interface {
 	ReleaseNamespaceQuotaReservation(context.Context, uuid.UUID, uuid.UUID) error
 	GetTransferByID(context.Context, uuid.UUID) (*model.TransferSession, error)
 	GetTransferByIdempotency(context.Context, uuid.UUID, string) (*model.TransferSession, error)
+	GetTransferByNamespaceIdempotency(context.Context, uuid.UUID, string) (*model.TransferSession, error)
 	ListTransfers(context.Context, uuid.UUID, *model.TransferStatus, int, string) ([]*model.TransferSession, string, error)
 	LockTransfer(context.Context, uuid.UUID) (*model.TransferSession, error)
 	ListTransferParts(context.Context, uuid.UUID) ([]model.TransferPart, error)

@@ -76,6 +76,6 @@ func (h *AbortTransferHandler) Handle(ctx context.Context, cmd AbortTransfer) er
 		}); err != nil {
 			return err
 		}
-		return h.repo.ReleaseQuotaReservation(txCtx, cmd.WorkspaceID, cmd.SessionID)
+		return h.repo.ReleaseNamespaceQuotaReservation(txCtx, session.NamespaceID(), cmd.SessionID)
 	})
 }

@@ -232,7 +232,7 @@ func (r *Repository) releaseQuotaReservation(ctx context.Context, reservation qu
 
 func (r *Repository) CreateQuotaReservation(ctx context.Context, reservation repository.QuotaReservation) error {
 	if reservation.ID == uuid.Nil || reservation.QuotaAccountID == uuid.Nil ||
-		reservation.WorkspaceID == uuid.Nil || reservation.SessionID == uuid.Nil ||
+		reservation.SessionID == uuid.Nil ||
 		reservation.Bytes < 0 || reservation.Files < 0 || reservation.State != "RESERVED" ||
 		reservation.ExpiresAt.IsZero() {
 		return domain.ErrPersistence

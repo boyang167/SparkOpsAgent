@@ -1338,6 +1338,12 @@ func (r *Repository) GetTransferByIdempotency(ctx context.Context, workspaceID u
 	return transferResult(row, err)
 }
 
+func (r *Repository) GetTransferByNamespaceIdempotency(ctx context.Context, namespaceID uuid.UUID, key string) (*model.TransferSession, error) {
+	var row transferSessionRow
+	err := postgres.DB(ctx, r.db).Where("namespace_id = ? AND idempotency_key = ?", namespaceID, key).First(&row).Error
+	return transferResult(row, err)
+}
+
 type transferCursor struct {
 	CreatedAt time.Time `json:"created_at"`
 	ID        uuid.UUID `json:"id"`
@@ -1560,9 +1566,11 @@ func (r *Repository) SaveTransferStateCAS(ctx context.Context, workspaceID, id u
 		updates["committed_node_id"] = *patch.CommittedNodeID
 	}
 	db := postgres.DB(ctx, r.db)
-	result := db.Model(&transferSessionRow{}).
-		Where("workspace_id = ? AND id = ? AND version = ? AND status = ?", workspaceID, id, expectedVersion, patch.StatusFrom).
-		Updates(updates)
+	scope := db.Model(&transferSessionRow{}).Where("id = ?", id)
+	if workspaceID != uuid.Nil {
+		scope = scope.Where("workspace_id = ?", workspaceID)
+	}
+	result := scope.Where("version = ? AND status = ?", expectedVersion, patch.StatusFrom).Updates(updates)
 	if result.Error != nil {
 		if db.Dialector.Name() == "sqlite" && isSQLiteBusy(result.Error) {
 			return domain.ErrTransactionRetry
@@ -1573,7 +1581,11 @@ func (r *Repository) SaveTransferStateCAS(ctx context.Context, workspaceID, id u
 		return nil
 	}
 	var row transferSessionRow
-	err := db.Select("id", "version", "status").Where("workspace_id = ? AND id = ?", workspaceID, id).First(&row).Error
+	readScope := db.Select("id", "version", "status").Where("id = ?", id)
+	if workspaceID != uuid.Nil {
+		readScope = readScope.Where("workspace_id = ?", workspaceID)
+	}
+	err := readScope.First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return domain.ErrTransferNotFound
 	}
@@ -1587,8 +1599,13 @@ func (r *Repository) SaveTransferStateCAS(ctx context.Context, workspaceID, id u
 }
 
 func transferRowFromModel(session *model.TransferSession, now time.Time) transferSessionRow {
+	var workspaceID *uuid.UUID
+	if session.WorkspaceID() != uuid.Nil {
+		value := session.WorkspaceID()
+		workspaceID = &value
+	}
 	row := transferSessionRow{
-		ID: session.ID(), WorkspaceID: session.WorkspaceID(), NamespaceID: session.NamespaceID(),
+		ID: session.ID(), WorkspaceID: workspaceID, NamespaceID: session.NamespaceID(),
 		TargetParentID: session.TargetParentID(), TargetName: session.TargetName(), Protocol: session.Protocol(),
 		ExpectedSize: session.ExpectedSize(),
 		ProviderID:   session.ProviderID(), TemporaryObjectKey: session.TemporaryObjectKey(),
@@ -1632,9 +1649,13 @@ func transferResult(row transferSessionRow, err error) (*model.TransferSession, 
 			Signature: row.ScanSignature, CompletedAt: completed,
 		}
 	}
+	workspaceID := uuid.Nil
+	if row.WorkspaceID != nil {
+		workspaceID = *row.WorkspaceID
+	}
 	return model.RestoreTransferSession(model.PersistedTransferSession{
 		Input: model.TransferSessionInput{
-			ID: row.ID, WorkspaceID: row.WorkspaceID, NamespaceID: row.NamespaceID,
+			ID: row.ID, WorkspaceID: workspaceID, NamespaceID: row.NamespaceID,
 			TargetParentID: row.TargetParentID, TargetName: row.TargetName, CreatedBy: row.CreatedBy,
 			Protocol: row.Protocol, ExpectedSize: row.ExpectedSize, ExpectedSHA256: stringValueOrEmpty(row.ExpectedSHA256),
 			IdempotencyKey: row.IdempotencyKey, RequestHash: row.RequestHash, TemporaryObjectKey: row.TemporaryObjectKey,

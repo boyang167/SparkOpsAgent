@@ -1075,6 +1075,42 @@ func TestReserveQuotaHandlesNullBoundariesFilesAndOverflow(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrQuotaExceeded)
 }
 
+func TestNamespaceQuotaReservationAllowsMissingWorkspace(t *testing.T) {
+	repo, db := newTestRepository(t)
+	namespace := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeUser,
+		OrganizationID: uuid.New(), OwnerUserID: uuid.New(), Status: "ACTIVE",
+	}
+	require.NoError(t, repo.CreateNamespace(context.Background(), namespace))
+	session, err := model.NewTransferSession(model.TransferSessionInput{
+		ID: uuid.New(), NamespaceID: namespace.ID, TargetName: "personal.bin",
+		CreatedBy: uuid.New(), Protocol: model.TransferProtocolMultipart,
+		ExpectedSize: 12, ExpectedSHA256: strings.Repeat("a", 64),
+		IdempotencyKey: "personal-upload", RequestHash: strings.Repeat("b", 64),
+		TemporaryObjectKey: "transfers/personal/content",
+		ExpiresAt:          time.Now().UTC().Add(time.Hour), ProviderID: ptrUUID(uuid.New()),
+		Classification: model.TransferClassificationInternal,
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTransfer(context.Background(), session))
+	accountID, err := repo.ReserveNamespaceQuota(context.Background(), namespace.ID, 12, 1)
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateQuotaReservation(context.Background(), repository.QuotaReservation{
+		ID: uuid.New(), QuotaAccountID: accountID, NamespaceID: namespace.ID,
+		SessionID: session.ID(), Bytes: 12, Files: 1, State: "RESERVED",
+		ExpiresAt: session.ExpiresAt(),
+	}))
+
+	var reservation struct {
+		NamespaceID uuid.UUID
+		WorkspaceID *uuid.UUID
+	}
+	require.NoError(t, db.Table("filesystem.quota_reservations").
+		Where("session_id = ?", session.ID()).Take(&reservation).Error)
+	require.Equal(t, namespace.ID, reservation.NamespaceID)
+	require.Nil(t, reservation.WorkspaceID)
+}
+
 func transferSessionFixture(t *testing.T, ns *model.Namespace, parentID *uuid.UUID, size int64) *model.TransferSession {
 	t.Helper()
 	session, err := model.NewTransferSession(model.TransferSessionInput{

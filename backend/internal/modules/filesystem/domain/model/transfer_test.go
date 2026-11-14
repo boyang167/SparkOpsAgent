@@ -146,7 +146,6 @@ func TestTransferSessionValidatesInvariants(t *testing.T) {
 		edit func(*TransferSessionInput)
 		err  error
 	}{
-		{"workspace required", func(v *TransferSessionInput) { v.WorkspaceID = uuid.Nil }, ErrInvalidTransfer},
 		{"namespace required", func(v *TransferSessionInput) { v.NamespaceID = uuid.Nil }, ErrInvalidTransfer},
 		{"creator required", func(v *TransferSessionInput) { v.CreatedBy = uuid.Nil }, ErrInvalidTransfer},
 		{"name required", func(v *TransferSessionInput) { v.TargetName = "a/b" }, ErrInvalidTransferName},

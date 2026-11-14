@@ -116,7 +116,7 @@ type quotaReservationRow struct {
 	ID             uuid.UUID  `gorm:"column:id;primaryKey;type:uuid"`
 	QuotaAccountID uuid.UUID  `gorm:"column:quota_account_id;not null;type:uuid;index"`
 	NamespaceID    uuid.UUID  `gorm:"column:namespace_id;not null;type:uuid;index"`
-	WorkspaceID    uuid.UUID  `gorm:"column:workspace_id;not null;type:uuid;index"`
+	WorkspaceID    *uuid.UUID `gorm:"column:workspace_id;type:uuid;index"`
 	SessionID      *uuid.UUID `gorm:"column:session_id;type:uuid;uniqueIndex"`
 	Bytes          int64      `gorm:"not null"`
 	Files          int64      `gorm:"not null"`
@@ -194,7 +194,7 @@ func (commandDedupRow) TableName() string { return "filesystem.command_dedup" }
 
 type transferSessionRow struct {
 	ID                 uuid.UUID                    `gorm:"column:id;primaryKey;type:uuid"`
-	WorkspaceID        uuid.UUID                    `gorm:"column:workspace_id;not null;type:uuid;uniqueIndex:ux_transfer_idempotency;index:ix_transfer_sessions_workspace_status,priority:1"`
+	WorkspaceID        *uuid.UUID                   `gorm:"column:workspace_id;type:uuid;index:ix_transfer_sessions_workspace_status,priority:1"`
 	NamespaceID        uuid.UUID                    `gorm:"column:namespace_id;not null;type:uuid"`
 	TargetParentID     *uuid.UUID                   `gorm:"column:target_parent_id;type:uuid"`
 	TargetName         string                       `gorm:"column:target_name;not null"`

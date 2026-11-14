@@ -122,7 +122,7 @@ var transferNamePattern = regexp.MustCompile(`^[^/\\\x00]+$`)
 
 func NewTransferSession(input TransferSessionInput) (*TransferSession, error) {
 	input.ExpiresAt = CanonicalTransferExpiry(input.ExpiresAt)
-	if input.ID == uuid.Nil || input.WorkspaceID == uuid.Nil || input.NamespaceID == uuid.Nil ||
+	if input.ID == uuid.Nil || input.NamespaceID == uuid.Nil ||
 		input.CreatedBy == uuid.Nil || strings.TrimSpace(input.IdempotencyKey) == "" ||
 		!isSHA256(input.RequestHash) || strings.TrimSpace(input.TemporaryObjectKey) == "" {
 		return nil, ErrInvalidTransfer

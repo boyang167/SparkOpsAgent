@@ -446,6 +446,10 @@ func TestCreateTransferPlacesAndReservesQuotaByNamespaceType(t *testing.T) {
 			cmd.ParentID = namespace.RootNodeID
 			cmd.Authorization.ResourceID = *namespace.RootNodeID
 			cmd.IdempotencyKey = "namespace-" + tt.name
+			if tt.namespaceType != model.NamespaceTypeWorkspace {
+				cmd.WorkspaceID = uuid.Nil
+				cmd.Authorization.WorkspaceID = uuid.Nil
+			}
 
 			result, err := handler.Handle(context.Background(), cmd)
 
@@ -458,10 +462,19 @@ func TestCreateTransferPlacesAndReservesQuotaByNamespaceType(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, decision.ProviderID, *session.ProviderID())
 			require.Equal(t, transferRequestHash(cmd, *namespace.RootNodeID, &decision), session.RequestHash())
-			var reservation struct{ NamespaceID uuid.UUID }
+			var reservation struct {
+				NamespaceID uuid.UUID
+				WorkspaceID *uuid.UUID
+			}
 			require.NoError(t, db.Table("filesystem.quota_reservations").
 				Where("session_id = ?", result.SessionID).Take(&reservation).Error)
 			require.Equal(t, namespace.ID, reservation.NamespaceID)
+			if tt.namespaceType == model.NamespaceTypeWorkspace {
+				require.NotNil(t, reservation.WorkspaceID)
+				require.Equal(t, namespace.WorkspaceID, *reservation.WorkspaceID)
+			} else {
+				require.Nil(t, reservation.WorkspaceID)
+			}
 			var account struct{ ReservedBytes int64 }
 			require.NoError(t, db.Table("filesystem.quota_accounts").
 				Where("namespace_id = ?", namespace.ID).Take(&account).Error)
@@ -569,13 +582,13 @@ type lookupTransactionRepository struct {
 	firstLookupInTransaction bool
 }
 
-func (r *lookupTransactionRepository) GetTransferByIdempotency(ctx context.Context, workspaceID uuid.UUID, key string) (*model.TransferSession, error) {
+func (r *lookupTransactionRepository) GetTransferByNamespaceIdempotency(ctx context.Context, namespaceID uuid.UUID, key string) (*model.TransferSession, error) {
 	if !r.lookupChecked {
 		r.lookupChecked = true
 		_, err := postgres.RequireTx(ctx)
 		r.firstLookupInTransaction = err == nil
 	}
-	return r.FilesystemRepository.GetTransferByIdempotency(ctx, workspaceID, key)
+	return r.FilesystemRepository.GetTransferByNamespaceIdempotency(ctx, namespaceID, key)
 }
 
 func transferFixture(ns *model.Namespace) CreateTransfer {
