@@ -71,6 +71,8 @@ filesystem:
     capability_secret: ""
     max_file_bytes: 21474836480
     storage_root: "./data/filesystem"
+    control_base_url: "http://localhost:8080"
+    internal_token: ""
   sftp:
     enabled: true
     listen: ":2022"

@@ -65,5 +65,10 @@ func (s *Server) handleUpload(c *gin.Context) {
 		return
 	}
 
+	if err := s.control.RecordUploaded(c.Request.Context(), sessionID, written, checksum); err != nil {
+		httpx.Fail(c, "UPLOAD_NOTIFY_FAILED", "control plane upload notification failed", http.StatusBadGateway)
+		return
+	}
+
 	httpx.OK(c, gin.H{"size": written, "sha256": checksum})
 }

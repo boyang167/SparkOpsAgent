@@ -56,6 +56,8 @@ filesystem:
     capability_secret: "docker-dev-filesystem-secret"
     max_file_bytes: 21474836480
     storage_root: "/var/lib/sparkops/filesystem"
+    control_base_url: "http://api:8080"
+    internal_token: "docker-dev-filesystem-secret"
   reconciler:
     interval: 30s
     lease_ttl: 90s

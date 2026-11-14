@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/subscriber"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
 )
 
@@ -18,11 +18,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	log.Printf(
-		"file-worker listening config at %s; subscribers %s %s",
-		cfg.Server.Addr,
-		subscriber.TransferVerifyCommitSubscriber,
-		subscriber.PreviewGenerationSubscriber,
-	)
-	<-ctx.Done()
+	if err := runWorker(ctx, cfg); err != nil && !errors.Is(err, context.Canceled) {
+		log.Fatal(err)
+	}
 }

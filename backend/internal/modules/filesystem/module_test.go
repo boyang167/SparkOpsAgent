@@ -46,6 +46,7 @@ func (discardAudit) Log(context.Context, audit.Entry) error { return nil }
 func TestRegisterValidatesDependencies(t *testing.T) {
 	registry := events.NewRegistry()
 	base := appctx.Container{
+		Config:                 &config.Config{},
 		DB:                     &gorm.DB{},
 		Transactor:             postgres.NewDirectTransactor(),
 		EventBus:               messaging.NewInMemoryBus(registry),
@@ -65,7 +66,14 @@ func TestRegisterValidatesDependencies(t *testing.T) {
 		{name: "event bus", drop: func(c *appctx.Container) { c.EventBus = nil }, want: "requires event bus"},
 		{name: "permission checker", drop: func(c *appctx.Container) { c.PermissionChecker = nil }, want: "requires permission checker"},
 		{name: "member checker", drop: func(c *appctx.Container) { c.WorkspaceMemberChecker = nil }, want: "requires workspace member checker"},
-		{name: "audit logger", drop: func(c *appctx.Container) { c.AuditLogger = nil }, want: "requires audit logger"},
+		{name: "audit logger auto provision", drop: func(c *appctx.Container) {
+			c.AuditLogger = nil
+			db, openErr := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+			require.NoError(t, openErr)
+			require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+			require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
+			c.DB = db
+		}},
 		{name: "event registry", drop: func(c *appctx.Container) { c.EventRegistry = nil }, want: "requires event registry"},
 		{name: "engine", drop: func(c *appctx.Container) { c.Engine = nil }, want: "requires HTTP engine"},
 	}
@@ -74,6 +82,10 @@ func TestRegisterValidatesDependencies(t *testing.T) {
 			container := base
 			tt.drop(&container)
 			err := New(authn.NewTokenProvider(config.JWTConfig{})).Register(&container)
+			if tt.want == "" {
+				require.NoError(t, err)
+				return
+			}
 			require.ErrorContains(t, err, tt.want)
 		})
 	}
@@ -86,6 +98,7 @@ func TestRegisterExposesMetadataRoutesWithoutLocalProvider(t *testing.T) {
 	registry := events.NewRegistry()
 	engine := httpx.NewEngine()
 	container := &appctx.Container{
+		Config:                 &config.Config{},
 		DB:                     db,
 		Transactor:             postgres.NewTransactor(db),
 		EventBus:               messaging.NewInMemoryBus(registry),

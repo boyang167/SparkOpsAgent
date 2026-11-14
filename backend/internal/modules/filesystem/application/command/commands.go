@@ -316,15 +316,23 @@ type CreateNamespace struct {
 }
 
 type CreateNamespaceHandler struct {
-	repo  repository.FilesystemRepository
-	tx    postgres.Transactor
-	bus   messaging.Bus
-	audit auditPort
+	repo              repository.FilesystemRepository
+	tx                postgres.Transactor
+	bus               messaging.Bus
+	audit             auditPort
+	localStorageRoot  string
+	ensureDefaultProv *EnsureDefaultLocalProviderHandler
 }
 
 func NewCreateNamespaceHandler(repo repository.FilesystemRepository, tx postgres.Transactor, bus messaging.Bus, logger auditPort) *CreateNamespaceHandler {
 	requireMutationDependencies(repo, tx)
 	return &CreateNamespaceHandler{repo: repo, tx: tx, bus: bus, audit: logger}
+}
+
+func (h *CreateNamespaceHandler) WithDefaultLocalProvider(root string, ensure *EnsureDefaultLocalProviderHandler) *CreateNamespaceHandler {
+	h.localStorageRoot = strings.TrimSpace(root)
+	h.ensureDefaultProv = ensure
+	return h
 }
 
 func (h *CreateNamespaceHandler) Handle(ctx context.Context, cmd CreateNamespace) (out *model.Namespace, err error) {
@@ -376,6 +384,14 @@ func (h *CreateNamespaceHandler) Handle(ctx context.Context, cmd CreateNamespace
 			return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.namespace.create", domain.ErrNamespaceMismatch)
 		}
 		return nil, err
+	}
+	if h.ensureDefaultProv != nil && h.localStorageRoot != "" {
+		if _, ensureErr := h.ensureDefaultProv.Handle(ctx, EnsureDefaultLocalProvider{
+			OrganizationID: cmd.OrganizationID,
+			StorageRoot:    h.localStorageRoot,
+		}); ensureErr != nil {
+			return nil, ensureErr
+		}
 	}
 	return ns, nil
 }

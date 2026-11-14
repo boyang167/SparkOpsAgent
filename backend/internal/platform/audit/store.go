@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,6 +72,27 @@ func (s *GormStore) List(ctx context.Context, filter ListFilter) ([]LogView, err
 	q := postgres.DB(ctx, s.db).Model(&auditLogModel{}).Order("created_at DESC").Limit(limit).Offset(filter.Offset)
 	if filter.OrgID != nil {
 		q = q.Where("org_id = ?", filter.OrgID.String())
+	}
+	if prefix := strings.TrimSpace(filter.ActionPrefix); prefix != "" {
+		q = q.Where("action LIKE ?", prefix+"%")
+	}
+	if action := strings.TrimSpace(filter.Action); action != "" {
+		q = q.Where("action = ?", action)
+	}
+	if actor := strings.TrimSpace(filter.ActorID); actor != "" {
+		q = q.Where("actor_id = ?", actor)
+	}
+	if resourceID := strings.TrimSpace(filter.ResourceID); resourceID != "" {
+		q = q.Where("resource_id = ?", resourceID)
+	}
+	if resourceType := strings.TrimSpace(filter.ResourceType); resourceType != "" {
+		q = q.Where("resource_type = ?", resourceType)
+	}
+	if !filter.CreatedAtAfter.IsZero() {
+		q = q.Where("created_at >= ?", filter.CreatedAtAfter)
+	}
+	if !filter.CreatedAtBefore.IsZero() {
+		q = q.Where("created_at <= ?", filter.CreatedAtBefore)
 	}
 	var rows []auditLogModel
 	if err := q.Find(&rows).Error; err != nil {

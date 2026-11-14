@@ -61,6 +61,8 @@ type TransferGatewayConfig struct {
 	CapabilitySecret   string `yaml:"capability_secret"`
 	MaxFileBytes       int64  `yaml:"max_file_bytes"`
 	StorageRoot        string `yaml:"storage_root"`
+	ControlBaseURL     string `yaml:"control_base_url"`
+	InternalToken      string `yaml:"internal_token"`
 }
 
 type PolicyConfig struct {

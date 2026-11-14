@@ -49,9 +49,16 @@ type Store interface {
 }
 
 type ListFilter struct {
-	OrgID  *kernel.OrgID
-	Limit  int
-	Offset int
+	OrgID          *kernel.OrgID
+	Limit          int
+	Offset         int
+	ActionPrefix   string
+	Action         string
+	ActorID        string
+	ResourceID     string
+	ResourceType   string
+	CreatedAtAfter time.Time
+	CreatedAtBefore time.Time
 }
 
 func EncodeDetail(detail map[string]any) json.RawMessage {

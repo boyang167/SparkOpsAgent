@@ -257,3 +257,7 @@ func (m *mockControlPort) ResolveDownload(_ context.Context, fileID string) (Dow
 	}
 	return grant, nil
 }
+
+func (m *mockControlPort) RecordUploaded(context.Context, string, int64, string) error {
+	return nil
+}

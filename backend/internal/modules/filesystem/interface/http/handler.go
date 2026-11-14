@@ -69,6 +69,7 @@ type Handler struct {
 	listArtifacts         func(context.Context, query.ListArtifacts) ([]model.Artifact, string, error)
 	searchFiles           func(context.Context, query.SearchFiles) ([]query.SearchHit, string, error)
 	getPreviewBlob        func(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID) (uuid.UUID, error)
+	listFileAudits        func(context.Context, query.ListFileAuditEvents) (query.ListFileAuditEventsResult, error)
 }
 
 func NewHandler(
@@ -162,6 +163,14 @@ func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.Ha
 	base.POST("/storage-bindings", authz.RequirePermission(permissions, authz.PermStorageAdmin), requireIdempotencyKey(), h.CreateStorageBinding)
 	base.GET("/lifecycle-policies", authz.RequirePermission(permissions, authz.PermStorageRead), h.ListLifecyclePolicies)
 	base.POST("/lifecycle-policies", authz.RequirePermission(permissions, authz.PermLifecycleAdmin), requireIdempotencyKey(), h.UpsertLifecyclePolicy)
+	base.GET("/filesystem-audits", authz.RequirePermission(permissions, authz.PermFileAdmin), h.ListFilesystemAudits)
+}
+
+func (h *Handler) BindAuditList(handler func(context.Context, query.ListFileAuditEvents) (query.ListFileAuditEventsResult, error)) {
+	if h == nil {
+		return
+	}
+	h.listFileAudits = handler
 }
 
 func (h *Handler) auditMiddlewareDenial() gin.HandlerFunc {

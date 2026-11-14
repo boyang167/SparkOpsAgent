@@ -126,7 +126,10 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 		providerID = decision.ProviderID
 		placementDecision = &decision
 	} else if providerID == uuid.Nil {
-		return out, model.ErrInvalidTransfer
+		providerID, err = h.defaultProviderID(ctx, cmd.OrganizationID)
+		if err != nil {
+			return out, err
+		}
 	}
 
 	requestHash := transferRequestHash(cmd, *parentID, placementDecision)
@@ -233,6 +236,25 @@ func transferRequestHash(cmd CreateTransfer, parentID uuid.UUID, placement *serv
 
 func DescriptorFromSession(session *model.TransferSession) TransferDescriptor {
 	return descriptor(session)
+}
+
+func (h *CreateTransferHandler) defaultProviderID(ctx context.Context, organizationID uuid.UUID) (uuid.UUID, error) {
+	providers, err := h.repo.ListStorageProviders(ctx, organizationID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	for _, provider := range providers {
+		if provider == nil || strings.TrimSpace(provider.Status) != "ACTIVE" {
+			continue
+		}
+		if provider.ProviderType == model.ProviderTypeLocal {
+			return provider.ID, nil
+		}
+	}
+	if organizationID != uuid.Nil {
+		return DefaultLocalProviderID(organizationID), nil
+	}
+	return uuid.Nil, model.ErrInvalidTransfer
 }
 
 func descriptor(session *model.TransferSession) TransferDescriptor {

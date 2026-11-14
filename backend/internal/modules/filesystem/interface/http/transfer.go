@@ -52,10 +52,14 @@ func (h *Handler) CreateTransfer(c *gin.Context) {
 		invalidRequest(c)
 		return
 	}
-	providerID, ok := canonicalUUID(body.ProviderID)
-	if !ok {
-		invalidRequest(c)
-		return
+	var providerID uuid.UUID
+	if strings.TrimSpace(body.ProviderID) != "" {
+		var ok bool
+		providerID, ok = canonicalUUID(body.ProviderID)
+		if !ok {
+			invalidRequest(c)
+			return
+		}
 	}
 	if body.Protocol != model.TransferProtocolDirect && body.Protocol != model.TransferProtocolMultipart {
 		invalidRequest(c)

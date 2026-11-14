@@ -14,9 +14,12 @@ import (
 	filesystemevent "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	domainservice "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/service"
 	agentsign "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/capability"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/gatewaycontrol"
+	fsstorage "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/storage"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
 	filesystemhttp "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/interface/http"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/entitlements"
@@ -54,7 +57,11 @@ func (m *Module) Register(c *appctx.Container) error {
 		return fmt.Errorf("filesystem module requires workspace member checker")
 	}
 	if c.AuditLogger == nil {
-		return fmt.Errorf("filesystem module requires audit logger")
+		auditStore := audit.NewGormStore(c.DB)
+		if err := auditStore.AutoMigrate(); err != nil {
+			return fmt.Errorf("filesystem audit migrate: %w", err)
+		}
+		c.AuditLogger = audit.NewService(auditStore)
 	}
 	if c.EventRegistry == nil {
 		return fmt.Errorf("filesystem module requires event registry")
@@ -74,7 +81,10 @@ func (m *Module) Register(c *appctx.Container) error {
 		return c.PermissionChecker.HasPermission(ctx, kernel.WorkspaceID{UUID: workspaceID}, kernel.MemberID{UUID: actorID}, authz.PermFileAdmin)
 	})
 	c.FilesystemGrantPort = resourceauth.NewGrantService(repo, resourceAuthorizer, c.Transactor, c.EventBus, c.AuditLogger)
-	createNamespace := command.NewCreateNamespaceHandler(repo, c.Transactor, c.EventBus, c.AuditLogger)
+	storageRoot := c.Config.Filesystem.TransferGateway.StorageRoot
+	ensureDefault := command.NewEnsureDefaultLocalProviderHandler(repo)
+	createNamespace := command.NewCreateNamespaceHandler(repo, c.Transactor, c.EventBus, c.AuditLogger).
+		WithDefaultLocalProvider(storageRoot, ensureDefault)
 	if err := c.EventBus.Subscribe(
 		integration.EventWorkspaceCreated,
 		"filesystem.workspace-created.create-namespace",
@@ -139,6 +149,19 @@ func (m *Module) Register(c *appctx.Container) error {
 			query.NewAuthorizationSearchAuthorizer(resourceAuthorizer),
 		).Handle,
 		GetPreviewBlob: previewReader.BlobID,
+	})
+	if auditService, ok := c.AuditLogger.(*audit.Service); ok {
+		handler.BindAuditList(query.NewListFileAuditEventsHandler(auditService).Handle)
+	}
+	recordUploaded := command.NewRecordTransferUploadedHandler(repo, c.Transactor, c.EventBus)
+	runtimeCatalog, err := fsstorage.NewRuntimeCatalog(repo, fsstorage.RuntimeCatalogConfig{LocalFallbackRoot: storageRoot})
+	if err != nil {
+		return fmt.Errorf("filesystem runtime catalog: %w", err)
+	}
+	gatewayControl := gatewaycontrol.NewService(repo, runtimeCatalog, recordUploaded.Handle)
+	filesystemhttp.RegisterInternalGatewayRoutes(c.Engine, c.Config, filesystemhttp.InternalGatewayHandlers{
+		Control: gatewayControl,
+		Token:   c.Config.Filesystem.TransferGateway.InternalToken,
 	})
 	handler.BindResourceAccess(filesystemhttp.ResourceAccess{
 		Grant:            grantCommands.Handle,

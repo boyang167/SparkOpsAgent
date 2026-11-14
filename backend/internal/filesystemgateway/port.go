@@ -12,6 +12,7 @@ import (
 type ControlPort interface {
 	ResolveUpload(ctx context.Context, sessionID string) (UploadGrant, error)
 	ResolveDownload(ctx context.Context, fileID string) (DownloadGrant, error)
+	RecordUploaded(ctx context.Context, sessionID string, size int64, sha256 string) error
 }
 
 type UploadGrant struct {

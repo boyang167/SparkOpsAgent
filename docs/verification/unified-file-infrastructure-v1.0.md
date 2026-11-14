@@ -19,6 +19,20 @@
 - `docs/verification/unified-file-infrastructure-g5.md`
 - `docs/verification/unified-file-infrastructure-disaster-recovery.md`
 
+## 2026-11-14 数据面补缺复跑（UTC+8）
+
+| 项 | 结果 |
+|---|---|
+| Transfer Gateway `RecordUploaded` → `TransferUploaded` 事件 | **PASS**（单元 + gateway 测试；`go test ./internal/filesystemgateway/...`） |
+| 内部 Control API（grant / uploaded） | **PASS**（`RegisterInternalGatewayRoutes` + module 测试） |
+| 工作区默认 LOCAL Provider（`default-local`） | **PASS**（`EnsureDefaultLocalProvider` + CreateTransfer 默认解析） |
+| `GET /filesystem-audits` 后端路由 | **PASS**（`ListFilesystemAudits` + query 过滤 `filesystem.`） |
+| file-worker 订阅 verify/commit | **PASS**（`cmd/file-worker` 启动注册 AMQP 订阅） |
+| SFTP `HTTPTransferControl` / Export 字节 Worker | **SKIP**（仍为 landing/API 占位；Import 仅元数据节点） |
+| Knowledge / 20GiB / 200 并发 / RPO/RTO | **SKIP**（无归档现场报告） |
+
+Compose：`filesystem.transfer_gateway.control_base_url=http://api:8080`，网关依赖 `api` healthy。
+
 ## 2026-11-13 Fresh 检查（G5 Task 7 复跑 22:10 UTC+8）
 
 | 检查 | 结果 |
