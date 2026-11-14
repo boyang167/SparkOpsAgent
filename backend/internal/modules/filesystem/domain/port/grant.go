@@ -9,14 +9,15 @@ import (
 )
 
 type GrantRequest struct {
-	CommandID      uuid.UUID
-	ActorID        uuid.UUID
-	OrganizationID uuid.UUID
-	WorkspaceID    uuid.UUID
-	NamespaceID    uuid.UUID
-	NodeID         uuid.UUID
-	Grant          model.ResourceGrant
-	TraceID        string
+	CommandID             uuid.UUID
+	ActorID               uuid.UUID
+	OrganizationID        uuid.UUID
+	GranteeOrganizationID uuid.UUID
+	WorkspaceID           uuid.UUID
+	NamespaceID           uuid.UUID
+	NodeID                uuid.UUID
+	Grant                 model.ResourceGrant
+	TraceID               string
 }
 
 type FilesystemGrantPort interface {

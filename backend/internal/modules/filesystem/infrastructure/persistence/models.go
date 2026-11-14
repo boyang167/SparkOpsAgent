@@ -125,13 +125,19 @@ type quotaReservationRow struct {
 func (quotaReservationRow) TableName() string { return "filesystem.quota_reservations" }
 
 type resourceGrantRow struct {
-	ID         uuid.UUID                `gorm:"column:id;primaryKey;type:uuid"`
-	NodeID     uuid.UUID                `gorm:"column:node_id;not null;type:uuid;index"`
-	GranteeID  uuid.UUID                `gorm:"column:grantee_id;not null;type:uuid;index"`
-	Permission model.ResourcePermission `gorm:"not null;type:varchar(32)"`
-	Effect     model.GrantEffect        `gorm:"not null;type:varchar(8)"`
-	ExpiresAt  *time.Time               `gorm:"column:expires_at"`
-	CreatedAt  time.Time                `gorm:"column:created_at;not null"`
+	ID                uuid.UUID                `gorm:"column:id;primaryKey;type:uuid"`
+	NodeID            uuid.UUID                `gorm:"column:node_id;not null;type:uuid;index"`
+	OrganizationID    uuid.UUID                `gorm:"column:organization_id;type:uuid;index"`
+	GranteeID         uuid.UUID                `gorm:"column:grantee_id;not null;type:uuid;index"`
+	PrincipalType     model.PrincipalType      `gorm:"column:principal_type;type:varchar(32);default:USER"`
+	PrincipalID       uuid.UUID                `gorm:"column:principal_id;type:uuid;index"`
+	Permission        model.ResourcePermission `gorm:"not null;type:varchar(32)"`
+	Effect            model.GrantEffect        `gorm:"not null;type:varchar(8)"`
+	InheritToChildren bool                     `gorm:"column:inherit_to_children;not null;default:true"`
+	ExpiresAt         *time.Time               `gorm:"column:expires_at"`
+	RevokedAt         *time.Time               `gorm:"column:revoked_at"`
+	PolicyVersion     int64                    `gorm:"column:policy_version;not null;default:1"`
+	CreatedAt         time.Time                `gorm:"column:created_at;not null"`
 }
 
 func (resourceGrantRow) TableName() string { return "filesystem.resource_grants" }

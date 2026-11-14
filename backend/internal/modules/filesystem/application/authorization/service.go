@@ -9,13 +9,14 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 	domainservice "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/service"
 )
 
 type Repository interface {
 	GetNode(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
 	GetNodeIncludingTrashed(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
-	ListResourceGrants(context.Context, uuid.UUID, uuid.UUID, model.ResourcePermission, time.Time) ([]model.ResourceGrant, error)
+	ListResourceGrants(context.Context, []uuid.UUID, []repository.PrincipalRef, model.ResourcePermission, time.Time) ([]model.ResourceGrant, error)
 }
 
 type AdminBypass func(context.Context, uuid.UUID, uuid.UUID) (bool, error)
@@ -59,7 +60,7 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 			permissions = append(permissions, model.ResourcePermissionAdmin)
 		}
 		for _, permission := range permissions {
-			grants, grantErr := s.repo.ListResourceGrants(ctx, current.ID, request.ActorID, permission, s.now())
+			grants, grantErr := s.repo.ListResourceGrants(ctx, []uuid.UUID{current.ID}, []repository.PrincipalRef{{Type: model.PrincipalUser, ID: request.ActorID}}, permission, s.now())
 			if grantErr != nil {
 				return Decision{Reason: "authorization_unavailable"}
 			}

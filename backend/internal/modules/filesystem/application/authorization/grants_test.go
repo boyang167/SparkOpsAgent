@@ -126,3 +126,55 @@ func TestGrantServiceRejectsForgedCrossTenantScope(t *testing.T) {
 	require.Len(t, audits.entries, 3)
 	require.Equal(t, second.OrganizationID, audits.entries[2].OrgID.UUID)
 }
+
+func TestGrantServiceSupportsTypedPrincipalsAndRevokeReuse(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+	require.NoError(t, persistence.AutoMigrate(db))
+	require.NoError(t, messagingpersistence.AutoMigrate(db))
+	repo := persistence.NewRepository(db)
+	owner := uuid.New()
+	namespace := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	require.NoError(t, repo.CreateNamespace(context.Background(), namespace))
+	node, err := model.NewRootDirectory(namespace.ID, owner, ".root")
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(context.Background(), node))
+	require.NoError(t, repo.SetNamespaceRoot(context.Background(), namespace.WorkspaceID, node.ID))
+	service := NewGrantService(repo, NewService(repo, nil), postgres.NewTransactor(db), nil, nil)
+	principalID := uuid.New()
+	request := GrantRequest{
+		CommandID: uuid.New(), ActorID: owner, OrganizationID: namespace.OrganizationID,
+		WorkspaceID: namespace.WorkspaceID, NamespaceID: namespace.ID, NodeID: node.ID,
+		GranteeOrganizationID: namespace.OrganizationID,
+		Grant: model.ResourceGrant{
+			PrincipalType: model.PrincipalWorkspace, PrincipalID: principalID,
+			Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow,
+		},
+	}
+	grant, err := service.Create(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, principalID, grant.GranteeID)
+	require.Equal(t, principalID, grant.PrincipalID)
+	require.Equal(t, model.PrincipalWorkspace, grant.PrincipalType)
+
+	roleRequest := request
+	roleRequest.CommandID = uuid.New()
+	roleRequest.Grant.PrincipalType = model.PrincipalRole
+	roleGrant, err := service.Create(context.Background(), roleRequest)
+	require.NoError(t, err)
+	require.Equal(t, principalID, roleGrant.PrincipalID)
+	require.Equal(t, model.PrincipalRole, roleGrant.PrincipalType)
+
+	request.CommandID = uuid.New()
+	require.NoError(t, service.Revoke(context.Background(), request, grant.ID))
+	request.CommandID = uuid.New()
+	recreated, err := service.Create(context.Background(), request)
+	require.NoError(t, err)
+	require.NotEqual(t, grant.ID, recreated.ID)
+
+	var revokedAt *string
+	require.NoError(t, db.Table("filesystem.resource_grants").Select("revoked_at").Where("id = ?", grant.ID).Scan(&revokedAt).Error)
+	require.NotNil(t, revokedAt)
+}

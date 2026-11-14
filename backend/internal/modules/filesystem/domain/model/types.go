@@ -129,11 +129,28 @@ const (
 	ResourcePermissionAdmin  ResourcePermission = "ADMIN"
 )
 
+type PrincipalType string
+
+const (
+	PrincipalUser           PrincipalType = "USER"
+	PrincipalWorkspace      PrincipalType = "WORKSPACE"
+	PrincipalOrganization   PrincipalType = "ORGANIZATION"
+	PrincipalRole           PrincipalType = "ROLE"
+	PrincipalServiceAccount PrincipalType = "SERVICE_ACCOUNT"
+	PrincipalAgent          PrincipalType = "AGENT"
+)
+
 type ResourceGrant struct {
-	ID         uuid.UUID
-	NodeID     uuid.UUID
-	GranteeID  uuid.UUID
-	Permission ResourcePermission
-	Effect     GrantEffect
-	ExpiresAt  *time.Time
+	ID                uuid.UUID
+	NodeID            uuid.UUID
+	OrganizationID    uuid.UUID
+	GranteeID         uuid.UUID
+	PrincipalType     PrincipalType
+	PrincipalID       uuid.UUID
+	Permission        ResourcePermission
+	Effect            GrantEffect
+	InheritToChildren bool
+	ExpiresAt         *time.Time
+	RevokedAt         *time.Time
+	PolicyVersion     int64
 }

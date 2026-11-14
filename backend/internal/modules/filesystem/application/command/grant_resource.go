@@ -65,7 +65,8 @@ func (h *GrantResourceHandler) Revoke(ctx context.Context, cmd GrantResource, gr
 func grantRequest(cmd GrantResource) filesystemport.GrantRequest {
 	return filesystemport.GrantRequest{
 		CommandID: cmd.CommandID, ActorID: cmd.ActorID, OrganizationID: cmd.OrganizationID,
-		WorkspaceID: cmd.WorkspaceID, NamespaceID: cmd.NamespaceID, NodeID: cmd.NodeID, TraceID: cmd.TraceID,
+		GranteeOrganizationID: cmd.GranteeOrganizationID,
+		WorkspaceID:           cmd.WorkspaceID, NamespaceID: cmd.NamespaceID, NodeID: cmd.NodeID, TraceID: cmd.TraceID,
 		Grant: model.ResourceGrant{GranteeID: cmd.GranteeID, Permission: cmd.Permission, Effect: cmd.Effect, ExpiresAt: cmd.ExpiresAt},
 	}
 }

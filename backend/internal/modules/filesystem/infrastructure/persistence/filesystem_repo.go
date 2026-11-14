@@ -702,30 +702,53 @@ func (r *Repository) PromoteReplica(ctx context.Context, promotion repository.Re
 	}))
 }
 
-func (r *Repository) ListResourceGrants(ctx context.Context, nodeID, granteeID uuid.UUID, permission model.ResourcePermission, at time.Time) ([]model.ResourceGrant, error) {
+func (r *Repository) ListResourceGrants(ctx context.Context, nodeIDs []uuid.UUID, principals []repository.PrincipalRef, permission model.ResourcePermission, at time.Time) ([]model.ResourceGrant, error) {
+	if len(nodeIDs) == 0 || len(principals) == 0 {
+		return []model.ResourceGrant{}, nil
+	}
 	var rows []resourceGrantRow
-	err := postgres.DB(ctx, r.db).
-		Where("node_id = ? AND grantee_id = ? AND permission = ? AND (expires_at IS NULL OR expires_at > ?)", nodeID, granteeID, permission, at).
-		Find(&rows).Error
+	query := postgres.DB(ctx, r.db).
+		Where("node_id IN ? AND permission = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)", nodeIDs, permission, at)
+	conditions := make([]string, 0, len(principals))
+	args := make([]any, 0, len(principals)*2)
+	for _, principal := range principals {
+		conditions = append(conditions, "((principal_type = ? OR principal_type = '' OR principal_type IS NULL) AND (principal_id = ? OR principal_id IS NULL OR principal_id = grantee_id OR principal_id = ?))")
+		args = append(args, principal.Type, principal.ID, uuid.Nil)
+	}
+	err := query.Where(strings.Join(conditions, " OR "), args...).Find(&rows).Error
 	if err != nil {
 		return nil, wrapPersistence(err)
 	}
 	grants := make([]model.ResourceGrant, len(rows))
 	for index, row := range rows {
-		grants[index] = model.ResourceGrant{ID: row.ID, NodeID: row.NodeID, GranteeID: row.GranteeID, Permission: row.Permission, Effect: row.Effect, ExpiresAt: row.ExpiresAt}
+		grants[index] = resourceGrantFromRow(row)
 	}
 	return grants, nil
 }
 
 func (r *Repository) CreateResourceGrant(ctx context.Context, grant model.ResourceGrant) error {
+	if grant.PrincipalType == "" {
+		grant.PrincipalType = model.PrincipalUser
+	}
+	if grant.PrincipalID == uuid.Nil {
+		grant.PrincipalID = grant.GranteeID
+	}
+	if grant.GranteeID == uuid.Nil {
+		grant.GranteeID = grant.PrincipalID
+	}
 	return wrapPersistence(postgres.DB(ctx, r.db).Create(&resourceGrantRow{
-		ID: grant.ID, NodeID: grant.NodeID, GranteeID: grant.GranteeID, Permission: grant.Permission,
-		Effect: grant.Effect, ExpiresAt: grant.ExpiresAt, CreatedAt: time.Now().UTC(),
+		ID: grant.ID, NodeID: grant.NodeID, OrganizationID: grant.OrganizationID, GranteeID: grant.GranteeID,
+		PrincipalType: grant.PrincipalType, PrincipalID: grant.PrincipalID, Permission: grant.Permission,
+		Effect: grant.Effect, InheritToChildren: grant.InheritToChildren, ExpiresAt: grant.ExpiresAt,
+		RevokedAt: grant.RevokedAt, PolicyVersion: grant.PolicyVersion, CreatedAt: time.Now().UTC(),
 	}).Error)
 }
 
 func (r *Repository) RevokeResourceGrant(ctx context.Context, nodeID, grantID uuid.UUID) error {
-	result := postgres.DB(ctx, r.db).Where("id = ? AND node_id = ?", grantID, nodeID).Delete(&resourceGrantRow{})
+	now := time.Now().UTC()
+	result := postgres.DB(ctx, r.db).Model(&resourceGrantRow{}).
+		Where("id = ? AND node_id = ? AND revoked_at IS NULL", grantID, nodeID).
+		Update("revoked_at", now)
 	if result.Error != nil {
 		return wrapPersistence(result.Error)
 	}
@@ -737,14 +760,31 @@ func (r *Repository) RevokeResourceGrant(ctx context.Context, nodeID, grantID uu
 
 func (r *Repository) ListNodeResourceGrants(ctx context.Context, nodeID uuid.UUID) ([]model.ResourceGrant, error) {
 	var rows []resourceGrantRow
-	if err := postgres.DB(ctx, r.db).Where("node_id = ?", nodeID).Order("id ASC").Find(&rows).Error; err != nil {
+	if err := postgres.DB(ctx, r.db).Where("node_id = ? AND revoked_at IS NULL", nodeID).Order("id ASC").Find(&rows).Error; err != nil {
 		return nil, wrapPersistence(err)
 	}
 	result := make([]model.ResourceGrant, len(rows))
 	for i, row := range rows {
-		result[i] = model.ResourceGrant{ID: row.ID, NodeID: row.NodeID, GranteeID: row.GranteeID, Permission: row.Permission, Effect: row.Effect, ExpiresAt: row.ExpiresAt}
+		result[i] = resourceGrantFromRow(row)
 	}
 	return result, nil
+}
+
+func resourceGrantFromRow(row resourceGrantRow) model.ResourceGrant {
+	principalType := row.PrincipalType
+	if principalType == "" {
+		principalType = model.PrincipalUser
+	}
+	principalID := row.PrincipalID
+	if principalID == uuid.Nil {
+		principalID = row.GranteeID
+	}
+	return model.ResourceGrant{
+		ID: row.ID, NodeID: row.NodeID, OrganizationID: row.OrganizationID, GranteeID: row.GranteeID,
+		PrincipalType: principalType, PrincipalID: principalID, Permission: row.Permission,
+		Effect: row.Effect, InheritToChildren: row.InheritToChildren, ExpiresAt: row.ExpiresAt,
+		RevokedAt: row.RevokedAt, PolicyVersion: row.PolicyVersion,
+	}
 }
 
 func (r *Repository) ApplyQuotaUsage(ctx context.Context, workspaceID uuid.UUID, bytesDelta, filesDelta int64) error {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 )
 
 type grantRepositoryStub struct {
@@ -49,11 +50,19 @@ func TestAuthorizeDeleteReplayTraversesTrashedAncestors(t *testing.T) {
 	}).Reason)
 }
 
-func (r grantRepositoryStub) ListResourceGrants(_ context.Context, nodeID, granteeID uuid.UUID, permission model.ResourcePermission, at time.Time) ([]model.ResourceGrant, error) {
+func (r grantRepositoryStub) ListResourceGrants(_ context.Context, nodeIDs []uuid.UUID, principals []repository.PrincipalRef, permission model.ResourcePermission, at time.Time) ([]model.ResourceGrant, error) {
 	var result []model.ResourceGrant
-	for _, grant := range r.grants[nodeID] {
-		if grant.GranteeID == granteeID && grant.Permission == permission && (grant.ExpiresAt == nil || grant.ExpiresAt.After(at)) {
-			result = append(result, grant)
+	for _, nodeID := range nodeIDs {
+		for _, grant := range r.grants[nodeID] {
+			for _, principal := range principals {
+				if grant.PrincipalType == "" && principal.Type == model.PrincipalUser {
+					grant.PrincipalType = model.PrincipalUser
+					grant.PrincipalID = grant.GranteeID
+				}
+				if grant.PrincipalType == principal.Type && grant.PrincipalID == principal.ID && grant.Permission == permission && grant.RevokedAt == nil && (grant.ExpiresAt == nil || grant.ExpiresAt.After(at)) {
+					result = append(result, grant)
+				}
+			}
 		}
 	}
 	return result, nil

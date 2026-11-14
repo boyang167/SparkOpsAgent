@@ -346,7 +346,7 @@ func TestResourceGrantEffectAndExpiryRoundTrip(t *testing.T) {
 	require.NoError(t, db.Create(&resourceGrantRow{ID: uuid.New(), NodeID: node.ID, GranteeID: granteeID, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow}).Error)
 	require.NoError(t, db.Create(&resourceGrantRow{ID: uuid.New(), NodeID: node.ID, GranteeID: granteeID, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectDeny, ExpiresAt: &expired}).Error)
 
-	grants, err := repo.ListResourceGrants(context.Background(), node.ID, granteeID, model.ResourcePermissionRead, time.Now())
+	grants, err := repo.ListResourceGrants(context.Background(), []uuid.UUID{node.ID}, []repository.PrincipalRef{{Type: model.PrincipalUser, ID: granteeID}}, model.ResourcePermissionRead, time.Now())
 	require.NoError(t, err)
 	require.Len(t, grants, 1)
 	require.Equal(t, model.GrantEffectAllow, grants[0].Effect)
