@@ -257,9 +257,41 @@ func TestEnsureDefaultWorkspaceRolesAddsMissingRolesWithoutOverwritingExisting(t
 	for _, item := range items {
 		byName[item.Name] = item
 	}
-	require.Equal(t, []string{authz.PermProjectRead}, byName["developer"].Permissions)
+	require.Contains(t, byName["developer"].Permissions, authz.PermProjectRead)
+	require.Contains(t, byName["developer"].Permissions, authz.PermFileRead)
+	require.Contains(t, byName["developer"].Permissions, authz.PermFileWrite)
+	require.Contains(t, byName["developer"].Permissions, authz.PermFileDelete)
 	require.Contains(t, byName["admin"].Permissions, authz.PermProjectReview)
 	require.Contains(t, byName["reviewer"].Permissions, authz.PermProjectReview)
+}
+
+func TestEnsureDefaultWorkspaceRolesAddsRequiredFilesystemPermissions(t *testing.T) {
+	ctx := context.Background()
+	wsID := kernel.NewWorkspaceID()
+	roles := newMemoryRoleRepo()
+	developer := model.NewRole(wsID, "developer", []string{authz.PermProjectRead}, nil)
+	operator := model.NewRole(wsID, "operator", []string{authz.PermProjectOperate}, nil)
+	reviewer := model.NewRole(wsID, "reviewer", []string{authz.PermProjectReview}, nil)
+	custom := model.NewRole(wsID, "custom", []string{authz.PermProjectRead}, nil)
+	for _, role := range []*model.Role{developer, operator, reviewer, custom} {
+		require.NoError(t, roles.Save(ctx, role))
+	}
+
+	require.NoError(t, command.NewEnsureDefaultWorkspaceRolesHandler(roles).Handle(ctx))
+
+	items, err := roles.ListByWorkspace(ctx, wsID)
+	require.NoError(t, err)
+	byName := make(map[string]*model.Role, len(items))
+	for _, role := range items {
+		byName[role.Name] = role
+	}
+	for _, name := range []string{"developer", "operator"} {
+		require.Contains(t, byName[name].Permissions, authz.PermFileRead)
+		require.Contains(t, byName[name].Permissions, authz.PermFileWrite)
+		require.Contains(t, byName[name].Permissions, authz.PermFileDelete)
+	}
+	require.NotContains(t, byName["reviewer"].Permissions, authz.PermFileRead)
+	require.NotContains(t, byName["custom"].Permissions, authz.PermFileRead)
 }
 
 func TestEnsureDefaultWorkspaceRolesSeedsWorkspaceWithoutAdmin(t *testing.T) {

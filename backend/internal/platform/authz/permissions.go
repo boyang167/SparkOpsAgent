@@ -47,6 +47,23 @@ var DefaultAdminPermissions = []string{
 	PermLifecycleAdmin,
 }
 
+var defaultMemberFilesystemPermissions = []string{
+	PermFileRead,
+	PermFileWrite,
+	PermFileDelete,
+}
+
+func RequiredDefaultRolePermissions(name string) []string {
+	switch name {
+	case "admin":
+		return DefaultAdminPermissions
+	case "developer", "operator":
+		return defaultMemberFilesystemPermissions
+	default:
+		return nil
+	}
+}
+
 // MergePermissions returns existing permissions plus any defaults not yet present.
 func MergePermissions(existing, defaults []string) []string {
 	seen := make(map[string]struct{}, len(existing)+len(defaults))
@@ -107,13 +124,14 @@ var DefaultWorkspaceRoles = []DefaultRoleDefinition{
 	{Name: "admin", Permissions: DefaultAdminPermissions},
 	{Name: "developer", Permissions: []string{
 		PermProjectRead, PermProjectWrite, PermProjectSubmit,
-		PermSecretRead, PermAgentRead, PermChatUse, PermFileRead, PermFileWrite,
+		PermSecretRead, PermAgentRead, PermChatUse, PermFileRead, PermFileWrite, PermFileDelete,
 	}},
 	{Name: "reviewer", Permissions: []string{
 		PermProjectRead, PermProjectReview, PermSecretRead,
 	}},
 	{Name: "operator", Permissions: []string{
 		PermProjectRead, PermProjectOperate, PermSecretRead,
+		PermFileRead, PermFileWrite, PermFileDelete,
 	}},
 	{Name: "viewer", Permissions: []string{PermProjectRead}},
 }

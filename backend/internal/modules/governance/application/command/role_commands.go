@@ -339,13 +339,15 @@ func (h *EnsureDefaultWorkspaceRolesHandler) Handle(ctx context.Context) error {
 				}
 				continue
 			}
-			if definition.Name == "admin" {
-				merged := authz.MergePermissions(role.Permissions, definition.Permissions)
-				if len(merged) != len(role.Permissions) {
-					role.UpdatePermissions(merged)
-					if err := h.roles.Save(ctx, role); err != nil {
-						return err
-					}
+			required := authz.RequiredDefaultRolePermissions(definition.Name)
+			if len(required) == 0 {
+				continue
+			}
+			merged := authz.MergePermissions(role.Permissions, required)
+			if len(merged) != len(role.Permissions) {
+				role.UpdatePermissions(merged)
+				if err := h.roles.Save(ctx, role); err != nil {
+					return err
 				}
 			}
 		}

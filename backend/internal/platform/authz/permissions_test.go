@@ -22,7 +22,15 @@ func TestFilesystemPermissionsByWorkspaceRole(t *testing.T) {
 		{
 			role: "developer",
 			want: map[string]bool{
-				PermFileRead: true, PermFileWrite: true, PermFileDelete: false,
+				PermFileRead: true, PermFileWrite: true, PermFileDelete: true,
+				PermFileShare: false, PermFileAdmin: false, PermStorageRead: false,
+				PermStorageAdmin: false, PermLifecycleAdmin: false,
+			},
+		},
+		{
+			role: "operator",
+			want: map[string]bool{
+				PermFileRead: true, PermFileWrite: true, PermFileDelete: true,
 				PermFileShare: false, PermFileAdmin: false, PermStorageRead: false,
 				PermStorageAdmin: false, PermLifecycleAdmin: false,
 			},
