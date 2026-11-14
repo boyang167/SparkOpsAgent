@@ -18,6 +18,7 @@
 - `docs/verification/unified-file-infrastructure-g4.md`
 - `docs/verification/unified-file-infrastructure-g5.md`
 - `docs/verification/unified-file-infrastructure-disaster-recovery.md`
+- `docs/verification/enterprise-file-governance-sharing.md`（Tasks 1–13 的企业文件治理与分享增量验证；属于 v1.0 之上的发布门禁证据，不改变本文既有容量、迁移与灾备阻断结论）
 
 ## 2026-11-14 数据面补缺复跑（UTC+8）
 

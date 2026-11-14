@@ -73,6 +73,9 @@ func Require(t testing.TB) {
 	if os.Getenv("REQUIRE_INTEGRATION") != "1" {
 		t.Skip("set REQUIRE_INTEGRATION=1 to run filesystem integration suites")
 	}
+	if os.Getenv("DATABASE_DSN") == "" {
+		t.Fatal("DATABASE_DSN is required when REQUIRE_INTEGRATION=1")
+	}
 }
 
 func (e *TestEnv) UploadAs(t testing.TB, principal Principal, content []byte) File {
