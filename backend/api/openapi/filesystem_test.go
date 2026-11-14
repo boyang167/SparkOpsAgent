@@ -204,6 +204,9 @@ func TestSharedWithMeOpenAPIDocumentsSourceProjectionAndFilter(t *testing.T) {
 		[]any{"USER", "WORKSPACE", "ORGANIZATION", "ROLE"},
 		writePrincipalType["enum"].([]any),
 	)
+	sourceNamespace := schemas["SharedNamespaceSource"].(map[string]any)
+	require.Subset(t, sourceNamespace["required"].([]any),
+		[]any{"organization_id", "workspace_id"})
 }
 
 func TestFilesystemAuditOpenAPISchemaMatchesSDKContract(t *testing.T) {

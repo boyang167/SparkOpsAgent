@@ -473,6 +473,8 @@ export const SharedItemVMSchema = z.object({
   original_path: z.string(),
   source_namespace: z.object({
     namespace_type: NamespaceTypeSchema,
+    organization_id: z.string().uuid(),
+    workspace_id: z.string().uuid().nullable(),
     owner_user_id: z.string().uuid().nullable(),
   }),
 });

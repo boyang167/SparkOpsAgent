@@ -176,6 +176,7 @@ export default async function FilesPage({
         />
         <SharedWithMePanel
           workspaceId={workspaceId}
+          organizationId={currentOrganization.id}
           organizationLabel={organizationLabel}
           workspaceLabel={workspaceLabel}
           source={initialState.source}

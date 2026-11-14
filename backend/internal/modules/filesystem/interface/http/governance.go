@@ -626,8 +626,10 @@ func sharedNodeView(item repository.SharedNode) gin.H {
 		"source_grant_ids": item.SourceGrantIDs, "sources": sources,
 		"original_path": item.OriginalPath,
 		"source_namespace": gin.H{
-			"namespace_type": item.SourceNamespace.NamespaceType,
-			"owner_user_id":  item.SourceNamespace.OwnerUserID,
+			"namespace_type":  item.SourceNamespace.NamespaceType,
+			"organization_id": item.SourceNamespace.OrganizationID,
+			"workspace_id":    item.SourceNamespace.WorkspaceID,
+			"owner_user_id":   item.SourceNamespace.OwnerUserID,
 		},
 	}
 }

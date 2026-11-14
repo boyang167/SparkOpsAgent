@@ -205,6 +205,8 @@ func TestListSharedNodesProjectsAllowSourcesAndNamespaceSafePathsInBatches(t *te
 	projected := byID[file.ID]
 	require.Equal(t, "/.root/项目/方案.md", projected.OriginalPath)
 	require.Equal(t, model.NamespaceTypeUser, projected.SourceNamespace.NamespaceType)
+	require.Equal(t, orgID, projected.SourceNamespace.OrganizationID)
+	require.Nil(t, projected.SourceNamespace.WorkspaceID)
 	require.NotNil(t, projected.SourceNamespace.OwnerUserID)
 	require.Equal(t, userOwner, *projected.SourceNamespace.OwnerUserID)
 	require.Equal(t, []repository.SharedGrantSource{{
@@ -213,6 +215,9 @@ func TestListSharedNodesProjectsAllowSourcesAndNamespaceSafePathsInBatches(t *te
 	}}, projected.Sources)
 	require.NotContains(t, projected.SourceGrantIDs, denyID)
 	require.Equal(t, "/同名.md", byID[workspaceFile.ID].OriginalPath)
+	require.Equal(t, orgID, byID[workspaceFile.ID].SourceNamespace.OrganizationID)
+	require.NotNil(t, byID[workspaceFile.ID].SourceNamespace.WorkspaceID)
+	require.Equal(t, workspaceNamespace.WorkspaceID, *byID[workspaceFile.ID].SourceNamespace.WorkspaceID)
 	require.NotContains(t, projected.OriginalPath, "internal-root")
 }
 

@@ -75,8 +75,10 @@ type SharedGrantSource struct {
 }
 
 type SharedNamespaceSource struct {
-	NamespaceType model.NamespaceType
-	OwnerUserID   *uuid.UUID
+	NamespaceType  model.NamespaceType
+	OrganizationID uuid.UUID
+	WorkspaceID    *uuid.UUID
+	OwnerUserID    *uuid.UUID
 }
 
 type SharedNode struct {

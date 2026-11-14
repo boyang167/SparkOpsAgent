@@ -25,6 +25,8 @@ describe("SharedItemVMSchema", () => {
       original_path: "/项目/报告.md",
       source_namespace: {
         namespace_type: "USER",
+        organization_id: "00000000-0000-4000-8000-000000000007",
+        workspace_id: null,
         owner_user_id: "00000000-0000-4000-8000-000000000006",
       },
     });
@@ -58,11 +60,16 @@ describe("SharedItemVMSchema", () => {
       original_path: "/未来来源.md",
       source_namespace: {
         namespace_type: "WORKSPACE",
+        organization_id: "00000000-0000-4000-8000-000000000007",
+        workspace_id: "00000000-0000-4000-8000-000000000008",
         owner_user_id: null,
       },
     });
 
     expect(parsed.sources[0]?.principal_type).toBe("FUTURE_PRINCIPAL");
+    expect(parsed.source_namespace.workspace_id).toBe(
+      "00000000-0000-4000-8000-000000000008",
+    );
     expect(() => SharedItemVMSchema.parse({
       ...parsed,
       sources: [{ ...parsed.sources[0], principal_type: "x".repeat(65) }],

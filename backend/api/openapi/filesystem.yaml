@@ -2090,11 +2090,18 @@ components:
           nullable: true
     SharedNamespaceSource:
       type: object
-      required: [namespace_type, owner_user_id]
+      required: [namespace_type, organization_id, workspace_id, owner_user_id]
       properties:
         namespace_type:
           type: string
           enum: [USER, WORKSPACE, ORGANIZATION]
+        organization_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+          nullable: true
         owner_user_id:
           type: string
           format: uuid

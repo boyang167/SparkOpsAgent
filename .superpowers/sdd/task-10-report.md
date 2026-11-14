@@ -95,3 +95,21 @@
 - `DATABASE_DSN` 未配置，未执行依赖外部 PostgreSQL 的数据库集成测试；root identity、合法 `.root` 子目录及 Agent/Service Account 生产链路由 SQLite repository 测试覆盖。
 - 未连接真实浏览器或真实 Agent/Service Account 执行主体，因为当前系统不存在对应权威会话上下文。
 - 修复提交 hash 见本次最终交付；Git commit 对象无法在其自身内容中自引用。
+
+## 终审身份标签修复
+
+- 修复起点 HEAD：`1298e4c066ec02e1b6ee940f4b935433a410e2a3`。
+- backend 共享投影的 `source_namespace` 现在返回数据库权威 `organization_id` 与 nullable `workspace_id`；沿用已有 Namespace 批量查询，没有新增名称查询或 N+1。
+- OpenAPI、fronted contract、BFF/SDK transport fixtures 与 UI 已同步该结构。
+- SharedWithMePanel 仅在 `source_namespace.workspace_id === current workspaceId` 时使用当前 `workspaceLabel`；其他工作区统一显示“工作区空间（身份信息不可用）”。
+- Organization 文案同样要求 `source_namespace.organization_id === current organizationId`；无法证明时显示“组织空间（身份信息不可用）”。
+- TDD RED 已确认旧实现会对其他 workspace/organization 冒用当前页面标签；新增 same workspace、different workspace 与未证明 organization 测试后转绿。
+
+## 终审身份标签验证
+
+- `go test ./internal/modules/filesystem/infrastructure/persistence ./internal/modules/filesystem/interface/http ./api/openapi -count=1`：3 个 package 全部通过。
+- `go test ./internal/modules/filesystem/... -count=1`：filesystem 模块全部通过。
+- `pnpm vitest run packages/contracts/src/filesystem/index.test.ts packages/bff-modules/src/filesystem/index.test.ts packages/web-sdk/src/filesystem.test.ts apps/web/src/modules/filesystem/components/SharedWithMePanel.test.tsx`：4 个文件、36 个测试通过。
+- `pnpm vitest run packages/contracts/src/filesystem/index.test.ts packages/upstream/src/filesystem.test.ts packages/bff-modules/src/filesystem/index.test.ts packages/web-sdk/src/filesystem.test.ts apps/web/app/api/bff/v1/filesystem/governed-routes.test.ts apps/web/src/server/loaders/filesystem.test.ts apps/web/src/modules/filesystem`：28 个文件、224 个测试通过。
+- `pnpm typecheck`：6 个 workspace package 全部通过。
+- 修复提交 hash 见本次最终交付；Git commit 对象无法在其自身内容中自引用。

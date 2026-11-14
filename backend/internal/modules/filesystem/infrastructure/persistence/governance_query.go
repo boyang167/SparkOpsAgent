@@ -221,10 +221,16 @@ func sharedNodeProjections(
 			value := *namespace.OwnerUserID
 			ownerUserID = &value
 		}
+		var workspaceID *uuid.UUID
+		if namespace.NamespaceType == model.NamespaceTypeWorkspace && namespace.WorkspaceID != nil {
+			value := *namespace.WorkspaceID
+			workspaceID = &value
+		}
 		out[nodeID] = sharedNodeProjection{
 			Sources: sources, OriginalPath: "/" + strings.Join(pathParts, "/"),
 			SourceNamespace: repository.SharedNamespaceSource{
-				NamespaceType: namespace.NamespaceType, OwnerUserID: ownerUserID,
+				NamespaceType: namespace.NamespaceType, OrganizationID: namespace.OrganizationID,
+				WorkspaceID: workspaceID, OwnerUserID: ownerUserID,
 			},
 		}
 	}

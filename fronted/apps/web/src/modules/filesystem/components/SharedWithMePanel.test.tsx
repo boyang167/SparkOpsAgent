@@ -71,6 +71,8 @@ function item(
     }],
     source_namespace: {
       namespace_type: index === 2 ? "USER" : "WORKSPACE",
+      organization_id: "organization-1",
+      workspace_id: index === 2 ? null : "workspace-1",
       owner_user_id: index === 2
         ? `50000000-0000-4000-8000-0000000000${index}`
         : null,
@@ -90,6 +92,7 @@ describe("SharedWithMePanel", () => {
     const items = sourceTypes.map(([type], index) => item(index + 1, type));
     render(createElement(SharedWithMePanel, {
       workspaceId: "workspace-1",
+      organizationId: "organization-1",
       organizationLabel: "星火科技",
       workspaceLabel: "研发平台",
       items,
@@ -104,6 +107,63 @@ describe("SharedWithMePanel", () => {
     expect(screen.getAllByText("READ、DOWNLOAD")).toHaveLength(4);
     expect(screen.getByText("/项目/共享文件 1.md")).toBeInTheDocument();
     expect(screen.queryByText(items[0]!.node.owner_id)).not.toBeInTheDocument();
+  });
+
+  it("uses the current workspace label only for a matching source namespace", () => {
+    const sameWorkspace = item(17, "WORKSPACE");
+    const differentWorkspace = {
+      ...item(18, "WORKSPACE"),
+      source_namespace: {
+        ...item(18, "WORKSPACE").source_namespace,
+        workspace_id: "workspace-other",
+      },
+    };
+    const rendered = render(createElement(SharedWithMePanel, {
+      workspaceId: "workspace-1",
+      organizationId: "organization-1",
+      organizationLabel: "星火科技",
+      workspaceLabel: "研发平台",
+      items: [sameWorkspace],
+      state: "ready",
+    }));
+
+    expect(screen.getByText("研发平台 · 共享者信息不可用")).toBeInTheDocument();
+
+    rendered.rerender(createElement(SharedWithMePanel, {
+      workspaceId: "workspace-1",
+      organizationId: "organization-1",
+      organizationLabel: "星火科技",
+      workspaceLabel: "研发平台",
+      items: [differentWorkspace],
+      state: "ready",
+    }));
+    expect(screen.getByText("工作区空间（身份信息不可用） · 共享者信息不可用"))
+      .toBeInTheDocument();
+    expect(screen.queryByText("研发平台 · 共享者信息不可用")).not.toBeInTheDocument();
+    expect(screen.queryByText("研发平台")).not.toBeInTheDocument();
+  });
+
+  it("does not reuse the current organization label for an unproven namespace", () => {
+    const foreignOrganization = {
+      ...item(19, "ORGANIZATION"),
+      source_namespace: {
+        namespace_type: "ORGANIZATION" as const,
+        organization_id: "organization-other",
+        workspace_id: null,
+        owner_user_id: null,
+      },
+    };
+    render(createElement(SharedWithMePanel, {
+      workspaceId: "workspace-1",
+      organizationId: "organization-1",
+      organizationLabel: "星火科技",
+      workspaceLabel: "研发平台",
+      items: [foreignOrganization],
+      state: "ready",
+    }));
+
+    expect(screen.getAllByText("组织空间（身份信息不可用）").length).toBeGreaterThan(0);
+    expect(screen.queryByText("星火科技")).not.toBeInTheDocument();
   });
 
   it("keeps unknown principal types in a safe fallback group", () => {

@@ -166,7 +166,9 @@ func TestGovernanceSharedWithMeForwardsQueryCursorAndLimit(t *testing.T) {
 				}},
 				OriginalPath: "/项目/报告.md",
 				SourceNamespace: repository.SharedNamespaceSource{
-					NamespaceType: model.NamespaceTypeWorkspace,
+					NamespaceType:  model.NamespaceTypeWorkspace,
+					OrganizationID: orgID,
+					WorkspaceID:    &workspaceID,
 				},
 			}}, "", nil
 		},
@@ -191,6 +193,8 @@ func TestGovernanceSharedWithMeForwardsQueryCursorAndLimit(t *testing.T) {
 	require.Contains(t, res.Body.String(), `"original_path":"/项目/报告.md"`)
 	require.Contains(t, res.Body.String(), `"principal_type":"AGENT"`)
 	require.Contains(t, res.Body.String(), `"expires_at":"2026-12-31T16:00:00Z"`)
+	require.Contains(t, res.Body.String(), `"organization_id":"`+orgID.String()+`"`)
+	require.Contains(t, res.Body.String(), `"workspace_id":"`+workspaceID.String()+`"`)
 }
 
 func TestGovernanceSharedWithMeRejectsUnknownSourceType(t *testing.T) {

@@ -6,6 +6,7 @@ import { FileDetailDrawer } from "./FileDetailDrawer";
 
 export type SharedWithMePanelProps = {
   workspaceId: string;
+  organizationId?: string;
   organizationLabel: string;
   workspaceLabel: string;
   source?: "organization" | "workspace" | "user" | "agent";
@@ -41,15 +42,21 @@ function groupFor(item: SharedItemVM, source?: SourceFilter): GroupID {
 
 function sourceLabel(
   item: SharedItemVM,
+  workspaceId: string,
+  organizationId: string | undefined,
   organizationLabel: string,
   workspaceLabel: string,
   source?: SourceFilter,
 ) {
   switch (groupFor(item, source)) {
     case "ORGANIZATION":
-      return organizationLabel;
+      return organizationId === item.source_namespace.organization_id
+        ? organizationLabel
+        : "组织空间（身份信息不可用）";
     case "WORKSPACE":
-      return workspaceLabel;
+      return workspaceId === item.source_namespace.workspace_id
+        ? workspaceLabel
+        : "工作区空间（身份信息不可用）";
     case "USER":
       return "其他用户";
     case "AGENT":
@@ -83,14 +90,20 @@ function sourceTypesLabel(item: SharedItemVM) {
 
 function ownerAndSharerLabel(
   item: SharedItemVM,
+  workspaceId: string,
+  organizationId: string | undefined,
   organizationLabel: string,
   workspaceLabel: string,
 ) {
   const owner =
     item.source_namespace.namespace_type === "ORGANIZATION"
-      ? organizationLabel
+      ? organizationId === item.source_namespace.organization_id
+        ? organizationLabel
+        : "组织空间（身份信息不可用）"
       : item.source_namespace.namespace_type === "WORKSPACE"
-        ? workspaceLabel
+        ? workspaceId === item.source_namespace.workspace_id
+          ? workspaceLabel
+          : "工作区空间（身份信息不可用）"
         : item.source_namespace.owner_user_id
           ? "个人空间所有者（身份信息不可用）"
           : "所有者信息不可用";
@@ -125,6 +138,7 @@ function formatUTC(date: Date) {
 
 export function SharedWithMePanel({
   workspaceId,
+  organizationId,
   organizationLabel,
   workspaceLabel,
   source,
@@ -237,7 +251,14 @@ export function SharedWithMePanel({
                 { className: "filesystem-shared-metadata" },
                 createElement(Metadata, {
                   label: "来源",
-                  value: sourceLabel(item, organizationLabel, workspaceLabel, source),
+                  value: sourceLabel(
+                    item,
+                    workspaceId,
+                    organizationId,
+                    organizationLabel,
+                    workspaceLabel,
+                    source,
+                  ),
                 }),
                 createElement(Metadata, {
                   label: "授权来源类型",
@@ -247,6 +268,8 @@ export function SharedWithMePanel({
                   label: "所有者 / 分享者",
                   value: ownerAndSharerLabel(
                     item,
+                    workspaceId,
+                    organizationId,
                     organizationLabel,
                     workspaceLabel,
                   ),
@@ -273,7 +296,14 @@ export function SharedWithMePanel({
           projectionDetails: [
             {
               label: "来源",
-              value: sourceLabel(selected, organizationLabel, workspaceLabel, source),
+              value: sourceLabel(
+                selected,
+                workspaceId,
+                organizationId,
+                organizationLabel,
+                workspaceLabel,
+                source,
+              ),
             },
             {
               label: "授权来源类型",

@@ -450,6 +450,8 @@ describe("governed filesystem sdk", () => {
       original_path: "/项目/shared.pdf",
       source_namespace: {
         namespace_type: "WORKSPACE",
+        organization_id: "00000000-0000-4000-8000-000000000002",
+        workspace_id: "00000000-0000-4000-8000-000000000003",
         owner_user_id: null,
       },
     } as const;
