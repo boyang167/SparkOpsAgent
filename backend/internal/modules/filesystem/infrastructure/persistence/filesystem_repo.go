@@ -43,8 +43,8 @@ func (r *Repository) CreateNamespace(ctx context.Context, namespace *model.Names
 		ownerUserID = &namespace.OwnerUserID
 	}
 	db := postgres.DB(ctx, r.db)
-	return wrapPersistence(db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&namespaceRow{
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&namespaceRow{
 			ID: namespace.ID, NamespaceType: namespace.NamespaceType, OrganizationID: namespace.OrganizationID,
 			WorkspaceID: workspaceID, OwnerUserID: ownerUserID, RootNodeID: namespace.RootNodeID,
 			Status: status, PolicyVersion: namespace.PolicyVersion, CreatedAt: now, UpdatedAt: now,
@@ -54,13 +54,55 @@ func (r *Repository) CreateNamespace(ctx context.Context, namespace *model.Names
 		if namespace.NamespaceType != model.NamespaceTypeWorkspace {
 			return nil
 		}
-		return tx.Create(&quotaAccountRow{ID: uuid.New(), OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID, UpdatedAt: now}).Error
-	}))
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&quotaAccountRow{ID: uuid.New(), OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID, UpdatedAt: now}).Error
+	})
+	if isSQLiteBusy(err) {
+		return domain.ErrTransactionRetry
+	}
+	return wrapPersistence(err)
 }
 
 func (r *Repository) GetNamespaceByWorkspace(ctx context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
 	var row namespaceRow
-	err := postgres.DB(ctx, r.db).Where("workspace_id = ?", workspaceID).First(&row).Error
+	err := postgres.DB(ctx, r.db).
+		Where("namespace_type = ? AND workspace_id = ?", model.NamespaceTypeWorkspace, workspaceID).
+		First(&row).Error
+	return namespaceResult(row, err)
+}
+
+func (r *Repository) GetNamespaceByOrganization(ctx context.Context, organizationID uuid.UUID) (*model.Namespace, error) {
+	var row namespaceRow
+	err := postgres.DB(ctx, r.db).
+		Where("namespace_type = ? AND organization_id = ?", model.NamespaceTypeOrganization, organizationID).
+		First(&row).Error
+	return namespaceResult(row, err)
+}
+
+func (r *Repository) GetNamespaceByUser(ctx context.Context, organizationID, userID uuid.UUID) (*model.Namespace, error) {
+	var row namespaceRow
+	err := postgres.DB(ctx, r.db).
+		Where("namespace_type = ? AND organization_id = ? AND owner_user_id = ?",
+			model.NamespaceTypeUser, organizationID, userID).
+		First(&row).Error
+	return namespaceResult(row, err)
+}
+
+func (r *Repository) ListNamespacesForOrganization(ctx context.Context, organizationID uuid.UUID) ([]*model.Namespace, error) {
+	var rows []namespaceRow
+	if err := postgres.DB(ctx, r.db).
+		Where("organization_id = ?", organizationID).
+		Order("id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, wrapPersistence(err)
+	}
+	namespaces := make([]*model.Namespace, len(rows))
+	for i := range rows {
+		namespaces[i] = namespaceFromRow(&rows[i])
+	}
+	return namespaces, nil
+}
+
+func namespaceResult(row namespaceRow, err error) (*model.Namespace, error) {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, domain.ErrNamespaceNotFound
 	}
@@ -98,7 +140,7 @@ func namespaceFromRow(row *namespaceRow) *model.Namespace {
 
 func (r *Repository) SetNamespaceRoot(ctx context.Context, workspaceID, rootNodeID uuid.UUID) error {
 	result := postgres.DB(ctx, r.db).Model(&namespaceRow{}).
-		Where("workspace_id = ?", workspaceID).
+		Where("id = ? OR (namespace_type = ? AND workspace_id = ?)", workspaceID, model.NamespaceTypeWorkspace, workspaceID).
 		Updates(map[string]any{"root_node_id": rootNodeID, "updated_at": time.Now().UTC()})
 	if result.Error != nil {
 		return wrapPersistence(result.Error)
@@ -150,6 +192,18 @@ func (r *Repository) CreateNode(ctx context.Context, node *model.Node) error {
 	}).Error
 	if conflict := mapUniqueConflict(err); conflict != nil {
 		return conflict
+	}
+	return wrapPersistence(err)
+}
+
+func (r *Repository) CreateNodeIdempotent(ctx context.Context, node *model.Node) error {
+	err := postgres.DB(ctx, r.db).Clauses(clause.OnConflict{DoNothing: true}).Create(&nodeRow{
+		ID: node.ID, NamespaceID: node.NamespaceID, ParentID: node.ParentID, Type: node.Type,
+		Name: node.Name, NormalizedName: node.NormalizedName, CurrentRevisionID: node.CurrentRevisionID,
+		State: node.State, OwnerID: node.OwnerID, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}).Error
+	if isSQLiteBusy(err) {
+		return domain.ErrTransactionRetry
 	}
 	return wrapPersistence(err)
 }
@@ -941,6 +995,9 @@ func wrapPersistence(err error) error {
 	if isDomainError(err) {
 		return err
 	}
+	if isSQLiteBusy(err) {
+		return domain.ErrTransactionRetry
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return domain.ErrPersistence
 	}
@@ -1598,7 +1655,7 @@ func (r *Repository) CreateFileLink(ctx context.Context, link model.FileLink) er
 		ID: link.ID, NodeID: link.NodeID, RevisionID: link.RevisionID,
 		LinkType: link.LinkType, LinkID: link.LinkID, CreatedAt: link.CreatedAt,
 	}
-	return wrapPersistence(postgres.DB(ctx, r.db).Create(&row).Error)
+	return wrapPersistence(postgres.DB(ctx, r.db).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error)
 }
 
 func (r *Repository) GetFileLink(ctx context.Context, nodeID uuid.UUID, revisionID *uuid.UUID, linkType string) (*model.FileLink, error) {

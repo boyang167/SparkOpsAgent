@@ -8,6 +8,8 @@ import (
 
 const FileLinkTypeArtifact = "ARTIFACT"
 
+const FileLinkTypeNamespaceRoot = "NAMESPACE_ROOT"
+
 // Artifact is a business-facing link to a file node (not a duplicate blob).
 type Artifact struct {
 	ID                uuid.UUID

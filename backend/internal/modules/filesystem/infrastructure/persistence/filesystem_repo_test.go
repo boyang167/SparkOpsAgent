@@ -79,6 +79,37 @@ func TestCreateNamespaceCreatesQuotaOnlyForWorkspace(t *testing.T) {
 	require.Zero(t, quotaCount)
 }
 
+func TestNamespaceQueriesAreScopedByTypeAndOrganization(t *testing.T) {
+	repo, db := newTestRepository(t)
+	organizationID := uuid.New()
+	otherOrganizationID := uuid.New()
+	userID := uuid.New()
+	workspaceID := uuid.New()
+	organization := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeOrganization, OrganizationID: organizationID}
+	user := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeUser, OrganizationID: organizationID, OwnerUserID: userID}
+	workspace := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: organizationID, WorkspaceID: workspaceID}
+	foreignUser := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeUser, OrganizationID: otherOrganizationID, OwnerUserID: userID}
+	for _, namespace := range []*model.Namespace{organization, user, workspace, foreignUser} {
+		require.NoError(t, repo.CreateNamespace(context.Background(), namespace))
+	}
+
+	gotOrganization, err := repo.GetNamespaceByOrganization(context.Background(), organizationID)
+	require.NoError(t, err)
+	require.Equal(t, organization.ID, gotOrganization.ID)
+	gotUser, err := repo.GetNamespaceByUser(context.Background(), organizationID, userID)
+	require.NoError(t, err)
+	require.Equal(t, user.ID, gotUser.ID)
+	_, err = repo.GetNamespaceByUser(context.Background(), otherOrganizationID, userID)
+	require.NoError(t, err)
+	namespaces, err := repo.ListNamespacesForOrganization(context.Background(), organizationID)
+	require.NoError(t, err)
+	require.Len(t, namespaces, 3)
+	for _, namespace := range namespaces {
+		require.Equal(t, organizationID, namespace.OrganizationID)
+	}
+	require.NoError(t, db.Table("filesystem.namespaces").Where("namespace_type = ?", model.NamespaceTypeWorkspace).Count(new(int64)).Error)
+}
+
 func TestCreateChildRejectsDuplicateNormalizedName(t *testing.T) {
 	repo, db := newTestRepository(t)
 	ns := seedNamespace(t, db)

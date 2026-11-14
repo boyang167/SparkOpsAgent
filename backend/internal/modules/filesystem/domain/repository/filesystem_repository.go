@@ -79,6 +79,9 @@ var (
 
 type FilesystemRepository interface {
 	CreateNamespace(context.Context, *model.Namespace) error
+	GetNamespaceByOrganization(context.Context, uuid.UUID) (*model.Namespace, error)
+	GetNamespaceByUser(context.Context, uuid.UUID, uuid.UUID) (*model.Namespace, error)
+	ListNamespacesForOrganization(context.Context, uuid.UUID) ([]*model.Namespace, error)
 	GetNamespaceByWorkspace(context.Context, uuid.UUID) (*model.Namespace, error)
 	GetNamespace(context.Context, uuid.UUID) (*model.Namespace, error)
 	SetNamespaceRoot(context.Context, uuid.UUID, uuid.UUID) error
