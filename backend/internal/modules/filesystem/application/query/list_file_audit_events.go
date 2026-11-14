@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 
@@ -158,10 +159,49 @@ func sanitizeAuditValue(value any) any {
 }
 
 func sensitiveAuditKey(key string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(key))
-	return strings.Contains(normalized, "token") ||
-		strings.Contains(normalized, "secret") ||
-		strings.Contains(normalized, "credential") ||
-		normalized == "capability" ||
-		strings.Contains(normalized, "capability_token")
+	normalized := normalizeAuditKey(key)
+	for _, sensitive := range []string{
+		"token",
+		"token_hash",
+		"password",
+		"secret",
+		"api_key",
+		"access_key",
+		"private_key",
+		"authorization",
+		"cookie",
+		"credential",
+		"capability",
+	} {
+		if normalized == sensitive || strings.HasSuffix(normalized, "_"+sensitive) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeAuditKey(key string) string {
+	input := []rune(strings.TrimSpace(key))
+	normalized := make([]rune, 0, len(input))
+	appendSeparator := func() {
+		if len(normalized) > 0 && normalized[len(normalized)-1] != '_' {
+			normalized = append(normalized, '_')
+		}
+	}
+	for index, current := range input {
+		if !unicode.IsLetter(current) && !unicode.IsDigit(current) {
+			appendSeparator()
+			continue
+		}
+		if unicode.IsUpper(current) && index > 0 {
+			previous := input[index-1]
+			nextIsLower := index+1 < len(input) && unicode.IsLower(input[index+1])
+			if unicode.IsLower(previous) || unicode.IsDigit(previous) ||
+				(unicode.IsUpper(previous) && nextIsLower) {
+				appendSeparator()
+			}
+		}
+		normalized = append(normalized, unicode.ToLower(current))
+	}
+	return strings.Trim(string(normalized), "_")
 }

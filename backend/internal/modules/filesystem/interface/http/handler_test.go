@@ -56,6 +56,27 @@ func (s *auditStub) Log(_ context.Context, entry audit.Entry) error {
 	return nil
 }
 
+func TestAuditCapabilityRecordsAllowDecision(t *testing.T) {
+	logs := &auditStub{}
+	handler := &Handler{audit: logs}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	workspaceID := uuid.New()
+	handler.auditCapability(c, requestContext{
+		workspaceID: workspaceID,
+		actorID:     uuid.New(),
+		traceID:     "trace-capability",
+		namespace: &model.Namespace{
+			ID: uuid.New(), WorkspaceID: workspaceID, OrganizationID: uuid.New(),
+		},
+	}, command.IssuedCapability{ID: uuid.New(), Hash: "hash-value"})
+
+	require.Len(t, logs.entries, 1)
+	require.Equal(t, workspaceID.String(), logs.entries[0].Detail["workspace_id"])
+	require.Equal(t, "ALLOW", logs.entries[0].Detail["decision"])
+}
+
 func TestCreateDirectoryRequiresMembershipPermissionAndIdempotencyKey(t *testing.T) {
 	tests := []struct {
 		name        string

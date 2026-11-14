@@ -108,3 +108,41 @@
 
 - 审计后端仍使用既有 offset cursor；前端历史栈只对本次已访问 cursor 提供上一页，深链到未知 cursor 时不会伪造前页。
 - 服务端详情重试依赖 Next `router.refresh()`；持续 403/404 会稳定回到对应 Drawer 状态。
+
+---
+
+## 复审剩余 3 Important 与契约 Minor
+
+### RED
+
+1. AuditWorkspace render-frame scope：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/AuditWorkspace.test.tsx`
+   - 退出码 1；URL filter 切换后的首次 render 仍调用旧审计详情 Drawer，证明仅靠 effect 清理会闪现旧 selected/items。
+2. 脱敏、ALLOW 写入与 OpenAPI：
+   `go test ./internal/modules/filesystem/application/query ./internal/modules/filesystem/interface/http ./internal/platform/audit ./api/openapi`
+   - 退出码 1；`password` 等规范化敏感键未脱敏、`filesystem.capability.issued` 缺少 `decision: ALLOW`、审计 id/actor_id 缺 UUID format。
+   - repository 的 workspace + decision 分页前过滤 characterization 测试通过，确认无需修改存储查询实现。
+
+### GREEN
+
+1. AuditWorkspace 定向：1 个文件、8 项测试通过。
+2. 后端定向：query、HTTP、audit repository、OpenAPI 全部通过。
+3. Filesystem 前端回归：
+   `pnpm vitest run apps/web/src/modules/filesystem apps/web/src/components/ui/Drawer.test.tsx apps/web/src/server/loaders/filesystem.test.ts packages/web-sdk/src/filesystem.test.ts`
+   - 20 个文件、133 项测试通过。
+4. 相关 Go：
+   `go test ./internal/modules/filesystem/... ./internal/platform/audit ./api/openapi`
+   - 全部通过。
+5. `pnpm --filter @sparkops/web typecheck`、IDE diagnostics、`git diff --check` 全部通过。
+
+### 实现与契约取舍
+
+- AuditWorkspace 将 items、next cursor、load state、selected event 统一绑定到 `workspace + actor/action/resource/result/time/cursor` request scope；scope 不匹配时 render 当帧直接使用空 loading 视图，旧行与旧 Drawer 不等待 effect 才清理。
+- 审计 detail 键先统一大小写、连字符和驼峰，再按明确的精确键/命名后缀脱敏；覆盖 token/token_hash/password/secret/api_key/access_key/private_key/authorization/cookie/credential/capability，并递归处理对象和数组。`token_count`、`tokenizer`、`credential_id`、`access_key_id` 等元数据保留。
+- `filesystem.capability.issued` 现在明确写入 `decision: ALLOW`；复核 filesystem 其他写入点后，mutation、grant、controlled export 已写 decision，middleware/resource deny 已写 DENY，无其他依赖默认 ALLOW 的写入点。
+- OpenAPI 为审计 `id`、`actor_id` 增加 UUID format。服务真实响应始终提供 detail 与 next_cursor，因此 OpenAPI 继续将二者列为 required；SDK 保留 optional+default 的输入容错以兼容旧响应，但解析后的输出类型仍始终包含二者。
+
+### 提交
+
+- Message: `fix(filesystem): close task 7 audit review`
+- Commit: 本追加报告所在提交。

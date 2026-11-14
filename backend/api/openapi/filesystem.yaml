@@ -2019,8 +2019,10 @@ components:
       properties:
         id:
           type: string
+          format: uuid
         actor_id:
           type: string
+          format: uuid
         action:
           type: string
         resource_type:

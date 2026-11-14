@@ -375,7 +375,10 @@ func (h *Handler) auditCapability(c *gin.Context, rc requestContext, issued comm
 	_ = h.audit.Log(c.Request.Context(), audit.Entry{
 		ActorID: kernel.MemberID{UUID: rc.actorID}, OrgID: &kernel.OrgID{UUID: rc.namespace.OrganizationID},
 		Action: "filesystem.capability.issued", ResourceType: "filesystem", ResourceID: issued.ID.String(),
-		Detail: map[string]any{"workspace_id": rc.workspaceID.String(), "token_hash": issued.Hash, "trace_id": rc.traceID},
+		Detail: map[string]any{
+			"workspace_id": rc.workspaceID.String(), "decision": "ALLOW",
+			"token_hash": issued.Hash, "trace_id": rc.traceID,
+		},
 	})
 }
 

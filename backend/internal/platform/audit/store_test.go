@@ -51,3 +51,41 @@ func TestGormStoreListFiltersWorkspaceAndDecisionBeforeLimit(t *testing.T) {
 	require.Equal(t, workspaceA.String(), rows[0].Detail["workspace_id"])
 	require.Equal(t, "DENY", rows[0].Detail["decision"])
 }
+
+func TestGormStoreFindsAllowedCapabilityAuditWithinWorkspaceBeforeLimit(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:audit-capability?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+	store := NewGormStore(db)
+	require.NoError(t, store.AutoMigrate())
+
+	orgID := uuid.New()
+	workspaceID := uuid.New()
+	actorID := kernel.MemberID{UUID: uuid.New()}
+	require.NoError(t, store.Append(context.Background(), Entry{
+		ActorID: actorID, OrgID: &kernel.OrgID{UUID: orgID},
+		Action: "filesystem.node.rename", ResourceType: "filesystem", ResourceID: uuid.NewString(),
+		Detail: map[string]any{
+			"workspace_id": workspaceID.String(),
+			"decision":     "DENY",
+		},
+	}))
+	require.NoError(t, store.Append(context.Background(), Entry{
+		ActorID: actorID, OrgID: &kernel.OrgID{UUID: orgID},
+		Action: "filesystem.capability.issued", ResourceType: "filesystem", ResourceID: uuid.NewString(),
+		Detail: map[string]any{
+			"workspace_id": workspaceID.String(),
+			"decision":     "ALLOW",
+		},
+	}))
+
+	rows, err := store.List(context.Background(), ListFilter{
+		OrgID: &kernel.OrgID{UUID: orgID}, WorkspaceID: workspaceID.String(),
+		Decision: "ALLOW", Action: "filesystem.capability.issued", Limit: 1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "filesystem.capability.issued", rows[0].Action)
+	require.Equal(t, "ALLOW", rows[0].Detail["decision"])
+}

@@ -9,6 +9,7 @@ import { BffError } from "@sparkops/contracts";
 import { AuditWorkspace } from "./AuditWorkspace";
 
 const sdk = vi.hoisted(() => ({ listFileAuditEvents: vi.fn() }));
+const drawerRenders = vi.hoisted(() => [] as string[]);
 const navigation = vi.hoisted(() => ({
   replace: vi.fn(),
   searchParams: new URLSearchParams(),
@@ -26,7 +27,10 @@ vi.mock("@/components/ui/Drawer", () => ({
     open: boolean;
     title: string;
     children: React.ReactNode;
-  }) => open ? createElement("div", { role: "dialog", "aria-label": title }, children) : null,
+  }) => {
+    if (open) drawerRenders.push(title);
+    return open ? createElement("div", { role: "dialog", "aria-label": title }, children) : null;
+  },
 }));
 vi.mock("@/components/ui/InlineAlert", () => ({
   InlineAlert: ({ children }: { children: React.ReactNode }) =>
@@ -62,6 +66,7 @@ function renderWorkspace() {
 describe("AuditWorkspace", () => {
   beforeEach(() => {
     sdk.listFileAuditEvents.mockReset();
+    drawerRenders.length = 0;
     navigation.replace.mockReset();
     navigation.searchParams = new URLSearchParams("tab=audit&action=filesystem.node.rename");
     sdk.listFileAuditEvents.mockResolvedValue({ items: [event], next_cursor: "20" });
@@ -222,6 +227,51 @@ describe("AuditWorkspace", () => {
 
     resolveOld({ items: [{ ...event, action: "stale.action" }], next_cursor: "" });
     await waitFor(() => expect(screen.queryByText("stale.action")).not.toBeInTheDocument());
+  });
+
+  it("isolates visible state in the same render when workspace or URL filters change", async () => {
+    const rendered = renderWorkspace();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "查看审计事件 filesystem.node.rename",
+      }),
+    );
+    expect(screen.getByRole("dialog", { name: "审计事件详情" })).toBeInTheDocument();
+
+    let resolveFilter!: (value: unknown) => void;
+    sdk.listFileAuditEvents.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveFilter = resolve; }),
+    );
+    navigation.searchParams = new URLSearchParams("tab=audit&action=new.filter");
+    drawerRenders.length = 0;
+    rendered.rerender(
+      createElement(AuditWorkspace, {
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        permissions: ["file:admin"],
+      }),
+    );
+
+    expect(screen.queryByText("filesystem.node.rename")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "审计事件详情" })).not.toBeInTheDocument();
+    expect(drawerRenders).toEqual([]);
+    expect(screen.getByRole("status")).toHaveTextContent("正在加载审计记录");
+
+    resolveFilter({
+      items: [{ ...event, action: "new.filter" }],
+      next_cursor: "",
+    });
+    expect(await screen.findByText("new.filter")).toBeInTheDocument();
+
+    sdk.listFileAuditEvents.mockImplementationOnce(() => new Promise(() => {}));
+    rendered.rerender(
+      createElement(AuditWorkspace, {
+        workspaceId: "00000000-0000-4000-8000-000000000099",
+        permissions: ["file:admin"],
+      }),
+    );
+
+    expect(screen.queryByText("new.filter")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("正在加载审计记录");
   });
 
   it("retries an audit request after an error", async () => {

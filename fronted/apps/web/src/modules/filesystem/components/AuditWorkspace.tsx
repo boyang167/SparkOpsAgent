@@ -14,6 +14,7 @@ export type AuditWorkspaceProps = {
 };
 
 const PAGE_SIZE = 20;
+type AuditLoadState = "loading" | "ready" | "error" | "forbidden";
 
 function queryFromURL(params: URLSearchParams): FileAuditQuery {
   return {
@@ -47,11 +48,41 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
   });
   const draft = draftState.source === urlSignature ? draftState.value : initialQuery;
   const query = queryState.source === urlSignature ? queryState.value : initialQuery;
-  const [items, setItems] = useState<FileAuditEventVM[]>([]);
-  const [nextCursor, setNextCursor] = useState("");
-  const [state, setState] = useState<"loading" | "ready" | "error" | "forbidden">("loading");
+  const requestScope = JSON.stringify([
+    workspaceId,
+    query.actor_id ?? "",
+    query.action ?? "",
+    query.resource_id ?? "",
+    query.result ?? "",
+    query.from ?? "",
+    query.to ?? "",
+    query.cursor ?? "",
+  ]);
+  const [viewState, setViewState] = useState<{
+    scope: string;
+    items: FileAuditEventVM[];
+    nextCursor: string;
+    state: AuditLoadState;
+    selected: FileAuditEventVM | null;
+  }>({
+    scope: requestScope,
+    items: [],
+    nextCursor: "",
+    state: "loading",
+    selected: null,
+  });
+  const scopedView =
+    viewState.scope === requestScope
+      ? viewState
+      : {
+          scope: requestScope,
+          items: [],
+          nextCursor: "",
+          state: "loading" as const,
+          selected: null,
+        };
+  const { items, nextCursor, state, selected } = scopedView;
   const [advanced, setAdvanced] = useState(false);
-  const [selected, setSelected] = useState<FileAuditEventVM | null>(null);
   const [retry, setRetry] = useState(0);
   const requestGeneration = useRef(0);
   const filterScope = [
@@ -79,17 +110,28 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
     if (queryState.source !== urlSignature) {
       setQueryState({ source: urlSignature, value: initialQuery });
     }
-    setSelected(null);
   }, [draftState.source, initialQuery, queryState.source, urlSignature, workspaceId]);
 
   useEffect(() => {
     const generation = ++requestGeneration.current;
     if (!canRead) {
-      setState("forbidden");
+      setViewState({
+        scope: requestScope,
+        items: [],
+        nextCursor: "",
+        state: "forbidden",
+        selected: null,
+      });
       return;
     }
     const controller = new AbortController();
-    setState("loading");
+    setViewState({
+      scope: requestScope,
+      items: [],
+      nextCursor: "",
+      state: "loading",
+      selected: null,
+    });
     void listFileAuditEvents(
       workspaceId,
       { ...query, limit: PAGE_SIZE },
@@ -97,16 +139,26 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
     )
       .then((page) => {
         if (controller.signal.aborted || generation !== requestGeneration.current) return;
-        setItems(page.items);
-        setNextCursor(page.next_cursor ?? "");
-        setState("ready");
+        setViewState({
+          scope: requestScope,
+          items: page.items,
+          nextCursor: page.next_cursor ?? "",
+          state: "ready",
+          selected: null,
+        });
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted || generation !== requestGeneration.current) return;
-        setState(error instanceof BffError && error.status === 403 ? "forbidden" : "error");
+        setViewState({
+          scope: requestScope,
+          items: [],
+          nextCursor: "",
+          state: error instanceof BffError && error.status === 403 ? "forbidden" : "error",
+          selected: null,
+        });
       });
     return () => controller.abort();
-  }, [canRead, query, retry, workspaceId]);
+  }, [canRead, query, requestScope, retry, workspaceId]);
 
   function writeQuery(next: FileAuditQuery) {
     const params = new URLSearchParams(searchParams.toString());
@@ -243,7 +295,12 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
                 type: "button",
                 className: "link-muted text-left",
                 "aria-label": `查看审计事件 ${item.action}`,
-                onClick: () => setSelected(item),
+                onClick: () =>
+                  setViewState((current) =>
+                    current.scope === requestScope
+                      ? { ...current, selected: item }
+                      : current,
+                  ),
               }, item.action)),
               createElement("td", { className: "font-mono text-xs" }, `${item.resource_type}/${shortID(item.resource_id)}`),
               createElement("td", null, item.result),
@@ -294,7 +351,15 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
     form,
     content,
     pagination,
-    createElement(AuditDetailDrawer, { item: selected, onClose: () => setSelected(null) }),
+    createElement(AuditDetailDrawer, {
+      item: selected,
+      onClose: () =>
+        setViewState((current) =>
+          current.scope === requestScope
+            ? { ...current, selected: null }
+            : current,
+        ),
+    }),
   );
 }
 

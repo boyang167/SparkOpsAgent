@@ -81,3 +81,43 @@ func TestListFileAuditEventsRecursivelyRedactsSensitiveDetail(t *testing.T) {
 	require.Equal(t, "[REDACTED]", item["secret"])
 	require.Equal(t, "visible", item["name"])
 }
+
+func TestListFileAuditEventsUsesNormalizedExactSensitiveKeysWithoutHidingMetadata(t *testing.T) {
+	workspaceID := uuid.New()
+	sensitive := map[string]any{
+		"Token": "x", "TOKEN-HASH": "x", "password": "x", "clientSecret": "x",
+		"apiKey": "x", "X-Access-Key": "x", "privateKey": "x",
+		"Authorization": "x", "session-cookie": "x", "databaseCredential": "x",
+	}
+	safe := map[string]any{
+		"token_count": 7, "tokenizer": "bpe", "credential_id": "credential-1",
+		"access_key_id": "public-id", "private_key_algorithm": "ed25519",
+	}
+	detail := map[string]any{
+		"workspace_id": workspaceID.String(),
+		"sensitive":    sensitive,
+		"safe":         safe,
+		"nested": []any{
+			map[string]any{"API_KEY": "x", "token_count": 2},
+		},
+	}
+	store := &auditListStub{rows: []audit.LogView{{
+		ID: "event-2", ActorID: uuid.NewString(), Action: "filesystem.capability.issued",
+		ResourceType: "filesystem", ResourceID: uuid.NewString(), Detail: detail,
+		CreatedAt: "2026-11-14T04:00:00Z",
+	}}}
+
+	result, err := NewListFileAuditEventsHandler(store).Handle(context.Background(), ListFileAuditEvents{
+		OrganizationID: uuid.New(), WorkspaceID: workspaceID, Limit: 20,
+	})
+
+	require.NoError(t, err)
+	actualSensitive := result.Items[0].Detail["sensitive"].(map[string]any)
+	for key := range sensitive {
+		require.Equal(t, "[REDACTED]", actualSensitive[key], key)
+	}
+	require.Equal(t, safe, result.Items[0].Detail["safe"])
+	nested := result.Items[0].Detail["nested"].([]any)[0].(map[string]any)
+	require.Equal(t, "[REDACTED]", nested["API_KEY"])
+	require.Equal(t, 2, nested["token_count"])
+}

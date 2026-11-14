@@ -115,7 +115,14 @@ func TestFilesystemAuditOpenAPISchemaMatchesSDKContract(t *testing.T) {
 	} {
 		require.Contains(t, eventProperties, field)
 	}
+	require.Equal(t, "uuid", eventProperties["id"].(map[string]any)["format"])
+	require.Equal(t, "uuid", eventProperties["actor_id"].(map[string]any)["format"])
 	require.Equal(t, "object", eventProperties["detail"].(map[string]any)["type"])
+	require.ElementsMatch(t,
+		[]any{"items", "next_cursor"},
+		page["required"].([]any),
+	)
+	require.Contains(t, event["required"].([]any), "detail")
 }
 
 func TestFilesystemRoutesDeclareImplementedStableErrors(t *testing.T) {
