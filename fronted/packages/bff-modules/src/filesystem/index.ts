@@ -72,6 +72,15 @@ export async function listFileNodes(
   return mapNodePage(data);
 }
 
+export async function getFileNode(
+  ctx: BffContext,
+  workspaceId: string,
+  nodeId: string,
+): Promise<FileNodeVM> {
+  const data = await ctx.upstream.filesystem.getFileNode(workspaceId, nodeId);
+  return mapNode(data);
+}
+
 export async function createDirectoryNode(
   ctx: BffContext,
   workspaceId: string,

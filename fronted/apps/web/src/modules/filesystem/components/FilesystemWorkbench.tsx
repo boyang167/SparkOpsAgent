@@ -12,9 +12,12 @@ import {
   uploadTransfer,
 } from "@sparkops/web-sdk/filesystem";
 import { Drawer } from "@/components/ui/Drawer";
+import { AuditWorkspace } from "./AuditWorkspace";
 import { DirectoryTree } from "./DirectoryTree";
+import { FileDetailDrawer } from "./FileDetailDrawer";
 import { FileDropZone } from "./FileDropZone";
 import { FileExplorerPanel } from "./FileExplorerPanel";
+import { GovernanceWorkspace } from "./GovernanceWorkspace";
 import { MoveNodesModal } from "./MoveNodesModal";
 import { TransferCenter, TransferSummary } from "./TransferCenter";
 import { createTransferQueue } from "./transfer-queue";
@@ -27,6 +30,7 @@ export type FilesystemWorkbenchProps = {
   initialNodes: FileNodeVM[];
   initialState: WorkbenchState;
   permissions: string[];
+  initialSelectedNode?: FileNodeVM;
 };
 
 const tabs: Array<{
@@ -71,6 +75,7 @@ export function FilesystemWorkbench({
   initialNodes,
   initialState,
   permissions,
+  initialSelectedNode,
 }: FilesystemWorkbenchProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -80,6 +85,9 @@ export function FilesystemWorkbench({
   const [moveNodes, setMoveNodes] = useState<FileNodeVM[]>([]);
   const [treeVersion, setTreeVersion] = useState(0);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<FileNodeVM | null>(
+    initialSelectedNode ?? null,
+  );
   const transferQueues = useRef(new Map<string, TransferQueue>());
   const queueLifecycleGeneration = useRef(0);
   const transferQueueKey = `${workspaceId}:${namespace.id}`;
@@ -260,6 +268,25 @@ export function FilesystemWorkbench({
     window.history.replaceState(null, "", `${pathname}?${nextSearchParams.toString()}`);
   }
 
+  function openNode(node: FileNodeVM) {
+    if (node.type === "DIRECTORY") {
+      navigateDirectory(node);
+      return;
+    }
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.set("node", node.id);
+    setSelectedNode(node);
+    router.replace(`${pathname}?${nextSearchParams.toString()}`);
+  }
+
+  function closeNode() {
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.delete("node");
+    setSelectedNode(null);
+    const query = nextSearchParams.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  }
+
   const rootNode: FileNodeVM | null = namespace.root_node_id
     ? {
         id: namespace.root_node_id,
@@ -372,6 +399,7 @@ export function FilesystemWorkbench({
           view,
           canMove: permissions.includes("file:write"),
           onMove: setMoveNodes,
+          onOpen: openNode,
           onFilesSelected: permissions.includes("file:write")
             ? (files: File[]) =>
                 transferQueue.enqueue(
@@ -465,11 +493,15 @@ export function FilesystemWorkbench({
           "aria-labelledby": `workbench-tab-${tab.id}`,
           hidden: activeTab !== tab.id,
         },
-        tab.id === "files"
-          ? filesContent
-          : tab.id === "transfers"
-            ? createElement(TransferCenter, { queue: transferQueue, workspaceId })
-            : createElement("div", { className: "empty-state" }, "此功能将在后续任务中接入。"),
+        activeTab !== tab.id
+          ? null
+          : tab.id === "files"
+            ? filesContent
+            : tab.id === "transfers"
+              ? createElement(TransferCenter, { queue: transferQueue, workspaceId })
+              : tab.id === "governance"
+                ? createElement(GovernanceWorkspace, { workspaceId, permissions })
+                : createElement(AuditWorkspace, { workspaceId, permissions }),
       ),
     ),
     activeTab === "files"
@@ -515,6 +547,14 @@ export function FilesystemWorkbench({
             children: renderDirectoryTree(),
           },
         )
+      : null,
+    selectedNode
+      ? createElement(FileDetailDrawer, {
+          open: true,
+          node: selectedNode,
+          workspaceId,
+          onClose: closeNode,
+        })
       : null,
   );
 }

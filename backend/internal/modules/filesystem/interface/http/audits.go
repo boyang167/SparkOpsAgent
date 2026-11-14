@@ -58,6 +58,7 @@ func (h *Handler) ListFilesystemAudits(c *gin.Context) {
 	}
 	result, err := h.listFileAudits(c.Request.Context(), query.ListFileAuditEvents{
 		OrganizationID: rc.namespace.OrganizationID,
+		WorkspaceID:    rc.workspaceID,
 		ActorID:        actorID,
 		Action:         c.Query("action"),
 		ResourceID:     c.Query("resource_id"),

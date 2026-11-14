@@ -137,6 +137,7 @@ func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.Ha
 	base.Use(h.auditMiddlewareDenial())
 	base.GET("/namespaces", authz.RequirePermission(permissions, authz.PermFileRead), h.GetNamespace)
 	base.GET("/files", authz.RequirePermission(permissions, authz.PermFileRead), h.ListFiles)
+	base.GET("/files/:nodeId", authz.RequirePermission(permissions, authz.PermFileRead), h.GetFileNode)
 	base.GET("/files/search", authz.RequirePermission(permissions, authz.PermFileRead), h.SearchFiles)
 	base.GET("/files/:nodeId/preview", authz.RequirePermission(permissions, authz.PermFileRead), h.GetFilePreview)
 	base.POST("/directories", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.CreateDirectory)
@@ -403,6 +404,35 @@ func (h *Handler) ListFiles(c *gin.Context) {
 		scanCursor = rawNext
 	}
 	httpx.OK(c, gin.H{"items": views, "next_cursor": nextCursor})
+}
+
+func (h *Handler) GetFileNode(c *gin.Context) {
+	rc, ok := h.requestContext(c, false)
+	if !ok {
+		return
+	}
+	nodeID, ok := canonicalUUID(c.Param("nodeId"))
+	if !ok {
+		invalidRequest(c)
+		return
+	}
+	if !h.requireResource(c, rc, nodeID, model.ResourcePermissionRead) {
+		return
+	}
+	if h.getNode == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	node, err := h.getNode(c.Request.Context(), rc.namespace.ID, nodeID)
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	if node.NamespaceID != rc.namespace.ID {
+		filesystemError(c, domain.ErrNamespaceMismatch)
+		return
+	}
+	httpx.OK(c, nodeView(node))
 }
 
 type createDirectoryRequest struct {

@@ -30,6 +30,7 @@ export type FileExplorerPanelProps = {
   canMove?: boolean;
   onCreateDirectory?: (name: string) => Promise<void>;
   onNavigate?: () => void;
+  onOpen?: (node: FileNodeVM) => void;
 };
 
 export function FileExplorerPanel({
@@ -45,6 +46,7 @@ export function FileExplorerPanel({
   canMove = false,
   onCreateDirectory,
   onNavigate,
+  onOpen,
 }: FileExplorerPanelProps) {
   const router = useRouter();
   const [nodes, setNodes] = useState(initialNodes);
@@ -152,13 +154,17 @@ export function FileExplorerPanel({
         view={view}
         selectedIds={selectedIds}
         onSelectionChange={setSelectedIds}
-        onOpen={(node) =>
+        onOpen={(node) => {
+          if (onOpen) {
+            onOpen(node);
+            return;
+          }
           router.push(
             node.type === "DIRECTORY"
               ? `/files/${node.id}`
               : `/files/${node.id}?mode=revisions`,
-          )
-        }
+          );
+        }}
         onRename={(node) => {
           setDialog(showRenameDialog(node));
           setRenameValue(node.name);

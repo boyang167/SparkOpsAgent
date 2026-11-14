@@ -7,6 +7,7 @@ export type WorkbenchState = {
   parent?: string;
   cursor?: string;
   query: string;
+  node?: string;
 };
 
 type SearchParamValue = string | string[] | undefined;
@@ -22,6 +23,7 @@ export function parseWorkbenchState(input: Record<string, SearchParamValue>): Wo
   const parent = firstValue(input.parent);
   const cursor = firstValue(input.cursor);
   const query = firstValue(input.q);
+  const node = firstValue(input.node);
 
   return {
     tab: tabs.includes(tab as WorkbenchTab) ? (tab as WorkbenchTab) : "files",
@@ -29,5 +31,6 @@ export function parseWorkbenchState(input: Record<string, SearchParamValue>): Wo
     parent: parent || undefined,
     cursor: cursor || undefined,
     query: query?.trim() ?? "",
+    node: node || undefined,
   };
 }

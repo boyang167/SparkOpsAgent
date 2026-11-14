@@ -105,6 +105,41 @@ func TestListFilesUsesReadPermissionAndDoesNotRequireIdempotencyKey(t *testing.T
 	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
 }
 
+func TestGetFileNodeUsesWorkspaceNamespaceAndResourceAuthorization(t *testing.T) {
+	nsID := uuid.New()
+	nodeID := uuid.New()
+	ownerID := uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID}, nil
+		},
+		getNode: func(_ context.Context, namespaceID, requestedNodeID uuid.UUID) (*model.Node, error) {
+			require.Equal(t, nsID, namespaceID)
+			require.Equal(t, nodeID, requestedNodeID)
+			return &model.Node{
+				ID: nodeID, NamespaceID: nsID, Type: model.NodeTypeFile,
+				Name: "规格.md", State: model.NodeStateActive, OwnerID: ownerID,
+			}, nil
+		},
+		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			require.Equal(t, nodeID, request.NodeID)
+			return resourceauth.Decision{Allowed: true}
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{
+		allowed: map[string]bool{authz.PermFileRead: true},
+	}, h)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/workspaces/"+wsID.String()+"/files/"+nodeID.String(), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), nodeID.String())
+	require.Contains(t, res.Body.String(), "规格.md")
+}
+
 func TestListTransfersUsesReadPermissionAndPassesFilters(t *testing.T) {
 	nsID, rootID := uuid.New(), uuid.New()
 	var captured query.ListTransfers

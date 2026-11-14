@@ -69,7 +69,7 @@ func (s *GormStore) List(ctx context.Context, filter ListFilter) ([]LogView, err
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := postgres.DB(ctx, s.db).Model(&auditLogModel{}).Order("created_at DESC").Limit(limit).Offset(filter.Offset)
+	q := postgres.DB(ctx, s.db).Model(&auditLogModel{}).Order("created_at DESC, id DESC").Limit(limit).Offset(filter.Offset)
 	if filter.OrgID != nil {
 		q = q.Where("org_id = ?", filter.OrgID.String())
 	}
@@ -87,6 +87,20 @@ func (s *GormStore) List(ctx context.Context, filter ListFilter) ([]LogView, err
 	}
 	if resourceType := strings.TrimSpace(filter.ResourceType); resourceType != "" {
 		q = q.Where("resource_type = ?", resourceType)
+	}
+	if workspaceID := strings.TrimSpace(filter.WorkspaceID); workspaceID != "" {
+		if s.db.Dialector.Name() == "postgres" {
+			q = q.Where("detail ->> 'workspace_id' = ?", workspaceID)
+		} else {
+			q = q.Where("json_extract(detail, '$.workspace_id') = ?", workspaceID)
+		}
+	}
+	if decision := strings.TrimSpace(filter.Decision); decision != "" {
+		if s.db.Dialector.Name() == "postgres" {
+			q = q.Where("detail ->> 'decision' = ?", decision)
+		} else {
+			q = q.Where("json_extract(detail, '$.decision') = ?", decision)
+		}
 	}
 	if !filter.CreatedAtAfter.IsZero() {
 		q = q.Where("created_at >= ?", filter.CreatedAtAfter)

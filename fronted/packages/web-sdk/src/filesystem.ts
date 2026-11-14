@@ -107,6 +107,18 @@ export function listFileNodes(
   });
 }
 
+export function getFileNode(
+  workspaceId: string,
+  nodeId: string,
+  options: BffFetchOptions = {},
+) {
+  return bffFetch<FileNodeVM>(`/workspaces/${workspaceId}/files/${nodeId}`, {
+    method: "GET",
+    workspaceId,
+    ...options,
+  });
+}
+
 export function createDirectoryNode(
   workspaceId: string,
   input: CreateDirectoryCommand,

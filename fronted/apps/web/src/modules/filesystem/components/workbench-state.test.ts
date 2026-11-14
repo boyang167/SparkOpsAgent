@@ -9,6 +9,7 @@ describe("parseWorkbenchState", () => {
       parent: undefined,
       cursor: "c1",
       query: "",
+      node: undefined,
     });
   });
 
@@ -20,6 +21,7 @@ describe("parseWorkbenchState", () => {
         parent: ["parent-1", "parent-2"],
         cursor: ["cursor-1", "cursor-2"],
         q: ["  report  ", "ignored"],
+        node: ["node-1", "node-2"],
       }),
     ).toEqual({
       tab: "audit",
@@ -27,6 +29,7 @@ describe("parseWorkbenchState", () => {
       parent: "parent-1",
       cursor: "cursor-1",
       query: "report",
+      node: "node-1",
     });
   });
 });

@@ -15,6 +15,7 @@ import (
 
 type ListFileAuditEvents struct {
 	OrganizationID uuid.UUID
+	WorkspaceID    uuid.UUID
 	ActorID        *uuid.UUID
 	Action         string
 	ResourceID     string
@@ -76,6 +77,7 @@ func (h *ListFileAuditEventsHandler) Handle(ctx context.Context, q ListFileAudit
 		Offset:       offset,
 		ActionPrefix: "filesystem.",
 		ResourceType: "filesystem",
+		WorkspaceID:  q.WorkspaceID.String(),
 	}
 	if q.Action != "" {
 		filter.ActionPrefix = ""
@@ -86,6 +88,9 @@ func (h *ListFileAuditEventsHandler) Handle(ctx context.Context, q ListFileAudit
 	}
 	if q.ActorID != nil {
 		filter.ActorID = q.ActorID.String()
+	}
+	if q.Result != "" {
+		filter.Decision = strings.ToUpper(strings.TrimSpace(q.Result))
 	}
 	if q.From != nil {
 		filter.CreatedAtAfter = q.From.UTC()
@@ -108,9 +113,6 @@ func (h *ListFileAuditEventsHandler) Handle(ctx context.Context, q ListFileAudit
 			if trace, ok := row.Detail["trace_id"].(string); ok {
 				traceID = trace
 			}
-		}
-		if q.Result != "" && !strings.EqualFold(q.Result, result) {
-			continue
 		}
 		items = append(items, FileAuditEvent{
 			ID: row.ID, ActorID: row.ActorID, Action: row.Action,

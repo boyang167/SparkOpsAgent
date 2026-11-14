@@ -26,6 +26,7 @@ const navigation = vi.hoisted(() => ({
 const explorer = vi.hoisted(() => ({
   views: [] as string[],
   canMoves: [] as boolean[],
+  onOpen: undefined as undefined | ((node: FileNodeVM) => void),
 }));
 
 const directoryTree = vi.hoisted(() => ({
@@ -75,10 +76,47 @@ vi.mock("./MoveNodesModal", () => ({
   MoveNodesModal: () => null,
 }));
 
+vi.mock("./GovernanceWorkspace", () => ({
+  GovernanceWorkspace: () => createElement("div", null, "治理工作区"),
+}));
+
+vi.mock("./AuditWorkspace", () => ({
+  AuditWorkspace: () => createElement("div", null, "审计工作区"),
+}));
+
+vi.mock("./FileDetailDrawer", () => ({
+  FileDetailDrawer: ({
+    open,
+    node,
+    onClose,
+  }: {
+    open: boolean;
+    node: FileNodeVM | null;
+    onClose: () => void;
+  }) =>
+    open && node
+      ? createElement(
+          "div",
+          { role: "dialog", "aria-label": "文件详情" },
+          node.name,
+          createElement("button", { type: "button", onClick: onClose }, "关闭文件详情"),
+        )
+      : null,
+}));
+
 vi.mock("./FileExplorerPanel", () => ({
-  FileExplorerPanel: ({ view, canMove }: { view: string; canMove: boolean }) => {
+  FileExplorerPanel: ({
+    view,
+    canMove,
+    onOpen,
+  }: {
+    view: string;
+    canMove: boolean;
+    onOpen?: (node: FileNodeVM) => void;
+  }) => {
     explorer.views.push(view);
     explorer.canMoves.push(canMove);
+    explorer.onOpen = onOpen;
     return null;
   },
 }));
@@ -186,6 +224,7 @@ describe("FilesystemWorkbench", () => {
     navigation.searchParams = new URLSearchParams();
     explorer.views = [];
     explorer.canMoves = [];
+    explorer.onOpen = undefined;
     directoryTree.roots = [];
     directoryTree.canWrites = [];
     directoryTree.onNavigate = undefined;
@@ -213,6 +252,35 @@ describe("FilesystemWorkbench", () => {
     fireEvent.click(screen.getByRole("tab", { name: "传输" }));
 
     expect(navigation.replace).toHaveBeenCalledWith("/files?q=report&view=grid&tab=transfers");
+  });
+
+  it("opens a file drawer from the browser and keeps selection in the URL", () => {
+    navigation.searchParams = new URLSearchParams("tab=files&view=grid");
+    renderWorkbench(["file:read"], [movableNode]);
+
+    act(() => explorer.onOpen?.(movableNode));
+
+    expect(navigation.replace).toHaveBeenCalledWith(
+      `/files?tab=files&view=grid&node=${movableNode.id}`,
+    );
+    expect(screen.getByRole("dialog", { name: "文件详情" })).toHaveTextContent("报告.md");
+    fireEvent.click(screen.getByRole("button", { name: "关闭文件详情" }));
+    expect(navigation.replace).toHaveBeenLastCalledWith("/files?tab=files&view=grid");
+  });
+
+  it("restores a selected file drawer from URL-backed server data", () => {
+    render(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialSelectedNode: movableNode,
+        initialState: { tab: "files", view: "list", query: "", node: movableNode.id },
+        permissions: ["file:read"],
+      }),
+    );
+
+    expect(screen.getByRole("dialog", { name: "文件详情" })).toHaveTextContent("报告.md");
   });
 
   it("connects the selected tab to its panel", () => {

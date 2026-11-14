@@ -2,11 +2,10 @@ import { redirect, notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { WORKSPACE_COOKIE } from "@sparkops/bff-core";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { FileExplorerPanel } from "@/modules/filesystem/components/FileExplorerPanel";
 import { loadSession } from "@/server/loaders/session";
 import { loadWorkspaceId } from "@/server/loaders/context";
 import { loadWorkspaces } from "@/server/loaders/workspaces";
-import { loadFileNamespace, loadFileNodes, loadFileRevisions } from "@/server/loaders/filesystem";
+import { loadFileNamespace, loadFileRevisions } from "@/server/loaders/filesystem";
 
 export default async function FileNodePage({
   params,
@@ -33,26 +32,14 @@ export default async function FileNodePage({
     redirect("/dashboard");
   }
 
+  if (mode !== "revisions") {
+    redirect(`/files?node=${encodeURIComponent(nodeId)}`);
+  }
+
   const namespace = await loadFileNamespace(workspaceId);
   const rootId = namespace.root_node_id;
   if (!rootId) {
     notFound();
-  }
-
-  if (mode !== "revisions") {
-    const children = await loadFileNodes(workspaceId, nodeId);
-    return (
-      <div className="stack-lg">
-        <PageHeader eyebrow="Filesystem" title="目录" description={`节点 ${nodeId}`} />
-        <FileExplorerPanel
-          workspaceId={workspaceId}
-          namespaceId={namespace.id}
-          parentId={nodeId}
-          initialNodes={children.items}
-          breadcrumb={[{ id: nodeId, name: "…" }]}
-        />
-      </div>
-    );
   }
 
   const revisions = await loadFileRevisions(workspaceId, nodeId);

@@ -88,6 +88,12 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
         { method: "GET", options: { ...options, workspaceId } },
       );
     },
+    getFileNode(workspaceId: string, nodeId: string) {
+      return upstreamFetch<FileNodeVM>(
+        `/api/v1/workspaces/${workspaceId}/files/${nodeId}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
     createDirectory(workspaceId: string, input: CreateDirectoryCommand, idempotencyKey: string) {
       return upstreamFetch<FileNodeVM>(`/api/v1/workspaces/${workspaceId}/directories`, {
         method: "POST",

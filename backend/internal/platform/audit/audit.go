@@ -9,14 +9,14 @@ import (
 )
 
 const (
-	ActionOrgCreate         = "org.create"
-	ActionOrgStatusUpdate   = "org.status.update"
-	ActionOrgMemberInvite   = "org.member.invite"
+	ActionOrgCreate           = "org.create"
+	ActionOrgStatusUpdate     = "org.status.update"
+	ActionOrgMemberInvite     = "org.member.invite"
 	ActionOrgMemberRoleUpdate = "org.member.role_update"
-	ActionOrgMemberRemove   = "org.member.remove"
-	ActionOrgOwnerTransfer  = "org.owner.transfer"
-	ActionPlatformOrgCreate = "platform.org.create"
-	ActionPlatformOrgDelete = "platform.org.delete"
+	ActionOrgMemberRemove     = "org.member.remove"
+	ActionOrgOwnerTransfer    = "org.owner.transfer"
+	ActionPlatformOrgCreate   = "platform.org.create"
+	ActionPlatformOrgDelete   = "platform.org.delete"
 )
 
 type Entry struct {
@@ -49,15 +49,17 @@ type Store interface {
 }
 
 type ListFilter struct {
-	OrgID          *kernel.OrgID
-	Limit          int
-	Offset         int
-	ActionPrefix   string
-	Action         string
-	ActorID        string
-	ResourceID     string
-	ResourceType   string
-	CreatedAtAfter time.Time
+	OrgID           *kernel.OrgID
+	Limit           int
+	Offset          int
+	ActionPrefix    string
+	Action          string
+	ActorID         string
+	ResourceID      string
+	ResourceType    string
+	WorkspaceID     string
+	Decision        string
+	CreatedAtAfter  time.Time
 	CreatedAtBefore time.Time
 }
 

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TransferSessionVM } from "@sparkops/contracts/filesystem";
 import {
+  getFileNode,
+  listFileAuditEvents,
   listFileNodes,
   listTransferSessions,
   moveFileNode,
@@ -172,6 +174,71 @@ describe("filesystem node sdk", () => {
       expect.stringContaining("parent_id=parent-1&type=DIRECTORY"),
       expect.anything(),
     );
+  });
+
+  it("gets one workspace-scoped node for URL selection", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 0,
+          message: "ok",
+          data: {
+            id: "00000000-0000-4000-8000-000000000011",
+            namespace_id: "00000000-0000-4000-8000-000000000002",
+            parent_id: null,
+            type: "FILE",
+            name: "规格.md",
+            current_revision_id: null,
+            state: "ACTIVE",
+            owner_id: "00000000-0000-4000-8000-000000000003",
+          },
+          trace_id: "trace-1",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getFileNode("workspace-1", "node-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/bff/v1/workspaces/workspace-1/files/node-1",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("forwards every supported audit filter and cursor", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 0,
+          message: "ok",
+          data: { items: [], next_cursor: "" },
+          trace_id: "trace-1",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listFileAuditEvents("workspace-1", {
+      actor_id: "00000000-0000-4000-8000-000000000001",
+      action: "filesystem.node.rename",
+      resource_id: "node-1",
+      result: "DENY",
+      from: "2026-11-14T00:00:00.000Z",
+      to: "2026-11-14T23:59:59.000Z",
+      cursor: "20",
+      limit: 20,
+    });
+
+    const url = String(fetchMock.mock.calls[0]?.[0]);
+    expect(url).toContain("actor_id=00000000-0000-4000-8000-000000000001");
+    expect(url).toContain("action=filesystem.node.rename");
+    expect(url).toContain("resource_id=node-1");
+    expect(url).toContain("result=DENY");
+    expect(url).toContain("cursor=20");
+    expect(url).toContain("limit=20");
   });
 
   it("moves a node with the backend request fields and an idempotency key", async () => {
