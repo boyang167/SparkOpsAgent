@@ -45,3 +45,33 @@
 ## 环境限制
 
 - 当前环境未设置 `DATABASE_DSN`，未执行依赖外部 PostgreSQL 的真实数据库集成测试；SQLite repository 边界测试已执行。
+
+## 终审 Important 修复（2026-11-15）
+
+### TDD 记录
+
+- RED：后端缺少与前端一致的 canonical payload 函数；数组重排无法稳定命中同一请求哈希。
+- RED：已完成 reshare 在 proof 失效后先执行实时授权，导致合法幂等重放被拒绝。
+- RED：前端 expiry 未规范到 UTC 毫秒格式，同一时刻的不同时区表示生成不同 fingerprint。
+- GREEN：canonical、完成态重放、首次失效 proof、actor/scope/payload 冲突和前端 fingerprint 测试通过。
+
+### 修复结果
+
+1. 共享请求 canonical payload
+   - 后端与前端统一字段顺序和默认语义：`principal_type`、排序后的 `principal_ids/actions`、默认 `ALLOW`、inherit、UTC 毫秒 expiry/null、reshare、排序后的 `source_grant_ids`。
+   - 所有数组均复制后排序，不修改调用方输入；nil/空 source grants 统一编码为 `[]`。
+   - 服务端安全哈希在 canonical payload 外继续绑定 operation、request、actor、organization、workspace、namespace、node 和 classification。
+
+2. 完成态幂等重放
+   - Submit 先按 command ID 识别已完成请求，并校验 actor/org/workspace/node、canonical hash 和确定性 request ID。
+   - 同 actor、同 scope、同集合 payload 的完成态请求直接返回稳定结果，不再受后续 SHARE authority、proof 撤销或过期影响。
+   - 新命令先 claim，再在同一事务中实时校验 SHARE authority、reshare proof 和策略后写入。
+   - 不同 actor、scope 或 payload 仍返回幂等冲突；首次提交 proof 无效仍拒绝。
+   - Preview 保持每次实时验证。
+
+### 验证
+
+- `go test ./internal/modules/filesystem/application/command -count=1`：通过。
+- `go test ./internal/modules/filesystem/... -count=1`：通过。
+- 前端 `share-file-form` 与 `ShareFileModal` canonical 相关测试：通过。
+- `go vet ./internal/modules/filesystem/...`：通过。

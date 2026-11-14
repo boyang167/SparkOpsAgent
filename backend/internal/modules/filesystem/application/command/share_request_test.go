@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
@@ -89,6 +90,13 @@ func (s *shareStoreStub) CompleteCommand(_ context.Context, commandID uuid.UUID,
 	command.NodeID, command.RevisionID = nodeID, revisionID
 	s.commands[commandID] = command
 	return nil
+}
+func (s *shareStoreStub) GetCommand(_ context.Context, commandID uuid.UUID) (*repository.CommandDedup, error) {
+	command, ok := s.commands[commandID]
+	if !ok {
+		return nil, domain.ErrCommandNotFound
+	}
+	return &command, nil
 }
 
 type principalScopeStub struct {
@@ -559,6 +567,165 @@ func TestSubmitShareReplaysSameCommandAndRejectsDifferentPayload(t *testing.T) {
 	cmd.Actions = []model.ResourcePermission{model.ResourcePermissionDownload}
 	_, err = handler.Submit(context.Background(), cmd)
 	require.ErrorIs(t, err, repository.ErrIdempotencyConflict)
+}
+
+func TestCanonicalSharePayloadMatchesFrontendSetSemanticsWithoutMutatingInput(t *testing.T) {
+	principalA := uuid.MustParse("00000000-0000-4000-8000-000000000001")
+	principalB := uuid.MustParse("00000000-0000-4000-8000-000000000002")
+	grantA := uuid.MustParse("00000000-0000-4000-8000-000000000011")
+	grantB := uuid.MustParse("00000000-0000-4000-8000-000000000012")
+	expiresAt := time.Date(2026, time.December, 31, 16, 0, 0, 123456789, time.FixedZone("offset", 8*60*60))
+	cmd := SubmitShare{
+		PrincipalType: model.PrincipalUser,
+		PrincipalIDs:  []uuid.UUID{principalB, principalA},
+		Actions: []model.ResourcePermission{
+			model.ResourcePermissionRead, model.ResourcePermissionDownload,
+		},
+		Effect:            model.GrantEffectAllow,
+		InheritToChildren: true,
+		ExpiresAt:         &expiresAt,
+		Reshare:           true,
+		SourceGrantIDs:    []uuid.UUID{grantB, grantA},
+	}
+	originalPrincipals := append([]uuid.UUID(nil), cmd.PrincipalIDs...)
+	originalActions := append([]model.ResourcePermission(nil), cmd.Actions...)
+	originalSources := append([]uuid.UUID(nil), cmd.SourceGrantIDs...)
+
+	payload, err := canonicalSharePayload(cmd)
+
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"principal_type":"USER",
+		"principal_ids":["00000000-0000-4000-8000-000000000001","00000000-0000-4000-8000-000000000002"],
+		"actions":["DOWNLOAD","READ"],
+		"effect":"ALLOW",
+		"inherit_to_children":true,
+		"expires_at":"2026-12-31T08:00:00.123Z",
+		"reshare":true,
+		"source_grant_ids":["00000000-0000-4000-8000-000000000011","00000000-0000-4000-8000-000000000012"]
+	}`, string(payload))
+	require.Equal(t, originalPrincipals, cmd.PrincipalIDs)
+	require.Equal(t, originalActions, cmd.Actions)
+	require.Equal(t, originalSources, cmd.SourceGrantIDs)
+
+	cmd.ExpiresAt = nil
+	cmd.SourceGrantIDs = nil
+	cmd.Reshare = false
+	payload, err = canonicalSharePayload(cmd)
+	require.NoError(t, err)
+	require.Contains(t, string(payload), `"expires_at":null`)
+	require.Contains(t, string(payload), `"source_grant_ids":[]`)
+	cmd.SourceGrantIDs = []uuid.UUID{}
+	emptyPayload, err := canonicalSharePayload(cmd)
+	require.NoError(t, err)
+	require.Equal(t, payload, emptyPayload)
+
+	cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID, cmd.NodeID = uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	requestID, namespaceID := uuid.New(), uuid.New()
+	internalHash, err := shareHash(cmd, namespaceID, model.TransferClassificationInternal, requestID)
+	require.NoError(t, err)
+	restrictedHash, err := shareHash(cmd, namespaceID, model.TransferClassificationRestricted, requestID)
+	require.NoError(t, err)
+	require.NotEqual(t, internalHash, restrictedHash)
+}
+
+func TestSubmitShareCanonicalReplayPrecedesMutableReshareAuthorization(t *testing.T) {
+	organizationID, workspaceID, actorID := uuid.New(), uuid.New(), uuid.New()
+	principalA, principalB := uuid.New(), uuid.New()
+	sourceA, sourceB := uuid.New(), uuid.New()
+	namespace := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace,
+		OrganizationID: organizationID, WorkspaceID: uuid.New(),
+	}
+	node := &model.Node{ID: uuid.New(), NamespaceID: namespace.ID, Type: model.NodeTypeFile}
+	store := &shareStoreStub{
+		namespace: namespace, node: node,
+		classification: model.TransferClassificationInternal,
+	}
+	authorizer := &shareSourceAuthorizerStub{allowed: true, requiresProof: true}
+	handler := NewShareRequestHandler(
+		store, postgres.NewDirectTransactor(), nil,
+		principalScopeStub{scopes: map[uuid.UUID]PrincipalScope{
+			principalA: {OrganizationID: organizationID},
+			principalB: {OrganizationID: organizationID},
+		}},
+		shareAuthorityStub{}, authorizer,
+	)
+	cmd := SubmitShare{
+		CommandID: uuid.New(), ActorID: actorID, OrganizationID: organizationID,
+		WorkspaceID: workspaceID, NodeID: node.ID, PrincipalType: model.PrincipalUser,
+		PrincipalIDs: []uuid.UUID{principalB, principalA},
+		Actions: []model.ResourcePermission{
+			model.ResourcePermissionRead, model.ResourcePermissionDownload,
+		},
+		Effect: model.GrantEffectAllow, Reshare: true,
+		SourceGrantIDs: []uuid.UUID{sourceB, sourceA},
+	}
+	first, err := handler.Submit(context.Background(), cmd)
+	require.NoError(t, err)
+	require.Equal(t, 1, authorizer.proofCalls)
+	require.Equal(t, 1, authorizer.called)
+
+	authorizer.allowed = false
+	authorizer.proofErr = domain.ErrResourceDenied
+	cmd.PrincipalIDs = []uuid.UUID{principalA, principalB}
+	cmd.Actions = []model.ResourcePermission{
+		model.ResourcePermissionDownload, model.ResourcePermissionRead,
+	}
+	cmd.SourceGrantIDs = []uuid.UUID{sourceA, sourceB}
+	replayed, err := handler.Submit(context.Background(), cmd)
+
+	require.NoError(t, err)
+	require.Equal(t, first.Request.ID, replayed.Request.ID)
+	require.Equal(t, 1, authorizer.proofCalls, "completed replay must not revalidate mutable proof")
+	require.Equal(t, 1, authorizer.called, "completed replay must not revalidate current SHARE authority")
+	require.Len(t, store.grants, 4)
+
+	for _, mutate := range []func(*SubmitShare){
+		func(value *SubmitShare) { value.ActorID = uuid.New() },
+		func(value *SubmitShare) { value.WorkspaceID = uuid.New() },
+		func(value *SubmitShare) { value.Actions = []model.ResourcePermission{model.ResourcePermissionRead} },
+	} {
+		changed := cmd
+		mutate(&changed)
+		_, replayErr := handler.Submit(context.Background(), changed)
+		require.ErrorIs(t, replayErr, repository.ErrIdempotencyConflict)
+	}
+}
+
+func TestSubmitShareRejectsInvalidProofOnFirstExecution(t *testing.T) {
+	organizationID, workspaceID, actorID, targetID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	namespace := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace,
+		OrganizationID: organizationID, WorkspaceID: uuid.New(),
+	}
+	node := &model.Node{ID: uuid.New(), NamespaceID: namespace.ID, Type: model.NodeTypeFile}
+	store := &shareStoreStub{
+		namespace: namespace, node: node,
+		classification: model.TransferClassificationInternal,
+	}
+	authorizer := &shareSourceAuthorizerStub{
+		allowed: true, requiresProof: true, proofErr: domain.ErrResourceDenied,
+	}
+	handler := NewShareRequestHandler(
+		store, postgres.NewDirectTransactor(), nil,
+		principalScopeStub{scopes: map[uuid.UUID]PrincipalScope{
+			targetID: {OrganizationID: organizationID},
+		}},
+		shareAuthorityStub{}, authorizer,
+	)
+
+	_, err := handler.Submit(context.Background(), SubmitShare{
+		CommandID: uuid.New(), ActorID: actorID, OrganizationID: organizationID,
+		WorkspaceID: workspaceID, NodeID: node.ID, PrincipalType: model.PrincipalUser,
+		PrincipalIDs: []uuid.UUID{targetID}, Actions: []model.ResourcePermission{model.ResourcePermissionRead},
+		Effect: model.GrantEffectAllow, Reshare: true, SourceGrantIDs: []uuid.UUID{uuid.New()},
+	})
+
+	require.ErrorIs(t, err, domain.ErrResourceDenied)
+	require.Equal(t, 1, authorizer.proofCalls)
+	require.Empty(t, store.requests)
+	require.Empty(t, store.grants)
 }
 
 func TestApproveShareRequestCreatesGrantsStatusAndOutboxTransactionally(t *testing.T) {

@@ -65,7 +65,7 @@ export function canonicalSharePayload(input: CreateGovernedGrantCommand): string
     actions: [...input.actions].sort(),
     effect: input.effect ?? "ALLOW",
     inherit_to_children: input.inherit_to_children ?? false,
-    expires_at: input.expires_at ?? null,
+    expires_at: input.expires_at ? new Date(input.expires_at).toISOString() : null,
     reshare: input.reshare ?? false,
     source_grant_ids: [...(input.source_grant_ids ?? [])].sort(),
   });

@@ -49,23 +49,39 @@ describe("share file form", () => {
   it("fingerprints every logical share payload field canonically", () => {
     const baseline: CreateGovernedGrantCommand = {
       principal_type: "USER",
-      principal_ids: ["00000000-0000-4000-8000-000000000001"],
+      principal_ids: [
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000002",
+      ],
       actions: ["READ", "DOWNLOAD"],
       effect: "ALLOW",
       inherit_to_children: true,
-      expires_at: null,
+      expires_at: "2026-12-31T08:00:00.123Z",
+      reshare: true,
+      source_grant_ids: [
+        "00000000-0000-4000-8000-000000000011",
+        "00000000-0000-4000-8000-000000000012",
+      ],
     };
     expect(canonicalSharePayload({
       ...baseline,
+      principal_ids: [...baseline.principal_ids].reverse(),
       actions: ["DOWNLOAD", "READ"],
+      expires_at: "2026-12-31T16:00:00.123+08:00",
+      source_grant_ids: [...(baseline.source_grant_ids ?? [])].reverse(),
     })).toBe(canonicalSharePayload(baseline));
+    expect(baseline.principal_ids).toEqual([
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+    ]);
 
     const edits = [
-      { ...baseline, principal_ids: ["00000000-0000-4000-8000-000000000002"] },
+      { ...baseline, principal_ids: ["00000000-0000-4000-8000-000000000003"] },
       { ...baseline, actions: ["READ"] as CreateGovernedGrantCommand["actions"] },
       { ...baseline, effect: "DENY" as const },
       { ...baseline, inherit_to_children: false },
-      { ...baseline, expires_at: "2026-12-31T16:00:00.000Z" },
+      { ...baseline, expires_at: "2027-12-31T08:00:00.123Z" },
+      { ...baseline, source_grant_ids: ["00000000-0000-4000-8000-000000000013"] },
     ];
     for (const edit of edits) {
       expect(canonicalSharePayload(edit)).not.toBe(canonicalSharePayload(baseline));
