@@ -137,3 +137,51 @@
 ### 剩余风险
 
 - 显式刷新不会自动轮询远端活动 session；这是本次选择的最小可靠方案，避免隐藏标签持续产生请求。用户可随时刷新，Task 5 本地活动任务仍由现有队列实时轮询。
+
+## 剩余 Critical：本地队列 Workspace/Namespace 隔离
+
+### 根因与方案
+
+- 原 `FilesystemWorkbench` 只在首次 render 创建一个 `TransferQueue`，其上传、查询和终止回调永久捕获初始 `workspaceId` / `namespace.id`。切换 Workspace 后既会显示旧本地任务，也可能把新文件写入旧 Workspace。
+- 队列现在保存在组件实例内的 Map 中，以 `workspaceId:namespace.id` 为 key；每个队列创建时绑定不可变的作用域参数。当前界面只展示和接收当前 key 对应的队列，切回原作用域时恢复该队列及其进度。
+- Workspace/Namespace 切换不会终止后台上传；组件真实卸载时会 dispose 全部 scoped 队列、取消非终态任务并清理订阅，避免组件生命周期结束后继续持有资源。
+- React StrictMode 会执行 effect 的 setup/cleanup 回放。卸载清理使用 microtask 和单调 lifecycle generation 判定真实卸载，避免开发模式回放提前销毁仍在使用的队列。
+- 持久任务仍只和当前 scoped 本地队列按 `session_id` 去重；不同 Workspace 即使 session ID 相同也不会互相隐藏。
+
+### RED
+
+1. Workspace/Namespace 隔离与卸载测试：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/FilesystemWorkbench.test.tsx -t "scopes local queues|disposes scoped queues"`
+   - 退出码 1；切换到 B 后仍显示 A 本地任务，新入队任务仍使用 A 的 Workspace/Namespace，且卸载后活动上传未取消。
+2. StrictMode 生命周期测试：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/FilesystemWorkbench.test.tsx -t "StrictMode effect replay"`
+   - 退出码 1；首次 cleanup 提前 dispose 队列，drop 后 `createTransferSession` 调用次数为 0。
+
+### GREEN
+
+1. 新增隔离与生命周期定向测试：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/FilesystemWorkbench.test.tsx -t "scopes local queues|disposes scoped queues|StrictMode effect replay"`
+   - 退出码 0；3 项测试通过。
+2. 前端定向回归：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/FilesystemWorkbench.test.tsx apps/web/src/modules/filesystem/components/transfer-queue.test.ts apps/web/src/modules/filesystem/components/TransferCenter.test.tsx`
+   - 退出码 0；3 个测试文件、44 项测试通过。
+3. Filesystem 完整回归：
+   `pnpm vitest run apps/web/src/modules/filesystem packages/web-sdk/src/filesystem.test.ts`
+   - 退出码 0；15 个测试文件、103 项测试通过。
+4. Web 类型检查：
+   `pnpm --filter web typecheck`
+   - 退出码 0。
+5. IDE diagnostics：
+   - `FilesystemWorkbench.tsx`、`FilesystemWorkbench.test.tsx`、`transfer-queue.ts` 无 linter errors。
+6. `git diff --check`
+   - 退出码 0。
+
+### 提交
+
+- Message: `fix(filesystem-ui): scope local transfer queues`
+- Commit: 本节所在提交。
+
+### 剩余风险
+
+- scoped 队列只在 `FilesystemWorkbench` 组件实例存活期间保留；离开整个页面会按要求终止并清理活动任务，不提供跨页面重载恢复。已由后端创建的 session 仍可通过持久任务列表查看。
+- 队列 Map 的规模等于该组件生命周期内访问过的 Workspace/Namespace 数量，并在真实卸载时整体清空；常规 Workspace 切换规模有限，未引入全局缓存或跨用户状态。

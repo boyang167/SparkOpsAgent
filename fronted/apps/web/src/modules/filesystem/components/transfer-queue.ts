@@ -53,6 +53,7 @@ export type TransferQueue = {
   getSnapshot: () => readonly TransferItem[];
   subscribe: (listener: () => void) => () => void;
   whenIdle: () => Promise<void>;
+  dispose: () => void;
 };
 
 type TransferQueueOptions = {
@@ -85,6 +86,7 @@ export function createTransferQueue({
 }: TransferQueueOptions): TransferQueue {
   let sequence = 0;
   let active = 0;
+  let disposed = false;
   let snapshot: TransferItem[] = [];
   const listeners = new Set<() => void>();
   const activeTransfers = new Map<string, ActiveTransfer>();
@@ -240,6 +242,7 @@ export function createTransferQueue({
 
   return {
     enqueue(files, targetParentId) {
+      if (disposed) return [];
       const created = Array.from(files, (file) => {
         sequence += 1;
         return {
@@ -278,6 +281,7 @@ export function createTransferQueue({
       }
     },
     retry(id) {
+      if (disposed) return;
       const item = snapshot.find((candidate) => candidate.id === id);
       if (item?.status !== "failed") return;
       update(id, (current) => ({
@@ -291,12 +295,24 @@ export function createTransferQueue({
     },
     getSnapshot: () => snapshot,
     subscribe(listener) {
+      if (disposed) return () => undefined;
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
     whenIdle() {
       if (isIdle()) return Promise.resolve();
       return new Promise<void>((resolve) => idleResolvers.add(resolve));
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const item of snapshot) {
+        if (!["completed", "failed", "canceled"].includes(item.status)) {
+          this.cancel(item.id);
+        }
+      }
+      listeners.clear();
+      resolveIdle();
     },
   };
 }

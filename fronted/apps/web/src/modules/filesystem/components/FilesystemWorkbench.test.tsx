@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createElement } from "react";
+import { createElement, StrictMode } from "react";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilesystemWorkbench } from "./FilesystemWorkbench";
@@ -110,6 +110,13 @@ const namespace = {
   status: "ACTIVE",
 };
 
+const namespaceB = {
+  id: "00000000-0000-4000-8000-000000000022",
+  workspace_id: "00000000-0000-4000-8000-000000000021",
+  root_node_id: "00000000-0000-4000-8000-000000000023",
+  status: "ACTIVE",
+};
+
 const movableNode: FileNodeVM = {
   id: "00000000-0000-4000-8000-000000000011",
   namespace_id: namespace.id,
@@ -121,11 +128,15 @@ const movableNode: FileNodeVM = {
   owner_id: "00000000-0000-4000-8000-000000000012",
 };
 
-function transferSession(sessionId: string) {
+function transferSession(
+  sessionId: string,
+  workspaceId = namespace.workspace_id,
+  namespaceId = namespace.id,
+) {
   return {
     session_id: sessionId,
-    workspace_id: namespace.workspace_id,
-    namespace_id: namespace.id,
+    workspace_id: workspaceId,
+    namespace_id: namespaceId,
     status: "UPLOADING",
     protocol: "DIRECT",
     target_name: "报告.txt",
@@ -368,6 +379,197 @@ describe("FilesystemWorkbench", () => {
     finishUpload();
     await waitFor(() => expect(screen.getByText("已完成")).toBeInTheDocument());
     expect(navigation.refresh).toHaveBeenCalled();
+  });
+
+  it("scopes local queues by workspace and restores an active queue when returning", async () => {
+    const sharedSessionID = "00000000-0000-4000-8000-000000000090";
+    let finishA!: () => void;
+    let finishB!: () => void;
+    let signalA: AbortSignal | undefined;
+    sdk.createTransferSession.mockImplementation(
+      async (
+        workspaceId: string,
+        input: { namespace_id: string; name: string },
+      ) =>
+        transferSession(
+          sharedSessionID,
+          workspaceId,
+          input.namespace_id,
+        ),
+    );
+    sdk.uploadTransfer.mockImplementation(
+      async (file: File, options: { signal?: AbortSignal }) => {
+        if (file.name === "A.txt") {
+          signalA = options.signal;
+          await new Promise<void>((resolve) => {
+            finishA = resolve;
+          });
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          finishB = resolve;
+        });
+      },
+    );
+    sdk.getTransferSession.mockResolvedValue({ status: "COMPLETED" });
+    sdk.listTransferSessions.mockImplementation(async (workspaceId: string) => ({
+      items:
+        workspaceId === namespaceB.workspace_id
+          ? [
+              {
+                ...transferSession(
+                  sharedSessionID,
+                  namespaceB.workspace_id,
+                  namespaceB.id,
+                ),
+                target_name: "B 持久任务",
+              },
+            ]
+          : [],
+      next_cursor: "",
+    }));
+    const rendered = renderWorkbench(["file:read", "file:write"]);
+
+    fireEvent.drop(screen.getByTestId("file-drop-zone"), {
+      dataTransfer: {
+        files: [new File(["a"], "A.txt")],
+        types: ["Files"],
+        items: [],
+      },
+    });
+    await waitFor(() => expect(sdk.uploadTransfer).toHaveBeenCalledTimes(1));
+
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespaceB.workspace_id,
+        namespace: namespaceB,
+        initialNodes: [],
+        initialState: { tab: "transfers", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+    expect(signalA?.aborted).toBe(false);
+    expect(screen.queryByText("A.txt")).not.toBeInTheDocument();
+    expect(await screen.findByText("B 持久任务")).toBeInTheDocument();
+
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespaceB.workspace_id,
+        namespace: namespaceB,
+        initialNodes: [],
+        initialState: { tab: "files", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+    fireEvent.drop(screen.getByTestId("file-drop-zone"), {
+      dataTransfer: {
+        files: [new File(["b"], "B.txt")],
+        types: ["Files"],
+        items: [],
+      },
+    });
+    await waitFor(() => expect(sdk.createTransferSession).toHaveBeenLastCalledWith(
+      namespaceB.workspace_id,
+      expect.objectContaining({ namespace_id: namespaceB.id, name: "B.txt" }),
+      expect.anything(),
+    ));
+
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "transfers", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+    expect(screen.getByText("A.txt")).toBeInTheDocument();
+    expect(screen.queryByText("B.txt")).not.toBeInTheDocument();
+    expect(screen.getByText("正在上传")).toBeInTheDocument();
+
+    finishA();
+    finishB();
+    await waitFor(() => expect(screen.getByText("已完成")).toBeInTheDocument());
+  });
+
+  it("disposes scoped queues only when the workbench unmounts", async () => {
+    let uploadSignal: AbortSignal | undefined;
+    sdk.createTransferSession.mockResolvedValue(
+      transferSession("00000000-0000-4000-8000-000000000091"),
+    );
+    sdk.uploadTransfer.mockImplementation(
+      async (_file: File, options: { signal?: AbortSignal }) => {
+        uploadSignal = options.signal;
+        await new Promise<void>(() => undefined);
+      },
+    );
+    sdk.abortTransfer.mockResolvedValue(undefined);
+    const rendered = renderWorkbench(["file:read", "file:write"]);
+    fireEvent.drop(screen.getByTestId("file-drop-zone"), {
+      dataTransfer: {
+        files: [new File(["a"], "A.txt")],
+        types: ["Files"],
+        items: [],
+      },
+    });
+    await waitFor(() => expect(uploadSignal).toBeDefined());
+
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespaceB.workspace_id,
+        namespace: namespaceB,
+        initialNodes: [],
+        initialState: { tab: "files", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+    expect(uploadSignal?.aborted).toBe(false);
+
+    rendered.unmount();
+    await waitFor(() => expect(uploadSignal?.aborted).toBe(true));
+    await waitFor(() =>
+      expect(sdk.abortTransfer).toHaveBeenCalledWith(
+        "00000000-0000-4000-8000-000000000091",
+        namespace.workspace_id,
+      ),
+    );
+  });
+
+  it("keeps the scoped queue usable through StrictMode effect replay", async () => {
+    sdk.createTransferSession.mockResolvedValue(
+      transferSession("00000000-0000-4000-8000-000000000092"),
+    );
+    sdk.uploadTransfer.mockResolvedValue(undefined);
+    sdk.getTransferSession.mockResolvedValue({ status: "COMPLETED" });
+
+    render(
+      createElement(
+        StrictMode,
+        null,
+        createElement(FilesystemWorkbench, {
+          workspaceId: namespace.workspace_id,
+          namespace,
+          initialNodes: [],
+          initialState: { tab: "files", view: "list", query: "" },
+          permissions: ["file:read", "file:write"],
+        }),
+      ),
+    );
+    fireEvent.drop(screen.getByTestId("file-drop-zone"), {
+      dataTransfer: {
+        files: [new File(["a"], "strict.txt")],
+        types: ["Files"],
+        items: [],
+      },
+    });
+
+    await waitFor(() =>
+      expect(sdk.createTransferSession).toHaveBeenCalledWith(
+        namespace.workspace_id,
+        expect.objectContaining({ namespace_id: namespace.id, name: "strict.txt" }),
+        expect.anything(),
+      ),
+    );
   });
 
   it("aborts a late session when canceled during session creation", async () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { createElement, useState } from "react";
+import { createElement, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { FileNamespaceVM, FileNodeVM } from "@sparkops/contracts/filesystem";
 import {
@@ -18,6 +18,7 @@ import { FileExplorerPanel } from "./FileExplorerPanel";
 import { MoveNodesModal } from "./MoveNodesModal";
 import { TransferCenter, TransferSummary } from "./TransferCenter";
 import { createTransferQueue } from "./transfer-queue";
+import type { TransferQueue } from "./transfer-queue";
 import type { FileView, WorkbenchState, WorkbenchTab } from "./workbench-state";
 
 export type FilesystemWorkbenchProps = {
@@ -79,15 +80,21 @@ export function FilesystemWorkbench({
   const [moveNodes, setMoveNodes] = useState<FileNodeVM[]>([]);
   const [treeVersion, setTreeVersion] = useState(0);
   const [moveError, setMoveError] = useState<string | null>(null);
-  const [transferQueue] = useState(() =>
-    createTransferQueue({
+  const transferQueues = useRef(new Map<string, TransferQueue>());
+  const queueLifecycleGeneration = useRef(0);
+  const transferQueueKey = `${workspaceId}:${namespace.id}`;
+  let transferQueue = transferQueues.current.get(transferQueueKey);
+  if (!transferQueue) {
+    const scopedWorkspaceId = workspaceId;
+    const scopedNamespaceId = namespace.id;
+    transferQueue = createTransferQueue({
       concurrency: 3,
       abort: async (session) => {
         try {
-          await abortTransfer(session.session_id, workspaceId);
+          await abortTransfer(session.session_id, scopedWorkspaceId);
           return "canceled";
         } catch (abortError) {
-          const current = await getTransferSession(session.session_id, workspaceId);
+          const current = await getTransferSession(session.session_id, scopedWorkspaceId);
           if (current.status === "COMPLETED") {
             router.refresh();
             return "completed";
@@ -99,7 +106,7 @@ export function FilesystemWorkbench({
       upload: async (file, targetParentId, controls) => {
         const input = {
           parent_id: targetParentId,
-          namespace_id: namespace.id,
+          namespace_id: scopedNamespaceId,
           name: file.name,
           protocol: "DIRECT",
           size: file.size,
@@ -109,13 +116,13 @@ export function FilesystemWorkbench({
 
         async function createWithKey(idempotencyKey: string) {
           try {
-            return await createTransferSession(workspaceId, input, {
+            return await createTransferSession(scopedWorkspaceId, input, {
               idempotencyKey,
               signal: controls.signal,
             });
           } catch (error) {
             if (!controls.signal.aborted) throw error;
-            return createTransferSession(workspaceId, input, { idempotencyKey });
+            return createTransferSession(scopedWorkspaceId, input, { idempotencyKey });
           }
         }
 
@@ -126,7 +133,7 @@ export function FilesystemWorkbench({
           controls.setStatus("verifying");
           let current =
             initial ??
-            (await getTransferSession(sessionId, workspaceId, {
+            (await getTransferSession(sessionId, scopedWorkspaceId, {
               signal: controls.signal,
             }));
           while (!controls.signal.aborted) {
@@ -138,7 +145,7 @@ export function FilesystemWorkbench({
               throw new Error(current.error_code || "上传处理失败");
             }
             await abortableDelay(500, controls.signal);
-            current = await getTransferSession(sessionId, workspaceId, {
+            current = await getTransferSession(sessionId, scopedWorkspaceId, {
               signal: controls.signal,
             });
           }
@@ -153,7 +160,7 @@ export function FilesystemWorkbench({
           }
           controls.setStatus("uploading");
           await uploadTransfer(file, {
-            workspaceId,
+            workspaceId: scopedWorkspaceId,
             session,
             signal: controls.signal,
             onProgress: (progress) =>
@@ -177,7 +184,7 @@ export function FilesystemWorkbench({
         if (controls.retrying && controls.session) {
           const current = await getTransferSession(
             controls.session.session_id,
-            workspaceId,
+            scopedWorkspaceId,
             { signal: controls.signal },
           );
           if (current.status === "COMPLETED") {
@@ -219,8 +226,20 @@ export function FilesystemWorkbench({
 
         await startFreshSession();
       },
-    }),
-  );
+    });
+    transferQueues.current.set(transferQueueKey, transferQueue);
+  }
+  useEffect(() => {
+    queueLifecycleGeneration.current += 1;
+    return () => {
+      const cleanupGeneration = ++queueLifecycleGeneration.current;
+      queueMicrotask(() => {
+        if (cleanupGeneration !== queueLifecycleGeneration.current) return;
+        transferQueues.current.forEach((queue) => queue.dispose());
+        transferQueues.current.clear();
+      });
+    };
+  }, []);
   const visibleTabs = tabs.filter(
     (tab) => !tab.permission || permissions.includes(tab.permission),
   );
