@@ -2,6 +2,8 @@ package http
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +14,7 @@ import (
 
 	resourceauth "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/authorization"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/query"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
@@ -71,6 +74,7 @@ func TestGovernanceInvalidWorkspaceAudienceReturnsForbidden(t *testing.T) {
 func TestGovernanceChildrenConcealsUnauthorizedNamespaceAndParent(t *testing.T) {
 	orgID, workspaceID := uuid.New(), uuid.New()
 	namespaceID, rootID := uuid.New(), uuid.New()
+	authorizerCalled := false
 	handler := &GovernanceHandler{
 		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
 			return &model.Namespace{
@@ -78,8 +82,52 @@ func TestGovernanceChildrenConcealsUnauthorizedNamespaceAndParent(t *testing.T) 
 				OrganizationID: orgID, WorkspaceID: workspaceID, RootNodeID: &rootID,
 			}, nil
 		},
+		getNode: func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error) {
+			return &model.Node{ID: rootID, NamespaceID: namespaceID, Type: model.NodeTypeDirectory, State: model.NodeStateActive}, nil
+		},
+		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, string, int, string) ([]model.Node, string, error) {
+			return nil, "", nil
+		},
 		authorize: func(context.Context, resourceauth.Request) resourceauth.Decision {
+			authorizerCalled = true
 			return resourceauth.Decision{Reason: "default_deny"}
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{orgID: orgID, active: true}, handler)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/namespaces/"+namespaceID.String()+"/children?parent_id="+rootID.String(), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Organization-ID", orgID.String())
+	req.Header.Set("X-Workspace-ID", workspaceID.String())
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusNotFound, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), "FILESYSTEM_NOT_FOUND")
+	require.True(t, authorizerCalled)
+}
+
+func TestGovernanceChildrenUsesHiddenRootInternallyWhenParentIsOmitted(t *testing.T) {
+	orgID, workspaceID := uuid.New(), uuid.New()
+	namespaceID, rootID, visibleChild := uuid.New(), uuid.New(), uuid.New()
+	handler := &GovernanceHandler{
+		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace,
+				OrganizationID: orgID, WorkspaceID: workspaceID, RootNodeID: &rootID,
+			}, nil
+		},
+		getNode: func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error) {
+			return &model.Node{ID: rootID, NamespaceID: namespaceID, Type: model.NodeTypeDirectory, State: model.NodeStateActive}, nil
+		},
+		listChildren: func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, string, int, string) ([]model.Node, string, error) {
+			return []model.Node{{
+				ID: visibleChild, NamespaceID: namespaceID, ParentID: &rootID,
+				Type: model.NodeTypeDirectory, State: model.NodeStateActive,
+			}}, "", nil
+		},
+		authorize: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			return resourceauth.Decision{Allowed: request.NodeID == visibleChild}
 		},
 	}
 	router, token, _, _ := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{orgID: orgID, active: true}, handler)
@@ -91,8 +139,9 @@ func TestGovernanceChildrenConcealsUnauthorizedNamespaceAndParent(t *testing.T) 
 
 	router.ServeHTTP(res, req)
 
-	require.Equal(t, http.StatusNotFound, res.Code, res.Body.String())
-	require.Contains(t, res.Body.String(), "FILESYSTEM_NOT_FOUND")
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), visibleChild.String())
+	require.NotContains(t, res.Body.String(), rootID.String())
 }
 
 func TestGovernanceSharedWithMeForwardsQueryCursorAndLimit(t *testing.T) {
@@ -121,6 +170,89 @@ func TestGovernanceSharedWithMeForwardsQueryCursorAndLimit(t *testing.T) {
 	require.Equal(t, "budget", captured.Query)
 	require.Equal(t, cursor, captured.Cursor)
 	require.Equal(t, 23, captured.Limit)
+}
+
+func TestGovernanceChildrenPaginatesAfterAuthorizationWithoutLeakingHiddenCursor(t *testing.T) {
+	orgID, workspaceID := uuid.New(), uuid.New()
+	namespaceID, rootID := uuid.New(), uuid.New()
+	visible1 := uuid.MustParse("10000000-0000-0000-0000-000000000001")
+	hidden := uuid.MustParse("20000000-0000-0000-0000-000000000002")
+	visible2 := uuid.MustParse("30000000-0000-0000-0000-000000000003")
+	visible3 := uuid.MustParse("40000000-0000-0000-0000-000000000004")
+	nodes := []model.Node{
+		{ID: visible1, NamespaceID: namespaceID, Type: model.NodeTypeFile, State: model.NodeStateActive},
+		{ID: hidden, NamespaceID: namespaceID, Type: model.NodeTypeFile, State: model.NodeStateActive},
+		{ID: visible2, NamespaceID: namespaceID, Type: model.NodeTypeFile, State: model.NodeStateActive},
+		{ID: visible3, NamespaceID: namespaceID, Type: model.NodeTypeFile, State: model.NodeStateActive},
+	}
+	handler := &GovernanceHandler{
+		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace,
+				OrganizationID: orgID, WorkspaceID: workspaceID, RootNodeID: &rootID,
+			}, nil
+		},
+		getNode: func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error) {
+			return &model.Node{ID: rootID, NamespaceID: namespaceID, Type: model.NodeTypeDirectory, State: model.NodeStateActive}, nil
+		},
+		listChildren: func(_ context.Context, _ uuid.UUID, _ *uuid.UUID, _ *model.NodeType, _ string, _ int, cursor string) ([]model.Node, string, error) {
+			if cursor == visible2.String() {
+				return nodes[3:], "", nil
+			}
+			return nodes, "", nil
+		},
+		authorize: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			return resourceauth.Decision{Allowed: request.NodeID != hidden}
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{orgID: orgID, active: true}, handler)
+	request := func(cursor string) map[string]any {
+		url := "/api/v1/filesystem/namespaces/" + namespaceID.String() + "/children?limit=2"
+		if cursor != "" {
+			url += "&cursor=" + cursor
+		}
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Organization-ID", orgID.String())
+		req.Header.Set("X-Workspace-ID", workspaceID.String())
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+		var envelope map[string]any
+		require.NoError(t, json.Unmarshal(res.Body.Bytes(), &envelope))
+		return envelope["data"].(map[string]any)
+	}
+
+	first := request("")
+	require.Len(t, first["items"], 2)
+	require.Equal(t, visible2.String(), first["next_cursor"])
+	require.NotEqual(t, hidden.String(), first["next_cursor"])
+	second := request(visible2.String())
+	require.Len(t, second["items"], 1)
+	require.Equal(t, "", second["next_cursor"])
+}
+
+func TestGovernanceRepositoryFailureReturnsInternalError(t *testing.T) {
+	for _, repositoryErr := range []error{domain.ErrPersistence, errors.New("database unavailable")} {
+		t.Run(repositoryErr.Error(), func(t *testing.T) {
+			orgID := uuid.New()
+			handler := &GovernanceHandler{
+				namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
+					return nil, repositoryErr
+				},
+			}
+			router, token, _, _ := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{}, handler)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/namespaces/"+uuid.NewString()+"/children", nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("X-Organization-ID", orgID.String())
+			res := httptest.NewRecorder()
+
+			router.ServeHTTP(res, req)
+
+			require.Equal(t, http.StatusInternalServerError, res.Code, res.Body.String())
+			require.Contains(t, res.Body.String(), "FILESYSTEM_INTERNAL_ERROR")
+		})
+	}
 }
 
 func governanceRouter(t *testing.T, orgs authz.OrgPermissionChecker, workspaces authz.WorkspaceAccessResolver, handler *GovernanceHandler) (*gin.Engine, string, uuid.UUID, kernel.MemberID) {

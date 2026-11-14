@@ -191,19 +191,28 @@ func (h *GovernanceHandler) ListChildren(c *gin.Context) {
 	if !ok {
 		return
 	}
+	explicitParent := parentID != nil
 	if parentID == nil {
 		parentID = namespace.RootNodeID
 	}
-	if parentID == nil || h.getNode == nil || h.listChildren == nil || h.authorize == nil {
+	if parentID == nil {
 		notFound(c)
+		return
+	}
+	if h.getNode == nil || h.listChildren == nil || h.authorize == nil {
+		governanceError(c, domain.ErrPersistence)
 		return
 	}
 	parent, err := h.getNode(c.Request.Context(), namespace.ID, *parentID)
-	if err != nil || parent.Type != model.NodeTypeDirectory {
+	if err != nil {
+		governanceError(c, err)
+		return
+	}
+	if parent.Type != model.NodeTypeDirectory {
 		notFound(c)
 		return
 	}
-	if !h.authorize(c.Request.Context(), resourceauth.Request{
+	if explicitParent && !h.authorize(c.Request.Context(), resourceauth.Request{
 		ActorID: rc.actorID, WorkspaceID: rc.workspaceID, NamespaceID: namespace.ID,
 		NodeID: *parentID, Permission: model.ResourcePermissionRead,
 	}).Allowed {
@@ -223,19 +232,44 @@ func (h *GovernanceHandler) ListChildren(c *gin.Context) {
 		invalidRequest(c)
 		return
 	}
-	nodes, next, err := h.listChildren(c.Request.Context(), namespace.ID, parentID, nodeType, search, limit, c.Query("cursor"))
-	if err != nil {
-		filesystemError(c, err)
-		return
-	}
-	items := make([]gin.H, 0, len(nodes))
-	for index := range nodes {
-		if h.authorize(c.Request.Context(), resourceauth.Request{
-			ActorID: rc.actorID, WorkspaceID: rc.workspaceID, NamespaceID: namespace.ID,
-			NodeID: nodes[index].ID, Permission: model.ResourcePermissionRead,
-		}).Allowed {
-			items = append(items, nodeView(&nodes[index]))
+	visible := make([]model.Node, 0, limit+1)
+	scanCursor := c.Query("cursor")
+	for len(visible) <= limit {
+		pageStart := scanCursor
+		nodes, rawNext, listErr := h.listChildren(c.Request.Context(), namespace.ID, parentID, nodeType, search, 200, scanCursor)
+		if listErr != nil {
+			governanceError(c, listErr)
+			return
 		}
+		for index := range nodes {
+			scanCursor = nodes[index].ID.String()
+			if h.authorize(c.Request.Context(), resourceauth.Request{
+				ActorID: rc.actorID, WorkspaceID: rc.workspaceID, NamespaceID: namespace.ID,
+				NodeID: nodes[index].ID, Permission: model.ResourcePermissionRead,
+			}).Allowed {
+				visible = append(visible, nodes[index])
+				if len(visible) == limit+1 {
+					break
+				}
+			}
+		}
+		if len(visible) == limit+1 || rawNext == "" || rawNext == pageStart {
+			break
+		}
+		scanCursor = rawNext
+	}
+	next := ""
+	if len(visible) > limit {
+		next = visible[limit-1].ID.String()
+		visible = visible[:limit]
+	}
+	items := make([]gin.H, 0, len(visible))
+	for index := range visible {
+		view := nodeView(&visible[index])
+		if !explicitParent && visible[index].ParentID != nil && *visible[index].ParentID == *parentID {
+			view["parent_id"] = nil
+		}
+		items = append(items, view)
 	}
 	httpx.OK(c, gin.H{"items": items, "next_cursor": next})
 }
@@ -283,11 +317,19 @@ func (h *GovernanceHandler) EffectiveAccess(c *gin.Context) {
 	}
 	node, err := h.nodeByID(c.Request.Context(), nodeID)
 	if err != nil {
-		notFound(c)
+		governanceError(c, err)
 		return
 	}
 	namespace, err := h.namespaceByID(c.Request.Context(), node.NamespaceID)
-	if err != nil || !validNamespaceAudience(rc, namespace) {
+	if err != nil {
+		governanceError(c, err)
+		return
+	}
+	if namespace == nil {
+		governanceError(c, domain.ErrPersistence)
+		return
+	}
+	if !validNamespaceAudience(rc, namespace) {
 		if err == nil && namespace != nil && namespace.OrganizationID == rc.organizationID && namespace.NamespaceType != model.NamespaceTypeUser && rc.workspaceID == uuid.Nil {
 			httpx.Fail(c, "TENANT_NOT_WORKSPACE_MEMBER", "workspace context required", http.StatusForbidden)
 			return
@@ -313,7 +355,15 @@ func (h *GovernanceHandler) namespaceContext(c *gin.Context) (governanceContext,
 		return governanceContext{}, nil, false
 	}
 	namespace, err := h.namespaceByID(c.Request.Context(), namespaceID)
-	if err != nil || namespace.OrganizationID != rc.organizationID {
+	if err != nil {
+		governanceError(c, err)
+		return governanceContext{}, nil, false
+	}
+	if namespace == nil {
+		governanceError(c, domain.ErrPersistence)
+		return governanceContext{}, nil, false
+	}
+	if namespace.OrganizationID != rc.organizationID {
 		notFound(c)
 		return governanceContext{}, nil, false
 	}
@@ -349,7 +399,14 @@ func governanceError(c *gin.Context, err error) {
 		httpx.Fail(c, "TENANT_NOT_WORKSPACE_MEMBER", "workspace membership required", http.StatusForbidden)
 		return
 	}
-	filesystemError(c, err)
+	switch {
+	case errors.Is(err, domain.ErrResourceDenied):
+		httpx.Fail(c, "FILESYSTEM_RESOURCE_FORBIDDEN", "filesystem resource access denied", http.StatusForbidden)
+	case errors.Is(err, domain.ErrNamespaceNotFound), errors.Is(err, domain.ErrNodeNotFound):
+		notFound(c)
+	default:
+		httpx.Fail(c, "FILESYSTEM_INTERNAL_ERROR", "filesystem operation failed", http.StatusInternalServerError)
+	}
 }
 
 func notFound(c *gin.Context) {

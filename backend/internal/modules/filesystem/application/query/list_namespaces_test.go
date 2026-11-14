@@ -69,20 +69,23 @@ func TestListNamespacesReturnsCurrentScopesAndDiscoverableOrganizationSubtree(t 
 	userRoot, workspaceRoot, orgEntry := uuid.New(), uuid.New(), uuid.New()
 	user := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeUser, OrganizationID: orgID, OwnerUserID: actorID, RootNodeID: &userRoot}
 	workspace := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: orgID, WorkspaceID: workspaceID, RootNodeID: &workspaceRoot}
-	organization := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeOrganization, OrganizationID: orgID}
+	organizationRoot := uuid.New()
+	organization := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeOrganization, OrganizationID: orgID, RootNodeID: &organizationRoot}
 	repo := &governanceRepositoryStub{
 		user: user, workspace: workspace, org: organization,
 		shared: []SharedNode{{
 			Node:             model.Node{ID: orgEntry, NamespaceID: organization.ID},
-			EffectiveActions: []model.ResourcePermission{model.ResourcePermissionRead},
+			EffectiveActions: []model.ResourcePermission{model.ResourcePermissionRead, model.ResourcePermissionWrite},
 		}},
 	}
 	handler := NewListNamespacesHandler(repo, namespacePrincipalResolver{principals: []repository.PrincipalRef{
 		{Type: model.PrincipalUser, ID: actorID},
 		{Type: model.PrincipalWorkspace, ID: workspaceID},
 	}}, namespaceAuthorizerStub{allowed: map[uuid.UUID]map[model.ResourcePermission]bool{
-		userRoot:      {model.ResourcePermissionRead: true, model.ResourcePermissionWrite: true},
-		workspaceRoot: {model.ResourcePermissionRead: true},
+		userRoot:         {model.ResourcePermissionRead: true, model.ResourcePermissionWrite: true},
+		workspaceRoot:    {model.ResourcePermissionRead: true},
+		orgEntry:         {model.ResourcePermissionRead: true, model.ResourcePermissionWrite: true},
+		organizationRoot: {model.ResourcePermissionAdmin: true},
 	}})
 
 	got, err := handler.Handle(context.Background(), ListNamespaces{
@@ -96,6 +99,8 @@ func TestListNamespacesReturnsCurrentScopesAndDiscoverableOrganizationSubtree(t 
 	require.Equal(t, model.NamespaceTypeWorkspace, got[1].NamespaceType)
 	require.Equal(t, model.NamespaceTypeOrganization, got[2].NamespaceType)
 	require.Equal(t, []uuid.UUID{orgEntry}, got[2].EntryNodeIDs)
+	require.Nil(t, got[2].RootNodeID)
+	require.ElementsMatch(t, []model.ResourcePermission{model.ResourcePermissionRead, model.ResourcePermissionWrite}, got[2].Capabilities)
 	require.Equal(t, organization.ID, repo.filter.NamespaceID)
 	require.Equal(t, 200, repo.filter.Limit)
 }

@@ -69,7 +69,7 @@ func (h *ListNamespacesHandler) Handle(ctx context.Context, q ListNamespaces) ([
 	out := make([]NamespaceSummary, 0, 3)
 	user, err := h.repo.GetNamespaceByUser(ctx, q.OrganizationID, q.ActorID)
 	if err == nil {
-		out = append(out, h.summary(ctx, q, user, nil))
+		out = append(out, h.rootSummary(ctx, q, user))
 	} else if !errors.Is(err, domain.ErrNamespaceNotFound) {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func (h *ListNamespacesHandler) Handle(ctx context.Context, q ListNamespaces) ([
 			if workspace.OrganizationID != q.OrganizationID {
 				return nil, resourceauth.ErrPrincipalScopeMismatch
 			}
-			out = append(out, h.summary(ctx, q, workspace, nil))
+			out = append(out, h.rootSummary(ctx, q, workspace))
 		} else if !errors.Is(workspaceErr, domain.ErrNamespaceNotFound) {
 			return nil, workspaceErr
 		}
@@ -91,9 +91,15 @@ func (h *ListNamespacesHandler) Handle(ctx context.Context, q ListNamespaces) ([
 	if err != nil {
 		return nil, err
 	}
-	entryIDs := make([]uuid.UUID, 0, 1)
+	organizationSummary := h.rootSummary(ctx, q, organization)
+	if organizationSummary.RootNodeID != nil {
+		return append(out, organizationSummary), nil
+	}
+	entryIDs := make([]uuid.UUID, 0)
+	capabilities := make(map[model.ResourcePermission]struct{})
 	cursor := ""
-	for len(entryIDs) == 0 {
+	for {
+		pageStart := cursor
 		entries, next, listErr := h.repo.ListSharedNodes(ctx, q.OrganizationID, principals, SharedWithMeFilter{
 			NamespaceID: organization.ID, Cursor: cursor, Limit: 200, Principals: principals,
 		}, nowUTC())
@@ -101,42 +107,59 @@ func (h *ListNamespacesHandler) Handle(ctx context.Context, q ListNamespaces) ([
 			return nil, listErr
 		}
 		for _, entry := range entries {
-			if containsAction(entry.EffectiveActions, model.ResourcePermissionRead) {
-				entryIDs = append(entryIDs, entry.Node.ID)
-				break
+			effective := authorizeSharedCandidate(ctx, h.authorizer, SharedWithMe{
+				ActorID: q.ActorID, OrganizationID: q.OrganizationID, WorkspaceID: q.WorkspaceID,
+			}, entry.Node)
+			if !containsAction(effective.EffectiveActions, model.ResourcePermissionRead) {
+				continue
+			}
+			entryIDs = append(entryIDs, entry.Node.ID)
+			for _, action := range effective.EffectiveActions {
+				capabilities[action] = struct{}{}
 			}
 		}
-		if len(entryIDs) > 0 || next == "" || next == cursor {
+		if next == "" || next == pageStart {
 			break
 		}
 		cursor = next
 	}
-	rootVisible := organization.RootNodeID != nil && h.authorizer.Authorize(ctx, resourceauth.Request{
-		ActorID: q.ActorID, WorkspaceID: q.WorkspaceID, NamespaceID: organization.ID,
-		NodeID: *organization.RootNodeID, Permission: model.ResourcePermissionRead,
-	}).Allowed
-	if rootVisible || len(entryIDs) > 0 {
-		out = append(out, h.summary(ctx, q, organization, entryIDs))
+	if len(entryIDs) > 0 {
+		organizationSummary.EntryNodeIDs = entryIDs
+		for _, action := range resourceActions {
+			if _, ok := capabilities[action]; ok {
+				organizationSummary.Capabilities = append(organizationSummary.Capabilities, action)
+			}
+		}
+		out = append(out, organizationSummary)
 	}
 	return out, nil
 }
 
-func (h *ListNamespacesHandler) summary(ctx context.Context, q ListNamespaces, namespace *model.Namespace, entries []uuid.UUID) NamespaceSummary {
+func (h *ListNamespacesHandler) rootSummary(ctx context.Context, q ListNamespaces, namespace *model.Namespace) NamespaceSummary {
 	summary := NamespaceSummary{
 		ID: namespace.ID, NamespaceType: namespace.NamespaceType, OrganizationID: namespace.OrganizationID,
-		WorkspaceID: namespace.WorkspaceID, OwnerUserID: namespace.OwnerUserID, RootNodeID: namespace.RootNodeID,
-		Status: namespace.Status, EntryNodeIDs: entries,
+		WorkspaceID: namespace.WorkspaceID, OwnerUserID: namespace.OwnerUserID, Status: namespace.Status,
 	}
 	if namespace.RootNodeID == nil {
 		return summary
 	}
+	rootCapabilities := make([]model.ResourcePermission, 0, len(resourceActions))
+	rootReadable := false
 	for _, action := range resourceActions {
 		if h.authorizer.Authorize(ctx, resourceauth.Request{
 			ActorID: q.ActorID, WorkspaceID: q.WorkspaceID, NamespaceID: namespace.ID,
 			NodeID: *namespace.RootNodeID, Permission: action,
 		}).Allowed {
-			summary.Capabilities = append(summary.Capabilities, action)
+			rootCapabilities = append(rootCapabilities, action)
+			if action == model.ResourcePermissionRead {
+				rootReadable = true
+				rootID := *namespace.RootNodeID
+				summary.RootNodeID = &rootID
+			}
 		}
+	}
+	if rootReadable {
+		summary.Capabilities = rootCapabilities
 	}
 	return summary
 }

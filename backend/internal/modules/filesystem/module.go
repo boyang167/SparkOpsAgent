@@ -267,7 +267,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	governanceHandler := filesystemhttp.NewGovernanceHandler(
 		repo,
 		query.NewListNamespacesHandler(repo, principalResolver, resourceAuthorizer),
-		query.NewSharedWithMeHandler(repo, principalResolver),
+		query.NewSharedWithMeHandler(repo, principalResolver, resourceAuthorizer),
 		query.NewEffectiveAccessHandler(resourceAuthorizer),
 		resourceAuthorizer,
 	)

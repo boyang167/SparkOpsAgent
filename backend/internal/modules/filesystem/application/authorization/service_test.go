@@ -220,6 +220,37 @@ func TestAuthorizeDirectDenyOverridesInheritedOrganizationAllow(t *testing.T) {
 	require.Equal(t, "explicit_deny", decision.Reason)
 }
 
+func TestAuthorizeDecisionIncludesAncestorDenyAndChildAllowSources(t *testing.T) {
+	organizationID, workspaceID, actorID := uuid.New(), uuid.New(), uuid.New()
+	namespace := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeOrganization, OrganizationID: organizationID, PolicyVersion: 5}
+	root := node(namespace.ID, uuid.Nil, uuid.New())
+	child := node(namespace.ID, root.ID, uuid.New())
+	denyID, allowID := uuid.New(), uuid.New()
+	service := NewService(grantRepositoryStub{
+		nodes:      map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
+		namespaces: map[uuid.UUID]*model.Namespace{namespace.ID: namespace},
+		grants: map[uuid.UUID][]model.ResourceGrant{
+			root.ID: {{
+				ID: denyID, NodeID: root.ID, PrincipalType: model.PrincipalUser, PrincipalID: actorID,
+				InheritToChildren: true, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectDeny,
+			}},
+			child.ID: {{
+				ID: allowID, NodeID: child.ID, PrincipalType: model.PrincipalUser, PrincipalID: actorID,
+				Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow,
+			}},
+		},
+	}, principalResolverStub{principals: []repository.PrincipalRef{{Type: model.PrincipalUser, ID: actorID}}}, authorityStub{})
+
+	decision := service.Authorize(context.Background(), Request{
+		ActorID: actorID, WorkspaceID: workspaceID, NamespaceID: namespace.ID,
+		NodeID: child.ID, Permission: model.ResourcePermissionRead,
+	})
+
+	require.False(t, decision.Allowed)
+	require.Equal(t, "explicit_deny", decision.Reason)
+	require.ElementsMatch(t, []uuid.UUID{denyID, allowID}, decision.SourceGrantIDs)
+}
+
 func TestAuthorizeDecisionUsesRepositoryNamespacePolicyVersionInCacheKey(t *testing.T) {
 	organizationID, ownerID := uuid.New(), uuid.New()
 	request := Request{
