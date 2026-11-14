@@ -278,7 +278,7 @@ func TestCreateTransferPostgresReplaysAuthoritativeExpiredSessionWhenConfigured(
 	require.NoError(t, messagingpersistence.AutoMigrate(db))
 	require.NoError(t, audit.NewGormStore(db).AutoMigrate())
 	repo := persistence.NewRepository(db)
-	ns := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	ns := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
 	require.NoError(t, repo.CreateNamespace(context.Background(), ns))
 	seedPutNamespaceRoot(t, repo, ns)
 	cmd := transferFixture(ns)
@@ -360,7 +360,7 @@ func TestCreateTransferRollsBackSessionQuotaReservationAuditAndOutbox(t *testing
 
 func TestCreateTransferRejectsCrossWorkspaceParentAndAuditsStableReason(t *testing.T) {
 	db, ns := newTransferTestDB(t)
-	other := &model.Namespace{ID: uuid.New(), OrganizationID: ns.OrganizationID, WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	other := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: ns.OrganizationID, WorkspaceID: uuid.New(), Status: "ACTIVE"}
 	repo := persistence.NewRepository(db)
 	require.NoError(t, repo.CreateNamespace(context.Background(), other))
 	seedPutNamespaceRoot(t, repo, other)
@@ -529,7 +529,7 @@ func newConcurrentTransferTestDB(t *testing.T) (*gorm.DB, *model.Namespace, stri
 	require.NoError(t, messagingpersistence.AutoMigrate(db))
 	require.NoError(t, audit.NewGormStore(db).AutoMigrate())
 	repo := persistence.NewRepository(db)
-	ns := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	ns := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
 	require.NoError(t, repo.CreateNamespace(context.Background(), ns))
 	seedPutNamespaceRoot(t, repo, ns)
 	return db, ns, mainDSN, filesystemDSN, platformDSN

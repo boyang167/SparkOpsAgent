@@ -351,7 +351,7 @@ func (h *CreateNamespaceHandler) Handle(ctx context.Context, cmd CreateNamespace
 	} else if !errors.Is(lookupErr, domain.ErrNamespaceNotFound) {
 		return nil, lookupErr
 	}
-	ns := &model.Namespace{ID: uuid.New(), OrganizationID: cmd.OrganizationID, WorkspaceID: cmd.WorkspaceID, Status: "ACTIVE"}
+	ns := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: cmd.OrganizationID, WorkspaceID: cmd.WorkspaceID, Status: "ACTIVE"}
 	ctx = withResourceID(ctx, ns.ID.String())
 	root, err := model.NewRootDirectory(ns.ID, cmd.ActorID, ".root")
 	if err != nil {

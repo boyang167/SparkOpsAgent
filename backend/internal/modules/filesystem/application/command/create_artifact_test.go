@@ -61,7 +61,7 @@ func TestArtifactCannotReferenceFileFromAnotherWorkspace(t *testing.T) {
 	namespaceB := uuid.New()
 	fileID := uuid.New()
 	stub := &artifactRepoStub{
-		namespace: &model.Namespace{ID: namespaceA, WorkspaceID: workspaceA, OrganizationID: org, Status: "ACTIVE"},
+		namespace: &model.Namespace{ID: namespaceA, NamespaceType: model.NamespaceTypeWorkspace, WorkspaceID: workspaceA, OrganizationID: org, Status: "ACTIVE"},
 		node:      &model.Node{ID: fileID, NamespaceID: namespaceB, Type: model.NodeTypeFile, State: model.NodeStateActive},
 	}
 	handler := NewCreateArtifactHandlerWithRepo(stub, nil, nil)
@@ -88,7 +88,7 @@ func TestCreateArtifactWritesFileLinkAndVersionedEvent(t *testing.T) {
 	revisionID := uuid.New()
 	runID := uuid.New()
 	stub := &artifactRepoStub{
-		namespace: &model.Namespace{ID: namespaceID, OrganizationID: organizationID, WorkspaceID: workspaceID, Status: "ACTIVE"},
+		namespace: &model.Namespace{ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: organizationID, WorkspaceID: workspaceID, Status: "ACTIVE"},
 		node: &model.Node{
 			ID: fileID, NamespaceID: namespaceID, Type: model.NodeTypeFile,
 			CurrentRevisionID: &revisionID, State: model.NodeStateActive,

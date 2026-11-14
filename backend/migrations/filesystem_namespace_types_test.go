@@ -51,6 +51,7 @@ func TestFilesystemNamespaceTypesMigrationBackfillsWorkspaceRows(t *testing.T) {
 		FROM filesystem.namespaces WHERE workspace_id = ?
 	`, workspaceID).Scan(&got).Error)
 	require.Equal(t, "WORKSPACE", got.NamespaceType)
+	require.NotNil(t, got.WorkspaceID)
 	require.Equal(t, workspaceID, *got.WorkspaceID)
 	require.Nil(t, got.OwnerUserID)
 	require.EqualValues(t, 1, got.PolicyVersion)

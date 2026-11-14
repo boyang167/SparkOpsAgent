@@ -28,6 +28,24 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 )
 
+func TestCreateNamespaceRejectsInvalidTypedNamespace(t *testing.T) {
+	repo, _ := newTestRepository(t)
+
+	err := repo.CreateNamespace(context.Background(), &model.Namespace{
+		ID:             uuid.New(),
+		NamespaceType:  model.NamespaceTypeOrganization,
+		OrganizationID: uuid.New(),
+		WorkspaceID:    uuid.New(),
+	})
+	require.ErrorIs(t, err, model.ErrInvalidNamespace)
+
+	err = repo.CreateNamespace(context.Background(), &model.Namespace{
+		ID:             uuid.New(),
+		OrganizationID: uuid.New(),
+	})
+	require.ErrorIs(t, err, model.ErrInvalidNamespace)
+}
+
 func TestCreateChildRejectsDuplicateNormalizedName(t *testing.T) {
 	repo, db := newTestRepository(t)
 	ns := seedNamespace(t, db)
@@ -617,7 +635,7 @@ func TestCreateTransferPostgresConflictDoesNotAbortTransaction(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(string(migration)).Error)
 	repo := NewRepository(db)
-	ns := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	ns := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
 	require.NoError(t, repo.CreateNamespace(context.Background(), ns))
 	parent := rootDirectory(ns.ID, "parent")
 	require.NoError(t, repo.CreateNode(context.Background(), parent))

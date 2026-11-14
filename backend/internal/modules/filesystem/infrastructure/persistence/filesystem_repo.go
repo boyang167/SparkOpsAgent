@@ -26,14 +26,13 @@ type Repository struct{ db *gorm.DB }
 func NewRepository(db *gorm.DB) repository.FilesystemRepository { return &Repository{db: db} }
 
 func (r *Repository) CreateNamespace(ctx context.Context, namespace *model.Namespace) error {
+	if err := namespace.Validate(); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	status := namespace.Status
 	if status == "" {
 		status = "ACTIVE"
-	}
-	namespaceType := namespace.NamespaceType
-	if namespaceType == "" {
-		namespaceType = model.NamespaceTypeWorkspace
 	}
 	var workspaceID *uuid.UUID
 	if namespace.WorkspaceID != uuid.Nil {
@@ -46,7 +45,7 @@ func (r *Repository) CreateNamespace(ctx context.Context, namespace *model.Names
 	db := postgres.DB(ctx, r.db)
 	return wrapPersistence(db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&namespaceRow{
-			ID: namespace.ID, NamespaceType: namespaceType, OrganizationID: namespace.OrganizationID,
+			ID: namespace.ID, NamespaceType: namespace.NamespaceType, OrganizationID: namespace.OrganizationID,
 			WorkspaceID: workspaceID, OwnerUserID: ownerUserID, RootNodeID: namespace.RootNodeID,
 			Status: status, PolicyVersion: namespace.PolicyVersion, CreatedAt: now, UpdatedAt: now,
 		}).Error; err != nil {

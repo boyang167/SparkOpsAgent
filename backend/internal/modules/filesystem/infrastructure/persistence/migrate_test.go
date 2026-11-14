@@ -50,11 +50,20 @@ func TestPostgresFallbackConstraintsMatchKernelInvariants(t *testing.T) {
 	}
 }
 
+func TestPostgresFallbackPreservesNamespaceTransferKeyBeforeForeignKey(t *testing.T) {
+	fallbackSQL := strings.Join(postgresFallbackConstraints, "\n")
+	uniqueKey := "CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_workspace_id_id ON filesystem.namespaces(workspace_id, id) WHERE workspace_id IS NOT NULL"
+	transferForeignKey := "REFERENCES filesystem.namespaces(workspace_id, id)"
+	require.Contains(t, fallbackSQL, uniqueKey)
+	require.Contains(t, fallbackSQL, transferForeignKey)
+	require.Less(t, strings.Index(fallbackSQL, uniqueKey), strings.Index(fallbackSQL, transferForeignKey))
+}
+
 func TestPostgresFallbackConstraintCatalog(t *testing.T) {
 	db := openFilesystemPostgres(t)
 	require.NoError(t, AutoMigrate(db))
 	for _, index := range []string{
-		"ux_filesystem_nodes_root_name", "ux_filesystem_nodes_child_name", "ux_filesystem_blobs_dedup",
+		"ux_filesystem_namespaces_workspace_id_id", "ux_filesystem_nodes_root_name", "ux_filesystem_nodes_child_name", "ux_filesystem_blobs_dedup",
 		"ux_filesystem_revisions_node_no", "ux_filesystem_replicas_identity", "ux_filesystem_grants_identity",
 		"ux_transfer_sessions_workspace_id", "ux_transfer_sessions_idempotency",
 		"ux_transfer_parts_number", "ux_quota_reservations_session",

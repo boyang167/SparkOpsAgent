@@ -126,7 +126,7 @@ func TestPutLocalFileRollsBackWhenEventPublishFails(t *testing.T) {
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
 	require.NoError(t, persistence.AutoMigrate(db))
 	repo := persistence.NewRepository(db)
-	ns := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	ns := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
 	require.NoError(t, repo.CreateNamespace(context.Background(), ns))
 	seedPutNamespaceRoot(t, repo, ns)
 	provider, err := local.New(t.TempDir())
@@ -399,7 +399,7 @@ func newPutTestRepository(t *testing.T) (*gorm.DB, repository.FilesystemReposito
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
 	require.NoError(t, persistence.AutoMigrate(db))
 	repo := persistence.NewRepository(db)
-	ns := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	ns := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
 	require.NoError(t, repo.CreateNamespace(context.Background(), ns))
 	seedPutNamespaceRoot(t, repo, ns)
 	return db, repo, ns
@@ -416,7 +416,7 @@ func newConcurrentPutTestRepository(t *testing.T) (*gorm.DB, repository.Filesyst
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, persistence.AutoMigrate(db))
 	repo := persistence.NewRepository(db)
-	ns := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	ns := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
 	require.NoError(t, repo.CreateNamespace(context.Background(), ns))
 	seedPutNamespaceRoot(t, repo, ns)
 	return db, repo, ns, mainDSN, filesystemDSN
