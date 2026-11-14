@@ -712,8 +712,8 @@ func (r *Repository) ListResourceGrants(ctx context.Context, nodeIDs []uuid.UUID
 	conditions := make([]string, 0, len(principals))
 	args := make([]any, 0, len(principals)*2)
 	for _, principal := range principals {
-		conditions = append(conditions, "((principal_type = ? OR principal_type = '' OR principal_type IS NULL) AND (principal_id = ? OR principal_id IS NULL OR principal_id = grantee_id OR principal_id = ?))")
-		args = append(args, principal.Type, principal.ID, uuid.Nil)
+		conditions = append(conditions, "(principal_type = ? AND principal_id = ?)")
+		args = append(args, principal.Type, principal.ID)
 	}
 	err := query.Where(strings.Join(conditions, " OR "), args...).Find(&rows).Error
 	if err != nil {
@@ -736,12 +736,34 @@ func (r *Repository) CreateResourceGrant(ctx context.Context, grant model.Resour
 	if grant.GranteeID == uuid.Nil {
 		grant.GranteeID = grant.PrincipalID
 	}
-	return wrapPersistence(postgres.DB(ctx, r.db).Create(&resourceGrantRow{
-		ID: grant.ID, NodeID: grant.NodeID, OrganizationID: grant.OrganizationID, GranteeID: grant.GranteeID,
-		PrincipalType: grant.PrincipalType, PrincipalID: grant.PrincipalID, Permission: grant.Permission,
-		Effect: grant.Effect, InheritToChildren: grant.InheritToChildren, ExpiresAt: grant.ExpiresAt,
-		RevokedAt: grant.RevokedAt, PolicyVersion: grant.PolicyVersion, CreatedAt: time.Now().UTC(),
-	}).Error)
+	if grant.PrincipalID == uuid.Nil || grant.GranteeID != grant.PrincipalID {
+		return domain.ErrResourceDenied
+	}
+	save := func(db *gorm.DB) error {
+		now := time.Now().UTC()
+		var existing []resourceGrantRow
+		if err := db.Where("node_id = ? AND principal_type = ? AND principal_id = ? AND permission = ? AND effect = ? AND revoked_at IS NULL",
+			grant.NodeID, grant.PrincipalType, grant.PrincipalID, grant.Permission, grant.Effect).Find(&existing).Error; err != nil {
+			return err
+		}
+		for _, row := range existing {
+			if row.ExpiresAt != nil && !row.ExpiresAt.After(now) {
+				if err := db.Model(&resourceGrantRow{}).Where("id = ? AND revoked_at IS NULL", row.ID).Update("revoked_at", now).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return db.Create(&resourceGrantRow{
+			ID: grant.ID, NodeID: grant.NodeID, OrganizationID: grant.OrganizationID, GranteeID: grant.GranteeID,
+			PrincipalType: grant.PrincipalType, PrincipalID: grant.PrincipalID, Permission: grant.Permission,
+			Effect: grant.Effect, InheritToChildren: grant.InheritToChildren, ExpiresAt: grant.ExpiresAt,
+			RevokedAt: grant.RevokedAt, PolicyVersion: grant.PolicyVersion, CreatedAt: now,
+		}).Error
+	}
+	if _, err := postgres.RequireTx(ctx); err == nil {
+		return wrapPersistence(save(postgres.DB(ctx, r.db)))
+	}
+	return wrapPersistence(postgres.DB(ctx, r.db).Transaction(save))
 }
 
 func (r *Repository) RevokeResourceGrant(ctx context.Context, nodeID, grantID uuid.UUID) error {
@@ -760,7 +782,8 @@ func (r *Repository) RevokeResourceGrant(ctx context.Context, nodeID, grantID uu
 
 func (r *Repository) ListNodeResourceGrants(ctx context.Context, nodeID uuid.UUID) ([]model.ResourceGrant, error) {
 	var rows []resourceGrantRow
-	if err := postgres.DB(ctx, r.db).Where("node_id = ? AND revoked_at IS NULL", nodeID).Order("id ASC").Find(&rows).Error; err != nil {
+	now := time.Now().UTC()
+	if err := postgres.DB(ctx, r.db).Where("node_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)", nodeID, now).Order("id ASC").Find(&rows).Error; err != nil {
 		return nil, wrapPersistence(err)
 	}
 	result := make([]model.ResourceGrant, len(rows))
@@ -771,17 +794,9 @@ func (r *Repository) ListNodeResourceGrants(ctx context.Context, nodeID uuid.UUI
 }
 
 func resourceGrantFromRow(row resourceGrantRow) model.ResourceGrant {
-	principalType := row.PrincipalType
-	if principalType == "" {
-		principalType = model.PrincipalUser
-	}
-	principalID := row.PrincipalID
-	if principalID == uuid.Nil {
-		principalID = row.GranteeID
-	}
 	return model.ResourceGrant{
 		ID: row.ID, NodeID: row.NodeID, OrganizationID: row.OrganizationID, GranteeID: row.GranteeID,
-		PrincipalType: principalType, PrincipalID: principalID, Permission: row.Permission,
+		PrincipalType: row.PrincipalType, PrincipalID: row.PrincipalID, Permission: row.Permission,
 		Effect: row.Effect, InheritToChildren: row.InheritToChildren, ExpiresAt: row.ExpiresAt,
 		RevokedAt: row.RevokedAt, PolicyVersion: row.PolicyVersion,
 	}

@@ -130,7 +130,7 @@ func TestRegisterExposesMetadataRoutesWithoutLocalProvider(t *testing.T) {
 	require.NoError(t, repo.SetNamespaceRoot(context.Background(), namespace.WorkspaceID, root.ID))
 	grants, err := container.FilesystemGrantPort.List(context.Background(), filesystemport.GrantRequest{
 		ActorID: owner, OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID,
-		NamespaceID: namespace.ID, NodeID: root.ID,
+		GranteeOrganizationID: namespace.OrganizationID, NamespaceID: namespace.ID, NodeID: root.ID,
 	})
 	require.NoError(t, err)
 	require.Empty(t, grants)

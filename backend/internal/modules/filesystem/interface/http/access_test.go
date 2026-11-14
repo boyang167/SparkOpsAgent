@@ -50,3 +50,15 @@ func TestGrantEndpointRejectsCrossOrganization(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, res.Code, res.Body.String())
 	require.Contains(t, res.Body.String(), "FILESYSTEM_CROSS_ORGANIZATION_GRANT")
 }
+
+func TestGrantViewIncludesConsistentTypedPrincipalFields(t *testing.T) {
+	principalID := uuid.New()
+	view := grantView(model.ResourceGrant{
+		ID: uuid.New(), NodeID: uuid.New(), GranteeID: principalID,
+		PrincipalType: model.PrincipalRole, PrincipalID: principalID,
+		Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow,
+	})
+	require.Equal(t, model.PrincipalRole, view["principal_type"])
+	require.Equal(t, principalID, view["principal_id"])
+	require.Equal(t, principalID, view["grantee_id"])
+}

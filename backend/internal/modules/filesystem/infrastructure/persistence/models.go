@@ -127,10 +127,10 @@ func (quotaReservationRow) TableName() string { return "filesystem.quota_reserva
 type resourceGrantRow struct {
 	ID                uuid.UUID                `gorm:"column:id;primaryKey;type:uuid"`
 	NodeID            uuid.UUID                `gorm:"column:node_id;not null;type:uuid;index"`
-	OrganizationID    uuid.UUID                `gorm:"column:organization_id;type:uuid;index"`
+	OrganizationID    uuid.UUID                `gorm:"column:organization_id;not null;type:uuid;index"`
 	GranteeID         uuid.UUID                `gorm:"column:grantee_id;not null;type:uuid;index"`
-	PrincipalType     model.PrincipalType      `gorm:"column:principal_type;type:varchar(32);default:USER"`
-	PrincipalID       uuid.UUID                `gorm:"column:principal_id;type:uuid;index"`
+	PrincipalType     model.PrincipalType      `gorm:"column:principal_type;not null;type:varchar(32)"`
+	PrincipalID       uuid.UUID                `gorm:"column:principal_id;not null;type:uuid;index"`
 	Permission        model.ResourcePermission `gorm:"not null;type:varchar(32)"`
 	Effect            model.GrantEffect        `gorm:"not null;type:varchar(8)"`
 	InheritToChildren bool                     `gorm:"column:inherit_to_children;not null;default:true"`

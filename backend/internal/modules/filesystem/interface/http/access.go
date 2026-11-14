@@ -383,7 +383,15 @@ func (h *Handler) auditCapability(c *gin.Context, rc requestContext, issued comm
 }
 
 func grantView(grant model.ResourceGrant) gin.H {
-	return gin.H{"id": grant.ID, "node_id": grant.NodeID, "grantee_id": grant.GranteeID, "permission": grant.Permission, "effect": grant.Effect, "expires_at": grant.ExpiresAt}
+	granteeID := grant.GranteeID
+	if granteeID == uuid.Nil {
+		granteeID = grant.PrincipalID
+	}
+	return gin.H{
+		"id": grant.ID, "node_id": grant.NodeID, "grantee_id": granteeID,
+		"principal_type": grant.PrincipalType, "principal_id": grant.PrincipalID,
+		"permission": grant.Permission, "effect": grant.Effect, "expires_at": grant.ExpiresAt,
+	}
 }
 
 func exportView(task model.ExportTask) gin.H {

@@ -65,6 +65,9 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 				return Decision{Reason: "authorization_unavailable"}
 			}
 			for _, grant := range grants {
+				if current.ID != node.ID && !grant.InheritToChildren {
+					continue
+				}
 				relations = append(relations, domainservice.Relation{
 					ResourceID: current.ID, Effect: grant.Effect, Inherited: current.ID != node.ID,
 					Permission: grant.Permission, Source: domainservice.SourceGrant, PolicyID: grant.ID.String(),

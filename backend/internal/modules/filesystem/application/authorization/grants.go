@@ -48,6 +48,10 @@ func (s *GrantService) Create(ctx context.Context, request GrantRequest) (model.
 		s.log(ctx, request, uuid.Nil, "create", "DENY", decision.Reason)
 		return model.ResourceGrant{}, domain.ErrResourceDenied
 	}
+	if err := validateGrantOrganization(request); err != nil {
+		s.log(ctx, request, uuid.Nil, "create", "DENY", "principal_organization_mismatch")
+		return model.ResourceGrant{}, err
+	}
 	grant := request.Grant
 	if grant.PrincipalID != uuid.Nil && grant.GranteeID != uuid.Nil && grant.PrincipalID != grant.GranteeID {
 		return model.ResourceGrant{}, domain.ErrResourceDenied
@@ -64,9 +68,6 @@ func (s *GrantService) Create(ctx context.Context, request GrantRequest) (model.
 	if grant.PrincipalID == uuid.Nil {
 		return model.ResourceGrant{}, domain.ErrResourceDenied
 	}
-	if request.GranteeOrganizationID != uuid.Nil && request.GranteeOrganizationID != request.OrganizationID {
-		return model.ResourceGrant{}, domain.ErrCrossOrganizationGrant
-	}
 	if grant.ID == uuid.Nil {
 		if request.CommandID != uuid.Nil {
 			grant.ID = uuid.NewSHA1(uuid.NameSpaceOID, []byte("filesystem-grant:"+request.CommandID.String()))
@@ -76,9 +77,6 @@ func (s *GrantService) Create(ctx context.Context, request GrantRequest) (model.
 	}
 	grant.NodeID = request.NodeID
 	grant.OrganizationID = request.OrganizationID
-	if !grant.InheritToChildren {
-		grant.InheritToChildren = true
-	}
 	if grant.PolicyVersion == 0 {
 		grant.PolicyVersion = 1
 	}
@@ -122,6 +120,10 @@ func (s *GrantService) Revoke(ctx context.Context, request GrantRequest, grantID
 		s.log(ctx, request, grantID, "revoke", "DENY", decision.Reason)
 		return domain.ErrResourceDenied
 	}
+	if err := validateGrantOrganization(request); err != nil {
+		s.log(ctx, request, grantID, "revoke", "DENY", "principal_organization_mismatch")
+		return err
+	}
 	return s.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
 		replayed, claimErr := s.claim(txCtx, request, "grant_revoke", grantRequestHash("grant_revoke", request, grantID), grantID)
 		if claimErr != nil || replayed {
@@ -151,7 +153,17 @@ func (s *GrantService) List(ctx context.Context, request GrantRequest) ([]model.
 	if decision := s.authorizer.Authorize(ctx, Request{ActorID: request.ActorID, WorkspaceID: request.WorkspaceID, NamespaceID: request.NamespaceID, NodeID: request.NodeID, Permission: model.ResourcePermissionAdmin}); !decision.Allowed {
 		return nil, domain.ErrResourceDenied
 	}
+	if err := validateGrantOrganization(request); err != nil {
+		return nil, err
+	}
 	return s.repo.ListNodeResourceGrants(ctx, request.NodeID)
+}
+
+func validateGrantOrganization(request GrantRequest) error {
+	if request.GranteeOrganizationID == uuid.Nil || request.GranteeOrganizationID != request.OrganizationID {
+		return domain.ErrCrossOrganizationGrant
+	}
+	return nil
 }
 
 func (s *GrantService) authoritativeRequest(ctx context.Context, request GrantRequest) (GrantRequest, error) {

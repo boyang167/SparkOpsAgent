@@ -343,13 +343,68 @@ func TestResourceGrantEffectAndExpiryRoundTrip(t *testing.T) {
 	require.NoError(t, repo.CreateNode(context.Background(), node))
 	granteeID := uuid.New()
 	expired := time.Now().Add(-time.Hour)
-	require.NoError(t, db.Create(&resourceGrantRow{ID: uuid.New(), NodeID: node.ID, GranteeID: granteeID, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow}).Error)
-	require.NoError(t, db.Create(&resourceGrantRow{ID: uuid.New(), NodeID: node.ID, GranteeID: granteeID, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectDeny, ExpiresAt: &expired}).Error)
+	require.NoError(t, db.Create(&resourceGrantRow{ID: uuid.New(), NodeID: node.ID, OrganizationID: ns.OrganizationID, GranteeID: granteeID, PrincipalType: model.PrincipalUser, PrincipalID: granteeID, InheritToChildren: true, PolicyVersion: 1, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow}).Error)
+	require.NoError(t, db.Create(&resourceGrantRow{ID: uuid.New(), NodeID: node.ID, OrganizationID: ns.OrganizationID, GranteeID: granteeID, PrincipalType: model.PrincipalUser, PrincipalID: granteeID, InheritToChildren: true, PolicyVersion: 1, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectDeny, ExpiresAt: &expired}).Error)
 
 	grants, err := repo.ListResourceGrants(context.Background(), []uuid.UUID{node.ID}, []repository.PrincipalRef{{Type: model.PrincipalUser, ID: granteeID}}, model.ResourcePermissionRead, time.Now())
 	require.NoError(t, err)
 	require.Len(t, grants, 1)
 	require.Equal(t, model.GrantEffectAllow, grants[0].Effect)
+}
+
+func TestListResourceGrantsMatchesExactPrincipalAndRejectsEmptyFilters(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	node := rootDirectory(ns.ID, "typed")
+	require.NoError(t, repo.CreateNode(context.Background(), node))
+	principalID := uuid.New()
+	for _, principalType := range []model.PrincipalType{model.PrincipalWorkspace, model.PrincipalRole} {
+		require.NoError(t, repo.CreateResourceGrant(context.Background(), model.ResourceGrant{
+			ID: uuid.New(), NodeID: node.ID, OrganizationID: ns.OrganizationID,
+			GranteeID: principalID, PrincipalType: principalType, PrincipalID: principalID,
+			Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow,
+			InheritToChildren: true, PolicyVersion: 1,
+		}))
+	}
+	grants, err := repo.ListResourceGrants(context.Background(), []uuid.UUID{node.ID}, []repository.PrincipalRef{{Type: model.PrincipalWorkspace, ID: principalID}}, model.ResourcePermissionRead, time.Now())
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	require.Equal(t, model.PrincipalWorkspace, grants[0].PrincipalType)
+
+	grants, err = repo.ListResourceGrants(context.Background(), nil, []repository.PrincipalRef{{Type: model.PrincipalWorkspace, ID: principalID}}, model.ResourcePermissionRead, time.Now())
+	require.NoError(t, err)
+	require.Empty(t, grants)
+	grants, err = repo.ListResourceGrants(context.Background(), []uuid.UUID{node.ID}, nil, model.ResourcePermissionRead, time.Now())
+	require.NoError(t, err)
+	require.Empty(t, grants)
+}
+
+func TestCreateResourceGrantRevokesExpiredKeyBeforeRecreating(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	node := rootDirectory(ns.ID, "recreate")
+	require.NoError(t, repo.CreateNode(context.Background(), node))
+	principalID := uuid.New()
+	expired := time.Now().Add(-time.Minute)
+	first := model.ResourceGrant{
+		ID: uuid.New(), NodeID: node.ID, OrganizationID: ns.OrganizationID,
+		GranteeID: principalID, PrincipalType: model.PrincipalUser, PrincipalID: principalID,
+		Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow,
+		ExpiresAt: &expired, InheritToChildren: true, PolicyVersion: 1,
+	}
+	require.NoError(t, repo.CreateResourceGrant(context.Background(), first))
+	second := first
+	second.ID = uuid.New()
+	second.ExpiresAt = nil
+	require.NoError(t, repo.CreateResourceGrant(context.Background(), second))
+
+	var revokedAt *time.Time
+	require.NoError(t, db.Table("filesystem.resource_grants").Where("id = ?", first.ID).Pluck("revoked_at", &revokedAt).Error)
+	require.NotNil(t, revokedAt)
+	grants, err := repo.ListNodeResourceGrants(context.Background(), node.ID)
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	require.Equal(t, second.ID, grants[0].ID)
 }
 
 func TestGetCommandConvertsNotFoundPrecisely(t *testing.T) {

@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,58 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 )
+
+func TestSQLiteAutoMigrateUpgradesLegacyGrantRows(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
+	orgID, namespaceID, nodeID, granteeID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(`CREATE TABLE filesystem.namespaces (
+		id BLOB PRIMARY KEY, namespace_type TEXT, organization_id BLOB, workspace_id BLOB,
+		owner_user_id BLOB, root_node_id BLOB, status TEXT, policy_version INTEGER,
+		created_at DATETIME, updated_at DATETIME
+	)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE filesystem.nodes (
+		id BLOB PRIMARY KEY, namespace_id BLOB, parent_id BLOB, node_type TEXT,
+		name TEXT, normalized_name TEXT, current_revision_id BLOB, state TEXT,
+		owner_id BLOB, created_at DATETIME, updated_at DATETIME
+	)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE filesystem.resource_grants (
+		id BLOB PRIMARY KEY, node_id BLOB NOT NULL, grantee_id BLOB NOT NULL,
+		permission TEXT NOT NULL, effect TEXT NOT NULL, expires_at DATETIME,
+		created_at DATETIME, UNIQUE(node_id, grantee_id, permission, effect)
+	)`).Error)
+	require.NoError(t, db.Exec("INSERT INTO filesystem.namespaces (id, namespace_type, organization_id, workspace_id, status) VALUES (?, 'WORKSPACE', ?, ?, 'ACTIVE')", namespaceID, orgID, uuid.New()).Error)
+	require.NoError(t, db.Exec("INSERT INTO filesystem.nodes (id, namespace_id, node_type, name, normalized_name, state, owner_id) VALUES (?, ?, 'DIRECTORY', 'root', 'root', 'ACTIVE', ?)", nodeID, namespaceID, uuid.New()).Error)
+	require.NoError(t, db.Exec("INSERT INTO filesystem.resource_grants (id, node_id, grantee_id, permission, effect) VALUES (?, ?, ?, 'READ', 'ALLOW')", uuid.New(), nodeID, granteeID).Error)
+
+	require.NoError(t, AutoMigrate(db))
+	var got struct {
+		OrganizationID uuid.UUID
+		PrincipalType  model.PrincipalType
+		PrincipalID    uuid.UUID
+		Inherit        bool `gorm:"column:inherit_to_children"`
+		PolicyVersion  int64
+	}
+	require.NoError(t, db.Table("filesystem.resource_grants").Select("organization_id, principal_type, principal_id, inherit_to_children, policy_version").Where("node_id = ?", nodeID).Scan(&got).Error)
+	require.Equal(t, orgID, got.OrganizationID)
+	require.Equal(t, model.PrincipalUser, got.PrincipalType)
+	require.Equal(t, granteeID, got.PrincipalID)
+	require.True(t, got.Inherit)
+	require.EqualValues(t, 1, got.PolicyVersion)
+
+	repo := NewRepository(db)
+	grants, err := repo.ListResourceGrants(context.Background(), []uuid.UUID{nodeID}, []repository.PrincipalRef{{Type: model.PrincipalUser, ID: granteeID}}, model.ResourcePermissionRead, time.Now())
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	grants, err = repo.ListResourceGrants(context.Background(), []uuid.UUID{nodeID}, []repository.PrincipalRef{{Type: model.PrincipalWorkspace, ID: granteeID}}, model.ResourcePermissionRead, time.Now())
+	require.NoError(t, err)
+	require.Empty(t, grants)
+}
 
 func TestPostgresFallbackConstraintsMatchKernelInvariants(t *testing.T) {
 	fallbackSQL := strings.Join(postgresFallbackConstraints, "\n")
@@ -71,7 +123,7 @@ func TestPostgresFallbackConstraintCatalog(t *testing.T) {
 	require.NoError(t, AutoMigrate(db))
 	for _, index := range []string{
 		"ux_filesystem_namespaces_workspace_id_id", "ux_filesystem_nodes_root_name", "ux_filesystem_nodes_child_name", "ux_filesystem_blobs_dedup",
-		"ux_filesystem_revisions_node_no", "ux_filesystem_replicas_identity", "ux_filesystem_grants_identity",
+		"ux_filesystem_revisions_node_no", "ux_filesystem_replicas_identity", "ux_filesystem_grants_active_identity",
 		"ux_transfer_sessions_workspace_id", "ux_transfer_sessions_idempotency",
 		"ux_transfer_parts_number", "ux_quota_reservations_session",
 		"ix_transfer_sessions_workspace_status", "ix_transfer_sessions_expires_at", "ix_transfer_parts_session_offset",
@@ -212,8 +264,8 @@ func TestSQLiteKernelConstraintsRejectInvalidWrites(t *testing.T) {
 		uuid.New(), uuid.New(), uuid.New(), "bad", "INVALID",
 	).Error)
 	require.Error(t, db.Exec(
-		"INSERT INTO filesystem.resource_grants (id, node_id, grantee_id, permission, effect) VALUES (?, ?, ?, ?, ?)",
-		uuid.New(), nodeID, uuid.New(), "READ", "INVALID",
+		"INSERT INTO filesystem.resource_grants (id, node_id, organization_id, grantee_id, principal_type, principal_id, permission, effect) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		uuid.New(), nodeID, uuid.New(), uuid.New(), "USER", uuid.New(), "READ", "INVALID",
 	).Error)
 
 	var violations []struct {

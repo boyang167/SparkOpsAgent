@@ -75,7 +75,7 @@ func TestAuthorizeInheritsAllowFromAncestor(t *testing.T) {
 	service := NewService(grantRepositoryStub{
 		nodes: map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
 		grants: map[uuid.UUID][]model.ResourceGrant{
-			root.ID: {{NodeID: root.ID, GranteeID: actor, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow}},
+			root.ID: {{NodeID: root.ID, GranteeID: actor, InheritToChildren: true, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow}},
 		},
 	}, nil)
 
@@ -92,7 +92,7 @@ func TestAuthorizeExplicitDenyWinsAcrossAncestors(t *testing.T) {
 	service := NewService(grantRepositoryStub{
 		nodes: map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
 		grants: map[uuid.UUID][]model.ResourceGrant{
-			root.ID:  {{NodeID: root.ID, GranteeID: actor, Permission: model.ResourcePermissionWrite, Effect: model.GrantEffectAllow}},
+			root.ID:  {{NodeID: root.ID, GranteeID: actor, InheritToChildren: true, Permission: model.ResourcePermissionWrite, Effect: model.GrantEffectAllow}},
 			child.ID: {{NodeID: child.ID, GranteeID: actor, Permission: model.ResourcePermissionWrite, Effect: model.GrantEffectDeny}},
 		},
 	}, nil)
@@ -103,6 +103,31 @@ func TestAuthorizeExplicitDenyWinsAcrossAncestors(t *testing.T) {
 	require.Equal(t, "explicit_deny", decision.Reason)
 }
 
+func TestAuthorizeHonorsGrantInheritanceFlag(t *testing.T) {
+	namespaceID, owner, actor := uuid.New(), uuid.New(), uuid.New()
+	root := node(namespaceID, uuid.Nil, owner)
+	child := node(namespaceID, root.ID, owner)
+	repo := grantRepositoryStub{
+		nodes: map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
+		grants: map[uuid.UUID][]model.ResourceGrant{
+			root.ID:  {{NodeID: root.ID, GranteeID: actor, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow}},
+			child.ID: {{NodeID: child.ID, GranteeID: actor, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow}},
+		},
+	}
+	service := NewService(repo, nil)
+
+	require.True(t, service.Authorize(context.Background(), Request{
+		ActorID: actor, NamespaceID: namespaceID, NodeID: child.ID, Permission: model.ResourcePermissionRead,
+	}).Allowed)
+	repo.grants[child.ID] = nil
+	require.False(t, service.Authorize(context.Background(), Request{
+		ActorID: actor, NamespaceID: namespaceID, NodeID: child.ID, Permission: model.ResourcePermissionRead,
+	}).Allowed)
+	require.True(t, service.Authorize(context.Background(), Request{
+		ActorID: actor, NamespaceID: namespaceID, NodeID: root.ID, Permission: model.ResourcePermissionRead,
+	}).Allowed)
+}
+
 func TestAuthorizeAdminGrantCoversEveryPermissionAndAdminDenyWins(t *testing.T) {
 	namespaceID, owner, actor := uuid.New(), uuid.New(), uuid.New()
 	root := node(namespaceID, uuid.Nil, owner)
@@ -110,7 +135,7 @@ func TestAuthorizeAdminGrantCoversEveryPermissionAndAdminDenyWins(t *testing.T) 
 	repo := grantRepositoryStub{
 		nodes: map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
 		grants: map[uuid.UUID][]model.ResourceGrant{
-			root.ID: {{NodeID: root.ID, GranteeID: actor, Permission: model.ResourcePermissionAdmin, Effect: model.GrantEffectAllow}},
+			root.ID: {{NodeID: root.ID, GranteeID: actor, InheritToChildren: true, Permission: model.ResourcePermissionAdmin, Effect: model.GrantEffectAllow}},
 		},
 	}
 	service := NewService(repo, nil)

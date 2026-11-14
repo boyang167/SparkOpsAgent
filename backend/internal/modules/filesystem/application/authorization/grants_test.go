@@ -53,7 +53,8 @@ func TestGrantServiceOwnerCanCreateListAndRevokeTransactionally(t *testing.T) {
 		CommandID: createCommandID,
 		ActorID:   owner, OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID,
 		NamespaceID: namespace.ID, NodeID: node.ID,
-		Grant: model.ResourceGrant{GranteeID: uuid.New(), Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow},
+		GranteeOrganizationID: namespace.OrganizationID,
+		Grant:                 model.ResourceGrant{GranteeID: uuid.New(), Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow},
 	}
 	grant, err := service.Create(context.Background(), request)
 	require.NoError(t, err)
@@ -104,7 +105,8 @@ func TestGrantServiceRejectsForgedCrossTenantScope(t *testing.T) {
 	request := GrantRequest{
 		CommandID: uuid.New(), ActorID: owner, OrganizationID: second.OrganizationID,
 		WorkspaceID: first.WorkspaceID, NamespaceID: second.ID, NodeID: node.ID,
-		Grant: model.ResourceGrant{GranteeID: uuid.New(), Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow},
+		GranteeOrganizationID: first.OrganizationID,
+		Grant:                 model.ResourceGrant{GranteeID: uuid.New(), Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow},
 	}
 	_, err = service.Create(context.Background(), request)
 	require.ErrorIs(t, err, domain.ErrResourceDenied)
@@ -121,6 +123,7 @@ func TestGrantServiceRejectsForgedCrossTenantScope(t *testing.T) {
 	request.CommandID = uuid.New()
 	request.OrganizationID = first.OrganizationID
 	request.WorkspaceID = second.WorkspaceID
+	request.GranteeOrganizationID = second.OrganizationID
 	_, err = service.Create(context.Background(), request)
 	require.ErrorIs(t, err, domain.ErrResourceDenied)
 	require.Len(t, audits.entries, 3)
@@ -153,6 +156,18 @@ func TestGrantServiceSupportsTypedPrincipalsAndRevokeReuse(t *testing.T) {
 			Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow,
 		},
 	}
+	missingOrganization := request
+	missingOrganization.CommandID = uuid.New()
+	missingOrganization.GranteeOrganizationID = uuid.Nil
+	_, err = service.Create(context.Background(), missingOrganization)
+	require.ErrorIs(t, err, domain.ErrCrossOrganizationGrant)
+
+	wrongOrganization := request
+	wrongOrganization.CommandID = uuid.New()
+	wrongOrganization.GranteeOrganizationID = uuid.New()
+	_, err = service.Create(context.Background(), wrongOrganization)
+	require.ErrorIs(t, err, domain.ErrCrossOrganizationGrant)
+
 	grant, err := service.Create(context.Background(), request)
 	require.NoError(t, err)
 	require.Equal(t, principalID, grant.GranteeID)

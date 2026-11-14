@@ -108,8 +108,7 @@ func AutoMigrate(db *gorm.DB) error {
 			`CREATE TRIGGER IF NOT EXISTS filesystem.trg_transfer_parts_update_bounds BEFORE UPDATE ON transfer_parts BEGIN SELECT CASE WHEN NEW.offset_bytes > (SELECT expected_size FROM transfer_sessions WHERE id = NEW.session_id) OR NEW.size_bytes > (SELECT expected_size FROM transfer_sessions WHERE id = NEW.session_id) - NEW.offset_bytes THEN RAISE(ABORT, 'transfer part exceeds expected session size') END; END`,
 			`CREATE TABLE IF NOT EXISTS filesystem.quota_reservations (id BLOB PRIMARY KEY, quota_account_id BLOB NOT NULL, workspace_id BLOB NOT NULL, session_id BLOB, bytes INTEGER NOT NULL CHECK (bytes >= 0), files INTEGER NOT NULL CHECK (files >= 0), state TEXT NOT NULL, expires_at DATETIME NOT NULL, created_at DATETIME, FOREIGN KEY(quota_account_id, workspace_id) REFERENCES quota_accounts(id, workspace_id), FOREIGN KEY(workspace_id, session_id) REFERENCES transfer_sessions(workspace_id, id))`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_quota_reservations_session ON quota_reservations(workspace_id, session_id) WHERE session_id IS NOT NULL`,
-			`CREATE TABLE IF NOT EXISTS filesystem.resource_grants (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, organization_id BLOB, grantee_id BLOB NOT NULL, principal_type TEXT DEFAULT 'USER' CHECK (principal_type IN ('USER','WORKSPACE','ORGANIZATION','ROLE','SERVICE_ACCOUNT','AGENT')), principal_id BLOB, permission TEXT NOT NULL CHECK (permission IN ('READ','WRITE','DELETE','SHARE','ADMIN')), effect TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY')), inherit_to_children INTEGER NOT NULL DEFAULT 1 CHECK (inherit_to_children IN (0, 1)), expires_at DATETIME, revoked_at DATETIME, policy_version INTEGER NOT NULL DEFAULT 1, created_at DATETIME, FOREIGN KEY(node_id) REFERENCES nodes(id))`,
-			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_grants_active_identity ON resource_grants(node_id, principal_type, principal_id, permission, effect) WHERE revoked_at IS NULL`,
+			`CREATE TABLE IF NOT EXISTS filesystem.resource_grants (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, organization_id BLOB NOT NULL, grantee_id BLOB NOT NULL, principal_type TEXT NOT NULL CHECK (principal_type IN ('USER','WORKSPACE','ORGANIZATION','ROLE','SERVICE_ACCOUNT','AGENT')), principal_id BLOB NOT NULL, permission TEXT NOT NULL CHECK (permission IN ('READ','WRITE','DELETE','SHARE','ADMIN')), effect TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY')), inherit_to_children INTEGER NOT NULL DEFAULT 1 CHECK (inherit_to_children IN (0, 1)), expires_at DATETIME, revoked_at DATETIME, policy_version INTEGER NOT NULL DEFAULT 1, created_at DATETIME, FOREIGN KEY(node_id) REFERENCES nodes(id))`,
 			`CREATE TABLE IF NOT EXISTS filesystem.file_links (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, revision_id BLOB, link_type TEXT NOT NULL, link_id BLOB NOT NULL, created_at DATETIME, UNIQUE(link_type, link_id, node_id, revision_id), FOREIGN KEY(node_id) REFERENCES nodes(id), FOREIGN KEY(revision_id) REFERENCES file_revisions(id))`,
 			`CREATE TABLE IF NOT EXISTS filesystem.command_dedup (command_id BLOB PRIMARY KEY, workspace_id BLOB NOT NULL, operation TEXT NOT NULL, request_hash TEXT NOT NULL, node_id BLOB, revision_id BLOB, state TEXT NOT NULL, created_at DATETIME, updated_at DATETIME)`,
 			`CREATE TABLE IF NOT EXISTS filesystem.storage_providers (id BLOB PRIMARY KEY, organization_id BLOB NOT NULL, name TEXT NOT NULL CHECK (length(trim(name)) > 0), provider_type TEXT NOT NULL CHECK (provider_type IN ('LOCAL','NFS','S3')), endpoint TEXT NOT NULL DEFAULT '', secret_ref TEXT NOT NULL CHECK (length(trim(secret_ref)) > 0), capabilities TEXT NOT NULL DEFAULT '{}', health TEXT NOT NULL DEFAULT '{}', config_version INTEGER NOT NULL DEFAULT 1 CHECK (config_version > 0), status TEXT NOT NULL DEFAULT 'ACTIVE', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, UNIQUE(organization_id, name))`,
@@ -120,6 +119,9 @@ func AutoMigrate(db *gorm.DB) error {
 			if err := db.Exec(statement).Error; err != nil {
 				return wrapPersistence(err)
 			}
+		}
+		if err := upgradeSQLiteResourceGrants(db); err != nil {
+			return err
 		}
 		for _, statement := range []string{
 			`ALTER TABLE filesystem.blobs ADD COLUMN tombstoned_at DATETIME`,
@@ -147,6 +149,93 @@ func AutoMigrate(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+func upgradeSQLiteResourceGrants(db *gorm.DB) error {
+	var principalColumns int64
+	if err := db.Raw("SELECT COUNT(*) FROM filesystem.pragma_table_info('resource_grants') WHERE name = 'principal_type'").Scan(&principalColumns).Error; err != nil {
+		return wrapPersistence(err)
+	}
+	if principalColumns == 0 {
+		if err := db.Exec("ALTER TABLE filesystem.resource_grants RENAME TO resource_grants_legacy").Error; err != nil {
+			return wrapPersistence(err)
+		}
+		if err := db.Exec(`CREATE TABLE filesystem.resource_grants (
+			id BLOB PRIMARY KEY,
+			node_id BLOB NOT NULL,
+			organization_id BLOB NOT NULL,
+			grantee_id BLOB NOT NULL,
+			principal_type TEXT NOT NULL CHECK (principal_type IN ('USER','WORKSPACE','ORGANIZATION','ROLE','SERVICE_ACCOUNT','AGENT')),
+			principal_id BLOB NOT NULL,
+			permission TEXT NOT NULL CHECK (permission IN ('READ','WRITE','DELETE','SHARE','ADMIN')),
+			effect TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY')),
+			inherit_to_children INTEGER NOT NULL DEFAULT 1 CHECK (inherit_to_children IN (0, 1)),
+			expires_at DATETIME,
+			revoked_at DATETIME,
+			policy_version INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME,
+			FOREIGN KEY(node_id) REFERENCES nodes(id)
+		)`).Error; err != nil {
+			return wrapPersistence(err)
+		}
+		if err := db.Exec(`INSERT INTO filesystem.resource_grants
+			(id, node_id, organization_id, grantee_id, principal_type, principal_id,
+			 permission, effect, inherit_to_children, expires_at, revoked_at, policy_version, created_at)
+			SELECT old.id, old.node_id,
+				(SELECT ns.organization_id FROM filesystem.nodes n JOIN filesystem.namespaces ns ON ns.id = n.namespace_id WHERE n.id = old.node_id),
+				old.grantee_id, 'USER', old.grantee_id, old.permission, old.effect, 1, old.expires_at, NULL, 1, old.created_at
+			FROM filesystem.resource_grants_legacy old`).Error; err != nil {
+			return wrapPersistence(err)
+		}
+		if err := db.Exec("DROP TABLE filesystem.resource_grants_legacy").Error; err != nil {
+			return wrapPersistence(err)
+		}
+	} else {
+		for _, column := range []struct {
+			name string
+			sql  string
+		}{
+			{"organization_id", "ALTER TABLE filesystem.resource_grants ADD COLUMN organization_id BLOB"},
+			{"principal_id", "ALTER TABLE filesystem.resource_grants ADD COLUMN principal_id BLOB"},
+			{"inherit_to_children", "ALTER TABLE filesystem.resource_grants ADD COLUMN inherit_to_children INTEGER DEFAULT 1"},
+			{"revoked_at", "ALTER TABLE filesystem.resource_grants ADD COLUMN revoked_at DATETIME"},
+			{"policy_version", "ALTER TABLE filesystem.resource_grants ADD COLUMN policy_version INTEGER DEFAULT 1"},
+		} {
+			exists, err := sqliteResourceGrantColumnExists(db, column.name)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				if err := db.Exec(column.sql).Error; err != nil {
+					return wrapPersistence(err)
+				}
+			}
+		}
+		if err := db.Exec(`UPDATE filesystem.resource_grants
+			SET principal_type = COALESCE(NULLIF(principal_type, ''), 'USER'),
+				principal_id = COALESCE(principal_id, grantee_id),
+				organization_id = COALESCE(organization_id, (SELECT ns.organization_id FROM filesystem.nodes n JOIN filesystem.namespaces ns ON ns.id = n.namespace_id WHERE n.id = filesystem.resource_grants.node_id)),
+				inherit_to_children = COALESCE(inherit_to_children, 1),
+				policy_version = COALESCE(policy_version, 1)
+			WHERE principal_type IS NULL OR principal_type = '' OR principal_id IS NULL OR organization_id IS NULL`).Error; err != nil {
+			return wrapPersistence(err)
+		}
+	}
+	if err := db.Exec("DROP INDEX IF EXISTS filesystem.ux_filesystem_grants_identity").Error; err != nil {
+		return wrapPersistence(err)
+	}
+	if err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_grants_active_identity ON resource_grants(node_id, principal_type, principal_id, permission, effect) WHERE revoked_at IS NULL").Error; err != nil {
+		return wrapPersistence(err)
+	}
+	return nil
+}
+
+func sqliteResourceGrantColumnExists(db *gorm.DB, column string) (bool, error) {
+	var count int64
+	if err := db.Raw("SELECT COUNT(*) FROM filesystem.pragma_table_info('resource_grants') WHERE name = ?", column).Scan(&count).Error; err != nil {
+		return false, wrapPersistence(err)
+	}
+	return count > 0, nil
 }
 
 func isSQLiteDuplicateColumn(err error) bool {
