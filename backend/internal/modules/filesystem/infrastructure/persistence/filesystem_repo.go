@@ -44,7 +44,7 @@ func (r *Repository) CreateNamespace(ctx context.Context, namespace *model.Names
 	}
 	db := postgres.DB(ctx, r.db)
 	err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&namespaceRow{
+		if err := tx.Create(&namespaceRow{
 			ID: namespace.ID, NamespaceType: namespace.NamespaceType, OrganizationID: namespace.OrganizationID,
 			WorkspaceID: workspaceID, OwnerUserID: ownerUserID, RootNodeID: namespace.RootNodeID,
 			Status: status, PolicyVersion: namespace.PolicyVersion, CreatedAt: now, UpdatedAt: now,
@@ -54,7 +54,41 @@ func (r *Repository) CreateNamespace(ctx context.Context, namespace *model.Names
 		if namespace.NamespaceType != model.NamespaceTypeWorkspace {
 			return nil
 		}
-		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&quotaAccountRow{ID: uuid.New(), OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID, UpdatedAt: now}).Error
+		return tx.Create(&quotaAccountRow{ID: uuid.New(), OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID, UpdatedAt: now}).Error
+	})
+	if isSQLiteBusy(err) {
+		return domain.ErrTransactionRetry
+	}
+	return wrapPersistence(err)
+}
+
+func (r *Repository) CreateNamespaceIfAbsent(ctx context.Context, namespace *model.Namespace) error {
+	if err := namespace.Validate(); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	var workspaceID, ownerUserID *uuid.UUID
+	if namespace.WorkspaceID != uuid.Nil {
+		workspaceID = &namespace.WorkspaceID
+	}
+	if namespace.OwnerUserID != uuid.Nil {
+		ownerUserID = &namespace.OwnerUserID
+	}
+	db := postgres.DB(ctx, r.db)
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&namespaceRow{
+			ID: namespace.ID, NamespaceType: namespace.NamespaceType, OrganizationID: namespace.OrganizationID,
+			WorkspaceID: workspaceID, OwnerUserID: ownerUserID, RootNodeID: namespace.RootNodeID,
+			Status: "ACTIVE", PolicyVersion: namespace.PolicyVersion, CreatedAt: now, UpdatedAt: now,
+		}).Error; err != nil {
+			return err
+		}
+		if namespace.NamespaceType != model.NamespaceTypeWorkspace {
+			return nil
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&quotaAccountRow{
+			ID: uuid.New(), OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID, UpdatedAt: now,
+		}).Error
 	})
 	if isSQLiteBusy(err) {
 		return domain.ErrTransactionRetry
@@ -140,7 +174,20 @@ func namespaceFromRow(row *namespaceRow) *model.Namespace {
 
 func (r *Repository) SetNamespaceRoot(ctx context.Context, workspaceID, rootNodeID uuid.UUID) error {
 	result := postgres.DB(ctx, r.db).Model(&namespaceRow{}).
-		Where("id = ? OR (namespace_type = ? AND workspace_id = ?)", workspaceID, model.NamespaceTypeWorkspace, workspaceID).
+		Where("namespace_type = ? AND workspace_id = ?", model.NamespaceTypeWorkspace, workspaceID).
+		Updates(map[string]any{"root_node_id": rootNodeID, "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrNamespaceNotFound
+	}
+	return nil
+}
+
+func (r *Repository) SetNamespaceRootByID(ctx context.Context, namespaceID, rootNodeID uuid.UUID) error {
+	result := postgres.DB(ctx, r.db).Model(&namespaceRow{}).
+		Where("id = ?", namespaceID).
 		Updates(map[string]any{"root_node_id": rootNodeID, "updated_at": time.Now().UTC()})
 	if result.Error != nil {
 		return wrapPersistence(result.Error)
@@ -196,7 +243,7 @@ func (r *Repository) CreateNode(ctx context.Context, node *model.Node) error {
 	return wrapPersistence(err)
 }
 
-func (r *Repository) CreateNodeIdempotent(ctx context.Context, node *model.Node) error {
+func (r *Repository) CreateNamespaceRootNodeIfAbsent(ctx context.Context, node *model.Node) error {
 	err := postgres.DB(ctx, r.db).Clauses(clause.OnConflict{DoNothing: true}).Create(&nodeRow{
 		ID: node.ID, NamespaceID: node.NamespaceID, ParentID: node.ParentID, Type: node.Type,
 		Name: node.Name, NormalizedName: node.NormalizedName, CurrentRevisionID: node.CurrentRevisionID,
@@ -1651,6 +1698,17 @@ func (r *Repository) SearchFileNodes(ctx context.Context, filter repository.File
 }
 
 func (r *Repository) CreateFileLink(ctx context.Context, link model.FileLink) error {
+	row := fileLinkRow{
+		ID: link.ID, NodeID: link.NodeID, RevisionID: link.RevisionID,
+		LinkType: link.LinkType, LinkID: link.LinkID, CreatedAt: link.CreatedAt,
+	}
+	return wrapPersistence(postgres.DB(ctx, r.db).Create(&row).Error)
+}
+
+func (r *Repository) CreateNamespaceRootLink(ctx context.Context, link model.FileLink) error {
+	if link.LinkType != model.FileLinkTypeNamespaceRoot {
+		return domain.ErrPersistence
+	}
 	row := fileLinkRow{
 		ID: link.ID, NodeID: link.NodeID, RevisionID: link.RevisionID,
 		LinkType: link.LinkType, LinkID: link.LinkID, CreatedAt: link.CreatedAt,

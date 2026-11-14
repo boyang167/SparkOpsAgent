@@ -79,6 +79,83 @@ func TestCreateNamespaceCreatesQuotaOnlyForWorkspace(t *testing.T) {
 	require.Zero(t, quotaCount)
 }
 
+func TestGetNamespaceByWorkspaceRequiresWorkspaceType(t *testing.T) {
+	repo, db := newTestRepository(t)
+	workspaceID := uuid.New()
+	organizationID := uuid.New()
+	require.NoError(t, db.Create(&namespaceRow{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeOrganization, OrganizationID: organizationID,
+		Status: "ACTIVE",
+	}).Error)
+	_, err := repo.GetNamespaceByWorkspace(context.Background(), workspaceID)
+	require.ErrorIs(t, err, domain.ErrNamespaceNotFound)
+}
+
+func TestCreateNamespacePreservesConflictError(t *testing.T) {
+	repo, _ := newTestRepository(t)
+	namespace := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace,
+		OrganizationID: uuid.New(), WorkspaceID: uuid.New(),
+	}
+	require.NoError(t, repo.CreateNamespace(context.Background(), namespace))
+	require.Error(t, repo.CreateNamespace(context.Background(), namespace))
+}
+
+func TestNamespaceRootLinkIsIdempotentOnlyThroughDedicatedMethod(t *testing.T) {
+	repo, db := newTestRepository(t)
+	namespace := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace,
+		OrganizationID: uuid.New(), WorkspaceID: uuid.New(),
+	}
+	require.NoError(t, repo.CreateNamespace(context.Background(), namespace))
+	root := rootDirectory(namespace.ID, ".root")
+	require.NoError(t, repo.CreateNode(context.Background(), root))
+	link := model.FileLink{
+		ID: uuid.New(), NodeID: root.ID, LinkType: model.FileLinkTypeNamespaceRoot,
+		LinkID: namespace.ID, CreatedAt: time.Now().UTC(),
+	}
+	require.NoError(t, repo.CreateFileLink(context.Background(), link))
+	require.Error(t, repo.CreateFileLink(context.Background(), link))
+	dedicated, ok := repo.(interface {
+		CreateNamespaceRootLink(context.Context, model.FileLink) error
+	})
+	require.True(t, ok)
+	require.NoError(t, dedicated.CreateNamespaceRootLink(context.Background(), link))
+	require.NoError(t, dedicated.CreateNamespaceRootLink(context.Background(), link))
+	var count int64
+	require.NoError(t, db.Table("filesystem.file_links").
+		Where("link_type = ? AND link_id = ?", model.FileLinkTypeNamespaceRoot, namespace.ID).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+}
+
+func TestSetNamespaceRootByIDUpdatesOnlyRequestedNamespace(t *testing.T) {
+	repo, _ := newTestRepository(t)
+	first := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeOrganization,
+		OrganizationID: uuid.New(),
+	}
+	second := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeOrganization,
+		OrganizationID: uuid.New(),
+	}
+	require.NoError(t, repo.CreateNamespace(context.Background(), first))
+	require.NoError(t, repo.CreateNamespace(context.Background(), second))
+	dedicated, ok := repo.(interface {
+		SetNamespaceRootByID(context.Context, uuid.UUID, uuid.UUID) error
+	})
+	require.True(t, ok)
+	root := rootDirectory(first.ID, ".root")
+	require.NoError(t, repo.CreateNode(context.Background(), root))
+	rootID := root.ID
+	require.NoError(t, dedicated.SetNamespaceRootByID(context.Background(), first.ID, rootID))
+	gotFirst, err := repo.GetNamespace(context.Background(), first.ID)
+	require.NoError(t, err)
+	gotSecond, err := repo.GetNamespace(context.Background(), second.ID)
+	require.NoError(t, err)
+	require.Equal(t, &rootID, gotFirst.RootNodeID)
+	require.Nil(t, gotSecond.RootNodeID)
+}
+
 func TestNamespaceQueriesAreScopedByTypeAndOrganization(t *testing.T) {
 	repo, db := newTestRepository(t)
 	organizationID := uuid.New()

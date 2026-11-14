@@ -93,7 +93,8 @@ func (m *Module) Register(c *appctx.Container) error {
 	c.FilesystemGrantPort = resourceauth.NewGrantService(repo, resourceAuthorizer, c.Transactor, c.EventBus, c.AuditLogger)
 	storageRoot := c.Config.Filesystem.TransferGateway.StorageRoot
 	ensureDefault := command.NewEnsureDefaultLocalProviderHandler(repo)
-	ensureNamespace := command.NewEnsureNamespaceHandler(repo, c.Transactor)
+	ensureNamespace := command.NewEnsureNamespaceHandler(repo, c.Transactor).
+		WithDefaultLocalProvider(storageRoot, ensureDefault)
 	if err := c.EventBus.Subscribe(
 		integration.EventWorkspaceCreated,
 		"filesystem.workspace-created.create-namespace",

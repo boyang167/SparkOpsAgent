@@ -23,8 +23,10 @@ type EnsureNamespace struct {
 }
 
 type EnsureNamespaceHandler struct {
-	repo repository.FilesystemRepository
-	tx   postgres.Transactor
+	repo              repository.FilesystemRepository
+	tx                postgres.Transactor
+	localStorageRoot  string
+	ensureDefaultProv *EnsureDefaultLocalProviderHandler
 }
 
 func NewEnsureNamespaceHandler(repo repository.FilesystemRepository, tx postgres.Transactor) *EnsureNamespaceHandler {
@@ -32,22 +34,20 @@ func NewEnsureNamespaceHandler(repo repository.FilesystemRepository, tx postgres
 	return &EnsureNamespaceHandler{repo: repo, tx: tx}
 }
 
+func (h *EnsureNamespaceHandler) WithDefaultLocalProvider(root string, ensure *EnsureDefaultLocalProviderHandler) *EnsureNamespaceHandler {
+	h.localStorageRoot = root
+	h.ensureDefaultProv = ensure
+	return h
+}
+
 func (h *EnsureNamespaceHandler) Handle(ctx context.Context, cmd EnsureNamespace) (*model.Namespace, error) {
-	workspaceID, ownerUserID := cmd.WorkspaceID, cmd.OwnerUserID
-	switch cmd.NamespaceType {
-	case model.NamespaceTypeOrganization:
-		workspaceID, ownerUserID = uuid.Nil, uuid.Nil
-	case model.NamespaceTypeWorkspace:
-		ownerUserID = uuid.Nil
-	case model.NamespaceTypeUser:
-		workspaceID = uuid.Nil
-	}
+	cmd = normalizeEnsureNamespace(cmd)
 	namespace := &model.Namespace{
 		ID:             namespaceID(cmd),
 		NamespaceType:  cmd.NamespaceType,
 		OrganizationID: cmd.OrganizationID,
-		WorkspaceID:    workspaceID,
-		OwnerUserID:    ownerUserID,
+		WorkspaceID:    cmd.WorkspaceID,
+		OwnerUserID:    cmd.OwnerUserID,
 		Status:         "ACTIVE",
 	}
 	if err := namespace.Validate(); err != nil {
@@ -72,7 +72,16 @@ func (h *EnsureNamespaceHandler) Handle(ctx context.Context, cmd EnsureNamespace
 	}
 
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
-		if err := h.repo.CreateNamespace(txCtx, namespace); err != nil {
+		idempotentRepo, ok := h.repo.(interface {
+			CreateNamespaceIfAbsent(context.Context, *model.Namespace) error
+			CreateNamespaceRootNodeIfAbsent(context.Context, *model.Node) error
+			SetNamespaceRootByID(context.Context, uuid.UUID, uuid.UUID) error
+			CreateNamespaceRootLink(context.Context, model.FileLink) error
+		})
+		if !ok {
+			return domain.ErrPersistence
+		}
+		if err := idempotentRepo.CreateNamespaceIfAbsent(txCtx, namespace); err != nil {
 			return err
 		}
 		canonical, err := h.repo.GetNamespace(txCtx, namespace.ID)
@@ -87,23 +96,13 @@ func (h *EnsureNamespaceHandler) Handle(ctx context.Context, cmd EnsureNamespace
 			return rootErr
 		}
 		root.ID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-namespace-root:"+namespace.ID.String()))
-		if idempotentRepo, ok := h.repo.(interface {
-			CreateNodeIdempotent(context.Context, *model.Node) error
-		}); ok {
-			if err := idempotentRepo.CreateNodeIdempotent(txCtx, root); err != nil {
-				return err
-			}
-		} else if _, err := h.repo.GetNodeIncludingTrashed(txCtx, namespace.ID, root.ID); errors.Is(err, domain.ErrNodeNotFound) {
-			if err := h.repo.CreateNode(txCtx, root); err != nil {
-				return err
-			}
-		} else if err != nil {
+		if err := idempotentRepo.CreateNamespaceRootNodeIfAbsent(txCtx, root); err != nil {
 			return err
 		}
-		if err := h.repo.SetNamespaceRoot(txCtx, namespace.ID, root.ID); err != nil {
+		if err := idempotentRepo.SetNamespaceRootByID(txCtx, namespace.ID, root.ID); err != nil {
 			return err
 		}
-		if err := h.repo.CreateFileLink(txCtx, model.FileLink{
+		if err := idempotentRepo.CreateNamespaceRootLink(txCtx, model.FileLink{
 			ID:        uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-namespace-root-link:"+namespace.ID.String())),
 			NodeID:    root.ID,
 			LinkType:  model.FileLinkTypeNamespaceRoot,
@@ -120,6 +119,14 @@ func (h *EnsureNamespaceHandler) Handle(ctx context.Context, cmd EnsureNamespace
 			return repaired, nil
 		}
 		return nil, err
+	}
+	if h.ensureDefaultProv != nil && h.localStorageRoot != "" &&
+		cmd.NamespaceType == model.NamespaceTypeWorkspace {
+		if _, providerErr := h.ensureDefaultProv.Handle(ctx, EnsureDefaultLocalProvider{
+			OrganizationID: cmd.OrganizationID, StorageRoot: h.localStorageRoot,
+		}); providerErr != nil {
+			return nil, providerErr
+		}
 	}
 	return namespace, nil
 }
@@ -138,6 +145,19 @@ func (h *EnsureNamespaceHandler) lookup(ctx context.Context, cmd EnsureNamespace
 }
 
 func namespaceID(cmd EnsureNamespace) uuid.UUID {
+	cmd = normalizeEnsureNamespace(cmd)
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(fmt.Sprintf("filesystem-namespace:%s:%s:%s:%s",
 		cmd.NamespaceType, cmd.OrganizationID, cmd.WorkspaceID, cmd.OwnerUserID)))
+}
+
+func normalizeEnsureNamespace(cmd EnsureNamespace) EnsureNamespace {
+	switch cmd.NamespaceType {
+	case model.NamespaceTypeOrganization:
+		cmd.WorkspaceID, cmd.OwnerUserID = uuid.Nil, uuid.Nil
+	case model.NamespaceTypeWorkspace:
+		cmd.OwnerUserID = uuid.Nil
+	case model.NamespaceTypeUser:
+		cmd.WorkspaceID = uuid.Nil
+	}
+	return cmd
 }
