@@ -1,5 +1,6 @@
 import type { BffContext } from "@sparkops/bff-core";
 import type {
+  CreateGovernedGrantCommand,
   CreateDirectoryCommand,
   CreateStorageBindingCommand,
   CreateStoragePoolCommand,
@@ -10,12 +11,18 @@ import type {
   FileNodePageVM,
   FileNodeVM,
   FileRevisionPageVM,
+  GovernedChildrenQuery,
+  GovernedShareSubmissionVM,
+  EffectiveAccessVM,
   LifecyclePolicyPageVM,
+  NamespaceSummaryPageVM,
   RegisterStorageProviderCommand,
   RenameFileNodeCommand,
   StorageBindingPageVM,
   StoragePoolPageVM,
   StorageProviderPageVM,
+  SharedItemPageVM,
+  SharedWithMeQuery,
   UpdateStoragePoolCommand,
   UpdateStorageProviderCommand,
   TransferListQuery,
@@ -24,18 +31,26 @@ import type {
   UpsertLifecyclePolicyCommand,
 } from "@sparkops/contracts/filesystem";
 import {
+  EffectiveAccessVMSchema,
   FileAuditEventPageVMSchema,
   FileNamespaceVMSchema,
   FileNodePageVMSchema,
   FileNodeVMSchema,
   FileRevisionPageVMSchema,
   LifecyclePolicyPageVMSchema,
+  GovernedShareSubmissionVMSchema,
+  NamespaceSummaryPageVMSchema,
+  SharedItemPageVMSchema,
   StorageBindingPageVMSchema,
   StoragePoolPageVMSchema,
   StorageProviderPageVMSchema,
   TransferSessionPageVMSchema,
   TransferSessionVMSchema,
 } from "@sparkops/contracts/filesystem";
+
+function governedContext(organizationId: string, workspaceId?: string) {
+  return { organizationId, ...(workspaceId ? { workspaceId } : {}) };
+}
 
 function mapTransfer(data: TransferSessionVM): TransferSessionVM {
   return TransferSessionVMSchema.parse(data);
@@ -284,4 +299,90 @@ export async function listFileAuditEvents(
 ): Promise<FileAuditEventPageVM> {
   const data = await ctx.upstream.filesystem.listFileAuditEvents(workspaceId, query);
   return FileAuditEventPageVMSchema.parse(data);
+}
+
+export async function listGovernedNamespaces(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId?: string,
+): Promise<NamespaceSummaryPageVM> {
+  const data = await ctx.upstream.filesystem.listGovernedNamespaces(
+    governedContext(organizationId, workspaceId),
+  );
+  return NamespaceSummaryPageVMSchema.parse(data);
+}
+
+export async function listGovernedChildren(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId: string | undefined,
+  namespaceId: string,
+  query: GovernedChildrenQuery = {},
+): Promise<FileNodePageVM> {
+  const data = await ctx.upstream.filesystem.listGovernedChildren(
+    governedContext(organizationId, workspaceId),
+    namespaceId,
+    query,
+  );
+  return FileNodePageVMSchema.parse(data);
+}
+
+export async function listSharedWithMe(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId: string | undefined,
+  query: SharedWithMeQuery = {},
+): Promise<SharedItemPageVM> {
+  const data = await ctx.upstream.filesystem.listSharedWithMe(
+    governedContext(organizationId, workspaceId),
+    query,
+  );
+  return SharedItemPageVMSchema.parse(data);
+}
+
+export async function getEffectiveAccess(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId: string | undefined,
+  nodeId: string,
+): Promise<EffectiveAccessVM> {
+  const data = await ctx.upstream.filesystem.getEffectiveAccess(
+    governedContext(organizationId, workspaceId),
+    nodeId,
+  );
+  return EffectiveAccessVMSchema.parse(data);
+}
+
+export async function createGovernedGrant(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId: string | undefined,
+  nodeId: string,
+  input: CreateGovernedGrantCommand,
+  idempotencyKey: string,
+): Promise<GovernedShareSubmissionVM> {
+  const data = await ctx.upstream.filesystem.createGovernedGrant(
+    governedContext(organizationId, workspaceId),
+    nodeId,
+    input,
+    idempotencyKey,
+  );
+  return GovernedShareSubmissionVMSchema.parse(data);
+}
+
+export async function createShareRequest(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId: string | undefined,
+  nodeId: string,
+  input: CreateGovernedGrantCommand,
+  idempotencyKey: string,
+): Promise<GovernedShareSubmissionVM> {
+  const data = await ctx.upstream.filesystem.createShareRequest(
+    governedContext(organizationId, workspaceId),
+    nodeId,
+    input,
+    idempotencyKey,
+  );
+  return GovernedShareSubmissionVMSchema.parse(data);
 }

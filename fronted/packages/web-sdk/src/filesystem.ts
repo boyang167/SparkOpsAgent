@@ -1,4 +1,5 @@
 import type {
+  CreateGovernedGrantCommand,
   CreateDirectoryCommand,
   CreateStorageBindingCommand,
   CreateStoragePoolCommand,
@@ -9,12 +10,16 @@ import type {
   FileNodePageVM,
   FileNodeVM,
   FileRevisionPageVM,
+  GovernedShareSubmissionVM,
+  EffectiveAccessVM,
   LifecyclePolicyPageVM,
+  NamespaceSummaryPageVM,
   RegisterStorageProviderCommand,
   RenameFileNodeCommand,
   StorageBindingPageVM,
   StoragePoolPageVM,
   StorageProviderPageVM,
+  SharedItemPageVM,
   UpdateStoragePoolCommand,
   UpdateStorageProviderCommand,
   TransferListQuery,
@@ -80,6 +85,64 @@ type ListFilesQuery = {
   query?: string;
 };
 
+export interface GovernedFilesystemFetchOptions extends BffFetchOptions {
+  organizationId: string;
+}
+
+export interface GovernedFilesystemWriteOptions extends GovernedFilesystemFetchOptions {
+  idempotencyKey?: string;
+}
+
+type GovernedChildrenQuery = {
+  parentId?: string;
+  nodeType?: "FILE" | "DIRECTORY";
+  query?: string;
+  cursor?: string;
+  limit?: number;
+};
+
+type SharedWithMeQuery = {
+  query?: string;
+  cursor?: string;
+  limit?: number;
+};
+
+function governedFetchOptions(
+  options: GovernedFilesystemFetchOptions,
+  idempotencyKey?: string,
+): BffFetchOptions {
+  const {
+    organizationId,
+    idempotencyKey: _providedIdempotencyKey,
+    ...rest
+  } = options as GovernedFilesystemWriteOptions;
+  void _providedIdempotencyKey;
+  const headers = new Headers(rest.headers);
+  headers.set("X-Organization-ID", organizationId);
+  if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
+  return { ...rest, headers };
+}
+
+function governedChildrenSearch(query: GovernedChildrenQuery = {}) {
+  const params = new URLSearchParams();
+  if (query.parentId) params.set("parent_id", query.parentId);
+  if (query.nodeType) params.set("type", query.nodeType);
+  if (query.query) params.set("q", query.query);
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit != null) params.set("limit", String(query.limit));
+  const suffix = params.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
+function sharedWithMeSearch(query: SharedWithMeQuery = {}) {
+  const params = new URLSearchParams();
+  if (query.query) params.set("q", query.query);
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit != null) params.set("limit", String(query.limit));
+  const suffix = params.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
 function listFilesQuery(query: ListFilesQuery = {}) {
   const params = new URLSearchParams();
   if (query.parentId) params.set("parent_id", query.parentId);
@@ -97,6 +160,88 @@ export function getFileNamespace(workspaceId: string, options: BffFetchOptions =
     workspaceId,
     ...options,
   });
+}
+
+export function listGovernedNamespaces(options: GovernedFilesystemFetchOptions) {
+  return bffFetch<NamespaceSummaryPageVM>(
+    "/filesystem/namespaces",
+    {
+      ...governedFetchOptions(options),
+      method: "GET",
+    },
+  );
+}
+
+export function listGovernedChildren(
+  namespaceId: string,
+  query: GovernedChildrenQuery = {},
+  options: GovernedFilesystemFetchOptions,
+) {
+  return bffFetch<FileNodePageVM>(
+    `/filesystem/namespaces/${encodeURIComponent(namespaceId)}/children${governedChildrenSearch(query)}`,
+    {
+      ...governedFetchOptions(options),
+      method: "GET",
+    },
+  );
+}
+
+export function listSharedWithMe(
+  query: SharedWithMeQuery = {},
+  options: GovernedFilesystemFetchOptions,
+) {
+  return bffFetch<SharedItemPageVM>(
+    `/filesystem/shared-with-me${sharedWithMeSearch(query)}`,
+    {
+      ...governedFetchOptions(options),
+      method: "GET",
+    },
+  );
+}
+
+export function getEffectiveAccess(
+  nodeId: string,
+  options: GovernedFilesystemFetchOptions,
+) {
+  return bffFetch<EffectiveAccessVM>(
+    `/filesystem/nodes/${encodeURIComponent(nodeId)}/effective-access`,
+    {
+      ...governedFetchOptions(options),
+      method: "GET",
+    },
+  );
+}
+
+export function createGovernedGrant(
+  nodeId: string,
+  input: CreateGovernedGrantCommand,
+  options: GovernedFilesystemWriteOptions,
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("governed-grant");
+  return bffFetch<GovernedShareSubmissionVM>(
+    `/filesystem/nodes/${encodeURIComponent(nodeId)}/grants`,
+    {
+      ...governedFetchOptions(options, idempotencyKey),
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function createShareRequest(
+  nodeId: string,
+  input: CreateGovernedGrantCommand,
+  options: GovernedFilesystemWriteOptions,
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("share-request");
+  return bffFetch<GovernedShareSubmissionVM>(
+    `/filesystem/nodes/${encodeURIComponent(nodeId)}/share-requests`,
+    {
+      ...governedFetchOptions(options, idempotencyKey),
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
 }
 
 export function listFileNodes(

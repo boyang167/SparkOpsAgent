@@ -146,3 +146,49 @@ Task 8 代码与自动验收完成。未启动或重启根工作区服务；浏�
 - DOM：FileDetailDrawer 详情/版本/审计 tabs；GovernanceWorkspace 三个二级 tabs。
 - 源码契约：FileExplorerPanel 新建目录按钮应用 `filesystem-touch-target`。
 - CSS 契约：`filesystem-touch-target` 的 `min-height` 与 `min-width` 均为 `2.75rem`；未声明所有 Task 8 按钮均已覆盖，只声明上述清单中的核心交互。
+
+---
+
+# Task 8 追加：治理空间 Contracts 与传输路径
+
+## 基线与范围
+
+- 基线：`master` / `0f3b6b9d8d423e97098e091d1cb900f00ad83a51`，实施前工作树干净。
+- 仅实现 contracts、upstream、BFF module、web-sdk 和 6 条 Next BFF route；未实现 Task 9–12 UI，未增加依赖。
+- 保留原 `/api/bff/v1/workspaces/{workspaceId}/...` filesystem 客户端和路由。
+
+## TDD 记录
+
+### RED
+
+先在以下三个文件增加测试：
+
+- `packages/upstream/src/filesystem.test.ts`
+- `packages/bff-modules/src/filesystem/index.test.ts`
+- `packages/web-sdk/src/filesystem.test.ts`
+
+运行 brief 指定命令后退出码 1：3 files / 7 failed / 13 passed。失败均因治理 schema、客户端和方法尚不存在，符合预期。
+
+### GREEN
+
+- brief 指定测试：3 files / 20 tests，退出码 0。
+- 受影响 filesystem 回归：5 files / 35 tests，退出码 0。
+- `pnpm typecheck`：6 packages，退出码 0。
+- IDE diagnostics：修改范围无 linter errors。
+- `git diff --check`：退出码 0。
+- Vitest 仍输出仓库既有 Vite/esbuild/oxc deprecation warning；无测试失败。
+
+## 实现摘要
+
+- 按 Task 5/6 OpenAPI 和 Go JSON view 增加 Zod schema 与 inferred types：Namespace summary/page、typed Grant/page、effective access/cache key、shared item/page、ShareRequest、typed write command、即时/待审批写响应。
+- 新治理客户端统一使用 `/api/bff/v1/filesystem`；personal/organization 未嵌入 workspace URL。
+- children 完整转发 `parent_id/type/q/cursor/limit`，shared-with-me 完整转发 `q/cursor/limit`。
+- 读写均转发 `X-Organization-ID` 和可选 `X-Workspace-ID`；写请求另转发原 body 与 `Idempotency-Key`。未新增或伪造 actor/user principal header，身份继续来自既有 BFF cookie/token 上下文。
+- 动态 path 参数在 web-sdk 和 upstream 两层均使用 `encodeURIComponent`；Next route 使用当前版本的异步 `params`。
+- 新增 6 条 route：namespaces、namespace children、shared-with-me、effective-access、grants POST、share-requests POST。
+- 后端统一治理 grants 当前仅实现 POST，未虚构 GET/DELETE；share-requests 当前仅实现 POST。两类写响应均支持后端即时 `201` 与待审批 `202` 数据形态。
+
+## 风险与未验证项
+
+- 未做真实登录态浏览器/后端联调；本任务仅完成 contracts 与传输层自动测试。
+- 未实现 OpenAPI 中尚未落到本 Task 8 六条 route 的 approve/reject UI/client，也未提前实现 Task 9–12。

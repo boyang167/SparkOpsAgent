@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TransferSessionVM } from "@sparkops/contracts/filesystem";
 import {
+  NamespaceSummaryVMSchema,
+  ShareRequestVMSchema,
+} from "@sparkops/contracts/filesystem";
+import {
+  createGovernedGrant,
   getFileNode,
+  listGovernedChildren,
+  listGovernedNamespaces,
+  listSharedWithMe,
   listFileAuditEvents,
   listFileNodes,
   listTransferSessions,
@@ -293,5 +301,140 @@ describe("filesystem node sdk", () => {
     expect(keys[0]).toBeTruthy();
     expect(keys[1]).toBeTruthy();
     expect(keys[0]).not.toBe(keys[1]);
+  });
+});
+
+describe("governed filesystem sdk", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("matches the governed namespace and share-request backend contracts", () => {
+    const namespace = {
+      id: "00000000-0000-4000-8000-000000000001",
+      namespace_type: "USER",
+      organization_id: "00000000-0000-4000-8000-000000000002",
+      workspace_id: null,
+      owner_user_id: "00000000-0000-4000-8000-000000000003",
+      root_node_id: "00000000-0000-4000-8000-000000000004",
+      status: "ACTIVE",
+      capabilities: ["READ", "WRITE", "SHARE"],
+      entry_node_ids: [],
+      entry_nodes_truncated: false,
+    };
+    expect(NamespaceSummaryVMSchema.parse(namespace)).toEqual(namespace);
+    expect(
+      ShareRequestVMSchema.parse({
+        id: "00000000-0000-4000-8000-000000000010",
+        organization_id: namespace.organization_id,
+        namespace_id: namespace.id,
+        node_id: namespace.root_node_id,
+        requested_by: namespace.owner_user_id,
+        principal_type: "USER",
+        principal_ids: ["00000000-0000-4000-8000-000000000011"],
+        actions: ["READ"],
+        inherit_to_children: true,
+        expires_at: null,
+        classification: "INTERNAL",
+        effect: "ALLOW",
+        status: "PENDING",
+        reviewed_by: null,
+        reviewed_at: null,
+        rejection_reason: "",
+        created_at: "2026-11-15T00:00:00Z",
+      }).status,
+    ).toBe("PENDING");
+  });
+
+  it("uses one top-level BFF path and forwards complete read context", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(
+        JSON.stringify({
+          code: 0,
+          message: "ok",
+          data: { items: [], next_cursor: "" },
+          trace_id: "trace-1",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const options = {
+      organizationId: "00000000-0000-4000-8000-000000000002",
+      workspaceId: "00000000-0000-4000-8000-000000000003",
+    };
+
+    await listGovernedNamespaces(options);
+    await listGovernedChildren(
+      "namespace/with space",
+      {
+        parentId: "00000000-0000-4000-8000-000000000004",
+        nodeType: "DIRECTORY",
+        query: "设计 文档",
+        cursor: "00000000-0000-4000-8000-000000000005",
+        limit: 20,
+      },
+      options,
+    );
+    await listSharedWithMe({ query: "共享 文档", cursor: "opaque+/=", limit: 10 }, options);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/bff/v1/filesystem/namespaces");
+    expect(fetchMock.mock.calls[1]?.[0]).toContain(
+      "/api/bff/v1/filesystem/namespaces/namespace%2Fwith%20space/children?parent_id=00000000-0000-4000-8000-000000000004&type=DIRECTORY&q=%E8%AE%BE%E8%AE%A1+%E6%96%87%E6%A1%A3&cursor=00000000-0000-4000-8000-000000000005&limit=20",
+    );
+    expect(fetchMock.mock.calls[2]?.[0]).toContain(
+      "/api/bff/v1/filesystem/shared-with-me?q=%E5%85%B1%E4%BA%AB+%E6%96%87%E6%A1%A3&cursor=opaque%2B%2F%3D&limit=10",
+    );
+    for (const [, init] of fetchMock.mock.calls) {
+      const headers = new Headers((init as RequestInit).headers);
+      expect(headers.get("X-Organization-ID")).toBe(options.organizationId);
+      expect(headers.get("X-Workspace-ID")).toBe(options.workspaceId);
+    }
+  });
+
+  it("forwards governed write body, tenant context, and explicit idempotency key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 0,
+          message: "ok",
+          data: {
+            id: "00000000-0000-4000-8000-000000000010",
+            organization_id: "00000000-0000-4000-8000-000000000002",
+            namespace_id: "00000000-0000-4000-8000-000000000011",
+            node_id: "00000000-0000-4000-8000-000000000012",
+            requested_by: "00000000-0000-4000-8000-000000000013",
+            principal_type: "USER",
+            principal_ids: ["00000000-0000-4000-8000-000000000014"],
+            actions: ["READ"],
+            classification: "CONFIDENTIAL",
+            effect: "ALLOW",
+            status: "PENDING",
+            created_at: "2026-11-15T00:00:00Z",
+          },
+          trace_id: "trace-1",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      principal_type: "USER" as const,
+      principal_ids: ["00000000-0000-4000-8000-000000000014"],
+      actions: ["READ" as const],
+    };
+
+    await createGovernedGrant("node/with space", input, {
+      organizationId: "00000000-0000-4000-8000-000000000002",
+      idempotencyKey: "grant-key-1",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/bff/v1/filesystem/nodes/node%2Fwith%20space/grants");
+    expect(init).toEqual(expect.objectContaining({ method: "POST", body: JSON.stringify(input) }));
+    const headers = new Headers(init.headers);
+    expect(headers.get("X-Organization-ID")).toBe("00000000-0000-4000-8000-000000000002");
+    expect(headers.get("Idempotency-Key")).toBe("grant-key-1");
+    expect(headers.get("X-Actor-ID")).toBeNull();
   });
 });

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BffContext } from "@sparkops/bff-core";
-import { listFileNodes, moveFileNode } from "./index";
+import {
+  createGovernedGrant,
+  listFileNodes,
+  listGovernedChildren,
+  moveFileNode,
+} from "./index";
 
 function context(filesystem: Record<string, unknown>): BffContext {
   return {
@@ -46,6 +51,87 @@ describe("filesystem BFF module", () => {
       "node-1",
       { parent_id: "parent-2", name: "报告.md" },
       "move-key-1",
+    );
+  });
+
+  it("passes governed query and organization/workspace context to upstream", async () => {
+    const listChildren = vi.fn().mockResolvedValue({ items: [], next_cursor: "next-page" });
+    const query = {
+      parent_id: "00000000-0000-4000-8000-000000000004",
+      type: "DIRECTORY" as const,
+      q: "设计",
+      cursor: "00000000-0000-4000-8000-000000000005",
+      limit: 20,
+    };
+
+    await listGovernedChildren(
+      context({ listGovernedChildren: listChildren }),
+      "00000000-0000-4000-8000-000000000002",
+      "00000000-0000-4000-8000-000000000003",
+      "00000000-0000-4000-8000-000000000006",
+      query,
+    );
+
+    expect(listChildren).toHaveBeenCalledWith(
+      {
+        organizationId: "00000000-0000-4000-8000-000000000002",
+        workspaceId: "00000000-0000-4000-8000-000000000003",
+      },
+      "00000000-0000-4000-8000-000000000006",
+      query,
+    );
+  });
+
+  it("validates governed grant responses and forwards writes unchanged", async () => {
+    const createGrant = vi.fn().mockResolvedValue({
+      request: {
+        id: "00000000-0000-4000-8000-000000000010",
+        organization_id: "00000000-0000-4000-8000-000000000002",
+        namespace_id: "00000000-0000-4000-8000-000000000011",
+        node_id: "00000000-0000-4000-8000-000000000012",
+        requested_by: "00000000-0000-4000-8000-000000000013",
+        principal_type: "ROLE",
+        principal_ids: ["00000000-0000-4000-8000-000000000014"],
+        actions: ["READ"],
+        classification: "INTERNAL",
+        effect: "ALLOW",
+        status: "APPROVED",
+        created_at: "2026-11-15T00:00:00Z",
+      },
+      grants: [
+        {
+          id: "00000000-0000-4000-8000-000000000015",
+          node_id: "00000000-0000-4000-8000-000000000012",
+          grantee_id: "00000000-0000-4000-8000-000000000014",
+          principal_type: "ROLE",
+          principal_id: "00000000-0000-4000-8000-000000000014",
+          permission: "READ",
+          effect: "ALLOW",
+          expires_at: null,
+        },
+      ],
+    });
+    const input = {
+      principal_type: "ROLE" as const,
+      principal_ids: ["00000000-0000-4000-8000-000000000014"],
+      actions: ["READ" as const],
+    };
+
+    const result = await createGovernedGrant(
+      context({ createGovernedGrant: createGrant }),
+      "00000000-0000-4000-8000-000000000002",
+      undefined,
+      "00000000-0000-4000-8000-000000000012",
+      input,
+      "grant-key-1",
+    );
+
+    expect("grants" in result && result.grants[0]?.principal_type).toBe("ROLE");
+    expect(createGrant).toHaveBeenCalledWith(
+      { organizationId: "00000000-0000-4000-8000-000000000002" },
+      "00000000-0000-4000-8000-000000000012",
+      input,
+      "grant-key-1",
     );
   });
 });

@@ -371,3 +371,161 @@ export const FileAuditQuerySchema = z.object({
 });
 
 export type FileAuditQuery = z.infer<typeof FileAuditQuerySchema>;
+
+export const NamespaceTypeSchema = z.enum(["USER", "WORKSPACE", "ORGANIZATION"]);
+export type NamespaceType = z.infer<typeof NamespaceTypeSchema>;
+
+export const ResourceActionSchema = z.enum(["READ", "WRITE", "DELETE", "SHARE", "ADMIN"]);
+export type ResourceAction = z.infer<typeof ResourceActionSchema>;
+
+export const GovernedPermissionSchema = z.enum([
+  "READ",
+  "DOWNLOAD",
+  "WRITE",
+  "DELETE",
+  "SHARE",
+  "ADMIN",
+]);
+export type GovernedPermission = z.infer<typeof GovernedPermissionSchema>;
+
+export const PrincipalTypeSchema = z.enum(["USER", "WORKSPACE", "ORGANIZATION", "ROLE"]);
+export type PrincipalType = z.infer<typeof PrincipalTypeSchema>;
+
+export const GrantEffectSchema = z.enum(["ALLOW", "DENY"]);
+export type GrantEffect = z.infer<typeof GrantEffectSchema>;
+
+export const NamespaceSummaryVMSchema = z.object({
+  id: z.string().uuid(),
+  namespace_type: NamespaceTypeSchema,
+  organization_id: z.string().uuid(),
+  workspace_id: z.string().uuid().nullable().optional(),
+  owner_user_id: z.string().uuid().nullable().optional(),
+  root_node_id: z.string().uuid().nullable().optional(),
+  status: z.string(),
+  capabilities: z.array(ResourceActionSchema),
+  entry_node_ids: z.array(z.string().uuid()),
+  entry_nodes_truncated: z.boolean(),
+});
+export type NamespaceSummaryVM = z.infer<typeof NamespaceSummaryVMSchema>;
+
+export const NamespaceSummaryPageVMSchema = z.object({
+  items: z.array(NamespaceSummaryVMSchema),
+});
+export type NamespaceSummaryPageVM = z.infer<typeof NamespaceSummaryPageVMSchema>;
+
+export const GovernedGrantVMSchema = z.object({
+  id: z.string().uuid(),
+  node_id: z.string().uuid(),
+  grantee_id: z.string().uuid(),
+  principal_type: PrincipalTypeSchema,
+  principal_id: z.string().uuid(),
+  permission: GovernedPermissionSchema,
+  effect: GrantEffectSchema,
+  expires_at: z.string().datetime({ offset: true }).nullable().optional(),
+});
+export type GovernedGrantVM = z.infer<typeof GovernedGrantVMSchema>;
+
+export const GovernedGrantPageVMSchema = z.object({
+  items: z.array(GovernedGrantVMSchema),
+});
+export type GovernedGrantPageVM = z.infer<typeof GovernedGrantPageVMSchema>;
+
+export const AuthorizationCacheKeyVMSchema = z.object({
+  organization_id: z.string().uuid(),
+  workspace_id: z.string().uuid().nullable(),
+  actor_id: z.string().uuid(),
+  node_id: z.string().uuid(),
+  action: ResourceActionSchema,
+  policy_version: z.number().int(),
+});
+export type AuthorizationCacheKeyVM = z.infer<typeof AuthorizationCacheKeyVMSchema>;
+
+export const EffectiveAccessVMSchema = z.object({
+  decision: z.enum(["ALLOW", "DENY"]),
+  effective_actions: z.array(ResourceActionSchema),
+  reason_code: z.string(),
+  source_grant_ids: z.array(z.string().uuid()),
+  policy_version: z.number().int(),
+  cache_key: AuthorizationCacheKeyVMSchema,
+});
+export type EffectiveAccessVM = z.infer<typeof EffectiveAccessVMSchema>;
+
+export const SharedItemVMSchema = z.object({
+  node: FileNodeVMSchema,
+  effective_actions: z.array(ResourceActionSchema),
+  source_grant_ids: z.array(z.string().uuid()),
+});
+export type SharedItemVM = z.infer<typeof SharedItemVMSchema>;
+
+export const SharedItemPageVMSchema = z.object({
+  items: z.array(SharedItemVMSchema),
+  next_cursor: z.string(),
+});
+export type SharedItemPageVM = z.infer<typeof SharedItemPageVMSchema>;
+
+export const CreateGovernedGrantCommandSchema = z.object({
+  principal_type: PrincipalTypeSchema,
+  principal_ids: z.array(z.string().uuid()).min(1),
+  actions: z.array(GovernedPermissionSchema).min(1),
+  effect: GrantEffectSchema.optional(),
+  inherit_to_children: z.boolean().optional(),
+  expires_at: z.string().datetime({ offset: true }).nullable().optional(),
+});
+export type CreateGovernedGrantCommand = z.infer<typeof CreateGovernedGrantCommandSchema>;
+
+export const ShareRequestStatusSchema = z.enum([
+  "PENDING",
+  "APPROVED",
+  "REJECTED",
+  "CANCELLED",
+]);
+export type ShareRequestStatus = z.infer<typeof ShareRequestStatusSchema>;
+
+export const ShareRequestVMSchema = z.object({
+  id: z.string().uuid(),
+  organization_id: z.string().uuid(),
+  namespace_id: z.string().uuid(),
+  node_id: z.string().uuid(),
+  requested_by: z.string().uuid(),
+  principal_type: PrincipalTypeSchema,
+  principal_ids: z.array(z.string().uuid()),
+  actions: z.array(GovernedPermissionSchema),
+  inherit_to_children: z.boolean().optional(),
+  expires_at: z.string().datetime({ offset: true }).nullable().optional(),
+  classification: TransferClassificationSchema,
+  effect: GrantEffectSchema,
+  status: ShareRequestStatusSchema,
+  reviewed_by: z.string().uuid().nullable().optional(),
+  reviewed_at: z.string().datetime({ offset: true }).nullable().optional(),
+  rejection_reason: z.string().optional(),
+  created_at: z.string().datetime({ offset: true }),
+});
+export type ShareRequestVM = z.infer<typeof ShareRequestVMSchema>;
+
+export const GovernedShareResultVMSchema = z.object({
+  request: ShareRequestVMSchema,
+  grants: z.array(GovernedGrantVMSchema),
+});
+export type GovernedShareResultVM = z.infer<typeof GovernedShareResultVMSchema>;
+
+export const GovernedShareSubmissionVMSchema = z.union([
+  GovernedShareResultVMSchema,
+  ShareRequestVMSchema,
+]);
+export type GovernedShareSubmissionVM = z.infer<typeof GovernedShareSubmissionVMSchema>;
+
+export const GovernedChildrenQuerySchema = z.object({
+  parent_id: z.string().uuid().optional(),
+  type: FileNodeTypeSchema.optional(),
+  q: z.string().max(200).optional(),
+  cursor: z.string().uuid().max(128).optional(),
+  limit: z.number().int().positive().max(200).optional(),
+});
+export type GovernedChildrenQuery = z.infer<typeof GovernedChildrenQuerySchema>;
+
+export const SharedWithMeQuerySchema = z.object({
+  q: z.string().max(200).optional(),
+  cursor: z.string().max(512).optional(),
+  limit: z.number().int().positive().max(200).optional(),
+});
+export type SharedWithMeQuery = z.infer<typeof SharedWithMeQuerySchema>;
