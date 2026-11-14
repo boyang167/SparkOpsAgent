@@ -62,9 +62,9 @@ func (a workspaceRoleReaderAdapter) ListWorkspaceRoleIDs(ctx context.Context, wo
 }
 
 type namespaceAuthorityAdapter struct {
-	workspaces    authz.WorkspaceAccessResolver
-	permissions   authz.PermissionChecker
-	organizations authz.OrgPermissionChecker
+	workspaces      authz.WorkspaceAccessResolver
+	rolePermissions authz.WorkspaceRolePermissionChecker
+	organizations   authz.OrgPermissionChecker
 }
 
 func (a namespaceAuthorityAdapter) HasWorkspaceFileAdmin(ctx context.Context, workspaceID, actorID uuid.UUID) (bool, error) {
@@ -74,7 +74,7 @@ func (a namespaceAuthorityAdapter) HasWorkspaceFileAdmin(ctx context.Context, wo
 	if err != nil || !active {
 		return false, err
 	}
-	return a.permissions.HasPermission(
+	return a.rolePermissions.HasWorkspaceRolePermission(
 		ctx, kernel.WorkspaceID{UUID: workspaceID}, kernel.MemberID{UUID: actorID}, authz.PermFileAdmin,
 	)
 }
@@ -128,6 +128,9 @@ func (m *Module) Register(c *appctx.Container) error {
 	if c.WorkspaceRoleReader == nil {
 		return fmt.Errorf("filesystem module requires workspace role reader")
 	}
+	if c.WorkspaceRolePermissions == nil {
+		return fmt.Errorf("filesystem module requires workspace role permission checker")
+	}
 	if c.OrgPermissionChecker == nil {
 		return fmt.Errorf("filesystem module requires organization permission checker")
 	}
@@ -157,7 +160,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		workspaceRoleReaderAdapter{reader: c.WorkspaceRoleReader},
 	)
 	resourceAuthorizer := resourceauth.NewService(repo, principalResolver, namespaceAuthorityAdapter{
-		workspaces: c.WorkspaceAccessResolver, permissions: c.PermissionChecker, organizations: c.OrgPermissionChecker,
+		workspaces: c.WorkspaceAccessResolver, rolePermissions: c.WorkspaceRolePermissions, organizations: c.OrgPermissionChecker,
 	})
 	c.FilesystemGrantPort = resourceauth.NewGrantService(repo, resourceAuthorizer, c.Transactor, c.EventBus, c.AuditLogger)
 	storageRoot := c.Config.Filesystem.TransferGateway.StorageRoot

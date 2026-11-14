@@ -29,6 +29,10 @@ func (c *Checker) HasPermission(ctx context.Context, workspaceID kernel.Workspac
 			return true, nil
 		}
 	}
+	return c.HasWorkspaceRolePermission(ctx, workspaceID, memberID, perm)
+}
+
+func (c *Checker) HasWorkspaceRolePermission(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID, perm string) (bool, error) {
 	roles, err := c.bindings.ListRolesForMember(ctx, workspaceID, memberID)
 	if err != nil {
 		return false, err

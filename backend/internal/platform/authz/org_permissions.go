@@ -12,13 +12,11 @@ var orgRolePermissions = map[string][]string{
 		PermOrgRead,
 		PermOrgMemberManage,
 		PermOrgWorkspaceCreate,
-		PermOrgFileAdmin,
 	},
 	"admin": {
 		PermOrgRead,
 		PermOrgMemberManage,
 		PermOrgWorkspaceCreate,
-		PermOrgFileAdmin,
 	},
 	"member": {
 		PermOrgRead,

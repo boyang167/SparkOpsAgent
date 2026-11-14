@@ -47,6 +47,13 @@ func TestFilesystemPermissionsByWorkspaceRole(t *testing.T) {
 	}
 }
 
+func TestOrganizationDefaultsDoNotGrantFileAdminBeforeGovernanceBootstrap(t *testing.T) {
+	for _, role := range []string{"owner", "admin", "member"} {
+		require.NotContains(t, PermissionsForOrgRole(role), PermOrgFileAdmin, role)
+		require.False(t, OrgRoleHasPermission(role, PermOrgFileAdmin), role)
+	}
+}
+
 func roleDefinition(t *testing.T, name string) DefaultRoleDefinition {
 	t.Helper()
 	for _, role := range DefaultWorkspaceRoles {

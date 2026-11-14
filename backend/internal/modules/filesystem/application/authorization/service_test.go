@@ -220,19 +220,40 @@ func TestAuthorizeDirectDenyOverridesInheritedOrganizationAllow(t *testing.T) {
 	require.Equal(t, "explicit_deny", decision.Reason)
 }
 
-func TestAuthorizationCacheKeyIncludesPolicyVersion(t *testing.T) {
+func TestAuthorizeDecisionUsesRepositoryNamespacePolicyVersionInCacheKey(t *testing.T) {
+	organizationID, ownerID := uuid.New(), uuid.New()
 	request := Request{
-		ActorID: uuid.New(), WorkspaceID: uuid.New(), NamespaceID: uuid.New(),
+		ActorID: ownerID, WorkspaceID: uuid.New(), NamespaceID: uuid.New(),
 		NodeID: uuid.New(), Permission: model.ResourcePermissionWrite,
 	}
-	organizationID := uuid.New()
+	namespace := &model.Namespace{
+		ID: request.NamespaceID, NamespaceType: model.NamespaceTypeUser,
+		OrganizationID: organizationID, OwnerUserID: ownerID, PolicyVersion: 11,
+	}
+	target := node(namespace.ID, uuid.Nil, ownerID)
+	target.ID = request.NodeID
+	service := NewService(grantRepositoryStub{
+		nodes:      map[uuid.UUID]*model.Node{target.ID: target},
+		namespaces: map[uuid.UUID]*model.Namespace{namespace.ID: namespace},
+	}, nil, nil)
 
-	first := authorizationCacheKey(request, organizationID, 11)
-	second := authorizationCacheKey(request, organizationID, 12)
+	first := service.Authorize(context.Background(), request)
+	namespace.PolicyVersion = 12
+	second := service.Authorize(context.Background(), request)
 
-	require.NotEqual(t, first, second)
+	require.True(t, first.Allowed)
+	require.True(t, second.Allowed)
 	require.Equal(t, int64(11), first.PolicyVersion)
-	require.Equal(t, organizationID, first.OrganizationID)
+	require.Equal(t, int64(12), second.PolicyVersion)
+	require.NotEqual(t, first.CacheKey, second.CacheKey)
+	require.Equal(t, AuthorizationCacheKey{
+		OrganizationID: organizationID,
+		WorkspaceID:    request.WorkspaceID,
+		ActorID:        ownerID,
+		NodeID:         request.NodeID,
+		Action:         model.ResourcePermissionWrite,
+		PolicyVersion:  11,
+	}, first.CacheKey)
 }
 
 func TestAuthorizeInheritsAllowFromAncestor(t *testing.T) {

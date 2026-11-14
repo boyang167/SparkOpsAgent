@@ -53,3 +53,37 @@ Coverage added for authoritative principal resolution, inactive membership, cros
 ## Concerns
 
 No blocking concerns. Task 3's `GranteeOrganizationID` remains on grant mutation requests as planned, and Task 5 API work was intentionally not included. No cache exists yet; the cache-key contract is defined and tested for future use.
+
+## Critical/Important review fixes
+
+### Changes
+
+- Added a `WorkspaceRolePermissionChecker` shared port backed directly by current Workspace role bindings. Filesystem WORKSPACE Namespace management now calls this port for `file:admin`; it no longer calls the generic `PermissionChecker` path that grants system SuperAdmin unconditionally.
+- Added regression coverage proving an active Workspace member who is a system SuperAdmin is denied WORKSPACE Namespace admin authority without a Workspace `file:admin` role and allowed after that role is bound.
+- Extended the application authorization `Decision` with `PolicyVersion` and `CacheKey`. The production `Authorize` path now reads `Namespace.PolicyVersion` from the repository and builds the key from organization, workspace, actor, node, action, and that version.
+- Kept the `org:file:admin` constant and Organization permission-check contract, but removed it from the fixed owner/admin default permission table. Task 12 remains responsible for governance assignment.
+
+### TDD evidence
+
+RED was observed before implementation:
+
+```text
+Decision has no field or method PolicyVersion
+Decision has no field or method CacheKey
+Checker has no field or method HasWorkspaceRolePermission
+owner default permissions should not contain org:file:admin
+```
+
+GREEN verification:
+
+- `go test ./internal/modules/filesystem/application/authorization -count=1` — PASS
+- `go test ./internal/modules/filesystem/domain/service -run Decide -count=1` — PASS
+- `go test ./internal/modules/filesystem/interface/http -run Access -count=1` — PASS (package compiled; no matching test names)
+- `go test ./internal/modules/filesystem/... -count=1` — PASS
+- `go test ./internal/modules/tenant/... ./internal/modules/governance/... ./internal/platform/appctx ./internal/platform/authz -count=1` — PASS
+- `go test ./internal/bootstrap/... -run '^$' -count=1` — PASS
+- `git diff --check` — PASS
+
+### Review conclusion
+
+All listed Critical/Important findings are addressed. Existing principal resolution, global Deny precedence, USER Namespace ownership, and cross-Organization protections remain covered. No Task 5 API, Task 12 bootstrap assignment, or cache storage was introduced.

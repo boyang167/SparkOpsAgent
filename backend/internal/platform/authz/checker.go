@@ -18,3 +18,7 @@ type WorkspaceAccessResolver interface {
 type WorkspaceRoleReader interface {
 	ListWorkspaceRoleIDs(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID) ([]kernel.RoleID, error)
 }
+
+type WorkspaceRolePermissionChecker interface {
+	HasWorkspaceRolePermission(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID, permission string) (bool, error)
+}

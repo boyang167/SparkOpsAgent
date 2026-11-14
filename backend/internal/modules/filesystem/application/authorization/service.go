@@ -35,8 +35,10 @@ type Request struct {
 }
 
 type Decision struct {
-	Allowed bool
-	Reason  string
+	Allowed       bool
+	Reason        string
+	PolicyVersion int64
+	CacheKey      AuthorizationCacheKey
 }
 
 type AuthorizationCacheKey struct {
@@ -64,8 +66,17 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 	if err != nil {
 		return Decision{Reason: "resource_not_found"}
 	}
+	decision := Decision{
+		PolicyVersion: namespace.PolicyVersion,
+		CacheKey:      authorizationCacheKey(request, namespace.OrganizationID, namespace.PolicyVersion),
+	}
+	denied := func(reason string) Decision {
+		decision.Allowed = false
+		decision.Reason = reason
+		return decision
+	}
 	if namespace.NamespaceType == model.NamespaceTypeWorkspace && namespace.WorkspaceID != request.WorkspaceID {
-		return Decision{Reason: "organization_boundary"}
+		return denied("organization_boundary")
 	}
 	principals := []repository.PrincipalRef{{Type: model.PrincipalUser, ID: request.ActorID}}
 	if s.principals != nil {
@@ -73,10 +84,10 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 			ActorID: request.ActorID, OrganizationID: namespace.OrganizationID, WorkspaceID: request.WorkspaceID,
 		})
 		if errors.Is(err, ErrPrincipalScopeMismatch) {
-			return Decision{Reason: "organization_boundary"}
+			return denied("organization_boundary")
 		}
 		if err != nil {
-			return Decision{Reason: "authorization_unavailable"}
+			return denied("authorization_unavailable")
 		}
 	}
 	getNode := s.repo.GetNode
@@ -85,7 +96,7 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 	}
 	node, err := getNode(ctx, request.NamespaceID, request.NodeID)
 	if err != nil {
-		return Decision{Reason: "resource_not_found"}
+		return denied("resource_not_found")
 	}
 	relations := make([]domainservice.Relation, 0)
 	for current := node; current != nil; {
@@ -96,7 +107,7 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 		for _, permission := range permissions {
 			grants, grantErr := s.repo.ListResourceGrants(ctx, []uuid.UUID{current.ID}, principals, permission, s.now())
 			if grantErr != nil {
-				return Decision{Reason: "authorization_unavailable"}
+				return denied("authorization_unavailable")
 			}
 			for _, grant := range grants {
 				if current.ID != node.ID && !grant.InheritToChildren {
@@ -114,10 +125,10 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 		}
 		current, err = getNode(ctx, request.NamespaceID, *current.ParentID)
 		if errors.Is(err, domain.ErrNodeNotFound) {
-			return Decision{Reason: "resource_not_found"}
+			return denied("resource_not_found")
 		}
 		if err != nil {
-			return Decision{Reason: "authorization_unavailable"}
+			return denied("authorization_unavailable")
 		}
 	}
 	if namespace.NamespaceType == model.NamespaceTypeUser && namespace.OwnerUserID == request.ActorID {
@@ -129,7 +140,7 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 	if s.authority != nil {
 		admin, adminErr := s.hasNamespaceAuthority(ctx, namespace, request)
 		if adminErr != nil {
-			return Decision{Reason: "authorization_unavailable"}
+			return denied("authorization_unavailable")
 		}
 		if admin {
 			relations = append(relations, domainservice.Relation{
@@ -144,7 +155,9 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 	}, request.Permission, domainservice.Resource{
 		ID: node.ID, OrganizationID: namespace.OrganizationID, WorkspaceID: request.WorkspaceID,
 	}, relations...)
-	return Decision{Allowed: decided.Result == domainservice.DecisionAllow, Reason: decided.ReasonCode}
+	decision.Allowed = decided.Result == domainservice.DecisionAllow
+	decision.Reason = decided.ReasonCode
+	return decision
 }
 
 func (s *Service) hasNamespaceAuthority(ctx context.Context, namespace *model.Namespace, request Request) (bool, error) {

@@ -9,6 +9,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/repository"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/authz"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 	"github.com/stretchr/testify/require"
 )
@@ -197,4 +198,34 @@ func TestCheckerHasPermission(t *testing.T) {
 
 	err = checker.RequirePermission(ctx, wsID, memberID, "project:write")
 	require.ErrorIs(t, err, domain.ErrPermissionDenied)
+}
+
+type superAdminStub struct{}
+
+func (superAdminStub) IsSuperAdmin(context.Context, kernel.MemberID) (bool, error) {
+	return true, nil
+}
+
+func TestWorkspaceRolePermissionDoesNotInheritSystemSuperAdmin(t *testing.T) {
+	ctx := context.Background()
+	workspaceID, memberID := kernel.NewWorkspaceID(), kernel.NewMemberID()
+	roles := newMemoryRoleRepo()
+	bindings := newMemoryBindingRepo(roles)
+	checker := query.NewChecker(bindings, superAdminStub{})
+
+	genericAllowed, err := checker.HasPermission(ctx, workspaceID, memberID, authz.PermFileAdmin)
+	require.NoError(t, err)
+	require.True(t, genericAllowed, "generic permission behavior remains unchanged")
+
+	workspaceAllowed, err := checker.HasWorkspaceRolePermission(ctx, workspaceID, memberID, authz.PermFileAdmin)
+	require.NoError(t, err)
+	require.False(t, workspaceAllowed, "system superadmin without a workspace role must not gain resource authority")
+
+	role := model.NewRole(workspaceID, "file-admin", []string{authz.PermFileAdmin}, nil)
+	require.NoError(t, roles.Save(ctx, role))
+	require.NoError(t, bindings.Save(ctx, model.NewRoleBinding(role.ID, memberID)))
+
+	workspaceAllowed, err = checker.HasWorkspaceRolePermission(ctx, workspaceID, memberID, authz.PermFileAdmin)
+	require.NoError(t, err)
+	require.True(t, workspaceAllowed)
 }

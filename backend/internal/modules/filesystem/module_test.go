@@ -13,6 +13,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	filesystemport "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/port"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
+	govquery "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/application/query"
+	govmodel "github.com/sparkops/sparkops-agent/backend/internal/modules/governance/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/appctx"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/authn"
@@ -49,6 +51,30 @@ func (noRoles) ListWorkspaceRoleIDs(context.Context, kernel.WorkspaceID, kernel.
 	return nil, nil
 }
 
+type workspaceRolePermissions struct{ allowed bool }
+
+func (p workspaceRolePermissions) HasWorkspaceRolePermission(context.Context, kernel.WorkspaceID, kernel.MemberID, string) (bool, error) {
+	return p.allowed, nil
+}
+
+type roleBindingsStub struct{ roles []*govmodel.Role }
+
+func (*roleBindingsStub) Save(context.Context, *govmodel.RoleBinding) error { return nil }
+func (s *roleBindingsStub) ListRolesForMember(context.Context, kernel.WorkspaceID, kernel.MemberID) ([]*govmodel.Role, error) {
+	return s.roles, nil
+}
+func (*roleBindingsStub) Exists(context.Context, kernel.RoleID, kernel.MemberID) (bool, error) {
+	return false, nil
+}
+func (*roleBindingsStub) Delete(context.Context, kernel.RoleID, kernel.MemberID) error { return nil }
+func (*roleBindingsStub) DeleteByRoleID(context.Context, kernel.RoleID) error          { return nil }
+
+type superAdmin struct{}
+
+func (superAdmin) IsSuperAdmin(context.Context, kernel.MemberID) (bool, error) {
+	return true, nil
+}
+
 type allowOrgPermissions struct{}
 
 func (allowOrgPermissions) IsOrgMember(context.Context, kernel.OrgID, kernel.MemberID) (bool, error) {
@@ -65,18 +91,19 @@ func (discardAudit) Log(context.Context, audit.Entry) error { return nil }
 func TestRegisterValidatesDependencies(t *testing.T) {
 	registry := events.NewRegistry()
 	base := appctx.Container{
-		Config:                  &config.Config{},
-		DB:                      &gorm.DB{},
-		Transactor:              postgres.NewDirectTransactor(),
-		EventBus:                messaging.NewInMemoryBus(registry),
-		PermissionChecker:       allowPermissions{},
-		WorkspaceMemberChecker:  &allowMembers{},
-		WorkspaceAccessResolver: &allowMembers{},
-		WorkspaceRoleReader:     noRoles{},
-		OrgPermissionChecker:    allowOrgPermissions{},
-		AuditLogger:             discardAudit{},
-		EventRegistry:           registry,
-		Engine:                  httpx.NewEngine(),
+		Config:                   &config.Config{},
+		DB:                       &gorm.DB{},
+		Transactor:               postgres.NewDirectTransactor(),
+		EventBus:                 messaging.NewInMemoryBus(registry),
+		PermissionChecker:        allowPermissions{},
+		WorkspaceMemberChecker:   &allowMembers{},
+		WorkspaceAccessResolver:  &allowMembers{},
+		WorkspaceRoleReader:      noRoles{},
+		WorkspaceRolePermissions: workspaceRolePermissions{allowed: true},
+		OrgPermissionChecker:     allowOrgPermissions{},
+		AuditLogger:              discardAudit{},
+		EventRegistry:            registry,
+		Engine:                   httpx.NewEngine(),
 	}
 	tests := []struct {
 		name string
@@ -90,6 +117,7 @@ func TestRegisterValidatesDependencies(t *testing.T) {
 		{name: "member checker", drop: func(c *appctx.Container) { c.WorkspaceMemberChecker = nil }, want: "requires workspace member checker"},
 		{name: "workspace access resolver", drop: func(c *appctx.Container) { c.WorkspaceAccessResolver = nil }, want: "requires workspace access resolver"},
 		{name: "workspace role reader", drop: func(c *appctx.Container) { c.WorkspaceRoleReader = nil }, want: "requires workspace role reader"},
+		{name: "workspace role permission checker", drop: func(c *appctx.Container) { c.WorkspaceRolePermissions = nil }, want: "requires workspace role permission checker"},
 		{name: "organization permission checker", drop: func(c *appctx.Container) { c.OrgPermissionChecker = nil }, want: "requires organization permission checker"},
 		{name: "audit logger auto provision", drop: func(c *appctx.Container) {
 			c.AuditLogger = nil
@@ -124,18 +152,19 @@ func TestRegisterExposesMetadataRoutesWithoutLocalProvider(t *testing.T) {
 	engine := httpx.NewEngine()
 	memberAccess := &allowMembers{}
 	container := &appctx.Container{
-		Config:                  &config.Config{},
-		DB:                      db,
-		Transactor:              postgres.NewTransactor(db),
-		EventBus:                messaging.NewInMemoryBus(registry),
-		PermissionChecker:       allowPermissions{},
-		WorkspaceMemberChecker:  memberAccess,
-		WorkspaceAccessResolver: memberAccess,
-		WorkspaceRoleReader:     noRoles{},
-		OrgPermissionChecker:    allowOrgPermissions{},
-		AuditLogger:             discardAudit{},
-		EventRegistry:           registry,
-		Engine:                  engine,
+		Config:                   &config.Config{},
+		DB:                       db,
+		Transactor:               postgres.NewTransactor(db),
+		EventBus:                 messaging.NewInMemoryBus(registry),
+		PermissionChecker:        allowPermissions{},
+		WorkspaceMemberChecker:   memberAccess,
+		WorkspaceAccessResolver:  memberAccess,
+		WorkspaceRoleReader:      noRoles{},
+		WorkspaceRolePermissions: workspaceRolePermissions{allowed: true},
+		OrgPermissionChecker:     allowOrgPermissions{},
+		AuditLogger:              discardAudit{},
+		EventRegistry:            registry,
+		Engine:                   engine,
 	}
 	module := New(authn.NewTokenProvider(config.JWTConfig{}))
 	require.NoError(t, module.Register(container))
@@ -171,9 +200,45 @@ func TestRegisterExposesMetadataRoutesWithoutLocalProvider(t *testing.T) {
 	require.NoError(t, closer.Close())
 }
 
+func TestNamespaceAuthorityRequiresWorkspaceRolePermission(t *testing.T) {
+	authority := namespaceAuthorityAdapter{
+		workspaces:      &allowMembers{},
+		rolePermissions: workspaceRolePermissions{allowed: false},
+		organizations:   allowOrgPermissions{},
+	}
+
+	allowed, err := authority.HasWorkspaceFileAdmin(context.Background(), uuid.New(), uuid.New())
+
+	require.NoError(t, err)
+	require.False(t, allowed)
+}
+
+func TestWorkspaceNamespaceAdminDoesNotUseSystemSuperAdminBypass(t *testing.T) {
+	workspaceID, actorID := uuid.New(), uuid.New()
+	bindings := &roleBindingsStub{}
+	checker := govquery.NewChecker(bindings, superAdmin{})
+	authority := namespaceAuthorityAdapter{
+		workspaces:      &allowMembers{},
+		rolePermissions: checker,
+		organizations:   allowOrgPermissions{},
+	}
+
+	allowed, err := authority.HasWorkspaceFileAdmin(context.Background(), workspaceID, actorID)
+	require.NoError(t, err)
+	require.False(t, allowed)
+
+	bindings.roles = []*govmodel.Role{govmodel.NewRole(
+		kernel.WorkspaceID{UUID: workspaceID}, "file-admin", []string{authz.PermFileAdmin}, nil,
+	)}
+	allowed, err = authority.HasWorkspaceFileAdmin(context.Background(), workspaceID, actorID)
+	require.NoError(t, err)
+	require.True(t, allowed)
+}
+
 var _ authz.PermissionChecker = allowPermissions{}
 var _ authz.WorkspaceMemberChecker = (*allowMembers)(nil)
 var _ authz.WorkspaceAccessResolver = (*allowMembers)(nil)
 var _ authz.WorkspaceRoleReader = noRoles{}
+var _ authz.WorkspaceRolePermissionChecker = workspaceRolePermissions{}
 var _ authz.OrgPermissionChecker = allowOrgPermissions{}
 var _ audit.Logger = discardAudit{}
