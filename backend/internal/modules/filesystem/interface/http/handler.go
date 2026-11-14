@@ -43,6 +43,7 @@ type Handler struct {
 	namespaceForWorkspace func(context.Context, uuid.UUID) (*model.Namespace, error)
 	getNode               func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
 	listChildren          func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, int, string) ([]model.Node, string, error)
+	listChildrenFiltered  func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, string, int, string) ([]model.Node, string, error)
 	listRevisions         func(context.Context, uuid.UUID, uuid.UUID, int, string) ([]model.FileRevision, string, error)
 	createDirectory       func(context.Context, command.CreateDirectory) (*model.Node, error)
 	renameNode            func(context.Context, command.RenameNode) error
@@ -106,6 +107,11 @@ func NewHandler(
 		restoreRevision:   restore.Handle,
 		authorizeResource: authorizer.Authorize,
 		audit:             logger,
+	}
+	if filtered, ok := repo.(interface {
+		ListChildrenFiltered(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, string, int, string) ([]model.Node, string, error)
+	}); ok {
+		handler.listChildrenFiltered = filtered.ListChildrenFiltered
 	}
 	if transfers != nil {
 		handler.createTransfer = transfers.Create
@@ -343,7 +349,13 @@ func (h *Handler) ListFiles(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if h.listChildren == nil {
+	search := strings.TrimSpace(c.Query("q"))
+	if len(search) > 200 {
+		invalidRequest(c)
+		return
+	}
+	if (search == "" && h.listChildren == nil) ||
+		(search != "" && h.listChildrenFiltered == nil) {
 		filesystemError(c, domain.ErrPersistence)
 		return
 	}
@@ -378,7 +390,14 @@ func (h *Handler) ListFiles(c *gin.Context) {
 	scanCursor := c.Query("cursor")
 	nextCursor := ""
 	for len(views) < limit {
-		items, rawNext, err := h.listChildren(c.Request.Context(), rc.namespace.ID, parentID, nodeType, 200, scanCursor)
+		var items []model.Node
+		var rawNext string
+		var err error
+		if search == "" {
+			items, rawNext, err = h.listChildren(c.Request.Context(), rc.namespace.ID, parentID, nodeType, 200, scanCursor)
+		} else {
+			items, rawNext, err = h.listChildrenFiltered(c.Request.Context(), rc.namespace.ID, parentID, nodeType, search, 200, scanCursor)
+		}
 		if err != nil {
 			filesystemError(c, err)
 			return

@@ -113,6 +113,21 @@ describe("FileBrowser", () => {
     expect(screen.queryByRole("button", { name: /^移动到… / })).not.toBeInTheDocument();
   });
 
+  it("hides rename and move mutations for a read-only user", () => {
+    const props = createProps();
+    render(
+      createElement(FileBrowser, {
+        ...props,
+        canMove: false,
+        canRename: false,
+      }),
+    );
+
+    expect(screen.queryByRole("button", { name: /^重命名 / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^移动到… / })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开 资料" })).toBeInTheDocument();
+  });
+
   it("offers one keyboard-accessible move action for the current selection", async () => {
     const user = userEvent.setup();
     const props = createProps();

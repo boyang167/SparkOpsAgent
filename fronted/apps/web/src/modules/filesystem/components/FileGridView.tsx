@@ -12,6 +12,7 @@ export type FileGridViewProps = {
   onMove: (nodes: FileNodeVM[]) => void;
   onDragStart: (event: DragEvent<HTMLElement>, node: FileNodeVM) => void;
   onDragEnd: () => void;
+  canRename: boolean;
   canMove: boolean;
 };
 
@@ -24,6 +25,7 @@ export function FileGridView({
   onMove,
   onDragStart,
   onDragEnd,
+  canRename,
   canMove,
 }: FileGridViewProps) {
   return createElement(
@@ -75,6 +77,7 @@ export function FileGridView({
           { className: "flex flex-wrap justify-end gap-2" },
           createElement(FileActionMenu, {
             node,
+            canRename: canRename && node.state === "ACTIVE",
             canMove: canMove && node.state === "ACTIVE",
             onRename,
             onMove,

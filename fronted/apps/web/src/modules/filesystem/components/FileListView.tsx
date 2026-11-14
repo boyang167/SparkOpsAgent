@@ -12,6 +12,7 @@ export type FileListViewProps = {
   onMove: (nodes: FileNodeVM[]) => void;
   onDragStart: (event: DragEvent<HTMLElement>, node: FileNodeVM) => void;
   onDragEnd: () => void;
+  canRename: boolean;
   canMove: boolean;
 };
 
@@ -24,6 +25,7 @@ export function FileListView({
   onMove,
   onDragStart,
   onDragEnd,
+  canRename,
   canMove,
 }: FileListViewProps) {
   return createElement(
@@ -98,6 +100,7 @@ export function FileListView({
               { className: "text-right" },
               createElement(FileActionMenu, {
                 node,
+                canRename: canRename && node.state === "ACTIVE",
                 canMove: canMove && node.state === "ACTIVE",
                 onRename,
                 onMove,

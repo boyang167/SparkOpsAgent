@@ -15,10 +15,20 @@ export async function loadFileNamespace(workspaceId: string): Promise<FileNamesp
 
 export async function loadFileNodes(
   workspaceId: string,
-  parentId?: string | null,
+  query: {
+    parentId?: string | null;
+    cursor?: string;
+    query?: string;
+    limit?: number;
+  } = {},
 ): Promise<FileNodePageVM> {
   const ctx = await loadBffContext(workspaceId);
-  return listFileNodes(ctx, workspaceId, { parent_id: parentId ?? undefined });
+  return listFileNodes(ctx, workspaceId, {
+    parent_id: query.parentId ?? undefined,
+    cursor: query.cursor,
+    q: query.query,
+    limit: query.limit,
+  });
 }
 
 export async function loadFileNode(workspaceId: string, nodeId: string): Promise<FileNodeVM> {
@@ -30,6 +40,13 @@ export type FileNodeSelection = {
   node?: FileNodeVM;
   error?: "forbidden" | "not-found" | "error";
 };
+
+export function isInvalidFilesystemScopeError(error: unknown): boolean {
+  return (
+    error instanceof BffError &&
+    (error.status === 400 || error.status === 403 || error.status === 404)
+  );
+}
 
 export async function resolveFileNodeSelection(
   load: () => Promise<FileNodeVM>,

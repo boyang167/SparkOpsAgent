@@ -157,6 +157,10 @@ func (r *Repository) GetNodeIncludingTrashed(ctx context.Context, namespaceID, n
 }
 
 func (r *Repository) ListChildren(ctx context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, nodeType *model.NodeType, limit int, cursor string) ([]model.Node, string, error) {
+	return r.ListChildrenFiltered(ctx, namespaceID, parentID, nodeType, "", limit, cursor)
+}
+
+func (r *Repository) ListChildrenFiltered(ctx context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, nodeType *model.NodeType, search string, limit int, cursor string) ([]model.Node, string, error) {
 	if parentID != nil {
 		if _, err := r.GetNode(ctx, namespaceID, *parentID); err != nil {
 			return nil, "", err
@@ -170,6 +174,11 @@ func (r *Repository) ListChildren(ctx context.Context, namespaceID uuid.UUID, pa
 	}
 	if nodeType != nil {
 		query = query.Where("node_type = ?", *nodeType)
+	}
+	needle := strings.ToLower(strings.TrimSpace(norm.NFC.String(search)))
+	if needle != "" {
+		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(needle)
+		query = query.Where(`normalized_name LIKE ? ESCAPE '\'`, "%"+escaped+"%")
 	}
 	if cursor != "" {
 		query = query.Where("id > ?", cursor)

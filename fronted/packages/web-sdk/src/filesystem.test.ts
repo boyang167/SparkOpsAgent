@@ -168,10 +168,14 @@ describe("filesystem node sdk", () => {
     await listFileNodes("workspace-1", {
       parentId: "parent-1",
       nodeType: "DIRECTORY",
+      query: "设计",
+      cursor: "cursor-1",
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("parent_id=parent-1&type=DIRECTORY"),
+      expect.stringContaining(
+        "parent_id=parent-1&type=DIRECTORY&q=%E8%AE%BE%E8%AE%A1&cursor=cursor-1",
+      ),
       expect.anything(),
     );
   });

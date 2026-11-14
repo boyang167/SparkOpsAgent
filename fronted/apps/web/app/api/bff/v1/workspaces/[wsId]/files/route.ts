@@ -7,8 +7,18 @@ export const GET = createBffHandler(async (ctx, req, { params }) => {
     throw new Error("workspace id required");
   }
   const parentId = req.nextUrl.searchParams.get("parent_id") ?? undefined;
+  const typeValue = req.nextUrl.searchParams.get("type") ?? undefined;
+  const nodeType =
+    typeValue === "FILE" || typeValue === "DIRECTORY" ? typeValue : undefined;
+  const query = req.nextUrl.searchParams.get("q") ?? undefined;
   const cursor = req.nextUrl.searchParams.get("cursor") ?? undefined;
   const limitRaw = req.nextUrl.searchParams.get("limit");
   const limit = limitRaw ? Number.parseInt(limitRaw, 10) : undefined;
-  return listFileNodes(ctx, wsId, { parent_id: parentId, cursor, limit });
+  return listFileNodes(ctx, wsId, {
+    parent_id: parentId,
+    type: nodeType,
+    q: query,
+    cursor,
+    limit,
+  });
 });

@@ -31,6 +31,7 @@ export type FileExplorerPanelProps = {
   onCreateDirectory?: (name: string) => Promise<void>;
   onNavigate?: () => void;
   onOpen?: (node: FileNodeVM) => void;
+  canWrite?: boolean;
 };
 
 export function FileExplorerPanel({
@@ -47,6 +48,7 @@ export function FileExplorerPanel({
   onCreateDirectory,
   onNavigate,
   onOpen,
+  canWrite = true,
 }: FileExplorerPanelProps) {
   const router = useRouter();
   const [nodes, setNodes] = useState(initialNodes);
@@ -135,17 +137,19 @@ export function FileExplorerPanel({
       </nav>
 
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          className="btn btn-secondary filesystem-touch-target"
-          onClick={() => {
-            setDialog(showCreateDialog());
-            setCreateName("");
-          }}
-        >
-          新建目录
-        </button>
-        {onFilesSelected ? (
+        {canWrite ? (
+          <button
+            type="button"
+            className="btn btn-secondary filesystem-touch-target"
+            onClick={() => {
+              setDialog(showCreateDialog());
+              setCreateName("");
+            }}
+          >
+            新建目录
+          </button>
+        ) : null}
+        {canWrite && onFilesSelected ? (
           <UploadPanel
             onFilesSelected={onFilesSelected}
             emphasis={dialog ? "secondary" : "primary"}
@@ -175,6 +179,7 @@ export function FileExplorerPanel({
           setRenameValue(node.name);
         }}
         onMove={(moveNodes) => onMove?.(moveNodes)}
+        canRename={canWrite}
         canMove={canMove && Boolean(onMove)}
       />
 

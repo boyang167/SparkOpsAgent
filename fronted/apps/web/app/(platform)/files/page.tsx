@@ -13,8 +13,18 @@ import {
   loadFileNamespace,
   loadFileNode,
   loadFileNodes,
+  isInvalidFilesystemScopeError,
   resolveFileNodeSelection,
 } from "@/server/loaders/filesystem";
+
+function rootFilesPath(state: ReturnType<typeof parseWorkbenchState>) {
+  const params = new URLSearchParams();
+  if (state.tab !== "files") params.set("tab", state.tab);
+  if (state.view !== "list") params.set("view", state.view);
+  if (state.query) params.set("q", state.query);
+  const query = params.toString();
+  return query ? `/files?${query}` : "/files";
+}
 
 export default async function FilesPage({
   searchParams,
@@ -63,7 +73,20 @@ export default async function FilesPage({
     );
   }
 
-  const listing = await loadFileNodes(workspaceId, initialState.parent ?? rootId);
+  let listing: Awaited<ReturnType<typeof loadFileNodes>>;
+  try {
+    listing = await loadFileNodes(workspaceId, {
+      parentId: initialState.parent ?? rootId,
+      cursor: initialState.cursor,
+      query: initialState.query,
+      limit: 100,
+    });
+  } catch (error) {
+    if (isInvalidFilesystemScopeError(error)) {
+      redirect(rootFilesPath(initialState));
+    }
+    throw error;
+  }
   const selection = initialState.node
     ? await resolveFileNodeSelection(() => loadFileNode(workspaceId, initialState.node!))
     : {};
@@ -75,6 +98,7 @@ export default async function FilesPage({
         workspaceId={workspaceId}
         namespace={namespace}
         initialNodes={listing.items}
+        initialNextCursor={listing.next_cursor}
         initialState={initialState}
         permissions={permissions}
         initialSelectedNode={selection.node}

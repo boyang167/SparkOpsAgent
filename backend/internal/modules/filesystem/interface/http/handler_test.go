@@ -274,8 +274,13 @@ func TestListTransfersUsesReadPermissionAndPassesFilters(t *testing.T) {
 			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
 		},
 		listTransfers: func(_ context.Context, input query.ListTransfers) ([]*model.TransferSession, string, error) {
-			captured = input
+			if captured.WorkspaceID == uuid.Nil {
+				captured = input
+			}
 			return []*model.TransferSession{workspaceSession(input.WorkspaceID)}, "next-page", nil
+		},
+		authorizeResource: func(context.Context, resourceauth.Request) resourceauth.Decision {
+			return resourceauth.Decision{Allowed: true}
 		},
 	}
 	router, token, wsID := testRouter(t, memberStub(true), permissionStub{
@@ -296,6 +301,67 @@ func TestListTransfersUsesReadPermissionAndPassesFilters(t *testing.T) {
 	require.Equal(t, "opaque", captured.Cursor)
 	require.Contains(t, res.Body.String(), "next-page")
 	require.Contains(t, res.Body.String(), "payload.bin")
+}
+
+func TestListTransfersFiltersDeniedParentsAndFillsPageWithoutCursorGaps(t *testing.T) {
+	nsID, rootID := uuid.New(), uuid.New()
+	deniedParent, allowedParentA, allowedParentB := uuid.New(), uuid.New(), uuid.New()
+	newSession := func(workspaceID, parentID uuid.UUID, name string) *model.TransferSession {
+		session, err := model.NewTransferSession(model.TransferSessionInput{
+			ID: uuid.New(), WorkspaceID: workspaceID, NamespaceID: nsID,
+			TargetParentID: &parentID, TargetName: name, CreatedBy: uuid.New(),
+			Protocol: model.TransferProtocolDirect, ExpectedSize: 7,
+			IdempotencyKey: uuid.NewString(), RequestHash: strings.Repeat("a", 64),
+			TemporaryObjectKey: "transfers/" + name, ExpiresAt: time.Now().Add(time.Hour),
+			Classification: model.TransferClassificationInternal,
+		})
+		require.NoError(t, err)
+		return session
+	}
+	var calls []query.ListTransfers
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		listTransfers: func(_ context.Context, input query.ListTransfers) ([]*model.TransferSession, string, error) {
+			calls = append(calls, input)
+			switch input.Cursor {
+			case "":
+				return []*model.TransferSession{
+					newSession(input.WorkspaceID, deniedParent, "secret.bin"),
+					newSession(input.WorkspaceID, allowedParentA, "visible-a.bin"),
+				}, "cursor-after-first-batch", nil
+			case "cursor-after-first-batch":
+				return []*model.TransferSession{
+					newSession(input.WorkspaceID, allowedParentB, "visible-b.bin"),
+				}, "cursor-after-visible-b", nil
+			default:
+				t.Fatalf("unexpected cursor %q", input.Cursor)
+				return nil, "", nil
+			}
+		},
+		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			require.Equal(t, model.ResourcePermissionRead, request.Permission)
+			return resourceauth.Decision{Allowed: request.NodeID != deniedParent}
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{
+		allowed: map[string]bool{authz.PermFileRead: true},
+	}, h)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/workspaces/"+wsID.String()+"/transfers?limit=2", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.NotContains(t, res.Body.String(), "secret.bin")
+	require.Contains(t, res.Body.String(), "visible-a.bin")
+	require.Contains(t, res.Body.String(), "visible-b.bin")
+	require.Contains(t, res.Body.String(), "cursor-after-visible-b")
+	require.Len(t, calls, 2)
+	require.Equal(t, 2, calls[0].Limit)
+	require.Equal(t, 1, calls[1].Limit)
 }
 
 func TestListTransfersRejectsInvalidStatus(t *testing.T) {
@@ -430,6 +496,37 @@ func TestListFilesValidatesAndPassesNodeTypeBeforeQuery(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, invalidResponse.Code, invalidResponse.Body.String())
 	require.Contains(t, invalidResponse.Body.String(), "FILESYSTEM_INVALID_REQUEST")
 	require.Nil(t, capturedType)
+}
+
+func TestListFilesPassesSearchBeforePagination(t *testing.T) {
+	nsID, rootID := uuid.New(), uuid.New()
+	var capturedQuery, capturedCursor string
+	var capturedLimit int
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		listChildrenFiltered: func(_ context.Context, _ uuid.UUID, _ *uuid.UUID, _ *model.NodeType, search string, limit int, cursor string) ([]model.Node, string, error) {
+			capturedQuery, capturedLimit, capturedCursor = search, limit, cursor
+			return nil, "", nil
+		},
+		authorizeResource: func(context.Context, resourceauth.Request) resourceauth.Decision {
+			return resourceauth.Decision{Allowed: true}
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{
+		allowed: map[string]bool{authz.PermFileRead: true},
+	}, h)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/workspaces/"+wsID.String()+"/files?q=design&cursor=00000000-0000-0000-0000-000000000001&limit=20", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.Equal(t, "design", capturedQuery)
+	require.Equal(t, 200, capturedLimit)
+	require.Equal(t, "00000000-0000-0000-0000-000000000001", capturedCursor)
 }
 
 func TestListFilesDeniesWhenResourceAuthorizerDeniesAfterRBAC(t *testing.T) {

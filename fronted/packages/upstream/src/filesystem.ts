@@ -25,8 +25,15 @@ import { upstreamFetch } from "./core";
 
 type ListFilesQuery = {
   parent_id?: string | null;
+  type?: "FILE" | "DIRECTORY";
+  q?: string;
   cursor?: string;
   limit?: number;
+};
+
+type MoveFileNodeCommand = {
+  parent_id: string | null;
+  name: string;
 };
 
 type ListRevisionsQuery = {
@@ -37,6 +44,8 @@ type ListRevisionsQuery = {
 function filesQuery(query: ListFilesQuery = {}) {
   const params = new URLSearchParams();
   if (query.parent_id) params.set("parent_id", query.parent_id);
+  if (query.type) params.set("type", query.type);
+  if (query.q) params.set("q", query.q);
   if (query.cursor) params.set("cursor", query.cursor);
   if (query.limit != null) params.set("limit", String(query.limit));
   const suffix = params.toString();
@@ -110,6 +119,19 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
     ) {
       return upstreamFetch<void>(`/api/v1/workspaces/${workspaceId}/files/${nodeId}/name`, {
         method: "PATCH",
+        body: JSON.stringify(input),
+        headers: { "Idempotency-Key": idempotencyKey },
+        options: { ...options, workspaceId },
+      });
+    },
+    moveFileNode(
+      workspaceId: string,
+      nodeId: string,
+      input: MoveFileNodeCommand,
+      idempotencyKey: string,
+    ) {
+      return upstreamFetch<void>(`/api/v1/workspaces/${workspaceId}/files/${nodeId}/move`, {
+        method: "POST",
         body: JSON.stringify(input),
         headers: { "Idempotency-Key": idempotencyKey },
         options: { ...options, workspaceId },

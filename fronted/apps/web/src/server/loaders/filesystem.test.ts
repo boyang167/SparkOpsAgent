@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BffError } from "@sparkops/contracts";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
-import { resolveFileNodeSelection } from "./filesystem";
+import { isInvalidFilesystemScopeError, resolveFileNodeSelection } from "./filesystem";
 
 const node: FileNodeVM = {
   id: "00000000-0000-4000-8000-000000000011",
@@ -36,5 +36,23 @@ describe("resolveFileNodeSelection", () => {
     await expect(
       resolveFileNodeSelection(() => Promise.reject(new Error("offline"))),
     ).resolves.toEqual({ error: "error" });
+  });
+});
+
+describe("isInvalidFilesystemScopeError", () => {
+  it.each([400, 403, 404])("treats %s as a stale URL scope", (status) => {
+    expect(
+      isInvalidFilesystemScopeError(
+        new BffError("stale scope", "FILESYSTEM_ERROR", status),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not hide service failures as stale scope", () => {
+    expect(
+      isInvalidFilesystemScopeError(
+        new BffError("offline", "FILESYSTEM_ERROR", 503),
+      ),
+    ).toBe(false);
   });
 });

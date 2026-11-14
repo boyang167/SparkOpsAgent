@@ -66,7 +66,13 @@ export async function getFileNamespace(
 export async function listFileNodes(
   ctx: BffContext,
   workspaceId: string,
-  query: { parent_id?: string | null; cursor?: string; limit?: number } = {},
+  query: {
+    parent_id?: string | null;
+    type?: "FILE" | "DIRECTORY";
+    q?: string;
+    cursor?: string;
+    limit?: number;
+  } = {},
 ): Promise<FileNodePageVM> {
   const data = await ctx.upstream.filesystem.listFiles(workspaceId, query);
   return mapNodePage(data);
@@ -99,6 +105,21 @@ export async function renameFileNode(
   idempotencyKey: string,
 ): Promise<void> {
   await ctx.upstream.filesystem.renameFileNode(workspaceId, nodeId, input, idempotencyKey);
+}
+
+export async function moveFileNode(
+  ctx: BffContext,
+  workspaceId: string,
+  nodeId: string,
+  input: { parent_id: string | null; name: string },
+  idempotencyKey: string,
+): Promise<void> {
+  await ctx.upstream.filesystem.moveFileNode(
+    workspaceId,
+    nodeId,
+    input,
+    idempotencyKey,
+  );
 }
 
 export async function listFileRevisions(

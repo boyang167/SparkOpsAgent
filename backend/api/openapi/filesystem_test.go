@@ -60,6 +60,27 @@ func TestFilesystemOpenAPIPathsMatchHTTPContract(t *testing.T) {
 	require.Contains(t, specText, "g2 transfer gateway")
 }
 
+func TestFilesystemListOpenAPIDocumentsTypeAndQueryFilters(t *testing.T) {
+	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &document))
+
+	paths := document["paths"].(map[string]any)
+	item := paths["/api/v1/workspaces/{wsId}/files"].(map[string]any)
+	get := item["get"].(map[string]any)
+	parameters := get["parameters"].([]any)
+	names := make([]string, 0, len(parameters))
+	for _, rawParameter := range parameters {
+		parameter := rawParameter.(map[string]any)
+		if name, ok := parameter["name"].(string); ok {
+			names = append(names, name)
+		}
+	}
+	require.Contains(t, names, "type")
+	require.Contains(t, names, "q")
+}
+
 func TestFilesystemOpenAPIIdempotencyAndLocalRefs(t *testing.T) {
 	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
 	require.NoError(t, err)

@@ -155,24 +155,47 @@ func (h *Handler) ListTransfers(c *gin.Context) {
 		filesystemError(c, domain.ErrPersistence)
 		return
 	}
-	items, next, err := h.listTransfers(c.Request.Context(), query.ListTransfers{
-		WorkspaceID: rc.workspaceID,
-		Status:      status,
-		Limit:       limit,
-		Cursor:      c.Query("cursor"),
-	})
-	if err != nil {
-		filesystemError(c, err)
-		return
+	views := make([]gin.H, 0, limit)
+	scanCursor := c.Query("cursor")
+	nextCursor := ""
+	const maxAuthorizationBatches = 20
+	for batch := 0; batch < maxAuthorizationBatches && len(views) < limit; batch++ {
+		remaining := limit - len(views)
+		items, rawNext, err := h.listTransfers(c.Request.Context(), query.ListTransfers{
+			WorkspaceID: rc.workspaceID,
+			Status:      status,
+			Limit:       remaining,
+			Cursor:      scanCursor,
+		})
+		if err != nil {
+			filesystemError(c, err)
+			return
+		}
+		for _, session := range items {
+			parent := session.TargetParentID()
+			if parent == nil {
+				parent = rc.namespace.RootNodeID
+			}
+			if parent == nil {
+				continue
+			}
+			decision := h.resourceDecision(c, rc, *parent, model.ResourcePermissionRead)
+			if !decision.Allowed {
+				h.auditResourceDeny(c, rc, *parent, decision.Reason)
+				continue
+			}
+			views = append(views, transferSessionView(query.GetTransferResult{
+				Session:    session,
+				Descriptor: command.DescriptorFromSession(session),
+			}, TransferGatewayView{}))
+		}
+		nextCursor = rawNext
+		if rawNext == "" || rawNext == scanCursor {
+			break
+		}
+		scanCursor = rawNext
 	}
-	views := make([]gin.H, 0, len(items))
-	for _, session := range items {
-		views = append(views, transferSessionView(query.GetTransferResult{
-			Session:    session,
-			Descriptor: command.DescriptorFromSession(session),
-		}, TransferGatewayView{}))
-	}
-	httpx.OK(c, gin.H{"items": views, "next_cursor": next})
+	httpx.OK(c, gin.H{"items": views, "next_cursor": nextCursor})
 }
 
 func transferListPagination(c *gin.Context) (int, bool) {

@@ -9,9 +9,11 @@ import { createTransferQueue } from "./transfer-queue";
 import { TransferCenter, TransferSummary } from "./TransferCenter";
 
 const listTransferSessionsMock = vi.hoisted(() => vi.fn());
+const abortTransferMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@sparkops/web-sdk/filesystem", () => ({
   listTransferSessions: listTransferSessionsMock,
+  abortTransfer: abortTransferMock,
 }));
 
 function persisted(
@@ -56,6 +58,73 @@ describe("TransferCenter", () => {
   afterEach(() => {
     cleanup();
     listTransferSessionsMock.mockReset();
+    abortTransferMock.mockReset();
+  });
+
+  it("aborts an active persisted session through the backend", async () => {
+    const active = {
+      ...persisted("00000000-0000-0000-0000-000000000030", "活动任务.bin"),
+      status: "UPLOADING" as const,
+    };
+    listTransferSessionsMock
+      .mockResolvedValueOnce({ items: [active], next_cursor: "" })
+      .mockResolvedValueOnce({ items: [], next_cursor: "" });
+    abortTransferMock.mockResolvedValue(undefined);
+    render(
+      createElement(TransferCenter, {
+        queue: emptyQueue(),
+        workspaceId: active.workspace_id,
+      }),
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "取消 活动任务.bin" }),
+    );
+
+    await vi.waitFor(() =>
+      expect(abortTransferMock).toHaveBeenCalledWith(
+        active.session_id,
+        active.workspace_id,
+      ),
+    );
+    expect(listTransferSessionsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("requires a matching file before creating a new transfer for a failed persisted task", async () => {
+    const failed = persisted(
+      "00000000-0000-0000-0000-000000000031",
+      "失败任务.bin",
+    );
+    listTransferSessionsMock.mockResolvedValue({
+      items: [failed],
+      next_cursor: "",
+    });
+    const queue = emptyQueue();
+    const enqueue = vi.spyOn(queue, "enqueue");
+    render(
+      createElement(TransferCenter, {
+        queue,
+        workspaceId: failed.workspace_id,
+      }),
+    );
+
+    expect(
+      await screen.findByText(/重新选择匹配文件后将新建传输/),
+    ).toBeInTheDocument();
+    const input = screen.getByLabelText("重新选择并新建 失败任务.bin");
+    fireEvent.change(input, {
+      target: { files: [new File(["wrong"], "其他.bin")] },
+    });
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("文件名称和大小必须与失败任务一致");
+
+    fireEvent.change(input, {
+      target: { files: [new File(["1234567"], "失败任务.bin")] },
+    });
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.any(File)]),
+      failed.target_parent_id,
+    );
   });
 
   it("merges persisted sessions with local work and deduplicates by session id", async () => {

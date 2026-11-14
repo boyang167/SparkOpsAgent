@@ -7,11 +7,15 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import type { ChangeEvent } from "react";
 import type {
   TransferSessionVM,
   TransferStatus as PersistedStatus,
 } from "@sparkops/contracts/filesystem";
-import { listTransferSessions } from "@sparkops/web-sdk/filesystem";
+import {
+  abortTransfer,
+  listTransferSessions,
+} from "@sparkops/web-sdk/filesystem";
 import type { TransferItem, TransferQueue, TransferStatus } from "./transfer-queue";
 
 const statusLabels: Record<TransferStatus, string> = {
@@ -80,8 +84,55 @@ function Progress({ item }: { item: TransferItem }) {
   );
 }
 
-function PersistedTransferCard({ session }: { session: TransferSessionVM }) {
+function PersistedTransferCard({
+  session,
+  queue,
+  onRefresh,
+}: {
+  session: TransferSessionVM;
+  queue: TransferQueue;
+  onRefresh: () => void;
+}) {
   const completed = session.status === "COMPLETED";
+  const terminal = new Set<PersistedStatus>([
+    "COMPLETED",
+    "FAILED",
+    "REJECTED",
+    "ABORTED",
+    "EXPIRED",
+  ]);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function cancelPersisted() {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await abortTransfer(session.session_id, session.workspace_id);
+      onRefresh();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "取消失败，请重试。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function selectReplacement(file: File | undefined) {
+    if (!file) return;
+    setActionError(null);
+    if (
+      file.name !== session.target_name ||
+      file.size !== session.expected_size
+    ) {
+      setActionError("文件名称和大小必须与失败任务一致。");
+      return;
+    }
+    if (!session.target_parent_id) {
+      setActionError("原目标目录不可用，无法安全新建传输。");
+      return;
+    }
+    queue.enqueue([file], session.target_parent_id);
+  }
   return createElement(
     "article",
     { className: "card stack-sm" },
@@ -98,6 +149,19 @@ function PersistedTransferCard({ session }: { session: TransferSessionVM }) {
           persistedStatusLabels[session.status],
         ),
       ),
+      !terminal.has(session.status)
+        ? createElement(
+            "button",
+            {
+              type: "button",
+              className: "btn btn-ghost btn-sm",
+              "aria-label": `取消 ${session.target_name}`,
+              disabled: busy,
+              onClick: () => void cancelPersisted(),
+            },
+            busy ? "正在取消" : "取消",
+          )
+        : null,
     ),
     createElement(
       "div",
@@ -124,6 +188,38 @@ function PersistedTransferCard({ session }: { session: TransferSessionVM }) {
           "p",
           { role: "alert", className: "text-sm text-danger" },
           session.error_code,
+        )
+      : null,
+    session.status === "FAILED"
+      ? createElement(
+          "div",
+          { className: "stack-xs" },
+          createElement(
+            "p",
+            { className: "text-sm text-muted" },
+            "旧会话已失败；重新选择匹配文件后将新建传输，不会恢复旧会话。",
+          ),
+          createElement(
+            "label",
+            { className: "btn btn-secondary btn-sm self-start" },
+            "重新选择并新建",
+            createElement("input", {
+              type: "file",
+              className: "sr-only",
+              "aria-label": `重新选择并新建 ${session.target_name}`,
+              onChange: (event: ChangeEvent<HTMLInputElement>) => {
+                selectReplacement(event.currentTarget.files?.[0]);
+                event.currentTarget.value = "";
+              },
+            }),
+          ),
+        )
+      : null,
+    actionError
+      ? createElement(
+          "p",
+          { role: "alert", className: "text-sm text-danger" },
+          actionError,
         )
       : null,
   );
@@ -447,6 +543,10 @@ export function TransferCenter({
       createElement(PersistedTransferCard, {
         key: session.session_id,
         session,
+        queue,
+        onRefresh: () => {
+          if (workspaceId) beginFirstPageRequest(workspaceId, false);
+        },
       }),
     ),
     scopedPersisted.phase === "loading"

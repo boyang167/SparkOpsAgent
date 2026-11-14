@@ -17,6 +17,7 @@ export type FileBrowserProps = {
   onOpen: (node: FileNodeVM) => void;
   onRename: (node: FileNodeVM) => void;
   onMove: (nodes: FileNodeVM[]) => void;
+  canRename?: boolean;
   canMove?: boolean;
 };
 
@@ -36,6 +37,7 @@ export function FileBrowser({
   onOpen,
   onRename,
   onMove,
+  canRename = true,
   canMove = true,
 }: FileBrowserProps) {
   const [selection, setSelection] = useState(() => new Set(selectedIds));
@@ -106,6 +108,7 @@ export function FileBrowser({
     onMove,
     onDragStart: handleDragStart,
     onDragEnd: clearNodeDragSession,
+    canRename,
     canMove,
   };
 

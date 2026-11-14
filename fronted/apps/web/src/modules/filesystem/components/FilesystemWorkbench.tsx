@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createElement, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import type { ChangeEvent, FormEvent, KeyboardEvent } from "react";
 import type { FileNamespaceVM, FileNodeVM } from "@sparkops/contracts/filesystem";
 import {
   abortTransfer,
@@ -28,6 +28,7 @@ export type FilesystemWorkbenchProps = {
   workspaceId: string;
   namespace: FileNamespaceVM;
   initialNodes: FileNodeVM[];
+  initialNextCursor?: string;
   initialState: WorkbenchState;
   permissions: string[];
   initialSelectedNode?: FileNodeVM;
@@ -74,6 +75,7 @@ export function FilesystemWorkbench({
   workspaceId,
   namespace,
   initialNodes,
+  initialNextCursor = "",
   initialState,
   permissions,
   initialSelectedNode,
@@ -82,31 +84,105 @@ export function FilesystemWorkbench({
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const scopeKey = `${workspaceId}:${namespace.id}:${namespace.root_node_id ?? ""}`;
+  const scopeKeyRef = useRef(scopeKey);
+  const scopeCleanupRef = useRef<{
+    key: string;
+    parent?: string;
+    node?: string;
+    cursor?: string;
+  } | null>(null);
+  const scopeChanged = scopeKeyRef.current !== scopeKey;
+  if (scopeChanged) {
+    scopeCleanupRef.current = {
+      key: scopeKey,
+      parent: initialState.parent,
+      node: initialState.node,
+      cursor: initialState.cursor,
+    };
+  }
+  const cleanup =
+    scopeCleanupRef.current?.key === scopeKey ? scopeCleanupRef.current : null;
+  const staleParent = Boolean(
+    cleanup?.parent && cleanup.parent === initialState.parent,
+  );
+  const staleNode = Boolean(cleanup?.node && cleanup.node === initialState.node);
+  const staleCursor = Boolean(
+    cleanup?.cursor && cleanup.cursor === initialState.cursor,
+  );
+  const effectiveState = {
+    ...initialState,
+    parent: staleParent ? undefined : initialState.parent,
+    node: staleNode ? undefined : initialState.node,
+    cursor: staleCursor ? undefined : initialState.cursor,
+  };
+  const scopedInitialSelectedNode = staleNode
+    ? undefined
+    : initialSelectedNode;
+  const scopedInitialSelectedNodeError = staleNode
+    ? undefined
+    : initialSelectedNodeError;
   const [view, setView] = useState<FileView>(initialState.view);
+  const [searchValue, setSearchValue] = useState(initialState.query);
+  const cursorTrail = useRef<string[]>([]);
+  const cursorScopeRef = useRef(
+    `${scopeKey}:${initialState.parent ?? ""}:${initialState.query}`,
+  );
   const [directoryDrawerOpen, setDirectoryDrawerOpen] = useState(false);
   const [moveNodes, setMoveNodes] = useState<FileNodeVM[]>([]);
   const [treeVersion, setTreeVersion] = useState(0);
   const [moveError, setMoveError] = useState<string | null>(null);
   const serverSelectionKey = [
     workspaceId,
-    initialState.node ?? "",
-    initialSelectedNode?.id ?? "",
-    initialSelectedNodeError ?? "",
+    effectiveState.node ?? "",
+    scopedInitialSelectedNode?.id ?? "",
+    scopedInitialSelectedNodeError ?? "",
   ].join(":");
   const serverSelectionKeyRef = useRef(serverSelectionKey);
   const [selection, setSelection] = useState<{
     node: FileNodeVM | null;
     error?: "forbidden" | "not-found" | "error";
-  }>({ node: initialSelectedNode ?? null, error: initialSelectedNodeError });
+  }>({
+    node: scopedInitialSelectedNode ?? null,
+    error: scopedInitialSelectedNodeError,
+  });
   const selected =
     serverSelectionKeyRef.current === serverSelectionKey
       ? selection
-      : { node: initialSelectedNode ?? null, error: initialSelectedNodeError };
+      : {
+          node: scopedInitialSelectedNode ?? null,
+          error: scopedInitialSelectedNodeError,
+        };
   useLayoutEffect(() => {
     if (serverSelectionKeyRef.current === serverSelectionKey) return;
     serverSelectionKeyRef.current = serverSelectionKey;
-    setSelection({ node: initialSelectedNode ?? null, error: initialSelectedNodeError });
-  }, [initialSelectedNode, initialSelectedNodeError, serverSelectionKey]);
+    setSelection({
+      node: scopedInitialSelectedNode ?? null,
+      error: scopedInitialSelectedNodeError,
+    });
+  }, [scopedInitialSelectedNode, scopedInitialSelectedNodeError, serverSelectionKey]);
+  useLayoutEffect(() => {
+    if (scopeKeyRef.current === scopeKey) return;
+    scopeKeyRef.current = scopeKey;
+    setView(initialState.view);
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.delete("parent");
+    nextSearchParams.delete("node");
+    nextSearchParams.delete("cursor");
+    const query = nextSearchParams.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  }, [initialState.view, pathname, router, scopeKey, searchParams]);
+  useLayoutEffect(() => {
+    setSearchValue(initialState.query);
+    const cursorScope = `${scopeKey}:${initialState.parent ?? ""}:${initialState.query}`;
+    if (cursorScopeRef.current !== cursorScope) {
+      cursorScopeRef.current = cursorScope;
+      cursorTrail.current = [];
+    }
+  }, [initialState.parent, initialState.query, scopeKey]);
+  useLayoutEffect(() => {
+    setView(initialState.view);
+  }, [initialState.view, scopeKey]);
   const transferQueues = useRef(new Map<string, TransferQueue>());
   const queueLifecycleGeneration = useRef(0);
   const transferQueueKey = `${workspaceId}:${namespace.id}`;
@@ -270,8 +346,8 @@ export function FilesystemWorkbench({
   const visibleTabs = tabs.filter(
     (tab) => !tab.permission || permissions.includes(tab.permission),
   );
-  const activeTab = visibleTabs.some((tab) => tab.id === initialState.tab)
-    ? initialState.tab
+  const activeTab = visibleTabs.some((tab) => tab.id === effectiveState.tab)
+    ? effectiveState.tab
     : "files";
 
   function selectTab(tab: WorkbenchTab) {
@@ -332,6 +408,35 @@ export function FilesystemWorkbench({
     router.push(query ? `${pathname}?${query}` : pathname);
   }
 
+  function submitSearch() {
+    cursorTrail.current = [];
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    const query = searchValue.trim();
+    if (query) nextSearchParams.set("q", query);
+    else nextSearchParams.delete("q");
+    nextSearchParams.delete("cursor");
+    const nextQuery = nextSearchParams.toString();
+    router.push(nextQuery ? `${pathname}?${nextQuery}` : pathname);
+  }
+
+  function nextPage() {
+    if (!initialNextCursor) return;
+    cursorTrail.current.push(effectiveState.cursor ?? "");
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.set("cursor", initialNextCursor);
+    router.push(`${pathname}?${nextSearchParams.toString()}`);
+  }
+
+  function previousPage() {
+    if (cursorTrail.current.length === 0) return;
+    const previousCursor = cursorTrail.current.pop() ?? "";
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    if (previousCursor) nextSearchParams.set("cursor", previousCursor);
+    else nextSearchParams.delete("cursor");
+    const query = nextSearchParams.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }
+
   function refreshDirectories() {
     setTreeVersion((value) => value + 1);
     router.refresh();
@@ -359,10 +464,10 @@ export function FilesystemWorkbench({
   function renderDirectoryTree() {
     if (!rootNode) return null;
     return createElement(DirectoryTree, {
-      key: treeVersion,
+      key: `${scopeKey}:${treeVersion}`,
       workspaceId,
       root: rootNode,
-      currentId: initialState.parent ?? rootNode.id,
+      currentId: effectiveState.parent ?? rootNode.id,
       onNavigate: navigateDirectory,
       onDropNodes: (nodeIds: string[], target: FileNodeVM) => {
         void dropNodes(nodeIds, target);
@@ -420,9 +525,11 @@ export function FilesystemWorkbench({
       ? createElement(FileExplorerPanel, {
           workspaceId,
           namespaceId: namespace.id,
-          parentId: initialState.parent ?? namespace.root_node_id,
+          key: `${scopeKey}:${effectiveState.parent ?? namespace.root_node_id}`,
+          parentId: effectiveState.parent ?? namespace.root_node_id,
           initialNodes,
           view,
+          canWrite: permissions.includes("file:write"),
           canMove: permissions.includes("file:write"),
           onMove: setMoveNodes,
           onOpen: openNode,
@@ -430,7 +537,7 @@ export function FilesystemWorkbench({
             ? (files: File[]) =>
                 transferQueue.enqueue(
                   files,
-                  initialState.parent ?? namespace.root_node_id!,
+                  effectiveState.parent ?? namespace.root_node_id!,
                 )
             : undefined,
         })
@@ -452,10 +559,10 @@ export function FilesystemWorkbench({
     createElement(
       FileDropZone,
       {
-        targetParentId: initialState.parent ?? namespace.root_node_id ?? "",
+        targetParentId: effectiveState.parent ?? namespace.root_node_id ?? "",
         targetName: "当前目录",
         canWrite:
-          Boolean(initialState.parent ?? namespace.root_node_id) &&
+          Boolean(effectiveState.parent ?? namespace.root_node_id) &&
           permissions.includes("file:write"),
         onFiles: (files: File[], targetParentId: string) =>
           transferQueue.enqueue(files, targetParentId),
@@ -466,7 +573,58 @@ export function FilesystemWorkbench({
           className: "filesystem-browser-main",
           "aria-labelledby": "workbench-tab-files",
         },
+        createElement(
+          "form",
+          {
+            role: "search",
+            "aria-label": "文件搜索",
+            className: "mb-4 flex flex-wrap gap-2",
+            onSubmit: (event: FormEvent) => {
+              event.preventDefault();
+              submitSearch();
+            },
+          },
+          createElement("input", {
+            type: "search",
+            className: "input min-w-0 flex-1",
+            "aria-label": "搜索文件",
+            value: searchValue,
+            onChange: (event: ChangeEvent<HTMLInputElement>) =>
+              setSearchValue(event.currentTarget.value),
+          }),
+          createElement(
+            "button",
+            { type: "submit", className: "btn btn-secondary" },
+            "搜索",
+          ),
+        ),
         filesPanel,
+        createElement(
+          "nav",
+          { "aria-label": "文件分页", className: "mt-4 flex gap-2" },
+          cursorTrail.current.length > 0
+            ? createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "btn btn-ghost btn-sm",
+                  onClick: previousPage,
+                },
+                "上一页",
+              )
+            : null,
+          initialNextCursor
+            ? createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "btn btn-secondary btn-sm",
+                  onClick: nextPage,
+                },
+                "下一页",
+              )
+            : null,
+        ),
       ),
     ),
   );

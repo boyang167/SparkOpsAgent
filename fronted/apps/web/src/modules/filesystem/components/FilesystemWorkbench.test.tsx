@@ -26,6 +26,7 @@ const navigation = vi.hoisted(() => ({
 const explorer = vi.hoisted(() => ({
   views: [] as string[],
   canMoves: [] as boolean[],
+  parentIds: [] as string[],
   onOpen: undefined as undefined | ((node: FileNodeVM) => void),
 }));
 
@@ -115,14 +116,17 @@ vi.mock("./FileExplorerPanel", () => ({
   FileExplorerPanel: ({
     view,
     canMove,
+    parentId,
     onOpen,
   }: {
     view: string;
     canMove: boolean;
+    parentId: string;
     onOpen?: (node: FileNodeVM) => void;
   }) => {
     explorer.views.push(view);
     explorer.canMoves.push(canMove);
+    explorer.parentIds.push(parentId);
     explorer.onOpen = onOpen;
     return null;
   },
@@ -231,6 +235,7 @@ describe("FilesystemWorkbench", () => {
     navigation.searchParams = new URLSearchParams();
     explorer.views = [];
     explorer.canMoves = [];
+    explorer.parentIds = [];
     explorer.onOpen = undefined;
     directoryTree.roots = [];
     directoryTree.canWrites = [];
@@ -338,6 +343,50 @@ describe("FilesystemWorkbench", () => {
     expect(screen.getByRole("dialog", { name: "文件详情" })).toHaveTextContent("B.md");
   });
 
+  it("normalizes stale parent node and cursor in the workspace switch frame", () => {
+    navigation.searchParams = new URLSearchParams(
+      `parent=${namespace.root_node_id}&node=${movableNode.id}&cursor=old-cursor&view=grid`,
+    );
+    const rendered = render(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [movableNode],
+        initialSelectedNode: movableNode,
+        initialState: {
+          tab: "files",
+          view: "grid",
+          query: "",
+          parent: namespace.root_node_id,
+          node: movableNode.id,
+          cursor: "old-cursor",
+        },
+        permissions: ["file:read"],
+      }),
+    );
+
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespaceB.workspace_id,
+        namespace: namespaceB,
+        initialNodes: [],
+        initialState: {
+          tab: "files",
+          view: "grid",
+          query: "",
+          parent: namespace.root_node_id,
+          node: movableNode.id,
+          cursor: "old-cursor",
+        },
+        permissions: ["file:read"],
+      }),
+    );
+
+    expect(explorer.parentIds.at(-1)).toBe(namespaceB.root_node_id);
+    expect(screen.queryByRole("dialog", { name: "文件详情" })).not.toBeInTheDocument();
+    expect(navigation.replace).toHaveBeenCalledWith("/files?view=grid");
+  });
+
   it.each([
     ["forbidden", "forbidden"],
     ["not-found", "not-found"],
@@ -404,6 +453,27 @@ describe("FilesystemWorkbench", () => {
     expect(navigation.replace).not.toHaveBeenCalled();
   });
 
+  it("synchronizes the view when browser history changes the URL", () => {
+    const rendered = renderWorkbench();
+    navigation.searchParams = new URLSearchParams("view=grid");
+
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "files", view: "grid", query: "" },
+        permissions: ["file:read"],
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "切换到网格视图" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(explorer.views.at(-1)).toBe("grid");
+  });
+
   it("selects the next visible tab with ArrowRight", () => {
     renderWorkbench();
 
@@ -432,11 +502,61 @@ describe("FilesystemWorkbench", () => {
   });
 
   it("navigates a directory through the supported parent query", () => {
+    navigation.searchParams = new URLSearchParams("cursor=old-page&q=report");
     renderWorkbench();
 
     directoryTree.onNavigate?.({ id: "directory-1" });
 
-    expect(navigation.push).toHaveBeenCalledWith("/files?parent=directory-1");
+    expect(navigation.push).toHaveBeenCalledWith("/files?q=report&parent=directory-1");
+  });
+
+  it("submits backend search and navigates stable cursor pages", () => {
+    navigation.searchParams = new URLSearchParams("q=report&cursor=cursor-1");
+    const rendered = render(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialNextCursor: "cursor-2",
+        initialState: {
+          tab: "files",
+          view: "list",
+          query: "report",
+          cursor: "cursor-1",
+        },
+        permissions: ["file:read"],
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(navigation.push).toHaveBeenCalledWith("/files?q=report&cursor=cursor-2");
+
+    navigation.searchParams = new URLSearchParams("q=report&cursor=cursor-2");
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialNextCursor: "",
+        initialState: {
+          tab: "files",
+          view: "list",
+          query: "report",
+          cursor: "cursor-2",
+        },
+        permissions: ["file:read"],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "上一页" }));
+    expect(navigation.push).toHaveBeenLastCalledWith(
+      "/files?q=report&cursor=cursor-1",
+    );
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索文件" }), {
+      target: { value: "design" },
+    });
+    fireEvent.submit(screen.getByRole("search", { name: "文件搜索" }));
+    expect(navigation.push).toHaveBeenLastCalledWith("/files?q=design");
   });
 
   it("gates drag and keyboard move entry points with file write permission", () => {

@@ -423,6 +423,35 @@ func TestListChildrenFiltersNodeTypeBeforePagination(t *testing.T) {
 	require.Equal(t, model.NodeTypeDirectory, items[1].Type)
 }
 
+func TestListChildrenFilteredAppliesQueryBeforeStablePagination(t *testing.T) {
+	repo, db := newTestRepository(t)
+	filtered, ok := repo.(interface {
+		ListChildrenFiltered(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, string, int, string) ([]model.Node, string, error)
+	})
+	require.True(t, ok)
+	ns := seedNamespace(t, db)
+	for _, name := range []string{"design-a.md", "notes.md", "design-b.md"} {
+		require.NoError(t, repo.CreateNode(context.Background(), rootFile(ns.ID, name)))
+	}
+
+	first, cursor, err := filtered.ListChildrenFiltered(
+		context.Background(), ns.ID, nil, nil, "design", 1, "",
+	)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	require.Contains(t, first[0].Name, "design")
+	require.NotEmpty(t, cursor)
+
+	second, next, err := filtered.ListChildrenFiltered(
+		context.Background(), ns.ID, nil, nil, "design", 1, cursor,
+	)
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	require.Contains(t, second[0].Name, "design")
+	require.NotEqual(t, first[0].ID, second[0].ID)
+	require.Empty(t, next)
+}
+
 func TestUniqueConflictMappingIsConstraintSpecific(t *testing.T) {
 	tests := []struct {
 		name string
