@@ -8,13 +8,16 @@ import (
 )
 
 type namespaceRow struct {
-	ID             uuid.UUID  `gorm:"column:id;primaryKey;type:uuid"`
-	OrganizationID uuid.UUID  `gorm:"column:organization_id;not null;type:uuid"`
-	WorkspaceID    uuid.UUID  `gorm:"column:workspace_id;not null;uniqueIndex;type:uuid"`
-	RootNodeID     *uuid.UUID `gorm:"column:root_node_id;type:uuid"`
-	Status         string     `gorm:"not null;type:varchar(32)"`
-	CreatedAt      time.Time  `gorm:"not null"`
-	UpdatedAt      time.Time  `gorm:"not null"`
+	ID             uuid.UUID           `gorm:"column:id;primaryKey;type:uuid"`
+	NamespaceType  model.NamespaceType `gorm:"column:namespace_type;not null;default:'WORKSPACE';type:varchar(16)"`
+	OrganizationID uuid.UUID           `gorm:"column:organization_id;not null;type:uuid"`
+	WorkspaceID    *uuid.UUID          `gorm:"column:workspace_id;type:uuid"`
+	OwnerUserID    *uuid.UUID          `gorm:"column:owner_user_id;type:uuid"`
+	RootNodeID     *uuid.UUID          `gorm:"column:root_node_id;type:uuid"`
+	Status         string              `gorm:"not null;type:varchar(32)"`
+	PolicyVersion  int64               `gorm:"column:policy_version;not null;default:1"`
+	CreatedAt      time.Time           `gorm:"not null"`
+	UpdatedAt      time.Time           `gorm:"not null"`
 }
 
 func (namespaceRow) TableName() string { return "filesystem.namespaces" }

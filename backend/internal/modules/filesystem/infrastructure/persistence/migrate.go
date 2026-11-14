@@ -9,7 +9,9 @@ import (
 
 var postgresFallbackConstraints = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_id_namespace ON filesystem.nodes(id, namespace_id)`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_workspace_id ON filesystem.namespaces(workspace_id, id)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_workspace_id ON filesystem.namespaces(workspace_id) WHERE namespace_type = 'WORKSPACE'`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_organization_id ON filesystem.namespaces(organization_id) WHERE namespace_type = 'ORGANIZATION'`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_user_owner ON filesystem.namespaces(organization_id, owner_user_id) WHERE namespace_type = 'USER'`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_quota_accounts_id_workspace ON filesystem.quota_accounts(id, workspace_id)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_root_name ON filesystem.nodes(namespace_id, normalized_name) WHERE parent_id IS NULL`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_child_name ON filesystem.nodes(namespace_id, parent_id, normalized_name) WHERE parent_id IS NOT NULL`,
@@ -31,6 +33,8 @@ var postgresFallbackConstraints = []string{
 	`DO $$ BEGIN ALTER TABLE filesystem.file_links ADD CONSTRAINT fk_file_links_revision FOREIGN KEY (revision_id) REFERENCES filesystem.file_revisions(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.artifacts ADD CONSTRAINT fk_artifacts_file FOREIGN KEY (file_id) REFERENCES filesystem.nodes(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.nodes ADD CONSTRAINT ck_filesystem_node_type CHECK (node_type IN ('FILE','DIRECTORY')); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.namespaces ADD CONSTRAINT ck_filesystem_namespace_type CHECK (namespace_type IN ('ORGANIZATION','WORKSPACE','USER')); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.namespaces ADD CONSTRAINT ck_filesystem_namespace_scope CHECK ((namespace_type = 'ORGANIZATION' AND workspace_id IS NULL AND owner_user_id IS NULL) OR (namespace_type = 'WORKSPACE' AND workspace_id IS NOT NULL AND owner_user_id IS NULL) OR (namespace_type = 'USER' AND workspace_id IS NULL AND owner_user_id IS NOT NULL)); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.nodes ADD CONSTRAINT ck_filesystem_node_state CHECK (state IN ('ACTIVE','TRASHED','RETENTION_HOLD','PURGE_PENDING','PURGED')); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.blobs ADD CONSTRAINT ck_filesystem_blob_size CHECK (size >= 0 AND ref_count >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.blobs ADD CONSTRAINT ck_filesystem_blob_state CHECK (state IN ('PENDING','AVAILABLE','QUARANTINED','TOMBSTONED','GC_PENDING','DELETED')); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
@@ -79,7 +83,10 @@ func AutoMigrate(db *gorm.DB) error {
 	}
 	if db.Dialector.Name() == "sqlite" {
 		for _, statement := range []string{
-			`CREATE TABLE IF NOT EXISTS filesystem.namespaces (id BLOB PRIMARY KEY, organization_id BLOB NOT NULL, workspace_id BLOB NOT NULL UNIQUE, root_node_id BLOB, status TEXT NOT NULL, created_at DATETIME, updated_at DATETIME, UNIQUE(workspace_id, id), FOREIGN KEY(root_node_id, id) REFERENCES nodes(id, namespace_id))`,
+			`CREATE TABLE IF NOT EXISTS filesystem.namespaces (id BLOB PRIMARY KEY, namespace_type TEXT NOT NULL CHECK (namespace_type IN ('ORGANIZATION','WORKSPACE','USER')), organization_id BLOB NOT NULL, workspace_id BLOB, owner_user_id BLOB, root_node_id BLOB, status TEXT NOT NULL, policy_version INTEGER NOT NULL DEFAULT 1, created_at DATETIME, updated_at DATETIME, UNIQUE(workspace_id, id), CHECK ((namespace_type = 'ORGANIZATION' AND workspace_id IS NULL AND owner_user_id IS NULL) OR (namespace_type = 'WORKSPACE' AND workspace_id IS NOT NULL AND owner_user_id IS NULL) OR (namespace_type = 'USER' AND workspace_id IS NULL AND owner_user_id IS NOT NULL)), FOREIGN KEY(root_node_id, id) REFERENCES nodes(id, namespace_id))`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_namespaces_workspace_id ON namespaces(workspace_id) WHERE namespace_type = 'WORKSPACE'`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_namespaces_organization_id ON namespaces(organization_id) WHERE namespace_type = 'ORGANIZATION'`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_namespaces_user_owner ON namespaces(organization_id, owner_user_id) WHERE namespace_type = 'USER'`,
 			`CREATE TABLE IF NOT EXISTS filesystem.nodes (id BLOB PRIMARY KEY, namespace_id BLOB NOT NULL, parent_id BLOB, node_type TEXT NOT NULL CHECK (node_type IN ('FILE','DIRECTORY')), name TEXT NOT NULL, normalized_name TEXT NOT NULL, current_revision_id BLOB, state TEXT NOT NULL CHECK (state IN ('ACTIVE','TRASHED','RETENTION_HOLD','PURGE_PENDING','PURGED')), owner_id BLOB NOT NULL, created_at DATETIME, updated_at DATETIME, UNIQUE(id, namespace_id), FOREIGN KEY(namespace_id) REFERENCES namespaces(id), FOREIGN KEY(parent_id, namespace_id) REFERENCES nodes(id, namespace_id), FOREIGN KEY(current_revision_id, id) REFERENCES file_revisions(id, node_id))`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_nodes_root_name ON nodes(namespace_id, normalized_name) WHERE parent_id IS NULL`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_nodes_child_name ON nodes(namespace_id, parent_id, normalized_name) WHERE parent_id IS NOT NULL`,

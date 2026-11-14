@@ -137,7 +137,7 @@ func TestSQLiteKernelConstraintsRejectInvalidWrites(t *testing.T) {
 	}
 
 	namespaceID, workspaceID := uuid.New(), uuid.New()
-	require.NoError(t, db.Create(&namespaceRow{ID: namespaceID, OrganizationID: uuid.New(), WorkspaceID: workspaceID, Status: "ACTIVE"}).Error)
+	require.NoError(t, db.Create(&namespaceRow{ID: namespaceID, OrganizationID: uuid.New(), WorkspaceID: &workspaceID, Status: "ACTIVE"}).Error)
 	require.Error(t, db.Exec(
 		"INSERT INTO filesystem.nodes (id, namespace_id, node_type, name, normalized_name, state, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		uuid.New(), namespaceID, "INVALID", "bad", "bad", "ACTIVE", uuid.New(),

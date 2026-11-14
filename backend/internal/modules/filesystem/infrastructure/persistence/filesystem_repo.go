@@ -31,11 +31,24 @@ func (r *Repository) CreateNamespace(ctx context.Context, namespace *model.Names
 	if status == "" {
 		status = "ACTIVE"
 	}
+	namespaceType := namespace.NamespaceType
+	if namespaceType == "" {
+		namespaceType = model.NamespaceTypeWorkspace
+	}
+	var workspaceID *uuid.UUID
+	if namespace.WorkspaceID != uuid.Nil {
+		workspaceID = &namespace.WorkspaceID
+	}
+	var ownerUserID *uuid.UUID
+	if namespace.OwnerUserID != uuid.Nil {
+		ownerUserID = &namespace.OwnerUserID
+	}
 	db := postgres.DB(ctx, r.db)
 	return wrapPersistence(db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&namespaceRow{
-			ID: namespace.ID, OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID,
-			RootNodeID: namespace.RootNodeID, Status: status, CreatedAt: now, UpdatedAt: now,
+			ID: namespace.ID, NamespaceType: namespaceType, OrganizationID: namespace.OrganizationID,
+			WorkspaceID: workspaceID, OwnerUserID: ownerUserID, RootNodeID: namespace.RootNodeID,
+			Status: status, PolicyVersion: namespace.PolicyVersion, CreatedAt: now, UpdatedAt: now,
 		}).Error; err != nil {
 			return err
 		}
@@ -52,7 +65,7 @@ func (r *Repository) GetNamespaceByWorkspace(ctx context.Context, workspaceID uu
 	if err != nil {
 		return nil, wrapPersistence(err)
 	}
-	return &model.Namespace{ID: row.ID, OrganizationID: row.OrganizationID, WorkspaceID: row.WorkspaceID, RootNodeID: row.RootNodeID, Status: row.Status}, nil
+	return namespaceFromRow(&row), nil
 }
 
 func (r *Repository) GetNamespace(ctx context.Context, namespaceID uuid.UUID) (*model.Namespace, error) {
@@ -64,7 +77,21 @@ func (r *Repository) GetNamespace(ctx context.Context, namespaceID uuid.UUID) (*
 	if err != nil {
 		return nil, wrapPersistence(err)
 	}
-	return &model.Namespace{ID: row.ID, OrganizationID: row.OrganizationID, WorkspaceID: row.WorkspaceID, RootNodeID: row.RootNodeID, Status: row.Status}, nil
+	return namespaceFromRow(&row), nil
+}
+
+func namespaceFromRow(row *namespaceRow) *model.Namespace {
+	namespace := &model.Namespace{
+		ID: row.ID, NamespaceType: row.NamespaceType, OrganizationID: row.OrganizationID,
+		RootNodeID: row.RootNodeID, Status: row.Status, PolicyVersion: row.PolicyVersion,
+	}
+	if row.WorkspaceID != nil {
+		namespace.WorkspaceID = *row.WorkspaceID
+	}
+	if row.OwnerUserID != nil {
+		namespace.OwnerUserID = *row.OwnerUserID
+	}
+	return namespace
 }
 
 func (r *Repository) SetNamespaceRoot(ctx context.Context, workspaceID, rootNodeID uuid.UUID) error {

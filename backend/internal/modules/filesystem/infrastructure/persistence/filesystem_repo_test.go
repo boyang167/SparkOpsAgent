@@ -931,7 +931,7 @@ func openConcurrentWorkerDB(mainDSN, filesystemDSN string) (*gorm.DB, error) {
 func seedNamespace(t *testing.T, db *gorm.DB) *model.Namespace {
 	t.Helper()
 	ns := &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New(), WorkspaceID: uuid.New()}
-	require.NoError(t, db.Create(&namespaceRow{ID: ns.ID, OrganizationID: ns.OrganizationID, WorkspaceID: ns.WorkspaceID, Status: "ACTIVE"}).Error)
+	require.NoError(t, db.Create(&namespaceRow{ID: ns.ID, OrganizationID: ns.OrganizationID, WorkspaceID: &ns.WorkspaceID, Status: "ACTIVE"}).Error)
 	return ns
 }
 
