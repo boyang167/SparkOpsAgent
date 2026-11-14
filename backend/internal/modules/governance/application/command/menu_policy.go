@@ -9,6 +9,7 @@ var DefaultMenuRolePolicies = map[string][]string{
 	"/projects":              {"admin", "developer", "operator", "reviewer", "viewer"},
 	"/templates":             {"admin", "developer"},
 	"/knowledge":             {"admin", "developer"},
+	"/files":                 {"admin", "developer", "operator"},
 	"/delivery/builds":       {"admin", "developer", "operator", "reviewer"},
 	"/publish/products":      {"admin", "operator"},
 	"/products/workflows":    {"admin", "operator"},

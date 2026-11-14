@@ -86,6 +86,7 @@ func (h *SeedWorkspaceMenusHandler) seedAll(ctx context.Context, workspaceID ker
 			Name:        menuNameFromPath(item.Href),
 			Path:        item.Href,
 			Title:       item.Label,
+			Icon:        item.Icon,
 			Component:   item.Href,
 			Sort:        item.Sort,
 		}); err != nil {
@@ -344,6 +345,7 @@ type defaultMenuItem struct {
 type defaultDirectMenu struct {
 	Href  string
 	Label string
+	Icon  string
 	Sort  int
 }
 
@@ -386,6 +388,7 @@ var defaultMenuGroups = []defaultMenuGroup{
 
 var defaultDirectMenus = []defaultDirectMenu{
 	{Href: "/knowledge", Label: "知识库", Sort: 95},
+	{Href: "/files", Label: "文件中心", Icon: "Folder", Sort: 96},
 }
 
 var legacyBusinessNavGroupIDs = []string{
@@ -400,6 +403,7 @@ var enterpriseMenuTitleByPath = map[string]string{
 	"/projects":              "项目",
 	"/templates":             "模板中心",
 	"/knowledge":             "知识库",
+	"/files":                 "文件中心",
 	"/publish/products":      "产品",
 	"/products/workflows":    "工作流",
 	"/publish/release-plans": "发布计划",
@@ -474,8 +478,10 @@ func (h *SeedWorkspaceMenusHandler) repairBusinessNavigation(
 		menu.ParentID = nil
 		menu.Name = menuNameFromPath(item.Href)
 		menu.Title = item.Label
+		menu.Icon = item.Icon
 		menu.Component = item.Href
 		menu.Sort = item.Sort
+		menu.Hidden = false
 		if err := h.menus.Save(ctx, menu); err != nil {
 			return err
 		}

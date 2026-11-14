@@ -28,3 +28,8 @@ func TestDefaultMenuRolePolicies_templatesHiddenFromViewer(t *testing.T) {
 	require.NotContains(t, roles, "viewer")
 	require.Contains(t, roles, "developer")
 }
+
+func TestDefaultMenuRolePolicies_filesRoles(t *testing.T) {
+	require.Equal(t, []string{"admin", "developer", "operator"},
+		command.DefaultMenuRolePolicies["/files"])
+}

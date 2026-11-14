@@ -74,6 +74,7 @@ func TestDefaultMenuGroups_matchBusinessNavigation(t *testing.T) {
 
 	require.Equal(t, []defaultDirectMenu{
 		{Href: "/knowledge", Label: "知识库", Sort: 95},
+		{Href: "/files", Label: "文件中心", Icon: "Folder", Sort: 96},
 	}, defaultDirectMenus)
 }
 
@@ -134,6 +135,7 @@ func TestRepairBusinessNavigation_preservesLeafIDsAndMovesMenus(t *testing.T) {
 		{"menu-projects", "/projects", "项目", groups["application"]},
 		{"menu-templates", "/templates", "模板", groups["application"]},
 		{"menu-knowledge", "/knowledge", "知识库", groups["application"]},
+		{"menu-files", "/files", "文件", groups["application"]},
 		{"menu-workflows", "/products/workflows", "工作流", groups["ops-delivery"]},
 		{"menu-release-plans", "/publish/release-plans", "发布计划", groups["ops-delivery"]},
 		{"menu-pods", "/runtime/pods", "运行实例", groups["ops-runtime"]},
@@ -176,6 +178,16 @@ func TestRepairBusinessNavigation_preservesLeafIDsAndMovesMenus(t *testing.T) {
 	require.Equal(t, "menu-knowledge", knowledge.ID)
 	require.Nil(t, knowledge.ParentID)
 	require.Equal(t, 95, knowledge.Sort)
+
+	files, err := store.FindByPath(ctx, workspaceID, "/files")
+	require.NoError(t, err)
+	require.Equal(t, "menu-files", files.ID)
+	require.Nil(t, files.ParentID)
+	require.Equal(t, "文件中心", files.Title)
+	require.Equal(t, "Folder", files.Icon)
+	require.Equal(t, "/files", files.Component)
+	require.Equal(t, 96, files.Sort)
+	require.False(t, files.Hidden)
 
 	oldDelivery, err := store.FindGroupMenu(ctx, workspaceID, "ops-delivery")
 	require.NoError(t, err)
