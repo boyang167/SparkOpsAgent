@@ -7,3 +7,5 @@ END
 $$;
 
 DROP TABLE filesystem.file_lineage;
+
+DROP INDEX filesystem.ux_filesystem_namespaces_id_organization;

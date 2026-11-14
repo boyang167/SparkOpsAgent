@@ -42,6 +42,10 @@ const directoryTree = vi.hoisted(() => ({
     | ((nodeIds: string[], target: FileNodeVM) => void),
 }));
 
+const auditWorkspace = vi.hoisted(() => ({
+  modes: [] as string[],
+}));
+
 vi.mock("@sparkops/web-sdk/filesystem", () => ({
   moveFileNode: sdk.moveFileNode,
   abortTransfer: sdk.abortTransfer,
@@ -92,7 +96,10 @@ vi.mock("./GovernanceWorkspace", () => ({
 }));
 
 vi.mock("./AuditWorkspace", () => ({
-  AuditWorkspace: () => createElement("div", null, "审计工作区"),
+  AuditWorkspace: ({ mode }: { mode: string }) => {
+    auditWorkspace.modes.push(mode);
+    return createElement("div", null, `审计工作区 ${mode}`);
+  },
 }));
 
 vi.mock("./FileDetailDrawer", () => ({
@@ -281,6 +288,7 @@ describe("FilesystemWorkbench", () => {
     directoryTree.canWrites = [];
     directoryTree.onNavigate = undefined;
     directoryTree.onDropNodes = undefined;
+    auditWorkspace.modes = [];
   });
 
   it("selects files and hides governance without storage read permission", () => {
@@ -301,10 +309,39 @@ describe("FilesystemWorkbench", () => {
     expect(screen.getByRole("tab", { name: "共享审批" })).toBeInTheDocument();
   });
 
-  it("shows audit only with file admin permission", () => {
-    renderWorkbench(["file:read", "file:admin"]);
+  it("shows workspace audit for workspace file administrators", () => {
+    render(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "audit", view: "list", query: "" },
+        permissions: ["file:read", "file:admin"],
+      }),
+    );
 
     expect(screen.getByRole("tab", { name: "审计" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "审计" })).toHaveAttribute("aria-selected", "true");
+    expect(auditWorkspace.modes).toEqual(["workspace"]);
+  });
+
+  it("keeps organization owners on the URL-selected organization audit tab", () => {
+    navigation.searchParams = new URLSearchParams("tab=audit");
+    render(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "audit", view: "list", query: "" },
+        permissions: ["file:read", "org:file:admin"],
+        organizationId: "00000000-0000-4000-8000-000000000004",
+      }),
+    );
+
+    expect(screen.getByRole("tab", { name: "审计" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("审计工作区 organization")).toBeInTheDocument();
+    expect(auditWorkspace.modes).toEqual(["organization"]);
+    expect(navigation.replace).not.toHaveBeenCalled();
   });
 
   it("preserves existing query parameters when selecting a tab", () => {

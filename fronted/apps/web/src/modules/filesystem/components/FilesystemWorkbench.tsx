@@ -37,6 +37,7 @@ import type {
   WorkbenchState,
   WorkbenchTab,
 } from "./workbench-state";
+import { resolveFilesystemAuditMode } from "./workbench-permissions";
 
 export type FilesystemWorkbenchProps = {
   workspaceId: string;
@@ -65,7 +66,7 @@ const tabs: Array<{
   { id: "transfers", label: "传输" },
   { id: "governance", label: "存储治理", permission: "storage:read" },
   { id: "approvals", label: "共享审批", permission: "org:file:admin" },
-  { id: "audit", label: "审计", permission: "file:admin" },
+  { id: "audit", label: "审计" },
 ];
 
 function uploadIdempotencyKey() {
@@ -331,8 +332,11 @@ export function FilesystemWorkbench({
       });
     };
   }, []);
-  const visibleTabs = tabs.filter(
-    (tab) => !tab.permission || permissions.includes(tab.permission),
+  const auditMode = resolveFilesystemAuditMode(permissions);
+  const visibleTabs = tabs.filter((tab) =>
+    tab.id === "audit"
+      ? Boolean(auditMode)
+      : !tab.permission || permissions.includes(tab.permission),
   );
   const activeTab = visibleTabs.some((tab) => tab.id === effectiveState.tab)
     ? effectiveState.tab
@@ -738,7 +742,14 @@ export function FilesystemWorkbench({
                   ? organizationId
                     ? createElement(ShareApprovalPanel, { organizationId, workspaceId })
                     : null
-                  : createElement(AuditWorkspace, { workspaceId, organizationId, permissions }),
+                  : auditMode
+                    ? createElement(AuditWorkspace, {
+                        workspaceId,
+                        organizationId,
+                        permissions,
+                        mode: auditMode,
+                      })
+                    : null,
       ),
     ),
     activeTab === "files"

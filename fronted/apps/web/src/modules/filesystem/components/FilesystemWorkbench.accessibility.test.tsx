@@ -42,7 +42,8 @@ vi.mock("./GovernanceWorkspace", () => ({
 }));
 
 vi.mock("./AuditWorkspace", () => ({
-  AuditWorkspace: () => createElement("div", null, "审计工作区"),
+  AuditWorkspace: ({ mode }: { mode: string }) =>
+    createElement("div", { "data-testid": "audit-mode" }, `审计工作区 ${mode}`),
 }));
 
 vi.mock("./FileDetailDrawer", () => ({
@@ -153,6 +154,28 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
     );
     expect(container.querySelector(".filesystem-browser-main")?.tagName).toBe("DIV");
     expect(container.querySelector("main")).toBeNull();
+  });
+
+  it("exposes organization audit as the selected accessible tab for tenant owners", () => {
+    render(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "audit", view: "list", query: "" },
+        permissions: ["file:read", "org:file:admin"],
+        organizationId: "organization-1",
+      }),
+    );
+
+    const auditTab = screen.getByRole("tab", { name: "审计" });
+    expect(auditTab).toHaveAttribute("aria-selected", "true");
+    expect(auditTab).toHaveAttribute("aria-controls", "workbench-panel-audit");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute(
+      "aria-labelledby",
+      "workbench-tab-audit",
+    );
+    expect(screen.getByTestId("audit-mode")).toHaveTextContent("organization");
   });
 
   it("keeps list and grid usable without horizontal page overflow and offers keyboard move", () => {

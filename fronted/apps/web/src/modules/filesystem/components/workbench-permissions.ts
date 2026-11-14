@@ -17,3 +17,13 @@ export function resolveWorkbenchPermissions(
 export function hasFilesystemPageAccess(permissions: string[]): boolean {
   return permissions.includes("file:read");
 }
+
+export type FilesystemAuditMode = "organization" | "workspace";
+
+export function resolveFilesystemAuditMode(
+  permissions: string[],
+): FilesystemAuditMode | undefined {
+  if (permissions.includes("org:file:admin")) return "organization";
+  if (permissions.includes("file:admin")) return "workspace";
+  return undefined;
+}

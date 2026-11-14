@@ -63,6 +63,7 @@ function renderWorkspace() {
     createElement(AuditWorkspace, {
       workspaceId: "00000000-0000-4000-8000-000000000001",
       permissions: ["file:admin"],
+      mode: "workspace",
     }),
   );
 }
@@ -83,6 +84,7 @@ describe("AuditWorkspace", () => {
       workspaceId: "00000000-0000-4000-8000-000000000001",
       organizationId: "00000000-0000-4000-8000-000000000002",
       permissions: ["org:file:admin"],
+      mode: "organization",
     }));
 
     expect(await screen.findByText(event.action)).toBeInTheDocument();
@@ -160,6 +162,7 @@ describe("AuditWorkspace", () => {
       createElement(AuditWorkspace, {
         workspaceId: "00000000-0000-4000-8000-000000000001",
         permissions: ["file:admin"],
+        mode: "workspace",
       }),
     );
     navigation.searchParams = new URLSearchParams(
@@ -169,6 +172,7 @@ describe("AuditWorkspace", () => {
       createElement(AuditWorkspace, {
         workspaceId: "00000000-0000-4000-8000-000000000001",
         permissions: ["file:admin"],
+        mode: "workspace",
       }),
     );
     await waitFor(() =>
@@ -182,6 +186,7 @@ describe("AuditWorkspace", () => {
       createElement(AuditWorkspace, {
         workspaceId: "00000000-0000-4000-8000-000000000001",
         permissions: ["file:admin"],
+        mode: "workspace",
       }),
     );
     await waitFor(() =>
@@ -210,6 +215,7 @@ describe("AuditWorkspace", () => {
       createElement(AuditWorkspace, {
         workspaceId: "00000000-0000-4000-8000-000000000001",
         permissions: ["file:admin"],
+        mode: "workspace",
       }),
     );
 
@@ -241,6 +247,7 @@ describe("AuditWorkspace", () => {
       createElement(AuditWorkspace, {
         workspaceId: "00000000-0000-4000-8000-000000000001",
         permissions: ["file:admin"],
+        mode: "workspace",
       }),
     );
     expect(await screen.findByText("new.action")).toBeInTheDocument();
@@ -269,6 +276,7 @@ describe("AuditWorkspace", () => {
       createElement(AuditWorkspace, {
         workspaceId: "00000000-0000-4000-8000-000000000001",
         permissions: ["file:admin"],
+        mode: "workspace",
       }),
     );
 
@@ -288,6 +296,7 @@ describe("AuditWorkspace", () => {
       createElement(AuditWorkspace, {
         workspaceId: "00000000-0000-4000-8000-000000000099",
         permissions: ["file:admin"],
+        mode: "workspace",
       }),
     );
 

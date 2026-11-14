@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   hasFilesystemPageAccess,
+  resolveFilesystemAuditMode,
   resolveWorkbenchPermissions,
 } from "./workbench-permissions";
 
@@ -29,6 +30,20 @@ describe("resolveWorkbenchPermissions", () => {
     expect(resolveWorkbenchPermissions(["file:read", "file:admin"], false)).not.toContain(
       "org:file:admin",
     );
+  });
+});
+
+describe("resolveFilesystemAuditMode", () => {
+  it("uses authoritative organization permission before workspace permission", () => {
+    expect(resolveFilesystemAuditMode(["file:read", "org:file:admin"])).toBe("organization");
+    expect(resolveFilesystemAuditMode(["file:read", "file:admin", "org:file:admin"])).toBe(
+      "organization",
+    );
+  });
+
+  it("uses workspace audit only for workspace file administrators", () => {
+    expect(resolveFilesystemAuditMode(["file:read", "file:admin"])).toBe("workspace");
+    expect(resolveFilesystemAuditMode(["file:read"])).toBeUndefined();
   });
 });
 

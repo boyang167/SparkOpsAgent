@@ -28,6 +28,15 @@
 - Approval：组织 pending API 返回独立 COUNT 的 `total_count`；面板消费 `next_cursor`、去重追加、隔离 stale response，审批后重置首屏/cursor/count。测试覆盖 51 条两页。
 - Revoke：完成重放前校验 actor/org/workspace/namespace/node/grant/payload 的 canonical identity；同 key 换身份或路径冲突，成功后 grant 状态变化不破坏稳定重放。
 
+## 复审收尾修复
+
+- 审计入口：新增权威 `resolveFilesystemAuditMode`。`org:file:admin` 映射 Organization audit，`file:admin` 映射 Workspace audit；同时拥有时优先组织级。两者都没有时隐藏审计 tab。`AuditWorkspace` 接收显式 mode 并再次核验对应权限，`tab=audit` 对 Tenant Owner 保持有效。
+- Lineage 组织一致性：`000087` 在建表前创建 `namespaces(id, organization_id)` 唯一索引，并为 source/target namespace 增加包含 `organization_id` 的复合 FK；down 在安全门禁通过后先删 lineage 表、再删其依赖的唯一索引。
+- Fallback：PostgreSQL fallback 同步唯一索引与复合 FK；SQLite fresh schema 同步约束，并会事务性重建缺少组织复合 FK 的既有 lineage 表，非法历史组合会使升级失败而不是被静默保留。
+- PostgreSQL 条件集成测试会插入合法 lineage，验证带活动数据的 down 明确失败且表/数据保留，清理 lineage 后 down 成功；同时覆盖 cross-org 组合拒绝。
+- TDD RED：组织 Owner 审计 tab 被隐藏、audit mode helper 不存在、cross-org lineage 可写入、partial SQLite lineage 缺少组织 FK。
+- TDD GREEN：前端权限/Workbench/accessibility 聚焦测试及 migration/fallback 聚焦测试通过。
+
 ## 验证
 
 - `go test ./internal/modules/governance/application/command -run Bootstrap -count=1`
@@ -38,6 +47,7 @@
 - `pnpm vitest run apps/web/src/modules/filesystem packages/contracts/src/filesystem packages/upstream/src/filesystem.test.ts packages/bff-modules/src/filesystem/index.test.ts packages/web-sdk/src/filesystem.test.ts apps/web/app/api/bff/v1/filesystem/governed-routes.test.ts apps/web/app/api/bff/v1/workspaces/[wsId]/filesystem-forwarding.test.ts`（32 files / 243 tests）
 - `pnpm typecheck`（6 packages）
 - OpenAPI 本地引用、运行时路由一致性及 Idempotency 响应矩阵测试通过。
+- 复审收尾：`pnpm vitest run apps/web/src/modules/filesystem`（26 files / 198 tests）；`pnpm typecheck`；`go test ./migrations -run FileLineage -count=1`；lineage fallback 聚焦测试；`go test ./internal/modules/filesystem/... -count=1`；受影响包 `go vet`。
 
 `DATABASE_DSN` 未设置，因此真实 PostgreSQL migration up/down 与 tenant repository 条件集成测试已明确 skip，未声称通过；SQLite migration/fallback 与持久化测试已通过。
 

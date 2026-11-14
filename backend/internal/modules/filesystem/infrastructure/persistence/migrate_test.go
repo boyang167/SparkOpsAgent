@@ -195,6 +195,17 @@ func TestPostgresFallbackConstraintsMatchKernelInvariants(t *testing.T) {
 	}
 }
 
+func TestPostgresFallbackLineageBindsNamespacesToOrganization(t *testing.T) {
+	fallbackSQL := strings.Join(postgresFallbackConstraints, "\n")
+	for _, fragment := range []string{
+		"ux_filesystem_namespaces_id_organization",
+		"FOREIGN KEY (source_namespace_id, organization_id) REFERENCES filesystem.namespaces(id, organization_id)",
+		"FOREIGN KEY (target_namespace_id, organization_id) REFERENCES filesystem.namespaces(id, organization_id)",
+	} {
+		require.Contains(t, fallbackSQL, fragment)
+	}
+}
+
 func TestPostgresClassificationFallbackIsFailClosedAndTransferAware(t *testing.T) {
 	for _, fragment := range []string{
 		"node_type = 'DIRECTORY'",
@@ -391,7 +402,7 @@ func TestSQLiteAutoMigrateCreatesLineageWithCompositeForeignKeys(t *testing.T) {
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM filesystem.sqlite_master WHERE type = 'table' AND name = 'file_lineage'").Scan(&count).Error)
 	require.Equal(t, int64(1), count)
 
-	orgID, sourceNamespaceID, targetNamespaceID := uuid.New(), uuid.New(), uuid.New()
+	orgID, otherOrgID, sourceNamespaceID, targetNamespaceID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	sourceNodeID, targetNodeID, otherNodeID := uuid.New(), uuid.New(), uuid.New()
 	sourceRevisionID, targetRevisionID, otherRevisionID := uuid.New(), uuid.New(), uuid.New()
 	blobID, ownerID := uuid.New(), uuid.New()
@@ -446,6 +457,14 @@ func TestSQLiteAutoMigrateCreatesLineageWithCompositeForeignKeys(t *testing.T) {
 		uuid.New(), orgID, targetNamespaceID, sourceNodeID, sourceRevisionID,
 		targetNamespaceID, targetNodeID, targetRevisionID, uuid.New(), ownerID, time.Now(),
 	).Error)
+	require.Error(t, db.Exec(insert,
+		uuid.New(), otherOrgID, sourceNamespaceID, sourceNodeID, sourceRevisionID,
+		targetNamespaceID, targetNodeID, targetRevisionID, uuid.New(), ownerID, time.Now(),
+	).Error)
+	require.NoError(t, db.Exec(insert,
+		uuid.New(), orgID, sourceNamespaceID, sourceNodeID, sourceRevisionID,
+		targetNamespaceID, targetNodeID, targetRevisionID, uuid.New(), ownerID, time.Now(),
+	).Error)
 }
 
 func TestSQLiteAutoMigrateRepairsMissingLineageTableOnPartialUpgrade(t *testing.T) {
@@ -457,9 +476,27 @@ func TestSQLiteAutoMigrateRepairsMissingLineageTableOnPartialUpgrade(t *testing.
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
 	require.NoError(t, AutoMigrate(db))
 	require.NoError(t, db.Exec("DROP TABLE filesystem.file_lineage").Error)
+	require.NoError(t, db.Exec(`CREATE TABLE filesystem.file_lineage (
+		id BLOB PRIMARY KEY,
+		organization_id BLOB NOT NULL,
+		source_namespace_id BLOB NOT NULL,
+		source_node_id BLOB NOT NULL,
+		source_revision_id BLOB NOT NULL,
+		target_namespace_id BLOB NOT NULL,
+		target_node_id BLOB NOT NULL UNIQUE,
+		target_revision_id BLOB NOT NULL,
+		relation TEXT NOT NULL,
+		command_id BLOB NOT NULL UNIQUE,
+		created_by BLOB NOT NULL,
+		created_at DATETIME NOT NULL
+	)`).Error)
 
 	require.NoError(t, AutoMigrate(db))
 	var count int64
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM filesystem.sqlite_master WHERE type = 'table' AND name = 'file_lineage'").Scan(&count).Error)
 	require.Equal(t, int64(1), count)
+	var tableSQL string
+	require.NoError(t, db.Raw("SELECT sql FROM filesystem.sqlite_master WHERE type = 'table' AND name = 'file_lineage'").Scan(&tableSQL).Error)
+	require.Contains(t, tableSQL, "FOREIGN KEY(source_namespace_id, organization_id)")
+	require.Contains(t, tableSQL, "FOREIGN KEY(target_namespace_id, organization_id)")
 }

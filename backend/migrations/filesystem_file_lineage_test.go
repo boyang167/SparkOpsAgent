@@ -14,6 +14,9 @@ func TestFilesystemFileLineageMigrationDefinesCompositeOwnershipConstraintsAndSa
 	down := readMigration(t, "000087_filesystem_file_lineage.down.sql")
 
 	for _, fragment := range []string{
+		"CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_id_organization ON filesystem.namespaces(id, organization_id)",
+		"FOREIGN KEY (source_namespace_id, organization_id) REFERENCES filesystem.namespaces(id, organization_id)",
+		"FOREIGN KEY (target_namespace_id, organization_id) REFERENCES filesystem.namespaces(id, organization_id)",
 		"FOREIGN KEY (source_node_id, source_namespace_id) REFERENCES filesystem.nodes(id, namespace_id)",
 		"FOREIGN KEY (target_node_id, target_namespace_id) REFERENCES filesystem.nodes(id, namespace_id)",
 		"FOREIGN KEY (source_revision_id, source_node_id) REFERENCES filesystem.file_revisions(id, node_id)",
@@ -25,6 +28,7 @@ func TestFilesystemFileLineageMigrationDefinesCompositeOwnershipConstraintsAndSa
 	}
 	require.Contains(t, down, "cannot roll back active filesystem file lineage")
 	require.Contains(t, down, "IF EXISTS (SELECT 1 FROM filesystem.file_lineage)")
+	require.Less(t, strings.Index(down, "DROP TABLE filesystem.file_lineage"), strings.Index(down, "DROP INDEX filesystem.ux_filesystem_namespaces_id_organization"))
 }
 
 func TestFilesystemFileLineageMigrationUpDownAndForeignKeysWhenPostgresConfigured(t *testing.T) {
@@ -33,7 +37,7 @@ func TestFilesystemFileLineageMigrationUpDownAndForeignKeysWhenPostgresConfigure
 	require.NoError(t, db.Exec(readMigration(t, "000083_filesystem_namespace_types.up.sql")).Error)
 	require.NoError(t, db.Exec(readMigration(t, "000087_filesystem_file_lineage.up.sql")).Error)
 
-	orgID, sourceNamespaceID, targetNamespaceID := uuid.New(), uuid.New(), uuid.New()
+	orgID, otherOrgID, sourceNamespaceID, targetNamespaceID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	sourceNodeID, targetNodeID, wrongNodeID := uuid.New(), uuid.New(), uuid.New()
 	sourceRevisionID, targetRevisionID, wrongRevisionID := uuid.New(), uuid.New(), uuid.New()
 	blobID, ownerID := uuid.New(), uuid.New()
@@ -82,5 +86,27 @@ func TestFilesystemFileLineageMigrationUpDownAndForeignKeysWhenPostgresConfigure
 	`, uuid.New(), orgID, sourceNamespaceID, sourceNodeID, wrongRevisionID,
 		targetNamespaceID, targetNodeID, targetRevisionID, uuid.New(), ownerID, time.Now()).Error)
 
+	lineageID := uuid.New()
+	require.Error(t, db.Exec(`
+		INSERT INTO filesystem.file_lineage
+			(id, organization_id, source_namespace_id, source_node_id, source_revision_id,
+			 target_namespace_id, target_node_id, target_revision_id, relation, command_id, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ADOPTED_AS_ORGANIZATION_FILE', ?, ?, ?)
+	`, uuid.New(), otherOrgID, sourceNamespaceID, sourceNodeID, sourceRevisionID,
+		targetNamespaceID, targetNodeID, targetRevisionID, uuid.New(), ownerID, time.Now()).Error)
+	require.NoError(t, db.Exec(`
+		INSERT INTO filesystem.file_lineage
+			(id, organization_id, source_namespace_id, source_node_id, source_revision_id,
+			 target_namespace_id, target_node_id, target_revision_id, relation, command_id, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ADOPTED_AS_ORGANIZATION_FILE', ?, ?, ?)
+	`, lineageID, orgID, sourceNamespaceID, sourceNodeID, sourceRevisionID,
+		targetNamespaceID, targetNodeID, targetRevisionID, uuid.New(), ownerID, time.Now()).Error)
+
+	require.ErrorContains(t, db.Exec(readMigration(t, "000087_filesystem_file_lineage.down.sql")).Error, "cannot roll back active filesystem file lineage")
+	var count int64
+	require.NoError(t, db.Table("filesystem.file_lineage").Where("id = ?", lineageID).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+	require.NoError(t, db.Exec("DELETE FROM filesystem.file_lineage WHERE id = ?", lineageID).Error)
 	require.NoError(t, db.Exec(readMigration(t, "000087_filesystem_file_lineage.down.sql")).Error)
+	require.Error(t, db.Exec("SELECT 1 FROM filesystem.file_lineage").Error)
 }

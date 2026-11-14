@@ -7,11 +7,13 @@ import { BffError } from "@sparkops/contracts";
 import { listFileAuditEvents, listOrganizationFileAuditEvents } from "@sparkops/web-sdk/filesystem";
 import { Drawer } from "@/components/ui/Drawer";
 import { InlineAlert } from "@/components/ui/InlineAlert";
+import type { FilesystemAuditMode } from "./workbench-permissions";
 
 export type AuditWorkspaceProps = {
   workspaceId: string;
   organizationId?: string;
   permissions: string[];
+  mode: FilesystemAuditMode;
 };
 
 const PAGE_SIZE = 20;
@@ -33,7 +35,12 @@ function queryFromURL(params: URLSearchParams): FileAuditQuery {
   };
 }
 
-export function AuditWorkspace({ workspaceId, organizationId, permissions }: AuditWorkspaceProps) {
+export function AuditWorkspace({
+  workspaceId,
+  organizationId,
+  permissions,
+  mode,
+}: AuditWorkspaceProps) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -113,8 +120,13 @@ export function AuditWorkspace({ workspaceId, organizationId, permissions }: Aud
   const cursorTrail =
     historyState.scope === filterScope ? historyState.trail : [query.cursor ?? ""];
   const currentCursorIndex = cursorTrail.lastIndexOf(query.cursor ?? "");
-  const canReadOrganization = Boolean(organizationId) && permissions.includes("org:file:admin");
-  const canRead = canReadOrganization || permissions.includes("file:admin");
+  const canReadOrganization =
+    mode === "organization" &&
+    Boolean(organizationId) &&
+    permissions.includes("org:file:admin");
+  const canReadWorkspace =
+    mode === "workspace" && permissions.includes("file:admin");
+  const canRead = canReadOrganization || canReadWorkspace;
 
   useEffect(() => {
     if (draftState.source !== urlSignature) {

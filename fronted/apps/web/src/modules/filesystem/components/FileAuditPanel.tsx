@@ -13,5 +13,5 @@ export function FileAuditPanel({
   workspaceId,
   permissions = ["file:admin"],
 }: FileAuditPanelProps): React.ReactElement {
-  return createElement(AuditWorkspace, { workspaceId, permissions });
+  return createElement(AuditWorkspace, { workspaceId, permissions, mode: "workspace" });
 }

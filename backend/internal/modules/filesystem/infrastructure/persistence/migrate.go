@@ -53,6 +53,7 @@ FROM classified_nodes WHERE node.id = classified_nodes.committed_node_id;
 var postgresFallbackConstraints = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_id_namespace ON filesystem.nodes(id, namespace_id)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_workspace_id_id ON filesystem.namespaces(workspace_id, id)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_id_organization ON filesystem.namespaces(id, organization_id)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_workspace_id ON filesystem.namespaces(workspace_id) WHERE namespace_type = 'WORKSPACE'`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_organization_id ON filesystem.namespaces(organization_id) WHERE namespace_type = 'ORGANIZATION'`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_user_owner ON filesystem.namespaces(organization_id, owner_user_id) WHERE namespace_type = 'USER'`,
@@ -77,10 +78,10 @@ var postgresFallbackConstraints = []string{
 	`DO $$ BEGIN ALTER TABLE filesystem.resource_grants ADD CONSTRAINT fk_grants_node FOREIGN KEY (node_id) REFERENCES filesystem.nodes(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.file_links ADD CONSTRAINT fk_file_links_node FOREIGN KEY (node_id) REFERENCES filesystem.nodes(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.file_links ADD CONSTRAINT fk_file_links_revision FOREIGN KEY (revision_id) REFERENCES filesystem.file_revisions(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
-	`DO $$ BEGIN ALTER TABLE filesystem.file_lineage ADD CONSTRAINT fk_file_lineage_source_namespace FOREIGN KEY (source_namespace_id) REFERENCES filesystem.namespaces(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.file_lineage ADD CONSTRAINT fk_file_lineage_source_namespace_organization FOREIGN KEY (source_namespace_id, organization_id) REFERENCES filesystem.namespaces(id, organization_id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.file_lineage ADD CONSTRAINT fk_file_lineage_source_node_namespace FOREIGN KEY (source_node_id, source_namespace_id) REFERENCES filesystem.nodes(id, namespace_id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.file_lineage ADD CONSTRAINT fk_file_lineage_source_revision_node FOREIGN KEY (source_revision_id, source_node_id) REFERENCES filesystem.file_revisions(id, node_id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
-	`DO $$ BEGIN ALTER TABLE filesystem.file_lineage ADD CONSTRAINT fk_file_lineage_target_namespace FOREIGN KEY (target_namespace_id) REFERENCES filesystem.namespaces(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.file_lineage ADD CONSTRAINT fk_file_lineage_target_namespace_organization FOREIGN KEY (target_namespace_id, organization_id) REFERENCES filesystem.namespaces(id, organization_id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.file_lineage ADD CONSTRAINT fk_file_lineage_target_node_namespace FOREIGN KEY (target_node_id, target_namespace_id) REFERENCES filesystem.nodes(id, namespace_id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.file_lineage ADD CONSTRAINT fk_file_lineage_target_revision_node FOREIGN KEY (target_revision_id, target_node_id) REFERENCES filesystem.file_revisions(id, node_id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_file_lineage_target_node ON filesystem.file_lineage(target_node_id)`,
@@ -139,16 +140,19 @@ var postgresFallbackConstraints = []string{
 	`DO $$ BEGIN ALTER TABLE filesystem.storage_providers ADD CONSTRAINT ck_storage_provider_version CHECK (config_version > 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 }
 
+const sqliteFileLineageTable = `CREATE TABLE IF NOT EXISTS filesystem.file_lineage (id BLOB PRIMARY KEY, organization_id BLOB NOT NULL, source_namespace_id BLOB NOT NULL, source_node_id BLOB NOT NULL, source_revision_id BLOB NOT NULL, target_namespace_id BLOB NOT NULL, target_node_id BLOB NOT NULL UNIQUE, target_revision_id BLOB NOT NULL, relation TEXT NOT NULL CHECK (relation = 'ADOPTED_AS_ORGANIZATION_FILE'), command_id BLOB NOT NULL UNIQUE, created_by BLOB NOT NULL, created_at DATETIME NOT NULL, CHECK (source_node_id <> target_node_id), FOREIGN KEY(source_namespace_id, organization_id) REFERENCES namespaces(id, organization_id), FOREIGN KEY(source_node_id, source_namespace_id) REFERENCES nodes(id, namespace_id), FOREIGN KEY(source_revision_id, source_node_id) REFERENCES file_revisions(id, node_id), FOREIGN KEY(target_namespace_id, organization_id) REFERENCES namespaces(id, organization_id), FOREIGN KEY(target_node_id, target_namespace_id) REFERENCES nodes(id, namespace_id), FOREIGN KEY(target_revision_id, target_node_id) REFERENCES file_revisions(id, node_id))`
+
 func AutoMigrate(db *gorm.DB) error {
 	if !postgres.ShouldRunAutoMigrate(db) {
 		return nil
 	}
 	if db.Dialector.Name() == "sqlite" {
 		for _, statement := range []string{
-			`CREATE TABLE IF NOT EXISTS filesystem.namespaces (id BLOB PRIMARY KEY, namespace_type TEXT NOT NULL CHECK (namespace_type IN ('ORGANIZATION','WORKSPACE','USER')), organization_id BLOB NOT NULL, workspace_id BLOB, owner_user_id BLOB, root_node_id BLOB, status TEXT NOT NULL, policy_version INTEGER NOT NULL DEFAULT 1, created_at DATETIME, updated_at DATETIME, UNIQUE(workspace_id, id), CHECK ((namespace_type = 'ORGANIZATION' AND workspace_id IS NULL AND owner_user_id IS NULL) OR (namespace_type = 'WORKSPACE' AND workspace_id IS NOT NULL AND owner_user_id IS NULL) OR (namespace_type = 'USER' AND workspace_id IS NULL AND owner_user_id IS NOT NULL)), FOREIGN KEY(root_node_id, id) REFERENCES nodes(id, namespace_id))`,
+			`CREATE TABLE IF NOT EXISTS filesystem.namespaces (id BLOB PRIMARY KEY, namespace_type TEXT NOT NULL CHECK (namespace_type IN ('ORGANIZATION','WORKSPACE','USER')), organization_id BLOB NOT NULL, workspace_id BLOB, owner_user_id BLOB, root_node_id BLOB, status TEXT NOT NULL, policy_version INTEGER NOT NULL DEFAULT 1, created_at DATETIME, updated_at DATETIME, UNIQUE(workspace_id, id), UNIQUE(id, organization_id), CHECK ((namespace_type = 'ORGANIZATION' AND workspace_id IS NULL AND owner_user_id IS NULL) OR (namespace_type = 'WORKSPACE' AND workspace_id IS NOT NULL AND owner_user_id IS NULL) OR (namespace_type = 'USER' AND workspace_id IS NULL AND owner_user_id IS NOT NULL)), FOREIGN KEY(root_node_id, id) REFERENCES nodes(id, namespace_id))`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_namespaces_workspace_id ON namespaces(workspace_id) WHERE namespace_type = 'WORKSPACE'`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_namespaces_organization_id ON namespaces(organization_id) WHERE namespace_type = 'ORGANIZATION'`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_namespaces_user_owner ON namespaces(organization_id, owner_user_id) WHERE namespace_type = 'USER'`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_namespaces_id_organization ON namespaces(id, organization_id)`,
 			`CREATE TABLE IF NOT EXISTS filesystem.nodes (id BLOB PRIMARY KEY, namespace_id BLOB NOT NULL, parent_id BLOB, node_type TEXT NOT NULL CHECK (node_type IN ('FILE','DIRECTORY')), name TEXT NOT NULL, normalized_name TEXT NOT NULL, current_revision_id BLOB, state TEXT NOT NULL CHECK (state IN ('ACTIVE','TRASHED','RETENTION_HOLD','PURGE_PENDING','PURGED')), owner_id BLOB NOT NULL, classification TEXT NOT NULL DEFAULT 'INTERNAL' CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED')), created_at DATETIME, updated_at DATETIME, UNIQUE(id, namespace_id), FOREIGN KEY(namespace_id) REFERENCES namespaces(id), FOREIGN KEY(parent_id, namespace_id) REFERENCES nodes(id, namespace_id), FOREIGN KEY(current_revision_id, id) REFERENCES file_revisions(id, node_id))`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_nodes_root_name ON nodes(namespace_id, normalized_name) WHERE parent_id IS NULL`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_nodes_child_name ON nodes(namespace_id, parent_id, normalized_name) WHERE parent_id IS NOT NULL`,
@@ -174,7 +178,7 @@ func AutoMigrate(db *gorm.DB) error {
 			`CREATE INDEX IF NOT EXISTS filesystem.ix_filesystem_share_requests_org_status ON share_requests(organization_id, status, created_at)`,
 			`CREATE INDEX IF NOT EXISTS filesystem.ix_filesystem_share_requests_node ON share_requests(node_id, created_at)`,
 			`CREATE TABLE IF NOT EXISTS filesystem.file_links (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, revision_id BLOB, link_type TEXT NOT NULL, link_id BLOB NOT NULL, created_at DATETIME, UNIQUE(link_type, link_id, node_id, revision_id), FOREIGN KEY(node_id) REFERENCES nodes(id), FOREIGN KEY(revision_id) REFERENCES file_revisions(id))`,
-			`CREATE TABLE IF NOT EXISTS filesystem.file_lineage (id BLOB PRIMARY KEY, organization_id BLOB NOT NULL, source_namespace_id BLOB NOT NULL, source_node_id BLOB NOT NULL, source_revision_id BLOB NOT NULL, target_namespace_id BLOB NOT NULL, target_node_id BLOB NOT NULL UNIQUE, target_revision_id BLOB NOT NULL, relation TEXT NOT NULL CHECK (relation = 'ADOPTED_AS_ORGANIZATION_FILE'), command_id BLOB NOT NULL UNIQUE, created_by BLOB NOT NULL, created_at DATETIME NOT NULL, CHECK (source_node_id <> target_node_id), FOREIGN KEY(source_namespace_id) REFERENCES namespaces(id), FOREIGN KEY(source_node_id, source_namespace_id) REFERENCES nodes(id, namespace_id), FOREIGN KEY(source_revision_id, source_node_id) REFERENCES file_revisions(id, node_id), FOREIGN KEY(target_namespace_id) REFERENCES namespaces(id), FOREIGN KEY(target_node_id, target_namespace_id) REFERENCES nodes(id, namespace_id), FOREIGN KEY(target_revision_id, target_node_id) REFERENCES file_revisions(id, node_id))`,
+			sqliteFileLineageTable,
 			`CREATE INDEX IF NOT EXISTS filesystem.ix_file_lineage_source ON file_lineage(organization_id, source_node_id, created_at DESC)`,
 			`CREATE TABLE IF NOT EXISTS filesystem.command_dedup (command_id BLOB PRIMARY KEY, workspace_id BLOB NOT NULL, operation TEXT NOT NULL, request_hash TEXT NOT NULL, node_id BLOB, revision_id BLOB, state TEXT NOT NULL, created_at DATETIME, updated_at DATETIME)`,
 			`CREATE TABLE IF NOT EXISTS filesystem.storage_providers (id BLOB PRIMARY KEY, organization_id BLOB NOT NULL, name TEXT NOT NULL CHECK (length(trim(name)) > 0), provider_type TEXT NOT NULL CHECK (provider_type IN ('LOCAL','NFS','S3')), endpoint TEXT NOT NULL DEFAULT '', secret_ref TEXT NOT NULL CHECK (length(trim(secret_ref)) > 0), capabilities TEXT NOT NULL DEFAULT '{}', health TEXT NOT NULL DEFAULT '{}', config_version INTEGER NOT NULL DEFAULT 1 CHECK (config_version > 0), status TEXT NOT NULL DEFAULT 'ACTIVE', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, UNIQUE(organization_id, name))`,
@@ -187,6 +191,9 @@ func AutoMigrate(db *gorm.DB) error {
 			}
 		}
 		if err := upgradeSQLiteResourceGrants(db); err != nil {
+			return err
+		}
+		if err := upgradeSQLiteFileLineage(db); err != nil {
 			return err
 		}
 		hadNodeClassification, err := sqliteHasColumn(db, "nodes", "classification")
@@ -264,6 +271,43 @@ func sqliteHasColumn(db *gorm.DB, table, column string) (bool, error) {
 		return false, wrapPersistence(err)
 	}
 	return count > 0, nil
+}
+
+func upgradeSQLiteFileLineage(db *gorm.DB) error {
+	var tableSQL string
+	if err := db.Raw("SELECT sql FROM filesystem.sqlite_master WHERE type = 'table' AND name = 'file_lineage'").Scan(&tableSQL).Error; err != nil {
+		return wrapPersistence(err)
+	}
+	if strings.Contains(tableSQL, "FOREIGN KEY(source_namespace_id, organization_id)") &&
+		strings.Contains(tableSQL, "FOREIGN KEY(target_namespace_id, organization_id)") {
+		return nil
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DROP INDEX IF EXISTS filesystem.ix_file_lineage_source").Error; err != nil {
+			return wrapPersistence(err)
+		}
+		if err := tx.Exec("ALTER TABLE filesystem.file_lineage RENAME TO file_lineage_legacy").Error; err != nil {
+			return wrapPersistence(err)
+		}
+		if err := tx.Exec(sqliteFileLineageTable).Error; err != nil {
+			return wrapPersistence(err)
+		}
+		if err := tx.Exec(`INSERT INTO filesystem.file_lineage
+			(id, organization_id, source_namespace_id, source_node_id, source_revision_id,
+			 target_namespace_id, target_node_id, target_revision_id, relation, command_id, created_by, created_at)
+			SELECT id, organization_id, source_namespace_id, source_node_id, source_revision_id,
+			 target_namespace_id, target_node_id, target_revision_id, relation, command_id, created_by, created_at
+			FROM filesystem.file_lineage_legacy`).Error; err != nil {
+			return wrapPersistence(err)
+		}
+		if err := tx.Exec("DROP TABLE filesystem.file_lineage_legacy").Error; err != nil {
+			return wrapPersistence(err)
+		}
+		if err := tx.Exec("CREATE INDEX filesystem.ix_file_lineage_source ON file_lineage(organization_id, source_node_id, created_at DESC)").Error; err != nil {
+			return wrapPersistence(err)
+		}
+		return nil
+	})
 }
 
 func backfillSQLiteNodeClassifications(db *gorm.DB) error {
