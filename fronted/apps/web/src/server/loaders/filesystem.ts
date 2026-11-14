@@ -42,9 +42,11 @@ export type FileNodeSelection = {
 };
 
 export function isInvalidFilesystemScopeError(error: unknown): boolean {
+  if (!(error instanceof BffError)) return false;
   return (
-    error instanceof BffError &&
-    (error.status === 400 || error.status === 403 || error.status === 404)
+    (error.status === 400 && error.code === "FILESYSTEM_INVALID_REQUEST") ||
+    (error.status === 403 && error.code === "FILESYSTEM_RESOURCE_FORBIDDEN") ||
+    (error.status === 404 && error.code === "FILESYSTEM_NOT_FOUND")
   );
 }
 

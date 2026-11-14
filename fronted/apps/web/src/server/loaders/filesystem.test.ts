@@ -40,19 +40,26 @@ describe("resolveFileNodeSelection", () => {
 });
 
 describe("isInvalidFilesystemScopeError", () => {
-  it.each([400, 403, 404])("treats %s as a stale URL scope", (status) => {
+  it.each([
+    [400, "FILESYSTEM_INVALID_REQUEST"],
+    [403, "FILESYSTEM_RESOURCE_FORBIDDEN"],
+    [404, "FILESYSTEM_NOT_FOUND"],
+  ] as const)("treats only %s %s as a stale URL scope", (status, code) => {
     expect(
       isInvalidFilesystemScopeError(
-        new BffError("stale scope", "FILESYSTEM_ERROR", status),
+        new BffError("stale scope", code, status),
       ),
     ).toBe(true);
   });
 
-  it("does not hide service failures as stale scope", () => {
-    expect(
-      isInvalidFilesystemScopeError(
-        new BffError("offline", "FILESYSTEM_ERROR", 503),
-      ),
-    ).toBe(false);
+  it.each([
+    [400, "SOME_OTHER_BAD_REQUEST"],
+    [403, "AUTH_FORBIDDEN"],
+    [404, "SOME_OTHER_NOT_FOUND"],
+    [503, "FILESYSTEM_UNAVAILABLE"],
+  ] as const)("does not hide unrelated %s %s failures", (status, code) => {
+    expect(isInvalidFilesystemScopeError(new BffError("failed", code, status))).toBe(
+      false,
+    );
   });
 });

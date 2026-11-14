@@ -74,6 +74,7 @@ describe("TransferCenter", () => {
       createElement(TransferCenter, {
         queue: emptyQueue(),
         workspaceId: active.workspace_id,
+        canWrite: true,
       }),
     );
 
@@ -105,6 +106,7 @@ describe("TransferCenter", () => {
       createElement(TransferCenter, {
         queue,
         workspaceId: failed.workspace_id,
+        canWrite: true,
       }),
     );
 
@@ -125,6 +127,42 @@ describe("TransferCenter", () => {
       expect.arrayContaining([expect.any(File)]),
       failed.target_parent_id,
     );
+  });
+
+  it("hides persisted and local mutations from a read-only user", async () => {
+    const active = {
+      ...persisted("00000000-0000-0000-0000-000000000032", "只读活动.bin"),
+      status: "UPLOADING" as const,
+    };
+    const failed = persisted(
+      "00000000-0000-0000-0000-000000000033",
+      "只读失败.bin",
+    );
+    listTransferSessionsMock.mockResolvedValue({
+      items: [active, failed],
+      next_cursor: "",
+    });
+    const queue = createTransferQueue({
+      concurrency: 1,
+      upload: async () => {
+        throw new Error("failed");
+      },
+    });
+    queue.enqueue([new File(["local"], "本地失败.bin")], "parent-1");
+    await queue.whenIdle();
+
+    render(
+      createElement(TransferCenter, {
+        queue,
+        workspaceId: active.workspace_id,
+        canWrite: false,
+      }),
+    );
+
+    expect(await screen.findByText("只读活动.bin")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "取消 只读活动.bin" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("重新选择并新建 只读失败.bin")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试 本地失败.bin" })).not.toBeInTheDocument();
   });
 
   it("merges persisted sessions with local work and deduplicates by session id", async () => {
@@ -353,12 +391,14 @@ describe("TransferCenter", () => {
         throw new Error("网络中断");
       },
     });
-    const { rerender } = render(createElement(TransferCenter, { queue }));
+    const { rerender } = render(
+      createElement(TransferCenter, { queue, canWrite: true }),
+    );
     expect(screen.getByText("暂无传输任务")).toBeInTheDocument();
 
     queue.enqueue([new File(["payload"], "报告.txt")], "parent-1");
     await queue.whenIdle();
-    rerender(createElement(TransferCenter, { queue }));
+    rerender(createElement(TransferCenter, { queue, canWrite: true }));
 
     expect(screen.getByText("报告.txt")).toBeInTheDocument();
     expect(screen.getByText("上传失败")).toBeInTheDocument();
@@ -395,15 +435,17 @@ describe("TransferCenter", () => {
     });
     queue.enqueue([new File(["payload"], "报告.txt")], "parent-1");
     await queue.whenIdle();
-    const { rerender } = render(createElement(TransferCenter, { queue }));
+    const { rerender } = render(
+      createElement(TransferCenter, { queue, canWrite: true }),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "重试 报告.txt" }));
     await vi.waitFor(() => expect(attempts).toBe(2));
-    rerender(createElement(TransferCenter, { queue }));
+    rerender(createElement(TransferCenter, { queue, canWrite: true }));
     fireEvent.click(screen.getByRole("button", { name: "取消 报告.txt" }));
     finish();
     await queue.whenIdle();
-    rerender(createElement(TransferCenter, { queue }));
+    rerender(createElement(TransferCenter, { queue, canWrite: true }));
 
     expect(screen.getByText("已取消")).toBeInTheDocument();
   });

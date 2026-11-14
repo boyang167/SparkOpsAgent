@@ -38,6 +38,25 @@ describe("filesystem Next BFF routes", () => {
     });
   });
 
+  it("rejects a non-empty unsupported type instead of dropping it", async () => {
+    const { GET } = await import("./files/route");
+    const request = {
+      nextUrl: new URL(
+        "http://localhost/api/bff/v1/workspaces/workspace-1/files?type=SYMLINK",
+      ),
+    };
+
+    await expect(
+      (GET as unknown as Function)({}, request, {
+        params: { wsId: "workspace-1" },
+      }),
+    ).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+      status: 400,
+    });
+    expect(listFileNodes).not.toHaveBeenCalled();
+  });
+
   it("forwards move JSON and Idempotency-Key without rewriting", async () => {
     const { POST } = await import("./files/[nodeId]/move/route");
     const input = { parent_id: "parent-2", name: "报告.md" };

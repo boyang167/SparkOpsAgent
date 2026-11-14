@@ -71,3 +71,32 @@
 - 资源授权扫描设置 20 批上限；极端稀疏 ACL 可能返回不足 limit 的短页，但会返回后续 cursor，继续翻页不会泄漏或跳过已授权项。
 - 持久 FAILED 任务无法原地 resume，这是后端真实 API 限制；当前明确采用“确认旧终态后重新选择并新建”。
 - Vitest 仍输出仓库既有 Vite/Rolldown deprecation warning，不影响结果。
+
+## 最终复审跟进：2 Important + 1 Minor
+
+### 1. 超长 `q` 与 stale scope 分类
+
+- RED：新增页面状态测试证明 trim 后超过 200 字符的 `q` 没有请求前规范化；loader 测试证明任意 400/403/404 都会被误判为 stale scope。
+- GREEN：页面在读取 workspace、namespace 或文件列表前移除非法 `q` 及其 cursor，并重定向到保留 tab/view/parent/node 的安全 URL；规范化后的同一 URL 不会再次重定向，其他 tab 也不会被非法 `q` 阻塞。
+- 分类取舍：仅将 `400 + FILESYSTEM_INVALID_REQUEST`、`403 + FILESYSTEM_RESOURCE_FORBIDDEN`、`404 + FILESYSTEM_NOT_FOUND` 识别为无效 scope；后端 `q > 200` 返回 400 的契约保持不变。
+- 测试：覆盖 trim 边界、同 URL 无循环、transfers tab、状态保留及非目标错误码不被吞掉。
+
+### 2. TransferCenter 写权限
+
+- RED：只读渲染仍显示持久任务取消、失败任务“重新选择并新建”以及本地队列重试。
+- GREEN：TransferCenter 接收 `canWrite`，安全默认 false；持久任务取消/重新选择新建、本地失败重试和活动任务取消均只在 `file:write` 时显示，Workbench 显式传入权限。后端继续执行最终授权。
+- 测试：新增只读持久任务与本地队列操作裁剪测试；原有可写取消、重选和重试测试显式以 `canWrite` 运行。
+
+### 3. BFF 非法 `type`
+
+- RED：`type=SYMLINK` 被静默降级为未指定类型并调用后端列表。
+- GREEN：非空且不属于 `FILE | DIRECTORY` 的 type 在 BFF 边界返回 `INVALID_REQUEST` 400，不调用 list；合法 DIRECTORY 继续原样转发。
+- 测试：新增 SYMLINK 拒绝及零下游调用断言。
+
+### 跟进验证
+
+- 前端 filesystem 矩阵：24 files / 160 tests PASS。
+- `pnpm typecheck`：PASS。
+- Go filesystem 与 OpenAPI：PASS。
+- IDE diagnostics：修改范围无 linter errors。
+- `git diff --check`：PASS。

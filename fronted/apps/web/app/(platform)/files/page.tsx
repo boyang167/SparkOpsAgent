@@ -4,7 +4,7 @@ import { WORKSPACE_COOKIE } from "@sparkops/bff-core";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilesystemWorkbench } from "@/modules/filesystem/components/FilesystemWorkbench";
 import { resolveWorkbenchPermissions } from "@/modules/filesystem/components/workbench-permissions";
-import { parseWorkbenchState } from "@/modules/filesystem/components/workbench-state";
+import type { WorkbenchState } from "@/modules/filesystem/components/workbench-state";
 import { loadSession } from "@/server/loaders/session";
 import { loadMyPermissions } from "@/server/loaders/governance";
 import { loadWorkspaceId } from "@/server/loaders/context";
@@ -16,8 +16,9 @@ import {
   isInvalidFilesystemScopeError,
   resolveFileNodeSelection,
 } from "@/server/loaders/filesystem";
+import { normalizeFilesPageSearch } from "./page-state";
 
-function rootFilesPath(state: ReturnType<typeof parseWorkbenchState>) {
+function rootFilesPath(state: WorkbenchState) {
   const params = new URLSearchParams();
   if (state.tab !== "files") params.set("tab", state.tab);
   if (state.view !== "list") params.set("view", state.view);
@@ -34,6 +35,10 @@ export default async function FilesPage({
   const session = await loadSession();
   if (!session) {
     redirect("/login");
+  }
+  const normalizedSearch = normalizeFilesPageSearch(await searchParams);
+  if (normalizedSearch.redirectPath) {
+    redirect(normalizedSearch.redirectPath);
   }
 
   const cookieStore = await cookies();
@@ -59,7 +64,7 @@ export default async function FilesPage({
   );
 
   const namespace = await loadFileNamespace(workspaceId);
-  const initialState = parseWorkbenchState(await searchParams);
+  const initialState = normalizedSearch.state;
   const rootId = namespace.root_node_id;
   if (!rootId) {
     return (

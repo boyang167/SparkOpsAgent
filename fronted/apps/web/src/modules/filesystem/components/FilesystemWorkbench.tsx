@@ -697,7 +697,11 @@ export function FilesystemWorkbench({
           : tab.id === "files"
             ? filesContent
             : tab.id === "transfers"
-              ? createElement(TransferCenter, { queue: transferQueue, workspaceId })
+              ? createElement(TransferCenter, {
+                  queue: transferQueue,
+                  workspaceId,
+                  canWrite: permissions.includes("file:write"),
+                })
               : tab.id === "governance"
                 ? createElement(GovernanceWorkspace, { workspaceId, permissions })
                 : createElement(AuditWorkspace, { workspaceId, permissions }),

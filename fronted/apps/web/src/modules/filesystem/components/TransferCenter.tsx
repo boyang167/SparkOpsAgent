@@ -87,10 +87,12 @@ function Progress({ item }: { item: TransferItem }) {
 function PersistedTransferCard({
   session,
   queue,
+  canWrite,
   onRefresh,
 }: {
   session: TransferSessionVM;
   queue: TransferQueue;
+  canWrite: boolean;
   onRefresh: () => void;
 }) {
   const completed = session.status === "COMPLETED";
@@ -149,7 +151,7 @@ function PersistedTransferCard({
           persistedStatusLabels[session.status],
         ),
       ),
-      !terminal.has(session.status)
+      canWrite && !terminal.has(session.status)
         ? createElement(
             "button",
             {
@@ -190,7 +192,7 @@ function PersistedTransferCard({
           session.error_code,
         )
       : null,
-    session.status === "FAILED"
+    canWrite && session.status === "FAILED"
       ? createElement(
           "div",
           { className: "stack-xs" },
@@ -256,9 +258,11 @@ function mergePersisted(
 export function TransferCenter({
   queue,
   workspaceId,
+  canWrite = false,
 }: {
   queue: TransferQueue;
   workspaceId?: string;
+  canWrite?: boolean;
 }) {
   const items = useTransfers(queue);
   const [persisted, setPersisted] = useState<PersistedState>({
@@ -497,7 +501,7 @@ export function TransferCenter({
           createElement(
             "div",
             { className: "flex gap-2" },
-            item.status === "failed"
+            canWrite && item.status === "failed"
               ? createElement(
                   "button",
                   {
@@ -509,6 +513,7 @@ export function TransferCenter({
                   "重试",
                 )
               : null,
+            canWrite &&
             !item.cancelRequested &&
             ["queued", "creating", "uploading", "verifying"].includes(item.status)
               ? createElement(
@@ -544,6 +549,7 @@ export function TransferCenter({
         key: session.session_id,
         session,
         queue,
+        canWrite,
         onRefresh: () => {
           if (workspaceId) beginFirstPageRequest(workspaceId, false);
         },
