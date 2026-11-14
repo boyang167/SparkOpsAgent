@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Drawer } from "@/components/ui/Drawer";
 import { FileBrowser } from "./FileBrowser";
 import { FilesystemWorkbench } from "./FilesystemWorkbench";
+import { UploadPanel } from "./UploadPanel";
 
 const navigation = vi.hoisted(() => ({
   replace: vi.fn(),
@@ -74,6 +75,23 @@ const file: FileNodeVM = {
   owner_id: "owner-1",
 };
 
+function contrastRatio(foreground: string, background: string) {
+  function luminance(hex: string) {
+    const channels = hex
+      .slice(1)
+      .match(/.{2}/g)!
+      .map((channel) => {
+        const value = Number.parseInt(channel, 16) / 255;
+        return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      });
+    return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
+  }
+  const [lighter, darker] = [luminance(foreground), luminance(background)].sort(
+    (a, b) => b - a,
+  );
+  return (lighter! + 0.05) / (darker! + 0.05);
+}
+
 describe("FilesystemWorkbench accessibility and responsive contracts", () => {
   afterEach(() => {
     cleanup();
@@ -81,7 +99,7 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
   });
 
   it("exposes named tabs, directory tree, view toggles and responsive regions", () => {
-    render(
+    const { container } = render(
       createElement(FilesystemWorkbench, {
         workspaceId: namespace.workspace_id,
         namespace,
@@ -107,6 +125,15 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
     expect(screen.getByTestId("filesystem-browser-layout")).toHaveClass(
       "filesystem-browser-layout",
     );
+    expect(screen.getAllByRole("tab").every((tab) =>
+      tab.classList.contains("filesystem-touch-target"),
+    )).toBe(true);
+    expect(container.querySelector(".filesystem-browser-main")).toHaveAttribute(
+      "aria-labelledby",
+      "workbench-tab-files",
+    );
+    expect(container.querySelector(".filesystem-browser-main")?.tagName).toBe("DIV");
+    expect(container.querySelector("main")).toBeNull();
   });
 
   it("keeps list and grid usable without horizontal page overflow and offers keyboard move", () => {
@@ -124,7 +151,10 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
     const rendered = render(createElement(FileBrowser, { ...common, view: "list" }));
 
     expect(screen.getByRole("table").parentElement).toHaveClass("filesystem-table-wrap");
-    fireEvent.click(screen.getByRole("checkbox", { name: "选择 报告.md" }));
+    const listCheckbox = screen.getByRole("checkbox", { name: "选择 报告.md" });
+    expect(listCheckbox).toHaveClass("filesystem-selection-checkbox");
+    expect(listCheckbox.parentElement).toHaveClass("filesystem-selection-target");
+    fireEvent.click(listCheckbox.parentElement!);
     fireEvent.click(screen.getByRole("button", { name: "移动所选 1 项到…" }));
     expect(onMove).toHaveBeenCalledWith([file]);
 
@@ -133,6 +163,49 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
     expect(screen.getByRole("button", { name: "打开 报告.md" })).toHaveClass(
       "filesystem-touch-target",
     );
+    const gridCheckbox = screen.getByRole("checkbox", { name: "选择 报告.md" });
+    expect(gridCheckbox.parentElement).toHaveClass("filesystem-selection-target");
+    expect(gridCheckbox).toHaveClass("filesystem-selection-checkbox");
+  });
+
+  it("keeps exactly one primary file action while an edit panel is open", () => {
+    const SelectableUploadPanel = UploadPanel as unknown as React.ComponentType<{
+      onFilesSelected: (files: File[]) => void;
+      emphasis: "primary" | "secondary";
+    }>;
+    const rendered = render(
+      createElement(SelectableUploadPanel, {
+        onFilesSelected: vi.fn(),
+        emphasis: "primary",
+      }),
+    );
+    expect(screen.getByRole("button", { name: "上传文件" })).toHaveClass("btn-primary");
+
+    rendered.rerender(
+      createElement(SelectableUploadPanel, {
+        onFilesSelected: vi.fn(),
+        emphasis: "secondary",
+      }),
+    );
+    expect(screen.getByRole("button", { name: "上传文件" })).toHaveClass("btn-secondary");
+    expect(screen.getByRole("button", { name: "上传文件" })).not.toHaveClass("btn-primary");
+
+    const componentDirectory = resolve(
+      process.cwd(),
+      "apps/web/src/modules/filesystem/components",
+    );
+    const explorerSource = readFileSync(
+      resolve(componentDirectory, "FileExplorerPanel.tsx"),
+      "utf8",
+    );
+    const poolSource = readFileSync(resolve(componentDirectory, "StoragePoolPanel.tsx"), "utf8");
+    const bindingSource = readFileSync(
+      resolve(componentDirectory, "StorageBindingPanel.tsx"),
+      "utf8",
+    );
+    expect(explorerSource).toContain('emphasis={dialog ? "secondary" : "primary"}');
+    expect(poolSource).toContain("dialogOpen={providerOpen || poolOpen}");
+    expect(bindingSource).toContain('className={open ? "btn btn-secondary" : "btn btn-primary"}');
   });
 
   it("closes a Drawer with Escape", async () => {
@@ -177,7 +250,20 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
     expect(css).toMatch(
       /\.filesystem-touch-target\s*\{[^}]*min-height:\s*2\.75rem[^}]*min-width:\s*2\.75rem/s,
     );
-    expect(css).toMatch(/\.filesystem-workbench[\s\S]*:focus-visible\s*\{[^}]*var\(--/s);
+    expect(css).toMatch(
+      /\.filesystem-selection-target\s*\{[^}]*min-height:\s*2\.75rem[^}]*min-width:\s*2\.75rem/s,
+    );
+    expect(css).toMatch(
+      /\.filesystem-selection-checkbox\s*\{[^}]*width:\s*1rem[^}]*height:\s*1rem/s,
+    );
+    expect(css).toMatch(
+      /\.filesystem-workbench\s+:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--primary\)[^}]*outline-offset:\s*2px/s,
+    );
+    const primary = css.match(/--primary:\s*(#[\da-f]{6})/i)?.[1];
+    const surface = css.match(/--surface:\s*(#[\da-f]{6})/i)?.[1];
+    expect(primary).toBeDefined();
+    expect(surface).toBeDefined();
+    expect(contrastRatio(primary!, surface!)).toBeGreaterThanOrEqual(4.5);
     expect(css).toMatch(
       /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.filesystem-workbench/s,
     );

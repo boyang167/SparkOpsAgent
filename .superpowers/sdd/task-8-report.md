@@ -23,7 +23,7 @@ Task 8 代码与自动验收完成。未启动或重启根工作区服务，未�
    - 退出码 0；1 file / 4 tests。
 2. Filesystem 前端完整矩阵：
    `pnpm vitest run apps/web/src/modules/filesystem packages/web-sdk/src/filesystem.test.ts`
-   - 退出码 0；19 files / 131 tests。
+   - 首轮退出码 0；19 files / 131 tests；Important 修复后矩阵为 19 files / 132 tests。
    - 无 React act warning 或未处理 Promise；存在仓库测试工具链既有的 Vite/esbuild/oxc deprecation warning。
 3. Monorepo 类型检查：
    `pnpm typecheck`
@@ -37,7 +37,7 @@ Task 8 代码与自动验收完成。未启动或重启根工作区服务，未�
 
 ## 实现摘要
 
-- 工作台使用语义化 CSS 类和既有 `--surface-*`、`--primary-soft`、`--border-strong`、shadow/radius token；未增加依赖或散落硬编码颜色。
+- 工作台使用语义化 CSS 类和既有 `--surface-*`、`--primary-soft`、`--primary`、shadow/radius token；未增加依赖或散落硬编码颜色。
 - 桌面为 `14rem–18rem` 目录侧栏加弹性主区；900px 以下隐藏侧栏并通过现有 Drawer 打开目录，主区与表格均限制横向页面溢出。
 - 列表表格在自身容器横向滚动；网格从三列降为两列、单列。关键图标和文件操作具备 44px 触控目标。
 - tablist、tree/treeitem、list/grid、tabpanel、Drawer、progressbar 保持可访问语义；视图切换有明确 `aria-pressed` 与“切换到…”名称。
@@ -77,3 +77,39 @@ Task 8 代码与自动验收完成。未启动或重启根工作区服务，未�
 - 实时容量曲线：不在范围，未实现、未展示、未伪造。
 - 20 GiB 断点续传、200 并发、Knowledge 真库迁移、RPO/RTO、灾备恢复：本轮无现场证据，验收文档继续保持 SKIP / PENDING。
 - 根工作区服务重启与 `/ready`、`/files` 运行态探测：依用户约束未执行。
+
+---
+
+## 四个 Important 修复追加
+
+### RED
+
+运行：
+`pnpm vitest run apps/web/src/modules/filesystem/components/FilesystemWorkbench.accessibility.test.tsx`
+
+- 退出码 1；5 项中 4 项失败、1 项通过。
+- 失败分别证明：tabs 未具备 44px 触控类；列表/网格 checkbox 没有可点击的 44px label 区域；上传按钮不响应编辑态主动作切换；CSS 缺少选择控件触控契约。
+- 同一测试同时要求 `.filesystem-browser-main` 不再是 `main`、保留 `aria-labelledby="workbench-tab-files"`，并具体断言 focus-visible 为 `2px solid var(--primary)`、offset 2px；测试从现有 `--primary` / `--surface` token 解析颜色并验证对比度不低于 4.5。
+
+### GREEN
+
+1. Important 定向：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/FilesystemWorkbench.accessibility.test.tsx`
+   - 退出码 0；1 file / 5 tests。
+2. Filesystem 完整矩阵：
+   `pnpm vitest run apps/web/src/modules/filesystem packages/web-sdk/src/filesystem.test.ts`
+   - 退出码 0；19 files / 132 tests。
+3. `pnpm typecheck`
+   - 退出码 0；6 packages。
+4. IDE diagnostics 与 `git diff --check`
+   - 均无错误。
+5. 后端
+   - 本次仅修改前端组件、样式、测试与验收文档，未重复后端回归。
+
+### 修复结果与主动作层级
+
+- focus-visible 改用现有近黑 `--primary`，明确 2px outline + 2px offset；不再使用低对比 `--border-strong`。
+- 文件浏览内容容器由嵌套 `main` 改为普通 `div`，继续由文件 tab ID 提供 `aria-labelledby`。
+- 文件 tab：无编辑面板时“上传文件”为唯一 primary；新建/重命名面板打开后上传降为 secondary，面板提交成为唯一 primary。
+- 治理 tab：Provider/存储池默认仅“新增存储池”为 primary；任一 Modal 打开后背景触发器降为 secondary，Modal 提交成为唯一 primary。作用域绑定同理；传输、审计无 competing primary，生命周期仅保存动作使用 primary。
+- tabs、视图切换、目录入口、树展开和文件操作均有至少 44px 触控目标。列表/网格 checkbox 保持 16px 视觉尺寸，由 44px `label` 扩大点击区域，label 点击行为由 DOM 测试验证。

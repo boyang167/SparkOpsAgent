@@ -38,10 +38,11 @@ Compose：`filesystem.transfer_gateway.control_base_url=http://api:8080`，网�
 
 | 项 | 结果 |
 |---|---|
-| Filesystem 前端矩阵 | **PASS** — 19 files / 131 tests，exit 0 |
+| Filesystem 前端矩阵 | **PASS** — Important 修复后 fresh 结果为 19 files / 132 tests，exit 0 |
 | Monorepo 前端类型检查 | **PASS** — 6 packages，exit 0 |
 | Filesystem 后端 brief 回归 | **PASS** — filesystem、filesystemgateway、sftpgateway、OpenAPI 指定包全部 exit 0 |
-| 响应式与无障碍自动契约 | **PASS** — tab/tree/list/grid、键盘移动替代、Drawer Esc、progressbar、窄屏布局、横向滚动、触控目标、focus-visible、reduced-motion |
+| 响应式与无障碍自动契约 | **PASS** — tab/tree/list/grid、键盘移动替代、Drawer Esc、progressbar、窄屏布局、横向滚动；tabs/选择 label/关键按钮为 44px 触控目标，checkbox 保持 16px；focus-visible 使用高对比 `--primary` 的 2px outline + 2px offset并自动验证 token 对比度 ≥4.5 |
+| 主动作与 landmark 契约 | **PASS（组件/源码契约）** — 编辑/Modal 打开时背景主动作降为 secondary，当前提交保持唯一 primary；文件浏览不再嵌套 `main`，保留 tab `aria-labelledby` |
 | 浏览器手工矩阵 | **SKIP / PENDING** — 本轮按约束未启动或重启根工作区服务，也未执行真实浏览器端到端验收 |
 | 实时容量曲线 | **不在范围** — Task 8 未实现容量曲线；不作为发布能力声明 |
 

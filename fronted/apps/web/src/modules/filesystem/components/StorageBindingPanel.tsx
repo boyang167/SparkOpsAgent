@@ -88,7 +88,11 @@ export function StorageBindingPanel({
           <p className="text-sm text-muted">将存储池绑定到 Organization / Workspace / Project / User。</p>
         </div>
         {canAdmin ? (
-          <button type="button" className="btn btn-primary" onClick={() => setOpen(true)}>
+          <button
+            type="button"
+            className={open ? "btn btn-secondary" : "btn btn-primary"}
+            onClick={() => setOpen(true)}
+          >
             新增绑定
           </button>
         ) : null}

@@ -29,10 +29,11 @@
 
 | 项 | 结果 |
 |---|---|
-| Filesystem 前端完整矩阵 | **PASS** — `pnpm vitest run apps/web/src/modules/filesystem packages/web-sdk/src/filesystem.test.ts`，19 files / 131 tests，exit 0 |
+| Filesystem 前端完整矩阵 | **PASS** — `pnpm vitest run apps/web/src/modules/filesystem packages/web-sdk/src/filesystem.test.ts`，Important 修复后 fresh 结果为 19 files / 132 tests，exit 0 |
 | 前端类型检查 | **PASS** — `pnpm typecheck`，6 packages，exit 0 |
 | Filesystem / Gateway / SFTP / OpenAPI 后端回归 | **PASS** — `go test ./internal/modules/filesystem/... ./internal/filesystemgateway/... ./internal/sftpgateway/... ./api/openapi -count=1`，exit 0 |
-| 自动无障碍与响应式契约 | **PASS** — 覆盖 tab / tree / list / grid、键盘“移动到…”，Drawer Esc、progressbar、窄屏侧栏 Drawer、横向溢出、44px 触控目标、focus-visible、reduced-motion 与 150ms 过渡 |
+| 自动无障碍与响应式契约 | **PASS** — 覆盖 tab / tree / list / grid、键盘“移动到…”，Drawer Esc、progressbar、窄屏侧栏 Drawer、横向溢出；tabs/选择 label/关键按钮具备 44px 触控目标，checkbox 视觉尺寸保持 16px；focus-visible 具体断言为 `2px solid var(--primary)` + 2px offset，并自动验证 token 对比度 ≥4.5 |
+| 单主动作与 landmark | **PASS（组件/源码契约）** — 文件编辑态上传降为 secondary、提交为唯一 primary；治理 Modal 打开时背景触发器降级；文件浏览容器已移除嵌套 `main` 并保留 tab `aria-labelledby` |
 | loading / error / empty / forbidden | **PASS（组件自动测试）** — Filesystem 组件矩阵覆盖独立状态，不以空态替代加载或权限拒绝 |
 | 浏览器手工矩阵 | **SKIP / PENDING** — 未启动或重启根工作区服务，未执行真实浏览器权限、拖拽、窄屏和键盘端到端矩阵 |
 | 实时容量曲线 | **不在范围** — 未实现、未展示，也未伪造容量数据 |

@@ -135,6 +135,7 @@ export function StoragePoolPanel({
         title="存储 Provider 与存储池"
         description="凭证仅通过 Secret 引用提交，界面不回显任何密钥内容。"
         canAdmin={canAdmin}
+        dialogOpen={providerOpen || poolOpen}
         onAddProvider={() => setProviderOpen(true)}
         onAddPool={() => setPoolOpen(true)}
       />
@@ -289,6 +290,7 @@ function PanelHeader(props: {
   title: string;
   description: string;
   canAdmin: boolean;
+  dialogOpen: boolean;
   onAddProvider: () => void;
   onAddPool: () => void;
 }) {
@@ -303,7 +305,11 @@ function PanelHeader(props: {
           <button type="button" className="btn btn-secondary" onClick={props.onAddProvider}>
             {STORAGE_PROVIDER_REGISTER_LABEL}
           </button>
-          <button type="button" className="btn btn-primary" onClick={props.onAddPool}>
+          <button
+            type="button"
+            className={props.dialogOpen ? "btn btn-secondary" : "btn btn-primary"}
+            onClick={props.onAddPool}
+          >
             {STORAGE_POOL_CREATE_LABEL}
           </button>
         </div>

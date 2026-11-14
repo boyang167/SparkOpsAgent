@@ -402,7 +402,10 @@ export function FilesystemWorkbench({
           "aria-selected": activeTab === tab.id,
           "aria-controls": `workbench-panel-${tab.id}`,
           tabIndex: activeTab === tab.id ? 0 : -1,
-          className: activeTab === tab.id ? "btn btn-secondary" : "btn btn-ghost",
+          className:
+            activeTab === tab.id
+              ? "btn btn-secondary filesystem-touch-target"
+              : "btn btn-ghost filesystem-touch-target",
           onClick: () => selectTab(tab.id),
           onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) =>
             handleTabKeyDown(event, tabIndex),
@@ -457,7 +460,14 @@ export function FilesystemWorkbench({
         onFiles: (files: File[], targetParentId: string) =>
           transferQueue.enqueue(files, targetParentId),
       },
-      createElement("main", { className: "filesystem-browser-main" }, filesPanel),
+      createElement(
+        "div",
+        {
+          className: "filesystem-browser-main",
+          "aria-labelledby": "workbench-tab-files",
+        },
+        filesPanel,
+      ),
     ),
   );
 

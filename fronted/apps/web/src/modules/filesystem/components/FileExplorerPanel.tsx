@@ -145,7 +145,12 @@ export function FileExplorerPanel({
         >
           新建目录
         </button>
-        {onFilesSelected ? <UploadPanel onFilesSelected={onFilesSelected} /> : null}
+        {onFilesSelected ? (
+          <UploadPanel
+            onFilesSelected={onFilesSelected}
+            emphasis={dialog ? "secondary" : "primary"}
+          />
+        ) : null}
       </div>
 
       <FileBrowser

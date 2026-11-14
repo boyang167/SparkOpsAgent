@@ -6,9 +6,14 @@ import type { ChangeEvent } from "react";
 interface UploadPanelProps {
   onFilesSelected: (files: File[]) => void;
   disabled?: boolean;
+  emphasis?: "primary" | "secondary";
 }
 
-export function UploadPanel({ onFilesSelected, disabled = false }: UploadPanelProps) {
+export function UploadPanel({
+  onFilesSelected,
+  disabled = false,
+  emphasis = "primary",
+}: UploadPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   function handleFiles(files: FileList | null) {
@@ -32,7 +37,7 @@ export function UploadPanel({ onFilesSelected, disabled = false }: UploadPanelPr
       "button",
       {
         type: "button",
-        className: "btn btn-primary",
+        className: `btn btn-${emphasis}`,
         disabled,
         onClick: () => inputRef.current?.click(),
       },

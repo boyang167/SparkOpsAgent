@@ -60,13 +60,19 @@ export function FileListView({
             createElement(
               "td",
               null,
-              createElement("input", {
-                type: "checkbox",
-                "aria-label": `选择 ${node.name}`,
-                checked: selectedIds.has(node.id),
-                disabled: node.state !== "ACTIVE",
-                onChange: (event) => onSelectionChange(node.id, event.currentTarget.checked),
-              }),
+              createElement(
+                "label",
+                { className: "filesystem-selection-target" },
+                createElement("input", {
+                  type: "checkbox",
+                  className: "filesystem-selection-checkbox",
+                  "aria-label": `选择 ${node.name}`,
+                  checked: selectedIds.has(node.id),
+                  disabled: node.state !== "ACTIVE",
+                  onChange: (event) =>
+                    onSelectionChange(node.id, event.currentTarget.checked),
+                }),
+              ),
             ),
             createElement(
               "td",
