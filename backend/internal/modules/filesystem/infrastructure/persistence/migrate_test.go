@@ -52,11 +52,18 @@ func TestPostgresFallbackConstraintsMatchKernelInvariants(t *testing.T) {
 
 func TestPostgresFallbackPreservesNamespaceTransferKeyBeforeForeignKey(t *testing.T) {
 	fallbackSQL := strings.Join(postgresFallbackConstraints, "\n")
-	uniqueKey := "CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_workspace_id_id ON filesystem.namespaces(workspace_id, id) WHERE workspace_id IS NOT NULL"
+	uniqueKey := "CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_workspace_id_id ON filesystem.namespaces(workspace_id, id)"
 	transferForeignKey := "REFERENCES filesystem.namespaces(workspace_id, id)"
 	require.Contains(t, fallbackSQL, uniqueKey)
+	require.NotContains(t, fallbackSQL, uniqueKey+" WHERE")
 	require.Contains(t, fallbackSQL, transferForeignKey)
 	require.Less(t, strings.Index(fallbackSQL, uniqueKey), strings.Index(fallbackSQL, transferForeignKey))
+
+	migrationSQL, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "..", "migrations", "000083_filesystem_namespace_types.up.sql"))
+	require.NoError(t, err)
+	normalizedMigrationSQL := strings.Join(strings.Fields(string(migrationSQL)), " ")
+	require.Contains(t, normalizedMigrationSQL, uniqueKey)
+	require.NotContains(t, normalizedMigrationSQL, uniqueKey+" WHERE")
 }
 
 func TestPostgresFallbackConstraintCatalog(t *testing.T) {

@@ -46,6 +46,39 @@ func TestCreateNamespaceRejectsInvalidTypedNamespace(t *testing.T) {
 	require.ErrorIs(t, err, model.ErrInvalidNamespace)
 }
 
+func TestCreateNamespaceCreatesQuotaOnlyForWorkspace(t *testing.T) {
+	repo, db := newTestRepository(t)
+	organizationID := uuid.New()
+	workspaceID := uuid.New()
+	userID := uuid.New()
+
+	require.NoError(t, repo.CreateNamespace(context.Background(), &model.Namespace{
+		ID:             uuid.New(),
+		NamespaceType:  model.NamespaceTypeOrganization,
+		OrganizationID: organizationID,
+	}))
+	require.NoError(t, repo.CreateNamespace(context.Background(), &model.Namespace{
+		ID:             uuid.New(),
+		NamespaceType:  model.NamespaceTypeUser,
+		OrganizationID: organizationID,
+		OwnerUserID:    userID,
+	}))
+	require.NoError(t, repo.CreateNamespace(context.Background(), &model.Namespace{
+		ID:             uuid.New(),
+		NamespaceType:  model.NamespaceTypeWorkspace,
+		OrganizationID: organizationID,
+		WorkspaceID:    workspaceID,
+	}))
+
+	var quotaCount int64
+	require.NoError(t, db.Table("filesystem.quota_accounts").Where("organization_id = ?", organizationID).Count(&quotaCount).Error)
+	require.Equal(t, int64(1), quotaCount)
+	require.NoError(t, db.Table("filesystem.quota_accounts").Where("workspace_id = ?", workspaceID).Count(&quotaCount).Error)
+	require.Equal(t, int64(1), quotaCount)
+	require.NoError(t, db.Table("filesystem.quota_accounts").Where("workspace_id IS NULL").Count(&quotaCount).Error)
+	require.Zero(t, quotaCount)
+}
+
 func TestCreateChildRejectsDuplicateNormalizedName(t *testing.T) {
 	repo, db := newTestRepository(t)
 	ns := seedNamespace(t, db)

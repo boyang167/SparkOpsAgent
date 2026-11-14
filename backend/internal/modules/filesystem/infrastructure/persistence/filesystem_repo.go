@@ -51,6 +51,9 @@ func (r *Repository) CreateNamespace(ctx context.Context, namespace *model.Names
 		}).Error; err != nil {
 			return err
 		}
+		if namespace.NamespaceType != model.NamespaceTypeWorkspace {
+			return nil
+		}
 		return tx.Create(&quotaAccountRow{ID: uuid.New(), OrganizationID: namespace.OrganizationID, WorkspaceID: namespace.WorkspaceID, UpdatedAt: now}).Error
 	}))
 }

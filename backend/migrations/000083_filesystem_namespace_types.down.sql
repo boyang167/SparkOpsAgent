@@ -1,6 +1,7 @@
 DROP INDEX IF EXISTS filesystem.ux_filesystem_namespaces_user_owner;
 DROP INDEX IF EXISTS filesystem.ux_filesystem_namespaces_workspace_id;
 DROP INDEX IF EXISTS filesystem.ux_filesystem_namespaces_organization_id;
+DROP INDEX IF EXISTS filesystem.ux_filesystem_namespaces_workspace_id_id;
 
 ALTER TABLE filesystem.namespaces
     DROP CONSTRAINT IF EXISTS ck_filesystem_namespace_scope,

@@ -9,7 +9,7 @@ import (
 
 var postgresFallbackConstraints = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_id_namespace ON filesystem.nodes(id, namespace_id)`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_workspace_id_id ON filesystem.namespaces(workspace_id, id) WHERE workspace_id IS NOT NULL`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_workspace_id_id ON filesystem.namespaces(workspace_id, id)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_workspace_id ON filesystem.namespaces(workspace_id) WHERE namespace_type = 'WORKSPACE'`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_organization_id ON filesystem.namespaces(organization_id) WHERE namespace_type = 'ORGANIZATION'`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_user_owner ON filesystem.namespaces(organization_id, owner_user_id) WHERE namespace_type = 'USER'`,

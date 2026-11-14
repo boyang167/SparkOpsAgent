@@ -24,6 +24,9 @@ ALTER TABLE filesystem.namespaces
             OR (namespace_type = 'USER' AND workspace_id IS NULL AND owner_user_id IS NOT NULL)
         );
 
+CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_workspace_id_id
+    ON filesystem.namespaces(workspace_id, id);
+
 CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_organization_id
     ON filesystem.namespaces(organization_id)
     WHERE namespace_type = 'ORGANIZATION';
