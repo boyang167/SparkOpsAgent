@@ -84,6 +84,40 @@ func TestFilesystemOpenAPIIdempotencyAndLocalRefs(t *testing.T) {
 	assertLocalRefsResolve(t, document, document)
 }
 
+func TestFilesystemAuditOpenAPISchemaMatchesSDKContract(t *testing.T) {
+	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &document))
+
+	paths := document["paths"].(map[string]any)
+	operation := paths["/api/v1/workspaces/{wsId}/filesystem-audits"].(map[string]any)["get"].(map[string]any)
+	responses := operation["responses"].(map[string]any)
+	response := responses["200"].(map[string]any)
+	content := response["content"].(map[string]any)
+	schema := content["application/json"].(map[string]any)["schema"].(map[string]any)
+	allOf := schema["allOf"].([]any)
+	override := allOf[1].(map[string]any)
+	data := override["properties"].(map[string]any)["data"].(map[string]any)
+	require.Equal(t, "#/components/schemas/FileAuditEventPage", data["$ref"])
+
+	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+	page := schemas["FileAuditEventPage"].(map[string]any)
+	pageProperties := page["properties"].(map[string]any)
+	require.Equal(t, "#/components/schemas/FileAuditEvent",
+		pageProperties["items"].(map[string]any)["items"].(map[string]any)["$ref"])
+	require.Contains(t, pageProperties, "next_cursor")
+	event := schemas["FileAuditEvent"].(map[string]any)
+	eventProperties := event["properties"].(map[string]any)
+	for _, field := range []string{
+		"id", "actor_id", "action", "resource_type", "resource_id",
+		"result", "trace_id", "created_at", "detail",
+	} {
+		require.Contains(t, eventProperties, field)
+	}
+	require.Equal(t, "object", eventProperties["detail"].(map[string]any)["type"])
+}
+
 func TestFilesystemRoutesDeclareImplementedStableErrors(t *testing.T) {
 	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
 	require.NoError(t, err)

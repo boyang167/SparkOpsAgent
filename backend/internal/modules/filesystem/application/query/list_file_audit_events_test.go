@@ -42,3 +42,42 @@ func TestListFileAuditEventsScopesWorkspaceAndDecisionBeforePagination(t *testin
 	require.Len(t, result.Items, 1)
 	require.Equal(t, "DENY", result.Items[0].Result)
 }
+
+func TestListFileAuditEventsRecursivelyRedactsSensitiveDetail(t *testing.T) {
+	workspaceID := uuid.New()
+	store := &auditListStub{rows: []audit.LogView{{
+		ID: "event-1", ActorID: uuid.NewString(), Action: "filesystem.capability.issued",
+		ResourceType: "filesystem", ResourceID: uuid.NewString(),
+		Detail: map[string]any{
+			"workspace_id": workspaceID.String(),
+			"token_hash":   "hash-value",
+			"nested": map[string]any{
+				"token":         "token-value",
+				"client_secret": "secret-value",
+				"credential":    "credential-value",
+				"capability":    "capability-value",
+				"safe":          "keep-me",
+			},
+			"items": []any{map[string]any{"secret": "nested-secret", "name": "visible"}},
+		},
+		CreatedAt: "2026-11-14T04:00:00Z",
+	}}}
+
+	result, err := NewListFileAuditEventsHandler(store).Handle(context.Background(), ListFileAuditEvents{
+		OrganizationID: uuid.New(), WorkspaceID: workspaceID, Limit: 20,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	detail := result.Items[0].Detail
+	require.Equal(t, workspaceID.String(), detail["workspace_id"])
+	require.Equal(t, "[REDACTED]", detail["token_hash"])
+	nested := detail["nested"].(map[string]any)
+	require.Equal(t, "keep-me", nested["safe"])
+	for _, key := range []string{"token", "client_secret", "credential", "capability"} {
+		require.Equal(t, "[REDACTED]", nested[key])
+	}
+	item := detail["items"].([]any)[0].(map[string]any)
+	require.Equal(t, "[REDACTED]", item["secret"])
+	require.Equal(t, "visible", item["name"])
+}

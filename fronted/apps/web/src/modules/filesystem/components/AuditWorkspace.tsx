@@ -1,6 +1,6 @@
 "use client";
 
-import { createElement, useEffect, useMemo, useState } from "react";
+import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { FileAuditEventVM, FileAuditQuery } from "@sparkops/contracts/filesystem";
 import { BffError } from "@sparkops/contracts";
@@ -32,20 +32,58 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const urlSignature = searchParams.toString();
   const initialQuery = useMemo(
-    () => queryFromURL(new URLSearchParams(searchParams.toString())),
-    [searchParams],
+    () => queryFromURL(new URLSearchParams(urlSignature)),
+    [urlSignature],
   );
-  const [draft, setDraft] = useState<FileAuditQuery>(initialQuery);
-  const [query, setQuery] = useState<FileAuditQuery>(initialQuery);
+  const [draftState, setDraftState] = useState({
+    source: urlSignature,
+    value: initialQuery,
+  });
+  const [queryState, setQueryState] = useState({
+    source: urlSignature,
+    value: initialQuery,
+  });
+  const draft = draftState.source === urlSignature ? draftState.value : initialQuery;
+  const query = queryState.source === urlSignature ? queryState.value : initialQuery;
   const [items, setItems] = useState<FileAuditEventVM[]>([]);
   const [nextCursor, setNextCursor] = useState("");
   const [state, setState] = useState<"loading" | "ready" | "error" | "forbidden">("loading");
   const [advanced, setAdvanced] = useState(false);
   const [selected, setSelected] = useState<FileAuditEventVM | null>(null);
+  const [retry, setRetry] = useState(0);
+  const requestGeneration = useRef(0);
+  const filterScope = [
+    workspaceId,
+    query.actor_id ?? "",
+    query.action ?? "",
+    query.resource_id ?? "",
+    query.result ?? "",
+    query.from ?? "",
+    query.to ?? "",
+  ].join("|");
+  const [historyState, setHistoryState] = useState({
+    scope: filterScope,
+    trail: [query.cursor ?? ""],
+  });
+  const cursorTrail =
+    historyState.scope === filterScope ? historyState.trail : [query.cursor ?? ""];
+  const currentCursorIndex = cursorTrail.lastIndexOf(query.cursor ?? "");
   const canRead = permissions.includes("file:admin");
 
   useEffect(() => {
+    if (draftState.source !== urlSignature) {
+      setDraftState({ source: urlSignature, value: initialQuery });
+    }
+    if (queryState.source !== urlSignature) {
+      setQueryState({ source: urlSignature, value: initialQuery });
+    }
+    setSelected(null);
+  }, [draftState.source, initialQuery, queryState.source, urlSignature, workspaceId]);
+
+  useEffect(() => {
+    const generation = ++requestGeneration.current;
     if (!canRead) {
       setState("forbidden");
       return;
@@ -58,16 +96,17 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
       { signal: controller.signal },
     )
       .then((page) => {
+        if (controller.signal.aborted || generation !== requestGeneration.current) return;
         setItems(page.items);
         setNextCursor(page.next_cursor ?? "");
         setState("ready");
       })
       .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || generation !== requestGeneration.current) return;
         setState(error instanceof BffError && error.status === 403 ? "forbidden" : "error");
       });
     return () => controller.abort();
-  }, [canRead, query, workspaceId]);
+  }, [canRead, query, retry, workspaceId]);
 
   function writeQuery(next: FileAuditQuery) {
     const params = new URLSearchParams(searchParams.toString());
@@ -80,7 +119,10 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
     else params.delete("audit_cursor");
     params.set("tab", "audit");
     router.replace(`${pathname}?${params.toString()}`);
-    setQuery({ ...next, limit: PAGE_SIZE });
+    setQueryState({
+      source: urlSignature,
+      value: { ...next, limit: PAGE_SIZE },
+    });
   }
 
   if (!canRead) {
@@ -107,7 +149,10 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
           className: "input",
           value: draft.action ?? "",
           onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
-            setDraft((current) => ({ ...current, action: event.target.value || undefined })),
+            setDraftState((current) => ({
+              source: urlSignature,
+              value: { ...current.value, action: event.target.value || undefined },
+            })),
         }),
       ),
       createElement(
@@ -120,7 +165,10 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
             className: "input",
             value: draft.result ?? "",
             onChange: (event: React.ChangeEvent<HTMLSelectElement>) =>
-              setDraft((current) => ({ ...current, result: event.target.value || undefined })),
+              setDraftState((current) => ({
+                source: urlSignature,
+                value: { ...current.value, result: event.target.value || undefined },
+              })),
           },
           createElement("option", { value: "" }, "全部"),
           createElement("option", { value: "ALLOW" }, "ALLOW"),
@@ -138,10 +186,10 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
       ? createElement(
           "div",
           { className: "grid gap-3 sm:grid-cols-2 lg:grid-cols-3" },
-          createElement(TextFilter, { label: "操作者 ID", value: draft.actor_id, onChange: (actor_id) => setDraft((current) => ({ ...current, actor_id })), mono: true }),
-          createElement(TextFilter, { label: "资源 ID", value: draft.resource_id, onChange: (resource_id) => setDraft((current) => ({ ...current, resource_id })), mono: true }),
-          createElement(DateFilter, { label: "起始时间", value: draft.from, onChange: (from) => setDraft((current) => ({ ...current, from })) }),
-          createElement(DateFilter, { label: "结束时间", value: draft.to, onChange: (to) => setDraft((current) => ({ ...current, to })) }),
+          createElement(TextFilter, { label: "操作者 ID", value: draft.actor_id, onChange: (actor_id) => setDraftState((current) => ({ source: urlSignature, value: { ...current.value, actor_id } })), mono: true }),
+          createElement(TextFilter, { label: "资源 ID", value: draft.resource_id, onChange: (resource_id) => setDraftState((current) => ({ source: urlSignature, value: { ...current.value, resource_id } })), mono: true }),
+          createElement(DateFilter, { label: "起始时间", value: draft.from, onChange: (from) => setDraftState((current) => ({ source: urlSignature, value: { ...current.value, from } })) }),
+          createElement(DateFilter, { label: "结束时间", value: draft.to, onChange: (to) => setDraftState((current) => ({ source: urlSignature, value: { ...current.value, to } })) }),
         )
       : null,
   );
@@ -152,10 +200,22 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
   } else if (state === "forbidden") {
     content = createElement("div", { className: "empty-state" }, "无权查看文件审计。");
   } else if (state === "error") {
-    content = createElement(InlineAlert, {
-      tone: "error",
-      children: "加载文件审计失败，请稍后重试。",
-    });
+    content = createElement(
+      InlineAlert,
+      {
+        tone: "error",
+        children: createElement(
+          "div",
+          { className: "flex flex-wrap items-center gap-2" },
+          createElement("span", { role: "alert" }, "加载审计记录失败，请稍后重试。"),
+          createElement(
+            "button",
+            { type: "button", className: "btn btn-ghost btn-sm", onClick: () => setRetry((value) => value + 1) },
+            "重试加载审计",
+          ),
+        ),
+      },
+    );
   } else if (items.length === 0) {
     content = createElement("div", { className: "empty-state" }, "暂无审计记录。");
   } else {
@@ -198,12 +258,32 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
   const pagination = state === "ready"
     ? createElement(
         "div",
-        { className: "flex justify-end" },
+        { className: "flex justify-end gap-2" },
+        createElement("button", {
+          type: "button",
+          className: "btn btn-ghost btn-sm",
+          disabled: currentCursorIndex <= 0,
+          onClick: () => {
+            const previous = cursorTrail[currentCursorIndex - 1];
+            if (previous === undefined) return;
+            writeQuery({ ...query, cursor: previous || undefined });
+          },
+        }, "上一页"),
         createElement("button", {
           type: "button",
           className: "btn btn-secondary btn-sm",
           disabled: !nextCursor,
-          onClick: () => writeQuery({ ...query, cursor: nextCursor }),
+          onClick: () => {
+            const visited =
+              currentCursorIndex >= 0
+                ? cursorTrail.slice(0, currentCursorIndex + 1)
+                : [query.cursor ?? ""];
+            setHistoryState({
+              scope: filterScope,
+              trail: [...visited, nextCursor],
+            });
+            writeQuery({ ...query, cursor: nextCursor });
+          },
         }, "下一页"),
       )
     : null;

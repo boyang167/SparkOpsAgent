@@ -68,13 +68,21 @@ func (h *StartControlledExportHandler) auditBoth(ctx context.Context, task model
 	if h.audit == nil {
 		return nil
 	}
-	for _, orgID := range []uuid.UUID{task.SourceOrganizationID, task.TargetOrganizationID} {
+	scopes := []struct {
+		organizationID uuid.UUID
+		workspaceID    uuid.UUID
+	}{
+		{organizationID: task.SourceOrganizationID, workspaceID: task.SourceWorkspaceID},
+		{organizationID: task.TargetOrganizationID, workspaceID: task.TargetWorkspaceID},
+	}
+	for _, scope := range scopes {
 		if err := h.audit.Log(ctx, audit.Entry{
-			ActorID: kernel.MemberID{UUID: task.ActorID}, OrgID: &kernel.OrgID{UUID: orgID},
+			ActorID: kernel.MemberID{UUID: task.ActorID}, OrgID: &kernel.OrgID{UUID: scope.organizationID},
 			Action: "filesystem.export.started", ResourceType: "filesystem", ResourceID: task.SourceNodeID.String(),
 			Detail: map[string]any{
 				"export_id": task.ID.String(), "source_organization_id": task.SourceOrganizationID.String(),
-				"target_organization_id": task.TargetOrganizationID.String(), "decision": "ALLOW",
+				"target_organization_id": task.TargetOrganizationID.String(),
+				"workspace_id":           scope.workspaceID.String(), "decision": "ALLOW",
 			},
 		}); err != nil {
 			return err

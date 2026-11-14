@@ -1,6 +1,7 @@
 "use client";
 
-import { createElement, useEffect, useState } from "react";
+import { createElement, useEffect, useId, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import type {
   FileAuditEventVM,
   FileNodeVM,
@@ -15,10 +16,12 @@ import { Drawer } from "@/components/ui/Drawer";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 
 export type FileDetailDrawerProps = {
-  node: FileNodeVM;
+  node: FileNodeVM | null;
   workspaceId: string;
   open: boolean;
   onClose: () => void;
+  loadError?: "forbidden" | "not-found" | "error";
+  onRetry?: () => void;
 };
 
 type DetailTab = "details" | "revisions" | "audit";
@@ -29,77 +32,132 @@ export function FileDetailDrawer({
   workspaceId,
   open,
   onClose,
+  loadError,
+  onRetry,
 }: FileDetailDrawerProps): React.ReactElement | null {
   const [tab, setTab] = useState<DetailTab>("details");
-  const [revisions, setRevisions] = useState<FileRevisionVM[]>([]);
-  const [revisionState, setRevisionState] = useState<LoadState>("idle");
-  const [audits, setAudits] = useState<FileAuditEventVM[]>([]);
-  const [auditState, setAuditState] = useState<LoadState>("idle");
+  const detailTabsId = useId();
+  const detailKey = `${workspaceId}:${node?.id ?? ""}`;
+  const [revisionData, setRevisionData] = useState<{
+    key: string;
+    items: FileRevisionVM[];
+    state: LoadState;
+  }>({ key: detailKey, items: [], state: "idle" });
+  const [auditData, setAuditData] = useState<{
+    key: string;
+    items: FileAuditEventVM[];
+    state: LoadState;
+  }>({ key: detailKey, items: [], state: "idle" });
+  const [revisionRetry, setRevisionRetry] = useState(0);
+  const [auditRetry, setAuditRetry] = useState(0);
+  const revisionGeneration = useRef(0);
+  const auditGeneration = useRef(0);
+  const revisions = revisionData.key === detailKey ? revisionData.items : [];
+  const revisionState =
+    revisionData.key === detailKey ? revisionData.state : open && node ? "loading" : "idle";
+  const audits = auditData.key === detailKey ? auditData.items : [];
+  const auditState =
+    auditData.key === detailKey ? auditData.state : open && node ? "loading" : "idle";
 
   useEffect(() => {
-    if (!open) {
-      setTab("details");
-      setRevisions([]);
-      setRevisionState("idle");
-      setAudits([]);
-      setAuditState("idle");
+    const generation = ++revisionGeneration.current;
+    if (!open || !node) {
+      setRevisionData({ key: detailKey, items: [], state: "idle" });
       return;
     }
     const controller = new AbortController();
-    setRevisionState("loading");
+    setRevisionData({ key: detailKey, items: [], state: "loading" });
     void listFileRevisions(workspaceId, node.id, { limit: 50 }, { signal: controller.signal })
       .then((page) => {
-        setRevisions(page.items);
-        setRevisionState("ready");
+        if (controller.signal.aborted || generation !== revisionGeneration.current) return;
+        setRevisionData({ key: detailKey, items: page.items, state: "ready" });
       })
       .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setRevisionState(
-          error instanceof BffError && error.status === 403 ? "forbidden" : "error",
-        );
+        if (controller.signal.aborted || generation !== revisionGeneration.current) return;
+        setRevisionData({
+          key: detailKey,
+          items: [],
+          state: error instanceof BffError && error.status === 403 ? "forbidden" : "error",
+        });
       });
     return () => controller.abort();
-  }, [node.id, open, workspaceId]);
+  }, [detailKey, node, open, revisionRetry, workspaceId]);
 
   useEffect(() => {
-    if (!open || tab !== "audit" || auditState !== "idle") return;
+    const generation = ++auditGeneration.current;
+    if (!open || !node) {
+      setAuditData({ key: detailKey, items: [], state: "idle" });
+      return;
+    }
+    if (tab !== "audit") return;
     const controller = new AbortController();
-    setAuditState("loading");
+    setAuditData({ key: detailKey, items: [], state: "loading" });
     void listFileAuditEvents(
       workspaceId,
       { resource_id: node.id, limit: 20 },
       { signal: controller.signal },
     )
       .then((page) => {
-        setAudits(page.items);
-        setAuditState("ready");
+        if (controller.signal.aborted || generation !== auditGeneration.current) return;
+        setAuditData({ key: detailKey, items: page.items, state: "ready" });
       })
       .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setAuditState(
-          error instanceof BffError && error.status === 403 ? "forbidden" : "error",
-        );
+        if (controller.signal.aborted || generation !== auditGeneration.current) return;
+        setAuditData({
+          key: detailKey,
+          items: [],
+          state: error instanceof BffError && error.status === 403 ? "forbidden" : "error",
+        });
       });
     return () => controller.abort();
-  }, [auditState, node.id, open, tab, workspaceId]);
+  }, [auditRetry, detailKey, node, open, tab, workspaceId]);
+
+  useEffect(() => {
+    if (!open) setTab("details");
+  }, [open]);
+
+  const tabDefinitions = [
+    ["details", "详情"],
+    ["revisions", "版本"],
+    ["audit", "审计"],
+  ] as const;
+
+  function tabID(id: DetailTab) {
+    return `${detailTabsId}-tab-${id}`;
+  }
+
+  function panelID(id: DetailTab) {
+    return `${detailTabsId}-panel-${id}`;
+  }
+
+  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const offset = event.key === "ArrowRight" ? 1 : -1;
+    const next = tabDefinitions[(index + offset + tabDefinitions.length) % tabDefinitions.length];
+    if (!next) return;
+    setTab(next[0]);
+    document.getElementById(tabID(next[0]))?.focus();
+  }
 
   const tabs = createElement(
     "div",
     { role: "tablist", "aria-label": "文件详情" },
-    ([
-        ["details", "详情"],
-        ["revisions", "版本"],
-        ["audit", "审计"],
-      ] as const).map(([id, label]) =>
+    tabDefinitions.map(([id, label], index) =>
       createElement(
         "button",
         {
           key: id,
+          id: tabID(id),
           type: "button",
           role: "tab",
           "aria-selected": tab === id,
+          "aria-controls": panelID(id),
+          tabIndex: tab === id ? 0 : -1,
           className: tab === id ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm",
           onClick: () => setTab(id),
+          onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) =>
+            onTabKeyDown(event, index),
         },
         label,
       ),
@@ -111,16 +169,33 @@ export function FileDetailDrawer({
     {
       open,
       onClose,
-      title: node.name,
-      description: node.type === "DIRECTORY" ? "目录详情" : "文件详情",
-      tabs,
+      title: node?.name ?? "文件详情",
+      description: node?.type === "DIRECTORY" ? "目录详情" : "文件详情",
+      tabs: node ? tabs : undefined,
       panelClassName: "w-full max-w-xl",
-      children:
-        tab === "details"
-          ? createElement(Details, { node })
-          : tab === "revisions"
-            ? createElement(RevisionList, { state: revisionState, revisions })
-            : createElement(AuditList, { state: auditState, items: audits }),
+      children: node
+        ? createElement(
+            "div",
+            {
+              id: panelID(tab),
+              role: "tabpanel",
+              "aria-labelledby": tabID(tab),
+            },
+            tab === "details"
+              ? createElement(Details, { node })
+              : tab === "revisions"
+                ? createElement(RevisionList, {
+                    state: revisionState,
+                    revisions,
+                    onRetry: () => setRevisionRetry((value) => value + 1),
+                  })
+                : createElement(AuditList, {
+                    state: auditState,
+                    items: audits,
+                    onRetry: () => setAuditRetry((value) => value + 1),
+                  }),
+          )
+        : createElement(SelectionLoadState, { error: loadError, onRetry }),
     },
   );
 }
@@ -157,19 +232,33 @@ function Detail({ label, value, mono = false }: { label: string; value: string; 
 function RevisionList({
   state,
   revisions,
+  onRetry,
 }: {
   state: LoadState;
   revisions: FileRevisionVM[];
+  onRetry: () => void;
 }) {
   if (state === "loading" || state === "idle") {
     return createElement("div", { role: "status", className: "empty-state" }, "正在加载版本…");
   }
   if (state === "forbidden") return createElement("div", { className: "empty-state" }, "无权查看该文件的版本。");
   if (state === "error") {
-    return createElement(InlineAlert, {
-      tone: "error",
-      children: createElement("span", { role: "alert" }, "加载版本失败，请稍后重试。"),
-    });
+    return createElement(
+      InlineAlert,
+      {
+        tone: "error",
+        children: createElement(
+          "div",
+          { className: "flex flex-wrap items-center gap-2" },
+          createElement("span", { role: "alert" }, "加载版本失败，请稍后重试。"),
+          createElement(
+            "button",
+            { type: "button", className: "btn btn-ghost btn-sm", onClick: onRetry },
+            "重试加载版本",
+          ),
+        ),
+      },
+    );
   }
   if (revisions.length === 0) return createElement("div", { className: "empty-state" }, "暂无版本记录。");
   return createElement(
@@ -187,18 +276,38 @@ function RevisionList({
   );
 }
 
-function AuditList({ state, items }: { state: LoadState; items: FileAuditEventVM[] }) {
+function AuditList({
+  state,
+  items,
+  onRetry,
+}: {
+  state: LoadState;
+  items: FileAuditEventVM[];
+  onRetry: () => void;
+}) {
   if (state === "loading" || state === "idle") {
     return createElement("div", { role: "status", className: "empty-state" }, "正在加载文件审计…");
   }
   if (state === "forbidden") return createElement("div", { className: "empty-state" }, "无权查看该文件的审计。");
   if (state === "error") {
-    return createElement(InlineAlert, {
-      tone: "error",
-      children: "加载文件审计失败，请稍后重试。",
-    });
+    return createElement(
+      InlineAlert,
+      {
+        tone: "error",
+        children: createElement(
+          "div",
+          { className: "flex flex-wrap items-center gap-2" },
+          createElement("span", { role: "alert" }, "加载审计失败，请稍后重试。"),
+          createElement(
+            "button",
+            { type: "button", className: "btn btn-ghost btn-sm", onClick: onRetry },
+            "重试加载审计",
+          ),
+        ),
+      },
+    );
   }
-  if (items.length === 0) return createElement("div", { className: "empty-state" }, "暂无文件审计记录。");
+  if (items.length === 0) return createElement("div", { className: "empty-state" }, "暂无相关审计记录。");
   return createElement(
     "div",
     { className: "stack-sm" },
@@ -211,5 +320,32 @@ function AuditList({ state, items }: { state: LoadState; items: FileAuditEventVM
         item.trace_id ? createElement("p", { className: "font-mono text-xs" }, item.trace_id) : null,
       ),
     ),
+  );
+}
+
+function SelectionLoadState({
+  error,
+  onRetry,
+}: {
+  error?: "forbidden" | "not-found" | "error";
+  onRetry?: () => void;
+}) {
+  const message =
+    error === "forbidden"
+      ? "无权查看该文件。"
+      : error === "not-found"
+        ? "文件不存在或已被删除。"
+        : "加载文件详情失败，请稍后重试。";
+  return createElement(
+    "div",
+    { className: "empty-state", role: error === "error" ? "alert" : undefined },
+    createElement("p", null, message),
+    onRetry
+      ? createElement(
+          "button",
+          { type: "button", className: "btn btn-secondary btn-sm", onClick: onRetry },
+          "重试",
+        )
+      : null,
   );
 }

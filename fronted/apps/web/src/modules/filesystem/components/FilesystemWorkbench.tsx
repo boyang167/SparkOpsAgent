@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { createElement, useEffect, useRef, useState } from "react";
+import { createElement, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { FileNamespaceVM, FileNodeVM } from "@sparkops/contracts/filesystem";
 import {
@@ -31,6 +31,7 @@ export type FilesystemWorkbenchProps = {
   initialState: WorkbenchState;
   permissions: string[];
   initialSelectedNode?: FileNodeVM;
+  initialSelectedNodeError?: "forbidden" | "not-found" | "error";
 };
 
 const tabs: Array<{
@@ -76,6 +77,7 @@ export function FilesystemWorkbench({
   initialState,
   permissions,
   initialSelectedNode,
+  initialSelectedNodeError,
 }: FilesystemWorkbenchProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -85,9 +87,26 @@ export function FilesystemWorkbench({
   const [moveNodes, setMoveNodes] = useState<FileNodeVM[]>([]);
   const [treeVersion, setTreeVersion] = useState(0);
   const [moveError, setMoveError] = useState<string | null>(null);
-  const [selectedNode, setSelectedNode] = useState<FileNodeVM | null>(
-    initialSelectedNode ?? null,
-  );
+  const serverSelectionKey = [
+    workspaceId,
+    initialState.node ?? "",
+    initialSelectedNode?.id ?? "",
+    initialSelectedNodeError ?? "",
+  ].join(":");
+  const serverSelectionKeyRef = useRef(serverSelectionKey);
+  const [selection, setSelection] = useState<{
+    node: FileNodeVM | null;
+    error?: "forbidden" | "not-found" | "error";
+  }>({ node: initialSelectedNode ?? null, error: initialSelectedNodeError });
+  const selected =
+    serverSelectionKeyRef.current === serverSelectionKey
+      ? selection
+      : { node: initialSelectedNode ?? null, error: initialSelectedNodeError };
+  useLayoutEffect(() => {
+    if (serverSelectionKeyRef.current === serverSelectionKey) return;
+    serverSelectionKeyRef.current = serverSelectionKey;
+    setSelection({ node: initialSelectedNode ?? null, error: initialSelectedNodeError });
+  }, [initialSelectedNode, initialSelectedNodeError, serverSelectionKey]);
   const transferQueues = useRef(new Map<string, TransferQueue>());
   const queueLifecycleGeneration = useRef(0);
   const transferQueueKey = `${workspaceId}:${namespace.id}`;
@@ -275,14 +294,14 @@ export function FilesystemWorkbench({
     }
     const nextSearchParams = new URLSearchParams(searchParams.toString());
     nextSearchParams.set("node", node.id);
-    setSelectedNode(node);
+    setSelection({ node });
     router.replace(`${pathname}?${nextSearchParams.toString()}`);
   }
 
   function closeNode() {
     const nextSearchParams = new URLSearchParams(searchParams.toString());
     nextSearchParams.delete("node");
-    setSelectedNode(null);
+    setSelection({ node: null });
     const query = nextSearchParams.toString();
     router.replace(query ? `${pathname}?${query}` : pathname);
   }
@@ -548,12 +567,14 @@ export function FilesystemWorkbench({
           },
         )
       : null,
-    selectedNode
+    selected.node || selected.error
       ? createElement(FileDetailDrawer, {
           open: true,
-          node: selectedNode,
+          node: selected.node,
+          loadError: selected.error,
           workspaceId,
           onClose: closeNode,
+          onRetry: () => router.refresh(),
         })
       : null,
   );

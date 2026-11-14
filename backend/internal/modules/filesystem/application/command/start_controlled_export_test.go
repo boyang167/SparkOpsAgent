@@ -11,6 +11,36 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
 )
 
+type exportAuditRecorder struct {
+	entries []audit.Entry
+}
+
+func (r *exportAuditRecorder) Log(_ context.Context, entry audit.Entry) error {
+	r.entries = append(r.entries, entry)
+	return nil
+}
+
+func TestControlledExportAuditRecordsEachWorkspaceScope(t *testing.T) {
+	recorder := &exportAuditRecorder{}
+	handler := &StartControlledExportHandler{audit: recorder}
+	task := model.ExportTask{
+		ID:                   uuid.New(),
+		ActorID:              uuid.New(),
+		SourceOrganizationID: uuid.New(),
+		TargetOrganizationID: uuid.New(),
+		SourceWorkspaceID:    uuid.New(),
+		TargetWorkspaceID:    uuid.New(),
+		SourceNodeID:         uuid.New(),
+	}
+
+	require.NoError(t, handler.auditBoth(context.Background(), task))
+	require.Len(t, recorder.entries, 2)
+	require.Equal(t, task.SourceOrganizationID, recorder.entries[0].OrgID.UUID)
+	require.Equal(t, task.SourceWorkspaceID.String(), recorder.entries[0].Detail["workspace_id"])
+	require.Equal(t, task.TargetOrganizationID, recorder.entries[1].OrgID.UUID)
+	require.Equal(t, task.TargetWorkspaceID.String(), recorder.entries[1].Detail["workspace_id"])
+}
+
 func TestControlledExportRecordsTaskWithoutGrant(t *testing.T) {
 	store := newCapabilityStoreStub()
 	audits := &exportAuditRecorder{}
@@ -38,11 +68,4 @@ func TestControlledExportRecordsTaskWithoutGrant(t *testing.T) {
 	require.Equal(t, task.ID, replayed.ID)
 	require.Len(t, audits.entries, 2)
 	require.Len(t, store.exports, 1)
-}
-
-type exportAuditRecorder struct{ entries []audit.Entry }
-
-func (r *exportAuditRecorder) Log(_ context.Context, entry audit.Entry) error {
-	r.entries = append(r.entries, entry)
-	return nil
 }

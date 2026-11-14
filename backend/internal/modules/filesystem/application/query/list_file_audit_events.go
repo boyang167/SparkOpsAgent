@@ -117,7 +117,7 @@ func (h *ListFileAuditEventsHandler) Handle(ctx context.Context, q ListFileAudit
 		items = append(items, FileAuditEvent{
 			ID: row.ID, ActorID: row.ActorID, Action: row.Action,
 			ResourceType: row.ResourceType, ResourceID: row.ResourceID,
-			Result: result, TraceID: traceID, CreatedAt: row.CreatedAt, Detail: row.Detail,
+			Result: result, TraceID: traceID, CreatedAt: row.CreatedAt, Detail: sanitizeAuditDetail(row.Detail),
 		})
 	}
 	next := ""
@@ -125,4 +125,43 @@ func (h *ListFileAuditEventsHandler) Handle(ctx context.Context, q ListFileAudit
 		next = strconv.Itoa(offset + limit)
 	}
 	return ListFileAuditEventsResult{Items: items, NextCursor: next}, nil
+}
+
+func sanitizeAuditDetail(detail map[string]any) map[string]any {
+	if detail == nil {
+		return map[string]any{}
+	}
+	sanitized := make(map[string]any, len(detail))
+	for key, value := range detail {
+		if sensitiveAuditKey(key) {
+			sanitized[key] = "[REDACTED]"
+			continue
+		}
+		sanitized[key] = sanitizeAuditValue(value)
+	}
+	return sanitized
+}
+
+func sanitizeAuditValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return sanitizeAuditDetail(typed)
+	case []any:
+		sanitized := make([]any, len(typed))
+		for index, item := range typed {
+			sanitized[index] = sanitizeAuditValue(item)
+		}
+		return sanitized
+	default:
+		return value
+	}
+}
+
+func sensitiveAuditKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	return strings.Contains(normalized, "token") ||
+		strings.Contains(normalized, "secret") ||
+		strings.Contains(normalized, "credential") ||
+		normalized == "capability" ||
+		strings.Contains(normalized, "capability_token")
 }

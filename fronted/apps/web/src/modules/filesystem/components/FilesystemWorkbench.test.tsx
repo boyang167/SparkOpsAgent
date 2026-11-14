@@ -88,18 +88,25 @@ vi.mock("./FileDetailDrawer", () => ({
   FileDetailDrawer: ({
     open,
     node,
+    loadError,
     onClose,
+    onRetry,
   }: {
     open: boolean;
     node: FileNodeVM | null;
+    loadError?: "forbidden" | "not-found" | "error";
     onClose: () => void;
+    onRetry?: () => void;
   }) =>
-    open && node
+    open && (node || loadError)
       ? createElement(
           "div",
           { role: "dialog", "aria-label": "文件详情" },
-          node.name,
+          node?.name ?? loadError,
           createElement("button", { type: "button", onClick: onClose }, "关闭文件详情"),
+          onRetry
+            ? createElement("button", { type: "button", onClick: onRetry }, "重试文件详情")
+            : null,
         )
       : null,
 }));
@@ -281,6 +288,76 @@ describe("FilesystemWorkbench", () => {
     );
 
     expect(screen.getByRole("dialog", { name: "文件详情" })).toHaveTextContent("报告.md");
+  });
+
+  it("synchronizes selected node across URL history and workspace changes without stale content", () => {
+    const nodeB = {
+      ...movableNode,
+      id: "00000000-0000-4000-8000-000000000031",
+      namespace_id: namespaceB.id,
+      parent_id: namespaceB.root_node_id,
+      name: "B.md",
+    };
+    navigation.searchParams = new URLSearchParams(`node=${movableNode.id}`);
+    const rendered = render(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialSelectedNode: movableNode,
+        initialState: { tab: "files", view: "list", query: "", node: movableNode.id },
+        permissions: ["file:read"],
+      }),
+    );
+    expect(screen.getByText("报告.md")).toBeInTheDocument();
+
+    navigation.searchParams = new URLSearchParams();
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespaceB.workspace_id,
+        namespace: namespaceB,
+        initialNodes: [],
+        initialState: { tab: "files", view: "list", query: "" },
+        permissions: ["file:read"],
+      }),
+    );
+    expect(screen.queryByText("报告.md")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "文件详情" })).not.toBeInTheDocument();
+
+    navigation.searchParams = new URLSearchParams(`node=${nodeB.id}`);
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespaceB.workspace_id,
+        namespace: namespaceB,
+        initialNodes: [],
+        initialSelectedNode: nodeB,
+        initialState: { tab: "files", view: "list", query: "", node: nodeB.id },
+        permissions: ["file:read"],
+      }),
+    );
+    expect(screen.getByRole("dialog", { name: "文件详情" })).toHaveTextContent("B.md");
+  });
+
+  it.each([
+    ["forbidden", "forbidden"],
+    ["not-found", "not-found"],
+    ["error", "error"],
+  ] as const)("renders selected-node %s inside the drawer and retries through refresh", (loadError, text) => {
+    navigation.searchParams = new URLSearchParams(`node=${movableNode.id}`);
+    render(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialSelectedNodeError: loadError,
+        initialState: { tab: "files", view: "list", query: "", node: movableNode.id },
+        permissions: ["file:read"],
+      }),
+    );
+
+    expect(screen.getByRole("dialog", { name: "文件详情" })).toHaveTextContent(text);
+    fireEvent.click(screen.getByRole("button", { name: "重试文件详情" }));
+    expect(navigation.refresh).toHaveBeenCalled();
   });
 
   it("connects the selected tab to its panel", () => {

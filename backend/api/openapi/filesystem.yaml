@@ -1159,7 +1159,7 @@ paths:
                   - type: object
                     properties:
                       data:
-                        type: object
+                        $ref: "#/components/schemas/FileAuditEventPage"
         "400":
           $ref: "#/components/responses/InvalidRequest"
         "401":
@@ -2002,6 +2002,41 @@ components:
           format: uuid
         version:
           type: integer
+    FileAuditEventPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileAuditEvent"
+        next_cursor:
+          type: string
+    FileAuditEvent:
+      type: object
+      required:
+        [id, actor_id, action, resource_type, resource_id, result, created_at, detail]
+      properties:
+        id:
+          type: string
+        actor_id:
+          type: string
+        action:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+        result:
+          type: string
+        trace_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        detail:
+          type: object
+          additionalProperties: true
     SuccessEnvelope:
       type: object
       required: [code, message, trace_id]

@@ -50,7 +50,7 @@ func (h *Handler) ListFilesystemAudits(c *gin.Context) {
 	limit := 50
 	if raw := c.Query("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed <= 0 {
+		if err != nil || parsed <= 0 || parsed > 100 {
 			invalidRequest(c)
 			return
 		}

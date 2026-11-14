@@ -64,3 +64,47 @@
 - 预览接口只有 blob 标识，没有面向浏览器的读取 capability；本次明确占位，不猜测 URL。后续若增加 capability 契约，应另行 TDD 接入预览和下载。
 - 审计分页仍沿用后端既有 offset cursor；已增加稳定 `created_at DESC, id DESC` 排序并保证 Workspace/decision 在分页前过滤，但高并发插入下 offset 分页仍可能发生位移，若要快照一致性需后续改为 keyset cursor。
 - `FileAuditPanel` 保留为 `AuditWorkspace` 的兼容薄封装；新工作台直接使用 `AuditWorkspace`。
+
+---
+
+## Important / Minor 缺口修复
+
+### RED
+
+1. 前端状态、竞态与可访问性定向测试：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/FilesystemWorkbench.test.tsx apps/web/src/modules/filesystem/components/FileDetailDrawer.test.tsx apps/web/src/modules/filesystem/components/AuditWorkspace.test.tsx apps/web/src/components/ui/Drawer.test.tsx apps/web/src/server/loaders/filesystem.test.ts`
+   - 修复前 5 个文件失败，共 16 项失败、30 项通过；覆盖 URL/workspace 选中同步、晚响应、重试、分页历史、服务端节点错误和 Drawer 焦点。
+2. 后端定向测试：
+   `go test ./internal/modules/filesystem/application/query ./internal/modules/filesystem/application/command ./internal/modules/filesystem/interface/http ./api/openapi`
+   - 递归脱敏、controlled export workspace scope、audit `limit > 100` 和具体 OpenAPI schema 按预期失败；node endpoint 拒绝路径测试已通过现有实现。
+
+### GREEN
+
+1. 前端定向：5 个文件、47 项测试通过。
+2. Filesystem 前端回归：
+   `pnpm vitest run apps/web/src/modules/filesystem apps/web/src/components/ui/Drawer.test.tsx apps/web/src/server/loaders/filesystem.test.ts`
+   - 19 个文件、123 项测试通过。
+3. Filesystem Go 与 OpenAPI：
+   `go test ./internal/modules/filesystem/... ./api/openapi`
+   - 全部通过。
+4. Web 类型检查：`pnpm --filter @sparkops/web typecheck` 通过。
+5. IDE diagnostics：修改范围无 linter errors；`git diff --check` 通过。
+
+### 修复摘要与真实契约取舍
+
+- Workbench 以 workspace、URL node 和服务端选中结果为权威同步来源；切换 workspace 或浏览器前进/后退时不渲染旧节点。服务端节点 403/404/其他失败映射到 Drawer 的 forbidden/not-found/error，并支持刷新重试，不再中断整页。
+- FileDetailDrawer 对 node/workspace 切换立即隔离旧数据；版本与审计请求均使用 AbortController 和 generation 防止晚响应覆盖，错误可重试。详情 tabs 增加 roving tabindex、方向键和 tabpanel 关联。
+- AuditWorkspace 同步 URL draft/query，使用 generation + AbortController 防竞态；后端真实 cursor 之外不推测总页数，仅维护已访问 cursor trail，支持上一页以及浏览器前进/后退。
+- 服务端对审计 detail 递归脱敏 token、token_hash、secret、credential、capability 等敏感键；UI 不承担安全边界。OpenAPI 明确定义 `FileAuditEvent`、`FileAuditEventPage`、detail 和 next_cursor，并与 SDK 字段一致；`limit > 100` 返回 400。
+- controlled export 的 source/target 两条审计分别记录对应 `workspace_id`。复核其他 filesystem 审计写点：mutation、grant、middleware/resource deny、capability issue 均已有 workspace scope；capability 的 token_hash 由查询层统一脱敏。
+- Drawer 复用现有 modal focus hook，增加初始聚焦、Tab trap 和关闭恢复；未增加依赖，未扩大 Task 8 视觉范围。
+
+### 提交
+
+- Message: `fix(filesystem-ui): harden task 7 workspaces`
+- Commit: 本追加报告所在提交。
+
+### 剩余风险
+
+- 审计后端仍使用既有 offset cursor；前端历史栈只对本次已访问 cursor 提供上一页，深链到未知 cursor 时不会伪造前页。
+- 服务端详情重试依赖 Next `router.refresh()`；持续 403/404 会稳定回到对应 Drawer 状态。

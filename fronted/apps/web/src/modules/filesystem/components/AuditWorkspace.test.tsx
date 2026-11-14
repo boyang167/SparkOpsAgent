@@ -117,7 +117,7 @@ describe("AuditWorkspace", () => {
   });
 
   it("uses the backend cursor for pagination and persists it in the URL", async () => {
-    renderWorkspace();
+    const rendered = renderWorkspace();
     await screen.findByText("filesystem.node.rename");
 
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
@@ -125,5 +125,112 @@ describe("AuditWorkspace", () => {
     await waitFor(() =>
       expect(navigation.replace).toHaveBeenCalledWith(expect.stringContaining("audit_cursor=20")),
     );
+    expect(screen.getByRole("button", { name: "上一页" })).toBeInTheDocument();
+
+    navigation.searchParams = new URLSearchParams(
+      "tab=audit&action=filesystem.node.rename&audit_cursor=20",
+    );
+    rendered.rerender(
+      createElement(AuditWorkspace, {
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        permissions: ["file:admin"],
+      }),
+    );
+    navigation.searchParams = new URLSearchParams(
+      "tab=audit&action=filesystem.node.rename",
+    );
+    rendered.rerender(
+      createElement(AuditWorkspace, {
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        permissions: ["file:admin"],
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled(),
+    );
+
+    navigation.searchParams = new URLSearchParams(
+      "tab=audit&action=filesystem.node.rename&audit_cursor=20",
+    );
+    rendered.rerender(
+      createElement(AuditWorkspace, {
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        permissions: ["file:admin"],
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "上一页" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "上一页" }));
+    await waitFor(() =>
+      expect(navigation.replace).toHaveBeenLastCalledWith(
+        expect.not.stringContaining("audit_cursor="),
+      ),
+    );
+  });
+
+  it("synchronizes URL filters on history navigation", async () => {
+    const rendered = renderWorkspace();
+    await screen.findByText("filesystem.node.rename");
+
+    navigation.searchParams = new URLSearchParams(
+      "tab=audit&action=filesystem.node.delete&audit_cursor=40",
+    );
+    sdk.listFileAuditEvents.mockResolvedValueOnce({
+      items: [{ ...event, action: "filesystem.node.delete" }],
+      next_cursor: "",
+    });
+    rendered.rerender(
+      createElement(AuditWorkspace, {
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        permissions: ["file:admin"],
+      }),
+    );
+
+    expect(screen.getByLabelText("动作")).toHaveValue("filesystem.node.delete");
+    await waitFor(() =>
+      expect(sdk.listFileAuditEvents).toHaveBeenLastCalledWith(
+        expect.any(String),
+        expect.objectContaining({ action: "filesystem.node.delete", cursor: "40" }),
+        expect.any(Object),
+      ),
+    );
+  });
+
+  it("aborts stale requests and ignores their late responses", async () => {
+    let resolveOld!: (value: unknown) => void;
+    sdk.listFileAuditEvents.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveOld = resolve; }),
+    );
+    const rendered = renderWorkspace();
+    await waitFor(() => expect(sdk.listFileAuditEvents).toHaveBeenCalledTimes(1));
+    const oldSignal = sdk.listFileAuditEvents.mock.calls[0]?.[2]?.signal as AbortSignal;
+
+    navigation.searchParams = new URLSearchParams("tab=audit&action=new.action");
+    sdk.listFileAuditEvents.mockResolvedValueOnce({
+      items: [{ ...event, action: "new.action" }],
+      next_cursor: "",
+    });
+    rendered.rerender(
+      createElement(AuditWorkspace, {
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        permissions: ["file:admin"],
+      }),
+    );
+    expect(await screen.findByText("new.action")).toBeInTheDocument();
+    expect(oldSignal.aborted).toBe(true);
+
+    resolveOld({ items: [{ ...event, action: "stale.action" }], next_cursor: "" });
+    await waitFor(() => expect(screen.queryByText("stale.action")).not.toBeInTheDocument());
+  });
+
+  it("retries an audit request after an error", async () => {
+    sdk.listFileAuditEvents.mockRejectedValueOnce(new Error("offline"));
+    renderWorkspace();
+    expect(await screen.findByRole("alert")).toHaveTextContent("加载审计记录失败");
+
+    sdk.listFileAuditEvents.mockResolvedValueOnce({ items: [event], next_cursor: "" });
+    fireEvent.click(screen.getByRole("button", { name: "重试加载审计" }));
+    expect(await screen.findByText("filesystem.node.rename")).toBeInTheDocument();
   });
 });

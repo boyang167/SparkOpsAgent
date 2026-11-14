@@ -9,7 +9,12 @@ import { loadSession } from "@/server/loaders/session";
 import { loadMyPermissions } from "@/server/loaders/governance";
 import { loadWorkspaceId } from "@/server/loaders/context";
 import { loadWorkspaces } from "@/server/loaders/workspaces";
-import { loadFileNamespace, loadFileNode, loadFileNodes } from "@/server/loaders/filesystem";
+import {
+  loadFileNamespace,
+  loadFileNode,
+  loadFileNodes,
+  resolveFileNodeSelection,
+} from "@/server/loaders/filesystem";
 
 export default async function FilesPage({
   searchParams,
@@ -59,9 +64,9 @@ export default async function FilesPage({
   }
 
   const listing = await loadFileNodes(workspaceId, initialState.parent ?? rootId);
-  const initialSelectedNode = initialState.node
-    ? await loadFileNode(workspaceId, initialState.node)
-    : undefined;
+  const selection = initialState.node
+    ? await resolveFileNodeSelection(() => loadFileNode(workspaceId, initialState.node!))
+    : {};
 
   return (
     <div className="stack-lg">
@@ -72,7 +77,8 @@ export default async function FilesPage({
         initialNodes={listing.items}
         initialState={initialState}
         permissions={permissions}
-        initialSelectedNode={initialSelectedNode}
+        initialSelectedNode={selection.node}
+        initialSelectedNodeError={selection.error}
       />
     </div>
   );

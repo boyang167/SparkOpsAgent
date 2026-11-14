@@ -140,6 +140,99 @@ func TestGetFileNodeUsesWorkspaceNamespaceAndResourceAuthorization(t *testing.T)
 	require.Contains(t, res.Body.String(), "规格.md")
 }
 
+func TestGetFileNodeRejectsPermissionResourceNamespaceAndMissingNode(t *testing.T) {
+	tests := []struct {
+		name        string
+		permissions map[string]bool
+		decision    resourceauth.Decision
+		node        func(uuid.UUID, uuid.UUID) (*model.Node, error)
+		wantStatus  int
+		wantCode    string
+	}{
+		{
+			name: "permission denied", permissions: map[string]bool{},
+			decision: resourceauth.Decision{Allowed: true},
+			node: func(namespaceID, nodeID uuid.UUID) (*model.Node, error) {
+				return &model.Node{ID: nodeID, NamespaceID: namespaceID}, nil
+			},
+			wantStatus: http.StatusForbidden, wantCode: "AUTH_FORBIDDEN",
+		},
+		{
+			name: "resource denied", permissions: map[string]bool{authz.PermFileRead: true},
+			decision: resourceauth.Decision{Allowed: false},
+			node: func(namespaceID, nodeID uuid.UUID) (*model.Node, error) {
+				return &model.Node{ID: nodeID, NamespaceID: namespaceID}, nil
+			},
+			wantStatus: http.StatusForbidden, wantCode: "FILESYSTEM_RESOURCE_FORBIDDEN",
+		},
+		{
+			name: "cross workspace namespace", permissions: map[string]bool{authz.PermFileRead: true},
+			decision: resourceauth.Decision{Allowed: true},
+			node: func(_ uuid.UUID, nodeID uuid.UUID) (*model.Node, error) {
+				return &model.Node{ID: nodeID, NamespaceID: uuid.New()}, nil
+			},
+			wantStatus: http.StatusNotFound, wantCode: "FILESYSTEM_NOT_FOUND",
+		},
+		{
+			name: "not found", permissions: map[string]bool{authz.PermFileRead: true},
+			decision: resourceauth.Decision{Allowed: true},
+			node: func(_ uuid.UUID, _ uuid.UUID) (*model.Node, error) {
+				return nil, domain.ErrNodeNotFound
+			},
+			wantStatus: http.StatusNotFound, wantCode: "FILESYSTEM_NOT_FOUND",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nsID, nodeID := uuid.New(), uuid.New()
+			h := &Handler{
+				namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+					return &model.Namespace{ID: nsID, WorkspaceID: workspaceID}, nil
+				},
+				getNode: func(_ context.Context, namespaceID, requestedNodeID uuid.UUID) (*model.Node, error) {
+					return tt.node(namespaceID, requestedNodeID)
+				},
+				authorizeResource: func(context.Context, resourceauth.Request) resourceauth.Decision {
+					return tt.decision
+				},
+			}
+			router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: tt.permissions}, h)
+			req := httptest.NewRequest(http.MethodGet,
+				"/api/v1/workspaces/"+wsID.String()+"/files/"+nodeID.String(), nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			res := httptest.NewRecorder()
+			router.ServeHTTP(res, req)
+
+			require.Equal(t, tt.wantStatus, res.Code, res.Body.String())
+			require.Contains(t, res.Body.String(), tt.wantCode)
+		})
+	}
+}
+
+func TestListFilesystemAuditsRejectsLimitAboveOpenAPIMaximum(t *testing.T) {
+	nsID := uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, OrganizationID: uuid.New()}, nil
+		},
+		listFileAudits: func(context.Context, query.ListFileAuditEvents) (query.ListFileAuditEventsResult, error) {
+			t.Fatal("audit query must not run for an invalid limit")
+			return query.ListFileAuditEventsResult{}, nil
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{
+		allowed: map[string]bool{authz.PermFileAdmin: true},
+	}, h)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/workspaces/"+wsID.String()+"/filesystem-audits?limit=101", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), "FILESYSTEM_INVALID_REQUEST")
+}
+
 func TestListTransfersUsesReadPermissionAndPassesFilters(t *testing.T) {
 	nsID, rootID := uuid.New(), uuid.New()
 	var captured query.ListTransfers
