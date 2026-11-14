@@ -17,15 +17,24 @@ vi.mock("./FileDetailDrawer", () => ({
     open,
     node,
     projectionOnly,
+    projectionDetails,
   }: {
     open: boolean;
     node: { id: string; name: string } | null;
     projectionOnly?: boolean;
+    projectionDetails?: Array<{ label: string; value: string }>;
   }) => {
     if (!open || !node) return null;
     detail.nodeId = node.id;
     detail.projectionOnly = Boolean(projectionOnly);
-    return createElement("div", { role: "dialog", "aria-label": "文件详情" }, node.name);
+    return createElement(
+      "div",
+      { role: "dialog", "aria-label": "文件详情" },
+      node.name,
+      projectionDetails?.map((entry) =>
+        createElement("span", { key: entry.label }, entry.value),
+      ),
+    );
   },
 }));
 
@@ -102,13 +111,80 @@ describe("SharedWithMePanel", () => {
       workspaceId: "workspace-1",
       organizationLabel: "星火科技",
       workspaceLabel: "研发平台",
-      items: [item(5, "SERVICE_ACCOUNT"), item(6, "ROLE")],
+      items: [
+        item(5, "SERVICE_ACCOUNT"),
+        item(6, "ROLE"),
+        item(12, "FUTURE_PRINCIPAL"),
+      ],
       state: "ready",
     }));
 
     expect(screen.getByRole("heading", { name: "其他授权来源" })).toBeInTheDocument();
     expect(screen.getByText("共享文件 5.md")).toBeInTheDocument();
     expect(screen.getByText("共享文件 6.md")).toBeInTheDocument();
+    expect(screen.getByText("共享文件 12.md")).toBeInTheDocument();
+  });
+
+  it("uses stable source priority, shows every source type, and renders a node once", () => {
+    const shared = item(13, "USER");
+    shared.sources = [
+      shared.sources[0]!,
+      {
+        grant_id: "30000000-0000-4000-8000-000000000099",
+        principal_type: "ORGANIZATION",
+        principal_id: "40000000-0000-4000-8000-000000000099",
+        expires_at: "2027-01-31T16:00:00.000Z",
+      },
+    ];
+    const rendered = render(createElement(SharedWithMePanel, {
+      workspaceId: "workspace-1",
+      organizationLabel: "星火科技",
+      workspaceLabel: "研发平台",
+      items: [shared],
+      state: "ready",
+    }));
+
+    expect(screen.getByRole("heading", { name: "租户发布" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "其他用户共享" })).not.toBeInTheDocument();
+    expect(screen.getByText("租户、其他用户")).toBeInTheDocument();
+    expect(screen.getAllByText("共享文件 13.md")).toHaveLength(1);
+
+    rendered.rerender(createElement(SharedWithMePanel, {
+      workspaceId: "workspace-1",
+      organizationLabel: "星火科技",
+      workspaceLabel: "研发平台",
+      items: [{
+        ...shared,
+        sources: [...shared.sources].reverse().map((entry, index) => ({
+          ...entry,
+          grant_id: `60000000-0000-4000-8000-0000000000${index + 1}`,
+        })),
+      }],
+      state: "ready",
+    }));
+    expect(screen.getByRole("heading", { name: "租户发布" })).toBeInTheDocument();
+    expect(screen.getByText("租户、其他用户")).toBeInTheDocument();
+  });
+
+  it("uses the active source filter as the primary group", () => {
+    const shared = item(14, "ORGANIZATION");
+    shared.sources.push({
+      grant_id: "30000000-0000-4000-8000-000000000098",
+      principal_type: "USER",
+      principal_id: "40000000-0000-4000-8000-000000000098",
+      expires_at: null,
+    });
+    render(createElement(SharedWithMePanel, {
+      workspaceId: "workspace-1",
+      organizationLabel: "星火科技",
+      workspaceLabel: "研发平台",
+      source: "user",
+      items: [shared],
+      state: "ready",
+    }));
+
+    expect(screen.getByRole("heading", { name: "其他用户共享" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "租户发布" })).not.toBeInTheDocument();
   });
 
   it("opens projection-only detail by original node id without mutation targets", () => {
@@ -162,18 +238,67 @@ describe("SharedWithMePanel", () => {
     expect(screen.queryByRole("dialog", { name: "文件详情" })).not.toBeInTheDocument();
   });
 
+  it("derives an open detail from the latest item projection", () => {
+    const shared = item(15, "USER");
+    const rendered = render(createElement(SharedWithMePanel, {
+      workspaceId: "workspace-1",
+      organizationLabel: "星火科技",
+      workspaceLabel: "研发平台",
+      items: [shared],
+      state: "ready",
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "打开 共享文件 15.md" }));
+
+    const updated = {
+      ...shared,
+      node: { ...shared.node, name: "更新后的共享文件.md" },
+      effective_actions: ["READ"] as SharedItemVM["effective_actions"],
+      original_path: "/更新/共享文件.md",
+      sources: [{
+        ...shared.sources[0]!,
+        principal_type: "AGENT",
+      }],
+    };
+    rendered.rerender(createElement(SharedWithMePanel, {
+      workspaceId: "workspace-1",
+      organizationLabel: "星火科技",
+      workspaceLabel: "研发平台",
+      items: [updated],
+      state: "ready",
+    }));
+
+    expect(screen.getByRole("dialog", { name: "文件详情" })).toHaveTextContent(
+      "更新后的共享文件.md",
+    );
+    expect(screen.getByRole("dialog", { name: "文件详情" })).toHaveTextContent("READ");
+    expect(screen.getByRole("dialog", { name: "文件详情" })).toHaveTextContent(
+      "/更新/共享文件.md",
+    );
+    expect(screen.getByRole("dialog", { name: "文件详情" })).toHaveTextContent(
+      "Agent / Workflow",
+    );
+  });
+
   it("formats valid expiry deterministically and safely handles invalid values", () => {
+    const missingExpiry = item(16, "USER");
+    delete (missingExpiry.sources[0] as { expires_at?: string | null }).expires_at;
     render(createElement(SharedWithMePanel, {
       workspaceId: "workspace-1",
       organizationLabel: "星火科技",
       workspaceLabel: "研发平台",
-      items: [item(9, "USER"), item(10, "USER", "not-a-date"), item(11, "USER", null)],
+      items: [
+        item(9, "USER"),
+        item(10, "USER", "not-a-date"),
+        item(11, "USER", null),
+        missingExpiry,
+      ],
       state: "ready",
     }));
 
     const time = screen.getByText("2026/12/31 16:00 UTC");
     expect(time.tagName).toBe("TIME");
     expect(time).toHaveAttribute("datetime", "2026-12-31T16:00:00.000Z");
+    expect(screen.getByText("永久有效")).toBeInTheDocument();
     expect(screen.getAllByText("到期信息不可用")).toHaveLength(2);
     expect(screen.queryByText("Invalid Date")).not.toBeInTheDocument();
   });

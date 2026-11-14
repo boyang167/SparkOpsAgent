@@ -459,16 +459,9 @@ export type EffectiveAccessVM = z.infer<typeof EffectiveAccessVMSchema>;
 
 export const SharedSourceVMSchema = z.object({
   grant_id: z.string().uuid(),
-  principal_type: z.enum([
-    "USER",
-    "WORKSPACE",
-    "ORGANIZATION",
-    "ROLE",
-    "SERVICE_ACCOUNT",
-    "AGENT",
-  ]),
+  principal_type: z.string().trim().min(1).max(64),
   principal_id: z.string().uuid(),
-  expires_at: z.string().datetime({ offset: true }).nullable(),
+  expires_at: z.string().datetime({ offset: true }).nullable().optional(),
 });
 export type SharedSourceVM = z.infer<typeof SharedSourceVMSchema>;
 

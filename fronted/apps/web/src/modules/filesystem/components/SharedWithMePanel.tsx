@@ -8,31 +8,44 @@ export type SharedWithMePanelProps = {
   workspaceId: string;
   organizationLabel: string;
   workspaceLabel: string;
+  source?: "organization" | "workspace" | "user" | "agent";
   items: SharedItemVM[];
   state: "loading" | "ready" | "empty" | "error" | "forbidden";
 };
 
 const groups = [
   { id: "ORGANIZATION", label: "租户发布" },
-  { id: "USER", label: "其他用户共享" },
   { id: "WORKSPACE", label: "工作区共享" },
+  { id: "USER", label: "其他用户共享" },
   { id: "AGENT", label: "Agent / Workflow 产物" },
   { id: "OTHER", label: "其他授权来源" },
 ] as const;
 
-function groupFor(item: SharedItemVM) {
-  const principalType = item.sources[0]?.principal_type;
-  return groups.some((group) => group.id === principalType)
-    ? principalType
-    : "OTHER";
+type SourceFilter = SharedWithMePanelProps["source"];
+type GroupID = (typeof groups)[number]["id"];
+
+const knownSourceOrder = ["ORGANIZATION", "WORKSPACE", "USER", "AGENT"] as const;
+
+function groupFor(item: SharedItemVM, source?: SourceFilter): GroupID {
+  const sourceTypes = new Set(item.sources.map((entry) => entry.principal_type));
+  const filteredType = source?.toUpperCase();
+  if (
+    filteredType &&
+    knownSourceOrder.includes(filteredType as (typeof knownSourceOrder)[number]) &&
+    sourceTypes.has(filteredType)
+  ) {
+    return filteredType as GroupID;
+  }
+  return knownSourceOrder.find((type) => sourceTypes.has(type)) ?? "OTHER";
 }
 
 function sourceLabel(
   item: SharedItemVM,
   organizationLabel: string,
   workspaceLabel: string,
+  source?: SourceFilter,
 ) {
-  switch (item.sources[0]?.principal_type) {
+  switch (groupFor(item, source)) {
     case "ORGANIZATION":
       return organizationLabel;
     case "WORKSPACE":
@@ -44,6 +57,28 @@ function sourceLabel(
     default:
       return "其他授权主体";
   }
+}
+
+function sourceTypesLabel(item: SharedItemVM) {
+  const labels: Record<string, string> = {
+    ORGANIZATION: "租户",
+    WORKSPACE: "工作区",
+    USER: "其他用户",
+    AGENT: "Agent / Workflow",
+    ROLE: "角色",
+    SERVICE_ACCOUNT: "服务账号",
+  };
+  const distinct = [...new Set(item.sources.map((entry) => entry.principal_type))];
+  distinct.sort((left, right) => {
+    const leftIndex = knownSourceOrder.indexOf(left as (typeof knownSourceOrder)[number]);
+    const rightIndex = knownSourceOrder.indexOf(right as (typeof knownSourceOrder)[number]);
+    const leftRank = leftIndex < 0 ? knownSourceOrder.length : leftIndex;
+    const rightRank = rightIndex < 0 ? knownSourceOrder.length : rightIndex;
+    return leftRank - rightRank || left.localeCompare(right);
+  });
+  return distinct.length > 0
+    ? distinct.map((type) => labels[type] ?? `其他（${type}）`).join("、")
+    : "未提供";
 }
 
 function ownerAndSharerLabel(
@@ -62,14 +97,22 @@ function ownerAndSharerLabel(
   return `${owner} · 共享者信息不可用`;
 }
 
-function expiry(item: SharedItemVM) {
+function expiry(item: SharedItemVM):
+  | { kind: "date"; value: Date }
+  | { kind: "permanent" }
+  | { kind: "unavailable" } {
   const values = item.sources.map((source) => source.expires_at);
-  if (values.length === 0 || values.some((value) => value == null)) return null;
-  const dates = values.map((value) => new Date(value!));
-  if (dates.some((date) => Number.isNaN(date.getTime()))) return null;
-  return dates.reduce((earliest, date) =>
+  if (values.length === 0 || values.some((value) => value === undefined)) {
+    return { kind: "unavailable" };
+  }
+  if (values.some((value) => value === null)) return { kind: "permanent" };
+  const dates = values.map((value) => new Date(value as string));
+  if (dates.some((date) => Number.isNaN(date.getTime()))) {
+    return { kind: "unavailable" };
+  }
+  return { kind: "date", value: dates.reduce((earliest, date) =>
     date.getTime() < earliest.getTime() ? date : earliest,
-  );
+  ) };
 }
 
 function formatUTC(date: Date) {
@@ -84,22 +127,24 @@ export function SharedWithMePanel({
   workspaceId,
   organizationLabel,
   workspaceLabel,
+  source,
   items,
   state,
 }: SharedWithMePanelProps) {
   const [selection, setSelection] = useState<{
     scopeKey: string;
-    item: SharedItemVM;
+    namespaceId: string;
+    nodeId: string;
   } | null>(null);
+  const scopeKey = `${workspaceId}:${source ?? "all"}`;
   const selected =
-    selection?.scopeKey === workspaceId &&
-    items.some(
-      (item) =>
-        item.node.id === selection.item.node.id &&
-        item.node.namespace_id === selection.item.node.namespace_id,
-    )
-      ? selection.item
-      : null;
+    selection?.scopeKey === scopeKey
+      ? items.find(
+        (item) =>
+          item.node.id === selection.nodeId &&
+          item.node.namespace_id === selection.namespaceId,
+      )
+      : undefined;
 
   useEffect(() => {
     if (selection && !selected) setSelection(null);
@@ -135,7 +180,7 @@ export function SharedWithMePanel({
       ),
     ),
     groups.map((group) => {
-      const groupItems = items.filter((item) => groupFor(item) === group.id);
+      const groupItems = items.filter((item) => groupFor(item, source) === group.id);
       if (groupItems.length === 0) return null;
       return createElement(
         "section",
@@ -178,7 +223,11 @@ export function SharedWithMePanel({
                     type: "button",
                     className: "btn btn-secondary btn-sm filesystem-touch-target",
                     "aria-label": `打开 ${item.node.name}`,
-                    onClick: () => setSelection({ scopeKey: workspaceId, item }),
+                    onClick: () => setSelection({
+                      scopeKey,
+                      namespaceId: item.node.namespace_id,
+                      nodeId: item.node.id,
+                    }),
                   },
                   "查看详情",
                 ),
@@ -188,7 +237,11 @@ export function SharedWithMePanel({
                 { className: "filesystem-shared-metadata" },
                 createElement(Metadata, {
                   label: "来源",
-                  value: sourceLabel(item, organizationLabel, workspaceLabel),
+                  value: sourceLabel(item, organizationLabel, workspaceLabel, source),
+                }),
+                createElement(Metadata, {
+                  label: "授权来源类型",
+                  value: sourceTypesLabel(item),
                 }),
                 createElement(Metadata, {
                   label: "所有者 / 分享者",
@@ -220,7 +273,11 @@ export function SharedWithMePanel({
           projectionDetails: [
             {
               label: "来源",
-              value: sourceLabel(selected, organizationLabel, workspaceLabel),
+              value: sourceLabel(selected, organizationLabel, workspaceLabel, source),
+            },
+            {
+              label: "授权来源类型",
+              value: sourceTypesLabel(selected),
             },
             {
               label: "有效权限",
@@ -237,7 +294,7 @@ export function SharedWithMePanel({
 }
 
 function ExpiryMetadata({ item }: { item: SharedItemVM }) {
-  const date = expiry(item);
+  const result = expiry(item);
   return createElement(
     "div",
     { className: "stack-xs min-w-0" },
@@ -245,13 +302,15 @@ function ExpiryMetadata({ item }: { item: SharedItemVM }) {
     createElement(
       "dd",
       { className: "text-sm break-words" },
-      date
+      result.kind === "date"
         ? createElement(
             "time",
-            { dateTime: date.toISOString() },
-            formatUTC(date),
+            { dateTime: result.value.toISOString() },
+            formatUTC(result.value),
           )
-        : "到期信息不可用",
+        : result.kind === "permanent"
+          ? "永久有效"
+          : "到期信息不可用",
     ),
   );
 }

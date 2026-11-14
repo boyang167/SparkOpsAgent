@@ -194,6 +194,16 @@ func TestSharedWithMeOpenAPIDocumentsSourceProjectionAndFilter(t *testing.T) {
 	source := schemas["SharedGrantSource"].(map[string]any)
 	require.Subset(t, source["required"].([]any),
 		[]any{"grant_id", "principal_type", "principal_id", "expires_at"})
+	principalType := source["properties"].(map[string]any)["principal_type"].(map[string]any)
+	require.Equal(t, "string", principalType["type"])
+	require.NotContains(t, principalType, "enum")
+	require.Equal(t, 64, principalType["maxLength"])
+	require.Contains(t, principalType["description"], "SERVICE_ACCOUNT")
+	writePrincipalType := schemas["CreateTypedGrantRequest"].(map[string]any)["properties"].(map[string]any)["principal_type"].(map[string]any)
+	require.ElementsMatch(t,
+		[]any{"USER", "WORKSPACE", "ORGANIZATION", "ROLE"},
+		writePrincipalType["enum"].([]any),
+	)
 }
 
 func TestFilesystemAuditOpenAPISchemaMatchesSDKContract(t *testing.T) {

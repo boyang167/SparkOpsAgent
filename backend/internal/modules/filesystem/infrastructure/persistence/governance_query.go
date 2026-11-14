@@ -176,6 +176,10 @@ func sharedNodeProjections(
 		if !exists {
 			continue
 		}
+		namespace, namespaceExists := namespaceByID[node.NamespaceID]
+		if !namespaceExists {
+			continue
+		}
 		pathParts := make([]string, 0, 8)
 		sources := make([]repository.SharedGrantSource, 0)
 		visited := make(map[uuid.UUID]struct{})
@@ -185,7 +189,7 @@ func sharedNodeProjections(
 				break
 			}
 			visited[current.ID] = struct{}{}
-			if current.Name != ".root" {
+			if namespace.RootNodeID == nil || current.ID != *namespace.RootNodeID {
 				pathParts = append(pathParts, current.Name)
 			}
 			for _, grant := range grantsByNode[current.ID] {
@@ -212,7 +216,6 @@ func sharedNodeProjections(
 		for left, right := 0, len(pathParts)-1; left < right; left, right = left+1, right-1 {
 			pathParts[left], pathParts[right] = pathParts[right], pathParts[left]
 		}
-		namespace := namespaceByID[node.NamespaceID]
 		var ownerUserID *uuid.UUID
 		if namespace.NamespaceType == model.NamespaceTypeUser && namespace.OwnerUserID != nil {
 			value := *namespace.OwnerUserID

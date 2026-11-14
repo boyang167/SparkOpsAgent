@@ -178,6 +178,7 @@ export default async function FilesPage({
           workspaceId={workspaceId}
           organizationLabel={organizationLabel}
           workspaceLabel={workspaceLabel}
+          source={initialState.source}
           items={sharedItems}
           state={sharedState}
         />

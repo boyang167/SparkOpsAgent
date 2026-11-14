@@ -2078,7 +2078,9 @@ components:
           format: uuid
         principal_type:
           type: string
-          enum: [USER, WORKSPACE, ORGANIZATION, ROLE, SERVICE_ACCOUNT, AGENT]
+          minLength: 1
+          maxLength: 64
+          description: Known values are USER, WORKSPACE, ORGANIZATION, ROLE, SERVICE_ACCOUNT, and AGENT; clients must preserve future non-empty values.
         principal_id:
           type: string
           format: uuid
