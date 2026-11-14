@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
@@ -20,7 +21,7 @@ var postgresFallbackConstraints = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_revisions_node_no ON filesystem.file_revisions(node_id, revision_no)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_revisions_id_node ON filesystem.file_revisions(id, node_id)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_replicas_identity ON filesystem.storage_replicas(blob_id, provider_id, object_key)`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_grants_active_identity ON filesystem.resource_grants(node_id, principal_type, principal_id, permission, effect) WHERE revoked_at IS NULL`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_grants_active_identity ON filesystem.resource_grants(node_id, principal_type, principal_id, permission, effect) WHERE revoked_at IS NULL`,
 	`DO $$ BEGIN ALTER TABLE filesystem.nodes ADD CONSTRAINT fk_nodes_namespace FOREIGN KEY (namespace_id) REFERENCES filesystem.namespaces(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.nodes ADD CONSTRAINT fk_nodes_parent_namespace FOREIGN KEY (parent_id, namespace_id) REFERENCES filesystem.nodes(id, namespace_id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.nodes ADD CONSTRAINT fk_nodes_current_revision FOREIGN KEY (current_revision_id, id) REFERENCES filesystem.file_revisions(id, node_id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
@@ -152,43 +153,14 @@ func AutoMigrate(db *gorm.DB) error {
 }
 
 func upgradeSQLiteResourceGrants(db *gorm.DB) error {
-	var principalColumns int64
-	if err := db.Raw("SELECT COUNT(*) FROM filesystem.pragma_table_info('resource_grants') WHERE name = 'principal_type'").Scan(&principalColumns).Error; err != nil {
-		return wrapPersistence(err)
+	columns, notNull, err := sqliteResourceGrantColumns(db)
+	if err != nil {
+		return err
 	}
-	if principalColumns == 0 {
-		if err := db.Exec("ALTER TABLE filesystem.resource_grants RENAME TO resource_grants_legacy").Error; err != nil {
-			return wrapPersistence(err)
-		}
-		if err := db.Exec(`CREATE TABLE filesystem.resource_grants (
-			id BLOB PRIMARY KEY,
-			node_id BLOB NOT NULL,
-			organization_id BLOB NOT NULL,
-			grantee_id BLOB NOT NULL,
-			principal_type TEXT NOT NULL CHECK (principal_type IN ('USER','WORKSPACE','ORGANIZATION','ROLE','SERVICE_ACCOUNT','AGENT')),
-			principal_id BLOB NOT NULL,
-			permission TEXT NOT NULL CHECK (permission IN ('READ','WRITE','DELETE','SHARE','ADMIN')),
-			effect TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY')),
-			inherit_to_children INTEGER NOT NULL DEFAULT 1 CHECK (inherit_to_children IN (0, 1)),
-			expires_at DATETIME,
-			revoked_at DATETIME,
-			policy_version INTEGER NOT NULL DEFAULT 1,
-			created_at DATETIME,
-			FOREIGN KEY(node_id) REFERENCES nodes(id)
-		)`).Error; err != nil {
-			return wrapPersistence(err)
-		}
-		if err := db.Exec(`INSERT INTO filesystem.resource_grants
-			(id, node_id, organization_id, grantee_id, principal_type, principal_id,
-			 permission, effect, inherit_to_children, expires_at, revoked_at, policy_version, created_at)
-			SELECT old.id, old.node_id,
-				(SELECT ns.organization_id FROM filesystem.nodes n JOIN filesystem.namespaces ns ON ns.id = n.namespace_id WHERE n.id = old.node_id),
-				old.grantee_id, 'USER', old.grantee_id, old.permission, old.effect, 1, old.expires_at, NULL, 1, old.created_at
-			FROM filesystem.resource_grants_legacy old`).Error; err != nil {
-			return wrapPersistence(err)
-		}
-		if err := db.Exec("DROP TABLE filesystem.resource_grants_legacy").Error; err != nil {
-			return wrapPersistence(err)
+	if !columns["organization_id"] || !columns["principal_type"] || !columns["principal_id"] ||
+		!notNull["organization_id"] || !notNull["principal_type"] || !notNull["principal_id"] {
+		if err := rebuildSQLiteResourceGrants(db, columns); err != nil {
+			return err
 		}
 	} else {
 		for _, column := range []struct {
@@ -201,11 +173,7 @@ func upgradeSQLiteResourceGrants(db *gorm.DB) error {
 			{"revoked_at", "ALTER TABLE filesystem.resource_grants ADD COLUMN revoked_at DATETIME"},
 			{"policy_version", "ALTER TABLE filesystem.resource_grants ADD COLUMN policy_version INTEGER DEFAULT 1"},
 		} {
-			exists, err := sqliteResourceGrantColumnExists(db, column.name)
-			if err != nil {
-				return err
-			}
-			if !exists {
+			if !columns[column.name] {
 				if err := db.Exec(column.sql).Error; err != nil {
 					return wrapPersistence(err)
 				}
@@ -230,12 +198,82 @@ func upgradeSQLiteResourceGrants(db *gorm.DB) error {
 	return nil
 }
 
-func sqliteResourceGrantColumnExists(db *gorm.DB, column string) (bool, error) {
-	var count int64
-	if err := db.Raw("SELECT COUNT(*) FROM filesystem.pragma_table_info('resource_grants') WHERE name = ?", column).Scan(&count).Error; err != nil {
-		return false, wrapPersistence(err)
+func sqliteResourceGrantColumns(db *gorm.DB) (map[string]bool, map[string]bool, error) {
+	var rows []struct {
+		Name    string `gorm:"column:name"`
+		NotNull int    `gorm:"column:notnull"`
 	}
-	return count > 0, nil
+	if err := db.Raw(`SELECT name, "notnull" FROM filesystem.pragma_table_info('resource_grants')`).Scan(&rows).Error; err != nil {
+		return nil, nil, wrapPersistence(err)
+	}
+	columns := make(map[string]bool, len(rows))
+	notNull := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		columns[row.Name] = true
+		notNull[row.Name] = row.NotNull == 1
+	}
+	return columns, notNull, nil
+}
+
+func rebuildSQLiteResourceGrants(db *gorm.DB, columns map[string]bool) error {
+	if err := db.Exec("ALTER TABLE filesystem.resource_grants RENAME TO resource_grants_legacy").Error; err != nil {
+		return wrapPersistence(err)
+	}
+	if err := db.Exec(`CREATE TABLE filesystem.resource_grants (
+		id BLOB PRIMARY KEY,
+		node_id BLOB NOT NULL,
+		organization_id BLOB NOT NULL,
+		grantee_id BLOB NOT NULL,
+		principal_type TEXT NOT NULL CHECK (principal_type IN ('USER','WORKSPACE','ORGANIZATION','ROLE','SERVICE_ACCOUNT','AGENT')),
+		principal_id BLOB NOT NULL,
+		permission TEXT NOT NULL CHECK (permission IN ('READ','WRITE','DELETE','SHARE','ADMIN')),
+		effect TEXT NOT NULL CHECK (effect IN ('ALLOW','DENY')),
+		inherit_to_children INTEGER NOT NULL DEFAULT 1 CHECK (inherit_to_children IN (0, 1)),
+		expires_at DATETIME,
+		revoked_at DATETIME,
+		policy_version INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME,
+		FOREIGN KEY(node_id) REFERENCES nodes(id)
+	)`).Error; err != nil {
+		return wrapPersistence(err)
+	}
+	organization := "(SELECT ns.organization_id FROM filesystem.nodes n JOIN filesystem.namespaces ns ON ns.id = n.namespace_id WHERE n.id = old.node_id)"
+	principalType, principalID := "'USER'", "old.grantee_id"
+	inherit, expires, revoked, policy := "1", "NULL", "NULL", "1"
+	if columns["principal_type"] {
+		principalType = "COALESCE(NULLIF(old.principal_type, ''), 'USER')"
+	}
+	if columns["principal_id"] {
+		principalID = "COALESCE(old.principal_id, old.grantee_id)"
+	}
+	if columns["organization_id"] {
+		organization = "COALESCE(old.organization_id, " + organization + ")"
+	}
+	if columns["inherit_to_children"] {
+		inherit = "COALESCE(old.inherit_to_children, 1)"
+	}
+	if columns["expires_at"] {
+		expires = "old.expires_at"
+	}
+	if columns["revoked_at"] {
+		revoked = "old.revoked_at"
+	}
+	if columns["policy_version"] {
+		policy = "COALESCE(old.policy_version, 1)"
+	}
+	query := fmt.Sprintf(`INSERT INTO filesystem.resource_grants
+		(id, node_id, organization_id, grantee_id, principal_type, principal_id,
+		 permission, effect, inherit_to_children, expires_at, revoked_at, policy_version, created_at)
+		SELECT old.id, old.node_id, %s, old.grantee_id, %s, %s, old.permission, old.effect,
+			%s, %s, %s, %s, old.created_at
+		FROM filesystem.resource_grants_legacy old`, organization, principalType, principalID, inherit, expires, revoked, policy)
+	if err := db.Exec(query).Error; err != nil {
+		return wrapPersistence(err)
+	}
+	if err := db.Exec("DROP TABLE filesystem.resource_grants_legacy").Error; err != nil {
+		return wrapPersistence(err)
+	}
+	return nil
 }
 
 func isSQLiteDuplicateColumn(err error) bool {

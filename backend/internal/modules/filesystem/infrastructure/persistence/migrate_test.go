@@ -65,6 +65,60 @@ func TestSQLiteAutoMigrateUpgradesLegacyGrantRows(t *testing.T) {
 	require.Empty(t, grants)
 }
 
+func TestSQLiteAutoMigrateRebuildsPartiallyUpgradedGrantRows(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
+	orgID, namespaceID, nodeID, granteeID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(`CREATE TABLE filesystem.namespaces (
+		id BLOB PRIMARY KEY, namespace_type TEXT, organization_id BLOB, workspace_id BLOB,
+		owner_user_id BLOB, root_node_id BLOB, status TEXT, policy_version INTEGER,
+		created_at DATETIME, updated_at DATETIME
+	)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE filesystem.nodes (
+		id BLOB PRIMARY KEY, namespace_id BLOB, parent_id BLOB, node_type TEXT,
+		name TEXT, normalized_name TEXT, current_revision_id BLOB, state TEXT,
+		owner_id BLOB, created_at DATETIME, updated_at DATETIME
+	)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE filesystem.resource_grants (
+		id BLOB PRIMARY KEY, node_id BLOB NOT NULL, organization_id BLOB,
+		grantee_id BLOB NOT NULL, principal_type TEXT, principal_id BLOB,
+		permission TEXT NOT NULL, effect TEXT NOT NULL, inherit_to_children INTEGER,
+		expires_at DATETIME, revoked_at DATETIME, policy_version INTEGER, created_at DATETIME
+	)`).Error)
+	require.NoError(t, db.Exec("INSERT INTO filesystem.namespaces (id, namespace_type, organization_id, workspace_id, status) VALUES (?, 'WORKSPACE', ?, ?, 'ACTIVE')", namespaceID, orgID, uuid.New()).Error)
+	require.NoError(t, db.Exec("INSERT INTO filesystem.nodes (id, namespace_id, node_type, name, normalized_name, state, owner_id) VALUES (?, ?, 'DIRECTORY', 'root', 'root', 'ACTIVE', ?)", nodeID, namespaceID, uuid.New()).Error)
+	require.NoError(t, db.Exec("INSERT INTO filesystem.resource_grants (id, node_id, organization_id, grantee_id, principal_type, principal_id, permission, effect) VALUES (?, ?, ?, ?, 'USER', ?, 'READ', 'ALLOW')", uuid.New(), nodeID, orgID, granteeID, granteeID).Error)
+
+	require.NoError(t, AutoMigrate(db))
+	var columns []struct {
+		Name    string `gorm:"column:name"`
+		NotNull int    `gorm:"column:notnull"`
+	}
+	require.NoError(t, db.Raw(`SELECT name, "notnull" FROM filesystem.pragma_table_info('resource_grants') WHERE name IN ('organization_id', 'principal_type', 'principal_id')`).Scan(&columns).Error)
+	require.Len(t, columns, 3)
+	for _, column := range columns {
+		require.Equal(t, 1, column.NotNull, column.Name)
+	}
+	var got struct {
+		OrganizationID uuid.UUID
+		PrincipalType  model.PrincipalType
+		PrincipalID    uuid.UUID
+	}
+	require.NoError(t, db.Table("filesystem.resource_grants").Select("organization_id, principal_type, principal_id").Where("node_id = ?", nodeID).Scan(&got).Error)
+	require.Equal(t, orgID, got.OrganizationID)
+	require.Equal(t, model.PrincipalUser, got.PrincipalType)
+	require.Equal(t, granteeID, got.PrincipalID)
+
+	repo := NewRepository(db)
+	grants, err := repo.ListResourceGrants(context.Background(), []uuid.UUID{nodeID}, []repository.PrincipalRef{{Type: model.PrincipalUser, ID: granteeID}}, model.ResourcePermissionRead, time.Now())
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	grants, err = repo.ListResourceGrants(context.Background(), []uuid.UUID{nodeID}, []repository.PrincipalRef{{Type: model.PrincipalRole, ID: granteeID}}, model.ResourcePermissionRead, time.Now())
+	require.NoError(t, err)
+	require.Empty(t, grants)
+}
+
 func TestPostgresFallbackConstraintsMatchKernelInvariants(t *testing.T) {
 	fallbackSQL := strings.Join(postgresFallbackConstraints, "\n")
 	migrationBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "..", "migrations", "000077_filesystem_kernel.up.sql"))

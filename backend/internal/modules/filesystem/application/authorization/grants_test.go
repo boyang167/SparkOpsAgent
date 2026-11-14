@@ -153,7 +153,7 @@ func TestGrantServiceSupportsTypedPrincipalsAndRevokeReuse(t *testing.T) {
 		GranteeOrganizationID: namespace.OrganizationID,
 		Grant: model.ResourceGrant{
 			PrincipalType: model.PrincipalWorkspace, PrincipalID: principalID,
-			Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow,
+			InheritToChildren: true, Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow,
 		},
 	}
 	missingOrganization := request
@@ -173,14 +173,29 @@ func TestGrantServiceSupportsTypedPrincipalsAndRevokeReuse(t *testing.T) {
 	require.Equal(t, principalID, grant.GranteeID)
 	require.Equal(t, principalID, grant.PrincipalID)
 	require.Equal(t, model.PrincipalWorkspace, grant.PrincipalType)
+	require.True(t, grant.InheritToChildren)
+
+	inheritConflict := request
+	inheritConflict.Grant.InheritToChildren = false
+	_, err = service.Create(context.Background(), inheritConflict)
+	require.ErrorIs(t, err, repository.ErrIdempotencyConflict)
 
 	roleRequest := request
 	roleRequest.CommandID = uuid.New()
 	roleRequest.Grant.PrincipalType = model.PrincipalRole
+	roleRequest.Grant.InheritToChildren = false
 	roleGrant, err := service.Create(context.Background(), roleRequest)
 	require.NoError(t, err)
 	require.Equal(t, principalID, roleGrant.PrincipalID)
 	require.Equal(t, model.PrincipalRole, roleGrant.PrincipalType)
+	require.False(t, roleGrant.InheritToChildren)
+
+	legacyRequest := request
+	legacyRequest.CommandID = uuid.New()
+	legacyRequest.Grant = model.ResourceGrant{GranteeID: uuid.New(), Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow}
+	legacyGrant, err := service.Create(context.Background(), legacyRequest)
+	require.NoError(t, err)
+	require.True(t, legacyGrant.InheritToChildren)
 
 	request.CommandID = uuid.New()
 	require.NoError(t, service.Revoke(context.Background(), request, grant.ID))

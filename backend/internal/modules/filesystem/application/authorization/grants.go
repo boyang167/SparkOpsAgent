@@ -53,6 +53,7 @@ func (s *GrantService) Create(ctx context.Context, request GrantRequest) (model.
 		return model.ResourceGrant{}, err
 	}
 	grant := request.Grant
+	legacyGrantInput := grant.PrincipalType == "" && grant.PrincipalID == uuid.Nil && grant.GranteeID != uuid.Nil
 	if grant.PrincipalID != uuid.Nil && grant.GranteeID != uuid.Nil && grant.PrincipalID != grant.GranteeID {
 		return model.ResourceGrant{}, domain.ErrResourceDenied
 	}
@@ -67,6 +68,9 @@ func (s *GrantService) Create(ctx context.Context, request GrantRequest) (model.
 	}
 	if grant.PrincipalID == uuid.Nil {
 		return model.ResourceGrant{}, domain.ErrResourceDenied
+	}
+	if legacyGrantInput {
+		grant.InheritToChildren = true
 	}
 	if grant.ID == uuid.Nil {
 		if request.CommandID != uuid.Nil {
@@ -188,9 +192,9 @@ func (s *GrantService) authoritativeRequest(ctx context.Context, request GrantRe
 
 func grantRequestHash(operation string, request GrantRequest, grantID uuid.UUID) string {
 	grant := request.Grant
-	value := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+	value := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%t",
 		operation, request.ActorID, request.OrganizationID, request.WorkspaceID, request.NamespaceID,
-		request.NodeID, grantID, grant.PrincipalType, grant.PrincipalID, grant.Permission, grant.Effect)
+		request.NodeID, grantID, grant.PrincipalType, grant.PrincipalID, grant.Permission, grant.Effect, grant.InheritToChildren)
 	if grant.ExpiresAt != nil {
 		value += "|" + grant.ExpiresAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
 	}
