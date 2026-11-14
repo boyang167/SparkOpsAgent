@@ -34,9 +34,27 @@ func (allowPermissions) HasPermission(context.Context, kernel.WorkspaceID, kerne
 	return true, nil
 }
 
-type allowMembers struct{}
+type allowMembers struct{ organizationID uuid.UUID }
 
-func (allowMembers) IsWorkspaceMember(context.Context, kernel.WorkspaceID, kernel.MemberID) (bool, error) {
+func (*allowMembers) IsWorkspaceMember(context.Context, kernel.WorkspaceID, kernel.MemberID) (bool, error) {
+	return true, nil
+}
+func (a *allowMembers) ResolveWorkspaceAccess(_ context.Context, _ kernel.WorkspaceID, _ kernel.MemberID) (kernel.OrgID, bool, error) {
+	return kernel.OrgID{UUID: a.organizationID}, true, nil
+}
+
+type noRoles struct{}
+
+func (noRoles) ListWorkspaceRoleIDs(context.Context, kernel.WorkspaceID, kernel.MemberID) ([]kernel.RoleID, error) {
+	return nil, nil
+}
+
+type allowOrgPermissions struct{}
+
+func (allowOrgPermissions) IsOrgMember(context.Context, kernel.OrgID, kernel.MemberID) (bool, error) {
+	return true, nil
+}
+func (allowOrgPermissions) HasOrgPermission(context.Context, kernel.OrgID, kernel.MemberID, string) (bool, error) {
 	return true, nil
 }
 
@@ -47,15 +65,18 @@ func (discardAudit) Log(context.Context, audit.Entry) error { return nil }
 func TestRegisterValidatesDependencies(t *testing.T) {
 	registry := events.NewRegistry()
 	base := appctx.Container{
-		Config:                 &config.Config{},
-		DB:                     &gorm.DB{},
-		Transactor:             postgres.NewDirectTransactor(),
-		EventBus:               messaging.NewInMemoryBus(registry),
-		PermissionChecker:      allowPermissions{},
-		WorkspaceMemberChecker: allowMembers{},
-		AuditLogger:            discardAudit{},
-		EventRegistry:          registry,
-		Engine:                 httpx.NewEngine(),
+		Config:                  &config.Config{},
+		DB:                      &gorm.DB{},
+		Transactor:              postgres.NewDirectTransactor(),
+		EventBus:                messaging.NewInMemoryBus(registry),
+		PermissionChecker:       allowPermissions{},
+		WorkspaceMemberChecker:  &allowMembers{},
+		WorkspaceAccessResolver: &allowMembers{},
+		WorkspaceRoleReader:     noRoles{},
+		OrgPermissionChecker:    allowOrgPermissions{},
+		AuditLogger:             discardAudit{},
+		EventRegistry:           registry,
+		Engine:                  httpx.NewEngine(),
 	}
 	tests := []struct {
 		name string
@@ -67,6 +88,9 @@ func TestRegisterValidatesDependencies(t *testing.T) {
 		{name: "event bus", drop: func(c *appctx.Container) { c.EventBus = nil }, want: "requires event bus"},
 		{name: "permission checker", drop: func(c *appctx.Container) { c.PermissionChecker = nil }, want: "requires permission checker"},
 		{name: "member checker", drop: func(c *appctx.Container) { c.WorkspaceMemberChecker = nil }, want: "requires workspace member checker"},
+		{name: "workspace access resolver", drop: func(c *appctx.Container) { c.WorkspaceAccessResolver = nil }, want: "requires workspace access resolver"},
+		{name: "workspace role reader", drop: func(c *appctx.Container) { c.WorkspaceRoleReader = nil }, want: "requires workspace role reader"},
+		{name: "organization permission checker", drop: func(c *appctx.Container) { c.OrgPermissionChecker = nil }, want: "requires organization permission checker"},
 		{name: "audit logger auto provision", drop: func(c *appctx.Container) {
 			c.AuditLogger = nil
 			db, openErr := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -98,16 +122,20 @@ func TestRegisterExposesMetadataRoutesWithoutLocalProvider(t *testing.T) {
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
 	registry := events.NewRegistry()
 	engine := httpx.NewEngine()
+	memberAccess := &allowMembers{}
 	container := &appctx.Container{
-		Config:                 &config.Config{},
-		DB:                     db,
-		Transactor:             postgres.NewTransactor(db),
-		EventBus:               messaging.NewInMemoryBus(registry),
-		PermissionChecker:      allowPermissions{},
-		WorkspaceMemberChecker: allowMembers{},
-		AuditLogger:            discardAudit{},
-		EventRegistry:          registry,
-		Engine:                 engine,
+		Config:                  &config.Config{},
+		DB:                      db,
+		Transactor:              postgres.NewTransactor(db),
+		EventBus:                messaging.NewInMemoryBus(registry),
+		PermissionChecker:       allowPermissions{},
+		WorkspaceMemberChecker:  memberAccess,
+		WorkspaceAccessResolver: memberAccess,
+		WorkspaceRoleReader:     noRoles{},
+		OrgPermissionChecker:    allowOrgPermissions{},
+		AuditLogger:             discardAudit{},
+		EventRegistry:           registry,
+		Engine:                  engine,
 	}
 	module := New(authn.NewTokenProvider(config.JWTConfig{}))
 	require.NoError(t, module.Register(container))
@@ -123,6 +151,7 @@ func TestRegisterExposesMetadataRoutesWithoutLocalProvider(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	owner := uuid.New()
 	namespace := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Status: "ACTIVE"}
+	memberAccess.organizationID = namespace.OrganizationID
 	require.NoError(t, repo.CreateNamespace(context.Background(), namespace))
 	root, err := model.NewRootDirectory(namespace.ID, owner, ".root")
 	require.NoError(t, err)
@@ -143,5 +172,8 @@ func TestRegisterExposesMetadataRoutesWithoutLocalProvider(t *testing.T) {
 }
 
 var _ authz.PermissionChecker = allowPermissions{}
-var _ authz.WorkspaceMemberChecker = allowMembers{}
+var _ authz.WorkspaceMemberChecker = (*allowMembers)(nil)
+var _ authz.WorkspaceAccessResolver = (*allowMembers)(nil)
+var _ authz.WorkspaceRoleReader = noRoles{}
+var _ authz.OrgPermissionChecker = allowOrgPermissions{}
 var _ audit.Logger = discardAudit{}

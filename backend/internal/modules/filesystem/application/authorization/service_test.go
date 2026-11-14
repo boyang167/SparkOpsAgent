@@ -14,8 +14,17 @@ import (
 )
 
 type grantRepositoryStub struct {
-	nodes  map[uuid.UUID]*model.Node
-	grants map[uuid.UUID][]model.ResourceGrant
+	nodes      map[uuid.UUID]*model.Node
+	namespaces map[uuid.UUID]*model.Namespace
+	grants     map[uuid.UUID][]model.ResourceGrant
+}
+
+func (r grantRepositoryStub) GetNamespace(_ context.Context, namespaceID uuid.UUID) (*model.Namespace, error) {
+	namespace := r.namespaces[namespaceID]
+	if namespace == nil {
+		return nil, domain.ErrNamespaceNotFound
+	}
+	return namespace, nil
 }
 
 func (r grantRepositoryStub) GetNode(_ context.Context, namespaceID, nodeID uuid.UUID) (*model.Node, error) {
@@ -40,7 +49,10 @@ func TestAuthorizeDeleteReplayTraversesTrashedAncestors(t *testing.T) {
 	root.State = model.NodeStateTrashed
 	child := node(namespaceID, root.ID, owner)
 	child.State = model.NodeStateTrashed
-	service := NewService(grantRepositoryStub{nodes: map[uuid.UUID]*model.Node{root.ID: root, child.ID: child}}, nil)
+	service := NewService(grantRepositoryStub{
+		nodes:      map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
+		namespaces: map[uuid.UUID]*model.Namespace{namespaceID: userNamespace(namespaceID, owner)},
+	}, nil, nil)
 
 	require.True(t, service.Authorize(context.Background(), Request{
 		ActorID: owner, NamespaceID: namespaceID, NodeID: child.ID, Permission: model.ResourcePermissionDelete,
@@ -68,16 +80,172 @@ func (r grantRepositoryStub) ListResourceGrants(_ context.Context, nodeIDs []uui
 	return result, nil
 }
 
+type authorityStub struct {
+	workspaceAdmin    bool
+	organizationAdmin bool
+}
+
+func (s authorityStub) HasWorkspaceFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
+	return s.workspaceAdmin, nil
+}
+
+func (s authorityStub) HasOrganizationFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
+	return s.organizationAdmin, nil
+}
+
+func TestAuthorizeNamespaceMatrixUsesResolvedPrincipals(t *testing.T) {
+	organizationID, workspaceID := uuid.New(), uuid.New()
+	userOwner, tenantOwner, member, roleID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	tests := []struct {
+		name       string
+		namespace  *model.Namespace
+		actorID    uuid.UUID
+		principals []repository.PrincipalRef
+		grants     map[uuid.UUID][]model.ResourceGrant
+		allowed    bool
+	}{
+		{
+			name: "user namespace owner", actorID: userOwner, allowed: true,
+			namespace: &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeUser, OrganizationID: organizationID, OwnerUserID: userOwner, PolicyVersion: 7},
+		},
+		{
+			name: "tenant owner cannot read another user namespace", actorID: tenantOwner,
+			namespace: &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeUser, OrganizationID: organizationID, OwnerUserID: userOwner, PolicyVersion: 7},
+		},
+		{
+			name: "workspace grant covers active member", actorID: member, allowed: true,
+			namespace: &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: organizationID, WorkspaceID: workspaceID, PolicyVersion: 8},
+			principals: []repository.PrincipalRef{
+				{Type: model.PrincipalUser, ID: member},
+				{Type: model.PrincipalWorkspace, ID: workspaceID},
+				{Type: model.PrincipalOrganization, ID: organizationID},
+				{Type: model.PrincipalRole, ID: roleID},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := node(tt.namespace.ID, uuid.Nil, uuid.New())
+			grants := tt.grants
+			if tt.name == "workspace grant covers active member" {
+				grants = map[uuid.UUID][]model.ResourceGrant{root.ID: {{
+					NodeID: root.ID, PrincipalType: model.PrincipalWorkspace, PrincipalID: workspaceID,
+					Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow,
+				}}}
+			}
+			resolver := principalResolverStub{principals: tt.principals}
+			if tt.namespace.NamespaceType == model.NamespaceTypeUser {
+				resolver.principals = []repository.PrincipalRef{{Type: model.PrincipalUser, ID: tt.actorID}}
+			}
+			service := NewService(grantRepositoryStub{
+				nodes: map[uuid.UUID]*model.Node{root.ID: root}, namespaces: map[uuid.UUID]*model.Namespace{tt.namespace.ID: tt.namespace}, grants: grants,
+			}, resolver, authorityStub{organizationAdmin: true})
+
+			decision := service.Authorize(context.Background(), Request{
+				ActorID: tt.actorID, WorkspaceID: tt.namespace.WorkspaceID, NamespaceID: tt.namespace.ID,
+				NodeID: root.ID, Permission: model.ResourcePermissionRead,
+			})
+
+			require.Equal(t, tt.allowed, decision.Allowed)
+		})
+	}
+}
+
+type principalResolverStub struct {
+	principals []repository.PrincipalRef
+	err        error
+}
+
+func (s principalResolverStub) Resolve(context.Context, ResolvePrincipalsInput) ([]repository.PrincipalRef, error) {
+	return s.principals, s.err
+}
+
+func TestAuthorizeOrganizationGrantRequiresValidWorkspaceContext(t *testing.T) {
+	organizationID, workspaceID, actorID := uuid.New(), uuid.New(), uuid.New()
+	namespace := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeOrganization, OrganizationID: organizationID, PolicyVersion: 4}
+	root := node(namespace.ID, uuid.Nil, uuid.New())
+	repo := grantRepositoryStub{
+		nodes: map[uuid.UUID]*model.Node{root.ID: root}, namespaces: map[uuid.UUID]*model.Namespace{namespace.ID: namespace},
+		grants: map[uuid.UUID][]model.ResourceGrant{root.ID: {{
+			NodeID: root.ID, PrincipalType: model.PrincipalOrganization, PrincipalID: organizationID,
+			Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow,
+		}}},
+	}
+	valid := NewService(repo, principalResolverStub{principals: []repository.PrincipalRef{
+		{Type: model.PrincipalUser, ID: actorID},
+		{Type: model.PrincipalWorkspace, ID: workspaceID},
+		{Type: model.PrincipalOrganization, ID: organizationID},
+	}}, authorityStub{})
+	require.True(t, valid.Authorize(context.Background(), Request{
+		ActorID: actorID, WorkspaceID: workspaceID, NamespaceID: namespace.ID, NodeID: root.ID, Permission: model.ResourcePermissionRead,
+	}).Allowed)
+
+	withoutWorkspace := NewService(repo, principalResolverStub{
+		principals: []repository.PrincipalRef{{Type: model.PrincipalUser, ID: actorID}},
+	}, authorityStub{})
+	require.False(t, withoutWorkspace.Authorize(context.Background(), Request{
+		ActorID: actorID, NamespaceID: namespace.ID, NodeID: root.ID, Permission: model.ResourcePermissionRead,
+	}).Allowed)
+}
+
+func TestAuthorizeDirectDenyOverridesInheritedOrganizationAllow(t *testing.T) {
+	organizationID, workspaceID, actorID := uuid.New(), uuid.New(), uuid.New()
+	namespace := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeOrganization, OrganizationID: organizationID, PolicyVersion: 3}
+	root := node(namespace.ID, uuid.Nil, uuid.New())
+	child := node(namespace.ID, root.ID, uuid.New())
+	repo := grantRepositoryStub{
+		nodes:      map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
+		namespaces: map[uuid.UUID]*model.Namespace{namespace.ID: namespace},
+		grants: map[uuid.UUID][]model.ResourceGrant{
+			root.ID: {{
+				NodeID: root.ID, PrincipalType: model.PrincipalOrganization, PrincipalID: organizationID,
+				InheritToChildren: true, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow,
+			}},
+			child.ID: {{
+				NodeID: child.ID, PrincipalType: model.PrincipalUser, PrincipalID: actorID,
+				Permission: model.ResourcePermissionRead, Effect: model.GrantEffectDeny,
+			}},
+		},
+	}
+	service := NewService(repo, principalResolverStub{principals: []repository.PrincipalRef{
+		{Type: model.PrincipalUser, ID: actorID},
+		{Type: model.PrincipalOrganization, ID: organizationID},
+	}}, authorityStub{})
+
+	decision := service.Authorize(context.Background(), Request{
+		ActorID: actorID, WorkspaceID: workspaceID, NamespaceID: namespace.ID, NodeID: child.ID, Permission: model.ResourcePermissionRead,
+	})
+
+	require.False(t, decision.Allowed)
+	require.Equal(t, "explicit_deny", decision.Reason)
+}
+
+func TestAuthorizationCacheKeyIncludesPolicyVersion(t *testing.T) {
+	request := Request{
+		ActorID: uuid.New(), WorkspaceID: uuid.New(), NamespaceID: uuid.New(),
+		NodeID: uuid.New(), Permission: model.ResourcePermissionWrite,
+	}
+	organizationID := uuid.New()
+
+	first := authorizationCacheKey(request, organizationID, 11)
+	second := authorizationCacheKey(request, organizationID, 12)
+
+	require.NotEqual(t, first, second)
+	require.Equal(t, int64(11), first.PolicyVersion)
+	require.Equal(t, organizationID, first.OrganizationID)
+}
+
 func TestAuthorizeInheritsAllowFromAncestor(t *testing.T) {
 	namespaceID, owner, actor := uuid.New(), uuid.New(), uuid.New()
 	root := node(namespaceID, uuid.Nil, owner)
 	child := node(namespaceID, root.ID, owner)
 	service := NewService(grantRepositoryStub{
-		nodes: map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
+		nodes:      map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
+		namespaces: map[uuid.UUID]*model.Namespace{namespaceID: userNamespace(namespaceID, owner)},
 		grants: map[uuid.UUID][]model.ResourceGrant{
 			root.ID: {{NodeID: root.ID, GranteeID: actor, InheritToChildren: true, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow}},
 		},
-	}, nil)
+	}, nil, nil)
 
 	decision := service.Authorize(context.Background(), Request{ActorID: actor, NamespaceID: namespaceID, NodeID: child.ID, Permission: model.ResourcePermissionRead})
 
@@ -90,12 +258,13 @@ func TestAuthorizeExplicitDenyWinsAcrossAncestors(t *testing.T) {
 	root := node(namespaceID, uuid.Nil, owner)
 	child := node(namespaceID, root.ID, owner)
 	service := NewService(grantRepositoryStub{
-		nodes: map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
+		nodes:      map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
+		namespaces: map[uuid.UUID]*model.Namespace{namespaceID: userNamespace(namespaceID, owner)},
 		grants: map[uuid.UUID][]model.ResourceGrant{
 			root.ID:  {{NodeID: root.ID, GranteeID: actor, InheritToChildren: true, Permission: model.ResourcePermissionWrite, Effect: model.GrantEffectAllow}},
 			child.ID: {{NodeID: child.ID, GranteeID: actor, Permission: model.ResourcePermissionWrite, Effect: model.GrantEffectDeny}},
 		},
-	}, nil)
+	}, nil, nil)
 
 	decision := service.Authorize(context.Background(), Request{ActorID: actor, NamespaceID: namespaceID, NodeID: child.ID, Permission: model.ResourcePermissionWrite})
 
@@ -108,13 +277,14 @@ func TestAuthorizeHonorsGrantInheritanceFlag(t *testing.T) {
 	root := node(namespaceID, uuid.Nil, owner)
 	child := node(namespaceID, root.ID, owner)
 	repo := grantRepositoryStub{
-		nodes: map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
+		nodes:      map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
+		namespaces: map[uuid.UUID]*model.Namespace{namespaceID: userNamespace(namespaceID, owner)},
 		grants: map[uuid.UUID][]model.ResourceGrant{
 			root.ID:  {{NodeID: root.ID, GranteeID: actor, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow}},
 			child.ID: {{NodeID: child.ID, GranteeID: actor, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow}},
 		},
 	}
-	service := NewService(repo, nil)
+	service := NewService(repo, nil, nil)
 
 	require.True(t, service.Authorize(context.Background(), Request{
 		ActorID: actor, NamespaceID: namespaceID, NodeID: child.ID, Permission: model.ResourcePermissionRead,
@@ -133,12 +303,13 @@ func TestAuthorizeAdminGrantCoversEveryPermissionAndAdminDenyWins(t *testing.T) 
 	root := node(namespaceID, uuid.Nil, owner)
 	child := node(namespaceID, root.ID, owner)
 	repo := grantRepositoryStub{
-		nodes: map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
+		nodes:      map[uuid.UUID]*model.Node{root.ID: root, child.ID: child},
+		namespaces: map[uuid.UUID]*model.Namespace{namespaceID: userNamespace(namespaceID, owner)},
 		grants: map[uuid.UUID][]model.ResourceGrant{
 			root.ID: {{NodeID: root.ID, GranteeID: actor, InheritToChildren: true, Permission: model.ResourcePermissionAdmin, Effect: model.GrantEffectAllow}},
 		},
 	}
-	service := NewService(repo, nil)
+	service := NewService(repo, nil, nil)
 	for _, permission := range []model.ResourcePermission{
 		model.ResourcePermissionRead, model.ResourcePermissionWrite, model.ResourcePermissionDelete,
 		model.ResourcePermissionShare, model.ResourcePermissionAdmin,
@@ -149,24 +320,48 @@ func TestAuthorizeAdminGrantCoversEveryPermissionAndAdminDenyWins(t *testing.T) 
 		{NodeID: child.ID, GranteeID: actor, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow},
 		{NodeID: child.ID, GranteeID: actor, Permission: model.ResourcePermissionAdmin, Effect: model.GrantEffectDeny},
 	}
-	decision := NewService(repo, nil).Authorize(context.Background(), Request{ActorID: actor, NamespaceID: namespaceID, NodeID: child.ID, Permission: model.ResourcePermissionRead})
+	decision := NewService(repo, nil, nil).Authorize(context.Background(), Request{ActorID: actor, NamespaceID: namespaceID, NodeID: child.ID, Permission: model.ResourcePermissionRead})
 	require.False(t, decision.Allowed)
 	require.Equal(t, "admin_deny", decision.Reason)
 }
 
 func TestAuthorizeOwnerAdminDefaultDenyAndNamespaceBoundary(t *testing.T) {
-	namespaceID, owner, stranger := uuid.New(), uuid.New(), uuid.New()
+	namespaceID, workspaceID, owner, stranger := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	target := node(namespaceID, uuid.Nil, owner)
-	service := NewService(grantRepositoryStub{nodes: map[uuid.UUID]*model.Node{target.ID: target}}, func(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
-		return true, nil
-	})
+	userNS := userNamespace(namespaceID, owner)
+	userService := NewService(grantRepositoryStub{
+		nodes:      map[uuid.UUID]*model.Node{target.ID: target},
+		namespaces: map[uuid.UUID]*model.Namespace{namespaceID: userNS},
+	}, nil, authorityStub{organizationAdmin: true})
 
-	require.Equal(t, "owner", service.Authorize(context.Background(), Request{ActorID: owner, NamespaceID: namespaceID, NodeID: target.ID, Permission: model.ResourcePermissionWrite}).Reason)
-	require.Equal(t, "admin_bypass", service.Authorize(context.Background(), Request{ActorID: stranger, NamespaceID: namespaceID, NodeID: target.ID, Permission: model.ResourcePermissionAdmin}).Reason)
+	require.Equal(t, "owner", userService.Authorize(context.Background(), Request{ActorID: owner, NamespaceID: namespaceID, NodeID: target.ID, Permission: model.ResourcePermissionWrite}).Reason)
+	require.Equal(t, "default_deny", userService.Authorize(context.Background(), Request{ActorID: stranger, NamespaceID: namespaceID, NodeID: target.ID, Permission: model.ResourcePermissionAdmin}).Reason)
 
-	withoutAdmin := NewService(grantRepositoryStub{nodes: map[uuid.UUID]*model.Node{target.ID: target}}, nil)
+	workspaceNS := &model.Namespace{
+		ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace,
+		OrganizationID: uuid.New(), WorkspaceID: workspaceID, PolicyVersion: 1,
+	}
+	workspaceService := NewService(grantRepositoryStub{
+		nodes:      map[uuid.UUID]*model.Node{target.ID: target},
+		namespaces: map[uuid.UUID]*model.Namespace{namespaceID: workspaceNS},
+	}, nil, authorityStub{workspaceAdmin: true})
+	require.Equal(t, "admin_bypass", workspaceService.Authorize(context.Background(), Request{
+		ActorID: stranger, WorkspaceID: workspaceID, NamespaceID: namespaceID, NodeID: target.ID, Permission: model.ResourcePermissionAdmin,
+	}).Reason)
+
+	withoutAdmin := NewService(grantRepositoryStub{
+		nodes:      map[uuid.UUID]*model.Node{target.ID: target},
+		namespaces: map[uuid.UUID]*model.Namespace{namespaceID: userNS},
+	}, nil, nil)
 	require.Equal(t, "default_deny", withoutAdmin.Authorize(context.Background(), Request{ActorID: stranger, NamespaceID: namespaceID, NodeID: target.ID, Permission: model.ResourcePermissionRead}).Reason)
 	require.Equal(t, "resource_not_found", withoutAdmin.Authorize(context.Background(), Request{ActorID: owner, NamespaceID: uuid.New(), NodeID: target.ID, Permission: model.ResourcePermissionRead}).Reason)
+}
+
+func userNamespace(namespaceID, ownerID uuid.UUID) *model.Namespace {
+	return &model.Namespace{
+		ID: namespaceID, NamespaceType: model.NamespaceTypeUser,
+		OrganizationID: uuid.New(), OwnerUserID: ownerID, PolicyVersion: 1,
+	}
 }
 
 func node(namespaceID, parentID, owner uuid.UUID) *model.Node {

@@ -50,6 +50,7 @@ func (m *Module) Register(c *appctx.Container) error {
 	identityACL := acl.NewIdentityACL(c.DB)
 	access := query.NewAccessChecker(store, orgRepo)
 	c.WorkspaceMemberChecker = access
+	c.WorkspaceAccessResolver = access
 	c.OrgWorkspaceCreatorChecker = access
 	c.OrgPermissionChecker = access
 

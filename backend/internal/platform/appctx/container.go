@@ -46,6 +46,8 @@ type Container struct {
 	PermissionChecker          authz.PermissionChecker
 	SystemRoleChecker          authz.SystemRoleChecker
 	WorkspaceMemberChecker     authz.WorkspaceMemberChecker
+	WorkspaceAccessResolver    authz.WorkspaceAccessResolver
+	WorkspaceRoleReader        authz.WorkspaceRoleReader
 	OrgWorkspaceCreatorChecker authz.OrgWorkspaceCreatorChecker
 	OrgPermissionChecker       authz.OrgPermissionChecker
 	ProjectAccessChecker       authz.ProjectAccessChecker

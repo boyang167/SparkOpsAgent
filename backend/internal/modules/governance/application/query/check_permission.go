@@ -55,3 +55,17 @@ func (c *Checker) RequirePermission(ctx context.Context, workspaceID kernel.Work
 func (c *Checker) ListRolesForMember(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID) ([]*model.Role, error) {
 	return c.bindings.ListRolesForMember(ctx, workspaceID, memberID)
 }
+
+func (c *Checker) ListWorkspaceRoleIDs(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID) ([]kernel.RoleID, error) {
+	roles, err := c.bindings.ListRolesForMember(ctx, workspaceID, memberID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]kernel.RoleID, 0, len(roles))
+	for _, role := range roles {
+		if role != nil {
+			ids = append(ids, role.ID)
+		}
+	}
+	return ids, nil
+}

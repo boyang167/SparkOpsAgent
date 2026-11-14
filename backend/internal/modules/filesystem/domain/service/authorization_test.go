@@ -33,6 +33,53 @@ func TestExplicitDenyOverridesInheritedAllow(t *testing.T) {
 	require.Equal(t, "trace-deny", decision.TraceID)
 }
 
+func TestDecideGlobalDenyOverridesNearestAllow(t *testing.T) {
+	organizationID, workspaceID := uuid.New(), uuid.New()
+	resource := Resource{ID: uuid.New(), OrganizationID: organizationID, WorkspaceID: workspaceID}
+	subject := Subject{
+		ActorID: uuid.New(), OrganizationID: organizationID, WorkspaceID: workspaceID,
+		Authenticated: true, Entitled: true, RBACAllowed: true,
+	}
+
+	decision := Decide(subject, model.ResourcePermissionRead, resource,
+		Relation{
+			ResourceID: resource.ID, Effect: model.GrantEffectAllow,
+			Permission: model.ResourcePermissionRead, Source: SourceGrant, PolicyID: "nearest-allow",
+		},
+		Relation{
+			ResourceID: uuid.New(), Effect: model.GrantEffectDeny, Inherited: true,
+			Permission: model.ResourcePermissionRead, Source: SourceGrant, PolicyID: "ancestor-deny",
+		},
+	)
+
+	require.Equal(t, DecisionDeny, decision.Result)
+	require.Equal(t, "ancestor-deny", decision.PolicyID)
+}
+
+func TestDecideKeepsNearestInheritedAllowWhenNoDenyExists(t *testing.T) {
+	organizationID, workspaceID := uuid.New(), uuid.New()
+	resource := Resource{ID: uuid.New(), OrganizationID: organizationID, WorkspaceID: workspaceID}
+	subject := Subject{
+		ActorID: uuid.New(), OrganizationID: organizationID, WorkspaceID: workspaceID,
+		Authenticated: true, Entitled: true, RBACAllowed: true,
+	}
+
+	decision := Decide(subject, model.ResourcePermissionRead, resource,
+		Relation{
+			ResourceID: uuid.New(), Effect: model.GrantEffectAllow, Inherited: true,
+			Permission: model.ResourcePermissionRead, Source: SourceGrant, PolicyID: "nearest", PolicyVersion: "2",
+		},
+		Relation{
+			ResourceID: uuid.New(), Effect: model.GrantEffectAllow, Inherited: true,
+			Permission: model.ResourcePermissionRead, Source: SourceGrant, PolicyID: "farthest", PolicyVersion: "1",
+		},
+	)
+
+	require.Equal(t, DecisionAllow, decision.Result)
+	require.Equal(t, "nearest", decision.PolicyID)
+	require.Equal(t, "2", decision.PolicyVersion)
+}
+
 func TestCapabilityIsIntersectionNotDelegatorUnion(t *testing.T) {
 	fileA, fileB := uuid.New(), uuid.New()
 	issuer := NewCapabilityIssuer(nil)

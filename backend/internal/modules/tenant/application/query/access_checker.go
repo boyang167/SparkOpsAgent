@@ -20,3 +20,15 @@ func NewAccessChecker(store *persistence.TenantStore, orgRepo repository.Organiz
 func (a *AccessChecker) IsWorkspaceMember(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID) (bool, error) {
 	return a.store.IsWorkspaceMember(ctx, workspaceID, memberID)
 }
+
+func (a *AccessChecker) ResolveWorkspaceAccess(ctx context.Context, workspaceID kernel.WorkspaceID, memberID kernel.MemberID) (kernel.OrgID, bool, error) {
+	workspace, err := a.store.FindWorkspaceByID(ctx, workspaceID)
+	if err != nil {
+		return kernel.OrgID{}, false, err
+	}
+	member, err := a.store.IsWorkspaceMember(ctx, workspaceID, memberID)
+	if err != nil {
+		return kernel.OrgID{}, false, err
+	}
+	return workspace.OrgID, member && workspace.Status == "active", nil
+}

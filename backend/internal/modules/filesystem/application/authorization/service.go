@@ -3,6 +3,7 @@ package authorization
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,12 +15,16 @@ import (
 )
 
 type Repository interface {
+	GetNamespace(context.Context, uuid.UUID) (*model.Namespace, error)
 	GetNode(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
 	GetNodeIncludingTrashed(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
 	ListResourceGrants(context.Context, []uuid.UUID, []repository.PrincipalRef, model.ResourcePermission, time.Time) ([]model.ResourceGrant, error)
 }
 
-type AdminBypass func(context.Context, uuid.UUID, uuid.UUID) (bool, error)
+type AuthorityChecker interface {
+	HasWorkspaceFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error)
+	HasOrganizationFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error)
+}
 
 type Request struct {
 	ActorID     uuid.UUID
@@ -34,17 +39,46 @@ type Decision struct {
 	Reason  string
 }
 
-type Service struct {
-	repo        Repository
-	adminBypass AdminBypass
-	now         func() time.Time
+type AuthorizationCacheKey struct {
+	OrganizationID uuid.UUID
+	WorkspaceID    uuid.UUID
+	ActorID        uuid.UUID
+	NodeID         uuid.UUID
+	Action         model.ResourcePermission
+	PolicyVersion  int64
 }
 
-func NewService(repo Repository, adminBypass AdminBypass) *Service {
-	return &Service{repo: repo, adminBypass: adminBypass, now: func() time.Time { return time.Now().UTC() }}
+type Service struct {
+	repo       Repository
+	principals PrincipalResolver
+	authority  AuthorityChecker
+	now        func() time.Time
+}
+
+func NewService(repo Repository, principals PrincipalResolver, authority AuthorityChecker) *Service {
+	return &Service{repo: repo, principals: principals, authority: authority, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (s *Service) Authorize(ctx context.Context, request Request) Decision {
+	namespace, err := s.repo.GetNamespace(ctx, request.NamespaceID)
+	if err != nil {
+		return Decision{Reason: "resource_not_found"}
+	}
+	if namespace.NamespaceType == model.NamespaceTypeWorkspace && namespace.WorkspaceID != request.WorkspaceID {
+		return Decision{Reason: "organization_boundary"}
+	}
+	principals := []repository.PrincipalRef{{Type: model.PrincipalUser, ID: request.ActorID}}
+	if s.principals != nil {
+		principals, err = s.principals.Resolve(ctx, ResolvePrincipalsInput{
+			ActorID: request.ActorID, OrganizationID: namespace.OrganizationID, WorkspaceID: request.WorkspaceID,
+		})
+		if errors.Is(err, ErrPrincipalScopeMismatch) {
+			return Decision{Reason: "organization_boundary"}
+		}
+		if err != nil {
+			return Decision{Reason: "authorization_unavailable"}
+		}
+	}
 	getNode := s.repo.GetNode
 	if request.Permission == model.ResourcePermissionDelete {
 		getNode = s.repo.GetNodeIncludingTrashed
@@ -60,7 +94,7 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 			permissions = append(permissions, model.ResourcePermissionAdmin)
 		}
 		for _, permission := range permissions {
-			grants, grantErr := s.repo.ListResourceGrants(ctx, []uuid.UUID{current.ID}, []repository.PrincipalRef{{Type: model.PrincipalUser, ID: request.ActorID}}, permission, s.now())
+			grants, grantErr := s.repo.ListResourceGrants(ctx, []uuid.UUID{current.ID}, principals, permission, s.now())
 			if grantErr != nil {
 				return Decision{Reason: "authorization_unavailable"}
 			}
@@ -71,6 +105,7 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 				relations = append(relations, domainservice.Relation{
 					ResourceID: current.ID, Effect: grant.Effect, Inherited: current.ID != node.ID,
 					Permission: grant.Permission, Source: domainservice.SourceGrant, PolicyID: grant.ID.String(),
+					PolicyVersion: strconv.FormatInt(grant.PolicyVersion, 10),
 				})
 			}
 		}
@@ -85,14 +120,14 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 			return Decision{Reason: "authorization_unavailable"}
 		}
 	}
-	if node.OwnerID == request.ActorID {
+	if namespace.NamespaceType == model.NamespaceTypeUser && namespace.OwnerUserID == request.ActorID {
 		relations = append(relations, domainservice.Relation{
 			ResourceID: node.ID, Effect: model.GrantEffectAllow, Permission: request.Permission,
 			Source: domainservice.SourceOwner, PolicyID: "owner",
 		})
 	}
-	if s.adminBypass != nil {
-		admin, adminErr := s.adminBypass(ctx, request.WorkspaceID, request.ActorID)
+	if s.authority != nil {
+		admin, adminErr := s.hasNamespaceAuthority(ctx, namespace, request)
 		if adminErr != nil {
 			return Decision{Reason: "authorization_unavailable"}
 		}
@@ -104,8 +139,34 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 		}
 	}
 	decided := domainservice.Decide(domainservice.Subject{
-		ActorID: request.ActorID, WorkspaceID: request.WorkspaceID,
+		ActorID: request.ActorID, OrganizationID: namespace.OrganizationID, WorkspaceID: request.WorkspaceID,
 		Authenticated: true, Entitled: true, RBACAllowed: true,
-	}, request.Permission, domainservice.Resource{ID: node.ID, WorkspaceID: request.WorkspaceID}, relations...)
+	}, request.Permission, domainservice.Resource{
+		ID: node.ID, OrganizationID: namespace.OrganizationID, WorkspaceID: request.WorkspaceID,
+	}, relations...)
 	return Decision{Allowed: decided.Result == domainservice.DecisionAllow, Reason: decided.ReasonCode}
+}
+
+func (s *Service) hasNamespaceAuthority(ctx context.Context, namespace *model.Namespace, request Request) (bool, error) {
+	switch namespace.NamespaceType {
+	case model.NamespaceTypeUser:
+		return namespace.OwnerUserID == request.ActorID, nil
+	case model.NamespaceTypeWorkspace:
+		return s.authority.HasWorkspaceFileAdmin(ctx, namespace.WorkspaceID, request.ActorID)
+	case model.NamespaceTypeOrganization:
+		return s.authority.HasOrganizationFileAdmin(ctx, namespace.OrganizationID, request.ActorID)
+	default:
+		return false, nil
+	}
+}
+
+func authorizationCacheKey(request Request, organizationID uuid.UUID, policyVersion int64) AuthorizationCacheKey {
+	return AuthorizationCacheKey{
+		OrganizationID: organizationID,
+		WorkspaceID:    request.WorkspaceID,
+		ActorID:        request.ActorID,
+		NodeID:         request.NodeID,
+		Action:         request.Permission,
+		PolicyVersion:  policyVersion,
+	}
 }

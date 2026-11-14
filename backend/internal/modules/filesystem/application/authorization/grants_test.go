@@ -47,7 +47,7 @@ func TestGrantServiceOwnerCanCreateListAndRevokeTransactionally(t *testing.T) {
 	require.NoError(t, filesystemevent.Register(registry))
 	bus := messaging.NewReliableBus(registry, messagingpersistence.NewOutboxStore(db), nil, nil, nil)
 	audits := &grantAuditRecorder{}
-	service := NewGrantService(repo, NewService(repo, nil), postgres.NewTransactor(db), bus, audits)
+	service := NewGrantService(repo, NewService(repo, nil, authorityStub{workspaceAdmin: true}), postgres.NewTransactor(db), bus, audits)
 	createCommandID := uuid.New()
 	request := GrantRequest{
 		CommandID: createCommandID,
@@ -99,9 +99,7 @@ func TestGrantServiceRejectsForgedCrossTenantScope(t *testing.T) {
 	require.NoError(t, repo.CreateNode(context.Background(), node))
 	require.NoError(t, repo.SetNamespaceRoot(context.Background(), first.WorkspaceID, node.ID))
 	audits := &grantAuditRecorder{}
-	service := NewGrantService(repo, NewService(repo, func(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
-		return true, nil
-	}), postgres.NewTransactor(db), nil, audits)
+	service := NewGrantService(repo, NewService(repo, nil, authorityStub{workspaceAdmin: true}), postgres.NewTransactor(db), nil, audits)
 	request := GrantRequest{
 		CommandID: uuid.New(), ActorID: owner, OrganizationID: second.OrganizationID,
 		WorkspaceID: first.WorkspaceID, NamespaceID: second.ID, NodeID: node.ID,
@@ -145,7 +143,7 @@ func TestGrantServiceSupportsTypedPrincipalsAndRevokeReuse(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateNode(context.Background(), node))
 	require.NoError(t, repo.SetNamespaceRoot(context.Background(), namespace.WorkspaceID, node.ID))
-	service := NewGrantService(repo, NewService(repo, nil), postgres.NewTransactor(db), nil, nil)
+	service := NewGrantService(repo, NewService(repo, nil, authorityStub{workspaceAdmin: true}), postgres.NewTransactor(db), nil, nil)
 	principalID := uuid.New()
 	request := GrantRequest{
 		CommandID: uuid.New(), ActorID: owner, OrganizationID: namespace.OrganizationID,

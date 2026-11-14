@@ -54,6 +54,7 @@ func (m *Module) Register(c *appctx.Container) error {
 
 	checker := query.NewChecker(bindingRepo, c.SystemRoleChecker)
 	c.PermissionChecker = checker
+	c.WorkspaceRoleReader = checker
 
 	engine, err := policy.NewEngine(c.Config.Policy, c.DB)
 	if err != nil {

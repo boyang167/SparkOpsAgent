@@ -32,6 +32,62 @@ type Module struct {
 	runtimeCatalog *fsstorage.RuntimeCatalog
 }
 
+type workspaceAuthorityAdapter struct {
+	resolver authz.WorkspaceAccessResolver
+}
+
+func (a workspaceAuthorityAdapter) ResolveWorkspaceAccess(ctx context.Context, workspaceID, actorID uuid.UUID) (uuid.UUID, bool, error) {
+	organizationID, active, err := a.resolver.ResolveWorkspaceAccess(
+		ctx, kernel.WorkspaceID{UUID: workspaceID}, kernel.MemberID{UUID: actorID},
+	)
+	return organizationID.UUID, active, err
+}
+
+type workspaceRoleReaderAdapter struct {
+	reader authz.WorkspaceRoleReader
+}
+
+func (a workspaceRoleReaderAdapter) ListWorkspaceRoleIDs(ctx context.Context, workspaceID, actorID uuid.UUID) ([]uuid.UUID, error) {
+	roleIDs, err := a.reader.ListWorkspaceRoleIDs(
+		ctx, kernel.WorkspaceID{UUID: workspaceID}, kernel.MemberID{UUID: actorID},
+	)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]uuid.UUID, 0, len(roleIDs))
+	for _, roleID := range roleIDs {
+		ids = append(ids, roleID.UUID)
+	}
+	return ids, nil
+}
+
+type namespaceAuthorityAdapter struct {
+	workspaces    authz.WorkspaceAccessResolver
+	permissions   authz.PermissionChecker
+	organizations authz.OrgPermissionChecker
+}
+
+func (a namespaceAuthorityAdapter) HasWorkspaceFileAdmin(ctx context.Context, workspaceID, actorID uuid.UUID) (bool, error) {
+	_, active, err := a.workspaces.ResolveWorkspaceAccess(
+		ctx, kernel.WorkspaceID{UUID: workspaceID}, kernel.MemberID{UUID: actorID},
+	)
+	if err != nil || !active {
+		return false, err
+	}
+	return a.permissions.HasPermission(
+		ctx, kernel.WorkspaceID{UUID: workspaceID}, kernel.MemberID{UUID: actorID}, authz.PermFileAdmin,
+	)
+}
+
+func (a namespaceAuthorityAdapter) HasOrganizationFileAdmin(ctx context.Context, organizationID, actorID uuid.UUID) (bool, error) {
+	orgID, memberID := kernel.OrgID{UUID: organizationID}, kernel.MemberID{UUID: actorID}
+	member, err := a.organizations.IsOrgMember(ctx, orgID, memberID)
+	if err != nil || !member {
+		return false, err
+	}
+	return a.organizations.HasOrgPermission(ctx, orgID, memberID, authz.PermOrgFileAdmin)
+}
+
 func New(tokens *authn.TokenProvider) *Module {
 	return &Module{tokens: tokens}
 }
@@ -66,6 +122,15 @@ func (m *Module) Register(c *appctx.Container) error {
 	if c.WorkspaceMemberChecker == nil {
 		return fmt.Errorf("filesystem module requires workspace member checker")
 	}
+	if c.WorkspaceAccessResolver == nil {
+		return fmt.Errorf("filesystem module requires workspace access resolver")
+	}
+	if c.WorkspaceRoleReader == nil {
+		return fmt.Errorf("filesystem module requires workspace role reader")
+	}
+	if c.OrgPermissionChecker == nil {
+		return fmt.Errorf("filesystem module requires organization permission checker")
+	}
 	if c.AuditLogger == nil {
 		auditStore := audit.NewGormStore(c.DB)
 		if err := auditStore.AutoMigrate(); err != nil {
@@ -87,8 +152,12 @@ func (m *Module) Register(c *appctx.Container) error {
 	}
 
 	repo := persistence.NewRepository(c.DB)
-	resourceAuthorizer := resourceauth.NewService(repo, func(ctx context.Context, workspaceID, actorID uuid.UUID) (bool, error) {
-		return c.PermissionChecker.HasPermission(ctx, kernel.WorkspaceID{UUID: workspaceID}, kernel.MemberID{UUID: actorID}, authz.PermFileAdmin)
+	principalResolver := resourceauth.NewPrincipalResolver(
+		workspaceAuthorityAdapter{resolver: c.WorkspaceAccessResolver},
+		workspaceRoleReaderAdapter{reader: c.WorkspaceRoleReader},
+	)
+	resourceAuthorizer := resourceauth.NewService(repo, principalResolver, namespaceAuthorityAdapter{
+		workspaces: c.WorkspaceAccessResolver, permissions: c.PermissionChecker, organizations: c.OrgPermissionChecker,
 	})
 	c.FilesystemGrantPort = resourceauth.NewGrantService(repo, resourceAuthorizer, c.Transactor, c.EventBus, c.AuditLogger)
 	storageRoot := c.Config.Filesystem.TransferGateway.StorageRoot
