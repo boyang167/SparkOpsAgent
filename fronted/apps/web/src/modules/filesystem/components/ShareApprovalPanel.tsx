@@ -20,7 +20,10 @@ function stableKey(prefix: string) {
 
 export function ShareApprovalPanel({ organizationId, workspaceId }: Props) {
   const [items, setItems] = useState<ShareRequestVM[]>([]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [totalCount, setTotalCount] = useState(0);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [loadingMore, setLoadingMore] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<ShareRequestVM | null>(null);
   const [reason, setReason] = useState("");
@@ -28,19 +31,35 @@ export function ShareApprovalPanel({ organizationId, workspaceId }: Props) {
   const generation = useRef(0);
   const mutationKeys = useRef(new Map<string, string>());
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (cursor = "", append = false) => {
     const current = ++generation.current;
-    setState("loading");
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setState("loading");
+      setNextCursor("");
+    }
     try {
       const page = await listOrganizationShareRequests(
-        { status: "PENDING", limit: 50 },
+        { status: "PENDING", limit: 50, ...(cursor ? { cursor } : {}) },
         { organizationId, workspaceId },
       );
       if (current !== generation.current) return;
-      setItems(page.items);
+      setItems((currentItems) => {
+        if (!append) return page.items;
+        const existing = new Set(currentItems.map((item) => item.id));
+        return [...currentItems, ...page.items.filter((item) => !existing.has(item.id))];
+      });
+      setNextCursor(page.next_cursor);
+      setTotalCount(page.total_count);
       setState("ready");
     } catch {
-      if (current === generation.current) setState("error");
+      if (current === generation.current) {
+        if (append) setMutationError("加载更多待审批申请失败，请稍后重试。");
+        else setState("error");
+      }
+    } finally {
+      if (current === generation.current && append) setLoadingMore(false);
     }
   }, [organizationId, workspaceId]);
 
@@ -123,8 +142,11 @@ export function ShareApprovalPanel({ organizationId, workspaceId }: Props) {
   } else {
     content = createElement(
       "div",
-      { className: "table-wrap" },
+      { className: "stack-sm" },
       createElement(
+        "div",
+        { className: "table-wrap" },
+        createElement(
         "table",
         { className: "data-table text-sm" },
         createElement("thead", null, createElement("tr", null,
@@ -155,7 +177,17 @@ export function ShareApprovalPanel({ organizationId, workspaceId }: Props) {
             }, "拒绝"),
           )),
         ))),
+        ),
       ),
+      nextCursor
+        ? createElement("button", {
+          type: "button",
+          className: "btn btn-secondary self-center",
+          "aria-label": "加载更多待审批申请",
+          disabled: loadingMore || Boolean(busy),
+          onClick: () => void load(nextCursor, true),
+        }, loadingMore ? "正在加载…" : "加载更多")
+        : null,
     );
   }
 
@@ -183,7 +215,7 @@ export function ShareApprovalPanel({ organizationId, workspaceId }: Props) {
         createElement("h2", { className: "section-title" }, "共享审批"),
         createElement("p", { className: "text-sm text-muted" }, "审核需要组织文件管理员确认的共享范围。"),
       ),
-      createElement("span", { className: "badge badge-neutral" }, `待审批 ${items.length}`),
+      createElement("span", { className: "badge badge-neutral" }, `待审批 ${totalCount}`),
     ),
     mutationError
       ? createElement("div", { className: "inline-alert inline-alert-error", role: "alert" }, mutationError)

@@ -1049,6 +1049,22 @@ func (r *Repository) ListShareRequestsPage(ctx context.Context, query repository
 	return result, nil
 }
 
+func (r *Repository) CountShareRequests(ctx context.Context, query repository.ShareRequestPageQuery) (int64, error) {
+	dbQuery := postgres.DB(ctx, r.db).Model(&shareRequestRow{}).
+		Where("organization_id = ?", query.OrganizationID)
+	if query.NodeID != uuid.Nil {
+		dbQuery = dbQuery.Where("node_id = ?", query.NodeID)
+	}
+	if query.Status != "" {
+		dbQuery = dbQuery.Where("status = ?", query.Status)
+	}
+	var count int64
+	if err := dbQuery.Count(&count).Error; err != nil {
+		return 0, wrapPersistence(err)
+	}
+	return count, nil
+}
+
 func (r *Repository) ReviewShareRequestCAS(ctx context.Context, request model.ShareRequest, from model.ShareRequestStatus) error {
 	result := postgres.DB(ctx, r.db).Model(&shareRequestRow{}).
 		Where("id = ? AND status = ?", request.ID, from).

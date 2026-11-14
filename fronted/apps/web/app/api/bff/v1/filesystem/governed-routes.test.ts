@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   getEffectiveAccess: vi.fn(),
   listGovernedGrants: vi.fn(),
   listShareRequests: vi.fn(),
+  listOrganizationShareRequests: vi.fn(),
+  listOrganizationFileAuditEvents: vi.fn(),
   createGovernedGrant: vi.fn(),
   createShareRequest: vi.fn(),
   previewGovernedShare: vi.fn(),
@@ -32,6 +34,8 @@ vi.mock("@sparkops/bff-modules/filesystem", () => ({
   getEffectiveAccess: mocks.getEffectiveAccess,
   listGovernedGrants: mocks.listGovernedGrants,
   listShareRequests: mocks.listShareRequests,
+  listOrganizationShareRequests: mocks.listOrganizationShareRequests,
+  listOrganizationFileAuditEvents: mocks.listOrganizationFileAuditEvents,
   createGovernedGrant: mocks.createGovernedGrant,
   createShareRequest: mocks.createShareRequest,
   previewGovernedShare: mocks.previewGovernedShare,
@@ -75,6 +79,8 @@ describe("governed filesystem Next BFF routes", () => {
     const effective = await import("./nodes/[nodeId]/effective-access/route");
     const grants = await import("./nodes/[nodeId]/grants/route");
     const shareRequests = await import("./nodes/[nodeId]/share-requests/route");
+    const organizationShareRequests = await import("./share-requests/route");
+    const audits = await import("./audits/route");
     const sharePreview = await import("./nodes/[nodeId]/share-preview/route");
     const params = Promise.resolve({ namespaceId: "ns-1", nodeId: "node-1" });
 
@@ -97,19 +103,23 @@ describe("governed filesystem Next BFF routes", () => {
         request("/api/bff/v1/filesystem/nodes/node-1/share-requests") as never,
         { params },
       ),
+      organizationShareRequests.GET(request("/api/bff/v1/filesystem/share-requests") as never),
+      audits.GET(request("/api/bff/v1/filesystem/audits") as never),
       sharePreview.POST(
         request("/api/bff/v1/filesystem/nodes/node-1/share-preview") as never,
         { params },
       ),
     ]);
 
-    expect(responses.map((response) => response.status)).toEqual([400, 400, 400, 400, 400, 400, 400]);
+    expect(responses.map((response) => response.status)).toEqual([400, 400, 400, 400, 400, 400, 400, 400, 400]);
     expect(mocks.listGovernedNamespaces).not.toHaveBeenCalled();
     expect(mocks.listGovernedChildren).not.toHaveBeenCalled();
     expect(mocks.listSharedWithMe).not.toHaveBeenCalled();
     expect(mocks.getEffectiveAccess).not.toHaveBeenCalled();
     expect(mocks.createGovernedGrant).not.toHaveBeenCalled();
     expect(mocks.createShareRequest).not.toHaveBeenCalled();
+    expect(mocks.listOrganizationShareRequests).not.toHaveBeenCalled();
+    expect(mocks.listOrganizationFileAuditEvents).not.toHaveBeenCalled();
     expect(mocks.previewGovernedShare).not.toHaveBeenCalled();
   });
 
@@ -135,7 +145,7 @@ describe("governed filesystem Next BFF routes", () => {
 
   it("forwards governance metadata reads without idempotency headers", async () => {
     mocks.listGovernedGrants.mockResolvedValue({ items: [], classification: "INTERNAL", next_cursor: "", truncated: false });
-    mocks.listShareRequests.mockResolvedValue({ items: [], next_cursor: "", truncated: false });
+    mocks.listShareRequests.mockResolvedValue({ items: [], next_cursor: "", truncated: false, total_count: 0 });
     const grants = await import("./nodes/[nodeId]/grants/route");
     const requests = await import("./nodes/[nodeId]/share-requests/route");
     const req = request("/api/bff/v1/filesystem/nodes/node-1?limit=25&cursor=opaque%2B%2F%3D", {
@@ -160,6 +170,36 @@ describe("governed filesystem Next BFF routes", () => {
       workspaceId,
       "node-1",
       { limit: 25, cursor: "opaque+/=" },
+    );
+  });
+
+  it("forwards organization approval and audit queries", async () => {
+    mocks.listOrganizationShareRequests.mockResolvedValue({ items: [], next_cursor: "", truncated: false, total_count: 51 });
+    mocks.listOrganizationFileAuditEvents.mockResolvedValue({ items: [], next_cursor: "" });
+    const requests = await import("./share-requests/route");
+    const audits = await import("./audits/route");
+
+    await requests.GET(request("/api/bff/v1/filesystem/share-requests?status=PENDING&limit=50&cursor=page-2", {
+      organization: organizationId,
+    }) as never);
+    await audits.GET(request("/api/bff/v1/filesystem/audits?namespace_id=00000000-0000-4000-8000-000000000003&action=filesystem.share.approve", {
+      organization: organizationId,
+    }) as never);
+
+    expect(mocks.listOrganizationShareRequests).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: undefined }),
+      organizationId,
+      undefined,
+      { status: "PENDING", limit: 50, cursor: "page-2" },
+    );
+    expect(mocks.listOrganizationFileAuditEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: undefined }),
+      organizationId,
+      undefined,
+      expect.objectContaining({
+        namespace_id: "00000000-0000-4000-8000-000000000003",
+        action: "filesystem.share.approve",
+      }),
     );
   });
 

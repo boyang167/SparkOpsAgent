@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BffError } from "@sparkops/contracts";
 import { AuditWorkspace } from "./AuditWorkspace";
 
-const sdk = vi.hoisted(() => ({ listFileAuditEvents: vi.fn() }));
+const sdk = vi.hoisted(() => ({
+  listFileAuditEvents: vi.fn(),
+  listOrganizationFileAuditEvents: vi.fn(),
+}));
 const drawerRenders = vi.hoisted(() => [] as string[]);
 const navigation = vi.hoisted(() => ({
   replace: vi.fn(),
@@ -17,6 +20,7 @@ const navigation = vi.hoisted(() => ({
 
 vi.mock("@sparkops/web-sdk/filesystem", () => ({
   listFileAuditEvents: sdk.listFileAuditEvents,
+  listOrganizationFileAuditEvents: sdk.listOrganizationFileAuditEvents,
 }));
 vi.mock("@/components/ui/Drawer", () => ({
   Drawer: ({
@@ -66,10 +70,27 @@ function renderWorkspace() {
 describe("AuditWorkspace", () => {
   beforeEach(() => {
     sdk.listFileAuditEvents.mockReset();
+    sdk.listOrganizationFileAuditEvents.mockReset();
     drawerRenders.length = 0;
     navigation.replace.mockReset();
     navigation.searchParams = new URLSearchParams("tab=audit&action=filesystem.node.rename");
     sdk.listFileAuditEvents.mockResolvedValue({ items: [event], next_cursor: "20" });
+  });
+
+  it("uses the organization audit feed for organization file administrators", async () => {
+    sdk.listOrganizationFileAuditEvents.mockResolvedValue({ items: [event], next_cursor: "" });
+    render(createElement(AuditWorkspace, {
+      workspaceId: "00000000-0000-4000-8000-000000000001",
+      organizationId: "00000000-0000-4000-8000-000000000002",
+      permissions: ["org:file:admin"],
+    }));
+
+    expect(await screen.findByText(event.action)).toBeInTheDocument();
+    expect(sdk.listOrganizationFileAuditEvents).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ organizationId: "00000000-0000-4000-8000-000000000002" }),
+    );
+    expect(sdk.listFileAuditEvents).not.toHaveBeenCalled();
   });
 
   afterEach(() => cleanup());

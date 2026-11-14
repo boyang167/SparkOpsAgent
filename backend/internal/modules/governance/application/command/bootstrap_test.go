@@ -223,6 +223,23 @@ func TestBootstrapWorkspaceCreatesDefaultRolesAndOnlyBindsAdmin(t *testing.T) {
 	require.Len(t, bindings.bindings, 1)
 }
 
+func TestBootstrapWorkspaceNeverPersistsOrganizationPermissionsInWorkspaceRoles(t *testing.T) {
+	ctx := context.Background()
+	wsID := kernel.NewWorkspaceID()
+	ownerID := kernel.NewMemberID()
+	roles := newMemoryRoleRepo()
+	bindings := &memoryBindingRepo{}
+	require.NoError(t, roles.Save(ctx, model.NewRole(wsID, "admin", []string{authz.PermGovernanceAdmin}, nil)))
+	handler := command.NewBootstrapWorkspaceHandler(roles, bindings, nil)
+
+	require.NoError(t, handler.Handle(ctx, wsID, ownerID, append(authz.DefaultAdminPermissions, authz.PermOrgFileAdmin)))
+	items, err := roles.ListByWorkspace(ctx, wsID)
+	require.NoError(t, err)
+	for _, role := range items {
+		require.NotContains(t, role.Permissions, authz.PermOrgFileAdmin, role.Name)
+	}
+}
+
 func TestBootstrapWorkspaceSynchronizesPolicyOutsideInbox(t *testing.T) {
 	ctx := context.Background()
 	wsID := kernel.NewWorkspaceID()

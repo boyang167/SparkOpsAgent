@@ -16,6 +16,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/persistence"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	messagingpersistence "github.com/sparkops/sparkops-agent/backend/internal/platform/messaging/persistence"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
@@ -30,6 +31,13 @@ type shareStoreStub struct {
 	requests       map[uuid.UUID]model.ShareRequest
 	grants         []model.ResourceGrant
 	commands       map[uuid.UUID]repository.CommandDedup
+}
+
+type shareAuditRecorder struct{ entries []audit.Entry }
+
+func (r *shareAuditRecorder) Log(_ context.Context, entry audit.Entry) error {
+	r.entries = append(r.entries, entry)
+	return nil
 }
 
 func (s *shareStoreStub) GetNodeByID(context.Context, uuid.UUID) (*model.Node, error) {
@@ -142,6 +150,33 @@ func (s shareAuthorityStub) HasWorkspaceFileAdmin(context.Context, uuid.UUID, uu
 }
 func (s shareAuthorityStub) HasOrganizationFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
 	return s.orgAdmin, nil
+}
+
+func TestShareGovernanceAuditEventMatrixHasRequiredStructuredMetadata(t *testing.T) {
+	recorder := &shareAuditRecorder{}
+	handler := &ShareRequestHandler{audit: recorder}
+	request := model.ShareRequest{
+		ID: uuid.New(), OrganizationID: uuid.New(), NamespaceID: uuid.New(), NodeID: uuid.New(),
+		PrincipalType: model.PrincipalUser, PrincipalIDs: []uuid.UUID{uuid.New()},
+		Actions: []model.ResourcePermission{model.ResourcePermissionRead},
+	}
+	for _, fixture := range []struct {
+		action string
+		reason string
+	}{
+		{action: "REQUEST", reason: "owner_requested"},
+		{action: "APPROVE", reason: ""},
+		{action: "REJECT", reason: "not_required"},
+	} {
+		require.NoError(t, handler.logShareAudit(context.Background(), uuid.New(), request, fixture.action, "trace-governance", fixture.reason))
+	}
+	require.Len(t, recorder.entries, 3)
+	for _, entry := range recorder.entries {
+		for _, key := range []string{"namespace_id", "node_id", "principal_before", "principal_after", "reason", "trace_id", "action"} {
+			require.Contains(t, entry.Detail, key, "%s missing %s", entry.Action, key)
+		}
+		require.Equal(t, "trace-governance", entry.Detail["trace_id"])
+	}
 }
 
 func TestShareRequestPolicyMatrix(t *testing.T) {

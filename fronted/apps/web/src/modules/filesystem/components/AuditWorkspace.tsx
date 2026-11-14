@@ -4,12 +4,13 @@ import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { FileAuditEventVM, FileAuditQuery } from "@sparkops/contracts/filesystem";
 import { BffError } from "@sparkops/contracts";
-import { listFileAuditEvents } from "@sparkops/web-sdk/filesystem";
+import { listFileAuditEvents, listOrganizationFileAuditEvents } from "@sparkops/web-sdk/filesystem";
 import { Drawer } from "@/components/ui/Drawer";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 
 export type AuditWorkspaceProps = {
   workspaceId: string;
+  organizationId?: string;
   permissions: string[];
 };
 
@@ -32,7 +33,7 @@ function queryFromURL(params: URLSearchParams): FileAuditQuery {
   };
 }
 
-export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps) {
+export function AuditWorkspace({ workspaceId, organizationId, permissions }: AuditWorkspaceProps) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -52,6 +53,7 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
   const draft = draftState.source === urlSignature ? draftState.value : initialQuery;
   const query = queryState.source === urlSignature ? queryState.value : initialQuery;
   const requestScope = JSON.stringify([
+    organizationId ?? "",
     workspaceId,
     query.actor_id ?? "",
     query.action ?? "",
@@ -92,6 +94,7 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
   const [retry, setRetry] = useState(0);
   const requestGeneration = useRef(0);
   const filterScope = [
+    organizationId ?? "",
     workspaceId,
     query.actor_id ?? "",
     query.action ?? "",
@@ -110,7 +113,8 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
   const cursorTrail =
     historyState.scope === filterScope ? historyState.trail : [query.cursor ?? ""];
   const currentCursorIndex = cursorTrail.lastIndexOf(query.cursor ?? "");
-  const canRead = permissions.includes("file:admin");
+  const canReadOrganization = Boolean(organizationId) && permissions.includes("org:file:admin");
+  const canRead = canReadOrganization || permissions.includes("file:admin");
 
   useEffect(() => {
     if (draftState.source !== urlSignature) {
@@ -141,11 +145,17 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
       state: "loading",
       selected: null,
     });
-    void listFileAuditEvents(
-      workspaceId,
-      { ...query, limit: PAGE_SIZE },
-      { signal: controller.signal },
-    )
+    const request = canReadOrganization
+      ? listOrganizationFileAuditEvents(
+          { ...query, limit: PAGE_SIZE },
+          { organizationId: organizationId!, signal: controller.signal },
+        )
+      : listFileAuditEvents(
+          workspaceId,
+          { ...query, limit: PAGE_SIZE },
+          { signal: controller.signal },
+        );
+    void request
       .then((page) => {
         if (controller.signal.aborted || generation !== requestGeneration.current) return;
         setViewState({
@@ -167,7 +177,7 @@ export function AuditWorkspace({ workspaceId, permissions }: AuditWorkspaceProps
         });
       });
     return () => controller.abort();
-  }, [canRead, query, requestScope, retry, workspaceId]);
+  }, [canRead, canReadOrganization, organizationId, query, requestScope, retry, workspaceId]);
 
   function writeQuery(next: FileAuditQuery) {
     const params = new URLSearchParams(searchParams.toString());

@@ -2,16 +2,20 @@ package command
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
+	sharedevents "github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/kernel"
 )
 
@@ -31,11 +35,15 @@ type AdoptionAuthorizer interface {
 
 type AdoptionStore interface {
 	GetNodeByID(context.Context, uuid.UUID) (*model.Node, error)
+	LockNodeByID(context.Context, uuid.UUID) (*model.Node, error)
 	GetNamespace(context.Context, uuid.UUID) (*model.Namespace, error)
 	GetNamespaceByOrganization(context.Context, uuid.UUID) (*model.Namespace, error)
+	LockNamespaceByOrganization(context.Context, uuid.UUID) (*model.Namespace, error)
 	GetNode(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
+	LockNode(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
 	GetRevision(context.Context, uuid.UUID, uuid.UUID) (*model.FileRevision, error)
 	GetBlob(context.Context, uuid.UUID) (*model.Blob, error)
+	LockBlob(context.Context, uuid.UUID) (*model.Blob, error)
 	GetAvailableReplica(context.Context, uuid.UUID, uuid.UUID) (*model.StorageReplica, error)
 	CreateNode(context.Context, *model.Node) error
 	SaveRevision(context.Context, *model.FileRevision, *model.Blob, *model.StorageReplica) error
@@ -45,6 +53,7 @@ type AdoptionStore interface {
 	CreateFileLineage(context.Context, model.FileLineage) error
 	ClaimCommand(context.Context, repository.CommandDedup) (*repository.CommandDedup, error)
 	CompleteCommand(context.Context, uuid.UUID, *uuid.UUID, *uuid.UUID) error
+	GetCommand(context.Context, uuid.UUID) (*repository.CommandDedup, error)
 }
 
 type AdoptFile struct {
@@ -63,6 +72,7 @@ type AdoptFileHandler struct {
 	tx         postgres.Transactor
 	authorizer AdoptionAuthorizer
 	audit      auditPort
+	bus        messaging.Bus
 	now        func() time.Time
 }
 
@@ -73,57 +83,28 @@ func NewAdoptFileHandler(store AdoptionStore, tx postgres.Transactor, authorizer
 	return &AdoptFileHandler{store: store, tx: tx, authorizer: authorizer, audit: logger, now: func() time.Time { return time.Now().UTC() }}
 }
 
+func (h *AdoptFileHandler) WithBus(bus messaging.Bus) *AdoptFileHandler {
+	h.bus = bus
+	return h
+}
+
 func (h *AdoptFileHandler) Handle(ctx context.Context, cmd AdoptFile) (*model.Node, error) {
 	if cmd.CommandID == uuid.Nil || cmd.ActorID == uuid.Nil || cmd.OrganizationID == uuid.Nil ||
 		cmd.SourceNodeID == uuid.Nil || cmd.TargetParentID == uuid.Nil || strings.TrimSpace(cmd.Name) == "" {
 		return nil, domain.ErrIdempotencyConflict
 	}
-	source, err := h.store.GetNodeByID(ctx, cmd.SourceNodeID)
-	if err != nil {
-		return nil, err
-	}
-	if source.Type != model.NodeTypeFile || source.State != model.NodeStateActive || source.CurrentRevisionID == nil {
-		return nil, domain.ErrUnsupportedNodeType
-	}
-	sourceNamespace, err := h.store.GetNamespace(ctx, source.NamespaceID)
-	if err != nil {
-		return nil, err
-	}
-	targetNamespace, err := h.store.GetNamespaceByOrganization(ctx, cmd.OrganizationID)
-	if err != nil {
-		return nil, err
-	}
-	if sourceNamespace.OrganizationID != cmd.OrganizationID || targetNamespace.OrganizationID != cmd.OrganizationID {
-		return nil, domain.ErrCrossOrganizationGrant
-	}
-	if targetNamespace.NamespaceType != model.NamespaceTypeOrganization || targetNamespace.Status != "" && targetNamespace.Status != "ACTIVE" {
-		return nil, domain.ErrNamespaceMismatch
-	}
-	parent, err := h.store.GetNode(ctx, targetNamespace.ID, cmd.TargetParentID)
-	if err != nil {
-		return nil, err
-	}
-	if parent.Type != model.NodeTypeDirectory || parent.State != model.NodeStateActive {
-		return nil, domain.ErrParentNotFound
-	}
-	if !h.authorizer.Authorize(ctx, AdoptionAuthorizationRequest{
-		ActorID: cmd.ActorID, WorkspaceID: cmd.WorkspaceID, NamespaceID: source.NamespaceID,
-		NodeID: source.ID, Permission: model.ResourcePermissionRead,
-	}) || !h.authorizer.Authorize(ctx, AdoptionAuthorizationRequest{
-		ActorID: cmd.ActorID, WorkspaceID: cmd.WorkspaceID, NamespaceID: targetNamespace.ID,
-		NodeID: parent.ID, Permission: model.ResourcePermissionWrite,
-	}) {
-		return nil, domain.ErrResourceDenied
-	}
 
 	targetID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-adoption-node:"+cmd.CommandID.String()))
 	revisionID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-adoption-revision:"+cmd.CommandID.String()))
 	requestHash := mutationRequestHash(
-		"adopt", cmd.OrganizationID, cmd.WorkspaceID, source.NamespaceID, source.ID,
-		*source.CurrentRevisionID, targetNamespace.ID, parent.ID, strings.TrimSpace(cmd.Name), cmd.ActorID,
+		"adopt", cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID, cmd.SourceNodeID,
+		cmd.TargetParentID, strings.TrimSpace(cmd.Name),
 	)
+	if replayed, found, err := h.replayCompleted(ctx, cmd, requestHash, targetID, revisionID); found || err != nil {
+		return replayed, err
+	}
 	var target *model.Node
-	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+	err := withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
 		claimed, claimErr := h.store.ClaimCommand(txCtx, repository.CommandDedup{
 			CommandID: cmd.CommandID, WorkspaceID: cmd.OrganizationID, Operation: "adopt",
 			RequestHash: requestHash, NodeID: &targetID, RevisionID: &revisionID,
@@ -135,18 +116,57 @@ func (h *AdoptFileHandler) Handle(ctx context.Context, cmd AdoptFile) (*model.No
 			if claimed.NodeID == nil || claimed.RevisionID == nil {
 				return domain.ErrOutcomeUnknown
 			}
-			target, claimErr = h.store.GetNode(txCtx, targetNamespace.ID, *claimed.NodeID)
+			target, claimErr = h.store.GetNodeByID(txCtx, *claimed.NodeID)
 			return claimErr
+		}
+		source, getErr := h.store.LockNodeByID(txCtx, cmd.SourceNodeID)
+		if getErr != nil {
+			return getErr
+		}
+		if source.Type != model.NodeTypeFile || source.State != model.NodeStateActive || source.CurrentRevisionID == nil {
+			return domain.ErrUnsupportedNodeType
+		}
+		sourceNamespace, getErr := h.store.GetNamespace(txCtx, source.NamespaceID)
+		if getErr != nil {
+			return getErr
+		}
+		targetNamespace, getErr := h.store.LockNamespaceByOrganization(txCtx, cmd.OrganizationID)
+		if getErr != nil {
+			return getErr
+		}
+		if sourceNamespace.OrganizationID != cmd.OrganizationID || targetNamespace.OrganizationID != cmd.OrganizationID {
+			return domain.ErrCrossOrganizationGrant
+		}
+		if targetNamespace.NamespaceType != model.NamespaceTypeOrganization ||
+			targetNamespace.Status != "" && targetNamespace.Status != "ACTIVE" {
+			return domain.ErrNamespaceMismatch
+		}
+		parent, getErr := h.store.LockNode(txCtx, targetNamespace.ID, cmd.TargetParentID)
+		if getErr != nil {
+			return getErr
+		}
+		if parent.Type != model.NodeTypeDirectory || parent.State != model.NodeStateActive {
+			return domain.ErrParentNotFound
+		}
+		if !h.authorizer.Authorize(txCtx, AdoptionAuthorizationRequest{
+			ActorID: cmd.ActorID, WorkspaceID: cmd.WorkspaceID, NamespaceID: source.NamespaceID,
+			NodeID: source.ID, Permission: model.ResourcePermissionRead,
+		}) || !h.authorizer.Authorize(txCtx, AdoptionAuthorizationRequest{
+			ActorID: cmd.ActorID, WorkspaceID: cmd.WorkspaceID, NamespaceID: targetNamespace.ID,
+			NodeID: parent.ID, Permission: model.ResourcePermissionWrite,
+		}) {
+			return domain.ErrResourceDenied
 		}
 		sourceRevision, getErr := h.store.GetRevision(txCtx, source.ID, *source.CurrentRevisionID)
 		if getErr != nil {
 			return getErr
 		}
-		blob, getErr := h.store.GetBlob(txCtx, sourceRevision.BlobID())
+		blob, getErr := h.store.LockBlob(txCtx, sourceRevision.BlobID())
 		if getErr != nil {
 			return getErr
 		}
-		if blob.State != model.BlobStateAvailable || len(blob.SHA256) != 64 || blob.Size != sourceRevision.Size() {
+		if blob.DedupDomain != cmd.OrganizationID || blob.State != model.BlobStateAvailable ||
+			len(blob.SHA256) != 64 || blob.Size != sourceRevision.Size() {
 			return domain.ErrTransferIntegrity
 		}
 		replica, getErr := h.store.GetAvailableReplica(txCtx, blob.ID, uuid.Nil)
@@ -190,6 +210,20 @@ func (h *AdoptFileHandler) Handle(ctx context.Context, cmd AdoptFile) (*model.No
 		if lineageErr := h.store.CreateFileLineage(txCtx, lineage); lineageErr != nil {
 			return lineageErr
 		}
+		if h.bus != nil {
+			if publishErr := h.bus.Publish(txCtx,
+				event.FileCreated{
+					BaseEvent: sharedevents.NewBaseEvent(event.FileCreatedName),
+					FileID: target.ID, NamespaceID: targetNamespace.ID,
+				},
+				event.FileRevisionCreated{
+					BaseEvent: sharedevents.NewBaseEvent(event.FileRevisionCreatedName),
+					FileID: target.ID, RevisionID: revisionID, RevisionNo: 1,
+				},
+			); publishErr != nil {
+				return publishErr
+			}
+		}
 		if completeErr := h.store.CompleteCommand(txCtx, cmd.CommandID, &target.ID, &revisionID); completeErr != nil {
 			return completeErr
 		}
@@ -211,4 +245,30 @@ func (h *AdoptFileHandler) Handle(ctx context.Context, cmd AdoptFile) (*model.No
 		return nil
 	})
 	return target, err
+}
+
+func (h *AdoptFileHandler) replayCompleted(
+	ctx context.Context,
+	cmd AdoptFile,
+	requestHash string,
+	targetID uuid.UUID,
+	revisionID uuid.UUID,
+) (*model.Node, bool, error) {
+	claimed, err := h.store.GetCommand(ctx, cmd.CommandID)
+	if errors.Is(err, domain.ErrCommandNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if claimed.State != "COMPLETED" {
+		return nil, false, nil
+	}
+	if claimed.Operation != "adopt" || claimed.WorkspaceID != cmd.OrganizationID ||
+		claimed.RequestHash != requestHash || claimed.NodeID == nil || claimed.RevisionID == nil ||
+		*claimed.NodeID != targetID || *claimed.RevisionID != revisionID {
+		return nil, true, domain.ErrIdempotencyConflict
+	}
+	target, err := h.store.GetNodeByID(ctx, targetID)
+	return target, true, err
 }

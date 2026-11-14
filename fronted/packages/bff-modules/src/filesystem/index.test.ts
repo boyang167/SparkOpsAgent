@@ -86,6 +86,7 @@ describe("filesystem BFF module", () => {
       items: [],
       next_cursor: "",
       truncated: false,
+      total_count: 0,
     });
     const ctx = context({
       listGovernedGrants: listGrants,

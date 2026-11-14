@@ -71,6 +71,9 @@ func TestGrantServiceOwnerCanCreateListAndRevokeTransactionally(t *testing.T) {
 	request.CommandID = uuid.New()
 	require.NoError(t, service.Revoke(context.Background(), request, grant.ID))
 	require.NoError(t, service.Revoke(context.Background(), request, grant.ID))
+	conflictingRevoke := request
+	conflictingRevoke.ActorID = uuid.New()
+	require.ErrorIs(t, service.Revoke(context.Background(), conflictingRevoke, grant.ID), repository.ErrIdempotencyConflict)
 	grants, err = service.List(context.Background(), request)
 	require.NoError(t, err)
 	require.Empty(t, grants)
@@ -79,6 +82,11 @@ func TestGrantServiceOwnerCanCreateListAndRevokeTransactionally(t *testing.T) {
 	require.Equal(t, int64(2), count)
 	require.Len(t, audits.entries, 2)
 	require.Equal(t, namespace.OrganizationID, audits.entries[0].OrgID.UUID)
+	for _, entry := range audits.entries {
+		for _, key := range []string{"namespace_id", "node_id", "principal_before", "principal_after", "reason", "trace_id", "action"} {
+			require.Contains(t, entry.Detail, key, "%s missing %s", entry.Action, key)
+		}
+	}
 }
 
 func TestGrantServiceRejectsForgedCrossTenantScope(t *testing.T) {

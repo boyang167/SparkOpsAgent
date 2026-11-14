@@ -63,6 +63,16 @@ func TestShareRequestRepositoryPersistsAndReviewsWithCAS(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, request.ID, page2[0].ID)
+	total, err := repo.CountShareRequests(context.Background(), repository.ShareRequestPageQuery{
+		OrganizationID: namespace.OrganizationID, Status: model.ShareRequestPending,
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+	total, err = repo.CountShareRequests(context.Background(), repository.ShareRequestPageQuery{
+		OrganizationID: uuid.New(), Status: model.ShareRequestPending,
+	})
+	require.NoError(t, err)
+	require.Zero(t, total)
 
 	reviewer, reviewedAt := uuid.New(), time.Now().UTC()
 	stored.Status, stored.ReviewedBy, stored.ReviewedAt = model.ShareRequestApproved, &reviewer, &reviewedAt

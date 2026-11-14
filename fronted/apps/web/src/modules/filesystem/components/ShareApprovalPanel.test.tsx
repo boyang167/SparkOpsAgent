@@ -46,6 +46,7 @@ describe("ShareApprovalPanel", () => {
       items: [pending],
       next_cursor: "",
       truncated: false,
+      total_count: 1,
     });
     sdk.approveShareRequest.mockResolvedValue({ ...pending, status: "APPROVED" });
     sdk.rejectShareRequest.mockResolvedValue({ ...pending, status: "REJECTED" });
@@ -85,5 +86,41 @@ describe("ShareApprovalPanel", () => {
       { reason: "受众范围不符合组织策略" },
       expect.objectContaining({ idempotencyKey: expect.stringMatching(/^share-reject-/) }),
     );
+  });
+
+  it("shows the authoritative pending total and loads the next page without replacing the first page", async () => {
+    const second = {
+      ...pending,
+      id: "00000000-0000-4000-8000-000000000099",
+      node_id: "00000000-0000-4000-8000-000000000098",
+    };
+    sdk.listOrganizationShareRequests
+      .mockResolvedValueOnce({
+        items: [pending],
+        next_cursor: "page-2",
+        truncated: true,
+        total_count: 51,
+      })
+      .mockResolvedValueOnce({
+        items: [second],
+        next_cursor: "",
+        truncated: false,
+        total_count: 51,
+      });
+    const user = userEvent.setup();
+    render(createElement(ShareApprovalPanel, {
+      organizationId: pending.organization_id,
+      workspaceId: "00000000-0000-4000-8000-000000000002",
+    }));
+
+    expect(await screen.findByText("待审批 51")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "加载更多待审批申请" }));
+    await waitFor(() => expect(sdk.listOrganizationShareRequests).toHaveBeenCalledTimes(2));
+    expect(sdk.listOrganizationShareRequests.mock.calls[1]?.[0]).toEqual({
+      status: "PENDING",
+      limit: 50,
+      cursor: "page-2",
+    });
+    expect(screen.getAllByRole("button", { name: "批准共享申请" })).toHaveLength(2);
   });
 });

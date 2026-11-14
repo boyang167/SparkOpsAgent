@@ -258,8 +258,8 @@ func (h *BootstrapWorkspaceHandler) Handle(ctx context.Context, workspaceID kern
 				return err
 			}
 		} else if definition.Name == "admin" {
-			merged := authz.MergePermissions(role.Permissions, permissions)
-			if len(merged) != len(role.Permissions) {
+			merged := authz.MergePermissions(workspaceScopedPermissions(role.Permissions), workspaceScopedPermissions(permissions))
+			if !samePermissions(merged, role.Permissions) {
 				role.UpdatePermissions(merged)
 				if err := h.roles.Save(ctx, role); err != nil {
 					return err
@@ -340,19 +340,40 @@ func (h *EnsureDefaultWorkspaceRolesHandler) Handle(ctx context.Context) error {
 				continue
 			}
 			required := authz.RequiredDefaultRolePermissions(definition.Name)
-			if len(required) == 0 {
+			merged := authz.MergePermissions(workspaceScopedPermissions(role.Permissions), required)
+			if samePermissions(merged, role.Permissions) {
 				continue
 			}
-			merged := authz.MergePermissions(role.Permissions, required)
-			if len(merged) != len(role.Permissions) {
-				role.UpdatePermissions(merged)
-				if err := h.roles.Save(ctx, role); err != nil {
-					return err
-				}
+			role.UpdatePermissions(merged)
+			if err := h.roles.Save(ctx, role); err != nil {
+				return err
 			}
 		}
 	}
 	return nil
+}
+
+func workspaceScopedPermissions(permissions []string) []string {
+	filtered := make([]string, 0, len(permissions))
+	for _, permission := range permissions {
+		if strings.HasPrefix(strings.TrimSpace(permission), "org:") {
+			continue
+		}
+		filtered = append(filtered, permission)
+	}
+	return filtered
+}
+
+func samePermissions(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 type CopyRoleHandler struct {

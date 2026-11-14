@@ -358,8 +358,10 @@ func (m *Module) Register(c *appctx.Container) error {
 		).Handle,
 		GetPreviewBlob: previewReader.BlobID,
 	})
+	var listFileAudits func(context.Context, query.ListFileAuditEvents) (query.ListFileAuditEventsResult, error)
 	if auditService, ok := c.AuditLogger.(*audit.Service); ok {
-		handler.BindAuditList(query.NewListFileAuditEventsHandler(auditService).Handle)
+		listFileAudits = query.NewListFileAuditEventsHandler(auditService).Handle
+		handler.BindAuditList(listFileAudits)
 	}
 	recordUploaded := command.NewRecordTransferUploadedHandler(repo, c.Transactor, c.EventBus)
 	runtimeCatalog, err := fsstorage.NewRuntimeCatalog(repo, fsstorage.RuntimeCatalogConfig{LocalFallbackRoot: storageRoot})
@@ -394,8 +396,12 @@ func (m *Module) Register(c *appctx.Container) error {
 	)
 	governanceHandler.BindShareWorkflow(shareCommands.Preview, shareCommands.Submit, shareCommands.Approve, shareCommands.Reject)
 	governanceHandler.BindAdoption(
-		command.NewAdoptFileHandler(repo, c.Transactor, adoptionAuthorizerAdapter{authorizer: resourceAuthorizer}, c.AuditLogger).Handle,
+		command.NewAdoptFileHandler(repo, c.Transactor, adoptionAuthorizerAdapter{authorizer: resourceAuthorizer}, c.AuditLogger).
+			WithBus(c.EventBus).Handle,
 	)
+	if listFileAudits != nil {
+		governanceHandler.BindAuditList(listFileAudits)
+	}
 	governanceHandler.BindGrantRevocation(grantCommands.Revoke)
 	filesystemhttp.RegisterGovernanceRoutes(
 		c.Engine,

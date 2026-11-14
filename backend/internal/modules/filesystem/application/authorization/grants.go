@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -103,7 +104,7 @@ func (s *GrantService) Create(ctx context.Context, request GrantRequest) (model.
 		if err := s.log(txCtx, request, grant.ID, "create", "ALLOW", ""); err != nil {
 			return err
 		}
-		return s.complete(txCtx, request.CommandID, grant.ID)
+		return s.complete(txCtx, request.CommandID, request.NodeID, grant.ID)
 	})
 	return grant, err
 }
@@ -129,6 +130,7 @@ func (s *GrantService) Revoke(ctx context.Context, request GrantRequest, grantID
 		s.log(ctx, request, grantID, "revoke", "DENY", "principal_organization_mismatch")
 		return err
 	}
+	requestHash := grantRevokeHash(request, grantID)
 	grants, err := s.repo.ListNodeResourceGrants(ctx, request.NodeID)
 	if err != nil {
 		return err
@@ -142,15 +144,25 @@ func (s *GrantService) Revoke(ctx context.Context, request GrantRequest, grantID
 		}
 	}
 	if !found {
-		if completed, commandErr := s.repo.GetCommand(ctx, request.CommandID); commandErr == nil &&
-			completed.State == "COMPLETED" && completed.Operation == "grant_revoke" &&
-			completed.RevisionID != nil && *completed.RevisionID == grantID {
-			return nil
+		completed, commandErr := s.repo.GetCommand(ctx, request.CommandID)
+		if commandErr == nil {
+			if completed.WorkspaceID != request.WorkspaceID || completed.Operation != "grant_revoke" ||
+				completed.RequestHash != requestHash || completed.NodeID == nil || *completed.NodeID != request.NodeID ||
+				completed.RevisionID == nil || *completed.RevisionID != grantID {
+				return domain.ErrIdempotencyConflict
+			}
+			if completed.State == "COMPLETED" {
+				return nil
+			}
+			return domain.ErrCommandInProgress
+		}
+		if !errors.Is(commandErr, domain.ErrCommandNotFound) {
+			return commandErr
 		}
 		return domain.ErrGrantNotFound
 	}
 	return s.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-		replayed, claimErr := s.claim(txCtx, request, "grant_revoke", grantRequestHash("grant_revoke", request, grantID), grantID)
+		replayed, claimErr := s.claim(txCtx, request, "grant_revoke", requestHash, grantID)
 		if claimErr != nil || replayed {
 			return claimErr
 		}
@@ -165,7 +177,7 @@ func (s *GrantService) Revoke(ctx context.Context, request GrantRequest, grantID
 		if err := s.log(txCtx, request, grantID, "revoke", "ALLOW", ""); err != nil {
 			return err
 		}
-		return s.complete(txCtx, request.CommandID, grantID)
+		return s.complete(txCtx, request.CommandID, request.NodeID, grantID)
 	})
 }
 
@@ -230,6 +242,14 @@ func grantRequestHash(operation string, request GrantRequest, grantID uuid.UUID)
 	return hex.EncodeToString(sum[:])
 }
 
+func grantRevokeHash(request GrantRequest, grantID uuid.UUID) string {
+	value := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s",
+		"grant_revoke", request.ActorID, request.OrganizationID, request.WorkspaceID,
+		request.NamespaceID, request.NodeID, grantID)
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
 func (s *GrantService) claim(ctx context.Context, request GrantRequest, operation, requestHash string, grantID uuid.UUID) (bool, error) {
 	if request.CommandID == uuid.Nil {
 		return false, nil
@@ -244,11 +264,11 @@ func (s *GrantService) claim(ctx context.Context, request GrantRequest, operatio
 	return claimed.State == "COMPLETED", nil
 }
 
-func (s *GrantService) complete(ctx context.Context, commandID, grantID uuid.UUID) error {
+func (s *GrantService) complete(ctx context.Context, commandID, nodeID, grantID uuid.UUID) error {
 	if commandID == uuid.Nil {
 		return nil
 	}
-	return s.repo.CompleteCommand(ctx, commandID, nil, &grantID)
+	return s.repo.CompleteCommand(ctx, commandID, &nodeID, &grantID)
 }
 
 func (s *GrantService) log(ctx context.Context, request GrantRequest, grantID uuid.UUID, operation, decision, reason string) error {
@@ -260,20 +280,21 @@ func (s *GrantService) log(ctx context.Context, request GrantRequest, grantID uu
 		"permission": request.Grant.Permission, "effect": request.Grant.Effect,
 	}
 	detail := map[string]any{
-		"workspace_id": request.WorkspaceID.String(), "namespace_id": request.NamespaceID.String(),
+		"namespace_id": request.NamespaceID.String(),
 		"node_id": request.NodeID.String(), "principal_id": request.Grant.PrincipalID.String(),
 		"decision": decision, "trace_id": request.TraceID, "grant_id": grantID.String(),
 		"action":           strings.ToUpper(operation),
 		"principal_before": principal, "principal_after": principal,
+		"reason": reason,
+	}
+	if request.WorkspaceID != uuid.Nil {
+		detail["workspace_id"] = request.WorkspaceID.String()
 	}
 	if operation == "create" {
 		detail["principal_before"] = "NONE"
 	}
 	if operation == "revoke" {
 		detail["principal_after"] = "REVOKED"
-	}
-	if reason != "" {
-		detail["reason"] = reason
 	}
 	return s.audit.Log(ctx, audit.Entry{
 		ActorID: kernel.MemberID{UUID: request.ActorID}, OrgID: &kernel.OrgID{UUID: request.OrganizationID},

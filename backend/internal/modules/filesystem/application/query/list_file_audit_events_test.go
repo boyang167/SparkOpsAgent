@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
@@ -45,6 +46,64 @@ func TestListFileAuditEventsScopesWorkspaceAndDecisionBeforePagination(t *testin
 	require.Len(t, result.Items, 1)
 	require.Equal(t, "DENY", result.Items[0].Result)
 }
+
+func TestListFileAuditEventsOrganizationScopeDoesNotInventWorkspaceFilter(t *testing.T) {
+	store := &auditListStub{}
+	orgID := uuid.New()
+
+	_, err := NewListFileAuditEventsHandler(store).Handle(context.Background(), ListFileAuditEvents{
+		OrganizationID: orgID,
+		Limit:          20,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, orgID.String(), store.filter.OrgID.String())
+	require.Empty(t, store.filter.WorkspaceID)
+}
+
+func TestListFileAuditEventsAppliesOrganizationMetadataActionAndDateFiltersInStore(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:audit-query-org-filters?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS platform").Error)
+	store := audit.NewGormStore(db)
+	require.NoError(t, store.AutoMigrate())
+
+	orgID, otherOrgID := uuid.New(), uuid.New()
+	namespaceID, nodeID, principalID := uuid.New(), uuid.New(), uuid.New()
+	actorID := kernel.MemberID{UUID: uuid.New()}
+	matching := audit.Entry{
+		ActorID: actorID, OrgID: &kernel.OrgID{UUID: orgID},
+		Action: "filesystem.share.approve", ResourceType: "filesystem", ResourceID: nodeID.String(),
+		Detail: map[string]any{
+			"namespace_id": namespaceID.String(), "node_id": nodeID.String(),
+			"principal_id": principalID.String(), "decision": "ALLOW",
+		},
+	}
+	require.NoError(t, store.Append(context.Background(), matching))
+	for _, entry := range []audit.Entry{
+		{ActorID: actorID, OrgID: &kernel.OrgID{UUID: otherOrgID}, Action: matching.Action, ResourceType: "filesystem", ResourceID: nodeID.String(), Detail: matching.Detail},
+		{ActorID: actorID, OrgID: &kernel.OrgID{UUID: orgID}, Action: "filesystem.share.reject", ResourceType: "filesystem", ResourceID: nodeID.String(), Detail: matching.Detail},
+	} {
+		require.NoError(t, store.Append(context.Background(), entry))
+	}
+	var createdAt time.Time
+	require.NoError(t, db.Table("platform.audit_logs").
+		Select("created_at").
+		Where("org_id = ? AND action = ?", orgID.String(), matching.Action).
+		Scan(&createdAt).Error)
+
+	result, err := NewListFileAuditEventsHandler(store).Handle(context.Background(), ListFileAuditEvents{
+		OrganizationID: orgID, NamespaceID: namespaceID.String(), NodeID: nodeID.String(),
+		PrincipalID: principalID.String(), Action: matching.Action,
+		From: timePointer(createdAt.Add(-time.Second)), To: timePointer(createdAt.Add(time.Second)), Limit: 20,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, matching.Action, result.Items[0].Action)
+}
+
+func timePointer(value time.Time) *time.Time { return &value }
 
 func TestListFileAuditEventsTreatsOnlyLegacyCapabilityWithoutDecisionAsAllow(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:audit-query-legacy-allow?mode=memory&cache=shared"), &gorm.Config{})

@@ -800,3 +800,16 @@ export function listFileAuditEvents(
     },
   );
 }
+
+export function listOrganizationFileAuditEvents(
+  query: FileAuditQuery = {},
+  options: GovernedFilesystemFetchOptions,
+) {
+  return bffFetch<FileAuditEventPageVM>(
+    `/filesystem/audits${fileAuditQuery(query)}`,
+    {
+      method: "GET",
+      ...options,
+    },
+  );
+}

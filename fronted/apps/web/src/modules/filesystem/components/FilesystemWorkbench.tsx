@@ -738,7 +738,7 @@ export function FilesystemWorkbench({
                   ? organizationId
                     ? createElement(ShareApprovalPanel, { organizationId, workspaceId })
                     : null
-                  : createElement(AuditWorkspace, { workspaceId, permissions }),
+                  : createElement(AuditWorkspace, { workspaceId, organizationId, permissions }),
       ),
     ),
     activeTab === "files"

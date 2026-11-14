@@ -81,10 +81,12 @@ func (h *ListFileAuditEventsHandler) Handle(ctx context.Context, q ListFileAudit
 		Offset:       offset,
 		ActionPrefix: "filesystem.",
 		ResourceType: "filesystem",
-		WorkspaceID:  q.WorkspaceID.String(),
 		NamespaceID:  strings.TrimSpace(q.NamespaceID),
 		NodeID:       strings.TrimSpace(q.NodeID),
 		PrincipalID:  strings.TrimSpace(q.PrincipalID),
+	}
+	if q.WorkspaceID != uuid.Nil {
+		filter.WorkspaceID = q.WorkspaceID.String()
 	}
 	if q.Action != "" {
 		filter.ActionPrefix = ""

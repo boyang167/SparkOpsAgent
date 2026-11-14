@@ -315,12 +315,20 @@ paths:
       responses:
         "204":
           description: Grant revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
   /api/v1/filesystem/share-requests:
     get:
@@ -364,6 +372,65 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /api/v1/filesystem/audits:
+    get:
+      tags: [filesystem]
+      summary: List organization-scoped filesystem audit events
+      operationId: listOrganizationFilesystemAudits
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - name: actor_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: action
+          in: query
+          schema: { type: string }
+        - name: resource_id
+          in: query
+          schema: { type: string }
+        - name: namespace_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: node_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: principal_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: result
+          in: query
+          schema: { type: string, enum: [ALLOW, DENY] }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: Organization filesystem audit events
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/FileAuditEventPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /api/v1/filesystem/nodes/{nodeId}/adopt:
     post:
       tags: [filesystem]
@@ -387,10 +454,20 @@ paths:
           description: Adopted file node
         "400":
           $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
   /api/v1/filesystem/nodes/{nodeId}/share-requests:
     get:
@@ -3257,7 +3334,7 @@ components:
           format: date-time
     ShareRequestPage:
       type: object
-      required: [items, next_cursor, truncated]
+      required: [items, next_cursor, truncated, total_count]
       properties:
         items:
           type: array
@@ -3267,6 +3344,10 @@ components:
           type: string
         truncated:
           type: boolean
+        total_count:
+          type: integer
+          format: int64
+          minimum: 0
     IssueCapabilityRequest:
       type: object
       required: [run_id, resource_ids, run_resource_ids, actions, expires_at]

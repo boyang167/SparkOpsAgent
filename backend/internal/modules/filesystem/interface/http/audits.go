@@ -21,12 +21,20 @@ func (h *Handler) ListFilesystemAudits(c *gin.Context) {
 		httpx.Fail(c, "NOT_IMPLEMENTED", "filesystem audit listing unavailable", http.StatusNotImplemented)
 		return
 	}
+	request, ok := fileAuditListRequest(c, rc.namespace.OrganizationID, rc.workspaceID)
+	if !ok {
+		return
+	}
+	h.writeFileAuditList(c, request)
+}
+
+func fileAuditListRequest(c *gin.Context, organizationID, workspaceID uuid.UUID) (query.ListFileAuditEvents, bool) {
 	var actorID *uuid.UUID
 	if raw := c.Query("actor_id"); raw != "" {
 		id, valid := canonicalUUID(raw)
 		if !valid {
 			invalidRequest(c)
-			return
+			return query.ListFileAuditEvents{}, false
 		}
 		actorID = &id
 	}
@@ -36,7 +44,7 @@ func (h *Handler) ListFilesystemAudits(c *gin.Context) {
 			id, valid := canonicalUUID(raw)
 			if !valid {
 				invalidRequest(c)
-				return
+				return query.ListFileAuditEvents{}, false
 			}
 			metadataIDs[key] = id.String()
 		}
@@ -46,7 +54,7 @@ func (h *Handler) ListFilesystemAudits(c *gin.Context) {
 		parsed, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
 			invalidRequest(c)
-			return
+			return query.ListFileAuditEvents{}, false
 		}
 		from = &parsed
 	}
@@ -54,7 +62,7 @@ func (h *Handler) ListFilesystemAudits(c *gin.Context) {
 		parsed, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
 			invalidRequest(c)
-			return
+			return query.ListFileAuditEvents{}, false
 		}
 		to = &parsed
 	}
@@ -63,13 +71,13 @@ func (h *Handler) ListFilesystemAudits(c *gin.Context) {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed <= 0 || parsed > 100 {
 			invalidRequest(c)
-			return
+			return query.ListFileAuditEvents{}, false
 		}
 		limit = parsed
 	}
-	result, err := h.listFileAudits(c.Request.Context(), query.ListFileAuditEvents{
-		OrganizationID: rc.namespace.OrganizationID,
-		WorkspaceID:    rc.workspaceID,
+	return query.ListFileAuditEvents{
+		OrganizationID: organizationID,
+		WorkspaceID:    workspaceID,
 		ActorID:        actorID,
 		Action:         c.Query("action"),
 		ResourceID:     c.Query("resource_id"),
@@ -81,7 +89,11 @@ func (h *Handler) ListFilesystemAudits(c *gin.Context) {
 		To:             to,
 		Cursor:         c.Query("cursor"),
 		Limit:          limit,
-	})
+	}, true
+}
+
+func (h *Handler) writeFileAuditList(c *gin.Context, request query.ListFileAuditEvents) {
+	result, err := h.listFileAudits(c.Request.Context(), request)
 	if err != nil {
 		filesystemError(c, err)
 		return

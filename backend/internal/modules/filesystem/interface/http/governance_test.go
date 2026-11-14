@@ -30,14 +30,15 @@ import (
 )
 
 type governanceOrgStub struct {
-	active bool
+	active    bool
+	fileAdmin bool
 }
 
 func (s governanceOrgStub) IsOrgMember(context.Context, kernel.OrgID, kernel.MemberID) (bool, error) {
 	return s.active, nil
 }
 func (s governanceOrgStub) HasOrgPermission(context.Context, kernel.OrgID, kernel.MemberID, string) (bool, error) {
-	return false, nil
+	return s.fileAdmin, nil
 }
 
 type governanceWorkspaceStub struct {
@@ -598,6 +599,81 @@ func TestGovernanceMetadataListLimitsAreBounded(t *testing.T) {
 		require.Equal(t, http.StatusOK, res.Code, res.Body.String())
 		expectedRepositoryLimit = 2
 	}
+}
+
+func TestOrganizationShareRequestPageReturnsAuthoritativeFilteredTotal(t *testing.T) {
+	orgID := uuid.New()
+	codec, err := query.NewSharedCursorCodec("organization-share-total", nil)
+	require.NoError(t, err)
+	handler := &GovernanceHandler{
+		cursor: codec,
+		listNodeShareRequests: func(_ context.Context, page repository.ShareRequestPageQuery) ([]model.ShareRequest, error) {
+			require.Equal(t, orgID, page.OrganizationID)
+			require.Equal(t, model.ShareRequestPending, page.Status)
+			require.Equal(t, 2, page.Limit)
+			now := time.Now().UTC()
+			return []model.ShareRequest{
+				{ID: uuid.New(), OrganizationID: orgID, Status: model.ShareRequestPending, CreatedAt: now},
+				{ID: uuid.New(), OrganizationID: orgID, Status: model.ShareRequestPending, CreatedAt: now.Add(-time.Second)},
+			}, nil
+		},
+		countShareRequests: func(_ context.Context, page repository.ShareRequestPageQuery) (int64, error) {
+			require.Equal(t, orgID, page.OrganizationID)
+			require.Equal(t, model.ShareRequestPending, page.Status)
+			require.Zero(t, page.AfterID)
+			require.True(t, page.AfterCreatedAt.IsZero())
+			return 51, nil
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(
+		t, orgID, governanceOrgStub{active: true, fileAdmin: true},
+		governanceWorkspaceStub{orgID: orgID, active: true}, handler,
+	)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/share-requests?status=PENDING&limit=1", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Organization-ID", orgID.String())
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), `"total_count":51`)
+	require.Contains(t, res.Body.String(), `"truncated":true`)
+}
+
+func TestOrganizationAuditRequiresFileAdminAndDoesNotApplyWorkspaceFilter(t *testing.T) {
+	orgID := uuid.New()
+	listed := 0
+	handler := &GovernanceHandler{
+		listFileAudits: func(_ context.Context, request query.ListFileAuditEvents) (query.ListFileAuditEventsResult, error) {
+			listed++
+			require.Equal(t, orgID, request.OrganizationID)
+			require.Zero(t, request.WorkspaceID)
+			return query.ListFileAuditEventsResult{}, nil
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(
+		t, orgID, governanceOrgStub{active: true},
+		governanceWorkspaceStub{orgID: orgID, active: true}, handler,
+	)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/audits", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Organization-ID", orgID.String())
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusForbidden, res.Code)
+	require.Zero(t, listed)
+
+	router, token, _, _ = governanceRouterWithIDs(
+		t, orgID, governanceOrgStub{active: true, fileAdmin: true},
+		governanceWorkspaceStub{orgID: orgID, active: true}, handler,
+	)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/audits", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Organization-ID", orgID.String())
+	res = httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.Equal(t, 1, listed)
 }
 
 func TestGovernanceGrantCursorPagesWithoutDuplicatesAndRejectsCrossNodeReplay(t *testing.T) {

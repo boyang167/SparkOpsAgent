@@ -33,6 +33,7 @@ type GovernanceRepository interface {
 	GetNodesWithAncestors(context.Context, uuid.UUID, []uuid.UUID) ([]model.Node, error)
 	ListGovernanceGrantsPage(context.Context, repository.GovernanceGrantPageQuery) ([]repository.GovernanceGrantRecord, error)
 	ListShareRequestsPage(context.Context, repository.ShareRequestPageQuery) ([]model.ShareRequest, error)
+	CountShareRequests(context.Context, repository.ShareRequestPageQuery) (int64, error)
 }
 
 type GovernanceHandler struct {
@@ -52,6 +53,8 @@ type GovernanceHandler struct {
 	revokeGrant           func(context.Context, command.GrantResource, uuid.UUID) error
 	listGovernanceGrants  func(context.Context, repository.GovernanceGrantPageQuery) ([]repository.GovernanceGrantRecord, error)
 	listNodeShareRequests func(context.Context, repository.ShareRequestPageQuery) ([]model.ShareRequest, error)
+	countShareRequests    func(context.Context, repository.ShareRequestPageQuery) (int64, error)
+	listFileAudits        func(context.Context, query.ListFileAuditEvents) (query.ListFileAuditEventsResult, error)
 	organizations         authz.OrgPermissionChecker
 	cursor                *query.SharedCursorCodec
 }
@@ -75,6 +78,7 @@ func NewGovernanceHandler(
 		authorize:             authorizer.Authorize,
 		listGovernanceGrants:  repo.ListGovernanceGrantsPage,
 		listNodeShareRequests: repo.ListShareRequestsPage,
+		countShareRequests:    repo.CountShareRequests,
 		cursor:                cursor,
 	}
 }
@@ -94,6 +98,10 @@ func (h *GovernanceHandler) BindAdoption(adopt func(context.Context, command.Ado
 
 func (h *GovernanceHandler) BindGrantRevocation(revoke func(context.Context, command.GrantResource, uuid.UUID) error) {
 	h.revokeGrant = revoke
+}
+
+func (h *GovernanceHandler) BindAuditList(list func(context.Context, query.ListFileAuditEvents) (query.ListFileAuditEventsResult, error)) {
+	h.listFileAudits = list
 }
 
 func RegisterGovernanceRoutes(
@@ -116,6 +124,7 @@ func RegisterGovernanceRoutes(
 	base.GET("/nodes/:nodeId/grants", handler.ListGovernedGrants)
 	base.GET("/nodes/:nodeId/share-requests", handler.ListShareRequests)
 	base.GET("/share-requests", handler.ListOrganizationShareRequests)
+	base.GET("/audits", handler.ListOrganizationAudits)
 	base.POST("/nodes/:nodeId/share-preview", requireIdempotencyKey(), handler.PreviewShare)
 	base.POST("/nodes/:nodeId/grants", requireIdempotencyKey(), handler.CreateGovernedGrant)
 	base.DELETE("/nodes/:nodeId/grants/:grantId", requireIdempotencyKey(), handler.RevokeGovernedGrant)
@@ -513,6 +522,16 @@ func (h *GovernanceHandler) ListShareRequests(c *gin.Context) {
 		governanceError(c, err)
 		return
 	}
+	totalCount := int64(len(requests))
+	if h.countShareRequests != nil {
+		totalCount, err = h.countShareRequests(c.Request.Context(), repository.ShareRequestPageQuery{
+			OrganizationID: rc.organizationID, NodeID: node.ID,
+		})
+		if err != nil {
+			governanceError(c, err)
+			return
+		}
+	}
 	next := ""
 	if len(requests) > limit {
 		next, err = h.cursor.EncodeGovernance(query.GovernanceCursorPosition{
@@ -528,12 +547,12 @@ func (h *GovernanceHandler) ListShareRequests(c *gin.Context) {
 	for _, request := range requests {
 		items = append(items, shareRequestView(request))
 	}
-	httpx.OK(c, gin.H{"items": items, "next_cursor": next, "truncated": next != ""})
+	httpx.OK(c, gin.H{"items": items, "next_cursor": next, "truncated": next != "", "total_count": totalCount})
 }
 
 func (h *GovernanceHandler) ListOrganizationShareRequests(c *gin.Context) {
 	rc, ok := governanceRequestContext(c)
-	if !ok || h == nil || h.listNodeShareRequests == nil || h.organizations == nil {
+	if !ok || h == nil || h.listNodeShareRequests == nil || h.countShareRequests == nil || h.organizations == nil {
 		filesystemError(c, domain.ErrPersistence)
 		return
 	}
@@ -567,9 +586,17 @@ func (h *GovernanceHandler) ListOrganizationShareRequests(c *gin.Context) {
 		governanceError(c, err)
 		return
 	}
-	requests, err := h.listNodeShareRequests(c.Request.Context(), repository.ShareRequestPageQuery{
+	pageQuery := repository.ShareRequestPageQuery{
 		OrganizationID: rc.organizationID, Status: status,
 		AfterCreatedAt: position.CreatedAt, AfterID: position.ID, Limit: limit + 1,
+	}
+	requests, err := h.listNodeShareRequests(c.Request.Context(), pageQuery)
+	if err != nil {
+		governanceError(c, err)
+		return
+	}
+	totalCount, err := h.countShareRequests(c.Request.Context(), repository.ShareRequestPageQuery{
+		OrganizationID: rc.organizationID, Status: status,
 	})
 	if err != nil {
 		governanceError(c, err)
@@ -590,7 +617,46 @@ func (h *GovernanceHandler) ListOrganizationShareRequests(c *gin.Context) {
 	for _, request := range requests {
 		items = append(items, shareRequestView(request))
 	}
-	httpx.OK(c, gin.H{"items": items, "next_cursor": next, "truncated": next != ""})
+	httpx.OK(c, gin.H{"items": items, "next_cursor": next, "truncated": next != "", "total_count": totalCount})
+}
+
+func (h *GovernanceHandler) ListOrganizationAudits(c *gin.Context) {
+	rc, ok := governanceRequestContext(c)
+	if !ok || h == nil || h.listFileAudits == nil || h.organizations == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	allowed, err := h.organizations.HasOrgPermission(
+		c.Request.Context(), kernel.OrgID{UUID: rc.organizationID},
+		kernel.MemberID{UUID: rc.actorID}, authz.PermOrgFileAdmin,
+	)
+	if err != nil {
+		governanceError(c, err)
+		return
+	}
+	if !allowed {
+		httpx.Fail(c, "FILESYSTEM_RESOURCE_FORBIDDEN", "organization file administration required", http.StatusForbidden)
+		return
+	}
+	request, valid := fileAuditListRequest(c, rc.organizationID, uuid.Nil)
+	if !valid {
+		return
+	}
+	result, err := h.listFileAudits(c.Request.Context(), request)
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	items := make([]gin.H, 0, len(result.Items))
+	for _, item := range result.Items {
+		items = append(items, gin.H{
+			"id": item.ID, "actor_id": item.ActorID, "action": item.Action,
+			"resource_type": item.ResourceType, "resource_id": item.ResourceID,
+			"result": item.Result, "trace_id": item.TraceID, "created_at": item.CreatedAt,
+			"detail": item.Detail,
+		})
+	}
+	httpx.OK(c, gin.H{"items": items, "next_cursor": result.NextCursor})
 }
 
 func (h *GovernanceHandler) decodeGovernanceCursor(value string, context query.GovernanceCursorContext) (query.GovernanceCursorPosition, error) {

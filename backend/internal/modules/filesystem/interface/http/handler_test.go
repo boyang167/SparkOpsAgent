@@ -130,9 +130,11 @@ func TestGetFileNodeUsesWorkspaceNamespaceAndResourceAuthorization(t *testing.T)
 	nsID := uuid.New()
 	nodeID := uuid.New()
 	ownerID := uuid.New()
+	orgID := uuid.New()
+	logs := &auditStub{}
 	h := &Handler{
 		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
-			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID}, nil
+			return &model.Namespace{ID: nsID, OrganizationID: orgID, WorkspaceID: workspaceID}, nil
 		},
 		getNode: func(_ context.Context, namespaceID, requestedNodeID uuid.UUID) (*model.Node, error) {
 			require.Equal(t, nsID, namespaceID)
@@ -140,12 +142,14 @@ func TestGetFileNodeUsesWorkspaceNamespaceAndResourceAuthorization(t *testing.T)
 			return &model.Node{
 				ID: nodeID, NamespaceID: nsID, Type: model.NodeTypeFile,
 				Name: "规格.md", State: model.NodeStateActive, OwnerID: ownerID,
+				Classification: model.TransferClassificationConfidential,
 			}, nil
 		},
 		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
 			require.Equal(t, nodeID, request.NodeID)
 			return resourceauth.Decision{Allowed: true}
 		},
+		audit: logs,
 	}
 	router, token, wsID := testRouter(t, memberStub(true), permissionStub{
 		allowed: map[string]bool{authz.PermFileRead: true},
@@ -159,6 +163,12 @@ func TestGetFileNodeUsesWorkspaceNamespaceAndResourceAuthorization(t *testing.T)
 	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
 	require.Contains(t, res.Body.String(), nodeID.String())
 	require.Contains(t, res.Body.String(), "规格.md")
+	require.Len(t, logs.entries, 1)
+	require.Equal(t, "filesystem.file.sensitive_read", logs.entries[0].Action)
+	for _, key := range []string{"namespace_id", "node_id", "principal_before", "principal_after", "reason", "trace_id", "action"} {
+		require.Contains(t, logs.entries[0].Detail, key)
+	}
+	require.NotContains(t, logs.entries[0].Detail, "content")
 }
 
 func TestGetFileNodeRejectsPermissionResourceNamespaceAndMissingNode(t *testing.T) {

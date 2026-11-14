@@ -312,6 +312,19 @@ export async function listFileAuditEvents(
   return FileAuditEventPageVMSchema.parse(data);
 }
 
+export async function listOrganizationFileAuditEvents(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId: string | undefined,
+  query: FileAuditQuery = {},
+): Promise<FileAuditEventPageVM> {
+  const data = await ctx.upstream.filesystem.listOrganizationFileAuditEvents(
+    governedContext(organizationId, workspaceId),
+    query,
+  );
+  return FileAuditEventPageVMSchema.parse(data);
+}
+
 export async function listGovernedNamespaces(
   ctx: BffContext,
   organizationId: string,

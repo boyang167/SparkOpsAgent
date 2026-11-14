@@ -13,6 +13,8 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/audit"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	sharedevents "github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
 type adoptionTransactor struct{}
@@ -37,6 +39,16 @@ type adoptionAudit struct{ entries []audit.Entry }
 
 func (a *adoptionAudit) Log(_ context.Context, entry audit.Entry) error {
 	a.entries = append(a.entries, entry)
+	return nil
+}
+
+type adoptionBus struct{ events []sharedevents.Event }
+
+func (b *adoptionBus) Publish(_ context.Context, events ...sharedevents.Event) error {
+	b.events = append(b.events, events...)
+	return nil
+}
+func (*adoptionBus) Subscribe(string, string, messaging.Handler) error {
 	return nil
 }
 
@@ -92,6 +104,9 @@ func (s *adoptionStore) GetNodeByID(_ context.Context, id uuid.UUID) (*model.Nod
 	}
 	return nil, domain.ErrNodeNotFound
 }
+func (s *adoptionStore) LockNodeByID(ctx context.Context, id uuid.UUID) (*model.Node, error) {
+	return s.GetNodeByID(ctx, id)
+}
 func (s *adoptionStore) GetNamespace(_ context.Context, id uuid.UUID) (*model.Namespace, error) {
 	if id == s.sourceNamespace.ID {
 		return s.sourceNamespace, nil
@@ -107,6 +122,9 @@ func (s *adoptionStore) GetNamespaceByOrganization(_ context.Context, id uuid.UU
 	}
 	return nil, domain.ErrNamespaceNotFound
 }
+func (s *adoptionStore) LockNamespaceByOrganization(ctx context.Context, id uuid.UUID) (*model.Namespace, error) {
+	return s.GetNamespaceByOrganization(ctx, id)
+}
 func (s *adoptionStore) GetNode(_ context.Context, namespaceID, nodeID uuid.UUID) (*model.Node, error) {
 	if namespaceID == s.targetNamespace.ID && nodeID == s.parent.ID {
 		return s.parent, nil
@@ -116,10 +134,16 @@ func (s *adoptionStore) GetNode(_ context.Context, namespaceID, nodeID uuid.UUID
 	}
 	return nil, domain.ErrNodeNotFound
 }
+func (s *adoptionStore) LockNode(ctx context.Context, namespaceID, nodeID uuid.UUID) (*model.Node, error) {
+	return s.GetNode(ctx, namespaceID, nodeID)
+}
 func (s *adoptionStore) GetRevision(context.Context, uuid.UUID, uuid.UUID) (*model.FileRevision, error) {
 	return s.revision, nil
 }
 func (s *adoptionStore) GetBlob(context.Context, uuid.UUID) (*model.Blob, error) { return s.blob, nil }
+func (s *adoptionStore) LockBlob(context.Context, uuid.UUID) (*model.Blob, error) {
+	return s.blob, nil
+}
 func (s *adoptionStore) GetAvailableReplica(context.Context, uuid.UUID, uuid.UUID) (*model.StorageReplica, error) {
 	return s.replica, nil
 }
@@ -178,6 +202,13 @@ func (s *adoptionStore) CompleteCommand(_ context.Context, id uuid.UUID, nodeID,
 	s.commands[id] = item
 	return nil
 }
+func (s *adoptionStore) GetCommand(_ context.Context, id uuid.UUID) (*repository.CommandDedup, error) {
+	item, ok := s.commands[id]
+	if !ok {
+		return nil, domain.ErrCommandNotFound
+	}
+	return &item, nil
+}
 
 func adoptionCommand(store *adoptionStore) command.AdoptFile {
 	return command.AdoptFile{
@@ -190,7 +221,8 @@ func adoptionCommand(store *adoptionStore) command.AdoptFile {
 func TestAdoptFileCreatesIndependentOrganizationFileAndLineageExactlyOnce(t *testing.T) {
 	store := newAdoptionStore(t)
 	logger := &adoptionAudit{}
-	handler := command.NewAdoptFileHandler(store, adoptionTransactor{}, adoptionAuthorizer{read: true, write: true}, logger)
+	bus := &adoptionBus{}
+	handler := command.NewAdoptFileHandler(store, adoptionTransactor{}, adoptionAuthorizer{read: true, write: true}, logger).WithBus(bus)
 	cmd := adoptionCommand(store)
 
 	first, err := handler.Handle(context.Background(), cmd)
@@ -213,6 +245,40 @@ func TestAdoptFileCreatesIndependentOrganizationFileAndLineageExactlyOnce(t *tes
 	require.Equal(t, store.targetNamespace.ID.String(), logger.entries[0].Detail["namespace_id"])
 	require.Equal(t, first.ID.String(), logger.entries[0].Detail["node_id"])
 	require.Equal(t, "trace-adopt-1", logger.entries[0].Detail["trace_id"])
+	for _, key := range []string{"namespace_id", "node_id", "principal_before", "principal_after", "reason", "trace_id", "action"} {
+		require.Contains(t, logger.entries[0].Detail, key)
+	}
+	require.Len(t, bus.events, 2)
+}
+
+func TestAdoptFileCompletedReplayPrecedesMutableAuthorizationAndRejectsDifferentPayload(t *testing.T) {
+	store := newAdoptionStore(t)
+	authority := adoptionAuthorizer{read: true, write: true}
+	handler := command.NewAdoptFileHandler(store, adoptionTransactor{}, authority, &adoptionAudit{})
+	cmd := adoptionCommand(store)
+
+	first, err := handler.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+	handler = command.NewAdoptFileHandler(store, adoptionTransactor{}, adoptionAuthorizer{}, &adoptionAudit{})
+	replayed, err := handler.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, replayed.ID)
+
+	cmd.Name = "不同文件名.txt"
+	_, err = handler.Handle(context.Background(), cmd)
+	require.ErrorIs(t, err, domain.ErrIdempotencyConflict)
+}
+
+func TestAdoptFileRequiresOrganizationDedupDomain(t *testing.T) {
+	store := newAdoptionStore(t)
+	store.blob.DedupDomain = uuid.New()
+
+	_, err := command.NewAdoptFileHandler(store, adoptionTransactor{}, adoptionAuthorizer{read: true, write: true}, &adoptionAudit{}).
+		Handle(context.Background(), adoptionCommand(store))
+
+	require.ErrorIs(t, err, domain.ErrTransferIntegrity)
+	require.Empty(t, store.lineages)
+	require.Zero(t, store.quotaFiles)
 }
 
 func TestAdoptFileEnforcesFileBoundaryPermissionsAndOrganization(t *testing.T) {

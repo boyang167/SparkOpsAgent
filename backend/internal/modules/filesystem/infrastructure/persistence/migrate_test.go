@@ -377,3 +377,89 @@ func TestSQLiteKernelConstraintsRejectInvalidWrites(t *testing.T) {
 	require.NoError(t, db.Raw("PRAGMA filesystem.foreign_key_check").Scan(&violations).Error)
 	require.Empty(t, violations)
 }
+
+func TestSQLiteAutoMigrateCreatesLineageWithCompositeForeignKeys(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
+	require.NoError(t, AutoMigrate(db))
+
+	var count int64
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM filesystem.sqlite_master WHERE type = 'table' AND name = 'file_lineage'").Scan(&count).Error)
+	require.Equal(t, int64(1), count)
+
+	orgID, sourceNamespaceID, targetNamespaceID := uuid.New(), uuid.New(), uuid.New()
+	sourceNodeID, targetNodeID, otherNodeID := uuid.New(), uuid.New(), uuid.New()
+	sourceRevisionID, targetRevisionID, otherRevisionID := uuid.New(), uuid.New(), uuid.New()
+	blobID, ownerID := uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(
+		"INSERT INTO filesystem.namespaces (id, namespace_type, organization_id, owner_user_id, status, policy_version) VALUES (?, 'USER', ?, ?, 'ACTIVE', 1)",
+		sourceNamespaceID, orgID, ownerID,
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO filesystem.namespaces (id, namespace_type, organization_id, status, policy_version) VALUES (?, 'ORGANIZATION', ?, 'ACTIVE', 1)",
+		targetNamespaceID, orgID,
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO filesystem.blobs (id, dedup_domain, sha256, size, ref_count, state) VALUES (?, ?, ?, 1, 3, 'AVAILABLE')",
+		blobID, orgID, strings.Repeat("a", 64),
+	).Error)
+	for _, node := range []struct {
+		id          uuid.UUID
+		namespaceID uuid.UUID
+		name        string
+	}{
+		{sourceNodeID, sourceNamespaceID, "source"},
+		{targetNodeID, targetNamespaceID, "target"},
+		{otherNodeID, sourceNamespaceID, "other"},
+	} {
+		require.NoError(t, db.Exec(
+			"INSERT INTO filesystem.nodes (id, namespace_id, node_type, name, normalized_name, state, owner_id, classification) VALUES (?, ?, 'FILE', ?, ?, 'ACTIVE', ?, 'INTERNAL')",
+			node.id, node.namespaceID, node.name, node.name, ownerID,
+		).Error)
+	}
+	for _, revision := range []struct {
+		id     uuid.UUID
+		nodeID uuid.UUID
+	}{
+		{sourceRevisionID, sourceNodeID},
+		{targetRevisionID, targetNodeID},
+		{otherRevisionID, otherNodeID},
+	} {
+		require.NoError(t, db.Exec(
+			"INSERT INTO filesystem.file_revisions (id, node_id, revision_no, blob_id, size, mime_type, created_by) VALUES (?, ?, 1, ?, 1, 'text/plain', ?)",
+			revision.id, revision.nodeID, blobID, ownerID,
+		).Error)
+	}
+	insert := `INSERT INTO filesystem.file_lineage
+		(id, organization_id, source_namespace_id, source_node_id, source_revision_id,
+		 target_namespace_id, target_node_id, target_revision_id, relation, command_id, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ADOPTED_AS_ORGANIZATION_FILE', ?, ?, ?)`
+	require.Error(t, db.Exec(insert,
+		uuid.New(), orgID, sourceNamespaceID, sourceNodeID, otherRevisionID,
+		targetNamespaceID, targetNodeID, targetRevisionID, uuid.New(), ownerID, time.Now(),
+	).Error)
+	require.Error(t, db.Exec(insert,
+		uuid.New(), orgID, targetNamespaceID, sourceNodeID, sourceRevisionID,
+		targetNamespaceID, targetNodeID, targetRevisionID, uuid.New(), ownerID, time.Now(),
+	).Error)
+}
+
+func TestSQLiteAutoMigrateRepairsMissingLineageTableOnPartialUpgrade(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
+	require.NoError(t, AutoMigrate(db))
+	require.NoError(t, db.Exec("DROP TABLE filesystem.file_lineage").Error)
+
+	require.NoError(t, AutoMigrate(db))
+	var count int64
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM filesystem.sqlite_master WHERE type = 'table' AND name = 'file_lineage'").Scan(&count).Error)
+	require.Equal(t, int64(1), count)
+}

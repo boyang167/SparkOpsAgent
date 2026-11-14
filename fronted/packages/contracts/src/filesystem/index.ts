@@ -566,6 +566,7 @@ export const ShareRequestPageVMSchema = z.object({
   items: z.array(ShareRequestVMSchema),
   next_cursor: z.string(),
   truncated: z.boolean(),
+  total_count: z.number().int().nonnegative(),
 });
 export type ShareRequestPageVM = z.infer<typeof ShareRequestPageVMSchema>;
 

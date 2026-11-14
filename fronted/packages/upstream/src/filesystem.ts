@@ -550,6 +550,15 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
         { method: "GET", options: { ...options, workspaceId } },
       );
     },
+    listOrganizationFileAuditEvents(
+      context: GovernedFilesystemContext,
+      query: FileAuditQuery = {},
+    ) {
+      return upstreamFetch<FileAuditEventPageVM>(
+        `/api/v1/filesystem/audits${fileAuditQuery(query)}`,
+        { method: "GET", options: governedOptions(options, context) },
+      );
+    },
   };
 }
 

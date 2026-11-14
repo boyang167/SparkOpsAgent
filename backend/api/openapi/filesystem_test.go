@@ -173,7 +173,7 @@ func TestFilesystemGovernancePageSchemasMatchRuntimeResponses(t *testing.T) {
 	shareRequestPage := schemas["ShareRequestPage"].(map[string]any)
 	require.ElementsMatch(
 		t,
-		[]any{"items", "next_cursor", "truncated"},
+		[]any{"items", "next_cursor", "truncated", "total_count"},
 		shareRequestPage["required"].([]any),
 	)
 	typedShareProperties := schemas["CreateTypedGrantRequest"].(map[string]any)["properties"].(map[string]any)
