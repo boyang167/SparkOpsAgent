@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -28,9 +29,10 @@ func TestSharedWithMeUsesTypedPrincipalsAndForwardsStableFilters(t *testing.T) {
 		model.ResourcePermissionWrite: {Allowed: true, Reason: "grant_allow", SourceGrantIDs: []uuid.UUID{grantID}},
 	}})
 
+	rawCursor := uuid.NewString()
 	items, next, err := handler.Handle(context.Background(), SharedWithMe{
 		ActorID: actorID, OrganizationID: orgID, WorkspaceID: workspaceID,
-		Query: "quarter", Cursor: uuid.NewString(), Limit: 17,
+		Query: "quarter", Cursor: encodeGovernanceCursor(rawCursor), Limit: 17,
 	})
 
 	require.NoError(t, err)
@@ -40,7 +42,8 @@ func TestSharedWithMeUsesTypedPrincipalsAndForwardsStableFilters(t *testing.T) {
 	require.ElementsMatch(t, []model.ResourcePermission{model.ResourcePermissionRead, model.ResourcePermissionWrite}, items[0].EffectiveActions)
 	require.Equal(t, []uuid.UUID{grantID}, items[0].SourceGrantIDs)
 	require.Equal(t, "quarter", repo.filter.Query)
-	require.Equal(t, 17, repo.filter.Limit)
+	require.Equal(t, SharedCandidateChunkSize, repo.filter.Limit)
+	require.Equal(t, rawCursor, repo.filter.Cursor)
 	require.Len(t, repo.filter.Principals, 3)
 	require.Equal(t, model.PrincipalRole, repo.filter.Principals[2].Type)
 }
@@ -106,6 +109,104 @@ func TestSharedWithMeIncludesAllowAndDenySourcesThatShapeEffectiveActions(t *tes
 
 type principalResolverErrorStub struct {
 	err error
+}
+
+type countingBatchAuthorizer struct {
+	visibleIDs map[uuid.UUID]bool
+	calls      int
+	maxBatch   int
+}
+
+func (a *countingBatchAuthorizer) Authorize(context.Context, resourceauth.Request) resourceauth.Decision {
+	return resourceauth.Decision{}
+}
+
+func (a *countingBatchAuthorizer) AuthorizeMany(_ context.Context, request resourceauth.BatchRequest) resourceauth.BatchDecisions {
+	a.calls++
+	if len(request.NodeIDs) > a.maxBatch {
+		a.maxBatch = len(request.NodeIDs)
+	}
+	out := make(resourceauth.BatchDecisions, len(request.NodeIDs))
+	for _, nodeID := range request.NodeIDs {
+		out[nodeID] = map[model.ResourcePermission]resourceauth.Decision{}
+		for _, permission := range request.Permissions {
+			out[nodeID][permission] = resourceauth.Decision{
+				Allowed: a.visibleIDs[nodeID] && permission == model.ResourcePermissionRead,
+			}
+		}
+	}
+	return out
+}
+
+func TestSharedWithMeUsesBoundedBatchEvaluationAndOpaqueContinuation(t *testing.T) {
+	actorID, namespaceID := uuid.New(), uuid.New()
+	candidates := make([]SharedNode, 300)
+	for index := range candidates {
+		candidates[index].Node = model.Node{
+			ID:          uuid.MustParse(fmt.Sprintf("%08x-0000-0000-0000-000000000000", index+1)),
+			NamespaceID: namespaceID,
+		}
+	}
+	repo := &governanceRepositoryStub{}
+	repo.listFn = func(filter SharedWithMeFilter) ([]SharedNode, string, error) {
+		start := 0
+		if filter.Cursor != "" {
+			for index := range candidates {
+				if candidates[index].Node.ID.String() == filter.Cursor {
+					start = index + 1
+					break
+				}
+			}
+		}
+		end := start + filter.Limit
+		if end > len(candidates) {
+			end = len(candidates)
+		}
+		next := ""
+		if end < len(candidates) {
+			next = candidates[end-1].Node.ID.String()
+		}
+		return candidates[start:end], next, nil
+	}
+	authorizer := &countingBatchAuthorizer{visibleIDs: map[uuid.UUID]bool{
+		candidates[256].Node.ID: true,
+		candidates[257].Node.ID: true,
+	}}
+	handler := NewSharedWithMeHandler(repo, namespacePrincipalResolver{
+		principals: []repository.PrincipalRef{{Type: model.PrincipalUser, ID: actorID}},
+	}, authorizer)
+
+	first, cursor, err := handler.Handle(context.Background(), SharedWithMe{
+		ActorID: actorID, OrganizationID: uuid.New(), NamespaceID: namespaceID, Limit: 1,
+	})
+
+	require.NoError(t, err)
+	require.Empty(t, first)
+	require.NotEmpty(t, cursor)
+	_, parseErr := uuid.Parse(cursor)
+	require.Error(t, parseErr, "continuation must not reveal the scanned node UUID")
+	require.Equal(t, 4, authorizer.calls)
+	require.LessOrEqual(t, authorizer.maxBatch, SharedCandidateChunkSize)
+
+	second, next, err := handler.Handle(context.Background(), SharedWithMe{
+		ActorID: actorID, OrganizationID: uuid.New(), NamespaceID: namespaceID,
+		Limit: 1, Cursor: cursor,
+	})
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	require.Equal(t, candidates[256].Node.ID, second[0].Node.ID)
+	require.NotEmpty(t, next)
+
+	third, finalCursor, err := handler.Handle(context.Background(), SharedWithMe{
+		ActorID: actorID, OrganizationID: uuid.New(), NamespaceID: namespaceID,
+		Limit: 1, Cursor: next,
+	})
+	require.NoError(t, err)
+	require.Len(t, third, 1)
+	require.Equal(t, candidates[257].Node.ID, third[0].Node.ID)
+	require.NotEqual(t, second[0].Node.ID, third[0].Node.ID)
+	require.Empty(t, finalCursor)
+	require.LessOrEqual(t, repo.listCalls, 9)
 }
 
 func (s principalResolverErrorStub) Resolve(context.Context, resourceauth.ResolvePrincipalsInput) ([]repository.PrincipalRef, error) {

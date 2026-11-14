@@ -20,6 +20,8 @@ var resourceActions = []model.ResourcePermission{
 	model.ResourcePermissionAdmin,
 }
 
+const NamespaceEntryNodeLimit = 32
+
 type ListNamespaces struct {
 	ActorID        uuid.UUID
 	OrganizationID uuid.UUID
@@ -27,15 +29,16 @@ type ListNamespaces struct {
 }
 
 type NamespaceSummary struct {
-	ID             uuid.UUID
-	NamespaceType  model.NamespaceType
-	OrganizationID uuid.UUID
-	WorkspaceID    uuid.UUID
-	OwnerUserID    uuid.UUID
-	RootNodeID     *uuid.UUID
-	Status         string
-	Capabilities   []model.ResourcePermission
-	EntryNodeIDs   []uuid.UUID
+	ID                  uuid.UUID
+	NamespaceType       model.NamespaceType
+	OrganizationID      uuid.UUID
+	WorkspaceID         uuid.UUID
+	OwnerUserID         uuid.UUID
+	RootNodeID          *uuid.UUID
+	Status              string
+	Capabilities        []model.ResourcePermission
+	EntryNodeIDs        []uuid.UUID
+	EntryNodesTruncated bool
 }
 
 type ListNamespacesRepository interface {
@@ -52,10 +55,10 @@ type ResourceAuthorizer interface {
 type ListNamespacesHandler struct {
 	repo       ListNamespacesRepository
 	principals resourceauth.PrincipalResolver
-	authorizer ResourceAuthorizer
+	authorizer GovernanceAuthorizer
 }
 
-func NewListNamespacesHandler(repo ListNamespacesRepository, principals resourceauth.PrincipalResolver, authorizer ResourceAuthorizer) *ListNamespacesHandler {
+func NewListNamespacesHandler(repo ListNamespacesRepository, principals resourceauth.PrincipalResolver, authorizer GovernanceAuthorizer) *ListNamespacesHandler {
 	return &ListNamespacesHandler{repo: repo, principals: principals, authorizer: authorizer}
 }
 
@@ -98,32 +101,54 @@ func (h *ListNamespacesHandler) Handle(ctx context.Context, q ListNamespaces) ([
 	entryIDs := make([]uuid.UUID, 0)
 	capabilities := make(map[model.ResourcePermission]struct{})
 	cursor := ""
-	for {
+	scanned := 0
+	hasMore := false
+	for scanned < SharedCandidateScanBudget && len(entryIDs) <= NamespaceEntryNodeLimit {
 		pageStart := cursor
 		entries, next, listErr := h.repo.ListSharedNodes(ctx, q.OrganizationID, principals, SharedWithMeFilter{
-			NamespaceID: organization.ID, Cursor: cursor, Limit: 200, Principals: principals,
+			NamespaceID: organization.ID, Cursor: cursor, Limit: SharedCandidateChunkSize, Principals: principals,
 		}, nowUTC())
 		if listErr != nil {
 			return nil, listErr
 		}
-		for _, entry := range entries {
-			effective := authorizeSharedCandidate(ctx, h.authorizer, SharedWithMe{
-				ActorID: q.ActorID, OrganizationID: q.OrganizationID, WorkspaceID: q.WorkspaceID,
-			}, entry.Node)
+		if remaining := SharedCandidateScanBudget - scanned; len(entries) > remaining {
+			entries = entries[:remaining]
+		}
+		effectiveEntries := authorizeSharedCandidates(ctx, h.authorizer, SharedWithMe{
+			ActorID: q.ActorID, OrganizationID: q.OrganizationID, WorkspaceID: q.WorkspaceID,
+			NamespaceID: organization.ID,
+		}, entries)
+		for index, entry := range entries {
+			scanned++
+			effective := effectiveEntries[index]
 			if !containsAction(effective.EffectiveActions, model.ResourcePermissionRead) {
 				continue
 			}
 			entryIDs = append(entryIDs, entry.Node.ID)
+			if len(entryIDs) > NamespaceEntryNodeLimit {
+				break
+			}
 			for _, action := range effective.EffectiveActions {
 				capabilities[action] = struct{}{}
 			}
 		}
+		hasMore = next != ""
 		if next == "" || next == pageStart {
 			break
 		}
 		cursor = next
 	}
+	if len(entryIDs) == 0 && scanned == SharedCandidateScanBudget && hasMore {
+		return nil, domain.ErrAuthorizationScanBudgetExceeded
+	}
 	if len(entryIDs) > 0 {
+		if len(entryIDs) > NamespaceEntryNodeLimit {
+			entryIDs = entryIDs[:NamespaceEntryNodeLimit]
+			organizationSummary.EntryNodesTruncated = true
+		}
+		if scanned == SharedCandidateScanBudget && hasMore {
+			organizationSummary.EntryNodesTruncated = true
+		}
 		organizationSummary.EntryNodeIDs = entryIDs
 		for _, action := range resourceActions {
 			if _, ok := capabilities[action]; ok {

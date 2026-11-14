@@ -19,6 +19,17 @@ func (s effectiveAuthorizerStub) Authorize(_ context.Context, request resourceau
 	return s.decisions[request.Permission]
 }
 
+func (s effectiveAuthorizerStub) AuthorizeMany(_ context.Context, request resourceauth.BatchRequest) resourceauth.BatchDecisions {
+	out := make(resourceauth.BatchDecisions, len(request.NodeIDs))
+	for _, nodeID := range request.NodeIDs {
+		out[nodeID] = make(map[model.ResourcePermission]resourceauth.Decision, len(request.Permissions))
+		for _, permission := range request.Permissions {
+			out[nodeID][permission] = s.decisions[permission]
+		}
+	}
+	return out
+}
+
 func TestEffectiveAccessMergesAllowedActionsAndGrantSources(t *testing.T) {
 	orgID, workspaceID, actorID, namespaceID, nodeID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	readGrant, writeGrant := uuid.New(), uuid.New()

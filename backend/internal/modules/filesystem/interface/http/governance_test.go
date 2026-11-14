@@ -255,6 +255,25 @@ func TestGovernanceRepositoryFailureReturnsInternalError(t *testing.T) {
 	}
 }
 
+func TestGovernanceNamespaceBudgetExceededReturnsServiceUnavailable(t *testing.T) {
+	orgID := uuid.New()
+	handler := &GovernanceHandler{
+		listNamespaces: func(context.Context, query.ListNamespaces) ([]query.NamespaceSummary, error) {
+			return nil, domain.ErrAuthorizationScanBudgetExceeded
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{}, handler)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/namespaces", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Organization-ID", orgID.String())
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), "FILESYSTEM_AUTHORIZATION_SCAN_BUDGET_EXCEEDED")
+}
+
 func governanceRouter(t *testing.T, orgs authz.OrgPermissionChecker, workspaces authz.WorkspaceAccessResolver, handler *GovernanceHandler) (*gin.Engine, string, uuid.UUID, kernel.MemberID) {
 	return governanceRouterWithIDs(t, uuid.New(), orgs, workspaces, handler)
 }

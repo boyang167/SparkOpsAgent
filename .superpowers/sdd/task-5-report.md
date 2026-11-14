@@ -2,45 +2,37 @@
 
 ## 状态
 
-完成统一只读文件治理 API 及审查修复：
+完成统一 Namespace、与我共享、有效权限查询 API 及三轮审查修复；旧 `/api/v1/workspaces/:wsId` 路由未改，未实施 Task 6。
 
-- `GET /api/v1/filesystem/namespaces`
-- `GET /api/v1/filesystem/namespaces/:namespaceId/children`
-- `GET /api/v1/filesystem/shared-with-me`
-- `GET /api/v1/filesystem/nodes/:nodeId/effective-access`
+## 最终实现
 
-旧 `/api/v1/workspaces/:wsId` 路由未变；未实施 Task 6。
-
-## 本轮修复
-
-- Organization root 仅在 root 有 `READ` 时返回；隐藏 root 时 `root_node_id=null`，capabilities 仅合并可见子树入口的有效 actions。
-- children 在省略 `parent_id` 时内部使用 namespace root，不要求客户端获知 root；返回第一层节点时清除隐藏 root 的 `parent_id`。
-- children 先授权后分页，通过 bounded raw pages 补页并用最后一个已返回的可见节点作为 cursor；hidden ID 不进入响应 cursor。
-- SharedWithMe 保留 typed-principal、组织范围、稳定 cursor 的 bounded DB 候选查询，最终可见性/actions 全部调用 Task 4 Authorizer。
-- Task 4 Decision 的 `source_grant_ids` 覆盖影响决策的 Allow/Deny grant；祖先 Deny 可压过子节点 Allow。
-- Governance 仓储/domain 错误仅明确 not-found/forbidden 映射为 404/403，其余数据库和未知错误映射为 500。
-- 移除了 Task 5 中 storage provider/pool PATCH/DELETE 的 OpenAPI 文档扩展，仅保留统一只读 API 契约。
+- Organization root 仅在 root 有 `READ` 时公开；隐藏 root 时 `root_node_id=null`，省略 `parent_id` 的 children 查询由服务端从 root 开始过滤。
+- children 在授权后补页，cursor 只取最后一个已返回的可见节点。
+- SharedWithMe 先以 typed principals 做稳定、有界 DB 候选查询，再按 64 节点 chunk 调用 Task 4 批量 Authorizer；每次请求最多扫描 256 个 raw candidates。
+- continuation cursor 为版本化 base64 opaque token；预算分页回归覆盖续页无遗漏、无重复。
+- 批量 Authorizer 每个 namespace/chunk 各批量加载一次节点祖先和相关 typed-principal grants，在内存复用 Deny、继承、owner/admin 语义；300 节点回归验证仓储调用固定为 1+1，而非 node×action×depth。
+- Allow/Deny 决策来源均进入 `source_grant_ids`；祖先 Deny 压过子节点 Allow。
+- Organization namespace 发现同样受 256 扫描预算约束；无法判定时返回 domain budget error/HTTP 503。入口最多 32 个，并返回 `entry_nodes_truncated`；capabilities 仅合并实际返回入口的有效 actions。
+- 数据库和未知错误映射 500，仅明确 not-found/forbidden 映射 404/403。
+- OpenAPI 记录 opaque cursor、truncation 字段和 budget-exceeded 错误；Task 5 未增加 storage mutation 契约，也未以测试 ignore 掩盖差异。
 
 ## TDD
 
 ### RED
 
-- SharedWithMe 构造器缺少 Authorizer，查询测试编译失败。
-- unauthorized parent 测试证明旧测试未实际调用 Authorizer。
-- 授权后分页返回 3 项而非 requested limit 2。
-- repository failure 被错误映射为 404。
-- 隐藏 root 的 children 请求返回 404，并在修复后继续暴露 `parent_id`。
-- root 无 READ 但有 ADMIN 时，namespace capabilities 错误包含 root ADMIN。
+- 缺少 `AuthorizeMany`/批量仓储接口时查询测试编译失败。
+- 300 个候选会逐节点逐 action 授权，无法满足固定 chunk 调用上限。
+- SharedWithMe 超过 256 候选时没有 opaque continuation。
+- Organization namespace 在扫描预算耗尽时静默遗漏，且没有 503 映射。
+- namespace entry 数量和 capabilities 没有固定上限语义。
 
 ### GREEN
 
-- `go test ./internal/modules/filesystem/application/query -count=1`
-- `go test ./internal/modules/filesystem/application/authorization -count=1`
-- `go test ./internal/modules/filesystem/interface/http -count=1`
-- `go test ./internal/modules/filesystem/... -count=1`
-- `go test ./api/openapi -count=1`
-- `git diff --check`
+- query、authorization、HTTP 专项测试通过。
+- 完整 `go test ./internal/modules/filesystem/... -count=1` 通过。
+- OpenAPI 解析、治理 header、stable error、local refs 等专项测试通过。
+- `git diff --check` 通过。
 
 ## Concerns
 
-- OpenAPI 路由一致性测试显式忽略仓库既有但未写入 fragment 的 storage provider/pool PATCH/DELETE 路由；本任务按审查要求没有补写这些非 Task 5 契约。
+- 完整 `go test ./api/openapi -count=1` 仍有且仅有既有 `TestFilesystemSpecificationExactlyMatchesRouter` 失败：在指定 Base commit `b094ee35e5648d2c70d94d96d621e057f777ebca` 中，`handler.go` 已注册 storage provider/pool PATCH/DELETE 四条路由，而同 commit 的 OpenAPI fragment 不含对应 path。Task 5 先前新增的 ignore 已撤回；按审查要求未修改这些非本任务 mutation 契约。

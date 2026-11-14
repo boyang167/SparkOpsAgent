@@ -92,9 +92,6 @@ func (r *Repository) ListSharedNodes(
 			continue
 		}
 		actions, sourceIDs := effectiveGrantActions(grantsByNode[id])
-		if len(actions) == 0 {
-			continue
-		}
 		out = append(out, repository.SharedNode{
 			Node: *nodeFromRow(node), EffectiveActions: actions, SourceGrantIDs: sourceIDs,
 		})
@@ -158,4 +155,51 @@ func normalizedSearch(value string) string {
 
 func escapeLike(value string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
+}
+
+func (r *Repository) GetNodesWithAncestors(ctx context.Context, namespaceID uuid.UUID, nodeIDs []uuid.UUID) ([]model.Node, error) {
+	if len(nodeIDs) == 0 {
+		return []model.Node{}, nil
+	}
+	var rows []nodeRow
+	sql := `WITH RECURSIVE ancestors AS (
+		SELECT * FROM filesystem.nodes WHERE namespace_id = ? AND id IN ?
+		UNION
+		SELECT parent.* FROM filesystem.nodes parent
+		JOIN ancestors child ON child.parent_id = parent.id
+		WHERE parent.namespace_id = ?
+	) SELECT * FROM ancestors`
+	if err := postgres.DB(ctx, r.db).Raw(sql, namespaceID, nodeIDs, namespaceID).Scan(&rows).Error; err != nil {
+		return nil, wrapPersistence(err)
+	}
+	out := make([]model.Node, len(rows))
+	for index := range rows {
+		out[index] = *nodeFromRow(rows[index])
+	}
+	return out, nil
+}
+
+func (r *Repository) ListResourceGrantsForActions(
+	ctx context.Context,
+	nodeIDs []uuid.UUID,
+	principals []repository.PrincipalRef,
+	actions []model.ResourcePermission,
+	at time.Time,
+) ([]model.ResourceGrant, error) {
+	if len(nodeIDs) == 0 || len(principals) == 0 || len(actions) == 0 {
+		return []model.ResourceGrant{}, nil
+	}
+	conditions, args := typedPrincipalConditions(principals)
+	var rows []resourceGrantRow
+	if err := postgres.DB(ctx, r.db).Table(resourceGrantRow{}.TableName()+" AS g").
+		Where("g.node_id IN ? AND g.permission IN ? AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at > ?)", nodeIDs, actions, at).
+		Where(strings.Join(conditions, " OR "), args...).
+		Find(&rows).Error; err != nil {
+		return nil, wrapPersistence(err)
+	}
+	out := make([]model.ResourceGrant, len(rows))
+	for index, row := range rows {
+		out[index] = resourceGrantFromRow(row)
+	}
+	return out, nil
 }

@@ -93,3 +93,32 @@ func TestListSharedNodesUsesStableNodeCursorAndOrganizationScope(t *testing.T) {
 	require.Equal(t, ids[1], second[0].Node.ID)
 	require.Empty(t, next)
 }
+
+func TestListSharedNodesReturnsDenyOnlyRawCandidateForBoundedAuthorization(t *testing.T) {
+	repo, _ := newTestRepository(t)
+	governanceRepo := repo.(*Repository)
+	ctx := context.Background()
+	orgID, actorID := uuid.New(), uuid.New()
+	namespace := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeOrganization, OrganizationID: orgID}
+	require.NoError(t, repo.CreateNamespace(ctx, namespace))
+	node := &model.Node{
+		ID: uuid.New(), NamespaceID: namespace.ID, Type: model.NodeTypeFile,
+		Name: "denied.txt", NormalizedName: "denied.txt", State: model.NodeStateActive, OwnerID: actorID,
+	}
+	require.NoError(t, repo.CreateNode(ctx, node))
+	require.NoError(t, repo.CreateResourceGrant(ctx, model.ResourceGrant{
+		ID: uuid.New(), NodeID: node.ID, OrganizationID: orgID,
+		PrincipalType: model.PrincipalUser, PrincipalID: actorID, GranteeID: actorID,
+		Permission: model.ResourcePermissionRead, Effect: model.GrantEffectDeny,
+	}))
+
+	items, next, err := governanceRepo.ListSharedNodes(ctx, orgID,
+		[]repository.PrincipalRef{{Type: model.PrincipalUser, ID: actorID}},
+		repository.SharedNodeFilter{Limit: 10}, time.Now().UTC())
+
+	require.NoError(t, err)
+	require.Empty(t, next)
+	require.Len(t, items, 1)
+	require.Equal(t, node.ID, items[0].Node.ID)
+	require.Empty(t, items[0].EffectiveActions)
+}

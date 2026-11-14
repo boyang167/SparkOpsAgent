@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -280,7 +281,7 @@ func (h *GovernanceHandler) SharedWithMe(c *gin.Context) {
 		filesystemError(c, domain.ErrPersistence)
 		return
 	}
-	limit, ok := pagination(c)
+	limit, ok := governancePagination(c)
 	if !ok {
 		return
 	}
@@ -400,6 +401,10 @@ func governanceError(c *gin.Context, err error) {
 		return
 	}
 	switch {
+	case errors.Is(err, domain.ErrInvalidGovernanceCursor):
+		httpx.Fail(c, "FILESYSTEM_INVALID_REQUEST", "invalid governance cursor", http.StatusBadRequest)
+	case errors.Is(err, domain.ErrAuthorizationScanBudgetExceeded):
+		httpx.Fail(c, "FILESYSTEM_AUTHORIZATION_SCAN_BUDGET_EXCEEDED", "authorization scan budget exceeded", http.StatusServiceUnavailable)
 	case errors.Is(err, domain.ErrResourceDenied):
 		httpx.Fail(c, "FILESYSTEM_RESOURCE_FORBIDDEN", "filesystem resource access denied", http.StatusForbidden)
 	case errors.Is(err, domain.ErrNamespaceNotFound), errors.Is(err, domain.ErrNodeNotFound):
@@ -418,7 +423,25 @@ func namespaceSummaryView(item query.NamespaceSummary) gin.H {
 		"id": item.ID, "namespace_type": item.NamespaceType, "organization_id": item.OrganizationID,
 		"workspace_id": item.WorkspaceID, "owner_user_id": item.OwnerUserID, "root_node_id": item.RootNodeID,
 		"status": item.Status, "capabilities": item.Capabilities, "entry_node_ids": item.EntryNodeIDs,
+		"entry_nodes_truncated": item.EntryNodesTruncated,
 	}
+}
+
+func governancePagination(c *gin.Context) (int, bool) {
+	limit := 100
+	if raw := c.Query("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 200 {
+			invalidRequest(c)
+			return 0, false
+		}
+		limit = value
+	}
+	if len(c.Query("cursor")) > 512 {
+		invalidRequest(c)
+		return 0, false
+	}
+	return limit, true
 }
 
 func sharedNodeView(item repository.SharedNode) gin.H {

@@ -295,10 +295,6 @@ func TestFilesystemSpecificationExactlyMatchesRouter(t *testing.T) {
 	filesystemhttp.RegisterRoutes(engine, pass, pass, openAPIMembers{}, openAPIPermissions{}, &filesystemhttp.Handler{})
 	actual := map[string]bool{}
 	for _, route := range engine.Routes() {
-		if strings.Contains(route.Path, "/storage-providers/:providerId") ||
-			strings.Contains(route.Path, "/storage-pools/:poolId") {
-			continue // Pre-existing undocumented mutation routes are outside the Task 5 read API contract.
-		}
 		path := strings.ReplaceAll(route.Path, ":wsId", "{wsId}")
 		path = strings.ReplaceAll(path, ":namespaceId", "{namespaceId}")
 		path = strings.ReplaceAll(path, ":nodeId", "{nodeId}")

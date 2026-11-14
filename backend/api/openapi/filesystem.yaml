@@ -98,7 +98,7 @@ paths:
           schema:
             type: string
             maxLength: 200
-        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/GovernanceCursor"
         - $ref: "#/components/parameters/Limit"
       responses:
         "200":
@@ -1624,6 +1624,13 @@ components:
         type: string
         format: uuid
         maxLength: 128
+    GovernanceCursor:
+      name: cursor
+      in: query
+      description: Opaque, versioned continuation cursor returned by this endpoint.
+      schema:
+        type: string
+        maxLength: 512
     Limit:
       name: limit
       in: query
@@ -1644,7 +1651,7 @@ components:
   schemas:
     NamespaceSummary:
       type: object
-      required: [id, namespace_type, organization_id, status, capabilities, entry_node_ids]
+      required: [id, namespace_type, organization_id, status, capabilities, entry_node_ids, entry_nodes_truncated]
       properties:
         id:
           type: string
@@ -1679,6 +1686,8 @@ components:
           items:
             type: string
             format: uuid
+        entry_nodes_truncated:
+          type: boolean
     NamespaceSummaryPage:
       type: object
       required: [items]
@@ -2564,6 +2573,7 @@ components:
                 - FILESYSTEM_RETRY_EXHAUSTED
                 - FILESYSTEM_UNAVAILABLE
                 - FILESYSTEM_INTERNAL_ERROR
+                - FILESYSTEM_AUTHORIZATION_SCAN_BUDGET_EXCEEDED
                 - AUTH_UNAUTHORIZED
                 - AUTH_INVALID_TOKEN
                 - AUTH_FORBIDDEN
