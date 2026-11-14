@@ -2,13 +2,20 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { WORKSPACE_COOKIE } from "@sparkops/bff-core";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { FileExplorerPanel } from "@/modules/filesystem/components/FileExplorerPanel";
+import { FilesystemWorkbench } from "@/modules/filesystem/components/FilesystemWorkbench";
+import { parseWorkbenchState } from "@/modules/filesystem/components/workbench-state";
 import { loadSession } from "@/server/loaders/session";
 import { loadWorkspaceId } from "@/server/loaders/context";
 import { loadWorkspaces } from "@/server/loaders/workspaces";
 import { loadFileNamespace, loadFileNodes } from "@/server/loaders/filesystem";
 
-export default async function FilesPage() {
+const DEFAULT_PERMISSIONS = ["file:read", "storage:read", "file:admin"];
+
+export default async function FilesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
   const session = await loadSession();
   if (!session) {
     redirect("/login");
@@ -26,6 +33,7 @@ export default async function FilesPage() {
   }
 
   const namespace = await loadFileNamespace(workspaceId);
+  const initialState = parseWorkbenchState(await searchParams);
   const rootId = namespace.root_node_id;
   if (!rootId) {
     return (
@@ -39,16 +47,17 @@ export default async function FilesPage() {
     );
   }
 
-  const listing = await loadFileNodes(workspaceId, rootId);
+  const listing = await loadFileNodes(workspaceId, initialState.parent ?? rootId);
 
   return (
     <div className="stack-lg">
       <PageHeader eyebrow="Filesystem" title="文件" description="浏览与管理 workspace 文件与目录" />
-      <FileExplorerPanel
+      <FilesystemWorkbench
         workspaceId={workspaceId}
-        namespaceId={namespace.id}
-        parentId={rootId}
+        namespace={namespace}
         initialNodes={listing.items}
+        initialState={initialState}
+        permissions={DEFAULT_PERMISSIONS}
       />
     </div>
   );
