@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -55,6 +56,162 @@ func TestSharedWithMeUsesTypedPrincipalsAndForwardsStableFilters(t *testing.T) {
 	require.Equal(t, rawCursor, repo.filter.Cursor)
 	require.Len(t, repo.filter.Principals, 3)
 	require.Equal(t, model.PrincipalRole, repo.filter.Principals[2].Type)
+}
+
+type projectionWorkspaceAuthority struct {
+	organizationID uuid.UUID
+	active         bool
+}
+
+func (a projectionWorkspaceAuthority) ResolveWorkspaceAccess(context.Context, uuid.UUID, uuid.UUID) (uuid.UUID, bool, error) {
+	return a.organizationID, a.active, nil
+}
+
+type projectionRoleReader struct{}
+
+func (projectionRoleReader) ListWorkspaceRoleIDs(context.Context, uuid.UUID, uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+type projectionAuthority struct{}
+
+func (projectionAuthority) HasWorkspaceFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
+	return false, nil
+}
+
+func (projectionAuthority) HasOrganizationFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
+	return false, nil
+}
+
+type organizationGrantProjectionRepo struct {
+	namespace *model.Namespace
+	node      *model.Node
+	grant     model.ResourceGrant
+}
+
+func (r organizationGrantProjectionRepo) GetNamespace(context.Context, uuid.UUID) (*model.Namespace, error) {
+	return r.namespace, nil
+}
+
+func (r organizationGrantProjectionRepo) GetNode(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error) {
+	return r.node, nil
+}
+
+func (r organizationGrantProjectionRepo) GetNodeIncludingTrashed(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error) {
+	return r.node, nil
+}
+
+func (r organizationGrantProjectionRepo) ListResourceGrants(
+	_ context.Context,
+	_ []uuid.UUID,
+	principals []repository.PrincipalRef,
+	permission model.ResourcePermission,
+	_ time.Time,
+) ([]model.ResourceGrant, error) {
+	if permission == r.grant.Permission && containsProjectionPrincipal(principals, r.grant.PrincipalType, r.grant.PrincipalID) {
+		return []model.ResourceGrant{r.grant}, nil
+	}
+	return nil, nil
+}
+
+func (r organizationGrantProjectionRepo) GetNodesWithAncestors(context.Context, uuid.UUID, []uuid.UUID) ([]model.Node, error) {
+	return []model.Node{*r.node}, nil
+}
+
+func (r organizationGrantProjectionRepo) ListResourceGrantsForActions(
+	_ context.Context,
+	_ []uuid.UUID,
+	principals []repository.PrincipalRef,
+	permissions []model.ResourcePermission,
+	_ time.Time,
+) ([]model.ResourceGrant, error) {
+	for _, permission := range permissions {
+		if permission == r.grant.Permission && containsProjectionPrincipal(principals, r.grant.PrincipalType, r.grant.PrincipalID) {
+			return []model.ResourceGrant{r.grant}, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r organizationGrantProjectionRepo) ListSharedNodes(
+	_ context.Context,
+	_ uuid.UUID,
+	principals []repository.PrincipalRef,
+	_ SharedWithMeFilter,
+	_ time.Time,
+) ([]SharedNode, string, error) {
+	if !containsProjectionPrincipal(principals, r.grant.PrincipalType, r.grant.PrincipalID) {
+		return nil, "", nil
+	}
+	return []SharedNode{{
+		Node: *r.node,
+		Sources: []repository.SharedGrantSource{{
+			GrantID: r.grant.ID, PrincipalType: r.grant.PrincipalType,
+			PrincipalID: r.grant.PrincipalID, Permission: r.grant.Permission,
+			Effect: r.grant.Effect,
+		}},
+	}}, "", nil
+}
+
+func containsProjectionPrincipal(principals []repository.PrincipalRef, principalType model.PrincipalType, principalID uuid.UUID) bool {
+	for _, principal := range principals {
+		if principal.Type == principalType && principal.ID == principalID {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSharedWithMeOrganizationGrantRequiresActiveWorkspaceMembership(t *testing.T) {
+	organizationID, workspaceID, actorID := uuid.New(), uuid.New(), uuid.New()
+	namespace := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeOrganization,
+		OrganizationID: organizationID, PolicyVersion: 1,
+	}
+	node := &model.Node{ID: uuid.New(), NamespaceID: namespace.ID, State: model.NodeStateActive}
+	grant := model.ResourceGrant{
+		ID: uuid.New(), NodeID: node.ID, OrganizationID: organizationID,
+		PrincipalType: model.PrincipalOrganization, PrincipalID: organizationID,
+		Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow,
+	}
+	repo := organizationGrantProjectionRepo{namespace: namespace, node: node, grant: grant}
+
+	tests := []struct {
+		name          string
+		workspaceID   uuid.UUID
+		resolvedOrgID uuid.UUID
+		active        bool
+		wantItems     int
+		wantScopeErr  bool
+	}{
+		{name: "organization only context", resolvedOrgID: organizationID},
+		{name: "active workspace membership", workspaceID: workspaceID, resolvedOrgID: organizationID, active: true, wantItems: 1},
+		{name: "inactive workspace membership", workspaceID: workspaceID, resolvedOrgID: organizationID},
+		{name: "cross organization workspace", workspaceID: workspaceID, resolvedOrgID: uuid.New(), active: true, wantScopeErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := resourceauth.NewPrincipalResolver(
+				projectionWorkspaceAuthority{organizationID: tt.resolvedOrgID, active: tt.active},
+				projectionRoleReader{},
+			)
+			authorizer := resourceauth.NewService(repo, resolver, projectionAuthority{})
+			handler := NewSharedWithMeHandler(repo, resolver, authorizer, testSharedCursorCodec(t))
+
+			items, _, err := handler.Handle(context.Background(), SharedWithMe{
+				ActorID: actorID, OrganizationID: organizationID,
+				WorkspaceID: tt.workspaceID, Limit: 10,
+			})
+
+			if tt.wantScopeErr {
+				require.ErrorIs(t, err, resourceauth.ErrPrincipalScopeMismatch)
+				require.Empty(t, items)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, items, tt.wantItems)
+		})
+	}
 }
 
 func TestSharedWithMeReadDoesNotInvokePlacementOrCreateReplica(t *testing.T) {

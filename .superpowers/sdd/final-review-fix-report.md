@@ -31,8 +31,8 @@
 - Personal namespace preview/submit works with only `X-Organization-ID` for the
   owner. Cross-organization and non-owner requests are concealed. Workspace
   namespaces still require a middleware-validated workspace context.
-- Principal resolution with a nil workspace returns `USER` plus `ORGANIZATION`
-  and does not call workspace membership or role lookup.
+- Principal resolution with a nil workspace returns only `USER`; organization
+  grants are available only after authoritative active workspace membership.
 - Header contracts remain unchanged: organization required, workspace optional.
 
 ### Stable approve/reject replay
@@ -62,11 +62,25 @@
   behavior, cursor context replay rejection, and duplicate-free normal paging.
 - OpenAPI documents the bounded scan, opaque cursor, filters, and 503 response.
 
+### Critical follow-up: organization grant workspace gate
+
+- Removed the nil-workspace `ORGANIZATION` principal that could expose
+  organization-granted shared metadata to an organization-only request.
+- A real `PrincipalResolver` + authorization `Service` + SharedWithMe projection
+  test proves organization grants are hidden without workspace context, visible
+  with active same-organization membership, hidden for inactive membership, and
+  rejected for a cross-organization workspace.
+- Personal namespace owners continue to preview and submit shares with only
+  `X-Organization-ID`; that path relies on namespace owner authority, not an
+  organization principal.
+
 ## TDD evidence
 
 Observed RED before implementation:
 
-- Nil-workspace principal resolution omitted the organization principal.
+- Nil-workspace principal resolution incorrectly included the organization
+  principal, and the real SharedWithMe projection returned the organization
+  grant without workspace context.
 - Personal-share tests did not compile because `ScopeID` did not exist.
 - Completed review replay failed after target scope/authority invalidation.
 - Migration static test found `DROP TABLE` before any destructive guard.
