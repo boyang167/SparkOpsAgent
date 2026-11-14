@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -149,16 +150,29 @@ func TestGovernanceChildrenUsesHiddenRootInternallyWhenParentIsOmitted(t *testin
 
 func TestGovernanceSharedWithMeForwardsQueryCursorAndLimit(t *testing.T) {
 	orgID, workspaceID := uuid.New(), uuid.New()
-	cursor := uuid.NewString()
+	cursor, nodeID, grantID, principalID := uuid.NewString(), uuid.New(), uuid.New(), uuid.New()
+	expiry := time.Date(2026, time.December, 31, 16, 0, 0, 0, time.UTC)
 	var captured query.SharedWithMe
 	handler := &GovernanceHandler{
 		sharedWithMe: func(_ context.Context, input query.SharedWithMe) ([]repository.SharedNode, string, error) {
 			captured = input
-			return []repository.SharedNode{}, "", nil
+			return []repository.SharedNode{{
+				Node:             model.Node{ID: nodeID, NamespaceID: uuid.New(), Type: model.NodeTypeFile, Name: "报告.md"},
+				EffectiveActions: []model.ResourcePermission{model.ResourcePermissionRead},
+				SourceGrantIDs:   []uuid.UUID{grantID},
+				Sources: []repository.SharedGrantSource{{
+					GrantID: grantID, PrincipalType: model.PrincipalAgent,
+					PrincipalID: principalID, ExpiresAt: &expiry,
+				}},
+				OriginalPath: "/项目/报告.md",
+				SourceNamespace: repository.SharedNamespaceSource{
+					NamespaceType: model.NamespaceTypeWorkspace,
+				},
+			}}, "", nil
 		},
 	}
 	router, token, _, memberID := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{orgID: orgID, active: true}, handler)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/shared-with-me?q=budget&cursor="+cursor+"&limit=23", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/shared-with-me?source_type=agent&q=budget&cursor="+cursor+"&limit=23", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-Organization-ID", orgID.String())
 	req.Header.Set("X-Workspace-ID", workspaceID.String())
@@ -173,6 +187,29 @@ func TestGovernanceSharedWithMeForwardsQueryCursorAndLimit(t *testing.T) {
 	require.Equal(t, "budget", captured.Query)
 	require.Equal(t, cursor, captured.Cursor)
 	require.Equal(t, 23, captured.Limit)
+	require.Equal(t, model.PrincipalAgent, captured.SourceType)
+	require.Contains(t, res.Body.String(), `"original_path":"/项目/报告.md"`)
+	require.Contains(t, res.Body.String(), `"principal_type":"AGENT"`)
+	require.Contains(t, res.Body.String(), `"expires_at":"2026-12-31T16:00:00Z"`)
+}
+
+func TestGovernanceSharedWithMeRejectsUnknownSourceType(t *testing.T) {
+	orgID := uuid.New()
+	handler := &GovernanceHandler{
+		sharedWithMe: func(context.Context, query.SharedWithMe) ([]repository.SharedNode, string, error) {
+			t.Fatal("handler must not run for invalid source_type")
+			return nil, "", nil
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{}, handler)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/shared-with-me?source_type=unknown", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Organization-ID", orgID.String())
+	res := httptest.NewRecorder()
+
+	router.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
 }
 
 func TestGovernanceChildrenPaginatesAfterAuthorizationWithoutLeakingHiddenCursor(t *testing.T) {

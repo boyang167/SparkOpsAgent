@@ -122,3 +122,91 @@ func TestListSharedNodesReturnsDenyOnlyRawCandidateForBoundedAuthorization(t *te
 	require.Equal(t, node.ID, items[0].Node.ID)
 	require.Empty(t, items[0].EffectiveActions)
 }
+
+func TestListSharedNodesProjectsAllowSourcesAndNamespaceSafePathsInBatches(t *testing.T) {
+	repo, _ := newTestRepository(t)
+	governanceRepo := repo.(*Repository)
+	ctx := context.Background()
+	orgID, actorID, userOwner := uuid.New(), uuid.New(), uuid.New()
+	userNamespace := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeUser,
+		OrganizationID: orgID, OwnerUserID: userOwner, Status: "ACTIVE",
+	}
+	workspaceNamespace := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace,
+		OrganizationID: orgID, WorkspaceID: uuid.New(), Status: "ACTIVE",
+	}
+	require.NoError(t, repo.CreateNamespace(ctx, userNamespace))
+	require.NoError(t, repo.CreateNamespace(ctx, workspaceNamespace))
+	userRoot, err := model.NewRootDirectory(userNamespace.ID, userOwner, ".root")
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(ctx, userRoot))
+	require.NoError(t, governanceRepo.SetNamespaceRootByID(ctx, userNamespace.ID, userRoot.ID))
+	folder, err := model.NewDirectory(userNamespace.ID, userOwner, "项目", userRoot.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(ctx, folder))
+	file, err := model.NewFile(userNamespace.ID, userOwner, "方案.md", folder.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(ctx, file))
+
+	workspaceRoot, err := model.NewRootDirectory(workspaceNamespace.ID, actorID, ".root")
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(ctx, workspaceRoot))
+	require.NoError(t, governanceRepo.SetNamespaceRootByID(ctx, workspaceNamespace.ID, workspaceRoot.ID))
+	workspaceFile, err := model.NewFile(workspaceNamespace.ID, actorID, "同名.md", workspaceRoot.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(ctx, workspaceFile))
+
+	expiry := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	allowID, denyID, workspaceAllowID := uuid.New(), uuid.New(), uuid.New()
+	for _, grant := range []model.ResourceGrant{
+		{
+			ID: allowID, NodeID: folder.ID, OrganizationID: orgID,
+			PrincipalType: model.PrincipalUser, PrincipalID: actorID, GranteeID: actorID,
+			Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow,
+			InheritToChildren: true, ExpiresAt: &expiry,
+		},
+		{
+			ID: denyID, NodeID: file.ID, OrganizationID: orgID,
+			PrincipalType: model.PrincipalWorkspace, PrincipalID: workspaceNamespace.WorkspaceID,
+			GranteeID: workspaceNamespace.WorkspaceID, Permission: model.ResourcePermissionWrite,
+			Effect: model.GrantEffectDeny,
+		},
+		{
+			ID: workspaceAllowID, NodeID: workspaceFile.ID, OrganizationID: orgID,
+			PrincipalType: model.PrincipalUser, PrincipalID: actorID, GranteeID: actorID,
+			Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow,
+		},
+	} {
+		require.NoError(t, repo.CreateResourceGrant(ctx, grant))
+	}
+
+	items, _, err := governanceRepo.ListSharedNodes(
+		ctx,
+		orgID,
+		[]repository.PrincipalRef{
+			{Type: model.PrincipalUser, ID: actorID},
+			{Type: model.PrincipalWorkspace, ID: workspaceNamespace.WorkspaceID},
+		},
+		repository.SharedNodeFilter{Limit: 10},
+		time.Now().UTC(),
+	)
+
+	require.NoError(t, err)
+	byID := make(map[uuid.UUID]repository.SharedNode, len(items))
+	for _, item := range items {
+		byID[item.Node.ID] = item
+	}
+	projected := byID[file.ID]
+	require.Equal(t, "/项目/方案.md", projected.OriginalPath)
+	require.Equal(t, model.NamespaceTypeUser, projected.SourceNamespace.NamespaceType)
+	require.NotNil(t, projected.SourceNamespace.OwnerUserID)
+	require.Equal(t, userOwner, *projected.SourceNamespace.OwnerUserID)
+	require.Equal(t, []repository.SharedGrantSource{{
+		GrantID: allowID, PrincipalType: model.PrincipalUser,
+		PrincipalID: actorID, ExpiresAt: &expiry,
+	}}, projected.Sources)
+	require.NotContains(t, projected.SourceGrantIDs, denyID)
+	require.Equal(t, "/同名.md", byID[workspaceFile.ID].OriginalPath)
+	require.NotContains(t, projected.OriginalPath, ".root")
+}

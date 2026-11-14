@@ -27,6 +27,7 @@ type SharedWithMe struct {
 	OrganizationID uuid.UUID
 	WorkspaceID    uuid.UUID
 	NamespaceID    uuid.UUID
+	SourceType     model.PrincipalType
 	Query          string
 	Cursor         string
 	Limit          int
@@ -77,6 +78,7 @@ func (h *SharedWithMeHandler) Handle(ctx context.Context, q SharedWithMe) ([]Sha
 		ActorID:        q.ActorID,
 		WorkspaceID:    q.WorkspaceID,
 		NamespaceID:    q.NamespaceID,
+		SourceType:     q.SourceType,
 		Query:          q.Query,
 	}
 	if h.cursor == nil {
@@ -107,6 +109,9 @@ func (h *SharedWithMeHandler) Handle(ctx context.Context, q SharedWithMe) ([]Sha
 			if !containsAction(item.EffectiveActions, model.ResourcePermissionRead) {
 				continue
 			}
+			if q.SourceType != "" && !containsSourceType(item.Sources, q.SourceType) {
+				continue
+			}
 			visible = append(visible, item)
 			if len(visible) == limit+1 {
 				break
@@ -135,6 +140,8 @@ func authorizeSharedCandidates(ctx context.Context, authorizer BatchResourceAuth
 	results := make([]SharedNode, len(candidates))
 	for index, candidate := range candidates {
 		results[index].Node = candidate.Node
+		results[index].OriginalPath = candidate.OriginalPath
+		results[index].SourceNamespace = candidate.SourceNamespace
 	}
 	if authorizer == nil {
 		return results
@@ -156,13 +163,13 @@ func authorizeSharedCandidates(ctx context.Context, authorizer BatchResourceAuth
 		sourceSet := make(map[uuid.UUID]struct{})
 		for _, action := range resourceActions {
 			decision := decisions[candidate.Node.ID][action]
-			for _, sourceID := range decision.SourceGrantIDs {
-				if sourceID != uuid.Nil {
-					sourceSet[sourceID] = struct{}{}
-				}
-			}
 			if decision.Allowed {
 				results[index].EffectiveActions = append(results[index].EffectiveActions, action)
+				for _, sourceID := range decision.SourceGrantIDs {
+					if sourceID != uuid.Nil {
+						sourceSet[sourceID] = struct{}{}
+					}
+				}
 			}
 		}
 		for sourceID := range sourceSet {
@@ -171,6 +178,20 @@ func authorizeSharedCandidates(ctx context.Context, authorizer BatchResourceAuth
 		sort.Slice(results[index].SourceGrantIDs, func(i, j int) bool {
 			return results[index].SourceGrantIDs[i].String() < results[index].SourceGrantIDs[j].String()
 		})
+		for _, source := range candidate.Sources {
+			if _, allowed := sourceSet[source.GrantID]; allowed {
+				results[index].Sources = append(results[index].Sources, source)
+			}
+		}
 	}
 	return results
+}
+
+func containsSourceType(sources []repository.SharedGrantSource, sourceType model.PrincipalType) bool {
+	for _, source := range sources {
+		if source.PrincipalType == sourceType {
+			return true
+		}
+	}
+	return false
 }

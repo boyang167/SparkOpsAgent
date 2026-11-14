@@ -93,6 +93,12 @@ paths:
       parameters:
         - $ref: "#/components/parameters/OrganizationHeader"
         - $ref: "#/components/parameters/WorkspaceHeader"
+        - name: source_type
+          in: query
+          description: Filter by an effective allow source grant principal type.
+          schema:
+            type: string
+            enum: [organization, workspace, user, agent]
         - name: q
           in: query
           schema:
@@ -2042,7 +2048,7 @@ components:
       enum: [READ, DOWNLOAD, WRITE, DELETE, SHARE, ADMIN]
     SharedNode:
       type: object
-      required: [node, effective_actions, source_grant_ids]
+      required: [node, effective_actions, source_grant_ids, sources, original_path, source_namespace]
       properties:
         node:
           $ref: "#/components/schemas/Node"
@@ -2055,6 +2061,42 @@ components:
           items:
             type: string
             format: uuid
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/SharedGrantSource"
+        original_path:
+          type: string
+        source_namespace:
+          $ref: "#/components/schemas/SharedNamespaceSource"
+    SharedGrantSource:
+      type: object
+      required: [grant_id, principal_type, principal_id, expires_at]
+      properties:
+        grant_id:
+          type: string
+          format: uuid
+        principal_type:
+          type: string
+          enum: [USER, WORKSPACE, ORGANIZATION, ROLE, SERVICE_ACCOUNT, AGENT]
+        principal_id:
+          type: string
+          format: uuid
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    SharedNamespaceSource:
+      type: object
+      required: [namespace_type, owner_user_id]
+      properties:
+        namespace_type:
+          type: string
+          enum: [USER, WORKSPACE, ORGANIZATION]
+        owner_user_id:
+          type: string
+          format: uuid
+          nullable: true
     SharedNodePage:
       type: object
       required: [items, next_cursor]

@@ -19,6 +19,9 @@ func TestSharedWithMeUsesTypedPrincipalsAndForwardsStableFilters(t *testing.T) {
 	nodeID, grantID := uuid.New(), uuid.New()
 	repo := &governanceRepositoryStub{shared: []SharedNode{{
 		Node: model.Node{ID: nodeID, NamespaceID: uuid.New(), Name: "quarterly.csv"},
+		Sources: []repository.SharedGrantSource{{
+			GrantID: grantID, PrincipalType: model.PrincipalUser, PrincipalID: actorID,
+		}},
 	}}}
 	resolver := namespacePrincipalResolver{principals: []repository.PrincipalRef{
 		{Type: model.PrincipalUser, ID: actorID},
@@ -59,11 +62,12 @@ func TestSharedWithMeReadDoesNotInvokePlacementOrCreateReplica(t *testing.T) {
 	repo := &sharedReadSideEffectProbe{governanceRepositoryStub: governanceRepositoryStub{
 		shared: []SharedNode{{Node: model.Node{ID: uuid.New(), NamespaceID: uuid.New()}}},
 	}}
+	codec := testSharedCursorCodec(t)
 	handler := NewSharedWithMeHandler(repo, namespacePrincipalResolver{
 		principals: []repository.PrincipalRef{{Type: model.PrincipalUser, ID: actorID}},
 	}, effectiveAuthorizerStub{decisions: map[model.ResourcePermission]resourceauth.Decision{
 		model.ResourcePermissionRead: {Allowed: true},
-	}}, testSharedCursorCodec(t))
+	}}, codec)
 
 	items, _, err := handler.Handle(context.Background(), SharedWithMe{
 		ActorID: actorID, OrganizationID: uuid.New(), WorkspaceID: uuid.New(), Limit: 10,
@@ -144,10 +148,16 @@ func TestSharedWithMeDropsChildAllowWhenAncestorDenyWins(t *testing.T) {
 	require.Empty(t, items)
 }
 
-func TestSharedWithMeIncludesAllowAndDenySourcesThatShapeEffectiveActions(t *testing.T) {
+func TestSharedWithMeOnlyExposesSourcesForEffectiveAllows(t *testing.T) {
 	actorID, nodeID, namespaceID := uuid.New(), uuid.New(), uuid.New()
 	readAllow, writeAllow, writeDeny := uuid.New(), uuid.New(), uuid.New()
-	repo := &governanceRepositoryStub{shared: []SharedNode{{Node: model.Node{ID: nodeID, NamespaceID: namespaceID}}}}
+	repo := &governanceRepositoryStub{shared: []SharedNode{{
+		Node: model.Node{ID: nodeID, NamespaceID: namespaceID},
+		Sources: []repository.SharedGrantSource{
+			{GrantID: readAllow, PrincipalType: model.PrincipalUser, PrincipalID: actorID},
+			{GrantID: writeAllow, PrincipalType: model.PrincipalUser, PrincipalID: actorID},
+		},
+	}}}
 	handler := NewSharedWithMeHandler(repo, namespacePrincipalResolver{
 		principals: []repository.PrincipalRef{{Type: model.PrincipalUser, ID: actorID}},
 	}, effectiveAuthorizerStub{decisions: map[model.ResourcePermission]resourceauth.Decision{
@@ -166,7 +176,63 @@ func TestSharedWithMeIncludesAllowAndDenySourcesThatShapeEffectiveActions(t *tes
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.Equal(t, []model.ResourcePermission{model.ResourcePermissionRead}, items[0].EffectiveActions)
-	require.ElementsMatch(t, []uuid.UUID{readAllow, writeAllow, writeDeny}, items[0].SourceGrantIDs)
+	require.Equal(t, []uuid.UUID{readAllow}, items[0].SourceGrantIDs)
+	require.Equal(t, []repository.SharedGrantSource{{
+		GrantID: readAllow, PrincipalType: model.PrincipalUser, PrincipalID: actorID,
+	}}, items[0].Sources)
+}
+
+func TestSharedWithMeFiltersByEffectiveSourceTypeAndBindsCursorContext(t *testing.T) {
+	actorID, organizationID, namespaceID := uuid.New(), uuid.New(), uuid.New()
+	userNode, agentNode := uuid.New(), uuid.New()
+	userGrant, agentGrant := uuid.New(), uuid.New()
+	repo := &governanceRepositoryStub{shared: []SharedNode{
+		{
+			Node: model.Node{ID: userNode, NamespaceID: namespaceID},
+			Sources: []repository.SharedGrantSource{{
+				GrantID: userGrant, PrincipalType: model.PrincipalUser, PrincipalID: actorID,
+			}},
+		},
+		{
+			Node: model.Node{ID: agentNode, NamespaceID: namespaceID},
+			Sources: []repository.SharedGrantSource{{
+				GrantID: agentGrant, PrincipalType: model.PrincipalAgent, PrincipalID: uuid.New(),
+			}},
+		},
+	}}
+	codec := testSharedCursorCodec(t)
+	handler := NewSharedWithMeHandler(repo, namespacePrincipalResolver{
+		principals: []repository.PrincipalRef{
+			{Type: model.PrincipalUser, ID: actorID},
+			{Type: model.PrincipalAgent, ID: repo.shared[1].Sources[0].PrincipalID},
+		},
+	}, effectiveAuthorizerByNodeStub{decisions: map[uuid.UUID]map[model.ResourcePermission]resourceauth.Decision{
+		userNode: {
+			model.ResourcePermissionRead: {Allowed: true, SourceGrantIDs: []uuid.UUID{userGrant}},
+		},
+		agentNode: {
+			model.ResourcePermissionRead: {Allowed: true, SourceGrantIDs: []uuid.UUID{agentGrant}},
+		},
+	}}, codec)
+
+	items, _, err := handler.Handle(context.Background(), SharedWithMe{
+		ActorID: actorID, OrganizationID: organizationID, NamespaceID: namespaceID,
+		SourceType: model.PrincipalUser, Limit: 1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, userNode, items[0].Node.ID)
+	cursor, err := codec.Encode(userNode.String(), SharedCursorContext{
+		OrganizationID: organizationID, ActorID: actorID, NamespaceID: namespaceID,
+		SourceType: model.PrincipalUser,
+	})
+	require.NoError(t, err)
+	_, _, err = handler.Handle(context.Background(), SharedWithMe{
+		ActorID: actorID, OrganizationID: organizationID, NamespaceID: namespaceID,
+		SourceType: model.PrincipalAgent, Limit: 1, Cursor: cursor,
+	})
+	require.ErrorIs(t, err, domain.ErrInvalidGovernanceCursor)
 }
 
 type principalResolverErrorStub struct {
@@ -177,6 +243,22 @@ type countingBatchAuthorizer struct {
 	visibleIDs map[uuid.UUID]bool
 	calls      int
 	maxBatch   int
+}
+
+type effectiveAuthorizerByNodeStub struct {
+	decisions map[uuid.UUID]map[model.ResourcePermission]resourceauth.Decision
+}
+
+func (a effectiveAuthorizerByNodeStub) Authorize(context.Context, resourceauth.Request) resourceauth.Decision {
+	return resourceauth.Decision{}
+}
+
+func (a effectiveAuthorizerByNodeStub) AuthorizeMany(_ context.Context, request resourceauth.BatchRequest) resourceauth.BatchDecisions {
+	out := make(resourceauth.BatchDecisions, len(request.NodeIDs))
+	for _, nodeID := range request.NodeIDs {
+		out[nodeID] = a.decisions[nodeID]
+	}
+	return out
 }
 
 func (a *countingBatchAuthorizer) Authorize(context.Context, resourceauth.Request) resourceauth.Decision {

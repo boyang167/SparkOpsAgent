@@ -67,10 +67,25 @@ type PrincipalRef struct {
 	ID   uuid.UUID
 }
 
+type SharedGrantSource struct {
+	GrantID       uuid.UUID
+	PrincipalType model.PrincipalType
+	PrincipalID   uuid.UUID
+	ExpiresAt     *time.Time
+}
+
+type SharedNamespaceSource struct {
+	NamespaceType model.NamespaceType
+	OwnerUserID   *uuid.UUID
+}
+
 type SharedNode struct {
 	Node             model.Node
 	EffectiveActions []model.ResourcePermission
 	SourceGrantIDs   []uuid.UUID
+	Sources          []SharedGrantSource
+	OriginalPath     string
+	SourceNamespace  SharedNamespaceSource
 }
 
 type SharedNodeFilter struct {

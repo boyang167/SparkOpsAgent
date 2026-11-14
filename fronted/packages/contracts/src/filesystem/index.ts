@@ -457,10 +457,31 @@ export const EffectiveAccessVMSchema = z.object({
 });
 export type EffectiveAccessVM = z.infer<typeof EffectiveAccessVMSchema>;
 
+export const SharedSourceVMSchema = z.object({
+  grant_id: z.string().uuid(),
+  principal_type: z.enum([
+    "USER",
+    "WORKSPACE",
+    "ORGANIZATION",
+    "ROLE",
+    "SERVICE_ACCOUNT",
+    "AGENT",
+  ]),
+  principal_id: z.string().uuid(),
+  expires_at: z.string().datetime({ offset: true }).nullable(),
+});
+export type SharedSourceVM = z.infer<typeof SharedSourceVMSchema>;
+
 export const SharedItemVMSchema = z.object({
   node: FileNodeVMSchema,
   effective_actions: z.array(ResourceActionSchema),
   source_grant_ids: z.array(z.string().uuid()),
+  sources: z.array(SharedSourceVMSchema),
+  original_path: z.string(),
+  source_namespace: z.object({
+    namespace_type: NamespaceTypeSchema,
+    owner_user_id: z.string().uuid().nullable(),
+  }),
 });
 export type SharedItemVM = z.infer<typeof SharedItemVMSchema>;
 

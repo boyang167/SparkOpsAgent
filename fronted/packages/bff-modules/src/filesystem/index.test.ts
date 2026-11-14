@@ -168,6 +168,17 @@ describe("filesystem BFF module", () => {
         },
         effective_actions: ["READ", "DOWNLOAD"],
         source_grant_ids: ["00000000-0000-4000-8000-000000000007"],
+        sources: [{
+          grant_id: "00000000-0000-4000-8000-000000000007",
+          principal_type: "WORKSPACE",
+          principal_id: "00000000-0000-4000-8000-000000000003",
+          expires_at: "2026-12-31T16:00:00Z",
+        }],
+        original_path: "/shared.pdf",
+        source_namespace: {
+          namespace_type: "WORKSPACE",
+          owner_user_id: null,
+        },
       }],
       next_cursor: "",
     });
@@ -209,6 +220,8 @@ describe("filesystem BFF module", () => {
 
     expect(namespaces.items[0]?.capabilities).toContain("DOWNLOAD");
     expect(shared.items[0]?.effective_actions).toContain("DOWNLOAD");
+    expect(shared.items[0]?.sources[0]?.principal_type).toBe("WORKSPACE");
+    expect(shared.items[0]?.original_path).toBe("/shared.pdf");
     expect(access.effective_actions).toContain("DOWNLOAD");
     expect(listNamespaces).toHaveBeenCalledWith({ organizationId, workspaceId });
     expect(listShared).toHaveBeenCalledWith(

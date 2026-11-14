@@ -15,6 +15,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 )
 
 const (
@@ -28,6 +29,7 @@ type SharedCursorContext struct {
 	ActorID        uuid.UUID
 	WorkspaceID    uuid.UUID
 	NamespaceID    uuid.UUID
+	SourceType     model.PrincipalType
 	Query          string
 }
 
@@ -108,13 +110,14 @@ func (c *SharedCursorCodec) Decode(value string, context SharedCursorContext) (s
 
 func sharedCursorAAD(context SharedCursorContext) []byte {
 	aad, _ := json.Marshal(struct {
-		Version        byte      `json:"version"`
-		Source         string    `json:"source"`
-		OrganizationID uuid.UUID `json:"organization_id"`
-		ActorID        uuid.UUID `json:"actor_id"`
-		WorkspaceID    uuid.UUID `json:"workspace_id"`
-		NamespaceID    uuid.UUID `json:"namespace_id"`
-		Query          string    `json:"query"`
+		Version        byte                `json:"version"`
+		Source         string              `json:"source"`
+		OrganizationID uuid.UUID           `json:"organization_id"`
+		ActorID        uuid.UUID           `json:"actor_id"`
+		WorkspaceID    uuid.UUID           `json:"workspace_id"`
+		NamespaceID    uuid.UUID           `json:"namespace_id"`
+		SourceType     model.PrincipalType `json:"source_type"`
+		Query          string              `json:"query"`
 	}{
 		Version:        sharedCursorVersion,
 		Source:         sharedCursorSource,
@@ -122,6 +125,7 @@ func sharedCursorAAD(context SharedCursorContext) []byte {
 		ActorID:        context.ActorID,
 		WorkspaceID:    context.WorkspaceID,
 		NamespaceID:    context.NamespaceID,
+		SourceType:     context.SourceType,
 		Query:          strings.ToLower(strings.TrimSpace(norm.NFC.String(context.Query))),
 	})
 	return aad

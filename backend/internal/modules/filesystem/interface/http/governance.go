@@ -307,9 +307,14 @@ func (h *GovernanceHandler) SharedWithMe(c *gin.Context) {
 		invalidRequest(c)
 		return
 	}
+	sourceType, valid := sharedSourceType(c.Query("source_type"))
+	if !valid {
+		invalidRequest(c)
+		return
+	}
 	items, next, err := h.sharedWithMe(c.Request.Context(), query.SharedWithMe{
 		ActorID: rc.actorID, OrganizationID: rc.organizationID, WorkspaceID: rc.workspaceID,
-		Query: search, Cursor: c.Query("cursor"), Limit: limit,
+		SourceType: sourceType, Query: search, Cursor: c.Query("cursor"), Limit: limit,
 	})
 	if err != nil {
 		governanceError(c, err)
@@ -320,6 +325,23 @@ func (h *GovernanceHandler) SharedWithMe(c *gin.Context) {
 		views = append(views, sharedNodeView(item))
 	}
 	httpx.OK(c, gin.H{"items": views, "next_cursor": next})
+}
+
+func sharedSourceType(value string) (model.PrincipalType, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return "", true
+	case "organization":
+		return model.PrincipalOrganization, true
+	case "workspace":
+		return model.PrincipalWorkspace, true
+	case "user":
+		return model.PrincipalUser, true
+	case "agent":
+		return model.PrincipalAgent, true
+	default:
+		return "", false
+	}
 }
 
 func (h *GovernanceHandler) EffectiveAccess(c *gin.Context) {
@@ -592,9 +614,21 @@ func governancePagination(c *gin.Context) (int, bool) {
 }
 
 func sharedNodeView(item repository.SharedNode) gin.H {
+	sources := make([]gin.H, 0, len(item.Sources))
+	for _, source := range item.Sources {
+		sources = append(sources, gin.H{
+			"grant_id": source.GrantID, "principal_type": source.PrincipalType,
+			"principal_id": source.PrincipalID, "expires_at": source.ExpiresAt,
+		})
+	}
 	return gin.H{
 		"node": nodeView(&item.Node), "effective_actions": item.EffectiveActions,
-		"source_grant_ids": item.SourceGrantIDs,
+		"source_grant_ids": item.SourceGrantIDs, "sources": sources,
+		"original_path": item.OriginalPath,
+		"source_namespace": gin.H{
+			"namespace_type": item.SourceNamespace.NamespaceType,
+			"owner_user_id":  item.SourceNamespace.OwnerUserID,
+		},
 	}
 }
 

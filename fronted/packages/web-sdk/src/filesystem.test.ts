@@ -427,6 +427,53 @@ describe("governed filesystem sdk", () => {
     }
   });
 
+  it("returns the governed shared projection through the SDK", async () => {
+    const projection = {
+      node: {
+        id: "00000000-0000-4000-8000-000000000005",
+        namespace_id: "00000000-0000-4000-8000-000000000001",
+        parent_id: null,
+        type: "FILE",
+        name: "shared.pdf",
+        current_revision_id: null,
+        state: "ACTIVE",
+        owner_id: "00000000-0000-4000-8000-000000000006",
+      },
+      effective_actions: ["READ", "DOWNLOAD"],
+      source_grant_ids: ["00000000-0000-4000-8000-000000000007"],
+      sources: [{
+        grant_id: "00000000-0000-4000-8000-000000000007",
+        principal_type: "AGENT",
+        principal_id: "00000000-0000-4000-8000-000000000008",
+        expires_at: "2026-12-31T16:00:00Z",
+      }],
+      original_path: "/项目/shared.pdf",
+      source_namespace: {
+        namespace_type: "WORKSPACE",
+        owner_user_id: null,
+      },
+    } as const;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({
+        code: 0,
+        message: "ok",
+        data: { items: [projection], next_cursor: "" },
+        trace_id: "trace-1",
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    )));
+
+    const page = await listSharedWithMe(
+      { sourceType: "agent" },
+      {
+        organizationId: "00000000-0000-4000-8000-000000000002",
+        workspaceId: "00000000-0000-4000-8000-000000000003",
+      },
+    );
+
+    expect(page.items[0]).toEqual(projection);
+  });
+
   it("forwards governed write body, tenant context, and explicit idempotency key", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

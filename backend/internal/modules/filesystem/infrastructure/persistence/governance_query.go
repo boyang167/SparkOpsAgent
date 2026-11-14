@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/text/unicode/norm"
+	"gorm.io/gorm"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
@@ -81,6 +82,10 @@ func (r *Repository) ListSharedNodes(
 	for _, grant := range grants {
 		grantsByNode[grant.NodeID] = append(grantsByNode[grant.NodeID], grant)
 	}
+	projections, err := sharedNodeProjections(ctx, db, organizationID, ids, principals, at)
+	if err != nil {
+		return nil, "", err
+	}
 	nodesByID := make(map[uuid.UUID]nodeRow, len(nodes))
 	for _, node := range nodes {
 		nodesByID[node.ID] = node
@@ -92,11 +97,135 @@ func (r *Repository) ListSharedNodes(
 			continue
 		}
 		actions, sourceIDs := effectiveGrantActions(grantsByNode[id])
+		projection := projections[id]
 		out = append(out, repository.SharedNode{
 			Node: *nodeFromRow(node), EffectiveActions: actions, SourceGrantIDs: sourceIDs,
+			Sources: projection.Sources, OriginalPath: projection.OriginalPath,
+			SourceNamespace: projection.SourceNamespace,
 		})
 	}
 	return out, next, nil
+}
+
+type sharedNodeProjection struct {
+	Sources         []repository.SharedGrantSource
+	OriginalPath    string
+	SourceNamespace repository.SharedNamespaceSource
+}
+
+func sharedNodeProjections(
+	ctx context.Context,
+	db *gorm.DB,
+	organizationID uuid.UUID,
+	nodeIDs []uuid.UUID,
+	principals []repository.PrincipalRef,
+	at time.Time,
+) (map[uuid.UUID]sharedNodeProjection, error) {
+	var ancestors []nodeRow
+	sql := `WITH RECURSIVE ancestors AS (
+		SELECT * FROM filesystem.nodes WHERE id IN ?
+		UNION
+		SELECT parent.* FROM filesystem.nodes parent
+		JOIN ancestors child ON child.parent_id = parent.id
+			AND child.namespace_id = parent.namespace_id
+	) SELECT DISTINCT * FROM ancestors`
+	if err := db.WithContext(ctx).Raw(sql, nodeIDs).Scan(&ancestors).Error; err != nil {
+		return nil, wrapPersistence(err)
+	}
+	nodeByID := make(map[uuid.UUID]nodeRow, len(ancestors))
+	ancestorIDs := make([]uuid.UUID, 0, len(ancestors))
+	namespaceIDs := make([]uuid.UUID, 0, len(ancestors))
+	namespaceSet := make(map[uuid.UUID]struct{})
+	for _, node := range ancestors {
+		nodeByID[node.ID] = node
+		ancestorIDs = append(ancestorIDs, node.ID)
+		if _, exists := namespaceSet[node.NamespaceID]; !exists {
+			namespaceSet[node.NamespaceID] = struct{}{}
+			namespaceIDs = append(namespaceIDs, node.NamespaceID)
+		}
+	}
+	conditions, args := typedPrincipalConditions(principals)
+	var grants []resourceGrantRow
+	if len(ancestorIDs) > 0 {
+		if err := db.Table(resourceGrantRow{}.TableName()+" AS g").
+			Where("g.node_id IN ? AND g.organization_id = ? AND g.effect = ? AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at > ?)",
+				ancestorIDs, organizationID, model.GrantEffectAllow, at).
+			Where(strings.Join(conditions, " OR "), args...).
+			Find(&grants).Error; err != nil {
+			return nil, wrapPersistence(err)
+		}
+	}
+	grantsByNode := make(map[uuid.UUID][]resourceGrantRow)
+	for _, grant := range grants {
+		grantsByNode[grant.NodeID] = append(grantsByNode[grant.NodeID], grant)
+	}
+	var namespaces []namespaceRow
+	if len(namespaceIDs) > 0 {
+		if err := db.Where("id IN ? AND organization_id = ?", namespaceIDs, organizationID).
+			Find(&namespaces).Error; err != nil {
+			return nil, wrapPersistence(err)
+		}
+	}
+	namespaceByID := make(map[uuid.UUID]namespaceRow, len(namespaces))
+	for _, namespace := range namespaces {
+		namespaceByID[namespace.ID] = namespace
+	}
+	out := make(map[uuid.UUID]sharedNodeProjection, len(nodeIDs))
+	for _, nodeID := range nodeIDs {
+		node, exists := nodeByID[nodeID]
+		if !exists {
+			continue
+		}
+		pathParts := make([]string, 0, 8)
+		sources := make([]repository.SharedGrantSource, 0)
+		visited := make(map[uuid.UUID]struct{})
+		current := node
+		for {
+			if _, repeated := visited[current.ID]; repeated {
+				break
+			}
+			visited[current.ID] = struct{}{}
+			if current.Name != ".root" {
+				pathParts = append(pathParts, current.Name)
+			}
+			for _, grant := range grantsByNode[current.ID] {
+				if current.ID != nodeID && !grant.InheritToChildren {
+					continue
+				}
+				sources = append(sources, repository.SharedGrantSource{
+					GrantID: grant.ID, PrincipalType: grant.PrincipalType,
+					PrincipalID: grant.PrincipalID, ExpiresAt: grant.ExpiresAt,
+				})
+			}
+			if current.ParentID == nil {
+				break
+			}
+			parent, found := nodeByID[*current.ParentID]
+			if !found || parent.NamespaceID != node.NamespaceID {
+				break
+			}
+			current = parent
+		}
+		sort.Slice(sources, func(i, j int) bool {
+			return sources[i].GrantID.String() < sources[j].GrantID.String()
+		})
+		for left, right := 0, len(pathParts)-1; left < right; left, right = left+1, right-1 {
+			pathParts[left], pathParts[right] = pathParts[right], pathParts[left]
+		}
+		namespace := namespaceByID[node.NamespaceID]
+		var ownerUserID *uuid.UUID
+		if namespace.NamespaceType == model.NamespaceTypeUser && namespace.OwnerUserID != nil {
+			value := *namespace.OwnerUserID
+			ownerUserID = &value
+		}
+		out[nodeID] = sharedNodeProjection{
+			Sources: sources, OriginalPath: "/" + strings.Join(pathParts, "/"),
+			SourceNamespace: repository.SharedNamespaceSource{
+				NamespaceType: namespace.NamespaceType, OwnerUserID: ownerUserID,
+			},
+		}
+	}
+	return out, nil
 }
 
 func typedPrincipalConditions(principals []repository.PrincipalRef) ([]string, []any) {

@@ -164,6 +164,38 @@ func TestFilesystemResourceActionIncludesDownload(t *testing.T) {
 	)
 }
 
+func TestSharedWithMeOpenAPIDocumentsSourceProjectionAndFilter(t *testing.T) {
+	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &document))
+
+	paths := document["paths"].(map[string]any)
+	operation := paths["/api/v1/filesystem/shared-with-me"].(map[string]any)["get"].(map[string]any)
+	parameters := operation["parameters"].([]any)
+	var sourceType map[string]any
+	for _, value := range parameters {
+		parameter := value.(map[string]any)
+		if parameter["name"] == "source_type" {
+			sourceType = parameter
+			break
+		}
+	}
+	require.NotNil(t, sourceType)
+	require.ElementsMatch(t, []any{"organization", "workspace", "user", "agent"},
+		sourceType["schema"].(map[string]any)["enum"].([]any))
+
+	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+	shared := schemas["SharedNode"].(map[string]any)
+	require.Subset(t, shared["required"].([]any), []any{"sources", "original_path", "source_namespace"})
+	properties := shared["properties"].(map[string]any)
+	require.Equal(t, "#/components/schemas/SharedGrantSource",
+		properties["sources"].(map[string]any)["items"].(map[string]any)["$ref"])
+	source := schemas["SharedGrantSource"].(map[string]any)
+	require.Subset(t, source["required"].([]any),
+		[]any{"grant_id", "principal_type", "principal_id", "expires_at"})
+}
+
 func TestFilesystemAuditOpenAPISchemaMatchesSDKContract(t *testing.T) {
 	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
 	require.NoError(t, err)
