@@ -1,23 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { resolveWorkbenchPermissions } from "./workbench-permissions";
+import {
+  hasFilesystemPageAccess,
+  resolveWorkbenchPermissions,
+} from "./workbench-permissions";
 
 describe("resolveWorkbenchPermissions", () => {
-  it("defaults to file read when workspace permissions are unavailable", () => {
-    expect(resolveWorkbenchPermissions(undefined, false)).toEqual(["file:read"]);
+  it("fails closed when workspace permissions are unavailable", () => {
+    expect(resolveWorkbenchPermissions(undefined, false)).toEqual([]);
   });
 
-  it("preserves real workspace permissions", () => {
-    expect(resolveWorkbenchPermissions(["storage:read"], false)).toEqual([
-      "file:read",
-      "storage:read",
-    ]);
+  it("preserves real workspace permissions without inventing file read", () => {
+    expect(resolveWorkbenchPermissions(["storage:read"], false)).toEqual(["storage:read"]);
   });
 
-  it("grants management tabs to an explicit super admin", () => {
+  it("grants explicit super admin access to the complete workbench", () => {
     expect(resolveWorkbenchPermissions(undefined, true)).toEqual([
       "file:read",
       "storage:read",
       "file:admin",
     ]);
+  });
+});
+
+describe("hasFilesystemPageAccess", () => {
+  it("requires file read for page access", () => {
+    expect(hasFilesystemPageAccess([])).toBe(false);
+    expect(hasFilesystemPageAccess(["file:write"])).toBe(false);
+    expect(hasFilesystemPageAccess(["file:read"])).toBe(true);
   });
 });

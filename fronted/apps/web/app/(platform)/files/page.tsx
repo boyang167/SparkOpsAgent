@@ -1,9 +1,13 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { WORKSPACE_COOKIE } from "@sparkops/bff-core";
+import { InlineAlert } from "@/components/ui/InlineAlert";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilesystemWorkbench } from "@/modules/filesystem/components/FilesystemWorkbench";
-import { resolveWorkbenchPermissions } from "@/modules/filesystem/components/workbench-permissions";
+import {
+  hasFilesystemPageAccess,
+  resolveWorkbenchPermissions,
+} from "@/modules/filesystem/components/workbench-permissions";
 import type { WorkbenchState } from "@/modules/filesystem/components/workbench-state";
 import { loadSession } from "@/server/loaders/session";
 import { loadMyPermissions } from "@/server/loaders/governance";
@@ -62,6 +66,21 @@ export default async function FilesPage({
     workspacePermissions,
     session.is_super_admin ?? false,
   );
+
+  if (!hasFilesystemPageAccess(permissions)) {
+    return (
+      <div className="stack-lg">
+        <PageHeader
+          eyebrow="Filesystem"
+          title="文件中心"
+          description="当前角色没有访问工作区文件的权限。"
+        />
+        <InlineAlert tone="error">
+          无权访问文件中心。请联系工作区管理员授予文件读取权限。
+        </InlineAlert>
+      </div>
+    );
+  }
 
   const namespace = await loadFileNamespace(workspaceId);
   const initialState = normalizedSearch.state;

@@ -46,7 +46,7 @@ describe("business navigation", () => {
   it("exposes files as a direct entitled entry", () => {
     expect(FILES_NAV_ITEM).toEqual({
       href: "/files",
-      label: "文件",
+      label: "文件中心",
       entitlement: "filesystem",
     });
   });

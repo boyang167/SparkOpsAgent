@@ -29,7 +29,7 @@ export const KNOWLEDGE_NAV_ITEM: NavLeafConfig = {
 };
 export const FILES_NAV_ITEM: NavLeafConfig = {
   href: "/files",
-  label: "文件",
+  label: "文件中心",
   entitlement: "filesystem",
 };
 

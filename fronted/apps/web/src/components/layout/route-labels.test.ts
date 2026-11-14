@@ -8,8 +8,8 @@ describe("resolveRouteVisitMeta", () => {
       group: "知识库",
     });
     expect(resolveRouteVisitMeta("/files")).toEqual({
-      label: "文件",
-      group: "文件",
+      label: "文件中心",
+      group: "文件中心",
     });
     expect(resolveRouteVisitMeta("/cronjobs")).toEqual({
       label: "定时构建",
