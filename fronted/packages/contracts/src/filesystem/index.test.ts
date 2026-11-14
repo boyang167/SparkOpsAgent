@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { CreateGovernedGrantCommandSchema, SharedItemVMSchema } from "./index";
+import {
+  CreateGovernedGrantCommandSchema,
+  GovernanceMetadataQuerySchema,
+  SharedItemVMSchema,
+} from "./index";
+
+describe("GovernanceMetadataQuerySchema", () => {
+  it("clamps requested page sizes to the server maximum", () => {
+    expect(GovernanceMetadataQuerySchema.parse({ limit: "999" })).toEqual({ limit: 200 });
+  });
+});
 
 describe("SharedItemVMSchema", () => {
   it("preserves authoritative source projection metadata", () => {

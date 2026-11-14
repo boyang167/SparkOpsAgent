@@ -48,6 +48,8 @@ type grantBody struct {
 	InheritToChildren     *bool      `json:"inherit_to_children"`
 	ExpiresAt             *time.Time `json:"expires_at"`
 	Anonymous             bool       `json:"anonymous"`
+	Reshare               bool       `json:"reshare"`
+	SourceGrantIDs        []string   `json:"source_grant_ids"`
 }
 
 func (h *Handler) CreateGrant(c *gin.Context) {
@@ -386,6 +388,7 @@ func shareCommand(c *gin.Context, rc requestContext, nodeID uuid.UUID, body gran
 	}
 	principalType := model.PrincipalType(strings.ToUpper(strings.TrimSpace(body.PrincipalType)))
 	principalIDs, ok := parseUUIDs(body.PrincipalIDs)
+	sourceGrantIDs, sourceIDsValid := parseUUIDs(body.SourceGrantIDs)
 	actions := make([]model.ResourcePermission, 0, len(body.Actions))
 	legacy := principalType == "" && len(body.PrincipalIDs) == 0 && len(body.Actions) == 0
 	if legacy {
@@ -401,7 +404,7 @@ func shareCommand(c *gin.Context, rc requestContext, nodeID uuid.UUID, body gran
 		actions = []model.ResourcePermission{permission}
 		body.Effect = string(effect)
 	} else {
-		if !ok || len(principalIDs) == 0 || len(body.Actions) == 0 {
+		if !ok || !sourceIDsValid || len(principalIDs) == 0 || len(body.Actions) == 0 {
 			invalidRequest(c)
 			return command.SubmitShare{}, false, false
 		}
@@ -419,6 +422,7 @@ func shareCommand(c *gin.Context, rc requestContext, nodeID uuid.UUID, body gran
 		WorkspaceID: rc.workspaceID, NodeID: nodeID, PrincipalType: principalType, PrincipalIDs: principalIDs,
 		Actions: actions, Effect: model.GrantEffect(strings.ToUpper(strings.TrimSpace(body.Effect))),
 		InheritToChildren: inherit, ExpiresAt: body.ExpiresAt,
+		Reshare: body.Reshare, SourceGrantIDs: sourceGrantIDs,
 	}, legacy, true
 }
 

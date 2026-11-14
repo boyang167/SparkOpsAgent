@@ -22,6 +22,10 @@ type Repository interface {
 	ListResourceGrants(context.Context, []uuid.UUID, []repository.PrincipalRef, model.ResourcePermission, time.Time) ([]model.ResourceGrant, error)
 }
 
+type ReshareProofRepository interface {
+	ListValidReshareProofGrants(context.Context, repository.ReshareProofQuery) ([]model.ResourceGrant, error)
+}
+
 type AuthorityChecker interface {
 	HasWorkspaceFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error)
 	HasOrganizationFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error)
@@ -33,6 +37,14 @@ type Request struct {
 	NamespaceID uuid.UUID
 	NodeID      uuid.UUID
 	Permission  model.ResourcePermission
+}
+
+type ReshareProofRequest struct {
+	ActorID        uuid.UUID
+	WorkspaceID    uuid.UUID
+	NamespaceID    uuid.UUID
+	NodeID         uuid.UUID
+	SourceGrantIDs []uuid.UUID
 }
 
 type Decision struct {
@@ -160,6 +172,57 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 	decision.Reason = decided.ReasonCode
 	decision.SourceGrantIDs = sortedGrantIDs(sourceGrantIDs)
 	return decision
+}
+
+func (s *Service) HasIndependentShareAuthority(ctx context.Context, request Request) (bool, error) {
+	namespace, err := s.repo.GetNamespace(ctx, request.NamespaceID)
+	if err != nil {
+		return false, err
+	}
+	if _, err := s.repo.GetNode(ctx, request.NamespaceID, request.NodeID); err != nil {
+		return false, err
+	}
+	if namespace.NamespaceType == model.NamespaceTypeUser && namespace.OwnerUserID == request.ActorID {
+		return true, nil
+	}
+	if s.authority == nil {
+		return false, nil
+	}
+	return s.hasNamespaceAuthority(ctx, namespace, request)
+}
+
+func (s *Service) VerifyReshareProof(ctx context.Context, request ReshareProofRequest) error {
+	if len(request.SourceGrantIDs) == 0 {
+		return domain.ErrResourceDenied
+	}
+	namespace, err := s.repo.GetNamespace(ctx, request.NamespaceID)
+	if err != nil {
+		return domain.ErrResourceDenied
+	}
+	if _, err := s.repo.GetNode(ctx, request.NamespaceID, request.NodeID); err != nil {
+		return domain.ErrResourceDenied
+	}
+	proofRepo, ok := s.repo.(ReshareProofRepository)
+	if !ok || s.principals == nil {
+		return domain.ErrResourceDenied
+	}
+	principals, err := s.principals.Resolve(ctx, ResolvePrincipalsInput{
+		ActorID: request.ActorID, OrganizationID: namespace.OrganizationID, WorkspaceID: request.WorkspaceID,
+	})
+	if err != nil {
+		return domain.ErrResourceDenied
+	}
+	grants, err := proofRepo.ListValidReshareProofGrants(ctx, repository.ReshareProofQuery{
+		OrganizationID: namespace.OrganizationID, NamespaceID: namespace.ID, NodeID: request.NodeID,
+		GrantIDs: request.SourceGrantIDs, Principals: principals, At: s.now(),
+	})
+	if err != nil {
+		return err
+	}
+	if len(grants) != len(request.SourceGrantIDs) {
+		return domain.ErrResourceDenied
+	}
+	return nil
 }
 
 func sortedGrantIDs(ids map[uuid.UUID]struct{}) []uuid.UUID {

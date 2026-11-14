@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -110,4 +111,33 @@ func TestSharedCursorCodecUsesFreshNoncePerToken(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NotEqual(t, firstRaw[1:13], secondRaw[1:13])
+}
+
+func TestGovernanceMetadataCursorBindsOrganizationNodeAndKind(t *testing.T) {
+	codec, err := NewSharedCursorCodec("metadata-cursor-secret", nil)
+	require.NoError(t, err)
+	context := GovernanceCursorContext{
+		OrganizationID: uuid.New(), NodeID: uuid.New(), Kind: "grants",
+	}
+	position := GovernanceCursorPosition{
+		CreatedAt: time.Date(2026, time.November, 15, 3, 0, 0, 123, time.UTC),
+		ID:        uuid.New(),
+	}
+
+	token, err := codec.EncodeGovernance(position, context)
+	require.NoError(t, err)
+	decoded, err := codec.DecodeGovernance(token, context)
+	require.NoError(t, err)
+	require.Equal(t, position, decoded)
+
+	for _, replay := range []GovernanceCursorContext{
+		{OrganizationID: uuid.New(), NodeID: context.NodeID, Kind: context.Kind},
+		{OrganizationID: context.OrganizationID, NodeID: uuid.New(), Kind: context.Kind},
+		{OrganizationID: context.OrganizationID, NodeID: context.NodeID, Kind: "share-requests"},
+	} {
+		_, decodeErr := codec.DecodeGovernance(token, replay)
+		require.ErrorIs(t, decodeErr, domain.ErrInvalidGovernanceCursor)
+	}
+	_, err = codec.DecodeGovernance("invalid", context)
+	require.ErrorIs(t, err, domain.ErrInvalidGovernanceCursor)
 }

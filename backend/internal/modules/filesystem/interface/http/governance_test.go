@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -238,19 +239,19 @@ func TestGovernanceMetadataRequiresAdminAndReturnsRealClassification(t *testing.
 		authorize: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
 			return resourceauth.Decision{Allowed: request.Permission == model.ResourcePermissionAdmin}
 		},
-		listGovernanceGrants: func(_ context.Context, _ uuid.UUID, limit int) ([]governanceGrant, bool, error) {
-			require.Equal(t, 50, limit)
-			return []governanceGrant{{
+		listGovernanceGrants: func(_ context.Context, page repository.GovernanceGrantPageQuery) ([]repository.GovernanceGrantRecord, error) {
+			require.Equal(t, 51, page.Limit)
+			return []repository.GovernanceGrantRecord{{
 				Grant: model.ResourceGrant{
 					ID: grantID, NodeID: nodeID, PrincipalType: model.PrincipalWorkspace,
 					PrincipalID: principalID, GranteeID: principalID,
 					Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow,
 				},
 				Source: "DIRECT",
-			}}, false, nil
+			}}, nil
 		},
-		listNodeShareRequests: func(_ context.Context, _ uuid.UUID, limit int) ([]model.ShareRequest, error) {
-			require.Equal(t, 51, limit)
+		listNodeShareRequests: func(_ context.Context, page repository.ShareRequestPageQuery) ([]model.ShareRequest, error) {
+			require.Equal(t, 51, page.Limit)
 			return []model.ShareRequest{{
 				ID: requestID, OrganizationID: orgID, NamespaceID: namespaceID, NodeID: nodeID,
 				RequestedBy: principalID, PrincipalType: model.PrincipalWorkspace,
@@ -443,7 +444,7 @@ func TestGovernedShareHTTPRequiresIdempotencyAndForwardsTypedDownload(t *testing
 func TestSharePreviewAllowsSameOrganizationSourceWorkspaceAndConcealsCrossOrganization(t *testing.T) {
 	orgID, otherOrgID := uuid.New(), uuid.New()
 	currentWorkspaceID, sourceWorkspaceID := uuid.New(), uuid.New()
-	namespaceID, nodeID, principalID := uuid.New(), uuid.New(), uuid.New()
+	namespaceID, nodeID, principalID, sourceGrantID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	namespaceOrgID := orgID
 	previewCalls, submitCalls := 0, 0
 	handler := &GovernanceHandler{
@@ -459,11 +460,15 @@ func TestSharePreviewAllowsSameOrganizationSourceWorkspaceAndConcealsCrossOrgani
 		previewShare: func(_ context.Context, cmd command.SubmitShare) (command.SharePreview, error) {
 			previewCalls++
 			require.Equal(t, currentWorkspaceID, cmd.WorkspaceID)
+			require.True(t, cmd.Reshare)
+			require.Equal(t, []uuid.UUID{sourceGrantID}, cmd.SourceGrantIDs)
 			return command.SharePreview{Outcome: command.SharePreviewActive, Reason: "POLICY_ACTIVE"}, nil
 		},
 		submitShare: func(_ context.Context, cmd command.SubmitShare) (command.ShareResult, error) {
 			submitCalls++
 			require.Equal(t, currentWorkspaceID, cmd.WorkspaceID)
+			require.True(t, cmd.Reshare)
+			require.Equal(t, []uuid.UUID{sourceGrantID}, cmd.SourceGrantIDs)
 			return command.ShareResult{
 				Request: model.ShareRequest{
 					ID: uuid.New(), Status: model.ShareRequestApproved,
@@ -478,7 +483,7 @@ func TestSharePreviewAllowsSameOrganizationSourceWorkspaceAndConcealsCrossOrgani
 		governanceWorkspaceStub{orgID: orgID, active: true}, handler,
 	)
 	send := func() *httptest.ResponseRecorder {
-		body := `{"principal_type":"USER","principal_ids":["` + principalID.String() + `"],"actions":["READ"]}`
+		body := `{"principal_type":"USER","principal_ids":["` + principalID.String() + `"],"actions":["READ"],"reshare":true,"source_grant_ids":["` + sourceGrantID.String() + `"]}`
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/filesystem/nodes/"+nodeID.String()+"/share-preview", strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("X-Organization-ID", orgID.String())
@@ -495,7 +500,7 @@ func TestSharePreviewAllowsSameOrganizationSourceWorkspaceAndConcealsCrossOrgani
 	require.Contains(t, res.Body.String(), `"outcome":"ACTIVE"`)
 	require.Equal(t, 1, previewCalls)
 
-	body := `{"principal_type":"USER","principal_ids":["` + principalID.String() + `"],"actions":["READ"]}`
+	body := `{"principal_type":"USER","principal_ids":["` + principalID.String() + `"],"actions":["READ"],"reshare":true,"source_grant_ids":["` + sourceGrantID.String() + `"]}`
 	submitReq := httptest.NewRequest(http.MethodPost, "/api/v1/filesystem/nodes/"+nodeID.String()+"/grants", strings.NewReader(body))
 	submitReq.Header.Set("Authorization", "Bearer "+token)
 	submitReq.Header.Set("X-Organization-ID", orgID.String())
@@ -525,7 +530,11 @@ func TestSharePreviewAllowsSameOrganizationSourceWorkspaceAndConcealsCrossOrgani
 
 func TestGovernanceMetadataListLimitsAreBounded(t *testing.T) {
 	orgID, workspaceID, namespaceID, nodeID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	codec, err := query.NewSharedCursorCodec("governance-limit-test", nil)
+	require.NoError(t, err)
+	expectedRepositoryLimit := 2
 	handler := &GovernanceHandler{
+		cursor: codec,
 		nodeByID: func(context.Context, uuid.UUID) (*model.Node, error) {
 			return &model.Node{ID: nodeID, NamespaceID: namespaceID}, nil
 		},
@@ -538,13 +547,23 @@ func TestGovernanceMetadataListLimitsAreBounded(t *testing.T) {
 		authorize: func(context.Context, resourceauth.Request) resourceauth.Decision {
 			return resourceauth.Decision{Allowed: true}
 		},
-		listGovernanceGrants: func(_ context.Context, _ uuid.UUID, limit int) ([]governanceGrant, bool, error) {
-			require.Equal(t, 1, limit)
-			return []governanceGrant{{Grant: model.ResourceGrant{ID: uuid.New()}}}, true, nil
+		listGovernanceGrants: func(_ context.Context, page repository.GovernanceGrantPageQuery) ([]repository.GovernanceGrantRecord, error) {
+			require.Equal(t, expectedRepositoryLimit, page.Limit)
+			if expectedRepositoryLimit != 2 {
+				return nil, nil
+			}
+			return []repository.GovernanceGrantRecord{
+				{Grant: model.ResourceGrant{ID: uuid.New()}},
+				{Grant: model.ResourceGrant{ID: uuid.New()}},
+			}, nil
 		},
-		listNodeShareRequests: func(_ context.Context, _ uuid.UUID, limit int) ([]model.ShareRequest, error) {
-			require.Equal(t, 2, limit)
-			return []model.ShareRequest{{ID: uuid.New()}, {ID: uuid.New()}}, nil
+		listNodeShareRequests: func(_ context.Context, page repository.ShareRequestPageQuery) ([]model.ShareRequest, error) {
+			require.Equal(t, expectedRepositoryLimit, page.Limit)
+			if expectedRepositoryLimit != 2 {
+				return nil, nil
+			}
+			now := time.Now().UTC()
+			return []model.ShareRequest{{ID: uuid.New(), CreatedAt: now}, {ID: uuid.New(), CreatedAt: now.Add(-time.Second)}}, nil
 		},
 	}
 	router, token, _, _ := governanceRouterWithIDs(
@@ -552,24 +571,105 @@ func TestGovernanceMetadataListLimitsAreBounded(t *testing.T) {
 		governanceWorkspaceStub{orgID: orgID, active: true}, handler,
 	)
 	for _, resource := range []string{"grants", "share-requests"} {
-		for _, invalidLimit := range []string{"0", "201"} {
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/nodes/"+nodeID.String()+"/"+resource+"?limit="+invalidLimit, nil)
-			req.Header.Set("Authorization", "Bearer "+token)
-			req.Header.Set("X-Organization-ID", orgID.String())
-			req.Header.Set("X-Workspace-ID", workspaceID.String())
-			res := httptest.NewRecorder()
-			router.ServeHTTP(res, req)
-			require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
-		}
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/nodes/"+nodeID.String()+"/"+resource+"?limit=1", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/nodes/"+nodeID.String()+"/"+resource+"?limit=0", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("X-Organization-ID", orgID.String())
 		req.Header.Set("X-Workspace-ID", workspaceID.String())
 		res := httptest.NewRecorder()
 		router.ServeHTTP(res, req)
+		require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
+
+		req = httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/nodes/"+nodeID.String()+"/"+resource+"?limit=1", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Organization-ID", orgID.String())
+		req.Header.Set("X-Workspace-ID", workspaceID.String())
+		res = httptest.NewRecorder()
+		router.ServeHTTP(res, req)
 		require.Equal(t, http.StatusOK, res.Code, res.Body.String())
 		require.Contains(t, res.Body.String(), `"truncated":true`)
+
+		expectedRepositoryLimit = 201
+		req = httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/nodes/"+nodeID.String()+"/"+resource+"?limit=999", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Organization-ID", orgID.String())
+		req.Header.Set("X-Workspace-ID", workspaceID.String())
+		res = httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+		expectedRepositoryLimit = 2
 	}
+}
+
+func TestGovernanceGrantCursorPagesWithoutDuplicatesAndRejectsCrossNodeReplay(t *testing.T) {
+	orgID, workspaceID, namespaceID := uuid.New(), uuid.New(), uuid.New()
+	nodeID, otherNodeID, firstID, secondID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	codec, err := query.NewSharedCursorCodec("governance-http-cursor", nil)
+	require.NoError(t, err)
+	handler := &GovernanceHandler{
+		cursor: codec,
+		nodeByID: func(_ context.Context, requested uuid.UUID) (*model.Node, error) {
+			return &model.Node{ID: requested, NamespaceID: namespaceID}, nil
+		},
+		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace,
+				OrganizationID: orgID, WorkspaceID: workspaceID,
+			}, nil
+		},
+		authorize: func(context.Context, resourceauth.Request) resourceauth.Decision {
+			return resourceauth.Decision{Allowed: true}
+		},
+		listGovernanceGrants: func(_ context.Context, page repository.GovernanceGrantPageQuery) ([]repository.GovernanceGrantRecord, error) {
+			require.Equal(t, 2, page.Limit)
+			if page.AfterID == uuid.Nil {
+				return []repository.GovernanceGrantRecord{
+					{Grant: model.ResourceGrant{ID: firstID, NodeID: nodeID}, Source: "DIRECT"},
+					{Grant: model.ResourceGrant{ID: secondID, NodeID: nodeID}, Source: "DIRECT"},
+				}, nil
+			}
+			require.Equal(t, firstID, page.AfterID)
+			return []repository.GovernanceGrantRecord{
+				{Grant: model.ResourceGrant{ID: secondID, NodeID: nodeID}, Source: "DIRECT"},
+			}, nil
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(
+		t, orgID, governanceOrgStub{active: true},
+		governanceWorkspaceStub{orgID: orgID, active: true}, handler,
+	)
+	get := func(target uuid.UUID, cursor string) *httptest.ResponseRecorder {
+		path := "/api/v1/filesystem/nodes/" + target.String() + "/grants?limit=1"
+		if cursor != "" {
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Organization-ID", orgID.String())
+		req.Header.Set("X-Workspace-ID", workspaceID.String())
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		return res
+	}
+
+	first := get(nodeID, "")
+	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+	var firstEnvelope struct {
+		Data struct {
+			Items      []map[string]any `json:"items"`
+			NextCursor string           `json:"next_cursor"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &firstEnvelope))
+	require.Equal(t, firstID.String(), firstEnvelope.Data.Items[0]["id"])
+	require.NotEmpty(t, firstEnvelope.Data.NextCursor)
+
+	second := get(nodeID, firstEnvelope.Data.NextCursor)
+	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+	require.NotContains(t, second.Body.String(), firstID.String())
+	require.Contains(t, second.Body.String(), secondID.String())
+
+	replayed := get(otherNodeID, firstEnvelope.Data.NextCursor)
+	require.Equal(t, http.StatusBadRequest, replayed.Code, replayed.Body.String())
 }
 
 func TestGovernanceMetadataRejectsOrdinaryReader(t *testing.T) {
@@ -584,11 +684,11 @@ func TestGovernanceMetadataRejectsOrdinaryReader(t *testing.T) {
 		authorize: func(context.Context, resourceauth.Request) resourceauth.Decision {
 			return resourceauth.Decision{Allowed: false}
 		},
-		listGovernanceGrants: func(context.Context, uuid.UUID, int) ([]governanceGrant, bool, error) {
+		listGovernanceGrants: func(context.Context, repository.GovernanceGrantPageQuery) ([]repository.GovernanceGrantRecord, error) {
 			t.Fatal("ordinary reader must not enumerate grants")
-			return nil, false, nil
+			return nil, nil
 		},
-		listNodeShareRequests: func(context.Context, uuid.UUID, int) ([]model.ShareRequest, error) {
+		listNodeShareRequests: func(context.Context, repository.ShareRequestPageQuery) ([]model.ShareRequest, error) {
 			t.Fatal("ordinary reader must not enumerate share requests")
 			return nil, nil
 		},

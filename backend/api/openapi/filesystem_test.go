@@ -150,6 +150,54 @@ func TestFilesystemGrantCompatibilityAndRejectReasonSchemas(t *testing.T) {
 	require.EqualValues(t, 1000, reason["maxLength"])
 }
 
+func TestFilesystemGovernancePageSchemasMatchRuntimeResponses(t *testing.T) {
+	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &document))
+
+	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+	artifactPage := schemas["ArtifactPage"].(map[string]any)
+	require.ElementsMatch(t, []any{"items", "next_cursor"}, artifactPage["required"].([]any))
+
+	resourceGrantPage := schemas["ResourceGrantPage"].(map[string]any)
+	require.ElementsMatch(
+		t,
+		[]any{"items", "next_cursor", "truncated"},
+		resourceGrantPage["required"].([]any),
+	)
+	require.Contains(t, resourceGrantPage["properties"].(map[string]any), "next_cursor")
+	legacyResourceGrantPage := schemas["LegacyResourceGrantPage"].(map[string]any)
+	require.ElementsMatch(t, []any{"items"}, legacyResourceGrantPage["required"].([]any))
+
+	shareRequestPage := schemas["ShareRequestPage"].(map[string]any)
+	require.ElementsMatch(
+		t,
+		[]any{"items", "next_cursor", "truncated"},
+		shareRequestPage["required"].([]any),
+	)
+	typedShareProperties := schemas["CreateTypedGrantRequest"].(map[string]any)["properties"].(map[string]any)
+	require.Contains(t, typedShareProperties, "reshare")
+	require.Contains(t, typedShareProperties, "source_grant_ids")
+
+	paths := document["paths"].(map[string]any)
+	for _, path := range []string{
+		"/api/v1/filesystem/nodes/{nodeId}/grants",
+		"/api/v1/filesystem/nodes/{nodeId}/share-requests",
+	} {
+		operation := paths[path].(map[string]any)["get"].(map[string]any)
+		names := make([]string, 0)
+		for _, value := range operation["parameters"].([]any) {
+			parameter := value.(map[string]any)
+			if name, ok := parameter["name"].(string); ok {
+				names = append(names, name)
+			}
+		}
+		require.Contains(t, names, "cursor")
+		require.Contains(t, names, "limit")
+	}
+}
+
 func TestFilesystemResourceActionIncludesDownload(t *testing.T) {
 	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
 	require.NoError(t, err)

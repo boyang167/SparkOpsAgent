@@ -35,8 +35,14 @@ type ShareAuthority interface {
 	HasOrganizationFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error)
 }
 
+type ShareAuthorization struct {
+	Allowed              bool
+	RequiresReshareProof bool
+}
+
 type ShareSourceAuthorizer interface {
-	AuthorizeShare(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID) (bool, error)
+	AuthorizeShare(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID) (ShareAuthorization, error)
+	VerifyReshareProof(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, []uuid.UUID) error
 }
 
 type ShareRequestStore interface {
@@ -64,6 +70,8 @@ type SubmitShare struct {
 	Effect            model.GrantEffect
 	InheritToChildren bool
 	ExpiresAt         *time.Time
+	Reshare           bool
+	SourceGrantIDs    []uuid.UUID
 }
 
 type ShareResult struct {
@@ -120,7 +128,7 @@ func (h *ShareRequestHandler) Submit(ctx context.Context, cmd SubmitShare) (Shar
 	if cmd.Effect == "" {
 		cmd.Effect = model.GrantEffectAllow
 	}
-	prepared, err := h.prepareShare(ctx, cmd)
+	prepared, err := h.prepareShare(ctx, cmd, false)
 	if err != nil {
 		return result, err
 	}
@@ -136,8 +144,15 @@ func (h *ShareRequestHandler) Submit(ctx context.Context, cmd SubmitShare) (Shar
 		Actions: append([]model.ResourcePermission(nil), cmd.Actions...), Effect: cmd.Effect, InheritToChildren: cmd.InheritToChildren,
 		ExpiresAt: cmd.ExpiresAt, Classification: classification, Status: status, CreatedAt: h.now(),
 	}
-	hash := shareHash("submit", request, cmd.ActorID, "")
+	hash := shareHash("submit", request, cmd.ActorID, "", cmd.Reshare, cmd.SourceGrantIDs)
 	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if cmd.Reshare {
+			if err := h.sourceAuthorizer.VerifyReshareProof(
+				txCtx, cmd.ActorID, cmd.WorkspaceID, namespace.ID, node.ID, cmd.SourceGrantIDs,
+			); err != nil {
+				return err
+			}
+		}
 		replayed, claimErr := h.claim(txCtx, cmd.CommandID, cmd.WorkspaceID, node.ID, request.ID, hash)
 		if claimErr != nil {
 			return claimErr
@@ -169,7 +184,7 @@ func (h *ShareRequestHandler) Preview(ctx context.Context, cmd SubmitShare) (Sha
 	if cmd.Effect == "" {
 		cmd.Effect = model.GrantEffectAllow
 	}
-	prepared, err := h.prepareShare(ctx, cmd)
+	prepared, err := h.prepareShare(ctx, cmd, true)
 	if err != nil {
 		return SharePreview{}, err
 	}
@@ -286,7 +301,7 @@ type preparedShare struct {
 	immediate      bool
 }
 
-func (h *ShareRequestHandler) prepareShare(ctx context.Context, cmd SubmitShare) (preparedShare, error) {
+func (h *ShareRequestHandler) prepareShare(ctx context.Context, cmd SubmitShare, verifyProof bool) (preparedShare, error) {
 	if err := validateSubmitShare(cmd); err != nil {
 		return preparedShare{}, err
 	}
@@ -301,12 +316,19 @@ func (h *ShareRequestHandler) prepareShare(ctx context.Context, cmd SubmitShare)
 	if namespace.OrganizationID != cmd.OrganizationID || h.sourceAuthorizer == nil {
 		return preparedShare{}, domain.ErrResourceDenied
 	}
-	allowed, err := h.sourceAuthorizer.AuthorizeShare(ctx, cmd.ActorID, cmd.WorkspaceID, namespace.ID, node.ID)
+	authorization, err := h.sourceAuthorizer.AuthorizeShare(ctx, cmd.ActorID, cmd.WorkspaceID, namespace.ID, node.ID)
 	if err != nil {
 		return preparedShare{}, err
 	}
-	if !allowed {
+	if !authorization.Allowed || (authorization.RequiresReshareProof && !cmd.Reshare) {
 		return preparedShare{}, domain.ErrResourceDenied
+	}
+	if cmd.Reshare && verifyProof {
+		if err := h.sourceAuthorizer.VerifyReshareProof(
+			ctx, cmd.ActorID, cmd.WorkspaceID, namespace.ID, node.ID, cmd.SourceGrantIDs,
+		); err != nil {
+			return preparedShare{}, err
+		}
 	}
 	classification, err := h.store.GetNodeClassification(ctx, cmd.NodeID)
 	if err != nil {
@@ -457,6 +479,19 @@ func validateSubmitShare(cmd SubmitShare) error {
 	if len(cmd.PrincipalIDs) == 0 || len(cmd.Actions) == 0 {
 		return domain.ErrSharePolicyDenied
 	}
+	if cmd.Reshare != (len(cmd.SourceGrantIDs) > 0) {
+		return domain.ErrSharePolicyDenied
+	}
+	seenSourceGrants := map[uuid.UUID]struct{}{}
+	for _, id := range cmd.SourceGrantIDs {
+		if id == uuid.Nil {
+			return domain.ErrSharePolicyDenied
+		}
+		if _, ok := seenSourceGrants[id]; ok {
+			return domain.ErrSharePolicyDenied
+		}
+		seenSourceGrants[id] = struct{}{}
+	}
 	if cmd.Effect != model.GrantEffectAllow && cmd.Effect != model.GrantEffectDeny {
 		return domain.ErrSharePolicyDenied
 	}
@@ -516,7 +551,7 @@ func grantsForRequest(request model.ShareRequest, commandID uuid.UUID) []model.R
 	return grants
 }
 
-func shareHash(operation string, request model.ShareRequest, actorID uuid.UUID, reason string) string {
+func shareHash(operation string, request model.ShareRequest, actorID uuid.UUID, reason string, reshare bool, sourceGrantIDs []uuid.UUID) string {
 	payload, _ := json.Marshal(struct {
 		Operation         string
 		RequestID         uuid.UUID
@@ -531,9 +566,12 @@ func shareHash(operation string, request model.ShareRequest, actorID uuid.UUID, 
 		InheritToChildren bool
 		ExpiresAt         *time.Time
 		Reason            string
+		Reshare           bool
+		SourceGrantIDs    []uuid.UUID
 	}{
 		operation, request.ID, request.OrganizationID, request.NamespaceID, request.NodeID, actorID,
 		request.PrincipalType, request.PrincipalIDs, request.Actions, request.Effect, request.InheritToChildren, request.ExpiresAt, reason,
+		reshare, sourceGrantIDs,
 	})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])

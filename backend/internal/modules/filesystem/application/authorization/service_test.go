@@ -102,7 +102,7 @@ func TestAuthorizeCurrentWorkspaceAdminCannotBypassSourceWorkspace(t *testing.T)
 		OrganizationID: organizationID, WorkspaceID: sourceWorkspaceID, PolicyVersion: 1,
 	}
 	target := &model.Node{ID: nodeID, NamespaceID: namespaceID, State: model.NodeStateActive}
-	authority := workspaceAuthorityByIDStub{adminWorkspaceID: currentWorkspaceID}
+	authority := workspaceAuthorityByIDStub{adminWorkspaceID: currentWorkspaceID, actorID: actorID}
 	service := NewService(grantRepositoryStub{
 		nodes:      map[uuid.UUID]*model.Node{nodeID: target},
 		namespaces: map[uuid.UUID]*model.Namespace{namespaceID: namespace},
@@ -119,10 +119,11 @@ func TestAuthorizeCurrentWorkspaceAdminCannotBypassSourceWorkspace(t *testing.T)
 
 type workspaceAuthorityByIDStub struct {
 	adminWorkspaceID uuid.UUID
+	actorID          uuid.UUID
 }
 
-func (s workspaceAuthorityByIDStub) HasWorkspaceFileAdmin(_ context.Context, _ uuid.UUID, workspaceID uuid.UUID) (bool, error) {
-	return workspaceID == s.adminWorkspaceID, nil
+func (s workspaceAuthorityByIDStub) HasWorkspaceFileAdmin(_ context.Context, workspaceID, actorID uuid.UUID) (bool, error) {
+	return workspaceID == s.adminWorkspaceID && actorID == s.actorID, nil
 }
 
 func (workspaceAuthorityByIDStub) HasOrganizationFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error) {

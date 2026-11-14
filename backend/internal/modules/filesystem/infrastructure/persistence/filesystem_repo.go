@@ -809,6 +809,99 @@ func (r *Repository) ListNodeResourceGrantsLimited(ctx context.Context, nodeID u
 	return result, nil
 }
 
+func (r *Repository) ListValidReshareProofGrants(ctx context.Context, query repository.ReshareProofQuery) ([]model.ResourceGrant, error) {
+	if len(query.GrantIDs) == 0 || len(query.Principals) == 0 {
+		return []model.ResourceGrant{}, nil
+	}
+	principalConditions := make([]string, 0, len(query.Principals))
+	args := []any{query.NamespaceID, query.NodeID, query.NamespaceID, query.GrantIDs, query.OrganizationID, query.At}
+	for _, principal := range query.Principals {
+		principalConditions = append(principalConditions, "(g.principal_type = ? AND g.principal_id = ?)")
+		args = append(args, principal.Type, principal.ID)
+	}
+	var rows []resourceGrantRow
+	err := postgres.DB(ctx, r.db).Raw(`
+WITH RECURSIVE ancestors AS (
+	SELECT id, parent_id, 0 AS depth
+	FROM filesystem.nodes
+	WHERE namespace_id = ? AND id = ? AND state = 'ACTIVE'
+	UNION ALL
+	SELECT parent.id, parent.parent_id, child.depth + 1
+	FROM filesystem.nodes parent
+	JOIN ancestors child ON child.parent_id = parent.id
+	WHERE parent.namespace_id = ? AND parent.state = 'ACTIVE'
+)
+SELECT g.*
+FROM filesystem.resource_grants g
+JOIN ancestors a ON a.id = g.node_id
+WHERE g.id IN ?
+	AND g.organization_id = ?
+	AND g.effect = 'ALLOW'
+	AND g.permission = 'SHARE'
+	AND g.revoked_at IS NULL
+	AND (g.expires_at IS NULL OR g.expires_at > ?)
+	AND (a.depth = 0 OR g.inherit_to_children = TRUE)
+	AND (`+strings.Join(principalConditions, " OR ")+`)
+ORDER BY g.id ASC`, args...).Scan(&rows).Error
+	if err != nil {
+		return nil, wrapPersistence(err)
+	}
+	result := make([]model.ResourceGrant, len(rows))
+	for index, row := range rows {
+		result[index] = resourceGrantFromRow(row)
+	}
+	return result, nil
+}
+
+func (r *Repository) ListGovernanceGrantsPage(ctx context.Context, query repository.GovernanceGrantPageQuery) ([]repository.GovernanceGrantRecord, error) {
+	type pageRow struct {
+		Grant resourceGrantRow `gorm:"embedded"`
+		Depth int              `gorm:"column:depth"`
+	}
+	args := []any{query.NamespaceID, query.NodeID, query.NamespaceID, query.OrganizationID, time.Now().UTC()}
+	cursorClause := ""
+	if query.AfterID != uuid.Nil {
+		cursorClause = " AND g.id > ?"
+		args = append(args, query.AfterID)
+	}
+	args = append(args, query.Limit)
+	var rows []pageRow
+	err := postgres.DB(ctx, r.db).Raw(`
+WITH RECURSIVE ancestors AS (
+	SELECT id, parent_id, 0 AS depth
+	FROM filesystem.nodes
+	WHERE namespace_id = ? AND id = ? AND state = 'ACTIVE'
+	UNION ALL
+	SELECT parent.id, parent.parent_id, child.depth + 1
+	FROM filesystem.nodes parent
+	JOIN ancestors child ON child.parent_id = parent.id
+	WHERE parent.namespace_id = ? AND parent.state = 'ACTIVE'
+)
+SELECT g.*, a.depth
+FROM filesystem.resource_grants g
+JOIN ancestors a ON a.id = g.node_id
+WHERE g.organization_id = ?
+	AND g.revoked_at IS NULL
+	AND (g.expires_at IS NULL OR g.expires_at > ?)
+	AND (a.depth = 0 OR g.inherit_to_children = TRUE)`+cursorClause+`
+ORDER BY g.id ASC
+LIMIT ?`, args...).Scan(&rows).Error
+	if err != nil {
+		return nil, wrapPersistence(err)
+	}
+	result := make([]repository.GovernanceGrantRecord, len(rows))
+	for index, row := range rows {
+		source := "INHERITED"
+		if row.Depth == 0 {
+			source = "DIRECT"
+		}
+		result[index] = repository.GovernanceGrantRecord{
+			Grant: resourceGrantFromRow(row.Grant), Source: source,
+		}
+	}
+	return result, nil
+}
+
 func resourceGrantFromRow(row resourceGrantRow) model.ResourceGrant {
 	return model.ResourceGrant{
 		ID: row.ID, NodeID: row.NodeID, OrganizationID: row.OrganizationID, GranteeID: row.GranteeID,
@@ -921,6 +1014,26 @@ func (r *Repository) ListShareRequestsForNodeLimited(ctx context.Context, nodeID
 		Where("node_id = ?", nodeID).
 		Order("created_at DESC, id ASC").
 		Limit(limit).Find(&rows).Error; err != nil {
+		return nil, wrapPersistence(err)
+	}
+	result := make([]model.ShareRequest, len(rows))
+	for index, row := range rows {
+		result[index] = shareRequestFromRow(row)
+	}
+	return result, nil
+}
+
+func (r *Repository) ListShareRequestsPage(ctx context.Context, query repository.ShareRequestPageQuery) ([]model.ShareRequest, error) {
+	var rows []shareRequestRow
+	dbQuery := postgres.DB(ctx, r.db).
+		Where("organization_id = ? AND node_id = ?", query.OrganizationID, query.NodeID)
+	if !query.AfterCreatedAt.IsZero() && query.AfterID != uuid.Nil {
+		dbQuery = dbQuery.Where(
+			"(created_at < ?) OR (created_at = ? AND id < ?)",
+			query.AfterCreatedAt, query.AfterCreatedAt, query.AfterID,
+		)
+	}
+	if err := dbQuery.Order("created_at DESC, id DESC").Limit(query.Limit).Find(&rows).Error; err != nil {
 		return nil, wrapPersistence(err)
 	}
 	result := make([]model.ShareRequest, len(rows))

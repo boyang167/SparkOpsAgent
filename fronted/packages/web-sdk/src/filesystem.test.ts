@@ -555,12 +555,12 @@ describe("governed filesystem sdk", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({
         code: 0,
         message: "ok",
-        data: { items: [], classification: "INTERNAL", truncated: false },
+        data: { items: [], classification: "INTERNAL", next_cursor: "", truncated: false },
       }), { status: 200, headers: { "Content-Type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         code: 0,
         message: "ok",
-        data: { items: [], truncated: false },
+        data: { items: [], next_cursor: "", truncated: false },
       }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const options = {
@@ -568,14 +568,14 @@ describe("governed filesystem sdk", () => {
       workspaceId: "00000000-0000-4000-8000-000000000003",
     };
 
-    await listGovernedGrants("node/with space", options);
-    await listShareRequests("node/with space", options);
+    await listGovernedGrants("node/with space", options, { cursor: "opaque+/=", limit: 25 });
+    await listShareRequests("node/with space", options, { cursor: "opaque+/=", limit: 25 });
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "/api/bff/v1/filesystem/nodes/node%2Fwith%20space/grants",
+      "/api/bff/v1/filesystem/nodes/node%2Fwith%20space/grants?cursor=opaque%2B%2F%3D&limit=25",
     );
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
-      "/api/bff/v1/filesystem/nodes/node%2Fwith%20space/share-requests",
+      "/api/bff/v1/filesystem/nodes/node%2Fwith%20space/share-requests?cursor=opaque%2B%2F%3D&limit=25",
     );
   });
 

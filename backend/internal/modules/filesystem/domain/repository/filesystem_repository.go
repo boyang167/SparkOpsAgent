@@ -67,6 +67,36 @@ type PrincipalRef struct {
 	ID   uuid.UUID
 }
 
+type ReshareProofQuery struct {
+	OrganizationID uuid.UUID
+	NamespaceID    uuid.UUID
+	NodeID         uuid.UUID
+	GrantIDs       []uuid.UUID
+	Principals     []PrincipalRef
+	At             time.Time
+}
+
+type GovernanceGrantRecord struct {
+	Grant  model.ResourceGrant
+	Source string
+}
+
+type GovernanceGrantPageQuery struct {
+	OrganizationID uuid.UUID
+	NamespaceID    uuid.UUID
+	NodeID         uuid.UUID
+	AfterID        uuid.UUID
+	Limit          int
+}
+
+type ShareRequestPageQuery struct {
+	OrganizationID uuid.UUID
+	NodeID         uuid.UUID
+	AfterCreatedAt time.Time
+	AfterID        uuid.UUID
+	Limit          int
+}
+
 type SharedGrantSource struct {
 	GrantID       uuid.UUID
 	PrincipalType model.PrincipalType

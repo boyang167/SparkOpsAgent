@@ -134,11 +134,11 @@ describe("governed filesystem Next BFF routes", () => {
   });
 
   it("forwards governance metadata reads without idempotency headers", async () => {
-    mocks.listGovernedGrants.mockResolvedValue({ items: [], classification: "INTERNAL", truncated: false });
-    mocks.listShareRequests.mockResolvedValue({ items: [], truncated: false });
+    mocks.listGovernedGrants.mockResolvedValue({ items: [], classification: "INTERNAL", next_cursor: "", truncated: false });
+    mocks.listShareRequests.mockResolvedValue({ items: [], next_cursor: "", truncated: false });
     const grants = await import("./nodes/[nodeId]/grants/route");
     const requests = await import("./nodes/[nodeId]/share-requests/route");
-    const req = request("/api/bff/v1/filesystem/nodes/node-1", {
+    const req = request("/api/bff/v1/filesystem/nodes/node-1?limit=25&cursor=opaque%2B%2F%3D", {
       organization: organizationId,
       workspace: workspaceId,
     });
@@ -152,12 +152,14 @@ describe("governed filesystem Next BFF routes", () => {
       organizationId,
       workspaceId,
       "node-1",
+      { limit: 25, cursor: "opaque+/=" },
     );
     expect(mocks.listShareRequests).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId }),
       organizationId,
       workspaceId,
       "node-1",
+      { limit: 25, cursor: "opaque+/=" },
     );
   });
 

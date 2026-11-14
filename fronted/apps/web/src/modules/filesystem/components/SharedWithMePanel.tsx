@@ -363,6 +363,9 @@ export function SharedWithMePanel({
           members,
           memberDirectoryAvailable,
           effectiveActions: shareSelection.effective_actions,
+          reshareSourceGrantIds: shareSelection.sources
+            .filter((source) => source.effect === "ALLOW" && source.permission === "SHARE")
+            .map((source) => source.grant_id),
           onClose: () => setShareSelection(null),
         })
       : null,

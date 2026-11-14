@@ -11,7 +11,7 @@ const detail = vi.hoisted(() => ({
   nodeId: "",
   projectionOnly: false,
 }));
-const share = vi.hoisted(() => ({ nodeId: "" }));
+const share = vi.hoisted(() => ({ nodeId: "", sourceGrantIds: [] as string[] }));
 
 vi.mock("./FileDetailDrawer", () => ({
   FileDetailDrawer: ({
@@ -39,9 +39,14 @@ vi.mock("./FileDetailDrawer", () => ({
   },
 }));
 vi.mock("./ShareFileModal", () => ({
-  ShareFileModal: ({ open, node }: { open: boolean; node: { id: string } }) => {
+  ShareFileModal: ({ open, node, reshareSourceGrantIds }: {
+    open: boolean;
+    node: { id: string };
+    reshareSourceGrantIds?: string[];
+  }) => {
     if (!open) return null;
     share.nodeId = node.id;
+    share.sourceGrantIds = reshareSourceGrantIds ?? [];
     return createElement("div", { role: "dialog", "aria-label": "共享文件" });
   },
 }));
@@ -97,6 +102,7 @@ describe("SharedWithMePanel", () => {
     detail.nodeId = "";
     detail.projectionOnly = false;
     share.nodeId = "";
+    share.sourceGrantIds = [];
   });
 
   it("renders reshare only for an explicit active SHARE source grant", () => {
@@ -128,6 +134,7 @@ describe("SharedWithMePanel", () => {
     expect(screen.queryByRole("button", { name: `共享 ${adminOnly.node.name}` })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: `共享 ${allowed.node.name}` }));
     expect(share.nodeId).toBe(allowed.node.id);
+    expect(share.sourceGrantIds).toEqual([allowed.sources[0]!.grant_id]);
   });
 
   it("groups shared projections by source and shows authorized metadata", () => {

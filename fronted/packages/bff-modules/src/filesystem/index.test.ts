@@ -6,7 +6,9 @@ import {
   getEffectiveAccess,
   listFileNodes,
   listGovernedChildren,
+  listGovernedGrants,
   listGovernedNamespaces,
+  listShareRequests,
   listSharedWithMe,
   moveFileNode,
   previewGovernedShare,
@@ -71,6 +73,39 @@ describe("filesystem BFF module", () => {
       cursor: "cursor-1",
       limit: 20,
     });
+  });
+
+  it("forwards governance metadata cursor pagination", async () => {
+    const listGrants = vi.fn().mockResolvedValue({
+      items: [],
+      classification: "INTERNAL",
+      next_cursor: "",
+      truncated: false,
+    });
+    const listRequests = vi.fn().mockResolvedValue({
+      items: [],
+      next_cursor: "",
+      truncated: false,
+    });
+    const ctx = context({
+      listGovernedGrants: listGrants,
+      listShareRequests: listRequests,
+    });
+    const query = { cursor: "opaque+/=", limit: 25 };
+
+    await listGovernedGrants(ctx, "org-1", "workspace-1", "node-1", query);
+    await listShareRequests(ctx, "org-1", "workspace-1", "node-1", query);
+
+    expect(listGrants).toHaveBeenCalledWith(
+      { organizationId: "org-1", workspaceId: "workspace-1" },
+      "node-1",
+      query,
+    );
+    expect(listRequests).toHaveBeenCalledWith(
+      { organizationId: "org-1", workspaceId: "workspace-1" },
+      "node-1",
+      query,
+    );
   });
 
   it("passes the real move contract and idempotency key to upstream", async () => {

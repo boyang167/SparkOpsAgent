@@ -66,5 +66,7 @@ export function canonicalSharePayload(input: CreateGovernedGrantCommand): string
     effect: input.effect ?? "ALLOW",
     inherit_to_children: input.inherit_to_children ?? false,
     expires_at: input.expires_at ?? null,
+    reshare: input.reshare ?? false,
+    source_grant_ids: [...(input.source_grant_ids ?? [])].sort(),
   });
 }

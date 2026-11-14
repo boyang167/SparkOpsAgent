@@ -68,12 +68,29 @@ export function FileDetailDrawer({
     access?: EffectiveAccessVM;
     grants: GovernedGrantVM[];
     requests: ShareRequestVM[];
+    grantCursor: string;
+    requestCursor: string;
     metadataTruncated: boolean;
     state: LoadState;
     metadataRestricted: boolean;
-  }>({ key: detailKey, grants: [], requests: [], metadataTruncated: false, state: "idle", metadataRestricted: false });
+    loadingMore: boolean;
+    loadMoreError: boolean;
+  }>({
+    key: detailKey,
+    grants: [],
+    requests: [],
+    grantCursor: "",
+    requestCursor: "",
+    metadataTruncated: false,
+    state: "idle",
+    metadataRestricted: false,
+    loadingMore: false,
+    loadMoreError: false,
+  });
   const revisionGeneration = useRef(0);
   const auditGeneration = useRef(0);
+  const accessGeneration = useRef(0);
+  const accessMoreController = useRef<AbortController | null>(null);
   const revisions = revisionData.key === detailKey ? revisionData.items : [];
   const revisionState =
     revisionData.key === detailKey ? revisionData.state : open && node ? "loading" : "idle";
@@ -82,7 +99,18 @@ export function FileDetailDrawer({
     auditData.key === detailKey ? auditData.state : open && node ? "loading" : "idle";
   const scopedAccess = accessData.key === detailKey
     ? accessData
-    : { key: detailKey, grants: [], requests: [], metadataTruncated: false, state: "loading" as const, metadataRestricted: false };
+    : {
+        key: detailKey,
+        grants: [],
+        requests: [],
+        grantCursor: "",
+        requestCursor: "",
+        metadataTruncated: false,
+        state: "loading" as const,
+        metadataRestricted: false,
+        loadingMore: false,
+        loadMoreError: false,
+      };
 
   useEffect(() => {
     const generation = ++revisionGeneration.current;
@@ -138,15 +166,21 @@ export function FileDetailDrawer({
   }, [auditRetry, detailKey, node, open, projectionOnly, tab, workspaceId]);
 
   useEffect(() => {
+    const generation = ++accessGeneration.current;
+    accessMoreController.current?.abort();
     if (!open || !node || projectionOnly || tab !== "access") return;
     if (!organizationId) {
       setAccessData({
         key: detailKey,
         grants: [],
         requests: [],
+        grantCursor: "",
+        requestCursor: "",
         metadataTruncated: false,
         state: "error",
         metadataRestricted: false,
+        loadingMore: false,
+        loadMoreError: false,
       });
       return;
     }
@@ -156,9 +190,13 @@ export function FileDetailDrawer({
       key,
       grants: [],
       requests: [],
+      grantCursor: "",
+      requestCursor: "",
       metadataTruncated: false,
       state: "loading",
       metadataRestricted: false,
+      loadingMore: false,
+      loadMoreError: false,
     });
     const options = { organizationId, workspaceId, signal: controller.signal };
     void Promise.allSettled([
@@ -166,17 +204,21 @@ export function FileDetailDrawer({
       listGovernedGrants(node.id, options),
       listShareRequests(node.id, options),
     ]).then(([accessResult, grantsResult, requestsResult]) => {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || generation !== accessGeneration.current) return;
       if (accessResult.status === "rejected") {
         setAccessData({
           key,
           grants: [],
           requests: [],
+          grantCursor: "",
+          requestCursor: "",
           metadataTruncated: false,
           state: accessResult.reason instanceof BffError && accessResult.reason.status === 403
             ? "forbidden"
             : "error",
           metadataRestricted: false,
+          loadingMore: false,
+          loadMoreError: false,
         });
         return;
       }
@@ -194,14 +236,21 @@ export function FileDetailDrawer({
         access: accessResult.value,
         grants: grantsResult.status === "fulfilled" ? grantsResult.value.items : [],
         requests: requestsResult.status === "fulfilled" ? requestsResult.value.items : [],
+        grantCursor: grantsResult.status === "fulfilled" ? grantsResult.value.next_cursor : "",
+        requestCursor: requestsResult.status === "fulfilled" ? requestsResult.value.next_cursor : "",
         metadataTruncated:
-          (grantsResult.status === "fulfilled" && grantsResult.value.truncated) ||
-          (requestsResult.status === "fulfilled" && requestsResult.value.truncated),
+          (grantsResult.status === "fulfilled" && Boolean(grantsResult.value.next_cursor)) ||
+          (requestsResult.status === "fulfilled" && Boolean(requestsResult.value.next_cursor)),
         state: metadataErrors.length > 0 && !metadataRestricted ? "error" : "ready",
         metadataRestricted,
+        loadingMore: false,
+        loadMoreError: false,
       });
     });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      accessMoreController.current?.abort();
+    };
   }, [
     accessRetry,
     detailKey,
@@ -212,6 +261,66 @@ export function FileDetailDrawer({
     tab,
     workspaceId,
   ]);
+
+  function loadMoreGovernance() {
+    if (
+      !node ||
+      !organizationId ||
+      scopedAccess.loadingMore ||
+      (!scopedAccess.grantCursor && !scopedAccess.requestCursor)
+    ) return;
+    const key = detailKey;
+    const generation = accessGeneration.current;
+    const grantCursor = scopedAccess.grantCursor;
+    const requestCursor = scopedAccess.requestCursor;
+    const controller = new AbortController();
+    accessMoreController.current?.abort();
+    accessMoreController.current = controller;
+    setAccessData((current) =>
+      current.key === key
+        ? { ...current, loadingMore: true, loadMoreError: false }
+        : current,
+    );
+    const options = { organizationId, workspaceId, signal: controller.signal };
+    void Promise.all([
+      grantCursor
+        ? listGovernedGrants(node.id, options, { cursor: grantCursor })
+        : Promise.resolve(null),
+      requestCursor
+        ? listShareRequests(node.id, options, { cursor: requestCursor })
+        : Promise.resolve(null),
+    ]).then(([grantPage, requestPage]) => {
+      if (controller.signal.aborted || generation !== accessGeneration.current) return;
+      setAccessData((current) => {
+        if (current.key !== key) return current;
+        const grants = grantPage
+          ? appendUnique(current.grants, grantPage.items)
+          : current.grants;
+        const requests = requestPage
+          ? appendUnique(current.requests, requestPage.items)
+          : current.requests;
+        const nextGrantCursor = grantPage?.next_cursor ?? "";
+        const nextRequestCursor = requestPage?.next_cursor ?? "";
+        return {
+          ...current,
+          grants,
+          requests,
+          grantCursor: nextGrantCursor,
+          requestCursor: nextRequestCursor,
+          metadataTruncated: Boolean(nextGrantCursor || nextRequestCursor),
+          loadingMore: false,
+          loadMoreError: false,
+        };
+      });
+    }).catch(() => {
+      if (controller.signal.aborted || generation !== accessGeneration.current) return;
+      setAccessData((current) =>
+        current.key === key
+          ? { ...current, loadingMore: false, loadMoreError: true }
+          : current,
+      );
+    });
+  }
 
   useEffect(() => {
     if (!open) setTab("details");
@@ -295,6 +404,7 @@ export function FileDetailDrawer({
                 ? createElement(AccessDetails, {
                     data: scopedAccess,
                     onRetry: () => setAccessRetry((value) => value + 1),
+                    onLoadMore: loadMoreGovernance,
                   })
               : tab === "revisions"
                 ? createElement(RevisionList, {
@@ -370,16 +480,22 @@ function Details({ node }: { node: FileNodeVM }) {
 function AccessDetails({
   data,
   onRetry,
+  onLoadMore,
 }: {
   data: {
     access?: EffectiveAccessVM;
     grants: GovernedGrantVM[];
     requests: ShareRequestVM[];
+    grantCursor: string;
+    requestCursor: string;
     metadataTruncated: boolean;
     state: LoadState;
     metadataRestricted: boolean;
+    loadingMore: boolean;
+    loadMoreError: boolean;
   };
   onRetry: () => void;
+  onLoadMore: () => void;
 }) {
   if (data.state === "loading" || data.state === "idle") {
     return createElement("div", { role: "status", className: "empty-state" }, "正在加载共享与权限…");
@@ -478,13 +594,45 @@ function AccessDetails({
             : null,
           data.metadataTruncated
             ? createElement(
-                "p",
-                { className: "text-sm text-muted" },
-                "仅显示前 50 项治理记录。",
+                "button",
+                {
+                  type: "button",
+                  className: "btn btn-secondary btn-sm self-start",
+                  disabled: data.loadingMore,
+                  onClick: onLoadMore,
+                },
+                data.loadingMore ? "正在加载…" : "加载更多",
+              )
+            : null,
+          data.loadMoreError
+            ? createElement(
+                InlineAlert,
+                {
+                  tone: "error",
+                  children: createElement(
+                    "div",
+                    { className: "flex flex-wrap items-center gap-2" },
+                    createElement("span", { role: "alert" }, "加载更多治理记录失败。"),
+                    createElement(
+                      "button",
+                      { type: "button", className: "btn btn-ghost btn-sm", onClick: onLoadMore },
+                      "重试",
+                    ),
+                  ),
+                },
               )
             : null,
         ),
   );
+}
+
+function appendUnique<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+  const ids = new Set(current.map((item) => item.id));
+  return current.concat(incoming.filter((item) => {
+    if (ids.has(item.id)) return false;
+    ids.add(item.id);
+    return true;
+  }));
 }
 
 function Detail({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {

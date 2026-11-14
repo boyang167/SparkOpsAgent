@@ -183,4 +183,28 @@ describe("ShareFileModal", () => {
     fireEvent.click(submit);
     expect(sdk.createGovernedGrant).toHaveBeenCalledTimes(1);
   });
+
+  it("sends authoritative source SHARE grant ids for shared reshare preview and submit", async () => {
+    const user = userEvent.setup();
+    const sourceGrantId = "00000000-0000-4000-8000-000000000301";
+    sdk.createGovernedGrant.mockResolvedValue({
+      request: { status: "APPROVED" },
+      grants: [{ id: "00000000-0000-4000-8000-000000000302" }],
+    });
+    render(modal({ reshareSourceGrantIds: [sourceGrantId] }));
+    await user.click(screen.getByRole("radio", { name: /王小明/ }));
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    await waitFor(() => expect(sdk.previewGovernedShare).toHaveBeenCalled());
+    expect(sdk.previewGovernedShare.mock.calls[0][1]).toMatchObject({
+      reshare: true,
+      source_grant_ids: [sourceGrantId],
+    });
+
+    await user.click(await screen.findByRole("button", { name: "立即共享" }));
+    await waitFor(() => expect(sdk.createGovernedGrant).toHaveBeenCalled());
+    expect(sdk.createGovernedGrant.mock.calls[0][1]).toMatchObject({
+      reshare: true,
+      source_grant_ids: [sourceGrantId],
+    });
+  });
 });

@@ -73,15 +73,35 @@ type shareSourceAuthorizerAdapter struct {
 	authorizer *resourceauth.Service
 }
 
-func (a shareSourceAuthorizerAdapter) AuthorizeShare(ctx context.Context, actorID, workspaceID, namespaceID, nodeID uuid.UUID) (bool, error) {
+func (a shareSourceAuthorizerAdapter) AuthorizeShare(ctx context.Context, actorID, workspaceID, namespaceID, nodeID uuid.UUID) (command.ShareAuthorization, error) {
 	if a.authorizer == nil {
-		return false, nil
+		return command.ShareAuthorization{}, nil
 	}
-	decision := a.authorizer.Authorize(ctx, resourceauth.Request{
+	request := resourceauth.Request{
 		ActorID: actorID, WorkspaceID: workspaceID, NamespaceID: namespaceID,
 		NodeID: nodeID, Permission: model.ResourcePermissionShare,
+	}
+	decision := a.authorizer.Authorize(ctx, request)
+	if !decision.Allowed {
+		return command.ShareAuthorization{}, nil
+	}
+	independent, err := a.authorizer.HasIndependentShareAuthority(ctx, request)
+	if err != nil {
+		return command.ShareAuthorization{}, err
+	}
+	return command.ShareAuthorization{
+		Allowed: true, RequiresReshareProof: !independent,
+	}, nil
+}
+
+func (a shareSourceAuthorizerAdapter) VerifyReshareProof(ctx context.Context, actorID, workspaceID, namespaceID, nodeID uuid.UUID, sourceGrantIDs []uuid.UUID) error {
+	if a.authorizer == nil {
+		return domain.ErrResourceDenied
+	}
+	return a.authorizer.VerifyReshareProof(ctx, resourceauth.ReshareProofRequest{
+		ActorID: actorID, WorkspaceID: workspaceID, NamespaceID: namespaceID,
+		NodeID: nodeID, SourceGrantIDs: sourceGrantIDs,
 	})
-	return decision.Allowed, nil
 }
 
 type principalScopeAdapter struct {
@@ -356,6 +376,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewSharedWithMeHandler(repo, principalResolver, resourceAuthorizer, sharedCursorCodec),
 		query.NewEffectiveAccessHandler(resourceAuthorizer),
 		resourceAuthorizer,
+		sharedCursorCodec,
 	)
 	governanceHandler.BindShareWorkflow(shareCommands.Preview, shareCommands.Submit, shareCommands.Approve, shareCommands.Reject)
 	filesystemhttp.RegisterGovernanceRoutes(

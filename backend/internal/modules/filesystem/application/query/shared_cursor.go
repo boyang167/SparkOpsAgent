@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/text/unicode/norm"
@@ -19,9 +20,10 @@ import (
 )
 
 const (
-	sharedCursorVersion = byte(1)
-	sharedCursorDomain  = "filesystem-shared-cursor-v1"
-	sharedCursorSource  = "shared-with-me"
+	sharedCursorVersion    = byte(1)
+	sharedCursorDomain     = "filesystem-shared-cursor-v1"
+	sharedCursorSource     = "shared-with-me"
+	governanceCursorSource = "governance-metadata"
 )
 
 type SharedCursorContext struct {
@@ -36,6 +38,17 @@ type SharedCursorContext struct {
 type SharedCursorCodec struct {
 	aead        cipher.AEAD
 	nonceReader io.Reader
+}
+
+type GovernanceCursorContext struct {
+	OrganizationID uuid.UUID
+	NodeID         uuid.UUID
+	Kind           string
+}
+
+type GovernanceCursorPosition struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        uuid.UUID `json:"id"`
 }
 
 func NewSharedCursorCodec(secret string, nonceReader io.Reader) (*SharedCursorCodec, error) {
@@ -108,6 +121,53 @@ func (c *SharedCursorCodec) Decode(value string, context SharedCursorContext) (s
 	return position.String(), nil
 }
 
+func (c *SharedCursorCodec) EncodeGovernance(position GovernanceCursorPosition, context GovernanceCursorContext) (string, error) {
+	if c == nil || c.aead == nil || c.nonceReader == nil || position.ID == uuid.Nil {
+		return "", domain.ErrPersistence
+	}
+	plaintext, err := json.Marshal(GovernanceCursorPosition{
+		CreatedAt: position.CreatedAt.UTC(), ID: position.ID,
+	})
+	if err != nil {
+		return "", domain.ErrPersistence
+	}
+	nonce := make([]byte, c.aead.NonceSize())
+	if _, err := io.ReadFull(c.nonceReader, nonce); err != nil {
+		return "", domain.ErrPersistence
+	}
+	ciphertext := c.aead.Seal(nil, nonce, plaintext, governanceCursorAAD(context))
+	token := make([]byte, 1+len(nonce)+len(ciphertext))
+	token[0] = sharedCursorVersion
+	copy(token[1:], nonce)
+	copy(token[1+len(nonce):], ciphertext)
+	return base64.RawURLEncoding.EncodeToString(token), nil
+}
+
+func (c *SharedCursorCodec) DecodeGovernance(value string, context GovernanceCursorContext) (GovernanceCursorPosition, error) {
+	if value == "" {
+		return GovernanceCursorPosition{}, nil
+	}
+	if c == nil || c.aead == nil {
+		return GovernanceCursorPosition{}, domain.ErrInvalidGovernanceCursor
+	}
+	token, err := base64.RawURLEncoding.DecodeString(value)
+	minimum := 1 + c.aead.NonceSize() + c.aead.Overhead() + 2
+	if err != nil || len(token) < minimum || token[0] != sharedCursorVersion {
+		return GovernanceCursorPosition{}, domain.ErrInvalidGovernanceCursor
+	}
+	nonceEnd := 1 + c.aead.NonceSize()
+	plaintext, err := c.aead.Open(nil, token[1:nonceEnd], token[nonceEnd:], governanceCursorAAD(context))
+	if err != nil {
+		return GovernanceCursorPosition{}, domain.ErrInvalidGovernanceCursor
+	}
+	var position GovernanceCursorPosition
+	if err := json.Unmarshal(plaintext, &position); err != nil || position.ID == uuid.Nil {
+		return GovernanceCursorPosition{}, domain.ErrInvalidGovernanceCursor
+	}
+	position.CreatedAt = position.CreatedAt.UTC()
+	return position, nil
+}
+
 func sharedCursorAAD(context SharedCursorContext) []byte {
 	aad, _ := json.Marshal(struct {
 		Version        byte                `json:"version"`
@@ -127,6 +187,21 @@ func sharedCursorAAD(context SharedCursorContext) []byte {
 		NamespaceID:    context.NamespaceID,
 		SourceType:     context.SourceType,
 		Query:          strings.ToLower(strings.TrimSpace(norm.NFC.String(context.Query))),
+	})
+	return aad
+}
+
+func governanceCursorAAD(context GovernanceCursorContext) []byte {
+	aad, _ := json.Marshal(struct {
+		Version        byte      `json:"version"`
+		Source         string    `json:"source"`
+		OrganizationID uuid.UUID `json:"organization_id"`
+		NodeID         uuid.UUID `json:"node_id"`
+		Kind           string    `json:"kind"`
+	}{
+		Version: sharedCursorVersion, Source: governanceCursorSource,
+		OrganizationID: context.OrganizationID, NodeID: context.NodeID,
+		Kind: strings.ToLower(strings.TrimSpace(context.Kind)),
 	})
 	return aad
 }

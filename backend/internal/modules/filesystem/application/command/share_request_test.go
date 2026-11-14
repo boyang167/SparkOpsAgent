@@ -109,14 +109,24 @@ type shareAuthorityStub struct {
 }
 
 type shareSourceAuthorizerStub struct {
-	allowed bool
-	err     error
-	called  int
+	allowed       bool
+	requiresProof bool
+	err           error
+	proofErr      error
+	called        int
+	proofCalls    int
+	proofIDs      []uuid.UUID
 }
 
-func (s *shareSourceAuthorizerStub) AuthorizeShare(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID) (bool, error) {
+func (s *shareSourceAuthorizerStub) AuthorizeShare(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID) (ShareAuthorization, error) {
 	s.called++
-	return s.allowed, s.err
+	return ShareAuthorization{Allowed: s.allowed, RequiresReshareProof: s.requiresProof}, s.err
+}
+
+func (s *shareSourceAuthorizerStub) VerifyReshareProof(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ uuid.UUID, _ uuid.UUID, sourceGrantIDs []uuid.UUID) error {
+	s.proofCalls++
+	s.proofIDs = append([]uuid.UUID(nil), sourceGrantIDs...)
+	return s.proofErr
 }
 
 func (s shareAuthorityStub) HasWorkspaceFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
@@ -290,6 +300,75 @@ func TestSharePreviewRequiresAuthoritativeShareAccess(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrResourceDenied)
 	require.Empty(t, store.requests)
 	require.Empty(t, store.grants)
+}
+
+func TestReshareProofIsRequiredForGrantAuthorityAndSharedByPreviewAndSubmit(t *testing.T) {
+	organizationID, workspaceID, actorID, targetID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	namespace := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace,
+		OrganizationID: organizationID, WorkspaceID: uuid.New(),
+	}
+	node := &model.Node{ID: uuid.New(), NamespaceID: namespace.ID, Type: model.NodeTypeFile}
+	store := &shareStoreStub{
+		namespace: namespace, node: node,
+		classification: model.TransferClassificationInternal,
+	}
+	authorizer := &shareSourceAuthorizerStub{allowed: true, requiresProof: true}
+	handler := NewShareRequestHandler(
+		store, postgres.NewDirectTransactor(), nil,
+		principalScopeStub{scopes: map[uuid.UUID]PrincipalScope{
+			targetID: {OrganizationID: organizationID},
+		}},
+		shareAuthorityStub{}, authorizer,
+	)
+	base := SubmitShare{
+		CommandID: uuid.New(), ActorID: actorID, OrganizationID: organizationID,
+		WorkspaceID: workspaceID, NodeID: node.ID, PrincipalType: model.PrincipalUser,
+		PrincipalIDs: []uuid.UUID{targetID}, Actions: []model.ResourcePermission{model.ResourcePermissionRead},
+	}
+
+	_, err := handler.Preview(context.Background(), base)
+	require.ErrorIs(t, err, domain.ErrResourceDenied)
+	require.Zero(t, authorizer.proofCalls)
+
+	sourceGrantID := uuid.New()
+	base.Reshare = true
+	base.SourceGrantIDs = []uuid.UUID{sourceGrantID}
+	_, err = handler.Preview(context.Background(), base)
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{sourceGrantID}, authorizer.proofIDs)
+
+	base.CommandID = uuid.New()
+	_, err = handler.Submit(context.Background(), base)
+	require.NoError(t, err)
+	require.Equal(t, 2, authorizer.proofCalls)
+}
+
+func TestOwnerOrNamespaceAdminCanShareWithoutReshareProof(t *testing.T) {
+	organizationID, workspaceID, actorID, targetID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	namespace := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace,
+		OrganizationID: organizationID, WorkspaceID: workspaceID,
+	}
+	node := &model.Node{ID: uuid.New(), NamespaceID: namespace.ID, Type: model.NodeTypeFile}
+	authorizer := &shareSourceAuthorizerStub{allowed: true, requiresProof: false}
+	handler := NewShareRequestHandler(
+		&shareStoreStub{namespace: namespace, node: node, classification: model.TransferClassificationInternal},
+		postgres.NewDirectTransactor(), nil,
+		principalScopeStub{scopes: map[uuid.UUID]PrincipalScope{
+			targetID: {OrganizationID: organizationID},
+		}},
+		shareAuthorityStub{}, authorizer,
+	)
+
+	_, err := handler.Preview(context.Background(), SubmitShare{
+		CommandID: uuid.New(), ActorID: actorID, OrganizationID: organizationID,
+		WorkspaceID: workspaceID, NodeID: node.ID, PrincipalType: model.PrincipalUser,
+		PrincipalIDs: []uuid.UUID{targetID}, Actions: []model.ResourcePermission{model.ResourcePermissionRead},
+	})
+
+	require.NoError(t, err)
+	require.Zero(t, authorizer.proofCalls)
 }
 
 func TestSubmitShareRequiresAuthoritativeSourceSharePermission(t *testing.T) {

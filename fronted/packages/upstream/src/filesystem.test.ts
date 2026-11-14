@@ -284,4 +284,38 @@ describe("filesystem upstream", () => {
     expect(init).toEqual(expect.objectContaining({ method: "POST", body: JSON.stringify(input) }));
     expect(new Headers(init.headers).get("Idempotency-Key")).toBe("preview-key-1");
   });
+
+  it("forwards governance cursor pagination to metadata reads", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({
+        code: 0,
+        message: "ok",
+        data: { items: [], next_cursor: "", truncated: false },
+        trace_id: "trace-1",
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const context = {
+      organizationId: "00000000-0000-4000-8000-000000000002",
+      workspaceId: "00000000-0000-4000-8000-000000000003",
+    };
+
+    await createFilesystemUpstream().listGovernedGrants(
+      context,
+      "node/with space",
+      { cursor: "opaque+/=", limit: 25 },
+    );
+    await createFilesystemUpstream().listShareRequests(
+      context,
+      "node/with space",
+      { cursor: "opaque+/=", limit: 25 },
+    );
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      "/api/v1/filesystem/nodes/node%2Fwith%20space/grants?cursor=opaque%2B%2F%3D&limit=25",
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toContain(
+      "/api/v1/filesystem/nodes/node%2Fwith%20space/share-requests?cursor=opaque%2B%2F%3D&limit=25",
+    );
+  });
 });

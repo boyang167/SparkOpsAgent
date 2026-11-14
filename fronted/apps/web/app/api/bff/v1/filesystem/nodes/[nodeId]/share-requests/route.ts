@@ -1,7 +1,10 @@
 import { createBffContext, createTraceId, fail, ok } from "@sparkops/bff-core";
 import { createShareRequest, listShareRequests } from "@sparkops/bff-modules/filesystem";
 import { BffError } from "@sparkops/contracts";
-import { CreateGovernedGrantCommandSchema } from "@sparkops/contracts/filesystem";
+import {
+  CreateGovernedGrantCommandSchema,
+  GovernanceMetadataQuerySchema,
+} from "@sparkops/contracts/filesystem";
 import { NextRequest } from "next/server";
 
 export async function GET(
@@ -16,8 +19,11 @@ export async function GET(
     }
     const ctx = await createBffContext(req);
     const { nodeId } = await context.params;
+    const query = GovernanceMetadataQuerySchema.parse(
+      Object.fromEntries(req.nextUrl.searchParams.entries()),
+    );
     return ok(
-      await listShareRequests(ctx, organizationId, ctx.workspaceId, nodeId),
+      await listShareRequests(ctx, organizationId, ctx.workspaceId, nodeId, query),
       traceId,
     );
   } catch (err) {

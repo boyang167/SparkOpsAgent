@@ -439,6 +439,107 @@ func TestListNodeResourceGrantsLimitedBoundsAndFiltersInheritedRows(t *testing.T
 	require.True(t, inherited[0].InheritToChildren)
 }
 
+func TestListGovernanceGrantsPageUsesStableDatabaseCursor(t *testing.T) {
+	repo, db := newTestRepository(t)
+	concrete := repo.(*Repository)
+	namespace := seedNamespace(t, db)
+	node := rootDirectory(namespace.ID, "grant-pages")
+	require.NoError(t, repo.CreateNode(context.Background(), node))
+	principalID := uuid.New()
+	ids := []uuid.UUID{
+		uuid.MustParse("10000000-0000-4000-8000-000000000001"),
+		uuid.MustParse("20000000-0000-4000-8000-000000000002"),
+		uuid.MustParse("30000000-0000-4000-8000-000000000003"),
+	}
+	permissions := []model.ResourcePermission{
+		model.ResourcePermissionRead, model.ResourcePermissionDownload, model.ResourcePermissionWrite,
+	}
+	for index, id := range ids {
+		require.NoError(t, repo.CreateResourceGrant(context.Background(), model.ResourceGrant{
+			ID: id, NodeID: node.ID, OrganizationID: namespace.OrganizationID,
+			GranteeID: principalID, PrincipalType: model.PrincipalUser, PrincipalID: principalID,
+			Permission: permissions[index], Effect: model.GrantEffectAllow,
+		}))
+	}
+
+	first, err := concrete.ListGovernanceGrantsPage(context.Background(), repository.GovernanceGrantPageQuery{
+		OrganizationID: namespace.OrganizationID, NamespaceID: namespace.ID,
+		NodeID: node.ID, Limit: 2,
+	})
+	require.NoError(t, err)
+	require.Equal(t, ids[:2], []uuid.UUID{first[0].Grant.ID, first[1].Grant.ID})
+	second, err := concrete.ListGovernanceGrantsPage(context.Background(), repository.GovernanceGrantPageQuery{
+		OrganizationID: namespace.OrganizationID, NamespaceID: namespace.ID,
+		NodeID: node.ID, AfterID: first[1].Grant.ID, Limit: 2,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{ids[2]}, []uuid.UUID{second[0].Grant.ID})
+}
+
+func TestListValidReshareProofGrantsRejectsInvalidGrantClaims(t *testing.T) {
+	repo, db := newTestRepository(t)
+	concrete := repo.(*Repository)
+	namespace := seedNamespace(t, db)
+	parent := rootDirectory(namespace.ID, "proof-parent")
+	require.NoError(t, repo.CreateNode(context.Background(), parent))
+	child, err := model.NewFile(namespace.ID, uuid.New(), "proof.txt", parent.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(context.Background(), child))
+
+	userID, workspaceID, roleID, expiredRoleID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	now := time.Now().UTC()
+	expiredAt, revokedAt := now.Add(-time.Hour), now.Add(-time.Minute)
+	validID, inheritedID := uuid.New(), uuid.New()
+	readID, otherID, crossOrgID, revokedID, expiredID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	rows := []resourceGrantRow{
+		{ID: validID, NodeID: child.ID, OrganizationID: namespace.OrganizationID, GranteeID: userID, PrincipalType: model.PrincipalUser, PrincipalID: userID, Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow},
+		{ID: inheritedID, NodeID: parent.ID, OrganizationID: namespace.OrganizationID, GranteeID: userID, PrincipalType: model.PrincipalUser, PrincipalID: userID, Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow, InheritToChildren: true},
+		{ID: readID, NodeID: child.ID, OrganizationID: namespace.OrganizationID, GranteeID: userID, PrincipalType: model.PrincipalUser, PrincipalID: userID, Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow},
+		{ID: otherID, NodeID: child.ID, OrganizationID: namespace.OrganizationID, GranteeID: uuid.New(), PrincipalType: model.PrincipalUser, PrincipalID: uuid.New(), Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow},
+		{ID: crossOrgID, NodeID: child.ID, OrganizationID: uuid.New(), GranteeID: roleID, PrincipalType: model.PrincipalRole, PrincipalID: roleID, Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow},
+		{ID: revokedID, NodeID: child.ID, OrganizationID: namespace.OrganizationID, GranteeID: workspaceID, PrincipalType: model.PrincipalWorkspace, PrincipalID: workspaceID, Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow, RevokedAt: &revokedAt},
+		{ID: expiredID, NodeID: child.ID, OrganizationID: namespace.OrganizationID, GranteeID: expiredRoleID, PrincipalType: model.PrincipalRole, PrincipalID: expiredRoleID, Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow, ExpiresAt: &expiredAt},
+	}
+	for _, row := range rows {
+		require.NoError(t, db.Create(&row).Error)
+	}
+	principals := []repository.PrincipalRef{
+		{Type: model.PrincipalUser, ID: userID},
+		{Type: model.PrincipalWorkspace, ID: workspaceID},
+		{Type: model.PrincipalRole, ID: roleID},
+		{Type: model.PrincipalRole, ID: expiredRoleID},
+	}
+	query := repository.ReshareProofQuery{
+		OrganizationID: namespace.OrganizationID, NamespaceID: namespace.ID,
+		NodeID: child.ID, Principals: principals, At: now,
+	}
+
+	for _, tt := range []struct {
+		name  string
+		id    uuid.UUID
+		valid bool
+	}{
+		{name: "direct share", id: validID, valid: true},
+		{name: "inherited share", id: inheritedID, valid: true},
+		{name: "read only", id: readID},
+		{name: "other principal", id: otherID},
+		{name: "cross organization", id: crossOrgID},
+		{name: "revoked", id: revokedID},
+		{name: "expired", id: expiredID},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			query.GrantIDs = []uuid.UUID{tt.id}
+			grants, queryErr := concrete.ListValidReshareProofGrants(context.Background(), query)
+			require.NoError(t, queryErr)
+			if tt.valid {
+				require.Equal(t, []uuid.UUID{tt.id}, []uuid.UUID{grants[0].ID})
+			} else {
+				require.Empty(t, grants)
+			}
+		})
+	}
+}
+
 func TestGetCommandConvertsNotFoundPrecisely(t *testing.T) {
 	repo, _ := newTestRepository(t)
 

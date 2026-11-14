@@ -37,10 +37,12 @@ export type ShareFileModalProps = {
   members: WorkspaceMemberVM[];
   memberDirectoryAvailable?: boolean;
   effectiveActions: GovernedPermission[];
+  reshareSourceGrantIds?: string[];
   onClose: () => void;
 };
 
 type SuccessState = "ACTIVE" | "PENDING_APPROVAL";
+const EMPTY_RESHARE_SOURCE_GRANT_IDS: string[] = [];
 
 function idempotencyKey() {
   return `share-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
@@ -72,6 +74,7 @@ export function ShareFileModal({
   members,
   memberDirectoryAvailable = true,
   effectiveActions,
+  reshareSourceGrantIds = EMPTY_RESHARE_SOURCE_GRANT_IDS,
   onClose,
 }: ShareFileModalProps): ReactElement {
   const [step, setStep] = useState<1 | 2>(1);
@@ -132,8 +135,11 @@ export function ShareFileModal({
         effect: form.effect,
         inherit_to_children: node.type === "DIRECTORY" ? form.inheritToChildren : false,
         expires_at: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
+        ...(reshareSourceGrantIds.length > 0
+          ? { reshare: true, source_grant_ids: reshareSourceGrantIds }
+          : {}),
       }
-    : null, [form, node.type, selected]);
+    : null, [form, node.type, reshareSourceGrantIds, selected]);
   const fingerprint = input ? canonicalSharePayload(input) : "";
 
   useEffect(() => {

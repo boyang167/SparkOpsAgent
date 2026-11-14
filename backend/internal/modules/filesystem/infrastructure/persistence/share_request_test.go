@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 )
 
@@ -51,6 +52,17 @@ func TestShareRequestRepositoryPersistsAndReviewsWithCAS(t *testing.T) {
 	limited, err := repo.ListShareRequestsForNodeLimited(context.Background(), node.ID, 1)
 	require.NoError(t, err)
 	require.Equal(t, []uuid.UUID{newer.ID}, []uuid.UUID{limited[0].ID})
+	page1, err := repo.ListShareRequestsPage(context.Background(), repository.ShareRequestPageQuery{
+		OrganizationID: namespace.OrganizationID, NodeID: node.ID, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, newer.ID, page1[0].ID)
+	page2, err := repo.ListShareRequestsPage(context.Background(), repository.ShareRequestPageQuery{
+		OrganizationID: namespace.OrganizationID, NodeID: node.ID,
+		AfterCreatedAt: page1[0].CreatedAt, AfterID: page1[0].ID, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, request.ID, page2[0].ID)
 
 	reviewer, reviewedAt := uuid.New(), time.Now().UTC()
 	stored.Status, stored.ReviewedBy, stored.ReviewedAt = model.ShareRequestApproved, &reviewer, &reviewedAt

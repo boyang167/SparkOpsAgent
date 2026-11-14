@@ -11,6 +11,7 @@ import type {
   FileNodeVM,
   FileRevisionPageVM,
   GovernedGrantPageVM,
+  GovernanceMetadataQuery,
   GovernedShareSubmissionVM,
   EffectiveAccessVM,
   LifecyclePolicyPageVM,
@@ -268,9 +269,14 @@ export function previewGovernedShare(
 export function listGovernedGrants(
   nodeId: string,
   options: GovernedFilesystemFetchOptions,
+  query: GovernanceMetadataQuery = {},
 ) {
+  const params = new URLSearchParams();
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit) params.set("limit", String(query.limit));
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return bffFetch<GovernedGrantPageVM>(
-    `/filesystem/nodes/${encodeURIComponent(nodeId)}/grants`,
+    `/filesystem/nodes/${encodeURIComponent(nodeId)}/grants${suffix}`,
     {
       ...governedFetchOptions(options),
       method: "GET",
@@ -281,9 +287,14 @@ export function listGovernedGrants(
 export function listShareRequests(
   nodeId: string,
   options: GovernedFilesystemFetchOptions,
+  query: GovernanceMetadataQuery = {},
 ) {
+  const params = new URLSearchParams();
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit) params.set("limit", String(query.limit));
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return bffFetch<ShareRequestPageVM>(
-    `/filesystem/nodes/${encodeURIComponent(nodeId)}/share-requests`,
+    `/filesystem/nodes/${encodeURIComponent(nodeId)}/share-requests${suffix}`,
     {
       ...governedFetchOptions(options),
       method: "GET",

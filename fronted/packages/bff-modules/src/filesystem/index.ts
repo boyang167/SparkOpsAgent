@@ -13,6 +13,7 @@ import type {
   FileRevisionPageVM,
   GovernedChildrenQuery,
   GovernedGrantPageVM,
+  GovernanceMetadataQuery,
   GovernedShareSubmissionVM,
   EffectiveAccessVM,
   LifecyclePolicyPageVM,
@@ -364,10 +365,12 @@ export async function listGovernedGrants(
   organizationId: string,
   workspaceId: string | undefined,
   nodeId: string,
+  query: GovernanceMetadataQuery = {},
 ): Promise<GovernedGrantPageVM> {
   const data = await ctx.upstream.filesystem.listGovernedGrants(
     governedContext(organizationId, workspaceId),
     nodeId,
+    query,
   );
   return GovernedGrantPageVMSchema.parse(data);
 }
@@ -377,10 +380,12 @@ export async function listShareRequests(
   organizationId: string,
   workspaceId: string | undefined,
   nodeId: string,
+  query: GovernanceMetadataQuery = {},
 ): Promise<ShareRequestPageVM> {
   const data = await ctx.upstream.filesystem.listShareRequests(
     governedContext(organizationId, workspaceId),
     nodeId,
+    query,
   );
   return ShareRequestPageVMSchema.parse(data);
 }

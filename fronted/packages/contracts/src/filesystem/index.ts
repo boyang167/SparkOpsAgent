@@ -438,6 +438,7 @@ export type GovernedGrantVM = z.infer<typeof GovernedGrantVMSchema>;
 export const GovernedGrantPageVMSchema = z.object({
   items: z.array(GovernedGrantVMSchema),
   classification: TransferClassificationSchema.optional(),
+  next_cursor: z.string(),
   truncated: z.boolean(),
 });
 export type GovernedGrantPageVM = z.infer<typeof GovernedGrantPageVMSchema>;
@@ -510,6 +511,16 @@ export const CreateGovernedGrantCommandSchema = z.object({
   effect: GrantEffectSchema.optional(),
   inherit_to_children: z.boolean().optional(),
   expires_at: z.string().datetime({ offset: true }).nullable().optional(),
+  reshare: z.boolean().optional(),
+  source_grant_ids: z.array(z.string().uuid()).min(1).optional(),
+}).superRefine((value, ctx) => {
+  if (Boolean(value.reshare) !== Boolean(value.source_grant_ids?.length)) {
+    ctx.addIssue({
+      code: "custom",
+      message: "reshare and source_grant_ids must be provided together",
+      path: ["source_grant_ids"],
+    });
+  }
 });
 export type CreateGovernedGrantCommand = z.infer<typeof CreateGovernedGrantCommandSchema>;
 
@@ -550,9 +561,16 @@ export type ShareRequestVM = z.infer<typeof ShareRequestVMSchema>;
 
 export const ShareRequestPageVMSchema = z.object({
   items: z.array(ShareRequestVMSchema),
+  next_cursor: z.string(),
   truncated: z.boolean(),
 });
 export type ShareRequestPageVM = z.infer<typeof ShareRequestPageVMSchema>;
+
+export const GovernanceMetadataQuerySchema = z.object({
+  cursor: z.string().trim().min(1).max(512).optional(),
+  limit: z.coerce.number().int().min(1).transform((value) => Math.min(value, 200)).optional(),
+});
+export type GovernanceMetadataQuery = z.infer<typeof GovernanceMetadataQuerySchema>;
 
 export const GovernedShareResultVMSchema = z.object({
   request: ShareRequestVMSchema,

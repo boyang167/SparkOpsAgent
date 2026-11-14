@@ -12,6 +12,7 @@ import type {
   FileRevisionPageVM,
   GovernedChildrenQuery,
   GovernedGrantPageVM,
+  GovernanceMetadataQuery,
   GovernedShareSubmissionVM,
   EffectiveAccessVM,
   LifecyclePolicyPageVM,
@@ -91,6 +92,14 @@ function sharedWithMeQuery(query: SharedWithMeQuery = {}) {
   if (query.q) params.set("q", query.q);
   if (query.cursor) params.set("cursor", query.cursor);
   if (query.limit != null) params.set("limit", String(query.limit));
+  const suffix = params.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
+function governanceMetadataQuery(query: GovernanceMetadataQuery = {}) {
+  const params = new URLSearchParams();
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit) params.set("limit", String(query.limit));
   const suffix = params.toString();
   return suffix ? `?${suffix}` : "";
 }
@@ -183,9 +192,13 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
         },
       );
     },
-    listGovernedGrants(context: GovernedFilesystemContext, nodeId: string) {
+    listGovernedGrants(
+      context: GovernedFilesystemContext,
+      nodeId: string,
+      query: GovernanceMetadataQuery = {},
+    ) {
       return upstreamFetch<GovernedGrantPageVM>(
-        `/api/v1/filesystem/nodes/${encodeURIComponent(nodeId)}/grants`,
+        `/api/v1/filesystem/nodes/${encodeURIComponent(nodeId)}/grants${governanceMetadataQuery(query)}`,
         {
           method: "GET",
           headers: governedHeaders(context),
@@ -193,9 +206,13 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
         },
       );
     },
-    listShareRequests(context: GovernedFilesystemContext, nodeId: string) {
+    listShareRequests(
+      context: GovernedFilesystemContext,
+      nodeId: string,
+      query: GovernanceMetadataQuery = {},
+    ) {
       return upstreamFetch<ShareRequestPageVM>(
-        `/api/v1/filesystem/nodes/${encodeURIComponent(nodeId)}/share-requests`,
+        `/api/v1/filesystem/nodes/${encodeURIComponent(nodeId)}/share-requests${governanceMetadataQuery(query)}`,
         {
           method: "GET",
           headers: governedHeaders(context),

@@ -142,6 +142,7 @@ describe("FileDetailDrawer", () => {
         inherit_to_children: true,
         source: "INHERITED",
       }],
+      next_cursor: "",
       truncated: false,
     });
     sdk.listShareRequests.mockResolvedValue({
@@ -160,6 +161,7 @@ describe("FileDetailDrawer", () => {
         status: "PENDING",
         created_at: "2026-11-15T00:00:00Z",
       }],
+      next_cursor: "",
       truncated: false,
     });
   });
@@ -224,6 +226,48 @@ describe("FileDetailDrawer", () => {
     expect(screen.getByText(/2026-12-31/)).toBeInTheDocument();
     expect(screen.getByText("等待审批")).toBeInTheDocument();
     expect(screen.getByText("显式拒绝 · DELETE")).toBeInTheDocument();
+  });
+
+  it("loads subsequent governance pages without duplicating records", async () => {
+    const firstGrant = {
+      id: "00000000-0000-4000-8000-000000000061",
+      node_id: file.id,
+      grantee_id: "00000000-0000-4000-8000-000000000073",
+      principal_type: "WORKSPACE" as const,
+      principal_id: "00000000-0000-4000-8000-000000000073",
+      permission: "READ" as const,
+      effect: "ALLOW" as const,
+      inherit_to_children: false,
+      source: "DIRECT" as const,
+    };
+    const secondGrant = {
+      ...firstGrant,
+      id: "00000000-0000-4000-8000-000000000063",
+      permission: "SHARE" as const,
+    };
+    sdk.listGovernedGrants
+      .mockResolvedValueOnce({
+        items: [firstGrant],
+        next_cursor: "grant-page-2",
+        truncated: true,
+      })
+      .mockResolvedValueOnce({
+        items: [firstGrant, secondGrant],
+        next_cursor: "",
+        truncated: false,
+      });
+    render(drawer());
+    await userEvent.click(screen.getByRole("tab", { name: "共享与权限" }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "加载更多" }));
+    expect(await screen.findByText("SHARE")).toBeInTheDocument();
+    expect(screen.getAllByText("READ")).toHaveLength(1);
+    expect(sdk.listGovernedGrants).toHaveBeenLastCalledWith(
+      file.id,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      { cursor: "grant-page-2" },
+    );
+    expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
   });
 
   it("shows governance metadata as restricted on 403 without leaking grants", async () => {
