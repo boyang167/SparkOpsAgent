@@ -11,6 +11,10 @@ const navigation = vi.hoisted(() => ({
   searchParams: new URLSearchParams(),
 }));
 
+const explorer = vi.hoisted(() => ({
+  views: [] as string[],
+}));
+
 vi.mock("next/navigation", () => ({
   usePathname: () => "/files",
   useRouter: () => ({ replace: navigation.replace }),
@@ -18,7 +22,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("./FileExplorerPanel", () => ({
-  FileExplorerPanel: () => null,
+  FileExplorerPanel: ({ view }: { view: string }) => {
+    explorer.views.push(view);
+    return null;
+  },
 }));
 
 const namespace = {
@@ -41,11 +48,15 @@ function renderWorkbench(permissions: string[] = ["file:read"]) {
 }
 
 describe("FilesystemWorkbench", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   beforeEach(() => {
     navigation.replace.mockReset();
     navigation.searchParams = new URLSearchParams();
+    explorer.views = [];
   });
 
   it("selects files and hides governance without storage read permission", () => {
@@ -85,6 +96,7 @@ describe("FilesystemWorkbench", () => {
 
   it("changes only the view query parameter from the files toolbar", () => {
     navigation.searchParams = new URLSearchParams("q=report&tab=files");
+    const replaceState = vi.spyOn(window.history, "replaceState");
     renderWorkbench();
 
     expect(screen.getByRole("button", { name: "列表视图" })).toHaveAttribute(
@@ -95,7 +107,14 @@ describe("FilesystemWorkbench", () => {
     expect(gridButton).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(gridButton);
 
-    expect(navigation.replace).toHaveBeenCalledWith("/files?q=report&tab=files&view=grid");
+    expect(gridButton).toHaveAttribute("aria-pressed", "true");
+    expect(explorer.views.at(-1)).toBe("grid");
+    expect(replaceState).toHaveBeenCalledWith(
+      null,
+      "",
+      "/files?q=report&tab=files&view=grid",
+    );
+    expect(navigation.replace).not.toHaveBeenCalled();
   });
 
   it("selects the next visible tab with ArrowRight", () => {

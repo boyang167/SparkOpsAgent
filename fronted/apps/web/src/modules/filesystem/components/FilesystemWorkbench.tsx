@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { createElement } from "react";
+import { createElement, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { FileNamespaceVM, FileNodeVM } from "@sparkops/contracts/filesystem";
 import { FileExplorerPanel } from "./FileExplorerPanel";
@@ -36,6 +36,7 @@ export function FilesystemWorkbench({
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [view, setView] = useState<FileView>(initialState.view);
   const visibleTabs = tabs.filter(
     (tab) => !tab.permission || permissions.includes(tab.permission),
   );
@@ -49,10 +50,11 @@ export function FilesystemWorkbench({
     router.replace(`${pathname}?${nextSearchParams.toString()}`);
   }
 
-  function selectView(view: FileView) {
+  function selectView(nextView: FileView) {
     const nextSearchParams = new URLSearchParams(searchParams.toString());
-    nextSearchParams.set("view", view);
-    router.replace(`${pathname}?${nextSearchParams.toString()}`);
+    nextSearchParams.set("view", nextView);
+    setView(nextView);
+    window.history.replaceState(null, "", `${pathname}?${nextSearchParams.toString()}`);
   }
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, tabIndex: number) {
@@ -99,7 +101,7 @@ export function FilesystemWorkbench({
           namespaceId: namespace.id,
           parentId: initialState.parent ?? namespace.root_node_id,
           initialNodes,
-          view: initialState.view,
+          view,
         })
       : createElement("div", { className: "empty-state" }, "此功能将在后续任务中接入。");
 
@@ -120,9 +122,9 @@ export function FilesystemWorkbench({
             {
               type: "button",
               className:
-                initialState.view === "list" ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm",
+                view === "list" ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm",
               "aria-label": "列表视图",
-              "aria-pressed": initialState.view === "list",
+              "aria-pressed": view === "list",
               onClick: () => selectView("list"),
             },
             createElement("span", { "aria-hidden": true }, "☰"),
@@ -132,9 +134,9 @@ export function FilesystemWorkbench({
             {
               type: "button",
               className:
-                initialState.view === "grid" ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm",
+                view === "grid" ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm",
               "aria-label": "网格视图",
-              "aria-pressed": initialState.view === "grid",
+              "aria-pressed": view === "grid",
               onClick: () => selectView("grid"),
             },
             createElement("span", { "aria-hidden": true }, "▦"),

@@ -7,6 +7,12 @@ import type { FileNodeVM } from "@sparkops/contracts/filesystem";
 import { createDirectoryNode } from "@sparkops/web-sdk/filesystem";
 import { FileBrowser } from "./FileBrowser";
 import { createPanelRenameHandler, submitPanelRename } from "./file-explorer-panel-rename";
+import {
+  createFileBrowserMoveAdapter,
+  type FileExplorerDialog,
+  showCreateDialog,
+  showRenameDialog,
+} from "./file-explorer-panel-state";
 import { UploadPanel } from "./UploadPanel";
 import type { FileView } from "./workbench-state";
 
@@ -45,9 +51,8 @@ export function FileExplorerPanel({
   const router = useRouter();
   const [nodes, setNodes] = useState(initialNodes);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [renameTarget, setRenameTarget] = useState<FileNodeVM | null>(null);
+  const [dialog, setDialog] = useState<FileExplorerDialog>(null);
   const [renameValue, setRenameValue] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +61,7 @@ export function FileExplorerPanel({
     () => createPanelRenameHandler(workspaceId, onRename),
     [onRename, workspaceId],
   );
+  const moveAdapter = useMemo(() => createFileBrowserMoveAdapter(onMove), [onMove]);
 
   const doCreateDirectory = useCallback(
     async (name: string): Promise<FileNodeVM | void> => {
@@ -73,15 +79,15 @@ export function FileExplorerPanel({
   );
 
   async function submitRename() {
-    if (!renameTarget || !renameValue.trim()) return;
+    if (dialog?.type !== "rename" || !renameValue.trim()) return;
     setPending(true);
     setError(null);
     try {
-      const nextName = await submitPanelRename(renameTarget.id, renameValue, doRename);
+      const nextName = await submitPanelRename(dialog.node.id, renameValue, doRename);
       setNodes((current) =>
-        current.map((node) => (node.id === renameTarget.id ? { ...node, name: nextName } : node)),
+        current.map((node) => (node.id === dialog.node.id ? { ...node, name: nextName } : node)),
       );
-      setRenameTarget(null);
+      setDialog(null);
       setRenameValue("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "重命名失败");
@@ -101,7 +107,7 @@ export function FileExplorerPanel({
       } else {
         onNavigate?.();
       }
-      setCreateOpen(false);
+      setDialog(null);
       setCreateName("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建目录失败");
@@ -131,7 +137,7 @@ export function FileExplorerPanel({
           type="button"
           className="btn btn-secondary"
           onClick={() => {
-            setCreateOpen(true);
+            setDialog(showCreateDialog());
             setCreateName("");
           }}
         >
@@ -159,13 +165,14 @@ export function FileExplorerPanel({
           )
         }
         onRename={(node) => {
-          setRenameTarget(node);
+          setDialog(showRenameDialog(node));
           setRenameValue(node.name);
         }}
-        onMove={onMove ? (node) => onMove(node.id) : undefined}
+        onMove={moveAdapter.onMove}
+        canMove={moveAdapter.canMove}
       />
 
-      {renameTarget ? (
+      {dialog?.type === "rename" ? (
         <div className="card stack-sm max-w-md" role="dialog" aria-labelledby="rename-title">
           <h3 id="rename-title" className="font-semibold">
             重命名
@@ -183,7 +190,7 @@ export function FileExplorerPanel({
               type="button"
               className="btn btn-ghost"
               disabled={pending}
-              onClick={() => setRenameTarget(null)}
+              onClick={() => setDialog(null)}
             >
               取消
             </button>
@@ -199,7 +206,7 @@ export function FileExplorerPanel({
         </div>
       ) : null}
 
-      {createOpen ? (
+      {dialog?.type === "create" ? (
         <div className="card stack-sm max-w-md" role="dialog" aria-labelledby="mkdir-title">
           <h3 id="mkdir-title" className="font-semibold">
             新建目录
@@ -217,7 +224,7 @@ export function FileExplorerPanel({
               type="button"
               className="btn btn-ghost"
               disabled={pending}
-              onClick={() => setCreateOpen(false)}
+              onClick={() => setDialog(null)}
             >
               取消
             </button>

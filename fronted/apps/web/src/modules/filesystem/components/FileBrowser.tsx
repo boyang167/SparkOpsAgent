@@ -13,7 +13,8 @@ export type FileBrowserProps = {
   onSelectionChange: (selectedIds: string[]) => void;
   onOpen: (node: FileNodeVM) => void;
   onRename: (node: FileNodeVM) => void;
-  onMove?: (node: FileNodeVM) => void;
+  onMove: (node: FileNodeVM) => void;
+  canMove?: boolean;
 };
 
 export function sortFileNodes(nodes: FileNodeVM[]) {
@@ -31,6 +32,7 @@ export function FileBrowser({
   onOpen,
   onRename,
   onMove,
+  canMove = true,
 }: FileBrowserProps) {
   const [selection, setSelection] = useState(() => new Set(selectedIds));
   const sortedNodes = useMemo(() => sortFileNodes(nodes), [nodes]);
@@ -61,6 +63,7 @@ export function FileBrowser({
     onOpen,
     onRename,
     onMove,
+    canMove,
   };
 
   return createElement(view === "grid" ? FileGridView : FileListView, viewProps);

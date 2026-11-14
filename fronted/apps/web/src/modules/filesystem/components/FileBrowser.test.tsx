@@ -101,4 +101,11 @@ describe("FileBrowser", () => {
     expect(props.onRename).toHaveBeenCalledWith(nodes[1]);
     expect(props.onMove).toHaveBeenCalledWith(nodes[1]);
   });
+
+  it("hides move actions when the compatibility adapter disables the capability", () => {
+    const props = createProps();
+    render(createElement(FileBrowser, { ...props, canMove: false }));
+
+    expect(screen.queryByRole("button", { name: /^移动 / })).not.toBeInTheDocument();
+  });
 });

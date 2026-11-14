@@ -7,7 +7,8 @@ export type FileListViewProps = {
   onSelectionChange: (nodeId: string, selected: boolean) => void;
   onOpen: (node: FileNodeVM) => void;
   onRename: (node: FileNodeVM) => void;
-  onMove?: (node: FileNodeVM) => void;
+  onMove: (node: FileNodeVM) => void;
+  canMove: boolean;
 };
 
 export function FileListView({
@@ -17,6 +18,7 @@ export function FileListView({
   onOpen,
   onRename,
   onMove,
+  canMove,
 }: FileListViewProps) {
   return createElement(
     "div",
@@ -85,7 +87,7 @@ export function FileListView({
                 },
                 "重命名",
               ),
-              onMove
+              canMove
                 ? createElement(
                     "button",
                     {

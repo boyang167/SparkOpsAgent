@@ -7,7 +7,8 @@ export type FileGridViewProps = {
   onSelectionChange: (nodeId: string, selected: boolean) => void;
   onOpen: (node: FileNodeVM) => void;
   onRename: (node: FileNodeVM) => void;
-  onMove?: (node: FileNodeVM) => void;
+  onMove: (node: FileNodeVM) => void;
+  canMove: boolean;
 };
 
 export function FileGridView({
@@ -17,6 +18,7 @@ export function FileGridView({
   onOpen,
   onRename,
   onMove,
+  canMove,
 }: FileGridViewProps) {
   return createElement(
     "ul",
@@ -63,7 +65,7 @@ export function FileGridView({
             },
             "重命名",
           ),
-          onMove
+          canMove
             ? createElement(
                 "button",
                 {
