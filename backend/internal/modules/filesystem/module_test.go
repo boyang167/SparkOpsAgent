@@ -175,6 +175,10 @@ func TestRegisterExposesMetadataRoutesWithoutLocalProvider(t *testing.T) {
 	}
 	require.True(t, routes["GET /api/v1/workspaces/:wsId/files"])
 	require.True(t, routes["POST /api/v1/workspaces/:wsId/directories"])
+	require.True(t, routes["GET /api/v1/filesystem/namespaces"])
+	require.True(t, routes["GET /api/v1/filesystem/namespaces/:namespaceId/children"])
+	require.True(t, routes["GET /api/v1/filesystem/shared-with-me"])
+	require.True(t, routes["GET /api/v1/filesystem/nodes/:nodeId/effective-access"])
 	require.False(t, routes["POST /api/v1/workspaces/:wsId/files"], "upload is deferred to G2")
 	require.NotNil(t, container.FilesystemGrantPort)
 	repo := persistence.NewRepository(db)

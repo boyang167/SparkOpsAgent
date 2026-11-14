@@ -3,6 +3,7 @@ package authorization
 import (
 	"context"
 	"errors"
+	"sort"
 	"strconv"
 	"time"
 
@@ -35,10 +36,11 @@ type Request struct {
 }
 
 type Decision struct {
-	Allowed       bool
-	Reason        string
-	PolicyVersion int64
-	CacheKey      AuthorizationCacheKey
+	Allowed        bool
+	Reason         string
+	PolicyVersion  int64
+	CacheKey       AuthorizationCacheKey
+	SourceGrantIDs []uuid.UUID
 }
 
 type AuthorizationCacheKey struct {
@@ -99,6 +101,7 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 		return denied("resource_not_found")
 	}
 	relations := make([]domainservice.Relation, 0)
+	sourceGrantIDs := make(map[uuid.UUID]struct{})
 	for current := node; current != nil; {
 		permissions := []model.ResourcePermission{request.Permission}
 		if request.Permission != model.ResourcePermissionAdmin {
@@ -118,6 +121,7 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 					Permission: grant.Permission, Source: domainservice.SourceGrant, PolicyID: grant.ID.String(),
 					PolicyVersion: strconv.FormatInt(grant.PolicyVersion, 10),
 				})
+				sourceGrantIDs[grant.ID] = struct{}{}
 			}
 		}
 		if current.ParentID == nil {
@@ -157,7 +161,19 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 	}, relations...)
 	decision.Allowed = decided.Result == domainservice.DecisionAllow
 	decision.Reason = decided.ReasonCode
+	decision.SourceGrantIDs = sortedGrantIDs(sourceGrantIDs)
 	return decision
+}
+
+func sortedGrantIDs(ids map[uuid.UUID]struct{}) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(ids))
+	for id := range ids {
+		if id != uuid.Nil {
+			out = append(out, id)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
+	return out
 }
 
 func (s *Service) hasNamespaceAuthority(ctx context.Context, namespace *model.Namespace, request Request) (bool, error) {

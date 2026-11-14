@@ -1,3 +1,54 @@
+# Task 5 Report
+
+## Status
+
+Implemented unified governed filesystem query APIs:
+
+- `GET /api/v1/filesystem/namespaces`
+- `GET /api/v1/filesystem/namespaces/:namespaceId/children`
+- `GET /api/v1/filesystem/shared-with-me`
+- `GET /api/v1/filesystem/nodes/:nodeId/effective-access`
+
+The legacy `/api/v1/workspaces/:wsId` routes remain unchanged.
+
+## Security and authorization
+
+- Requires canonical `X-Organization-ID`; missing or malformed values return `400`.
+- Accepts optional canonical `X-Workspace-ID`; workspace membership and organization ownership are resolved authoritatively, with invalid audience returning `403`.
+- Namespace organization/type/owner/workspace audience is checked before query execution.
+- Unauthorized namespace or parent discovery is concealed with `404`.
+- Effective access reuses the Task 4 authorizer and principal resolver; no parallel authorization path was introduced.
+- Organization namespace summaries expose only authorized subtree entry IDs when the root is not visible.
+
+## Query implementation
+
+- Shared-with-me filtering is performed in two bounded repository queries rather than tenant-wide N+1 traversal.
+- Repository filtering uses typed `(principal_type, principal_id)` pairs, organization scope, active/non-expired grants, stable node-ID cursors, query filtering, node deduplication, action union, and global deny precedence.
+- Effective access returns decision, effective actions, reason code, source grant IDs, policy version, and cache key.
+
+## TDD evidence
+
+RED was observed before implementation for:
+
+- query handlers (missing governance query types/handlers),
+- repository shared query (missing `ListSharedNodes`),
+- HTTP governance routes (missing handler/registration),
+- module route wiring,
+- OpenAPI governance headers,
+- denied source-grant propagation.
+
+GREEN verification:
+
+- `go test ./internal/modules/filesystem/application/query -run "Namespace|Shared|Effective" -count=1`
+- `go test ./internal/modules/filesystem/interface/http -run Governance -count=1`
+- `go test ./internal/modules/filesystem/infrastructure/persistence -run "ListSharedNodes" -count=1`
+- `go test ./internal/modules/filesystem/... -count=1`
+- `go test ./api/openapi -count=1`
+- OpenAPI root external-reference load and validation are covered by the OpenAPI test suite.
+
+## Concerns
+
+None known.
 # Task 5 报告：多文件上传与统一传输队列
 
 ## 状态

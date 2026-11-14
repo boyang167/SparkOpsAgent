@@ -66,6 +66,20 @@ type PrincipalRef struct {
 	ID   uuid.UUID
 }
 
+type SharedNode struct {
+	Node             model.Node
+	EffectiveActions []model.ResourcePermission
+	SourceGrantIDs   []uuid.UUID
+}
+
+type SharedNodeFilter struct {
+	NamespaceID uuid.UUID
+	Query       string
+	Cursor      string
+	Limit       int
+	Principals  []PrincipalRef
+}
+
 type QuotaReservation struct {
 	ID             uuid.UUID
 	QuotaAccountID uuid.UUID

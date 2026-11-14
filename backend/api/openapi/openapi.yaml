@@ -142,6 +142,15 @@ paths:
   /api/v1/projects/{projectId}/pods/{podId}/terminal/stream:
     $ref: "./runtime.yaml#/paths/~1api~1v1~1projects~1{projectId}~1pods~1{podId}~1terminal~1stream"
 
+  /api/v1/filesystem/namespaces:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1filesystem~1namespaces"
+  /api/v1/filesystem/namespaces/{namespaceId}/children:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1filesystem~1namespaces~1{namespaceId}~1children"
+  /api/v1/filesystem/shared-with-me:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1filesystem~1shared-with-me"
+  /api/v1/filesystem/nodes/{nodeId}/effective-access:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1filesystem~1nodes~1{nodeId}~1effective-access"
+
   /api/v1/workspaces/{wsId}/namespaces:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1namespaces"
   /api/v1/workspaces/{wsId}/files:
@@ -166,8 +175,12 @@ paths:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1transfers~1{sessionId}"
   /api/v1/workspaces/{wsId}/storage-providers:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1storage-providers"
+  /api/v1/workspaces/{wsId}/storage-providers/{providerId}:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1storage-providers~1{providerId}"
   /api/v1/workspaces/{wsId}/storage-pools:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1storage-pools"
+  /api/v1/workspaces/{wsId}/storage-pools/{poolId}:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1storage-pools~1{poolId}"
   /api/v1/workspaces/{wsId}/storage-bindings:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1storage-bindings"
   /api/v1/workspaces/{wsId}/lifecycle-policies:

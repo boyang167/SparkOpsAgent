@@ -81,6 +81,29 @@ func TestFilesystemListOpenAPIDocumentsTypeAndQueryFilters(t *testing.T) {
 	require.Contains(t, names, "q")
 }
 
+func TestFilesystemGovernanceOpenAPIDocumentsContextHeaders(t *testing.T) {
+	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &document))
+
+	paths := document["paths"].(map[string]any)
+	for _, path := range []string{
+		"/api/v1/filesystem/namespaces",
+		"/api/v1/filesystem/namespaces/{namespaceId}/children",
+		"/api/v1/filesystem/shared-with-me",
+		"/api/v1/filesystem/nodes/{nodeId}/effective-access",
+	} {
+		operation := paths[path].(map[string]any)["get"].(map[string]any)
+		require.True(t, operationHasRef(operation, "#/components/parameters/OrganizationHeader"), path)
+		require.True(t, operationHasRef(operation, "#/components/parameters/WorkspaceHeader"), path)
+	}
+	components := document["components"].(map[string]any)
+	parameters := components["parameters"].(map[string]any)
+	require.Equal(t, true, parameters["OrganizationHeader"].(map[string]any)["required"])
+	require.Equal(t, false, parameters["WorkspaceHeader"].(map[string]any)["required"])
+}
+
 func TestFilesystemOpenAPIIdempotencyAndLocalRefs(t *testing.T) {
 	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
 	require.NoError(t, err)
@@ -238,6 +261,21 @@ func (openAPIMembers) IsWorkspaceMember(context.Context, kernel.WorkspaceID, ker
 	return true, nil
 }
 
+type openAPIOrganizations struct{}
+
+func (openAPIOrganizations) IsOrgMember(context.Context, kernel.OrgID, kernel.MemberID) (bool, error) {
+	return true, nil
+}
+func (openAPIOrganizations) HasOrgPermission(context.Context, kernel.OrgID, kernel.MemberID, string) (bool, error) {
+	return true, nil
+}
+
+type openAPIWorkspaceAccess struct{}
+
+func (openAPIWorkspaceAccess) ResolveWorkspaceAccess(context.Context, kernel.WorkspaceID, kernel.MemberID) (kernel.OrgID, bool, error) {
+	return kernel.OrgID{}, true, nil
+}
+
 func TestFilesystemSpecificationExactlyMatchesRouter(t *testing.T) {
 	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
 	require.NoError(t, err)
@@ -253,16 +291,20 @@ func TestFilesystemSpecificationExactlyMatchesRouter(t *testing.T) {
 
 	engine := gin.New()
 	pass := func(c *gin.Context) { c.Next() }
+	filesystemhttp.RegisterGovernanceRoutes(engine, pass, pass, openAPIOrganizations{}, openAPIWorkspaceAccess{}, &filesystemhttp.GovernanceHandler{})
 	filesystemhttp.RegisterRoutes(engine, pass, pass, openAPIMembers{}, openAPIPermissions{}, &filesystemhttp.Handler{})
 	actual := map[string]bool{}
 	for _, route := range engine.Routes() {
 		path := strings.ReplaceAll(route.Path, ":wsId", "{wsId}")
+		path = strings.ReplaceAll(path, ":namespaceId", "{namespaceId}")
 		path = strings.ReplaceAll(path, ":nodeId", "{nodeId}")
 		path = strings.ReplaceAll(path, ":revisionId", "{revisionId}")
 		path = strings.ReplaceAll(path, ":sessionId", "{sessionId}")
 		path = strings.ReplaceAll(path, ":grantId", "{grantId}")
 		path = strings.ReplaceAll(path, ":capabilityId", "{capabilityId}")
 		path = strings.ReplaceAll(path, ":exportId", "{exportId}")
+		path = strings.ReplaceAll(path, ":providerId", "{providerId}")
+		path = strings.ReplaceAll(path, ":poolId", "{poolId}")
 		actual[route.Method+" "+path] = true
 	}
 	require.Equal(t, spec, actual)

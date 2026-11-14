@@ -1,4 +1,166 @@
 paths:
+  /api/v1/filesystem/namespaces:
+    get:
+      tags: [filesystem]
+      summary: List governed filesystem namespaces visible to the current user
+      operationId: listGovernedFilesystemNamespaces
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - $ref: "#/components/parameters/WorkspaceHeader"
+      responses:
+        "200":
+          description: Visible namespace summaries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/NamespaceSummaryPage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/filesystem/namespaces/{namespaceId}/children:
+    get:
+      tags: [filesystem]
+      summary: List authorized children in a governed namespace
+      operationId: listGovernedFilesystemChildren
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - $ref: "#/components/parameters/WorkspaceHeader"
+        - $ref: "#/components/parameters/NamespaceID"
+        - $ref: "#/components/parameters/ParentID"
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [FILE, DIRECTORY]
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 200
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Authorized filesystem children
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/NodePage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/filesystem/shared-with-me:
+    get:
+      tags: [filesystem]
+      summary: List resources shared with the current typed principals
+      operationId: listFilesystemSharedWithMe
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - $ref: "#/components/parameters/WorkspaceHeader"
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 200
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Effective shared resources
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SharedNodePage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/filesystem/nodes/{nodeId}/effective-access:
+    get:
+      tags: [filesystem]
+      summary: Get effective resource access for the current user
+      operationId: getFilesystemEffectiveAccess
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrganizationHeader"
+        - $ref: "#/components/parameters/WorkspaceHeader"
+        - $ref: "#/components/parameters/NodeID"
+      responses:
+        "200":
+          description: Effective resource authorization decision
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/EffectiveAccess"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /api/v1/workspaces/{wsId}/namespaces:
     get:
       tags: [filesystem]
@@ -685,6 +847,74 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /api/v1/workspaces/{wsId}/storage-providers/{providerId}:
+    patch:
+      tags: [filesystem, storage]
+      summary: Update a storage provider
+      operationId: updateStorageProvider
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ProviderID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateStorageProviderRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MutationOK"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      tags: [filesystem, storage]
+      summary: Delete a storage provider
+      operationId: deleteStorageProvider
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ProviderID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          $ref: "#/components/responses/MutationOK"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /api/v1/workspaces/{wsId}/storage-pools:
     get:
       tags: [filesystem, storage]
@@ -753,6 +983,74 @@ paths:
           $ref: "#/components/responses/Conflict"
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/storage-pools/{poolId}:
+    patch:
+      tags: [filesystem, storage]
+      summary: Update a storage pool
+      operationId: updateStoragePool
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/PoolID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateStoragePoolRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MutationOK"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      tags: [filesystem, storage]
+      summary: Delete a storage pool
+      operationId: deleteStoragePool
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/PoolID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          $ref: "#/components/responses/MutationOK"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/Unprocessable"
         "500":
@@ -1377,6 +1675,29 @@ paths:
 
 components:
   parameters:
+    OrganizationHeader:
+      name: X-Organization-ID
+      in: header
+      required: true
+      description: Organization context; membership is verified authoritatively.
+      schema:
+        type: string
+        format: uuid
+    WorkspaceHeader:
+      name: X-Workspace-ID
+      in: header
+      required: false
+      description: Optional current workspace context; membership and organization are verified authoritatively.
+      schema:
+        type: string
+        format: uuid
+    NamespaceID:
+      name: namespaceId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     WorkspaceID:
       name: wsId
       in: path
@@ -1386,6 +1707,20 @@ components:
         format: uuid
     NodeID:
       name: nodeId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ProviderID:
+      name: providerId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PoolID:
+      name: poolId
       in: path
       required: true
       schema:
@@ -1457,6 +1792,124 @@ components:
         maxLength: 128
 
   schemas:
+    NamespaceSummary:
+      type: object
+      required: [id, namespace_type, organization_id, status, capabilities, entry_node_ids]
+      properties:
+        id:
+          type: string
+          format: uuid
+        namespace_type:
+          type: string
+          enum: [USER, WORKSPACE, ORGANIZATION]
+        organization_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+          nullable: true
+        owner_user_id:
+          type: string
+          format: uuid
+          nullable: true
+        root_node_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResourceAction"
+        entry_node_ids:
+          type: array
+          description: Authorized subtree entry nodes; populated for partially visible organization namespaces.
+          items:
+            type: string
+            format: uuid
+    NamespaceSummaryPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/NamespaceSummary"
+    ResourceAction:
+      type: string
+      enum: [READ, WRITE, DELETE, SHARE, ADMIN]
+    SharedNode:
+      type: object
+      required: [node, effective_actions, source_grant_ids]
+      properties:
+        node:
+          $ref: "#/components/schemas/Node"
+        effective_actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResourceAction"
+        source_grant_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+    SharedNodePage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SharedNode"
+        next_cursor:
+          type: string
+    AuthorizationCacheKey:
+      type: object
+      required: [organization_id, workspace_id, actor_id, node_id, action, policy_version]
+      properties:
+        organization_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+          nullable: true
+        actor_id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+          format: uuid
+        action:
+          $ref: "#/components/schemas/ResourceAction"
+        policy_version:
+          type: integer
+          format: int64
+    EffectiveAccess:
+      type: object
+      required: [decision, effective_actions, reason_code, source_grant_ids, policy_version, cache_key]
+      properties:
+        decision:
+          type: string
+          enum: [ALLOW, DENY]
+        effective_actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResourceAction"
+        reason_code:
+          type: string
+        source_grant_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        policy_version:
+          type: integer
+          format: int64
+        cache_key:
+          $ref: "#/components/schemas/AuthorizationCacheKey"
     Namespace:
       type: object
       required: [id, workspace_id, status]
@@ -1846,6 +2299,18 @@ components:
           additionalProperties: true
         status:
           type: string
+    UpdateStorageProviderRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        endpoint:
+          type: string
+        secret_ref:
+          type: string
+        status:
+          type: string
     StorageProviderCreated:
       type: object
       required: [id]
@@ -1897,6 +2362,19 @@ components:
       properties:
         name:
           type: string
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoragePoolMember"
+    UpdateStoragePoolRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
         members:
           type: array
           items:
@@ -2264,6 +2742,9 @@ components:
                 - AUTH_UNAUTHORIZED
                 - AUTH_INVALID_TOKEN
                 - AUTH_FORBIDDEN
+                - TENANT_ORG_REQUIRED
+                - TENANT_ORG_INVALID
+                - TENANT_ORG_ACCESS_DENIED
                 - TENANT_WORKSPACE_REQUIRED
                 - TENANT_WORKSPACE_INVALID
                 - TENANT_NOT_WORKSPACE_MEMBER

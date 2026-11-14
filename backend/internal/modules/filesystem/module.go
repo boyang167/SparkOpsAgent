@@ -263,9 +263,25 @@ func (m *Module) Register(c *appctx.Container) error {
 		StartExport:      command.NewStartControlledExportHandler(accessStore, c.AuditLogger).Handle,
 		ImportExported:   operation.NewImportExportedFileHandler(repo, accessStore).Handle,
 	})
+	entitlementMiddleware := entitlements.Middleware(c.DB)
+	governanceHandler := filesystemhttp.NewGovernanceHandler(
+		repo,
+		query.NewListNamespacesHandler(repo, principalResolver, resourceAuthorizer),
+		query.NewSharedWithMeHandler(repo, principalResolver),
+		query.NewEffectiveAccessHandler(resourceAuthorizer),
+		resourceAuthorizer,
+	)
+	filesystemhttp.RegisterGovernanceRoutes(
+		c.Engine,
+		entitlementMiddleware,
+		authn.RequireAuth(m.tokens),
+		c.OrgPermissionChecker,
+		c.WorkspaceAccessResolver,
+		governanceHandler,
+	)
 	filesystemhttp.RegisterRoutes(
 		c.Engine,
-		entitlements.Middleware(c.DB),
+		entitlementMiddleware,
 		authn.RequireAuth(m.tokens),
 		c.WorkspaceMemberChecker,
 		c.PermissionChecker,
