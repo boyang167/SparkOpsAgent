@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createElement } from "react";
+import type { KeyboardEvent } from "react";
 import type { FileNamespaceVM, FileNodeVM } from "@sparkops/contracts/filesystem";
 import { FileExplorerPanel } from "./FileExplorerPanel";
 import type { WorkbenchState, WorkbenchTab } from "./workbench-state";
@@ -48,19 +49,37 @@ export function FilesystemWorkbench({
     router.replace(`${pathname}?${nextSearchParams.toString()}`);
   }
 
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, tabIndex: number) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+
+    event.preventDefault();
+    const offset = event.key === "ArrowRight" ? 1 : -1;
+    const nextIndex = (tabIndex + offset + visibleTabs.length) % visibleTabs.length;
+    const nextTab = visibleTabs[nextIndex];
+    if (!nextTab) return;
+
+    document.getElementById(`workbench-tab-${nextTab.id}`)?.focus();
+    selectTab(nextTab.id);
+  }
+
   const tabList = createElement(
     "div",
     { role: "tablist", "aria-label": "文件工作台", className: "flex flex-wrap gap-2" },
-    visibleTabs.map((tab) =>
+    visibleTabs.map((tab, tabIndex) =>
       createElement(
         "button",
         {
           key: tab.id,
+          id: `workbench-tab-${tab.id}`,
           type: "button",
           role: "tab",
           "aria-selected": activeTab === tab.id,
+          "aria-controls": `workbench-panel-${tab.id}`,
+          tabIndex: activeTab === tab.id ? 0 : -1,
           className: activeTab === tab.id ? "btn btn-secondary" : "btn btn-ghost",
           onClick: () => selectTab(tab.id),
+          onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) =>
+            handleTabKeyDown(event, tabIndex),
         },
         tab.label,
       ),
@@ -81,6 +100,14 @@ export function FilesystemWorkbench({
     "div",
     { className: "stack-lg" },
     tabList,
-    createElement("div", { role: "tabpanel" }, panel),
+    createElement(
+      "div",
+      {
+        id: `workbench-panel-${activeTab}`,
+        role: "tabpanel",
+        "aria-labelledby": `workbench-tab-${activeTab}`,
+      },
+      panel,
+    ),
   );
 }

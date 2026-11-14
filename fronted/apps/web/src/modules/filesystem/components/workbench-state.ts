@@ -9,13 +9,25 @@ export type WorkbenchState = {
   query: string;
 };
 
-export function parseWorkbenchState(input: Record<string, string | undefined>): WorkbenchState {
+type SearchParamValue = string | string[] | undefined;
+
+function firstValue(value: SearchParamValue): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export function parseWorkbenchState(input: Record<string, SearchParamValue>): WorkbenchState {
   const tabs: WorkbenchTab[] = ["files", "transfers", "governance", "audit"];
+  const tab = firstValue(input.tab);
+  const view = firstValue(input.view);
+  const parent = firstValue(input.parent);
+  const cursor = firstValue(input.cursor);
+  const query = firstValue(input.q);
+
   return {
-    tab: tabs.includes(input.tab as WorkbenchTab) ? (input.tab as WorkbenchTab) : "files",
-    view: input.view === "grid" ? "grid" : "list",
-    parent: input.parent || undefined,
-    cursor: input.cursor || undefined,
-    query: input.q?.trim() ?? "",
+    tab: tabs.includes(tab as WorkbenchTab) ? (tab as WorkbenchTab) : "files",
+    view: view === "grid" ? "grid" : "list",
+    parent: parent || undefined,
+    cursor: cursor || undefined,
+    query: query?.trim() ?? "",
   };
 }

@@ -3,18 +3,18 @@ import { cookies } from "next/headers";
 import { WORKSPACE_COOKIE } from "@sparkops/bff-core";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilesystemWorkbench } from "@/modules/filesystem/components/FilesystemWorkbench";
+import { resolveWorkbenchPermissions } from "@/modules/filesystem/components/workbench-permissions";
 import { parseWorkbenchState } from "@/modules/filesystem/components/workbench-state";
 import { loadSession } from "@/server/loaders/session";
+import { loadMyPermissions } from "@/server/loaders/governance";
 import { loadWorkspaceId } from "@/server/loaders/context";
 import { loadWorkspaces } from "@/server/loaders/workspaces";
 import { loadFileNamespace, loadFileNodes } from "@/server/loaders/filesystem";
 
-const DEFAULT_PERMISSIONS = ["file:read", "storage:read", "file:admin"];
-
 export default async function FilesPage({
   searchParams,
 }: {
-  searchParams: Promise<Record<string, string | undefined>>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await loadSession();
   if (!session) {
@@ -31,6 +31,17 @@ export default async function FilesPage({
   if (!workspaceId) {
     redirect("/dashboard");
   }
+
+  let workspacePermissions: string[] | undefined;
+  try {
+    workspacePermissions = await loadMyPermissions(workspaceId);
+  } catch {
+    workspacePermissions = undefined;
+  }
+  const permissions = resolveWorkbenchPermissions(
+    workspacePermissions,
+    session.is_super_admin ?? false,
+  );
 
   const namespace = await loadFileNamespace(workspaceId);
   const initialState = parseWorkbenchState(await searchParams);
@@ -57,7 +68,7 @@ export default async function FilesPage({
         namespace={namespace}
         initialNodes={listing.items}
         initialState={initialState}
-        permissions={DEFAULT_PERMISSIONS}
+        permissions={permissions}
       />
     </div>
   );
