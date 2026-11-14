@@ -19,6 +19,7 @@ import {
   listFileNodes,
   listTransferSessions,
   moveFileNode,
+  previewGovernedShare,
   uploadTransfer,
 } from "./filesystem";
 
@@ -310,6 +311,29 @@ describe("filesystem node sdk", () => {
 });
 
 describe("governed filesystem sdk", () => {
+  it("posts share previews with caller idempotency", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      code: 0,
+      message: "ok",
+      data: { outcome: "ACTIVE", reason: "POLICY_ACTIVE" },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await previewGovernedShare("node-1", {
+      principal_type: "USER",
+      principal_ids: ["00000000-0000-4000-8000-000000000014"],
+      actions: ["READ"],
+    }, {
+      organizationId: "00000000-0000-4000-8000-000000000001",
+      workspaceId: "00000000-0000-4000-8000-000000000002",
+      idempotencyKey: "preview-1",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/filesystem/nodes/node-1/share-preview");
+    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("preview-1");
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -447,6 +471,8 @@ describe("governed filesystem sdk", () => {
         grant_id: "00000000-0000-4000-8000-000000000007",
         principal_type: "AGENT",
         principal_id: "00000000-0000-4000-8000-000000000008",
+        permission: "READ",
+        effect: "ALLOW",
         expires_at: "2026-12-31T16:00:00Z",
       }],
       original_path: "/项目/shared.pdf",
@@ -529,12 +555,12 @@ describe("governed filesystem sdk", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({
         code: 0,
         message: "ok",
-        data: { items: [], classification: "INTERNAL" },
+        data: { items: [], classification: "INTERNAL", truncated: false },
       }), { status: 200, headers: { "Content-Type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         code: 0,
         message: "ok",
-        data: { items: [] },
+        data: { items: [], truncated: false },
       }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const options = {

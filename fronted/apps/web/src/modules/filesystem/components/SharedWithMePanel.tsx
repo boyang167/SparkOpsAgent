@@ -92,6 +92,12 @@ function sourceTypesLabel(item: SharedItemVM) {
     : "未提供";
 }
 
+function hasExplicitShareSource(item: SharedItemVM) {
+  return item.sources.some(
+    (source) => source.effect === "ALLOW" && source.permission === "SHARE",
+  );
+}
+
 function ownerAndSharerLabel(
   item: SharedItemVM,
   workspaceId: string,
@@ -252,7 +258,7 @@ export function SharedWithMePanel({
                   },
                   "查看详情",
                 ),
-                item.effective_actions.includes("SHARE")
+                item.effective_actions.includes("SHARE") && hasExplicitShareSource(item)
                   ? createElement(
                       "button",
                       {
@@ -260,7 +266,12 @@ export function SharedWithMePanel({
                         className: "btn btn-ghost btn-sm filesystem-touch-target",
                         "aria-label": `共享 ${item.node.name}`,
                         onClick: () => {
-                          if (item.effective_actions.includes("SHARE")) setShareSelection(item);
+                          if (
+                            item.effective_actions.includes("SHARE") &&
+                            hasExplicitShareSource(item)
+                          ) {
+                            setShareSelection(item);
+                          }
                         },
                       },
                       "共享",

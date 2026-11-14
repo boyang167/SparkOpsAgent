@@ -71,6 +71,28 @@ type ShareResult struct {
 	Grants  []model.ResourceGrant
 }
 
+type SharePreviewOutcome string
+
+const (
+	SharePreviewActive          SharePreviewOutcome = "ACTIVE"
+	SharePreviewPendingApproval SharePreviewOutcome = "PENDING_APPROVAL"
+)
+
+type SharePreview struct {
+	Outcome SharePreviewOutcome
+	Reason  string
+}
+
+type SharePolicyInput struct {
+	NamespaceType           model.NamespaceType
+	PrincipalType           model.PrincipalType
+	Actions                 []model.ResourcePermission
+	Effect                  model.GrantEffect
+	Classification          model.TransferClassification
+	SourceOrganizationAdmin bool
+	TargetWorkspaceAdmins   []bool
+}
+
 type ReviewShareRequest struct {
 	CommandID       uuid.UUID
 	ActorID         uuid.UUID
@@ -98,48 +120,11 @@ func (h *ShareRequestHandler) Submit(ctx context.Context, cmd SubmitShare) (Shar
 	if cmd.Effect == "" {
 		cmd.Effect = model.GrantEffectAllow
 	}
-	if err := validateSubmitShare(cmd); err != nil {
-		return result, err
-	}
-	node, err := h.store.GetNodeByID(ctx, cmd.NodeID)
+	prepared, err := h.prepareShare(ctx, cmd)
 	if err != nil {
 		return result, err
 	}
-	namespace, err := h.store.GetNamespace(ctx, node.NamespaceID)
-	if err != nil {
-		return result, err
-	}
-	if namespace.OrganizationID != cmd.OrganizationID {
-		return result, domain.ErrResourceDenied
-	}
-	if h.sourceAuthorizer == nil {
-		return result, domain.ErrResourceDenied
-	}
-	allowed, err := h.sourceAuthorizer.AuthorizeShare(ctx, cmd.ActorID, cmd.WorkspaceID, namespace.ID, node.ID)
-	if err != nil {
-		return result, err
-	}
-	if !allowed {
-		return result, domain.ErrResourceDenied
-	}
-	classification, err := h.store.GetNodeClassification(ctx, cmd.NodeID)
-	if err != nil {
-		return result, err
-	}
-	if node.Type == model.NodeTypeDirectory && cmd.InheritToChildren {
-		classification, err = h.store.GetSubtreeHighestClassification(ctx, namespace.ID, node.ID)
-		if err != nil {
-			return result, err
-		}
-	}
-	scopes, err := h.resolveScopes(ctx, cmd.PrincipalType, cmd.PrincipalIDs, namespace.OrganizationID)
-	if err != nil {
-		return result, err
-	}
-	immediate, err := h.sharePolicy(ctx, cmd, namespace, classification, scopes)
-	if err != nil {
-		return result, err
-	}
+	node, namespace, classification, immediate := prepared.node, prepared.namespace, prepared.classification, prepared.immediate
 	requestID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("filesystem-share-request:"+cmd.CommandID.String()))
 	status := model.ShareRequestPending
 	if immediate {
@@ -178,6 +163,20 @@ func (h *ShareRequestHandler) Submit(ctx context.Context, cmd SubmitShare) (Shar
 		return h.store.CompleteCommand(txCtx, cmd.CommandID, &node.ID, &request.ID)
 	})
 	return result, err
+}
+
+func (h *ShareRequestHandler) Preview(ctx context.Context, cmd SubmitShare) (SharePreview, error) {
+	if cmd.Effect == "" {
+		cmd.Effect = model.GrantEffectAllow
+	}
+	prepared, err := h.prepareShare(ctx, cmd)
+	if err != nil {
+		return SharePreview{}, err
+	}
+	if prepared.immediate {
+		return SharePreview{Outcome: SharePreviewActive, Reason: "POLICY_ACTIVE"}, nil
+	}
+	return SharePreview{Outcome: SharePreviewPendingApproval, Reason: "POLICY_APPROVAL_REQUIRED"}, nil
 }
 
 func (h *ShareRequestHandler) Approve(ctx context.Context, cmd ReviewShareRequest) (model.ShareRequest, error) {
@@ -280,56 +279,121 @@ func (h *ShareRequestHandler) resolveScopes(ctx context.Context, principalType m
 	return scopes, nil
 }
 
+type preparedShare struct {
+	node           *model.Node
+	namespace      *model.Namespace
+	classification model.TransferClassification
+	immediate      bool
+}
+
+func (h *ShareRequestHandler) prepareShare(ctx context.Context, cmd SubmitShare) (preparedShare, error) {
+	if err := validateSubmitShare(cmd); err != nil {
+		return preparedShare{}, err
+	}
+	node, err := h.store.GetNodeByID(ctx, cmd.NodeID)
+	if err != nil {
+		return preparedShare{}, err
+	}
+	namespace, err := h.store.GetNamespace(ctx, node.NamespaceID)
+	if err != nil {
+		return preparedShare{}, err
+	}
+	if namespace.OrganizationID != cmd.OrganizationID || h.sourceAuthorizer == nil {
+		return preparedShare{}, domain.ErrResourceDenied
+	}
+	allowed, err := h.sourceAuthorizer.AuthorizeShare(ctx, cmd.ActorID, cmd.WorkspaceID, namespace.ID, node.ID)
+	if err != nil {
+		return preparedShare{}, err
+	}
+	if !allowed {
+		return preparedShare{}, domain.ErrResourceDenied
+	}
+	classification, err := h.store.GetNodeClassification(ctx, cmd.NodeID)
+	if err != nil {
+		return preparedShare{}, err
+	}
+	if node.Type == model.NodeTypeDirectory && cmd.InheritToChildren {
+		classification, err = h.store.GetSubtreeHighestClassification(ctx, namespace.ID, node.ID)
+		if err != nil {
+			return preparedShare{}, err
+		}
+	}
+	scopes, err := h.resolveScopes(ctx, cmd.PrincipalType, cmd.PrincipalIDs, namespace.OrganizationID)
+	if err != nil {
+		return preparedShare{}, err
+	}
+	immediate, err := h.sharePolicy(ctx, cmd, namespace, classification, scopes)
+	if err != nil {
+		return preparedShare{}, err
+	}
+	return preparedShare{node: node, namespace: namespace, classification: classification, immediate: immediate}, nil
+}
+
 func (h *ShareRequestHandler) sharePolicy(ctx context.Context, cmd SubmitShare, namespace *model.Namespace, classification model.TransferClassification, scopes []PrincipalScope) (bool, error) {
-	if cmd.Effect == model.GrantEffectDeny {
-		return true, nil
+	input := SharePolicyInput{
+		NamespaceType: namespace.NamespaceType, PrincipalType: cmd.PrincipalType,
+		Actions: cmd.Actions, Effect: cmd.Effect, Classification: classification,
 	}
-	if cmd.PrincipalType == model.PrincipalOrganization {
-		for _, action := range cmd.Actions {
-			if action == model.ResourcePermissionDelete || action == model.ResourcePermissionShare || action == model.ResourcePermissionAdmin {
-				return false, domain.ErrSharePolicyDenied
-			}
-		}
-		if classification == model.TransferClassificationRestricted {
-			return false, domain.ErrSharePolicyDenied
-		}
-	}
-	if namespace.NamespaceType == model.NamespaceTypeOrganization {
+	if namespace.NamespaceType == model.NamespaceTypeOrganization || cmd.PrincipalType == model.PrincipalOrganization {
 		admin, err := h.authority.HasOrganizationFileAdmin(ctx, namespace.OrganizationID, cmd.ActorID)
 		if err != nil {
 			return false, err
 		}
-		if !admin || cmd.PrincipalType != model.PrincipalWorkspace {
-			return false, domain.ErrResourceDenied
-		}
-		if classification == model.TransferClassificationConfidential {
-			return false, nil
-		}
-		return true, nil
+		input.SourceOrganizationAdmin = admin
 	}
-	if classification == model.TransferClassificationConfidential {
-		return false, nil
-	}
-	if cmd.PrincipalType == model.PrincipalUser && onlyReadActions(cmd.Actions) {
-		return true, nil
-	}
-	switch cmd.PrincipalType {
-	case model.PrincipalUser:
-		return false, nil
-	case model.PrincipalWorkspace, model.PrincipalRole:
+	if cmd.PrincipalType == model.PrincipalWorkspace || cmd.PrincipalType == model.PrincipalRole {
 		for _, scope := range scopes {
 			admin, err := h.authority.HasWorkspaceFileAdmin(ctx, scope.WorkspaceID, cmd.ActorID)
 			if err != nil {
 				return false, err
 			}
+			input.TargetWorkspaceAdmins = append(input.TargetWorkspaceAdmins, admin)
+		}
+	}
+	return EvaluateSharePolicy(input)
+}
+
+func EvaluateSharePolicy(input SharePolicyInput) (bool, error) {
+	if input.Effect == model.GrantEffectDeny {
+		return true, nil
+	}
+	if input.PrincipalType == model.PrincipalOrganization {
+		for _, action := range input.Actions {
+			if action == model.ResourcePermissionDelete || action == model.ResourcePermissionShare || action == model.ResourcePermissionAdmin {
+				return false, domain.ErrSharePolicyDenied
+			}
+		}
+		if input.Classification == model.TransferClassificationRestricted {
+			return false, domain.ErrSharePolicyDenied
+		}
+	}
+	if input.NamespaceType == model.NamespaceTypeOrganization {
+		if !input.SourceOrganizationAdmin || input.PrincipalType != model.PrincipalWorkspace {
+			return false, domain.ErrResourceDenied
+		}
+		if input.Classification == model.TransferClassificationConfidential {
+			return false, nil
+		}
+		return true, nil
+	}
+	if input.Classification == model.TransferClassificationConfidential {
+		return false, nil
+	}
+	if input.PrincipalType == model.PrincipalUser && onlyReadActions(input.Actions) {
+		return true, nil
+	}
+	switch input.PrincipalType {
+	case model.PrincipalUser:
+		return false, nil
+	case model.PrincipalWorkspace, model.PrincipalRole:
+		for _, admin := range input.TargetWorkspaceAdmins {
 			if !admin {
 				return false, nil
 			}
 		}
 		return true, nil
 	case model.PrincipalOrganization:
-		admin, err := h.authority.HasOrganizationFileAdmin(ctx, namespace.OrganizationID, cmd.ActorID)
-		return admin, err
+		return input.SourceOrganizationAdmin, nil
 	default:
 		return false, domain.ErrUnsupportedPrincipal
 	}

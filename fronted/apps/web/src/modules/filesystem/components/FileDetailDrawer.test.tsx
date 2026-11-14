@@ -142,6 +142,7 @@ describe("FileDetailDrawer", () => {
         inherit_to_children: true,
         source: "INHERITED",
       }],
+      truncated: false,
     });
     sdk.listShareRequests.mockResolvedValue({
       items: [{
@@ -159,6 +160,7 @@ describe("FileDetailDrawer", () => {
         status: "PENDING",
         created_at: "2026-11-15T00:00:00Z",
       }],
+      truncated: false,
     });
   });
 

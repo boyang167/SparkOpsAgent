@@ -438,6 +438,7 @@ export type GovernedGrantVM = z.infer<typeof GovernedGrantVMSchema>;
 export const GovernedGrantPageVMSchema = z.object({
   items: z.array(GovernedGrantVMSchema),
   classification: TransferClassificationSchema.optional(),
+  truncated: z.boolean(),
 });
 export type GovernedGrantPageVM = z.infer<typeof GovernedGrantPageVMSchema>;
 
@@ -465,6 +466,8 @@ export const SharedSourceVMSchema = z.object({
   grant_id: z.string().uuid(),
   principal_type: z.string().trim().min(1).max(64),
   principal_id: z.string().uuid(),
+  permission: GovernedPermissionSchema,
+  effect: z.literal("ALLOW"),
   expires_at: z.string().datetime({ offset: true }).nullable().optional(),
 });
 export type SharedSourceVM = z.infer<typeof SharedSourceVMSchema>;
@@ -510,6 +513,12 @@ export const CreateGovernedGrantCommandSchema = z.object({
 });
 export type CreateGovernedGrantCommand = z.infer<typeof CreateGovernedGrantCommandSchema>;
 
+export const SharePreviewVMSchema = z.object({
+  outcome: z.enum(["ACTIVE", "PENDING_APPROVAL"]),
+  reason: z.string().trim().min(1),
+});
+export type SharePreviewVM = z.infer<typeof SharePreviewVMSchema>;
+
 export const ShareRequestStatusSchema = z.enum([
   "PENDING",
   "APPROVED",
@@ -541,6 +550,7 @@ export type ShareRequestVM = z.infer<typeof ShareRequestVMSchema>;
 
 export const ShareRequestPageVMSchema = z.object({
   items: z.array(ShareRequestVMSchema),
+  truncated: z.boolean(),
 });
 export type ShareRequestPageVM = z.infer<typeof ShareRequestPageVMSchema>;
 

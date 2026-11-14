@@ -9,6 +9,7 @@ import {
   listGovernedNamespaces,
   listSharedWithMe,
   moveFileNode,
+  previewGovernedShare,
 } from "./index";
 
 function context(filesystem: Record<string, unknown>): BffContext {
@@ -19,6 +20,39 @@ function context(filesystem: Record<string, unknown>): BffContext {
 }
 
 describe("filesystem BFF module", () => {
+  it("validates and returns the authoritative share preview", async () => {
+    const preview = vi.fn().mockResolvedValue({
+      outcome: "PENDING_APPROVAL",
+      reason: "POLICY_APPROVAL_REQUIRED",
+    });
+    const input = {
+      principal_type: "USER" as const,
+      principal_ids: ["00000000-0000-4000-8000-000000000014"],
+      actions: ["READ" as const],
+    };
+
+    await expect(previewGovernedShare(
+      context({ previewGovernedShare: preview }),
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+      "node-1",
+      input,
+      "preview-key-1",
+    )).resolves.toEqual({
+      outcome: "PENDING_APPROVAL",
+      reason: "POLICY_APPROVAL_REQUIRED",
+    });
+    expect(preview).toHaveBeenCalledWith(
+      {
+        organizationId: "00000000-0000-4000-8000-000000000001",
+        workspaceId: "00000000-0000-4000-8000-000000000002",
+      },
+      "node-1",
+      input,
+      "preview-key-1",
+    );
+  });
+
   it("passes all file list filters to upstream", async () => {
     const listFiles = vi.fn().mockResolvedValue({ items: [], next_cursor: "" });
 
@@ -172,6 +206,8 @@ describe("filesystem BFF module", () => {
           grant_id: "00000000-0000-4000-8000-000000000007",
           principal_type: "WORKSPACE",
           principal_id: "00000000-0000-4000-8000-000000000003",
+          permission: "READ",
+          effect: "ALLOW",
           expires_at: "2026-12-31T16:00:00Z",
         }],
         original_path: "/shared.pdf",

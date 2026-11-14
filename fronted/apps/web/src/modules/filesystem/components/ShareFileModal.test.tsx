@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import { ShareFileModal } from "./ShareFileModal";
 const sdk = vi.hoisted(() => ({
   createGovernedGrant: vi.fn(),
   createShareRequest: vi.fn(),
+  previewGovernedShare: vi.fn(),
 }));
 
 vi.mock("@sparkops/web-sdk/filesystem", () => sdk);
@@ -65,6 +66,11 @@ describe("ShareFileModal", () => {
   beforeEach(() => {
     sdk.createGovernedGrant.mockReset();
     sdk.createShareRequest.mockReset();
+    sdk.previewGovernedShare.mockReset();
+    sdk.previewGovernedShare.mockResolvedValue({
+      outcome: "ACTIVE",
+      reason: "POLICY_ACTIVE",
+    });
   });
   afterEach(cleanup);
 
@@ -72,9 +78,9 @@ describe("ShareFileModal", () => {
     render(modal());
     expect(screen.getByRole("radio", { name: /研发空间/ })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /王小明/ })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /星火组织/ })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: /星火组织/ })).toBeEnabled();
     expect(screen.queryByRole("textbox", { name: /ID|UUID/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/成员目录不可用/)).toBeInTheDocument();
+    expect(screen.getByText("将共享给当前租户（所有具备租户成员资格的用户）")).toBeInTheDocument();
   });
 
   it("blocks organization audience for restricted nodes", () => {
@@ -85,6 +91,10 @@ describe("ShareFileModal", () => {
 
   it("submits matching workspace data with one stable idempotency key", async () => {
     const user = userEvent.setup();
+    sdk.previewGovernedShare.mockResolvedValue({
+      outcome: "PENDING_APPROVAL",
+      reason: "POLICY_APPROVAL_REQUIRED",
+    });
     sdk.createShareRequest.mockResolvedValue({
       id: "00000000-0000-4000-8000-000000000201",
       status: "PENDING",
@@ -97,6 +107,7 @@ describe("ShareFileModal", () => {
     expect(screen.getByRole("checkbox", { name: "READ" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "DOWNLOAD" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /应用到子项/ })).toBeChecked();
+    await screen.findByRole("button", { name: "提交审批" });
     await user.click(screen.getByRole("button", { name: "提交审批" }));
 
     await waitFor(() => expect(sdk.createShareRequest).toHaveBeenCalledTimes(1));
@@ -123,8 +134,53 @@ describe("ShareFileModal", () => {
     render(modal({ effectiveActions: ["READ"] }));
     await user.click(screen.getByRole("radio", { name: /王小明/ }));
     await user.click(screen.getByRole("button", { name: "下一步" }));
-    await user.click(screen.getByRole("button", { name: "立即共享" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("无权共享");
+    expect(sdk.previewGovernedShare).not.toHaveBeenCalled();
+    const submit = screen.getByRole("button", { name: "立即共享" });
+    expect(submit).toBeDisabled();
+    fireEvent.click(submit);
     expect(sdk.createGovernedGrant).not.toHaveBeenCalled();
+  });
+
+  it("disables workspace when its member directory fails but keeps organization available", () => {
+    render(modal({ memberDirectoryAvailable: false, members: [] }));
+    expect(screen.getByRole("radio", { name: /研发空间/ })).toBeDisabled();
+    expect(screen.getByText(/工作区成员目录不可用/)).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /星火组织/ })).toBeEnabled();
+  });
+
+  it("reuses a failed logical submission key and rotates it after editing", async () => {
+    const user = userEvent.setup();
+    sdk.createGovernedGrant
+      .mockRejectedValueOnce(new Error("network"))
+      .mockRejectedValueOnce(new Error("network"));
+    render(modal());
+    await user.click(screen.getByRole("radio", { name: /王小明/ }));
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    await screen.findByRole("button", { name: "立即共享" });
+
+    await user.click(screen.getByRole("button", { name: "立即共享" }));
+    await screen.findByText(/共享失败/);
+    await user.click(screen.getByRole("button", { name: "立即共享" }));
+    await waitFor(() => expect(sdk.createGovernedGrant).toHaveBeenCalledTimes(2));
+    const firstKey = sdk.createGovernedGrant.mock.calls[0][2].idempotencyKey;
+    expect(sdk.createGovernedGrant.mock.calls[1][2].idempotencyKey).toBe(firstKey);
+
+    await user.click(screen.getByRole("checkbox", { name: "WRITE" }));
+    await waitFor(() => expect(sdk.previewGovernedShare).toHaveBeenCalledTimes(2));
+    await user.click(await screen.findByRole("button", { name: "立即共享" }));
+    await waitFor(() => expect(sdk.createGovernedGrant).toHaveBeenCalledTimes(3));
+    expect(sdk.createGovernedGrant.mock.calls[2][2].idempotencyKey).not.toBe(firstKey);
+  });
+
+  it("synchronously blocks a rapid double submission", async () => {
+    const user = userEvent.setup();
+    sdk.createGovernedGrant.mockReturnValue(new Promise(() => undefined));
+    render(modal());
+    await user.click(screen.getByRole("radio", { name: /王小明/ }));
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    const submit = await screen.findByRole("button", { name: "立即共享" });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    expect(sdk.createGovernedGrant).toHaveBeenCalledTimes(1);
   });
 });

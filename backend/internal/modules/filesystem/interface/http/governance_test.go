@@ -162,7 +162,8 @@ func TestGovernanceSharedWithMeForwardsQueryCursorAndLimit(t *testing.T) {
 				SourceGrantIDs:   []uuid.UUID{grantID},
 				Sources: []repository.SharedGrantSource{{
 					GrantID: grantID, PrincipalType: model.PrincipalAgent,
-					PrincipalID: principalID, ExpiresAt: &expiry,
+					PrincipalID: principalID, Permission: model.ResourcePermissionRead,
+					Effect: model.GrantEffectAllow, ExpiresAt: &expiry,
 				}},
 				OriginalPath: "/项目/报告.md",
 				SourceNamespace: repository.SharedNamespaceSource{
@@ -192,6 +193,8 @@ func TestGovernanceSharedWithMeForwardsQueryCursorAndLimit(t *testing.T) {
 	require.Equal(t, model.PrincipalAgent, captured.SourceType)
 	require.Contains(t, res.Body.String(), `"original_path":"/项目/报告.md"`)
 	require.Contains(t, res.Body.String(), `"principal_type":"AGENT"`)
+	require.Contains(t, res.Body.String(), `"permission":"READ"`)
+	require.Contains(t, res.Body.String(), `"effect":"ALLOW"`)
 	require.Contains(t, res.Body.String(), `"expires_at":"2026-12-31T16:00:00Z"`)
 	require.Contains(t, res.Body.String(), `"organization_id":"`+orgID.String()+`"`)
 	require.Contains(t, res.Body.String(), `"workspace_id":"`+workspaceID.String()+`"`)
@@ -235,7 +238,8 @@ func TestGovernanceMetadataRequiresAdminAndReturnsRealClassification(t *testing.
 		authorize: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
 			return resourceauth.Decision{Allowed: request.Permission == model.ResourcePermissionAdmin}
 		},
-		listGovernanceGrants: func(context.Context, uuid.UUID) ([]governanceGrant, error) {
+		listGovernanceGrants: func(_ context.Context, _ uuid.UUID, limit int) ([]governanceGrant, bool, error) {
+			require.Equal(t, 50, limit)
 			return []governanceGrant{{
 				Grant: model.ResourceGrant{
 					ID: grantID, NodeID: nodeID, PrincipalType: model.PrincipalWorkspace,
@@ -243,9 +247,10 @@ func TestGovernanceMetadataRequiresAdminAndReturnsRealClassification(t *testing.
 					Permission: model.ResourcePermissionRead, Effect: model.GrantEffectAllow,
 				},
 				Source: "DIRECT",
-			}}, nil
+			}}, false, nil
 		},
-		listNodeShareRequests: func(context.Context, uuid.UUID) ([]model.ShareRequest, error) {
+		listNodeShareRequests: func(_ context.Context, _ uuid.UUID, limit int) ([]model.ShareRequest, error) {
+			require.Equal(t, 51, limit)
 			return []model.ShareRequest{{
 				ID: requestID, OrganizationID: orgID, NamespaceID: namespaceID, NodeID: nodeID,
 				RequestedBy: principalID, PrincipalType: model.PrincipalWorkspace,
@@ -433,6 +438,202 @@ func TestGovernedShareHTTPRequiresIdempotencyAndForwardsTypedDownload(t *testing
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	require.Equal(t, model.PrincipalWorkspace, captured.PrincipalType)
 	require.Equal(t, []model.ResourcePermission{model.ResourcePermissionRead, model.ResourcePermissionDownload}, captured.Actions)
+}
+
+func TestSharePreviewAllowsSameOrganizationSourceWorkspaceAndConcealsCrossOrganization(t *testing.T) {
+	orgID, otherOrgID := uuid.New(), uuid.New()
+	currentWorkspaceID, sourceWorkspaceID := uuid.New(), uuid.New()
+	namespaceID, nodeID, principalID := uuid.New(), uuid.New(), uuid.New()
+	namespaceOrgID := orgID
+	previewCalls, submitCalls := 0, 0
+	handler := &GovernanceHandler{
+		nodeByID: func(context.Context, uuid.UUID) (*model.Node, error) {
+			return &model.Node{ID: nodeID, NamespaceID: namespaceID}, nil
+		},
+		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace,
+				OrganizationID: namespaceOrgID, WorkspaceID: sourceWorkspaceID,
+			}, nil
+		},
+		previewShare: func(_ context.Context, cmd command.SubmitShare) (command.SharePreview, error) {
+			previewCalls++
+			require.Equal(t, currentWorkspaceID, cmd.WorkspaceID)
+			return command.SharePreview{Outcome: command.SharePreviewActive, Reason: "POLICY_ACTIVE"}, nil
+		},
+		submitShare: func(_ context.Context, cmd command.SubmitShare) (command.ShareResult, error) {
+			submitCalls++
+			require.Equal(t, currentWorkspaceID, cmd.WorkspaceID)
+			return command.ShareResult{
+				Request: model.ShareRequest{
+					ID: uuid.New(), Status: model.ShareRequestApproved,
+					PrincipalType: cmd.PrincipalType, PrincipalIDs: cmd.PrincipalIDs, Actions: cmd.Actions,
+				},
+				Grants: []model.ResourceGrant{{ID: uuid.New()}},
+			}, nil
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(
+		t, orgID, governanceOrgStub{active: true},
+		governanceWorkspaceStub{orgID: orgID, active: true}, handler,
+	)
+	send := func() *httptest.ResponseRecorder {
+		body := `{"principal_type":"USER","principal_ids":["` + principalID.String() + `"],"actions":["READ"]}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/filesystem/nodes/"+nodeID.String()+"/share-preview", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Organization-ID", orgID.String())
+		req.Header.Set("X-Workspace-ID", currentWorkspaceID.String())
+		req.Header.Set("Idempotency-Key", "preview-1")
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		return res
+	}
+
+	res := send()
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), `"outcome":"ACTIVE"`)
+	require.Equal(t, 1, previewCalls)
+
+	body := `{"principal_type":"USER","principal_ids":["` + principalID.String() + `"],"actions":["READ"]}`
+	submitReq := httptest.NewRequest(http.MethodPost, "/api/v1/filesystem/nodes/"+nodeID.String()+"/grants", strings.NewReader(body))
+	submitReq.Header.Set("Authorization", "Bearer "+token)
+	submitReq.Header.Set("X-Organization-ID", orgID.String())
+	submitReq.Header.Set("X-Workspace-ID", currentWorkspaceID.String())
+	submitReq.Header.Set("Idempotency-Key", "submit-1")
+	submitReq.Header.Set("Content-Type", "application/json")
+	submitRes := httptest.NewRecorder()
+	router.ServeHTTP(submitRes, submitReq)
+	require.Equal(t, http.StatusCreated, submitRes.Code, submitRes.Body.String())
+	require.Equal(t, 1, submitCalls)
+
+	namespaceOrgID = otherOrgID
+	res = send()
+	require.Equal(t, http.StatusNotFound, res.Code, res.Body.String())
+	require.Equal(t, 1, previewCalls)
+	submitReq = httptest.NewRequest(http.MethodPost, "/api/v1/filesystem/nodes/"+nodeID.String()+"/grants", strings.NewReader(body))
+	submitReq.Header.Set("Authorization", "Bearer "+token)
+	submitReq.Header.Set("X-Organization-ID", orgID.String())
+	submitReq.Header.Set("X-Workspace-ID", currentWorkspaceID.String())
+	submitReq.Header.Set("Idempotency-Key", "submit-2")
+	submitReq.Header.Set("Content-Type", "application/json")
+	submitRes = httptest.NewRecorder()
+	router.ServeHTTP(submitRes, submitReq)
+	require.Equal(t, http.StatusNotFound, submitRes.Code, submitRes.Body.String())
+	require.Equal(t, 1, submitCalls)
+}
+
+func TestGovernanceMetadataListLimitsAreBounded(t *testing.T) {
+	orgID, workspaceID, namespaceID, nodeID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	handler := &GovernanceHandler{
+		nodeByID: func(context.Context, uuid.UUID) (*model.Node, error) {
+			return &model.Node{ID: nodeID, NamespaceID: namespaceID}, nil
+		},
+		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace,
+				OrganizationID: orgID, WorkspaceID: workspaceID,
+			}, nil
+		},
+		authorize: func(context.Context, resourceauth.Request) resourceauth.Decision {
+			return resourceauth.Decision{Allowed: true}
+		},
+		listGovernanceGrants: func(_ context.Context, _ uuid.UUID, limit int) ([]governanceGrant, bool, error) {
+			require.Equal(t, 1, limit)
+			return []governanceGrant{{Grant: model.ResourceGrant{ID: uuid.New()}}}, true, nil
+		},
+		listNodeShareRequests: func(_ context.Context, _ uuid.UUID, limit int) ([]model.ShareRequest, error) {
+			require.Equal(t, 2, limit)
+			return []model.ShareRequest{{ID: uuid.New()}, {ID: uuid.New()}}, nil
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(
+		t, orgID, governanceOrgStub{active: true},
+		governanceWorkspaceStub{orgID: orgID, active: true}, handler,
+	)
+	for _, resource := range []string{"grants", "share-requests"} {
+		for _, invalidLimit := range []string{"0", "201"} {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/nodes/"+nodeID.String()+"/"+resource+"?limit="+invalidLimit, nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("X-Organization-ID", orgID.String())
+			req.Header.Set("X-Workspace-ID", workspaceID.String())
+			res := httptest.NewRecorder()
+			router.ServeHTTP(res, req)
+			require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
+		}
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/nodes/"+nodeID.String()+"/"+resource+"?limit=1", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Organization-ID", orgID.String())
+		req.Header.Set("X-Workspace-ID", workspaceID.String())
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+		require.Contains(t, res.Body.String(), `"truncated":true`)
+	}
+}
+
+func TestGovernanceMetadataRejectsOrdinaryReader(t *testing.T) {
+	orgID, workspaceID, namespaceID, nodeID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	handler := &GovernanceHandler{
+		nodeByID: func(context.Context, uuid.UUID) (*model.Node, error) {
+			return &model.Node{ID: nodeID, NamespaceID: namespaceID}, nil
+		},
+		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace, OrganizationID: orgID, WorkspaceID: workspaceID}, nil
+		},
+		authorize: func(context.Context, resourceauth.Request) resourceauth.Decision {
+			return resourceauth.Decision{Allowed: false}
+		},
+		listGovernanceGrants: func(context.Context, uuid.UUID, int) ([]governanceGrant, bool, error) {
+			t.Fatal("ordinary reader must not enumerate grants")
+			return nil, false, nil
+		},
+		listNodeShareRequests: func(context.Context, uuid.UUID, int) ([]model.ShareRequest, error) {
+			t.Fatal("ordinary reader must not enumerate share requests")
+			return nil, nil
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{orgID: orgID, active: true}, handler)
+	for _, resource := range []string{"grants", "share-requests"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/nodes/"+nodeID.String()+"/"+resource, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Organization-ID", orgID.String())
+		req.Header.Set("X-Workspace-ID", workspaceID.String())
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		require.Equal(t, http.StatusForbidden, res.Code, res.Body.String())
+	}
+}
+
+func TestGovernanceMetadataConcealsCrossOrganizationNode(t *testing.T) {
+	requestOrgID, sourceOrgID, workspaceID := uuid.New(), uuid.New(), uuid.New()
+	namespaceID, nodeID := uuid.New(), uuid.New()
+	handler := &GovernanceHandler{
+		nodeByID: func(context.Context, uuid.UUID) (*model.Node, error) {
+			return &model.Node{ID: nodeID, NamespaceID: namespaceID}, nil
+		},
+		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace,
+				OrganizationID: sourceOrgID, WorkspaceID: workspaceID,
+			}, nil
+		},
+		authorize: func(context.Context, resourceauth.Request) resourceauth.Decision {
+			t.Fatal("cross-organization metadata must be concealed before authorization")
+			return resourceauth.Decision{}
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(
+		t, requestOrgID, governanceOrgStub{active: true},
+		governanceWorkspaceStub{orgID: requestOrgID, active: true}, handler,
+	)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/nodes/"+nodeID.String()+"/grants", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Organization-ID", requestOrgID.String())
+	req.Header.Set("X-Workspace-ID", workspaceID.String())
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusNotFound, res.Code, res.Body.String())
 }
 
 func TestApproveShareRequestHTTPForwardsAuthoritativeOrganization(t *testing.T) {

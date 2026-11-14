@@ -20,6 +20,8 @@ describe("SharedItemVMSchema", () => {
         grant_id: "00000000-0000-4000-8000-000000000004",
         principal_type: "AGENT",
         principal_id: "00000000-0000-4000-8000-000000000005",
+        permission: "READ",
+        effect: "ALLOW",
         expires_at: null,
       }],
       original_path: "/项目/报告.md",
@@ -56,6 +58,8 @@ describe("SharedItemVMSchema", () => {
         grant_id: "00000000-0000-4000-8000-000000000004",
         principal_type: "FUTURE_PRINCIPAL",
         principal_id: "00000000-0000-4000-8000-000000000005",
+        permission: "READ",
+        effect: "ALLOW",
       }],
       original_path: "/未来来源.md",
       source_namespace: {

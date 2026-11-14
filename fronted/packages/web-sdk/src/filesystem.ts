@@ -21,6 +21,7 @@ import type {
   StoragePoolPageVM,
   StorageProviderPageVM,
   SharedItemPageVM,
+  SharePreviewVM,
   ShareRequestPageVM,
   UpdateStoragePoolCommand,
   UpdateStorageProviderCommand,
@@ -240,6 +241,22 @@ export function createShareRequest(
   const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("share-request");
   return bffFetch<GovernedShareSubmissionVM>(
     `/filesystem/nodes/${encodeURIComponent(nodeId)}/share-requests`,
+    {
+      ...governedFetchOptions(options, idempotencyKey),
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function previewGovernedShare(
+  nodeId: string,
+  input: CreateGovernedGrantCommand,
+  options: GovernedFilesystemWriteOptions,
+) {
+  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("share-preview");
+  return bffFetch<SharePreviewVM>(
+    `/filesystem/nodes/${encodeURIComponent(nodeId)}/share-preview`,
     {
       ...governedFetchOptions(options, idempotencyKey),
       method: "POST",

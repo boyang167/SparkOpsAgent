@@ -44,6 +44,13 @@ func TestShareRequestRepositoryPersistsAndReviewsWithCAS(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, request.PrincipalIDs, stored.PrincipalIDs)
 	require.Equal(t, request.Actions, stored.Actions)
+	newer := request
+	newer.ID = uuid.New()
+	newer.CreatedAt = request.CreatedAt.Add(time.Minute)
+	require.NoError(t, repo.CreateShareRequest(context.Background(), newer))
+	limited, err := repo.ListShareRequestsForNodeLimited(context.Background(), node.ID, 1)
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{newer.ID}, []uuid.UUID{limited[0].ID})
 
 	reviewer, reviewedAt := uuid.New(), time.Now().UTC()
 	stored.Status, stored.ReviewedBy, stored.ReviewedAt = model.ShareRequestApproved, &reviewer, &reviewedAt

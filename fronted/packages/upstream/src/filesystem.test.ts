@@ -254,4 +254,34 @@ describe("filesystem upstream", () => {
     expect(headers.get("X-Workspace-ID")).toBeNull();
     expect(headers.get("Idempotency-Key")).toBe("share-key-1");
   });
+
+  it("forwards governed share preview without changing its payload", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      code: 0,
+      message: "ok",
+      data: { outcome: "ACTIVE", reason: "POLICY_ACTIVE" },
+      trace_id: "trace-1",
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      principal_type: "USER" as const,
+      principal_ids: ["00000000-0000-4000-8000-000000000014"],
+      actions: ["READ" as const],
+    };
+
+    await createFilesystemUpstream().previewGovernedShare(
+      {
+        organizationId: "00000000-0000-4000-8000-000000000002",
+        workspaceId: "00000000-0000-4000-8000-000000000003",
+      },
+      "node-1",
+      input,
+      "preview-key-1",
+    );
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/filesystem/nodes/node-1/share-preview");
+    expect(init).toEqual(expect.objectContaining({ method: "POST", body: JSON.stringify(input) }));
+    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("preview-key-1");
+  });
 });

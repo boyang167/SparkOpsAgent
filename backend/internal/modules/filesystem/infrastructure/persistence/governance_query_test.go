@@ -211,7 +211,8 @@ func TestListSharedNodesProjectsAllowSourcesAndNamespaceSafePathsInBatches(t *te
 	require.Equal(t, userOwner, *projected.SourceNamespace.OwnerUserID)
 	require.Equal(t, []repository.SharedGrantSource{{
 		GrantID: allowID, PrincipalType: model.PrincipalUser,
-		PrincipalID: actorID, ExpiresAt: &expiry,
+		PrincipalID: actorID, Permission: model.ResourcePermissionRead,
+		Effect: model.GrantEffectAllow, ExpiresAt: &expiry,
 	}}, projected.Sources)
 	require.NotContains(t, projected.SourceGrantIDs, denyID)
 	require.Equal(t, "/同名.md", byID[workspaceFile.ID].OriginalPath)

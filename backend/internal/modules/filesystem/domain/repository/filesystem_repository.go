@@ -71,6 +71,8 @@ type SharedGrantSource struct {
 	GrantID       uuid.UUID
 	PrincipalType model.PrincipalType
 	PrincipalID   uuid.UUID
+	Permission    model.ResourcePermission
+	Effect        model.GrantEffect
 	ExpiresAt     *time.Time
 }
 

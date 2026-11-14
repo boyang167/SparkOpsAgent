@@ -22,6 +22,7 @@ import type {
   StoragePoolPageVM,
   StorageProviderPageVM,
   SharedItemPageVM,
+  SharePreviewVM,
   ShareRequestPageVM,
   SharedWithMeQuery,
   UpdateStoragePoolCommand,
@@ -210,6 +211,22 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
     ) {
       return upstreamFetch<GovernedShareSubmissionVM>(
         `/api/v1/filesystem/nodes/${encodeURIComponent(nodeId)}/grants`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          headers: governedHeaders(context, { "Idempotency-Key": idempotencyKey }),
+          options: governedOptions(options, context),
+        },
+      );
+    },
+    previewGovernedShare(
+      context: GovernedFilesystemContext,
+      nodeId: string,
+      input: CreateGovernedGrantCommand,
+      idempotencyKey: string,
+    ) {
+      return upstreamFetch<SharePreviewVM>(
+        `/api/v1/filesystem/nodes/${encodeURIComponent(nodeId)}/share-preview`,
         {
           method: "POST",
           body: JSON.stringify(input),

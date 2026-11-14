@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -31,8 +32,8 @@ type GovernanceRepository interface {
 	GetNodeByID(context.Context, uuid.UUID) (*model.Node, error)
 	ListChildrenFiltered(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, string, int, string) ([]model.Node, string, error)
 	GetNodesWithAncestors(context.Context, uuid.UUID, []uuid.UUID) ([]model.Node, error)
-	ListNodeResourceGrants(context.Context, uuid.UUID) ([]model.ResourceGrant, error)
-	ListShareRequestsForNode(context.Context, uuid.UUID) ([]model.ShareRequest, error)
+	ListNodeResourceGrantsLimited(context.Context, uuid.UUID, bool, int) ([]model.ResourceGrant, error)
+	ListShareRequestsForNodeLimited(context.Context, uuid.UUID, int) ([]model.ShareRequest, error)
 }
 
 type governanceGrant struct {
@@ -49,11 +50,12 @@ type GovernanceHandler struct {
 	sharedWithMe          func(context.Context, query.SharedWithMe) ([]repository.SharedNode, string, error)
 	effectiveAccess       func(context.Context, query.EffectiveAccess) query.EffectiveAccessResult
 	authorize             func(context.Context, resourceauth.Request) resourceauth.Decision
+	previewShare          func(context.Context, command.SubmitShare) (command.SharePreview, error)
 	submitShare           func(context.Context, command.SubmitShare) (command.ShareResult, error)
 	approveShare          func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error)
 	rejectShare           func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error)
-	listGovernanceGrants  func(context.Context, uuid.UUID) ([]governanceGrant, error)
-	listNodeShareRequests func(context.Context, uuid.UUID) ([]model.ShareRequest, error)
+	listGovernanceGrants  func(context.Context, uuid.UUID, int) ([]governanceGrant, bool, error)
+	listNodeShareRequests func(context.Context, uuid.UUID, int) ([]model.ShareRequest, error)
 }
 
 func NewGovernanceHandler(
@@ -72,22 +74,33 @@ func NewGovernanceHandler(
 		sharedWithMe:          shared.Handle,
 		effectiveAccess:       effective.Handle,
 		authorize:             authorizer.Authorize,
-		listNodeShareRequests: repo.ListShareRequestsForNode,
+		listNodeShareRequests: repo.ListShareRequestsForNodeLimited,
 	}
-	handler.listGovernanceGrants = func(ctx context.Context, nodeID uuid.UUID) ([]governanceGrant, error) {
+	handler.listGovernanceGrants = func(ctx context.Context, nodeID uuid.UUID, limit int) ([]governanceGrant, bool, error) {
 		node, err := repo.GetNodeByID(ctx, nodeID)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		nodes, err := repo.GetNodesWithAncestors(ctx, node.NamespaceID, []uuid.UUID{nodeID})
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		result := make([]governanceGrant, 0)
+		sort.Slice(nodes, func(i, j int) bool {
+			if nodes[i].ID == nodeID {
+				return nodes[j].ID != nodeID
+			}
+			if nodes[j].ID == nodeID {
+				return false
+			}
+			return nodes[i].ID.String() < nodes[j].ID.String()
+		})
+		result := make([]governanceGrant, 0, limit+1)
 		for _, sourceNode := range nodes {
-			grants, listErr := repo.ListNodeResourceGrants(ctx, sourceNode.ID)
+			grants, listErr := repo.ListNodeResourceGrantsLimited(
+				ctx, sourceNode.ID, sourceNode.ID != nodeID, limit+1-len(result),
+			)
 			if listErr != nil {
-				return nil, listErr
+				return nil, false, listErr
 			}
 			for _, grant := range grants {
 				if sourceNode.ID != nodeID && !grant.InheritToChildren {
@@ -98,19 +111,23 @@ func NewGovernanceHandler(
 					source = "DIRECT"
 				}
 				result = append(result, governanceGrant{Grant: grant, Source: source})
+				if len(result) > limit {
+					return result[:limit], true, nil
+				}
 			}
 		}
-		return result, nil
+		return result, false, nil
 	}
 	return handler
 }
 
 func (h *GovernanceHandler) BindShareWorkflow(
+	preview func(context.Context, command.SubmitShare) (command.SharePreview, error),
 	submit func(context.Context, command.SubmitShare) (command.ShareResult, error),
 	approve func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error),
 	reject func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error),
 ) {
-	h.submitShare, h.approveShare, h.rejectShare = submit, approve, reject
+	h.previewShare, h.submitShare, h.approveShare, h.rejectShare = preview, submit, approve, reject
 }
 
 func RegisterGovernanceRoutes(
@@ -132,6 +149,7 @@ func RegisterGovernanceRoutes(
 	base.GET("/nodes/:nodeId/effective-access", handler.EffectiveAccess)
 	base.GET("/nodes/:nodeId/grants", handler.ListGovernedGrants)
 	base.GET("/nodes/:nodeId/share-requests", handler.ListShareRequests)
+	base.POST("/nodes/:nodeId/share-preview", requireIdempotencyKey(), handler.PreviewShare)
 	base.POST("/nodes/:nodeId/grants", requireIdempotencyKey(), handler.CreateGovernedGrant)
 	base.POST("/nodes/:nodeId/share-requests", requireIdempotencyKey(), handler.CreateShareRequest)
 	base.POST("/share-requests/:requestId/approve", requireIdempotencyKey(), handler.ApproveShareRequest)
@@ -441,7 +459,11 @@ func (h *GovernanceHandler) ListGovernedGrants(c *gin.Context) {
 		httpx.Fail(c, "FILESYSTEM_RESOURCE_FORBIDDEN", "governance metadata access denied", http.StatusForbidden)
 		return
 	}
-	grants, err := h.listGovernanceGrants(c.Request.Context(), node.ID)
+	limit, valid := governanceListLimit(c)
+	if !valid {
+		return
+	}
+	grants, truncated, err := h.listGovernanceGrants(c.Request.Context(), node.ID, limit)
 	if err != nil {
 		governanceError(c, err)
 		return
@@ -457,7 +479,7 @@ func (h *GovernanceHandler) ListGovernedGrants(c *gin.Context) {
 			"source": item.Source,
 		})
 	}
-	httpx.OK(c, gin.H{"items": items, "classification": node.Classification})
+	httpx.OK(c, gin.H{"items": items, "classification": node.Classification, "truncated": truncated})
 }
 
 func (h *GovernanceHandler) ListShareRequests(c *gin.Context) {
@@ -476,16 +498,37 @@ func (h *GovernanceHandler) ListShareRequests(c *gin.Context) {
 		httpx.Fail(c, "FILESYSTEM_RESOURCE_FORBIDDEN", "governance metadata access denied", http.StatusForbidden)
 		return
 	}
-	requests, err := h.listNodeShareRequests(c.Request.Context(), node.ID)
+	limit, valid := governanceListLimit(c)
+	if !valid {
+		return
+	}
+	requests, err := h.listNodeShareRequests(c.Request.Context(), node.ID, limit+1)
 	if err != nil {
 		governanceError(c, err)
 		return
+	}
+	truncated := len(requests) > limit
+	if truncated {
+		requests = requests[:limit]
 	}
 	items := make([]gin.H, 0, len(requests))
 	for _, request := range requests {
 		items = append(items, shareRequestView(request))
 	}
-	httpx.OK(c, gin.H{"items": items})
+	httpx.OK(c, gin.H{"items": items, "truncated": truncated})
+}
+
+func governanceListLimit(c *gin.Context) (int, bool) {
+	raw := strings.TrimSpace(c.Query("limit"))
+	if raw == "" {
+		return 50, true
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 || limit > 200 {
+		invalidRequest(c)
+		return 0, false
+	}
+	return limit, true
 }
 
 func (h *GovernanceHandler) governanceMetadataNode(c *gin.Context) (governanceContext, *model.Node, *model.Namespace, bool) {
@@ -545,7 +588,7 @@ func (h *GovernanceHandler) submitGovernedShare(c *gin.Context) {
 		governanceError(c, err)
 		return
 	}
-	if !validNamespaceAudience(rc, namespace) {
+	if namespace == nil || namespace.OrganizationID != rc.organizationID {
 		notFound(c)
 		return
 	}
@@ -578,6 +621,58 @@ func (h *GovernanceHandler) submitGovernedShare(c *gin.Context) {
 		return
 	}
 	created(c, shareResultView(result))
+}
+
+func (h *GovernanceHandler) PreviewShare(c *gin.Context) {
+	rc, ok := governanceRequestContext(c)
+	if !ok || h == nil || h.nodeByID == nil || h.namespaceByID == nil || h.previewShare == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	nodeID, ok := canonicalUUID(c.Param("nodeId"))
+	if !ok {
+		invalidRequest(c)
+		return
+	}
+	node, err := h.nodeByID(c.Request.Context(), nodeID)
+	if err != nil {
+		governanceError(c, err)
+		return
+	}
+	namespace, err := h.namespaceByID(c.Request.Context(), node.NamespaceID)
+	if err != nil {
+		governanceError(c, err)
+		return
+	}
+	if namespace == nil || namespace.OrganizationID != rc.organizationID {
+		notFound(c)
+		return
+	}
+	var body grantBody
+	if !decodeJSON(c, &body) {
+		return
+	}
+	scopeID := rc.workspaceID
+	if scopeID == uuid.Nil {
+		scopeID = rc.organizationID
+	}
+	request := requestContext{
+		workspaceID: rc.workspaceID, actorID: rc.actorID, namespace: namespace,
+		commandID: commandID(scopeID, c.GetString(idempotencyContextKey)), traceID: httpx.GetTraceID(c),
+	}
+	submit, _, valid := shareCommand(c, request, nodeID, body)
+	if !valid {
+		return
+	}
+	if submit.WorkspaceID == uuid.Nil {
+		submit.WorkspaceID = scopeID
+	}
+	preview, err := h.previewShare(c.Request.Context(), submit)
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"outcome": preview.Outcome, "reason": preview.Reason})
 }
 
 func (h *GovernanceHandler) ApproveShareRequest(c *gin.Context) {
@@ -751,7 +846,8 @@ func sharedNodeView(item repository.SharedNode) gin.H {
 	for _, source := range item.Sources {
 		sources = append(sources, gin.H{
 			"grant_id": source.GrantID, "principal_type": source.PrincipalType,
-			"principal_id": source.PrincipalID, "expires_at": source.ExpiresAt,
+			"principal_id": source.PrincipalID, "permission": source.Permission,
+			"effect": source.Effect, "expires_at": source.ExpiresAt,
 		})
 	}
 	return gin.H{

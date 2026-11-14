@@ -75,6 +75,8 @@ function item(
       grant_id: `30000000-0000-4000-8000-0000000000${index}`,
       principal_type: sourcePrincipalType,
       principal_id: `40000000-0000-4000-8000-0000000000${index}`,
+      permission: "READ",
+      effect: "ALLOW",
       expires_at: expiresAt,
     }],
     source_namespace: {
@@ -97,22 +99,33 @@ describe("SharedWithMePanel", () => {
     share.nodeId = "";
   });
 
-  it("renders reshare only when the projection has effective SHARE", () => {
+  it("renders reshare only for an explicit active SHARE source grant", () => {
     const denied = item(1, "WORKSPACE");
-    const allowed = {
+    const adminOnly = {
       ...item(2, "USER"),
       effective_actions: ["READ", "SHARE"] as SharedItemVM["effective_actions"],
+      sources: [{ ...item(2, "USER").sources[0]!, permission: "ADMIN" as const }],
+    };
+    const allowed = {
+      ...item(3, "USER"),
+      effective_actions: ["READ", "SHARE"] as SharedItemVM["effective_actions"],
+      sources: [{ ...item(3, "USER").sources[0]!, permission: "SHARE" as const }],
+      source_namespace: {
+        ...item(3, "USER").source_namespace,
+        workspace_id: "external-workspace",
+      },
     };
     render(createElement(SharedWithMePanel, {
       workspaceId: "workspace-1",
       organizationId: "organization-1",
       organizationLabel: "星火科技",
       workspaceLabel: "研发平台",
-      items: [denied, allowed],
+      items: [denied, adminOnly, allowed],
       state: "ready",
     }));
 
     expect(screen.queryByRole("button", { name: `共享 ${denied.node.name}` })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: `共享 ${adminOnly.node.name}` })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: `共享 ${allowed.node.name}` }));
     expect(share.nodeId).toBe(allowed.node.id);
   });
@@ -222,6 +235,8 @@ describe("SharedWithMePanel", () => {
         grant_id: "30000000-0000-4000-8000-000000000099",
         principal_type: "ORGANIZATION",
         principal_id: "40000000-0000-4000-8000-000000000099",
+        permission: "READ",
+        effect: "ALLOW",
         expires_at: "2027-01-31T16:00:00.000Z",
       },
     ];
@@ -261,6 +276,8 @@ describe("SharedWithMePanel", () => {
       grant_id: "30000000-0000-4000-8000-000000000098",
       principal_type: "USER",
       principal_id: "40000000-0000-4000-8000-000000000098",
+      permission: "READ",
+      effect: "ALLOW",
       expires_at: null,
     });
     render(createElement(SharedWithMePanel, {

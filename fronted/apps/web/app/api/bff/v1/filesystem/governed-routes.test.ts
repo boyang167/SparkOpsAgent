@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   listShareRequests: vi.fn(),
   createGovernedGrant: vi.fn(),
   createShareRequest: vi.fn(),
+  previewGovernedShare: vi.fn(),
 }));
 
 vi.mock("@sparkops/bff-core", () => ({
@@ -33,6 +34,7 @@ vi.mock("@sparkops/bff-modules/filesystem", () => ({
   listShareRequests: mocks.listShareRequests,
   createGovernedGrant: mocks.createGovernedGrant,
   createShareRequest: mocks.createShareRequest,
+  previewGovernedShare: mocks.previewGovernedShare,
 }));
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
@@ -66,13 +68,14 @@ describe("governed filesystem Next BFF routes", () => {
     }));
   });
 
-  it("requires organization context on all six governed routes", async () => {
+  it("requires organization context on all governed routes", async () => {
     const namespaces = await import("./namespaces/route");
     const children = await import("./namespaces/[namespaceId]/children/route");
     const shared = await import("./shared-with-me/route");
     const effective = await import("./nodes/[nodeId]/effective-access/route");
     const grants = await import("./nodes/[nodeId]/grants/route");
     const shareRequests = await import("./nodes/[nodeId]/share-requests/route");
+    const sharePreview = await import("./nodes/[nodeId]/share-preview/route");
     const params = Promise.resolve({ namespaceId: "ns-1", nodeId: "node-1" });
 
     const responses = await Promise.all([
@@ -94,15 +97,20 @@ describe("governed filesystem Next BFF routes", () => {
         request("/api/bff/v1/filesystem/nodes/node-1/share-requests") as never,
         { params },
       ),
+      sharePreview.POST(
+        request("/api/bff/v1/filesystem/nodes/node-1/share-preview") as never,
+        { params },
+      ),
     ]);
 
-    expect(responses.map((response) => response.status)).toEqual([400, 400, 400, 400, 400, 400]);
+    expect(responses.map((response) => response.status)).toEqual([400, 400, 400, 400, 400, 400, 400]);
     expect(mocks.listGovernedNamespaces).not.toHaveBeenCalled();
     expect(mocks.listGovernedChildren).not.toHaveBeenCalled();
     expect(mocks.listSharedWithMe).not.toHaveBeenCalled();
     expect(mocks.getEffectiveAccess).not.toHaveBeenCalled();
     expect(mocks.createGovernedGrant).not.toHaveBeenCalled();
     expect(mocks.createShareRequest).not.toHaveBeenCalled();
+    expect(mocks.previewGovernedShare).not.toHaveBeenCalled();
   });
 
   it("lists namespaces with optional workspace context", async () => {
@@ -126,8 +134,8 @@ describe("governed filesystem Next BFF routes", () => {
   });
 
   it("forwards governance metadata reads without idempotency headers", async () => {
-    mocks.listGovernedGrants.mockResolvedValue({ items: [], classification: "INTERNAL" });
-    mocks.listShareRequests.mockResolvedValue({ items: [] });
+    mocks.listGovernedGrants.mockResolvedValue({ items: [], classification: "INTERNAL", truncated: false });
+    mocks.listShareRequests.mockResolvedValue({ items: [], truncated: false });
     const grants = await import("./nodes/[nodeId]/grants/route");
     const requests = await import("./nodes/[nodeId]/share-requests/route");
     const req = request("/api/bff/v1/filesystem/nodes/node-1", {
@@ -150,6 +158,42 @@ describe("governed filesystem Next BFF routes", () => {
       organizationId,
       workspaceId,
       "node-1",
+    );
+  });
+
+  it("requires idempotency and forwards authoritative share preview", async () => {
+    mocks.previewGovernedShare.mockResolvedValue({
+      outcome: "PENDING_APPROVAL",
+      reason: "POLICY_APPROVAL_REQUIRED",
+    });
+    const preview = await import("./nodes/[nodeId]/share-preview/route");
+    const body = {
+      principal_type: "USER",
+      principal_ids: ["00000000-0000-4000-8000-000000000003"],
+      actions: ["READ"],
+    };
+    const params = { params: Promise.resolve({ nodeId: "node-1" }) };
+    const missing = await preview.POST(request("/preview", {
+      organization: organizationId,
+      workspace: workspaceId,
+      body,
+    }) as never, params);
+    expect(missing.status).toBe(400);
+
+    const response = await preview.POST(request("/preview", {
+      organization: organizationId,
+      workspace: workspaceId,
+      idempotencyKey: "preview-1",
+      body,
+    }) as never, params);
+    expect(response.status).toBe(200);
+    expect(mocks.previewGovernedShare).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId }),
+      organizationId,
+      workspaceId,
+      "node-1",
+      body,
+      "preview-1",
     );
   });
 

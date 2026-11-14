@@ -68,9 +68,10 @@ export function FileDetailDrawer({
     access?: EffectiveAccessVM;
     grants: GovernedGrantVM[];
     requests: ShareRequestVM[];
+    metadataTruncated: boolean;
     state: LoadState;
     metadataRestricted: boolean;
-  }>({ key: detailKey, grants: [], requests: [], state: "idle", metadataRestricted: false });
+  }>({ key: detailKey, grants: [], requests: [], metadataTruncated: false, state: "idle", metadataRestricted: false });
   const revisionGeneration = useRef(0);
   const auditGeneration = useRef(0);
   const revisions = revisionData.key === detailKey ? revisionData.items : [];
@@ -81,7 +82,7 @@ export function FileDetailDrawer({
     auditData.key === detailKey ? auditData.state : open && node ? "loading" : "idle";
   const scopedAccess = accessData.key === detailKey
     ? accessData
-    : { key: detailKey, grants: [], requests: [], state: "loading" as const, metadataRestricted: false };
+    : { key: detailKey, grants: [], requests: [], metadataTruncated: false, state: "loading" as const, metadataRestricted: false };
 
   useEffect(() => {
     const generation = ++revisionGeneration.current;
@@ -143,6 +144,7 @@ export function FileDetailDrawer({
         key: detailKey,
         grants: [],
         requests: [],
+        metadataTruncated: false,
         state: "error",
         metadataRestricted: false,
       });
@@ -154,6 +156,7 @@ export function FileDetailDrawer({
       key,
       grants: [],
       requests: [],
+      metadataTruncated: false,
       state: "loading",
       metadataRestricted: false,
     });
@@ -169,6 +172,7 @@ export function FileDetailDrawer({
           key,
           grants: [],
           requests: [],
+          metadataTruncated: false,
           state: accessResult.reason instanceof BffError && accessResult.reason.status === 403
             ? "forbidden"
             : "error",
@@ -190,6 +194,9 @@ export function FileDetailDrawer({
         access: accessResult.value,
         grants: grantsResult.status === "fulfilled" ? grantsResult.value.items : [],
         requests: requestsResult.status === "fulfilled" ? requestsResult.value.items : [],
+        metadataTruncated:
+          (grantsResult.status === "fulfilled" && grantsResult.value.truncated) ||
+          (requestsResult.status === "fulfilled" && requestsResult.value.truncated),
         state: metadataErrors.length > 0 && !metadataRestricted ? "error" : "ready",
         metadataRestricted,
       });
@@ -368,6 +375,7 @@ function AccessDetails({
     access?: EffectiveAccessVM;
     grants: GovernedGrantVM[];
     requests: ShareRequestVM[];
+    metadataTruncated: boolean;
     state: LoadState;
     metadataRestricted: boolean;
   };
@@ -466,6 +474,13 @@ function AccessDetails({
                     `${request.principal_type} · ${request.actions.join("、")}`,
                   ),
                 ),
+              )
+            : null,
+          data.metadataTruncated
+            ? createElement(
+                "p",
+                { className: "text-sm text-muted" },
+                "仅显示前 50 项治理记录。",
               )
             : null,
         ),

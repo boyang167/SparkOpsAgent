@@ -791,6 +791,24 @@ func (r *Repository) ListNodeResourceGrants(ctx context.Context, nodeID uuid.UUI
 	return result, nil
 }
 
+func (r *Repository) ListNodeResourceGrantsLimited(ctx context.Context, nodeID uuid.UUID, inheritedOnly bool, limit int) ([]model.ResourceGrant, error) {
+	var rows []resourceGrantRow
+	now := time.Now().UTC()
+	query := postgres.DB(ctx, r.db).
+		Where("node_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)", nodeID, now)
+	if inheritedOnly {
+		query = query.Where("inherit_to_children = ?", true)
+	}
+	if err := query.Order("id ASC").Limit(limit).Find(&rows).Error; err != nil {
+		return nil, wrapPersistence(err)
+	}
+	result := make([]model.ResourceGrant, len(rows))
+	for i, row := range rows {
+		result[i] = resourceGrantFromRow(row)
+	}
+	return result, nil
+}
+
 func resourceGrantFromRow(row resourceGrantRow) model.ResourceGrant {
 	return model.ResourceGrant{
 		ID: row.ID, NodeID: row.NodeID, OrganizationID: row.OrganizationID, GranteeID: row.GranteeID,
@@ -888,6 +906,21 @@ func (r *Repository) ListShareRequestsForNode(ctx context.Context, nodeID uuid.U
 		Where("node_id = ?", nodeID).
 		Order("created_at DESC").
 		Find(&rows).Error; err != nil {
+		return nil, wrapPersistence(err)
+	}
+	result := make([]model.ShareRequest, len(rows))
+	for index, row := range rows {
+		result[index] = shareRequestFromRow(row)
+	}
+	return result, nil
+}
+
+func (r *Repository) ListShareRequestsForNodeLimited(ctx context.Context, nodeID uuid.UUID, limit int) ([]model.ShareRequest, error) {
+	var rows []shareRequestRow
+	if err := postgres.DB(ctx, r.db).
+		Where("node_id = ?", nodeID).
+		Order("created_at DESC, id ASC").
+		Limit(limit).Find(&rows).Error; err != nil {
 		return nil, wrapPersistence(err)
 	}
 	result := make([]model.ShareRequest, len(rows))

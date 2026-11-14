@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/url"
 	"os"
@@ -405,6 +406,37 @@ func TestCreateResourceGrantRevokesExpiredKeyBeforeRecreating(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, grants, 1)
 	require.Equal(t, second.ID, grants[0].ID)
+}
+
+func TestListNodeResourceGrantsLimitedBoundsAndFiltersInheritedRows(t *testing.T) {
+	repo, db := newTestRepository(t)
+	concrete := repo.(*Repository)
+	ns := seedNamespace(t, db)
+	node := rootDirectory(ns.ID, "bounded")
+	require.NoError(t, repo.CreateNode(context.Background(), node))
+	principalID := uuid.New()
+	permissions := []model.ResourcePermission{
+		model.ResourcePermissionRead,
+		model.ResourcePermissionDownload,
+		model.ResourcePermissionWrite,
+	}
+	for index, inherit := range []bool{false, true, true} {
+		require.NoError(t, repo.CreateResourceGrant(context.Background(), model.ResourceGrant{
+			ID:     uuid.MustParse(fmt.Sprintf("00000000-0000-4000-8000-%012d", index+1)),
+			NodeID: node.ID, OrganizationID: ns.OrganizationID,
+			GranteeID: principalID, PrincipalType: model.PrincipalUser, PrincipalID: principalID,
+			Permission: permissions[index], Effect: model.GrantEffectAllow,
+			InheritToChildren: inherit, PolicyVersion: 1,
+		}))
+	}
+
+	direct, err := concrete.ListNodeResourceGrantsLimited(context.Background(), node.ID, false, 2)
+	require.NoError(t, err)
+	require.Len(t, direct, 2)
+	inherited, err := concrete.ListNodeResourceGrantsLimited(context.Background(), node.ID, true, 1)
+	require.NoError(t, err)
+	require.Len(t, inherited, 1)
+	require.True(t, inherited[0].InheritToChildren)
 }
 
 func TestGetCommandConvertsNotFoundPrecisely(t *testing.T) {

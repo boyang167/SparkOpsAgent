@@ -357,7 +357,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		query.NewEffectiveAccessHandler(resourceAuthorizer),
 		resourceAuthorizer,
 	)
-	governanceHandler.BindShareWorkflow(shareCommands.Submit, shareCommands.Approve, shareCommands.Reject)
+	governanceHandler.BindShareWorkflow(shareCommands.Preview, shareCommands.Submit, shareCommands.Approve, shareCommands.Reject)
 	filesystemhttp.RegisterGovernanceRoutes(
 		c.Engine,
 		entitlementMiddleware,

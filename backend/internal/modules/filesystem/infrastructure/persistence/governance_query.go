@@ -198,7 +198,8 @@ func sharedNodeProjections(
 				}
 				sources = append(sources, repository.SharedGrantSource{
 					GrantID: grant.ID, PrincipalType: grant.PrincipalType,
-					PrincipalID: grant.PrincipalID, ExpiresAt: grant.ExpiresAt,
+					PrincipalID: grant.PrincipalID, Permission: grant.Permission,
+					Effect: grant.Effect, ExpiresAt: grant.ExpiresAt,
 				})
 			}
 			if current.ParentID == nil {

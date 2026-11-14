@@ -193,6 +193,105 @@ func TestShareRequestPolicyMatrix(t *testing.T) {
 	}
 }
 
+func TestSharePreviewMatchesSubmitPolicy(t *testing.T) {
+	organizationID, workspaceID, actorID, userID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	tests := []struct {
+		name           string
+		principalType  model.PrincipalType
+		actions        []model.ResourcePermission
+		classification model.TransferClassification
+		authority      shareAuthorityStub
+		wantOutcome    SharePreviewOutcome
+	}{
+		{
+			name: "confidential user read requires approval", principalType: model.PrincipalUser,
+			actions:        []model.ResourcePermission{model.ResourcePermissionRead},
+			classification: model.TransferClassificationConfidential, wantOutcome: SharePreviewPendingApproval,
+		},
+		{
+			name: "ordinary user write requires approval", principalType: model.PrincipalUser,
+			actions:        []model.ResourcePermission{model.ResourcePermissionWrite},
+			classification: model.TransferClassificationInternal, wantOutcome: SharePreviewPendingApproval,
+		},
+		{
+			name: "workspace admin internal share is active", principalType: model.PrincipalWorkspace,
+			actions:        []model.ResourcePermission{model.ResourcePermissionRead},
+			classification: model.TransferClassificationInternal,
+			authority:      shareAuthorityStub{workspaceAdmin: true}, wantOutcome: SharePreviewActive,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			namespace := &model.Namespace{
+				ID: uuid.New(), NamespaceType: model.NamespaceTypeUser,
+				OrganizationID: organizationID, OwnerUserID: actorID,
+			}
+			node := &model.Node{ID: uuid.New(), NamespaceID: namespace.ID, Type: model.NodeTypeFile}
+			store := &shareStoreStub{namespace: namespace, node: node, classification: tt.classification}
+			principalID := userID
+			scope := PrincipalScope{OrganizationID: organizationID}
+			if tt.principalType == model.PrincipalWorkspace {
+				principalID = workspaceID
+				scope.WorkspaceID = workspaceID
+			}
+			handler := NewShareRequestHandler(
+				store, postgres.NewDirectTransactor(), nil,
+				principalScopeStub{scopes: map[uuid.UUID]PrincipalScope{principalID: scope}},
+				tt.authority, &shareSourceAuthorizerStub{allowed: true},
+			)
+			input := SubmitShare{
+				CommandID: uuid.New(), ActorID: actorID, OrganizationID: organizationID,
+				WorkspaceID: workspaceID, NodeID: node.ID, PrincipalType: tt.principalType,
+				PrincipalIDs: []uuid.UUID{principalID}, Actions: tt.actions,
+			}
+
+			preview, err := handler.Preview(context.Background(), input)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantOutcome, preview.Outcome)
+			require.Empty(t, store.requests)
+			require.Empty(t, store.grants)
+			require.Empty(t, store.commands)
+
+			input.CommandID = uuid.New()
+			result, err := handler.Submit(context.Background(), input)
+			require.NoError(t, err)
+			if tt.wantOutcome == SharePreviewActive {
+				require.Equal(t, model.ShareRequestApproved, result.Request.Status)
+			} else {
+				require.Equal(t, model.ShareRequestPending, result.Request.Status)
+			}
+		})
+	}
+}
+
+func TestSharePreviewRequiresAuthoritativeShareAccess(t *testing.T) {
+	organizationID, workspaceID, actorID := uuid.New(), uuid.New(), uuid.New()
+	namespace := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeWorkspace,
+		OrganizationID: organizationID, WorkspaceID: workspaceID,
+	}
+	node := &model.Node{ID: uuid.New(), NamespaceID: namespace.ID, Type: model.NodeTypeFile}
+	store := &shareStoreStub{
+		namespace: namespace, node: node,
+		classification: model.TransferClassificationInternal,
+	}
+	handler := NewShareRequestHandler(
+		store, postgres.NewDirectTransactor(), nil,
+		principalScopeStub{}, shareAuthorityStub{}, &shareSourceAuthorizerStub{allowed: false},
+	)
+
+	_, err := handler.Preview(context.Background(), SubmitShare{
+		CommandID: uuid.New(), ActorID: actorID, OrganizationID: organizationID,
+		WorkspaceID: workspaceID, NodeID: node.ID, PrincipalType: model.PrincipalUser,
+		PrincipalIDs: []uuid.UUID{actorID}, Actions: []model.ResourcePermission{model.ResourcePermissionRead},
+	})
+
+	require.ErrorIs(t, err, domain.ErrResourceDenied)
+	require.Empty(t, store.requests)
+	require.Empty(t, store.grants)
+}
+
 func TestSubmitShareRequiresAuthoritativeSourceSharePermission(t *testing.T) {
 	organizationID, workspaceID := uuid.New(), uuid.New()
 	namespace := &model.Namespace{

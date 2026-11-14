@@ -62,6 +62,73 @@ func TestAuthorizeDeleteReplayTraversesTrashedAncestors(t *testing.T) {
 	}).Reason)
 }
 
+func TestAuthorizeAllowsExplicitUserGrantFromAnotherWorkspaceNamespace(t *testing.T) {
+	organizationID, sourceWorkspaceID, currentWorkspaceID := uuid.New(), uuid.New(), uuid.New()
+	actorID, namespaceID, nodeID, grantID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	namespace := &model.Namespace{
+		ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace,
+		OrganizationID: organizationID, WorkspaceID: sourceWorkspaceID, PolicyVersion: 1,
+	}
+	target := &model.Node{ID: nodeID, NamespaceID: namespaceID, State: model.NodeStateActive}
+	service := NewService(grantRepositoryStub{
+		nodes:      map[uuid.UUID]*model.Node{nodeID: target},
+		namespaces: map[uuid.UUID]*model.Namespace{namespaceID: namespace},
+		grants: map[uuid.UUID][]model.ResourceGrant{
+			nodeID: {{
+				ID: grantID, NodeID: nodeID, OrganizationID: organizationID,
+				PrincipalType: model.PrincipalUser, PrincipalID: actorID, GranteeID: actorID,
+				Permission: model.ResourcePermissionShare, Effect: model.GrantEffectAllow,
+			}},
+		},
+	}, principalResolverStub{principals: []repository.PrincipalRef{
+		{Type: model.PrincipalUser, ID: actorID},
+		{Type: model.PrincipalWorkspace, ID: currentWorkspaceID},
+	}}, authorityStub{})
+
+	decision := service.Authorize(context.Background(), Request{
+		ActorID: actorID, WorkspaceID: currentWorkspaceID,
+		NamespaceID: namespaceID, NodeID: nodeID, Permission: model.ResourcePermissionShare,
+	})
+
+	require.True(t, decision.Allowed)
+	require.Equal(t, []uuid.UUID{grantID}, decision.SourceGrantIDs)
+}
+
+func TestAuthorizeCurrentWorkspaceAdminCannotBypassSourceWorkspace(t *testing.T) {
+	organizationID, sourceWorkspaceID, currentWorkspaceID := uuid.New(), uuid.New(), uuid.New()
+	actorID, namespaceID, nodeID := uuid.New(), uuid.New(), uuid.New()
+	namespace := &model.Namespace{
+		ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace,
+		OrganizationID: organizationID, WorkspaceID: sourceWorkspaceID, PolicyVersion: 1,
+	}
+	target := &model.Node{ID: nodeID, NamespaceID: namespaceID, State: model.NodeStateActive}
+	authority := workspaceAuthorityByIDStub{adminWorkspaceID: currentWorkspaceID}
+	service := NewService(grantRepositoryStub{
+		nodes:      map[uuid.UUID]*model.Node{nodeID: target},
+		namespaces: map[uuid.UUID]*model.Namespace{namespaceID: namespace},
+	}, principalResolverStub{principals: []repository.PrincipalRef{{Type: model.PrincipalUser, ID: actorID}}}, authority)
+
+	decision := service.Authorize(context.Background(), Request{
+		ActorID: actorID, WorkspaceID: currentWorkspaceID,
+		NamespaceID: namespaceID, NodeID: nodeID, Permission: model.ResourcePermissionShare,
+	})
+
+	require.False(t, decision.Allowed)
+	require.Equal(t, "default_deny", decision.Reason)
+}
+
+type workspaceAuthorityByIDStub struct {
+	adminWorkspaceID uuid.UUID
+}
+
+func (s workspaceAuthorityByIDStub) HasWorkspaceFileAdmin(_ context.Context, _ uuid.UUID, workspaceID uuid.UUID) (bool, error) {
+	return workspaceID == s.adminWorkspaceID, nil
+}
+
+func (workspaceAuthorityByIDStub) HasOrganizationFileAdmin(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 func (r grantRepositoryStub) ListResourceGrants(_ context.Context, nodeIDs []uuid.UUID, principals []repository.PrincipalRef, permission model.ResourcePermission, at time.Time) ([]model.ResourceGrant, error) {
 	var result []model.ResourceGrant
 	for _, nodeID := range nodeIDs {

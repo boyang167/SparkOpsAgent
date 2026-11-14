@@ -23,6 +23,7 @@ import type {
   StoragePoolPageVM,
   StorageProviderPageVM,
   SharedItemPageVM,
+  SharePreviewVM,
   ShareRequestPageVM,
   SharedWithMeQuery,
   UpdateStoragePoolCommand,
@@ -44,6 +45,7 @@ import {
   GovernedShareSubmissionVMSchema,
   NamespaceSummaryPageVMSchema,
   SharedItemPageVMSchema,
+  SharePreviewVMSchema,
   ShareRequestPageVMSchema,
   StorageBindingPageVMSchema,
   StoragePoolPageVMSchema,
@@ -398,6 +400,23 @@ export async function createGovernedGrant(
     idempotencyKey,
   );
   return GovernedShareSubmissionVMSchema.parse(data);
+}
+
+export async function previewGovernedShare(
+  ctx: BffContext,
+  organizationId: string,
+  workspaceId: string | undefined,
+  nodeId: string,
+  input: CreateGovernedGrantCommand,
+  idempotencyKey: string,
+): Promise<SharePreviewVM> {
+  const data = await ctx.upstream.filesystem.previewGovernedShare(
+    governedContext(organizationId, workspaceId),
+    nodeId,
+    input,
+    idempotencyKey,
+  );
+  return SharePreviewVMSchema.parse(data);
 }
 
 export async function createShareRequest(

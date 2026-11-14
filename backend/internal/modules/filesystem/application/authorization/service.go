@@ -77,9 +77,6 @@ func (s *Service) Authorize(ctx context.Context, request Request) Decision {
 		decision.Reason = reason
 		return decision
 	}
-	if namespace.NamespaceType == model.NamespaceTypeWorkspace && namespace.WorkspaceID != request.WorkspaceID {
-		return denied("organization_boundary")
-	}
 	principals := []repository.PrincipalRef{{Type: model.PrincipalUser, ID: request.ActorID}}
 	if s.principals != nil {
 		principals, err = s.principals.Resolve(ctx, ResolvePrincipalsInput{
