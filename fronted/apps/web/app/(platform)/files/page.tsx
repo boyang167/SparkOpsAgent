@@ -90,7 +90,7 @@ export default async function FilesPage({
       <div className="stack-lg">
         <PageHeader
           eyebrow="Filesystem"
-          title="文件"
+          title="文件中心"
           description="工作区文件命名空间尚未初始化。"
         />
       </div>
@@ -117,7 +117,7 @@ export default async function FilesPage({
 
   return (
     <div className="stack-lg">
-      <PageHeader eyebrow="Filesystem" title="文件" description="浏览与管理 workspace 文件与目录" />
+      <PageHeader eyebrow="Filesystem" title="文件中心" description="浏览与管理 workspace 文件与目录" />
       <FilesystemWorkbench
         workspaceId={workspaceId}
         namespace={namespace}
