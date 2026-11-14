@@ -4,6 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
+import { BffError } from "@sparkops/contracts";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DirectoryTree, type DirectoryTreeProps } from "./DirectoryTree";
@@ -39,6 +40,26 @@ const nestedDirectory: FileNodeVM = {
   parent_id: directory.id,
   name: "设计稿",
 };
+const secondDirectory: FileNodeVM = {
+  ...root,
+  id: "directory-3",
+  parent_id: root.id,
+  name: "团队资料",
+};
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function itemFor(name: string) {
+  const item = screen.getByText(name).closest('[role="treeitem"]');
+  if (!(item instanceof HTMLElement)) throw new Error(`treeitem not found: ${name}`);
+  return item;
+}
 
 function props(overrides: Partial<DirectoryTreeProps> = {}): DirectoryTreeProps {
   return {
@@ -54,47 +75,171 @@ function props(overrides: Partial<DirectoryTreeProps> = {}): DirectoryTreeProps 
 describe("DirectoryTree", () => {
   beforeEach(() => {
     sdk.listFileNodes.mockReset();
-    sdk.listFileNodes
-      .mockResolvedValueOnce({ items: [directory], next_cursor: "" })
-      .mockResolvedValueOnce({ items: [nestedDirectory], next_cursor: "" });
   });
 
   afterEach(cleanup);
 
-  it("loads directory children only when their parent expands", async () => {
+  it("loads every page of directory children when a node expands", async () => {
     const user = userEvent.setup();
+    sdk.listFileNodes
+      .mockResolvedValueOnce({ items: [directory], next_cursor: "cursor-1" })
+      .mockResolvedValueOnce({ items: [secondDirectory], next_cursor: "" });
     render(createElement(DirectoryTree, props()));
 
     expect(screen.getByRole("tree")).toBeInTheDocument();
     expect(sdk.listFileNodes).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "展开 全部文件" }));
+
+    await waitFor(() => expect(screen.getByText("团队资料")).toBeInTheDocument());
+    expect(sdk.listFileNodes).toHaveBeenNthCalledWith(1, workspaceId, {
+      parentId: root.id,
+      nodeType: "DIRECTORY",
+    });
+    expect(sdk.listFileNodes).toHaveBeenNthCalledWith(2, workspaceId, {
+      parentId: root.id,
+      nodeType: "DIRECTORY",
+      cursor: "cursor-1",
+    });
+  });
+
+  it("loads a nested directory only when it expands", async () => {
+    const user = userEvent.setup();
+    sdk.listFileNodes
+      .mockResolvedValueOnce({ items: [directory], next_cursor: "" })
+      .mockResolvedValueOnce({ items: [nestedDirectory], next_cursor: "" });
+    render(createElement(DirectoryTree, props()));
+
+    await user.click(screen.getByRole("button", { name: "展开 全部文件" }));
     await user.click(await screen.findByRole("button", { name: "展开 项目资料" }));
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(sdk.listFileNodes).toHaveBeenLastCalledWith(workspaceId, {
         parentId: "directory-1",
         nodeType: "DIRECTORY",
-      }),
-    );
-    expect(screen.getByRole("button", { name: "设计稿" })).toBeInTheDocument();
+      });
+    });
+    expect(screen.getByText("设计稿")).toBeInTheDocument();
   });
 
-  it("supports ArrowRight, ArrowLeft, and Enter", async () => {
+  it("implements roving focus and tree arrow-key navigation", async () => {
     const user = userEvent.setup();
     const onNavigate = vi.fn();
+    sdk.listFileNodes.mockResolvedValueOnce({
+      items: [directory, secondDirectory],
+      next_cursor: "",
+    });
     render(createElement(DirectoryTree, props({ onNavigate })));
     const rootItem = screen.getByRole("treeitem", { name: /全部文件/ });
 
     rootItem.focus();
     await user.keyboard("{ArrowRight}");
     expect(rootItem).toHaveAttribute("aria-expanded", "true");
-    expect(await screen.findByRole("button", { name: "项目资料" })).toBeInTheDocument();
+    await screen.findByText("项目资料");
+    expect(rootItem).toHaveAttribute("tabindex", "0");
+    expect(itemFor("项目资料")).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("button", { name: "收起 全部文件" })).toHaveAttribute(
+      "tabindex",
+      "-1",
+    );
+
+    await user.keyboard("{ArrowRight}");
+    expect(itemFor("项目资料")).toHaveFocus();
+    expect(itemFor("项目资料")).toHaveAttribute("tabindex", "0");
+    expect(rootItem).toHaveAttribute("tabindex", "-1");
+
+    await user.keyboard("{ArrowDown}");
+    expect(itemFor("团队资料")).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(itemFor("项目资料")).toHaveFocus();
 
     await user.keyboard("{ArrowLeft}");
-    expect(rootItem).toHaveAttribute("aria-expanded", "false");
+    expect(rootItem).toHaveFocus();
 
-    await user.keyboard("{Enter}");
+    await user.keyboard(" ");
     expect(onNavigate).toHaveBeenCalledWith(root);
+    await user.keyboard("{Enter}");
+    expect(onNavigate).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reopen a node when loading finishes after collapse", async () => {
+    const user = userEvent.setup();
+    const page = deferred<{ items: FileNodeVM[]; next_cursor: string }>();
+    sdk.listFileNodes.mockReturnValueOnce(page.promise);
+    render(createElement(DirectoryTree, props()));
+    const rootItem = screen.getByRole("treeitem", { name: /全部文件/ });
+
+    rootItem.focus();
+    await user.keyboard("{ArrowRight}");
+    await user.keyboard("{ArrowLeft}");
+    page.resolve({ items: [directory], next_cursor: "" });
+
+    await waitFor(() => expect(screen.queryByText("加载中…")).not.toBeInTheDocument());
+    expect(rootItem).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("项目资料")).not.toBeInTheDocument();
+  });
+
+  it("shows an explicit empty state for an empty directory", async () => {
+    const user = userEvent.setup();
+    sdk.listFileNodes.mockResolvedValueOnce({ items: [], next_cursor: "" });
+    render(createElement(DirectoryTree, props()));
+
+    await user.click(screen.getByRole("button", { name: "展开 全部文件" }));
+
+    expect(await screen.findByText("空目录")).toBeInTheDocument();
+  });
+
+  it("distinguishes forbidden directory loading errors", async () => {
+    const user = userEvent.setup();
+    sdk.listFileNodes.mockRejectedValueOnce(
+      new BffError("forbidden", "FILESYSTEM_RESOURCE_FORBIDDEN", 403),
+    );
+    render(createElement(DirectoryTree, props()));
+
+    await user.click(screen.getByRole("button", { name: "展开 全部文件" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("无权访问此目录");
+  });
+
+  it("activates only the clicked nested treeitem", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    sdk.listFileNodes.mockResolvedValueOnce({ items: [directory], next_cursor: "" });
+    render(createElement(DirectoryTree, props({ onNavigate })));
+
+    await user.click(screen.getByRole("button", { name: "展开 全部文件" }));
+    await user.click(await screen.findByText("项目资料"));
+
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onNavigate).toHaveBeenCalledWith(directory);
+  });
+
+  it("returns roving focus to a node when it hides the focused descendant", async () => {
+    const user = userEvent.setup();
+    sdk.listFileNodes.mockResolvedValueOnce({ items: [directory], next_cursor: "" });
+    render(createElement(DirectoryTree, props()));
+    const rootItem = screen.getByRole("treeitem", { name: "全部文件" });
+
+    rootItem.focus();
+    await user.keyboard("{ArrowRight}");
+    await screen.findByText("项目资料");
+    await user.keyboard("{ArrowRight}");
+    expect(itemFor("项目资料")).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "收起 全部文件" }));
+
+    expect(rootItem).toHaveFocus();
+    expect(rootItem).toHaveAttribute("tabindex", "0");
+  });
+
+  it("does not steal focus when the tree mounts", () => {
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    outside.focus();
+
+    render(createElement(DirectoryTree, props()));
+
+    expect(outside).toHaveFocus();
+    outside.remove();
   });
 });

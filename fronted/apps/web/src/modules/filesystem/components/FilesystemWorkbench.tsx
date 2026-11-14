@@ -75,7 +75,15 @@ export function FilesystemWorkbench({
 
   function navigateDirectory(node: FileNodeVM) {
     setDirectoryDrawerOpen(false);
-    router.push(node.id === namespace.root_node_id ? "/files" : `/files/${node.id}`);
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.delete("cursor");
+    if (node.id === namespace.root_node_id) {
+      nextSearchParams.delete("parent");
+    } else {
+      nextSearchParams.set("parent", node.id);
+    }
+    const query = nextSearchParams.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
   }
 
   function renderDirectoryTree() {

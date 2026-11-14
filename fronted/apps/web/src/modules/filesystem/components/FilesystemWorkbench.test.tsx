@@ -8,6 +8,7 @@ import { FilesystemWorkbench } from "./FilesystemWorkbench";
 
 const navigation = vi.hoisted(() => ({
   replace: vi.fn(),
+  push: vi.fn(),
   searchParams: new URLSearchParams(),
 }));
 
@@ -17,11 +18,12 @@ const explorer = vi.hoisted(() => ({
 
 const directoryTree = vi.hoisted(() => ({
   roots: [] as string[],
+  onNavigate: undefined as undefined | ((node: { id: string }) => void),
 }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/files",
-  useRouter: () => ({ replace: navigation.replace, push: vi.fn() }),
+  useRouter: () => ({ replace: navigation.replace, push: navigation.push }),
   useSearchParams: () => navigation.searchParams,
 }));
 
@@ -48,8 +50,15 @@ vi.mock("./FileExplorerPanel", () => ({
 }));
 
 vi.mock("./DirectoryTree", () => ({
-  DirectoryTree: ({ root }: { root: { id: string } }) => {
+  DirectoryTree: ({
+    root,
+    onNavigate,
+  }: {
+    root: { id: string };
+    onNavigate: (node: { id: string }) => void;
+  }) => {
     directoryTree.roots.push(root.id);
+    directoryTree.onNavigate = onNavigate;
     return createElement("div", { role: "tree" });
   },
 }));
@@ -81,9 +90,11 @@ describe("FilesystemWorkbench", () => {
 
   beforeEach(() => {
     navigation.replace.mockReset();
+    navigation.push.mockReset();
     navigation.searchParams = new URLSearchParams();
     explorer.views = [];
     directoryTree.roots = [];
+    directoryTree.onNavigate = undefined;
   });
 
   it("selects files and hides governance without storage read permission", () => {
@@ -169,5 +180,13 @@ describe("FilesystemWorkbench", () => {
     expect(screen.getByRole("dialog", { name: "目录" })).toBeInTheDocument();
     expect(screen.getAllByRole("tree")).toHaveLength(2);
     expect(directoryTree.roots.every((rootId) => rootId === namespace.root_node_id)).toBe(true);
+  });
+
+  it("navigates a directory through the supported parent query", () => {
+    renderWorkbench();
+
+    directoryTree.onNavigate?.({ id: "directory-1" });
+
+    expect(navigation.push).toHaveBeenCalledWith("/files?parent=directory-1");
   });
 });
