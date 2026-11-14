@@ -313,9 +313,9 @@ func openMigrationPostgres(t *testing.T) *gorm.DB {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_DSN")
 	if dsn == "" {
-		if strings.EqualFold(os.Getenv("CI"), "true") ||
-			strings.EqualFold(os.Getenv("REQUIRE_INTEGRATION"), "true") {
-			t.Fatal("DATABASE_DSN is required when migration integration tests run in CI")
+		if migrationIntegrationRequired(os.Getenv("CI")) ||
+			migrationIntegrationRequired(os.Getenv("REQUIRE_INTEGRATION")) {
+			t.Fatal("DATABASE_DSN is required when migration integration tests are required")
 		}
 		t.Skip("DATABASE_DSN is not set")
 	}
@@ -325,8 +325,8 @@ func openMigrationPostgres(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	databaseName := "sparkops_migration_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	if err := admin.Exec("CREATE DATABASE " + databaseName).Error; err != nil {
-		if strings.EqualFold(os.Getenv("CI"), "true") ||
-			strings.EqualFold(os.Getenv("REQUIRE_INTEGRATION"), "true") {
+		if migrationIntegrationRequired(os.Getenv("CI")) ||
+			migrationIntegrationRequired(os.Getenv("REQUIRE_INTEGRATION")) {
 			t.Fatalf("cannot create isolated PostgreSQL test database: %v", err)
 		}
 		t.Skipf("cannot create isolated PostgreSQL test database: %v", err)
@@ -346,6 +346,15 @@ func openMigrationPostgres(t *testing.T) *gorm.DB {
 		require.NoError(t, adminSQL.Close())
 	})
 	return db
+}
+
+func migrationIntegrationRequired(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true":
+		return true
+	default:
+		return false
+	}
 }
 
 func currentMigrationDSN(t *testing.T, db *gorm.DB) string {

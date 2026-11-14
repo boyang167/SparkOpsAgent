@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { createElement, useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useModalFocus } from "./modal-focus";
 
@@ -60,55 +60,63 @@ export function Modal({
 
   if (!open) return null;
 
-  const modal = (
-    <div
-      className={`modal-root${nested ? " modal-nested" : ""}${priority ? " modal-priority" : ""}`}
-      role="presentation"
-    >
-      <button
-        type="button"
-        className="modal-backdrop"
-        aria-label="关闭对话框"
-        onClick={() => onCloseRef.current()}
-      />
-      <div
-        ref={panelRef}
-        className={`modal-panel modal-panel-${size}${panelClassName ? ` ${panelClassName}` : ""}`}
-        role="dialog"
-        tabIndex={-1}
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={description ? descId : undefined}
-      >
-        <header className="modal-header">
-          <div className="modal-header-copy">
-            <h2 id={titleId} className="modal-title">
-              {title}
-            </h2>
-            {description ? (
-              <p id={descId} className="modal-description">
-                {description}
-              </p>
-            ) : null}
-          </div>
-          <div className="modal-header-actions">
-            {headerExtra}
-            <button
-              type="button"
-              className="modal-close"
-              onClick={() => onCloseRef.current()}
-              aria-label="关闭"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
-              </svg>
-            </button>
-          </div>
-        </header>
-        <div className="modal-body">{children}</div>
-        {footer ? <footer className="modal-footer">{footer}</footer> : null}
-      </div>
-    </div>
+  const modal = createElement(
+    "div",
+    {
+      className: `modal-root${nested ? " modal-nested" : ""}${priority ? " modal-priority" : ""}`,
+      role: "presentation",
+    },
+    createElement("button", {
+      type: "button",
+      className: "modal-backdrop",
+      "aria-label": "关闭对话框",
+      onClick: () => onCloseRef.current(),
+    }),
+    createElement(
+      "div",
+      {
+        ref: panelRef,
+        className: `modal-panel modal-panel-${size}${panelClassName ? ` ${panelClassName}` : ""}`,
+        role: "dialog",
+        tabIndex: -1,
+        "aria-modal": "true",
+        "aria-labelledby": titleId,
+        "aria-describedby": description ? descId : undefined,
+      },
+      createElement(
+        "header",
+        { className: "modal-header" },
+        createElement(
+          "div",
+          { className: "modal-header-copy" },
+          createElement("h2", { id: titleId, className: "modal-title" }, title),
+          description
+            ? createElement("p", { id: descId, className: "modal-description" }, description)
+            : null,
+        ),
+        createElement(
+          "div",
+          { className: "modal-header-actions" },
+          headerExtra,
+          createElement(
+            "button",
+            {
+              type: "button",
+              className: "modal-close",
+              onClick: () => onCloseRef.current(),
+              "aria-label": "关闭",
+            },
+            createElement(
+              "svg",
+              { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2" },
+              createElement("path", { d: "M18 6 6 18M6 6l12 12", strokeLinecap: "round" }),
+            ),
+          ),
+        ),
+      ),
+      createElement("div", { className: "modal-body" }, children),
+      footer ? createElement("footer", { className: "modal-footer" }, footer) : null,
+    ),
   );
 
   return typeof document !== "undefined" ? createPortal(modal, document.body) : null;

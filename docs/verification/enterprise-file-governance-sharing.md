@@ -14,14 +14,18 @@
 
 ## 自动授权矩阵
 
-`backend/tests/filesystem/security/tenant_isolation_test.go` 的 11 个独立 fixture 均使用真实
-`PrincipalResolver`、`authorization.Service`、filesystem repository 和 SQLite 数据库；每例重新创建
-Organization、Workspace、Namespace、Node、Grant、Role 与 membership fixture。
+`backend/tests/filesystem/security/tenant_isolation_test.go` 的 11 个独立 fixture 均使用生产
+`PrincipalResolver`、`authorization.Service`、filesystem repository 和真实 SQLite 行。测试专用
+authority adapter 从 organization/workspace/member/role/binding/permission 表查询，不使用
+always-allow/deny 或 map 判定。production tenant/governance persistence SQL 依赖 PostgreSQL schema/cast，
+所以本矩阵不冒称使用完整 production tenant/governance repository；这一个 adapter 层是明确的测试边界。
 
 - Tenant Owner → Organization Namespace `ADMIN`：ALLOW（organization admin authority）。
 - Tenant Owner → 他人 User Namespace `READ` 且无 Grant：DENY。
-- Workspace member → 顶层目录，Workspace `READ ALLOW` Grant：ALLOW。
-- Workspace member → admin-only 目录，仅 admin Role 有 Grant：DENY。
+- Workspace member → 顶层目录，membership audience 的 Workspace `READ ALLOW` Grant：ALLOW。
+  这是 top-level visibility policy；Node classification 仍为 `INTERNAL`，不是 `PUBLIC` classification。
+- Workspace member → admin-only 目录，admin Role ALLOW + 当前 USER 显式 DENY：DENY，
+  理由 `explicit_deny`；`INTERNAL` classification 不代表 admin-only。
 - Workspace A member → 分享给 Workspace A 的 Organization 目录：ALLOW。
 - Workspace B member → 仅分享给 Workspace A 的同一 Organization 目录：DENY。
 - Personal owner → 自己 User Namespace Node：ALLOW。
@@ -40,13 +44,14 @@ Organization、Workspace、Namespace、Node、Grant、Role 与 membership fixtur
 - `$env:REQUIRE_INTEGRATION="1"; go test -tags=integration ./tests/filesystem/security/... -count=1`：
   exit 1，明确报错 `DATABASE_DSN is required when REQUIRE_INTEGRATION=1`；真实 PostgreSQL security
   集成未运行，发布阻断。
-- 使用隔离 SQLite authorization fixture 并设置非连接用途的 harness sentinel 后运行矩阵聚焦命令：
+- 使用隔离 SQLite authority rows 并设置非连接用途的 harness sentinel 后运行矩阵聚焦命令：
+  `go test -tags=integration ./tests/filesystem/security -run EnterpriseAuthorizationMatrix -count=1 -v`，
   exit 0，11 行 authorization matrix PASS；该结果不冒充 PostgreSQL。
 - `go vet -tags=integration ./tests/filesystem/integration ./tests/filesystem/security ./migrations`：
   exit 0。
 - `go test ./api/openapi ./internal/modules/filesystem/interface/http -count=1`：exit 0，
   OpenAPI 与旧 Workspace Grant handler 自动契约 PASS。
-- `pnpm vitest run apps/web/src/modules/filesystem`：exit 0，26 files / 202 tests。
+- `pnpm vitest run apps/web/src/modules/filesystem`：exit 0，27 files / 204 tests。
 - `pnpm vitest run packages/upstream/src/filesystem.test.ts packages/bff-modules/src/filesystem/index.test.ts packages/web-sdk/src/filesystem.test.ts`：
   exit 0，3 files / 33 tests。
 - `pnpm typecheck`：exit 0，6 packages。
@@ -81,6 +86,19 @@ go test ./migrations -run TestFilesystemEnterpriseGovernanceMigratesExistingData
 
 真实输出中的 row counts 必须归档后，才能解除 release blocker。
 
+迁移门禁聚焦命令：
+
+```powershell
+# 默认：缺 DSN 时 exit 0 且明确 SKIP
+Remove-Item Env:REQUIRE_INTEGRATION -ErrorAction SilentlyContinue
+Remove-Item Env:DATABASE_DSN -ErrorAction SilentlyContinue
+go test ./migrations -run TestFilesystemEnterpriseGovernanceMigratesExistingDataFrom82To87AndBack -count=1 -v
+
+# 强制：缺 DSN 时预期 exit nonzero
+$env:REQUIRE_INTEGRATION="1"
+go test ./migrations -run TestFilesystemEnterpriseGovernanceMigratesExistingDataFrom82To87AndBack -count=1 -v
+```
+
 ## 兼容性证据边界
 
 - 自动：旧 Workspace Grant handler 契约由
@@ -98,6 +116,8 @@ go test ./migrations -run TestFilesystemEnterpriseGovernanceMigratesExistingData
 真实渲染测试覆盖四空间 navigation、shared loading/error panel、分享 Modal 两步、
 approval panel loading/action/reject Modal、文件详情 Drawer tabs、loading/error、焦点、dialog/tab/tabpanel
 ARIA，以及既有 tree/list/grid、触控目标、focus-visible、reduced-motion 和对比度契约。
+`EnterpriseGovernanceModal.accessibility.test.tsx` 不 mock `Modal`，直接验证生产 `Modal.tsx` 的
+`aria-modal`、`aria-labelledby`、`aria-describedby`、打开焦点、Tab trap、Esc 和触发点焦点恢复。
 仓库未安装 axe，因此沿用 Testing Library 的 role/name/state 查询与真实组件渲染；未削弱规则或屏蔽失败。
 
 ## Rollout 顺序
