@@ -6,6 +6,8 @@ describe("parseWorkbenchState", () => {
     expect(parseWorkbenchState({ tab: "bad", view: "bad", cursor: "c1" })).toEqual({
       tab: "files",
       view: "list",
+      space: "workspace",
+      source: undefined,
       parent: undefined,
       cursor: "c1",
       query: "",
@@ -22,14 +24,34 @@ describe("parseWorkbenchState", () => {
         cursor: ["cursor-1", "cursor-2"],
         q: ["  report  ", "ignored"],
         node: ["node-1", "node-2"],
+      space: ["organization", "my"],
+      source: ["workspace", "organization"],
       }),
     ).toEqual({
       tab: "audit",
       view: "grid",
+      space: "organization",
+      source: undefined,
       parent: "parent-1",
       cursor: "cursor-1",
       query: "report",
       node: "node-1",
+    });
+  });
+
+  it("allows only whitelisted shared sources and removes parent outside real spaces", () => {
+    expect(parseWorkbenchState({ space: "shared", source: "organization", parent: "p1" })).toMatchObject({
+      space: "shared",
+      source: "organization",
+      parent: undefined,
+    });
+    expect(parseWorkbenchState({ space: "shared", source: "external" })).toMatchObject({
+      space: "shared",
+      source: undefined,
+    });
+    expect(parseWorkbenchState({ space: "my", source: "workspace" })).toMatchObject({
+      space: "my",
+      source: undefined,
     });
   });
 });

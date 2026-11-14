@@ -1,7 +1,31 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BffError } from "@sparkops/contracts";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
-import { isInvalidFilesystemScopeError, resolveFileNodeSelection } from "./filesystem";
+import {
+  loadAccessibleFileNamespaces,
+  loadGovernedFileChildren,
+  loadSharedFileItems,
+  resolveFileNodeSelection,
+  resolveFileSpaceLoad,
+  isInvalidFilesystemScopeError,
+} from "./filesystem";
+
+const governed = vi.hoisted(() => ({
+  namespaces: vi.fn(),
+  children: vi.fn(),
+  shared: vi.fn(),
+}));
+
+vi.mock("@sparkops/bff-modules/filesystem", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sparkops/bff-modules/filesystem")>()),
+  listGovernedNamespaces: governed.namespaces,
+  listGovernedChildren: governed.children,
+  listSharedWithMe: governed.shared,
+}));
+
+vi.mock("./context", () => ({
+  loadBffContext: vi.fn().mockResolvedValue({}),
+}));
 
 const node: FileNodeVM = {
   id: "00000000-0000-4000-8000-000000000011",
@@ -61,5 +85,46 @@ describe("isInvalidFilesystemScopeError", () => {
     expect(isInvalidFilesystemScopeError(new BffError("failed", code, status))).toBe(
       false,
     );
+  });
+});
+
+describe("governed filesystem loaders", () => {
+  it("loads accessible summaries without substituting a root namespace", async () => {
+    governed.namespaces.mockResolvedValueOnce({ items: [] });
+    await expect(
+      loadAccessibleFileNamespaces("org-1", "workspace-1"),
+    ).resolves.toEqual({ items: [] });
+    expect(governed.children).not.toHaveBeenCalled();
+  });
+
+  it("routes real namespace and shared projections to distinct APIs", async () => {
+    governed.children.mockResolvedValueOnce({ items: [], next_cursor: "" });
+    governed.shared.mockResolvedValueOnce({ items: [], next_cursor: "" });
+    await loadGovernedFileChildren("org-1", "workspace-1", "namespace-1", {
+      parentId: "parent-1",
+    });
+    await loadSharedFileItems("org-1", "workspace-1", { source: "organization" });
+    expect(governed.children).toHaveBeenCalledTimes(1);
+    expect(governed.shared).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [403, "forbidden"],
+    [404, "not-found"],
+    [500, "error"],
+  ] as const)("keeps %s loading failures renderable", async (status, expected) => {
+    await expect(resolveFileSpaceLoad(() => Promise.reject(
+      new BffError("failed", "FILESYSTEM_ERROR", status),
+    ))).resolves.toEqual({ kind: expected });
+  });
+
+  it("keeps an empty children page distinct from a missing namespace", async () => {
+    await expect(resolveFileSpaceLoad(() => Promise.resolve({
+      items: [],
+      next_cursor: "",
+    }))).resolves.toEqual({
+      kind: "loaded",
+      value: { items: [], next_cursor: "" },
+    });
   });
 });

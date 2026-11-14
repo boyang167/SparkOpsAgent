@@ -4,7 +4,10 @@ import { createElement, useEffect, useRef, useState } from "react";
 import type { DragEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { BffError } from "@sparkops/contracts";
 import type { FileNodeVM } from "@sparkops/contracts/filesystem";
-import { listFileNodes } from "@sparkops/web-sdk/filesystem";
+import {
+  listFileNodes,
+  listGovernedChildren,
+} from "@sparkops/web-sdk/filesystem";
 import {
   clearNodeDragSession,
   getActiveNodeDragPayload,
@@ -23,6 +26,8 @@ export type DirectoryTreeProps = {
   onSelectionAncestorsChange?: (ancestorIds: ReadonlySet<string>) => void;
   canWrite?: boolean;
   selectionOnly?: boolean;
+  organizationId?: string;
+  namespaceId?: string;
 };
 
 type NodeState = {
@@ -49,6 +54,8 @@ export function DirectoryTree({
   onSelectionAncestorsChange,
   canWrite = false,
   selectionOnly = false,
+  organizationId,
+  namespaceId,
 }: DirectoryTreeProps) {
   const [states, setStates] = useState<Record<string, NodeState>>({});
   const [focusedId, setFocusedId] = useState(root.id);
@@ -225,11 +232,22 @@ export function DirectoryTree({
       const seenCursors = new Set<string>();
       let cursor = "";
       do {
-        const page = await listFileNodes(workspaceId, {
-          parentId: node.id,
-          nodeType: "DIRECTORY",
-          ...(cursor ? { cursor } : {}),
-        });
+        const page =
+          organizationId && namespaceId
+            ? await listGovernedChildren(
+                namespaceId,
+                {
+                  parentId: node.id,
+                  nodeType: "DIRECTORY",
+                  ...(cursor ? { cursor } : {}),
+                },
+                { organizationId, workspaceId },
+              )
+            : await listFileNodes(workspaceId, {
+                parentId: node.id,
+                nodeType: "DIRECTORY",
+                ...(cursor ? { cursor } : {}),
+              });
         children.push(...page.items);
         cursor = page.next_cursor;
         if (cursor && seenCursors.has(cursor)) {

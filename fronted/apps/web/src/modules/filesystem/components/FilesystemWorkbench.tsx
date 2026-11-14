@@ -3,7 +3,11 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createElement, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, KeyboardEvent } from "react";
-import type { FileNamespaceVM, FileNodeVM } from "@sparkops/contracts/filesystem";
+import type {
+  FileNamespaceVM,
+  FileNodeVM,
+  NamespaceSummaryVM,
+} from "@sparkops/contracts/filesystem";
 import {
   abortTransfer,
   createTransferSession,
@@ -17,12 +21,18 @@ import { DirectoryTree } from "./DirectoryTree";
 import { FileDetailDrawer } from "./FileDetailDrawer";
 import { FileDropZone } from "./FileDropZone";
 import { FileExplorerPanel } from "./FileExplorerPanel";
+import { FileSpaceNav } from "./FileSpaceNav";
 import { GovernanceWorkspace } from "./GovernanceWorkspace";
 import { MoveNodesModal } from "./MoveNodesModal";
 import { TransferCenter, TransferSummary } from "./TransferCenter";
 import { createTransferQueue } from "./transfer-queue";
 import type { TransferQueue } from "./transfer-queue";
-import type { FileView, WorkbenchState, WorkbenchTab } from "./workbench-state";
+import type {
+  FileSpace,
+  FileView,
+  WorkbenchState,
+  WorkbenchTab,
+} from "./workbench-state";
 
 export type FilesystemWorkbenchProps = {
   workspaceId: string;
@@ -33,6 +43,10 @@ export type FilesystemWorkbenchProps = {
   permissions: string[];
   initialSelectedNode?: FileNodeVM;
   initialSelectedNodeError?: "forbidden" | "not-found" | "error";
+  fileSpace?: FileSpace;
+  namespaceSummary?: NamespaceSummaryVM;
+  organizationLabel?: string;
+  workspaceLabel?: string;
 };
 
 const tabs: Array<{
@@ -80,6 +94,10 @@ export function FilesystemWorkbench({
   permissions,
   initialSelectedNode,
   initialSelectedNodeError,
+  fileSpace,
+  namespaceSummary,
+  organizationLabel,
+  workspaceLabel,
 }: FilesystemWorkbenchProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -463,6 +481,26 @@ export function FilesystemWorkbench({
 
   function renderDirectoryTree() {
     if (!rootNode) return null;
+    if (
+      fileSpace &&
+      namespaceSummary &&
+      organizationLabel &&
+      workspaceLabel
+    ) {
+      return createElement(FileSpaceNav, {
+        activeSpace: fileSpace,
+        organizationLabel,
+        workspaceLabel,
+        namespace: namespaceSummary,
+        workspaceId,
+        view,
+        currentId: effectiveState.parent ?? rootNode.id,
+        onNavigate: navigateDirectory,
+        onDropNodes: (nodeIds: string[], target: FileNodeVM) => {
+          void dropNodes(nodeIds, target);
+        },
+      });
+    }
     return createElement(DirectoryTree, {
       key: `${scopeKey}:${treeVersion}`,
       workspaceId,
