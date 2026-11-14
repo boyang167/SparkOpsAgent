@@ -67,6 +67,7 @@ type SubmitShare struct {
 	CommandID         uuid.UUID
 	ActorID           uuid.UUID
 	OrganizationID    uuid.UUID
+	ScopeID           uuid.UUID
 	WorkspaceID       uuid.UUID
 	NodeID            uuid.UUID
 	PrincipalType     model.PrincipalType
@@ -164,7 +165,7 @@ func (h *ShareRequestHandler) Submit(ctx context.Context, cmd SubmitShare) (Shar
 		return result, err
 	}
 	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-		replayed, claimErr := h.claim(txCtx, cmd.CommandID, cmd.WorkspaceID, node.ID, request.ID, hash)
+		replayed, claimErr := h.claim(txCtx, cmd.CommandID, shareScopeID(cmd), "share_submit", node.ID, request.ID, hash)
 		if claimErr != nil {
 			return claimErr
 		}
@@ -230,7 +231,7 @@ func (h *ShareRequestHandler) replayCompletedShare(ctx context.Context, cmd Subm
 	}
 	var result ShareResult
 	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-		replayed, claimErr := h.claim(txCtx, cmd.CommandID, cmd.WorkspaceID, cmd.NodeID, requestID, hash)
+		replayed, claimErr := h.claim(txCtx, cmd.CommandID, shareScopeID(cmd), "share_submit", cmd.NodeID, requestID, hash)
 		if claimErr != nil {
 			return claimErr
 		}
@@ -288,6 +289,14 @@ func (h *ShareRequestHandler) review(ctx context.Context, cmd ReviewShareRequest
 	if !approve && (reasonLength < 1 || reasonLength > 1000) {
 		return model.ShareRequest{}, domain.ErrSharePolicyDenied
 	}
+	operation := "reject"
+	if approve {
+		operation = "approve"
+	}
+	hash := reviewHash(operation, cmd)
+	if replayed, found, err := h.replayCompletedReview(ctx, cmd, operation, hash); found || err != nil {
+		return replayed, err
+	}
 	request, err := h.store.GetShareRequest(ctx, cmd.RequestID)
 	if err != nil {
 		return model.ShareRequest{}, err
@@ -305,14 +314,12 @@ func (h *ShareRequestHandler) review(ctx context.Context, cmd ReviewShareRequest
 	if err := h.requireApprovalAuthority(ctx, cmd.ActorID, request.PrincipalType, request.OrganizationID, scopes); err != nil {
 		return model.ShareRequest{}, err
 	}
-	operation := "reject"
-	if approve {
-		operation = "approve"
-	}
-	hash := reviewHash(operation, request.ID, cmd.ActorID, cmd.RejectionReason)
 	var reviewed model.ShareRequest
 	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
-		replayed, claimErr := h.claim(txCtx, cmd.CommandID, firstWorkspace(scopes), request.NodeID, request.ID, hash)
+		replayed, claimErr := h.claim(
+			txCtx, cmd.CommandID, firstWorkspace(scopes), "share_"+operation,
+			request.NodeID, request.ID, hash,
+		)
 		if claimErr != nil {
 			return claimErr
 		}
@@ -358,6 +365,58 @@ func (h *ShareRequestHandler) review(ctx context.Context, cmd ReviewShareRequest
 		return nil
 	})
 	return reviewed, err
+}
+
+func (h *ShareRequestHandler) replayCompletedReview(
+	ctx context.Context,
+	cmd ReviewShareRequest,
+	operation string,
+	hash string,
+) (model.ShareRequest, bool, error) {
+	existingCommand, err := h.store.GetCommand(ctx, cmd.CommandID)
+	if errors.Is(err, domain.ErrCommandNotFound) {
+		return model.ShareRequest{}, false, nil
+	}
+	if err != nil {
+		return model.ShareRequest{}, false, err
+	}
+	if existingCommand.State != "COMPLETED" {
+		return model.ShareRequest{}, false, nil
+	}
+	expectedOperation := "share_" + operation
+	if existingCommand.Operation != expectedOperation ||
+		existingCommand.RequestHash != hash ||
+		existingCommand.RevisionID == nil ||
+		*existingCommand.RevisionID != cmd.RequestID ||
+		existingCommand.NodeID == nil {
+		return model.ShareRequest{}, true, repository.ErrIdempotencyConflict
+	}
+	var replayed model.ShareRequest
+	err = h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		completed, claimErr := h.claim(
+			txCtx, cmd.CommandID, existingCommand.WorkspaceID, expectedOperation,
+			*existingCommand.NodeID, cmd.RequestID, hash,
+		)
+		if claimErr != nil {
+			return claimErr
+		}
+		if !completed {
+			return repository.ErrIdempotencyConflict
+		}
+		current, getErr := h.store.GetShareRequest(txCtx, cmd.RequestID)
+		if getErr != nil {
+			return getErr
+		}
+		if current.ID != cmd.RequestID || current.NodeID != *existingCommand.NodeID {
+			return repository.ErrIdempotencyConflict
+		}
+		if cmd.OrganizationID != uuid.Nil && current.OrganizationID != cmd.OrganizationID {
+			return repository.ErrIdempotencyConflict
+		}
+		replayed = current
+		return nil
+	})
+	return replayed, true, err
 }
 
 func (h *ShareRequestHandler) logShareAudit(ctx context.Context, actorID uuid.UUID, request model.ShareRequest, action, traceID, reason string) error {
@@ -574,9 +633,9 @@ func (h *ShareRequestHandler) createGrantsAndEvents(ctx context.Context, grants 
 	return h.bus.Publish(ctx, events...)
 }
 
-func (h *ShareRequestHandler) claim(ctx context.Context, commandID, workspaceID, nodeID, requestID uuid.UUID, hash string) (bool, error) {
+func (h *ShareRequestHandler) claim(ctx context.Context, commandID, scopeID uuid.UUID, operation string, nodeID, requestID uuid.UUID, hash string) (bool, error) {
 	claimed, err := h.store.ClaimCommand(ctx, repository.CommandDedup{
-		CommandID: commandID, WorkspaceID: workspaceID, Operation: "share_request", RequestHash: hash,
+		CommandID: commandID, WorkspaceID: scopeID, Operation: operation, RequestHash: hash,
 		NodeID: &nodeID, RevisionID: &requestID,
 	})
 	if err != nil {
@@ -715,6 +774,7 @@ func shareHash(cmd SubmitShare, namespaceID uuid.UUID, classification model.Tran
 		RequestID      uuid.UUID                    `json:"request_id"`
 		ActorID        uuid.UUID                    `json:"actor_id"`
 		OrganizationID uuid.UUID                    `json:"organization_id"`
+		ScopeID        uuid.UUID                    `json:"scope_id"`
 		WorkspaceID    uuid.UUID                    `json:"workspace_id"`
 		NamespaceID    uuid.UUID                    `json:"namespace_id"`
 		NodeID         uuid.UUID                    `json:"node_id"`
@@ -722,7 +782,7 @@ func shareHash(cmd SubmitShare, namespaceID uuid.UUID, classification model.Tran
 		Share          json.RawMessage              `json:"share"`
 	}{
 		Operation: "submit", RequestID: requestID, ActorID: cmd.ActorID,
-		OrganizationID: cmd.OrganizationID, WorkspaceID: cmd.WorkspaceID,
+		OrganizationID: cmd.OrganizationID, ScopeID: shareScopeID(cmd), WorkspaceID: cmd.WorkspaceID,
 		NamespaceID: namespaceID, NodeID: cmd.NodeID, Classification: classification,
 		Share: canonical,
 	})
@@ -733,8 +793,28 @@ func shareHash(cmd SubmitShare, namespaceID uuid.UUID, classification model.Tran
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func reviewHash(operation string, requestID, actorID uuid.UUID, reason string) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%s|%s", operation, requestID, actorID, reason)))
+func shareScopeID(cmd SubmitShare) uuid.UUID {
+	if cmd.ScopeID != uuid.Nil {
+		return cmd.ScopeID
+	}
+	if cmd.WorkspaceID != uuid.Nil {
+		return cmd.WorkspaceID
+	}
+	return cmd.OrganizationID
+}
+
+func reviewHash(operation string, cmd ReviewShareRequest) string {
+	payload, _ := json.Marshal(struct {
+		Operation      string    `json:"operation"`
+		ActorID        uuid.UUID `json:"actor_id"`
+		OrganizationID uuid.UUID `json:"organization_id"`
+		RequestID      uuid.UUID `json:"request_id"`
+		Reason         string    `json:"reason"`
+	}{
+		Operation: operation, ActorID: cmd.ActorID, OrganizationID: cmd.OrganizationID,
+		RequestID: cmd.RequestID, Reason: cmd.RejectionReason,
+	})
+	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }
 

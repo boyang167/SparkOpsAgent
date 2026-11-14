@@ -135,6 +135,15 @@ func TestGovernanceChildrenUsesHiddenRootInternallyWhenParentIsOmitted(t *testin
 		authorize: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
 			return resourceauth.Decision{Allowed: request.NodeID == visibleChild}
 		},
+		authorizeMany: func(_ context.Context, request resourceauth.BatchRequest) resourceauth.BatchDecisions {
+			out := make(resourceauth.BatchDecisions, len(request.NodeIDs))
+			for _, nodeID := range request.NodeIDs {
+				out[nodeID] = map[model.ResourcePermission]resourceauth.Decision{
+					model.ResourcePermissionRead: {Allowed: nodeID == visibleChild},
+				}
+			}
+			return out
+		},
 	}
 	router, token, _, _ := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{orgID: orgID, active: true}, handler)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/namespaces/"+namespaceID.String()+"/children", nil)
@@ -294,7 +303,11 @@ func TestGovernanceChildrenPaginatesAfterAuthorizationWithoutLeakingHiddenCursor
 		{ID: visible2, NamespaceID: namespaceID, Type: model.NodeTypeFile, State: model.NodeStateActive},
 		{ID: visible3, NamespaceID: namespaceID, Type: model.NodeTypeFile, State: model.NodeStateActive},
 	}
+	codec, err := query.NewSharedCursorCodec("children-pagination-test", nil)
+	require.NoError(t, err)
+	batchCalls := 0
 	handler := &GovernanceHandler{
+		cursor: codec,
 		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
 			return &model.Namespace{
 				ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace,
@@ -310,8 +323,15 @@ func TestGovernanceChildrenPaginatesAfterAuthorizationWithoutLeakingHiddenCursor
 			}
 			return nodes, "", nil
 		},
-		authorize: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
-			return resourceauth.Decision{Allowed: request.NodeID != hidden}
+		authorizeMany: func(_ context.Context, request resourceauth.BatchRequest) resourceauth.BatchDecisions {
+			batchCalls++
+			out := make(resourceauth.BatchDecisions, len(request.NodeIDs))
+			for _, nodeID := range request.NodeIDs {
+				out[nodeID] = map[model.ResourcePermission]resourceauth.Decision{
+					model.ResourcePermissionRead: {Allowed: nodeID != hidden},
+				}
+			}
+			return out
 		},
 	}
 	router, token, _, _ := governanceRouterWithIDs(t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{orgID: orgID, active: true}, handler)
@@ -334,11 +354,91 @@ func TestGovernanceChildrenPaginatesAfterAuthorizationWithoutLeakingHiddenCursor
 
 	first := request("")
 	require.Len(t, first["items"], 2)
-	require.Equal(t, visible2.String(), first["next_cursor"])
+	require.NotEmpty(t, first["next_cursor"])
 	require.NotEqual(t, hidden.String(), first["next_cursor"])
-	second := request(visible2.String())
+	require.NotEqual(t, visible2.String(), first["next_cursor"])
+	second := request(first["next_cursor"].(string))
 	require.Len(t, second["items"], 1)
 	require.Equal(t, "", second["next_cursor"])
+	require.Equal(t, 2, batchCalls)
+}
+
+func TestGovernanceChildrenUsesBoundedBatchAuthorizationAndSafeContinuation(t *testing.T) {
+	orgID, workspaceID, namespaceID, rootID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	codec, err := query.NewSharedCursorCodec("children-budget-test", nil)
+	require.NoError(t, err)
+	nodes := make([]model.Node, query.ChildrenCandidateScanBudget+1)
+	indexByID := make(map[string]int, len(nodes))
+	for index := range nodes {
+		nodes[index] = model.Node{
+			ID: uuid.New(), NamespaceID: namespaceID, ParentID: &rootID,
+			Type: model.NodeTypeFile, State: model.NodeStateActive,
+		}
+		indexByID[nodes[index].ID.String()] = index
+	}
+	repositoryCalls, batchCalls := 0, 0
+	handler := &GovernanceHandler{
+		cursor: codec,
+		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: namespaceID, NamespaceType: model.NamespaceTypeWorkspace,
+				OrganizationID: orgID, WorkspaceID: workspaceID, RootNodeID: &rootID,
+			}, nil
+		},
+		getNode: func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error) {
+			return &model.Node{ID: rootID, NamespaceID: namespaceID, Type: model.NodeTypeDirectory}, nil
+		},
+		listChildren: func(_ context.Context, _ uuid.UUID, _ *uuid.UUID, _ *model.NodeType, _ string, limit int, cursor string) ([]model.Node, string, error) {
+			repositoryCalls++
+			require.Equal(t, query.ChildrenCandidateChunkSize, limit)
+			start := 0
+			if cursor != "" {
+				start = indexByID[cursor] + 1
+			}
+			end := start + limit
+			if end > len(nodes) {
+				end = len(nodes)
+			}
+			next := ""
+			if end < len(nodes) {
+				next = nodes[end-1].ID.String()
+			}
+			return nodes[start:end], next, nil
+		},
+		authorizeMany: func(_ context.Context, request resourceauth.BatchRequest) resourceauth.BatchDecisions {
+			batchCalls++
+			out := make(resourceauth.BatchDecisions, len(request.NodeIDs))
+			for _, nodeID := range request.NodeIDs {
+				out[nodeID] = map[model.ResourcePermission]resourceauth.Decision{
+					model.ResourcePermissionRead: {Allowed: false},
+				}
+			}
+			return out
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(
+		t, orgID, governanceOrgStub{active: true},
+		governanceWorkspaceStub{orgID: orgID, active: true}, handler,
+	)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/filesystem/namespaces/"+namespaceID.String()+"/children?limit=10", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Organization-ID", orgID.String())
+	req.Header.Set("X-Workspace-ID", workspaceID.String())
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	var envelope struct {
+		Data struct {
+			Items      []map[string]any `json:"items"`
+			NextCursor string           `json:"next_cursor"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(res.Body.Bytes(), &envelope))
+	require.Empty(t, envelope.Data.Items)
+	require.NotEmpty(t, envelope.Data.NextCursor)
+	require.Equal(t, query.ChildrenCandidateScanBudget/query.ChildrenCandidateChunkSize, repositoryCalls)
+	require.Equal(t, repositoryCalls, batchCalls)
 }
 
 func TestGovernanceRepositoryFailureReturnsInternalError(t *testing.T) {
@@ -440,6 +540,101 @@ func TestGovernedShareHTTPRequiresIdempotencyAndForwardsTypedDownload(t *testing
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	require.Equal(t, model.PrincipalWorkspace, captured.PrincipalType)
 	require.Equal(t, []model.ResourcePermission{model.ResourcePermissionRead, model.ResourcePermissionDownload}, captured.Actions)
+}
+
+func TestPersonalSharePreviewAndSubmitUseOrganizationScopeWithoutFakeWorkspace(t *testing.T) {
+	orgID, namespaceID, nodeID, targetID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	var ownerID uuid.UUID
+	calls := 0
+	handler := &GovernanceHandler{
+		nodeByID: func(context.Context, uuid.UUID) (*model.Node, error) {
+			return &model.Node{ID: nodeID, NamespaceID: namespaceID}, nil
+		},
+		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: namespaceID, NamespaceType: model.NamespaceTypeUser,
+				OrganizationID: orgID, OwnerUserID: ownerID,
+			}, nil
+		},
+		previewShare: func(_ context.Context, cmd command.SubmitShare) (command.SharePreview, error) {
+			calls++
+			require.Equal(t, uuid.Nil, cmd.WorkspaceID)
+			require.Equal(t, orgID, cmd.ScopeID)
+			return command.SharePreview{Outcome: command.SharePreviewActive}, nil
+		},
+		submitShare: func(_ context.Context, cmd command.SubmitShare) (command.ShareResult, error) {
+			calls++
+			require.Equal(t, uuid.Nil, cmd.WorkspaceID)
+			require.Equal(t, orgID, cmd.ScopeID)
+			return command.ShareResult{Request: model.ShareRequest{ID: uuid.New(), Status: model.ShareRequestApproved}}, nil
+		},
+	}
+	router, token, _, memberID := governanceRouterWithIDs(
+		t, orgID, governanceOrgStub{active: true}, governanceWorkspaceStub{}, handler,
+	)
+	ownerID = memberID.UUID
+	body := `{"principal_type":"USER","principal_ids":["` + targetID.String() + `"],"actions":["READ"]}`
+	for _, path := range []string{"share-preview", "share-requests"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/filesystem/nodes/"+nodeID.String()+"/"+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Organization-ID", orgID.String())
+		req.Header.Set("Idempotency-Key", "personal-"+path)
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		require.Contains(t, []int{http.StatusOK, http.StatusCreated}, res.Code, res.Body.String())
+	}
+	require.Equal(t, 2, calls)
+}
+
+func TestGovernedShareRequiresNamespaceAudience(t *testing.T) {
+	requestOrgID, namespaceOrgID := uuid.New(), uuid.New()
+	namespaceID, nodeID, workspaceID, targetID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	namespaceType := model.NamespaceTypeUser
+	ownerID := uuid.New()
+	calls := 0
+	handler := &GovernanceHandler{
+		nodeByID: func(context.Context, uuid.UUID) (*model.Node, error) {
+			return &model.Node{ID: nodeID, NamespaceID: namespaceID}, nil
+		},
+		namespaceByID: func(context.Context, uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: namespaceID, NamespaceType: namespaceType, OrganizationID: namespaceOrgID,
+				WorkspaceID: workspaceID, OwnerUserID: ownerID,
+			}, nil
+		},
+		previewShare: func(context.Context, command.SubmitShare) (command.SharePreview, error) {
+			calls++
+			return command.SharePreview{}, nil
+		},
+	}
+	router, token, _, _ := governanceRouterWithIDs(
+		t, requestOrgID, governanceOrgStub{active: true},
+		governanceWorkspaceStub{orgID: requestOrgID, active: true}, handler,
+	)
+	send := func(includeWorkspace bool) *httptest.ResponseRecorder {
+		body := `{"principal_type":"USER","principal_ids":["` + targetID.String() + `"],"actions":["READ"]}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/filesystem/nodes/"+nodeID.String()+"/share-preview", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Organization-ID", requestOrgID.String())
+		if includeWorkspace {
+			req.Header.Set("X-Workspace-ID", workspaceID.String())
+		}
+		req.Header.Set("Idempotency-Key", uuid.NewString())
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		return res
+	}
+
+	require.Equal(t, http.StatusNotFound, send(false).Code, "cross-organization namespace")
+	namespaceOrgID = requestOrgID
+	require.Equal(t, http.StatusNotFound, send(false).Code, "non-owner personal namespace")
+	namespaceType = model.NamespaceTypeWorkspace
+	require.Equal(t, http.StatusForbidden, send(false).Code, "workspace namespace needs workspace context")
+	ownerID = uuid.Nil
+	require.Equal(t, http.StatusOK, send(true).Code)
+	require.Equal(t, 1, calls)
 }
 
 func TestSharePreviewAllowsSameOrganizationSourceWorkspaceAndConcealsCrossOrganization(t *testing.T) {

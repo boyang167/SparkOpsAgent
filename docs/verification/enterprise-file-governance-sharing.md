@@ -101,8 +101,12 @@ try {
 4. 断言旧文件行和旧 Grant 仍存在；
 5. 新建 typed Workspace Grant，软撤销后断言 active row count 立即为 0；
 6. 插入一个 `DOWNLOAD` Grant；
-7. 在同一一次性数据库依次执行 `000087`、`000086`、`000085`、`000084`、`000083` down；
-8. 断言旧文件和旧 Grant 仍存在，并断言 `DOWNLOAD` Grant 被 `000085` down 删除。
+7. 执行 `000087`、`000086` down 后，默认执行 `000085` down，断言门禁拒绝且
+   `DOWNLOAD` Grant 与 `filesystem.share_requests` 表均保留；
+8. 在同一显式事务中设置
+   `SET LOCAL sparkops.allow_destructive_filesystem_000085_down = 'on'` 后执行 `000085` down，
+   再完成 `000084`、`000083` down；
+9. 断言旧文件和旧 Grant 仍存在，并断言只有显式授权后 `DOWNLOAD` Grant 才被删除。
 
 本机未执行该 PostgreSQL 测试，因此本次实际 row counts 为：**未取得（NOT RUN）**。测试中预期的
 fixture counts 不能冒充现场结果。发布前必须在提供 `DATABASE_DSN` 的隔离 PostgreSQL 上执行：
@@ -198,8 +202,20 @@ JSX 等价改写为 `createElement`；组件没有新增 `inert` 行为，DOM �
 
 - 默认策略是 forward-fix：停止新分享/采纳写入，保留读路径，修复后向前迁移；不要把生产库 down
   当作普通恢复动作。
-- `000085` down **会删除全部 `DOWNLOAD` grants**，因为旧 schema 无法表示该权限。这是明确的数据破坏
-  边界；生产不得作为普通 rollback。只有完成备份、影响清点并取得显式业务批准后，才可在维护窗口执行。
+- `000085` down **会删除全部 `DOWNLOAD` grants**，因为旧 schema 无法表示该权限。默认执行会在任何
+  `DELETE`/`DROP` 前拒绝；生产应采用 forward-fix，不得把开关当作普通 rollback 手段。
+- 仅一次性验证数据库可在同一个显式事务中执行（开关是 transaction-local，连接池或逐语句 runner
+  不得把 `SET LOCAL` 与 down 脚本拆到不同事务）：
+
+```sql
+BEGIN;
+SET LOCAL sparkops.allow_destructive_filesystem_000085_down = 'on';
+\i backend/migrations/000085_filesystem_share_requests.down.sql
+COMMIT;
+```
+
+  使用不支持 `\i` 的 runner 时，也必须在同一连接、同一事务中先执行 `SET LOCAL`，再执行完整 down
+  脚本。执行前必须备份并清点 `DOWNLOAD` grants；生产事故一律优先 forward-fix。
 - `000086` down 在存在非 Workspace transfer，或非 Workspace quota 有 used/reserved/activity 时拒绝执行；
   必须先停止写入并安全清空/迁移这些活动。
 - `000087` down 在 `filesystem.file_lineage` 存在任何活动数据时拒绝执行；不得删除 lineage 来强行回滚

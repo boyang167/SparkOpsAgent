@@ -23,6 +23,7 @@ const (
 	sharedCursorVersion    = byte(1)
 	sharedCursorDomain     = "filesystem-shared-cursor-v1"
 	sharedCursorSource     = "shared-with-me"
+	childrenCursorSource   = "children"
 	governanceCursorSource = "governance-metadata"
 )
 
@@ -38,6 +39,15 @@ type SharedCursorContext struct {
 type SharedCursorCodec struct {
 	aead        cipher.AEAD
 	nonceReader io.Reader
+}
+
+type ChildrenCursorContext struct {
+	NamespaceID uuid.UUID
+	ParentID    uuid.UUID
+	ActorID     uuid.UUID
+	WorkspaceID uuid.UUID
+	NodeType    *model.NodeType
+	Query       string
 }
 
 type GovernanceCursorContext struct {
@@ -111,6 +121,50 @@ func (c *SharedCursorCodec) Decode(value string, context SharedCursorContext) (s
 	}
 	nonceEnd := 1 + c.aead.NonceSize()
 	plaintext, err := c.aead.Open(nil, token[1:nonceEnd], token[nonceEnd:], sharedCursorAAD(context))
+	if err != nil || len(plaintext) != len(uuid.UUID{}) {
+		return "", domain.ErrInvalidGovernanceCursor
+	}
+	position, err := uuid.FromBytes(plaintext)
+	if err != nil || position == uuid.Nil {
+		return "", domain.ErrInvalidGovernanceCursor
+	}
+	return position.String(), nil
+}
+
+func (c *SharedCursorCodec) EncodeChildren(after string, context ChildrenCursorContext) (string, error) {
+	if c == nil || c.aead == nil || c.nonceReader == nil {
+		return "", domain.ErrPersistence
+	}
+	position, err := uuid.Parse(after)
+	if err != nil || position == uuid.Nil {
+		return "", domain.ErrPersistence
+	}
+	nonce := make([]byte, c.aead.NonceSize())
+	if _, err := io.ReadFull(c.nonceReader, nonce); err != nil {
+		return "", domain.ErrPersistence
+	}
+	ciphertext := c.aead.Seal(nil, nonce, position[:], childrenCursorAAD(context))
+	token := make([]byte, 1+len(nonce)+len(ciphertext))
+	token[0] = sharedCursorVersion
+	copy(token[1:], nonce)
+	copy(token[1+len(nonce):], ciphertext)
+	return base64.RawURLEncoding.EncodeToString(token), nil
+}
+
+func (c *SharedCursorCodec) DecodeChildren(value string, context ChildrenCursorContext) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	if c == nil || c.aead == nil {
+		return "", domain.ErrInvalidGovernanceCursor
+	}
+	token, err := base64.RawURLEncoding.DecodeString(value)
+	minimum := 1 + c.aead.NonceSize() + c.aead.Overhead() + len(uuid.UUID{})
+	if err != nil || len(token) != minimum || token[0] != sharedCursorVersion {
+		return "", domain.ErrInvalidGovernanceCursor
+	}
+	nonceEnd := 1 + c.aead.NonceSize()
+	plaintext, err := c.aead.Open(nil, token[1:nonceEnd], token[nonceEnd:], childrenCursorAAD(context))
 	if err != nil || len(plaintext) != len(uuid.UUID{}) {
 		return "", domain.ErrInvalidGovernanceCursor
 	}
@@ -202,6 +256,29 @@ func governanceCursorAAD(context GovernanceCursorContext) []byte {
 		Version: sharedCursorVersion, Source: governanceCursorSource,
 		OrganizationID: context.OrganizationID, NodeID: context.NodeID,
 		Kind: strings.ToLower(strings.TrimSpace(context.Kind)),
+	})
+	return aad
+}
+
+func childrenCursorAAD(context ChildrenCursorContext) []byte {
+	var nodeType model.NodeType
+	if context.NodeType != nil {
+		nodeType = *context.NodeType
+	}
+	aad, _ := json.Marshal(struct {
+		Version     byte           `json:"version"`
+		Source      string         `json:"source"`
+		NamespaceID uuid.UUID      `json:"namespace_id"`
+		ParentID    uuid.UUID      `json:"parent_id"`
+		ActorID     uuid.UUID      `json:"actor_id"`
+		WorkspaceID uuid.UUID      `json:"workspace_id"`
+		NodeType    model.NodeType `json:"node_type"`
+		Query       string         `json:"query"`
+	}{
+		Version: sharedCursorVersion, Source: childrenCursorSource,
+		NamespaceID: context.NamespaceID, ParentID: context.ParentID,
+		ActorID: context.ActorID, WorkspaceID: context.WorkspaceID, NodeType: nodeType,
+		Query: strings.ToLower(strings.TrimSpace(norm.NFC.String(context.Query))),
 	})
 	return aad
 }

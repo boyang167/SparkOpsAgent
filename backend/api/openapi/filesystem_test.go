@@ -104,6 +104,25 @@ func TestFilesystemGovernanceOpenAPIDocumentsContextHeaders(t *testing.T) {
 	require.Equal(t, false, parameters["WorkspaceHeader"].(map[string]any)["required"])
 }
 
+func TestFilesystemChildrenOpenAPIDocumentsBoundedOpaqueAuthorizationCursor(t *testing.T) {
+	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &document))
+
+	operation := document["paths"].(map[string]any)["/api/v1/filesystem/namespaces/{namespaceId}/children"].(map[string]any)["get"].(map[string]any)
+	require.True(t, operationHasRef(operation, "#/components/parameters/ChildrenCursor"))
+	require.Contains(t, strings.ToLower(operation["description"].(string)), "256")
+	require.Contains(t, operation["responses"].(map[string]any), "503")
+	cursor := document["components"].(map[string]any)["parameters"].(map[string]any)["ChildrenCursor"].(map[string]any)
+	description := strings.ToLower(cursor["description"].(string))
+	require.Contains(t, description, "namespace")
+	require.Contains(t, description, "parent")
+	require.Contains(t, description, "actor")
+	require.Contains(t, description, "filter")
+	require.NotContains(t, cursor["schema"].(map[string]any), "format")
+}
+
 func TestFilesystemOpenAPIIdempotencyAndLocalRefs(t *testing.T) {
 	raw, err := specopenapi.Files.ReadFile("filesystem.yaml")
 	require.NoError(t, err)

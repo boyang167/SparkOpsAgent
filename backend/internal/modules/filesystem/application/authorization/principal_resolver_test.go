@@ -78,14 +78,17 @@ func TestPrincipalResolverRejectsCrossOrganizationWorkspace(t *testing.T) {
 	require.ErrorIs(t, err, ErrPrincipalScopeMismatch)
 }
 
-func TestPrincipalResolverWithoutWorkspaceReturnsOnlyUser(t *testing.T) {
-	actorID := uuid.New()
+func TestPrincipalResolverWithoutWorkspaceReturnsUserAndOrganization(t *testing.T) {
+	actorID, organizationID := uuid.New(), uuid.New()
 	resolver := NewPrincipalResolver(workspaceAuthorityStub{}, roleBindingStub{})
 
 	principals, err := resolver.Resolve(context.Background(), ResolvePrincipalsInput{
-		ActorID: actorID, OrganizationID: uuid.New(),
+		ActorID: actorID, OrganizationID: organizationID,
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, []repository.PrincipalRef{{Type: model.PrincipalUser, ID: actorID}}, principals)
+	require.Equal(t, []repository.PrincipalRef{
+		{Type: model.PrincipalUser, ID: actorID},
+		{Type: model.PrincipalOrganization, ID: organizationID},
+	}, principals)
 }

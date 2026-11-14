@@ -38,6 +38,7 @@ paths:
     get:
       tags: [filesystem]
       summary: List authorized children in a governed namespace
+      description: Scans at most 256 raw candidates per response in 64-node authorization batches. When more candidates remain, next_cursor safely continues the same bound query.
       operationId: listGovernedFilesystemChildren
       security:
         - bearerAuth: []
@@ -56,7 +57,7 @@ paths:
           schema:
             type: string
             maxLength: 200
-        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/ChildrenCursor"
         - $ref: "#/components/parameters/Limit"
       responses:
         "200":
@@ -2290,6 +2291,13 @@ components:
       name: cursor
       in: query
       description: Versioned, authenticated encrypted opaque continuation token bound to the caller and query context.
+      schema:
+        type: string
+        maxLength: 512
+    ChildrenCursor:
+      name: cursor
+      in: query
+      description: Versioned, authenticated encrypted opaque continuation token bound to namespace, parent, actor, workspace, and type/query filters.
       schema:
         type: string
         maxLength: 512

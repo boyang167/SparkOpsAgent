@@ -42,6 +42,11 @@ func NewPrincipalResolver(workspaces WorkspaceAuthority, roles WorkspaceRoleRead
 func (r *principalResolver) Resolve(ctx context.Context, input ResolvePrincipalsInput) ([]repository.PrincipalRef, error) {
 	principals := []repository.PrincipalRef{{Type: model.PrincipalUser, ID: input.ActorID}}
 	if input.WorkspaceID == uuid.Nil {
+		if input.OrganizationID != uuid.Nil {
+			principals = append(principals, repository.PrincipalRef{
+				Type: model.PrincipalOrganization, ID: input.OrganizationID,
+			})
+		}
 		return principals, nil
 	}
 	organizationID, active, err := r.workspaces.ResolveWorkspaceAccess(ctx, input.WorkspaceID, input.ActorID)

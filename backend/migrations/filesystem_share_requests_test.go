@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -38,4 +39,18 @@ func TestFilesystemShareRequestMigrationDefinesGovernedApprovalState(t *testing.
 	require.Contains(t, down, "DROP COLUMN IF EXISTS classification")
 	require.Contains(t, down, "rollback data loss")
 	require.Contains(t, down, "DROP TABLE")
+	executable := strings.TrimSpace(down)
+	for strings.HasPrefix(executable, "--") {
+		_, executable, _ = strings.Cut(executable, "\n")
+		executable = strings.TrimSpace(executable)
+	}
+	require.True(t, strings.HasPrefix(executable, "DO $"), "destructive rollback guard must be the first executable statement")
+	require.Contains(t, down, "current_setting('sparkops.allow_destructive_filesystem_000085_down', true)")
+	require.Contains(t, down, "RAISE EXCEPTION")
+	requireInOrder(
+		t, down,
+		"current_setting('sparkops.allow_destructive_filesystem_000085_down', true)",
+		"DELETE FROM filesystem.resource_grants",
+		"DROP TABLE",
+	)
 }

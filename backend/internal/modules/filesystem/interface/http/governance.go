@@ -45,6 +45,7 @@ type GovernanceHandler struct {
 	sharedWithMe          func(context.Context, query.SharedWithMe) ([]repository.SharedNode, string, error)
 	effectiveAccess       func(context.Context, query.EffectiveAccess) query.EffectiveAccessResult
 	authorize             func(context.Context, resourceauth.Request) resourceauth.Decision
+	authorizeMany         func(context.Context, resourceauth.BatchRequest) resourceauth.BatchDecisions
 	previewShare          func(context.Context, command.SubmitShare) (command.SharePreview, error)
 	submitShare           func(context.Context, command.SubmitShare) (command.ShareResult, error)
 	approveShare          func(context.Context, command.ReviewShareRequest) (model.ShareRequest, error)
@@ -64,7 +65,7 @@ func NewGovernanceHandler(
 	namespaces *query.ListNamespacesHandler,
 	shared *query.SharedWithMeHandler,
 	effective *query.EffectiveAccessHandler,
-	authorizer query.ResourceAuthorizer,
+	authorizer query.GovernanceAuthorizer,
 	cursor *query.SharedCursorCodec,
 ) *GovernanceHandler {
 	return &GovernanceHandler{
@@ -76,6 +77,7 @@ func NewGovernanceHandler(
 		sharedWithMe:          shared.Handle,
 		effectiveAccess:       effective.Handle,
 		authorize:             authorizer.Authorize,
+		authorizeMany:         authorizer.AuthorizeMany,
 		listGovernanceGrants:  repo.ListGovernanceGrantsPage,
 		listNodeShareRequests: repo.ListShareRequestsPage,
 		countShareRequests:    repo.CountShareRequests,
@@ -256,7 +258,7 @@ func (h *GovernanceHandler) ListChildren(c *gin.Context) {
 		notFound(c)
 		return
 	}
-	if h.getNode == nil || h.listChildren == nil || h.authorize == nil {
+	if h.getNode == nil || h.listChildren == nil || (explicitParent && h.authorize == nil) {
 		governanceError(c, domain.ErrPersistence)
 		return
 	}
@@ -276,7 +278,7 @@ func (h *GovernanceHandler) ListChildren(c *gin.Context) {
 		notFound(c)
 		return
 	}
-	limit, ok := pagination(c)
+	limit, ok := governancePagination(c)
 	if !ok {
 		return
 	}
@@ -289,27 +291,70 @@ func (h *GovernanceHandler) ListChildren(c *gin.Context) {
 		invalidRequest(c)
 		return
 	}
+	if h.authorizeMany == nil {
+		governanceError(c, domain.ErrPersistence)
+		return
+	}
+	cursorContext := query.ChildrenCursorContext{
+		NamespaceID: namespace.ID, ParentID: *parentID, ActorID: rc.actorID,
+		WorkspaceID: rc.workspaceID, NodeType: nodeType, Query: search,
+	}
+	scanCursor := ""
+	if c.Query("cursor") != "" {
+		if h.cursor == nil {
+			governanceError(c, domain.ErrInvalidGovernanceCursor)
+			return
+		}
+		scanCursor, err = h.cursor.DecodeChildren(c.Query("cursor"), cursorContext)
+		if err != nil {
+			governanceError(c, err)
+			return
+		}
+	}
 	visible := make([]model.Node, 0, limit+1)
-	scanCursor := c.Query("cursor")
-	for len(visible) <= limit {
+	scanned := 0
+	chunks := 0
+	hasMore := false
+	maxChunks := query.ChildrenCandidateScanBudget / query.ChildrenCandidateChunkSize
+	for len(visible) <= limit && scanned < query.ChildrenCandidateScanBudget && chunks < maxChunks {
 		pageStart := scanCursor
-		nodes, rawNext, listErr := h.listChildren(c.Request.Context(), namespace.ID, parentID, nodeType, search, 200, scanCursor)
+		chunkSize := query.ChildrenCandidateChunkSize
+		if remaining := query.ChildrenCandidateScanBudget - scanned; chunkSize > remaining {
+			chunkSize = remaining
+		}
+		nodes, rawNext, listErr := h.listChildren(
+			c.Request.Context(), namespace.ID, parentID, nodeType, search, chunkSize, scanCursor,
+		)
 		if listErr != nil {
 			governanceError(c, listErr)
 			return
 		}
+		chunks++
+		if remaining := query.ChildrenCandidateScanBudget - scanned; len(nodes) > remaining {
+			nodes = nodes[:remaining]
+		}
+		nodeIDs := make([]uuid.UUID, len(nodes))
 		for index := range nodes {
-			scanCursor = nodes[index].ID.String()
-			if h.authorize(c.Request.Context(), resourceauth.Request{
+			nodeIDs[index] = nodes[index].ID
+		}
+		decisions := resourceauth.BatchDecisions{}
+		if len(nodeIDs) > 0 {
+			decisions = h.authorizeMany(c.Request.Context(), resourceauth.BatchRequest{
 				ActorID: rc.actorID, WorkspaceID: rc.workspaceID, NamespaceID: namespace.ID,
-				NodeID: nodes[index].ID, Permission: model.ResourcePermissionRead,
-			}).Allowed {
+				NodeIDs: nodeIDs, Permissions: []model.ResourcePermission{model.ResourcePermissionRead},
+			})
+		}
+		for index := range nodes {
+			scanned++
+			scanCursor = nodes[index].ID.String()
+			if decisions[nodes[index].ID][model.ResourcePermissionRead].Allowed {
 				visible = append(visible, nodes[index])
 				if len(visible) == limit+1 {
 					break
 				}
 			}
 		}
+		hasMore = rawNext != ""
 		if len(visible) == limit+1 || rawNext == "" || rawNext == pageStart {
 			break
 		}
@@ -317,8 +362,22 @@ func (h *GovernanceHandler) ListChildren(c *gin.Context) {
 	}
 	next := ""
 	if len(visible) > limit {
-		next = visible[limit-1].ID.String()
+		if h.cursor == nil {
+			governanceError(c, domain.ErrPersistence)
+			return
+		}
+		next, err = h.cursor.EncodeChildren(visible[limit-1].ID.String(), cursorContext)
 		visible = visible[:limit]
+	} else if hasMore && (scanned == query.ChildrenCandidateScanBudget || chunks == maxChunks) {
+		if h.cursor == nil {
+			governanceError(c, domain.ErrPersistence)
+			return
+		}
+		next, err = h.cursor.EncodeChildren(scanCursor, cursorContext)
+	}
+	if err != nil {
+		governanceError(c, err)
+		return
 	}
 	items := make([]gin.H, 0, len(visible))
 	for index := range visible {
@@ -776,6 +835,14 @@ func (h *GovernanceHandler) submitGovernedShare(c *gin.Context) {
 		notFound(c)
 		return
 	}
+	if namespace.NamespaceType != model.NamespaceTypeUser && rc.workspaceID == uuid.Nil {
+		httpx.Fail(c, "TENANT_NOT_WORKSPACE_MEMBER", "workspace context required", http.StatusForbidden)
+		return
+	}
+	if !validShareNamespaceAudience(rc, namespace) {
+		notFound(c)
+		return
+	}
 	var body grantBody
 	if !decodeJSON(c, &body) {
 		return
@@ -792,9 +859,7 @@ func (h *GovernanceHandler) submitGovernedShare(c *gin.Context) {
 	if !valid {
 		return
 	}
-	if submit.WorkspaceID == uuid.Nil {
-		submit.WorkspaceID = scopeID
-	}
+	submit.ScopeID = scopeID
 	result, err := h.submitShare(c.Request.Context(), submit)
 	if err != nil {
 		filesystemError(c, err)
@@ -832,6 +897,14 @@ func (h *GovernanceHandler) PreviewShare(c *gin.Context) {
 		notFound(c)
 		return
 	}
+	if namespace.NamespaceType != model.NamespaceTypeUser && rc.workspaceID == uuid.Nil {
+		httpx.Fail(c, "TENANT_NOT_WORKSPACE_MEMBER", "workspace context required", http.StatusForbidden)
+		return
+	}
+	if !validShareNamespaceAudience(rc, namespace) {
+		notFound(c)
+		return
+	}
 	var body grantBody
 	if !decodeJSON(c, &body) {
 		return
@@ -848,9 +921,7 @@ func (h *GovernanceHandler) PreviewShare(c *gin.Context) {
 	if !valid {
 		return
 	}
-	if submit.WorkspaceID == uuid.Nil {
-		submit.WorkspaceID = scopeID
-	}
+	submit.ScopeID = scopeID
 	preview, err := h.previewShare(c.Request.Context(), submit)
 	if err != nil {
 		filesystemError(c, err)
@@ -1011,6 +1082,20 @@ func validNamespaceAudience(rc governanceContext, namespace *model.Namespace) bo
 	case model.NamespaceTypeWorkspace:
 		return rc.workspaceID != uuid.Nil && namespace.WorkspaceID == rc.workspaceID
 	case model.NamespaceTypeOrganization:
+		return rc.workspaceID != uuid.Nil
+	default:
+		return false
+	}
+}
+
+func validShareNamespaceAudience(rc governanceContext, namespace *model.Namespace) bool {
+	if namespace == nil || namespace.OrganizationID != rc.organizationID {
+		return false
+	}
+	switch namespace.NamespaceType {
+	case model.NamespaceTypeUser:
+		return namespace.OwnerUserID == rc.actorID
+	case model.NamespaceTypeWorkspace, model.NamespaceTypeOrganization:
 		return rc.workspaceID != uuid.Nil
 	default:
 		return false

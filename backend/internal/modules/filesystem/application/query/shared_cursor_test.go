@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 )
 
 func TestSharedCursorCodecEncryptsAndAuthenticatesPosition(t *testing.T) {
@@ -140,4 +141,36 @@ func TestGovernanceMetadataCursorBindsOrganizationNodeAndKind(t *testing.T) {
 	}
 	_, err = codec.DecodeGovernance("invalid", context)
 	require.ErrorIs(t, err, domain.ErrInvalidGovernanceCursor)
+}
+
+func TestChildrenCursorBindsNamespaceParentActorWorkspaceAndFilters(t *testing.T) {
+	nodeType := model.NodeTypeFile
+	context := ChildrenCursorContext{
+		NamespaceID: uuid.New(), ParentID: uuid.New(), ActorID: uuid.New(),
+		WorkspaceID: uuid.New(), NodeType: &nodeType, Query: " Quarterly ",
+	}
+	codec, err := NewSharedCursorCodec("children-cursor-secret", nil)
+	require.NoError(t, err)
+	position := uuid.NewString()
+	token, err := codec.EncodeChildren(position, context)
+	require.NoError(t, err)
+	decoded, err := codec.DecodeChildren(token, context)
+	require.NoError(t, err)
+	require.Equal(t, position, decoded)
+
+	otherType := model.NodeTypeDirectory
+	tests := []func(*ChildrenCursorContext){
+		func(value *ChildrenCursorContext) { value.NamespaceID = uuid.New() },
+		func(value *ChildrenCursorContext) { value.ParentID = uuid.New() },
+		func(value *ChildrenCursorContext) { value.ActorID = uuid.New() },
+		func(value *ChildrenCursorContext) { value.WorkspaceID = uuid.New() },
+		func(value *ChildrenCursorContext) { value.NodeType = &otherType },
+		func(value *ChildrenCursorContext) { value.Query = "annual" },
+	}
+	for _, mutate := range tests {
+		replay := context
+		mutate(&replay)
+		_, decodeErr := codec.DecodeChildren(token, replay)
+		require.ErrorIs(t, decodeErr, domain.ErrInvalidGovernanceCursor)
+	}
 }

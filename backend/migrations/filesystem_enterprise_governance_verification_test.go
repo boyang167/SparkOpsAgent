@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestFilesystemEnterpriseGovernanceMigratesExistingDataFrom82To87AndBack(t *testing.T) {
@@ -95,7 +96,32 @@ func TestFilesystemEnterpriseGovernanceMigratesExistingDataFrom82To87AndBack(t *
 	for _, migration := range []string{
 		"000087_filesystem_file_lineage.down.sql",
 		"000086_filesystem_namespace_quota.down.sql",
-		"000085_filesystem_share_requests.down.sql",
+	} {
+		require.NoErrorf(t, db.Exec(readMigration(t, migration)).Error, "apply %s", migration)
+	}
+	down85 := readMigration(t, "000085_filesystem_share_requests.down.sql")
+	err := db.Transaction(func(tx *gorm.DB) error {
+		return tx.Exec(down85).Error
+	})
+	require.Error(t, err, "DOWNLOAD grants must block destructive rollback by default")
+
+	var preservedDownloads, shareRequestTable int64
+	require.NoError(t, db.Table("filesystem.resource_grants").Where("id = ?", downloadGrantID).Count(&preservedDownloads).Error)
+	require.NoError(t, db.Raw(`
+		SELECT COUNT(*) FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = 'filesystem' AND c.relname = 'share_requests'
+	`).Scan(&shareRequestTable).Error)
+	require.Equal(t, int64(1), preservedDownloads)
+	require.Equal(t, int64(1), shareRequestTable)
+
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		if setErr := tx.Exec(`SET LOCAL sparkops.allow_destructive_filesystem_000085_down = 'on'`).Error; setErr != nil {
+			return setErr
+		}
+		return tx.Exec(down85).Error
+	}))
+	for _, migration := range []string{
 		"000084_filesystem_grant_principals.down.sql",
 		"000083_filesystem_namespace_types.down.sql",
 	} {
@@ -115,4 +141,33 @@ func TestFilesystemEnterpriseGovernanceMigratesExistingDataFrom82To87AndBack(t *
 		workspaceNamespaces, userGrants, legacyFiles, legacyActiveGrants, typedGrantActive,
 		filesAfterDown, legacyGrantsAfterDown, downloadGrantsAfterDown,
 	)
+}
+
+func TestFilesystemShareRequestDownAllowsEmptyDownloadSetWithoutOverride(t *testing.T) {
+	db := openMigrationPostgres(t)
+	for _, migration := range []string{
+		"000077_filesystem_kernel.up.sql",
+		"000078_filesystem_transfer.up.sql",
+		"000079_filesystem_storage_fabric.up.sql",
+		"000080_knowledge_filesystem_expand.up.sql",
+		"000081_filesystem_transfer_list.up.sql",
+		"000082_filesystem_blob_lifecycle.up.sql",
+		"000083_filesystem_namespace_types.up.sql",
+		"000084_filesystem_grant_principals.up.sql",
+		"000085_filesystem_share_requests.up.sql",
+	} {
+		require.NoErrorf(t, db.Exec(readMigration(t, migration)).Error, "apply %s", migration)
+	}
+
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		return tx.Exec(readMigration(t, "000085_filesystem_share_requests.down.sql")).Error
+	}))
+
+	var shareRequestTable int64
+	require.NoError(t, db.Raw(`
+		SELECT COUNT(*) FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = 'filesystem' AND c.relname = 'share_requests'
+	`).Scan(&shareRequestTable).Error)
+	require.Zero(t, shareRequestTable)
 }

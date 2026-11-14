@@ -579,6 +579,108 @@ func TestApproveAndRejectShareRequestUseCASAndSeparationOfDuties(t *testing.T) {
 	require.Len(t, store.grants, 1, "rejection must not create grants")
 }
 
+func TestCompletedReviewReplayPrecedesMutableAuthorizationAndBindsCanonicalIdentity(t *testing.T) {
+	organizationID, workspaceID := uuid.New(), uuid.New()
+	requester, reviewer, principalID := uuid.New(), uuid.New(), uuid.New()
+	scopes := principalScopeStub{scopes: map[uuid.UUID]PrincipalScope{
+		principalID: {OrganizationID: organizationID, WorkspaceID: workspaceID},
+	}}
+	authority := &shareAuthorityStub{workspaceAdmin: true}
+	store := &shareStoreStub{requests: map[uuid.UUID]model.ShareRequest{}}
+	handler := NewShareRequestHandler(
+		store, postgres.NewDirectTransactor(), nil, &scopes, authority,
+		&shareSourceAuthorizerStub{allowed: true},
+	)
+	newRequest := func() model.ShareRequest {
+		return model.ShareRequest{
+			ID: uuid.New(), OrganizationID: organizationID, NamespaceID: uuid.New(), NodeID: uuid.New(),
+			RequestedBy: requester, PrincipalType: model.PrincipalWorkspace,
+			PrincipalIDs: []uuid.UUID{principalID}, Actions: []model.ResourcePermission{model.ResourcePermissionRead},
+			Status: model.ShareRequestPending,
+		}
+	}
+
+	approveRequest := newRequest()
+	store.requests[approveRequest.ID] = approveRequest
+	approve := ReviewShareRequest{
+		CommandID: uuid.New(), ActorID: reviewer, OrganizationID: organizationID, RequestID: approveRequest.ID,
+	}
+	approved, err := handler.Approve(context.Background(), approve)
+	require.NoError(t, err)
+
+	authority.workspaceAdmin = false
+	scopes.scopes = map[uuid.UUID]PrincipalScope{}
+	replayed, err := handler.Approve(context.Background(), approve)
+	require.NoError(t, err)
+	require.Equal(t, approved, replayed)
+	require.Len(t, store.grants, 1)
+
+	for _, mutate := range []func(*ReviewShareRequest){
+		func(value *ReviewShareRequest) { value.ActorID = uuid.New() },
+		func(value *ReviewShareRequest) { value.OrganizationID = uuid.New() },
+		func(value *ReviewShareRequest) { value.RequestID = uuid.New() },
+	} {
+		changed := approve
+		mutate(&changed)
+		_, replayErr := handler.Approve(context.Background(), changed)
+		require.ErrorIs(t, replayErr, repository.ErrIdempotencyConflict)
+	}
+	_, err = handler.Reject(context.Background(), ReviewShareRequest{
+		CommandID: approve.CommandID, ActorID: reviewer, OrganizationID: organizationID,
+		RequestID: approveRequest.ID, RejectionReason: "changed operation",
+	})
+	require.ErrorIs(t, err, repository.ErrIdempotencyConflict)
+
+	rejectRequest := newRequest()
+	store.requests[rejectRequest.ID] = rejectRequest
+	authority.workspaceAdmin = true
+	scopes.scopes = map[uuid.UUID]PrincipalScope{
+		principalID: {OrganizationID: organizationID, WorkspaceID: workspaceID},
+	}
+	reject := ReviewShareRequest{
+		CommandID: uuid.New(), ActorID: reviewer, OrganizationID: organizationID,
+		RequestID: rejectRequest.ID, RejectionReason: "policy",
+	}
+	rejected, err := handler.Reject(context.Background(), reject)
+	require.NoError(t, err)
+	authority.workspaceAdmin = false
+	scopes.scopes = map[uuid.UUID]PrincipalScope{}
+	replayed, err = handler.Reject(context.Background(), reject)
+	require.NoError(t, err)
+	require.Equal(t, rejected, replayed)
+
+	changedReason := reject
+	changedReason.RejectionReason = "different"
+	_, err = handler.Reject(context.Background(), changedReason)
+	require.ErrorIs(t, err, repository.ErrIdempotencyConflict)
+}
+
+func TestFirstReviewExecutionStillRequiresCurrentAuthority(t *testing.T) {
+	organizationID, workspaceID := uuid.New(), uuid.New()
+	request := model.ShareRequest{
+		ID: uuid.New(), OrganizationID: organizationID, NamespaceID: uuid.New(), NodeID: uuid.New(),
+		RequestedBy: uuid.New(), PrincipalType: model.PrincipalWorkspace,
+		PrincipalIDs: []uuid.UUID{workspaceID}, Actions: []model.ResourcePermission{model.ResourcePermissionRead},
+		Status: model.ShareRequestPending,
+	}
+	store := &shareStoreStub{requests: map[uuid.UUID]model.ShareRequest{request.ID: request}}
+	handler := NewShareRequestHandler(
+		store, postgres.NewDirectTransactor(), nil,
+		principalScopeStub{scopes: map[uuid.UUID]PrincipalScope{
+			workspaceID: {OrganizationID: organizationID, WorkspaceID: workspaceID},
+		}},
+		shareAuthorityStub{}, &shareSourceAuthorizerStub{allowed: true},
+	)
+
+	_, err := handler.Approve(context.Background(), ReviewShareRequest{
+		CommandID: uuid.New(), ActorID: uuid.New(), OrganizationID: organizationID, RequestID: request.ID,
+	})
+
+	require.ErrorIs(t, err, domain.ErrResourceDenied)
+	require.Empty(t, store.commands)
+	require.Equal(t, model.ShareRequestPending, store.requests[request.ID].Status)
+}
+
 func TestSubmitShareReplaysSameCommandAndRejectsDifferentPayload(t *testing.T) {
 	organizationID, actorID, userID := uuid.New(), uuid.New(), uuid.New()
 	namespace := &model.Namespace{ID: uuid.New(), NamespaceType: model.NamespaceTypeUser, OrganizationID: organizationID, OwnerUserID: actorID}
