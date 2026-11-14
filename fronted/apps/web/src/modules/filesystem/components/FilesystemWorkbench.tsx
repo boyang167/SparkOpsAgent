@@ -105,49 +105,119 @@ export function FilesystemWorkbench({
           size: file.size,
           classification: "INTERNAL",
         } as const;
-        const idempotencyKey = uploadIdempotencyKey();
-        let session;
-        try {
-          session = await createTransferSession(workspaceId, input, {
-            idempotencyKey,
-            signal: controls.signal,
-          });
-        } catch (error) {
-          if (!controls.signal.aborted) throw error;
-          session = await createTransferSession(workspaceId, input, {
-            idempotencyKey,
-          });
+        const terminalStatuses = new Set(["FAILED", "REJECTED", "ABORTED", "EXPIRED"]);
+
+        async function createWithKey(idempotencyKey: string) {
+          try {
+            return await createTransferSession(workspaceId, input, {
+              idempotencyKey,
+              signal: controls.signal,
+            });
+          } catch (error) {
+            if (!controls.signal.aborted) throw error;
+            return createTransferSession(workspaceId, input, { idempotencyKey });
+          }
         }
-        controls.setSession(session);
-        if (controls.signal.aborted) {
+
+        async function waitForCompletion(
+          sessionId: string,
+          initial?: Awaited<ReturnType<typeof getTransferSession>>,
+        ) {
+          controls.setStatus("verifying");
+          let current =
+            initial ??
+            (await getTransferSession(sessionId, workspaceId, {
+              signal: controls.signal,
+            }));
+          while (!controls.signal.aborted) {
+            if (current.status === "COMPLETED") {
+              router.refresh();
+              return;
+            }
+            if (terminalStatuses.has(current.status)) {
+              throw new Error(current.error_code || "上传处理失败");
+            }
+            await abortableDelay(500, controls.signal);
+            current = await getTransferSession(sessionId, workspaceId, {
+              signal: controls.signal,
+            });
+          }
           throw new DOMException("Aborted", "AbortError");
         }
-        controls.setStatus("uploading");
-        await uploadTransfer(file, {
-          workspaceId,
-          session,
-          signal: controls.signal,
-          onProgress: (progress) =>
-            controls.setProgress({
-              uploadedBytes: progress.uploadedBytes,
-              totalBytes: progress.totalBytes,
-            }),
-        });
-        controls.setStatus("verifying");
-        while (!controls.signal.aborted) {
-          const current = await getTransferSession(session.session_id, workspaceId, {
+
+        async function uploadSession(
+          session: Awaited<ReturnType<typeof createTransferSession>>,
+        ) {
+          if (controls.signal.aborted) {
+            throw new DOMException("Aborted", "AbortError");
+          }
+          controls.setStatus("uploading");
+          await uploadTransfer(file, {
+            workspaceId,
+            session,
             signal: controls.signal,
+            onProgress: (progress) =>
+              controls.setProgress({
+                uploadedBytes: progress.uploadedBytes,
+                totalBytes: progress.totalBytes,
+              }),
           });
+          await waitForCompletion(session.session_id);
+        }
+
+        async function startFreshSession() {
+          const idempotencyKey = uploadIdempotencyKey();
+          controls.setIdempotencyKey(idempotencyKey);
+          controls.setProgress({ uploadedBytes: 0, totalBytes: file.size });
+          const session = await createWithKey(idempotencyKey);
+          controls.setSession(session);
+          await uploadSession(session);
+        }
+
+        if (controls.retrying && controls.session) {
+          const current = await getTransferSession(
+            controls.session.session_id,
+            workspaceId,
+            { signal: controls.signal },
+          );
           if (current.status === "COMPLETED") {
             router.refresh();
             return;
           }
-          if (["FAILED", "REJECTED", "ABORTED", "EXPIRED"].includes(current.status)) {
-            throw new Error(current.error_code || "上传处理失败");
+          if (terminalStatuses.has(current.status)) {
+            controls.setSession(undefined);
+            await startFreshSession();
+            return;
           }
-          await abortableDelay(500, controls.signal);
+          if (current.status === "INITIATED") {
+            await uploadSession(current);
+            return;
+          }
+          await waitForCompletion(current.session_id, current);
+          return;
         }
-        throw new Error("上传已取消");
+
+        if (controls.retrying && controls.idempotencyKey) {
+          const recovered = await createWithKey(controls.idempotencyKey);
+          controls.setSession(recovered);
+          if (recovered.status === "COMPLETED") {
+            router.refresh();
+            return;
+          }
+          if (terminalStatuses.has(recovered.status)) {
+            controls.setSession(undefined);
+            await startFreshSession();
+            return;
+          }
+          if (recovered.status !== "INITIATED") {
+            await waitForCompletion(recovered.session_id, recovered);
+            return;
+          }
+          await uploadSession(recovered);
+          return;
+        }
+
+        await startFreshSession();
       },
     }),
   );

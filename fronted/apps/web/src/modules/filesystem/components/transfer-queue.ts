@@ -23,15 +23,21 @@ export type TransferItem = {
   status: TransferStatus;
   progress: TransferProgress;
   session?: TransferSessionRef;
+  idempotencyKey?: string;
+  attempt: number;
   error?: string;
   cancelRequested?: boolean;
 };
 
 export type TransferControls = {
   signal: AbortSignal;
+  session?: TransferSessionRef;
+  idempotencyKey?: string;
+  retrying: boolean;
   setStatus: (status: "uploading" | "verifying") => void;
   setProgress: (progress: TransferProgress) => void;
-  setSession: (session: TransferSessionRef) => void;
+  setSession: (session: TransferSessionRef | undefined) => void;
+  setIdempotencyKey: (idempotencyKey: string) => void;
 };
 
 export type TransferUpload = (
@@ -171,6 +177,9 @@ export function createTransferQueue({
     try {
       await upload(item.file, item.targetParentId, {
         signal: controller.signal,
+        session: item.session,
+        idempotencyKey: item.idempotencyKey,
+        retrying: item.attempt > 0,
         setStatus: (status) =>
           !transfer.cancelRequested &&
           mutateActive(item.id, (current) => ({ ...current, status })),
@@ -179,10 +188,12 @@ export function createTransferQueue({
           mutateActive(item.id, (current) => ({ ...current, progress })),
         setSession: (session) => {
           mutateActive(item.id, (current) => ({ ...current, session }));
-          if (transfer.cancelRequested) {
+          if (session && transfer.cancelRequested) {
             void startAbort(session, transfer).catch(() => undefined);
           }
         },
+        setIdempotencyKey: (idempotencyKey) =>
+          mutateActive(item.id, (current) => ({ ...current, idempotencyKey })),
       });
       if (transfer.cancelRequested) {
         await finishCancellation(item.id, transfer);
@@ -236,6 +247,7 @@ export function createTransferQueue({
           file,
           targetParentId,
           status: "queued" as const,
+          attempt: 0,
           progress: { uploadedBytes: 0, totalBytes: file.size },
         };
       });
@@ -272,9 +284,8 @@ export function createTransferQueue({
         ...current,
         status: "queued",
         error: undefined,
-        session: undefined,
         cancelRequested: false,
-        progress: { uploadedBytes: 0, totalBytes: current.file.size },
+        attempt: current.attempt + 1,
       }));
       pump();
     },

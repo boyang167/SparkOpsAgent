@@ -189,14 +189,16 @@ describe("createTransferQueue", () => {
   it("reports a failed cancellation when backend abort fails", async () => {
     const abort = vi.fn().mockRejectedValue(new Error("abort unavailable"));
     let attempt = 0;
+    const signals: AbortSignal[] = [];
     const queue = createTransferQueue({
       concurrency: 1,
       abort,
       upload: async (_file, _parentId, controls) => {
         attempt += 1;
-        controls.setSession({ session_id: `session-${attempt}` });
-        controls.setStatus("uploading");
+        signals.push(controls.signal);
         if (attempt > 1) return;
+        controls.setSession({ session_id: "session-1" });
+        controls.setStatus("uploading");
         await waitForAbort(controls.signal);
       },
     });
@@ -215,8 +217,12 @@ describe("createTransferQueue", () => {
     await queue.whenIdle();
     expect(queue.getSnapshot()[0]).toMatchObject({
       status: "completed",
-      session: { session_id: "session-2" },
+      session: { session_id: "session-1" },
     });
+    expect(signals).toHaveLength(2);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
+    expect(signals[1]).not.toBe(signals[0]);
   });
 
   it("uses the reconciled completed state when cancel races with completion", async () => {
@@ -246,13 +252,15 @@ describe("createTransferQueue", () => {
     expect(completedSnapshots).toHaveLength(1);
   });
 
-  it("retry after polling failure creates and keeps a new session", async () => {
+  it("retry after polling failure preserves the old session", async () => {
     let attempt = 0;
     const queue = createTransferQueue({
       concurrency: 1,
       upload: async (_file, _parentId, controls) => {
         attempt += 1;
-        controls.setSession({ session_id: `session-${attempt}` });
+        if (attempt === 1) {
+          controls.setSession({ session_id: "session-1" });
+        }
         controls.setStatus("verifying");
         if (attempt === 1) throw new Error("poll failed");
       },
@@ -265,7 +273,7 @@ describe("createTransferQueue", () => {
 
     expect(queue.getSnapshot()[0]).toMatchObject({
       status: "completed",
-      session: { session_id: "session-2" },
+      session: { session_id: "session-1" },
     });
   });
 

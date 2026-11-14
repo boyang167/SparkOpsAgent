@@ -561,4 +561,139 @@ describe("FilesystemWorkbench", () => {
     expect(screen.getByText("已取消")).toBeInTheDocument();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it("reuses session-1 after polling network failure without creating or uploading again", async () => {
+    const session = transferSession("00000000-0000-4000-8000-000000000094");
+    sdk.createTransferSession.mockResolvedValue(session);
+    sdk.uploadTransfer.mockResolvedValue(undefined);
+    sdk.getTransferSession
+      .mockRejectedValueOnce(new Error("poll offline"))
+      .mockResolvedValueOnce({ ...session, status: "COMPLETED" });
+    const rendered = renderWorkbench(["file:read", "file:write"]);
+    fireEvent.drop(screen.getByTestId("file-drop-zone"), {
+      dataTransfer: {
+        files: [new File(["payload"], "报告.txt")],
+        types: ["Files"],
+        items: [],
+      },
+    });
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "transfers", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "重试 报告.txt" })).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "重试 报告.txt" }));
+    await waitFor(() => expect(screen.getByText("已完成")).toBeInTheDocument());
+
+    expect(sdk.createTransferSession).toHaveBeenCalledTimes(1);
+    expect(sdk.uploadTransfer).toHaveBeenCalledTimes(1);
+    expect(sdk.getTransferSession).toHaveBeenLastCalledWith(
+      session.session_id,
+      namespace.workspace_id,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("queries the old session before retrying an abort failure", async () => {
+    const session = transferSession("00000000-0000-4000-8000-000000000093");
+    sdk.createTransferSession.mockResolvedValue(session);
+    sdk.uploadTransfer.mockImplementationOnce(
+      async (_file: File, options: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          options.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    sdk.abortTransfer.mockRejectedValue(new Error("abort unavailable"));
+    sdk.getTransferSession
+      .mockResolvedValueOnce({ ...session, status: "UPLOADING" })
+      .mockResolvedValueOnce({ ...session, status: "COMPLETED" });
+    const rendered = renderWorkbench(["file:read", "file:write"]);
+    fireEvent.drop(screen.getByTestId("file-drop-zone"), {
+      dataTransfer: {
+        files: [new File(["payload"], "报告.txt")],
+        types: ["Files"],
+        items: [],
+      },
+    });
+    await waitFor(() => expect(sdk.uploadTransfer).toHaveBeenCalledTimes(1));
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "transfers", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "取消 报告.txt" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "重试 报告.txt" })).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "重试 报告.txt" }));
+    await waitFor(() => expect(screen.getByText("已完成")).toBeInTheDocument());
+
+    expect(sdk.createTransferSession).toHaveBeenCalledTimes(1);
+    expect(sdk.uploadTransfer).toHaveBeenCalledTimes(1);
+    expect(sdk.getTransferSession).toHaveBeenNthCalledWith(
+      2,
+      session.session_id,
+      namespace.workspace_id,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("creates session-2 only after session-1 is authoritatively terminal", async () => {
+    const session1 = transferSession("00000000-0000-4000-8000-000000000092");
+    const session2 = transferSession("00000000-0000-4000-8000-000000000091");
+    sdk.createTransferSession
+      .mockResolvedValueOnce(session1)
+      .mockResolvedValueOnce(session2);
+    sdk.uploadTransfer.mockResolvedValue(undefined);
+    sdk.getTransferSession
+      .mockRejectedValueOnce(new Error("poll offline"))
+      .mockResolvedValueOnce({ ...session1, status: "FAILED" })
+      .mockResolvedValueOnce({ ...session2, status: "COMPLETED" });
+    const rendered = renderWorkbench(["file:read", "file:write"]);
+    fireEvent.drop(screen.getByTestId("file-drop-zone"), {
+      dataTransfer: {
+        files: [new File(["payload"], "报告.txt")],
+        types: ["Files"],
+        items: [],
+      },
+    });
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "transfers", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "重试 报告.txt" })).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "重试 报告.txt" }));
+    await waitFor(() => expect(screen.getByText("已完成")).toBeInTheDocument());
+
+    expect(sdk.createTransferSession).toHaveBeenCalledTimes(2);
+    expect(sdk.uploadTransfer).toHaveBeenCalledTimes(2);
+    expect(sdk.createTransferSession.mock.calls[0]?.[2].idempotencyKey).not.toBe(
+      sdk.createTransferSession.mock.calls[1]?.[2].idempotencyKey,
+    );
+  });
 });

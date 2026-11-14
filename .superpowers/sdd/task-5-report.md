@@ -118,3 +118,57 @@
 
 - 创建结果未知时的同幂等键恢复依赖后端既有幂等重放契约；若 BFF 与后端同时完全不可达，任务会明确进入“取消失败”而不是伪装已取消，需用户在连接恢复后重试。
 - DIRECT Fetch 仍无法提供浏览器原生上传字节流事件；该限制与本报告前述一致。
+
+## Important：安全重试旧会话修复
+
+### 根因与恢复语义
+
+- 原 `retry()` 无条件清除 `session`，随后上传回调生成新幂等键并创建新 session。轮询网络失败或 abort 失败时，旧 session 可能仍在上传、校验或提交，重试会造成并行 session 和重复上传风险。
+- 队列项现在保留 `sessionId`、创建幂等键、尝试次数和进度。每次重试仍获得新的 controller 和并发槽，但不会丢弃旧会话身份。
+- 有旧 session 时，重试首先调用 `getTransferSession`：
+  - `COMPLETED`：直接完成，不 create、不 PUT；
+  - `INITIATED`：复用原 session 上传；
+  - `UPLOADING / PAUSED / VERIFYING / SCANNING / COMMITTING`：只恢复轮询，不 create、不 PUT；
+  - `FAILED / REJECTED / ABORTED / EXPIRED`：确认旧 session 已终态后，才清除旧引用、生成新幂等键并创建新 session。
+- 只有幂等键但没有 sessionId 时，说明创建结果未知；重试使用原幂等键恢复权威 session。网络未知时继续失败并保留身份，不会换键重复创建。
+- abort 失败后的重试同样先查询旧 session；未确认终态前不会创建 session-2。新 session 启动时进度归零，旧 controller 与轮询定时器不会复用。
+
+### RED
+
+运行：
+
+`pnpm vitest run apps/web/src/modules/filesystem/components/transfer-queue.test.ts apps/web/src/modules/filesystem/components/FilesystemWorkbench.test.tsx`
+
+- 退出码：1。
+- 5 项按预期失败：
+  - 轮询网络失败后重试额外调用 create/upload；
+  - abort 失败后重试未查询旧 session；
+  - 未等待 session-1 权威终态就进入新会话；
+  - 队列重试清除了轮询失败和 abort 失败任务的旧 session。
+
+### GREEN
+
+1. Task 5 定向测试：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/transfer-queue.test.ts apps/web/src/modules/filesystem/components/FileDropZone.test.tsx apps/web/src/modules/filesystem/components/TransferCenter.test.tsx apps/web/src/modules/filesystem/components/UploadPanel.test.ts apps/web/src/modules/filesystem/components/FilesystemWorkbench.test.tsx packages/web-sdk/src/filesystem.test.ts`
+   - 退出码：0。
+   - 6 个测试文件、45 项测试通过。
+2. Filesystem 回归：
+   `pnpm vitest run apps/web/src/modules/filesystem packages/web-sdk/src/filesystem.test.ts`
+   - 退出码：0。
+   - 15 个测试文件、91 项测试通过。
+3. Web 类型检查：
+   `pnpm --filter web typecheck`
+   - 退出码：0。
+4. IDE diagnostics：
+   - 本次修改文件无 linter errors。
+5. `git diff --check`
+   - 退出码：0。
+
+### 提交
+
+- Message: `fix(filesystem-ui): preserve sessions across transfer retries`
+- Commit: 本节所在提交。
+
+### 剩余风险
+
+- 活跃旧 session 会持续按现有 500ms 周期查询，直到后端终态、用户取消或网络再次失败；这是刻意的安全取舍，优先避免重复 PUT 和并行 session。
