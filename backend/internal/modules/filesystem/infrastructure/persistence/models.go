@@ -195,7 +195,7 @@ func (commandDedupRow) TableName() string { return "filesystem.command_dedup" }
 type transferSessionRow struct {
 	ID                 uuid.UUID                    `gorm:"column:id;primaryKey;type:uuid"`
 	WorkspaceID        *uuid.UUID                   `gorm:"column:workspace_id;type:uuid;index:ix_transfer_sessions_workspace_status,priority:1"`
-	NamespaceID        uuid.UUID                    `gorm:"column:namespace_id;not null;type:uuid"`
+	NamespaceID        uuid.UUID                    `gorm:"column:namespace_id;not null;type:uuid;uniqueIndex:ux_transfer_sessions_namespace_idempotency,priority:1"`
 	TargetParentID     *uuid.UUID                   `gorm:"column:target_parent_id;type:uuid"`
 	TargetName         string                       `gorm:"column:target_name;not null"`
 	Protocol           model.TransferProtocol       `gorm:"column:protocol;not null;type:varchar(24)"`
@@ -214,7 +214,7 @@ type transferSessionRow struct {
 	ScanSignature      string                       `gorm:"column:scan_signature"`
 	ScanCompletedAt    *time.Time                   `gorm:"column:scan_completed_at"`
 	ErrorCode          string                       `gorm:"column:error_code"`
-	IdempotencyKey     string                       `gorm:"column:idempotency_key;not null;uniqueIndex:ux_transfer_idempotency"`
+	IdempotencyKey     string                       `gorm:"column:idempotency_key;not null;uniqueIndex:ux_transfer_sessions_namespace_idempotency,priority:2"`
 	RequestHash        string                       `gorm:"column:request_hash;not null;size:64"`
 	ExpiresAt          time.Time                    `gorm:"column:expires_at;not null;index:ix_transfer_sessions_expires_at"`
 	Version            int64                        `gorm:"column:version;not null"`

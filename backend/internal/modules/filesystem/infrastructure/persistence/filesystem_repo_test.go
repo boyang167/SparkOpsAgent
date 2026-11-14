@@ -971,6 +971,56 @@ func TestTransferRepositoryRoundTripCASAndPartIdempotency(t *testing.T) {
 	require.Nil(t, storedChecksum)
 }
 
+func TestTransferIdempotencyKeyIsScopedByNamespace(t *testing.T) {
+	repo, _ := newTestRepository(t)
+	organizationID := uuid.New()
+	namespaces := []*model.Namespace{
+		{ID: uuid.New(), NamespaceType: model.NamespaceTypeUser, OrganizationID: organizationID, OwnerUserID: uuid.New(), Status: "ACTIVE"},
+		{ID: uuid.New(), NamespaceType: model.NamespaceTypeUser, OrganizationID: organizationID, OwnerUserID: uuid.New(), Status: "ACTIVE"},
+	}
+	for _, namespace := range namespaces {
+		require.NoError(t, repo.CreateNamespace(context.Background(), namespace))
+	}
+	build := func(namespaceID uuid.UUID) *model.TransferSession {
+		session, err := model.NewTransferSession(model.TransferSessionInput{
+			ID: uuid.New(), NamespaceID: namespaceID, TargetName: "same-key.bin",
+			CreatedBy: uuid.New(), Protocol: model.TransferProtocolMultipart,
+			ExpectedSize: 1, IdempotencyKey: "same-key",
+			RequestHash: strings.Repeat("a", 64), TemporaryObjectKey: "transfers/" + uuid.NewString(),
+			ExpiresAt: time.Now().UTC().Add(time.Hour), Classification: model.TransferClassificationInternal,
+		})
+		require.NoError(t, err)
+		return session
+	}
+	first := build(namespaces[0].ID)
+	second := build(namespaces[1].ID)
+	require.NoError(t, repo.CreateTransfer(context.Background(), first))
+	require.NoError(t, repo.CreateTransfer(context.Background(), second))
+
+	duplicate := build(namespaces[0].ID)
+	require.ErrorIs(t, repo.CreateTransfer(context.Background(), duplicate), domain.ErrTransferConflict)
+	got, err := repo.GetTransferByNamespaceIdempotency(context.Background(), namespaces[0].ID, "same-key")
+	require.NoError(t, err)
+	require.Equal(t, first.ID(), got.ID())
+}
+
+func TestTransferSessionModelIdempotencyIndexIsNamespaceScoped(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	statement := &gorm.Statement{DB: db}
+	require.NoError(t, statement.Parse(&transferSessionRow{}))
+	var columns []string
+	for _, index := range statement.Schema.ParseIndexes() {
+		if index.Name != "ux_transfer_sessions_namespace_idempotency" {
+			continue
+		}
+		for _, field := range index.Fields {
+			columns = append(columns, field.Field.DBName)
+		}
+	}
+	require.Equal(t, []string{"namespace_id", "idempotency_key"}, columns)
+}
+
 func TestListTransfersScopesFiltersAndPaginatesWithStableBoundary(t *testing.T) {
 	repo, db := newTestRepository(t)
 	ns := seedNamespace(t, db)

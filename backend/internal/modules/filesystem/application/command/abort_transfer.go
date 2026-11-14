@@ -16,6 +16,7 @@ import (
 type AbortTransfer struct {
 	ActorID     uuid.UUID
 	WorkspaceID uuid.UUID
+	NamespaceID uuid.UUID
 	SessionID   uuid.UUID
 	Authorization
 }
@@ -31,15 +32,19 @@ func NewAbortTransferHandler(repo repository.FilesystemRepository, tx postgres.T
 }
 
 func (h *AbortTransferHandler) Handle(ctx context.Context, cmd AbortTransfer) error {
-	if cmd.SessionID == uuid.Nil || cmd.WorkspaceID == uuid.Nil {
+	if cmd.SessionID == uuid.Nil {
 		return model.ErrInvalidTransfer
 	}
 	preview, err := h.repo.GetTransferByID(ctx, cmd.SessionID)
 	if err != nil {
 		return err
 	}
-	if preview.WorkspaceID() != cmd.WorkspaceID {
-		return domain.ErrTransferNotFound
+	namespace, err := h.repo.GetNamespace(ctx, preview.NamespaceID())
+	if err != nil {
+		return err
+	}
+	if err := validateAbortScope(cmd, namespace, preview); err != nil {
+		return err
 	}
 	parent := preview.TargetParentID()
 	if parent == nil {
@@ -53,8 +58,11 @@ func (h *AbortTransferHandler) Handle(ctx context.Context, cmd AbortTransfer) er
 		if lockErr != nil {
 			return lockErr
 		}
-		if session.WorkspaceID() != cmd.WorkspaceID {
+		if session.NamespaceID() != preview.NamespaceID() {
 			return domain.ErrTransferNotFound
+		}
+		if err := validateAbortScope(cmd, namespace, session); err != nil {
+			return err
 		}
 		switch session.Status() {
 		case model.TransferAborted:
@@ -78,4 +86,25 @@ func (h *AbortTransferHandler) Handle(ctx context.Context, cmd AbortTransfer) er
 		}
 		return h.repo.ReleaseNamespaceQuotaReservation(txCtx, session.NamespaceID(), cmd.SessionID)
 	})
+}
+
+func validateAbortScope(cmd AbortTransfer, namespace *model.Namespace, session *model.TransferSession) error {
+	if namespace == nil || session == nil || namespace.ID != session.NamespaceID() {
+		return domain.ErrTransferNotFound
+	}
+	if cmd.NamespaceID != uuid.Nil && cmd.NamespaceID != session.NamespaceID() {
+		return domain.ErrTransferNotFound
+	}
+	if namespace.NamespaceType == model.NamespaceTypeWorkspace {
+		if cmd.WorkspaceID == uuid.Nil ||
+			cmd.WorkspaceID != namespace.WorkspaceID ||
+			session.WorkspaceID() != namespace.WorkspaceID {
+			return domain.ErrTransferNotFound
+		}
+		return nil
+	}
+	if cmd.NamespaceID == uuid.Nil || cmd.WorkspaceID != uuid.Nil || session.WorkspaceID() != uuid.Nil {
+		return domain.ErrTransferNotFound
+	}
+	return nil
 }

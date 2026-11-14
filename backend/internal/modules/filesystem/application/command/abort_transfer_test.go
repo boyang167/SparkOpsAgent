@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
@@ -56,6 +57,95 @@ func TestAbortTransferReleasesQuotaReservation(t *testing.T) {
 	session, err := persistence.NewRepository(db).GetTransferByID(ctx, descriptor.SessionID)
 	require.NoError(t, err)
 	require.Equal(t, model.TransferAborted, session.Status())
+}
+
+func TestAbortTransferWithoutWorkspaceReleasesNamespaceQuota(t *testing.T) {
+	for _, namespaceType := range []model.NamespaceType{
+		model.NamespaceTypeOrganization,
+		model.NamespaceTypeUser,
+	} {
+		t.Run(string(namespaceType), func(t *testing.T) {
+			ctx := context.Background()
+			db, workspaceNamespace := newTransferTestDB(t)
+			repo := persistence.NewRepository(db)
+			namespace := &model.Namespace{
+				ID: uuid.New(), NamespaceType: namespaceType,
+				OrganizationID: workspaceNamespace.OrganizationID, Status: "ACTIVE",
+			}
+			if namespaceType == model.NamespaceTypeUser {
+				namespace.OwnerUserID = uuid.New()
+			}
+			require.NoError(t, repo.CreateNamespace(ctx, namespace))
+			root, err := model.NewRootDirectory(namespace.ID, uuid.New(), ".root")
+			require.NoError(t, err)
+			require.NoError(t, repo.CreateNode(ctx, root))
+			require.NoError(t, repo.SetNamespaceRootByID(ctx, namespace.ID, root.ID))
+			namespace.RootNodeID = &root.ID
+
+			create := newTransferHandler(db)
+			cmd := transferFixture(workspaceNamespace)
+			cmd.WorkspaceID = uuid.Nil
+			cmd.NamespaceID = namespace.ID
+			cmd.ParentID = namespace.RootNodeID
+			cmd.Authorization.WorkspaceID = uuid.Nil
+			cmd.Authorization.ResourceID = root.ID
+			cmd.IdempotencyKey = "namespace-abort-" + string(namespaceType)
+			descriptor, err := create.Handle(ctx, cmd)
+			require.NoError(t, err)
+
+			abort := NewAbortTransferHandler(repo, postgres.NewTransactor(db))
+			require.NoError(t, abort.Handle(ctx, AbortTransfer{
+				NamespaceID: namespace.ID, SessionID: descriptor.SessionID, ActorID: cmd.ActorID,
+				Authorization: Authorization{
+					Allowed: true, ResourceID: root.ID, Permission: model.ResourcePermissionWrite,
+				},
+			}))
+
+			var reservation struct {
+				State       string
+				WorkspaceID *uuid.UUID
+			}
+			require.NoError(t, db.Table("filesystem.quota_reservations").
+				Where("session_id = ?", descriptor.SessionID).Take(&reservation).Error)
+			require.Equal(t, "RELEASED", reservation.State)
+			require.Nil(t, reservation.WorkspaceID)
+			var account struct{ ReservedBytes, ReservedFiles int64 }
+			require.NoError(t, db.Table("filesystem.quota_accounts").
+				Where("namespace_id = ?", namespace.ID).Take(&account).Error)
+			require.Zero(t, account.ReservedBytes)
+			require.Zero(t, account.ReservedFiles)
+		})
+	}
+}
+
+func TestAbortTransferRejectsWrongNamespaceAndWorkspace(t *testing.T) {
+	ctx := context.Background()
+	db, namespace := newTransferTestDB(t)
+	create := newTransferHandler(db)
+	cmd := transferFixture(namespace)
+	descriptor, err := create.Handle(ctx, cmd)
+	require.NoError(t, err)
+	abort := NewAbortTransferHandler(persistence.NewRepository(db), postgres.NewTransactor(db))
+	auth := Authorization{
+		Allowed: true, WorkspaceID: namespace.WorkspaceID, ResourceID: *cmd.ParentID,
+		Permission: model.ResourcePermissionWrite,
+	}
+
+	err = abort.Handle(ctx, AbortTransfer{
+		NamespaceID: uuid.New(), WorkspaceID: namespace.WorkspaceID,
+		SessionID: descriptor.SessionID, ActorID: cmd.ActorID, Authorization: auth,
+	})
+	require.ErrorIs(t, err, domain.ErrTransferNotFound)
+	err = abort.Handle(ctx, AbortTransfer{
+		NamespaceID: namespace.ID, WorkspaceID: uuid.New(),
+		SessionID: descriptor.SessionID, ActorID: cmd.ActorID, Authorization: auth,
+	})
+	require.ErrorIs(t, err, domain.ErrTransferNotFound)
+
+	var reservation struct{ State string }
+	require.NoError(t, db.Table("filesystem.quota_reservations").
+		Where("session_id = ?", descriptor.SessionID).Take(&reservation).Error)
+	require.Equal(t, "RESERVED", reservation.State)
 }
 
 func TestAbortTransferIsIdempotentWhenAlreadyAborted(t *testing.T) {

@@ -245,3 +245,31 @@
 
 - Fix commit：本追加报告所在提交；精确 hash 记录在最终交付回复。
 - `DATABASE_DSN` 未设置，未执行真实 PostgreSQL up/down；migration 顺序测试、完整 migration 测试和 SQLite/fallback 行为测试已通过。
+
+---
+
+## Task 7 二次复审修复
+
+### 修复
+
+- `transferSessionRow` 的 GORM 索引改为严格的 `(namespace_id, idempotency_key)` 复合唯一索引，名称与 PostgreSQL migration/fallback 的 `ux_transfer_sessions_namespace_idempotency` 一致；移除错误的全局 `idempotency_key` 唯一索引定义。
+- SQLite repository 行为测试证明：不同 Namespace 可复用相同 idempotency key；同一 Namespace 的重复 key 不能创建第二个 session，并可读取原 session。
+- `AbortTransfer` 增加 Namespace scope：Workspace session 继续强制旧 Workspace 匹配；Organization/User session 要求显式 NamespaceID、禁止 WorkspaceID，并按 Namespace 释放 reservation。
+- Organization 与 User 两类无 Workspace transfer 的 Abort 均通过真实 repository 成功，将 reservation 标记为 `RELEASED` 并归零 Namespace quota 预留；错误 Namespace 和错误 Workspace 均拒绝且 reservation 保持 `RESERVED`。
+- 同类 lifecycle 复核：RecordUploaded、Verify 已对非 Nil Workspace 才比较，CAS 支持 `workspace_id = NULL`；Commit 已按 session Namespace 加载 Namespace、按 Namespace 提交 reservation。因此无需扩大重构。
+
+### 测试
+
+- `go test ./internal/modules/filesystem/application/command -run 'AbortTransfer|CreateTransfer|CommitTransfer|VerifyTransfer|RecordTransferUploaded' -count=1`：PASS
+- `go test ./internal/modules/filesystem/infrastructure/persistence -run 'TransferIdempotency|NamespaceQuota|Quota' -count=1`：PASS
+- `go test ./internal/modules/filesystem/infrastructure/persistence -count=1`：PASS
+- `go test ./migrations/... -count=1`：PASS（首次运行测试本身通过，但 Windows 临时文件清理返回一次 Access denied；原命令重跑退出码 0）
+- `go test ./internal/modules/filesystem/... -count=1`：PASS
+- `go vet ./internal/modules/filesystem/...`：PASS
+- IDE lint、`git diff --check`：PASS
+- `.\scripts\dev-restart.ps1 -Backend`：PASS，后端 PID `19596`
+
+### Commit 与未验证项
+
+- Fix commit：本追加报告所在提交；精确 hash 记录在最终交付回复。
+- `DATABASE_DSN` 未设置，真实 PostgreSQL migration 未执行；PostgreSQL migration 定义、fallback schema、GORM model index metadata 与 SQLite 行为已一致并通过测试。
