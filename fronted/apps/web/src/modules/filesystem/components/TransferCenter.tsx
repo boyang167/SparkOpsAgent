@@ -1,7 +1,16 @@
 "use client";
 
-import { createElement, useEffect, useState, useSyncExternalStore } from "react";
-import type { TransferSessionVM, TransferStatus as PersistedStatus } from "@sparkops/contracts/filesystem";
+import {
+  createElement,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import type {
+  TransferSessionVM,
+  TransferStatus as PersistedStatus,
+} from "@sparkops/contracts/filesystem";
 import { listTransferSessions } from "@sparkops/web-sdk/filesystem";
 import type { TransferItem, TransferQueue, TransferStatus } from "./transfer-queue";
 
@@ -120,6 +129,34 @@ function PersistedTransferCard({ session }: { session: TransferSessionVM }) {
   );
 }
 
+type PersistedLoadPhase =
+  | "loading"
+  | "refreshing"
+  | "loadingMore"
+  | "ready"
+  | "error";
+
+type PersistedState = {
+  workspaceId?: string;
+  items: TransferSessionVM[];
+  nextCursor: string;
+  phase: PersistedLoadPhase;
+};
+
+function mergePersisted(
+  current: TransferSessionVM[],
+  incoming: TransferSessionVM[],
+) {
+  const seen = new Set(current.map((session) => session.session_id));
+  const merged = [...current];
+  for (const session of incoming) {
+    if (seen.has(session.session_id)) continue;
+    seen.add(session.session_id);
+    merged.push(session);
+  }
+  return merged;
+}
+
 export function TransferCenter({
   queue,
   workspaceId,
@@ -128,41 +165,126 @@ export function TransferCenter({
   workspaceId?: string;
 }) {
   const items = useTransfers(queue);
-  const [persisted, setPersisted] = useState<TransferSessionVM[]>([]);
-  const [nextCursor, setNextCursor] = useState("");
-  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(
-    workspaceId ? "loading" : "ready",
-  );
+  const [persisted, setPersisted] = useState<PersistedState>({
+    workspaceId,
+    items: [],
+    nextCursor: "",
+    phase: workspaceId ? "loading" : "ready",
+  });
+  const requestGeneration = useRef(0);
+  const controllers = useRef(new Set<AbortController>());
+  const firstPageInFlight = useRef(false);
+  const loadMoreInFlight = useRef(false);
 
-  useEffect(() => {
-    if (!workspaceId) return;
-    let active = true;
-    setLoadState("loading");
-    void listTransferSessions(workspaceId, { limit: 100 })
+  function abortRequests() {
+    controllers.current.forEach((controller) => controller.abort());
+    controllers.current.clear();
+  }
+
+  function beginFirstPageRequest(targetWorkspaceId: string, preserveItems: boolean) {
+    if (firstPageInFlight.current && preserveItems) return;
+    requestGeneration.current += 1;
+    const generation = requestGeneration.current;
+    abortRequests();
+    firstPageInFlight.current = true;
+    loadMoreInFlight.current = false;
+    const controller = new AbortController();
+    controllers.current.add(controller);
+    setPersisted((current) => {
+      const sameWorkspace = current.workspaceId === targetWorkspaceId;
+      const retained = preserveItems && sameWorkspace ? current.items : [];
+      return {
+        workspaceId: targetWorkspaceId,
+        items: retained,
+        nextCursor: preserveItems && sameWorkspace ? current.nextCursor : "",
+        phase: retained.length > 0 ? "refreshing" : "loading",
+      };
+    });
+    void listTransferSessions(
+      targetWorkspaceId,
+      { limit: 100 },
+      { signal: controller.signal },
+    )
       .then((page) => {
-        if (!active) return;
-        setPersisted(page.items);
-        setNextCursor(page.next_cursor);
-        setLoadState("ready");
+        if (
+          generation !== requestGeneration.current ||
+          targetWorkspaceId !== workspaceId
+        ) {
+          return;
+        }
+        setPersisted({
+          workspaceId: targetWorkspaceId,
+          items: mergePersisted([], page.items),
+          nextCursor: page.next_cursor,
+          phase: "ready",
+        });
       })
       .catch(() => {
-        if (active) setLoadState("error");
+        if (
+          generation !== requestGeneration.current ||
+          targetWorkspaceId !== workspaceId
+        ) {
+          return;
+        }
+        setPersisted((current) => ({
+          ...current,
+          phase: "error",
+        }));
+      })
+      .finally(() => {
+        controllers.current.delete(controller);
+        if (generation === requestGeneration.current) {
+          firstPageInFlight.current = false;
+        }
       });
+  }
+
+  useEffect(() => {
+    requestGeneration.current += 1;
+    abortRequests();
+    firstPageInFlight.current = false;
+    loadMoreInFlight.current = false;
+    if (!workspaceId) {
+      setPersisted({
+        workspaceId: undefined,
+        items: [],
+        nextCursor: "",
+        phase: "ready",
+      });
+      return;
+    }
+    beginFirstPageRequest(workspaceId, false);
     return () => {
-      active = false;
+      requestGeneration.current += 1;
+      abortRequests();
+      firstPageInFlight.current = false;
+      loadMoreInFlight.current = false;
     };
   }, [workspaceId]);
 
+  const scopedPersisted =
+    persisted.workspaceId === workspaceId
+      ? persisted
+      : {
+          workspaceId,
+          items: [],
+          nextCursor: "",
+          phase: workspaceId ? ("loading" as const) : ("ready" as const),
+        };
   const localSessionIDs = new Set(
     items
       .map((item) => item.session?.session_id)
       .filter((id): id is string => Boolean(id)),
   );
-  const visiblePersisted = persisted.filter(
+  const visiblePersisted = scopedPersisted.items.filter(
     (session) => !localSessionIDs.has(session.session_id),
   );
 
-  if (items.length === 0 && visiblePersisted.length === 0 && loadState === "ready") {
+  if (
+    items.length === 0 &&
+    visiblePersisted.length === 0 &&
+    scopedPersisted.phase === "ready"
+  ) {
     return createElement(
       "div",
       { className: "empty-state stack-sm" },
@@ -172,22 +294,59 @@ export function TransferCenter({
         { className: "text-sm text-muted" },
         "上传文件后，可在这里查看进度并处理失败任务。",
       ),
+      workspaceId
+        ? createElement(
+            "button",
+            {
+              type: "button",
+              className: "btn btn-secondary btn-sm self-start",
+              onClick: () => beginFirstPageRequest(workspaceId, true),
+            },
+            "刷新",
+          )
+        : null,
     );
   }
 
   async function loadMore() {
-    if (!workspaceId || !nextCursor) return;
-    setLoadState("loading");
+    const cursor = scopedPersisted.nextCursor;
+    if (!workspaceId || !cursor || loadMoreInFlight.current) return;
+    loadMoreInFlight.current = true;
+    const generation = requestGeneration.current;
+    const targetWorkspaceId = workspaceId;
+    const controller = new AbortController();
+    controllers.current.add(controller);
+    setPersisted((current) => ({ ...current, phase: "loadingMore" }));
     try {
-      const page = await listTransferSessions(workspaceId, {
-        cursor: nextCursor,
-        limit: 100,
-      });
-      setPersisted((current) => [...current, ...page.items]);
-      setNextCursor(page.next_cursor);
-      setLoadState("ready");
+      const page = await listTransferSessions(
+        targetWorkspaceId,
+        { cursor, limit: 100 },
+        { signal: controller.signal },
+      );
+      if (
+        generation !== requestGeneration.current ||
+        targetWorkspaceId !== workspaceId
+      ) {
+        return;
+      }
+      setPersisted((current) => ({
+        ...current,
+        items: mergePersisted(current.items, page.items),
+        nextCursor: page.next_cursor,
+        phase: "ready",
+      }));
     } catch {
-      setLoadState("error");
+      if (
+        generation === requestGeneration.current &&
+        targetWorkspaceId === workspaceId
+      ) {
+        setPersisted((current) => ({ ...current, phase: "error" }));
+      }
+    } finally {
+      controllers.current.delete(controller);
+      if (generation === requestGeneration.current) {
+        loadMoreInFlight.current = false;
+      }
     }
   }
 
@@ -199,9 +358,27 @@ export function TransferCenter({
       { className: "stack-sm" },
       createElement("h2", { className: "section-title" }, "传输"),
       createElement(
-        "p",
-        { className: "text-sm text-muted" },
-        "任务会在后台继续运行，失败后可单独重试。",
+        "div",
+        { className: "flex flex-wrap items-center justify-between gap-3" },
+        createElement(
+          "p",
+          { className: "text-sm text-muted" },
+          "任务会在后台继续运行，失败后可单独重试。",
+        ),
+        workspaceId
+          ? createElement(
+              "button",
+              {
+                type: "button",
+                className: "btn btn-ghost btn-sm",
+                disabled:
+                  scopedPersisted.phase === "loading" ||
+                  scopedPersisted.phase === "refreshing",
+                onClick: () => beginFirstPageRequest(workspaceId, true),
+              },
+              "刷新",
+            )
+          : null,
       ),
     ),
     items.map((item) =>
@@ -272,26 +449,58 @@ export function TransferCenter({
         session,
       }),
     ),
-    loadState === "loading"
+    scopedPersisted.phase === "loading"
       ? createElement(
           "p",
           { role: "status", className: "text-sm text-muted" },
           "正在加载持久传输任务…",
         )
       : null,
-    loadState === "error"
+    scopedPersisted.phase === "refreshing"
       ? createElement(
           "p",
-          { role: "alert", className: "text-sm text-danger" },
-          "无法加载持久传输任务，请稍后重试。",
+          { role: "status", className: "text-sm text-muted" },
+          "正在刷新持久传输任务…",
         )
       : null,
-    nextCursor && loadState !== "loading"
+    scopedPersisted.phase === "loadingMore"
+      ? createElement(
+          "p",
+          { role: "status", className: "text-sm text-muted" },
+          "正在加载更多传输任务…",
+        )
+      : null,
+    scopedPersisted.phase === "error"
+      ? createElement(
+          "div",
+          { className: "flex flex-wrap items-center gap-3" },
+          createElement(
+            "p",
+            { role: "alert", className: "text-sm text-danger" },
+            "无法加载持久传输任务，请稍后重试。",
+          ),
+          workspaceId
+            ? createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "btn btn-secondary btn-sm",
+                  onClick: () => beginFirstPageRequest(workspaceId, true),
+                },
+                "重试",
+              )
+            : null,
+        )
+      : null,
+    scopedPersisted.nextCursor &&
+      scopedPersisted.phase !== "loading" &&
+      scopedPersisted.phase !== "refreshing"
       ? createElement(
           "button",
           {
             type: "button",
             className: "btn btn-secondary btn-sm self-start",
+            disabled: scopedPersisted.phase === "loadingMore",
             onClick: () => void loadMore(),
           },
           "加载更多",

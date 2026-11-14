@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ type listTransfersRepoStub struct {
 	cursor      string
 	rows        []*model.TransferSession
 	next        string
+	err         error
 }
 
 func (s *listTransfersRepoStub) ListTransfers(
@@ -28,7 +30,7 @@ func (s *listTransfersRepoStub) ListTransfers(
 	cursor string,
 ) ([]*model.TransferSession, string, error) {
 	s.workspaceID, s.status, s.limit, s.cursor = workspaceID, status, limit, cursor
-	return s.rows, s.next, nil
+	return s.rows, s.next, s.err
 }
 
 func TestListTransfersScopesWorkspaceAndStatus(t *testing.T) {
@@ -73,18 +75,41 @@ func TestListTransfersRejectsInvalidInputAndForeignRows(t *testing.T) {
 }
 
 func TestListTransfersClampsLimitToOneHundred(t *testing.T) {
-	repo := &listTransfersRepoStub{}
-	handler := NewListTransfersHandler(repo)
+	for _, test := range []struct {
+		name      string
+		requested int
+		expected  int
+	}{
+		{name: "default", requested: 0, expected: 100},
+		{name: "minimum", requested: 1, expected: 1},
+		{name: "maximum", requested: 100, expected: 100},
+		{name: "clamped", requested: 500, expected: 100},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &listTransfersRepoStub{}
+			handler := NewListTransfersHandler(repo)
+			_, _, err := handler.Handle(context.Background(), ListTransfers{
+				WorkspaceID: uuid.New(),
+				Limit:       test.requested,
+				Cursor:      "opaque-cursor",
+			})
+			require.NoError(t, err)
+			require.Equal(t, test.expected, repo.limit)
+			require.Equal(t, "opaque-cursor", repo.cursor)
+		})
+	}
+}
+
+func TestListTransfersPropagatesRepositoryError(t *testing.T) {
+	expected := errors.New("list failed")
+	handler := NewListTransfersHandler(&listTransfersRepoStub{err: expected})
 
 	_, _, err := handler.Handle(context.Background(), ListTransfers{
 		WorkspaceID: uuid.New(),
-		Limit:       500,
-		Cursor:      "opaque-cursor",
+		Limit:       20,
 	})
 
-	require.NoError(t, err)
-	require.Equal(t, 100, repo.limit)
-	require.Equal(t, "opaque-cursor", repo.cursor)
+	require.ErrorIs(t, err, expected)
 }
 
 func listTransferSessionFixture(t *testing.T, workspaceID uuid.UUID) *model.TransferSession {

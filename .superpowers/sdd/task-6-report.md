@@ -75,3 +75,65 @@
 - 持久列表没有浏览器内存队列的逐字节上传事件；非完成持久任务只展示后端状态和保守进度，刷新后状态以服务端为准。
 - 首屏默认读取最近 100 条，更多历史任务通过 cursor 手动加载；未实现 Task 7 的治理或审计重组。
 - 前端测试仍输出仓库既有 Vite/Rolldown deprecated 配置警告，不影响结果。
+
+## Critical / Important 审查修复
+
+### 根因与方案
+
+- 原首屏请求仅用 effect 局部 `active` 标志防止卸载后写入；workspace 切换后的首个 render 仍可短暂读取旧 `persisted`/cursor，分页请求也没有任何失效或取消机制。
+- 持久任务状态现在显式绑定 `workspaceId`。render 只消费与当前 workspace 相同的状态，因此 effect 执行前也不会泄露旧 workspace 数据。
+- 首屏、刷新和分页统一携带 `AbortSignal`，使用单调 request generation 拒绝所有旧请求结果；workspace 切换、快速 A→B→A、刷新替代分页和组件卸载都会中止当前 controller。
+- 采用规格内更小的显式刷新方案，不增加轮询流量。刷新保留同 workspace 的已显示数据并呈现独立刷新态；首次加载、加载更多、错误和空态保持分离。
+- 错误态提供“重试”，有数据和空态均提供“刷新”。分页使用同步 in-flight guard 防重复点击，并按 `session_id` 去重已有行及同页重复行。
+
+### RED
+
+1. Workspace、generation、分页与刷新测试：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/TransferCenter.test.tsx`
+   - 退出码 1；5 项按预期失败：
+     - SDK 调用未传 AbortSignal；
+     - workspace 切换/卸载不能确认请求已取消；
+     - 重复分页产生重复 key 和 4 个任务卡；
+     - 错误态没有重试按钮；
+     - 刷新与请求代际保护尚不存在。
+2. 空态刷新测试：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/TransferCenter.test.tsx -t "offers an explicit refresh"`
+   - 退出码 1；空态没有明确刷新入口。
+
+### GREEN
+
+1. TransferCenter 定向测试：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/TransferCenter.test.tsx`
+   - 退出码 0；12 项测试通过。
+2. 前端定向集成：
+   `pnpm vitest run apps/web/src/modules/filesystem/components/TransferCenter.test.tsx apps/web/src/modules/filesystem/components/FilesystemWorkbench.test.tsx packages/web-sdk/src/filesystem.test.ts`
+   - 退出码 0；3 个测试文件、38 项测试通过。
+3. Filesystem 前端回归：
+   `pnpm vitest run apps/web/src/modules/filesystem packages/web-sdk/src/filesystem.test.ts`
+   - 退出码 0；15 个测试文件、100 项测试通过。
+4. 后端目标包：
+   `go test ./internal/modules/filesystem/application/query ./internal/modules/filesystem/infrastructure/persistence ./internal/modules/filesystem/interface/http ./api/openapi ./migrations -count=1`
+   - 退出码 0。
+5. Web 类型检查：
+   `pnpm --filter web typecheck`
+   - 退出码 0。
+6. IDE diagnostics：
+   - 本次修改的 TransferCenter、测试和后端测试文件无 linter errors。
+7. `git diff --check`
+   - 退出码 0。
+
+### 后端测试加强
+
+- 仓储测试以同 workspace 的另一真实状态行证明 `status=FAILED` 会排除 `UPLOADING`。
+- 覆盖 malformed cursor、service limit 默认/最小/最大/截断、HTTP limit 1/100 与 0/101 边界。
+- 覆盖查询错误透传以及 Handler 对无效 cursor（400）和持久化不可用（503）的映射。
+- Migration 测试验证 Up 创建顺序与 Down 反序删除，不引入额外数据库测试基础设施。
+
+### 提交
+
+- Message: `fix(filesystem-ui): harden persisted transfer refresh`
+- Commit: 本节所在提交。
+
+### 剩余风险
+
+- 显式刷新不会自动轮询远端活动 session；这是本次选择的最小可靠方案，避免隐藏标签持续产生请求。用户可随时刷新，Task 5 本地活动任务仍由现有队列实时轮询。

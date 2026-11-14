@@ -170,6 +170,87 @@ func TestListTransfersRejectsInvalidStatus(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
 }
 
+func TestListTransfersValidatesLimitBoundaries(t *testing.T) {
+	nsID := uuid.New()
+	for _, test := range []struct {
+		limit      string
+		wantStatus int
+	}{
+		{limit: "0", wantStatus: http.StatusBadRequest},
+		{limit: "1", wantStatus: http.StatusOK},
+		{limit: "100", wantStatus: http.StatusOK},
+		{limit: "101", wantStatus: http.StatusBadRequest},
+	} {
+		t.Run(test.limit, func(t *testing.T) {
+			h := &Handler{
+				namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+					return &model.Namespace{ID: nsID, WorkspaceID: workspaceID}, nil
+				},
+				listTransfers: func(context.Context, query.ListTransfers) ([]*model.TransferSession, string, error) {
+					return nil, "", nil
+				},
+			}
+			router, token, wsID := testRouter(t, memberStub(true), permissionStub{
+				allowed: map[string]bool{authz.PermFileRead: true},
+			}, h)
+			req := httptest.NewRequest(http.MethodGet,
+				"/api/v1/workspaces/"+wsID.String()+"/transfers?limit="+test.limit,
+				nil,
+			)
+			req.Header.Set("Authorization", "Bearer "+token)
+			res := httptest.NewRecorder()
+			router.ServeHTTP(res, req)
+			require.Equal(t, test.wantStatus, res.Code, res.Body.String())
+		})
+	}
+}
+
+func TestListTransfersMapsQueryErrors(t *testing.T) {
+	nsID := uuid.New()
+	for _, test := range []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "invalid cursor",
+			err:        model.ErrInvalidTransfer,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "FILESYSTEM_INVALID_REQUEST",
+		},
+		{
+			name:       "repository unavailable",
+			err:        domain.ErrPersistence,
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "FILESYSTEM_UNAVAILABLE",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := &Handler{
+				namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+					return &model.Namespace{ID: nsID, WorkspaceID: workspaceID}, nil
+				},
+				listTransfers: func(context.Context, query.ListTransfers) ([]*model.TransferSession, string, error) {
+					return nil, "", test.err
+				},
+			}
+			router, token, wsID := testRouter(t, memberStub(true), permissionStub{
+				allowed: map[string]bool{authz.PermFileRead: true},
+			}, h)
+			req := httptest.NewRequest(http.MethodGet,
+				"/api/v1/workspaces/"+wsID.String()+"/transfers?cursor=opaque",
+				nil,
+			)
+			req.Header.Set("Authorization", "Bearer "+token)
+			res := httptest.NewRecorder()
+			router.ServeHTTP(res, req)
+			require.Equal(t, test.wantStatus, res.Code, res.Body.String())
+			require.Contains(t, res.Body.String(), test.wantCode)
+		})
+	}
+}
+
 func TestListFilesValidatesAndPassesNodeTypeBeforeQuery(t *testing.T) {
 	nsID, rootID := uuid.New(), uuid.New()
 	var capturedType *model.NodeType

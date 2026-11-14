@@ -729,6 +729,13 @@ func TestListTransfersScopesFiltersAndPaginatesWithStableBoundary(t *testing.T) 
 				"status":     model.TransferFailed,
 			}).Error)
 	}
+	otherStatus := transferSessionFixture(t, ns, &parent.ID, 5)
+	require.NoError(t, repo.CreateTransfer(context.Background(), otherStatus))
+	require.NoError(t, db.Model(&transferSessionRow{}).Where("id = ?", otherStatus.ID()).
+		Updates(map[string]any{
+			"created_at": createdAt.Add(2 * time.Second),
+			"status":     model.TransferUploading,
+		}).Error)
 
 	status := model.TransferFailed
 	page, next, err := repo.ListTransfers(context.Background(), ns.WorkspaceID, &status, 2, "")
@@ -750,7 +757,28 @@ func TestListTransfersScopesFiltersAndPaginatesWithStableBoundary(t *testing.T) 
 	for _, session := range append(page, last...) {
 		require.Equal(t, ns.WorkspaceID, session.WorkspaceID())
 		require.Equal(t, model.TransferFailed, session.Status())
+		require.NotEqual(t, otherStatus.ID(), session.ID())
 	}
+}
+
+func TestListTransfersRejectsMalformedCursorAndClampsLimits(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	parent := seedDirectory(t, db, ns.ID)
+	require.NoError(t, repo.CreateTransfer(
+		context.Background(),
+		transferSessionFixture(t, ns, &parent.ID, 1),
+	))
+
+	_, _, err := repo.ListTransfers(context.Background(), ns.WorkspaceID, nil, 20, "not-base64!")
+	require.ErrorIs(t, err, model.ErrInvalidTransfer)
+
+	minimum, _, err := repo.ListTransfers(context.Background(), ns.WorkspaceID, nil, 0, "")
+	require.NoError(t, err)
+	require.Len(t, minimum, 1)
+	maximum, _, err := repo.ListTransfers(context.Background(), ns.WorkspaceID, nil, 101, "")
+	require.NoError(t, err)
+	require.Len(t, maximum, 1)
 }
 
 func TestReserveQuotaHandlesNullBoundariesFilesAndOverflow(t *testing.T) {
