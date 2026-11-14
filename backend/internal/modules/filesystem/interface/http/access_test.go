@@ -81,6 +81,39 @@ func TestLegacyDenyGrantNormalizesWithoutDeclaredOrganization(t *testing.T) {
 	require.Equal(t, org, submit.OrganizationID)
 }
 
+func TestLegacyDenyReadAndWriteReturnImmediateDenyGrant(t *testing.T) {
+	for _, permission := range []model.ResourcePermission{model.ResourcePermissionRead, model.ResourcePermissionWrite} {
+		t.Run(string(permission), func(t *testing.T) {
+			org, namespaceID, nodeID := uuid.New(), uuid.New(), uuid.New()
+			var status model.ShareRequestStatus
+			h := &Handler{
+				namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+					return &model.Namespace{ID: namespaceID, OrganizationID: org, WorkspaceID: workspaceID, Status: "ACTIVE"}, nil
+				},
+				access: ResourceAccess{Share: func(_ context.Context, cmd command.SubmitShare) (command.ShareResult, error) {
+					require.Equal(t, model.GrantEffectDeny, cmd.Effect)
+					require.Equal(t, []model.ResourcePermission{permission}, cmd.Actions)
+					request := model.ShareRequest{Status: model.ShareRequestApproved, Effect: cmd.Effect}
+					status = request.Status
+					grant := model.ResourceGrant{Permission: permission, Effect: cmd.Effect}
+					return command.ShareResult{Request: request, Grants: []model.ResourceGrant{grant}}, nil
+				}},
+			}
+			router, token, workspaceID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileShare: true}}, h)
+			body := `{"grantee_id":"` + uuid.NewString() + `","permission":"` + string(permission) + `","effect":"DENY"}`
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+workspaceID.String()+"/files/"+nodeID.String()+"/grants", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Idempotency-Key", uuid.NewString())
+			res := httptest.NewRecorder()
+			router.ServeHTTP(res, req)
+			require.Equal(t, http.StatusCreated, res.Code, res.Body.String())
+			require.Equal(t, model.ShareRequestApproved, status)
+			require.Contains(t, res.Body.String(), `"effect":"DENY"`)
+		})
+	}
+}
+
 func TestTypedGrantBodyPreservesDownloadAsDistinctPermission(t *testing.T) {
 	org, workspaceID := uuid.New(), uuid.New()
 	rc := requestContext{
@@ -98,6 +131,21 @@ func TestTypedGrantBodyPreservesDownloadAsDistinctPermission(t *testing.T) {
 	require.Equal(t, []model.ResourcePermission{model.ResourcePermissionRead, model.ResourcePermissionDownload}, submit.Actions)
 }
 
+func TestTypedGrantBodyPreservesDenyEffect(t *testing.T) {
+	principalID := uuid.New()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	submit, legacy, ok := shareCommand(c, requestContext{
+		workspaceID: uuid.New(), actorID: uuid.New(), commandID: uuid.New(),
+		namespace: &model.Namespace{ID: uuid.New(), OrganizationID: uuid.New()},
+	}, uuid.New(), grantBody{
+		PrincipalType: string(model.PrincipalWorkspace), PrincipalIDs: []string{principalID.String()},
+		Actions: []string{string(model.ResourcePermissionWrite)}, Effect: string(model.GrantEffectDeny),
+	})
+	require.True(t, ok)
+	require.False(t, legacy)
+	require.Equal(t, model.GrantEffectDeny, submit.Effect)
+}
+
 func TestGrantViewIncludesConsistentTypedPrincipalFields(t *testing.T) {
 	principalID := uuid.New()
 	view := grantView(model.ResourceGrant{
@@ -108,4 +156,14 @@ func TestGrantViewIncludesConsistentTypedPrincipalFields(t *testing.T) {
 	require.Equal(t, model.PrincipalRole, view["principal_type"])
 	require.Equal(t, principalID, view["principal_id"])
 	require.Equal(t, principalID, view["grantee_id"])
+}
+
+func TestShareRequestViewIncludesEffect(t *testing.T) {
+	view := shareRequestView(model.ShareRequest{Effect: model.GrantEffectDeny})
+	require.Equal(t, model.GrantEffectDeny, view["effect"])
+}
+
+func TestExportViewIncludesClassification(t *testing.T) {
+	view := exportView(model.ExportTask{Classification: model.TransferClassificationRestricted})
+	require.Equal(t, model.TransferClassificationRestricted, view["classification"])
 }

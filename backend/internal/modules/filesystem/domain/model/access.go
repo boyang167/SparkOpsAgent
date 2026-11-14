@@ -36,4 +36,5 @@ type ExportTask struct {
 	TargetNodeID         *uuid.UUID
 	Status               string
 	ActorID              uuid.UUID
+	Classification       TransferClassification
 }

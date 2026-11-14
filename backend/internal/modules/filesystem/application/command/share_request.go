@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -192,7 +193,8 @@ func (h *ShareRequestHandler) review(ctx context.Context, cmd ReviewShareRequest
 		return model.ShareRequest{}, domain.ErrIdempotencyConflict
 	}
 	cmd.RejectionReason = strings.TrimSpace(cmd.RejectionReason)
-	if !approve && (len(cmd.RejectionReason) < 1 || len(cmd.RejectionReason) > 1000) {
+	reasonLength := utf8.RuneCountInString(cmd.RejectionReason)
+	if !approve && (reasonLength < 1 || reasonLength > 1000) {
 		return model.ShareRequest{}, domain.ErrSharePolicyDenied
 	}
 	request, err := h.store.GetShareRequest(ctx, cmd.RequestID)
@@ -279,6 +281,9 @@ func (h *ShareRequestHandler) resolveScopes(ctx context.Context, principalType m
 }
 
 func (h *ShareRequestHandler) sharePolicy(ctx context.Context, cmd SubmitShare, namespace *model.Namespace, classification model.TransferClassification, scopes []PrincipalScope) (bool, error) {
+	if cmd.Effect == model.GrantEffectDeny {
+		return true, nil
+	}
 	if cmd.PrincipalType == model.PrincipalOrganization {
 		for _, action := range cmd.Actions {
 			if action == model.ResourcePermissionDelete || action == model.ResourcePermissionShare || action == model.ResourcePermissionAdmin {

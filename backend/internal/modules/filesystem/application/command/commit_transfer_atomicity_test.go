@@ -73,6 +73,10 @@ func TestCommitTransferIsAtomicAndIdempotent(t *testing.T) {
 	node, err := repo.GetNodeByID(ctx, first.NodeID)
 	require.NoError(t, err)
 	require.Equal(t, cmd.Classification, node.Classification)
+	var committedNodeID string
+	require.NoError(t, db.Table("filesystem.transfer_sessions").Select("committed_node_id").
+		Where("id = ?", descriptor.SessionID).Scan(&committedNodeID).Error)
+	require.Equal(t, first.NodeID.String(), committedNodeID)
 
 	assertQuotaCommittedOnce(t, db, ns.WorkspaceID, cmd.Size)
 	assertOutboxEventCount(t, db, filesystemevent.TransferCompletedName, 1)

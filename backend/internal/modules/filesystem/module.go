@@ -344,7 +344,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		RevokeGrant:      grantCommands.Revoke,
 		IssueCapability:  command.NewIssueCapabilityHandler(domainservice.NewCapabilityIssuer(agentSigner), accessStore).Handle,
 		RevokeCapability: command.NewRevokeCapabilityHandler(accessStore).Handle,
-		StartExport:      command.NewStartControlledExportHandler(accessStore, c.AuditLogger).Handle,
+		StartExport:      command.NewStartControlledExportHandler(accessStore, c.AuditLogger, repo).Handle,
 		ImportExported:   operation.NewImportExportedFileHandler(repo, accessStore).Handle,
 	})
 	entitlementMiddleware := entitlements.Middleware(c.DB)

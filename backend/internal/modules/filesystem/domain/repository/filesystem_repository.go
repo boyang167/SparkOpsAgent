@@ -35,13 +35,14 @@ type CommandDedup struct {
 }
 
 type TransferStatePatch struct {
-	StatusFrom   model.TransferStatus
-	StatusTo     model.TransferStatus
-	ActualSize   *int64
-	ActualSHA256 string
-	ProviderID   *uuid.UUID
-	ScanResult   *model.TransferScanResult
-	ErrorCode    *string
+	StatusFrom      model.TransferStatus
+	StatusTo        model.TransferStatus
+	ActualSize      *int64
+	ActualSHA256    string
+	ProviderID      *uuid.UUID
+	ScanResult      *model.TransferScanResult
+	ErrorCode       *string
+	CommittedNodeID *uuid.UUID
 }
 
 type ReplicaMigrationCheckpoint struct {

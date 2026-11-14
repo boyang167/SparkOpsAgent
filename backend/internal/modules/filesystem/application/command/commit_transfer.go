@@ -163,6 +163,7 @@ func (h *CommitTransferHandler) Handle(ctx context.Context, cmd CommitTransfer) 
 		}
 		if err := h.repo.SaveTransferStateCAS(txCtx, session.WorkspaceID(), session.ID(), version, repository.TransferStatePatch{
 			StatusFrom: model.TransferCommitting, StatusTo: model.TransferCompleted,
+			CommittedNodeID: &nodeID,
 		}); err != nil {
 			return err
 		}

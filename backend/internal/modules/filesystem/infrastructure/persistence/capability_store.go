@@ -83,7 +83,8 @@ func (s *capabilityStore) SaveExportTask(ctx context.Context, task model.ExportT
 	row := exportTaskRow{
 		ID: task.ID, SourceOrganizationID: task.SourceOrganizationID, TargetOrganizationID: task.TargetOrganizationID,
 		SourceWorkspaceID: task.SourceWorkspaceID, TargetWorkspaceID: task.TargetWorkspaceID, SourceNodeID: task.SourceNodeID,
-		TargetNodeID: task.TargetNodeID, Status: task.Status, ActorID: task.ActorID, CreatedAt: now, UpdatedAt: now,
+		TargetNodeID: task.TargetNodeID, Status: task.Status, ActorID: task.ActorID,
+		Classification: task.Classification, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := postgres.DB(ctx, s.db).Create(&row).Error; err != nil {
 		if isUniqueViolation(err) {
@@ -168,10 +169,14 @@ func (row capabilityRow) record() (model.CapabilityRecord, error) {
 }
 
 func (row exportTaskRow) task() model.ExportTask {
+	classification := row.Classification
+	if !validClassification(classification) {
+		classification = model.TransferClassificationRestricted
+	}
 	return model.ExportTask{
 		ID: row.ID, SourceOrganizationID: row.SourceOrganizationID, TargetOrganizationID: row.TargetOrganizationID,
 		SourceWorkspaceID: row.SourceWorkspaceID, TargetWorkspaceID: row.TargetWorkspaceID, SourceNodeID: row.SourceNodeID,
-		TargetNodeID: row.TargetNodeID, Status: row.Status, ActorID: row.ActorID,
+		TargetNodeID: row.TargetNodeID, Status: row.Status, ActorID: row.ActorID, Classification: classification,
 	}
 }
 

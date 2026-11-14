@@ -4,9 +4,51 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/postgres"
 	"gorm.io/gorm"
 )
+
+const postgresNodeClassificationBackfill = `
+UPDATE filesystem.nodes SET classification = 'INTERNAL' WHERE node_type = 'DIRECTORY';
+UPDATE filesystem.nodes SET classification = 'RESTRICTED' WHERE node_type = 'FILE';
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+WITH transfer_hashes AS (
+	SELECT id, encode(digest(
+		uuid_send('6ba7b811-9dad-11d1-80b4-00c04fd430c8'::uuid)
+		|| convert_to('filesystem-transfer-node:' || id::text, 'UTF8'), 'sha1'
+	), 'hex') AS hash
+	FROM filesystem.transfer_sessions WHERE status = 'COMPLETED'
+), transfer_nodes AS (
+	SELECT id, (
+		substr(hash, 1, 8) || '-' || substr(hash, 9, 4) || '-5' || substr(hash, 14, 3) || '-'
+		|| CASE lower(substr(hash, 17, 1))
+			WHEN '0' THEN '8' WHEN '1' THEN '8' WHEN '2' THEN '8' WHEN '3' THEN '8'
+			WHEN '4' THEN '9' WHEN '5' THEN '9' WHEN '6' THEN '9' WHEN '7' THEN '9'
+			WHEN '8' THEN 'a' WHEN '9' THEN 'a' WHEN 'a' THEN 'a' WHEN 'b' THEN 'a'
+			ELSE 'b' END
+		|| substr(hash, 18, 3) || '-' || substr(hash, 21, 12)
+	)::uuid AS node_id FROM transfer_hashes
+)
+UPDATE filesystem.transfer_sessions AS session
+SET committed_node_id = transfer_nodes.node_id
+FROM transfer_nodes JOIN filesystem.nodes ON filesystem.nodes.id = transfer_nodes.node_id
+WHERE session.id = transfer_nodes.id AND session.committed_node_id IS NULL;
+WITH classified_nodes AS (
+	SELECT committed_node_id,
+		MAX(CASE classification
+			WHEN 'PUBLIC' THEN 1 WHEN 'INTERNAL' THEN 2
+			WHEN 'CONFIDENTIAL' THEN 3 WHEN 'RESTRICTED' THEN 4 END) AS sensitivity
+	FROM filesystem.transfer_sessions
+	WHERE status = 'COMPLETED' AND committed_node_id IS NOT NULL
+	GROUP BY committed_node_id
+)
+UPDATE filesystem.nodes AS node SET classification = CASE classified_nodes.sensitivity
+	WHEN 1 THEN 'PUBLIC' WHEN 2 THEN 'INTERNAL'
+	WHEN 3 THEN 'CONFIDENTIAL' WHEN 4 THEN 'RESTRICTED' END
+FROM classified_nodes WHERE node.id = classified_nodes.committed_node_id;
+`
 
 var postgresFallbackConstraints = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_id_namespace ON filesystem.nodes(id, namespace_id)`,
@@ -48,6 +90,8 @@ var postgresFallbackConstraints = []string{
 	`CREATE INDEX IF NOT EXISTS ix_filesystem_share_requests_org_status ON filesystem.share_requests(organization_id, status, created_at)`,
 	`CREATE INDEX IF NOT EXISTS ix_filesystem_share_requests_node ON filesystem.share_requests(node_id, created_at)`,
 	`DO $$ BEGIN ALTER TABLE filesystem.share_requests ADD CONSTRAINT ck_filesystem_share_request_status CHECK (status IN ('PENDING','APPROVED','REJECTED','CANCELLED')); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.transfer_sessions ADD CONSTRAINT fk_transfer_committed_node FOREIGN KEY (committed_node_id) REFERENCES filesystem.nodes(id); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+	`DO $$ BEGIN ALTER TABLE filesystem.export_tasks ADD CONSTRAINT ck_filesystem_export_classification CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED')); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`DO $$ BEGIN ALTER TABLE filesystem.quota_accounts ADD CONSTRAINT ck_filesystem_quota_values CHECK (used_bytes >= 0 AND reserved_bytes >= 0 AND used_files >= 0 AND reserved_files >= 0 AND (max_bytes IS NULL OR max_bytes >= 0) AND (max_files IS NULL OR max_files >= 0)); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_transfer_sessions_workspace_id ON filesystem.transfer_sessions(workspace_id, id)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_transfer_sessions_idempotency ON filesystem.transfer_sessions(workspace_id, idempotency_key)`,
@@ -102,7 +146,7 @@ func AutoMigrate(db *gorm.DB) error {
 			`CREATE TABLE IF NOT EXISTS filesystem.storage_replicas (id BLOB PRIMARY KEY, blob_id BLOB NOT NULL, provider_id BLOB NOT NULL, object_key TEXT NOT NULL, checksum TEXT, state TEXT NOT NULL CHECK (state IN ('CREATING','VERIFYING','AVAILABLE','DRAINING','FAILED','DELETED')), verified_at DATETIME, delete_after DATETIME, created_at DATETIME, UNIQUE(blob_id, provider_id, object_key), FOREIGN KEY(blob_id) REFERENCES blobs(id))`,
 			`CREATE TABLE IF NOT EXISTS filesystem.replica_migrations (blob_id BLOB NOT NULL, target_provider_id BLOB NOT NULL, target_replica_id BLOB NOT NULL, source_provider_id BLOB NOT NULL, bytes_copied INTEGER NOT NULL DEFAULT 0, target_object_key TEXT NOT NULL, policy_version INTEGER NOT NULL, updated_at DATETIME NOT NULL, PRIMARY KEY (blob_id, target_provider_id), FOREIGN KEY(blob_id) REFERENCES blobs(id))`,
 			`CREATE TABLE IF NOT EXISTS filesystem.quota_accounts (id BLOB PRIMARY KEY, organization_id BLOB NOT NULL, workspace_id BLOB NOT NULL UNIQUE, used_bytes INTEGER NOT NULL DEFAULT 0 CHECK (used_bytes >= 0), reserved_bytes INTEGER NOT NULL DEFAULT 0 CHECK (reserved_bytes >= 0), used_files INTEGER NOT NULL DEFAULT 0 CHECK (used_files >= 0), reserved_files INTEGER NOT NULL DEFAULT 0 CHECK (reserved_files >= 0), max_bytes INTEGER CHECK (max_bytes IS NULL OR max_bytes >= 0), max_files INTEGER CHECK (max_files IS NULL OR max_files >= 0), version INTEGER NOT NULL DEFAULT 0, updated_at DATETIME, UNIQUE(id, workspace_id))`,
-			`CREATE TABLE IF NOT EXISTS filesystem.transfer_sessions (id BLOB PRIMARY KEY, workspace_id BLOB NOT NULL, namespace_id BLOB NOT NULL, target_parent_id BLOB, target_name TEXT NOT NULL CHECK (length(trim(target_name)) > 0 AND instr(target_name, '/') = 0 AND instr(target_name, char(92)) = 0 AND instr(target_name, char(0)) = 0), protocol TEXT NOT NULL CHECK (protocol IN ('DIRECT','MULTIPART')), expected_size INTEGER NOT NULL CHECK (expected_size >= 0 AND expected_size <= 21474836480), expected_sha256 TEXT CHECK (expected_sha256 IS NULL OR (length(expected_sha256) = 64 AND lower(expected_sha256) NOT GLOB '*[^0-9a-f]*')), actual_size INTEGER CHECK (actual_size IS NULL OR (actual_size >= 0 AND actual_size <= 21474836480)), actual_sha256 TEXT CHECK (actual_sha256 IS NULL OR (length(actual_sha256) = 64 AND lower(actual_sha256) NOT GLOB '*[^0-9a-f]*')), provider_id BLOB, temporary_object_key TEXT NOT NULL CHECK (length(trim(temporary_object_key)) > 0), status TEXT NOT NULL CHECK (status IN ('INITIATED','UPLOADING','PAUSED','VERIFYING','SCANNING','COMMITTING','COMPLETED','FAILED','REJECTED','ABORTED','EXPIRED')), classification TEXT NOT NULL CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED')), scan_clean INTEGER, scan_threat_name TEXT, scan_engine TEXT, scan_signature TEXT, scan_completed_at DATETIME, error_code TEXT, idempotency_key TEXT NOT NULL CHECK (length(trim(idempotency_key)) > 0), request_hash TEXT NOT NULL CHECK (length(request_hash) = 64 AND lower(request_hash) NOT GLOB '*[^0-9a-f]*'), expires_at DATETIME NOT NULL, version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0), created_by BLOB NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, UNIQUE(workspace_id, idempotency_key), UNIQUE(workspace_id, id), FOREIGN KEY(workspace_id, namespace_id) REFERENCES namespaces(workspace_id, id), FOREIGN KEY(target_parent_id, namespace_id) REFERENCES nodes(id, namespace_id))`,
+			`CREATE TABLE IF NOT EXISTS filesystem.transfer_sessions (id BLOB PRIMARY KEY, workspace_id BLOB NOT NULL, namespace_id BLOB NOT NULL, target_parent_id BLOB, target_name TEXT NOT NULL CHECK (length(trim(target_name)) > 0 AND instr(target_name, '/') = 0 AND instr(target_name, char(92)) = 0 AND instr(target_name, char(0)) = 0), protocol TEXT NOT NULL CHECK (protocol IN ('DIRECT','MULTIPART')), expected_size INTEGER NOT NULL CHECK (expected_size >= 0 AND expected_size <= 21474836480), expected_sha256 TEXT CHECK (expected_sha256 IS NULL OR (length(expected_sha256) = 64 AND lower(expected_sha256) NOT GLOB '*[^0-9a-f]*')), actual_size INTEGER CHECK (actual_size IS NULL OR (actual_size >= 0 AND actual_size <= 21474836480)), actual_sha256 TEXT CHECK (actual_sha256 IS NULL OR (length(actual_sha256) = 64 AND lower(actual_sha256) NOT GLOB '*[^0-9a-f]*')), provider_id BLOB, temporary_object_key TEXT NOT NULL CHECK (length(trim(temporary_object_key)) > 0), status TEXT NOT NULL CHECK (status IN ('INITIATED','UPLOADING','PAUSED','VERIFYING','SCANNING','COMMITTING','COMPLETED','FAILED','REJECTED','ABORTED','EXPIRED')), classification TEXT NOT NULL CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED')), committed_node_id BLOB, scan_clean INTEGER, scan_threat_name TEXT, scan_engine TEXT, scan_signature TEXT, scan_completed_at DATETIME, error_code TEXT, idempotency_key TEXT NOT NULL CHECK (length(trim(idempotency_key)) > 0), request_hash TEXT NOT NULL CHECK (length(request_hash) = 64 AND lower(request_hash) NOT GLOB '*[^0-9a-f]*'), expires_at DATETIME NOT NULL, version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0), created_by BLOB NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, UNIQUE(workspace_id, idempotency_key), UNIQUE(workspace_id, id), FOREIGN KEY(workspace_id, namespace_id) REFERENCES namespaces(workspace_id, id), FOREIGN KEY(target_parent_id, namespace_id) REFERENCES nodes(id, namespace_id), FOREIGN KEY(committed_node_id) REFERENCES nodes(id))`,
 			`CREATE INDEX IF NOT EXISTS filesystem.ix_transfer_sessions_workspace_status ON transfer_sessions(workspace_id, status)`,
 			`CREATE INDEX IF NOT EXISTS filesystem.ix_transfer_sessions_workspace_created ON transfer_sessions(workspace_id, created_at DESC, id DESC)`,
 			`CREATE INDEX IF NOT EXISTS filesystem.ix_transfer_sessions_workspace_status_created ON transfer_sessions(workspace_id, status, created_at DESC, id DESC)`,
@@ -121,7 +165,7 @@ func AutoMigrate(db *gorm.DB) error {
 			`CREATE TABLE IF NOT EXISTS filesystem.command_dedup (command_id BLOB PRIMARY KEY, workspace_id BLOB NOT NULL, operation TEXT NOT NULL, request_hash TEXT NOT NULL, node_id BLOB, revision_id BLOB, state TEXT NOT NULL, created_at DATETIME, updated_at DATETIME)`,
 			`CREATE TABLE IF NOT EXISTS filesystem.storage_providers (id BLOB PRIMARY KEY, organization_id BLOB NOT NULL, name TEXT NOT NULL CHECK (length(trim(name)) > 0), provider_type TEXT NOT NULL CHECK (provider_type IN ('LOCAL','NFS','S3')), endpoint TEXT NOT NULL DEFAULT '', secret_ref TEXT NOT NULL CHECK (length(trim(secret_ref)) > 0), capabilities TEXT NOT NULL DEFAULT '{}', health TEXT NOT NULL DEFAULT '{}', config_version INTEGER NOT NULL DEFAULT 1 CHECK (config_version > 0), status TEXT NOT NULL DEFAULT 'ACTIVE', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, UNIQUE(organization_id, name))`,
 			`CREATE TABLE IF NOT EXISTS filesystem.capabilities (id BLOB PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, organization_id BLOB NOT NULL, workspace_id BLOB NOT NULL, actor_id BLOB NOT NULL, agent_id BLOB, run_id BLOB NOT NULL, resource_ids TEXT NOT NULL, actions TEXT NOT NULL, audience TEXT NOT NULL, expires_at DATETIME NOT NULL, revoked_at DATETIME, created_at DATETIME NOT NULL)`,
-			`CREATE TABLE IF NOT EXISTS filesystem.export_tasks (id BLOB PRIMARY KEY, source_organization_id BLOB NOT NULL, target_organization_id BLOB NOT NULL, source_workspace_id BLOB NOT NULL, target_workspace_id BLOB NOT NULL, source_node_id BLOB NOT NULL, target_node_id BLOB, status TEXT NOT NULL CHECK (status IN ('PENDING','IMPORTED')), actor_id BLOB NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)`,
+			`CREATE TABLE IF NOT EXISTS filesystem.export_tasks (id BLOB PRIMARY KEY, source_organization_id BLOB NOT NULL, target_organization_id BLOB NOT NULL, source_workspace_id BLOB NOT NULL, target_workspace_id BLOB NOT NULL, source_node_id BLOB NOT NULL, target_node_id BLOB, status TEXT NOT NULL CHECK (status IN ('PENDING','IMPORTED')), actor_id BLOB NOT NULL, classification TEXT NOT NULL DEFAULT 'RESTRICTED' CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED')), created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)`,
 			`CREATE TABLE IF NOT EXISTS filesystem.artifacts (id BLOB PRIMARY KEY, workspace_id BLOB NOT NULL, namespace_id BLOB NOT NULL, artifact_type TEXT NOT NULL, producer_type TEXT NOT NULL, producer_id BLOB NOT NULL, run_id BLOB NOT NULL, input_refs TEXT NOT NULL DEFAULT '[]', file_id BLOB NOT NULL, revision_id BLOB, retention_policy_id BLOB, created_at DATETIME NOT NULL, FOREIGN KEY(file_id) REFERENCES nodes(id))`,
 		} {
 			if err := db.Exec(statement).Error; err != nil {
@@ -131,8 +175,14 @@ func AutoMigrate(db *gorm.DB) error {
 		if err := upgradeSQLiteResourceGrants(db); err != nil {
 			return err
 		}
+		hadNodeClassification, err := sqliteHasColumn(db, "nodes", "classification")
+		if err != nil {
+			return err
+		}
 		for _, statement := range []string{
-			`ALTER TABLE filesystem.nodes ADD COLUMN classification TEXT NOT NULL DEFAULT 'INTERNAL' CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED'))`,
+			`ALTER TABLE filesystem.nodes ADD COLUMN classification TEXT NOT NULL DEFAULT 'RESTRICTED' CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED'))`,
+			`ALTER TABLE filesystem.transfer_sessions ADD COLUMN committed_node_id BLOB`,
+			`ALTER TABLE filesystem.export_tasks ADD COLUMN classification TEXT NOT NULL DEFAULT 'RESTRICTED' CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED'))`,
 			`ALTER TABLE filesystem.share_requests ADD COLUMN effect TEXT NOT NULL DEFAULT 'ALLOW' CHECK (effect IN ('ALLOW','DENY'))`,
 			`ALTER TABLE filesystem.blobs ADD COLUMN tombstoned_at DATETIME`,
 			`ALTER TABLE filesystem.blobs ADD COLUMN legal_hold INTEGER NOT NULL DEFAULT 0 CHECK (legal_hold IN (0, 1))`,
@@ -141,17 +191,37 @@ func AutoMigrate(db *gorm.DB) error {
 				return wrapPersistence(err)
 			}
 		}
+		if !hadNodeClassification {
+			if err := backfillSQLiteNodeClassifications(db); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
+	postgresNeedsClassificationBackfill := false
 	if postgres.ShouldRunAutoMigrate(db) && db.Dialector.Name() == "postgres" {
 		if err := db.Exec("CREATE SCHEMA IF NOT EXISTS filesystem").Error; err != nil {
 			return wrapPersistence(err)
 		}
+		hadNodes, err := postgresHasColumn(db, "nodes", "id")
+		if err != nil {
+			return err
+		}
+		hadClassification, err := postgresHasColumn(db, "nodes", "classification")
+		if err != nil {
+			return err
+		}
+		postgresNeedsClassificationBackfill = hadNodes && !hadClassification
 	}
 	if err := db.AutoMigrate(&namespaceRow{}, &nodeRow{}, &blobRow{}, &revisionRow{}, &replicaRow{}, &replicaMigrationRow{}, &quotaAccountRow{}, &transferSessionRow{}, &transferPartRow{}, &quotaReservationRow{}, &resourceGrantRow{}, &shareRequestRow{}, &fileLinkRow{}, &commandDedupRow{}, &storageProviderRow{}, &storagePoolRow{}, &storagePoolMemberRow{}, &storageBindingRow{}, &lifecyclePolicyRow{}, &capabilityRow{}, &exportTaskRow{}, &artifactRow{}); err != nil {
 		return wrapPersistence(err)
 	}
 	if db.Dialector.Name() == "postgres" {
+		if postgresNeedsClassificationBackfill {
+			if err := db.Exec(postgresNodeClassificationBackfill).Error; err != nil {
+				return wrapPersistence(err)
+			}
+		}
 		for _, statement := range postgresFallbackConstraints {
 			if err := db.Exec(statement).Error; err != nil {
 				return wrapPersistence(err)
@@ -159,6 +229,91 @@ func AutoMigrate(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+func postgresHasColumn(db *gorm.DB, table, column string) (bool, error) {
+	var exists bool
+	err := db.Raw(`
+SELECT EXISTS (
+	SELECT 1 FROM information_schema.columns
+	WHERE table_schema = 'filesystem' AND table_name = ? AND column_name = ?
+)`, table, column).Scan(&exists).Error
+	if err != nil {
+		return false, wrapPersistence(err)
+	}
+	return exists, nil
+}
+
+func sqliteHasColumn(db *gorm.DB, table, column string) (bool, error) {
+	var count int64
+	if err := db.Raw(fmt.Sprintf(`SELECT COUNT(*) FROM filesystem.pragma_table_info('%s') WHERE name = ?`, table), column).Scan(&count).Error; err != nil {
+		return false, wrapPersistence(err)
+	}
+	return count > 0, nil
+}
+
+func backfillSQLiteNodeClassifications(db *gorm.DB) error {
+	if err := db.Exec(`UPDATE filesystem.nodes SET classification =
+		CASE WHEN node_type = 'DIRECTORY' THEN 'INTERNAL' ELSE 'RESTRICTED' END`).Error; err != nil {
+		return wrapPersistence(err)
+	}
+	var sessions []struct {
+		ID              uuid.UUID
+		Classification  model.TransferClassification
+		CommittedNodeID *uuid.UUID
+	}
+	if err := db.Table("filesystem.transfer_sessions").
+		Select("id, classification, committed_node_id").
+		Where("status = ?", model.TransferCompleted).Find(&sessions).Error; err != nil {
+		return wrapPersistence(err)
+	}
+	highest := map[uuid.UUID]model.TransferClassification{}
+	for _, session := range sessions {
+		nodeID := session.CommittedNodeID
+		if nodeID == nil {
+			candidate := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer-node:"+session.ID.String()))
+			var count int64
+			if err := db.Table("filesystem.nodes").Where("id = ?", candidate).Count(&count).Error; err != nil {
+				return wrapPersistence(err)
+			}
+			if count == 0 {
+				continue
+			}
+			nodeID = &candidate
+			if err := db.Table("filesystem.transfer_sessions").Where("id = ?", session.ID).
+				Update("committed_node_id", candidate).Error; err != nil {
+				return wrapPersistence(err)
+			}
+		}
+		if classificationRank(session.Classification) > classificationRank(highest[*nodeID]) {
+			highest[*nodeID] = session.Classification
+		}
+	}
+	for nodeID, classification := range highest {
+		if !validClassification(classification) {
+			continue
+		}
+		if err := db.Table("filesystem.nodes").Where("id = ?", nodeID).
+			Update("classification", classification).Error; err != nil {
+			return wrapPersistence(err)
+		}
+	}
+	return nil
+}
+
+func classificationRank(classification model.TransferClassification) int {
+	switch classification {
+	case model.TransferClassificationPublic:
+		return 1
+	case model.TransferClassificationInternal:
+		return 2
+	case model.TransferClassificationConfidential:
+		return 3
+	case model.TransferClassificationRestricted:
+		return 4
+	default:
+		return 0
+	}
 }
 
 func upgradeSQLiteResourceGrants(db *gorm.DB) error {

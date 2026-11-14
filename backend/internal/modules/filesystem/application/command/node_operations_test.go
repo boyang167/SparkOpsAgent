@@ -151,6 +151,7 @@ func TestCopyNilParentResolvesNamespaceRoot(t *testing.T) {
 	put := NewPutLocalFileHandler(repo, provider, tx, nil, nil)
 	source, err := put.Handle(context.Background(), putFixture(ns))
 	require.NoError(t, err)
+	require.NoError(t, db.Exec("UPDATE filesystem.nodes SET classification = 'RESTRICTED' WHERE id = ?", source.ID).Error)
 	secondBlob := &model.Blob{ID: uuid.New(), DedupDomain: ns.OrganizationID, SHA256: strings.Repeat("b", 64), Size: 15, RefCount: 1, State: model.BlobStateAvailable}
 	secondRevision, err := model.NewRevision(source.ID, 2, secondBlob.ID, 15, "text/plain", source.OwnerID)
 	require.NoError(t, err)
@@ -167,6 +168,7 @@ func TestCopyNilParentResolvesNamespaceRoot(t *testing.T) {
 	})
 
 	require.NoError(t, err)
+	require.Equal(t, model.TransferClassificationRestricted, copied.Classification)
 	require.NotNil(t, copied.ParentID)
 	require.Equal(t, *ns.RootNodeID, *copied.ParentID)
 	persistedSource, err := repo.GetNode(context.Background(), ns.ID, source.ID)

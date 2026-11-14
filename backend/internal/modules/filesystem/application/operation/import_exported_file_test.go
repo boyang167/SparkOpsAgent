@@ -64,6 +64,7 @@ func TestImportCreatesNewFileIdentity(t *testing.T) {
 	store := &importStore{task: model.ExportTask{
 		ID: uuid.New(), SourceOrganizationID: uuid.New(), TargetOrganizationID: uuid.New(),
 		SourceNodeID: sourceNode, Status: model.ExportStatusPending,
+		Classification: model.TransferClassificationConfidential,
 	}}
 	nodes := &nodeCreatorStub{}
 	handler := NewImportExportedFileHandler(nodes, store)
@@ -77,10 +78,24 @@ func TestImportCreatesNewFileIdentity(t *testing.T) {
 	require.Equal(t, 1, nodes.creates)
 	require.Nil(t, nodes.nodes[0].CurrentRevisionID)
 	require.NotEqual(t, sourceNode, nodes.nodes[0].ID)
+	require.Equal(t, model.TransferClassificationConfidential, nodes.nodes[0].Classification)
 
 	second, err := handler.Handle(context.Background(), cmd)
 	require.NoError(t, err)
 	require.Equal(t, first.NodeID, second.NodeID)
 	require.Equal(t, 1, nodes.creates)
 	require.Equal(t, model.ExportStatusImported, store.task.Status)
+}
+
+func TestImportMissingLegacyClassificationDefaultsRestricted(t *testing.T) {
+	store := &importStore{task: model.ExportTask{
+		ID: uuid.New(), SourceNodeID: uuid.New(), Status: model.ExportStatusPending,
+	}}
+	nodes := &nodeCreatorStub{}
+	_, err := NewImportExportedFileHandler(nodes, store).Handle(context.Background(), ImportExportedFile{
+		ExportID: store.task.ID, TargetNamespaceID: uuid.New(), TargetParentID: uuid.New(),
+		OwnerID: uuid.New(), Name: "legacy.bin",
+	})
+	require.NoError(t, err)
+	require.Equal(t, model.TransferClassificationRestricted, nodes.nodes[0].Classification)
 }

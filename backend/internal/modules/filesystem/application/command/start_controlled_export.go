@@ -23,16 +23,21 @@ type StartControlledExport struct {
 	SourceNodeID         uuid.UUID
 }
 
+type ExportNodeReader interface {
+	GetNodeByID(context.Context, uuid.UUID) (*model.Node, error)
+}
+
 type StartControlledExportHandler struct {
 	store repository.CapabilityRepository
 	audit audit.Logger
+	nodes ExportNodeReader
 }
 
-func NewStartControlledExportHandler(store repository.CapabilityRepository, logger audit.Logger) *StartControlledExportHandler {
-	if store == nil {
-		panic("controlled export requires store")
+func NewStartControlledExportHandler(store repository.CapabilityRepository, logger audit.Logger, nodes ExportNodeReader) *StartControlledExportHandler {
+	if store == nil || nodes == nil {
+		panic("controlled export requires store and node reader")
 	}
-	return &StartControlledExportHandler{store: store, audit: logger}
+	return &StartControlledExportHandler{store: store, audit: logger, nodes: nodes}
 }
 
 func (h *StartControlledExportHandler) Handle(ctx context.Context, cmd StartControlledExport) (model.ExportTask, error) {
@@ -47,10 +52,21 @@ func (h *StartControlledExportHandler) Handle(ctx context.Context, cmd StartCont
 	if cmd.SourceOrganizationID == uuid.Nil || cmd.TargetOrganizationID == uuid.Nil || cmd.SourceOrganizationID == cmd.TargetOrganizationID || cmd.SourceNodeID == uuid.Nil || cmd.ActorID == uuid.Nil {
 		return model.ExportTask{}, domain.ErrControlledExportScope
 	}
+	source, err := h.nodes.GetNodeByID(ctx, cmd.SourceNodeID)
+	if err != nil {
+		return model.ExportTask{}, err
+	}
+	switch source.Classification {
+	case model.TransferClassificationPublic, model.TransferClassificationInternal,
+		model.TransferClassificationConfidential, model.TransferClassificationRestricted:
+	default:
+		return model.ExportTask{}, domain.ErrPersistence
+	}
 	task := model.ExportTask{
 		ID: cmd.ID, SourceOrganizationID: cmd.SourceOrganizationID, TargetOrganizationID: cmd.TargetOrganizationID,
 		SourceWorkspaceID: cmd.SourceWorkspaceID, TargetWorkspaceID: cmd.TargetWorkspaceID,
 		SourceNodeID: cmd.SourceNodeID, Status: model.ExportStatusPending, ActorID: cmd.ActorID,
+		Classification: source.Classification,
 	}
 	if err := h.store.SaveExportTask(ctx, task); err != nil {
 		if errors.Is(err, domain.ErrIdempotencyConflict) {

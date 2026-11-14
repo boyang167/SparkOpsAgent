@@ -382,7 +382,10 @@ func TestRejectShareRequestHTTPTrimsAndBoundsReason(t *testing.T) {
 	}
 	require.Equal(t, http.StatusBadRequest, send("   ").Code)
 	require.Equal(t, http.StatusBadRequest, send(strings.Repeat("x", 1001)).Code)
+	require.Equal(t, http.StatusBadRequest, send(strings.Repeat("界", 1001)).Code)
 	require.Zero(t, calls)
+	require.Equal(t, http.StatusOK, send(strings.Repeat("界", 1000)).Code)
+	require.Equal(t, strings.Repeat("界", 1000), captured.RejectionReason)
 	require.Equal(t, http.StatusOK, send("  policy violation  ").Code)
 	require.Equal(t, "policy violation", captured.RejectionReason)
 }

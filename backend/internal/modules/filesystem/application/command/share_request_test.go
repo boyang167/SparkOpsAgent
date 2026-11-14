@@ -134,6 +134,7 @@ func TestShareRequestPolicyMatrix(t *testing.T) {
 		namespaceType  model.NamespaceType
 		principalType  model.PrincipalType
 		actions        []model.ResourcePermission
+		effect         model.GrantEffect
 		classification model.TransferClassification
 		authority      shareAuthorityStub
 		wantStatus     model.ShareRequestStatus
@@ -149,6 +150,8 @@ func TestShareRequestPolicyMatrix(t *testing.T) {
 		{name: "confidential expansion remains pending for admin", namespaceType: model.NamespaceTypeUser, principalType: model.PrincipalWorkspace, actions: []model.ResourcePermission{model.ResourcePermissionRead}, classification: model.TransferClassificationConfidential, authority: shareAuthorityStub{workspaceAdmin: true, orgAdmin: true}, wantStatus: model.ShareRequestPending},
 		{name: "organization manager publishes to workspace immediately", namespaceType: model.NamespaceTypeOrganization, principalType: model.PrincipalWorkspace, actions: []model.ResourcePermission{model.ResourcePermissionRead}, classification: model.TransferClassificationInternal, authority: shareAuthorityStub{orgAdmin: true}, wantStatus: model.ShareRequestApproved, wantGrants: 1},
 		{name: "organization ordinary user cannot publish", namespaceType: model.NamespaceTypeOrganization, principalType: model.PrincipalWorkspace, actions: []model.ResourcePermission{model.ResourcePermissionRead}, classification: model.TransferClassificationInternal, wantErr: domain.ErrResourceDenied},
+		{name: "deny write is immediate without expansion approval", namespaceType: model.NamespaceTypeUser, principalType: model.PrincipalWorkspace, actions: []model.ResourcePermission{model.ResourcePermissionWrite}, effect: model.GrantEffectDeny, classification: model.TransferClassificationConfidential, wantStatus: model.ShareRequestApproved, wantGrants: 1},
+		{name: "deny organization admin action bypasses allow restrictions", namespaceType: model.NamespaceTypeUser, principalType: model.PrincipalOrganization, actions: []model.ResourcePermission{model.ResourcePermissionAdmin}, effect: model.GrantEffectDeny, classification: model.TransferClassificationRestricted, wantStatus: model.ShareRequestApproved, wantGrants: 1},
 	}
 
 	for _, tt := range tests {
@@ -171,7 +174,7 @@ func TestShareRequestPolicyMatrix(t *testing.T) {
 			result, err := handler.Submit(context.Background(), SubmitShare{
 				CommandID: uuid.New(), ActorID: actorID, OrganizationID: organizationID, WorkspaceID: workspaceID,
 				NodeID: node.ID, PrincipalType: tt.principalType, PrincipalIDs: []uuid.UUID{principalID},
-				Actions: tt.actions, InheritToChildren: true,
+				Actions: tt.actions, Effect: tt.effect, InheritToChildren: true,
 			})
 
 			if tt.wantErr != nil {
@@ -182,6 +185,10 @@ func TestShareRequestPolicyMatrix(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tt.wantStatus, result.Request.Status)
 			require.Len(t, store.grants, tt.wantGrants)
+			if tt.effect == model.GrantEffectDeny {
+				require.Equal(t, model.GrantEffectDeny, result.Request.Effect)
+				require.Equal(t, model.GrantEffectDeny, store.grants[0].Effect)
+			}
 		})
 	}
 }
@@ -328,12 +335,20 @@ func TestApproveAndRejectShareRequestUseCASAndSeparationOfDuties(t *testing.T) {
 	rejectRequest.ID = uuid.New()
 	rejectRequest.Classification = model.TransferClassificationInternal
 	store.requests[rejectRequest.ID] = rejectRequest
-	for _, reason := range []string{"   ", strings.Repeat("x", 1001)} {
+	for _, reason := range []string{"   ", strings.Repeat("x", 1001), strings.Repeat("界", 1001)} {
 		_, err = handler.Reject(context.Background(), ReviewShareRequest{
 			CommandID: uuid.New(), ActorID: approver, RequestID: rejectRequest.ID, RejectionReason: reason,
 		})
 		require.ErrorIs(t, err, domain.ErrSharePolicyDenied)
 	}
+	unicodeRequest := rejectRequest
+	unicodeRequest.ID = uuid.New()
+	store.requests[unicodeRequest.ID] = unicodeRequest
+	unicodeRejected, err := handler.Reject(context.Background(), ReviewShareRequest{
+		CommandID: uuid.New(), ActorID: approver, RequestID: unicodeRequest.ID, RejectionReason: strings.Repeat("界", 1000),
+	})
+	require.NoError(t, err)
+	require.Equal(t, strings.Repeat("界", 1000), unicodeRejected.RejectionReason)
 	rejected, err := handler.Reject(context.Background(), ReviewShareRequest{
 		CommandID: uuid.New(), ActorID: approver, RequestID: rejectRequest.ID, RejectionReason: "  not appropriate  ",
 	})

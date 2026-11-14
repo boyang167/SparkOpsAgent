@@ -12,3 +12,10 @@ ALTER TABLE filesystem.resource_grants
 ALTER TABLE filesystem.nodes
     DROP CONSTRAINT IF EXISTS ck_filesystem_node_classification,
     DROP COLUMN IF EXISTS classification;
+
+ALTER TABLE filesystem.export_tasks
+    DROP CONSTRAINT IF EXISTS ck_filesystem_export_classification,
+    DROP COLUMN IF EXISTS classification;
+
+ALTER TABLE filesystem.transfer_sessions
+    DROP COLUMN IF EXISTS committed_node_id;

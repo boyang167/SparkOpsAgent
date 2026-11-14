@@ -2838,6 +2838,10 @@ components:
           items:
             type: string
             enum: [READ, DOWNLOAD, WRITE, DELETE, SHARE, ADMIN]
+        effect:
+          type: string
+          enum: [ALLOW, DENY]
+          default: ALLOW
         inherit_to_children:
           type: boolean
           default: true
@@ -2855,7 +2859,7 @@ components:
           maxLength: 1000
     ShareRequest:
       type: object
-      required: [id, organization_id, namespace_id, node_id, requested_by, principal_type, principal_ids, actions, classification, status, created_at]
+      required: [id, organization_id, namespace_id, node_id, requested_by, principal_type, principal_ids, actions, classification, effect, status, created_at]
       properties:
         id:
           type: string
@@ -2888,6 +2892,9 @@ components:
         classification:
           type: string
           enum: [PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED]
+        effect:
+          type: string
+          enum: [ALLOW, DENY]
         status:
           type: string
           enum: [PENDING, APPROVED, REJECTED, CANCELLED]
@@ -2958,7 +2965,7 @@ components:
           format: uuid
     ExportTask:
       type: object
-      required: [id, source_organization_id, target_organization_id, source_node_id, status]
+      required: [id, source_organization_id, target_organization_id, source_node_id, classification, status]
       properties:
         id:
           type: string
@@ -2982,6 +2989,9 @@ components:
           type: string
           format: uuid
           nullable: true
+        classification:
+          type: string
+          enum: [PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED]
         status:
           type: string
           enum: [PENDING, IMPORTED]

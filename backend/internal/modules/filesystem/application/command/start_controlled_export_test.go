@@ -15,6 +15,15 @@ type exportAuditRecorder struct {
 	entries []audit.Entry
 }
 
+type exportNodeReaderStub struct {
+	node *model.Node
+	err  error
+}
+
+func (s exportNodeReaderStub) GetNodeByID(context.Context, uuid.UUID) (*model.Node, error) {
+	return s.node, s.err
+}
+
 func (r *exportAuditRecorder) Log(_ context.Context, entry audit.Entry) error {
 	r.entries = append(r.entries, entry)
 	return nil
@@ -44,10 +53,12 @@ func TestControlledExportAuditRecordsEachWorkspaceScope(t *testing.T) {
 func TestControlledExportRecordsTaskWithoutGrant(t *testing.T) {
 	store := newCapabilityStoreStub()
 	audits := &exportAuditRecorder{}
-	handler := NewStartControlledExportHandler(store, audits)
 	orgA, orgB := uuid.New(), uuid.New()
 	commandID := uuid.New()
 	sourceNode := uuid.New()
+	handler := NewStartControlledExportHandler(store, audits, exportNodeReaderStub{node: &model.Node{
+		ID: sourceNode, Classification: model.TransferClassificationConfidential,
+	}})
 	cmd := StartControlledExport{
 		ID: commandID, ActorID: uuid.New(),
 		SourceOrganizationID: orgA, TargetOrganizationID: orgB,
@@ -60,6 +71,7 @@ func TestControlledExportRecordsTaskWithoutGrant(t *testing.T) {
 	require.Equal(t, model.ExportStatusPending, task.Status)
 	require.Nil(t, task.TargetNodeID)
 	require.Equal(t, sourceNode, task.SourceNodeID)
+	require.Equal(t, model.TransferClassificationConfidential, task.Classification)
 	require.Len(t, audits.entries, 2)
 	require.NotEqual(t, audits.entries[0].OrgID.UUID, audits.entries[1].OrgID.UUID)
 

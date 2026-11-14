@@ -472,7 +472,7 @@ func shareRequestView(request model.ShareRequest) gin.H {
 		"id": request.ID, "organization_id": request.OrganizationID, "namespace_id": request.NamespaceID,
 		"node_id": request.NodeID, "requested_by": request.RequestedBy, "principal_type": request.PrincipalType,
 		"principal_ids": request.PrincipalIDs, "actions": request.Actions, "inherit_to_children": request.InheritToChildren,
-		"expires_at": request.ExpiresAt, "classification": request.Classification, "status": request.Status,
+		"expires_at": request.ExpiresAt, "classification": request.Classification, "effect": request.Effect, "status": request.Status,
 		"reviewed_by": request.ReviewedBy, "reviewed_at": request.ReviewedAt, "rejection_reason": request.RejectionReason,
 		"created_at": request.CreatedAt,
 	}
@@ -482,7 +482,8 @@ func exportView(task model.ExportTask) gin.H {
 	return gin.H{
 		"id": task.ID, "source_organization_id": task.SourceOrganizationID, "target_organization_id": task.TargetOrganizationID,
 		"source_workspace_id": task.SourceWorkspaceID, "target_workspace_id": task.TargetWorkspaceID,
-		"source_node_id": task.SourceNodeID, "target_node_id": task.TargetNodeID, "status": task.Status,
+		"source_node_id": task.SourceNodeID, "target_node_id": task.TargetNodeID,
+		"classification": task.Classification, "status": task.Status,
 	}
 }
 

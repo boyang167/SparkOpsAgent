@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -439,7 +440,8 @@ func (h *GovernanceHandler) RejectShareRequest(c *gin.Context) {
 		return
 	}
 	reason := strings.TrimSpace(body.Reason)
-	if len(reason) < 1 || len(reason) > 1000 {
+	reasonLength := utf8.RuneCountInString(reason)
+	if reasonLength < 1 || reasonLength > 1000 {
 		invalidRequest(c)
 		return
 	}

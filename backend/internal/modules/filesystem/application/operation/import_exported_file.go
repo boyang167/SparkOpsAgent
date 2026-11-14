@@ -45,6 +45,13 @@ func (h *ImportExportedFileHandler) Handle(ctx context.Context, cmd ImportExport
 	if err != nil {
 		return ImportResult{}, err
 	}
+	classification := task.Classification
+	switch classification {
+	case model.TransferClassificationPublic, model.TransferClassificationInternal,
+		model.TransferClassificationConfidential, model.TransferClassificationRestricted:
+	default:
+		classification = model.TransferClassificationRestricted
+	}
 	if cmd.TargetOrganizationID != uuid.Nil && cmd.TargetOrganizationID != task.TargetOrganizationID {
 		return ImportResult{}, domain.ErrControlledExportScope
 	}
@@ -62,6 +69,7 @@ func (h *ImportExportedFileHandler) Handle(ctx context.Context, cmd ImportExport
 		node.ID = uuid.New()
 	}
 	node.CurrentRevisionID = nil
+	node.Classification = classification
 	if err := h.nodes.CreateNode(ctx, node); err != nil {
 		return ImportResult{}, err
 	}

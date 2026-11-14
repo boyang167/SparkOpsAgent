@@ -38,6 +38,7 @@ func TestCapabilityStoreKeepsHashAndRevocation(t *testing.T) {
 		ID: uuid.New(), SourceOrganizationID: uuid.New(), TargetOrganizationID: uuid.New(),
 		SourceWorkspaceID: uuid.New(), TargetWorkspaceID: uuid.New(), SourceNodeID: uuid.New(),
 		Status: model.ExportStatusPending, ActorID: uuid.New(),
+		Classification: model.TransferClassificationRestricted,
 	}
 	require.NoError(t, store.SaveExportTask(context.Background(), task))
 	target := uuid.New()
@@ -46,6 +47,7 @@ func TestCapabilityStoreKeepsHashAndRevocation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, target, *imported.TargetNodeID)
 	require.Equal(t, model.ExportStatusImported, imported.Status)
+	require.Equal(t, model.TransferClassificationRestricted, imported.Classification)
 	_, err = store.GetCapability(context.Background(), uuid.New())
 	require.ErrorIs(t, err, domain.ErrCapabilityNotFound)
 }

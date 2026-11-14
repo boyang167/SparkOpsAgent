@@ -21,7 +21,11 @@ func TestSQLiteAutoMigrateUpgradesLegacyGrantRows(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
-	orgID, namespaceID, nodeID, granteeID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	orgID, namespaceID, directoryID, granteeID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	restrictedSessionID, confidentialSessionID, newerSessionID := uuid.New(), uuid.New(), uuid.New()
+	restrictedNodeID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer-node:"+restrictedSessionID.String()))
+	confidentialNodeID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-transfer-node:"+confidentialSessionID.String()))
+	unknownFileID := uuid.New()
 	require.NoError(t, db.Exec(`CREATE TABLE filesystem.namespaces (
 		id BLOB PRIMARY KEY, namespace_type TEXT, organization_id BLOB, workspace_id BLOB,
 		owner_user_id BLOB, root_node_id BLOB, status TEXT, policy_version INTEGER,
@@ -32,14 +36,31 @@ func TestSQLiteAutoMigrateUpgradesLegacyGrantRows(t *testing.T) {
 		name TEXT, normalized_name TEXT, current_revision_id BLOB, state TEXT,
 		owner_id BLOB, created_at DATETIME, updated_at DATETIME
 	)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE filesystem.transfer_sessions (
+		id BLOB PRIMARY KEY, workspace_id BLOB, status TEXT NOT NULL, classification TEXT NOT NULL,
+		committed_node_id BLOB, created_at DATETIME, expires_at DATETIME,
+		idempotency_key TEXT, expected_size INTEGER
+	)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE filesystem.export_tasks (
+		id BLOB PRIMARY KEY
+	)`).Error)
 	require.NoError(t, db.Exec(`CREATE TABLE filesystem.resource_grants (
 		id BLOB PRIMARY KEY, node_id BLOB NOT NULL, grantee_id BLOB NOT NULL,
 		permission TEXT NOT NULL, effect TEXT NOT NULL, expires_at DATETIME,
 		created_at DATETIME, UNIQUE(node_id, grantee_id, permission, effect)
 	)`).Error)
 	require.NoError(t, db.Exec("INSERT INTO filesystem.namespaces (id, namespace_type, organization_id, workspace_id, status) VALUES (?, 'WORKSPACE', ?, ?, 'ACTIVE')", namespaceID, orgID, uuid.New()).Error)
-	require.NoError(t, db.Exec("INSERT INTO filesystem.nodes (id, namespace_id, node_type, name, normalized_name, state, owner_id) VALUES (?, ?, 'DIRECTORY', 'root', 'root', 'ACTIVE', ?)", nodeID, namespaceID, uuid.New()).Error)
-	require.NoError(t, db.Exec("INSERT INTO filesystem.resource_grants (id, node_id, grantee_id, permission, effect) VALUES (?, ?, ?, 'READ', 'ALLOW')", uuid.New(), nodeID, granteeID).Error)
+	require.NoError(t, db.Exec("INSERT INTO filesystem.nodes (id, namespace_id, node_type, name, normalized_name, state, owner_id) VALUES (?, ?, 'DIRECTORY', 'root', 'root', 'ACTIVE', ?)", directoryID, namespaceID, uuid.New()).Error)
+	for _, node := range []struct {
+		id   uuid.UUID
+		name string
+	}{{restrictedNodeID, "restricted.bin"}, {confidentialNodeID, "confidential.bin"}, {unknownFileID, "unknown.bin"}} {
+		require.NoError(t, db.Exec("INSERT INTO filesystem.nodes (id, namespace_id, node_type, name, normalized_name, state, owner_id) VALUES (?, ?, 'FILE', ?, ?, 'ACTIVE', ?)", node.id, namespaceID, node.name, node.name, uuid.New()).Error)
+	}
+	require.NoError(t, db.Exec("INSERT INTO filesystem.transfer_sessions (id, status, classification) VALUES (?, 'COMPLETED', 'RESTRICTED')", restrictedSessionID).Error)
+	require.NoError(t, db.Exec("INSERT INTO filesystem.transfer_sessions (id, status, classification) VALUES (?, 'COMPLETED', 'PUBLIC')", confidentialSessionID).Error)
+	require.NoError(t, db.Exec("INSERT INTO filesystem.transfer_sessions (id, status, classification, committed_node_id) VALUES (?, 'COMPLETED', 'CONFIDENTIAL', ?)", newerSessionID, confidentialNodeID).Error)
+	require.NoError(t, db.Exec("INSERT INTO filesystem.resource_grants (id, node_id, grantee_id, permission, effect) VALUES (?, ?, ?, 'READ', 'ALLOW')", uuid.New(), directoryID, granteeID).Error)
 
 	require.NoError(t, AutoMigrate(db))
 	var got struct {
@@ -49,15 +70,25 @@ func TestSQLiteAutoMigrateUpgradesLegacyGrantRows(t *testing.T) {
 		Inherit        bool `gorm:"column:inherit_to_children"`
 		PolicyVersion  int64
 	}
-	require.NoError(t, db.Table("filesystem.resource_grants").Select("organization_id, principal_type, principal_id, inherit_to_children, policy_version").Where("node_id = ?", nodeID).Scan(&got).Error)
+	require.NoError(t, db.Table("filesystem.resource_grants").Select("organization_id, principal_type, principal_id, inherit_to_children, policy_version").Where("node_id = ?", directoryID).Scan(&got).Error)
 	require.Equal(t, orgID, got.OrganizationID)
 	require.Equal(t, model.PrincipalUser, got.PrincipalType)
 	require.Equal(t, granteeID, got.PrincipalID)
 	require.True(t, got.Inherit)
 	require.EqualValues(t, 1, got.PolicyVersion)
-	var nodeClassification model.TransferClassification
-	require.NoError(t, db.Table("filesystem.nodes").Select("classification").Where("id = ?", nodeID).Scan(&nodeClassification).Error)
-	require.Equal(t, model.TransferClassificationInternal, nodeClassification)
+	for nodeID, want := range map[uuid.UUID]model.TransferClassification{
+		directoryID: model.TransferClassificationInternal, restrictedNodeID: model.TransferClassificationRestricted,
+		confidentialNodeID: model.TransferClassificationConfidential, unknownFileID: model.TransferClassificationRestricted,
+	} {
+		var classification model.TransferClassification
+		require.NoError(t, db.Table("filesystem.nodes").Select("classification").Where("id = ?", nodeID).Scan(&classification).Error)
+		require.Equal(t, want, classification, nodeID)
+	}
+	exportID := uuid.New()
+	require.NoError(t, db.Exec("INSERT INTO filesystem.export_tasks (id) VALUES (?)", exportID).Error)
+	var exportClassification model.TransferClassification
+	require.NoError(t, db.Table("filesystem.export_tasks").Select("classification").Where("id = ?", exportID).Scan(&exportClassification).Error)
+	require.Equal(t, model.TransferClassificationRestricted, exportClassification)
 	var classificationColumn struct {
 		NotNull int `gorm:"column:notnull"`
 	}
@@ -65,10 +96,10 @@ func TestSQLiteAutoMigrateUpgradesLegacyGrantRows(t *testing.T) {
 	require.Equal(t, 1, classificationColumn.NotNull)
 
 	repo := NewRepository(db)
-	grants, err := repo.ListResourceGrants(context.Background(), []uuid.UUID{nodeID}, []repository.PrincipalRef{{Type: model.PrincipalUser, ID: granteeID}}, model.ResourcePermissionRead, time.Now())
+	grants, err := repo.ListResourceGrants(context.Background(), []uuid.UUID{directoryID}, []repository.PrincipalRef{{Type: model.PrincipalUser, ID: granteeID}}, model.ResourcePermissionRead, time.Now())
 	require.NoError(t, err)
 	require.Len(t, grants, 1)
-	grants, err = repo.ListResourceGrants(context.Background(), []uuid.UUID{nodeID}, []repository.PrincipalRef{{Type: model.PrincipalWorkspace, ID: granteeID}}, model.ResourcePermissionRead, time.Now())
+	grants, err = repo.ListResourceGrants(context.Background(), []uuid.UUID{directoryID}, []repository.PrincipalRef{{Type: model.PrincipalWorkspace, ID: granteeID}}, model.ResourcePermissionRead, time.Now())
 	require.NoError(t, err)
 	require.Empty(t, grants)
 }
@@ -161,6 +192,19 @@ func TestPostgresFallbackConstraintsMatchKernelInvariants(t *testing.T) {
 	} {
 		require.Contains(t, migrationSQL, invariant.migration)
 		require.Contains(t, fallbackSQL, invariant.fallback)
+	}
+}
+
+func TestPostgresClassificationFallbackIsFailClosedAndTransferAware(t *testing.T) {
+	for _, fragment := range []string{
+		"node_type = 'DIRECTORY'",
+		"node_type = 'FILE'",
+		"classification = 'RESTRICTED'",
+		"status = 'COMPLETED'",
+		"MAX(CASE classification",
+		"committed_node_id",
+	} {
+		require.Contains(t, postgresNodeClassificationBackfill, fragment)
 	}
 }
 

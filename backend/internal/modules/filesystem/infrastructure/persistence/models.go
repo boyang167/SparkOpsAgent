@@ -205,6 +205,7 @@ type transferSessionRow struct {
 	TemporaryObjectKey string                       `gorm:"column:temporary_object_key;not null"`
 	Status             model.TransferStatus         `gorm:"column:status;not null;type:varchar(24);index:ix_transfer_sessions_workspace_status,priority:2"`
 	Classification     model.TransferClassification `gorm:"column:classification;not null;type:varchar(16)"`
+	CommittedNodeID    *uuid.UUID                   `gorm:"column:committed_node_id;type:uuid"`
 	ScanClean          *bool                        `gorm:"column:scan_clean"`
 	ScanThreatName     string                       `gorm:"column:scan_threat_name"`
 	ScanEngine         string                       `gorm:"column:scan_engine"`
@@ -320,17 +321,18 @@ type capabilityRow struct {
 func (capabilityRow) TableName() string { return "filesystem.capabilities" }
 
 type exportTaskRow struct {
-	ID                   uuid.UUID  `gorm:"column:id;primaryKey;type:uuid"`
-	SourceOrganizationID uuid.UUID  `gorm:"column:source_organization_id;not null;type:uuid"`
-	TargetOrganizationID uuid.UUID  `gorm:"column:target_organization_id;not null;type:uuid"`
-	SourceWorkspaceID    uuid.UUID  `gorm:"column:source_workspace_id;not null;type:uuid"`
-	TargetWorkspaceID    uuid.UUID  `gorm:"column:target_workspace_id;not null;type:uuid"`
-	SourceNodeID         uuid.UUID  `gorm:"column:source_node_id;not null;type:uuid"`
-	TargetNodeID         *uuid.UUID `gorm:"column:target_node_id;type:uuid"`
-	Status               string     `gorm:"column:status;not null"`
-	ActorID              uuid.UUID  `gorm:"column:actor_id;not null;type:uuid"`
-	CreatedAt            time.Time  `gorm:"column:created_at;not null"`
-	UpdatedAt            time.Time  `gorm:"column:updated_at;not null"`
+	ID                   uuid.UUID                    `gorm:"column:id;primaryKey;type:uuid"`
+	SourceOrganizationID uuid.UUID                    `gorm:"column:source_organization_id;not null;type:uuid"`
+	TargetOrganizationID uuid.UUID                    `gorm:"column:target_organization_id;not null;type:uuid"`
+	SourceWorkspaceID    uuid.UUID                    `gorm:"column:source_workspace_id;not null;type:uuid"`
+	TargetWorkspaceID    uuid.UUID                    `gorm:"column:target_workspace_id;not null;type:uuid"`
+	SourceNodeID         uuid.UUID                    `gorm:"column:source_node_id;not null;type:uuid"`
+	TargetNodeID         *uuid.UUID                   `gorm:"column:target_node_id;type:uuid"`
+	Status               string                       `gorm:"column:status;not null"`
+	ActorID              uuid.UUID                    `gorm:"column:actor_id;not null;type:uuid"`
+	Classification       model.TransferClassification `gorm:"column:classification;not null;default:'RESTRICTED';type:varchar(16)"`
+	CreatedAt            time.Time                    `gorm:"column:created_at;not null"`
+	UpdatedAt            time.Time                    `gorm:"column:updated_at;not null"`
 }
 
 func (exportTaskRow) TableName() string { return "filesystem.export_tasks" }

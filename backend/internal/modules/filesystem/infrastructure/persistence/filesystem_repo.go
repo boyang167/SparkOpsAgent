@@ -1558,6 +1558,9 @@ func (r *Repository) SaveTransferStateCAS(ctx context.Context, workspaceID, id u
 	if patch.ErrorCode != nil {
 		updates["error_code"] = *patch.ErrorCode
 	}
+	if patch.CommittedNodeID != nil {
+		updates["committed_node_id"] = *patch.CommittedNodeID
+	}
 	db := postgres.DB(ctx, r.db)
 	result := db.Model(&transferSessionRow{}).
 		Where("workspace_id = ? AND id = ? AND version = ? AND status = ?", workspaceID, id, expectedVersion, patch.StatusFrom).
