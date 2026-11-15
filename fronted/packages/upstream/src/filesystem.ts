@@ -55,6 +55,11 @@ type MoveFileNodeCommand = {
 type ListRevisionsQuery = {
   cursor?: string;
   limit?: number;
+  namespace_id?: string;
+};
+
+type GetFileNodeQuery = {
+  namespace_id?: string;
 };
 
 export type GovernedFilesystemContext = {
@@ -75,7 +80,10 @@ function governedOptions(
   options: UpstreamRequestOptions,
   context: GovernedFilesystemContext,
 ): UpstreamRequestOptions {
-  return { ...options, workspaceId: context.workspaceId };
+  return {
+    ...options,
+    workspaceId: context.workspaceId ?? options.workspaceId,
+  };
 }
 
 function governedChildrenQuery(query: GovernedChildrenQuery = {}) {
@@ -122,6 +130,14 @@ function revisionsQuery(query: ListRevisionsQuery = {}) {
   const params = new URLSearchParams();
   if (query.cursor) params.set("cursor", query.cursor);
   if (query.limit != null) params.set("limit", String(query.limit));
+  if (query.namespace_id) params.set("namespace_id", query.namespace_id);
+  const suffix = params.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
+function getFileNodeQuery(query: GetFileNodeQuery = {}) {
+  const params = new URLSearchParams();
+  if (query.namespace_id) params.set("namespace_id", query.namespace_id);
   const suffix = params.toString();
   return suffix ? `?${suffix}` : "";
 }
@@ -339,9 +355,9 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
         { method: "GET", options: { ...options, workspaceId } },
       );
     },
-    getFileNode(workspaceId: string, nodeId: string) {
+    getFileNode(workspaceId: string, nodeId: string, query: GetFileNodeQuery = {}) {
       return upstreamFetch<FileNodeVM>(
-        `/api/v1/workspaces/${workspaceId}/files/${nodeId}`,
+        `/api/v1/workspaces/${workspaceId}/files/${nodeId}${getFileNodeQuery(query)}`,
         { method: "GET", options: { ...options, workspaceId } },
       );
     },

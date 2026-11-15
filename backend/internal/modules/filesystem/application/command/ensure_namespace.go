@@ -33,6 +33,7 @@ type namespaceEnsureRepository interface {
 	repository.FilesystemRepository
 	CreateNamespaceIfAbsent(context.Context, *model.Namespace) error
 	CreateNamespaceRootNodeIfAbsent(context.Context, *model.Node) error
+	LookupNamespaceRootNodeID(context.Context, uuid.UUID) (uuid.UUID, error)
 	SetNamespaceRootByID(context.Context, uuid.UUID, uuid.UUID) error
 	CreateNamespaceRootLink(context.Context, model.FileLink) error
 }
@@ -101,19 +102,23 @@ func (h *EnsureNamespaceHandler) Handle(ctx context.Context, cmd EnsureNamespace
 		if err := h.repo.CreateNamespaceRootNodeIfAbsent(txCtx, root); err != nil {
 			return err
 		}
-		if err := h.repo.SetNamespaceRootByID(txCtx, namespace.ID, root.ID); err != nil {
+		rootID, rootErr := h.authoritativeRootID(txCtx, namespace.ID, root.ID)
+		if rootErr != nil {
+			return rootErr
+		}
+		if err := h.repo.SetNamespaceRootByID(txCtx, namespace.ID, rootID); err != nil {
 			return err
 		}
 		if err := h.repo.CreateNamespaceRootLink(txCtx, model.FileLink{
 			ID:        uuid.NewSHA1(uuid.NameSpaceURL, []byte("filesystem-namespace-root-link:"+namespace.ID.String())),
-			NodeID:    root.ID,
+			NodeID:    rootID,
 			LinkType:  model.FileLinkTypeNamespaceRoot,
 			LinkID:    namespace.ID,
 			CreatedAt: time.Now().UTC(),
 		}); err != nil {
 			return err
 		}
-		namespace.RootNodeID = &root.ID
+		namespace.RootNodeID = &rootID
 		return nil
 	})
 	if err != nil {
@@ -123,13 +128,14 @@ func (h *EnsureNamespaceHandler) Handle(ctx context.Context, cmd EnsureNamespace
 				return nil, canonicalErr
 			}
 			if canonical.RootNodeID != nil {
-				return canonical, nil
+				if _, nodeErr := h.repo.GetNodeIncludingTrashed(ctx, canonical.ID, *canonical.RootNodeID); nodeErr == nil {
+					return canonical, nil
+				}
 			}
 		}
 		return nil, err
 	}
-	if h.ensureDefaultProv != nil && h.localStorageRoot != "" &&
-		cmd.NamespaceType == model.NamespaceTypeWorkspace {
+	if h.ensureDefaultProv != nil && h.localStorageRoot != "" {
 		if _, providerErr := h.ensureDefaultProv.Handle(ctx, EnsureDefaultLocalProvider{
 			OrganizationID: cmd.OrganizationID, StorageRoot: h.localStorageRoot,
 		}); providerErr != nil {
@@ -137,6 +143,26 @@ func (h *EnsureNamespaceHandler) Handle(ctx context.Context, cmd EnsureNamespace
 		}
 	}
 	return namespace, nil
+}
+
+func (h *EnsureNamespaceHandler) authoritativeRootID(ctx context.Context, namespaceID, preferred uuid.UUID) (uuid.UUID, error) {
+	if _, err := h.repo.GetNodeIncludingTrashed(ctx, namespaceID, preferred); err == nil {
+		return preferred, nil
+	} else if !errors.Is(err, domain.ErrNodeNotFound) {
+		return uuid.Nil, err
+	}
+	canonical, err := h.repo.GetNamespace(ctx, namespaceID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if canonical.RootNodeID != nil {
+		if _, nodeErr := h.repo.GetNodeIncludingTrashed(ctx, namespaceID, *canonical.RootNodeID); nodeErr == nil {
+			return *canonical.RootNodeID, nil
+		} else if !errors.Is(nodeErr, domain.ErrNodeNotFound) {
+			return uuid.Nil, nodeErr
+		}
+	}
+	return h.repo.LookupNamespaceRootNodeID(ctx, namespaceID)
 }
 
 func (h *EnsureNamespaceHandler) lookup(ctx context.Context, cmd EnsureNamespace) (*model.Namespace, error) {

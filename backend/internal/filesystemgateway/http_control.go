@@ -8,10 +8,12 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage/adapters/local"
 )
 
 // HTTPControlPort calls the API server internal filesystem gateway endpoints.
@@ -20,6 +22,7 @@ type HTTPControlPort struct {
 	token         string
 	httpClient    *http.Client
 	localProvider storage.Provider
+	localByRoot   sync.Map
 }
 
 func NewHTTPControlPort(baseURL, token string, localProvider storage.Provider) (*HTTPControlPort, error) {
@@ -48,16 +51,40 @@ func (c *HTTPControlPort) ResolveUpload(ctx context.Context, sessionID string) (
 		TemporaryObjectKey string `json:"temporary_object_key"`
 		ExpectedSize       int64  `json:"expected_size"`
 		Classification     string `json:"classification"`
+		LocalRoot          string `json:"local_root"`
 	}
 	if err := c.getJSON(ctx, fmt.Sprintf("%s/internal/filesystem/v1/transfers/%s/upload-grant", c.baseURL, sessionID), &payload); err != nil {
+		return UploadGrant{}, err
+	}
+	provider, err := c.providerForRoot(payload.LocalRoot)
+	if err != nil {
 		return UploadGrant{}, err
 	}
 	return UploadGrant{
 		TemporaryObjectKey: payload.TemporaryObjectKey,
 		ExpectedSize:       payload.ExpectedSize,
-		Provider:           c.localProvider,
+		Provider:           provider,
 		Classification:     model.TransferClassification(payload.Classification),
 	}, nil
+}
+
+func (c *HTTPControlPort) providerForRoot(root string) (storage.Provider, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return c.localProvider, nil
+	}
+	if v, ok := c.localByRoot.Load(root); ok {
+		return v.(storage.Provider), nil
+	}
+	created, err := local.New(root)
+	if err != nil {
+		return nil, err
+	}
+	if actual, loaded := c.localByRoot.LoadOrStore(root, created); loaded {
+		_ = created.Close()
+		return actual.(storage.Provider), nil
+	}
+	return created, nil
 }
 
 func (c *HTTPControlPort) ResolveDownload(_ context.Context, _ string) (DownloadGrant, error) {

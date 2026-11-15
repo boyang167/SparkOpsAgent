@@ -222,6 +222,7 @@ type transferSessionRow struct {
 	ActualSHA256       *string                      `gorm:"column:actual_sha256;size:64"`
 	ProviderID         *uuid.UUID                   `gorm:"column:provider_id;type:uuid"`
 	TemporaryObjectKey string                       `gorm:"column:temporary_object_key;not null"`
+	ProviderUploadID   *string                      `gorm:"column:provider_upload_id;size:512"`
 	Status             model.TransferStatus         `gorm:"column:status;not null;type:varchar(24);index:ix_transfer_sessions_workspace_status,priority:2"`
 	Classification     model.TransferClassification `gorm:"column:classification;not null;type:varchar(16)"`
 	CommittedNodeID    *uuid.UUID                   `gorm:"column:committed_node_id;type:uuid"`

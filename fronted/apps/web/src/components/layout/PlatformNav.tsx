@@ -12,10 +12,11 @@ import {
   type SidebarNavEntry,
 } from "@/components/layout/menu-tree-nav";
 import {
-  FILES_NAV_ITEM,
+  FILES_PLANE_NAV_GROUP,
   WORKPLACE_NAV_ITEM,
   filterBusinessDirectNavItems,
   filterBusinessNavGroups,
+  filterNavTreeByEntitlements,
 } from "@/components/layout/nav-tree";
 import { useShellContext } from "@/components/layout/shell-context";
 
@@ -118,7 +119,7 @@ function directNavLink(
       <span className="nav-icon">
         {item.href === WORKPLACE_NAV_ITEM.href
           ? icons.dashboard
-          : item.href === FILES_NAV_ITEM.href
+          : item.href.startsWith("/files")
             ? icons.filesystem
             : icons.knowledge}
       </span>
@@ -172,6 +173,9 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
     const groups = filterBusinessNavGroups({ showSuperAdmin: false, entitlements });
     const primary = groups.filter((group) => group.id !== "ops-infra");
     const settings = groups.filter((group) => group.id === "ops-infra");
+    const filesystemGroups = entitlements
+      ? filterNavTreeByEntitlements([FILES_PLANE_NAV_GROUP], entitlements)
+      : [FILES_PLANE_NAV_GROUP];
     const entries: SidebarNavEntry[] = primary.map((group) => ({
       type: "group",
       id: group.id,
@@ -180,6 +184,16 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
       items: group.items,
       defaultCollapsed: group.defaultCollapsed ?? false,
     }));
+    for (const group of filesystemGroups) {
+      entries.push({
+        type: "group",
+        id: group.id,
+        iconKey: "filesystem",
+        label: group.label,
+        items: group.items,
+        defaultCollapsed: false,
+      });
+    }
     for (const item of filterBusinessDirectNavItems(entitlements)) {
       entries.push({
         type: "link",
@@ -221,7 +235,7 @@ export function PlatformNav({ workspaceId }: PlatformNavProps) {
                 icon={resolveGroupIcon(entry.iconKey)}
                 items={entry.items}
                 pathname={pathname}
-                defaultOpen={entry.iconKey === "application"}
+                defaultOpen={entry.iconKey === "application" || entry.iconKey === "filesystem"}
               />
             )
       ))}

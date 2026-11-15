@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/google/uuid"
@@ -44,6 +45,34 @@ func TestRegisterProviderPersistsMetadataWithoutPlaintextSecret(t *testing.T) {
 	require.Equal(t, id, result.ID)
 	require.Equal(t, "vault://filesystem/local-primary", repo.saved.SecretRef)
 	require.Equal(t, true, repo.saved.Capabilities["encryption"])
+}
+
+func TestRegisterProviderRejectsMissingLocalEndpointPath(t *testing.T) {
+	handler := NewRegisterProviderHandler(&providerRepoStub{})
+	_, err := handler.Handle(context.Background(), RegisterProvider{
+		ID: uuid.New(), OrganizationID: uuid.New(), Name: "local-bad",
+		ProviderType: model.ProviderTypeLocal, Endpoint: "", SecretRef: "local://default",
+	})
+	require.ErrorIs(t, err, model.ErrInvalidStorageProvider)
+
+	_, err = handler.Handle(context.Background(), RegisterProvider{
+		ID: uuid.New(), OrganizationID: uuid.New(), Name: "local-missing",
+		ProviderType: model.ProviderTypeLocal,
+		Endpoint:     `A:\no-such-sparkops-filesystem-root`,
+		SecretRef:    "local://default",
+	})
+	require.ErrorIs(t, err, domain.ErrStorageProviderEndpointNotFound)
+}
+
+func TestRegisterProviderRejectsNonDirectoryLocalEndpoint(t *testing.T) {
+	file := t.TempDir() + "/not-a-dir.txt"
+	require.NoError(t, os.WriteFile(file, []byte("x"), 0o644))
+	handler := NewRegisterProviderHandler(&providerRepoStub{})
+	_, err := handler.Handle(context.Background(), RegisterProvider{
+		ID: uuid.New(), OrganizationID: uuid.New(), Name: "local-file",
+		ProviderType: model.ProviderTypeLocal, Endpoint: file, SecretRef: "local://default",
+	})
+	require.ErrorIs(t, err, domain.ErrStorageProviderEndpointNotADirectory)
 }
 
 func TestRegisterProviderRejectsEmptySecretRef(t *testing.T) {

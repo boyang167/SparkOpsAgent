@@ -171,6 +171,59 @@ func TestGetFileNodeUsesWorkspaceNamespaceAndResourceAuthorization(t *testing.T)
 	require.NotContains(t, logs.entries[0].Detail, "content")
 }
 
+func TestGetFileNodeHonorsNamespaceIDQuery(t *testing.T) {
+	orgID := uuid.New()
+	wsNS := uuid.New()
+	userNS := uuid.New()
+	nodeID := uuid.New()
+	actorID := uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: wsNS, OrganizationID: orgID, WorkspaceID: workspaceID,
+				NamespaceType: model.NamespaceTypeWorkspace,
+			}, nil
+		},
+		namespaceByID: func(_ context.Context, namespaceID uuid.UUID) (*model.Namespace, error) {
+			if namespaceID != userNS {
+				return nil, domain.ErrNamespaceNotFound
+			}
+			return &model.Namespace{
+				ID: userNS, OrganizationID: orgID, NamespaceType: model.NamespaceTypeUser,
+				OwnerUserID: actorID,
+			}, nil
+		},
+		getNode: func(_ context.Context, namespaceID, requestedNodeID uuid.UUID) (*model.Node, error) {
+			require.Equal(t, userNS, namespaceID)
+			require.Equal(t, nodeID, requestedNodeID)
+			return &model.Node{
+				ID: nodeID, NamespaceID: userNS, Type: model.NodeTypeFile,
+				Name: "K8s.md", State: model.NodeStateActive, OwnerID: actorID,
+			}, nil
+		},
+		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			require.Equal(t, userNS, request.NamespaceID)
+			require.Equal(t, nodeID, request.NodeID)
+			return resourceauth.Decision{Allowed: true}
+		},
+	}
+	tokens := authn.NewTokenProvider(config.JWTConfig{Secret: "filesystem-test"})
+	token, err := tokens.Issue(kernel.MemberID{UUID: actorID})
+	require.NoError(t, err)
+	wsID := kernel.NewWorkspaceID()
+	router := httpx.NewEngine()
+	RegisterRoutes(router, nil, authn.RequireAuth(tokens), memberStub(true), permissionStub{
+		allowed: map[string]bool{authz.PermFileRead: true},
+	}, h)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/workspaces/"+wsID.String()+"/files/"+nodeID.String()+"?namespace_id="+userNS.String(), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), "K8s.md")
+}
+
 func TestGetFileNodeRejectsPermissionResourceNamespaceAndMissingNode(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -688,11 +741,63 @@ func TestCreateDirectoryReturnsCreatedAndContextIdentity(t *testing.T) {
 	require.NotEqual(t, uuid.Nil, captured.ActorID)
 }
 
-func TestCreateDirectoryValidatesBodyNamespaceID(t *testing.T) {
-	namespaceID := uuid.New()
+func TestCreateDirectoryAllowsGovernedUserNamespace(t *testing.T) {
+	orgID := uuid.New()
+	wsNS := uuid.New()
+	userNS := uuid.New()
+	userRoot := uuid.New()
+	actorID := uuid.New()
+	var captured command.CreateDirectory
 	h := &Handler{
 		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
-			return &model.Namespace{ID: namespaceID, OrganizationID: uuid.New(), WorkspaceID: workspaceID}, nil
+			return &model.Namespace{
+				ID: wsNS, OrganizationID: orgID, WorkspaceID: workspaceID,
+				NamespaceType: model.NamespaceTypeWorkspace, RootNodeID: &userRoot,
+			}, nil
+		},
+		namespaceByID: func(_ context.Context, namespaceID uuid.UUID) (*model.Namespace, error) {
+			if namespaceID != userNS {
+				return nil, domain.ErrNamespaceNotFound
+			}
+			return &model.Namespace{
+				ID: userNS, OrganizationID: orgID, NamespaceType: model.NamespaceTypeUser,
+				OwnerUserID: actorID, RootNodeID: &userRoot,
+			}, nil
+		},
+		createDirectory: func(_ context.Context, cmd command.CreateDirectory) (*model.Node, error) {
+			captured = cmd
+			return &model.Node{ID: uuid.New(), NamespaceID: cmd.NamespaceID, Name: cmd.Name, Type: model.NodeTypeDirectory}, nil
+		},
+	}
+	tokens := authn.NewTokenProvider(config.JWTConfig{Secret: "filesystem-test"})
+	token, err := tokens.Issue(kernel.MemberID{UUID: actorID})
+	require.NoError(t, err)
+	wsID := kernel.NewWorkspaceID()
+	router := httpx.NewEngine()
+	h.authorizeResource = func(context.Context, resourceauth.Request) resourceauth.Decision {
+		return resourceauth.Decision{Allowed: true, Reason: "test"}
+	}
+	RegisterRoutes(router, nil, authn.RequireAuth(tokens), memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileWrite: true}}, h)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+wsID.String()+"/directories", strings.NewReader(`{"namespace_id":"`+userNS.String()+`","name":"personal"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Idempotency-Key", "create-personal")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusCreated, res.Code, res.Body.String())
+	require.Equal(t, userNS, captured.NamespaceID)
+	require.Equal(t, orgID, captured.OrganizationID)
+}
+
+func TestCreateDirectoryValidatesBodyNamespaceID(t *testing.T) {
+	namespaceID := uuid.New()
+	orgID := uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: namespaceID, OrganizationID: orgID, WorkspaceID: workspaceID}, nil
+		},
+		namespaceByID: func(_ context.Context, id uuid.UUID) (*model.Namespace, error) {
+			return nil, domain.ErrNamespaceNotFound
 		},
 		createDirectory: func(context.Context, command.CreateDirectory) (*model.Node, error) {
 			t.Fatal("invalid namespace_id must not reach command handler")

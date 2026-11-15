@@ -253,6 +253,20 @@ func (r *Repository) CreateNamespaceRootNodeIfAbsent(ctx context.Context, node *
 	return wrapPersistence(err)
 }
 
+func (r *Repository) LookupNamespaceRootNodeID(ctx context.Context, namespaceID uuid.UUID) (uuid.UUID, error) {
+	var row nodeRow
+	err := postgres.DB(ctx, r.db).
+		Where("namespace_id = ? AND parent_id IS NULL AND normalized_name = ?", namespaceID, ".root").
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return uuid.Nil, domain.ErrParentNotFound
+	}
+	if err != nil {
+		return uuid.Nil, wrapPersistence(err)
+	}
+	return row.ID, nil
+}
+
 func (r *Repository) GetNode(ctx context.Context, namespaceID, nodeID uuid.UUID) (*model.Node, error) {
 	node, err := r.GetNodeIncludingTrashed(ctx, namespaceID, nodeID)
 	if err != nil {
@@ -1676,6 +1690,41 @@ func (r *Repository) LockTransfer(ctx context.Context, id uuid.UUID) (*model.Tra
 	}
 	err = query.First(&row).Error
 	return transferResult(row, err)
+}
+
+func (r *Repository) SetTransferProviderUploadID(ctx context.Context, sessionID uuid.UUID, uploadID string) error {
+	uploadID = strings.TrimSpace(uploadID)
+	if sessionID == uuid.Nil || uploadID == "" {
+		return model.ErrInvalidTransfer
+	}
+	result := postgres.DB(ctx, r.db).Model(&transferSessionRow{}).
+		Where("id = ?", sessionID).
+		Updates(map[string]any{"provider_upload_id": uploadID, "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		return wrapPersistence(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrTransferNotFound
+	}
+	return nil
+}
+
+func (r *Repository) TransferProviderUploadID(ctx context.Context, sessionID uuid.UUID) (string, error) {
+	if sessionID == uuid.Nil {
+		return "", model.ErrInvalidTransfer
+	}
+	var row transferSessionRow
+	err := postgres.DB(ctx, r.db).Select("provider_upload_id").Where("id = ?", sessionID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", domain.ErrTransferNotFound
+	}
+	if err != nil {
+		return "", wrapPersistence(err)
+	}
+	if row.ProviderUploadID == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(*row.ProviderUploadID), nil
 }
 
 func (r *Repository) ListTransferParts(ctx context.Context, sessionID uuid.UUID) ([]model.TransferPart, error) {

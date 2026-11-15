@@ -118,6 +118,45 @@ func TestAbortTransferWithoutWorkspaceReleasesNamespaceQuota(t *testing.T) {
 	}
 }
 
+func TestAbortTransferAllowsUserNamespaceWithWorkspaceRoute(t *testing.T) {
+	ctx := context.Background()
+	db, workspaceNamespace := newTransferTestDB(t)
+	repo := persistence.NewRepository(db)
+	userNS := &model.Namespace{
+		ID: uuid.New(), NamespaceType: model.NamespaceTypeUser,
+		OrganizationID: workspaceNamespace.OrganizationID, OwnerUserID: uuid.New(), Status: "ACTIVE",
+	}
+	require.NoError(t, repo.CreateNamespace(ctx, userNS))
+	root, err := model.NewRootDirectory(userNS.ID, uuid.New(), ".root")
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(ctx, root))
+	require.NoError(t, repo.SetNamespaceRootByID(ctx, userNS.ID, root.ID))
+	userNS.RootNodeID = &root.ID
+
+	create := newTransferHandler(db)
+	cmd := transferFixture(workspaceNamespace)
+	cmd.NamespaceID = userNS.ID
+	cmd.ParentID = userNS.RootNodeID
+	cmd.Authorization.WorkspaceID = workspaceNamespace.WorkspaceID
+	cmd.Authorization.ResourceID = root.ID
+	cmd.IdempotencyKey = "user-ns-workspace-abort"
+	descriptor, err := create.Handle(ctx, cmd)
+	require.NoError(t, err)
+
+	abort := NewAbortTransferHandler(repo, postgres.NewTransactor(db))
+	require.NoError(t, abort.Handle(ctx, AbortTransfer{
+		WorkspaceID: workspaceNamespace.WorkspaceID, NamespaceID: userNS.ID,
+		SessionID: descriptor.SessionID, ActorID: cmd.ActorID,
+		Authorization: Authorization{
+			Allowed: true, WorkspaceID: workspaceNamespace.WorkspaceID, ResourceID: root.ID,
+			Permission: model.ResourcePermissionWrite,
+		},
+	}))
+	session, err := repo.GetTransferByID(ctx, descriptor.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, model.TransferAborted, session.Status())
+}
+
 func TestAbortTransferRejectsWrongNamespaceAndWorkspace(t *testing.T) {
 	ctx := context.Background()
 	db, namespace := newTransferTestDB(t)

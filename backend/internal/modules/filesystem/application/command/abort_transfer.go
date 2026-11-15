@@ -103,8 +103,14 @@ func validateAbortScope(cmd AbortTransfer, namespace *model.Namespace, session *
 		}
 		return nil
 	}
-	if cmd.NamespaceID == uuid.Nil || cmd.WorkspaceID != uuid.Nil || session.WorkspaceID() != uuid.Nil {
+	if cmd.NamespaceID != uuid.Nil && cmd.NamespaceID != session.NamespaceID() {
 		return domain.ErrTransferNotFound
+	}
+	// User/organization namespaces: uploads are routed through a workspace but are not workspace-scoped.
+	if cmd.WorkspaceID != uuid.Nil {
+		if session.WorkspaceID() != uuid.Nil && session.WorkspaceID() != cmd.WorkspaceID {
+			return domain.ErrTransferNotFound
+		}
 	}
 	return nil
 }

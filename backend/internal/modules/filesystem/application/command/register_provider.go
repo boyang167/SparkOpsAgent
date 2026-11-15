@@ -42,6 +42,9 @@ func (h *RegisterProviderHandler) Handle(ctx context.Context, cmd RegisterProvid
 	if cmd.ID.Version() == 5 {
 		return RegisterProviderResult{}, model.ErrInvalidStorageProvider
 	}
+	if err := validateProviderEndpoint(cmd.ProviderType, cmd.Endpoint); err != nil {
+		return RegisterProviderResult{}, err
+	}
 	provider, err := model.NewStorageProvider(model.StorageProviderInput{
 		ID: cmd.ID, OrganizationID: cmd.OrganizationID, Name: cmd.Name,
 		ProviderType: cmd.ProviderType, Endpoint: cmd.Endpoint, SecretRef: cmd.SecretRef,

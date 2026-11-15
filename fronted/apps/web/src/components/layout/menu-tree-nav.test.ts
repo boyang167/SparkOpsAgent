@@ -33,6 +33,35 @@ describe("menuTreeToNavGroups", () => {
     ]);
   });
 
+  it("maps filesystem root with plane leaves into one expandable group", () => {
+    const tree = [
+      node({
+        id: "menu-files",
+        path: "/files",
+        title: "文件中心",
+        icon: "Folder",
+        children: [
+          node({ id: "menu-files-data", path: "/files/data", title: "数据面", sort: 1 }),
+          node({ id: "menu-files-control", path: "/files/control", title: "控制面", sort: 2 }),
+          node({ id: "menu-files-governance", path: "/files/governance", title: "治理面", sort: 3 }),
+        ],
+      }),
+    ];
+
+    const [entry] = menuTreeToNavEntries(tree);
+    expect(entry).toMatchObject({
+      type: "group",
+      id: "menu-files:leaves",
+      iconKey: "filesystem",
+      label: "文件中心",
+    });
+    expect(entry?.type === "group" ? entry.items.map((item) => item.label) : []).toEqual([
+      "数据面",
+      "控制面",
+      "治理面",
+    ]);
+  });
+
   it("drops files menu links when filesystem entitlement is disabled", () => {
     const tree = [
       node({ path: "/files", title: "文件", sort: 96 }),

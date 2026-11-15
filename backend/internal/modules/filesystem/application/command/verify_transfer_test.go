@@ -112,6 +112,30 @@ func TestVerifyTransferRestrictedScanFailureRejected(t *testing.T) {
 	require.Equal(t, model.TransferRejected, updated.Status())
 }
 
+func TestVerifyTransferMarksMissingObjectFailed(t *testing.T) {
+	ctx := context.Background()
+	db, repo, ns := newTransferCommitDB(t)
+	provider, err := local.New(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = provider.Close() })
+	providerID := uuid.New()
+	cmd := transferFixture(ns)
+	cmd.ProviderID = providerID
+	descriptor, err := newTransferHandler(db).Handle(ctx, cmd)
+	require.NoError(t, err)
+	session, err := repo.GetTransferByID(ctx, descriptor.SessionID)
+	require.NoError(t, err)
+	require.NoError(t, repo.SaveTransferStateCAS(ctx, ns.WorkspaceID, session.ID(), session.Version(), repository.TransferStatePatch{
+		StatusFrom: model.TransferInitiated, StatusTo: model.TransferUploading,
+	}))
+	verify := NewVerifyTransferHandler(repo, postgres.NewTransactor(db), MapProviders{providerID: provider}, port.NoopScanner{})
+	require.NoError(t, verify.Handle(ctx, VerifyTransfer{SessionID: descriptor.SessionID, WorkspaceID: ns.WorkspaceID}))
+	updated, err := repo.GetTransferByID(ctx, descriptor.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, model.TransferFailed, updated.Status())
+	require.Equal(t, "object_missing", updated.ErrorCode())
+}
+
 func TestVerifyTransferScannerUnavailableFailsRetryably(t *testing.T) {
 	ctx := context.Background()
 	db, repo, ns := newTransferCommitDB(t)

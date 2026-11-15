@@ -9,6 +9,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/infrastructure/gatewaycontrol"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/config"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage/adapters/local"
 )
 
 type InternalGatewayHandlers struct {
@@ -40,11 +41,15 @@ func RegisterInternalGatewayRoutes(
 			filesystemError(c, err)
 			return
 		}
-		httpx.OK(c, gin.H{
+		view := gin.H{
 			"temporary_object_key": grant.TemporaryObjectKey,
 			"expected_size":        grant.ExpectedSize,
 			"classification":       grant.Classification,
-		})
+		}
+		if root, ok := local.StorageRoot(grant.Provider); ok {
+			view["local_root"] = root
+		}
+		httpx.OK(c, view)
 	})
 	group.POST("/transfers/:sessionId/uploaded", func(c *gin.Context) {
 		var body struct {

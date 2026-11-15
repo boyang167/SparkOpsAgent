@@ -26,41 +26,26 @@ const namespace = {
 describe("FileSpaceNav", () => {
   afterEach(cleanup);
 
-  it("renders fixed labels and authoritative context labels", () => {
+  it("renders context and directory tree for non-shared spaces", () => {
     render(createElement(FileSpaceNav, {
       activeSpace: "workspace",
       organizationLabel: "星火科技",
       workspaceLabel: "研发平台",
       namespace,
       workspaceId: "workspace-1",
-      view: "grid",
     }));
-    expect(screen.getByRole("navigation", { name: "文件空间" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "我的文件" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "当前工作区" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "租户文件" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "与我共享" })).toBeInTheDocument();
-    expect(screen.getByText("星火科技")).toBeInTheDocument();
-    expect(screen.getByText("研发平台")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "租户文件" })).toHaveAttribute(
-      "href",
-      "/files?view=grid&space=organization",
-    );
+    expect(screen.getByText("星火科技 · 研发平台")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "文件夹" })).toBeInTheDocument();
     expect(screen.getByRole("tree", { name: "目录" })).toBeInTheDocument();
   });
 
-  it("does not render a writable directory tree for shared", () => {
+  it("does not render a directory tree for shared", () => {
     render(createElement(FileSpaceNav, {
       activeSpace: "shared",
       organizationLabel: "星火科技",
       workspaceLabel: "研发平台",
       workspaceId: "workspace-1",
-      view: "list",
     }));
     expect(screen.queryByRole("tree")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "与我共享" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
   });
 });

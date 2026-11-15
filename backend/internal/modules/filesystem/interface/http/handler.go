@@ -31,16 +31,21 @@ import (
 const maxJSONBodyBytes = 64 << 10
 
 type TransferOptions struct {
-	Create  func(context.Context, command.CreateTransfer) (command.TransferDescriptor, error)
-	Get     func(context.Context, query.GetTransfer) (query.GetTransferResult, error)
-	List    func(context.Context, query.ListTransfers) ([]*model.TransferSession, string, error)
-	Abort   func(context.Context, command.AbortTransfer) error
-	Peek    func(context.Context, uuid.UUID) (*model.TransferSession, error)
-	Gateway TransferGatewayView
+	Create            func(context.Context, command.CreateTransfer) (command.TransferDescriptor, error)
+	Get               func(context.Context, query.GetTransfer) (query.GetTransferResult, error)
+	List              func(context.Context, query.ListTransfers) ([]*model.TransferSession, string, error)
+	Abort             func(context.Context, command.AbortTransfer) error
+	CompleteMultipart func(context.Context, command.CompleteTransferMultipart) error
+	PrepareMultipart  func(context.Context, uuid.UUID) error
+	Peek              func(context.Context, uuid.UUID) (*model.TransferSession, error)
+	Gateway           TransferGatewayView
+	ProviderCatalog   command.StorageProviderCatalog
+	ProviderUploadID  func(context.Context, uuid.UUID) (string, error)
 }
 
 type Handler struct {
 	namespaceForWorkspace func(context.Context, uuid.UUID) (*model.Namespace, error)
+	namespaceByID         func(context.Context, uuid.UUID) (*model.Namespace, error)
 	getNode               func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
 	listChildren          func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, int, string) ([]model.Node, string, error)
 	listChildrenFiltered  func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, string, int, string) ([]model.Node, string, error)
@@ -56,9 +61,13 @@ type Handler struct {
 	createTransfer        func(context.Context, command.CreateTransfer) (command.TransferDescriptor, error)
 	getTransfer           func(context.Context, query.GetTransfer) (query.GetTransferResult, error)
 	listTransfers         func(context.Context, query.ListTransfers) ([]*model.TransferSession, string, error)
-	abortTransfer         func(context.Context, command.AbortTransfer) error
-	peekTransfer          func(context.Context, uuid.UUID) (*model.TransferSession, error)
-	transferGatewayView   TransferGatewayView
+	abortTransfer              func(context.Context, command.AbortTransfer) error
+	completeTransferMultipart  func(context.Context, command.CompleteTransferMultipart) error
+	prepareTransferMultipart   func(context.Context, uuid.UUID) error
+	peekTransfer               func(context.Context, uuid.UUID) (*model.TransferSession, error)
+	transferGatewayView        TransferGatewayView
+	transferProviderCatalog    command.StorageProviderCatalog
+	transferProviderUploadID   func(context.Context, uuid.UUID) (string, error)
 	registerProvider      func(context.Context, command.RegisterProvider) (command.RegisterProviderResult, error)
 	updateProvider        func(context.Context, command.UpdateProvider) error
 	deleteProvider        func(context.Context, command.DeleteProvider) error
@@ -96,6 +105,7 @@ func NewHandler(
 ) *Handler {
 	handler := &Handler{
 		namespaceForWorkspace: repo.GetNamespaceByWorkspace,
+		namespaceByID:         repo.GetNamespace,
 		getNode:               repo.GetNode,
 		listChildren: func(ctx context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, nodeType *model.NodeType, limit int, cursor string) ([]model.Node, string, error) {
 			return list.Handle(ctx, query.ListChildren{NamespaceID: namespaceID, ParentID: parentID, NodeType: nodeType, Limit: limit, Cursor: cursor})
@@ -122,8 +132,12 @@ func NewHandler(
 		handler.getTransfer = transfers.Get
 		handler.listTransfers = transfers.List
 		handler.abortTransfer = transfers.Abort
+		handler.completeTransferMultipart = transfers.CompleteMultipart
+		handler.prepareTransferMultipart = transfers.PrepareMultipart
 		handler.peekTransfer = transfers.Peek
 		handler.transferGatewayView = transfers.Gateway
+		handler.transferProviderCatalog = transfers.ProviderCatalog
+		handler.transferProviderUploadID = transfers.ProviderUploadID
 	}
 	if storageAdmin != nil {
 		handler.registerProvider = storageAdmin.RegisterProvider
@@ -174,6 +188,7 @@ func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.Ha
 	base.GET("/transfers", authz.RequirePermission(permissions, authz.PermFileRead), h.ListTransfers)
 	base.GET("/transfers/:sessionId", authz.RequirePermission(permissions, authz.PermFileRead), h.GetTransfer)
 	base.DELETE("/transfers/:sessionId", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.AbortTransfer)
+	base.POST("/transfers/:sessionId/complete", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.CompleteTransfer)
 	base.GET("/storage-providers", authz.RequirePermission(permissions, authz.PermStorageRead), h.ListStorageProviders)
 	base.POST("/storage-providers", authz.RequirePermission(permissions, authz.PermStorageAdmin), requireIdempotencyKey(), h.RegisterStorageProvider)
 	base.PATCH("/storage-providers/:providerId", authz.RequirePermission(permissions, authz.PermStorageAdmin), requireIdempotencyKey(), h.UpdateStorageProvider)
@@ -270,6 +285,16 @@ type requestContext struct {
 }
 
 func (h *Handler) resourceDecision(c *gin.Context, rc requestContext, nodeID uuid.UUID, permission model.ResourcePermission) command.Authorization {
+	return h.resourceDecisionForNamespace(c, rc, rc.namespace.ID, nodeID, permission)
+}
+
+func (h *Handler) resourceDecisionForNamespace(
+	c *gin.Context,
+	rc requestContext,
+	namespaceID uuid.UUID,
+	nodeID uuid.UUID,
+	permission model.ResourcePermission,
+) command.Authorization {
 	if h.authorizeResource == nil {
 		return command.Authorization{
 			Reason: "authorization_unavailable", TraceID: rc.traceID,
@@ -277,7 +302,7 @@ func (h *Handler) resourceDecision(c *gin.Context, rc requestContext, nodeID uui
 		}
 	}
 	decision := h.authorizeResource(c.Request.Context(), resourceauth.Request{
-		ActorID: rc.actorID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID,
+		ActorID: rc.actorID, WorkspaceID: rc.workspaceID, NamespaceID: namespaceID,
 		NodeID: nodeID, Permission: permission,
 	})
 	return command.Authorization{
@@ -287,7 +312,17 @@ func (h *Handler) resourceDecision(c *gin.Context, rc requestContext, nodeID uui
 }
 
 func (h *Handler) requireResource(c *gin.Context, rc requestContext, nodeID uuid.UUID, permission model.ResourcePermission) bool {
-	decision := h.resourceDecision(c, rc, nodeID, permission)
+	return h.requireResourceInNamespace(c, rc, rc.namespace.ID, nodeID, permission)
+}
+
+func (h *Handler) requireResourceInNamespace(
+	c *gin.Context,
+	rc requestContext,
+	namespaceID uuid.UUID,
+	nodeID uuid.UUID,
+	permission model.ResourcePermission,
+) bool {
+	decision := h.resourceDecisionForNamespace(c, rc, namespaceID, nodeID, permission)
 	if decision.Allowed {
 		return true
 	}
@@ -448,24 +483,28 @@ func (h *Handler) GetFileNode(c *gin.Context) {
 	if !ok {
 		return
 	}
+	namespace, ok := h.namespaceForReadRequest(c, rc)
+	if !ok {
+		return
+	}
 	nodeID, ok := canonicalUUID(c.Param("nodeId"))
 	if !ok {
 		invalidRequest(c)
 		return
 	}
-	if !h.requireResource(c, rc, nodeID, model.ResourcePermissionRead) {
+	if !h.requireResourceInNamespace(c, rc, namespace.ID, nodeID, model.ResourcePermissionRead) {
 		return
 	}
 	if h.getNode == nil {
 		filesystemError(c, domain.ErrPersistence)
 		return
 	}
-	node, err := h.getNode(c.Request.Context(), rc.namespace.ID, nodeID)
+	node, err := h.getNode(c.Request.Context(), namespace.ID, nodeID)
 	if err != nil {
 		filesystemError(c, err)
 		return
 	}
-	if node.NamespaceID != rc.namespace.ID {
+	if node.NamespaceID != namespace.ID {
 		filesystemError(c, domain.ErrNamespaceMismatch)
 		return
 	}
@@ -475,7 +514,7 @@ func (h *Handler) GetFileNode(c *gin.Context) {
 			ActorID: kernel.MemberID{UUID: rc.actorID}, OrgID: &kernel.OrgID{UUID: rc.namespace.OrganizationID},
 			Action: "filesystem.file.sensitive_read", ResourceType: "filesystem", ResourceID: node.ID.String(),
 			Detail: map[string]any{
-				"workspace_id": rc.workspaceID.String(), "namespace_id": rc.namespace.ID.String(),
+				"workspace_id": rc.workspaceID.String(), "namespace_id": namespace.ID.String(),
 				"node_id": node.ID.String(), "principal_id": rc.actorID.String(),
 				"principal_before": "AUTHORIZED", "principal_after": "READ",
 				"reason": "sensitive_classification", "trace_id": rc.traceID,
@@ -504,17 +543,11 @@ func (h *Handler) CreateDirectory(c *gin.Context) {
 	if !decodeJSON(c, &body) {
 		return
 	}
-	if body.NamespaceID != "" {
-		namespaceID, valid := canonicalUUID(body.NamespaceID)
-		if !valid {
-			invalidRequest(c)
-			return
-		}
-		if namespaceID != rc.namespace.ID {
-			filesystemError(c, domain.ErrNamespaceMismatch)
-			return
-		}
+	targetNS, ok := h.resolveMutationNamespace(c, rc, body.NamespaceID)
+	if !ok {
+		return
 	}
+	rc.namespace = targetNS
 	parentID, ok := optionalUUID(body.ParentID)
 	if !ok || strings.TrimSpace(body.Name) == "" {
 		invalidRequest(c)
@@ -525,16 +558,31 @@ func (h *Handler) CreateDirectory(c *gin.Context) {
 		return
 	}
 	if parentID == nil {
-		parentID = rc.namespace.RootNodeID
+		parentID = targetNS.RootNodeID
 	}
 	if parentID == nil {
 		filesystemError(c, domain.ErrNamespaceNotFound)
 		return
 	}
+	if h.getNode != nil {
+		parent, err := h.getNode(c.Request.Context(), targetNS.ID, *parentID)
+		if err != nil {
+			filesystemError(c, err)
+			return
+		}
+		if parent.NamespaceID != targetNS.ID || parent.Type != model.NodeTypeDirectory {
+			if parent.NamespaceID != targetNS.ID {
+				filesystemError(c, domain.ErrNamespaceMismatch)
+			} else {
+				filesystemError(c, domain.ErrParentNotDirectory)
+			}
+			return
+		}
+	}
 	authorization := h.resourceDecision(c, rc, *parentID, model.ResourcePermissionWrite)
 	node, err := h.createDirectory(c.Request.Context(), command.CreateDirectory{
-		CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID,
-		WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, ParentID: parentID, Name: body.Name,
+		CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: targetNS.OrganizationID,
+		WorkspaceID: rc.workspaceID, NamespaceID: targetNS.ID, ParentID: parentID, Name: body.Name,
 		Authorization: authorization,
 	})
 	if err != nil {
@@ -656,6 +704,10 @@ func (h *Handler) ListRevisions(c *gin.Context) {
 	if !ok {
 		return
 	}
+	namespace, ok := h.namespaceForReadRequest(c, rc)
+	if !ok {
+		return
+	}
 	nodeID, ok := canonicalUUID(c.Param("nodeId"))
 	if !ok {
 		invalidRequest(c)
@@ -669,10 +721,10 @@ func (h *Handler) ListRevisions(c *gin.Context) {
 		filesystemError(c, domain.ErrPersistence)
 		return
 	}
-	if !h.requireResource(c, rc, nodeID, model.ResourcePermissionRead) {
+	if !h.requireResourceInNamespace(c, rc, namespace.ID, nodeID, model.ResourcePermissionRead) {
 		return
 	}
-	items, next, err := h.listRevisions(c.Request.Context(), rc.namespace.ID, nodeID, limit, c.Query("cursor"))
+	items, next, err := h.listRevisions(c.Request.Context(), namespace.ID, nodeID, limit, c.Query("cursor"))
 	if err != nil {
 		filesystemError(c, err)
 		return
@@ -901,12 +953,20 @@ func filesystemError(c *gin.Context, err error) {
 		httpx.Fail(c, "FILESYSTEM_UNSUPPORTED_OPERATION", "filesystem operation is unsupported", http.StatusUnprocessableEntity)
 	case errors.Is(err, domain.ErrParentNotFound), errors.Is(err, domain.ErrParentNotDirectory), errors.Is(err, domain.ErrDirectoryCycle), errors.Is(err, model.ErrInvalidNodeName):
 		httpx.Fail(c, "FILESYSTEM_INVALID_REQUEST", "invalid filesystem request", http.StatusUnprocessableEntity)
+	case errors.Is(err, domain.ErrStorageProviderEndpointNotFound):
+		httpx.Fail(c, "FILESYSTEM_STORAGE_PROVIDER_ENDPOINT", "storage provider endpoint path does not exist", http.StatusUnprocessableEntity)
+	case errors.Is(err, domain.ErrStorageProviderEndpointNotADirectory):
+		httpx.Fail(c, "FILESYSTEM_STORAGE_PROVIDER_ENDPOINT", "storage provider endpoint must be an existing directory", http.StatusUnprocessableEntity)
 	case errors.Is(err, model.ErrInvalidStorageProvider), errors.Is(err, model.ErrInvalidStoragePool),
 		errors.Is(err, model.ErrInvalidStorageBinding), errors.Is(err, model.ErrInvalidLifecyclePolicy),
 		errors.Is(err, model.ErrAmbiguousPrimaryProvider):
 		httpx.Fail(c, "FILESYSTEM_INVALID_REQUEST", "invalid request", http.StatusBadRequest)
 	case errors.Is(err, domain.ErrStorageProviderConflict):
 		httpx.Fail(c, "FILESYSTEM_CONFLICT", "filesystem operation conflict", http.StatusConflict)
+	case errors.Is(err, domain.ErrStoragePlacementUnsatisfied):
+		httpx.Fail(c, "FILESYSTEM_STORAGE_PLACEMENT", "no storage provider matched upload placement", http.StatusUnprocessableEntity)
+	case errors.Is(err, domain.ErrStorageGatewayMismatch):
+		httpx.Fail(c, "FILESYSTEM_STORAGE_GATEWAY", "selected storage provider is not served by configured transfer gateway", http.StatusUnprocessableEntity)
 	case errors.Is(err, domain.ErrStorageProviderNotFound), errors.Is(err, domain.ErrStoragePoolNotFound):
 		httpx.Fail(c, "FILESYSTEM_NOT_FOUND", "filesystem resource not found", http.StatusNotFound)
 	case errors.Is(err, domain.ErrStorageProviderProtected), errors.Is(err, domain.ErrStorageResourceInUse):

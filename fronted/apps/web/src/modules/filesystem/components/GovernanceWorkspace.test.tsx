@@ -7,8 +7,20 @@ import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GovernanceWorkspace } from "./GovernanceWorkspace";
 
+const push = vi.fn();
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push }),
+  usePathname: () => "/files/control/providers",
+}));
+
 vi.mock("./StoragePoolPanel", () => ({
-  StoragePoolPanel: () => createElement("div", null, "Provider 与存储池内容"),
+  StoragePoolPanel: (props: { focus?: string }) =>
+    createElement(
+      "div",
+      null,
+      props.focus === "pools" ? "存储池内容" : "存储 Provider 内容",
+    ),
 }));
 vi.mock("./StorageBindingPanel", () => ({
   StorageBindingPanel: () => createElement("div", null, "作用域绑定内容"),
@@ -29,23 +41,37 @@ describe("GovernanceWorkspace", () => {
       }),
     );
 
-    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
     expect(
       screen
         .getAllByRole("tab")
         .every((tab) => tab.classList.contains("filesystem-touch-target")),
     ).toBe(true);
-    expect(screen.getByText("Provider 与存储池内容")).toBeInTheDocument();
+    expect(screen.getByText("存储 Provider 内容")).toBeInTheDocument();
     expect(screen.queryByText("作用域绑定内容")).not.toBeInTheDocument();
     expect(screen.queryByText("生命周期策略内容")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "作用域绑定" }));
     expect(screen.getByText("作用域绑定内容")).toBeInTheDocument();
-    expect(screen.queryByText("Provider 与存储池内容")).not.toBeInTheDocument();
+    expect(screen.queryByText("存储 Provider 内容")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "生命周期策略" }));
     expect(screen.getByText("生命周期策略内容")).toBeInTheDocument();
     expect(screen.queryByText("作用域绑定内容")).not.toBeInTheDocument();
+  });
+
+  it("keeps four tabs when activeSection is set from the route", () => {
+    render(
+      createElement(GovernanceWorkspace, {
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        permissions: ["storage:read"],
+        activeSection: "providers",
+      }),
+    );
+
+    expect(screen.getByRole("tablist")).toBeInTheDocument();
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    expect(screen.getByText("存储 Provider 内容")).toBeInTheDocument();
   });
 
   it("shows a distinct forbidden state without storage read permission", () => {

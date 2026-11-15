@@ -3,22 +3,7 @@
 import { createElement } from "react";
 import type { NamespaceSummaryVM, FileNodeVM } from "@sparkops/contracts/filesystem";
 import { DirectoryTree } from "./DirectoryTree";
-import type { FileSpace, FileView } from "./workbench-state";
-
-const spaces: Array<{ id: FileSpace; label: string }> = [
-  { id: "my", label: "我的文件" },
-  { id: "workspace", label: "当前工作区" },
-  { id: "organization", label: "租户文件" },
-  { id: "shared", label: "与我共享" },
-];
-
-function hrefFor(space: FileSpace, view: FileView) {
-  const params = new URLSearchParams();
-  if (view !== "list") params.set("view", view);
-  if (space !== "workspace") params.set("space", space);
-  const query = params.toString();
-  return query ? `/files?${query}` : "/files";
-}
+import type { FileSpace } from "./workbench-state";
 
 export function FileSpaceNav({
   activeSpace,
@@ -26,7 +11,6 @@ export function FileSpaceNav({
   workspaceLabel,
   namespace,
   workspaceId,
-  view,
   currentId,
   canWrite = false,
   onNavigate = () => undefined,
@@ -37,7 +21,6 @@ export function FileSpaceNav({
   workspaceLabel: string;
   namespace?: NamespaceSummaryVM;
   workspaceId: string;
-  view: FileView;
   currentId?: string;
   canWrite?: boolean;
   onNavigate?: (node: FileNodeVM) => void;
@@ -58,44 +41,36 @@ export function FileSpaceNav({
 
   return createElement(
     "div",
-    { className: "stack-md min-w-0" },
+    { className: "filesystem-space-nav min-w-0" },
     createElement(
-      "nav",
-      { "aria-label": "文件空间", className: "flex min-w-0 flex-wrap gap-2" },
-      spaces.map((space) =>
-        createElement(
-          "a",
-          {
-            key: space.id,
-            href: hrefFor(space.id, view),
-            "aria-current": activeSpace === space.id ? "page" : undefined,
-            className:
-              activeSpace === space.id
-                ? "btn btn-secondary filesystem-touch-target"
-                : "btn btn-ghost filesystem-touch-target",
-          },
-          space.label,
-        ),
-      ),
-    ),
-    createElement(
-      "div",
-      { className: "stack-xs text-sm text-muted" },
-      createElement("span", null, organizationLabel),
-      createElement("span", null, workspaceLabel),
+      "p",
+      { className: "filesystem-space-eyebrow" },
+      `${organizationLabel} · ${workspaceLabel}`,
     ),
     activeSpace !== "shared" && root
-      ? createElement(DirectoryTree, {
-          workspaceId,
-          organizationId: namespace!.organization_id,
-          namespaceId: namespace!.id,
-          rootNode: root,
-          space: activeSpace,
-          currentId: currentId ?? root.id,
-          onNavigate,
-          onDropNodes,
-          canWrite,
-        })
+      ? createElement(
+          "section",
+          {
+            className: "filesystem-rail-section filesystem-rail-section-tree",
+            "aria-labelledby": "filesystem-rail-tree",
+          },
+          createElement(
+            "h2",
+            { id: "filesystem-rail-tree", className: "filesystem-rail-section-label" },
+            "文件夹",
+          ),
+          createElement(DirectoryTree, {
+            workspaceId,
+            organizationId: namespace!.organization_id,
+            namespaceId: namespace!.id,
+            rootNode: root,
+            space: activeSpace,
+            currentId: currentId ?? root.id,
+            onNavigate,
+            onDropNodes,
+            canWrite,
+          }),
+        )
       : null,
   );
 }

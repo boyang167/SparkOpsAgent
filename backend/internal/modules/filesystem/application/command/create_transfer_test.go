@@ -151,11 +151,6 @@ func TestCreateTransferRejectsDirectUploadToNonLocalProvider(t *testing.T) {
 			providerType: model.ProviderTypeS3, status: "ACTIVE",
 		},
 		{
-			name: "custom LOCAL provider", providerID: func(uuid.UUID) uuid.UUID { return uuid.New() },
-			organization: func(id uuid.UUID) uuid.UUID { return id },
-			providerType: model.ProviderTypeLocal, status: "ACTIVE",
-		},
-		{
 			name: "inactive default LOCAL provider", providerID: DefaultLocalProviderID,
 			organization: func(id uuid.UUID) uuid.UUID { return id },
 			providerType: model.ProviderTypeLocal, status: "DISABLED",
@@ -483,7 +478,7 @@ func TestCreateTransferPlacesAndReservesQuotaByNamespaceType(t *testing.T) {
 	}
 }
 
-func TestCreateTransferRejectsPlacedLocalProviderOutsideConfiguredGateway(t *testing.T) {
+func TestCreateTransferAcceptsPlacedLocalProviderForDirectGatewayUpload(t *testing.T) {
 	db, ns := newTransferTestDB(t)
 	repo := persistence.NewRepository(db)
 	selectedRoot := t.TempDir()
@@ -504,9 +499,43 @@ func TestCreateTransferRejectsPlacedLocalProviderOutsideConfiguredGateway(t *tes
 	cmd := transferFixture(ns)
 	cmd.Protocol = model.TransferProtocolDirect
 
-	_, err = handler.Handle(context.Background(), cmd)
+	result, err := handler.Handle(context.Background(), cmd)
 
-	require.ErrorIs(t, err, domain.ErrStorageGatewayMismatch)
+	require.NoError(t, err)
+	require.NotEqual(t, uuid.Nil, result.SessionID)
+}
+
+func TestCreateTransferUpgradesDirectToMultipartForNonLocalPlacement(t *testing.T) {
+	db, ns := newTransferTestDB(t)
+	repo := persistence.NewRepository(db)
+	s3ID := uuid.New()
+	s3Provider, err := model.NewStorageProvider(model.StorageProviderInput{
+		ID: s3ID, OrganizationID: ns.OrganizationID, Name: "s3",
+		ProviderType: model.ProviderTypeS3, Endpoint: "https://s3.example.com",
+		SecretRef: "secret://s3", Status: "ACTIVE",
+		Capabilities: map[string]any{"presigned_upload": true, "encryption": true},
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateStorageProvider(context.Background(), s3Provider))
+	placer := &sequentialTransferPlacer{
+		first:  service.PlacementDecision{PoolID: uuid.New(), ProviderID: s3ID, MatchedRuleIDs: []string{"scope:WORKSPACE"}},
+		second: service.PlacementDecision{PoolID: uuid.New(), ProviderID: s3ID, MatchedRuleIDs: []string{"scope:WORKSPACE", "capability:presigned_upload"}},
+	}
+	handler := NewCreateTransferHandler(
+		repo, postgres.NewTransactor(db), nil, auditService{store: audit.NewGormStore(db)}, placer,
+	).WithDirectLocalProvider(t.TempDir())
+	cmd := transferFixture(ns)
+	cmd.Protocol = model.TransferProtocolDirect
+
+	result, err := handler.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	require.NotEqual(t, uuid.Nil, result.SessionID)
+	require.Equal(t, 2, placer.calls)
+	require.True(t, placer.secondRequiresPresign)
+	session, sessionErr := repo.GetTransferByID(context.Background(), result.SessionID)
+	require.NoError(t, sessionErr)
+	require.Equal(t, model.TransferProtocolMultipart, session.Protocol())
 }
 
 func TestCreateTransferPlacementRejectsComplianceFailure(t *testing.T) {
@@ -538,6 +567,21 @@ func (s *stubTransferPlacer) Place(_ context.Context, request service.PlacementR
 		return service.PlacementDecision{}, s.err
 	}
 	return s.decision, nil
+}
+
+type sequentialTransferPlacer struct {
+	first, second service.PlacementDecision
+	calls         int
+	secondRequiresPresign bool
+}
+
+func (s *sequentialTransferPlacer) Place(_ context.Context, request service.PlacementRequest) (service.PlacementDecision, error) {
+	s.calls++
+	if s.calls == 1 {
+		return s.first, nil
+	}
+	s.secondRequiresPresign = request.RequiresPresignedUpload
+	return s.second, nil
 }
 
 func TestCreateTransferAuthorizationAndValidationFailuresAreAudited(t *testing.T) {

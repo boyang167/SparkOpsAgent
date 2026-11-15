@@ -14,7 +14,6 @@ function firstValue(value: SearchParamValue) {
 
 function safeFilesPath(state: WorkbenchState) {
   const params = new URLSearchParams();
-  if (state.tab !== "files") params.set("tab", state.tab);
   if (state.view !== "list") params.set("view", state.view);
   if (state.space && state.space !== "workspace") params.set("space", state.space);
   if (state.space === "shared" && state.source) params.set("source", state.source);
@@ -22,7 +21,8 @@ function safeFilesPath(state: WorkbenchState) {
   if (state.node) params.set("node", state.node);
   if (state.query) params.set("q", state.query);
   const query = params.toString();
-  return query ? `/files?${query}` : "/files";
+  const base = "/files/data/workspace";
+  return query ? `${base}?${query}` : base;
 }
 
 export function fileSpacePath(

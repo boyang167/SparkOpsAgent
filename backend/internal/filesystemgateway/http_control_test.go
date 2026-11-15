@@ -15,6 +15,7 @@ import (
 )
 
 func TestHTTPControlPortDecodesUploadGrantEnvelope(t *testing.T) {
+	placedRoot := filepath.Join(t.TempDir(), "placed")
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/internal/filesystem/v1/transfers/session-a/upload-grant", r.URL.Path)
 		assert.Equal(t, "internal-secret", r.Header.Get("X-SparkOps-Internal-Token"))
@@ -25,7 +26,8 @@ func TestHTTPControlPortDecodesUploadGrantEnvelope(t *testing.T) {
 			"data": {
 				"temporary_object_key": "tmp/session-a",
 				"expected_size": 12,
-				"classification": "INTERNAL"
+				"classification": "INTERNAL",
+				"local_root": "` + filepath.ToSlash(placedRoot) + `"
 			}
 		}`))
 	}))
@@ -42,5 +44,7 @@ func TestHTTPControlPortDecodesUploadGrantEnvelope(t *testing.T) {
 	assert.Equal(t, "tmp/session-a", grant.TemporaryObjectKey)
 	assert.Equal(t, int64(12), grant.ExpectedSize)
 	assert.Equal(t, model.TransferClassificationInternal, grant.Classification)
-	assert.Same(t, provider, grant.Provider)
+	root, ok := local.StorageRoot(grant.Provider)
+	require.True(t, ok)
+	assert.Equal(t, filepath.Clean(placedRoot), root)
 }

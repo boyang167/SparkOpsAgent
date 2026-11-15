@@ -2,6 +2,7 @@ import {
   ADMIN_NAV_SECTIONS,
   BUSINESS_NAV_TREE,
   BUSINESS_DIRECT_NAV_ITEMS,
+  FILES_PLANE_NAV_GROUP,
   PLATFORM_OPS_NAV_TREE,
 } from "./nav-tree";
 import type { WorkspaceEntitlementsVM } from "@sparkops/contracts/platform";
@@ -38,6 +39,15 @@ export function buildNavSearchItems(options?: {
     if (!entitlements || isPathEntitled(direct.href, entitlements)) {
       const group = direct.href === "/knowledge" ? "知识库" : direct.label;
       items.push({ href: direct.href, label: direct.label, group });
+    }
+  }
+  for (const plane of FILES_PLANE_NAV_GROUP.items) {
+    if (!entitlements || isPathEntitled(plane.href, entitlements)) {
+      items.push({
+        href: plane.href,
+        label: plane.label,
+        group: FILES_PLANE_NAV_GROUP.label,
+      });
     }
   }
 

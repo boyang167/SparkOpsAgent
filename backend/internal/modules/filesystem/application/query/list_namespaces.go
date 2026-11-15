@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/command"
 	resourceauth "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/authorization"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
@@ -53,17 +54,32 @@ type ResourceAuthorizer interface {
 	Authorize(context.Context, resourceauth.Request) resourceauth.Decision
 }
 
+type namespaceScopeEnsurer interface {
+	Handle(context.Context, command.EnsureNamespace) (*model.Namespace, error)
+}
+
 type ListNamespacesHandler struct {
 	repo       ListNamespacesRepository
 	principals resourceauth.PrincipalResolver
 	authorizer GovernanceAuthorizer
+	ensure     namespaceScopeEnsurer
 }
 
 func NewListNamespacesHandler(repo ListNamespacesRepository, principals resourceauth.PrincipalResolver, authorizer GovernanceAuthorizer) *ListNamespacesHandler {
 	return &ListNamespacesHandler{repo: repo, principals: principals, authorizer: authorizer}
 }
 
+func (h *ListNamespacesHandler) WithScopeEnsurer(ensurer namespaceScopeEnsurer) *ListNamespacesHandler {
+	h.ensure = ensurer
+	return h
+}
+
 func (h *ListNamespacesHandler) Handle(ctx context.Context, q ListNamespaces) ([]NamespaceSummary, error) {
+	if h.ensure != nil {
+		if err := h.ensureListedScopes(ctx, q); err != nil {
+			return nil, err
+		}
+	}
 	principals, err := h.principals.Resolve(ctx, resourceauth.ResolvePrincipalsInput{
 		ActorID: q.ActorID, OrganizationID: q.OrganizationID, WorkspaceID: q.WorkspaceID,
 	})
@@ -159,6 +175,25 @@ func (h *ListNamespacesHandler) Handle(ctx context.Context, q ListNamespaces) ([
 		out = append(out, organizationSummary)
 	}
 	return out, nil
+}
+
+func (h *ListNamespacesHandler) ensureListedScopes(ctx context.Context, q ListNamespaces) error {
+	specs := []command.EnsureNamespace{
+		{OrganizationID: q.OrganizationID, NamespaceType: model.NamespaceTypeOrganization, ActorID: q.ActorID},
+		{OrganizationID: q.OrganizationID, OwnerUserID: q.ActorID, NamespaceType: model.NamespaceTypeUser, ActorID: q.ActorID},
+	}
+	if q.WorkspaceID != uuid.Nil {
+		specs = append(specs, command.EnsureNamespace{
+			OrganizationID: q.OrganizationID, WorkspaceID: q.WorkspaceID,
+			NamespaceType: model.NamespaceTypeWorkspace, ActorID: q.ActorID,
+		})
+	}
+	for _, spec := range specs {
+		if _, err := h.ensure.Handle(ctx, spec); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (h *ListNamespacesHandler) rootSummary(ctx context.Context, q ListNamespaces, namespace *model.Namespace) NamespaceSummary {

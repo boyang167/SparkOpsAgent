@@ -185,9 +185,26 @@ func TestRepairBusinessNavigation_preservesLeafIDsAndMovesMenus(t *testing.T) {
 	require.Nil(t, files.ParentID)
 	require.Equal(t, "文件中心", files.Title)
 	require.Equal(t, "Folder", files.Icon)
-	require.Equal(t, "/files", files.Component)
+	require.Equal(t, "layout/routerHolder", files.Component)
 	require.Equal(t, 96, files.Sort)
 	require.False(t, files.Hidden)
+
+	dataPlane, err := store.FindByPath(ctx, workspaceID, "/files/data")
+	require.NoError(t, err)
+	require.Equal(t, "数据面", dataPlane.Title)
+	require.Equal(t, "/files/data/workspace", dataPlane.Component)
+	require.NotNil(t, dataPlane.ParentID)
+	require.Equal(t, files.ID, *dataPlane.ParentID)
+
+	controlPlane, err := store.FindByPath(ctx, workspaceID, "/files/control")
+	require.NoError(t, err)
+	require.Equal(t, "控制面", controlPlane.Title)
+	require.Equal(t, "/files/control/providers", controlPlane.Component)
+
+	governancePlane, err := store.FindByPath(ctx, workspaceID, "/files/governance")
+	require.NoError(t, err)
+	require.Equal(t, "治理面", governancePlane.Title)
+	require.Equal(t, "/files/governance/audit", governancePlane.Component)
 
 	oldDelivery, err := store.FindGroupMenu(ctx, workspaceID, "ops-delivery")
 	require.NoError(t, err)

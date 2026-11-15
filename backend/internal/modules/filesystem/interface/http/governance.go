@@ -1126,12 +1126,35 @@ func notFound(c *gin.Context) {
 }
 
 func namespaceSummaryView(item query.NamespaceSummary) gin.H {
-	return gin.H{
+	capabilities := item.Capabilities
+	if capabilities == nil {
+		capabilities = []model.ResourcePermission{}
+	}
+	entryNodeIDs := item.EntryNodeIDs
+	if entryNodeIDs == nil {
+		entryNodeIDs = []uuid.UUID{}
+	}
+	view := gin.H{
 		"id": item.ID, "namespace_type": item.NamespaceType, "organization_id": item.OrganizationID,
-		"workspace_id": item.WorkspaceID, "owner_user_id": item.OwnerUserID, "root_node_id": item.RootNodeID,
-		"status": item.Status, "capabilities": item.Capabilities, "entry_node_ids": item.EntryNodeIDs,
+		"status": item.Status, "capabilities": capabilities, "entry_node_ids": entryNodeIDs,
 		"entry_nodes_truncated": item.EntryNodesTruncated,
 	}
+	if item.WorkspaceID != uuid.Nil {
+		view["workspace_id"] = item.WorkspaceID
+	} else {
+		view["workspace_id"] = nil
+	}
+	if item.OwnerUserID != uuid.Nil {
+		view["owner_user_id"] = item.OwnerUserID
+	} else {
+		view["owner_user_id"] = nil
+	}
+	if item.RootNodeID != nil && *item.RootNodeID != uuid.Nil {
+		view["root_node_id"] = *item.RootNodeID
+	} else {
+		view["root_node_id"] = nil
+	}
+	return view
 }
 
 func governancePagination(c *gin.Context) (int, bool) {

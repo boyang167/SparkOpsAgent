@@ -27,17 +27,25 @@ export const KNOWLEDGE_NAV_ITEM: NavLeafConfig = {
   label: "知识库",
   entitlement: "knowledge",
 };
-export const FILES_NAV_ITEM: NavLeafConfig = {
-  href: "/files",
+export const FILES_PLANE_NAV_GROUP: NavGroupConfig = {
+  id: "filesystem",
   label: "文件中心",
+  items: [
+    { href: "/files/data", label: "数据面", entitlement: "filesystem" },
+    { href: "/files/control", label: "控制面", entitlement: "filesystem" },
+    { href: "/files/governance", label: "治理面", entitlement: "filesystem" },
+  ],
+};
+
+/** @deprecated 使用 FILES_PLANE_NAV_GROUP 三平面子菜单 */
+export const FILES_NAV_ITEM: NavLeafConfig = {
+  href: "/files/data",
+  label: "数据面",
   entitlement: "filesystem",
 };
 
-/** 业务控制台顶层直达入口（知识库、文件等），按 entitlement 过滤 */
-export const BUSINESS_DIRECT_NAV_ITEMS: NavLeafConfig[] = [
-  KNOWLEDGE_NAV_ITEM,
-  FILES_NAV_ITEM,
-];
+/** 业务控制台顶层直达入口（知识库等），按 entitlement 过滤 */
+export const BUSINESS_DIRECT_NAV_ITEMS: NavLeafConfig[] = [KNOWLEDGE_NAV_ITEM];
 
 export function filterBusinessDirectNavItems(
   entitlements?: WorkspaceEntitlementsVM,

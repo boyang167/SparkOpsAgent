@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import type { FileNodeVM, GovernedPermission } from "@sparkops/contracts/filesystem";
 import { createDirectoryNode } from "@sparkops/web-sdk/filesystem";
 import { FileBrowser } from "./FileBrowser";
@@ -10,6 +11,8 @@ import { createPanelRenameHandler, submitPanelRename } from "./file-explorer-pan
 import type { FileExplorerDialog } from "./file-explorer-panel-state";
 import { showCreateDialog, showRenameDialog } from "./file-explorer-panel-state";
 import { UploadPanel } from "./UploadPanel";
+import { InlineAlert } from "@/components/ui/InlineAlert";
+import { Modal } from "@/components/ui/Modal";
 import type { FileView } from "./workbench-state";
 
 export type BreadcrumbItem = {
@@ -34,6 +37,15 @@ export type FileExplorerPanelProps = {
   canWrite?: boolean;
   organizationId?: string;
   onShare?: (node: FileNodeVM, effectiveActions: GovernedPermission[]) => void;
+  searchValue?: string;
+  onSearchChange?: (value: string) => void;
+  onSearchSubmit?: () => void;
+  onViewChange?: (view: FileView) => void;
+  onOpenDirectory?: () => void;
+  spaceLabel?: string;
+  currentFolderLabel?: string;
+  workspaceRootHref?: string;
+  isListingSearch?: boolean;
 };
 
 export function FileExplorerPanel({
@@ -53,6 +65,15 @@ export function FileExplorerPanel({
   canWrite = true,
   organizationId,
   onShare,
+  searchValue = "",
+  onSearchChange,
+  onSearchSubmit,
+  onViewChange,
+  onOpenDirectory,
+  spaceLabel,
+  currentFolderLabel = "根目录",
+  workspaceRootHref = "/files/data/workspace",
+  isListingSearch = false,
 }: FileExplorerPanelProps) {
   const router = useRouter();
   const [nodes, setNodes] = useState(initialNodes);
@@ -63,6 +84,8 @@ export function FileExplorerPanel({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scopeKey = `${workspaceId}:${namespaceId ?? ""}:${parentId}`;
+  const createInputRef = useRef<HTMLInputElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setNodes(initialNodes);
@@ -108,6 +131,35 @@ export function FileExplorerPanel({
     }
   }
 
+  function closeCreateDialog() {
+    if (pending) return;
+    setDialog(null);
+    setCreateName("");
+    setError(null);
+  }
+
+  function closeRenameDialog() {
+    if (pending) return;
+    setDialog(null);
+    setRenameValue("");
+    setError(null);
+  }
+
+  useEffect(() => {
+    if (dialog?.type !== "create") return;
+    const timer = window.setTimeout(() => createInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [dialog?.type]);
+
+  useEffect(() => {
+    if (dialog?.type !== "rename") return;
+    const timer = window.setTimeout(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [dialog]);
+
   async function submitCreateDirectory() {
     if (!createName.trim()) return;
     setPending(true);
@@ -128,43 +180,130 @@ export function FileExplorerPanel({
     }
   }
 
+  const nodeCountLabel = `${nodes.length} 个项目`;
+  const locationLabel = isListingSearch
+    ? "搜索结果"
+    : currentFolderLabel || "根目录";
+
   return (
-    <div className="stack-lg">
-      <nav aria-label="路径" className="flex flex-wrap items-center gap-2 text-sm text-muted">
-        <Link href="/files" className="link-muted">
+  <div className="filesystem-explorer-shell">
+    <header className="filesystem-explorer-header">
+      <nav aria-label="当前位置" className="filesystem-explorer-location">
+        <span className="filesystem-location-space">{spaceLabel ?? "文件"}</span>
+        <span className="filesystem-location-sep" aria-hidden="true">
+          /
+        </span>
+        <Link href={workspaceRootHref} className="filesystem-location-link">
           根目录
         </Link>
-        {breadcrumb.map((item) => (
-          <span key={item.id} className="flex items-center gap-2">
-            <span aria-hidden>/</span>
-            <Link href={`/files/${item.id}`} className="link-muted">
-              {item.name}
-            </Link>
-          </span>
-        ))}
+        {!isListingSearch && locationLabel !== "根目录" ? (
+          <>
+            <span className="filesystem-location-sep" aria-hidden="true">
+              /
+            </span>
+            <span className="filesystem-location-current">{locationLabel}</span>
+          </>
+        ) : null}
+        {isListingSearch ? (
+          <>
+            <span className="filesystem-location-sep" aria-hidden="true">
+              /
+            </span>
+            <span className="filesystem-location-current">搜索结果</span>
+          </>
+        ) : null}
+        <span className="filesystem-location-count">{nodeCountLabel}</span>
       </nav>
 
-      <div className="flex flex-wrap items-center gap-3">
-        {canWrite ? (
-          <button
-            type="button"
-            className="btn btn-secondary filesystem-touch-target"
-            onClick={() => {
-              setDialog(showCreateDialog());
-              setCreateName("");
+      <div className="filesystem-explorer-command-bar">
+        <div className="filesystem-explorer-command-primary">
+          {canWrite ? (
+            <div className="filesystem-explorer-actions">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm filesystem-touch-target"
+                onClick={() => {
+                  setError(null);
+                  setDialog(showCreateDialog());
+                  setCreateName("");
+                }}
+              >
+                新建文件夹
+              </button>
+              {onFilesSelected ? (
+                <UploadPanel
+                  onFilesSelected={onFilesSelected}
+                  emphasis={dialog ? "secondary" : "primary"}
+                  size="sm"
+                />
+              ) : null}
+            </div>
+          ) : (
+            <span className="filesystem-explorer-readonly-hint text-sm text-muted">只读浏览</span>
+          )}
+        </div>
+
+        {onSearchSubmit && onSearchChange ? (
+          <form
+            role="search"
+            aria-label="文件搜索"
+            className="filesystem-explorer-search-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onSearchSubmit();
             }}
           >
-            新建目录
-          </button>
-        ) : null}
-        {canWrite && onFilesSelected ? (
-          <UploadPanel
-            onFilesSelected={onFilesSelected}
-            emphasis={dialog ? "secondary" : "primary"}
-          />
-        ) : null}
-      </div>
+            <input
+              type="search"
+              className="input input-sm filesystem-explorer-search"
+              aria-label="搜索文件"
+              placeholder="搜索名称或路径，Enter 确认"
+              value={searchValue}
+              onChange={(event) => onSearchChange(event.target.value)}
+            />
+          </form>
+        ) : (
+          <div className="filesystem-explorer-search-form" aria-hidden="true" />
+        )}
 
+        <div className="filesystem-explorer-command-secondary">
+          {onViewChange ? (
+            <div className="filesystem-view-toggle" role="group" aria-label="视图切换">
+              <button
+                type="button"
+                className={view === "list" ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm"}
+                aria-label="列表视图"
+                aria-pressed={view === "list"}
+                onClick={() => onViewChange("list")}
+              >
+                列表
+              </button>
+              <button
+                type="button"
+                className={view === "grid" ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm"}
+                aria-label="网格视图"
+                aria-pressed={view === "grid"}
+                onClick={() => onViewChange("grid")}
+              >
+                网格
+              </button>
+            </div>
+          ) : null}
+          {onOpenDirectory ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm filesystem-directory-trigger filesystem-touch-target"
+              aria-label="打开文件夹导航"
+              onClick={onOpenDirectory}
+            >
+              文件夹
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </header>
+
+    <div className="filesystem-explorer-body">
       <FileBrowser
         nodes={nodes}
         workspaceId={workspaceId}
@@ -193,76 +332,124 @@ export function FileExplorerPanel({
         organizationId={organizationId}
         onShare={onShare}
       />
+    </div>
 
-      {dialog?.type === "rename" ? (
-        <div className="card stack-sm max-w-md" role="dialog" aria-labelledby="rename-title">
-          <h3 id="rename-title" className="font-semibold">
-            重命名
-          </h3>
+      {!dialog && error ? (
+        <p className="filesystem-explorer-inline-error text-sm text-danger">{error}</p>
+      ) : null}
+
+      <Modal
+        open={dialog?.type === "create"}
+        title="新建文件夹"
+        description={`在「${locationLabel}」下创建子目录`}
+        size="sm"
+        onClose={closeCreateDialog}
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={pending}
+              onClick={closeCreateDialog}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              form="filesystem-create-folder-form"
+              className="btn btn-primary"
+              disabled={pending || !createName.trim()}
+            >
+              {pending ? "创建中…" : "创建"}
+            </button>
+          </div>
+        }
+      >
+        <form
+          id="filesystem-create-folder-form"
+          className="stack-md"
+          onSubmit={(event: FormEvent<HTMLFormElement>) => {
+            event.preventDefault();
+            void submitCreateDirectory();
+          }}
+        >
+          {error && dialog?.type === "create" ? (
+            <InlineAlert tone="error">{error}</InlineAlert>
+          ) : null}
+          <label className="stack-xs">
+            <span>文件夹名称</span>
+            <input
+              ref={createInputRef}
+              className="input"
+              placeholder="例如：项目资料"
+              autoComplete="off"
+              disabled={pending}
+              value={createName}
+              onChange={(event) => {
+                setError(null);
+                setCreateName(event.target.value);
+              }}
+            />
+          </label>
+        </form>
+      </Modal>
+
+      <Modal
+        open={dialog?.type === "rename"}
+        title="重命名"
+        description={
+          dialog?.type === "rename" ? `当前名称：${dialog.node.name}` : undefined
+        }
+        size="sm"
+        onClose={closeRenameDialog}
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={pending}
+              onClick={closeRenameDialog}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              form="filesystem-rename-form"
+              className="btn btn-primary"
+              disabled={pending || !renameValue.trim()}
+            >
+              {pending ? "保存中…" : "保存"}
+            </button>
+          </div>
+        }
+      >
+        <form
+          id="filesystem-rename-form"
+          className="stack-md"
+          onSubmit={(event: FormEvent<HTMLFormElement>) => {
+            event.preventDefault();
+            void submitRename();
+          }}
+        >
+          {error && dialog?.type === "rename" ? (
+            <InlineAlert tone="error">{error}</InlineAlert>
+          ) : null}
           <label className="stack-xs">
             <span>新名称</span>
             <input
+              ref={renameInputRef}
               className="input"
+              autoComplete="off"
+              disabled={pending}
               value={renameValue}
-              onChange={(event) => setRenameValue(event.target.value)}
+              onChange={(event) => {
+                setError(null);
+                setRenameValue(event.target.value);
+              }}
             />
           </label>
-          <div className="flex gap-2 justify-end">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              disabled={pending}
-              onClick={() => setDialog(null)}
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={pending}
-              onClick={() => void submitRename()}
-            >
-              保存
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {dialog?.type === "create" ? (
-        <div className="card stack-sm max-w-md" role="dialog" aria-labelledby="mkdir-title">
-          <h3 id="mkdir-title" className="font-semibold">
-            新建目录
-          </h3>
-          <label className="stack-xs">
-            <span>目录名称</span>
-            <input
-              className="input"
-              value={createName}
-              onChange={(event) => setCreateName(event.target.value)}
-            />
-          </label>
-          <div className="flex gap-2 justify-end">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              disabled={pending}
-              onClick={() => setDialog(null)}
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={pending}
-              onClick={() => void submitCreateDirectory()}
-            >
-              创建
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {error ? <p className="text-sm text-danger">{error}</p> : null}
+        </form>
+      </Modal>
     </div>
   );
 }

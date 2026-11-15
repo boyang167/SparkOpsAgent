@@ -116,41 +116,58 @@ func (h *CreateTransferHandler) Handle(ctx context.Context, cmd CreateTransfer) 
 		return out, model.ErrInvalidTransfer
 	}
 
+	protocol := cmd.Protocol
 	var placementDecision *service.PlacementDecision
 	providerID := cmd.ProviderID
-	if h.placement != nil {
-		decision, placeErr := h.placement.Place(ctx, service.PlacementRequest{
-			OrganizationID:          cmd.OrganizationID,
-			NamespaceType:           ns.NamespaceType,
-			WorkspaceID:             ns.WorkspaceID,
-			UserID:                  ns.OwnerUserID,
-			Classification:          cmd.Classification,
-			Size:                    cmd.Size,
-			RequiresPresignedUpload: cmd.Protocol == model.TransferProtocolMultipart,
-		})
-		if placeErr != nil {
-			return out, placeErr
+	for attempt := 0; attempt < 2; attempt++ {
+		placementDecision = nil
+		if h.placement != nil {
+			decision, placeErr := h.placement.Place(ctx, service.PlacementRequest{
+				OrganizationID:          cmd.OrganizationID,
+				NamespaceType:           ns.NamespaceType,
+				WorkspaceID:             ns.WorkspaceID,
+				UserID:                  ns.OwnerUserID,
+				Classification:          cmd.Classification,
+				Size:                    cmd.Size,
+				RequiresPresignedUpload: protocol == model.TransferProtocolMultipart,
+			})
+			if placeErr != nil {
+				return out, placeErr
+			}
+			providerID = decision.ProviderID
+			placementDecision = &decision
+		} else if providerID == uuid.Nil {
+			providerID, err = h.defaultProviderID(ctx, cmd.OrganizationID)
+			if err != nil {
+				return out, err
+			}
 		}
-		providerID = decision.ProviderID
-		placementDecision = &decision
-	} else if providerID == uuid.Nil {
-		providerID, err = h.defaultProviderID(ctx, cmd.OrganizationID)
-		if err != nil {
-			return out, err
+		if protocol != model.TransferProtocolDirect {
+			break
 		}
-	}
-	if cmd.Protocol == model.TransferProtocolDirect {
 		provider, providerErr := h.repo.GetStorageProvider(ctx, providerID)
 		if providerErr != nil {
 			return out, providerErr
 		}
-		if provider.OrganizationID != cmd.OrganizationID || provider.ProviderType != model.ProviderTypeLocal {
+		if directLocalGatewayCompatible(provider, cmd.OrganizationID) {
+			break
+		}
+		if h.placement == nil || attempt > 0 {
+			if placementDecision != nil {
+				return out, domain.ErrStorageGatewayMismatch
+			}
 			return out, model.ErrInvalidTransfer
 		}
-		if providerID != DefaultLocalProviderID(cmd.OrganizationID) ||
-			strings.TrimSpace(provider.Status) != "ACTIVE" ||
-			h.directLocalRoot == "" ||
-			!sameLocalRoot(provider.Endpoint, h.directLocalRoot) {
+		protocol = model.TransferProtocolMultipart
+		providerID = cmd.ProviderID
+	}
+	cmd.Protocol = protocol
+	if protocol == model.TransferProtocolDirect {
+		provider, providerErr := h.repo.GetStorageProvider(ctx, providerID)
+		if providerErr != nil {
+			return out, providerErr
+		}
+		if !directLocalGatewayCompatible(provider, cmd.OrganizationID) {
 			if placementDecision != nil {
 				return out, domain.ErrStorageGatewayMismatch
 			}
@@ -267,6 +284,16 @@ func transferRequestHash(cmd CreateTransfer, parentID uuid.UUID, placement *serv
 
 func DescriptorFromSession(session *model.TransferSession) TransferDescriptor {
 	return descriptor(session)
+}
+
+func directLocalGatewayCompatible(provider *model.StorageProvider, organizationID uuid.UUID) bool {
+	if provider == nil ||
+		provider.OrganizationID != organizationID ||
+		provider.ProviderType != model.ProviderTypeLocal ||
+		strings.TrimSpace(provider.Status) != "ACTIVE" {
+		return false
+	}
+	return strings.TrimSpace(provider.Endpoint) != ""
 }
 
 func (h *CreateTransferHandler) defaultProviderID(ctx context.Context, organizationID uuid.UUID) (uuid.UUID, error) {

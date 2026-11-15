@@ -206,6 +206,8 @@ type FilesystemRepository interface {
 	LockTransfer(context.Context, uuid.UUID) (*model.TransferSession, error)
 	ListTransferParts(context.Context, uuid.UUID) ([]model.TransferPart, error)
 	UpsertTransferPart(context.Context, *model.TransferPart) error
+	SetTransferProviderUploadID(context.Context, uuid.UUID, string) error
+	TransferProviderUploadID(context.Context, uuid.UUID) (string, error)
 	SaveTransferStateCAS(context.Context, uuid.UUID, uuid.UUID, int64, TransferStatePatch) error
 	CreateStorageProvider(context.Context, *model.StorageProvider) error
 	GetStorageProvider(context.Context, uuid.UUID) (*model.StorageProvider, error)

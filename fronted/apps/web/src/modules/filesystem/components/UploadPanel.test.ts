@@ -17,7 +17,7 @@ describe("UploadPanel", () => {
     const input = container.querySelector("input[type=file]") as HTMLInputElement;
     const files = [new File(["a"], "a.txt"), new File(["b"], "b.txt")];
 
-    expect(screen.getByRole("button", { name: "上传文件" })).toBeEnabled();
+    expect(screen.getByLabelText("上传文件")).toBeEnabled();
     fireEvent.change(input, { target: { files } });
 
     expect(onFilesSelected).toHaveBeenCalledWith(files);

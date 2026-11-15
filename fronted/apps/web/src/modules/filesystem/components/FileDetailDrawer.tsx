@@ -120,7 +120,12 @@ export function FileDetailDrawer({
     }
     const controller = new AbortController();
     setRevisionData({ key: detailKey, items: [], state: "loading" });
-    void listFileRevisions(workspaceId, node.id, { limit: 50 }, { signal: controller.signal })
+    void listFileRevisions(
+      workspaceId,
+      node.id,
+      { limit: 50, namespace_id: node.namespace_id },
+      { signal: controller.signal },
+    )
       .then((page) => {
         if (controller.signal.aborted || generation !== revisionGeneration.current) return;
         setRevisionData({ key: detailKey, items: page.items, state: "ready" });

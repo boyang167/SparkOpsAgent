@@ -13,7 +13,7 @@ describe("normalizeFilesPageSearch", () => {
     });
 
     expect(first.redirectPath).toBe(
-      "/files?view=grid&parent=parent-1",
+      "/files/data/workspace?view=grid&parent=parent-1",
     );
     expect(first.state.query).toBe("");
 
@@ -31,7 +31,7 @@ describe("normalizeFilesPageSearch", () => {
       cursor: "cursor-1",
     });
 
-    expect(result.redirectPath).toBe("/files?tab=transfers");
+    expect(result.redirectPath).toBeUndefined();
     expect(result.state.tab).toBe("transfers");
   });
 
@@ -51,7 +51,7 @@ describe("normalizeFilesPageSearch", () => {
         query: "report",
         node: "node-1",
       }),
-    ).toBe("/files?view=grid&space=organization&q=report");
+    ).toBe("/files/data/workspace?view=grid&space=organization&q=report");
   });
 
   it("normalizes shared sources through the whitelist", () => {
@@ -61,19 +61,19 @@ describe("normalizeFilesPageSearch", () => {
       space: "workspace",
       source: undefined,
       query: "",
-    }, "organization")).toBe("/files?space=shared&source=organization");
+    }, "organization")).toBe("/files/data/workspace?space=shared&source=organization");
     expect(fileSpacePath("shared", {
       tab: "files",
       view: "list",
       space: "workspace",
       source: undefined,
       query: "",
-    }, "external")).toBe("/files?space=shared");
+    }, "external")).toBe("/files/data/workspace?space=shared");
     expect(fileSpacePath("shared", {
       tab: "files",
       view: "list",
       space: "workspace",
       query: "",
-    }, "agent")).toBe("/files?space=shared&source=agent");
+    }, "agent")).toBe("/files/data/workspace?space=shared&source=agent");
   });
 });

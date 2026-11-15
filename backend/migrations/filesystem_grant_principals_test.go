@@ -21,8 +21,8 @@ func TestFilesystemGrantPrincipalMigrationDefinesBackfillAndActiveUniqueness(t *
 	require.Contains(t, up, "FROM filesystem.nodes")
 	require.Contains(t, up, "JOIN filesystem.namespaces")
 	require.Contains(t, up, "WHERE revoked_at IS NULL")
-	require.Contains(t, up, "CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_grants_active_identity")
+	require.Contains(t, up, "CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_grants_active_identity")
 	require.Contains(t, up, "node_id, principal_type, principal_id, permission, effect")
 	require.Contains(t, down, "DROP INDEX IF EXISTS filesystem.ux_filesystem_grants_active_identity")
-	require.Contains(t, down, "CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_grants_identity")
+	require.Contains(t, down, "CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_grants_identity")
 }

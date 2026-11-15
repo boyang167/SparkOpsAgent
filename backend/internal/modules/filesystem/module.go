@@ -294,6 +294,13 @@ func (m *Module) Register(c *appctx.Container) error {
 	getTransfer := query.NewGetTransferHandler(repo)
 	listTransfers := query.NewListTransfersHandler(repo)
 	abortTransfer := command.NewAbortTransferHandler(repo, c.Transactor)
+	recordUploaded := command.NewRecordTransferUploadedHandler(repo, c.Transactor, c.EventBus)
+	runtimeCatalog, err := fsstorage.NewRuntimeCatalog(repo, fsstorage.RuntimeCatalogConfig{LocalFallbackRoot: storageRoot})
+	if err != nil {
+		return fmt.Errorf("filesystem runtime catalog: %w", err)
+	}
+	prepareMultipart := command.NewPrepareTransferMultipartHandler(repo, runtimeCatalog)
+	completeMultipart := command.NewCompleteTransferMultipartHandler(repo, runtimeCatalog, recordUploaded)
 	handler := filesystemhttp.NewHandler(
 		repo,
 		query.NewListChildrenHandler(repo),
@@ -307,12 +314,16 @@ func (m *Module) Register(c *appctx.Container) error {
 		resourceAuthorizer,
 		c.AuditLogger,
 		&filesystemhttp.TransferOptions{
-			Create:  createTransfer.Handle,
-			Get:     getTransfer.Handle,
-			List:    listTransfers.Handle,
-			Abort:   abortTransfer.Handle,
-			Peek:    repo.GetTransferByID,
-			Gateway: filesystemhttp.NewTransferGatewayView(publicURL, issuer),
+			Create:            createTransfer.Handle,
+			Get:               getTransfer.Handle,
+			List:              listTransfers.Handle,
+			Abort:             abortTransfer.Handle,
+			CompleteMultipart: completeMultipart.Handle,
+			PrepareMultipart:  prepareMultipart.Handle,
+			Peek:              repo.GetTransferByID,
+			Gateway:           filesystemhttp.NewTransferGatewayView(publicURL, issuer),
+			ProviderCatalog:   runtimeCatalog,
+			ProviderUploadID:  repo.TransferProviderUploadID,
 		},
 		&filesystemhttp.StorageAdminOptions{
 			RegisterProvider:      command.NewRegisterProviderHandler(repo).Handle,
@@ -363,11 +374,6 @@ func (m *Module) Register(c *appctx.Container) error {
 		listFileAudits = query.NewListFileAuditEventsHandler(auditService).Handle
 		handler.BindAuditList(listFileAudits)
 	}
-	recordUploaded := command.NewRecordTransferUploadedHandler(repo, c.Transactor, c.EventBus)
-	runtimeCatalog, err := fsstorage.NewRuntimeCatalog(repo, fsstorage.RuntimeCatalogConfig{LocalFallbackRoot: storageRoot})
-	if err != nil {
-		return fmt.Errorf("filesystem runtime catalog: %w", err)
-	}
 	m.runtimeCatalog = runtimeCatalog
 	gatewayControl := gatewaycontrol.NewService(repo, runtimeCatalog, recordUploaded.Handle)
 	beginSFTP := command.NewBeginSFTPUploadHandler(repo, createTransfer, storageRoot, ensureDefault)
@@ -388,7 +394,8 @@ func (m *Module) Register(c *appctx.Container) error {
 	entitlementMiddleware := entitlements.Middleware(c.DB)
 	governanceHandler := filesystemhttp.NewGovernanceHandler(
 		repo,
-		query.NewListNamespacesHandler(repo, principalResolver, resourceAuthorizer),
+		query.NewListNamespacesHandler(repo, principalResolver, resourceAuthorizer).
+			WithScopeEnsurer(ensureNamespace),
 		query.NewSharedWithMeHandler(repo, principalResolver, resourceAuthorizer, sharedCursorCodec),
 		query.NewEffectiveAccessHandler(resourceAuthorizer),
 		resourceAuthorizer,

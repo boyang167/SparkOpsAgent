@@ -332,7 +332,7 @@ describe("TransferCenter", () => {
       next_cursor: "",
     });
     expect(await screen.findByText("任务二")).toBeInTheDocument();
-    expect(screen.getAllByRole("article")).toHaveLength(2);
+    expect(screen.getAllByRole("row")).toHaveLength(3);
     expect(screen.queryByText("任务一重复")).not.toBeInTheDocument();
     expect(screen.queryByText("任务二重复")).not.toBeInTheDocument();
   });

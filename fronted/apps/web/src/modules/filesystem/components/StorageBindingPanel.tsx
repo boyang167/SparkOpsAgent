@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CreateStorageBindingCommand, StorageBindingVM, StoragePoolVM } from "@sparkops/contracts/filesystem";
-import type { OrganizationVM, WorkspaceVM } from "@sparkops/contracts/tenant";
+import type { OrganizationVM, OrgMemberVM, WorkspaceVM } from "@sparkops/contracts/tenant";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 import { BffError } from "@sparkops/contracts";
 import { createStorageBinding, listStorageBindings, listStoragePools } from "@sparkops/web-sdk/filesystem";
@@ -11,12 +11,13 @@ import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import { canMutateStorage } from "./storage-admin-permissions";
 import {
+  buildBindingDisplayRow,
   defaultScopeIdForType,
-  formatBindingScopeRow,
   scopeTargetOptions,
   STORAGE_BINDING_SCOPE_LABELS,
   STORAGE_BINDING_SCOPE_TYPES,
   validateStorageBindingForm,
+  workspaceOrganizationId,
 } from "./storage-binding-panel-view";
 
 export type StorageBindingPanelProps = {
@@ -45,6 +46,7 @@ export function StorageBindingPanel({
   const [organizations, setOrganizations] = useState<OrganizationVM[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceVM[]>([]);
   const [projects, setProjects] = useState<ProjectVM[]>([]);
+  const [orgMembers, setOrgMembers] = useState<OrgMemberVM[]>([]);
   const [loading, setLoading] = useState(!initialBindings);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -53,8 +55,8 @@ export function StorageBindingPanel({
   const [form, setForm] = useState<CreateStorageBindingCommand>(() => initialBindingForm(workspaceId));
 
   const catalog = useMemo(
-    () => ({ organizations, workspaces, projects }),
-    [organizations, workspaces, projects],
+    () => ({ organizations, workspaces, projects, orgMembers }),
+    [organizations, workspaces, projects, orgMembers],
   );
 
   const scopeOptions = useMemo(
@@ -73,11 +75,21 @@ export function StorageBindingPanel({
         tenant.listWorkspaces(),
         workspace.listProjects(workspaceId),
       ]);
+      const organizationId = workspaceOrganizationId(workspaceItems, workspaceId);
+      let memberItems: OrgMemberVM[] = [];
+      if (organizationId) {
+        try {
+          memberItems = await tenant.listOrgMembers(organizationId);
+        } catch {
+          memberItems = [];
+        }
+      }
       setBindings(bindingPage.items);
       setPools(poolPage.items);
       setOrganizations(orgItems);
       setWorkspaces(workspaceItems);
       setProjects(projectItems);
+      setOrgMembers(memberItems);
       if (poolPage.items[0]) {
         setForm((current) =>
           current.pool_id ? current : { ...current, pool_id: poolPage.items[0].id },
@@ -134,14 +146,28 @@ export function StorageBindingPanel({
     }
   }
 
-  const poolNameById = new Map(pools.map((pool) => [pool.id, pool.name]));
+  const poolById = useMemo(() => new Map(pools.map((pool) => [pool.id, pool])), [pools]);
+
+  const rows = useMemo(
+    () =>
+      bindings.map((binding) => {
+        const pool = poolById.get(binding.pool_id);
+        return buildBindingDisplayRow(
+          binding,
+          catalog,
+          pool?.name ?? binding.pool_id.slice(0, 8),
+          pool?.status,
+        );
+      }),
+    [bindings, catalog, poolById],
+  );
 
   return (
-    <section className="stack-lg">
+    <section className="stack-lg filesystem-mount-bindings">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">存储作用域绑定</h2>
-          <p className="text-sm text-muted">将存储池绑定到租户、工作区、项目或用户；按名称选择，无需手填 UUID。</p>
+          <h2 className="text-lg font-semibold">Mount Bindings</h2>
+          <p className="filesystem-mount-bindings-subtitle">将存储池绑定到租户、工作区、项目或用户</p>
         </div>
         {canAdmin ? (
           <button
@@ -156,37 +182,60 @@ export function StorageBindingPanel({
 
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
 
-      {loading ? (
-        <div className="empty-state">加载中…</div>
-      ) : bindings.length === 0 ? (
-        <div className="empty-state">暂无绑定</div>
-      ) : (
-        <div className="table-wrap">
-          <table className="data-table text-sm">
-            <thead>
-              <tr>
-                <th>作用域</th>
-                <th>绑定目标</th>
-                <th>存储池</th>
-                <th>优先级</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bindings.map((binding) => {
-                const row = formatBindingScopeRow(binding, catalog);
-                return (
-                  <tr key={binding.id}>
-                    <td>{row.scopeLabel}</td>
-                    <td>{row.targetLabel}</td>
-                    <td>{poolNameById.get(binding.pool_id) ?? binding.pool_id.slice(0, 8)}</td>
-                    <td>{binding.priority}</td>
+      <div className="filesystem-mount-bindings-card">
+        {loading ? (
+          <div className="empty-state">加载中…</div>
+        ) : rows.length === 0 ? (
+          <div className="empty-state">暂无绑定</div>
+        ) : (
+          <div className="table-wrap filesystem-mount-bindings-table-wrap">
+            <table className="data-table filesystem-mount-bindings-table text-sm">
+              <thead>
+                <tr>
+                  <th>Mount Point</th>
+                  <th>Namespace</th>
+                  <th>Storage Pool</th>
+                  <th>优先级</th>
+                  <th>类型</th>
+                  <th>访问模式</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, index) => (
+                  <tr key={bindings[index]?.id ?? row.mountPoint}>
+                    <td className="font-mono text-xs">{row.mountPoint}</td>
+                    <td className="font-mono text-xs">{row.namespace}</td>
+                    <td>{row.poolName}</td>
+                    <td className="tabular-nums">{row.priority}</td>
+                    <td>{row.mountType}</td>
+                    <td>{row.accessMode}</td>
+                    <td>
+                      <span className={`filesystem-mount-status is-${row.status.tone}`}>
+                        {row.status.label}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="filesystem-mount-status-toggle"
+                        disabled
+                        title="即将支持"
+                      >
+                        切换状态
+                      </button>
+                    </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="filesystem-mount-bindings-note">
+          Object storage Prefix 与 POSIX 目录路径不等价；绑定将 Namespace 解析到对应 Storage Pool 的放置结果
+        </p>
+      </div>
 
       <Modal open={open} title="新增存储绑定" onClose={() => setOpen(false)}>
         <div className="stack-md">
@@ -214,23 +263,14 @@ export function StorageBindingPanel({
             </select>
           </label>
           <label className="stack-xs">
-            <span>{form.scope_type === "USER" ? "用户 ID" : "绑定目标"}</span>
-            {form.scope_type === "USER" ? (
-              <>
-                <input
-                  className="input font-mono text-xs"
-                  placeholder="用户 UUID"
-                  value={form.scope_id}
-                  onChange={(e) => {
-                    setFormError(null);
-                    setForm((f) => ({ ...f, scope_id: e.target.value }));
-                  }}
-                />
-                <span className="text-xs text-muted">用户级绑定暂仅支持按 ID 指定。</span>
-              </>
-            ) : scopeOptions.length === 0 ? (
+            <span>{form.scope_type === "USER" ? "用户" : "绑定目标"}</span>
+            {scopeOptions.length === 0 ? (
               <span className="text-sm text-muted">
-                {form.scope_type === "PROJECT" ? "当前工作区下暂无项目，请先创建项目。" : "暂无可选目标。"}
+                {form.scope_type === "PROJECT"
+                  ? "当前工作区下暂无项目，请先创建项目。"
+                  : form.scope_type === "USER"
+                    ? "当前租户下暂无成员，请先在租户设置中邀请用户。"
+                    : "暂无可选目标。"}
               </span>
             ) : (
               <select

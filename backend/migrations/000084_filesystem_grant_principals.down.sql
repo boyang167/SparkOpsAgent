@@ -8,5 +8,5 @@ ALTER TABLE filesystem.resource_grants
     DROP COLUMN IF EXISTS principal_type,
     DROP COLUMN IF EXISTS organization_id;
 
-CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_grants_identity
+CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_grants_identity
     ON filesystem.resource_grants(node_id, grantee_id, permission, effect);

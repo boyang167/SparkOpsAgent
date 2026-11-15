@@ -70,13 +70,16 @@ export function visibleMutationButtons(permissions: string[]) {
 }
 
 export function validateRegisterProviderForm(
-  form: Pick<RegisterStorageProviderCommand, "name" | "secret_ref" | "provider_type">,
+  form: Pick<RegisterStorageProviderCommand, "name" | "secret_ref" | "provider_type" | "endpoint">,
 ): string | null {
   if (!form.name.trim()) {
     return "请填写 Provider 名称";
   }
   if (!form.secret_ref.trim() && form.provider_type !== "LOCAL") {
     return "请填写 Secret 引用（仅提交引用路径，界面不会回显明文）";
+  }
+  if (!form.endpoint?.trim()) {
+    return "请填写 Endpoint";
   }
   return null;
 }
@@ -160,9 +163,73 @@ export function canDeleteProvider(provider: Pick<StorageProviderVM, "name">) {
   return provider.name !== DEFAULT_LOCAL_PROVIDER_NAME;
 }
 
-export function validateUpdateProviderForm(form: UpdateStorageProviderCommand): string | null {
+export type ProviderHealthTone = "healthy" | "degraded" | "unknown";
+
+export function providerHealthStatus(status: string): { label: string; tone: ProviderHealthTone } {
+  const normalized = status.trim().toUpperCase();
+  if (normalized === "ACTIVE") {
+    return { label: "Healthy", tone: "healthy" };
+  }
+  if (normalized === "DISABLED") {
+    return { label: "Degraded", tone: "degraded" };
+  }
+  return { label: status || "Unknown", tone: "unknown" };
+}
+
+export function providerKindSubtitle(provider: StorageProviderVM): string {
+  switch (provider.provider_type) {
+    case "S3":
+      return provider.endpoint?.trim() ? `Amazon S3 · ${provider.endpoint.trim()}` : "Amazon S3";
+    case "NFS":
+      return provider.endpoint?.trim() ? `NFS · ${provider.endpoint.trim()}` : "NFS";
+    case "LOCAL":
+      return "Local Storage";
+    default:
+      return provider.provider_type;
+  }
+}
+
+export function formatProviderCapabilities(provider: StorageProviderVM): string {
+  const caps = provider.capabilities;
+  if (caps && typeof caps === "object" && !Array.isArray(caps)) {
+    const enabled = Object.entries(caps)
+      .filter(([, value]) => value === true || value === "true")
+      .map(([key]) => key);
+    if (enabled.length > 0) {
+      return `Capabilities: ${enabled.join(", ")}`;
+    }
+    const keys = Object.keys(caps);
+    if (keys.length > 0) {
+      return `Capabilities: ${keys.join(", ")}`;
+    }
+  }
+  switch (provider.provider_type) {
+    case "S3":
+      return "Capabilities: Multipart, Versioning, Range Read";
+    case "NFS":
+      return "Capabilities: Mount, Range Read";
+    case "LOCAL":
+      return "Capabilities: Directory, Range Read";
+    default:
+      return "Capabilities: —";
+  }
+}
+
+export function boundPoolNamesForProvider(providerId: string, pools: StoragePoolVM[]): string[] {
+  return pools
+    .filter((pool) => pool.members.some((member) => member.provider_id === providerId))
+    .map((pool) => pool.name);
+}
+
+export function validateUpdateProviderForm(
+  form: UpdateStorageProviderCommand,
+  providerType?: RegisterStorageProviderCommand["provider_type"],
+): string | null {
   if (!form.name.trim()) {
     return "请填写 Provider 名称";
+  }
+  if (providerType && !form.endpoint?.trim()) {
+    return "请填写 Endpoint";
   }
   return null;
 }

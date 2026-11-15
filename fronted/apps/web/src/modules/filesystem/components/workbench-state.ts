@@ -21,6 +21,14 @@ function firstValue(value: SearchParamValue): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
+export function hrefForDataWorkspace(space: FileSpace = "workspace", view: FileView = "list") {
+  const params = new URLSearchParams();
+  if (view !== "list") params.set("view", view);
+  if (space !== "workspace") params.set("space", space);
+  const query = params.toString();
+  return query ? `/files/data/workspace?${query}` : "/files/data/workspace";
+}
+
 export function parseWorkbenchState(input: Record<string, SearchParamValue>): ParsedWorkbenchState {
   const tabs: WorkbenchTab[] = ["files", "transfers", "governance", "approvals", "audit"];
   const tab = firstValue(input.tab);

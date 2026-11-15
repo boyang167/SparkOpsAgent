@@ -1,5 +1,5 @@
 import type { StorageBindingScopeType, StorageBindingVM } from "@sparkops/contracts/filesystem";
-import type { OrganizationVM, WorkspaceVM } from "@sparkops/contracts/tenant";
+import type { OrganizationVM, OrgMemberVM, WorkspaceVM } from "@sparkops/contracts/tenant";
 import type { ProjectVM } from "@sparkops/contracts/workspace";
 
 export const STORAGE_BINDING_SCOPE_TYPES: StorageBindingScopeType[] = [
@@ -20,6 +20,7 @@ export type ScopeTargetCatalog = {
   organizations: Array<Pick<OrganizationVM, "id" | "name" | "slug">>;
   workspaces: Array<Pick<WorkspaceVM, "id" | "org_id" | "name" | "slug">>;
   projects: Array<Pick<ProjectVM, "id" | "name" | "display_name">>;
+  orgMembers: Array<Pick<OrgMemberVM, "member_id" | "email" | "display_name">>;
 };
 
 export type ScopeTargetOption = {
@@ -27,6 +28,10 @@ export type ScopeTargetOption = {
   label: string;
   detail?: string;
 };
+
+function catalogOrgMembers(catalog: ScopeTargetCatalog) {
+  return catalog.orgMembers ?? [];
+}
 
 export function workspaceOrganizationId(
   workspaces: Array<Pick<WorkspaceVM, "id" | "org_id">>,
@@ -48,7 +53,7 @@ export function defaultScopeIdForType(
     case "PROJECT":
       return catalog.projects[0]?.id ?? "";
     case "USER":
-      return "";
+      return catalogOrgMembers(catalog)[0]?.member_id ?? "";
     default:
       return "";
   }
@@ -78,7 +83,11 @@ export function scopeTargetOptions(
         detail: project.name,
       }));
     case "USER":
-      return [];
+      return catalogOrgMembers(catalog).map((member) => ({
+        id: member.member_id,
+        label: member.display_name?.trim() || member.email,
+        detail: member.email,
+      }));
     default:
       return [];
   }
@@ -120,6 +129,118 @@ export function formatBindingScopeRow(binding: StorageBindingVM, catalog: ScopeT
   };
 }
 
+export type BindingMountStatusTone = "mounted" | "degraded";
+
+export type BindingDisplayRow = {
+  mountPoint: string;
+  namespace: string;
+  poolName: string;
+  priority: number;
+  mountType: string;
+  accessMode: string;
+  status: { label: string; tone: BindingMountStatusTone };
+};
+
+function organizationSlug(
+  organizationId: string,
+  catalog: ScopeTargetCatalog,
+): string {
+  const org = catalog.organizations.find((item) => item.id === organizationId);
+  return org?.slug?.trim() || organizationId.slice(0, 8);
+}
+
+export function formatBindingMountPoint(
+  binding: StorageBindingVM,
+  catalog: ScopeTargetCatalog,
+): string {
+  switch (binding.scope_type) {
+    case "WORKSPACE": {
+      const workspace = catalog.workspaces.find((item) => item.id === binding.scope_id);
+      const slug = workspace?.slug?.trim() || binding.scope_id.slice(0, 8);
+      return `/workspace/${slug}`;
+    }
+    case "ORGANIZATION": {
+      const org = catalog.organizations.find((item) => item.id === binding.scope_id);
+      const slug = org?.slug?.trim() || binding.scope_id.slice(0, 8);
+      return `/org/${slug}`;
+    }
+    case "PROJECT": {
+      const project = catalog.projects.find((item) => item.id === binding.scope_id);
+      const segment = project?.name?.trim() || binding.scope_id.slice(0, 8);
+      return `/project/${segment}`;
+    }
+    case "USER":
+      return `/user/${binding.scope_id.slice(0, 8)}`;
+    default:
+      return "—";
+  }
+}
+
+export function formatBindingNamespace(
+  binding: StorageBindingVM,
+  catalog: ScopeTargetCatalog,
+): string {
+  const orgPart = organizationSlug(binding.organization_id, catalog);
+  switch (binding.scope_type) {
+    case "ORGANIZATION":
+      return orgPart;
+    case "WORKSPACE": {
+      const workspace = catalog.workspaces.find((item) => item.id === binding.scope_id);
+      const slug = workspace?.slug?.trim() || "workspace";
+      return `${orgPart}/${slug}`;
+    }
+    case "PROJECT": {
+      const project = catalog.projects.find((item) => item.id === binding.scope_id);
+      const segment = project?.name?.trim() || "project";
+      return `${orgPart}/${segment}`;
+    }
+    case "USER":
+      return `${orgPart}/user`;
+    default:
+      return orgPart;
+  }
+}
+
+export function bindingMountType(scopeType: StorageBindingVM["scope_type"]): string {
+  switch (scopeType) {
+    case "ORGANIZATION":
+      return "Gateway Mount";
+    case "USER":
+      return "Direct Mount";
+    default:
+      return "Virtual Mount";
+  }
+}
+
+export function bindingAccessMode(): string {
+  return "Read / Write";
+}
+
+export function bindingMountStatus(poolStatus?: string): { label: string; tone: BindingMountStatusTone } {
+  const normalized = poolStatus?.trim().toUpperCase();
+  if (normalized === "DISABLED") {
+    return { label: "Degraded", tone: "degraded" };
+  }
+  return { label: "Mounted", tone: "mounted" };
+}
+
+export function buildBindingDisplayRow(
+  binding: StorageBindingVM,
+  catalog: ScopeTargetCatalog,
+  poolName: string,
+  poolStatus?: string,
+): BindingDisplayRow {
+  return {
+    mountPoint: formatBindingMountPoint(binding, catalog),
+    namespace: formatBindingNamespace(binding, catalog),
+    poolName,
+    priority: binding.priority,
+    mountType: bindingMountType(binding.scope_type),
+    accessMode: bindingAccessMode(),
+    status: bindingMountStatus(poolStatus),
+  };
+}
+
 export function validateStorageBindingForm(input: {
   pool_id: string;
   scope_id: string;
@@ -130,7 +251,7 @@ export function validateStorageBindingForm(input: {
   }
   if (!input.scope_id.trim()) {
     if (input.scope_type === "USER") {
-      return "请填写用户 ID";
+      return "请选择用户";
     }
     return "请选择绑定目标";
   }

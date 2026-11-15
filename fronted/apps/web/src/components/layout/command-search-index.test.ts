@@ -11,9 +11,9 @@ describe("filesystem command search labels", () => {
       canManageAdmin: false,
       isSuperAdmin: false,
     });
-    const fileItem = items.find((item) => item.href === "/files");
+    const fileItem = items.find((item) => item.href === "/files/data");
 
-    expect(fileItem?.label).toBe("文件中心");
+    expect(fileItem?.label).toBe("数据面");
     expect(groupCommandResults(fileItem ? [fileItem] : [])[0]?.label).toBe("文件中心");
     expect(COMMAND_KIND_LABELS.filesystem).toBe("文件中心");
   });

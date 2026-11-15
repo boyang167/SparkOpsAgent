@@ -12,6 +12,7 @@ import (
 	filesystemevent "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
@@ -55,7 +56,9 @@ func (s *OnTransferUploaded) Handle(ctx context.Context, event events.Event) err
 		SessionID: uploaded.SessionID, WorkspaceID: uploaded.WorkspaceID,
 	}); err != nil {
 		log.Printf("filesystem verify transfer %s: %v", uploaded.SessionID, err)
-		if errors.Is(err, model.ErrTransferIntegrity) || errors.Is(err, domain.ErrTransferStatusConflict) {
+		if errors.Is(err, model.ErrTransferIntegrity) ||
+			errors.Is(err, domain.ErrTransferStatusConflict) ||
+			errors.Is(err, storage.ErrNotFound) {
 			return messaging.Permanent(err)
 		}
 		return err

@@ -104,9 +104,13 @@ export async function resolveFileSpaceLoad<T>(
   }
 }
 
-export async function loadFileNode(workspaceId: string, nodeId: string): Promise<FileNodeVM> {
+export async function loadFileNode(
+  workspaceId: string,
+  nodeId: string,
+  namespaceId?: string,
+): Promise<FileNodeVM> {
   const ctx = await loadBffContext(workspaceId);
-  return getFileNode(ctx, workspaceId, nodeId);
+  return getFileNode(ctx, workspaceId, nodeId, namespaceId);
 }
 
 export type FileNodeSelection = {

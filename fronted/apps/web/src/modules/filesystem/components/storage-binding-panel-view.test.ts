@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { StorageBindingVM } from "@sparkops/contracts/filesystem";
 import {
+  buildBindingDisplayRow,
   defaultScopeIdForType,
+  formatBindingMountPoint,
   formatScopeTargetLabel,
   STORAGE_BINDING_SCOPE_LABELS,
   scopeTargetOptions,
@@ -29,6 +32,13 @@ const catalog = {
       description: "",
     },
   ],
+  orgMembers: [
+    {
+      member_id: "user-1",
+      email: "alice@example.com",
+      display_name: "Alice",
+    },
+  ],
 };
 
 describe("storage-binding-panel-view", () => {
@@ -43,6 +53,42 @@ describe("storage-binding-panel-view", () => {
     expect(defaultScopeIdForType("WORKSPACE", "ws-1", catalog)).toBe("ws-1");
     expect(defaultScopeIdForType("ORGANIZATION", "ws-1", catalog)).toBe("org-1");
     expect(defaultScopeIdForType("PROJECT", "ws-1", catalog)).toBe("proj-1");
+    expect(defaultScopeIdForType("USER", "ws-1", catalog)).toBe("user-1");
+  });
+
+  it("tolerates catalogs without orgMembers", () => {
+    const legacy = {
+      organizations: catalog.organizations,
+      workspaces: catalog.workspaces,
+      projects: catalog.projects,
+    } as typeof catalog;
+    expect(defaultScopeIdForType("USER", "ws-1", legacy)).toBe("");
+    expect(scopeTargetOptions("USER", legacy)).toEqual([]);
+  });
+
+  it("lists tenant users for user scope bindings", () => {
+    const options = scopeTargetOptions("USER", catalog);
+    expect(options).toEqual([
+      { id: "user-1", label: "Alice", detail: "alice@example.com" },
+    ]);
+    expect(formatScopeTargetLabel("USER", "user-1", catalog)).toBe("Alice（alice@example.com）");
+  });
+
+  it("formats mount bindings rows for the table", () => {
+    const binding: StorageBindingVM = {
+      id: "11111111-1111-4111-8111-111111111111",
+      organization_id: "org-1",
+      scope_type: "WORKSPACE",
+      scope_id: "ws-1",
+      pool_id: "22222222-2222-4222-8222-222222222222",
+      priority: 0,
+    };
+    expect(formatBindingMountPoint(binding, catalog)).toBe("/workspace/dev");
+    const row = buildBindingDisplayRow(binding, catalog, "pool-cmc-primary", "ACTIVE");
+    expect(row.namespace).toBe("acme/dev");
+    expect(row.priority).toBe(0);
+    expect(row.mountType).toBe("Virtual Mount");
+    expect(row.status).toEqual({ label: "Mounted", tone: "mounted" });
   });
 
   it("validates binding form", () => {

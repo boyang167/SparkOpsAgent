@@ -110,8 +110,11 @@ export async function getFileNode(
   ctx: BffContext,
   workspaceId: string,
   nodeId: string,
+  namespaceId?: string,
 ): Promise<FileNodeVM> {
-  const data = await ctx.upstream.filesystem.getFileNode(workspaceId, nodeId);
+  const data = await ctx.upstream.filesystem.getFileNode(workspaceId, nodeId, {
+    namespace_id: namespaceId,
+  });
   return mapNode(data);
 }
 
@@ -154,7 +157,7 @@ export async function listFileRevisions(
   ctx: BffContext,
   workspaceId: string,
   nodeId: string,
-  query: { cursor?: string; limit?: number } = {},
+  query: { cursor?: string; limit?: number; namespace_id?: string } = {},
 ): Promise<FileRevisionPageVM> {
   const data = await ctx.upstream.filesystem.listRevisions(workspaceId, nodeId, query);
   return mapRevisionPage(data);

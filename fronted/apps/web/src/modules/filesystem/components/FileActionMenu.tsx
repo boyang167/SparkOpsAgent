@@ -11,6 +11,7 @@ export type FileActionMenuProps = {
   onShare?: (node: FileNodeVM, effectiveActions: GovernedPermission[]) => void;
   onRename: (node: FileNodeVM) => void;
   onMove: (nodes: FileNodeVM[]) => void;
+  density?: "default" | "compact";
 };
 
 export function FileActionMenu({
@@ -22,6 +23,7 @@ export function FileActionMenu({
   onShare,
   onRename,
   onMove,
+  density = "default",
 }: FileActionMenuProps) {
   const [effectiveActions, setEffectiveActions] = useState<GovernedPermission[]>([]);
 
@@ -48,15 +50,25 @@ export function FileActionMenu({
   }, [node.id, node.state, onShare, organizationId, workspaceId]);
 
   const canShare = effectiveActions.includes("SHARE");
+  const actionClass =
+    density === "compact"
+      ? "btn btn-ghost btn-sm filesystem-file-action filesystem-touch-target"
+      : "btn btn-ghost btn-sm filesystem-touch-target";
+
   return createElement(
     "div",
-    { className: "flex flex-wrap justify-end gap-1", "aria-label": `${node.name} 操作` },
+    {
+      className: `filesystem-file-actions flex flex-wrap justify-end gap-1${
+        density === "compact" ? " is-compact" : ""
+      }`,
+      "aria-label": `${node.name} 操作`,
+    },
     canRename
       ? createElement(
           "button",
           {
             type: "button",
-            className: "btn btn-ghost btn-sm filesystem-touch-target",
+            className: actionClass,
             "aria-label": `重命名 ${node.name}`,
             onClick: () => onRename(node),
           },
@@ -68,7 +80,7 @@ export function FileActionMenu({
           "button",
           {
             type: "button",
-            className: "btn btn-ghost btn-sm filesystem-touch-target",
+            className: actionClass,
             "aria-label": `移动到… ${node.name}`,
             onClick: () => onMove([node]),
           },
@@ -80,7 +92,7 @@ export function FileActionMenu({
           "button",
           {
             type: "button",
-            className: "btn btn-ghost btn-sm filesystem-touch-target",
+            className: actionClass,
             "aria-label": `共享 ${node.name}`,
             onClick: () => {
               if (effectiveActions.includes("SHARE")) onShare?.(node, effectiveActions);

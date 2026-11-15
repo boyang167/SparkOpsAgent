@@ -12,10 +12,12 @@ import type {
   TransferSessionVM,
   TransferStatus as PersistedStatus,
 } from "@sparkops/contracts/filesystem";
+import Link from "next/link";
 import {
   abortTransfer,
   listTransferSessions,
 } from "@sparkops/web-sdk/filesystem";
+import { computeTransferMetrics, transferDisplayId } from "./transfer-center-stats";
 import type { TransferItem, TransferQueue, TransferStatus } from "./transfer-queue";
 
 const statusLabels: Record<TransferStatus, string> = {
@@ -65,22 +67,127 @@ function statusLabel(item: TransferItem) {
   return statusLabels[item.status];
 }
 
-function Progress({ item }: { item: TransferItem }) {
-  const value = percent(item);
+function ProgressBar({
+  label,
+  value,
+}: {
+  label: string;
+  value: number;
+}) {
+  const clamped = Math.min(100, Math.max(0, value));
+  return createElement(
+    "div",
+    { className: "filesystem-transfer-progress stack-xs min-w-[8rem]" },
+    createElement(
+      "div",
+      {
+        role: "progressbar",
+        "aria-label": label,
+        "aria-valuemin": 0,
+        "aria-valuemax": 100,
+        "aria-valuenow": clamped,
+        className: "h-1.5 overflow-hidden rounded-full bg-surface-muted",
+      },
+      createElement("div", {
+        className: "filesystem-progress-fill h-full bg-primary",
+        style: { width: `${clamped}%` },
+      }),
+    ),
+    createElement("span", { className: "text-xs text-muted tabular-nums" }, `${clamped}%`),
+  );
+}
+
+function StatusBadge({ label, tone }: { label: string; tone: string }) {
+  return createElement(
+    "span",
+    { className: `badge ${tone} text-xs` },
+    label,
+  );
+}
+
+function badgeToneForLocal(item: TransferItem) {
+  if (item.status === "completed") return "badge-success";
+  if (item.status === "failed") return "badge-danger";
+  if (item.status === "canceled") return "badge-neutral";
+  return "badge-primary";
+}
+
+function badgeToneForPersisted(status: PersistedStatus) {
+  if (status === "COMPLETED") return "badge-success";
+  if (status === "FAILED" || status === "REJECTED" || status === "EXPIRED") {
+    return "badge-danger";
+  }
+  if (status === "PAUSED") return "badge-warning";
+  if (status === "ABORTED") return "badge-neutral";
+  return "badge-primary";
+}
+
+function persistedPercent(session: TransferSessionVM) {
+  return session.status === "COMPLETED" ? 100 : 0;
+}
+
+function TransferPageHeader({ actions }: { actions: ReturnType<typeof createElement> }) {
+  return createElement(
+    "div",
+    { className: "section-header !mb-0" },
+    createElement(
+      "div",
+      null,
+      createElement("h1", { className: "page-title mt-1" }, "传输中心"),
+      createElement(
+        "p",
+        { className: "text-muted mt-2" },
+        "统一管理上传、校验与提交状态。任务在后台持续运行，失败后可单独重试。",
+      ),
+    ),
+    actions ?? null,
+  );
+}
+
+function TransferStateMachineHint() {
+  return createElement(
+    "aside",
+    { className: "card stack-xs text-sm text-muted", "aria-label": "传输状态机" },
+    createElement("p", { className: "font-medium text" }, "传输状态机"),
+    createElement(
+      "p",
+      null,
+      "INITIATED → UPLOADING → PAUSED → VERIFYING → SCANNING → COMMITTING → COMPLETED",
+    ),
+    createElement(
+      "p",
+      { className: "text-xs" },
+      "失败、中止或过期会终止当前会话；客户端重试将创建新的传输会话。",
+    ),
+  );
+}
+
+function TransferMetricStrip({ counts }: { counts: ReturnType<typeof computeTransferMetrics> }) {
+  const cards = [
+    { label: "进行中", value: counts.running, hint: "正在处理", tone: "metric-card-sky" },
+    { label: "已完成", value: counts.completed, hint: "本会话", tone: "metric-card-emerald" },
+    { label: "已暂停", value: counts.paused, hint: "可恢复", tone: "metric-card-amber" },
+    { label: "失败任务", value: counts.failed, hint: "需处理", tone: "metric-card-violet" },
+  ];
   return createElement(
     "div",
     {
-      role: "progressbar",
-      "aria-label": `${item.file.name} 上传进度`,
-      "aria-valuemin": 0,
-      "aria-valuemax": 100,
-      "aria-valuenow": value,
-      className: "h-1.5 overflow-hidden rounded-full bg-surface-muted",
+      className: "filesystem-transfer-metrics grid gap-3 sm:grid-cols-2 xl:grid-cols-4",
+      "aria-label": "传输概览",
     },
-    createElement("div", {
-      className: "filesystem-progress-fill h-full bg-primary",
-      style: { width: `${value}%` },
-    }),
+    cards.map((card) =>
+      createElement(
+        "article",
+        { key: card.label, className: `metric-card ${card.tone}` },
+        createElement(
+          "div",
+          { className: "metric-card-body" },
+          createElement("p", { className: "metric-card-label" }, card.label),
+          createElement("p", { className: "metric-card-value" }, card.value),
+          createElement("p", { className: "metric-card-hint" }, card.hint),
+        ),
+      ),
+    ),
   );
 }
 
@@ -95,7 +202,6 @@ function PersistedTransferCard({
   canWrite: boolean;
   onRefresh: () => void;
 }) {
-  const completed = session.status === "COMPLETED";
   const terminal = new Set<PersistedStatus>([
     "COMPLETED",
     "FAILED",
@@ -135,95 +241,178 @@ function PersistedTransferCard({
     }
     queue.enqueue([file], session.target_parent_id);
   }
+  const progress = persistedPercent(session);
   return createElement(
-    "article",
-    { className: "card stack-sm" },
+    "tr",
+    null,
     createElement(
-      "div",
-      { className: "flex flex-wrap items-start justify-between gap-3" },
-      createElement(
-        "div",
-        { className: "min-w-0" },
-        createElement("h3", { className: "truncate font-medium" }, session.target_name),
-        createElement(
-          "p",
-          { className: "text-sm text-muted" },
-          persistedStatusLabels[session.status],
-        ),
-      ),
-      canWrite && !terminal.has(session.status)
-        ? createElement(
-            "button",
-            {
-              type: "button",
-              className: "btn btn-ghost btn-sm",
-              "aria-label": `取消 ${session.target_name}`,
-              disabled: busy,
-              onClick: () => void cancelPersisted(),
-            },
-            busy ? "正在取消" : "取消",
-          )
-        : null,
+      "td",
+      { className: "min-w-[12rem]" },
+      createElement("p", { className: "font-mono text-xs text-muted" }, transferDisplayId(session.session_id)),
+      createElement("p", { className: "truncate font-medium" }, session.target_name),
     ),
+    createElement("td", null, "上传"),
     createElement(
-      "div",
-      {
-        role: "progressbar",
-        "aria-label": `${session.target_name} 上传进度`,
-        "aria-valuemin": 0,
-        "aria-valuemax": 100,
-        "aria-valuenow": completed ? 100 : 0,
-        className: "h-1.5 overflow-hidden rounded-full bg-surface-muted",
-      },
-      createElement("div", {
-        className: "filesystem-progress-fill h-full bg-primary",
-        style: { width: completed ? "100%" : "0%" },
+      "td",
+      null,
+      createElement(ProgressBar, {
+        label: `${session.target_name} 上传进度`,
+        value: progress,
       }),
     ),
     createElement(
-      "p",
-      { className: "text-xs text-muted" },
-      `${completed ? session.expected_size : 0} / ${session.expected_size} 字节`,
-    ),
-    session.error_code
-      ? createElement(
-          "p",
-          { role: "alert", className: "text-sm text-danger" },
-          session.error_code,
-        )
-      : null,
-    canWrite && session.status === "FAILED"
-      ? createElement(
-          "div",
-          { className: "stack-xs" },
-          createElement(
+      "td",
+      null,
+      createElement(StatusBadge, {
+        label: persistedStatusLabels[session.status],
+        tone: badgeToneForPersisted(session.status),
+      }),
+      session.error_code
+        ? createElement(
             "p",
-            { className: "text-sm text-muted" },
-            "旧会话已失败；重新选择匹配文件后将新建传输，不会恢复旧会话。",
-          ),
-          createElement(
-            "label",
-            { className: "btn btn-secondary btn-sm self-start" },
-            "重新选择并新建",
-            createElement("input", {
-              type: "file",
-              className: "sr-only",
-              "aria-label": `重新选择并新建 ${session.target_name}`,
-              onChange: (event: ChangeEvent<HTMLInputElement>) => {
-                selectReplacement(event.currentTarget.files?.[0]);
-                event.currentTarget.value = "";
+            { role: "alert", className: "mt-1 text-xs text-danger" },
+            session.error_code,
+          )
+        : null,
+    ),
+    createElement("td", { className: "text-muted tabular-nums" }, "—"),
+    createElement(
+      "td",
+      { className: "text-right" },
+      createElement(
+        "div",
+        { className: "flex flex-col items-end gap-2" },
+        canWrite && !terminal.has(session.status)
+          ? createElement(
+              "button",
+              {
+                type: "button",
+                className: "btn btn-ghost btn-sm",
+                "aria-label": `取消 ${session.target_name}`,
+                disabled: busy,
+                onClick: () => void cancelPersisted(),
               },
-            }),
-          ),
-        )
-      : null,
-    actionError
-      ? createElement(
-          "p",
-          { role: "alert", className: "text-sm text-danger" },
-          actionError,
-        )
-      : null,
+              busy ? "正在取消" : "取消",
+            )
+          : null,
+        canWrite && session.status === "FAILED"
+          ? createElement(
+              "div",
+              { className: "stack-xs items-end text-right" },
+              createElement(
+                "p",
+                { className: "max-w-xs text-xs text-muted" },
+                "旧会话已失败；重新选择匹配文件后将新建传输，不会恢复旧会话。",
+              ),
+              createElement(
+                "label",
+                { className: "btn btn-secondary btn-sm" },
+                "重新选择并新建",
+                createElement("input", {
+                  type: "file",
+                  className: "sr-only",
+                  "aria-label": `重新选择并新建 ${session.target_name}`,
+                  onChange: (event: ChangeEvent<HTMLInputElement>) => {
+                    selectReplacement(event.currentTarget.files?.[0]);
+                    event.currentTarget.value = "";
+                  },
+                }),
+              ),
+            )
+          : null,
+        actionError
+          ? createElement(
+              "p",
+              { role: "alert", className: "text-xs text-danger" },
+              actionError,
+            )
+          : null,
+      ),
+    ),
+  );
+}
+
+function LocalTransferRow({
+  item,
+  canWrite,
+  queue,
+}: {
+  item: TransferItem;
+  canWrite: boolean;
+  queue: TransferQueue;
+}) {
+  const progress = percent(item);
+  const sessionId = item.session?.session_id ?? item.id;
+  const speed =
+    item.status === "uploading" || item.status === "verifying" ? "实时" : "—";
+  return createElement(
+    "tr",
+    null,
+    createElement(
+      "td",
+      { className: "min-w-[12rem]" },
+      createElement("p", { className: "font-mono text-xs text-muted" }, transferDisplayId(sessionId)),
+      createElement("p", { className: "truncate font-medium" }, item.file.name),
+    ),
+    createElement("td", null, "上传"),
+    createElement(
+      "td",
+      null,
+      createElement(ProgressBar, {
+        label: `${item.file.name} 上传进度`,
+        value: progress,
+      }),
+    ),
+    createElement(
+      "td",
+      null,
+      createElement(StatusBadge, {
+        label: statusLabel(item),
+        tone: badgeToneForLocal(item),
+      }),
+      item.error
+        ? createElement(
+            "p",
+            { role: "alert", className: "mt-1 text-xs text-danger" },
+            item.error,
+          )
+        : null,
+    ),
+    createElement("td", { className: "text-muted tabular-nums" }, speed),
+    createElement(
+      "td",
+      { className: "text-right" },
+      createElement(
+        "div",
+        { className: "flex flex-wrap justify-end gap-2" },
+        canWrite && item.status === "failed"
+          ? createElement(
+              "button",
+              {
+                type: "button",
+                className: "btn btn-secondary btn-sm",
+                "aria-label": `重试 ${item.file.name}`,
+                onClick: () => queue.retry(item.id),
+              },
+              "重试",
+            )
+          : null,
+        canWrite &&
+        !item.cancelRequested &&
+        ["queued", "creating", "uploading", "verifying"].includes(item.status)
+          ? createElement(
+              "button",
+              {
+                type: "button",
+                className: "btn btn-ghost btn-sm",
+                "aria-label": `取消 ${item.file.name}`,
+                onClick: () => queue.cancel(item.id),
+              },
+              "取消",
+            )
+          : null,
+      ),
+    ),
   );
 }
 
@@ -380,6 +569,31 @@ export function TransferCenter({
     (session) => !localSessionIDs.has(session.session_id),
   );
 
+  const metrics = computeTransferMetrics(items, visiblePersisted);
+  const headerActions = createElement(
+    "div",
+    { className: "flex flex-wrap items-center gap-2" },
+    workspaceId
+      ? createElement(
+          "button",
+          {
+            type: "button",
+            className: "btn btn-ghost btn-sm",
+            disabled:
+              scopedPersisted.phase === "loading" ||
+              scopedPersisted.phase === "refreshing",
+            onClick: () => beginFirstPageRequest(workspaceId, true),
+          },
+          "刷新",
+        )
+      : null,
+    createElement(
+      Link,
+      { href: "/files/data/workspace", className: "btn btn-primary btn-sm filesystem-touch-target" },
+      "新建传输",
+    ),
+  );
+
   if (
     items.length === 0 &&
     visiblePersisted.length === 0 &&
@@ -387,24 +601,20 @@ export function TransferCenter({
   ) {
     return createElement(
       "div",
-      { className: "empty-state stack-sm" },
-      createElement("h2", { className: "section-title" }, "暂无传输任务"),
+      { className: "stack-lg", "aria-label": "传输中心" },
+      createElement(TransferPageHeader, { actions: headerActions }),
+      createElement(TransferMetricStrip, { counts: metrics }),
       createElement(
-        "p",
-        { className: "text-sm text-muted" },
-        "上传文件后，可在这里查看进度并处理失败任务。",
+        "div",
+        { className: "card empty-state stack-sm" },
+        createElement("h2", { className: "section-title" }, "暂无传输任务"),
+        createElement(
+          "p",
+          { className: "text-sm text-muted" },
+          "在文件浏览中上传后，将在此展示进度与历史会话。",
+        ),
       ),
-      workspaceId
-        ? createElement(
-            "button",
-            {
-              type: "button",
-              className: "btn btn-secondary btn-sm self-start",
-              onClick: () => beginFirstPageRequest(workspaceId, true),
-            },
-            "刷新",
-          )
-        : null,
+      createElement(TransferStateMachineHint, null),
     );
   }
 
@@ -451,109 +661,65 @@ export function TransferCenter({
   }
 
   return createElement(
-    "section",
-    { className: "stack-md", "aria-label": "传输任务" },
+    "div",
+    { className: "stack-lg", "aria-label": "传输中心" },
+    createElement(TransferPageHeader, { actions: headerActions }),
+    createElement(TransferMetricStrip, { counts: metrics }),
     createElement(
-      "div",
-      { className: "stack-sm" },
-      createElement("h2", { className: "section-title" }, "传输"),
+      "section",
+      { className: "card overflow-hidden stack-sm", "aria-label": "传输任务" },
       createElement(
         "div",
-        { className: "flex flex-wrap items-center justify-between gap-3" },
-        createElement(
-          "p",
-          { className: "text-sm text-muted" },
-          "任务会在后台继续运行，失败后可单独重试。",
-        ),
-        workspaceId
-          ? createElement(
-              "button",
-              {
-                type: "button",
-                className: "btn btn-ghost btn-sm",
-                disabled:
-                  scopedPersisted.phase === "loading" ||
-                  scopedPersisted.phase === "refreshing",
-                onClick: () => beginFirstPageRequest(workspaceId, true),
-              },
-              "刷新",
-            )
-          : null,
-      ),
-    ),
-    items.map((item) =>
-      createElement(
-        "article",
-        { key: item.id, className: "card stack-sm" },
-        createElement(
-          "div",
-          { className: "flex flex-wrap items-start justify-between gap-3" },
-          createElement(
-            "div",
-            { className: "min-w-0" },
-            createElement("h3", { className: "truncate font-medium" }, item.file.name),
-            createElement(
-              "p",
-              { className: "text-sm text-muted" },
-              statusLabel(item),
-            ),
-          ),
-          createElement(
-            "div",
-            { className: "flex gap-2" },
-            canWrite && item.status === "failed"
-              ? createElement(
-                  "button",
-                  {
-                    type: "button",
-                    className: "btn btn-secondary btn-sm",
-                    "aria-label": `重试 ${item.file.name}`,
-                    onClick: () => queue.retry(item.id),
-                  },
-                  "重试",
-                )
-              : null,
-            canWrite &&
-            !item.cancelRequested &&
-            ["queued", "creating", "uploading", "verifying"].includes(item.status)
-              ? createElement(
-                  "button",
-                  {
-                    type: "button",
-                    className: "btn btn-ghost btn-sm",
-                    "aria-label": `取消 ${item.file.name}`,
-                    onClick: () => queue.cancel(item.id),
-                  },
-                  "取消",
-                )
-              : null,
-          ),
-        ),
-        createElement(Progress, { item }),
+        { className: "flex items-center justify-between gap-3 border-b border-border px-4 py-3" },
+        createElement("h2", { className: "section-title" }, "传输任务"),
         createElement(
           "p",
           { className: "text-xs text-muted" },
-          `${item.progress.uploadedBytes} / ${item.progress.totalBytes} 字节`,
+          `${items.length + visiblePersisted.length} 条记录`,
         ),
-        item.error
-          ? createElement(
-              "p",
-              { role: "alert", className: "text-sm text-danger" },
-              item.error,
-            )
-          : null,
       ),
-    ),
-    visiblePersisted.map((session) =>
-      createElement(PersistedTransferCard, {
-        key: session.session_id,
-        session,
-        queue,
-        canWrite,
-        onRefresh: () => {
-          if (workspaceId) beginFirstPageRequest(workspaceId, false);
-        },
-      }),
+      createElement(
+        "div",
+        { className: "overflow-x-auto" },
+        createElement(
+          "table",
+          { className: "data-table w-full text-sm" },
+          createElement(
+            "thead",
+            null,
+            createElement(
+              "tr",
+              null,
+              ["任务 ID / 文件", "方向", "进度", "状态", "速度", "操作"].map((column) =>
+                createElement("th", { key: column, scope: "col" }, column),
+              ),
+            ),
+          ),
+          createElement(
+            "tbody",
+            null,
+            items.map((item) =>
+              createElement(LocalTransferRow, {
+                key: item.id,
+                item,
+                canWrite,
+                queue,
+              }),
+            ),
+            visiblePersisted.map((session) =>
+              createElement(PersistedTransferCard, {
+                key: session.session_id,
+                session,
+                queue,
+                canWrite,
+                onRefresh: () => {
+                  if (workspaceId) beginFirstPageRequest(workspaceId, false);
+                },
+              }),
+            ),
+          ),
+        ),
+      ),
     ),
     scopedPersisted.phase === "loading"
       ? createElement(
@@ -612,6 +778,7 @@ export function TransferCenter({
           "加载更多",
         )
       : null,
+    createElement(TransferStateMachineHint, null),
   );
 }
 
@@ -629,10 +796,12 @@ export function TransferSummary({
   queue: TransferQueue;
   onViewAll: () => void;
 }) {
-  const active = useTransfers(queue)
+  const items = useTransfers(queue);
+  const active = items
     .filter((item) => activeStatuses.has(item.status))
     .slice(0, 3);
-  if (active.length === 0) return null;
+  const failed = items.filter((item) => item.status === "failed").slice(0, 2);
+  if (active.length === 0 && failed.length === 0) return null;
 
   return createElement(
     "section",
@@ -645,9 +814,31 @@ export function TransferSummary({
           "div",
           { className: "flex justify-between gap-3 text-sm" },
           createElement("span", { className: "truncate" }, item.file.name),
-          createElement("span", { className: "shrink-0 text-muted" }, `${percent(item)}%`),
+          createElement(
+            "span",
+            { className: "shrink-0 text-muted" },
+            statusLabel(item),
+          ),
         ),
-        createElement(Progress, { item }),
+        createElement(ProgressBar, {
+          label: `${item.file.name} 上传进度`,
+          value: percent(item),
+        }),
+      ),
+    ),
+    failed.map((item) =>
+      createElement(
+        "div",
+        { key: item.id, className: "stack-xs", role: "alert" },
+        createElement(
+          "div",
+          { className: "flex justify-between gap-3 text-sm" },
+          createElement("span", { className: "truncate" }, item.file.name),
+          createElement("span", { className: "shrink-0 text-danger" }, "上传失败"),
+        ),
+        item.error
+          ? createElement("p", { className: "text-xs text-danger" }, item.error)
+          : null,
       ),
     ),
     createElement(

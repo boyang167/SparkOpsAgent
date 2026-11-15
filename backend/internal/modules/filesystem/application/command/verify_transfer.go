@@ -50,6 +50,9 @@ func (h *VerifyTransferHandler) Handle(ctx context.Context, cmd VerifyTransfer) 
 	}
 	session, err := h.prepareForScanning(ctx, cmd)
 	if err != nil {
+		if errors.Is(err, errVerifyTerminal) {
+			return nil
+		}
 		return err
 	}
 	providerID := session.ProviderID()
@@ -108,7 +111,8 @@ func (h *VerifyTransferHandler) prepareForScanning(ctx context.Context, cmd Veri
 			return domain.ErrNamespaceMismatch
 		}
 		switch session.Status() {
-		case model.TransferCompleted, model.TransferRejected:
+		case model.TransferCompleted, model.TransferRejected, model.TransferFailed,
+			model.TransferAborted, model.TransferExpired:
 			prepared = session
 			return errVerifyTerminal
 		case model.TransferScanning:
@@ -192,11 +196,19 @@ func (h *VerifyTransferHandler) prepareForScanning(ctx context.Context, cmd Veri
 		if failErr := h.markTransferFailed(ctx, cmd.SessionID, "integrity_mismatch"); failErr != nil {
 			return nil, failErr
 		}
+		if failed, readErr := h.repo.GetTransferByID(ctx, cmd.SessionID); readErr == nil &&
+			failed.Status() == model.TransferFailed {
+			return failed, errVerifyTerminal
+		}
 		return nil, model.ErrTransferIntegrity
 	}
 	if errors.Is(err, errTransferObjectMissingPersist) {
 		if failErr := h.markTransferFailed(ctx, cmd.SessionID, "object_missing"); failErr != nil {
 			return nil, failErr
+		}
+		if failed, readErr := h.repo.GetTransferByID(ctx, cmd.SessionID); readErr == nil &&
+			failed.Status() == model.TransferFailed {
+			return failed, errVerifyTerminal
 		}
 		return nil, storage.ErrNotFound
 	}

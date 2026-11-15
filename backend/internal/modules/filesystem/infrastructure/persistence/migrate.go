@@ -203,6 +203,7 @@ func AutoMigrate(db *gorm.DB) error {
 		for _, statement := range []string{
 			`ALTER TABLE filesystem.nodes ADD COLUMN classification TEXT NOT NULL DEFAULT 'RESTRICTED' CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED'))`,
 			`ALTER TABLE filesystem.transfer_sessions ADD COLUMN committed_node_id BLOB`,
+			`ALTER TABLE filesystem.transfer_sessions ADD COLUMN provider_upload_id TEXT`,
 			`ALTER TABLE filesystem.export_tasks ADD COLUMN classification TEXT NOT NULL DEFAULT 'RESTRICTED' CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED'))`,
 			`ALTER TABLE filesystem.share_requests ADD COLUMN effect TEXT NOT NULL DEFAULT 'ALLOW' CHECK (effect IN ('ALLOW','DENY'))`,
 			`ALTER TABLE filesystem.blobs ADD COLUMN tombstoned_at DATETIME`,

@@ -39,6 +39,9 @@ function isPluginPath(path: string): boolean {
 }
 
 function iconKeyForNode(node: MenuTreeVM): string {
+  if (node.path === "/files") {
+    return "filesystem";
+  }
   if (node.path === "/plugins/kubernetes" || node.path.startsWith("/plugins/kubernetes/")) {
     return "plugin-kubernetes";
   }

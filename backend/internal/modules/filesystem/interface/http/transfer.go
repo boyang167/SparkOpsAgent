@@ -16,6 +16,7 @@ import (
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/platform/httpx"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/storage"
 )
 
 type TransferGatewayView struct {
@@ -77,26 +78,24 @@ func (h *Handler) CreateTransfer(c *gin.Context) {
 		filesystemError(c, domain.ErrPersistence)
 		return
 	}
+	targetNS, ok := h.resolveMutationNamespace(c, rc, body.NamespaceID)
+	if !ok {
+		return
+	}
+	rc.namespace = targetNS
 	if parentID == nil {
-		parentID = rc.namespace.RootNodeID
+		parentID = targetNS.RootNodeID
 	}
 	if parentID == nil {
 		filesystemError(c, domain.ErrNamespaceNotFound)
 		return
 	}
 	cmd := command.CreateTransfer{
-		ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID,
-		WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, ParentID: parentID,
+		ActorID: rc.actorID, OrganizationID: targetNS.OrganizationID,
+		WorkspaceID: rc.workspaceID, NamespaceID: targetNS.ID, ParentID: parentID,
 		Name: body.Name, Protocol: body.Protocol, Size: body.Size,
 		SHA256: strings.ToLower(strings.TrimSpace(body.SHA256)), Classification: body.Classification,
 		IdempotencyKey: c.GetString(idempotencyContextKey), ExpiresAt: expiresAt, ProviderID: providerID,
-	}
-	if body.NamespaceID != "" {
-		namespaceID, valid := canonicalUUID(body.NamespaceID)
-		if !valid || namespaceID != rc.namespace.ID {
-			filesystemError(c, domain.ErrNamespaceMismatch)
-			return
-		}
 	}
 	auth := h.resourceDecision(c, rc, *parentID, model.ResourcePermissionWrite)
 	auth.TraceID = rc.traceID
@@ -112,7 +111,18 @@ func (h *Handler) CreateTransfer(c *gin.Context) {
 		filesystemError(c, err)
 		return
 	}
-	created(c, transferSessionView(result, h.transferGatewayView))
+	if result.Session.Protocol() == model.TransferProtocolMultipart && h.prepareTransferMultipart != nil {
+		if err := h.prepareTransferMultipart(c.Request.Context(), sessionID); err != nil {
+			filesystemError(c, err)
+			return
+		}
+		result, err = h.getTransferAuthorized(c, rc, sessionID, model.ResourcePermissionRead)
+		if err != nil {
+			filesystemError(c, err)
+			return
+		}
+	}
+	created(c, h.transferSessionView(c.Request.Context(), result))
 }
 
 func (h *Handler) GetTransfer(c *gin.Context) {
@@ -134,7 +144,36 @@ func (h *Handler) GetTransfer(c *gin.Context) {
 		filesystemError(c, err)
 		return
 	}
-	httpx.OK(c, transferSessionView(result, h.transferGatewayView))
+	httpx.OK(c, h.transferSessionView(c.Request.Context(), result))
+}
+
+func (h *Handler) CompleteTransfer(c *gin.Context) {
+	rc, ok := h.requestContext(c, true)
+	if !ok {
+		return
+	}
+	sessionID, ok := canonicalUUID(c.Param("sessionId"))
+	if !ok {
+		invalidRequest(c)
+		return
+	}
+	if h.completeTransferMultipart == nil {
+		filesystemError(c, domain.ErrPersistence)
+		return
+	}
+	err := h.completeTransferMultipart(c.Request.Context(), command.CompleteTransferMultipart{
+		SessionID: sessionID, WorkspaceID: rc.workspaceID,
+	})
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	result, err := h.getTransferAuthorized(c, rc, sessionID, model.ResourcePermissionRead)
+	if err != nil {
+		filesystemError(c, err)
+		return
+	}
+	httpx.OK(c, h.transferSessionView(c.Request.Context(), result))
 }
 
 func (h *Handler) ListTransfers(c *gin.Context) {
@@ -172,22 +211,21 @@ func (h *Handler) ListTransfers(c *gin.Context) {
 			return
 		}
 		for _, session := range items {
-			parent := session.TargetParentID()
-			if parent == nil {
-				parent = rc.namespace.RootNodeID
-			}
-			if parent == nil {
+			parent, parentErr := h.transferAuthParent(c.Request.Context(), session)
+			if parentErr != nil {
 				continue
 			}
-			decision := h.resourceDecision(c, rc, *parent, model.ResourcePermissionRead)
+			decision := h.resourceDecisionForNamespace(
+				c, rc, session.NamespaceID(), parent, model.ResourcePermissionRead,
+			)
 			if !decision.Allowed {
-				h.auditResourceDeny(c, rc, *parent, decision.Reason)
+				h.auditResourceDeny(c, rc, parent, decision.Reason)
 				continue
 			}
-			views = append(views, transferSessionView(query.GetTransferResult{
+			views = append(views, h.transferSessionView(c.Request.Context(), query.GetTransferResult{
 				Session:    session,
 				Descriptor: command.DescriptorFromSession(session),
-			}, TransferGatewayView{}))
+			}))
 		}
 		nextCursor = rawNext
 		if rawNext == "" || rawNext == scanCursor {
@@ -244,14 +282,14 @@ func (h *Handler) AbortTransfer(c *gin.Context) {
 		filesystemError(c, domain.ErrPersistence)
 		return
 	}
-	parent, err := h.transferParent(c.Request.Context(), rc, sessionID)
+	parent, namespaceID, err := h.transferAuthScope(c.Request.Context(), rc.workspaceID, sessionID)
 	if err != nil {
 		filesystemError(c, err)
 		return
 	}
-	auth := h.resourceDecision(c, rc, parent, model.ResourcePermissionWrite)
+	auth := h.resourceDecisionForNamespace(c, rc, namespaceID, parent, model.ResourcePermissionWrite)
 	err = h.abortTransfer(c.Request.Context(), command.AbortTransfer{
-		ActorID: rc.actorID, WorkspaceID: rc.workspaceID, SessionID: sessionID,
+		ActorID: rc.actorID, WorkspaceID: rc.workspaceID, NamespaceID: namespaceID, SessionID: sessionID,
 		Authorization: auth,
 	})
 	if err != nil {
@@ -263,35 +301,57 @@ func (h *Handler) AbortTransfer(c *gin.Context) {
 
 func (h *Handler) getTransferAuthorized(c *gin.Context, rc requestContext, sessionID uuid.UUID, permission model.ResourcePermission) (query.GetTransferResult, error) {
 	var out query.GetTransferResult
-	parent, err := h.transferParent(c.Request.Context(), rc, sessionID)
+	parent, namespaceID, err := h.transferAuthScope(c.Request.Context(), rc.workspaceID, sessionID)
 	if err != nil {
 		return out, err
 	}
 	return h.getTransfer(c.Request.Context(), query.GetTransfer{
 		WorkspaceID: rc.workspaceID, SessionID: sessionID,
-		Authorization: h.resourceDecision(c, rc, parent, permission),
+		Authorization: h.resourceDecisionForNamespace(c, rc, namespaceID, parent, permission),
 	})
 }
 
-func (h *Handler) transferParent(ctx context.Context, rc requestContext, sessionID uuid.UUID) (uuid.UUID, error) {
+func (h *Handler) transferAuthScope(ctx context.Context, workspaceID, sessionID uuid.UUID) (parentID, namespaceID uuid.UUID, err error) {
+	if h == nil || h.peekTransfer == nil {
+		return uuid.Nil, uuid.Nil, domain.ErrPersistence
+	}
 	session, err := h.peekTransfer(ctx, sessionID)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, uuid.Nil, err
 	}
-	if session.WorkspaceID() != rc.workspaceID {
+	if session.WorkspaceID() != workspaceID {
+		return uuid.Nil, uuid.Nil, domain.ErrTransferNotFound
+	}
+	parent, err := h.transferAuthParent(ctx, session)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	return parent, session.NamespaceID(), nil
+}
+
+func (h *Handler) transferAuthParent(ctx context.Context, session *model.TransferSession) (uuid.UUID, error) {
+	if session == nil {
 		return uuid.Nil, domain.ErrTransferNotFound
 	}
 	parent := session.TargetParentID()
-	if parent == nil {
-		parent = rc.namespace.RootNodeID
+	if parent != nil {
+		return *parent, nil
 	}
-	if parent == nil {
+	if h == nil || h.namespaceByID == nil {
+		return uuid.Nil, domain.ErrPersistence
+	}
+	namespace, err := h.namespaceByID(ctx, session.NamespaceID())
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if namespace == nil || namespace.RootNodeID == nil {
 		return uuid.Nil, domain.ErrParentNotFound
 	}
-	return *parent, nil
+	return *namespace.RootNodeID, nil
 }
 
-func transferSessionView(result query.GetTransferResult, gw TransferGatewayView) gin.H {
+func (h *Handler) transferSessionView(ctx context.Context, result query.GetTransferResult) gin.H {
+	gw := h.transferGatewayView
 	view := gin.H{
 		"session_id":       result.Session.ID(),
 		"workspace_id":     result.Session.WorkspaceID(),
@@ -306,7 +366,7 @@ func transferSessionView(result query.GetTransferResult, gw TransferGatewayView)
 		"total_parts":      result.Descriptor.TotalParts,
 		"expires_at":       result.Session.ExpiresAt().UTC().Format(time.RFC3339Nano),
 		"error_code":       result.Session.ErrorCode(),
-		"parts":            transferPartsView(result.Parts),
+		"parts":            h.transferPartsView(ctx, result),
 	}
 	if base := strings.TrimRight(strings.TrimSpace(gw.PublicURL), "/"); base != "" && gw.Issuer != nil &&
 		result.Session.Protocol() == model.TransferProtocolDirect && result.Session.ExpectedSize() >= 0 {
@@ -316,6 +376,45 @@ func transferSessionView(result query.GetTransferResult, gw TransferGatewayView)
 		}
 	}
 	return view
+}
+
+func (h *Handler) transferPartsView(ctx context.Context, result query.GetTransferResult) []gin.H {
+	views := transferPartsView(result.Parts)
+	if result.Session.Protocol() != model.TransferProtocolMultipart ||
+		h.transferProviderCatalog == nil || h.transferProviderUploadID == nil {
+		return views
+	}
+	providerID := result.Session.ProviderID()
+	if providerID == nil {
+		return views
+	}
+	uploadID, err := h.transferProviderUploadID(ctx, result.Session.ID())
+	if err != nil || strings.TrimSpace(uploadID) == "" {
+		return views
+	}
+	provider, err := h.transferProviderCatalog.Provider(ctx, *providerID)
+	if err != nil {
+		return views
+	}
+	multipart, ok := provider.(storage.MultipartProvider)
+	if !ok {
+		return views
+	}
+	expires := time.Until(result.Session.ExpiresAt())
+	if expires <= 0 {
+		return views
+	}
+	for i := range views {
+		partNumber, ok := views[i]["part_number"].(int)
+		if !ok || partNumber <= 0 {
+			continue
+		}
+		url, presignErr := multipart.PresignPart(ctx, uploadID, partNumber, expires)
+		if presignErr == nil && strings.TrimSpace(url) != "" {
+			views[i]["upload_url"] = url
+		}
+	}
+	return views
 }
 
 func transferPartsView(parts []model.TransferPart) []gin.H {

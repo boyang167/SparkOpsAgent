@@ -421,11 +421,11 @@ func NewCreateDirectoryHandler(repo repository.FilesystemRepository, tx postgres
 
 func (h *CreateDirectoryHandler) Handle(ctx context.Context, cmd CreateDirectory) (out *model.Node, err error) {
 	ctx = withTraceID(ctx, cmd.TraceID)
-	ns, scopeErr := h.repo.GetNamespaceByWorkspace(ctx, cmd.WorkspaceID)
+	ns, scopeErr := h.repo.GetNamespace(ctx, cmd.NamespaceID)
 	parent := uuid.Nil
 	if cmd.ParentID != nil {
 		parent = *cmd.ParentID
-	} else if scopeErr == nil && ns.RootNodeID != nil {
+	} else if scopeErr == nil && ns != nil && ns.RootNodeID != nil {
 		parent = *ns.RootNodeID
 	}
 	if parent != uuid.Nil {
@@ -440,7 +440,8 @@ func (h *CreateDirectoryHandler) Handle(ctx context.Context, cmd CreateDirectory
 		err := authorizationDenied(cmd.Reason)
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", err)
 	}
-	if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
+	if ns.OrganizationID != cmd.OrganizationID ||
+		(ns.NamespaceType == model.NamespaceTypeWorkspace && ns.WorkspaceID != cmd.WorkspaceID) {
 		return nil, deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.directory.create", domain.ErrNamespaceMismatch)
 	}
 	node, err := model.NewDirectory(cmd.NamespaceID, cmd.ActorID, cmd.Name, parent)

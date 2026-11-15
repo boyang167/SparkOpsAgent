@@ -48,7 +48,17 @@ describe("StoragePoolPanel", () => {
     expect(validateRegisterProviderForm({ name: "p", secret_ref: "", provider_type: "S3" })).toMatch(
       /Secret/,
     );
-    expect(validateRegisterProviderForm({ name: "p", secret_ref: "", provider_type: "LOCAL" })).toBeNull();
+    expect(
+      validateRegisterProviderForm({ name: "p", secret_ref: "", provider_type: "LOCAL", endpoint: "" }),
+    ).toMatch(/Endpoint/);
+    expect(
+      validateRegisterProviderForm({
+        name: "p",
+        secret_ref: "",
+        provider_type: "LOCAL",
+        endpoint: "A:\\data\\filesystem",
+      }),
+    ).toBeNull();
 
     const normalized = normalizeRegisterProviderCommand({
       name: " test ",

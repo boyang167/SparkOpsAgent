@@ -372,9 +372,14 @@ export function listFileNodes(
 export function getFileNode(
   workspaceId: string,
   nodeId: string,
+  query: { namespace_id?: string } = {},
   options: BffFetchOptions = {},
 ) {
-  return bffFetch<FileNodeVM>(`/workspaces/${workspaceId}/files/${nodeId}`, {
+  const params = new URLSearchParams();
+  if (query.namespace_id) params.set("namespace_id", query.namespace_id);
+  const suffix = params.toString();
+  const qs = suffix ? `?${suffix}` : "";
+  return bffFetch<FileNodeVM>(`/workspaces/${workspaceId}/files/${nodeId}${qs}`, {
     method: "GET",
     workspaceId,
     ...options,
@@ -432,12 +437,13 @@ export function moveFileNode(
 export function listFileRevisions(
   workspaceId: string,
   nodeId: string,
-  query: { cursor?: string; limit?: number } = {},
+  query: { cursor?: string; limit?: number; namespace_id?: string } = {},
   options: BffFetchOptions = {},
 ) {
   const params = new URLSearchParams();
   if (query.cursor) params.set("cursor", query.cursor);
   if (query.limit != null) params.set("limit", String(query.limit));
+  if (query.namespace_id) params.set("namespace_id", query.namespace_id);
   const suffix = params.toString();
   const qs = suffix ? `?${suffix}` : "";
   return bffFetch<FileRevisionPageVM>(
@@ -491,6 +497,21 @@ export function getTransferSession(
   return bffFetch<TransferSessionVM>(`/workspaces/${workspaceId}/transfers/${sessionId}`, {
     method: "GET",
     workspaceId,
+    ...options,
+  });
+}
+
+export function completeTransferSession(
+  sessionId: string,
+  workspaceId: string,
+  options: BffFetchOptions & { idempotencyKey?: string } = {},
+) {
+  const idempotencyKey = options.idempotencyKey ?? defaultIdempotencyKey();
+  return bffFetch<TransferSessionVM>(`/workspaces/${workspaceId}/transfers/${sessionId}/complete`, {
+    method: "POST",
+    body: "{}",
+    workspaceId,
+    headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
     ...options,
   });
 }

@@ -75,6 +75,15 @@ func New(root string) (*Provider, error) {
 
 func (p *Provider) ID() string { return "local" }
 
+// StorageRoot returns the absolute filesystem root for a local adapter instance.
+func StorageRoot(p storage.Provider) (string, bool) {
+	lp, ok := p.(*Provider)
+	if !ok || lp == nil {
+		return "", false
+	}
+	return lp.root, true
+}
+
 func (p *Provider) Close() error { return p.guard.close() }
 
 func (p *Provider) Capabilities() storage.Capabilities {

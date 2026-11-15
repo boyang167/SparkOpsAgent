@@ -26,6 +26,6 @@ ALTER TABLE filesystem.resource_grants
     DROP CONSTRAINT IF EXISTS resource_grants_node_id_grantee_id_permission_effect_key;
 DROP INDEX IF EXISTS filesystem.ux_filesystem_grants_identity;
 
-CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_grants_active_identity
+CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_grants_active_identity
     ON filesystem.resource_grants(node_id, principal_type, principal_id, permission, effect)
     WHERE revoked_at IS NULL;

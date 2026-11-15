@@ -32254,15 +32254,641 @@ button.sprint-board-column-wf:hover:not(:disabled) {
 
 /* ---- Filesystem unified workbench ---- */
 
+.filesystem-console-planes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.filesystem-plane-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+  text-decoration: none;
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-sm);
+  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.filesystem-plane-tab:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.filesystem-plane-tab.is-active {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.filesystem-plane-eyebrow {
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.filesystem-plane-label {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.filesystem-console-body {
+  display: grid;
+  grid-template-columns: minmax(10rem, 12.5rem) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+  min-width: 0;
+}
+
+.filesystem-console-sidebar {
+  position: sticky;
+  top: 1rem;
+  padding: 0.75rem;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+}
+
+.filesystem-console-sidebar-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.filesystem-console-module-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.filesystem-console-module {
+  display: flex;
+  align-items: center;
+  min-height: 2.25rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.filesystem-console-module:hover {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+.filesystem-console-module.is-active {
+  color: var(--text);
+  background: var(--primary-soft);
+}
+
+.filesystem-console-main {
+  min-width: 0;
+}
+
+.filesystem-console-placeholder {
+  padding: 1rem 1.25rem;
+}
+
 .filesystem-workbench {
   display: grid;
   min-width: 0;
 }
 
+.filesystem-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
+  gap: 1rem;
+}
+
+.filesystem-provider-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 12.5rem;
+  padding: 1rem 1.1rem 2.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.filesystem-provider-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.filesystem-provider-card-icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.filesystem-provider-badge {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.filesystem-provider-badge.is-healthy {
+  color: #0d7a45;
+  background: #e8f7ef;
+}
+
+.filesystem-provider-badge.is-degraded {
+  color: #b45309;
+  background: #fef3c7;
+}
+
+.filesystem-provider-badge.is-unknown {
+  color: var(--text-secondary);
+  background: var(--surface-muted);
+}
+
+.filesystem-provider-card-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.3;
+}
+
+.filesystem-provider-card-subtitle {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.filesystem-provider-card-endpoint {
+  margin: 0.15rem 0 0;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: var(--surface-muted);
+  border-radius: var(--radius-md);
+  word-break: break-all;
+}
+
+.filesystem-provider-card-meta {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.filesystem-provider-card-actions {
+  position: absolute;
+  right: 0.85rem;
+  bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.filesystem-provider-card-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.45rem;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.filesystem-provider-card-action:hover {
+  background: var(--primary-soft);
+}
+
+.filesystem-provider-card-action.is-danger {
+  color: var(--danger, #b42318);
+}
+
+.filesystem-provider-card-action.is-danger:hover {
+  background: rgba(180, 35, 24, 0.08);
+}
+
+.modal-panel.filesystem-pool-modal {
+  max-width: 40rem;
+  max-height: min(88vh, 640px);
+}
+
+.modal-panel.filesystem-pool-modal .modal-body {
+  padding-top: 0.5rem;
+  max-height: min(calc(88vh - 7.5rem), 520px);
+}
+
+.modal-panel.filesystem-pool-modal .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.875rem 1.375rem 1.125rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.storage-pool-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.storage-pool-modal-fields {
+  display: grid;
+  gap: 1rem;
+}
+
+.storage-pool-modal-form .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.storage-pool-modal-form .form-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.storage-pool-members {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+}
+
+.storage-pool-members-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.storage-pool-members-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.storage-pool-members-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.storage-pool-members-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.storage-pool-members-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) 5.5rem auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.storage-pool-members-row .input {
+  min-height: 2.35rem;
+  font-size: 0.875rem;
+}
+
+.storage-pool-members-row-head span {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.storage-pool-members-priority {
+  width: 100%;
+  min-width: 0;
+}
+
+.storage-pool-members-remove {
+  justify-self: end;
+  padding: 0.25rem 0.35rem;
+  border: none;
+  background: transparent;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.storage-pool-members-remove:hover {
+  color: var(--text);
+}
+
+.storage-pool-members-add {
+  align-self: flex-start;
+  margin-top: 0.15rem;
+}
+
+.filesystem-mount-bindings-subtitle {
+  margin: 0.35rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: #b45309;
+}
+
+.filesystem-mount-bindings-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.filesystem-mount-bindings-table-wrap {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}
+
+.filesystem-mount-bindings-table thead th {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--surface-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.filesystem-mount-bindings-table tbody td {
+  vertical-align: middle;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.filesystem-mount-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.filesystem-mount-status.is-mounted {
+  color: #0d7a45;
+  background: #e8f7ef;
+}
+
+.filesystem-mount-status.is-degraded {
+  color: #b45309;
+  background: #fef3c7;
+}
+
+.filesystem-mount-status-toggle {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--primary);
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.filesystem-mount-bindings-note {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-top: 1px solid color-mix(in srgb, #93c5fd 35%, var(--border));
+}
+
+.modal-panel.filesystem-lifecycle-modal {
+  max-width: 42rem;
+  max-height: min(90vh, 720px);
+}
+
+.modal-panel.filesystem-lifecycle-modal .modal-body {
+  padding-top: 0.5rem;
+  max-height: min(calc(90vh - 7.5rem), 560px);
+}
+
+.modal-panel.filesystem-lifecycle-modal .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.875rem 1.375rem 1.125rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.lifecycle-policy-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.lifecycle-policy-modal-form .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.lifecycle-policy-modal-form .form-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.lifecycle-policy-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.lifecycle-rule-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem 1.05rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface-muted) 45%, var(--surface));
+}
+
+.lifecycle-rule-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.lifecycle-rule-card-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.lifecycle-rule-remove {
+  border: none;
+  background: transparent;
+  padding: 0.15rem 0.35rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.lifecycle-rule-remove:hover {
+  color: var(--text);
+}
+
+.lifecycle-rule-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.lifecycle-rule-section-title {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.lifecycle-rule-when-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem 0.75rem;
+}
+
+.lifecycle-rule-field .input {
+  min-height: 2.35rem;
+  font-size: 0.875rem;
+}
+
+.lifecycle-rule-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.lifecycle-rule-action {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  background: var(--surface);
+  cursor: pointer;
+  user-select: none;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.lifecycle-rule-action:hover {
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+  color: var(--text);
+}
+
+.lifecycle-rule-action.is-checked {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  background: var(--primary-soft);
+}
+
+@media (max-width: 520px) {
+  .lifecycle-rule-when-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .storage-pool-members-row {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-muted);
+  }
+
+  .storage-pool-members-row-head {
+    display: none;
+  }
+
+  .storage-pool-members-remove {
+    justify-self: start;
+  }
+}
+
+@media (max-width: 900px) {
+  .filesystem-console-planes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filesystem-console-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filesystem-console-sidebar {
+    position: static;
+  }
+}
+
+.filesystem-data-layout .page-title {
+  font-size: 1.125rem;
+  letter-spacing: 0.04em;
+}
+
+.filesystem-data-layout .section-header {
+  margin-bottom: 0.25rem;
+}
+
+.filesystem-data-workspace {
+  min-width: 0;
+}
+
+.filesystem-file-space-tabs .btn {
+  text-decoration: none;
+}
+
+.filesystem-workspace-frame.filesystem-browser-layout {
+  display: grid;
+  grid-template-columns: minmax(14.5rem, 16.5rem) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
 .filesystem-browser-layout {
   display: grid;
-  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+  grid-template-columns: minmax(15rem, 17.5rem) minmax(0, 1fr);
   align-items: start;
+  gap: 1rem;
   min-width: 0;
 }
 
@@ -32271,14 +32897,373 @@ button.sprint-board-column-wf:hover:not(:disabled) {
   min-width: 0;
 }
 
+.filesystem-workspace-frame .filesystem-directory-sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: min(78vh, 42rem);
+  overflow: auto;
+  padding: 0.85rem 0.7rem 1rem;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--surface-muted) 22%, var(--surface));
+}
+
 .filesystem-directory-sidebar {
   position: sticky;
   top: 1rem;
   max-height: calc(100vh - 2rem);
   overflow: auto;
-  padding: 0.75rem;
+  padding: 0.9rem 0.75rem;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.filesystem-space-eyebrow {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.filesystem-space-segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.25rem;
   border-radius: var(--radius-lg);
   background: var(--surface-muted);
+  box-shadow: var(--shadow-sm);
+}
+
+.filesystem-space-segments-column {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0.12rem;
+  padding: 0.15rem;
+  background: color-mix(in srgb, var(--surface-muted) 65%, transparent);
+  box-shadow: none;
+}
+
+.filesystem-space-segments-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.2rem;
+  padding: 0.2rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-muted) 55%, transparent);
+  box-shadow: none;
+}
+
+.filesystem-space-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.filesystem-rail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.filesystem-rail-section-tree {
+  flex: 1;
+  min-height: 0;
+}
+
+.filesystem-rail-section-label {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.filesystem-space-segment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.25rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.filesystem-space-segment:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.filesystem-space-segment.is-active {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.filesystem-space-segments-column .filesystem-space-segment {
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 2.125rem;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.8125rem;
+  border-radius: var(--radius-md);
+}
+
+.filesystem-space-segments-column .filesystem-space-segment.is-active {
+  font-weight: 500;
+  box-shadow: none;
+  background: var(--surface);
+}
+
+.filesystem-space-nav .filesystem-directory-tree {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.filesystem-explorer-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: min(78vh, 42rem);
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.filesystem-workspace-frame .filesystem-explorer-shell {
+  min-height: min(78vh, 42rem);
+}
+
+.filesystem-explorer-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.85rem 1rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.filesystem-explorer-location {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.35rem;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.filesystem-location-space {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.filesystem-location-sep {
+  color: var(--muted);
+  user-select: none;
+}
+
+.filesystem-location-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.filesystem-location-link:hover {
+  color: var(--text);
+}
+
+.filesystem-location-current {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.filesystem-location-count {
+  margin-left: auto;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.filesystem-explorer-command-bar {
+  display: grid;
+  grid-template-columns: auto minmax(10rem, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.filesystem-explorer-command-primary,
+.filesystem-explorer-command-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.filesystem-explorer-command-secondary {
+  justify-content: flex-end;
+}
+
+.filesystem-explorer-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.filesystem-explorer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filesystem-explorer-search-form {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.filesystem-explorer-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0.5rem 1rem 1rem;
+  overflow: auto;
+}
+
+.filesystem-selection-banner {
+  margin-bottom: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary-soft) 45%, var(--surface));
+}
+
+.filesystem-explorer-inline-error {
+  margin: 0;
+  padding: 0.35rem 1rem 0.75rem;
+}
+
+.filesystem-explorer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filesystem-explorer-search {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.filesystem-view-toggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.filesystem-explorer-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.filesystem-breadcrumb-root {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.filesystem-breadcrumb-segment::before {
+  content: "›";
+  margin-right: 0.5rem;
+  color: var(--muted);
+}
+
+.filesystem-breadcrumb-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.filesystem-breadcrumb-link:hover {
+  color: var(--text);
+}
+
+.filesystem-breadcrumb-count {
+  margin-left: auto;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.filesystem-explorer-footnote {
+  margin: 0;
+  padding: 0.65rem 1rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-muted) 40%, var(--surface));
+}
+
+.filesystem-name-cell {
+  min-width: 12rem;
+}
+
+.filesystem-name-link {
+  display: block;
+  font-weight: 600;
+  color: var(--text);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.filesystem-name-link:hover {
+  color: var(--primary);
+}
+
+.filesystem-node-id {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.filesystem-workbench-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+  box-shadow: var(--shadow-sm);
+}
+
+.filesystem-workbench-tabs .btn {
+  min-height: 2.25rem;
+  border: 0;
+  box-shadow: none;
+}
+
+.filesystem-workbench-tabs .btn-secondary {
+  background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
 
@@ -32300,7 +33285,7 @@ button.sprint-board-column-wf:hover:not(:disabled) {
   min-width: 0;
 }
 
-.filesystem-directory-trigger {
+.filesystem-explorer-command-bar .filesystem-directory-trigger {
   display: none;
 }
 
@@ -32311,7 +33296,11 @@ button.sprint-board-column-wf:hover:not(:disabled) {
 
 .filesystem-tree-item[aria-current="page"],
 .filesystem-tree-item[aria-selected="true"] {
-  background: var(--primary-soft);
+  background: color-mix(in srgb, var(--surface-muted) 80%, var(--surface));
+}
+
+.filesystem-tree-item[aria-current="page"] {
+  font-weight: 500;
 }
 
 .filesystem-table-wrap {
@@ -32325,12 +33314,105 @@ button.sprint-board-column-wf:hover:not(:disabled) {
 
 .filesystem-file-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.5rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
 }
 
 .filesystem-file-grid > li {
   min-width: 0;
+}
+
+.filesystem-grid-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-height: 7.5rem;
+  padding: 0.55rem 0.55rem 0.45rem;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: var(--surface);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.filesystem-grid-tile:hover,
+.filesystem-grid-tile:focus-within {
+  border-color: color-mix(in srgb, var(--border) 40%, var(--text));
+  box-shadow: var(--shadow-sm);
+}
+
+.filesystem-grid-tile-select {
+  position: absolute;
+  top: 0.2rem;
+  right: 0.15rem;
+  z-index: 1;
+  min-height: 2rem;
+  min-width: 2rem;
+}
+
+.filesystem-grid-tile-open {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.15rem 1.75rem 0 0.1rem;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.filesystem-grid-tile-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.filesystem-grid-tile-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.filesystem-grid-tile-kind {
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+.filesystem-grid-tile-actions {
+  margin-top: auto;
+  padding-top: 0.15rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.filesystem-file-actions.is-compact .filesystem-file-action {
+  min-height: 2rem;
+  min-width: auto;
+  padding-inline: 0.35rem;
+  font-size: 0.75rem;
+}
+
+.filesystem-grid-tile .filesystem-file-actions {
+  opacity: 0.85;
+}
+
+.filesystem-grid-tile:hover .filesystem-file-actions,
+.filesystem-grid-tile:focus-within .filesystem-file-actions {
+  opacity: 1;
 }
 
 .filesystem-shared-list {
@@ -32373,16 +33455,26 @@ button.sprint-board-column-wf:hover:not(:disabled) {
 }
 
 @media (max-width: 900px) {
-  .filesystem-browser-layout {
+  .filesystem-browser-layout,
+  .filesystem-workspace-frame.filesystem-browser-layout {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .filesystem-directory-sidebar {
+  .filesystem-directory-sidebar,
+  .filesystem-workspace-frame .filesystem-directory-sidebar {
     display: none;
   }
 
-  .filesystem-directory-trigger {
+  .filesystem-explorer-command-bar .filesystem-directory-trigger {
     display: inline-flex;
+  }
+
+  .filesystem-explorer-command-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filesystem-explorer-command-secondary {
+    justify-content: flex-start;
   }
 
   .filesystem-file-grid {
@@ -32394,14 +33486,29 @@ button.sprint-board-column-wf:hover:not(:disabled) {
   }
 }
 
+@media (max-width: 720px) {
+  .filesystem-explorer-command-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filesystem-explorer-search-form {
+    order: 3;
+    width: 100%;
+  }
+}
+
 @media (max-width: 560px) {
   .filesystem-workbench-tabs,
   .filesystem-workbench-toolbar {
     justify-content: flex-start;
   }
 
-  .filesystem-file-grid {
+  .filesystem-space-segments-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filesystem-file-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .filesystem-shared-metadata {

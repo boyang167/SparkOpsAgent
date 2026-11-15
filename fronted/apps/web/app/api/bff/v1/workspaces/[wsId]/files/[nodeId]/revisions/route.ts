@@ -10,5 +10,6 @@ export const GET = createBffHandler(async (ctx, req, { params }) => {
   const cursor = req.nextUrl.searchParams.get("cursor") ?? undefined;
   const limitRaw = req.nextUrl.searchParams.get("limit");
   const limit = limitRaw ? Number.parseInt(limitRaw, 10) : undefined;
-  return listFileRevisions(ctx, wsId, nodeId, { cursor, limit });
+  const namespaceId = req.nextUrl.searchParams.get("namespace_id") ?? undefined;
+  return listFileRevisions(ctx, wsId, nodeId, { cursor, limit, namespace_id: namespaceId });
 });

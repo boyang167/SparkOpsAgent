@@ -20,24 +20,29 @@ export function StoragePoolMembersEditor({
   onClearError,
 }: StoragePoolMembersEditorProps) {
   return (
-    <div className="stack-sm">
-      <div>
-        <div className="text-sm font-medium">Provider 成员</div>
-        <p className="text-xs text-muted">至少配置一个 PRIMARY；同一 Provider 只能添加一次。</p>
-      </div>
+    <section className="storage-pool-members" aria-labelledby="storage-pool-members-title">
+      <header className="storage-pool-members-header">
+        <h3 id="storage-pool-members-title" className="storage-pool-members-title">
+          Provider 成员
+        </h3>
+        <p className="storage-pool-members-hint">至少配置一个 PRIMARY；同一 Provider 只能添加一次。</p>
+      </header>
       {activeProviders.length === 0 ? (
         <InlineAlert tone="warning">暂无可用 Provider，请先注册并启用 Provider。</InlineAlert>
       ) : (
         <>
-          {members.map((member, index) => (
-            <div
-              key={`${member.provider_id}-${index}`}
-              className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,0.75fr)_7rem_auto]"
-            >
-              <label className="stack-xs">
-                <span className="text-xs text-muted">Provider</span>
+          <div className="storage-pool-members-table">
+            <div className="storage-pool-members-row storage-pool-members-row-head" aria-hidden>
+              <span>Provider</span>
+              <span>角色</span>
+              <span>优先级</span>
+              <span />
+            </div>
+            {members.map((member, index) => (
+              <div key={`${member.provider_id}-${index}`} className="storage-pool-members-row">
                 <select
                   className="input"
+                  aria-label="Provider"
                   value={member.provider_id}
                   onChange={(e) => {
                     onClearError();
@@ -50,15 +55,13 @@ export function StoragePoolMembersEditor({
                 >
                   {activeProviders.map((provider) => (
                     <option key={provider.id} value={provider.id}>
-                      {provider.name}（{provider.provider_type}）
+                      {provider.name}
                     </option>
                   ))}
                 </select>
-              </label>
-              <label className="stack-xs">
-                <span className="text-xs text-muted">角色</span>
                 <select
                   className="input"
+                  aria-label="角色"
                   value={member.mode}
                   onChange={(e) => {
                     onClearError();
@@ -77,12 +80,10 @@ export function StoragePoolMembersEditor({
                     </option>
                   ))}
                 </select>
-              </label>
-              <label className="stack-xs">
-                <span className="text-xs text-muted">优先级</span>
                 <input
                   type="number"
-                  className="input"
+                  className="input storage-pool-members-priority"
+                  aria-label="优先级"
                   value={member.priority}
                   onChange={(e) => {
                     onClearError();
@@ -93,11 +94,9 @@ export function StoragePoolMembersEditor({
                     );
                   }}
                 />
-              </label>
-              <div className="flex items-end">
                 <button
                   type="button"
-                  className="btn btn-ghost"
+                  className="storage-pool-members-remove"
                   aria-label={`移除 ${providerNameById.get(member.provider_id) ?? "Provider"} 成员`}
                   onClick={() => {
                     onClearError();
@@ -107,26 +106,24 @@ export function StoragePoolMembersEditor({
                   移除
                 </button>
               </div>
-            </div>
-          ))}
-          <div>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={members.length >= activeProviders.length}
-              onClick={() => {
-                const usedProviderIds = new Set(members.map((item) => item.provider_id));
-                const provider = activeProviders.find((item) => !usedProviderIds.has(item.id));
-                if (!provider) return;
-                onClearError();
-                onChange([...members, { provider_id: provider.id, mode: "REPLICA", priority: 0 }]);
-              }}
-            >
-              添加成员
-            </button>
+            ))}
           </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm storage-pool-members-add"
+            disabled={members.length >= activeProviders.length}
+            onClick={() => {
+              const usedProviderIds = new Set(members.map((item) => item.provider_id));
+              const provider = activeProviders.find((item) => !usedProviderIds.has(item.id));
+              if (!provider) return;
+              onClearError();
+              onChange([...members, { provider_id: provider.id, mode: "REPLICA", priority: 0 }]);
+            }}
+          >
+            添加成员
+          </button>
         </>
       )}
-    </div>
+    </section>
   );
 }

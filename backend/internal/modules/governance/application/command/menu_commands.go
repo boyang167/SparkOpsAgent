@@ -404,6 +404,9 @@ var enterpriseMenuTitleByPath = map[string]string{
 	"/templates":             "模板中心",
 	"/knowledge":             "知识库",
 	"/files":                 "文件中心",
+	"/files/data":            "数据面",
+	"/files/control":         "控制面",
+	"/files/governance":      "治理面",
 	"/publish/products":      "产品",
 	"/products/workflows":    "工作流",
 	"/publish/release-plans": "发布计划",
@@ -486,6 +489,9 @@ func (h *SeedWorkspaceMenusHandler) repairBusinessNavigation(
 			return err
 		}
 	}
+	if err := h.repairFilesystemPlaneMenus(ctx, workspaceID); err != nil {
+		return err
+	}
 
 	for _, groupID := range []string{"ops-delivery", "ops-observability"} {
 		group, err := h.menus.FindGroupMenu(ctx, workspaceID, groupID)
@@ -504,6 +510,53 @@ func (h *SeedWorkspaceMenusHandler) repairBusinessNavigation(
 			if err := h.menus.Save(ctx, group); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func (h *SeedWorkspaceMenusHandler) repairFilesystemPlaneMenus(
+	ctx context.Context,
+	workspaceID kernel.WorkspaceID,
+) error {
+	parent, err := h.menus.FindByPath(ctx, workspaceID, "/files")
+	if err != nil {
+		return nil
+	}
+	parent.Icon = "Folder"
+	parent.Component = "layout/routerHolder"
+	parent.Title = "文件中心"
+	parent.Hidden = false
+	if err := h.menus.Save(ctx, parent); err != nil {
+		return err
+	}
+	children := []struct {
+		path      string
+		title     string
+		component string
+		sort      int
+	}{
+		{"/files/data", "数据面", "/files/data/workspace", 1},
+		{"/files/control", "控制面", "/files/control/providers", 2},
+		{"/files/governance", "治理面", "/files/governance/audit", 3},
+	}
+	pid := parent.ID
+	for _, child := range children {
+		menu, findErr := h.menus.FindByPath(ctx, workspaceID, child.path)
+		if findErr != nil {
+			menu = &model.Menu{
+				WorkspaceID: workspaceID,
+				Path:        child.path,
+			}
+		}
+		menu.ParentID = &pid
+		menu.Name = menuNameFromPath(child.path)
+		menu.Title = child.title
+		menu.Component = child.component
+		menu.Sort = child.sort
+		menu.Hidden = false
+		if err := h.menus.Save(ctx, menu); err != nil {
+			return err
 		}
 	}
 	return nil

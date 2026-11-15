@@ -131,7 +131,7 @@ export function FileBrowser({
           {
             role: "toolbar",
             "aria-label": "所选文件操作",
-            className: "flex flex-wrap items-center justify-between gap-2",
+            className: "filesystem-selection-banner flex flex-wrap items-center justify-between gap-2",
           },
           createElement(
             "span",

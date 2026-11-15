@@ -6,12 +6,12 @@ ALTER TABLE filesystem.resource_grants
     CHECK (permission IN ('READ','DOWNLOAD','WRITE','DELETE','SHARE','ADMIN') AND effect IN ('ALLOW','DENY'));
 
 ALTER TABLE filesystem.nodes
-    ADD COLUMN classification VARCHAR(16);
+    ADD COLUMN IF NOT EXISTS classification VARCHAR(16);
 UPDATE filesystem.nodes SET classification = 'INTERNAL' WHERE node_type = 'DIRECTORY';
 UPDATE filesystem.nodes SET classification = 'RESTRICTED' WHERE node_type = 'FILE';
 
 ALTER TABLE filesystem.transfer_sessions
-    ADD COLUMN committed_node_id UUID REFERENCES filesystem.nodes(id);
+    ADD COLUMN IF NOT EXISTS committed_node_id UUID REFERENCES filesystem.nodes(id);
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 WITH transfer_hashes AS (
@@ -68,14 +68,27 @@ WHERE node.id = classified_nodes.committed_node_id;
 
 ALTER TABLE filesystem.nodes
     ALTER COLUMN classification SET DEFAULT 'INTERNAL',
-    ALTER COLUMN classification SET NOT NULL,
+    ALTER COLUMN classification SET NOT NULL;
+ALTER TABLE filesystem.nodes
+    DROP CONSTRAINT IF EXISTS ck_filesystem_node_classification;
+ALTER TABLE filesystem.nodes
     ADD CONSTRAINT ck_filesystem_node_classification
         CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED'));
 
-ALTER TABLE filesystem.export_tasks
-    ADD COLUMN classification VARCHAR(16) NOT NULL DEFAULT 'RESTRICTED',
-    ADD CONSTRAINT ck_filesystem_export_classification
-        CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED'));
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'filesystem' AND table_name = 'export_tasks'
+    ) THEN
+        ALTER TABLE filesystem.export_tasks
+            ADD COLUMN IF NOT EXISTS classification VARCHAR(16) NOT NULL DEFAULT 'RESTRICTED';
+        ALTER TABLE filesystem.export_tasks DROP CONSTRAINT IF EXISTS ck_filesystem_export_classification;
+        ALTER TABLE filesystem.export_tasks
+            ADD CONSTRAINT ck_filesystem_export_classification
+                CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED'));
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS filesystem.share_requests (
     id UUID PRIMARY KEY,

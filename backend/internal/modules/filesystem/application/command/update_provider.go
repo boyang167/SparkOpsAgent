@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -49,12 +50,19 @@ func (h *UpdateProviderHandler) Handle(ctx context.Context, cmd UpdateProvider) 
 	if secretRef == "" {
 		secretRef = existing.SecretRef
 	}
+	endpoint := strings.TrimSpace(cmd.Endpoint)
+	if endpoint == "" {
+		endpoint = existing.Endpoint
+	}
+	if err := validateProviderEndpoint(existing.ProviderType, endpoint); err != nil {
+		return err
+	}
 	updated, buildErr := model.NewStorageProvider(model.StorageProviderInput{
 		ID:             existing.ID,
 		OrganizationID: existing.OrganizationID,
 		Name:           cmd.Name,
 		ProviderType:   existing.ProviderType,
-		Endpoint:       cmd.Endpoint,
+		Endpoint:       endpoint,
 		SecretRef:      secretRef,
 		Capabilities:   existing.Capabilities,
 		Health:         existing.Health,

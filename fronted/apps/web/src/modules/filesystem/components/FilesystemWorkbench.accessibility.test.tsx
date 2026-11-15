@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Drawer } from "@/components/ui/Drawer";
 import { FileBrowser } from "./FileBrowser";
 import { FileDetailDrawer } from "./FileDetailDrawer";
-import { FileSpaceNav } from "./FileSpaceNav";
+import { FileSpaceTabList } from "./FileSpaceTabList";
 import { FilesystemWorkbench } from "./FilesystemWorkbench";
 import { ShareApprovalPanel } from "./ShareApprovalPanel";
 import { ShareFileModal } from "./ShareFileModal";
@@ -265,10 +265,9 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
         emphasis: "primary",
       }),
     );
-    expect(screen.getByRole("button", { name: "上传文件" })).toHaveClass("btn-primary");
-    expect(screen.getByRole("button", { name: "上传文件" })).toHaveClass(
-      "filesystem-touch-target",
-    );
+    const uploadTrigger = () => screen.getByText("上传文件").closest("label");
+    expect(uploadTrigger()).toHaveClass("btn-primary");
+    expect(uploadTrigger()).toHaveClass("filesystem-touch-target");
 
     rendered.rerender(
       createElement(SelectableUploadPanel, {
@@ -276,8 +275,8 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
         emphasis: "secondary",
       }),
     );
-    expect(screen.getByRole("button", { name: "上传文件" })).toHaveClass("btn-secondary");
-    expect(screen.getByRole("button", { name: "上传文件" })).not.toHaveClass("btn-primary");
+    expect(uploadTrigger()).toHaveClass("btn-secondary");
+    expect(uploadTrigger()).not.toHaveClass("btn-primary");
 
     const componentDirectory = resolve(
       process.cwd(),
@@ -322,18 +321,15 @@ describe("FilesystemWorkbench accessibility and responsive contracts", () => {
 
   it("renders all four file spaces and shared panel states with accessible landmarks", () => {
     const rendered = render(
-      createElement(FileSpaceNav, {
+      createElement(FileSpaceTabList, {
         activeSpace: "shared",
-        organizationLabel: "星火科技",
-        workspaceLabel: "研发平台",
-        workspaceId: "workspace-1",
         view: "list",
       }),
     );
-    const navigationRegion = screen.getByRole("navigation", { name: "文件空间" });
-    expect(navigationRegion).toBeInTheDocument();
-    expect(screen.getAllByRole("link")).toHaveLength(4);
-    expect(screen.getByRole("link", { name: "与我共享" })).toHaveAttribute(
+    const tablist = screen.getByRole("tablist", { name: "文件空间" });
+    expect(tablist).toBeInTheDocument();
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    expect(screen.getByRole("tab", { name: "与我共享" })).toHaveAttribute(
       "aria-current",
       "page",
     );

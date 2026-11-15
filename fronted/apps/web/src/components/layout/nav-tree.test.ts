@@ -3,7 +3,7 @@ import { DEFAULT_ENTITLEMENTS } from "./entitlements";
 import { buildNavSearchItems } from "./nav-search";
 import {
   BUSINESS_NAV_TREE,
-  FILES_NAV_ITEM,
+  FILES_PLANE_NAV_GROUP,
   KNOWLEDGE_NAV_ITEM,
   filterBusinessDirectNavItems,
 } from "./nav-tree";
@@ -43,23 +43,18 @@ describe("business navigation", () => {
     });
   });
 
-  it("exposes files as a direct entitled entry", () => {
-    expect(FILES_NAV_ITEM).toEqual({
-      href: "/files",
-      label: "文件中心",
-      entitlement: "filesystem",
-    });
+  it("exposes filesystem as a three-plane nav group", () => {
+    expect(FILES_PLANE_NAV_GROUP.items.map((item) => item.label)).toEqual([
+      "数据面",
+      "控制面",
+      "治理面",
+    ]);
   });
 
   it("hides files navigation when filesystem entitlement is disabled", () => {
-    const items = filterBusinessDirectNavItems({
-      ...DEFAULT_ENTITLEMENTS,
-      filesystem: false,
-    });
-    expect(items.some((item) => item.href === "/files")).toBe(false);
     const search = buildNavSearchItems({
       entitlements: { ...DEFAULT_ENTITLEMENTS, filesystem: false },
     });
-    expect(search.some((item) => item.href === "/files")).toBe(false);
+    expect(search.some((item) => item.href.startsWith("/files"))).toBe(false);
   });
 });

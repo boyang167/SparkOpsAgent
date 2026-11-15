@@ -36,7 +36,7 @@ export function FileListView({
 }: FileListViewProps) {
   return createElement(
     "div",
-    { className: "card filesystem-table-wrap" },
+    { className: "filesystem-table-wrap" },
     createElement(
       "table",
       { className: "data-table w-full" },
@@ -84,17 +84,24 @@ export function FileListView({
             ),
             createElement(
               "td",
-              null,
+              { className: "filesystem-name-cell" },
               createElement(
                 "button",
                 {
                   type: "button",
-                  className: "font-medium link filesystem-touch-target",
+                  className: "filesystem-name-link filesystem-touch-target",
                   "aria-label": `打开 ${node.name}`,
                   onClick: () => onOpen(node),
                 },
                 node.name,
               ),
+              node.type === "FILE"
+                ? createElement(
+                    "span",
+                    { className: "filesystem-node-id text-muted" },
+                    node.id.slice(0, 8),
+                  )
+                : null,
             ),
             createElement(
               "td",

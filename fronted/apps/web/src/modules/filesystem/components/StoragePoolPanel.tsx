@@ -19,7 +19,8 @@ import {
   updateStoragePool,
   updateStorageProvider,
 } from "@sparkops/web-sdk/filesystem";
-import { StoragePoolMembersEditor } from "./StoragePoolMembersEditor";
+import { StorageProviderCardGrid } from "./StorageProviderCardGrid";
+import { StoragePoolModalFooter, StoragePoolModalForm } from "./StoragePoolModalForm";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
 import {
@@ -39,9 +40,13 @@ import {
   validateUpdateProviderForm,
 } from "./storage-pool-panel-view";
 
+export type StoragePoolPanelFocus = "providers" | "pools";
+
 export type StoragePoolPanelProps = {
   workspaceId: string;
   permissions: string[];
+  /** 单页只展示 Provider 或存储池；不传则保留合并视图（兼容旧入口） */
+  focus?: StoragePoolPanelFocus;
   providers?: StorageProviderVM[];
   pools?: StoragePoolVM[];
   onReload?: () => void;
@@ -59,10 +64,13 @@ type DeleteTarget = {
 export function StoragePoolPanel({
   workspaceId,
   permissions,
+  focus,
   providers: initialProviders,
   pools: initialPools,
   onReload,
 }: StoragePoolPanelProps) {
+  const showProviders = focus !== "pools";
+  const showPools = focus !== "providers";
   const canAdmin = canShowStoragePoolMutations(permissions);
   const [providers, setProviders] = useState<StorageProviderVM[]>(initialProviders ?? []);
   const [pools, setPools] = useState<StoragePoolVM[]>(initialPools ?? []);
@@ -100,18 +108,32 @@ export function StoragePoolPanel({
     setLoading(true);
     setError(null);
     try {
+      const loadProviders = showProviders || showPools;
+      const loadPools = showPools || focus === "providers";
       const [providerPage, poolPage] = await Promise.all([
-        listStorageProviders(workspaceId),
-        listStoragePools(workspaceId),
+        loadProviders ? listStorageProviders(workspaceId) : Promise.resolve({ items: [] }),
+        loadPools ? listStoragePools(workspaceId) : Promise.resolve({ items: [] }),
       ]);
-      setProviders(providerPage.items);
-      setPools(poolPage.items);
+      if (loadProviders) setProviders(providerPage.items);
+      if (loadPools) setPools(poolPage.items);
     } catch (err) {
       setError(err instanceof BffError ? err.message : "加载存储配置失败");
     } finally {
       setLoading(false);
     }
-  }, [workspaceId]);
+  }, [focus, showPools, showProviders, workspaceId]);
+
+  function beginEditProvider(provider: StorageProviderVM) {
+    setProviderFormError(null);
+    setEditingProvider(provider);
+    setProviderEditForm({
+      name: provider.name,
+      endpoint: provider.endpoint ?? "",
+      secret_ref: "",
+      status: provider.status,
+    });
+    setProviderEditOpen(true);
+  }
 
   useEffect(() => {
     if (initialProviders === undefined) {
@@ -185,7 +207,10 @@ export function StoragePoolPanel({
 
   async function submitProviderUpdate() {
     if (!canAdmin || !editingProvider) return;
-    const validationError = validateUpdateProviderForm(providerEditForm);
+    const validationError = validateUpdateProviderForm(
+      providerEditForm,
+      editingProvider.provider_type,
+    );
     if (validationError) {
       setProviderFormError(validationError);
       return;
@@ -263,10 +288,15 @@ export function StoragePoolPanel({
   return (
     <section className="stack-lg">
       <PanelHeader
-        title="存储 Provider 与存储池"
-        description="凭证仅通过 Secret 引用提交，界面不回显任何密钥内容。"
+        title={
+          focus === "providers" || focus === "pools"
+            ? undefined
+            : "存储 Provider 与存储池"
+        }
         canAdmin={canAdmin}
         dialogOpen={dialogOpen}
+        showProviderActions={showProviders}
+        showPoolActions={showPools}
         onAddProvider={() => {
           setProviderFormError(null);
           setProviderOpen(true);
@@ -285,81 +315,32 @@ export function StoragePoolPanel({
         <div className="empty-state">加载中…</div>
       ) : (
         <>
-          <PanelSubhead title="Provider" />
-          {providers.length === 0 ? (
+          {showProviders && !focus ? <PanelSubhead title="Provider" /> : null}
+          {showProviders && providers.length === 0 ? (
             <div className="empty-state">尚未注册 Provider</div>
-          ) : (
-            <div className="table-wrap">
-              <table className="data-table text-sm">
-                <thead>
-                  <tr>
-                    <th>名称</th>
-                    <th>类型</th>
-                    <th>Endpoint</th>
-                    <th>凭证</th>
-                    <th>状态</th>
-                    {canAdmin ? <th>操作</th> : null}
-                  </tr>
-                </thead>
-                <tbody>
-                  {providers.map((provider) => (
-                    <tr key={provider.id}>
-                      <td>{provider.name}</td>
-                      <td>{provider.provider_type}</td>
-                      <td className="font-mono text-xs">{provider.endpoint || "—"}</td>
-                      <td className="text-muted">已通过密钥引用配置</td>
-                      <td>{provider.status}</td>
-                      {canAdmin ? (
-                        <td className="whitespace-nowrap">
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => {
-                              setProviderFormError(null);
-                              setEditingProvider(provider);
-                              setProviderEditForm({
-                                name: provider.name,
-                                endpoint: provider.endpoint ?? "",
-                                secret_ref: "",
-                                status: provider.status,
-                              });
-                              setProviderEditOpen(true);
-                            }}
-                          >
-                            编辑
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            disabled={!canDeleteProvider(provider)}
-                            title={
-                              canDeleteProvider(provider)
-                                ? undefined
-                                : "系统默认 Provider 不可删除"
-                            }
-                            onClick={() =>
-                              setDeleteTarget({
-                                kind: "provider",
-                                id: provider.id,
-                                name: provider.name,
-                              })
-                            }
-                          >
-                            删除
-                          </button>
-                        </td>
-                      ) : null}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          ) : null}
+          {showProviders && providers.length > 0 ? (
+            <StorageProviderCardGrid
+              providers={providers}
+              pools={pools}
+              canAdmin={canAdmin}
+              canDelete={canDeleteProvider}
+              onEdit={beginEditProvider}
+              onDelete={(provider) =>
+                setDeleteTarget({
+                  kind: "provider",
+                  id: provider.id,
+                  name: provider.name,
+                })
+              }
+            />
+          ) : null}
 
-          <PanelSubhead title="存储池" />
-          {pools.length === 0 ? (
+          {showPools && !focus ? <PanelSubhead title="存储池" /> : null}
+          {showPools && pools.length === 0 ? (
             <div className="empty-state">暂无存储池</div>
-          ) : (
+          ) : null}
+          {showPools && pools.length > 0 ? (
             <div className="table-wrap">
               <table className="data-table text-sm">
                 <thead>
@@ -422,7 +403,7 @@ export function StoragePoolPanel({
                 </tbody>
               </table>
             </div>
-          )}
+          ) : null}
         </>
       )}
 
@@ -468,11 +449,19 @@ export function StoragePoolPanel({
             </select>
           </label>
           <label className="stack-xs">
-            <span>Endpoint（可选）</span>
+            <span>Endpoint</span>
             <input
               className="input"
+              placeholder={
+                providerForm.provider_type === "LOCAL" || providerForm.provider_type === "NFS"
+                  ? "例如 A:\\data\\filesystem（必须是已存在的目录）"
+                  : "例如 https://minio.example.com"
+              }
               value={providerForm.endpoint ?? ""}
-              onChange={(e) => setProviderForm((f) => ({ ...f, endpoint: e.target.value }))}
+              onChange={(e) => {
+                setProviderFormError(null);
+                setProviderForm((f) => ({ ...f, endpoint: e.target.value }));
+              }}
             />
           </label>
           <label className="stack-xs">
@@ -499,32 +488,14 @@ export function StoragePoolPanel({
       <Modal
         open={poolOpen}
         title="新增存储池"
+        size="lg"
+        panelClassName="filesystem-pool-modal"
         onClose={() => {
           setPoolFormError(null);
           setPoolOpen(false);
         }}
-      >
-        <div className="stack-md">
-          {poolFormError ? <InlineAlert tone="error">{poolFormError}</InlineAlert> : null}
-          <label className="stack-xs">
-            <span>名称</span>
-            <input
-              className="input"
-              value={poolName}
-              onChange={(e) => {
-                setPoolFormError(null);
-                setPoolName(e.target.value);
-              }}
-            />
-          </label>
-          <StoragePoolMembersEditor
-            activeProviders={activeProviders}
-            members={poolMembers}
-            providerNameById={providerNameById}
-            onChange={setPoolMembers}
-            onClearError={() => setPoolFormError(null)}
-          />
-          <ModalFooter
+        footer={
+          <StoragePoolModalFooter
             pending={submitting}
             submitDisabled={activeProviders.length === 0}
             onCancel={() => {
@@ -534,7 +505,19 @@ export function StoragePoolPanel({
             onSubmit={() => void submitPool()}
             submitLabel="创建"
           />
-        </div>
+        }
+      >
+        <StoragePoolModalForm
+          error={poolFormError}
+          name={poolName}
+          showStatus={false}
+          onNameChange={setPoolName}
+          activeProviders={activeProviders}
+          members={poolMembers}
+          onMembersChange={setPoolMembers}
+          providerNameById={providerNameById}
+          onClearError={() => setPoolFormError(null)}
+        />
       </Modal>
 
       <Modal
@@ -564,9 +547,10 @@ export function StoragePoolPanel({
             <input className="input" value={editingProvider?.provider_type ?? ""} disabled />
           </label>
           <label className="stack-xs">
-            <span>Endpoint（可选）</span>
+            <span>Endpoint</span>
             <input
               className="input"
+              placeholder="必须是已存在的本地目录或可访问的 S3 地址"
               value={providerEditForm.endpoint ?? ""}
               onChange={(e) => {
                 setProviderFormError(null);
@@ -615,57 +599,39 @@ export function StoragePoolPanel({
       <Modal
         open={poolEditOpen}
         title="编辑存储池"
+        size="lg"
+        panelClassName="filesystem-pool-modal"
         onClose={() => {
           setPoolFormError(null);
           setPoolEditOpen(false);
           setEditingPool(null);
         }}
-      >
-        <div className="stack-md">
-          {poolFormError ? <InlineAlert tone="error">{poolFormError}</InlineAlert> : null}
-          <label className="stack-xs">
-            <span>名称</span>
-            <input
-              className="input"
-              value={poolEditName}
-              onChange={(e) => {
-                setPoolFormError(null);
-                setPoolEditName(e.target.value);
-              }}
-            />
-          </label>
-          <label className="stack-xs">
-            <span>状态</span>
-            <select
-              className="input"
-              value={poolEditStatus}
-              onChange={(e) => {
-                setPoolFormError(null);
-                setPoolEditStatus(e.target.value as StoragePoolVM["status"]);
-              }}
-            >
-              {PROVIDER_STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-          </label>
-          <StoragePoolMembersEditor
-            activeProviders={activeProviders}
-            members={poolEditMembers}
-            providerNameById={providerNameById}
-            onChange={setPoolEditMembers}
-            onClearError={() => setPoolFormError(null)}
-          />
-          <ModalFooter
+        footer={
+          <StoragePoolModalFooter
             pending={submitting}
             submitDisabled={activeProviders.length === 0}
-            onCancel={() => setPoolEditOpen(false)}
+            onCancel={() => {
+              setPoolFormError(null);
+              setPoolEditOpen(false);
+              setEditingPool(null);
+            }}
             onSubmit={() => void submitPoolUpdate()}
             submitLabel="保存"
           />
-        </div>
+        }
+      >
+        <StoragePoolModalForm
+          error={poolFormError}
+          name={poolEditName}
+          status={poolEditStatus}
+          onNameChange={setPoolEditName}
+          onStatusChange={(value) => setPoolEditStatus(value as StoragePoolVM["status"])}
+          activeProviders={activeProviders}
+          members={poolEditMembers}
+          onMembersChange={setPoolEditMembers}
+          providerNameById={providerNameById}
+          onClearError={() => setPoolFormError(null)}
+        />
       </Modal>
 
       <Modal
@@ -694,38 +660,57 @@ export function StoragePoolPanel({
 }
 
 function PanelHeader(props: {
-  title: string;
-  description: string;
+  title?: string;
   canAdmin: boolean;
   dialogOpen: boolean;
+  showProviderActions: boolean;
+  showPoolActions: boolean;
   onAddProvider: () => void;
   onAddPool: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <h2 className="text-lg font-semibold">{props.title}</h2>
-        <p className="text-sm text-muted">{props.description}</p>
-      </div>
+    <div
+      className={
+        props.title
+          ? "flex flex-wrap items-start justify-between gap-3"
+          : "flex flex-wrap items-start justify-end gap-3"
+      }
+    >
+      {props.title ? (
+        <div>
+          <h2 className="text-lg font-semibold">{props.title}</h2>
+        </div>
+      ) : null}
       {props.canAdmin ? (
         <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn btn-secondary" onClick={props.onAddProvider}>
-            {STORAGE_PROVIDER_REGISTER_LABEL}
-          </button>
-          <button
-            type="button"
-            className={props.dialogOpen ? "btn btn-secondary" : "btn btn-primary"}
-            onClick={props.onAddPool}
-          >
-            {STORAGE_POOL_CREATE_LABEL}
-          </button>
+          {props.showProviderActions ? (
+            <button
+              type="button"
+              className={
+                props.showPoolActions || props.dialogOpen ? "btn btn-secondary" : "btn btn-primary"
+              }
+              onClick={props.onAddProvider}
+            >
+              {STORAGE_PROVIDER_REGISTER_LABEL}
+            </button>
+          ) : null}
+          {props.showPoolActions ? (
+            <button
+              type="button"
+              className={props.dialogOpen ? "btn btn-secondary" : "btn btn-primary"}
+              onClick={props.onAddPool}
+            >
+              {STORAGE_POOL_CREATE_LABEL}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
   );
 }
 
-function PanelSubhead({ title }: { title: string }) {
+function PanelSubhead({ title }: { title?: string }) {
+  if (!title) return null;
   return <h3 className="text-base font-medium">{title}</h3>;
 }
 

@@ -12,6 +12,7 @@ import type {
 import type { WorkspaceMemberVM } from "@sparkops/contracts/governance";
 import {
   abortTransfer,
+  completeTransferSession,
   createTransferSession,
   getTransferSession,
   moveFileNode,
@@ -24,20 +25,22 @@ import { FileDetailDrawer } from "./FileDetailDrawer";
 import { FileDropZone } from "./FileDropZone";
 import { FileExplorerPanel } from "./FileExplorerPanel";
 import { FileSpaceNav } from "./FileSpaceNav";
-import { GovernanceWorkspace } from "./GovernanceWorkspace";
+import { FileSpaceTabList } from "./FileSpaceTabList";
+import { GovernanceWorkspace, type GovernanceSection } from "./GovernanceWorkspace";
 import { MoveNodesModal } from "./MoveNodesModal";
 import { ShareFileModal } from "./ShareFileModal";
 import { ShareApprovalPanel } from "./ShareApprovalPanel";
 import { TransferCenter, TransferSummary } from "./TransferCenter";
 import { createTransferQueue } from "./transfer-queue";
 import type { TransferQueue } from "./transfer-queue";
-import type {
-  FileSpace,
-  FileView,
-  WorkbenchState,
-  WorkbenchTab,
+import {
+  hrefForDataWorkspace,
+  type FileSpace,
+  type FileView,
+  type WorkbenchState,
+  type WorkbenchTab,
 } from "./workbench-state";
-import { resolveFilesystemAuditMode } from "./workbench-permissions";
+import { canWriteGovernedFileSpace, resolveFilesystemAuditMode } from "./workbench-permissions";
 
 export type FilesystemWorkbenchProps = {
   workspaceId: string;
@@ -55,7 +58,25 @@ export type FilesystemWorkbenchProps = {
   organizationId?: string;
   members?: WorkspaceMemberVM[];
   memberDirectoryAvailable?: boolean;
+  lockedTab?: WorkbenchTab;
+  hideTabList?: boolean;
+  /** 存储治理四 Tab 中与路由对齐的当前项 */
+  governanceSection?: GovernanceSection;
+  currentFolderLabel?: string;
 };
+
+function fileSpaceLabel(space?: FileSpace) {
+  switch (space) {
+    case "my":
+      return "我的文件";
+    case "organization":
+      return "租户文件";
+    case "shared":
+      return "与我共享";
+    default:
+      return "工作区文件";
+  }
+}
 
 const tabs: Array<{
   id: WorkbenchTab;
@@ -74,6 +95,17 @@ function uploadIdempotencyKey() {
     globalThis.crypto?.randomUUID?.() ??
     `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
   }`;
+}
+
+function transferProcessingFailureMessage(errorCode?: string) {
+  const code = errorCode?.trim();
+  if (code === "object_missing") {
+    return "校验失败：存储上找不到上传的临时文件，请检查 Provider 的 LOCAL Endpoint 是否为可写目录";
+  }
+  if (code === "integrity_mismatch") {
+    return "校验失败：文件大小或校验和不一致";
+  }
+  return code || "上传处理失败";
 }
 
 function abortableDelay(milliseconds: number, signal: AbortSignal) {
@@ -110,6 +142,10 @@ export function FilesystemWorkbench({
   organizationId,
   members = [],
   memberDirectoryAvailable = false,
+  lockedTab,
+  hideTabList = false,
+  governanceSection,
+  currentFolderLabel = "根目录",
 }: FilesystemWorkbenchProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -234,7 +270,7 @@ export function FilesystemWorkbench({
               return;
             }
             if (terminalStatuses.has(current.status)) {
-              throw new Error(current.error_code || "上传处理失败");
+              throw new Error(transferProcessingFailureMessage(current.error_code));
             }
             await abortableDelay(500, controls.signal);
             current = await getTransferSession(sessionId, scopedWorkspaceId, {
@@ -261,6 +297,11 @@ export function FilesystemWorkbench({
                 totalBytes: progress.totalBytes,
               }),
           });
+          if (session.protocol === "MULTIPART") {
+            await completeTransferSession(session.session_id, scopedWorkspaceId, {
+              signal: controls.signal,
+            });
+          }
           await waitForCompletion(session.session_id);
         }
 
@@ -338,20 +379,19 @@ export function FilesystemWorkbench({
       ? Boolean(auditMode)
       : !tab.permission || permissions.includes(tab.permission),
   );
-  const activeTab = visibleTabs.some((tab) => tab.id === effectiveState.tab)
-    ? effectiveState.tab
-    : "files";
-  const legacyWorkspaceWriteEnabled =
-    permissions.includes("file:write") &&
-    (!fileSpace && !namespaceSummary
-      ? true
-      : fileSpace === "workspace" &&
-        namespaceSummary?.namespace_type === "WORKSPACE" &&
-        namespaceSummary.id === namespace.id &&
-        namespaceSummary.workspace_id === workspaceId &&
-        namespaceSummary.capabilities.includes("WRITE"));
+  const activeTab =
+    lockedTab ??
+    (visibleTabs.some((tab) => tab.id === effectiveState.tab) ? effectiveState.tab : "files");
+  const legacyWorkspaceWriteEnabled = canWriteGovernedFileSpace({
+    permissions,
+    fileSpace,
+    namespaceSummary,
+    namespace,
+    workspaceId,
+  });
 
   function selectTab(tab: WorkbenchTab) {
+    if (hideTabList) return;
     const nextSearchParams = new URLSearchParams(searchParams.toString());
     nextSearchParams.set("tab", tab);
     router.replace(`${pathname}?${nextSearchParams.toString()}`);
@@ -483,7 +523,6 @@ export function FilesystemWorkbench({
         workspaceLabel,
         namespace: namespaceSummary,
         workspaceId,
-        view,
         currentId: effectiveState.parent ?? rootNode.id,
         canWrite: legacyWorkspaceWriteEnabled,
         onNavigate: navigateDirectory,
@@ -574,12 +613,30 @@ export function FilesystemWorkbench({
                   effectiveState.parent ?? namespace.root_node_id!,
                 )
             : undefined,
+          searchValue,
+          onSearchChange: setSearchValue,
+          onSearchSubmit: submitSearch,
+          onViewChange: selectView,
+          onOpenDirectory: () => setDirectoryDrawerOpen(true),
+          spaceLabel: fileSpaceLabel(fileSpace),
+          currentFolderLabel,
+          workspaceRootHref: hrefForDataWorkspace(fileSpace ?? "workspace", view),
+          isListingSearch: Boolean(effectiveState.query?.trim()),
         })
       : createElement("div", { className: "empty-state" }, "文件命名空间尚未初始化。");
+  const filesSpaceTabs =
+    fileSpace && namespaceSummary && organizationLabel && workspaceLabel
+      ? createElement(FileSpaceTabList, { activeSpace: fileSpace, view })
+      : null;
+
   const filesContent = createElement(
     "div",
+    { className: "filesystem-data-workspace stack-sm min-w-0" },
+    filesSpaceTabs,
+    createElement(
+    "div",
     {
-      className: "filesystem-browser-layout gap-6",
+      className: "filesystem-workspace-frame filesystem-browser-layout",
       "data-testid": "filesystem-browser-layout",
     },
     createElement(
@@ -601,37 +658,12 @@ export function FilesystemWorkbench({
         onFiles: (files: File[], targetParentId: string) =>
           transferQueue.enqueue(files, targetParentId),
       },
-      createElement(
-        "div",
-        {
-          className: "filesystem-browser-main",
-          "aria-labelledby": "workbench-tab-files",
-        },
         createElement(
-          "form",
+          "div",
           {
-            role: "search",
-            "aria-label": "文件搜索",
-            className: "mb-4 flex flex-wrap gap-2",
-            onSubmit: (event: FormEvent) => {
-              event.preventDefault();
-              submitSearch();
-            },
+            className: "filesystem-browser-main",
+            "aria-labelledby": "workbench-tab-files",
           },
-          createElement("input", {
-            type: "search",
-            className: "input min-w-0 flex-1",
-            "aria-label": "搜索文件",
-            value: searchValue,
-            onChange: (event: ChangeEvent<HTMLInputElement>) =>
-              setSearchValue(event.currentTarget.value),
-          }),
-          createElement(
-            "button",
-            { type: "submit", className: "btn btn-secondary" },
-            "搜索",
-          ),
-        ),
         filesPanel,
         createElement(
           "nav",
@@ -661,61 +693,13 @@ export function FilesystemWorkbench({
         ),
       ),
     ),
+    ),
   );
 
   return createElement(
     "div",
     { className: "filesystem-workbench stack-lg" },
-    tabList,
-    activeTab === "files"
-      ? createElement(
-          "div",
-          {
-            role: "toolbar",
-            "aria-label": "文件视图",
-            className: "filesystem-workbench-toolbar flex flex-wrap justify-end gap-2",
-          },
-          createElement(
-            "button",
-            {
-              type: "button",
-              className:
-                view === "list"
-                  ? "btn btn-secondary btn-sm filesystem-touch-target"
-                  : "btn btn-ghost btn-sm filesystem-touch-target",
-              "aria-label": "切换到列表视图",
-              "aria-pressed": view === "list",
-              onClick: () => selectView("list"),
-            },
-            createElement("span", { "aria-hidden": true }, "☰"),
-          ),
-          createElement(
-            "button",
-            {
-              type: "button",
-              className:
-                view === "grid"
-                  ? "btn btn-secondary btn-sm filesystem-touch-target"
-                  : "btn btn-ghost btn-sm filesystem-touch-target",
-              "aria-label": "切换到网格视图",
-              "aria-pressed": view === "grid",
-              onClick: () => selectView("grid"),
-            },
-            createElement("span", { "aria-hidden": true }, "▦"),
-          ),
-          createElement(
-            "button",
-            {
-              type: "button",
-              className:
-                "btn btn-ghost btn-sm filesystem-directory-trigger filesystem-touch-target",
-              "aria-label": "打开目录",
-              onClick: () => setDirectoryDrawerOpen(true),
-            },
-            "目录",
-          ),
-        )
-      : null,
+    hideTabList ? null : tabList,
     visibleTabs.map((tab) =>
       createElement(
         "div",
@@ -737,7 +721,11 @@ export function FilesystemWorkbench({
                   canWrite: legacyWorkspaceWriteEnabled,
                 })
               : tab.id === "governance"
-                ? createElement(GovernanceWorkspace, { workspaceId, permissions })
+                ? createElement(GovernanceWorkspace, {
+                    workspaceId,
+                    permissions,
+                    activeSection: governanceSection,
+                  })
                 : tab.id === "approvals"
                   ? organizationId
                     ? createElement(ShareApprovalPanel, { organizationId, workspaceId })
@@ -755,7 +743,13 @@ export function FilesystemWorkbench({
     activeTab === "files"
       ? createElement(TransferSummary, {
           queue: transferQueue,
-          onViewAll: () => selectTab("transfers"),
+          onViewAll: () => {
+            if (hideTabList) {
+              router.push("/files/data/transfers");
+              return;
+            }
+            selectTab("transfers");
+          },
         })
       : null,
     moveError

@@ -16,6 +16,7 @@ import {
   LIFECYCLE_WHEN_KEYS,
   type LifecycleRuleDraft,
 } from "./lifecycle-policy-spec";
+import { LIFECYCLE_ACTION_LABELS, LIFECYCLE_WHEN_LABELS } from "./lifecycle-policy-labels";
 
 export type LifecyclePolicyPanelProps = {
   workspaceId: string;
@@ -128,19 +129,13 @@ export function LifecyclePolicyPanel({
 
   return (
     <section className="stack-lg">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">生命周期策略</h2>
-          <p className="text-sm text-muted">仅允许规格定义的筛选条件与动作。</p>
+      {canAdmin ? (
+        <div className="flex flex-wrap items-start justify-end gap-3">
+          <button type="button" className="btn btn-primary" onClick={() => openEditor()}>
+            新建策略
+          </button>
         </div>
-        {canAdmin ? (
-          <div className="flex gap-2">
-            <button type="button" className="btn btn-secondary" onClick={() => openEditor()}>
-              新建策略
-            </button>
-          </div>
-        ) : null}
-      </div>
+      ) : null}
 
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
 
@@ -184,33 +179,57 @@ export function LifecyclePolicyPanel({
         </div>
       )}
 
-      <Modal open={editorOpen} title="编辑生命周期策略" onClose={() => setEditorOpen(false)}>
-        <div className="stack-md">
-          <label className="stack-xs">
-            <span>策略名称</span>
-            <input className="input" value={policyName} onChange={(e) => setPolicyName(e.target.value)} />
-          </label>
-          {ruleDrafts.map((rule, index) => (
-            <LifecycleRuleEditor
-              key={rule.id}
-              rule={rule}
-              onChange={(next: LifecycleRuleDraft) =>
-                setRuleDrafts((current) => current.map((item, i) => (i === index ? next : item)))
-              }
-              onRemove={() => setRuleDrafts((current) => current.filter((_, i) => i !== index))}
-            />
-          ))}
-          <button type="button" className="btn btn-secondary" onClick={addRule}>
-            添加规则
-          </button>
-          <div className="flex justify-end gap-2">
-            <button type="button" className="btn btn-ghost" disabled={submitting} onClick={() => setEditorOpen(false)}>
+      <Modal
+        open={editorOpen}
+        title="编辑生命周期策略"
+        size="lg"
+        panelClassName="filesystem-lifecycle-modal"
+        onClose={() => setEditorOpen(false)}
+        footer={
+          <div className="modal-footer-actions">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={submitting}
+              onClick={() => setEditorOpen(false)}
+            >
               取消
             </button>
-            <button type="button" className="btn btn-primary" disabled={submitting} onClick={() => void savePolicy()}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={submitting}
+              onClick={() => void savePolicy()}
+            >
               保存版本
             </button>
           </div>
+        }
+      >
+        <div className="lifecycle-policy-modal-form">
+          <label className="form-field">
+            <span className="form-label">策略名称</span>
+            <input
+              className="input"
+              value={policyName}
+              onChange={(e) => setPolicyName(e.target.value)}
+            />
+          </label>
+          <div className="lifecycle-policy-rules">
+            {ruleDrafts.map((rule, index) => (
+              <LifecycleRuleEditor
+                key={`${rule.id}-${index}`}
+                rule={rule}
+                onChange={(next: LifecycleRuleDraft) =>
+                  setRuleDrafts((current) => current.map((item, i) => (i === index ? next : item)))
+                }
+                onRemove={() => setRuleDrafts((current) => current.filter((_, i) => i !== index))}
+              />
+            ))}
+          </div>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={addRule}>
+            添加规则
+          </button>
         </div>
       </Modal>
     </section>
@@ -224,94 +243,126 @@ function LifecycleRuleEditor(props: {
 }) {
   const { rule, onChange, onRemove } = props;
   return (
-    <div className="rounded-lg border border-border p-3 stack-sm">
-      <RuleSectionHeader id={rule.id} onRemove={onRemove} />
-      <label className="stack-xs">
-        <span>规则 ID</span>
-        <input className="input" value={rule.id} onChange={(e) => onChange({ ...rule, id: e.target.value })} />
+    <article className="lifecycle-rule-card">
+      <header className="lifecycle-rule-card-header">
+        <h3 className="lifecycle-rule-card-title">规则 {rule.id}</h3>
+        <button type="button" className="lifecycle-rule-remove" onClick={onRemove}>
+          删除
+        </button>
+      </header>
+      <label className="form-field lifecycle-rule-field">
+        <span className="form-label">规则 ID</span>
+        <input
+          className="input"
+          value={rule.id}
+          onChange={(e) => onChange({ ...rule, id: e.target.value })}
+        />
       </label>
-      <fieldset className="stack-sm">
-        <legend className="text-sm font-medium">When 条件</legend>
-        {LIFECYCLE_WHEN_KEYS.map((key) => (
-          <label key={key} className="stack-xs">
-            <span>{key}</span>
-            {key === "scope" ? (
-              <select
-                className="input"
-                value={String(rule.when[key] ?? "")}
-                onChange={(e) =>
-                  onChange({ ...rule, when: { ...rule.when, [key]: e.target.value } })
-                }
+      <section className="lifecycle-rule-section" aria-labelledby={`when-${rule.id}`}>
+        <h4 id={`when-${rule.id}`} className="lifecycle-rule-section-title">
+          When 条件
+        </h4>
+        <div className="lifecycle-rule-when-grid">
+          {LIFECYCLE_WHEN_KEYS.map((key) => (
+            <label key={key} className="form-field lifecycle-rule-field">
+              <span className="form-label">{LIFECYCLE_WHEN_LABELS[key]}</span>
+              {key === "scope" ? (
+                <select
+                  className="input"
+                  value={String(rule.when[key] ?? "")}
+                  onChange={(e) => {
+                    const nextWhen = { ...rule.when };
+                    if (e.target.value === "") {
+                      delete nextWhen[key];
+                    } else {
+                      nextWhen[key] = e.target.value;
+                    }
+                    onChange({ ...rule, when: nextWhen });
+                  }}
+                >
+                  <option value="">未设置</option>
+                  {LIFECYCLE_SCOPE_VALUES.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              ) : key === "classification" ? (
+                <select
+                  className="input"
+                  value={String(rule.when[key] ?? "")}
+                  onChange={(e) => {
+                    const nextWhen = { ...rule.when };
+                    if (e.target.value === "") {
+                      delete nextWhen[key];
+                    } else {
+                      nextWhen[key] = e.target.value;
+                    }
+                    onChange({ ...rule, when: nextWhen });
+                  }}
+                >
+                  <option value="">未设置</option>
+                  {LIFECYCLE_CLASSIFICATION_VALUES.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  className="input"
+                  type={key === "min_size" || key === "max_age_days" ? "number" : "text"}
+                  min={key === "min_size" || key === "max_age_days" ? 0 : undefined}
+                  value={rule.when[key] ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const nextWhen = { ...rule.when };
+                    if (key === "min_size" || key === "max_age_days") {
+                      if (raw === "") {
+                        delete nextWhen[key];
+                      } else {
+                        nextWhen[key] = Number(raw);
+                      }
+                    } else {
+                      nextWhen[key] = raw;
+                    }
+                    onChange({ ...rule, when: nextWhen });
+                  }}
+                />
+              )}
+            </label>
+          ))}
+        </div>
+      </section>
+      <section className="lifecycle-rule-section" aria-labelledby={`actions-${rule.id}`}>
+        <h4 id={`actions-${rule.id}`} className="lifecycle-rule-section-title">
+          动作
+        </h4>
+        <div className="lifecycle-rule-actions">
+          {LIFECYCLE_ACTIONS.map((action) => {
+            const checked = rule.actions.includes(action);
+            return (
+              <label
+                key={action}
+                className={checked ? "lifecycle-rule-action is-checked" : "lifecycle-rule-action"}
               >
-                <option value="">未设置</option>
-                {LIFECYCLE_SCOPE_VALUES.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            ) : key === "classification" ? (
-              <select
-                className="input"
-                value={String(rule.when[key] ?? "")}
-                onChange={(e) =>
-                  onChange({ ...rule, when: { ...rule.when, [key]: e.target.value } })
-                }
-              >
-                <option value="">未设置</option>
-                {LIFECYCLE_CLASSIFICATION_VALUES.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                className="input"
-                value={rule.when[key] ?? ""}
-                onChange={(e) =>
-                  onChange({
-                    ...rule,
-                    when: {
-                      ...rule.when,
-                      [key]: key === "min_size" || key === "max_age_days" ? Number(e.target.value) : e.target.value,
-                    },
-                  })
-                }
-              />
-            )}
-          </label>
-        ))}
-      </fieldset>
-      <fieldset className="stack-xs">
-        <legend className="text-sm font-medium">动作</legend>
-        {LIFECYCLE_ACTIONS.map((action) => (
-          <label key={action} className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={rule.actions.includes(action)}
-              onChange={(e) => {
-                const actions = e.target.checked
-                  ? [...rule.actions, action]
-                  : rule.actions.filter((item) => item !== action);
-                onChange({ ...rule, actions });
-              }}
-            />
-            {action}
-          </label>
-        ))}
-      </fieldset>
-    </div>
-  );
-}
-
-function RuleSectionHeader({ id, onRemove }: { id: string; onRemove: () => void }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-sm font-medium">规则 {id}</span>
-      <button type="button" className="btn btn-ghost btn-sm" onClick={onRemove}>
-        删除
-      </button>
-    </div>
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={checked}
+                  onChange={(e) => {
+                    const actions = e.target.checked
+                      ? [...rule.actions, action]
+                      : rule.actions.filter((item) => item !== action);
+                    onChange({ ...rule, actions });
+                  }}
+                />
+                <span>{LIFECYCLE_ACTION_LABELS[action] ?? action}</span>
+              </label>
+            );
+          })}
+        </div>
+      </section>
+    </article>
   );
 }

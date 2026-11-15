@@ -267,6 +267,47 @@ func TestEnsureNamespaceRepairLookupRejectsCrossOrganizationRace(t *testing.T) {
 	require.Equal(t, int64(1), quotaCount)
 }
 
+func TestEnsureNamespaceReconcilesLegacyRootDirectory(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS filesystem").Error)
+	require.NoError(t, persistence.AutoMigrate(db))
+
+	organizationID, ownerID := uuid.New(), uuid.New()
+	cmd := EnsureNamespace{
+		OrganizationID: organizationID, OwnerUserID: ownerID,
+		NamespaceType: model.NamespaceTypeUser, ActorID: ownerID,
+	}
+	namespaceID := namespaceID(cmd)
+	legacyRootID := uuid.New()
+	repo := persistence.NewRepository(db)
+	require.NoError(t, repo.CreateNamespaceIfAbsent(context.Background(), &model.Namespace{
+		ID: namespaceID, NamespaceType: model.NamespaceTypeUser, OrganizationID: organizationID,
+		OwnerUserID: ownerID, Status: "ACTIVE",
+	}))
+	legacyRoot, err := model.NewRootDirectory(namespaceID, ownerID, ".root")
+	require.NoError(t, err)
+	legacyRoot.ID = legacyRootID
+	require.NoError(t, repo.CreateNode(context.Background(), legacyRoot))
+
+	handler := NewEnsureNamespaceHandler(repo, postgres.NewTransactor(db))
+	namespace, err := handler.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+	require.NotNil(t, namespace.RootNodeID)
+	require.Equal(t, legacyRootID, *namespace.RootNodeID)
+
+	reloaded, err := repo.GetNamespace(context.Background(), namespaceID)
+	require.NoError(t, err)
+	require.NotNil(t, reloaded.RootNodeID)
+	require.Equal(t, legacyRootID, *reloaded.RootNodeID)
+}
+
 func TestNamespaceIDNormalizesUnusedScopeFields(t *testing.T) {
 	organizationID, workspaceID, ownerID := uuid.New(), uuid.New(), uuid.New()
 	organization := namespaceID(EnsureNamespace{
