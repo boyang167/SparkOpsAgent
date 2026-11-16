@@ -325,7 +325,7 @@ func (p *Provider) resolve(objectKey string) (string, error) {
 }
 
 func (p *Provider) objectPath(objectKey string) string {
-	return filepath.Join(p.root, p.digest(objectKey)+".object")
+	return ObjectFilePath(p.root, objectKey)
 }
 
 func (p *Provider) checkRoot() error {

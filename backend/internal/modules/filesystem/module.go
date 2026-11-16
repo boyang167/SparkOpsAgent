@@ -369,6 +369,7 @@ func (m *Module) Register(c *appctx.Container) error {
 		).Handle,
 		GetPreviewBlob: previewReader.BlobID,
 	})
+	handler.BindFileStorage(query.NewGetFileStorageHandler(repo).Handle)
 	var listFileAudits func(context.Context, query.ListFileAuditEvents) (query.ListFileAuditEventsResult, error)
 	if auditService, ok := c.AuditLogger.(*audit.Service); ok {
 		listFileAudits = query.NewListFileAuditEventsHandler(auditService).Handle

@@ -7,6 +7,7 @@ import type {
   FileAuditEventVM,
   FileNodeVM,
   FileRevisionVM,
+  FileStorageVM,
   GovernedGrantVM,
   ShareRequestVM,
 } from "@sparkops/contracts/filesystem";
@@ -14,17 +15,21 @@ import { BffError } from "@sparkops/contracts";
 import {
   listFileAuditEvents,
   listFileRevisions,
+  getFileStorage,
   getEffectiveAccess,
   listGovernedGrants,
   listShareRequests,
 } from "@sparkops/web-sdk/filesystem";
 import { Drawer } from "@/components/ui/Drawer";
 import { InlineAlert } from "@/components/ui/InlineAlert";
+import { resolveNodePath } from "./file-node-display-path";
 
 export type FileDetailDrawerProps = {
   node: FileNodeVM | null;
   workspaceId: string;
   organizationId?: string;
+  namespaceRootId?: string | null;
+  displayPath?: string;
   open: boolean;
   onClose: () => void;
   loadError?: "forbidden" | "not-found" | "error";
@@ -40,6 +45,8 @@ export function FileDetailDrawer({
   node,
   workspaceId,
   organizationId,
+  namespaceRootId,
+  displayPath,
   open,
   onClose,
   loadError,
@@ -47,9 +54,15 @@ export function FileDetailDrawer({
   projectionOnly = false,
   projectionDetails = [],
 }: FileDetailDrawerProps): React.ReactElement | null {
-  const [tab, setTab] = useState<DetailTab>("details");
-  const detailTabsId = useId();
   const detailKey = `${workspaceId}:${node?.id ?? ""}`;
+  const [tab, setTab] = useState<DetailTab>("details");
+  const [resolvedPath, setResolvedPath] = useState<string | undefined>(displayPath);
+  const [storageData, setStorageData] = useState<{
+    key: string;
+    value?: FileStorageVM;
+    state: LoadState;
+  }>({ key: detailKey, state: "idle" });
+  const detailTabsId = useId();
   const [revisionData, setRevisionData] = useState<{
     key: string;
     items: FileRevisionVM[];
@@ -111,6 +124,59 @@ export function FileDetailDrawer({
         loadingMore: false,
         loadMoreError: false,
       };
+
+  useEffect(() => {
+    if (!open || !node || projectionOnly) {
+      setResolvedPath(undefined);
+      return;
+    }
+    if (displayPath) {
+      setResolvedPath(displayPath);
+      return;
+    }
+    const controller = new AbortController();
+    setResolvedPath(undefined);
+    resolveNodePath(workspaceId, node, namespaceRootId, controller.signal)
+      .then((path) => {
+        if (!controller.signal.aborted) {
+          setResolvedPath(path);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setResolvedPath("—");
+        }
+      });
+    return () => controller.abort();
+  }, [detailKey, displayPath, namespaceRootId, node, open, projectionOnly, workspaceId]);
+
+  useEffect(() => {
+    if (!open || !node || projectionOnly || node.type !== "FILE") {
+      setStorageData({ key: detailKey, state: "idle" });
+      return;
+    }
+    const controller = new AbortController();
+    setStorageData({ key: detailKey, state: "loading" });
+    void getFileStorage(
+      workspaceId,
+      node.id,
+      { namespace_id: node.namespace_id },
+      { signal: controller.signal },
+    )
+      .then((value) => {
+        if (!controller.signal.aborted) {
+          setStorageData({ key: detailKey, value, state: "ready" });
+        }
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setStorageData({
+          key: detailKey,
+          state: error instanceof BffError && error.status === 403 ? "forbidden" : "error",
+        });
+      });
+    return () => controller.abort();
+  }, [detailKey, node, open, projectionOnly, workspaceId]);
 
   useEffect(() => {
     const generation = ++revisionGeneration.current;
@@ -404,7 +470,12 @@ export function FileDetailDrawer({
             projectionOnly
               ? createElement(ProjectionDetails, { node, details: projectionDetails })
               : tab === "details"
-                ? createElement(Details, { node })
+                ? createElement(Details, {
+                    node,
+                    path: resolvedPath,
+                    storage:
+                      storageData.key === detailKey ? storageData : { key: detailKey, state: "loading" },
+                  })
               : tab === "access"
                 ? createElement(AccessDetails, {
                     data: scopedAccess,
@@ -462,7 +533,59 @@ function ProjectionDetails({
   );
 }
 
-function Details({ node }: { node: FileNodeVM }) {
+function Details({
+  node,
+  path,
+  storage,
+}: {
+  node: FileNodeVM;
+  path?: string;
+  storage: { key: string; value?: FileStorageVM; state: LoadState };
+}) {
+  const storageRows =
+    node.type === "FILE"
+      ? storage.state === "ready" && storage.value
+        ? [
+            createElement(Detail, {
+              label: "存储对象键",
+              value: storage.value.object_key,
+              mono: true,
+            }),
+            createElement(Detail, {
+              label: "存储类型",
+              value: storage.value.provider_type,
+            }),
+            createElement(Detail, {
+              label: "存储根目录",
+              value: storage.value.provider_root || "—",
+              mono: true,
+            }),
+            storage.value.local_object_file
+              ? createElement(Detail, {
+                  label: "物理对象文件",
+                  value: storage.value.local_object_file,
+                  mono: true,
+                })
+              : null,
+            createElement(Detail, {
+              label: "内容 SHA256",
+              value: storage.value.content_sha256,
+              mono: true,
+            }),
+          ]
+        : [
+            createElement(Detail, {
+              label: "底层存储",
+              value:
+                storage.state === "loading" || storage.state === "idle"
+                  ? "正在加载…"
+                  : storage.state === "forbidden"
+                    ? "无权查看"
+                    : "加载失败",
+            }),
+          ]
+      : [];
+
   return createElement(
     "div",
     { className: "stack-lg" },
@@ -471,6 +594,12 @@ function Details({ node }: { node: FileNodeVM }) {
       { className: "grid gap-4 sm:grid-cols-2" },
       createElement(Detail, { label: "类型", value: node.type === "DIRECTORY" ? "目录" : "文件" }),
       createElement(Detail, { label: "状态", value: node.state }),
+      createElement(Detail, {
+        label: "路径",
+        value: path ?? "正在解析…",
+        mono: true,
+      }),
+      ...storageRows,
       createElement(Detail, { label: "节点 ID", value: node.id, mono: true }),
       createElement(Detail, { label: "所有者", value: node.owner_id, mono: true }),
       createElement(Detail, { label: "当前版本 ID", value: node.current_revision_id ?? "—", mono: true }),

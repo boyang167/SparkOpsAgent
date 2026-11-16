@@ -11,6 +11,7 @@ import type {
   FileNodePageVM,
   FileNodeVM,
   FileRevisionPageVM,
+  FileStorageVM,
   GovernedChildrenQuery,
   GovernedGrantPageVM,
   GovernanceMetadataQuery,
@@ -176,6 +177,15 @@ export async function listFileRevisions(
 ): Promise<FileRevisionPageVM> {
   const data = await ctx.upstream.filesystem.listRevisions(workspaceId, nodeId, query);
   return mapRevisionPage(data);
+}
+
+export async function getFileStorage(
+  ctx: BffContext,
+  workspaceId: string,
+  nodeId: string,
+  query: { revision_id?: string; namespace_id?: string } = {},
+): Promise<FileStorageVM> {
+  return ctx.upstream.filesystem.getFileStorage(workspaceId, nodeId, query);
 }
 
 export async function createTransferSession(

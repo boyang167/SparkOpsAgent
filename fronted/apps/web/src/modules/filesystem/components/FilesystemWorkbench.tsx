@@ -22,6 +22,7 @@ import { Drawer } from "@/components/ui/Drawer";
 import { AuditWorkspace } from "./AuditWorkspace";
 import { DirectoryTree } from "./DirectoryTree";
 import { FileDetailDrawer } from "./FileDetailDrawer";
+import { nodePathInFolder } from "./file-node-display-path";
 import { FileDropZone } from "./FileDropZone";
 import { FileExplorerPanel } from "./FileExplorerPanel";
 import { FileSpaceNav } from "./FileSpaceNav";
@@ -799,6 +800,12 @@ export function FilesystemWorkbench({
           loadError: selected.error,
           workspaceId,
           organizationId,
+          namespaceRootId: namespace.root_node_id,
+          displayPath:
+            selected.node &&
+            selected.node.parent_id === (effectiveState.parent ?? namespace.root_node_id)
+              ? nodePathInFolder(currentFolderLabel, selected.node)
+              : undefined,
           onClose: closeNode,
           onRetry: () => router.refresh(),
         })

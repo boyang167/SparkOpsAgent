@@ -15,6 +15,8 @@ const sdk = vi.hoisted(() => ({
   getEffectiveAccess: vi.fn(),
   listGovernedGrants: vi.fn(),
   listShareRequests: vi.fn(),
+  getFileNode: vi.fn(),
+  getFileStorage: vi.fn(),
 }));
 
 vi.mock("@sparkops/web-sdk/filesystem", () => ({
@@ -23,6 +25,8 @@ vi.mock("@sparkops/web-sdk/filesystem", () => ({
   getEffectiveAccess: sdk.getEffectiveAccess,
   listGovernedGrants: sdk.listGovernedGrants,
   listShareRequests: sdk.listShareRequests,
+  getFileNode: sdk.getFileNode,
+  getFileStorage: sdk.getFileStorage,
 }));
 
 vi.mock("@/components/ui/Drawer", () => ({
@@ -85,6 +89,29 @@ function drawer(
 
 describe("FileDetailDrawer", () => {
   beforeEach(() => {
+    sdk.getFileStorage.mockReset();
+    sdk.getFileStorage.mockResolvedValue({
+      revision_id: file.current_revision_id ?? "00000000-0000-4000-8000-000000000099",
+      blob_id: "00000000-0000-4000-8000-000000000098",
+      provider_id: "00000000-0000-4000-8000-000000000097",
+      provider_type: "LOCAL",
+      provider_root: "A:\\21-Agent\\SparkOpsAgent\\logs",
+      object_key: "transfers/demo/content",
+      content_sha256: "ed2b89b68f11227164ecdd887a0b3ea122098cc0a66713c7ca9165ee7f35d3fb",
+      local_object_file:
+        "A:\\21-Agent\\SparkOpsAgent\\logs\\e60c18b8d64a19712695ab520548264e6f7f16bceae2c7aa1110ee46ef1fc7e8.object",
+    });
+    sdk.getFileNode.mockReset();
+    sdk.getFileNode.mockResolvedValue({
+      id: file.parent_id!,
+      namespace_id: file.namespace_id,
+      parent_id: null,
+      type: "DIRECTORY",
+      name: "test",
+      current_revision_id: null,
+      state: "ACTIVE",
+      owner_id: file.owner_id,
+    });
     sdk.listFileRevisions.mockReset();
     sdk.listFileAuditEvents.mockReset();
     sdk.getEffectiveAccess.mockReset();
@@ -189,6 +216,33 @@ describe("FileDetailDrawer", () => {
 
   afterEach(() => cleanup());
 
+  it("shows underlying storage metadata on the details tab", async () => {
+    render(drawer());
+    expect(await screen.findByText("存储对象键")).toBeInTheDocument();
+    expect(screen.getByText("transfers/demo/content")).toBeInTheDocument();
+    expect(screen.getByText("物理对象文件")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "A:\\21-Agent\\SparkOpsAgent\\logs\\e60c18b8d64a19712695ab520548264e6f7f16bceae2c7aa1110ee46ef1fc7e8.object",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the file path on the details tab", () => {
+    render(
+      createElement(FileDetailDrawer, {
+        open: true,
+        node: file,
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        displayPath: "/test/K8s.md",
+        onClose: vi.fn(),
+      }),
+    );
+
+    expect(screen.getByText("路径")).toBeInTheDocument();
+    expect(screen.getByText("/test/K8s.md")).toBeInTheDocument();
+  });
+
   it("loads real revisions when opened and closes with Escape", async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
@@ -200,7 +254,7 @@ describe("FileDetailDrawer", () => {
     expect(sdk.listFileRevisions).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000001",
       file.id,
-      { limit: 50 },
+      { limit: 50, namespace_id: file.namespace_id },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
 

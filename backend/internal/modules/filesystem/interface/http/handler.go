@@ -86,6 +86,7 @@ type Handler struct {
 	searchFiles               func(context.Context, query.SearchFiles) ([]query.SearchHit, string, error)
 	getPreviewBlob            func(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID) (uuid.UUID, error)
 	listFileAudits            func(context.Context, query.ListFileAuditEvents) (query.ListFileAuditEventsResult, error)
+	getFileStorage            func(context.Context, query.GetFileStorage) (query.FileStorageView, error)
 }
 
 func NewHandler(
@@ -168,6 +169,7 @@ func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.Ha
 	base.GET("/files/:nodeId", authz.RequirePermission(permissions, authz.PermFileRead), h.GetFileNode)
 	base.GET("/files/search", authz.RequirePermission(permissions, authz.PermFileRead), h.SearchFiles)
 	base.GET("/files/:nodeId/preview", authz.RequirePermission(permissions, authz.PermFileRead), h.GetFilePreview)
+	base.GET("/files/:nodeId/storage", authz.RequirePermission(permissions, authz.PermFileRead), h.GetFileStorage)
 	base.POST("/directories", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.CreateDirectory)
 	base.PATCH("/files/:nodeId/name", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.RenameNode)
 	base.POST("/files/:nodeId/move", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.MoveNode)

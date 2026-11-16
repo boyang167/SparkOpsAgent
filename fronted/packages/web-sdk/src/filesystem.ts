@@ -10,6 +10,7 @@ import type {
   FileNodePageVM,
   FileNodeVM,
   FileRevisionPageVM,
+  FileStorageVM,
   GovernedGrantPageVM,
   GovernanceMetadataQuery,
   GovernedShareSubmissionVM,
@@ -451,6 +452,27 @@ export function trashFileNode(
     workspaceId,
     headers: { ...rest.headers, "Idempotency-Key": key },
   });
+}
+
+export function getFileStorage(
+  workspaceId: string,
+  nodeId: string,
+  query: { revision_id?: string; namespace_id?: string } = {},
+  options: BffFetchOptions = {},
+) {
+  const params = new URLSearchParams();
+  if (query.revision_id) params.set("revision_id", query.revision_id);
+  if (query.namespace_id) params.set("namespace_id", query.namespace_id);
+  const suffix = params.toString();
+  const qs = suffix ? `?${suffix}` : "";
+  return bffFetch<FileStorageVM>(
+    `/workspaces/${workspaceId}/files/${nodeId}/storage${qs}`,
+    {
+      method: "GET",
+      workspaceId,
+      ...options,
+    },
+  );
 }
 
 export function listFileRevisions(

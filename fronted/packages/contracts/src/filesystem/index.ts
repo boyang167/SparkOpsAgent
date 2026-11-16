@@ -142,6 +142,19 @@ export const FileRevisionPageVMSchema = z.object({
 
 export type FileRevisionPageVM = z.infer<typeof FileRevisionPageVMSchema>;
 
+export const FileStorageVMSchema = z.object({
+  revision_id: z.string().uuid(),
+  blob_id: z.string().uuid(),
+  provider_id: z.string().uuid(),
+  provider_type: z.enum(["LOCAL", "NFS", "S3"]),
+  provider_root: z.string(),
+  object_key: z.string(),
+  content_sha256: z.string(),
+  local_object_file: z.string().optional(),
+});
+
+export type FileStorageVM = z.infer<typeof FileStorageVMSchema>;
+
 export const CreateDirectoryCommandSchema = z.object({
   namespace_id: z.string().uuid().optional(),
   parent_id: z.string().uuid().nullable().optional(),

@@ -10,6 +10,7 @@ import type {
   FileNodePageVM,
   FileNodeVM,
   FileRevisionPageVM,
+  FileStorageVM,
   GovernedChildrenQuery,
   GovernedGrantPageVM,
   GovernanceMetadataQuery,
@@ -414,6 +415,21 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
     listRevisions(workspaceId: string, nodeId: string, query: ListRevisionsQuery = {}) {
       return upstreamFetch<FileRevisionPageVM>(
         `/api/v1/workspaces/${workspaceId}/files/${nodeId}/revisions${revisionsQuery(query)}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+    getFileStorage(
+      workspaceId: string,
+      nodeId: string,
+      query: { revision_id?: string; namespace_id?: string } = {},
+    ) {
+      const params = new URLSearchParams();
+      if (query.revision_id) params.set("revision_id", query.revision_id);
+      if (query.namespace_id) params.set("namespace_id", query.namespace_id);
+      const suffix = params.toString();
+      const qs = suffix ? `?${suffix}` : "";
+      return upstreamFetch<FileStorageVM>(
+        `/api/v1/workspaces/${workspaceId}/files/${nodeId}/storage${qs}`,
         { method: "GET", options: { ...options, workspaceId } },
       );
     },
