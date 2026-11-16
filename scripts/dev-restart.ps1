@@ -1,8 +1,8 @@
-﻿# SparkOps 本地开发：停止并重启前后端
+﻿# SparkOps 本地开发：停止并重启 API、文件数据面和前端
 # 用法:
-#   .\scripts\dev-restart.ps1           # 重启后端 :8080 + 前端 :3000
+#   .\scripts\dev-restart.ps1           # 重启 API :8080 + Gateway :8082 + Worker + 前端 :3000
 #   .\scripts\dev-restart.ps1 -Stop     # 仅停止
-#   .\scripts\dev-restart.ps1 -Backend  # 只重启后端
+#   .\scripts\dev-restart.ps1 -Backend  # 只重启 API + Gateway + Worker
 #   .\scripts\dev-restart.ps1 -Frontend # 只重启前端
 
 param(
@@ -20,6 +20,7 @@ $DevDir = Join-Path $RepoRoot ".dev"
 $PidFile = Join-Path $DevDir "dev.pids.json"
 
 $BackendPort = 8080
+$GatewayPort = 8082
 $FrontendPort = 3000
 
 function Ensure-DevDir {
@@ -39,7 +40,7 @@ function Stop-PortListener {
             if ($processId -and $processId -ne 0) {
                 $found = $true
                 Write-Host "  停止端口 $Port 上的进程 PID=$processId" -ForegroundColor Yellow
-                Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+                Stop-ProcessTree -ProcessId $processId
             }
         }
     } catch {
@@ -54,11 +55,20 @@ function Stop-PortListener {
                 $processId = [int]$parts[4]
                 if ($processId -gt 0) {
                     Write-Host "  停止端口 $Port 上的进程 PID=$processId" -ForegroundColor Yellow
-                    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+                    Stop-ProcessTree -ProcessId $processId
                 }
             }
         }
     }
+}
+
+function Stop-ProcessTree {
+    param([int]$ProcessId)
+
+    if ($ProcessId -le 0 -or -not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
+        return
+    }
+    & taskkill.exe /PID $ProcessId /T /F 2>$null | Out-Null
 }
 
 function Load-Pids {
@@ -66,7 +76,7 @@ function Load-Pids {
     try {
         $saved = Get-Content $PidFile -Raw | ConvertFrom-Json
         $obj = @{}
-        foreach ($name in @("backend", "frontend")) {
+        foreach ($name in @("backend", "gateway", "worker", "frontend")) {
             $entry = $saved.$name
             if ($null -eq $entry) { continue }
             $obj[$name] = @{
@@ -92,15 +102,15 @@ function Stop-SavedPids {
     $saved = Load-Pids
     if ($saved.Count -eq 0) { return }
 
-    foreach ($name in @("backend", "frontend")) {
-        if ($name -eq "backend" -and -not $IncludeBackend) { continue }
+    foreach ($name in @("backend", "gateway", "worker", "frontend")) {
+        if ($name -in @("backend", "gateway", "worker") -and -not $IncludeBackend) { continue }
         if ($name -eq "frontend" -and -not $IncludeFrontend) { continue }
         $entry = $saved[$name]
         if ($null -eq $entry) { continue }
         $processId = [int]$entry.processId
         if ($processId -gt 0 -and (Get-Process -Id $processId -ErrorAction SilentlyContinue)) {
             Write-Host "  停止 $name (PID=$processId)" -ForegroundColor Yellow
-            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+            Stop-ProcessTree -ProcessId $processId
         }
     }
 }
@@ -113,7 +123,10 @@ function Stop-DevServices {
 
     Write-Host ">> 停止开发服务..." -ForegroundColor Cyan
     Stop-SavedPids -IncludeBackend $IncludeBackend -IncludeFrontend $IncludeFrontend
-    if ($IncludeBackend) { Stop-PortListener -Port $BackendPort }
+    if ($IncludeBackend) {
+        Stop-PortListener -Port $BackendPort
+        Stop-PortListener -Port $GatewayPort
+    }
     if ($IncludeFrontend) { Stop-PortListener -Port $FrontendPort }
     Start-Sleep -Milliseconds 500
 }
@@ -172,6 +185,60 @@ function Wait-BackendReady {
     return $false
 }
 
+function Wait-GatewayReady {
+    param(
+        [int]$Port,
+        [System.Diagnostics.Process]$Process,
+        [string]$LogPath,
+        [string]$ErrPath,
+        [int]$TimeoutSec = 90
+    )
+
+    Write-Host "  等待文件传输网关监听 :$Port ..." -ForegroundColor DarkGray
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        if ($Process -and $Process.HasExited) {
+            Write-Host "  文件传输网关进程已退出 (exit=$($Process.ExitCode))，最近日志:" -ForegroundColor Red
+            Show-BackendStartupLog -LogPath $LogPath -ErrPath $ErrPath
+            return $false
+        }
+        if (Test-PortListening -Port $Port) {
+            return $true
+        }
+        Start-Sleep -Seconds 2
+    }
+    Write-Host "  文件传输网关在 $TimeoutSec 秒内未就绪，最近日志:" -ForegroundColor Red
+    Show-BackendStartupLog -LogPath $LogPath -ErrPath $ErrPath
+    return $false
+}
+
+function Wait-WorkerReady {
+    param(
+        [System.Diagnostics.Process]$Process,
+        [string]$LogPath,
+        [string]$ErrPath,
+        [int]$TimeoutSec = 90
+    )
+
+    Write-Host "  等待文件 Worker 启动 ..." -ForegroundColor DarkGray
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        if ($Process.HasExited) {
+            Write-Host "  文件 Worker 进程已退出 (exit=$($Process.ExitCode))，最近日志:" -ForegroundColor Red
+            Show-BackendStartupLog -LogPath $LogPath -ErrPath $ErrPath
+            return $false
+        }
+        if ((Test-Path -LiteralPath $ErrPath) -and
+            (Select-String -LiteralPath $ErrPath -SimpleMatch "file-worker subscribers registered; waiting" -Quiet)) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    Write-Host "  文件 Worker 在 $TimeoutSec 秒内未就绪，最近日志:" -ForegroundColor Red
+    Show-BackendStartupLog -LogPath $LogPath -ErrPath $ErrPath
+    return $false
+}
+
 function Show-BackendStartupLog {
     param(
         [string]$LogPath,
@@ -215,9 +282,7 @@ function Start-BackendService {
         -WindowStyle Hidden
 
     if (-not (Wait-BackendReady -Port $BackendPort -Process $proc -LogPath $logPath -ErrPath $errPath)) {
-        if (-not $proc.HasExited) {
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-        }
+        Stop-ProcessTree -ProcessId $proc.Id
         throw "后端在 90 秒内未就绪，请查看 $errPath"
     }
 
@@ -226,6 +291,72 @@ function Start-BackendService {
         processId = $proc.Id
         port      = $BackendPort
         url  = "http://localhost:$BackendPort"
+    }
+}
+
+function Start-GatewayService {
+    if (-not (Test-Path (Join-Path $BackendDir "cmd\file-transfer-gateway"))) {
+        throw "未找到 backend/cmd/file-transfer-gateway，请确认仓库路径: $BackendDir"
+    }
+
+    Ensure-DevDir
+    $logPath = Join-Path $DevDir "gateway-run.log"
+    $errPath = Join-Path $DevDir "gateway-run.err.log"
+    Remove-Item -LiteralPath $logPath, $errPath -ErrorAction SilentlyContinue
+
+    Write-Host ">> 启动文件传输网关 http://localhost:$GatewayPort" -ForegroundColor Green
+    Write-Host "  启动日志: $errPath" -ForegroundColor DarkGray
+    $proc = Start-Process -FilePath "go" `
+        -ArgumentList "run", "./cmd/file-transfer-gateway" `
+        -WorkingDirectory $BackendDir `
+        -RedirectStandardOutput $logPath `
+        -RedirectStandardError $errPath `
+        -PassThru `
+        -WindowStyle Hidden
+
+    if (-not (Wait-GatewayReady -Port $GatewayPort -Process $proc -LogPath $logPath -ErrPath $errPath)) {
+        Stop-ProcessTree -ProcessId $proc.Id
+        throw "文件传输网关在 90 秒内未就绪，请查看 $errPath"
+    }
+
+    return @{
+        name      = "gateway"
+        processId = $proc.Id
+        port      = $GatewayPort
+        url       = "http://localhost:$GatewayPort"
+    }
+}
+
+function Start-WorkerService {
+    if (-not (Test-Path (Join-Path $BackendDir "cmd\file-worker"))) {
+        throw "未找到 backend/cmd/file-worker，请确认仓库路径: $BackendDir"
+    }
+
+    Ensure-DevDir
+    $logPath = Join-Path $DevDir "worker-run.log"
+    $errPath = Join-Path $DevDir "worker-run.err.log"
+    Remove-Item -LiteralPath $logPath, $errPath -ErrorAction SilentlyContinue
+
+    Write-Host ">> 启动文件 Worker" -ForegroundColor Green
+    Write-Host "  启动日志: $errPath" -ForegroundColor DarkGray
+    $proc = Start-Process -FilePath "go" `
+        -ArgumentList "run", "./cmd/file-worker" `
+        -WorkingDirectory $BackendDir `
+        -RedirectStandardOutput $logPath `
+        -RedirectStandardError $errPath `
+        -PassThru `
+        -WindowStyle Hidden
+
+    if (-not (Wait-WorkerReady -Process $proc -LogPath $logPath -ErrPath $errPath)) {
+        Stop-ProcessTree -ProcessId $proc.Id
+        throw "文件 Worker 在 90 秒内未就绪，请查看 $errPath"
+    }
+
+    return @{
+        name      = "worker"
+        processId = $proc.Id
+        port      = 0
+        url       = ""
     }
 }
 
@@ -300,12 +431,27 @@ if ($Stop) {
 }
 
 $started = @()
-if ($runBackend) { $started += ,(Start-BackendService) }
-if ($runFrontend) { $started += ,(Start-FrontendService) }
+try {
+    if ($runBackend) {
+        $started += ,(Start-BackendService)
+        $started += ,(Start-GatewayService)
+        $started += ,(Start-WorkerService)
+    }
+    if ($runFrontend) { $started += ,(Start-FrontendService) }
+} catch {
+    foreach ($entry in $started) {
+        Stop-ProcessTree -ProcessId $entry.processId
+    }
+    throw
+}
 if ($started.Count -gt 0) {
     $retained = @{}
-    if (-not $runBackend -and $existingPids.ContainsKey("backend")) {
-        $retained["backend"] = $existingPids["backend"]
+    if (-not $runBackend) {
+        foreach ($name in @("backend", "gateway", "worker")) {
+            if ($existingPids.ContainsKey($name)) {
+                $retained[$name] = $existingPids[$name]
+            }
+        }
     }
     if (-not $runFrontend -and $existingPids.ContainsKey("frontend")) {
         $retained["frontend"] = $existingPids["frontend"]

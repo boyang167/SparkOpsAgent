@@ -44,48 +44,48 @@ type TransferOptions struct {
 }
 
 type Handler struct {
-	namespaceForWorkspace func(context.Context, uuid.UUID) (*model.Namespace, error)
-	namespaceByID         func(context.Context, uuid.UUID) (*model.Namespace, error)
-	getNode               func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
-	listChildren          func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, int, string) ([]model.Node, string, error)
-	listChildrenFiltered  func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, string, int, string) ([]model.Node, string, error)
-	listRevisions         func(context.Context, uuid.UUID, uuid.UUID, int, string) ([]model.FileRevision, string, error)
-	createDirectory       func(context.Context, command.CreateDirectory) (*model.Node, error)
-	renameNode            func(context.Context, command.RenameNode) error
-	moveNode              func(context.Context, command.MoveNode) error
-	copyNode              func(context.Context, command.CopyNode) (*model.Node, error)
-	trashNode             func(context.Context, command.TrashNode) error
-	restoreRevision       func(context.Context, command.RestoreRevision) error
-	authorizeResource     func(context.Context, resourceauth.Request) resourceauth.Decision
-	audit                 audit.Logger
-	createTransfer        func(context.Context, command.CreateTransfer) (command.TransferDescriptor, error)
-	getTransfer           func(context.Context, query.GetTransfer) (query.GetTransferResult, error)
-	listTransfers         func(context.Context, query.ListTransfers) ([]*model.TransferSession, string, error)
-	abortTransfer              func(context.Context, command.AbortTransfer) error
-	completeTransferMultipart  func(context.Context, command.CompleteTransferMultipart) error
-	prepareTransferMultipart   func(context.Context, uuid.UUID) error
-	peekTransfer               func(context.Context, uuid.UUID) (*model.TransferSession, error)
-	transferGatewayView        TransferGatewayView
-	transferProviderCatalog    command.StorageProviderCatalog
-	transferProviderUploadID   func(context.Context, uuid.UUID) (string, error)
-	registerProvider      func(context.Context, command.RegisterProvider) (command.RegisterProviderResult, error)
-	updateProvider        func(context.Context, command.UpdateProvider) error
-	deleteProvider        func(context.Context, command.DeleteProvider) error
-	listStorageProviders  func(context.Context, query.StorageAdminList) ([]*model.StorageProvider, error)
-	createStoragePool     func(context.Context, command.CreateStoragePool) (command.CreateStoragePoolResult, error)
-	updateStoragePool     func(context.Context, command.UpdateStoragePool) (command.UpdateStoragePoolResult, error)
-	deleteStoragePool     func(context.Context, command.DeleteStoragePool) error
-	listStoragePools      func(context.Context, query.StorageAdminList) ([]model.StoragePoolSnapshot, error)
-	createStorageBinding  func(context.Context, command.CreateStorageBinding) (command.CreateStorageBindingResult, error)
-	listStorageBindings   func(context.Context, query.StorageAdminList) ([]model.StorageBinding, error)
-	upsertLifecyclePolicy func(context.Context, command.UpsertLifecyclePolicy) (command.UpsertLifecyclePolicyResult, error)
-	listLifecyclePolicies func(context.Context, query.StorageAdminList) ([]model.LifecyclePolicy, error)
-	access                ResourceAccess
-	createArtifact        func(context.Context, command.CreateArtifact) (model.Artifact, error)
-	listArtifacts         func(context.Context, query.ListArtifacts) ([]model.Artifact, string, error)
-	searchFiles           func(context.Context, query.SearchFiles) ([]query.SearchHit, string, error)
-	getPreviewBlob        func(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID) (uuid.UUID, error)
-	listFileAudits        func(context.Context, query.ListFileAuditEvents) (query.ListFileAuditEventsResult, error)
+	namespaceForWorkspace     func(context.Context, uuid.UUID) (*model.Namespace, error)
+	namespaceByID             func(context.Context, uuid.UUID) (*model.Namespace, error)
+	getNode                   func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
+	listChildren              func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, int, string) ([]model.Node, string, error)
+	listChildrenFiltered      func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, string, int, string) ([]model.Node, string, error)
+	listRevisions             func(context.Context, uuid.UUID, uuid.UUID, int, string) ([]model.FileRevision, string, error)
+	createDirectory           func(context.Context, command.CreateDirectory) (*model.Node, error)
+	renameNode                func(context.Context, command.RenameNode) error
+	moveNode                  func(context.Context, command.MoveNode) error
+	copyNode                  func(context.Context, command.CopyNode) (*model.Node, error)
+	trashNode                 func(context.Context, command.TrashNode) error
+	restoreRevision           func(context.Context, command.RestoreRevision) error
+	authorizeResource         func(context.Context, resourceauth.Request) resourceauth.Decision
+	audit                     audit.Logger
+	createTransfer            func(context.Context, command.CreateTransfer) (command.TransferDescriptor, error)
+	getTransfer               func(context.Context, query.GetTransfer) (query.GetTransferResult, error)
+	listTransfers             func(context.Context, query.ListTransfers) ([]*model.TransferSession, string, error)
+	abortTransfer             func(context.Context, command.AbortTransfer) error
+	completeTransferMultipart func(context.Context, command.CompleteTransferMultipart) error
+	prepareTransferMultipart  func(context.Context, uuid.UUID) error
+	peekTransfer              func(context.Context, uuid.UUID) (*model.TransferSession, error)
+	transferGatewayView       TransferGatewayView
+	transferProviderCatalog   command.StorageProviderCatalog
+	transferProviderUploadID  func(context.Context, uuid.UUID) (string, error)
+	registerProvider          func(context.Context, command.RegisterProvider) (command.RegisterProviderResult, error)
+	updateProvider            func(context.Context, command.UpdateProvider) error
+	deleteProvider            func(context.Context, command.DeleteProvider) error
+	listStorageProviders      func(context.Context, query.StorageAdminList) ([]*model.StorageProvider, error)
+	createStoragePool         func(context.Context, command.CreateStoragePool) (command.CreateStoragePoolResult, error)
+	updateStoragePool         func(context.Context, command.UpdateStoragePool) (command.UpdateStoragePoolResult, error)
+	deleteStoragePool         func(context.Context, command.DeleteStoragePool) error
+	listStoragePools          func(context.Context, query.StorageAdminList) ([]model.StoragePoolSnapshot, error)
+	createStorageBinding      func(context.Context, command.CreateStorageBinding) (command.CreateStorageBindingResult, error)
+	listStorageBindings       func(context.Context, query.StorageAdminList) ([]model.StorageBinding, error)
+	upsertLifecyclePolicy     func(context.Context, command.UpsertLifecyclePolicy) (command.UpsertLifecyclePolicyResult, error)
+	listLifecyclePolicies     func(context.Context, query.StorageAdminList) ([]model.LifecyclePolicy, error)
+	access                    ResourceAccess
+	createArtifact            func(context.Context, command.CreateArtifact) (model.Artifact, error)
+	listArtifacts             func(context.Context, query.ListArtifacts) ([]model.Artifact, string, error)
+	searchFiles               func(context.Context, query.SearchFiles) ([]query.SearchHit, string, error)
+	getPreviewBlob            func(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID) (uuid.UUID, error)
+	listFileAudits            func(context.Context, query.ListFileAuditEvents) (query.ListFileAuditEventsResult, error)
 }
 
 func NewHandler(
@@ -687,11 +687,16 @@ func (h *Handler) TrashNode(c *gin.Context) {
 	if !requireEmptyBody(c) {
 		return
 	}
+	targetNS, ok := h.resolveMutationNamespace(c, rc, strings.TrimSpace(c.Query("namespace_id")))
+	if !ok {
+		return
+	}
+	rc.namespace = targetNS
 	if h.trashNode == nil {
 		filesystemError(c, domain.ErrPersistence)
 		return
 	}
-	err := h.trashNode(c.Request.Context(), command.TrashNode{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, NodeID: nodeID, Authorization: h.resourceDecision(c, rc, nodeID, model.ResourcePermissionDelete)})
+	err := h.trashNode(c.Request.Context(), command.TrashNode{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: targetNS.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: targetNS.ID, NodeID: nodeID, Authorization: h.resourceDecision(c, rc, nodeID, model.ResourcePermissionDelete)})
 	if err != nil {
 		filesystemError(c, err)
 		return

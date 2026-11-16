@@ -129,6 +129,30 @@ describe("TransferCenter", () => {
     );
   });
 
+  it("explains a persisted name conflict instead of showing the error code", async () => {
+    const failed = {
+      ...persisted("00000000-0000-0000-0000-000000000039", "重复文件.bin"),
+      error_code: "name_conflict",
+    };
+    listTransferSessionsMock.mockResolvedValue({
+      items: [failed],
+      next_cursor: "",
+    });
+
+    render(
+      createElement(TransferCenter, {
+        queue: emptyQueue(),
+        workspaceId: failed.workspace_id,
+        canWrite: true,
+      }),
+    );
+
+    expect(
+      await screen.findByText("上传失败：当前目录已存在同名文件"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("name_conflict")).not.toBeInTheDocument();
+  });
+
   it("hides persisted and local mutations from a read-only user", async () => {
     const active = {
       ...persisted("00000000-0000-0000-0000-000000000032", "只读活动.bin"),

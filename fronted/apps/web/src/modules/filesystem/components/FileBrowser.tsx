@@ -18,8 +18,10 @@ export type FileBrowserProps = {
   onOpen: (node: FileNodeVM) => void;
   onRename: (node: FileNodeVM) => void;
   onMove: (nodes: FileNodeVM[]) => void;
+  onDelete?: (nodes: FileNodeVM[]) => void;
   canRename?: boolean;
   canMove?: boolean;
+  canDelete?: boolean;
   organizationId?: string;
   onShare?: (node: FileNodeVM, effectiveActions: GovernedPermission[]) => void;
 };
@@ -41,8 +43,10 @@ export function FileBrowser({
   onOpen,
   onRename,
   onMove,
+  onDelete,
   canRename = true,
   canMove = true,
+  canDelete = false,
   organizationId,
   onShare,
 }: FileBrowserProps) {
@@ -113,10 +117,12 @@ export function FileBrowser({
     onOpen,
     onRename,
     onMove,
+    onDelete,
     onDragStart: handleDragStart,
     onDragEnd: clearNodeDragSession,
     canRename,
     canMove,
+    canDelete,
     organizationId,
     workspaceId,
     onShare,
@@ -125,7 +131,7 @@ export function FileBrowser({
   return createElement(
     "div",
     { className: "stack-sm" },
-    canMove && effectiveSelection.size > 0
+    (canMove || canDelete) && effectiveSelection.size > 0
       ? createElement(
           "div",
           {
@@ -139,14 +145,33 @@ export function FileBrowser({
             `已选择 ${effectiveSelection.size} 项`,
           ),
           createElement(
-            "button",
-            {
-              type: "button",
-              className: "btn btn-secondary btn-sm filesystem-touch-target",
-              "aria-label": `移动所选 ${effectiveSelection.size} 项到…`,
-              onClick: () => onMove(selectedNodes()),
-            },
-            "移动到…",
+            "div",
+            { className: "flex flex-wrap gap-2" },
+            canMove
+              ? createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "btn btn-secondary btn-sm filesystem-touch-target",
+                    "aria-label": `移动所选 ${effectiveSelection.size} 项到…`,
+                    onClick: () => onMove(selectedNodes()),
+                  },
+                  "移动到…",
+                )
+              : null,
+            canDelete && onDelete
+              ? createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className:
+                      "btn btn-ghost btn-sm filesystem-touch-target filesystem-file-action-danger",
+                    "aria-label": `删除所选 ${effectiveSelection.size} 项`,
+                    onClick: () => onDelete(selectedNodes()),
+                  },
+                  "删除",
+                )
+              : null,
           ),
         )
       : null,

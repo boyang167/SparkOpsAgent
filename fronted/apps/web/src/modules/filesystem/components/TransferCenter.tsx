@@ -18,6 +18,7 @@ import {
   listTransferSessions,
 } from "@sparkops/web-sdk/filesystem";
 import { computeTransferMetrics, transferDisplayId } from "./transfer-center-stats";
+import { transferErrorMessage } from "./transfer-error-message";
 import type { TransferItem, TransferQueue, TransferStatus } from "./transfer-queue";
 
 const statusLabels: Record<TransferStatus, string> = {
@@ -271,7 +272,7 @@ function PersistedTransferCard({
         ? createElement(
             "p",
             { role: "alert", className: "mt-1 text-xs text-danger" },
-            session.error_code,
+            transferErrorMessage(session.error_code),
           )
         : null,
     ),

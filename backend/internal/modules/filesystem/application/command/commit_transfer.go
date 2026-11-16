@@ -27,6 +27,22 @@ type CommitTransferResult struct {
 	RevisionID uuid.UUID
 }
 
+type persistedCommitFailure struct {
+	cause error
+}
+
+func (e persistedCommitFailure) Error() string {
+	return e.cause.Error()
+}
+
+func (e persistedCommitFailure) Unwrap() error {
+	return e.cause
+}
+
+func (persistedCommitFailure) CommitFailurePersisted() bool {
+	return true
+}
+
 type CommitTransferHandler struct {
 	repo repository.FilesystemRepository
 	tx   postgres.Transactor
@@ -174,9 +190,60 @@ func (h *CommitTransferHandler) Handle(ctx context.Context, cmd CommitTransfer) 
 		return nil
 	})
 	if err != nil {
+		if code, permanent := CommitFailureCode(err); permanent {
+			if failErr := h.failTransfer(ctx, cmd.SessionID, code); failErr != nil {
+				return result, errors.Join(err, failErr)
+			}
+			return result, persistedCommitFailure{cause: err}
+		}
 		return result, err
 	}
 	return completed, nil
+}
+
+// CommitFailureCode classifies commit errors that cannot succeed on retry.
+func CommitFailureCode(err error) (string, bool) {
+	switch {
+	case errors.Is(err, domain.ErrNodeNameConflict):
+		return "name_conflict", true
+	case errors.Is(err, domain.ErrParentNotFound), errors.Is(err, domain.ErrParentNotDirectory):
+		return "target_unavailable", true
+	case errors.Is(err, domain.ErrQuotaExceeded):
+		return "quota_exceeded", true
+	case errors.Is(err, model.ErrInvalidTransfer), errors.Is(err, model.ErrInvalidNodeName),
+		errors.Is(err, model.ErrTransferIntegrity), errors.Is(err, model.ErrTransferScanRequired):
+		return "commit_invalid", true
+	default:
+		return "", false
+	}
+}
+
+func (h *CommitTransferHandler) failTransfer(ctx context.Context, sessionID uuid.UUID, code string) error {
+	return h.tx.WithinTransaction(ctx, func(txCtx context.Context) error {
+		session, err := h.repo.LockTransfer(txCtx, sessionID)
+		if err != nil {
+			return err
+		}
+		switch session.Status() {
+		case model.TransferFailed:
+			return nil
+		case model.TransferCompleted, model.TransferRejected, model.TransferAborted, model.TransferExpired:
+			return domain.ErrTransferStatusConflict
+		}
+		statusFrom := session.Status()
+		version := session.Version()
+		if err := session.Fail(code, version, time.Now().UTC()); err != nil {
+			return err
+		}
+		if err := h.repo.SaveTransferStateCAS(txCtx, session.WorkspaceID(), session.ID(), version, repository.TransferStatePatch{
+			StatusFrom: statusFrom,
+			StatusTo:   model.TransferFailed,
+			ErrorCode:  &code,
+		}); err != nil {
+			return err
+		}
+		return h.repo.ReleaseNamespaceQuotaReservation(txCtx, session.NamespaceID(), session.ID())
+	})
 }
 
 func commitTransferEvents(session *model.TransferSession, node *model.Node, revision *model.FileRevision, created bool) []sharedevents.Event {

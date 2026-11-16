@@ -434,6 +434,25 @@ export function moveFileNode(
   });
 }
 
+export function trashFileNode(
+  workspaceId: string,
+  nodeId: string,
+  options: BffFetchOptions & { idempotencyKey?: string; namespaceId?: string } = {},
+) {
+  const { idempotencyKey, namespaceId, ...rest } = options;
+  const key = idempotencyKey ?? mutationIdempotencyKey("trash");
+  const params = new URLSearchParams();
+  if (namespaceId) params.set("namespace_id", namespaceId);
+  const suffix = params.toString();
+  const qs = suffix ? `?${suffix}` : "";
+  return bffFetch<void>(`/workspaces/${workspaceId}/files/${nodeId}${qs}`, {
+    ...rest,
+    method: "DELETE",
+    workspaceId,
+    headers: { ...rest.headers, "Idempotency-Key": key },
+  });
+}
+
 export function listFileRevisions(
   workspaceId: string,
   nodeId: string,

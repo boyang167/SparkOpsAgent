@@ -3,19 +3,24 @@ import type { FileSpace } from "./workbench-state";
 
 const SUPER_ADMIN_PERMISSIONS = ["file:read", "storage:read", "file:admin"];
 
-/** 当前四空间浏览页是否允许新建/上传（依赖 RBAC + Namespace 根授权） */
-export function canWriteGovernedFileSpace(input: {
+type GovernedFileSpaceAccessInput = {
   permissions: string[];
   fileSpace?: FileSpace;
   namespaceSummary?: NamespaceSummaryVM;
   namespace: Pick<FileNamespaceVM, "id">;
   workspaceId: string;
-}): boolean {
-  if (!input.permissions.includes("file:write")) return false;
+};
+
+function canMutateGovernedFileSpace(
+  input: GovernedFileSpaceAccessInput,
+  permission: "file:write" | "file:delete",
+  capability: "WRITE" | "DELETE",
+): boolean {
+  if (!input.permissions.includes(permission)) return false;
   const { fileSpace, namespaceSummary, namespace, workspaceId } = input;
   if (!fileSpace || !namespaceSummary) return true;
   if (namespaceSummary.id !== namespace.id) return false;
-  if (!namespaceSummary.capabilities.includes("WRITE")) return false;
+  if (!namespaceSummary.capabilities.includes(capability)) return false;
 
   switch (fileSpace) {
     case "workspace":
@@ -30,6 +35,16 @@ export function canWriteGovernedFileSpace(input: {
     default:
       return false;
   }
+}
+
+/** 当前四空间浏览页是否允许新建/上传（依赖 RBAC + Namespace 根授权） */
+export function canWriteGovernedFileSpace(input: GovernedFileSpaceAccessInput): boolean {
+  return canMutateGovernedFileSpace(input, "file:write", "WRITE");
+}
+
+/** 当前四空间浏览页是否允许删除（依赖 RBAC + Namespace 根授权） */
+export function canDeleteGovernedFileSpace(input: GovernedFileSpaceAccessInput): boolean {
+  return canMutateGovernedFileSpace(input, "file:delete", "DELETE");
 }
 
 export function resolveWorkbenchPermissions(

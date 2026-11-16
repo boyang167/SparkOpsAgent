@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { NamespaceSummaryVM } from "@sparkops/contracts/filesystem";
 import {
+  canDeleteGovernedFileSpace,
   canWriteGovernedFileSpace,
   hasFilesystemPageAccess,
   resolveFilesystemAuditMode,
@@ -107,6 +108,53 @@ describe("canWriteGovernedFileSpace", () => {
           namespace_type: "WORKSPACE",
           workspace_id: "ws-2",
         },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("canDeleteGovernedFileSpace", () => {
+  it("allows delete in a personal namespace when governed capabilities include DELETE", () => {
+    expect(
+      canDeleteGovernedFileSpace({
+        permissions: ["file:delete"],
+        fileSpace: "my",
+        namespace: { id: "ns-1" },
+        workspaceId: "ws-1",
+        namespaceSummary: {
+          ...baseSummary,
+          namespace_type: "USER",
+          workspace_id: null,
+          owner_user_id: "user-1",
+          capabilities: ["READ", "DELETE"],
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects delete without the file:delete permission or DELETE capability", () => {
+    const summary: NamespaceSummaryVM = {
+      ...baseSummary,
+      namespace_type: "USER",
+      workspace_id: null,
+      capabilities: ["READ", "WRITE"],
+    };
+    expect(
+      canDeleteGovernedFileSpace({
+        permissions: ["file:write"],
+        fileSpace: "my",
+        namespace: { id: "ns-1" },
+        workspaceId: "ws-1",
+        namespaceSummary: summary,
+      }),
+    ).toBe(false);
+    expect(
+      canDeleteGovernedFileSpace({
+        permissions: ["file:delete"],
+        fileSpace: "my",
+        namespace: { id: "ns-1" },
+        workspaceId: "ws-1",
+        namespaceSummary: summary,
       }),
     ).toBe(false);
   });

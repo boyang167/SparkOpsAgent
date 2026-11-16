@@ -6,11 +6,13 @@ export type FileActionMenuProps = {
   node: FileNodeVM;
   canRename: boolean;
   canMove: boolean;
+  canDelete?: boolean;
   organizationId?: string;
   workspaceId?: string;
   onShare?: (node: FileNodeVM, effectiveActions: GovernedPermission[]) => void;
   onRename: (node: FileNodeVM) => void;
   onMove: (nodes: FileNodeVM[]) => void;
+  onDelete?: (nodes: FileNodeVM[]) => void;
   density?: "default" | "compact";
 };
 
@@ -18,11 +20,13 @@ export function FileActionMenu({
   node,
   canRename,
   canMove,
+  canDelete = false,
   organizationId,
   workspaceId,
   onShare,
   onRename,
   onMove,
+  onDelete,
   density = "default",
 }: FileActionMenuProps) {
   const [effectiveActions, setEffectiveActions] = useState<GovernedPermission[]>([]);
@@ -85,6 +89,18 @@ export function FileActionMenu({
             onClick: () => onMove([node]),
           },
           "移动到…",
+        )
+      : null,
+    canDelete && onDelete
+      ? createElement(
+          "button",
+          {
+            type: "button",
+            className: `${actionClass} filesystem-file-action-danger`,
+            "aria-label": `删除 ${node.name}`,
+            onClick: () => onDelete([node]),
+          },
+          "删除",
         )
       : null,
     canShare

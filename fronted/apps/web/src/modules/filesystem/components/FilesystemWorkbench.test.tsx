@@ -27,6 +27,7 @@ const explorer = vi.hoisted(() => ({
   views: [] as string[],
   canMoves: [] as boolean[],
   canWrites: [] as boolean[],
+  canDeletes: [] as boolean[],
   uploadEnabled: [] as boolean[],
   parentIds: [] as string[],
   onOpen: undefined as undefined | ((node: FileNodeVM) => void),
@@ -134,6 +135,7 @@ vi.mock("./FileExplorerPanel", () => ({
     view,
     canMove,
     canWrite,
+    canDelete,
     parentId,
     onOpen,
     onFilesSelected,
@@ -141,6 +143,7 @@ vi.mock("./FileExplorerPanel", () => ({
     view: string;
     canMove: boolean;
     canWrite: boolean;
+    canDelete?: boolean;
     parentId: string;
     onOpen?: (node: FileNodeVM) => void;
     onFilesSelected?: (files: File[]) => void;
@@ -148,6 +151,7 @@ vi.mock("./FileExplorerPanel", () => ({
     explorer.views.push(view);
     explorer.canMoves.push(canMove);
     explorer.canWrites.push(canWrite);
+    explorer.canDeletes.push(Boolean(canDelete));
     explorer.uploadEnabled.push(Boolean(onFilesSelected));
     explorer.parentIds.push(parentId);
     explorer.onOpen = onOpen;
@@ -280,6 +284,7 @@ describe("FilesystemWorkbench", () => {
     explorer.views = [];
     explorer.canMoves = [];
     explorer.canWrites = [];
+    explorer.canDeletes = [];
     explorer.uploadEnabled = [];
     explorer.parentIds = [];
     explorer.onOpen = undefined;
@@ -693,7 +698,14 @@ describe("FilesystemWorkbench", () => {
     );
 
     expect(explorer.canMoves.at(-1)).toBe(true);
+    expect(explorer.canDeletes.at(-1)).toBe(false);
     expect(directoryTree.canWrites.at(-1)).toBe(true);
+  });
+
+  it("gates delete separately from write", () => {
+    renderWorkbench(["file:read", "file:delete"]);
+    expect(explorer.canDeletes.at(-1)).toBe(true);
+    expect(explorer.canWrites.at(-1)).toBe(false);
   });
 
   it.each([
@@ -1194,6 +1206,38 @@ describe("FilesystemWorkbench", () => {
 
     expect(screen.getByText("已取消")).toBeInTheDocument();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("shows an actionable error when upload commit finds the same file name", async () => {
+    const session = transferSession("00000000-0000-4000-8000-000000000095");
+    sdk.createTransferSession.mockResolvedValue(session);
+    sdk.uploadTransfer.mockResolvedValue(undefined);
+    sdk.getTransferSession.mockResolvedValue({
+      ...session,
+      status: "FAILED",
+      error_code: "name_conflict",
+    });
+    const rendered = renderWorkbench(["file:read", "file:write"]);
+    fireEvent.drop(screen.getByTestId("file-drop-zone"), {
+      dataTransfer: {
+        files: [new File(["payload"], "报告.txt")],
+        types: ["Files"],
+        items: [],
+      },
+    });
+    rendered.rerender(
+      createElement(FilesystemWorkbench, {
+        workspaceId: namespace.workspace_id,
+        namespace,
+        initialNodes: [],
+        initialState: { tab: "transfers", view: "list", query: "" },
+        permissions: ["file:read", "file:write"],
+      }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("上传失败：当前目录已存在同名文件")).toBeInTheDocument(),
+    );
   });
 
   it("reuses session-1 after polling network failure without creating or uploading again", async () => {

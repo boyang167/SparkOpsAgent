@@ -2,6 +2,7 @@ package subscriber
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -9,8 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/command"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	filesystemevent "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
+	"github.com/sparkops/sparkops-agent/backend/internal/platform/messaging"
 	"github.com/sparkops/sparkops-agent/backend/internal/shared/events"
 )
 
@@ -20,11 +23,28 @@ func (stubVerify) Handle(context.Context, command.VerifyTransfer) error { return
 
 type recordingCommit struct {
 	calls int
+	err   error
 }
 
 func (r *recordingCommit) Handle(context.Context, command.CommitTransfer) (command.CommitTransferResult, error) {
 	r.calls++
-	return command.CommitTransferResult{}, nil
+	return command.CommitTransferResult{}, r.err
+}
+
+type persistedCommitError struct {
+	cause error
+}
+
+func (e persistedCommitError) Error() string {
+	return e.cause.Error()
+}
+
+func (e persistedCommitError) Unwrap() error {
+	return e.cause
+}
+
+func (persistedCommitError) CommitFailurePersisted() bool {
+	return true
 }
 
 type sessionStatusReader struct {
@@ -84,5 +104,35 @@ func TestOnTransferUploadedCommitWhenScanning(t *testing.T) {
 		SessionID: uuid.New(), WorkspaceID: uuid.New(),
 	}
 	require.NoError(t, s.Handle(context.Background(), event))
+	require.Equal(t, 1, commit.calls)
+}
+
+func TestOnTransferUploadedTreatsNameConflictAsPermanent(t *testing.T) {
+	commit := &recordingCommit{err: domain.ErrNodeNameConflict}
+	s := NewOnTransferUploaded(stubVerify{}, commit, sessionStatusReader{status: model.TransferScanning})
+	event := filesystemevent.TransferUploaded{
+		BaseEvent: events.NewBaseEvent(filesystemevent.TransferUploadedName),
+		SessionID: uuid.New(), WorkspaceID: uuid.New(),
+	}
+
+	err := s.Handle(context.Background(), event)
+
+	require.Error(t, err)
+	require.True(t, messaging.IsPermanent(err))
+	require.True(t, errors.Is(err, domain.ErrNodeNameConflict))
+	require.Equal(t, 1, commit.calls)
+}
+
+func TestOnTransferUploadedCommitsInboxWhenFailureStateWasPersisted(t *testing.T) {
+	commit := &recordingCommit{err: persistedCommitError{cause: domain.ErrNodeNameConflict}}
+	s := NewOnTransferUploaded(stubVerify{}, commit, sessionStatusReader{status: model.TransferScanning})
+	event := filesystemevent.TransferUploaded{
+		BaseEvent: events.NewBaseEvent(filesystemevent.TransferUploadedName),
+		SessionID: uuid.New(), WorkspaceID: uuid.New(),
+	}
+
+	err := s.Handle(context.Background(), event)
+
+	require.NoError(t, err)
 	require.Equal(t, 1, commit.calls)
 }

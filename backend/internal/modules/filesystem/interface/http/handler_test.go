@@ -1004,6 +1004,57 @@ func TestMutationJSONAndEmptyBodyContracts(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
 }
 
+func TestTrashHTTPHonorsNamespaceIDQuery(t *testing.T) {
+	orgID := uuid.New()
+	wsNS := uuid.New()
+	userNS := uuid.New()
+	nodeID := uuid.New()
+	actorID := uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: wsNS, OrganizationID: orgID, WorkspaceID: workspaceID,
+				NamespaceType: model.NamespaceTypeWorkspace,
+			}, nil
+		},
+		namespaceByID: func(_ context.Context, namespaceID uuid.UUID) (*model.Namespace, error) {
+			if namespaceID != userNS {
+				return nil, domain.ErrNamespaceNotFound
+			}
+			return &model.Namespace{
+				ID: userNS, OrganizationID: orgID, NamespaceType: model.NamespaceTypeUser,
+				OwnerUserID: actorID,
+			}, nil
+		},
+		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			require.Equal(t, userNS, request.NamespaceID)
+			require.Equal(t, model.ResourcePermissionDelete, request.Permission)
+			return resourceauth.Decision{Allowed: true, Reason: "owner"}
+		},
+		trashNode: func(_ context.Context, cmd command.TrashNode) error {
+			require.Equal(t, userNS, cmd.NamespaceID)
+			require.Equal(t, nodeID, cmd.NodeID)
+			require.True(t, cmd.Allowed)
+			return nil
+		},
+	}
+	tokens := authn.NewTokenProvider(config.JWTConfig{Secret: "filesystem-test"})
+	token, err := tokens.Issue(kernel.MemberID{UUID: actorID})
+	require.NoError(t, err)
+	wsID := kernel.NewWorkspaceID()
+	router := httpx.NewEngine()
+	RegisterRoutes(router, nil, authn.RequireAuth(tokens), memberStub(true), permissionStub{
+		allowed: map[string]bool{authz.PermFileDelete: true},
+	}, h)
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/v1/workspaces/"+wsID.String()+"/files/"+nodeID.String()+"?namespace_id="+userNS.String(), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", "trash-user-ns")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusNoContent, res.Code, res.Body.String())
+}
+
 func TestTrashHTTPReplayReturnsNoContentAndConflictsOnSameKeyDifferentTarget(t *testing.T) {
 	nsID, rootID, firstNode, secondNode := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	claims := map[uuid.UUID]uuid.UUID{}

@@ -69,6 +69,31 @@ describe("filesystem upstream", () => {
     expect(new Headers(init.headers).get("Idempotency-Key")).toBe("move-key-1");
   });
 
+  it("forwards trash as DELETE with an empty body and idempotency key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createFilesystemUpstream().trashFileNode(
+      "workspace-1",
+      "node-1",
+      "trash-key-1",
+      "namespace-1",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "/api/v1/workspaces/workspace-1/files/node-1?namespace_id=namespace-1",
+      ),
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.any(Headers),
+      }),
+    );
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.body).toBeUndefined();
+    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("trash-key-1");
+  });
+
   it("forwards governed child filters and tenant context without embedding a workspace path", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

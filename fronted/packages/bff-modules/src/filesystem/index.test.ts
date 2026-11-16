@@ -12,6 +12,7 @@ import {
   listSharedWithMe,
   moveFileNode,
   previewGovernedShare,
+  trashFileNode,
 } from "./index";
 
 function context(filesystem: Record<string, unknown>): BffContext {
@@ -125,6 +126,25 @@ describe("filesystem BFF module", () => {
       "node-1",
       { parent_id: "parent-2", name: "报告.md" },
       "move-key-1",
+    );
+  });
+
+  it("passes trash and the idempotency key to upstream", async () => {
+    const upstreamTrash = vi.fn().mockResolvedValue(undefined);
+
+    await trashFileNode(
+      context({ trashFileNode: upstreamTrash }),
+      "workspace-1",
+      "node-1",
+      "trash-key-1",
+      "namespace-1",
+    );
+
+    expect(upstreamTrash).toHaveBeenCalledWith(
+      "workspace-1",
+      "node-1",
+      "trash-key-1",
+      "namespace-1",
     );
   });
 

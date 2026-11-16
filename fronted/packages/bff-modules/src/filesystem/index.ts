@@ -153,6 +153,21 @@ export async function moveFileNode(
   );
 }
 
+export async function trashFileNode(
+  ctx: BffContext,
+  workspaceId: string,
+  nodeId: string,
+  idempotencyKey: string,
+  namespaceId?: string,
+): Promise<void> {
+  await ctx.upstream.filesystem.trashFileNode(
+    workspaceId,
+    nodeId,
+    idempotencyKey,
+    namespaceId,
+  );
+}
+
 export async function listFileRevisions(
   ctx: BffContext,
   workspaceId: string,

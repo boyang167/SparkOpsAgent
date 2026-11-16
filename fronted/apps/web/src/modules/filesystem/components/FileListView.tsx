@@ -10,10 +10,12 @@ export type FileListViewProps = {
   onOpen: (node: FileNodeVM) => void;
   onRename: (node: FileNodeVM) => void;
   onMove: (nodes: FileNodeVM[]) => void;
+  onDelete?: (nodes: FileNodeVM[]) => void;
   onDragStart: (event: DragEvent<HTMLElement>, node: FileNodeVM) => void;
   onDragEnd: () => void;
   canRename: boolean;
   canMove: boolean;
+  canDelete?: boolean;
   organizationId?: string;
   workspaceId?: string;
   onShare?: (node: FileNodeVM, effectiveActions: GovernedPermission[]) => void;
@@ -26,10 +28,12 @@ export function FileListView({
   onOpen,
   onRename,
   onMove,
+  onDelete,
   onDragStart,
   onDragEnd,
   canRename,
   canMove,
+  canDelete = false,
   organizationId,
   workspaceId,
   onShare,
@@ -115,11 +119,13 @@ export function FileListView({
                 node,
                 canRename: canRename && node.state === "ACTIVE",
                 canMove: canMove && node.state === "ACTIVE",
+                canDelete: canDelete && node.state === "ACTIVE",
                 organizationId,
                 workspaceId,
                 onShare,
                 onRename,
                 onMove,
+                onDelete,
               }),
             ),
           ),

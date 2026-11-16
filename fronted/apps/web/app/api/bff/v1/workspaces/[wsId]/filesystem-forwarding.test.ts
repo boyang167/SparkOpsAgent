@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const listFileNodes = vi.fn();
 const moveFileNode = vi.fn();
+const trashFileNode = vi.fn();
 
 vi.mock("@sparkops/bff-core", () => ({
   createBffHandler: (handler: unknown) => handler,
@@ -10,6 +11,8 @@ vi.mock("@sparkops/bff-core", () => ({
 vi.mock("@sparkops/bff-modules/filesystem", () => ({
   listFileNodes,
   moveFileNode,
+  trashFileNode,
+  getFileNode: vi.fn(),
 }));
 
 describe("filesystem Next BFF routes", () => {
@@ -75,6 +78,30 @@ describe("filesystem Next BFF routes", () => {
       "node-1",
       input,
       "move-key-1",
+    );
+  });
+
+  it("forwards trash with Idempotency-Key and no body", async () => {
+    const { DELETE } = await import("./files/[nodeId]/route");
+    const request = {
+      headers: new Headers({ "Idempotency-Key": "trash-key-1" }),
+      nextUrl: new URL(
+        "http://localhost/api/bff/v1/workspaces/workspace-1/files/node-1?namespace_id=namespace-1",
+      ),
+    };
+
+    await expect(
+      (DELETE as unknown as Function)({}, request, {
+        params: { wsId: "workspace-1", nodeId: "node-1" },
+      }),
+    ).resolves.toEqual({ deleted: true });
+
+    expect(trashFileNode).toHaveBeenCalledWith(
+      {},
+      "workspace-1",
+      "node-1",
+      "trash-key-1",
+      "namespace-1",
     );
   });
 });

@@ -82,6 +82,13 @@ func (s *OnTransferUploaded) Handle(ctx context.Context, event events.Event) err
 		SessionID: uploaded.SessionID, WorkspaceID: uploaded.WorkspaceID,
 	}); err != nil {
 		log.Printf("filesystem commit transfer %s: %v", uploaded.SessionID, err)
+		var persisted interface{ CommitFailurePersisted() bool }
+		if errors.As(err, &persisted) && persisted.CommitFailurePersisted() {
+			return nil
+		}
+		if _, permanent := command.CommitFailureCode(err); permanent {
+			return messaging.Permanent(err)
+		}
 		if errors.Is(err, domain.ErrTransferStatusConflict) {
 			return messaging.Permanent(err)
 		}

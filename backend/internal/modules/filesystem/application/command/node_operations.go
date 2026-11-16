@@ -213,11 +213,12 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) (err error
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.trash", err)
 	}
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
-		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
+		ns, err := h.repo.GetNamespace(txCtx, cmd.NamespaceID)
 		if err != nil {
 			return err
 		}
-		if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
+		if ns.OrganizationID != cmd.OrganizationID ||
+			(ns.NamespaceType == model.NamespaceTypeWorkspace && ns.WorkspaceID != cmd.WorkspaceID) {
 			return domain.ErrNamespaceMismatch
 		}
 		requestHash := mutationRequestHash("trash", cmd.WorkspaceID, cmd.NamespaceID, cmd.NodeID, cmd.ActorID)

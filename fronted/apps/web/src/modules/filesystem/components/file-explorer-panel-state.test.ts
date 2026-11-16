@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createFileBrowserMoveAdapter,
   showCreateDialog,
+  showDeleteDialog,
   showRenameDialog,
 } from "./file-explorer-panel-state";
 
@@ -27,6 +28,9 @@ describe("file explorer panel state", () => {
 
     dialog = showRenameDialog(node);
     expect(dialog).toEqual({ type: "rename", node });
+
+    dialog = showDeleteDialog([node]);
+    expect(dialog).toEqual({ type: "delete", nodes: [node] });
   });
 
   it("exposes move only when the owner supplies a move capability", () => {

@@ -20,6 +20,7 @@ import {
   listTransferSessions,
   moveFileNode,
   previewGovernedShare,
+  trashFileNode,
   uploadTransfer,
 } from "./filesystem";
 
@@ -307,6 +308,32 @@ describe("filesystem node sdk", () => {
     expect(keys[0]).toBeTruthy();
     expect(keys[1]).toBeTruthy();
     expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it("trashes a node with DELETE and an idempotency key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 0, message: "ok", data: { deleted: true }, trace_id: "trace-1" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await trashFileNode("workspace-1", "node-1", {
+      idempotencyKey: "trash-key-1",
+      namespaceId: "00000000-0000-4000-8000-000000000099",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/bff/v1/workspaces/workspace-1/files/node-1?namespace_id=00000000-0000-4000-8000-000000000099",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.any(Headers),
+      }),
+    );
+    const options = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(options.body).toBeUndefined();
+    expect(new Headers(options.headers).get("Idempotency-Key")).toBe("trash-key-1");
   });
 });
 

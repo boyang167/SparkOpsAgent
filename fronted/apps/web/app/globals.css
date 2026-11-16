@@ -33148,6 +33148,14 @@ button.sprint-board-column-wf:hover:not(:disabled) {
   background: color-mix(in srgb, var(--primary-soft) 45%, var(--surface));
 }
 
+.filesystem-file-action-danger {
+  color: var(--danger);
+}
+
+.filesystem-file-action-danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+
 .filesystem-explorer-inline-error {
   margin: 0;
   padding: 0.35rem 1rem 0.75rem;

@@ -395,6 +395,22 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
         options: { ...options, workspaceId },
       });
     },
+    trashFileNode(
+      workspaceId: string,
+      nodeId: string,
+      idempotencyKey: string,
+      namespaceId?: string,
+    ) {
+      const params = new URLSearchParams();
+      if (namespaceId) params.set("namespace_id", namespaceId);
+      const suffix = params.toString();
+      const qs = suffix ? `?${suffix}` : "";
+      return upstreamFetch<void>(`/api/v1/workspaces/${workspaceId}/files/${nodeId}${qs}`, {
+        method: "DELETE",
+        headers: { "Idempotency-Key": idempotencyKey },
+        options: { ...options, workspaceId },
+      });
+    },
     listRevisions(workspaceId: string, nodeId: string, query: ListRevisionsQuery = {}) {
       return upstreamFetch<FileRevisionPageVM>(
         `/api/v1/workspaces/${workspaceId}/files/${nodeId}/revisions${revisionsQuery(query)}`,

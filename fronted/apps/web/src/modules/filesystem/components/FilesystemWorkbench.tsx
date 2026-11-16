@@ -31,6 +31,7 @@ import { MoveNodesModal } from "./MoveNodesModal";
 import { ShareFileModal } from "./ShareFileModal";
 import { ShareApprovalPanel } from "./ShareApprovalPanel";
 import { TransferCenter, TransferSummary } from "./TransferCenter";
+import { transferErrorMessage } from "./transfer-error-message";
 import { createTransferQueue } from "./transfer-queue";
 import type { TransferQueue } from "./transfer-queue";
 import {
@@ -40,7 +41,11 @@ import {
   type WorkbenchState,
   type WorkbenchTab,
 } from "./workbench-state";
-import { canWriteGovernedFileSpace, resolveFilesystemAuditMode } from "./workbench-permissions";
+import {
+  canDeleteGovernedFileSpace,
+  canWriteGovernedFileSpace,
+  resolveFilesystemAuditMode,
+} from "./workbench-permissions";
 
 export type FilesystemWorkbenchProps = {
   workspaceId: string;
@@ -95,17 +100,6 @@ function uploadIdempotencyKey() {
     globalThis.crypto?.randomUUID?.() ??
     `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
   }`;
-}
-
-function transferProcessingFailureMessage(errorCode?: string) {
-  const code = errorCode?.trim();
-  if (code === "object_missing") {
-    return "校验失败：存储上找不到上传的临时文件，请检查 Provider 的 LOCAL Endpoint 是否为可写目录";
-  }
-  if (code === "integrity_mismatch") {
-    return "校验失败：文件大小或校验和不一致";
-  }
-  return code || "上传处理失败";
 }
 
 function abortableDelay(milliseconds: number, signal: AbortSignal) {
@@ -270,7 +264,7 @@ export function FilesystemWorkbench({
               return;
             }
             if (terminalStatuses.has(current.status)) {
-              throw new Error(transferProcessingFailureMessage(current.error_code));
+      throw new Error(transferErrorMessage(current.error_code));
             }
             await abortableDelay(500, controls.signal);
             current = await getTransferSession(sessionId, scopedWorkspaceId, {
@@ -383,6 +377,13 @@ export function FilesystemWorkbench({
     lockedTab ??
     (visibleTabs.some((tab) => tab.id === effectiveState.tab) ? effectiveState.tab : "files");
   const legacyWorkspaceWriteEnabled = canWriteGovernedFileSpace({
+    permissions,
+    fileSpace,
+    namespaceSummary,
+    namespace,
+    workspaceId,
+  });
+  const legacyWorkspaceDeleteEnabled = canDeleteGovernedFileSpace({
     permissions,
     fileSpace,
     namespaceSummary,
@@ -601,6 +602,7 @@ export function FilesystemWorkbench({
           view,
           canWrite: legacyWorkspaceWriteEnabled,
           canMove: legacyWorkspaceWriteEnabled,
+          canDelete: legacyWorkspaceDeleteEnabled,
           onMove: setMoveNodes,
           onOpen: openNode,
           organizationId,

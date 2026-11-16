@@ -125,7 +125,22 @@ describe("FileBrowser", () => {
 
     expect(screen.queryByRole("button", { name: /^重命名 / })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^移动到… / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^删除 / })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开 资料" })).toBeInTheDocument();
+  });
+
+  it("routes row and selection delete through the supplied callback", async () => {
+    const user = userEvent.setup();
+    const props = createProps();
+    const onDelete = vi.fn();
+    render(createElement(FileBrowser, { ...props, canDelete: true, onDelete }));
+
+    await user.click(screen.getByRole("button", { name: "删除 资料" }));
+    expect(onDelete).toHaveBeenCalledWith([nodes[1]]);
+
+    await user.click(screen.getByRole("checkbox", { name: "选择 规格说明.md" }));
+    await user.click(screen.getByRole("button", { name: "删除所选 1 项" }));
+    expect(onDelete).toHaveBeenLastCalledWith([nodes[0]]);
   });
 
   it("offers one keyboard-accessible move action for the current selection", async () => {

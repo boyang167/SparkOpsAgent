@@ -7,9 +7,10 @@ import type { FormEvent } from "react";
 import type { FileNodeVM, GovernedPermission } from "@sparkops/contracts/filesystem";
 import { createDirectoryNode } from "@sparkops/web-sdk/filesystem";
 import { FileBrowser } from "./FileBrowser";
+import { deleteDialogCopy, trashPanelNodes } from "./file-explorer-panel-delete";
 import { createPanelRenameHandler, submitPanelRename } from "./file-explorer-panel-rename";
 import type { FileExplorerDialog } from "./file-explorer-panel-state";
-import { showCreateDialog, showRenameDialog } from "./file-explorer-panel-state";
+import { showCreateDialog, showDeleteDialog, showRenameDialog } from "./file-explorer-panel-state";
 import { UploadPanel } from "./UploadPanel";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
@@ -31,6 +32,7 @@ export type FileExplorerPanelProps = {
   onRename?: (nodeId: string, name: string) => Promise<void>;
   onMove?: (nodes: FileNodeVM[]) => void;
   canMove?: boolean;
+  canDelete?: boolean;
   onCreateDirectory?: (name: string) => Promise<void>;
   onNavigate?: () => void;
   onOpen?: (node: FileNodeVM) => void;
@@ -59,6 +61,7 @@ export function FileExplorerPanel({
   onRename,
   onMove,
   canMove = false,
+  canDelete = false,
   onCreateDirectory,
   onNavigate,
   onOpen,
@@ -143,6 +146,37 @@ export function FileExplorerPanel({
     setDialog(null);
     setRenameValue("");
     setError(null);
+  }
+
+  function closeDeleteDialog() {
+    if (pending) return;
+    setDialog(null);
+    setError(null);
+  }
+
+  async function submitDelete() {
+    if (dialog?.type !== "delete" || dialog.nodes.length === 0) return;
+    setPending(true);
+    setError(null);
+    const result = await trashPanelNodes(
+      workspaceId,
+      dialog.nodes.map((node) => node.id),
+      { namespaceId },
+    );
+    if (result.removed.length > 0) {
+      const removed = new Set(result.removed);
+      setNodes((current) => current.filter((node) => !removed.has(node.id)));
+      setSelectedIds((current) => current.filter((nodeId) => !removed.has(nodeId)));
+    }
+    if (result.ok) {
+      setDialog(null);
+    } else {
+      const removed = new Set(result.removed);
+      const remaining = dialog.nodes.filter((node) => !removed.has(node.id));
+      setError(result.message ?? "删除失败");
+      setDialog(remaining.length > 0 ? showDeleteDialog(remaining) : null);
+    }
+    setPending(false);
   }
 
   useEffect(() => {
@@ -327,8 +361,13 @@ export function FileExplorerPanel({
           setRenameValue(node.name);
         }}
         onMove={(moveNodes) => onMove?.(moveNodes)}
+        onDelete={(deleteNodes) => {
+          setError(null);
+          setDialog(showDeleteDialog(deleteNodes));
+        }}
         canRename={canWrite}
         canMove={canMove && Boolean(onMove)}
+        canDelete={canDelete}
         organizationId={organizationId}
         onShare={onShare}
       />
@@ -449,6 +488,40 @@ export function FileExplorerPanel({
             />
           </label>
         </form>
+      </Modal>
+
+      <Modal
+        open={dialog?.type === "delete"}
+        title={dialog?.type === "delete" ? deleteDialogCopy(dialog.nodes).title : "删除"}
+        description={
+          dialog?.type === "delete" ? deleteDialogCopy(dialog.nodes).description : undefined
+        }
+        size="sm"
+        onClose={closeDeleteDialog}
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={pending}
+              onClick={closeDeleteDialog}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn-danger-solid"
+              disabled={pending || dialog?.type !== "delete" || dialog.nodes.length === 0}
+              onClick={() => void submitDelete()}
+            >
+              {pending ? "删除中…" : "删除"}
+            </button>
+          </div>
+        }
+      >
+        {error && dialog?.type === "delete" ? (
+          <InlineAlert tone="error">{error}</InlineAlert>
+        ) : null}
       </Modal>
     </div>
   );

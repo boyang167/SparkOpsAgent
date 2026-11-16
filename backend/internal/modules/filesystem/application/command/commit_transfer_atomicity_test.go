@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
 	filesystemevent "github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/event"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/port"
@@ -82,6 +83,68 @@ func TestCommitTransferIsAtomicAndIdempotent(t *testing.T) {
 	assertOutboxEventCount(t, db, filesystemevent.TransferCompletedName, 1)
 	assertOutboxEventCount(t, db, filesystemevent.FileCreatedName, 1)
 	assertOutboxEventCount(t, db, filesystemevent.FileRevisionCreatedName, 1)
+}
+
+func TestCommitTransferFailsAndReleasesQuotaOnNameConflict(t *testing.T) {
+	ctx := context.Background()
+	db, repo, ns := newTransferCommitDB(t)
+	provider, err := local.New(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = provider.Close() })
+
+	providerID := uuid.New()
+	content := []byte("duplicate-name")
+	checksum := storage.SHA256(content)
+	cmd := transferFixture(ns)
+	cmd.Size = int64(len(content))
+	cmd.SHA256 = checksum
+	cmd.ProviderID = providerID
+
+	existing, err := model.NewFile(ns.ID, cmd.ActorID, cmd.Name, *cmd.ParentID)
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(ctx, existing))
+
+	descriptor, err := newTransferHandler(db).Handle(ctx, cmd)
+	require.NoError(t, err)
+	session, err := repo.GetTransferByID(ctx, descriptor.SessionID)
+	require.NoError(t, err)
+	_, err = provider.Put(ctx, storage.PutRequest{
+		ObjectKey: session.TemporaryObjectKey(),
+		Body:      bytes.NewReader(content),
+		Size:      int64(len(content)),
+		SHA256:    checksum,
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.SaveTransferStateCAS(ctx, ns.WorkspaceID, session.ID(), session.Version(), repository.TransferStatePatch{
+		StatusFrom: model.TransferInitiated, StatusTo: model.TransferUploading,
+	}))
+	verify := NewVerifyTransferHandler(
+		repo, postgres.NewTransactor(db),
+		MapProviders{providerID: provider},
+		port.NoopScanner{},
+	)
+	require.NoError(t, verify.Handle(ctx, VerifyTransfer{
+		SessionID: descriptor.SessionID, WorkspaceID: ns.WorkspaceID,
+	}))
+
+	_, err = NewCommitTransferHandler(
+		repo, postgres.NewTransactor(db), newTransferOutboxBus(t, db),
+	).Handle(ctx, CommitTransfer{
+		SessionID: descriptor.SessionID, WorkspaceID: ns.WorkspaceID,
+	})
+
+	require.ErrorIs(t, err, domain.ErrNodeNameConflict)
+	var persisted interface{ CommitFailurePersisted() bool }
+	require.ErrorAs(t, err, &persisted)
+	require.True(t, persisted.CommitFailurePersisted())
+	failed, err := repo.GetTransferByID(ctx, descriptor.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, model.TransferFailed, failed.Status())
+	require.Equal(t, "name_conflict", failed.ErrorCode())
+	var reservation struct{ State string }
+	require.NoError(t, db.Table("filesystem.quota_reservations").
+		Where("session_id = ?", descriptor.SessionID).Take(&reservation).Error)
+	require.Equal(t, "RELEASED", reservation.State)
 }
 
 func newTransferOutboxBus(t *testing.T, db *gorm.DB) messaging.Bus {
