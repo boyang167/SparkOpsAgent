@@ -60,6 +60,9 @@ vi.mock("@/components/ui/InlineAlert", () => ({
   InlineAlert: ({ children }: { children: React.ReactNode }) =>
     createElement("div", null, children),
 }));
+vi.mock("./FilePreviewPane", () => ({
+  FilePreviewPane: () => createElement("div", null, "文件预览区域"),
+}));
 
 const file: FileNodeVM = {
   id: "00000000-0000-4000-8000-000000000011",
@@ -228,6 +231,34 @@ describe("FileDetailDrawer", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows owner name, timestamps, and owner id on the details tab", () => {
+    render(
+      createElement(FileDetailDrawer, {
+        open: true,
+        node: {
+          ...file,
+          created_at: "2026-11-15T08:00:00Z",
+          updated_at: "2026-11-17T10:30:00Z",
+        },
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        members: [
+          {
+            member_id: file.owner_id,
+            display_name: "王五",
+            email: "wang@example.com",
+            roles: [{ id: "role-1", name: "Member", permissions: [] }],
+          },
+        ],
+        onClose: vi.fn(),
+      }),
+    );
+
+    expect(screen.getByText("王五")).toBeInTheDocument();
+    expect(screen.getByText(file.owner_id)).toBeInTheDocument();
+    expect(screen.getByText("创建时间")).toBeInTheDocument();
+    expect(screen.getByText("更新时间")).toBeInTheDocument();
+  });
+
   it("shows the file path on the details tab", () => {
     render(
       createElement(FileDetailDrawer, {
@@ -262,11 +293,9 @@ describe("FileDetailDrawer", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("shows preview and download only when backed by a real capability", async () => {
+  it("renders the file preview pane for file nodes", () => {
     render(drawer());
-
-    expect(screen.getByText("当前后端未提供可直接展示的预览内容。")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "下载" })).not.toBeInTheDocument();
+    expect(screen.getByText("文件预览区域")).toBeInTheDocument();
   });
 
   it("shows effective access, grant source, audience, expiry, pending approval and deny", async () => {

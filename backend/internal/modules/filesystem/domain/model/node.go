@@ -21,6 +21,8 @@ type Node struct {
 	Classification    TransferClassification
 	DeletedAt         *time.Time
 	DeletedBy         *uuid.UUID
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 func NewFile(namespaceID, ownerID uuid.UUID, name string, parentID uuid.UUID) (*Node, error) {

@@ -51,6 +51,22 @@ func RegisterInternalGatewayRoutes(
 		}
 		httpx.OK(c, view)
 	})
+	group.GET("/files/:fileId/download-grant", func(c *gin.Context) {
+		grant, err := handlers.Control.ResolveDownload(c.Request.Context(), c.Param("fileId"))
+		if err != nil {
+			filesystemError(c, err)
+			return
+		}
+		view := gin.H{
+			"object_key":     grant.ObjectKey,
+			"classification": grant.Classification,
+			"audit_ok":       grant.AuditOK,
+		}
+		if root, ok := local.StorageRoot(grant.Provider); ok {
+			view["local_root"] = root
+		}
+		httpx.OK(c, view)
+	})
 	group.POST("/transfers/:sessionId/uploaded", func(c *gin.Context) {
 		var body struct {
 			Size   int64  `json:"size"`

@@ -48,3 +48,38 @@ func TestHTTPControlPortDecodesUploadGrantEnvelope(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, filepath.Clean(placedRoot), root)
 }
+
+func TestHTTPControlPortDecodesDownloadGrantEnvelope(t *testing.T) {
+	placedRoot := filepath.Join(t.TempDir(), "placed")
+	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/internal/filesystem/v1/files/file-a/download-grant", r.URL.Path)
+		assert.Equal(t, "internal-secret", r.Header.Get("X-SparkOps-Internal-Token"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"code": 0,
+			"message": "ok",
+			"data": {
+				"object_key": "objects/file-a",
+				"classification": "INTERNAL",
+				"audit_ok": true,
+				"local_root": "` + filepath.ToSlash(placedRoot) + `"
+			}
+		}`))
+	}))
+	defer control.Close()
+
+	provider, err := local.New(filepath.Join(t.TempDir(), "storage"))
+	require.NoError(t, err)
+	defer provider.Close()
+	port, err := NewHTTPControlPort(control.URL, "internal-secret", provider)
+	require.NoError(t, err)
+
+	grant, err := port.ResolveDownload(context.Background(), "file-a")
+	require.NoError(t, err)
+	assert.Equal(t, "objects/file-a", grant.ObjectKey)
+	assert.True(t, grant.AuditOK)
+	assert.Equal(t, model.TransferClassificationInternal, grant.Classification)
+	root, ok := local.StorageRoot(grant.Provider)
+	require.True(t, ok)
+	assert.Equal(t, filepath.Clean(placedRoot), root)
+}

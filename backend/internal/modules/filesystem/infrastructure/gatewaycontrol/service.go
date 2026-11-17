@@ -3,12 +3,14 @@ package gatewaycontrol
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/sparkops/sparkops-agent/backend/internal/filesystemgateway"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/application/command"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain"
+	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/model"
 	"github.com/sparkops/sparkops-agent/backend/internal/modules/filesystem/domain/repository"
 )
 
@@ -55,7 +57,42 @@ func (s *Service) ResolveUpload(ctx context.Context, sessionID string) (filesyst
 }
 
 func (s *Service) ResolveDownload(ctx context.Context, fileID string) (filesystemgateway.DownloadGrant, error) {
-	return filesystemgateway.DownloadGrant{}, fmt.Errorf("%w", filesystemgateway.ErrControlUnavailable)
+	if s == nil || s.repo == nil || s.catalog == nil {
+		return filesystemgateway.DownloadGrant{}, fmt.Errorf("%w", filesystemgateway.ErrControlUnavailable)
+	}
+	id, err := uuid.Parse(strings.TrimSpace(fileID))
+	if err != nil {
+		return filesystemgateway.DownloadGrant{}, domain.ErrNodeNotFound
+	}
+	node, err := s.repo.GetNodeByID(ctx, id)
+	if err != nil {
+		return filesystemgateway.DownloadGrant{}, err
+	}
+	if node.Type != model.NodeTypeFile || node.CurrentRevisionID == nil {
+		return filesystemgateway.DownloadGrant{}, domain.ErrRevisionNotFound
+	}
+	revision, err := s.repo.GetRevision(ctx, id, *node.CurrentRevisionID)
+	if err != nil {
+		return filesystemgateway.DownloadGrant{}, err
+	}
+	replica, err := s.repo.GetPreferredReplica(ctx, revision.BlobID())
+	if err != nil {
+		return filesystemgateway.DownloadGrant{}, err
+	}
+	provider, err := s.catalog.Provider(ctx, replica.ProviderID)
+	if err != nil {
+		return filesystemgateway.DownloadGrant{}, err
+	}
+	classification := node.Classification
+	if classification == "" {
+		classification = model.TransferClassificationInternal
+	}
+	return filesystemgateway.DownloadGrant{
+		ObjectKey:      replica.ObjectKey,
+		Provider:       provider,
+		Classification: classification,
+		AuditOK:        true,
+	}, nil
 }
 
 func (s *Service) RecordUploaded(ctx context.Context, sessionID string, size int64, sha256 string) error {

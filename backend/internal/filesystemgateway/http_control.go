@@ -87,8 +87,33 @@ func (c *HTTPControlPort) providerForRoot(root string) (storage.Provider, error)
 	return created, nil
 }
 
-func (c *HTTPControlPort) ResolveDownload(_ context.Context, _ string) (DownloadGrant, error) {
-	return DownloadGrant{}, fmt.Errorf("%w", ErrControlUnavailable)
+func (c *HTTPControlPort) ResolveDownload(ctx context.Context, fileID string) (DownloadGrant, error) {
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return DownloadGrant{}, fmt.Errorf("%w", ErrControlUnavailable)
+	}
+	var payload struct {
+		ObjectKey      string `json:"object_key"`
+		Classification string `json:"classification"`
+		LocalRoot      string `json:"local_root"`
+		AuditOK        bool   `json:"audit_ok"`
+	}
+	if err := c.getJSON(ctx, fmt.Sprintf("%s/internal/filesystem/v1/files/%s/download-grant", c.baseURL, fileID), &payload); err != nil {
+		return DownloadGrant{}, err
+	}
+	if strings.TrimSpace(payload.ObjectKey) == "" {
+		return DownloadGrant{}, fmt.Errorf("%w", ErrControlUnavailable)
+	}
+	provider, err := c.providerForRoot(payload.LocalRoot)
+	if err != nil {
+		return DownloadGrant{}, err
+	}
+	return DownloadGrant{
+		ObjectKey:      payload.ObjectKey,
+		Provider:       provider,
+		Classification: model.TransferClassification(payload.Classification),
+		AuditOK:        payload.AuditOK,
+	}, nil
 }
 
 func (c *HTTPControlPort) RecordUploaded(ctx context.Context, sessionID string, size int64, sha256 string) error {

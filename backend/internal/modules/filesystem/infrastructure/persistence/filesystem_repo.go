@@ -1408,6 +1408,7 @@ func nodeFromRow(row nodeRow) *model.Node {
 		Name: row.Name, NormalizedName: row.NormalizedName, CurrentRevisionID: row.CurrentRevisionID,
 		State: row.State, OwnerID: row.OwnerID, Classification: row.Classification,
 		DeletedAt: row.DeletedAt, DeletedBy: row.DeletedBy,
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
 }
 

@@ -12,7 +12,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const uploadAction = "transfer:write"
+const (
+	uploadAction   = "transfer:write"
+	downloadAction = "transfer:read"
+)
 
 type Issuer struct {
 	secret   []byte
@@ -33,6 +36,39 @@ type uploadClaims struct {
 	Action    string `json:"action"`
 	Nonce     string `json:"nonce"`
 	jwt.RegisteredClaims
+}
+
+type downloadClaims struct {
+	FileID string `json:"file_id"`
+	Action string `json:"action"`
+	Nonce  string `json:"nonce"`
+	jwt.RegisteredClaims
+}
+
+func (i *Issuer) DownloadToken(fileID uuid.UUID, expiresAt time.Time) (string, error) {
+	if fileID == uuid.Nil || !expiresAt.After(time.Now()) {
+		return "", errors.New("invalid capability scope")
+	}
+	nonce, err := randomNonce()
+	if err != nil {
+		return "", err
+	}
+	claims := downloadClaims{
+		FileID: fileID.String(),
+		Action: downloadAction,
+		Nonce:  nonce,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Audience: jwt.ClaimStrings{i.audience},
+			ExpiresAt: jwt.NewNumericDate(expiresAt.UTC()),
+			IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString(i.secret)
+	if err != nil {
+		return "", fmt.Errorf("sign capability token: %w", err)
+	}
+	return signed, nil
 }
 
 func (i *Issuer) UploadToken(sessionID uuid.UUID, expiresAt time.Time) (string, error) {

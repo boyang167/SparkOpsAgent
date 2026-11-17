@@ -311,7 +311,7 @@ async function readBoundedBody(req: Request, traceId: string): Promise<BodyInit 
   return body;
 }
 
-async function assertBffEntitlement(ctx: BffContext, req: NextRequest, traceId: string) {
+export async function assertBffEntitlement(ctx: BffContext, req: NextRequest, traceId: string) {
   await assertApiEntitlement(ctx, bffPathToApiPath(req.nextUrl.pathname), traceId);
 }
 
@@ -431,6 +431,26 @@ export function createBffHandler(handler: BffHandler) {
       const params = await context.params;
       const data = await handler(ctx, req, { params });
       return ok(data, traceId);
+    } catch (err) {
+      return fail(err, traceId);
+    }
+  };
+}
+
+export type BffRawHandler = (
+  ctx: BffContext,
+  req: NextRequest,
+  args: BffHandlerArgs,
+) => Promise<NextResponse>;
+
+export function createBffRawHandler(handler: BffRawHandler) {
+  return async (req: NextRequest, context: { params: Promise<Record<string, string>> }) => {
+    const traceId = createTraceId(req);
+    try {
+      const ctx = await createBffContext(req);
+      await assertBffEntitlement(ctx, req, traceId);
+      const params = await context.params;
+      return await handler(ctx, req, { params });
     } catch (err) {
       return fail(err, traceId);
     }

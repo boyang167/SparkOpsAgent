@@ -48,6 +48,7 @@ import {
   FileNodePageVMSchema,
   FileNodeVMSchema,
   FileRevisionPageVMSchema,
+  FileContentAccessVMSchema,
   LifecyclePolicyPageVMSchema,
   GovernedGrantPageVMSchema,
   GovernedShareSubmissionVMSchema,
@@ -255,6 +256,23 @@ export async function getFileStorage(
 ): Promise<FileStorageVM> {
   return ctx.upstream.filesystem.getFileStorage(workspaceId, nodeId, query);
 }
+
+export async function getFileContentAccess(
+  ctx: BffContext,
+  workspaceId: string,
+  nodeId: string,
+  query: { revision_id?: string; namespace_id?: string } = {},
+) {
+  const data = await ctx.upstream.filesystem.getFileContentAccess(workspaceId, nodeId, query);
+  const parsed = FileContentAccessVMSchema.safeParse(data);
+  if (!parsed.success) {
+    throw new Error("invalid file content access response from upstream");
+  }
+  return parsed.data;
+}
+
+export { loadFilePreviewContent } from "./file-preview";
+export type { LoadedFilePreview } from "./file-preview";
 
 export async function createTransferSession(
   ctx: BffContext,

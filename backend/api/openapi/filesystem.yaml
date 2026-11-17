@@ -907,6 +907,75 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /api/v1/workspaces/{wsId}/files/{nodeId}/content-access:
+    get:
+      tags: [filesystem]
+      summary: Issue short-lived download capability and preview metadata for a file revision
+      operationId: getFilesystemFileContentAccess
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+        - name: revision_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Content access metadata
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required:
+                          [revision_id, mime_type, size, file_name, preview_kind, preview_supported]
+                        properties:
+                          revision_id:
+                            type: string
+                            format: uuid
+                          mime_type:
+                            type: string
+                          size:
+                            type: integer
+                            format: int64
+                          file_name:
+                            type: string
+                          preview_kind:
+                            type: string
+                            enum: [text, image, pdf, unsupported]
+                          preview_supported:
+                            type: boolean
+                          reason_code:
+                            type: string
+                          max_preview_bytes:
+                            type: integer
+                            format: int64
+                          download_url:
+                            type: string
+                            format: uri
+                          capability_token:
+                            type: string
+                          expires_at:
+                            type: string
+                            format: date-time
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/workspaces/{wsId}/files/{nodeId}/storage:
     get:
       tags: [filesystem]
@@ -2749,6 +2818,12 @@ components:
         owner_id:
           type: string
           format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
         classification:
           $ref: "#/components/schemas/TransferClassification"
     Revision:

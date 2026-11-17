@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -47,6 +48,7 @@ type Handler struct {
 	namespaceForWorkspace     func(context.Context, uuid.UUID) (*model.Namespace, error)
 	namespaceByID             func(context.Context, uuid.UUID) (*model.Namespace, error)
 	getNode                   func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
+	getRevision               func(context.Context, uuid.UUID, uuid.UUID) (*model.FileRevision, error)
 	listChildren              func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, int, string) ([]model.Node, string, error)
 	listChildrenFiltered      func(context.Context, uuid.UUID, *uuid.UUID, *model.NodeType, string, int, string) ([]model.Node, string, error)
 	listRevisions             func(context.Context, uuid.UUID, uuid.UUID, int, string) ([]model.FileRevision, string, error)
@@ -113,6 +115,7 @@ func NewHandler(
 		namespaceForWorkspace: repo.GetNamespaceByWorkspace,
 		namespaceByID:         repo.GetNamespace,
 		getNode:               repo.GetNode,
+		getRevision:           repo.GetRevision,
 		listChildren: func(ctx context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, nodeType *model.NodeType, limit int, cursor string) ([]model.Node, string, error) {
 			return list.Handle(ctx, query.ListChildren{NamespaceID: namespaceID, ParentID: parentID, NodeType: nodeType, Limit: limit, Cursor: cursor})
 		},
@@ -179,6 +182,7 @@ func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.Ha
 	base.GET("/files/search", authz.RequirePermission(permissions, authz.PermFileRead), h.SearchFiles)
 	base.GET("/files/:nodeId/preview", authz.RequirePermission(permissions, authz.PermFileRead), h.GetFilePreview)
 	base.GET("/files/:nodeId/storage", authz.RequirePermission(permissions, authz.PermFileRead), h.GetFileStorage)
+	base.GET("/files/:nodeId/content-access", authz.RequirePermission(permissions, authz.PermFileRead), h.GetFileContentAccess)
 	base.POST("/directories", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.CreateDirectory)
 	base.PATCH("/files/:nodeId/name", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.RenameNode)
 	base.POST("/files/:nodeId/move", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.MoveNode)
@@ -1057,7 +1061,18 @@ func namespaceView(namespace *model.Namespace) gin.H {
 }
 
 func nodeView(node *model.Node) gin.H {
-	return gin.H{"id": node.ID, "namespace_id": node.NamespaceID, "parent_id": node.ParentID, "type": node.Type, "name": node.Name, "current_revision_id": node.CurrentRevisionID, "state": node.State, "owner_id": node.OwnerID, "classification": node.Classification}
+	view := gin.H{
+		"id": node.ID, "namespace_id": node.NamespaceID, "parent_id": node.ParentID, "type": node.Type,
+		"name": node.Name, "current_revision_id": node.CurrentRevisionID, "state": node.State,
+		"owner_id": node.OwnerID, "classification": node.Classification,
+	}
+	if !node.CreatedAt.IsZero() {
+		view["created_at"] = node.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	if !node.UpdatedAt.IsZero() {
+		view["updated_at"] = node.UpdatedAt.UTC().Format(time.RFC3339)
+	}
+	return view
 }
 
 func revisionView(revision *model.FileRevision) gin.H {

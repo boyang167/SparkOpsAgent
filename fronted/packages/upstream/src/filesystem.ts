@@ -11,6 +11,7 @@ import type {
   FileNodeVM,
   FileRevisionPageVM,
   FileStorageVM,
+  FileContentAccessVM,
   GovernedChildrenQuery,
   GovernedGrantPageVM,
   GovernanceMetadataQuery,
@@ -505,6 +506,21 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
       const qs = suffix ? `?${suffix}` : "";
       return upstreamFetch<FileStorageVM>(
         `/api/v1/workspaces/${workspaceId}/files/${nodeId}/storage${qs}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+    getFileContentAccess(
+      workspaceId: string,
+      nodeId: string,
+      query: { revision_id?: string; namespace_id?: string } = {},
+    ) {
+      const params = new URLSearchParams();
+      if (query.revision_id) params.set("revision_id", query.revision_id);
+      if (query.namespace_id) params.set("namespace_id", query.namespace_id);
+      const suffix = params.toString();
+      const qs = suffix ? `?${suffix}` : "";
+      return upstreamFetch<FileContentAccessVM>(
+        `/api/v1/workspaces/${workspaceId}/files/${nodeId}/content-access${qs}`,
         { method: "GET", options: { ...options, workspaceId } },
       );
     },

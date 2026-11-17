@@ -11,6 +11,7 @@ import type {
   FileNodeVM,
   FileRevisionPageVM,
   FileStorageVM,
+  FileContentAccessVM,
   GovernedGrantPageVM,
   GovernanceMetadataQuery,
   GovernedShareSubmissionVM,
@@ -38,6 +39,7 @@ import type {
   TransferSessionVM,
   UpsertLifecyclePolicyCommand,
 } from "@sparkops/contracts/filesystem";
+import { BffError } from "@sparkops/contracts";
 import { bffFetch, type BffFetchOptions } from "./client";
 
 export type TransferProgress = {
@@ -568,6 +570,108 @@ export function getFileStorage(
       ...options,
     },
   );
+}
+
+export function getFileContentAccess(
+  workspaceId: string,
+  nodeId: string,
+  query: { revision_id?: string; namespace_id?: string } = {},
+  options: BffFetchOptions = {},
+) {
+  const params = new URLSearchParams();
+  if (query.revision_id) params.set("revision_id", query.revision_id);
+  if (query.namespace_id) params.set("namespace_id", query.namespace_id);
+  const suffix = params.toString();
+  const qs = suffix ? `?${suffix}` : "";
+  return bffFetch<FileContentAccessVM>(
+    `/workspaces/${workspaceId}/files/${nodeId}/content-access${qs}`,
+    {
+      method: "GET",
+      workspaceId,
+      ...options,
+    },
+  );
+}
+
+export async function fetchFilePreviewBlob(
+  workspaceId: string,
+  nodeId: string,
+  query: { revision_id?: string; namespace_id?: string } = {},
+  options: { signal?: AbortSignal } = {},
+): Promise<{ blob: Blob; previewKind: string; mimeType: string }> {
+  const params = new URLSearchParams();
+  if (query.revision_id) params.set("revision_id", query.revision_id);
+  if (query.namespace_id) params.set("namespace_id", query.namespace_id);
+  const suffix = params.toString();
+  const qs = suffix ? `?${suffix}` : "";
+  const headers: HeadersInit = { "X-Workspace-Id": workspaceId };
+  let response: Response;
+  try {
+    response = await fetch(
+      `/api/bff/v1/workspaces/${workspaceId}/files/${nodeId}/preview-content${qs}`,
+      {
+        method: "GET",
+        headers,
+        credentials: "include",
+        signal: options.signal,
+      },
+    );
+  } catch (err) {
+    throw err;
+  }
+  if (!response.ok) {
+    let message = `预览内容加载失败（${response.status}）`;
+    try {
+      const body = (await response.json()) as { message?: string };
+      if (body.message) message = body.message;
+    } catch {
+      // ignore non-json errors
+    }
+    throw new Error(message);
+  }
+  const previewKind = response.headers.get("X-Preview-Kind") ?? "unsupported";
+  const mimeType =
+    response.headers.get("Content-Type")?.split(";")[0]?.trim() ||
+    "application/octet-stream";
+  return { blob: await response.blob(), previewKind, mimeType };
+}
+
+export function mapFilePreviewError(err: unknown): string {
+  if (err instanceof BffError) {
+    if (
+      err.code === "UPSTREAM_ERROR" &&
+      (err.status === 404 ||
+        err.message.toLowerCase().includes("invalid response") ||
+        err.message.toLowerCase().includes("empty error"))
+    ) {
+      return "预览接口未就绪，请重启后端服务（含 content-access 路由）后重试。";
+    }
+    if (err.code === "UPSTREAM_UNAVAILABLE") {
+      return "无法连接文件服务，请确认后端已启动。";
+    }
+    return err.message;
+  }
+  return err instanceof Error ? err.message : "预览加载失败，请稍后重试。";
+}
+
+export function filePreviewAccessMessage(access: FileContentAccessVM): string {
+  if (access.preview_supported) return "";
+  switch (access.reason_code) {
+    case "PREVIEW_TOO_LARGE":
+      return "文件体积超过在线预览上限，请下载后查看。";
+    case "PREVIEW_GATEWAY_UNAVAILABLE":
+      return "传输网关未配置，暂时无法预览或下载文件内容。";
+    case "PREVIEW_UNSUPPORTED":
+      return "此文件类型暂不支持在线预览。";
+    case "PREVIEW_CONTRACT_INVALID":
+      return "预览数据格式异常，请确认前后端版本一致并已重启服务。";
+    case "PREVIEW_DOWNLOAD_FAILED":
+      return "从传输网关拉取文件失败，请确认网关与 capability 配置一致。";
+    case "PREVIEW_GATEWAY_UNREACHABLE":
+      return "无法连接传输网关（:8082），请执行 dev-restart.ps1 -Backend。";
+    default:
+      return "此文件类型暂不支持在线预览。";
+  }
 }
 
 export function listFileRevisions(

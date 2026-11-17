@@ -22,7 +22,13 @@ import {
 } from "@sparkops/web-sdk/filesystem";
 import { Drawer } from "@/components/ui/Drawer";
 import { InlineAlert } from "@/components/ui/InlineAlert";
+import {
+  formatFileNodeTimestamp,
+  resolveMemberDisplayName,
+} from "./file-detail-display";
+import { FilePreviewPane } from "./FilePreviewPane";
 import { resolveNodePath } from "./file-node-display-path";
+import type { WorkspaceMemberVM } from "@sparkops/contracts/governance";
 
 export type FileDetailDrawerProps = {
   node: FileNodeVM | null;
@@ -36,6 +42,7 @@ export type FileDetailDrawerProps = {
   onRetry?: () => void;
   projectionOnly?: boolean;
   projectionDetails?: Array<{ label: string; value: string }>;
+  members?: WorkspaceMemberVM[];
 };
 
 type DetailTab = "details" | "access" | "revisions" | "audit";
@@ -53,6 +60,7 @@ export function FileDetailDrawer({
   onRetry,
   projectionOnly = false,
   projectionDetails = [],
+  members = [],
 }: FileDetailDrawerProps): React.ReactElement | null {
   const detailKey = `${workspaceId}:${node?.id ?? ""}`;
   const [tab, setTab] = useState<DetailTab>("details");
@@ -473,6 +481,8 @@ export function FileDetailDrawer({
                 ? createElement(Details, {
                     node,
                     path: resolvedPath,
+                    members,
+                    workspaceId,
                     storage:
                       storageData.key === detailKey ? storageData : { key: detailKey, state: "loading" },
                   })
@@ -536,12 +546,17 @@ function ProjectionDetails({
 function Details({
   node,
   path,
+  members,
+  workspaceId,
   storage,
 }: {
   node: FileNodeVM;
   path?: string;
+  members: readonly WorkspaceMemberVM[];
+  workspaceId: string;
   storage: { key: string; value?: FileStorageVM; state: LoadState };
 }) {
+  const ownerName = resolveMemberDisplayName(node.owner_id, members);
   const storageRows =
     node.type === "FILE"
       ? storage.state === "ready" && storage.value
@@ -601,12 +616,28 @@ function Details({
       }),
       ...storageRows,
       createElement(Detail, { label: "节点 ID", value: node.id, mono: true }),
-      createElement(Detail, { label: "所有者", value: node.owner_id, mono: true }),
+      createElement(OwnerDetail, {
+        ownerId: node.owner_id,
+        ownerName,
+      }),
+      createElement(Detail, {
+        label: "创建时间",
+        value: formatFileNodeTimestamp(node.created_at),
+      }),
+      createElement(Detail, {
+        label: "更新时间",
+        value: formatFileNodeTimestamp(node.updated_at),
+      }),
       createElement(Detail, { label: "当前版本 ID", value: node.current_revision_id ?? "—", mono: true }),
       createElement(Detail, { label: "父节点 ID", value: node.parent_id ?? "根目录", mono: true }),
     ),
     node.type === "FILE"
-      ? createElement("div", { className: "empty-state" }, "当前后端未提供可直接展示的预览内容。")
+      ? createElement(FilePreviewPane, {
+          workspaceId,
+          nodeId: node.id,
+          namespaceId: node.namespace_id,
+          enabled: true,
+        })
       : null,
   );
 }
@@ -775,6 +806,32 @@ function Detail({ label, value, mono = false }: { label: string; value: string; 
     { className: "stack-xs min-w-0" },
     createElement("dt", { className: "text-xs text-muted" }, label),
     createElement("dd", { className: mono ? "break-all font-mono text-xs" : "text-sm" }, value),
+  );
+}
+
+function OwnerDetail({
+  ownerId,
+  ownerName,
+}: {
+  ownerId: string;
+  ownerName: string | null;
+}) {
+  return createElement(
+    "div",
+    { className: "stack-xs min-w-0" },
+    createElement("dt", { className: "text-xs text-muted" }, "所有者"),
+    createElement(
+      "dd",
+      { className: "stack-xs" },
+      ownerName
+        ? createElement("span", { className: "text-sm" }, ownerName)
+        : createElement("span", { className: "text-sm text-muted" }, "未知成员"),
+      createElement(
+        "span",
+        { className: "break-all font-mono text-xs text-muted" },
+        ownerId,
+      ),
+    ),
   );
 }
 

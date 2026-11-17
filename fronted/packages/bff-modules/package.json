@@ -15,6 +15,7 @@
     "./workflow": "./src/workflow/index.ts",
     "./knowledge": "./src/knowledge/index.ts",
     "./filesystem": "./src/filesystem/index.ts",
+    "./filesystem/file-preview": "./src/filesystem/file-preview.ts",
     "./notification": "./src/notification/index.ts",
     "./delivery": "./src/delivery/index.ts",
     "./cluster": "./src/cluster/index.ts",

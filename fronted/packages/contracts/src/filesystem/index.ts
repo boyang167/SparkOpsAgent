@@ -104,6 +104,8 @@ export const FileNodeVMSchema = z.object({
   state: FileNodeStateSchema,
   owner_id: z.string().uuid(),
   classification: TransferClassificationSchema.optional(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
 });
 
 export type FileNodeVM = z.infer<typeof FileNodeVMSchema>;
@@ -154,6 +156,24 @@ export const FileStorageVMSchema = z.object({
 });
 
 export type FileStorageVM = z.infer<typeof FileStorageVMSchema>;
+
+export const FilePreviewKindSchema = z.enum(["text", "image", "pdf", "unsupported"]);
+
+export const FileContentAccessVMSchema = z.object({
+  revision_id: z.string().uuid(),
+  mime_type: z.string(),
+  size: z.coerce.number().int().nonnegative(),
+  file_name: z.string(),
+  preview_kind: FilePreviewKindSchema,
+  preview_supported: z.boolean(),
+  reason_code: z.string().optional(),
+  max_preview_bytes: z.number().int().nonnegative().optional(),
+  expires_at: z.string().optional(),
+  download_url: z.string().url().optional(),
+  capability_token: z.string().optional(),
+});
+
+export type FileContentAccessVM = z.infer<typeof FileContentAccessVMSchema>;
 
 export const CreateDirectoryCommandSchema = z.object({
   namespace_id: z.string().uuid().optional(),

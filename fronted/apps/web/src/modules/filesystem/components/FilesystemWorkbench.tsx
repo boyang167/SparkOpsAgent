@@ -810,6 +810,7 @@ export function FilesystemWorkbench({
               : undefined,
           onClose: closeNode,
           onRetry: () => router.refresh(),
+          members,
         })
       : null,
     shareTarget && organizationId && organizationLabel && workspaceLabel
