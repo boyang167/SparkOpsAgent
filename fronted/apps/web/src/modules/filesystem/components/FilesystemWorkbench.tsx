@@ -26,6 +26,7 @@ import { nodePathInFolder } from "./file-node-display-path";
 import { FileDropZone } from "./FileDropZone";
 import { FileExplorerPanel } from "./FileExplorerPanel";
 import { FileSpaceNav } from "./FileSpaceNav";
+import { DataPlaneFileSpaceCard } from "./DataPlaneFileSpaceCard";
 import { FileSpaceTabList } from "./FileSpaceTabList";
 import { GovernanceWorkspace, type GovernanceSection } from "./GovernanceWorkspace";
 import { MoveNodesModal } from "./MoveNodesModal";
@@ -594,6 +595,7 @@ export function FilesystemWorkbench({
     ),
   );
 
+  const dataPlaneLayout = hideTabList && Boolean(fileSpace);
   const filesPanel =
     namespace.root_node_id
       ? createElement(FileExplorerPanel, {
@@ -603,6 +605,7 @@ export function FilesystemWorkbench({
           parentId: effectiveState.parent ?? namespace.root_node_id,
           initialNodes,
           view,
+          layout: dataPlaneLayout ? "data-plane" : "classic",
           canWrite: legacyWorkspaceWriteEnabled,
           canMove: legacyWorkspaceWriteEnabled,
           canDelete: legacyWorkspaceDeleteEnabled,
@@ -622,84 +625,110 @@ export function FilesystemWorkbench({
           onSearchChange: setSearchValue,
           onSearchSubmit: submitSearch,
           onViewChange: selectView,
-          onOpenDirectory: () => setDirectoryDrawerOpen(true),
+          onOpenDirectory: dataPlaneLayout ? () => setDirectoryDrawerOpen(true) : undefined,
           spaceLabel: fileSpaceLabel(fileSpace),
+          organizationLabel,
+          workspaceLabel,
           currentFolderLabel,
           workspaceRootHref: hrefForDataWorkspace(fileSpace ?? "workspace", view),
           isListingSearch: Boolean(effectiveState.query?.trim()),
         })
       : createElement("div", { className: "empty-state" }, "文件命名空间尚未初始化。");
   const filesSpaceTabs =
-    fileSpace && namespaceSummary && organizationLabel && workspaceLabel
+    !dataPlaneLayout && fileSpace && namespaceSummary && organizationLabel && workspaceLabel
       ? createElement(FileSpaceTabList, { activeSpace: fileSpace, view })
       : null;
 
-  const filesContent = createElement(
-    "div",
-    { className: "filesystem-data-workspace stack-sm min-w-0" },
-    filesSpaceTabs,
-    createElement(
-    "div",
+  const browserMain = createElement(
+    FileDropZone,
     {
-      className: "filesystem-workspace-frame filesystem-browser-layout",
-      "data-testid": "filesystem-browser-layout",
+      targetParentId: effectiveState.parent ?? namespace.root_node_id ?? "",
+      targetName: "当前目录",
+      canWrite:
+        Boolean(effectiveState.parent ?? namespace.root_node_id) &&
+        legacyWorkspaceWriteEnabled,
+      onFiles: (files: File[], targetParentId: string) =>
+        transferQueue.enqueue(files, targetParentId),
     },
     createElement(
-      "aside",
+      "div",
       {
-        "aria-label": "目录",
-        className: "filesystem-directory-sidebar",
+        className: "filesystem-browser-main",
+        "aria-labelledby": "workbench-tab-files",
       },
-      renderDirectoryTree(),
-    ),
-    createElement(
-      FileDropZone,
-      {
-        targetParentId: effectiveState.parent ?? namespace.root_node_id ?? "",
-        targetName: "当前目录",
-        canWrite:
-          Boolean(effectiveState.parent ?? namespace.root_node_id) &&
-          legacyWorkspaceWriteEnabled,
-        onFiles: (files: File[], targetParentId: string) =>
-          transferQueue.enqueue(files, targetParentId),
-      },
-        createElement(
-          "div",
-          {
-            className: "filesystem-browser-main",
-            "aria-labelledby": "workbench-tab-files",
-          },
-        filesPanel,
-        createElement(
-          "nav",
-          { "aria-label": "文件分页", className: "mt-4 flex gap-2" },
-          cursorTrail.current.length > 0
-            ? createElement(
-                "button",
-                {
-                  type: "button",
-                  className: "btn btn-ghost btn-sm",
-                  onClick: previousPage,
-                },
-                "上一页",
-              )
-            : null,
-          initialNextCursor
-            ? createElement(
-                "button",
-                {
-                  type: "button",
-                  className: "btn btn-secondary btn-sm",
-                  onClick: nextPage,
-                },
-                "下一页",
-              )
-            : null,
-        ),
+      filesPanel,
+      createElement(
+        "nav",
+        { "aria-label": "文件分页", className: "mt-4 flex gap-2 px-3 pb-3" },
+        cursorTrail.current.length > 0
+          ? createElement(
+              "button",
+              {
+                type: "button",
+                className: "btn btn-ghost btn-sm",
+                onClick: previousPage,
+              },
+              "上一页",
+            )
+          : null,
+        initialNextCursor
+          ? createElement(
+              "button",
+              {
+                type: "button",
+                className: "btn btn-secondary btn-sm",
+                onClick: nextPage,
+              },
+              "下一页",
+            )
+          : null,
       ),
     ),
-    ),
   );
+
+  const browserFrame = dataPlaneLayout
+    ? createElement(
+        "div",
+        {
+          className: "filesystem-data-panel-frame",
+          "data-testid": "filesystem-browser-layout",
+        },
+        browserMain,
+      )
+    : createElement(
+        "div",
+        {
+          className: "filesystem-workspace-frame filesystem-browser-layout",
+          "data-testid": "filesystem-browser-layout",
+        },
+        createElement(
+          "aside",
+          {
+            "aria-label": "目录",
+            className: "filesystem-directory-sidebar",
+          },
+          renderDirectoryTree(),
+        ),
+        browserMain,
+      );
+
+  const filesContentInner = createElement(
+    "div",
+    { className: "filesystem-data-workspace min-w-0" },
+    browserFrame,
+  );
+
+  const filesContent =
+    dataPlaneLayout && fileSpace
+      ? createElement(
+          DataPlaneFileSpaceCard,
+          {
+            activeSpace: fileSpace,
+            view,
+            children: filesContentInner,
+          },
+        )
+      : createElement("div", { className: "filesystem-data-workspace stack-sm min-w-0" }, filesSpaceTabs, browserFrame);
 
   return createElement(
     "div",
@@ -724,6 +753,8 @@ export function FilesystemWorkbench({
                   queue: transferQueue,
                   workspaceId,
                   canWrite: legacyWorkspaceWriteEnabled,
+                  presentation:
+                    hideTabList && lockedTab === "transfers" ? "data-plane" : "classic",
                 })
               : tab.id === "governance"
                 ? createElement(GovernanceWorkspace, {

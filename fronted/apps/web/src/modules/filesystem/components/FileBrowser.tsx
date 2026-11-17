@@ -36,6 +36,7 @@ export type FileBrowserProps = {
   organizationId?: string;
   onShare?: (node: FileNodeVM, effectiveActions: GovernedPermission[]) => void;
   emptyMessage?: string;
+  listVariant?: "classic" | "data-plane";
 };
 
 export function sortFileNodes(nodes: FileNodeVM[]) {
@@ -70,6 +71,7 @@ export function FileBrowser({
   organizationId,
   onShare,
   emptyMessage,
+  listVariant = "classic",
 }: FileBrowserProps) {
   const [selection, setSelection] = useState(() => new Set(selectedIds));
   const sortedNodes = useMemo(() => sortFileNodes(nodes), [nodes]);
@@ -160,6 +162,7 @@ export function FileBrowser({
     organizationId,
     workspaceId,
     onShare: browseMode ? onShare : undefined,
+    listVariant,
   };
 
   const showBrowseToolbar = browseMode && (effectiveCanMove || effectiveCanDelete) && effectiveSelection.size > 0;

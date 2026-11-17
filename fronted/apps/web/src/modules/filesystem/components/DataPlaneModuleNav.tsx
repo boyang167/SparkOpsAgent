@@ -3,12 +3,17 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { createElement, useMemo } from "react";
+import {
+  DataPlaneBrowseIcon,
+  DataPlaneTransferIcon,
+  DataPlaneTrashIcon,
+} from "./data-plane-icons";
 import { hrefForDataTrash, hrefForDataWorkspace } from "./workbench-state";
 
 const DATA_PLANE_MODULES = [
-  { id: "workspace", label: "文件浏览", href: "/files/data/workspace" },
-  { id: "trash", label: "回收站", href: "/files/data/trash" },
-  { id: "transfers", label: "传输中心", href: "/files/data/transfers" },
+  { id: "workspace", label: "文件浏览", href: "/files/data/workspace", Icon: DataPlaneBrowseIcon },
+  { id: "trash", label: "回收站", href: "/files/data/trash", Icon: DataPlaneTrashIcon },
+  { id: "transfers", label: "传输中心", href: "/files/data/transfers", Icon: DataPlaneTransferIcon },
 ] as const;
 
 /** 数据面二级导航：文件浏览与传输中心 */
@@ -43,7 +48,7 @@ export function DataPlaneModuleNav() {
     {
       role: "navigation",
       "aria-label": "数据面模块",
-      className: "filesystem-data-module-nav flex max-w-full flex-wrap gap-2 overflow-x-auto",
+      className: "filesystem-data-module-nav",
     },
     DATA_PLANE_MODULES.map((item) =>
       createElement(
@@ -54,9 +59,10 @@ export function DataPlaneModuleNav() {
           "aria-current": active === item.id ? "page" : undefined,
           className:
             active === item.id
-              ? "btn btn-secondary btn-sm filesystem-touch-target"
-              : "btn btn-ghost btn-sm filesystem-touch-target",
+              ? "filesystem-data-module-tab is-active filesystem-touch-target"
+              : "filesystem-data-module-tab filesystem-touch-target",
         },
+        createElement(item.Icon),
         item.label,
       ),
     ),

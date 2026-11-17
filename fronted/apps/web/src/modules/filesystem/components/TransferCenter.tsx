@@ -17,7 +17,21 @@ import {
   abortTransfer,
   listTransferSessions,
 } from "@sparkops/web-sdk/filesystem";
-import { computeTransferMetrics, transferDisplayId } from "./transfer-center-stats";
+import { DataPlaneFileIcon } from "./data-plane-icons";
+import {
+  DATA_PLANE_TRANSFER_TABLE_COLUMNS,
+  TransferCompactProgress,
+  TransferDataPlaneEmptyState,
+  TransferDataPlaneStatsCard,
+  TransferDataPlaneTasksShell,
+  transferTypeBadge,
+} from "./transfer-center-data-plane-ui";
+import {
+  computeTransferMetrics,
+  formatByteCount,
+  formatTransferTimestamp,
+  transferDisplayId,
+} from "./transfer-center-stats";
 import {
   sliceTransferTablePage,
   TRANSFER_TABLE_PAGE_SIZE,
@@ -197,16 +211,37 @@ function TransferMetricStrip({ counts }: { counts: ReturnType<typeof computeTran
   );
 }
 
+type TransferPresentation = "classic" | "data-plane";
+
+function dataPlanePersistedStatusLabel(status: PersistedStatus) {
+  if (status === "COMPLETED") return "已完成";
+  if (status === "FAILED" || status === "REJECTED" || status === "EXPIRED") return "失败";
+  if (status === "PAUSED") return "已暂停";
+  if (status === "ABORTED") return "已取消";
+  return "传输中";
+}
+
+function dataPlaneLocalStatusLabel(item: TransferItem) {
+  if (item.cancelRequested) return "传输中";
+  if (item.status === "completed") return "已完成";
+  if (item.status === "failed") return "失败";
+  if (item.status === "canceled") return "已取消";
+  if (["queued", "creating", "uploading", "verifying"].includes(item.status)) return "传输中";
+  return statusLabels[item.status];
+}
+
 function PersistedTransferCard({
   session,
   queue,
   canWrite,
   onRefresh,
+  presentation = "classic",
 }: {
   session: TransferSessionVM;
   queue: TransferQueue;
   canWrite: boolean;
   onRefresh: () => void;
+  presentation?: TransferPresentation;
 }) {
   const terminal = new Set<PersistedStatus>([
     "COMPLETED",
@@ -248,6 +283,83 @@ function PersistedTransferCard({
     queue.enqueue([file], session.target_parent_id);
   }
   const progress = persistedPercent(session);
+  const typeVariant =
+    session.status === "PAUSED" || session.status === "FAILED" ? "upload-resume" : "upload";
+
+  if (presentation === "data-plane") {
+    return createElement(
+      "tr",
+      { className: "filesystem-transfer-data-row" },
+      createElement(
+        "td",
+        { className: "font-mono text-xs text-muted whitespace-nowrap" },
+        transferDisplayId(session.session_id),
+      ),
+      createElement(
+        "td",
+        { className: "filesystem-transfer-name-cell" },
+        createElement(DataPlaneFileIcon),
+        createElement("span", { className: "truncate" }, session.target_name),
+      ),
+      createElement("td", null, transferTypeBadge(typeVariant === "upload-resume" ? "上传/续传" : "上传", typeVariant)),
+      createElement("td", { className: "text-muted tabular-nums whitespace-nowrap" }, formatByteCount(session.expected_size)),
+      createElement(
+        "td",
+        null,
+        createElement(TransferCompactProgress, {
+          label: `${session.target_name} 上传进度`,
+          value: progress,
+        }),
+      ),
+      createElement(
+        "td",
+        null,
+        createElement(StatusBadge, {
+          label: dataPlanePersistedStatusLabel(session.status),
+          tone: badgeToneForPersisted(session.status),
+        }),
+      ),
+      createElement("td", { className: "text-muted text-sm whitespace-nowrap" }, "—"),
+      createElement(
+        "td",
+        { className: "text-right filesystem-transfer-actions-cell" },
+        createElement(
+          "div",
+          { className: "filesystem-transfer-row-actions" },
+          canWrite && !terminal.has(session.status)
+            ? createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "btn btn-ghost btn-sm filesystem-transfer-action-link",
+                  "aria-label": `暂停 ${session.target_name}`,
+                  disabled: busy,
+                  onClick: () => void cancelPersisted(),
+                },
+                busy ? "暂停中…" : "暂停",
+              )
+            : null,
+          canWrite && session.status === "FAILED"
+            ? createElement(
+                "label",
+                { className: "btn btn-ghost btn-sm filesystem-transfer-action-link" },
+                "重试",
+                createElement("input", {
+                  type: "file",
+                  className: "sr-only",
+                  "aria-label": `重试 ${session.target_name}`,
+                  onChange: (event: ChangeEvent<HTMLInputElement>) => {
+                    selectReplacement(event.currentTarget.files?.[0]);
+                    event.currentTarget.value = "";
+                  },
+                }),
+              )
+            : null,
+        ),
+      ),
+    );
+  }
+
   return createElement(
     "tr",
     null,
@@ -342,15 +454,102 @@ function LocalTransferRow({
   item,
   canWrite,
   queue,
+  presentation = "classic",
 }: {
   item: TransferItem;
   canWrite: boolean;
   queue: TransferQueue;
+  presentation?: TransferPresentation;
 }) {
   const progress = percent(item);
   const sessionId = item.session?.session_id ?? item.id;
   const speed =
     item.status === "uploading" || item.status === "verifying" ? "实时" : "—";
+
+  if (presentation === "data-plane") {
+    const typeVariant = item.status === "failed" ? "upload-resume" : "upload";
+    return createElement(
+      "tr",
+      { className: "filesystem-transfer-data-row" },
+      createElement(
+        "td",
+        { className: "font-mono text-xs text-muted whitespace-nowrap" },
+        transferDisplayId(sessionId),
+      ),
+      createElement(
+        "td",
+        { className: "filesystem-transfer-name-cell" },
+        createElement(DataPlaneFileIcon),
+        createElement("span", { className: "truncate" }, item.file.name),
+      ),
+      createElement(
+        "td",
+        null,
+        transferTypeBadge(typeVariant === "upload-resume" ? "上传/续传" : "上传", typeVariant),
+      ),
+      createElement(
+        "td",
+        { className: "text-muted tabular-nums whitespace-nowrap" },
+        formatByteCount(item.file.size),
+      ),
+      createElement(
+        "td",
+        null,
+        createElement(TransferCompactProgress, {
+          label: `${item.file.name} 上传进度`,
+          value: progress,
+        }),
+      ),
+      createElement(
+        "td",
+        null,
+        createElement(StatusBadge, {
+          label: dataPlaneLocalStatusLabel(item),
+          tone: badgeToneForLocal(item),
+        }),
+      ),
+      createElement(
+        "td",
+        { className: "text-muted text-sm whitespace-nowrap" },
+        formatTransferTimestamp(item.file.lastModified),
+      ),
+      createElement(
+        "td",
+        { className: "text-right filesystem-transfer-actions-cell" },
+        createElement(
+          "div",
+          { className: "filesystem-transfer-row-actions" },
+          canWrite && item.status === "failed"
+            ? createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "btn btn-ghost btn-sm filesystem-transfer-action-link",
+                  "aria-label": `重试 ${item.file.name}`,
+                  onClick: () => queue.retry(item.id),
+                },
+                "重试",
+              )
+            : null,
+          canWrite &&
+          !item.cancelRequested &&
+          ["queued", "creating", "uploading", "verifying"].includes(item.status)
+            ? createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "btn btn-ghost btn-sm filesystem-transfer-action-link",
+                  "aria-label": `暂停 ${item.file.name}`,
+                  onClick: () => queue.cancel(item.id),
+                },
+                "暂停",
+              )
+            : null,
+        ),
+      ),
+    );
+  }
+
   return createElement(
     "tr",
     null,
@@ -454,11 +653,14 @@ export function TransferCenter({
   queue,
   workspaceId,
   canWrite = false,
+  presentation = "classic",
 }: {
   queue: TransferQueue;
   workspaceId?: string;
   canWrite?: boolean;
+  presentation?: TransferPresentation;
 }) {
+  const dataPlane = presentation === "data-plane";
   const items = useTransfers(queue);
   const [tablePageIndex, setTablePageIndex] = useState(0);
   const [tablePageSize, setTablePageSize] = useState<number>(TRANSFER_TABLE_PAGE_SIZE);
@@ -604,7 +806,7 @@ export function TransferCenter({
           "button",
           {
             type: "button",
-            className: "btn btn-ghost btn-sm",
+            className: dataPlane ? "btn btn-ghost btn-sm filesystem-transfer-refresh-btn" : "btn btn-ghost btn-sm",
             disabled:
               scopedPersisted.phase === "loading" ||
               scopedPersisted.phase === "refreshing",
@@ -615,9 +817,166 @@ export function TransferCenter({
       : null,
     createElement(
       Link,
-      { href: "/files/data/workspace", className: "btn btn-primary btn-sm filesystem-touch-target" },
-      "新建传输",
+      {
+        href: "/files/data/workspace",
+        className: dataPlane
+          ? "btn btn-primary btn-sm filesystem-touch-target filesystem-transfer-new-btn"
+          : "btn btn-primary btn-sm filesystem-touch-target",
+      },
+      dataPlane ? "新建传输" : "新建传输",
     ),
+  );
+
+  const paginationFooter =
+    tablePage.totalCount > 0
+      ? createElement(
+          "nav",
+          {
+            "aria-label": "传输任务分页",
+            className: "filesystem-transfer-pagination-nav template-pagination",
+          },
+          createElement(
+            "select",
+            {
+              className: "input input-sm template-page-size",
+              "aria-label": "每页条数",
+              value: tablePageSize,
+              onChange: (event: ChangeEvent<HTMLSelectElement>) => {
+                setTablePageSize(Number(event.currentTarget.value));
+                setTablePageIndex(0);
+              },
+            },
+            TRANSFER_TABLE_PAGE_SIZE_OPTIONS.map((size) =>
+              createElement("option", { key: size, value: size }, `${size} / 页`),
+            ),
+          ),
+          createElement(
+            "button",
+            {
+              type: "button",
+              className: "btn-secondary text-sm",
+              disabled: tablePage.pageIndex <= 0,
+              onClick: () => setTablePageIndex((current) => Math.max(0, current - 1)),
+            },
+            "上一页",
+          ),
+          createElement(
+            "span",
+            { className: "template-page-indicator" },
+            `${tablePage.pageIndex + 1} / ${tablePage.totalPages}`,
+          ),
+          createElement(
+            "button",
+            {
+              type: "button",
+              className: "btn-secondary text-sm",
+              disabled: tablePage.pageIndex >= tablePage.totalPages - 1,
+              onClick: () =>
+                setTablePageIndex((current) => Math.min(tablePage.totalPages - 1, current + 1)),
+            },
+            "下一页",
+          ),
+        )
+      : null;
+
+  const tasksTable = createElement(
+    "div",
+    { className: "filesystem-table-wrap" },
+    createElement(
+      "table",
+      {
+        className: dataPlane
+          ? "data-table w-full filesystem-transfer-data-table text-sm"
+          : "data-table w-full text-sm",
+      },
+      createElement(
+        "thead",
+        null,
+        createElement(
+          "tr",
+          null,
+          (dataPlane
+            ? DATA_PLANE_TRANSFER_TABLE_COLUMNS
+            : ["任务 ID / 文件", "方向", "进度", "状态", "速度", "操作"]
+          ).map((column) => createElement("th", { key: column, scope: "col" }, column)),
+        ),
+      ),
+      createElement(
+        "tbody",
+        null,
+        tablePage.localItems.map((item) =>
+          createElement(LocalTransferRow, {
+            key: item.id,
+            item,
+            canWrite,
+            queue,
+            presentation,
+          }),
+        ),
+        tablePage.persistedItems.map((session) =>
+          createElement(PersistedTransferCard, {
+            key: session.session_id,
+            session,
+            queue,
+            canWrite,
+            presentation,
+            onRefresh: () => {
+              if (workspaceId) beginFirstPageRequest(workspaceId, false);
+            },
+          }),
+        ),
+      ),
+    ),
+  );
+
+  const statusMessages = createElement(
+    "div",
+    { className: dataPlane ? "px-4 pb-3 stack-xs" : undefined },
+    scopedPersisted.phase === "loading"
+      ? createElement("p", { role: "status", className: "text-sm text-muted" }, "正在加载持久传输任务…")
+      : null,
+    scopedPersisted.phase === "refreshing"
+      ? createElement("p", { role: "status", className: "text-sm text-muted" }, "正在刷新持久传输任务…")
+      : null,
+    scopedPersisted.phase === "loadingMore"
+      ? createElement("p", { role: "status", className: "text-sm text-muted" }, "正在加载更多传输任务…")
+      : null,
+    scopedPersisted.phase === "error"
+      ? createElement(
+          "div",
+          { className: "flex flex-wrap items-center gap-3" },
+          createElement(
+            "p",
+            { role: "alert", className: "text-sm text-danger" },
+            "无法加载持久传输任务，请稍后重试。",
+          ),
+          workspaceId
+            ? createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "btn btn-secondary btn-sm",
+                  onClick: () => beginFirstPageRequest(workspaceId, true),
+                },
+                "重试",
+              )
+            : null,
+        )
+      : null,
+    scopedPersisted.nextCursor &&
+      scopedPersisted.phase !== "loading" &&
+      scopedPersisted.phase !== "refreshing"
+      ? createElement(
+          "button",
+          {
+            type: "button",
+            className: "btn btn-ghost btn-sm self-start",
+            disabled: scopedPersisted.phase === "loadingMore",
+            onClick: () => void loadMore(),
+          },
+          "加载更多历史",
+        )
+      : null,
   );
 
   if (
@@ -625,6 +984,18 @@ export function TransferCenter({
     visiblePersisted.length === 0 &&
     scopedPersisted.phase === "ready"
   ) {
+    if (dataPlane) {
+      return createElement(
+        "div",
+        { className: "filesystem-transfer-data-plane stack-md min-w-0", "aria-label": "传输中心" },
+        createElement(TransferDataPlaneStatsCard, { counts: metrics }),
+        createElement(TransferDataPlaneTasksShell, {
+          totalCount: 0,
+          headerActions,
+          children: TransferDataPlaneEmptyState(),
+        }),
+      );
+    }
     return createElement(
       "div",
       { className: "stack-lg", "aria-label": "传输中心" },
@@ -686,6 +1057,53 @@ export function TransferCenter({
     }
   }
 
+  const classicPagination =
+    tablePage.totalCount > 0
+      ? createElement(
+          "div",
+          {
+            className:
+              "filesystem-transfer-pagination flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3",
+          },
+          scopedPersisted.nextCursor &&
+            scopedPersisted.phase !== "loading" &&
+            scopedPersisted.phase !== "refreshing"
+            ? createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "btn btn-ghost btn-sm",
+                  disabled: scopedPersisted.phase === "loadingMore",
+                  onClick: () => void loadMore(),
+                },
+                "加载更多历史",
+              )
+            : createElement("span", { "aria-hidden": true }),
+          paginationFooter,
+        )
+      : null;
+
+  const taskListBody = createElement(
+    "div",
+    { className: dataPlane ? "stack-sm" : "overflow-x-auto" },
+    tasksTable,
+    statusMessages,
+  );
+
+  if (dataPlane) {
+    return createElement(
+      "div",
+      { className: "filesystem-transfer-data-plane stack-md min-w-0", "aria-label": "传输中心" },
+      createElement(TransferDataPlaneStatsCard, { counts: metrics }),
+      createElement(TransferDataPlaneTasksShell, {
+        totalCount: tablePage.totalCount,
+        headerActions,
+        footer: paginationFooter,
+        children: taskListBody,
+      }),
+    );
+  }
+
   return createElement(
     "div",
     { className: "stack-lg", "aria-label": "传输中心" },
@@ -701,176 +1119,12 @@ export function TransferCenter({
         createElement(
           "p",
           { className: "text-xs text-muted" },
-          tablePage.totalCount > 0
-            ? `共 ${tablePage.totalCount} 条`
-            : "0 条记录",
+          tablePage.totalCount > 0 ? `共 ${tablePage.totalCount} 条` : "0 条记录",
         ),
       ),
-      createElement(
-        "div",
-        { className: "overflow-x-auto" },
-        createElement(
-          "table",
-          { className: "data-table w-full text-sm" },
-          createElement(
-            "thead",
-            null,
-            createElement(
-              "tr",
-              null,
-              ["任务 ID / 文件", "方向", "进度", "状态", "速度", "操作"].map((column) =>
-                createElement("th", { key: column, scope: "col" }, column),
-              ),
-            ),
-          ),
-          createElement(
-            "tbody",
-            null,
-            tablePage.localItems.map((item) =>
-              createElement(LocalTransferRow, {
-                key: item.id,
-                item,
-                canWrite,
-                queue,
-              }),
-            ),
-            tablePage.persistedItems.map((session) =>
-              createElement(PersistedTransferCard, {
-                key: session.session_id,
-                session,
-                queue,
-                canWrite,
-                onRefresh: () => {
-                  if (workspaceId) beginFirstPageRequest(workspaceId, false);
-                },
-              }),
-            ),
-          ),
-        ),
-      ),
-      tablePage.totalCount > 0
-        ? createElement(
-            "div",
-            {
-              className:
-                "filesystem-transfer-pagination flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3",
-            },
-            scopedPersisted.nextCursor &&
-              scopedPersisted.phase !== "loading" &&
-              scopedPersisted.phase !== "refreshing"
-              ? createElement(
-                  "button",
-                  {
-                    type: "button",
-                    className: "btn btn-ghost btn-sm",
-                    disabled: scopedPersisted.phase === "loadingMore",
-                    onClick: () => void loadMore(),
-                  },
-                  "加载更多历史",
-                )
-              : createElement("span", { "aria-hidden": true }),
-            createElement(
-              "nav",
-              {
-                "aria-label": "传输任务分页",
-                className: "template-pagination",
-                style: { padding: 0 },
-              },
-              createElement(
-                "select",
-                {
-                  className: "input template-page-size",
-                  "aria-label": "每页条数",
-                  value: tablePageSize,
-                  onChange: (event: ChangeEvent<HTMLSelectElement>) => {
-                    setTablePageSize(Number(event.target.value));
-                    setTablePageIndex(0);
-                  },
-                },
-                TRANSFER_TABLE_PAGE_SIZE_OPTIONS.map((size) =>
-                  createElement(
-                    "option",
-                    { key: size, value: size },
-                    `${size} 条/页`,
-                  ),
-                ),
-              ),
-              createElement(
-                "button",
-                {
-                  type: "button",
-                  className: "btn-secondary text-sm",
-                  disabled: tablePage.pageIndex <= 0,
-                  onClick: () =>
-                    setTablePageIndex((current) => Math.max(0, current - 1)),
-                },
-                "上一页",
-              ),
-              createElement(
-                "span",
-                { className: "template-page-indicator" },
-                `${tablePage.pageIndex + 1} / ${tablePage.totalPages}`,
-              ),
-              createElement(
-                "button",
-                {
-                  type: "button",
-                  className: "btn-secondary text-sm",
-                  disabled: tablePage.pageIndex >= tablePage.totalPages - 1,
-                  onClick: () =>
-                    setTablePageIndex((current) =>
-                      Math.min(tablePage.totalPages - 1, current + 1),
-                    ),
-                },
-                "下一页",
-              ),
-            ),
-          )
-        : null,
+      taskListBody,
+      classicPagination,
     ),
-    scopedPersisted.phase === "loading"
-      ? createElement(
-          "p",
-          { role: "status", className: "text-sm text-muted" },
-          "正在加载持久传输任务…",
-        )
-      : null,
-    scopedPersisted.phase === "refreshing"
-      ? createElement(
-          "p",
-          { role: "status", className: "text-sm text-muted" },
-          "正在刷新持久传输任务…",
-        )
-      : null,
-    scopedPersisted.phase === "loadingMore"
-      ? createElement(
-          "p",
-          { role: "status", className: "text-sm text-muted" },
-          "正在加载更多传输任务…",
-        )
-      : null,
-    scopedPersisted.phase === "error"
-      ? createElement(
-          "div",
-          { className: "flex flex-wrap items-center gap-3" },
-          createElement(
-            "p",
-            { role: "alert", className: "text-sm text-danger" },
-            "无法加载持久传输任务，请稍后重试。",
-          ),
-          workspaceId
-            ? createElement(
-                "button",
-                {
-                  type: "button",
-                  className: "btn btn-secondary btn-sm",
-                  onClick: () => beginFirstPageRequest(workspaceId, true),
-                },
-                "重试",
-              )
-            : null,
-        )
-      : null,
     createElement(TransferStateMachineHint, null),
   );
 }

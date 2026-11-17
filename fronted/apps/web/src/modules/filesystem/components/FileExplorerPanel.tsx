@@ -11,6 +11,7 @@ import { deleteDialogCopy, trashPanelNodes } from "./file-explorer-panel-delete"
 import { createPanelRenameHandler, submitPanelRename } from "./file-explorer-panel-rename";
 import type { FileExplorerDialog } from "./file-explorer-panel-state";
 import { showCreateDialog, showDeleteDialog, showRenameDialog } from "./file-explorer-panel-state";
+import { DataPlanePlusFolderIcon, DataPlaneUploadIcon } from "./data-plane-icons";
 import { UploadPanel } from "./UploadPanel";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
@@ -45,9 +46,12 @@ export type FileExplorerPanelProps = {
   onViewChange?: (view: FileView) => void;
   onOpenDirectory?: () => void;
   spaceLabel?: string;
+  organizationLabel?: string;
+  workspaceLabel?: string;
   currentFolderLabel?: string;
   workspaceRootHref?: string;
   isListingSearch?: boolean;
+  layout?: "classic" | "data-plane";
 };
 
 export function FileExplorerPanel({
@@ -74,9 +78,12 @@ export function FileExplorerPanel({
   onViewChange,
   onOpenDirectory,
   spaceLabel,
+  organizationLabel,
+  workspaceLabel,
   currentFolderLabel = "根目录",
   workspaceRootHref = "/files/data/workspace",
   isListingSearch = false,
+  layout = "classic",
 }: FileExplorerPanelProps) {
   const router = useRouter();
   const [nodes, setNodes] = useState(initialNodes);
@@ -218,36 +225,83 @@ export function FileExplorerPanel({
   const locationLabel = isListingSearch
     ? "搜索结果"
     : currentFolderLabel || "根目录";
+  const dataPlane = layout === "data-plane";
+  const searchPlaceholder = dataPlane
+    ? "搜索文件名称或路径…"
+    : "搜索名称或路径，Enter 确认";
+  const workspaceScope =
+    organizationLabel && workspaceLabel
+      ? `${organizationLabel} · ${workspaceLabel}`
+      : workspaceLabel ?? organizationLabel;
 
   return (
-  <div className="filesystem-explorer-shell">
-    <header className="filesystem-explorer-header">
-      <nav aria-label="当前位置" className="filesystem-explorer-location">
-        <span className="filesystem-location-space">{spaceLabel ?? "文件"}</span>
-        <span className="filesystem-location-sep" aria-hidden="true">
-          /
-        </span>
-        <Link href={workspaceRootHref} className="filesystem-location-link">
-          根目录
-        </Link>
-        {!isListingSearch && locationLabel !== "根目录" ? (
-          <>
-            <span className="filesystem-location-sep" aria-hidden="true">
-              /
-            </span>
-            <span className="filesystem-location-current">{locationLabel}</span>
-          </>
-        ) : null}
-        {isListingSearch ? (
-          <>
-            <span className="filesystem-location-sep" aria-hidden="true">
-              /
-            </span>
-            <span className="filesystem-location-current">搜索结果</span>
-          </>
-        ) : null}
-        <span className="filesystem-location-count">{nodeCountLabel}</span>
-      </nav>
+  <div
+    className={
+      dataPlane
+        ? "filesystem-explorer-shell filesystem-explorer-shell--data-plane"
+        : "filesystem-explorer-shell"
+    }
+  >
+    <header
+      className={
+        dataPlane
+          ? "filesystem-explorer-header filesystem-explorer-header--data-plane"
+          : "filesystem-explorer-header"
+      }
+    >
+      {dataPlane ? (
+        <div className="filesystem-data-workspace-head">
+          <div className="min-w-0">
+            <h3 className="filesystem-data-workspace-title">{spaceLabel ?? "文件"}</h3>
+            {workspaceScope ? (
+              <p className="filesystem-data-workspace-scope text-muted">{workspaceScope}</p>
+            ) : null}
+          </div>
+          <span className="badge badge-neutral filesystem-data-workspace-count">{nodeCountLabel}</span>
+        </div>
+      ) : (
+        <nav aria-label="当前位置" className="filesystem-explorer-location">
+          <span className="filesystem-location-space">{spaceLabel ?? "文件"}</span>
+          <span className="filesystem-location-sep" aria-hidden="true">
+            /
+          </span>
+          <Link href={workspaceRootHref} className="filesystem-location-link">
+            根目录
+          </Link>
+          {!isListingSearch && locationLabel !== "根目录" ? (
+            <>
+              <span className="filesystem-location-sep" aria-hidden="true">
+                /
+              </span>
+              <span className="filesystem-location-current">{locationLabel}</span>
+            </>
+          ) : null}
+          {isListingSearch ? (
+            <>
+              <span className="filesystem-location-sep" aria-hidden="true">
+                /
+              </span>
+              <span className="filesystem-location-current">搜索结果</span>
+            </>
+          ) : null}
+          <span className="filesystem-location-count">{nodeCountLabel}</span>
+        </nav>
+      )}
+
+      {dataPlane && !isListingSearch && locationLabel !== "根目录" ? (
+        <nav aria-label="当前文件夹" className="filesystem-data-folder-crumb text-muted">
+          <Link href={workspaceRootHref} className="filesystem-location-link">
+            根目录
+          </Link>
+          <span className="filesystem-location-sep" aria-hidden="true">
+            /
+          </span>
+          <span>{locationLabel}</span>
+        </nav>
+      ) : null}
+      {dataPlane && isListingSearch ? (
+        <p className="filesystem-data-folder-crumb text-muted">搜索结果</p>
+      ) : null}
 
       <div className="filesystem-explorer-command-bar">
         <div className="filesystem-explorer-command-primary">
@@ -255,13 +309,18 @@ export function FileExplorerPanel({
             <div className="filesystem-explorer-actions">
               <button
                 type="button"
-                className="btn btn-secondary btn-sm filesystem-touch-target"
+                className={
+                  dataPlane
+                    ? "btn btn-primary btn-sm filesystem-touch-target filesystem-explorer-pill-btn"
+                    : "btn btn-secondary btn-sm filesystem-touch-target"
+                }
                 onClick={() => {
                   setError(null);
                   setDialog(showCreateDialog());
                   setCreateName("");
                 }}
               >
+                {dataPlane ? <DataPlanePlusFolderIcon /> : null}
                 新建文件夹
               </button>
               {onFilesSelected ? (
@@ -269,6 +328,7 @@ export function FileExplorerPanel({
                   onFilesSelected={onFilesSelected}
                   emphasis={dialog ? "secondary" : "primary"}
                   size="sm"
+                  withIcon={dataPlane}
                 />
               ) : null}
             </div>
@@ -289,9 +349,13 @@ export function FileExplorerPanel({
           >
             <input
               type="search"
-              className="input input-sm filesystem-explorer-search"
+              className={
+                dataPlane
+                  ? "input input-sm filesystem-explorer-search filesystem-explorer-search--data-plane"
+                  : "input input-sm filesystem-explorer-search"
+              }
               aria-label="搜索文件"
-              placeholder="搜索名称或路径，Enter 确认"
+              placeholder={searchPlaceholder}
               value={searchValue}
               onChange={(event) => onSearchChange(event.target.value)}
             />
@@ -302,7 +366,15 @@ export function FileExplorerPanel({
 
         <div className="filesystem-explorer-command-secondary">
           {onViewChange ? (
-            <div className="filesystem-view-toggle" role="group" aria-label="视图切换">
+            <div
+              className={
+                dataPlane
+                  ? "filesystem-view-toggle filesystem-view-toggle--segment"
+                  : "filesystem-view-toggle"
+              }
+              role="group"
+              aria-label="视图切换"
+            >
               <button
                 type="button"
                 className={view === "list" ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm"}
@@ -343,6 +415,7 @@ export function FileExplorerPanel({
         workspaceId={workspaceId}
         namespaceId={namespaceId}
         view={view}
+        listVariant={dataPlane ? "data-plane" : "classic"}
         selectedIds={selectedIds}
         onSelectionChange={setSelectedIds}
         onOpen={(node) => {

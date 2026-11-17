@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { FileSpaceNav } from "@/modules/filesystem/components/FileSpaceNav";
+import { DataPlaneFileSpaceCard } from "@/modules/filesystem/components/DataPlaneFileSpaceCard";
 import { FileSpaceTabList } from "@/modules/filesystem/components/FileSpaceTabList";
 import { FilesystemWorkbench } from "@/modules/filesystem/components/FilesystemWorkbench";
 import { SharedWithMePanel } from "@/modules/filesystem/components/SharedWithMePanel";
@@ -104,8 +105,7 @@ export default async function FilesDataWorkspacePage({
           ? "forbidden"
           : "error";
     return (
-      <div className="filesystem-data-workspace stack-sm min-w-0">
-        <FileSpaceTabList activeSpace="shared" view={initialState.view} />
+      <DataPlaneFileSpaceCard activeSpace="shared" view={initialState.view}>
         <SharedWithMePanel
           workspaceId={workspaceId}
           organizationId={organizationId}
@@ -117,7 +117,7 @@ export default async function FilesDataWorkspacePage({
           members={members}
           memberDirectoryAvailable={memberDirectoryAvailable}
         />
-      </div>
+      </DataPlaneFileSpaceCard>
     );
   }
 

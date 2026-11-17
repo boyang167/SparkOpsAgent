@@ -1,6 +1,8 @@
 import { createElement } from "react";
 import type { DragEvent } from "react";
 import type { FileNodeVM, GovernedPermission } from "@sparkops/contracts/filesystem";
+import { DataPlaneFileIcon, DataPlaneFolderIcon } from "./data-plane-icons";
+import { formatFileNodeTimestamp } from "./file-detail-display";
 import { FileActionMenu } from "./FileActionMenu";
 import type { FileBrowserMode, TrashNodeDetails } from "./FileBrowser";
 
@@ -30,6 +32,7 @@ export type FileListViewProps = {
   organizationId?: string;
   workspaceId?: string;
   onShare?: (node: FileNodeVM, effectiveActions: GovernedPermission[]) => void;
+  listVariant?: "classic" | "data-plane";
 };
 
 export function FileListView({
@@ -52,16 +55,21 @@ export function FileListView({
   organizationId,
   workspaceId,
   onShare,
+  listVariant = "classic",
 }: FileListViewProps) {
   const trashMode = mode === "trash";
-  const selectableState = trashMode ? "TRASHED" : "ACTIVE";
+  const dataPlane = listVariant === "data-plane" && !trashMode;
+  const typeLabel = (node: FileNodeVM) =>
+    node.type === "DIRECTORY" ? (dataPlane ? "文件夹" : "目录") : "文件";
 
   return createElement(
     "div",
     { className: "filesystem-table-wrap" },
     createElement(
       "table",
-      { className: "data-table w-full" },
+      {
+        className: dataPlane ? "data-table w-full filesystem-data-table" : "data-table w-full",
+      },
       createElement(
         "thead",
         null,
@@ -73,6 +81,8 @@ export function FileListView({
           createElement("th", { className: "text-left" }, "类型"),
           trashMode ? createElement("th", { className: "text-left" }, "原路径") : null,
           trashMode ? createElement("th", { className: "text-left" }, "删除时间") : null,
+          dataPlane ? createElement("th", { className: "text-left" }, "大小") : null,
+          dataPlane ? createElement("th", { className: "text-left" }, "修改时间") : null,
           createElement("th", { className: "text-right" }, "操作"),
         ),
       ),
@@ -101,7 +111,7 @@ export function FileListView({
                   className: "filesystem-selection-checkbox",
                   "aria-label": `选择 ${node.name}`,
                   checked: selectedIds.has(node.id),
-                  disabled: node.state !== selectableState,
+                  disabled: node.state !== (trashMode ? "TRASHED" : "ACTIVE"),
                   onChange: (event) =>
                     onSelectionChange(node.id, event.currentTarget.checked),
                 }),
@@ -110,19 +120,39 @@ export function FileListView({
             createElement(
               "td",
               { className: "filesystem-name-cell" },
-              trashMode
-                ? createElement("span", { className: "filesystem-name-link" }, node.name)
-                : createElement(
-                    "button",
-                    {
-                      type: "button",
-                      className: "filesystem-name-link filesystem-touch-target",
-                      "aria-label": `打开 ${node.name}`,
-                      onClick: () => onOpen(node),
-                    },
-                    node.name,
-                  ),
-              node.type === "FILE" && !trashMode
+              dataPlane
+                ? createElement(
+                    "div",
+                    { className: "filesystem-data-name-cell" },
+                    node.type === "DIRECTORY"
+                      ? createElement(DataPlaneFolderIcon)
+                      : createElement(DataPlaneFileIcon),
+                    trashMode
+                      ? createElement("span", { className: "filesystem-name-link" }, node.name)
+                      : createElement(
+                          "button",
+                          {
+                            type: "button",
+                            className: "filesystem-name-link filesystem-touch-target",
+                            "aria-label": `打开 ${node.name}`,
+                            onClick: () => onOpen(node),
+                          },
+                          node.name,
+                        ),
+                  )
+                : trashMode
+                  ? createElement("span", { className: "filesystem-name-link" }, node.name)
+                  : createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "filesystem-name-link filesystem-touch-target",
+                        "aria-label": `打开 ${node.name}`,
+                        onClick: () => onOpen(node),
+                      },
+                      node.name,
+                    ),
+              !dataPlane && node.type === "FILE" && !trashMode
                 ? createElement(
                     "span",
                     { className: "filesystem-node-id text-muted" },
@@ -133,7 +163,7 @@ export function FileListView({
             createElement(
               "td",
               { className: "text-muted" },
-              node.type === "DIRECTORY" ? "目录" : "文件",
+              typeLabel(node),
             ),
             trashMode
               ? createElement(
@@ -147,6 +177,16 @@ export function FileListView({
                   "td",
                   { className: "text-muted" },
                   trashMeta ? formatTrashDeletedAt(trashMeta.deleted_at) : "—",
+                )
+              : null,
+            dataPlane
+              ? createElement("td", { className: "text-muted" }, "—")
+              : null,
+            dataPlane
+              ? createElement(
+                  "td",
+                  { className: "text-muted" },
+                  formatFileNodeTimestamp(node.updated_at),
                 )
               : null,
             createElement(
@@ -191,6 +231,8 @@ export function FileListView({
                     onRename,
                     onMove,
                     onDelete,
+                    presentation: dataPlane ? "icons" : "text",
+                    density: dataPlane ? "compact" : "default",
                   }),
             ),
           );

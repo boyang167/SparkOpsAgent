@@ -1,4 +1,5 @@
 import { InlineAlert } from "@/components/ui/InlineAlert";
+import { DataPlaneTrashShell } from "@/modules/filesystem/components/DataPlaneTrashShell";
 import { FileSpaceTabList } from "@/modules/filesystem/components/FileSpaceTabList";
 import { TrashExplorerPanel } from "@/modules/filesystem/components/TrashExplorerPanel";
 import { resolveFileSpaceView } from "@/modules/filesystem/components/file-space-view";
@@ -85,8 +86,7 @@ export default async function FilesDataTrashPage({
   );
 
   return (
-    <div className="filesystem-data-workspace stack-sm min-w-0">
-      <FileSpaceTabList activeSpace={initialState.space} view={initialState.view} mode="trash" />
+    <DataPlaneTrashShell activeSpace={initialState.space} view={initialState.view}>
       <TrashExplorerPanel
         workspaceId={workspaceId}
         namespaceId={spaceView.namespace.id}
@@ -94,7 +94,8 @@ export default async function FilesDataTrashPage({
         initialNextCursor={trashLoad.kind === "loaded" ? trashLoad.value.next_cursor : ""}
         initialLoadError={trashLoad.kind === "error"}
         view={initialState.view}
+        fileSpace={initialState.space}
       />
-    </div>
+    </DataPlaneTrashShell>
   );
 }

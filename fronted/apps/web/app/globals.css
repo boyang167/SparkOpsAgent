@@ -33524,6 +33524,701 @@ button.sprint-board-column-wf:hover:not(:disabled) {
   }
 }
 
+.filesystem-data-plane-header {
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.filesystem-data-plane-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filesystem-data-plane-header .page-title {
+  font-size: 1.375rem;
+  letter-spacing: -0.02em;
+}
+
+.filesystem-data-plane-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.filesystem-data-plane-subtitle {
+  font-size: 0.875rem;
+}
+
+.filesystem-data-plane-breadcrumb {
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+
+.filesystem-data-module-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.filesystem-data-module-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.filesystem-data-module-tab svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.filesystem-data-module-tab:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface-muted) 80%, transparent);
+}
+
+.filesystem-data-module-tab.is-active {
+  background: var(--text);
+  color: var(--surface);
+}
+
+.filesystem-data-plane-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.filesystem-data-plane-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  padding: 1rem 1.25rem 0.5rem;
+}
+
+.filesystem-data-plane-card-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.filesystem-data-plane-card-desc {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.filesystem-data-plane-org {
+  margin: 0;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.filesystem-data-plane-org-name {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.filesystem-data-plane-card .filesystem-file-space-tabs {
+  margin: 0 1.25rem 0.85rem;
+  max-width: calc(100% - 2.5rem);
+}
+
+.filesystem-data-plane-card-divider {
+  height: 1px;
+  background: var(--border);
+}
+
+.filesystem-data-plane-card-body {
+  min-width: 0;
+}
+
+.filesystem-data-panel-frame {
+  min-width: 0;
+}
+
+.filesystem-data-panel-frame .filesystem-explorer-shell {
+  min-height: min(70vh, 40rem);
+  border: 0;
+  box-shadow: none;
+}
+
+.filesystem-explorer-header--data-plane {
+  padding: 1rem 1.25rem 0.85rem;
+  gap: 0.75rem;
+}
+
+.filesystem-data-workspace-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.filesystem-data-workspace-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.filesystem-data-workspace-scope {
+  margin: 0.2rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.filesystem-data-workspace-count {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.filesystem-data-folder-crumb {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.filesystem-explorer-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+}
+
+.filesystem-explorer-search--data-plane {
+  border-radius: 999px;
+  min-width: 12rem;
+}
+
+.filesystem-view-toggle--segment {
+  display: inline-flex;
+  padding: 0.15rem;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  gap: 0.1rem;
+}
+
+.filesystem-view-toggle--segment .btn {
+  border-radius: calc(var(--radius-md) - 2px);
+  border: 0;
+  box-shadow: none;
+}
+
+.filesystem-data-name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.filesystem-data-name-cell svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.filesystem-data-table th,
+.filesystem-data-table td {
+  vertical-align: middle;
+}
+
+.filesystem-file-actions--icons .filesystem-file-action-icon {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  justify-content: center;
+}
+
+.filesystem-overflow-menu {
+  position: relative;
+}
+
+.filesystem-overflow-menu summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.filesystem-overflow-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.filesystem-overflow-panel {
+  position: absolute;
+  right: 0;
+  z-index: 20;
+  margin-top: 0.25rem;
+  min-width: 7.5rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.filesystem-overflow-item {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--text);
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.filesystem-overflow-item:hover {
+  background: var(--surface-muted);
+}
+
+@media (max-width: 720px) {
+  .filesystem-data-plane-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filesystem-data-plane-breadcrumb {
+    align-self: flex-start;
+  }
+}
+
+.filesystem-trash-shell-head {
+  padding: 1rem 1.25rem 0.65rem;
+}
+
+.filesystem-trash-shell-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.filesystem-trash-shell-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary) 12%, var(--surface));
+  color: var(--primary);
+}
+
+.filesystem-trash-shell-icon svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.filesystem-trash-shell-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.filesystem-trash-shell-desc {
+  margin: 0.2rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.filesystem-trash-space-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.35rem;
+  padding: 0 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.filesystem-trash-space-tab {
+  padding: 0.65rem 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.filesystem-trash-space-tab:hover {
+  color: var(--text);
+}
+
+.filesystem-trash-space-tab.is-active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+
+.filesystem-trash-shell-body {
+  min-width: 0;
+}
+
+.filesystem-trash-shell-foot {
+  padding: 0.75rem 1.25rem 1rem;
+  font-size: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.filesystem-trash-panel {
+  padding-top: 0.35rem;
+}
+
+.filesystem-trash-info-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  margin: 0 1.25rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+}
+
+.filesystem-trash-info-text {
+  margin: 0;
+  flex: 1;
+  min-width: 12rem;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.filesystem-trash-empty-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.filesystem-trash-command-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem 0.65rem;
+  padding: 0.85rem 1.25rem 0.35rem;
+  min-width: 0;
+}
+
+.filesystem-trash-search {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  grid-column: 1;
+}
+
+.filesystem-trash-search svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.filesystem-trash-search-input {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  padding-left: 0;
+}
+
+.filesystem-trash-command-meta {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  grid-column: 2;
+  min-width: 0;
+}
+
+.filesystem-trash-filter-select {
+  width: auto;
+  min-width: 5.75rem;
+  max-width: 7.25rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 0.35rem 1.75rem 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.filesystem-trash-list-area {
+  min-width: 0;
+  padding: 0 0.5rem 0.25rem;
+}
+
+.filesystem-trash-filter-empty {
+  margin: 1rem;
+}
+
+.filesystem-trash-empty-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.filesystem-trash-back-link {
+  border-radius: 999px;
+}
+
+.filesystem-trash-empty-art {
+  width: 100%;
+  height: auto;
+}
+
+.filesystem-transfer-data-plane {
+  min-width: 0;
+}
+
+.filesystem-transfer-stats-card,
+.filesystem-transfer-tasks-card {
+  overflow: hidden;
+}
+
+.filesystem-transfer-stats-head,
+.filesystem-transfer-tasks-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  padding: 1rem 1.25rem 0.85rem;
+}
+
+.filesystem-transfer-section-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.filesystem-transfer-section-desc {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.filesystem-transfer-range-select {
+  width: auto;
+  min-width: 7rem;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+}
+
+.filesystem-transfer-stats-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(6rem, 9rem);
+  align-items: end;
+  gap: 0.75rem 1.25rem;
+  padding: 0 1.25rem 1.1rem;
+}
+
+.filesystem-transfer-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.filesystem-transfer-metric-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.35rem 0.25rem;
+  text-align: center;
+}
+
+.filesystem-transfer-metric-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 999px;
+}
+
+.filesystem-transfer-metric-icon.is-sky {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, var(--surface));
+}
+
+.filesystem-transfer-metric-icon.is-emerald {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.filesystem-transfer-metric-icon.is-amber {
+  color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.filesystem-transfer-metric-icon.is-violet {
+  color: #7c3aed;
+  background: color-mix(in srgb, #7c3aed 12%, var(--surface));
+}
+
+.filesystem-transfer-metric-value {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.filesystem-transfer-metric-label {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.filesystem-transfer-sparkline {
+  width: 100%;
+  height: 3.25rem;
+  align-self: end;
+}
+
+.filesystem-transfer-tasks-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.filesystem-transfer-new-btn {
+  border-radius: 999px;
+}
+
+.filesystem-transfer-tasks-body {
+  min-width: 0;
+  padding: 0 0.35rem;
+}
+
+.filesystem-transfer-tasks-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.65rem 1.25rem 0.85rem;
+  border-top: 1px solid var(--border);
+}
+
+.filesystem-transfer-pagination-nav {
+  padding: 0;
+}
+
+.filesystem-transfer-data-table th,
+.filesystem-transfer-data-table td {
+  vertical-align: middle;
+}
+
+.filesystem-transfer-name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  max-width: 14rem;
+}
+
+.filesystem-transfer-name-cell svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.filesystem-transfer-type-badge {
+  white-space: nowrap;
+}
+
+.filesystem-transfer-progress-compact {
+  min-width: 6.5rem;
+  height: 0.35rem;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.filesystem-transfer-progress-compact-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+}
+
+.filesystem-transfer-progress-compact-fill.is-complete {
+  background: var(--success);
+}
+
+.filesystem-transfer-progress-compact-fill.is-active {
+  background: color-mix(in srgb, var(--warning) 65%, var(--primary));
+}
+
+.filesystem-transfer-row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.15rem;
+}
+
+.filesystem-transfer-action-link {
+  min-height: 1.75rem;
+  padding-inline: 0.45rem;
+  font-size: 0.8125rem;
+}
+
+.filesystem-transfer-empty {
+  min-height: 16rem;
+}
+
+@media (max-width: 900px) {
+  .filesystem-transfer-stats-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filesystem-transfer-sparkline {
+    display: none;
+  }
+
+  .filesystem-transfer-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .filesystem-trash-command-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filesystem-trash-search {
+    grid-column: 1;
+  }
+
+  .filesystem-trash-command-meta {
+    grid-column: 1;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 0.4rem;
+  }
+
+  .filesystem-trash-filter-select {
+    max-width: none;
+    flex: 1 1 6.5rem;
+  }
+
+  .filesystem-trash-command-meta .filesystem-view-toggle {
+    margin-left: auto;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .filesystem-workbench,
   .filesystem-workbench *,

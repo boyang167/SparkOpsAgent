@@ -1,5 +1,5 @@
-import { PageHeader } from "@/components/ui/PageHeader";
 import { DataPlaneModuleNav } from "@/modules/filesystem/components/DataPlaneModuleNav";
+import { DataPlanePageHeader } from "@/modules/filesystem/components/DataPlanePageHeader";
 
 export default function FilesDataLayout({
   children,
@@ -8,7 +8,7 @@ export default function FilesDataLayout({
 }) {
   return (
     <div className="stack-md min-w-0 filesystem-data-layout">
-      <PageHeader title="DATA PLANE" />
+      <DataPlanePageHeader />
       <DataPlaneModuleNav />
       {children}
     </div>

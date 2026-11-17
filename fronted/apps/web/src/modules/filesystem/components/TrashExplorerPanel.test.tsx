@@ -16,7 +16,9 @@ const purgeFileNode = vi.hoisted(() => vi.fn());
 const emptyTrash = vi.hoisted(() => vi.fn());
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh }),
+  useRouter: () => ({ refresh, replace: vi.fn() }),
+  usePathname: () => "/files/data/trash",
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("@sparkops/web-sdk/filesystem", () => ({
@@ -89,7 +91,7 @@ describe("TrashExplorerPanel", () => {
         initialItems: [],
       }),
     );
-    expect(screen.getByText("回收站为空。")).toBeInTheDocument();
+    expect(screen.getByText("回收站为空")).toBeInTheDocument();
   });
 
   it("retries after a load error", async () => {

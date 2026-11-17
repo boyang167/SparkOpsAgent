@@ -1,6 +1,7 @@
 import { createElement, useEffect, useState } from "react";
 import type { FileNodeVM, GovernedPermission } from "@sparkops/contracts/filesystem";
 import { getEffectiveAccess } from "@sparkops/web-sdk/filesystem";
+import { DataPlaneMoreIcon, DataPlanePencilIcon } from "./data-plane-icons";
 
 export type FileActionMenuProps = {
   node: FileNodeVM;
@@ -14,6 +15,7 @@ export type FileActionMenuProps = {
   onMove: (nodes: FileNodeVM[]) => void;
   onDelete?: (nodes: FileNodeVM[]) => void;
   density?: "default" | "compact";
+  presentation?: "text" | "icons";
 };
 
 export function FileActionMenu({
@@ -28,6 +30,7 @@ export function FileActionMenu({
   onMove,
   onDelete,
   density = "default",
+  presentation = "text",
 }: FileActionMenuProps) {
   const [effectiveActions, setEffectiveActions] = useState<GovernedPermission[]>([]);
 
@@ -58,6 +61,91 @@ export function FileActionMenu({
     density === "compact"
       ? "btn btn-ghost btn-sm filesystem-file-action filesystem-touch-target"
       : "btn btn-ghost btn-sm filesystem-touch-target";
+  const iconClass = `${actionClass} filesystem-file-action-icon`;
+
+  const overflowItems = [
+    canMove
+      ? createElement(
+          "button",
+          {
+            key: "move",
+            type: "button",
+            className: "filesystem-overflow-item",
+            onClick: () => onMove([node]),
+          },
+          "移动到…",
+        )
+      : null,
+    canDelete && onDelete
+      ? createElement(
+          "button",
+          {
+            key: "delete",
+            type: "button",
+            className: "filesystem-overflow-item filesystem-file-action-danger",
+            onClick: () => onDelete([node]),
+          },
+          "删除",
+        )
+      : null,
+    canShare
+      ? createElement(
+          "button",
+          {
+            key: "share",
+            type: "button",
+            className: "filesystem-overflow-item",
+            onClick: () => {
+              if (effectiveActions.includes("SHARE")) onShare?.(node, effectiveActions);
+            },
+          },
+          "共享",
+        )
+      : null,
+  ].filter(Boolean);
+
+  if (presentation === "icons") {
+    return createElement(
+      "div",
+      {
+        className: `filesystem-file-actions filesystem-file-actions--icons flex flex-wrap justify-end gap-0.5${
+          density === "compact" ? " is-compact" : ""
+        }`,
+        "aria-label": `${node.name} 操作`,
+      },
+      canRename
+        ? createElement(
+            "button",
+            {
+              type: "button",
+              className: iconClass,
+              "aria-label": `重命名 ${node.name}`,
+              onClick: () => onRename(node),
+            },
+            createElement(DataPlanePencilIcon),
+          )
+        : null,
+      overflowItems.length > 0
+        ? createElement(
+            "details",
+            { className: "filesystem-overflow-menu" },
+            createElement(
+              "summary",
+              {
+                className: iconClass,
+                "aria-label": `更多操作 ${node.name}`,
+              },
+              createElement(DataPlaneMoreIcon),
+            ),
+            createElement(
+              "div",
+              { className: "filesystem-overflow-panel", role: "menu" },
+              overflowItems,
+            ),
+          )
+        : null,
+    );
+  }
 
   return createElement(
     "div",

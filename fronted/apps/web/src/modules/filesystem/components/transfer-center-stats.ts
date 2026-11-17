@@ -58,5 +58,13 @@ export function transferDisplayId(sessionId: string) {
 export function formatByteCount(value: number) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+export function formatTransferTimestamp(value?: string | number | null) {
+  if (value == null) return "—";
+  const date = typeof value === "number" ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("zh-CN", { hour12: false });
 }

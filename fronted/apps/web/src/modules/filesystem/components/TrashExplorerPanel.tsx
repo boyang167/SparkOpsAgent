@@ -1,7 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createElement, useEffect, useMemo, useState } from "react";
+import type { ChangeEvent } from "react";
 import type { TrashItemVM } from "@sparkops/contracts/filesystem";
 import {
   emptyTrash,
@@ -11,15 +12,20 @@ import {
 } from "@sparkops/web-sdk/filesystem";
 import { InlineAlert } from "@/components/ui/InlineAlert";
 import { Modal } from "@/components/ui/Modal";
+import { DataPlaneSearchIcon, DataPlaneTrashIcon } from "./data-plane-icons";
 import { FileBrowser } from "./FileBrowser";
 import { runTrashBatch } from "./file-explorer-panel-trash-ops";
-import type { FileView } from "./workbench-state";
+import { TrashEmptyState } from "./TrashEmptyState";
+import type { FileSpace, FileView } from "./workbench-state";
 
 type TrashDialog =
   | { type: "restore"; nodeIds: string[] }
   | { type: "purge"; nodeIds: string[] }
   | { type: "empty" }
   | null;
+
+type TrashTypeFilter = "all" | "DIRECTORY" | "FILE";
+type TrashSortOrder = "deleted_desc" | "deleted_asc" | "name";
 
 export type TrashExplorerPanelProps = {
   workspaceId: string;
@@ -28,6 +34,7 @@ export type TrashExplorerPanelProps = {
   initialNextCursor?: string;
   initialLoadError?: boolean;
   view?: FileView;
+  fileSpace?: FileSpace;
 };
 
 export function TrashExplorerPanel({
@@ -37,9 +44,15 @@ export function TrashExplorerPanel({
   initialNextCursor = "",
   initialLoadError = false,
   view = "list",
+  fileSpace = "workspace",
 }: TrashExplorerPanelProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [items, setItems] = useState(initialItems);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<TrashTypeFilter>("all");
+  const [sortOrder, setSortOrder] = useState<TrashSortOrder>("deleted_desc");
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [dialog, setDialog] = useState<TrashDialog>(null);
@@ -58,17 +71,50 @@ export function TrashExplorerPanel({
     setActionError(null);
   }, [initialItems, initialLoadError, initialNextCursor, namespaceId, workspaceId]);
 
+  const filteredItems = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    let next = items;
+    if (query) {
+      next = next.filter(
+        (item) =>
+          item.node.name.toLowerCase().includes(query) ||
+          item.original_path.toLowerCase().includes(query),
+      );
+    }
+    if (typeFilter !== "all") {
+      next = next.filter((item) => item.node.type === typeFilter);
+    }
+    const sorted = [...next];
+    if (sortOrder === "name") {
+      sorted.sort((a, b) => a.node.name.localeCompare(b.node.name, "zh-CN"));
+    } else {
+      sorted.sort((a, b) => {
+        const left = new Date(a.deleted_at).getTime();
+        const right = new Date(b.deleted_at).getTime();
+        if (Number.isNaN(left) || Number.isNaN(right)) return 0;
+        return sortOrder === "deleted_desc" ? right - left : left - right;
+      });
+    }
+    return sorted;
+  }, [items, searchQuery, sortOrder, typeFilter]);
+
   const trashDetails = useMemo(
     () =>
       Object.fromEntries(
-        items.map((item) => [
+        filteredItems.map((item) => [
           item.node.id,
           { original_path: item.original_path, deleted_at: item.deleted_at },
         ]),
       ),
-    [items],
+    [filteredItems],
   );
-  const nodes = useMemo(() => items.map((item) => item.node), [items]);
+  const nodes = useMemo(() => filteredItems.map((item) => item.node), [filteredItems]);
+
+  function selectView(nextView: FileView) {
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.set("view", nextView);
+    router.replace(`${pathname}?${nextSearchParams.toString()}`);
+  }
 
   async function reloadTrash() {
     setPending(true);
@@ -268,26 +314,136 @@ export function TrashExplorerPanel({
     );
   }
 
+  const listContent =
+    items.length === 0
+      ? createElement(TrashEmptyState, { fileSpace, view })
+      : nodes.length === 0
+        ? createElement("div", { className: "empty-state filesystem-trash-filter-empty" }, "没有符合筛选条件的项目。")
+        : createElement(
+            FileBrowser,
+            {
+              nodes,
+              mode: "trash",
+              trashDetails,
+              view,
+              selectedIds,
+              onSelectionChange: setSelectedIds,
+              onOpen: () => undefined,
+              onRename: () => undefined,
+              onMove: () => undefined,
+              onRestore: (selected) => {
+                const nodeIds = selected.map((node) => node.id);
+                if (nodeIds.length === 1) {
+                  void submitRestore(nodeIds);
+                  return;
+                }
+                setDialog({ type: "restore", nodeIds });
+              },
+              onPurge: (selected) =>
+                setDialog({ type: "purge", nodeIds: selected.map((node) => node.id) }),
+              workspaceId,
+              namespaceId,
+            },
+          );
+
   return createElement(
     "div",
-    { className: "stack-md min-w-0" },
+    { className: "filesystem-trash-panel stack-md min-w-0" },
     createElement(
       "div",
-      { className: "filesystem-trash-toolbar flex flex-wrap items-center justify-between gap-2" },
+      { className: "filesystem-trash-info-banner", role: "status" },
       createElement(
         "p",
-        { className: "text-sm text-muted" },
-        "当前空间内已删除的项目会保留在此，直到恢复或彻底删除；切换上方空间可查看其他回收站。",
+        { className: "filesystem-trash-info-text" },
+        "当前空间内已删除的项目会保留在此，恢复或彻底删除后将不再显示。",
       ),
       createElement(
         "button",
         {
           type: "button",
-          className: "btn btn-ghost btn-sm filesystem-touch-target filesystem-file-action-danger",
+          className: "btn btn-ghost btn-sm filesystem-trash-empty-btn filesystem-touch-target",
           disabled: pending || items.length === 0,
           onClick: () => setDialog({ type: "empty" }),
         },
+        createElement(DataPlaneTrashIcon),
         "清空回收站",
+      ),
+    ),
+    createElement(
+      "div",
+      { className: "filesystem-trash-command-bar" },
+      createElement(
+        "label",
+        { className: "filesystem-trash-search" },
+        createElement(DataPlaneSearchIcon),
+        createElement("input", {
+          type: "search",
+          className: "input input-sm filesystem-trash-search-input",
+          "aria-label": "搜索回收站",
+          placeholder: "搜索回收站文件或目录",
+          value: searchQuery,
+          onChange: (event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.currentTarget.value),
+        }),
+      ),
+      createElement(
+        "div",
+        { className: "filesystem-trash-command-meta" },
+        createElement(
+          "select",
+          {
+            className: "input input-sm filesystem-trash-filter-select",
+            "aria-label": "类型筛选",
+            value: typeFilter,
+            onChange: (event: ChangeEvent<HTMLSelectElement>) =>
+              setTypeFilter(event.currentTarget.value as TrashTypeFilter),
+          },
+          createElement("option", { value: "all" }, "全部类型"),
+          createElement("option", { value: "DIRECTORY" }, "文件夹"),
+          createElement("option", { value: "FILE" }, "文件"),
+        ),
+        createElement(
+          "select",
+          {
+            className: "input input-sm filesystem-trash-filter-select",
+            "aria-label": "删除时间排序",
+            value: sortOrder,
+            onChange: (event: ChangeEvent<HTMLSelectElement>) =>
+              setSortOrder(event.currentTarget.value as TrashSortOrder),
+          },
+          createElement("option", { value: "deleted_desc" }, "删除时间"),
+          createElement("option", { value: "deleted_asc" }, "最早删除"),
+          createElement("option", { value: "name" }, "名称"),
+        ),
+        createElement(
+          "div",
+          {
+            className: "filesystem-view-toggle filesystem-view-toggle--segment",
+            role: "group",
+            "aria-label": "视图切换",
+          },
+          createElement(
+            "button",
+            {
+              type: "button",
+              className: view === "list" ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm",
+              "aria-label": "列表视图",
+              "aria-pressed": view === "list",
+              onClick: () => selectView("list"),
+            },
+            "列表",
+          ),
+          createElement(
+            "button",
+            {
+              type: "button",
+              className: view === "grid" ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm",
+              "aria-label": "网格视图",
+              "aria-pressed": view === "grid",
+              onClick: () => selectView("grid"),
+            },
+            "网格",
+          ),
+        ),
       ),
     ),
     actionError
@@ -296,45 +452,27 @@ export function TrashExplorerPanel({
     batchFailures.length > 0
       ? createElement(
           "div",
-          { className: "text-sm text-muted", role: "status" },
+          { className: "text-sm text-muted px-3", role: "status" },
           batchFailures.map((failure) =>
             createElement("p", { key: failure.nodeId }, `${failure.nodeId.slice(0, 8)}：${failure.message}`),
           ),
         )
       : null,
-    createElement(FileBrowser, {
-      nodes,
-      mode: "trash",
-      trashDetails,
-      view,
-      selectedIds,
-      onSelectionChange: setSelectedIds,
-      onOpen: () => undefined,
-      onRename: () => undefined,
-      onMove: () => undefined,
-      onRestore: (selected) => {
-        const nodeIds = selected.map((node) => node.id);
-        if (nodeIds.length === 1) {
-          void submitRestore(nodeIds);
-          return;
-        }
-        setDialog({ type: "restore", nodeIds });
-      },
-      onPurge: (selected) => setDialog({ type: "purge", nodeIds: selected.map((node) => node.id) }),
-      workspaceId,
-      namespaceId,
-      emptyMessage: "回收站为空。",
-    }),
+    createElement("div", { className: "filesystem-trash-list-area" }, listContent),
     nextCursor
       ? createElement(
-          "button",
-          {
-            type: "button",
-            className: "btn btn-secondary btn-sm filesystem-touch-target",
-            disabled: loadingMore,
-            onClick: () => void loadMore(),
-          },
-          loadingMore ? "加载中…" : "加载更多",
+          "div",
+          { className: "filesystem-trash-load-more px-3 pb-3" },
+          createElement(
+            "button",
+            {
+              type: "button",
+              className: "btn btn-secondary btn-sm filesystem-touch-target",
+              disabled: loadingMore,
+              onClick: () => void loadMore(),
+            },
+            loadingMore ? "加载中…" : "加载更多",
+          ),
         )
       : null,
     createElement(Modal, {
