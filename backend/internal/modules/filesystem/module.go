@@ -370,6 +370,13 @@ func (m *Module) Register(c *appctx.Container) error {
 		GetPreviewBlob: previewReader.BlobID,
 	})
 	handler.BindFileStorage(query.NewGetFileStorageHandler(repo).Handle)
+	handler.BindTrash(filesystemhttp.TrashHandlers{
+		ListTrash:               query.NewListTrashHandler(repo).Handle,
+		RestoreNode:             command.NewRestoreNodeHandler(repo, c.Transactor, c.EventBus, c.AuditLogger).Handle,
+		PermanentDeleteNode:     command.NewPermanentDeleteNodeHandler(repo, c.Transactor, c.EventBus, c.AuditLogger).Handle,
+		EmptyTrash:              command.NewEmptyTrashHandler(repo, c.Transactor, c.EventBus, c.AuditLogger).Handle,
+		GetNodeIncludingTrashed: repo.GetNodeIncludingTrashed,
+	})
 	var listFileAudits func(context.Context, query.ListFileAuditEvents) (query.ListFileAuditEventsResult, error)
 	if auditService, ok := c.AuditLogger.(*audit.Service); ok {
 		listFileAudits = query.NewListFileAuditEventsHandler(auditService).Handle

@@ -56,6 +56,11 @@ type Handler struct {
 	copyNode                  func(context.Context, command.CopyNode) (*model.Node, error)
 	trashNode                 func(context.Context, command.TrashNode) error
 	restoreRevision           func(context.Context, command.RestoreRevision) error
+	listTrash                 func(context.Context, query.ListTrash) (query.ListTrashResult, error)
+	restoreNode               func(context.Context, command.RestoreNode) error
+	permanentDeleteNode       func(context.Context, command.PermanentDeleteNode) error
+	emptyTrash                func(context.Context, command.EmptyTrash) (command.EmptyTrashResult, error)
+	getNodeIncludingTrashed   func(context.Context, uuid.UUID, uuid.UUID) (*model.Node, error)
 	authorizeResource         func(context.Context, resourceauth.Request) resourceauth.Decision
 	audit                     audit.Logger
 	createTransfer            func(context.Context, command.CreateTransfer) (command.TransferDescriptor, error)
@@ -166,6 +171,10 @@ func RegisterRoutes(engine *gin.Engine, entitlement gin.HandlerFunc, auth gin.Ha
 	base.Use(h.auditMiddlewareDenial())
 	base.GET("/namespaces", authz.RequirePermission(permissions, authz.PermFileRead), h.GetNamespace)
 	base.GET("/files", authz.RequirePermission(permissions, authz.PermFileRead), h.ListFiles)
+	base.GET("/files/trash", authz.RequirePermission(permissions, authz.PermFileRead), h.ListTrash)
+	base.DELETE("/files/trash", authz.RequirePermission(permissions, authz.PermFileDelete), requireIdempotencyKey(), h.EmptyTrash)
+	base.POST("/files/:nodeId/restore", authz.RequirePermission(permissions, authz.PermFileWrite), requireIdempotencyKey(), h.RestoreNode)
+	base.DELETE("/files/:nodeId/permanent", authz.RequirePermission(permissions, authz.PermFileDelete), requireIdempotencyKey(), h.PermanentDeleteNode)
 	base.GET("/files/:nodeId", authz.RequirePermission(permissions, authz.PermFileRead), h.GetFileNode)
 	base.GET("/files/search", authz.RequirePermission(permissions, authz.PermFileRead), h.SearchFiles)
 	base.GET("/files/:nodeId/preview", authz.RequirePermission(permissions, authz.PermFileRead), h.GetFilePreview)
@@ -392,6 +401,10 @@ func (h *Handler) ListFiles(c *gin.Context) {
 	if !ok {
 		return
 	}
+	namespace, ok := h.namespaceForReadRequest(c, rc)
+	if !ok {
+		return
+	}
 	parentID, ok := optionalUUIDQuery(c, "parent_id")
 	if !ok {
 		return
@@ -415,18 +428,18 @@ func (h *Handler) ListFiles(c *gin.Context) {
 		return
 	}
 	if parentID == nil {
-		if rc.namespace.RootNodeID == nil {
+		if namespace.RootNodeID == nil {
 			filesystemError(c, domain.ErrNamespaceNotFound)
 			return
 		}
-		parentID = rc.namespace.RootNodeID
+		parentID = namespace.RootNodeID
 	} else {
 		if h.getNode == nil {
 			filesystemError(c, domain.ErrPersistence)
 			return
 		}
-		parent, err := h.getNode(c.Request.Context(), rc.namespace.ID, *parentID)
-		if err != nil || parent.NamespaceID != rc.namespace.ID {
+		parent, err := h.getNode(c.Request.Context(), namespace.ID, *parentID)
+		if err != nil || parent.NamespaceID != namespace.ID {
 			if err == nil {
 				err = domain.ErrNamespaceMismatch
 			}
@@ -438,7 +451,7 @@ func (h *Handler) ListFiles(c *gin.Context) {
 			return
 		}
 	}
-	if !h.requireResource(c, rc, *parentID, model.ResourcePermissionRead) {
+	if !h.requireResourceInNamespace(c, rc, namespace.ID, *parentID, model.ResourcePermissionRead) {
 		return
 	}
 	views := make([]gin.H, 0, limit)
@@ -449,9 +462,9 @@ func (h *Handler) ListFiles(c *gin.Context) {
 		var rawNext string
 		var err error
 		if search == "" {
-			items, rawNext, err = h.listChildren(c.Request.Context(), rc.namespace.ID, parentID, nodeType, 200, scanCursor)
+			items, rawNext, err = h.listChildren(c.Request.Context(), namespace.ID, parentID, nodeType, 200, scanCursor)
 		} else {
-			items, rawNext, err = h.listChildrenFiltered(c.Request.Context(), rc.namespace.ID, parentID, nodeType, search, 200, scanCursor)
+			items, rawNext, err = h.listChildrenFiltered(c.Request.Context(), namespace.ID, parentID, nodeType, search, 200, scanCursor)
 		}
 		if err != nil {
 			filesystemError(c, err)
@@ -459,7 +472,7 @@ func (h *Handler) ListFiles(c *gin.Context) {
 		}
 		for i := range items {
 			scanCursor = items[i].ID.String()
-			decision := h.resourceDecision(c, rc, items[i].ID, model.ResourcePermissionRead)
+			decision := h.resourceDecisionForNamespace(c, rc, namespace.ID, items[i].ID, model.ResourcePermissionRead)
 			if !decision.Allowed {
 				h.auditResourceDeny(c, rc, items[i].ID, decision.Reason)
 				continue
@@ -604,10 +617,23 @@ func (h *Handler) RenameNode(c *gin.Context) {
 		if !decodeJSON(c, &body) || strings.TrimSpace(body.Name) == "" {
 			return errResponseWritten
 		}
+		targetNS, ok := h.resolveMutationNamespace(c, rc, strings.TrimSpace(c.Query("namespace_id")))
+		if !ok {
+			return errResponseWritten
+		}
+		rc.namespace = targetNS
+		if !h.requireResourceInNamespace(c, rc, targetNS.ID, nodeID, model.ResourcePermissionWrite) {
+			return errResponseWritten
+		}
 		if h.renameNode == nil {
 			return domain.ErrPersistence
 		}
-		return h.renameNode(c.Request.Context(), command.RenameNode{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, NodeID: nodeID, Name: body.Name, Authorization: h.resourceDecision(c, rc, nodeID, model.ResourcePermissionWrite)})
+		authorization := h.resourceDecisionForNamespace(c, rc, targetNS.ID, nodeID, model.ResourcePermissionWrite)
+		return h.renameNode(c.Request.Context(), command.RenameNode{
+			CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: targetNS.OrganizationID,
+			WorkspaceID: rc.workspaceID, NamespaceID: targetNS.ID, NodeID: nodeID, Name: body.Name,
+			Authorization: authorization,
+		})
 	})
 }
 
@@ -627,18 +653,40 @@ func (h *Handler) MoveNode(c *gin.Context) {
 			invalidRequest(c)
 			return errResponseWritten
 		}
+		targetNS, ok := h.resolveMutationNamespace(c, rc, strings.TrimSpace(c.Query("namespace_id")))
+		if !ok {
+			return errResponseWritten
+		}
+		rc.namespace = targetNS
 		if h.moveNode == nil {
 			return domain.ErrPersistence
 		}
 		targetParent := parentID
 		if targetParent == nil {
-			targetParent = rc.namespace.RootNodeID
+			targetParent = targetNS.RootNodeID
 		}
-		authorization := h.resourceDecision(c, rc, nodeID, model.ResourcePermissionWrite)
-		if authorization.Allowed && targetParent != nil {
-			authorization = h.resourceDecision(c, rc, *targetParent, model.ResourcePermissionWrite)
+		if targetParent == nil {
+			filesystemError(c, domain.ErrNamespaceNotFound)
+			return errResponseWritten
 		}
-		return h.moveNode(c.Request.Context(), command.MoveNode{CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: rc.namespace.OrganizationID, WorkspaceID: rc.workspaceID, NamespaceID: rc.namespace.ID, NodeID: nodeID, NewParentID: targetParent, NewName: body.Name, Authorization: authorization})
+		if !h.requireResourceInNamespace(c, rc, targetNS.ID, nodeID, model.ResourcePermissionWrite) {
+			return errResponseWritten
+		}
+		if !h.requireResourceInNamespace(c, rc, targetNS.ID, *targetParent, model.ResourcePermissionWrite) {
+			return errResponseWritten
+		}
+		authorization := h.resourceDecisionForNamespace(c, rc, targetNS.ID, nodeID, model.ResourcePermissionWrite)
+		if authorization.Allowed {
+			parentAuth := h.resourceDecisionForNamespace(c, rc, targetNS.ID, *targetParent, model.ResourcePermissionWrite)
+			if !parentAuth.Allowed {
+				authorization = parentAuth
+			}
+		}
+		return h.moveNode(c.Request.Context(), command.MoveNode{
+			CommandID: rc.commandID, ActorID: rc.actorID, OrganizationID: targetNS.OrganizationID,
+			WorkspaceID: rc.workspaceID, NamespaceID: targetNS.ID, NodeID: nodeID,
+			NewParentID: targetParent, NewName: body.Name, Authorization: authorization,
+		})
 	})
 }
 
@@ -822,17 +870,21 @@ func decodeJSON(c *gin.Context, dst any) bool {
 }
 
 func requireEmptyBody(c *gin.Context) bool {
-	if c.Request.Body == nil {
+	if c.Request.Body == nil || c.Request.Body == http.NoBody {
 		return true
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxJSONBodyBytes)
-	var one [1]byte
-	n, err := c.Request.Body.Read(one[:])
-	if n != 0 || (err != nil && !errors.Is(err, io.EOF)) {
+	payload, err := io.ReadAll(c.Request.Body)
+	if err != nil {
 		invalidRequest(c)
 		return false
 	}
-	return true
+	trimmed := strings.TrimSpace(string(payload))
+	if trimmed == "" || trimmed == "{}" {
+		return true
+	}
+	invalidRequest(c)
+	return false
 }
 
 func pagination(c *gin.Context) (int, bool) {
@@ -891,11 +943,12 @@ func optionalUUID(raw *string) (*uuid.UUID, bool) {
 }
 
 func canonicalUUID(raw string) (uuid.UUID, bool) {
-	if raw == "" || strings.TrimSpace(raw) != raw || raw != strings.ToLower(raw) || len(raw) != 36 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
 		return uuid.Nil, false
 	}
 	id, err := uuid.Parse(raw)
-	if err != nil || id == uuid.Nil || id.String() != raw {
+	if err != nil || id == uuid.Nil {
 		return uuid.Nil, false
 	}
 	return id, true
@@ -939,6 +992,12 @@ func filesystemError(c *gin.Context, err error) {
 		httpx.Fail(c, "FILESYSTEM_NOT_FOUND", "filesystem resource not found", http.StatusNotFound)
 	case errors.Is(err, domain.ErrNamespaceMismatch):
 		httpx.Fail(c, "FILESYSTEM_NOT_FOUND", "filesystem resource not found", http.StatusNotFound)
+	case errors.Is(err, domain.ErrRestoreNameConflict):
+		httpx.Fail(c, "FILESYSTEM_RESTORE_NAME_CONFLICT", "original directory already contains an item with this name", http.StatusConflict)
+	case errors.Is(err, domain.ErrRestoreParentUnavailable):
+		httpx.Fail(c, "FILESYSTEM_RESTORE_PARENT_UNAVAILABLE", "original parent directory is unavailable", http.StatusConflict)
+	case errors.Is(err, domain.ErrRetentionHold):
+		httpx.Fail(c, "FILESYSTEM_RETENTION_HOLD", "filesystem item is protected by retention policy", http.StatusConflict)
 	case errors.Is(err, domain.ErrNodeNameConflict), errors.Is(err, domain.ErrNodeIDConflict),
 		errors.Is(err, domain.ErrRevisionConflict), errors.Is(err, domain.ErrIdempotencyConflict),
 		errors.Is(err, domain.ErrCommandInProgress), errors.Is(err, domain.ErrRootMutation), errors.Is(err, domain.ErrNodeStateConflict):

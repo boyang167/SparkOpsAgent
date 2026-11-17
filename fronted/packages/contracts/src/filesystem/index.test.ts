@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   CreateGovernedGrantCommandSchema,
+  FileMutationBatchResultVMSchema,
   GovernanceMetadataQuerySchema,
   SharedItemVMSchema,
+  TrashItemPageVMSchema,
+  TrashItemVMSchema,
 } from "./index";
 
 describe("GovernanceMetadataQuerySchema", () => {
@@ -95,5 +98,63 @@ describe("SharedItemVMSchema", () => {
       effect: "ALLOW",
       inherit_to_children: false,
     }).success).toBe(false);
+  });
+});
+
+const validTrashNode = {
+  id: "00000000-0000-4000-8000-000000000001",
+  namespace_id: "00000000-0000-4000-8000-000000000002",
+  parent_id: "00000000-0000-4000-8000-000000000003",
+  type: "FILE" as const,
+  name: "a.txt",
+  current_revision_id: null,
+  state: "TRASHED" as const,
+  owner_id: "00000000-0000-4000-8000-000000000004",
+};
+
+const validTrashItem = {
+  node: validTrashNode,
+  original_path: "/项目/a.txt",
+  deleted_at: "2026-01-15T08:00:00.000Z",
+  can_restore: true,
+  can_permanently_delete: true,
+};
+
+describe("TrashItemVMSchema", () => {
+  it("accepts trashed nodes and rejects invalid deletion timestamps", () => {
+    const page = TrashItemPageVMSchema.parse({
+      items: [validTrashItem],
+      next_cursor: "",
+    });
+    expect(page.items[0]?.node.state).toBe("TRASHED");
+    expect(() =>
+      TrashItemVMSchema.parse({ ...validTrashItem, deleted_at: "not-a-date" }),
+    ).toThrow();
+  });
+});
+
+describe("FileMutationBatchResultVMSchema", () => {
+  it("parses batch mutation items", () => {
+    expect(
+      FileMutationBatchResultVMSchema.parse({
+        items: [
+          { node_id: "00000000-0000-4000-8000-000000000001", succeeded: true },
+          {
+            node_id: "00000000-0000-4000-8000-000000000002",
+            succeeded: false,
+            error_code: "FILESYSTEM_RESTORE_NAME_CONFLICT",
+          },
+        ],
+      }),
+    ).toEqual({
+      items: [
+        { node_id: "00000000-0000-4000-8000-000000000001", succeeded: true },
+        {
+          node_id: "00000000-0000-4000-8000-000000000002",
+          succeeded: false,
+          error_code: "FILESYSTEM_RESTORE_NAME_CONFLICT",
+        },
+      ],
+    });
   });
 });

@@ -47,6 +47,19 @@ func (authorizationError) Is(target error) bool { return target == domain.ErrRes
 
 func authorizationDenied(reason string) error { return authorizationError{reason: reason} }
 
+func validateMutationNamespace(ns *model.Namespace, organizationID, workspaceID uuid.UUID) error {
+	if ns == nil {
+		return domain.ErrNamespaceNotFound
+	}
+	if ns.OrganizationID != organizationID {
+		return domain.ErrNamespaceMismatch
+	}
+	if ns.NamespaceType == model.NamespaceTypeWorkspace && ns.WorkspaceID != workspaceID {
+		return domain.ErrNamespaceMismatch
+	}
+	return nil
+}
+
 func RequireResourceAllowed(authorization Authorization, workspaceID, resourceID uuid.UUID, permission model.ResourcePermission) error {
 	return requireAllowed(authorization, workspaceID, resourceID, permission)
 }

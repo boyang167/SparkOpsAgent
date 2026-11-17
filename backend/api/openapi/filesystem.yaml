@@ -690,6 +690,81 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /api/v1/workspaces/{wsId}/files/trash:
+    get:
+      tags: [filesystem]
+      summary: List top-level trash entries
+      operationId: listFilesystemTrash
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NamespaceIDQuery"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Trash entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/TrashItemPage"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      tags: [filesystem]
+      summary: Permanently delete every visible trash entry
+      operationId: emptyFilesystemTrash
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NamespaceIDQuery"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Batch empty-trash outcome
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/FileMutationBatchResult"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /api/v1/workspaces/{wsId}/files/search:
     get:
       tags: [filesystem]
@@ -832,6 +907,43 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /api/v1/workspaces/{wsId}/files/{nodeId}/storage:
+    get:
+      tags: [filesystem]
+      summary: Resolve storage placement for a file revision
+      operationId: getFilesystemFileStorage
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+        - name: revision_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: File storage placement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /api/v1/workspaces/{wsId}/files/{nodeId}/name:
     patch:
       tags: [filesystem]
@@ -942,6 +1054,70 @@ paths:
           $ref: "#/components/responses/Conflict"
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/files/{nodeId}/restore:
+    post:
+      tags: [filesystem]
+      summary: Restore a trashed node
+      operationId: restoreFilesystemNode
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+        - $ref: "#/components/parameters/NamespaceIDQuery"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Node restored
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/files/{nodeId}/permanent:
+    delete:
+      tags: [filesystem]
+      summary: Permanently delete a trashed subtree
+      operationId: permanentDeleteFilesystemNode
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/NodeID"
+        - $ref: "#/components/parameters/NamespaceIDQuery"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Node permanently deleted
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/Unprocessable"
         "500":
@@ -1210,6 +1386,37 @@ paths:
       responses:
         "204":
           description: Transfer aborted or already aborted
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v1/workspaces/{wsId}/transfers/{sessionId}/complete:
+    post:
+      tags: [filesystem]
+      summary: Complete a multipart transfer session
+      operationId: completeFilesystemTransfer
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Transfer completed
         "400":
           $ref: "#/components/responses/InvalidRequest"
         "401":
@@ -2204,6 +2411,13 @@ components:
       schema:
         type: string
         format: uuid
+    NamespaceIDQuery:
+      name: namespace_id
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
     WorkspaceID:
       name: wsId
       in: path
@@ -2569,6 +2783,53 @@ components:
             $ref: "#/components/schemas/Node"
         next_cursor:
           type: string
+    TrashItem:
+      type: object
+      required: [node, original_path, deleted_at, can_restore, can_permanently_delete]
+      properties:
+        node:
+          $ref: "#/components/schemas/Node"
+        original_path:
+          type: string
+        deleted_at:
+          type: string
+          format: date-time
+        deleted_by:
+          type: string
+          format: uuid
+        can_restore:
+          type: boolean
+        can_permanently_delete:
+          type: boolean
+    TrashItemPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrashItem"
+        next_cursor:
+          type: string
+    FileMutationItemResult:
+      type: object
+      required: [node_id, succeeded]
+      properties:
+        node_id:
+          type: string
+          format: uuid
+        succeeded:
+          type: boolean
+        error_code:
+          type: string
+    FileMutationBatchResult:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileMutationItemResult"
     RevisionPage:
       type: object
       required: [items, next_cursor]

@@ -3,7 +3,6 @@ package http
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -222,6 +221,71 @@ func TestGetFileNodeHonorsNamespaceIDQuery(t *testing.T) {
 	router.ServeHTTP(res, req)
 	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
 	require.Contains(t, res.Body.String(), "K8s.md")
+}
+
+func TestListFilesHonorsUserNamespaceIDQuery(t *testing.T) {
+	orgID := uuid.New()
+	wsNS := uuid.New()
+	userNS := uuid.New()
+	rootID := uuid.New()
+	childID := uuid.New()
+	actorID := uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: wsNS, OrganizationID: orgID, WorkspaceID: workspaceID,
+				NamespaceType: model.NamespaceTypeWorkspace,
+			}, nil
+		},
+		namespaceByID: func(_ context.Context, namespaceID uuid.UUID) (*model.Namespace, error) {
+			if namespaceID != userNS {
+				return nil, domain.ErrNamespaceNotFound
+			}
+			return &model.Namespace{
+				ID: userNS, OrganizationID: orgID, NamespaceType: model.NamespaceTypeUser,
+				OwnerUserID: actorID, RootNodeID: &rootID,
+			}, nil
+		},
+		getNode: func(_ context.Context, namespaceID, requestedNodeID uuid.UUID) (*model.Node, error) {
+			require.Equal(t, userNS, namespaceID)
+			require.Equal(t, rootID, requestedNodeID)
+			return &model.Node{
+				ID: rootID, NamespaceID: userNS, Type: model.NodeTypeDirectory, Name: ".root",
+			}, nil
+		},
+		listChildren: func(_ context.Context, namespaceID uuid.UUID, parentID *uuid.UUID, nodeType *model.NodeType, _ int, _ string) ([]model.Node, string, error) {
+			require.Equal(t, userNS, namespaceID)
+			require.NotNil(t, parentID)
+			require.Equal(t, rootID, *parentID)
+			require.NotNil(t, nodeType)
+			require.Equal(t, model.NodeTypeDirectory, *nodeType)
+			return []model.Node{{
+				ID: childID, NamespaceID: userNS, ParentID: &rootID,
+				Type: model.NodeTypeDirectory, Name: "test",
+			}}, "", nil
+		},
+		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			require.Equal(t, userNS, request.NamespaceID)
+			return resourceauth.Decision{Allowed: true, Reason: "owner"}
+		},
+	}
+	tokens := authn.NewTokenProvider(config.JWTConfig{Secret: "filesystem-test"})
+	token, err := tokens.Issue(kernel.MemberID{UUID: actorID})
+	require.NoError(t, err)
+	wsID := kernel.NewWorkspaceID()
+	router := httpx.NewEngine()
+	RegisterRoutes(router, nil, authn.RequireAuth(tokens), memberStub(true), permissionStub{
+		allowed: map[string]bool{authz.PermFileRead: true},
+	}, h)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/workspaces/"+wsID.String()+"/files?namespace_id="+userNS.String()+
+			"&parent_id="+rootID.String()+"&type=DIRECTORY", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), childID.String())
+	require.Contains(t, res.Body.String(), "test")
 }
 
 func TestGetFileNodeRejectsPermissionResourceNamespaceAndMissingNode(t *testing.T) {
@@ -811,7 +875,7 @@ func TestCreateDirectoryValidatesBodyNamespaceID(t *testing.T) {
 		wantStatus int
 		wantCode   string
 	}{
-		{name: "uppercase", namespace: strings.ToUpper(namespaceID.String()), wantStatus: http.StatusBadRequest, wantCode: "FILESYSTEM_INVALID_REQUEST"},
+		{name: "uppercase", namespace: strings.ToUpper(namespaceID.String()), wantStatus: http.StatusNotFound, wantCode: "FILESYSTEM_NOT_FOUND"},
 		{name: "nil", namespace: uuid.Nil.String(), wantStatus: http.StatusBadRequest, wantCode: "FILESYSTEM_INVALID_REQUEST"},
 		{name: "malformed", namespace: "not-a-uuid", wantStatus: http.StatusBadRequest, wantCode: "FILESYSTEM_INVALID_REQUEST"},
 		{name: "mismatch", namespace: uuid.NewString(), wantStatus: http.StatusNotFound, wantCode: "FILESYSTEM_NOT_FOUND"},
@@ -995,13 +1059,20 @@ func TestMutationJSONAndEmptyBodyContracts(t *testing.T) {
 		router.ServeHTTP(res, req)
 		require.Equal(t, http.StatusUnsupportedMediaType, res.Code, res.Body.String())
 	}
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/workspaces/"+wsID.String()+"/files/"+uuid.NewString(), io.NopCloser(strings.NewReader(`{}`)))
-	req.ContentLength = -1
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/workspaces/"+wsID.String()+"/files/"+uuid.NewString(), strings.NewReader(`{"x":1}`))
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Idempotency-Key", "key")
+	req.Header.Set("Idempotency-Key", "key-empty-body")
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), "FILESYSTEM_INVALID_REQUEST")
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/workspaces/"+wsID.String()+"/files/"+uuid.NewString(), strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", "key-empty-json")
+	res = httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.NotContains(t, res.Body.String(), "FILESYSTEM_INVALID_REQUEST", res.Body.String())
 }
 
 func TestTrashHTTPHonorsNamespaceIDQuery(t *testing.T) {
@@ -1101,7 +1172,7 @@ func TestUUIDsMustBeCanonicalNonNil(t *testing.T) {
 		return &model.Namespace{ID: nsID, WorkspaceID: workspaceID}, nil
 	}}
 	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileRead: true}}, h)
-	for _, nodeID := range []string{strings.ToUpper(uuid.NewString()), strings.ReplaceAll(uuid.NewString(), "-", ""), uuid.Nil.String()} {
+	for _, nodeID := range []string{"not-a-uuid", uuid.Nil.String()} {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID.String()+"/files/"+nodeID+"/revisions", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		res := httptest.NewRecorder()
@@ -1118,6 +1189,9 @@ func TestStableFilesystemErrorMapping(t *testing.T) {
 	}{
 		{domain.ErrUnsupportedNodeType, http.StatusUnprocessableEntity, "FILESYSTEM_UNSUPPORTED_OPERATION"},
 		{domain.ErrRootMutation, http.StatusConflict, "FILESYSTEM_CONFLICT"},
+		{domain.ErrRestoreNameConflict, http.StatusConflict, "FILESYSTEM_RESTORE_NAME_CONFLICT"},
+		{domain.ErrRestoreParentUnavailable, http.StatusConflict, "FILESYSTEM_RESTORE_PARENT_UNAVAILABLE"},
+		{domain.ErrRetentionHold, http.StatusConflict, "FILESYSTEM_RETENTION_HOLD"},
 		{domain.ErrNodeIDConflict, http.StatusConflict, "FILESYSTEM_CONFLICT"},
 		{domain.ErrCommandInProgress, http.StatusConflict, "FILESYSTEM_CONFLICT"},
 		{domain.ErrQuotaExceeded, http.StatusUnprocessableEntity, "FILESYSTEM_QUOTA_EXCEEDED"},
@@ -1194,6 +1268,259 @@ func TestResourceDecisionCarriesAuthorizationScope(t *testing.T) {
 	require.Equal(t, nodeID, decision.ResourceID)
 	require.Equal(t, model.ResourcePermissionWrite, decision.Permission)
 	require.Equal(t, "trace-1", decision.TraceID)
+}
+
+func TestListTrashHTTPRequiresReadPermission(t *testing.T) {
+	nsID, rootID := uuid.New(), uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		listTrash: func(context.Context, query.ListTrash) (query.ListTrashResult, error) {
+			return query.ListTrashResult{}, nil
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{}}, h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID.String()+"/files/trash", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusForbidden, res.Code)
+	require.Contains(t, res.Body.String(), "AUTH_FORBIDDEN")
+
+	router, token, wsID = testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileRead: true}}, h)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID.String()+"/files/trash", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res = httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusOK, res.Code)
+}
+
+func TestRestoreNodeHTTPChecksParentWritePermission(t *testing.T) {
+	nsID, rootID, nodeID := uuid.New(), uuid.New(), uuid.New()
+	var lastPermission model.ResourcePermission
+	var lastNodeID uuid.UUID
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		getNodeIncludingTrashed: func(_ context.Context, _ uuid.UUID, id uuid.UUID) (*model.Node, error) {
+			parent := rootID
+			return &model.Node{ID: id, NamespaceID: nsID, ParentID: &parent, State: model.NodeStateTrashed}, nil
+		},
+		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			lastPermission = request.Permission
+			lastNodeID = request.NodeID
+			if request.NodeID == rootID {
+				return resourceauth.Decision{Reason: "default_deny"}
+			}
+			return resourceauth.Decision{Allowed: true}
+		},
+		restoreNode: func(context.Context, command.RestoreNode) error { return nil },
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileWrite: true}}, h)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+wsID.String()+"/files/"+nodeID.String()+"/restore", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", "restore-key")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusForbidden, res.Code)
+	require.Equal(t, model.ResourcePermissionWrite, lastPermission)
+	require.Equal(t, rootID, lastNodeID)
+
+	h.authorizeResource = func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+		lastPermission = request.Permission
+		lastNodeID = request.NodeID
+		return resourceauth.Decision{Allowed: true}
+	}
+	res = httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusNoContent, res.Code)
+}
+
+func TestRestoreNodeHTTPMapsNameConflict(t *testing.T) {
+	nsID, rootID, nodeID := uuid.New(), uuid.New(), uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		getNodeIncludingTrashed: func(_ context.Context, _ uuid.UUID, id uuid.UUID) (*model.Node, error) {
+			parent := rootID
+			return &model.Node{ID: id, NamespaceID: nsID, ParentID: &parent, State: model.NodeStateTrashed}, nil
+		},
+		restoreNode: func(context.Context, command.RestoreNode) error {
+			return domain.ErrRestoreNameConflict
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileWrite: true}}, h)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+wsID.String()+"/files/"+nodeID.String()+"/restore", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", "restore-conflict")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusConflict, res.Code)
+	require.Contains(t, res.Body.String(), "FILESYSTEM_RESTORE_NAME_CONFLICT")
+}
+
+func TestPermanentDeleteHonorsUserNamespaceIDQuery(t *testing.T) {
+	orgID := uuid.New()
+	wsNS := uuid.New()
+	userNS := uuid.New()
+	nodeID := uuid.New()
+	actorID := uuid.New()
+	called := false
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: wsNS, OrganizationID: orgID, WorkspaceID: workspaceID,
+				NamespaceType: model.NamespaceTypeWorkspace,
+			}, nil
+		},
+		namespaceByID: func(_ context.Context, namespaceID uuid.UUID) (*model.Namespace, error) {
+			if namespaceID != userNS {
+				return nil, domain.ErrNamespaceNotFound
+			}
+			return &model.Namespace{
+				ID: userNS, OrganizationID: orgID, NamespaceType: model.NamespaceTypeUser,
+				OwnerUserID: actorID,
+			}, nil
+		},
+		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			require.Equal(t, userNS, request.NamespaceID)
+			require.Equal(t, model.ResourcePermissionDelete, request.Permission)
+			return resourceauth.Decision{Allowed: true, Reason: "owner"}
+		},
+		permanentDeleteNode: func(_ context.Context, cmd command.PermanentDeleteNode) error {
+			called = true
+			require.Equal(t, userNS, cmd.NamespaceID)
+			require.Equal(t, nodeID, cmd.NodeID)
+			require.True(t, cmd.Allowed)
+			return nil
+		},
+	}
+	tokens := authn.NewTokenProvider(config.JWTConfig{Secret: "filesystem-test"})
+	token, err := tokens.Issue(kernel.MemberID{UUID: actorID})
+	require.NoError(t, err)
+	wsID := kernel.NewWorkspaceID()
+	router := httpx.NewEngine()
+	RegisterRoutes(router, nil, authn.RequireAuth(tokens), memberStub(true), permissionStub{
+		allowed: map[string]bool{authz.PermFileDelete: true},
+	}, h)
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/v1/workspaces/"+wsID.String()+"/files/"+nodeID.String()+"/permanent?namespace_id="+userNS.String(),
+		strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", "purge-user-ns")
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusNoContent, res.Code, res.Body.String())
+	require.True(t, called)
+}
+
+func TestRenameHonorsUserNamespaceIDQuery(t *testing.T) {
+	orgID := uuid.New()
+	wsNS := uuid.New()
+	userNS := uuid.New()
+	nodeID := uuid.New()
+	actorID := uuid.New()
+	called := false
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{
+				ID: wsNS, OrganizationID: orgID, WorkspaceID: workspaceID,
+				NamespaceType: model.NamespaceTypeWorkspace,
+			}, nil
+		},
+		namespaceByID: func(_ context.Context, namespaceID uuid.UUID) (*model.Namespace, error) {
+			if namespaceID != userNS {
+				return nil, domain.ErrNamespaceNotFound
+			}
+			return &model.Namespace{
+				ID: userNS, OrganizationID: orgID, NamespaceType: model.NamespaceTypeUser,
+				OwnerUserID: actorID,
+			}, nil
+		},
+		authorizeResource: func(_ context.Context, request resourceauth.Request) resourceauth.Decision {
+			require.Equal(t, userNS, request.NamespaceID)
+			require.Equal(t, model.ResourcePermissionWrite, request.Permission)
+			return resourceauth.Decision{Allowed: true, Reason: "owner"}
+		},
+		renameNode: func(_ context.Context, cmd command.RenameNode) error {
+			called = true
+			require.Equal(t, userNS, cmd.NamespaceID)
+			require.Equal(t, nodeID, cmd.NodeID)
+			require.Equal(t, "kubeconfig2.yaml", cmd.Name)
+			require.True(t, cmd.Allowed)
+			return nil
+		},
+	}
+	tokens := authn.NewTokenProvider(config.JWTConfig{Secret: "filesystem-test"})
+	token, err := tokens.Issue(kernel.MemberID{UUID: actorID})
+	require.NoError(t, err)
+	wsID := kernel.NewWorkspaceID()
+	router := httpx.NewEngine()
+	RegisterRoutes(router, nil, authn.RequireAuth(tokens), memberStub(true), permissionStub{
+		allowed: map[string]bool{authz.PermFileWrite: true},
+	}, h)
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/workspaces/"+wsID.String()+"/files/"+nodeID.String()+"/name?namespace_id="+userNS.String(),
+		strings.NewReader(`{"name":"kubeconfig2.yaml"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", "rename-user-ns")
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+	require.True(t, called)
+}
+
+func TestPermanentDeleteNodeHTTPReturnsNoContent(t *testing.T) {
+	nsID, rootID, nodeID := uuid.New(), uuid.New(), uuid.New()
+	called := false
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		permanentDeleteNode: func(context.Context, command.PermanentDeleteNode) error {
+			called = true
+			return nil
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileDelete: true}}, h)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/workspaces/"+wsID.String()+"/files/"+nodeID.String()+"/permanent", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", "permanent-key")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusNoContent, res.Code)
+	require.True(t, called)
+}
+
+func TestEmptyTrashHTTPReturnsBatchItems(t *testing.T) {
+	nsID, rootID := uuid.New(), uuid.New()
+	nodeA, nodeB := uuid.New(), uuid.New()
+	h := &Handler{
+		namespaceForWorkspace: func(_ context.Context, workspaceID uuid.UUID) (*model.Namespace, error) {
+			return &model.Namespace{ID: nsID, WorkspaceID: workspaceID, RootNodeID: &rootID}, nil
+		},
+		emptyTrash: func(context.Context, command.EmptyTrash) (command.EmptyTrashResult, error) {
+			return command.EmptyTrashResult{Items: []command.EmptyTrashItemResult{
+				{NodeID: nodeA},
+				{NodeID: nodeB, Error: domain.ErrRestoreNameConflict},
+			}}, nil
+		},
+	}
+	router, token, wsID := testRouter(t, memberStub(true), permissionStub{allowed: map[string]bool{authz.PermFileDelete: true}}, h)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/workspaces/"+wsID.String()+"/files/trash", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", "empty-trash")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Contains(t, res.Body.String(), nodeA.String())
+	require.Contains(t, res.Body.String(), `"succeeded":true`)
+	require.Contains(t, res.Body.String(), `"succeeded":false`)
 }
 
 func testRouter(t *testing.T, members authz.WorkspaceMemberChecker, permissions authz.PermissionChecker, h *Handler) (*gin.Engine, string, kernel.WorkspaceID) {

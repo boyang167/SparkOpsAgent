@@ -6,6 +6,7 @@ import {
   listSharedWithMe,
   listFileNodes,
   listFileRevisions,
+  listTrashItems,
 } from "@sparkops/bff-modules/filesystem";
 import { BffError } from "@sparkops/contracts";
 import type {
@@ -15,6 +16,7 @@ import type {
   FileRevisionPageVM,
   NamespaceSummaryPageVM,
   SharedItemPageVM,
+  TrashItemPageVM,
 } from "@sparkops/contracts/filesystem";
 import { loadBffContext } from "./context";
 
@@ -149,4 +151,20 @@ export async function loadFileRevisions(
 ): Promise<FileRevisionPageVM> {
   const ctx = await loadBffContext(workspaceId);
   return listFileRevisions(ctx, workspaceId, nodeId);
+}
+
+export async function loadTrashItems(
+  workspaceId: string,
+  query: {
+    namespaceId?: string;
+    cursor?: string;
+    limit?: number;
+  } = {},
+): Promise<TrashItemPageVM> {
+  const ctx = await loadBffContext(workspaceId);
+  return listTrashItems(ctx, workspaceId, {
+    namespace_id: query.namespaceId,
+    cursor: query.cursor,
+    limit: query.limit,
+  });
 }

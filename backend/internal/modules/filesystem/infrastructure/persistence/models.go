@@ -33,6 +33,8 @@ type nodeRow struct {
 	State             model.NodeState              `gorm:"not null;type:varchar(32)"`
 	OwnerID           uuid.UUID                    `gorm:"column:owner_id;not null;type:uuid"`
 	Classification    model.TransferClassification `gorm:"column:classification;not null;default:'INTERNAL';type:varchar(16)"`
+	DeletedAt         *time.Time                   `gorm:"column:deleted_at"`
+	DeletedBy         *uuid.UUID                   `gorm:"column:deleted_by;type:uuid"`
 	CreatedAt         time.Time                    `gorm:"not null"`
 	UpdatedAt         time.Time                    `gorm:"not null"`
 }

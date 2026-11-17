@@ -139,7 +139,7 @@ describe("FileBrowser", () => {
     expect(onDelete).toHaveBeenCalledWith([nodes[1]]);
 
     await user.click(screen.getByRole("checkbox", { name: "选择 规格说明.md" }));
-    await user.click(screen.getByRole("button", { name: "删除所选 1 项" }));
+    await user.click(screen.getByRole("button", { name: "将所选 1 项移入回收站" }));
     expect(onDelete).toHaveBeenLastCalledWith([nodes[0]]);
   });
 
@@ -202,6 +202,40 @@ describe("FileBrowser", () => {
     expect(onSelectionChange).toHaveBeenLastCalledWith([nodes[0].id]);
     await userEvent.click(screen.getByRole("button", { name: "移动所选 1 项到…" }));
     expect(onMove).toHaveBeenCalledWith([{ ...nodes[0] }]);
+  });
+
+  it("supports trashed selection with metadata and without browse mutations", async () => {
+    const user = userEvent.setup();
+    const trashedNodes: FileNodeVM[] = [
+      {
+        ...nodes[0],
+        id: "00000000-0000-4000-8000-000000000021",
+        state: "TRASHED",
+        name: "回收站文件.md",
+      },
+    ];
+    const onRestore = vi.fn();
+    render(
+      createElement(FileBrowser, {
+        ...createProps(),
+        nodes: trashedNodes,
+        mode: "trash",
+        trashDetails: {
+          "00000000-0000-4000-8000-000000000021": {
+            original_path: "/资料/回收站文件.md",
+            deleted_at: "2026-01-15T08:00:00.000Z",
+          },
+        },
+        onRestore,
+        canMove: true,
+        canRename: true,
+      }),
+    );
+
+    expect(screen.getByText("/资料/回收站文件.md")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "打开 回收站文件.md" })).not.toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "恢复" })[0]);
+    expect(onRestore).toHaveBeenCalledWith(trashedNodes);
   });
 
   it("clears the internal drag session on dragend", () => {

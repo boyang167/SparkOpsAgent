@@ -16,13 +16,13 @@ export function deleteDialogCopy(nodes: TrashTarget[]) {
     const node = nodes[0];
     const kind = node.type === "DIRECTORY" ? "目录" : "文件";
     return {
-      title: node.type === "DIRECTORY" ? "删除目录" : "删除文件",
-      description: `将删除${kind}「${node.name}」。删除后它会从当前列表中移除。`,
+      title: "移入回收站",
+      description: `将${kind}「${node.name}」移入回收站。之后可从回收站恢复。`,
     };
   }
   return {
-    title: "删除所选项目",
-    description: `将删除所选 ${nodes.length} 项。删除后它们会从当前列表中移除。`,
+    title: "移入回收站",
+    description: `将所选 ${nodes.length} 项移入回收站。之后可从回收站恢复。`,
   };
 }
 

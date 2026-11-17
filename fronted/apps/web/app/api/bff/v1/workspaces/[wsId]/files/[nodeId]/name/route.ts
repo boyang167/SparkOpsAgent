@@ -16,7 +16,8 @@ export async function PATCH(
     if (!idempotencyKey) {
       throw new Error("Idempotency-Key header required");
     }
-    await renameFileNode(ctx, params.wsId, params.nodeId, body, idempotencyKey);
+    const namespaceId = req.nextUrl.searchParams.get("namespace_id") ?? undefined;
+    await renameFileNode(ctx, params.wsId, params.nodeId, body, idempotencyKey, namespaceId);
     return ok({ renamed: true }, traceId);
   } catch (err) {
     return fail(err, traceId);

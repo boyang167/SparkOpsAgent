@@ -26,4 +26,12 @@ describe("FileSpaceTabList", () => {
     expect(screen.getByRole("tab", { name: "与我共享" })).toHaveClass("btn-secondary");
     expect(screen.getByRole("tab", { name: "与我共享" })).toHaveAttribute("aria-current", "page");
   });
+
+  it("renders trash spaces without shared and keeps trash route", () => {
+    render(createElement(FileSpaceTabList, { activeSpace: "my", view: "list", mode: "trash" }));
+    expect(screen.getByRole("tablist", { name: "回收站所属空间" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "与我共享" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "个人空间" })).toHaveAttribute("href", "/files/data/trash?space=my");
+    expect(screen.getByRole("tab", { name: "工作区空间" })).toHaveAttribute("href", "/files/data/trash");
+  });
 });

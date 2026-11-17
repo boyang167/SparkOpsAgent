@@ -51,6 +51,9 @@ func (h *VerifyTransferHandler) Handle(ctx context.Context, cmd VerifyTransfer) 
 	session, err := h.prepareForScanning(ctx, cmd)
 	if err != nil {
 		if errors.Is(err, errVerifyTerminal) {
+			if session != nil && session.Status() == model.TransferFailed && session.ErrorCode() == "integrity_mismatch" {
+				return model.ErrTransferIntegrity
+			}
 			return nil
 		}
 		return err

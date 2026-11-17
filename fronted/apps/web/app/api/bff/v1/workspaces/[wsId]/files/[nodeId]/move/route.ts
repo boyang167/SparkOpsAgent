@@ -19,12 +19,14 @@ export const POST = createBffHandler(async (ctx, req, { params }) => {
   ) {
     throw new Error("invalid move request");
   }
+  const namespaceId = req.nextUrl.searchParams.get("namespace_id") ?? undefined;
   await moveFileNode(
     ctx,
     wsId,
     nodeId,
     { parent_id: body.parent_id, name: body.name },
     idempotencyKey,
+    namespaceId,
   );
   return { moved: true };
 });

@@ -294,6 +294,65 @@ func TestGetNodeConvertsNotFound(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrNodeNotFound)
 }
 
+func TestTrashNodeStoresDeletionMetadata(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	parent := seedDirectory(t, db, ns.ID)
+	file := mustFile(ns.ID, parent.ID, "meta.txt")
+	require.NoError(t, repo.CreateNode(context.Background(), file))
+	deletedAt := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	deletedBy := uuid.New()
+	require.NoError(t, repo.TrashNode(context.Background(), file.ID, deletedAt, deletedBy))
+	stored, err := repo.GetNodeIncludingTrashed(context.Background(), ns.ID, file.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.NodeStateTrashed, stored.State)
+	require.NotNil(t, stored.DeletedAt)
+	require.Equal(t, deletedAt, stored.DeletedAt.UTC())
+	require.NotNil(t, stored.DeletedBy)
+	require.Equal(t, deletedBy, *stored.DeletedBy)
+}
+
+func TestListTrashEntriesExcludesItemsBelowTrashedAncestor(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	parent := seedDirectory(t, db, ns.ID)
+	child := mustFile(ns.ID, parent.ID, "child.txt")
+	require.NoError(t, repo.CreateNode(context.Background(), child))
+	require.NoError(t, repo.TrashNode(context.Background(), child.ID, time.Now().UTC(), uuid.New()))
+	entries, _, err := repo.ListTrashEntries(context.Background(), repository.TrashListQuery{NamespaceID: ns.ID, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, child.ID, entries[0].Node.ID)
+
+	dir, err := model.NewDirectory(ns.ID, uuid.New(), "trash-dir", parent.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateNode(context.Background(), dir))
+	nested := mustFile(ns.ID, dir.ID, "nested.txt")
+	require.NoError(t, repo.CreateNode(context.Background(), nested))
+	require.NoError(t, repo.TrashNode(context.Background(), dir.ID, time.Now().UTC(), uuid.New()))
+	entries, _, err = repo.ListTrashEntries(context.Background(), repository.TrashListQuery{NamespaceID: ns.ID, Limit: 10})
+	require.NoError(t, err)
+	ids := make([]uuid.UUID, len(entries))
+	for i, item := range entries {
+		ids[i] = item.Node.ID
+	}
+	require.Contains(t, ids, dir.ID)
+	require.Contains(t, ids, child.ID)
+	require.NotContains(t, ids, nested.ID)
+}
+
+func TestCreateNodeAllowsActiveNameAfterPreviousNodeWasTrashed(t *testing.T) {
+	repo, db := newTestRepository(t)
+	ns := seedNamespace(t, db)
+	parent := seedDirectory(t, db, ns.ID)
+	trashed := mustFile(ns.ID, parent.ID, "a.txt")
+	require.NoError(t, repo.CreateNode(context.Background(), trashed))
+	require.NoError(t, repo.TrashNode(context.Background(), trashed.ID, time.Now().UTC(), uuid.New()))
+
+	replacement := mustFile(ns.ID, parent.ID, "A.TXT")
+	require.NoError(t, repo.CreateNode(context.Background(), replacement))
+}
+
 func TestTrashedDirectoryHidesSubtreeAndListChildren(t *testing.T) {
 	repo, db := newTestRepository(t)
 	ns := seedNamespace(t, db)
@@ -301,7 +360,7 @@ func TestTrashedDirectoryHidesSubtreeAndListChildren(t *testing.T) {
 	require.NoError(t, repo.CreateNode(context.Background(), parent))
 	child := mustFile(ns.ID, parent.ID, "child")
 	require.NoError(t, repo.CreateNode(context.Background(), child))
-	require.NoError(t, repo.TrashNode(context.Background(), parent.ID))
+	require.NoError(t, repo.TrashNode(context.Background(), parent.ID, time.Now().UTC(), uuid.New()))
 
 	_, err := repo.GetNode(context.Background(), ns.ID, parent.ID)
 	require.ErrorIs(t, err, domain.ErrNodeNotFound)

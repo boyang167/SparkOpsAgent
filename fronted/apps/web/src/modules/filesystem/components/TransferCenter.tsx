@@ -18,6 +18,11 @@ import {
   listTransferSessions,
 } from "@sparkops/web-sdk/filesystem";
 import { computeTransferMetrics, transferDisplayId } from "./transfer-center-stats";
+import {
+  sliceTransferTablePage,
+  TRANSFER_TABLE_PAGE_SIZE,
+  TRANSFER_TABLE_PAGE_SIZE_OPTIONS,
+} from "./transfer-center-pagination";
 import { transferErrorMessage } from "./transfer-error-message";
 import type { TransferItem, TransferQueue, TransferStatus } from "./transfer-queue";
 
@@ -455,6 +460,8 @@ export function TransferCenter({
   canWrite?: boolean;
 }) {
   const items = useTransfers(queue);
+  const [tablePageIndex, setTablePageIndex] = useState(0);
+  const [tablePageSize, setTablePageSize] = useState<number>(TRANSFER_TABLE_PAGE_SIZE);
   const [persisted, setPersisted] = useState<PersistedState>({
     workspaceId,
     items: [],
@@ -480,6 +487,10 @@ export function TransferCenter({
     loadMoreInFlight.current = false;
     const controller = new AbortController();
     controllers.current.add(controller);
+    if (!preserveItems) {
+      setTablePageIndex(0);
+      setTablePageSize(TRANSFER_TABLE_PAGE_SIZE);
+    }
     setPersisted((current) => {
       const sameWorkspace = current.workspaceId === targetWorkspaceId;
       const retained = preserveItems && sameWorkspace ? current.items : [];
@@ -535,6 +546,7 @@ export function TransferCenter({
     firstPageInFlight.current = false;
     loadMoreInFlight.current = false;
     if (!workspaceId) {
+      setTablePageIndex(0);
       setPersisted({
         workspaceId: undefined,
         items: [],
@@ -543,6 +555,8 @@ export function TransferCenter({
       });
       return;
     }
+    setTablePageIndex(0);
+    setTablePageSize(TRANSFER_TABLE_PAGE_SIZE);
     beginFirstPageRequest(workspaceId, false);
     return () => {
       requestGeneration.current += 1;
@@ -571,6 +585,17 @@ export function TransferCenter({
   );
 
   const metrics = computeTransferMetrics(items, visiblePersisted);
+  const tablePage = sliceTransferTablePage(
+    items,
+    visiblePersisted,
+    tablePageIndex,
+    tablePageSize,
+  );
+  useEffect(() => {
+    if (tablePage.pageIndex !== tablePageIndex) {
+      setTablePageIndex(tablePage.pageIndex);
+    }
+  }, [tablePage.pageIndex, tablePageIndex]);
   const headerActions = createElement(
     "div",
     { className: "flex flex-wrap items-center gap-2" },
@@ -676,7 +701,9 @@ export function TransferCenter({
         createElement(
           "p",
           { className: "text-xs text-muted" },
-          `${items.length + visiblePersisted.length} 条记录`,
+          tablePage.totalCount > 0
+            ? `共 ${tablePage.totalCount} 条`
+            : "0 条记录",
         ),
       ),
       createElement(
@@ -699,7 +726,7 @@ export function TransferCenter({
           createElement(
             "tbody",
             null,
-            items.map((item) =>
+            tablePage.localItems.map((item) =>
               createElement(LocalTransferRow, {
                 key: item.id,
                 item,
@@ -707,7 +734,7 @@ export function TransferCenter({
                 queue,
               }),
             ),
-            visiblePersisted.map((session) =>
+            tablePage.persistedItems.map((session) =>
               createElement(PersistedTransferCard, {
                 key: session.session_id,
                 session,
@@ -721,6 +748,85 @@ export function TransferCenter({
           ),
         ),
       ),
+      tablePage.totalCount > 0
+        ? createElement(
+            "div",
+            {
+              className:
+                "filesystem-transfer-pagination flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3",
+            },
+            scopedPersisted.nextCursor &&
+              scopedPersisted.phase !== "loading" &&
+              scopedPersisted.phase !== "refreshing"
+              ? createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "btn btn-ghost btn-sm",
+                    disabled: scopedPersisted.phase === "loadingMore",
+                    onClick: () => void loadMore(),
+                  },
+                  "加载更多历史",
+                )
+              : createElement("span", { "aria-hidden": true }),
+            createElement(
+              "nav",
+              {
+                "aria-label": "传输任务分页",
+                className: "template-pagination",
+                style: { padding: 0 },
+              },
+              createElement(
+                "select",
+                {
+                  className: "input template-page-size",
+                  "aria-label": "每页条数",
+                  value: tablePageSize,
+                  onChange: (event: ChangeEvent<HTMLSelectElement>) => {
+                    setTablePageSize(Number(event.target.value));
+                    setTablePageIndex(0);
+                  },
+                },
+                TRANSFER_TABLE_PAGE_SIZE_OPTIONS.map((size) =>
+                  createElement(
+                    "option",
+                    { key: size, value: size },
+                    `${size} 条/页`,
+                  ),
+                ),
+              ),
+              createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "btn-secondary text-sm",
+                  disabled: tablePage.pageIndex <= 0,
+                  onClick: () =>
+                    setTablePageIndex((current) => Math.max(0, current - 1)),
+                },
+                "上一页",
+              ),
+              createElement(
+                "span",
+                { className: "template-page-indicator" },
+                `${tablePage.pageIndex + 1} / ${tablePage.totalPages}`,
+              ),
+              createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "btn-secondary text-sm",
+                  disabled: tablePage.pageIndex >= tablePage.totalPages - 1,
+                  onClick: () =>
+                    setTablePageIndex((current) =>
+                      Math.min(tablePage.totalPages - 1, current + 1),
+                    ),
+                },
+                "下一页",
+              ),
+            ),
+          )
+        : null,
     ),
     scopedPersisted.phase === "loading"
       ? createElement(
@@ -763,20 +869,6 @@ export function TransferCenter({
                 "重试",
               )
             : null,
-        )
-      : null,
-    scopedPersisted.nextCursor &&
-      scopedPersisted.phase !== "loading" &&
-      scopedPersisted.phase !== "refreshing"
-      ? createElement(
-          "button",
-          {
-            type: "button",
-            className: "btn btn-secondary btn-sm self-start",
-            disabled: scopedPersisted.phase === "loadingMore",
-            onClick: () => void loadMore(),
-          },
-          "加载更多",
         )
       : null,
     createElement(TransferStateMachineHint, null),

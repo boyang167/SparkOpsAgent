@@ -2,15 +2,26 @@ import { createElement } from "react";
 import type { DragEvent } from "react";
 import type { FileNodeVM, GovernedPermission } from "@sparkops/contracts/filesystem";
 import { FileActionMenu } from "./FileActionMenu";
+import type { FileBrowserMode, TrashNodeDetails } from "./FileBrowser";
+
+function formatTrashDeletedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
 
 export type FileListViewProps = {
   nodes: FileNodeVM[];
+  mode?: FileBrowserMode;
+  trashDetails?: Record<string, TrashNodeDetails>;
   selectedIds: ReadonlySet<string>;
   onSelectionChange: (nodeId: string, selected: boolean) => void;
   onOpen: (node: FileNodeVM) => void;
   onRename: (node: FileNodeVM) => void;
   onMove: (nodes: FileNodeVM[]) => void;
   onDelete?: (nodes: FileNodeVM[]) => void;
+  onRestore?: (nodes: FileNodeVM[]) => void;
+  onPurge?: (nodes: FileNodeVM[]) => void;
   onDragStart: (event: DragEvent<HTMLElement>, node: FileNodeVM) => void;
   onDragEnd: () => void;
   canRename: boolean;
@@ -23,12 +34,16 @@ export type FileListViewProps = {
 
 export function FileListView({
   nodes,
+  mode = "browse",
+  trashDetails = {},
   selectedIds,
   onSelectionChange,
   onOpen,
   onRename,
   onMove,
   onDelete,
+  onRestore,
+  onPurge,
   onDragStart,
   onDragEnd,
   canRename,
@@ -38,6 +53,9 @@ export function FileListView({
   workspaceId,
   onShare,
 }: FileListViewProps) {
+  const trashMode = mode === "trash";
+  const selectableState = trashMode ? "TRASHED" : "ACTIVE";
+
   return createElement(
     "div",
     { className: "filesystem-table-wrap" },
@@ -53,14 +71,17 @@ export function FileListView({
           createElement("th", { "aria-label": "选择" }),
           createElement("th", { className: "text-left" }, "名称"),
           createElement("th", { className: "text-left" }, "类型"),
+          trashMode ? createElement("th", { className: "text-left" }, "原路径") : null,
+          trashMode ? createElement("th", { className: "text-left" }, "删除时间") : null,
           createElement("th", { className: "text-right" }, "操作"),
         ),
       ),
       createElement(
         "tbody",
         null,
-        nodes.map((node) =>
-          createElement(
+        nodes.map((node) => {
+          const trashMeta = trashDetails[node.id];
+          return createElement(
             "tr",
             {
               key: node.id,
@@ -80,7 +101,7 @@ export function FileListView({
                   className: "filesystem-selection-checkbox",
                   "aria-label": `选择 ${node.name}`,
                   checked: selectedIds.has(node.id),
-                  disabled: node.state !== "ACTIVE",
+                  disabled: node.state !== selectableState,
                   onChange: (event) =>
                     onSelectionChange(node.id, event.currentTarget.checked),
                 }),
@@ -89,17 +110,19 @@ export function FileListView({
             createElement(
               "td",
               { className: "filesystem-name-cell" },
-              createElement(
-                "button",
-                {
-                  type: "button",
-                  className: "filesystem-name-link filesystem-touch-target",
-                  "aria-label": `打开 ${node.name}`,
-                  onClick: () => onOpen(node),
-                },
-                node.name,
-              ),
-              node.type === "FILE"
+              trashMode
+                ? createElement("span", { className: "filesystem-name-link" }, node.name)
+                : createElement(
+                    "button",
+                    {
+                      type: "button",
+                      className: "filesystem-name-link filesystem-touch-target",
+                      "aria-label": `打开 ${node.name}`,
+                      onClick: () => onOpen(node),
+                    },
+                    node.name,
+                  ),
+              node.type === "FILE" && !trashMode
                 ? createElement(
                     "span",
                     { className: "filesystem-node-id text-muted" },
@@ -112,24 +135,66 @@ export function FileListView({
               { className: "text-muted" },
               node.type === "DIRECTORY" ? "目录" : "文件",
             ),
+            trashMode
+              ? createElement(
+                  "td",
+                  { className: "text-muted" },
+                  trashMeta?.original_path ?? "—",
+                )
+              : null,
+            trashMode
+              ? createElement(
+                  "td",
+                  { className: "text-muted" },
+                  trashMeta ? formatTrashDeletedAt(trashMeta.deleted_at) : "—",
+                )
+              : null,
             createElement(
               "td",
               { className: "text-right" },
-              createElement(FileActionMenu, {
-                node,
-                canRename: canRename && node.state === "ACTIVE",
-                canMove: canMove && node.state === "ACTIVE",
-                canDelete: canDelete && node.state === "ACTIVE",
-                organizationId,
-                workspaceId,
-                onShare,
-                onRename,
-                onMove,
-                onDelete,
-              }),
+              trashMode
+                ? createElement(
+                    "div",
+                    { className: "filesystem-file-actions flex flex-wrap justify-end gap-1" },
+                    onRestore
+                      ? createElement(
+                          "button",
+                          {
+                            type: "button",
+                            className: "btn btn-ghost btn-sm filesystem-touch-target",
+                            onClick: () => onRestore([node]),
+                          },
+                          "恢复",
+                        )
+                      : null,
+                    onPurge
+                      ? createElement(
+                          "button",
+                          {
+                            type: "button",
+                            className:
+                              "btn btn-ghost btn-sm filesystem-touch-target filesystem-file-action-danger",
+                            onClick: () => onPurge([node]),
+                          },
+                          "彻底删除",
+                        )
+                      : null,
+                  )
+                : createElement(FileActionMenu, {
+                    node,
+                    canRename: canRename && node.state === "ACTIVE",
+                    canMove: canMove && node.state === "ACTIVE",
+                    canDelete: canDelete && node.state === "ACTIVE",
+                    organizationId,
+                    workspaceId,
+                    onShare,
+                    onRename,
+                    onMove,
+                    onDelete,
+                  }),
             ),
-          ),
-        ),
+          );
+        }),
       ),
     ),
   );

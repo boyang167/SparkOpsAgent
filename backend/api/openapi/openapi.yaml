@@ -155,6 +155,8 @@ paths:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1namespaces"
   /api/v1/workspaces/{wsId}/files:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1files"
+  /api/v1/workspaces/{wsId}/files/trash:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1files~1trash"
   /api/v1/workspaces/{wsId}/directories:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1directories"
   /api/v1/workspaces/{wsId}/files/{nodeId}:
@@ -165,6 +167,10 @@ paths:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1files~1{nodeId}~1move"
   /api/v1/workspaces/{wsId}/files/{nodeId}/copy:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1files~1{nodeId}~1copy"
+  /api/v1/workspaces/{wsId}/files/{nodeId}/restore:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1files~1{nodeId}~1restore"
+  /api/v1/workspaces/{wsId}/files/{nodeId}/permanent:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1files~1{nodeId}~1permanent"
   /api/v1/workspaces/{wsId}/files/{nodeId}/revisions:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1files~1{nodeId}~1revisions"
   /api/v1/workspaces/{wsId}/files/{nodeId}/revisions/{revisionId}/restore:
@@ -173,6 +179,8 @@ paths:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1transfers"
   /api/v1/workspaces/{wsId}/transfers/{sessionId}:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1transfers~1{sessionId}"
+  /api/v1/workspaces/{wsId}/transfers/{sessionId}/complete:
+    $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1transfers~1{sessionId}~1complete"
   /api/v1/workspaces/{wsId}/storage-providers:
     $ref: "./filesystem.yaml#/paths/~1api~1v1~1workspaces~1{wsId}~1storage-providers"
   /api/v1/workspaces/{wsId}/storage-providers/{providerId}:

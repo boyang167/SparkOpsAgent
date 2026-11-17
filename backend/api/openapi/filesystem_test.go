@@ -37,6 +37,9 @@ func TestFilesystemOpenAPIPathsMatchHTTPContract(t *testing.T) {
 		"/api/v1/workspaces/{wsId}/files/{nodeId}/move":                           "post",
 		"/api/v1/workspaces/{wsId}/files/{nodeId}/copy":                           "post",
 		"/api/v1/workspaces/{wsId}/files/{nodeId}/revisions":                      "get",
+		"/api/v1/workspaces/{wsId}/files/trash":                                     "get",
+		"/api/v1/workspaces/{wsId}/files/{nodeId}/restore":                          "post",
+		"/api/v1/workspaces/{wsId}/files/{nodeId}/permanent":                        "delete",
 		"/api/v1/workspaces/{wsId}/files/{nodeId}/revisions/{revisionId}/restore": "post",
 		"/api/v1/workspaces/{wsId}/transfers":                                     "post",
 		"/api/v1/workspaces/{wsId}/transfers/{sessionId}":                         "get",
@@ -51,6 +54,8 @@ func TestFilesystemOpenAPIPathsMatchHTTPContract(t *testing.T) {
 		require.Truef(t, ok, "path item %s", path)
 		require.Contains(t, item, method)
 	}
+	trashPath := fragmentPaths["/api/v1/workspaces/{wsId}/files/trash"].(map[string]any)
+	require.Contains(t, trashPath, "delete")
 
 	filesPath := fragmentPaths["/api/v1/workspaces/{wsId}/files"].(map[string]any)
 	require.NotContains(t, filesPath, "post", "binary upload is deferred to G2")

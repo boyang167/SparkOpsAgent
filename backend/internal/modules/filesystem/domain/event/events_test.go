@@ -60,6 +60,8 @@ func TestRegisterCoversEveryG1MutationEvent(t *testing.T) {
 		NodeMovedName:         NodeMoved{BaseEvent: events.NewBaseEvent(NodeMovedName), NodeID: nodeID},
 		NodeCopiedName:        NodeCopied{BaseEvent: events.NewBaseEvent(NodeCopiedName), NodeID: nodeID},
 		NodeTrashedName:       NodeTrashed{BaseEvent: events.NewBaseEvent(NodeTrashedName), NodeID: nodeID},
+		NodeRestoredName:      NodeRestored{BaseEvent: events.NewBaseEvent(NodeRestoredName), NodeID: nodeID},
+		NodePurgedName:        NodePurged{BaseEvent: events.NewBaseEvent(NodePurgedName), NodeID: nodeID},
 		RevisionRestoredName:  RevisionRestored{BaseEvent: events.NewBaseEvent(RevisionRestoredName), NodeID: nodeID},
 		PermissionChangedName: PermissionChanged{BaseEvent: events.NewBaseEvent(PermissionChangedName), NodeID: nodeID},
 	} {

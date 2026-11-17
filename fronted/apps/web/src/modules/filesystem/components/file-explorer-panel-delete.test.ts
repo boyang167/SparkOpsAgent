@@ -7,20 +7,20 @@ vi.mock("@sparkops/web-sdk/filesystem", () => ({
 
 describe("file explorer delete", () => {
   it("describes a single file, a directory, and a selection", () => {
-    expect(deleteDialogCopy([{ name: "KBs.md", type: "FILE" }])).toEqual({
-      title: "删除文件",
-      description: "将删除文件「KBs.md」。删除后它会从当前列表中移除。",
+    expect(deleteDialogCopy([{ name: "a.txt", type: "FILE" }])).toEqual({
+      title: "移入回收站",
+      description: "将文件「a.txt」移入回收站。之后可从回收站恢复。",
     });
     expect(deleteDialogCopy([{ name: "test", type: "DIRECTORY" }])).toEqual({
-      title: "删除目录",
-      description: "将删除目录「test」。删除后它会从当前列表中移除。",
+      title: "移入回收站",
+      description: "将目录「test」移入回收站。之后可从回收站恢复。",
     });
     expect(
       deleteDialogCopy([
         { name: "KBs.md", type: "FILE" },
         { name: "test", type: "DIRECTORY" },
       ]).title,
-    ).toBe("删除所选项目");
+    ).toBe("移入回收站");
   });
 
   it("keeps nodes that were trashed when a later delete fails", async () => {

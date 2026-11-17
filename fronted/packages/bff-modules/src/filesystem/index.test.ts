@@ -10,8 +10,12 @@ import {
   listGovernedNamespaces,
   listShareRequests,
   listSharedWithMe,
+  emptyTrash,
+  listTrashItems,
   moveFileNode,
   previewGovernedShare,
+  purgeFileNode,
+  restoreFileNode,
   trashFileNode,
 } from "./index";
 
@@ -146,6 +150,56 @@ describe("filesystem BFF module", () => {
       "trash-key-1",
       "namespace-1",
     );
+  });
+
+  it("validates trash list pages and forwards restore, purge and empty trash", async () => {
+    const trashPage = {
+      items: [{
+        node: {
+          id: "00000000-0000-4000-8000-000000000001",
+          namespace_id: "00000000-0000-4000-8000-000000000002",
+          parent_id: null,
+          type: "FILE",
+          name: "a.txt",
+          current_revision_id: null,
+          state: "TRASHED",
+          owner_id: "00000000-0000-4000-8000-000000000003",
+        },
+        original_path: "/a.txt",
+        deleted_at: "2026-01-15T08:00:00.000Z",
+        can_restore: true,
+        can_permanently_delete: true,
+      }],
+      next_cursor: "",
+    };
+    const listTrash = vi.fn().mockResolvedValue(trashPage);
+    const restore = vi.fn().mockResolvedValue(undefined);
+    const purge = vi.fn().mockResolvedValue(undefined);
+    const empty = vi.fn().mockResolvedValue({
+      items: [{ node_id: "00000000-0000-4000-8000-000000000001", succeeded: true }],
+    });
+    const ctx = context({ listTrash, restoreFileNode: restore, purgeFileNode: purge, emptyTrash: empty });
+
+    await expect(listTrashItems(ctx, "workspace-1", {
+      namespace_id: "namespace-1",
+      cursor: "cursor-1",
+      limit: 20,
+    })).resolves.toEqual(trashPage);
+    expect(listTrash).toHaveBeenCalledWith("workspace-1", {
+      namespace_id: "namespace-1",
+      cursor: "cursor-1",
+      limit: 20,
+    });
+
+    await restoreFileNode(ctx, "workspace-1", "node-1", "restore-key-1", "namespace-1");
+    await purgeFileNode(ctx, "workspace-1", "node-1", "purge-key-1", "namespace-1");
+    await expect(emptyTrash(ctx, "workspace-1", "empty-key-1", "namespace-1")).resolves.toEqual({
+      items: [{ node_id: "00000000-0000-4000-8000-000000000001", succeeded: true }],
+    });
+
+    expect(restore).toHaveBeenCalledWith("workspace-1", "node-1", "restore-key-1", "namespace-1");
+    expect(purge).toHaveBeenCalledWith("workspace-1", "node-1", "purge-key-1", "namespace-1");
+    expect(empty).toHaveBeenCalledWith("workspace-1", "empty-key-1", "namespace-1");
   });
 
   it("passes governed query and organization/workspace context to upstream", async () => {

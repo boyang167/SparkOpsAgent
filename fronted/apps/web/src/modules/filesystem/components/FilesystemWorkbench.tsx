@@ -502,7 +502,9 @@ export function FilesystemWorkbench({
     setMoveError(null);
     try {
       for (const node of nodes) {
-        await moveFileNode(workspaceId, node.id, target.id, node.name);
+        await moveFileNode(workspaceId, node.id, target.id, node.name, {
+          namespaceId: namespace.id,
+        });
       }
       refreshDirectories();
     } catch {

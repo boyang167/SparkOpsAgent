@@ -20,6 +20,11 @@ import {
   listTransferSessions,
   moveFileNode,
   previewGovernedShare,
+  emptyTrash,
+  listTrashItems,
+  purgeFileNode,
+  renameFileNode,
+  restoreFileNode,
   trashFileNode,
   uploadTransfer,
 } from "./filesystem";
@@ -334,6 +339,123 @@ describe("filesystem node sdk", () => {
     const options = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(options.body).toBeUndefined();
     expect(new Headers(options.headers).get("Idempotency-Key")).toBe("trash-key-1");
+  });
+
+  it("renames a node with namespace query and idempotency key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 0, message: "ok", data: { renamed: true }, trace_id: "trace-1" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renameFileNode(
+      "workspace-1",
+      "node-1",
+      { name: "kubeconfig2.yaml" },
+      {
+        idempotencyKey: "rename-key-1",
+        namespaceId: "00000000-0000-4000-8000-000000000099",
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/bff/v1/workspaces/workspace-1/files/node-1/name?namespace_id=00000000-0000-4000-8000-000000000099",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ name: "kubeconfig2.yaml" }),
+      }),
+    );
+    const options = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(options.headers).get("Idempotency-Key")).toBe("rename-key-1");
+  });
+
+  it("lists trash, restores, purges and empties trash through BFF routes", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "GET") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              code: 0,
+              message: "ok",
+              data: { items: [], next_cursor: "" },
+              trace_id: "trace-1",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      if (url.includes("/trash") && init?.method === "DELETE" && !url.includes("/permanent")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              code: 0,
+              message: "ok",
+              data: { items: [{ node_id: "node-1", succeeded: true }] },
+              trace_id: "trace-1",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ code: 0, message: "ok", data: null, trace_id: "trace-1" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listTrashItems("workspace-1", {
+      namespace_id: "00000000-0000-4000-8000-000000000099",
+      cursor: "cursor-1",
+      limit: 25,
+    });
+    await restoreFileNode("workspace-1", "node-1", {
+      idempotencyKey: "restore-key-1",
+      namespaceId: "00000000-0000-4000-8000-000000000099",
+    });
+    await purgeFileNode("workspace-1", "node-1", {
+      idempotencyKey: "permanent-key-1",
+      namespaceId: "00000000-0000-4000-8000-000000000099",
+    });
+    await emptyTrash("workspace-1", {
+      idempotencyKey: "empty-key-1",
+      namespaceId: "00000000-0000-4000-8000-000000000099",
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/bff/v1/workspaces/workspace-1/files/trash?namespace_id=00000000-0000-4000-8000-000000000099&cursor=cursor-1&limit=25",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/bff/v1/workspaces/workspace-1/files/node-1/restore?namespace_id=00000000-0000-4000-8000-000000000099",
+      expect.objectContaining({
+        method: "POST",
+        body: "{}",
+        headers: expect.any(Headers),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/bff/v1/workspaces/workspace-1/files/node-1/permanent?namespace_id=00000000-0000-4000-8000-000000000099",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/bff/v1/workspaces/workspace-1/files/trash?namespace_id=00000000-0000-4000-8000-000000000099",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    const restoreInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    const purgeInit = fetchMock.mock.calls[2]?.[1] as RequestInit;
+    const emptyInit = fetchMock.mock.calls[3]?.[1] as RequestInit;
+    expect(new Headers(restoreInit.headers).get("Idempotency-Key")).toBe("restore-key-1");
+    expect(new Headers(purgeInit.headers).get("Idempotency-Key")).toBe("permanent-key-1");
+    expect(new Headers(emptyInit.headers).get("Idempotency-Key")).toBe("empty-key-1");
   });
 });
 

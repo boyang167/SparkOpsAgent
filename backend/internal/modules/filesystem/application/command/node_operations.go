@@ -49,19 +49,18 @@ func (h *RenameNodeHandler) Handle(ctx context.Context, cmd RenameNode) (err err
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.rename", err)
 	}
 	err = withinIdempotentMutation(ctx, h.tx, func(txCtx context.Context) error {
+		ns, err := h.repo.GetNamespace(txCtx, cmd.NamespaceID)
+		if err != nil {
+			return err
+		}
+		if err := validateMutationNamespace(ns, cmd.OrganizationID, cmd.WorkspaceID); err != nil {
+			return err
+		}
 		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
 		if err != nil {
 			return err
 		}
 		txCtx = withResourceID(txCtx, node.ID.String())
-		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
-		if err != nil {
-			return err
-		}
-		txCtx = withResourceID(txCtx, node.ID.String())
-		if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
-			return domain.ErrNamespaceMismatch
-		}
 		if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
 			return domain.ErrRootMutation
 		}
@@ -134,18 +133,18 @@ func (h *MoveNodeHandler) Handle(ctx context.Context, cmd MoveNode) (err error) 
 		return deniedWithAudit(ctx, h.audit, cmd.ActorID, cmd.OrganizationID, cmd.WorkspaceID.String(), "filesystem.node.move", err)
 	}
 	err = withinIdempotentMutationWithRetry(ctx, h.tx, func(txCtx context.Context) error {
+		ns, err := h.repo.GetNamespace(txCtx, cmd.NamespaceID)
+		if err != nil {
+			return err
+		}
+		if err := validateMutationNamespace(ns, cmd.OrganizationID, cmd.WorkspaceID); err != nil {
+			return err
+		}
 		node, err := h.repo.GetNode(txCtx, cmd.NamespaceID, cmd.NodeID)
 		if err != nil {
 			return err
 		}
 		txCtx = withResourceID(txCtx, node.ID.String())
-		ns, err := h.repo.GetNamespaceByWorkspace(txCtx, cmd.WorkspaceID)
-		if err != nil {
-			return err
-		}
-		if ns.ID != cmd.NamespaceID || ns.OrganizationID != cmd.OrganizationID {
-			return domain.ErrNamespaceMismatch
-		}
 		if ns.RootNodeID != nil && *ns.RootNodeID == node.ID {
 			return domain.ErrRootMutation
 		}
@@ -236,7 +235,7 @@ func (h *TrashNodeHandler) Handle(ctx context.Context, cmd TrashNode) (err error
 		if node.State == model.NodeStateTrashed || node.State == model.NodeStatePurged {
 			return domain.ErrNodeStateConflict
 		}
-		if err := h.repo.TrashNode(txCtx, node.ID); err != nil {
+		if err := h.repo.TrashNode(txCtx, node.ID, time.Now().UTC(), cmd.ActorID); err != nil {
 			return err
 		}
 		if h.bus != nil {

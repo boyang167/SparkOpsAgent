@@ -104,10 +104,12 @@ describe("DirectoryTree", () => {
     expect(sdk.listFileNodes).toHaveBeenNthCalledWith(1, workspaceId, {
       parentId: root.id,
       nodeType: "DIRECTORY",
+      namespaceId: root.namespace_id,
     });
     expect(sdk.listFileNodes).toHaveBeenNthCalledWith(2, workspaceId, {
       parentId: root.id,
       nodeType: "DIRECTORY",
+      namespaceId: root.namespace_id,
       cursor: "cursor-1",
     });
   });
@@ -126,6 +128,7 @@ describe("DirectoryTree", () => {
       expect(sdk.listFileNodes).toHaveBeenLastCalledWith(workspaceId, {
         parentId: "directory-1",
         nodeType: "DIRECTORY",
+        namespaceId: root.namespace_id,
       });
     });
     expect(screen.getByText("设计稿")).toBeInTheDocument();

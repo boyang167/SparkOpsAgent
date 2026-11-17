@@ -217,7 +217,7 @@ func (r *Repository) CreateNode(ctx context.Context, node *model.Node) error {
 			return domain.ErrParentNotDirectory
 		}
 	}
-	query := db.Where("namespace_id = ? AND normalized_name = ?", node.NamespaceID, node.NormalizedName)
+	query := db.Where("namespace_id = ? AND normalized_name = ? AND state = ?", node.NamespaceID, node.NormalizedName, model.NodeStateActive)
 	if node.ParentID == nil {
 		query = query.Where("parent_id IS NULL")
 	} else {
@@ -1315,13 +1315,32 @@ func (r *Repository) MoveNodeSafely(ctx context.Context, namespaceID, nodeID uui
 	return wrapPersistence(result.Error)
 }
 
-func (r *Repository) TrashNode(ctx context.Context, nodeID uuid.UUID) error {
-	result := postgres.DB(ctx, r.db).Model(&nodeRow{}).Where("id = ?", nodeID).Update("state", model.NodeStateTrashed)
+func (r *Repository) TrashNode(ctx context.Context, nodeID uuid.UUID, deletedAt time.Time, deletedBy uuid.UUID) error {
+	deletedAt = deletedAt.UTC()
+	result := postgres.DB(ctx, r.db).Model(&nodeRow{}).
+		Where("id = ? AND state = ?", nodeID, model.NodeStateActive).
+		Updates(map[string]any{
+			"state":      model.NodeStateTrashed,
+			"deleted_at": deletedAt,
+			"deleted_by": deletedBy,
+			"updated_at": deletedAt,
+		})
 	if result.Error != nil {
 		return wrapPersistence(result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return domain.ErrNodeNotFound
+		var row nodeRow
+		err := postgres.DB(ctx, r.db).Where("id = ?", nodeID).First(&row).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.ErrNodeNotFound
+		}
+		if err != nil {
+			return wrapPersistence(err)
+		}
+		if row.State == model.NodeStateTrashed {
+			return domain.ErrNodeStateConflict
+		}
+		return domain.ErrNodeStateConflict
 	}
 	return nil
 }
@@ -1384,7 +1403,12 @@ func commandFromRow(row commandDedupRow) *repository.CommandDedup {
 }
 
 func nodeFromRow(row nodeRow) *model.Node {
-	return &model.Node{ID: row.ID, NamespaceID: row.NamespaceID, ParentID: row.ParentID, Type: row.Type, Name: row.Name, NormalizedName: row.NormalizedName, CurrentRevisionID: row.CurrentRevisionID, State: row.State, OwnerID: row.OwnerID, Classification: row.Classification}
+	return &model.Node{
+		ID: row.ID, NamespaceID: row.NamespaceID, ParentID: row.ParentID, Type: row.Type,
+		Name: row.Name, NormalizedName: row.NormalizedName, CurrentRevisionID: row.CurrentRevisionID,
+		State: row.State, OwnerID: row.OwnerID, Classification: row.Classification,
+		DeletedAt: row.DeletedAt, DeletedBy: row.DeletedBy,
+	}
 }
 
 func validClassification(classification model.TransferClassification) bool {
@@ -1410,7 +1434,8 @@ func mapUniqueConflict(err error) error {
 		}
 		constraint = strings.ToLower(pgErr.ConstraintName)
 		switch constraint {
-		case "nodes_namespace_id_parent_id_normalized_name_key", "nodes_namespace_id_normalized_name_key":
+		case "nodes_namespace_id_parent_id_normalized_name_key", "nodes_namespace_id_normalized_name_key",
+			"ux_filesystem_nodes_root_name", "ux_filesystem_nodes_child_name":
 			return domain.ErrNodeNameConflict
 		case "nodes_pkey":
 			return domain.ErrNodeIDConflict

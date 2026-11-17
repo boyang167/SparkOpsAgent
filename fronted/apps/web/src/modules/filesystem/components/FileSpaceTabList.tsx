@@ -2,30 +2,39 @@
 
 import Link from "next/link";
 import { createElement } from "react";
-import { FILE_SPACE_NAV_ITEMS } from "./file-space-nav-items";
-import { hrefForDataWorkspace, type FileSpace, type FileView } from "./workbench-state";
+import { FILE_SPACE_NAV_ITEMS, TRASH_FILE_SPACE_NAV_ITEMS } from "./file-space-nav-items";
+import {
+  hrefForDataTrash,
+  hrefForDataWorkspace,
+  type FileSpace,
+  type FileView,
+} from "./workbench-state";
 
 /** 数据面文件空间切换，样式与控制面治理 Tab 一致 */
 export function FileSpaceTabList({
   activeSpace,
   view,
+  mode = "browse",
 }: {
   activeSpace: FileSpace;
   view: FileView;
+  mode?: "browse" | "trash";
 }) {
+  const items = mode === "trash" ? TRASH_FILE_SPACE_NAV_ITEMS : FILE_SPACE_NAV_ITEMS;
+  const hrefFor = mode === "trash" ? hrefForDataTrash : hrefForDataWorkspace;
   return createElement(
     "div",
     {
       role: "tablist",
-      "aria-label": "文件空间",
+      "aria-label": mode === "trash" ? "回收站所属空间" : "文件空间",
       className: "filesystem-file-space-tabs flex max-w-full flex-wrap gap-2 overflow-x-auto",
     },
-    FILE_SPACE_NAV_ITEMS.map((space) =>
+    items.map((space) =>
       createElement(
         Link,
         {
           key: space.id,
-          href: hrefForDataWorkspace(space.id, view),
+          href: hrefFor(space.id, view),
           role: "tab",
           "aria-selected": activeSpace === space.id,
           "aria-current": activeSpace === space.id ? "page" : undefined,

@@ -8,22 +8,34 @@ import { FileListView } from "./FileListView";
 import { clearNodeDragSession, writeNodeDragPayload } from "./directory-dnd";
 import type { FileView } from "./workbench-state";
 
+export type FileBrowserMode = "browse" | "trash";
+
+export type TrashNodeDetails = {
+  original_path: string;
+  deleted_at: string;
+};
+
 export type FileBrowserProps = {
   nodes: FileNodeVM[];
   workspaceId?: string;
   namespaceId?: string;
   view: FileView;
+  mode?: FileBrowserMode;
+  trashDetails?: Record<string, TrashNodeDetails>;
   selectedIds: string[];
   onSelectionChange: (selectedIds: string[]) => void;
   onOpen: (node: FileNodeVM) => void;
   onRename: (node: FileNodeVM) => void;
   onMove: (nodes: FileNodeVM[]) => void;
   onDelete?: (nodes: FileNodeVM[]) => void;
+  onRestore?: (nodes: FileNodeVM[]) => void;
+  onPurge?: (nodes: FileNodeVM[]) => void;
   canRename?: boolean;
   canMove?: boolean;
   canDelete?: boolean;
   organizationId?: string;
   onShare?: (node: FileNodeVM, effectiveActions: GovernedPermission[]) => void;
+  emptyMessage?: string;
 };
 
 export function sortFileNodes(nodes: FileNodeVM[]) {
@@ -33,36 +45,50 @@ export function sortFileNodes(nodes: FileNodeVM[]) {
   });
 }
 
+function selectableState(mode: FileBrowserMode): FileNodeVM["state"] {
+  return mode === "trash" ? "TRASHED" : "ACTIVE";
+}
+
 export function FileBrowser({
   nodes,
   workspaceId,
   namespaceId,
   view,
+  mode = "browse",
+  trashDetails = {},
   selectedIds,
   onSelectionChange,
   onOpen,
   onRename,
   onMove,
   onDelete,
+  onRestore,
+  onPurge,
   canRename = true,
   canMove = true,
   canDelete = false,
   organizationId,
   onShare,
+  emptyMessage,
 }: FileBrowserProps) {
   const [selection, setSelection] = useState(() => new Set(selectedIds));
   const sortedNodes = useMemo(() => sortFileNodes(nodes), [nodes]);
-  const activeNodeIds = useMemo(
-    () => new Set(nodes.filter((node) => node.state === "ACTIVE").map((node) => node.id)),
-    [nodes],
+  const expectedState = selectableState(mode);
+  const selectableNodeIds = useMemo(
+    () => new Set(nodes.filter((node) => node.state === expectedState).map((node) => node.id)),
+    [expectedState, nodes],
   );
   const effectiveSelection = useMemo(
-    () => new Set([...selection].filter((nodeId) => activeNodeIds.has(nodeId))),
-    [activeNodeIds, selection],
+    () => new Set([...selection].filter((nodeId) => selectableNodeIds.has(nodeId))),
+    [selectableNodeIds, selection],
   );
+  const browseMode = mode === "browse";
+  const effectiveCanRename = browseMode && canRename;
+  const effectiveCanMove = browseMode && canMove;
+  const effectiveCanDelete = browseMode && canDelete;
 
   useEffect(() => {
-    const nextSelection = new Set(selectedIds.filter((nodeId) => activeNodeIds.has(nodeId)));
+    const nextSelection = new Set(selectedIds.filter((nodeId) => selectableNodeIds.has(nodeId)));
     setSelection(nextSelection);
     if (
       nextSelection.size !== selectedIds.length ||
@@ -70,7 +96,7 @@ export function FileBrowser({
     ) {
       onSelectionChange([...nextSelection]);
     }
-  }, [activeNodeIds, onSelectionChange, selectedIds]);
+  }, [onSelectionChange, selectableNodeIds, selectedIds]);
 
   useEffect(() => clearNodeDragSession, []);
 
@@ -87,13 +113,13 @@ export function FileBrowser({
 
   function selectedNodes() {
     return nodes.filter(
-      (node) => node.state === "ACTIVE" && effectiveSelection.has(node.id),
+      (node) => node.state === expectedState && effectiveSelection.has(node.id),
     );
   }
 
   function handleDragStart(event: DragEvent<HTMLElement>, node: FileNodeVM) {
     clearNodeDragSession();
-    if (!workspaceId || !namespaceId || !canMove || node.state !== "ACTIVE") {
+    if (!workspaceId || !namespaceId || !effectiveCanMove || node.state !== "ACTIVE") {
       event.preventDefault();
       return;
     }
@@ -107,31 +133,42 @@ export function FileBrowser({
   }
 
   if (sortedNodes.length === 0) {
-    return createElement("div", { className: "empty-state" }, "此目录为空。");
+    return createElement(
+      "div",
+      { className: "empty-state" },
+      emptyMessage ?? (mode === "trash" ? "回收站为空。" : "此目录为空。"),
+    );
   }
 
   const viewProps = {
     nodes: sortedNodes,
+    mode,
+    trashDetails,
     selectedIds: effectiveSelection,
     onSelectionChange: changeSelection,
     onOpen,
     onRename,
     onMove,
     onDelete,
+    onRestore,
+    onPurge,
     onDragStart: handleDragStart,
     onDragEnd: clearNodeDragSession,
-    canRename,
-    canMove,
-    canDelete,
+    canRename: effectiveCanRename,
+    canMove: effectiveCanMove,
+    canDelete: effectiveCanDelete,
     organizationId,
     workspaceId,
-    onShare,
+    onShare: browseMode ? onShare : undefined,
   };
+
+  const showBrowseToolbar = browseMode && (effectiveCanMove || effectiveCanDelete) && effectiveSelection.size > 0;
+  const showTrashToolbar = !browseMode && effectiveSelection.size > 0;
 
   return createElement(
     "div",
     { className: "stack-sm" },
-    (canMove || canDelete) && effectiveSelection.size > 0
+    showBrowseToolbar
       ? createElement(
           "div",
           {
@@ -147,7 +184,7 @@ export function FileBrowser({
           createElement(
             "div",
             { className: "flex flex-wrap gap-2" },
-            canMove
+            effectiveCanMove
               ? createElement(
                   "button",
                   {
@@ -159,17 +196,59 @@ export function FileBrowser({
                   "移动到…",
                 )
               : null,
-            canDelete && onDelete
+            effectiveCanDelete && onDelete
               ? createElement(
                   "button",
                   {
                     type: "button",
                     className:
                       "btn btn-ghost btn-sm filesystem-touch-target filesystem-file-action-danger",
-                    "aria-label": `删除所选 ${effectiveSelection.size} 项`,
+                    "aria-label": `将所选 ${effectiveSelection.size} 项移入回收站`,
                     onClick: () => onDelete(selectedNodes()),
                   },
-                  "删除",
+                  "移入回收站",
+                )
+              : null,
+          ),
+        )
+      : null,
+    showTrashToolbar
+      ? createElement(
+          "div",
+          {
+            role: "toolbar",
+            "aria-label": "回收站所选操作",
+            className: "filesystem-selection-banner flex flex-wrap items-center justify-between gap-2",
+          },
+          createElement(
+            "span",
+            { className: "text-sm text-muted" },
+            `已选择 ${effectiveSelection.size} 项`,
+          ),
+          createElement(
+            "div",
+            { className: "flex flex-wrap gap-2" },
+            onRestore
+              ? createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "btn btn-secondary btn-sm filesystem-touch-target",
+                    onClick: () => onRestore(selectedNodes()),
+                  },
+                  "恢复",
+                )
+              : null,
+            onPurge
+              ? createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className:
+                      "btn btn-ghost btn-sm filesystem-touch-target filesystem-file-action-danger",
+                    onClick: () => onPurge(selectedNodes()),
+                  },
+                  "彻底删除",
                 )
               : null,
           ),

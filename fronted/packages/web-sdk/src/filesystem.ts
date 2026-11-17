@@ -28,6 +28,9 @@ import type {
   SharePreviewVM,
   ShareRequestPageVM,
   ShareRequestVM,
+  TrashItemPageVM,
+  TrashListQuery,
+  FileMutationBatchResultVM,
   UpdateStoragePoolCommand,
   UpdateStorageProviderCommand,
   TransferListQuery,
@@ -91,6 +94,7 @@ type ListFilesQuery = {
   limit?: number;
   nodeType?: "FILE" | "DIRECTORY";
   query?: string;
+  namespaceId?: string;
 };
 
 export interface GovernedFilesystemFetchOptions extends BffFetchOptions {
@@ -160,6 +164,7 @@ function listFilesQuery(query: ListFilesQuery = {}) {
   if (query.query) params.set("q", query.query);
   if (query.cursor) params.set("cursor", query.cursor);
   if (query.limit != null) params.set("limit", String(query.limit));
+  if (query.namespaceId) params.set("namespace_id", query.namespaceId);
   const suffix = params.toString();
   return suffix ? `?${suffix}` : "";
 }
@@ -406,16 +411,20 @@ export function renameFileNode(
   workspaceId: string,
   nodeId: string,
   input: RenameFileNodeCommand,
-  options: BffFetchOptions & { idempotencyKey?: string } = {},
+  options: BffFetchOptions & { idempotencyKey?: string; namespaceId?: string } = {},
 ) {
-  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("rename");
-  return bffFetch<void>(`/workspaces/${workspaceId}/files/${nodeId}/name`, {
-    method: "PATCH",
-    body: JSON.stringify(input),
-    workspaceId,
-    headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
-    ...options,
-  });
+  const { idempotencyKey, namespaceId, ...rest } = options;
+  const key = idempotencyKey ?? mutationIdempotencyKey("rename");
+  return bffFetch<void>(
+    `/workspaces/${workspaceId}/files/${nodeId}/name${trashNamespaceQuery(namespaceId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(input),
+      workspaceId,
+      headers: { ...rest.headers, "Idempotency-Key": key },
+      ...rest,
+    },
+  );
 }
 
 export function moveFileNode(
@@ -423,16 +432,20 @@ export function moveFileNode(
   nodeId: string,
   targetParentId: string,
   nodeName: string,
-  options: BffFetchOptions & { idempotencyKey?: string } = {},
+  options: BffFetchOptions & { idempotencyKey?: string; namespaceId?: string } = {},
 ) {
-  const idempotencyKey = options.idempotencyKey ?? mutationIdempotencyKey("move");
-  return bffFetch<void>(`/workspaces/${workspaceId}/files/${nodeId}/move`, {
-    ...options,
-    method: "POST",
-    body: JSON.stringify({ parent_id: targetParentId, name: nodeName }),
-    workspaceId,
-    headers: { ...options.headers, "Idempotency-Key": idempotencyKey },
-  });
+  const { idempotencyKey, namespaceId, ...rest } = options;
+  const key = idempotencyKey ?? mutationIdempotencyKey("move");
+  return bffFetch<void>(
+    `/workspaces/${workspaceId}/files/${nodeId}/move${trashNamespaceQuery(namespaceId)}`,
+    {
+      ...rest,
+      method: "POST",
+      body: JSON.stringify({ parent_id: targetParentId, name: nodeName }),
+      workspaceId,
+      headers: { ...rest.headers, "Idempotency-Key": key },
+    },
+  );
 }
 
 export function trashFileNode(
@@ -452,6 +465,88 @@ export function trashFileNode(
     workspaceId,
     headers: { ...rest.headers, "Idempotency-Key": key },
   });
+}
+
+function trashListQuery(query: TrashListQuery = {}) {
+  const params = new URLSearchParams();
+  if (query.namespace_id) params.set("namespace_id", query.namespace_id);
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit != null) params.set("limit", String(query.limit));
+  const suffix = params.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
+function trashNamespaceQuery(namespaceId?: string) {
+  const params = new URLSearchParams();
+  if (namespaceId) params.set("namespace_id", namespaceId);
+  const suffix = params.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
+export function listTrashItems(
+  workspaceId: string,
+  query: TrashListQuery = {},
+  options: BffFetchOptions = {},
+) {
+  return bffFetch<TrashItemPageVM>(`/workspaces/${workspaceId}/files/trash${trashListQuery(query)}`, {
+    method: "GET",
+    workspaceId,
+    ...options,
+  });
+}
+
+export function restoreFileNode(
+  workspaceId: string,
+  nodeId: string,
+  options: BffFetchOptions & { idempotencyKey?: string; namespaceId?: string } = {},
+) {
+  const { idempotencyKey, namespaceId, ...rest } = options;
+  const key = idempotencyKey ?? mutationIdempotencyKey("restore");
+  return bffFetch<void>(
+    `/workspaces/${workspaceId}/files/${nodeId}/restore${trashNamespaceQuery(namespaceId)}`,
+    {
+      ...rest,
+      method: "POST",
+      body: "{}",
+      workspaceId,
+      headers: { ...rest.headers, "Idempotency-Key": key },
+    },
+  );
+}
+
+export function purgeFileNode(
+  workspaceId: string,
+  nodeId: string,
+  options: BffFetchOptions & { idempotencyKey?: string; namespaceId?: string } = {},
+) {
+  const { idempotencyKey, namespaceId, ...rest } = options;
+  const key = idempotencyKey ?? mutationIdempotencyKey("permanent-delete");
+  return bffFetch<void>(
+    `/workspaces/${workspaceId}/files/${nodeId}/permanent${trashNamespaceQuery(namespaceId)}`,
+    {
+      ...rest,
+      method: "DELETE",
+      workspaceId,
+      headers: { ...rest.headers, "Idempotency-Key": key },
+    },
+  );
+}
+
+export function emptyTrash(
+  workspaceId: string,
+  options: BffFetchOptions & { idempotencyKey?: string; namespaceId?: string } = {},
+) {
+  const { idempotencyKey, namespaceId, ...rest } = options;
+  const key = idempotencyKey ?? mutationIdempotencyKey("empty-trash");
+  return bffFetch<FileMutationBatchResultVM>(
+    `/workspaces/${workspaceId}/files/trash${trashNamespaceQuery(namespaceId)}`,
+    {
+      ...rest,
+      method: "DELETE",
+      workspaceId,
+      headers: { ...rest.headers, "Idempotency-Key": key },
+    },
+  );
 }
 
 export function getFileStorage(

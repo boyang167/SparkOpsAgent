@@ -2,6 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TransferSessionVM } from "@sparkops/contracts/filesystem";
@@ -256,7 +257,7 @@ describe("TransferCenter", () => {
     });
     await Promise.resolve();
     expect(screen.queryByText("A 任务")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "加载更多历史" })).not.toBeInTheDocument();
   });
 
   it("keeps only the newest request during a rapid A to B to A switch", async () => {
@@ -315,7 +316,7 @@ describe("TransferCenter", () => {
     const { rerender } = render(
       createElement(TransferCenter, { queue, workspaceId: workspaceA }),
     );
-    fireEvent.click(await screen.findByRole("button", { name: "加载更多" }));
+    fireEvent.click(await screen.findByRole("button", { name: "加载更多历史" }));
     rerender(createElement(TransferCenter, { queue, workspaceId: workspaceB }));
     expect(await screen.findByText("B 当前")).toBeInTheDocument();
 
@@ -325,6 +326,35 @@ describe("TransferCenter", () => {
     });
     await Promise.resolve();
     expect(screen.queryByText("A 迟到分页")).not.toBeInTheDocument();
+  });
+
+  it("paginates the transfer table with ten rows per page", async () => {
+    const sessions = Array.from({ length: 12 }, (_, index) =>
+      persisted(
+        `00000000-0000-0000-0000-0000000000${String(index).padStart(2, "0")}`,
+        `分页任务-${index}.txt`,
+      ),
+    );
+    listTransferSessionsMock.mockResolvedValue({
+      items: sessions,
+      next_cursor: "",
+    });
+    const user = userEvent.setup();
+    render(
+      createElement(TransferCenter, {
+        queue: emptyQueue(),
+        workspaceId: sessions[0]?.workspace_id,
+      }),
+    );
+
+    const pageSize = screen.getByLabelText("每页条数");
+    expect(pageSize).toHaveValue("10");
+    expect(await screen.findByText("分页任务-0.txt")).toBeInTheDocument();
+    expect(screen.queryByText("分页任务-11.txt")).not.toBeInTheDocument();
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "下一页" }));
+    expect(await screen.findByText("分页任务-11.txt")).toBeInTheDocument();
+    expect(screen.queryByText("分页任务-0.txt")).not.toBeInTheDocument();
   });
 
   it("deduplicates repeated pages and blocks concurrent load more", async () => {
@@ -342,7 +372,7 @@ describe("TransferCenter", () => {
         workspaceId: "00000000-0000-0000-0000-000000000001",
       }),
     );
-    const loadMore = await screen.findByRole("button", { name: "加载更多" });
+    const loadMore = await screen.findByRole("button", { name: "加载更多历史" });
     fireEvent.click(loadMore);
     fireEvent.click(loadMore);
     expect(listTransferSessionsMock).toHaveBeenCalledTimes(2);

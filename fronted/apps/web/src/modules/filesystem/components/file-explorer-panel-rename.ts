@@ -5,13 +5,14 @@ export type PanelRenameHandler = (nodeId: string, name: string) => Promise<void>
 
 export function createPanelRenameHandler(
   workspaceId: string,
+  namespaceId: string | undefined,
   onRename?: PanelRenameHandler,
 ): PanelRenameHandler {
   if (onRename) {
     return onRename;
   }
   return async (nodeId, name) => {
-    await renameFileNode(workspaceId, nodeId, { name });
+    await renameFileNode(workspaceId, nodeId, { name }, { namespaceId });
   };
 }
 

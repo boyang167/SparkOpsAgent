@@ -123,6 +123,26 @@ type SharedNode struct {
 	SourceNamespace  SharedNamespaceSource
 }
 
+type TrashEntry struct {
+	Node         model.Node
+	OriginalPath string
+	DeletedAt    time.Time
+	DeletedBy    uuid.UUID
+}
+
+type TrashListQuery struct {
+	NamespaceID uuid.UUID
+	Limit       int
+	Cursor      string
+}
+
+type PurgeSummary struct {
+	NodeIDs   []uuid.UUID
+	FileCount int64
+	ByteCount int64
+	BlobIDs   []uuid.UUID
+}
+
 type SharedNodeFilter struct {
 	NamespaceID uuid.UUID
 	Query       string
@@ -187,7 +207,12 @@ type FilesystemRepository interface {
 	ApplyQuotaUsage(context.Context, uuid.UUID, int64, int64) error
 	RenameNode(context.Context, uuid.UUID, string) error
 	MoveNodeSafely(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID, string) error
-	TrashNode(context.Context, uuid.UUID) error
+	TrashNode(context.Context, uuid.UUID, time.Time, uuid.UUID) error
+	ListTrashEntries(context.Context, TrashListQuery) ([]TrashEntry, string, error)
+	RestoreNode(context.Context, uuid.UUID, uuid.UUID) error
+	PurgeTrashedSubtree(context.Context, uuid.UUID, uuid.UUID, time.Time) (PurgeSummary, error)
+	ReleaseNamespaceQuotaUsage(context.Context, uuid.UUID, int64, int64) error
+	DecrementBlobRef(context.Context, uuid.UUID, time.Time) error
 	ClaimCommand(context.Context, CommandDedup) (*CommandDedup, error)
 	CompleteCommand(context.Context, uuid.UUID, *uuid.UUID, *uuid.UUID) error
 	GetCommand(context.Context, uuid.UUID) (*CommandDedup, error)

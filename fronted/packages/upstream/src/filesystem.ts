@@ -30,6 +30,9 @@ import type {
   ShareRequestPageVM,
   ShareRequestVM,
   SharedWithMeQuery,
+  TrashItemPageVM,
+  TrashListQuery,
+  FileMutationBatchResultVM,
   UpdateStoragePoolCommand,
   UpdateStorageProviderCommand,
   TransferListQuery,
@@ -46,6 +49,7 @@ type ListFilesQuery = {
   q?: string;
   cursor?: string;
   limit?: number;
+  namespace_id?: string;
 };
 
 type MoveFileNodeCommand = {
@@ -123,6 +127,23 @@ function filesQuery(query: ListFilesQuery = {}) {
   if (query.q) params.set("q", query.q);
   if (query.cursor) params.set("cursor", query.cursor);
   if (query.limit != null) params.set("limit", String(query.limit));
+  if (query.namespace_id) params.set("namespace_id", query.namespace_id);
+  const suffix = params.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
+function trashQuery(query: TrashListQuery = {}) {
+  const params = new URLSearchParams();
+  if (query.namespace_id) params.set("namespace_id", query.namespace_id);
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit != null) params.set("limit", String(query.limit));
+  const suffix = params.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
+function trashMutationQuery(namespaceId?: string) {
+  const params = new URLSearchParams();
+  if (namespaceId) params.set("namespace_id", namespaceId);
   const suffix = params.toString();
   return suffix ? `?${suffix}` : "";
 }
@@ -375,26 +396,34 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
       nodeId: string,
       input: RenameFileNodeCommand,
       idempotencyKey: string,
+      namespaceId?: string,
     ) {
-      return upstreamFetch<void>(`/api/v1/workspaces/${workspaceId}/files/${nodeId}/name`, {
-        method: "PATCH",
-        body: JSON.stringify(input),
-        headers: { "Idempotency-Key": idempotencyKey },
-        options: { ...options, workspaceId },
-      });
+      return upstreamFetch<void>(
+        `/api/v1/workspaces/${workspaceId}/files/${nodeId}/name${trashMutationQuery(namespaceId)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(input),
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
     },
     moveFileNode(
       workspaceId: string,
       nodeId: string,
       input: MoveFileNodeCommand,
       idempotencyKey: string,
+      namespaceId?: string,
     ) {
-      return upstreamFetch<void>(`/api/v1/workspaces/${workspaceId}/files/${nodeId}/move`, {
-        method: "POST",
-        body: JSON.stringify(input),
-        headers: { "Idempotency-Key": idempotencyKey },
-        options: { ...options, workspaceId },
-      });
+      return upstreamFetch<void>(
+        `/api/v1/workspaces/${workspaceId}/files/${nodeId}/move${trashMutationQuery(namespaceId)}`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
     },
     trashFileNode(
       workspaceId: string,
@@ -402,15 +431,61 @@ export function createFilesystemUpstream(options: UpstreamRequestOptions = {}) {
       idempotencyKey: string,
       namespaceId?: string,
     ) {
-      const params = new URLSearchParams();
-      if (namespaceId) params.set("namespace_id", namespaceId);
-      const suffix = params.toString();
-      const qs = suffix ? `?${suffix}` : "";
-      return upstreamFetch<void>(`/api/v1/workspaces/${workspaceId}/files/${nodeId}${qs}`, {
-        method: "DELETE",
-        headers: { "Idempotency-Key": idempotencyKey },
-        options: { ...options, workspaceId },
-      });
+      return upstreamFetch<void>(
+        `/api/v1/workspaces/${workspaceId}/files/${nodeId}${trashMutationQuery(namespaceId)}`,
+        {
+          method: "DELETE",
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+    listTrash(workspaceId: string, query: TrashListQuery = {}) {
+      return upstreamFetch<TrashItemPageVM>(
+        `/api/v1/workspaces/${workspaceId}/files/trash${trashQuery(query)}`,
+        { method: "GET", options: { ...options, workspaceId } },
+      );
+    },
+    restoreFileNode(
+      workspaceId: string,
+      nodeId: string,
+      idempotencyKey: string,
+      namespaceId?: string,
+    ) {
+      return upstreamFetch<void>(
+        `/api/v1/workspaces/${workspaceId}/files/${nodeId}/restore${trashMutationQuery(namespaceId)}`,
+        {
+          method: "POST",
+          body: "{}",
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+    purgeFileNode(
+      workspaceId: string,
+      nodeId: string,
+      idempotencyKey: string,
+      namespaceId?: string,
+    ) {
+      return upstreamFetch<void>(
+        `/api/v1/workspaces/${workspaceId}/files/${nodeId}/permanent${trashMutationQuery(namespaceId)}`,
+        {
+          method: "DELETE",
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
+    },
+    emptyTrash(workspaceId: string, idempotencyKey: string, namespaceId?: string) {
+      return upstreamFetch<FileMutationBatchResultVM>(
+        `/api/v1/workspaces/${workspaceId}/files/trash${trashMutationQuery(namespaceId)}`,
+        {
+          method: "DELETE",
+          headers: { "Idempotency-Key": idempotencyKey },
+          options: { ...options, workspaceId },
+        },
+      );
     },
     listRevisions(workspaceId: string, nodeId: string, query: ListRevisionsQuery = {}) {
       return upstreamFetch<FileRevisionPageVM>(

@@ -59,8 +59,8 @@ var postgresFallbackConstraints = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_namespaces_user_owner ON filesystem.namespaces(organization_id, owner_user_id) WHERE namespace_type = 'USER'`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_quota_accounts_namespace ON filesystem.quota_accounts(namespace_id)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_quota_accounts_id_namespace ON filesystem.quota_accounts(id, namespace_id)`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_root_name ON filesystem.nodes(namespace_id, normalized_name) WHERE parent_id IS NULL`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_child_name ON filesystem.nodes(namespace_id, parent_id, normalized_name) WHERE parent_id IS NOT NULL`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_root_name ON filesystem.nodes(namespace_id, normalized_name) WHERE parent_id IS NULL AND state = 'ACTIVE'`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_nodes_child_name ON filesystem.nodes(namespace_id, parent_id, normalized_name) WHERE parent_id IS NOT NULL AND state = 'ACTIVE'`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_blobs_dedup ON filesystem.blobs(dedup_domain, sha256, size)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_revisions_node_no ON filesystem.file_revisions(node_id, revision_no)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_filesystem_revisions_id_node ON filesystem.file_revisions(id, node_id)`,
@@ -153,9 +153,9 @@ func AutoMigrate(db *gorm.DB) error {
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_namespaces_organization_id ON namespaces(organization_id) WHERE namespace_type = 'ORGANIZATION'`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_namespaces_user_owner ON namespaces(organization_id, owner_user_id) WHERE namespace_type = 'USER'`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_namespaces_id_organization ON namespaces(id, organization_id)`,
-			`CREATE TABLE IF NOT EXISTS filesystem.nodes (id BLOB PRIMARY KEY, namespace_id BLOB NOT NULL, parent_id BLOB, node_type TEXT NOT NULL CHECK (node_type IN ('FILE','DIRECTORY')), name TEXT NOT NULL, normalized_name TEXT NOT NULL, current_revision_id BLOB, state TEXT NOT NULL CHECK (state IN ('ACTIVE','TRASHED','RETENTION_HOLD','PURGE_PENDING','PURGED')), owner_id BLOB NOT NULL, classification TEXT NOT NULL DEFAULT 'INTERNAL' CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED')), created_at DATETIME, updated_at DATETIME, UNIQUE(id, namespace_id), FOREIGN KEY(namespace_id) REFERENCES namespaces(id), FOREIGN KEY(parent_id, namespace_id) REFERENCES nodes(id, namespace_id), FOREIGN KEY(current_revision_id, id) REFERENCES file_revisions(id, node_id))`,
-			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_nodes_root_name ON nodes(namespace_id, normalized_name) WHERE parent_id IS NULL`,
-			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_nodes_child_name ON nodes(namespace_id, parent_id, normalized_name) WHERE parent_id IS NOT NULL`,
+			`CREATE TABLE IF NOT EXISTS filesystem.nodes (id BLOB PRIMARY KEY, namespace_id BLOB NOT NULL, parent_id BLOB, node_type TEXT NOT NULL CHECK (node_type IN ('FILE','DIRECTORY')), name TEXT NOT NULL, normalized_name TEXT NOT NULL, current_revision_id BLOB, state TEXT NOT NULL CHECK (state IN ('ACTIVE','TRASHED','RETENTION_HOLD','PURGE_PENDING','PURGED')), owner_id BLOB NOT NULL, classification TEXT NOT NULL DEFAULT 'INTERNAL' CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED')), deleted_at DATETIME, deleted_by BLOB, created_at DATETIME, updated_at DATETIME, UNIQUE(id, namespace_id), FOREIGN KEY(namespace_id) REFERENCES namespaces(id), FOREIGN KEY(parent_id, namespace_id) REFERENCES nodes(id, namespace_id), FOREIGN KEY(current_revision_id, id) REFERENCES file_revisions(id, node_id))`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_nodes_root_name ON nodes(namespace_id, normalized_name) WHERE parent_id IS NULL AND state = 'ACTIVE'`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_nodes_child_name ON nodes(namespace_id, parent_id, normalized_name) WHERE parent_id IS NOT NULL AND state = 'ACTIVE'`,
 			`CREATE TABLE IF NOT EXISTS filesystem.blobs (id BLOB PRIMARY KEY, dedup_domain BLOB NOT NULL, sha256 TEXT NOT NULL, size INTEGER NOT NULL CHECK (size >= 0), encryption_key_ref TEXT, ref_count INTEGER NOT NULL CHECK (ref_count >= 0), state TEXT NOT NULL CHECK (state IN ('PENDING','AVAILABLE','QUARANTINED','TOMBSTONED','GC_PENDING','DELETED')), preferred_provider_id BLOB, tombstoned_at DATETIME, legal_hold INTEGER NOT NULL DEFAULT 0 CHECK (legal_hold IN (0, 1)), created_at DATETIME)`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS filesystem.ux_filesystem_blobs_dedup ON blobs(dedup_domain, sha256, size)`,
 			`CREATE TABLE IF NOT EXISTS filesystem.file_revisions (id BLOB PRIMARY KEY, node_id BLOB NOT NULL, revision_no INTEGER NOT NULL CHECK (revision_no > 0), blob_id BLOB NOT NULL, size INTEGER NOT NULL CHECK (size >= 0), mime_type TEXT NOT NULL, created_by BLOB NOT NULL, created_at DATETIME, UNIQUE(id, node_id), UNIQUE(node_id, revision_no), FOREIGN KEY(node_id) REFERENCES nodes(id), FOREIGN KEY(blob_id) REFERENCES blobs(id))`,
@@ -208,6 +208,8 @@ func AutoMigrate(db *gorm.DB) error {
 			`ALTER TABLE filesystem.share_requests ADD COLUMN effect TEXT NOT NULL DEFAULT 'ALLOW' CHECK (effect IN ('ALLOW','DENY'))`,
 			`ALTER TABLE filesystem.blobs ADD COLUMN tombstoned_at DATETIME`,
 			`ALTER TABLE filesystem.blobs ADD COLUMN legal_hold INTEGER NOT NULL DEFAULT 0 CHECK (legal_hold IN (0, 1))`,
+			`ALTER TABLE filesystem.nodes ADD COLUMN deleted_at DATETIME`,
+			`ALTER TABLE filesystem.nodes ADD COLUMN deleted_by BLOB`,
 		} {
 			if err := db.Exec(statement).Error; err != nil && !isSQLiteDuplicateColumn(err) {
 				return wrapPersistence(err)
@@ -217,6 +219,9 @@ func AutoMigrate(db *gorm.DB) error {
 			if err := backfillSQLiteNodeClassifications(db); err != nil {
 				return err
 			}
+		}
+		if err := upgradeSQLiteTrashIndexes(db); err != nil {
+			return err
 		}
 		return nil
 	}

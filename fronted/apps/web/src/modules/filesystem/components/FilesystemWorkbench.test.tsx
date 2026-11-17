@@ -754,6 +754,7 @@ describe("FilesystemWorkbench", () => {
         movableNode.id,
         target.id,
         movableNode.name,
+        { namespaceId: namespace.id },
       ),
     );
     expect(navigation.refresh).toHaveBeenCalled();

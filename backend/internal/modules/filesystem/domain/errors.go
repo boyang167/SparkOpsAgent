@@ -70,6 +70,8 @@ var (
 	ErrStorageGatewayMismatch          = errors.New("filesystem selected provider is not served by configured gateway")
 	ErrBlobStillReferenced             = errors.New("filesystem blob still referenced")
 	ErrRetentionHold                   = errors.New("filesystem retention hold active")
+	ErrRestoreNameConflict             = errors.New("filesystem restore name conflict")
+	ErrRestoreParentUnavailable        = errors.New("filesystem restore parent unavailable")
 	ErrBlobGCNotReady                  = errors.New("filesystem blob not ready for garbage collection")
 	ErrCrossWorkspaceReference         = errors.New("filesystem cross-workspace file reference rejected")
 )

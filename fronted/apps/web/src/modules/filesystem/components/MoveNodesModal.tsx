@@ -66,7 +66,9 @@ export function MoveNodesModal({
     setError(null);
     try {
       for (const node of nodes) {
-        await moveFileNode(workspaceId, node.id, target.id, node.name);
+        await moveFileNode(workspaceId, node.id, target.id, node.name, {
+          namespaceId: root.namespace_id,
+        });
       }
       onMoved(nodes, target);
       onClose();

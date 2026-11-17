@@ -115,6 +115,7 @@ describe("MoveNodesModal", () => {
       "file-a",
       "target",
       "A.txt",
+      { namespaceId: root.namespace_id },
     );
     expect(sdk.moveFileNode).toHaveBeenNthCalledWith(
       2,
@@ -122,6 +123,7 @@ describe("MoveNodesModal", () => {
       "file-b",
       "target",
       "B.txt",
+      { namespaceId: root.namespace_id },
     );
   });
 

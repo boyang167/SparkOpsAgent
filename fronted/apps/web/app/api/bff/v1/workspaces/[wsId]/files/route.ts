@@ -18,11 +18,13 @@ export const GET = createBffHandler(async (ctx, req, { params }) => {
   const cursor = req.nextUrl.searchParams.get("cursor") ?? undefined;
   const limitRaw = req.nextUrl.searchParams.get("limit");
   const limit = limitRaw ? Number.parseInt(limitRaw, 10) : undefined;
+  const namespaceId = req.nextUrl.searchParams.get("namespace_id") ?? undefined;
   return listFileNodes(ctx, wsId, {
     parent_id: parentId,
     type: nodeType,
     q: query,
     cursor,
     limit,
+    namespace_id: namespaceId,
   });
 });

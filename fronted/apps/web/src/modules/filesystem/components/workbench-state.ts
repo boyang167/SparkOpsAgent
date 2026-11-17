@@ -29,6 +29,14 @@ export function hrefForDataWorkspace(space: FileSpace = "workspace", view: FileV
   return query ? `/files/data/workspace?${query}` : "/files/data/workspace";
 }
 
+export function hrefForDataTrash(space: FileSpace = "workspace", view: FileView = "list") {
+  const params = new URLSearchParams();
+  if (view !== "list") params.set("view", view);
+  if (space !== "workspace") params.set("space", space);
+  const query = params.toString();
+  return query ? `/files/data/trash?${query}` : "/files/data/trash";
+}
+
 export function parseWorkbenchState(input: Record<string, SearchParamValue>): ParsedWorkbenchState {
   const tabs: WorkbenchTab[] = ["files", "transfers", "governance", "approvals", "audit"];
   const tab = firstValue(input.tab);

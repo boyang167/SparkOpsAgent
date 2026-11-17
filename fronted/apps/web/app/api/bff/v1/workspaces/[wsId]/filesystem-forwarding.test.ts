@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const listFileNodes = vi.fn();
+const listTrashItems = vi.fn();
 const moveFileNode = vi.fn();
 const trashFileNode = vi.fn();
+const restoreFileNode = vi.fn();
+const purgeFileNode = vi.fn();
+const emptyTrash = vi.fn();
 
 vi.mock("@sparkops/bff-core", () => ({
   createBffHandler: (handler: unknown) => handler,
@@ -10,8 +14,12 @@ vi.mock("@sparkops/bff-core", () => ({
 
 vi.mock("@sparkops/bff-modules/filesystem", () => ({
   listFileNodes,
+  listTrashItems,
   moveFileNode,
   trashFileNode,
+  restoreFileNode,
+  purgeFileNode,
+  emptyTrash,
   getFileNode: vi.fn(),
 }));
 
@@ -101,6 +109,89 @@ describe("filesystem Next BFF routes", () => {
       "workspace-1",
       "node-1",
       "trash-key-1",
+      "namespace-1",
+    );
+  });
+
+  it("forwards trash list filters from the trash route", async () => {
+    const { GET } = await import("./files/trash/route");
+    const request = {
+      nextUrl: new URL(
+        "http://localhost/api/bff/v1/workspaces/workspace-1/files/trash?namespace_id=namespace-1&cursor=cursor-1&limit=50",
+      ),
+    };
+
+    await (GET as unknown as Function)({}, request, {
+      params: { wsId: "workspace-1" },
+    });
+
+    expect(listTrashItems).toHaveBeenCalledWith({}, "workspace-1", {
+      namespace_id: "namespace-1",
+      cursor: "cursor-1",
+      limit: 50,
+    });
+  });
+
+  it("forwards empty trash with Idempotency-Key and namespace", async () => {
+    const { DELETE } = await import("./files/trash/route");
+    const request = {
+      headers: new Headers({ "Idempotency-Key": "empty-key-1" }),
+      nextUrl: new URL(
+        "http://localhost/api/bff/v1/workspaces/workspace-1/files/trash?namespace_id=namespace-1",
+      ),
+    };
+
+    await (DELETE as unknown as Function)({}, request, {
+      params: { wsId: "workspace-1" },
+    });
+
+    expect(emptyTrash).toHaveBeenCalledWith({}, "workspace-1", "empty-key-1", "namespace-1");
+  });
+
+  it("forwards restore with Idempotency-Key and namespace", async () => {
+    const { POST } = await import("./files/[nodeId]/restore/route");
+    const request = {
+      headers: new Headers({ "Idempotency-Key": "restore-key-1" }),
+      nextUrl: new URL(
+        "http://localhost/api/bff/v1/workspaces/workspace-1/files/node-1/restore?namespace_id=namespace-1",
+      ),
+    };
+
+    await expect(
+      (POST as unknown as Function)({}, request, {
+        params: { wsId: "workspace-1", nodeId: "node-1" },
+      }),
+    ).resolves.toEqual({ restored: true });
+
+    expect(restoreFileNode).toHaveBeenCalledWith(
+      {},
+      "workspace-1",
+      "node-1",
+      "restore-key-1",
+      "namespace-1",
+    );
+  });
+
+  it("forwards permanent delete with Idempotency-Key and namespace", async () => {
+    const { DELETE } = await import("./files/[nodeId]/permanent/route");
+    const request = {
+      headers: new Headers({ "Idempotency-Key": "purge-key-1" }),
+      nextUrl: new URL(
+        "http://localhost/api/bff/v1/workspaces/workspace-1/files/node-1/permanent?namespace_id=namespace-1",
+      ),
+    };
+
+    await expect(
+      (DELETE as unknown as Function)({}, request, {
+        params: { wsId: "workspace-1", nodeId: "node-1" },
+      }),
+    ).resolves.toEqual({ purged: true });
+
+    expect(purgeFileNode).toHaveBeenCalledWith(
+      {},
+      "workspace-1",
+      "node-1",
+      "purge-key-1",
       "namespace-1",
     );
   });

@@ -256,6 +256,7 @@ function ScopedDirectoryTree({
             : await listFileNodes(workspaceId, {
                 parentId: node.id,
                 nodeType: "DIRECTORY",
+                namespaceId,
                 ...(cursor ? { cursor } : {}),
               });
         children.push(...page.items);

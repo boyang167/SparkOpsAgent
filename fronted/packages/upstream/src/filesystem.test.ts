@@ -94,6 +94,123 @@ describe("filesystem upstream", () => {
     expect(new Headers(init.headers).get("Idempotency-Key")).toBe("trash-key-1");
   });
 
+  it("lists trash with namespace, cursor and limit", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 0,
+          message: "ok",
+          data: { items: [], next_cursor: "next-1" },
+          trace_id: "trace-1",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createFilesystemUpstream().listTrash("workspace-1", {
+      namespace_id: "namespace-1",
+      cursor: "cursor-1",
+      limit: 50,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "/api/v1/workspaces/workspace-1/files/trash?namespace_id=namespace-1&cursor=cursor-1&limit=50",
+      ),
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("restores and permanently deletes with namespace and idempotency key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createFilesystemUpstream().restoreFileNode(
+      "workspace-1",
+      "node-1",
+      "restore-key-1",
+      "namespace-1",
+    );
+    await createFilesystemUpstream().purgeFileNode(
+      "workspace-1",
+      "node-2",
+      "purge-key-1",
+      "namespace-1",
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("/files/node-1/restore?namespace_id=namespace-1"),
+      expect.objectContaining({
+        method: "POST",
+        body: "{}",
+        headers: expect.any(Headers),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining("/files/node-2/permanent?namespace_id=namespace-1"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    const restoreInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const purgeInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect(new Headers(restoreInit.headers).get("Idempotency-Key")).toBe("restore-key-1");
+    expect(new Headers(purgeInit.headers).get("Idempotency-Key")).toBe("purge-key-1");
+  });
+
+  it("renames with namespace query and idempotency key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createFilesystemUpstream().renameFileNode(
+      "workspace-1",
+      "node-1",
+      { name: "kubeconfig2.yaml" },
+      "rename-key-1",
+      "namespace-1",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/files/node-1/name?namespace_id=namespace-1"),
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ name: "kubeconfig2.yaml" }),
+      }),
+    );
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("rename-key-1");
+  });
+
+  it("empties trash with DELETE and idempotency key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 0,
+          message: "ok",
+          data: { items: [{ node_id: "node-1", succeeded: true }] },
+          trace_id: "trace-1",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createFilesystemUpstream().emptyTrash(
+      "workspace-1",
+      "empty-key-1",
+      "namespace-1",
+    );
+
+    expect(result.items).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/files/trash?namespace_id=namespace-1"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("empty-key-1");
+  });
+
   it("forwards governed child filters and tenant context without embedding a workspace path", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

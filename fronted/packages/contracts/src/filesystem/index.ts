@@ -627,3 +627,38 @@ export const SharedWithMeQuerySchema = z.object({
   limit: z.number().int().positive().max(200).optional(),
 });
 export type SharedWithMeQuery = z.infer<typeof SharedWithMeQuerySchema>;
+
+export const TrashListQuerySchema = z.object({
+  namespace_id: z.string().uuid().optional(),
+  cursor: z.string().max(512).optional(),
+  limit: z.number().int().positive().max(200).optional(),
+});
+export type TrashListQuery = z.infer<typeof TrashListQuerySchema>;
+
+export const TrashItemVMSchema = z.object({
+  node: FileNodeVMSchema,
+  original_path: z.string().min(1),
+  deleted_at: z.string().datetime({ offset: true }),
+  deleted_by: z.string().uuid().optional(),
+  can_restore: z.boolean(),
+  can_permanently_delete: z.boolean(),
+});
+export type TrashItemVM = z.infer<typeof TrashItemVMSchema>;
+
+export const TrashItemPageVMSchema = z.object({
+  items: z.array(TrashItemVMSchema),
+  next_cursor: z.string(),
+});
+export type TrashItemPageVM = z.infer<typeof TrashItemPageVMSchema>;
+
+export const FileMutationItemResultSchema = z.object({
+  node_id: z.string().uuid(),
+  succeeded: z.boolean(),
+  error_code: z.string().optional(),
+});
+export type FileMutationItemResult = z.infer<typeof FileMutationItemResultSchema>;
+
+export const FileMutationBatchResultVMSchema = z.object({
+  items: z.array(FileMutationItemResultSchema),
+});
+export type FileMutationBatchResultVM = z.infer<typeof FileMutationBatchResultVMSchema>;

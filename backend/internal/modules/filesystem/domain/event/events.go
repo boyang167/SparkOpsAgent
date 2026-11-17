@@ -14,6 +14,8 @@ const (
 	NodeMovedName           = "filesystem.file.moved.v1"
 	NodeCopiedName          = "filesystem.node.copied.v1"
 	NodeTrashedName         = "filesystem.file.trashed.v1"
+	NodeRestoredName        = "filesystem.node-restored.v1"
+	NodePurgedName          = "filesystem.node-purged.v1"
 	RevisionRestoredName    = "filesystem.revision.restored.v1"
 	PermissionChangedName   = "filesystem.file.permission-changed.v1"
 	TransferInitiatedName   = "filesystem.transfer.initiated.v1"
@@ -61,6 +63,16 @@ type NodeCopied struct {
 }
 
 type NodeTrashed struct {
+	events.BaseEvent
+	NodeID uuid.UUID `json:"node_id"`
+}
+
+type NodeRestored struct {
+	events.BaseEvent
+	NodeID uuid.UUID `json:"node_id"`
+}
+
+type NodePurged struct {
 	events.BaseEvent
 	NodeID uuid.UUID `json:"node_id"`
 }
@@ -145,6 +157,12 @@ func Register(registry *events.Registry) error {
 		},
 		func() error {
 			return registerNodeEvent(registry, NodeTrashedName, func(event NodeTrashed) uuid.UUID { return event.NodeID })
+		},
+		func() error {
+			return registerNodeEvent(registry, NodeRestoredName, func(event NodeRestored) uuid.UUID { return event.NodeID })
+		},
+		func() error {
+			return registerNodeEvent(registry, NodePurgedName, func(event NodePurged) uuid.UUID { return event.NodeID })
 		},
 		func() error {
 			return registerNodeEvent(registry, RevisionRestoredName, func(event RevisionRestored) uuid.UUID { return event.NodeID })

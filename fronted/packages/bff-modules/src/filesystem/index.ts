@@ -31,6 +31,9 @@ import type {
   ShareRequestPageVM,
   ShareRequestVM,
   SharedWithMeQuery,
+  TrashItemPageVM,
+  TrashListQuery,
+  FileMutationBatchResultVM,
   UpdateStoragePoolCommand,
   UpdateStorageProviderCommand,
   TransferListQuery,
@@ -58,6 +61,8 @@ import {
   StorageProviderPageVMSchema,
   TransferSessionPageVMSchema,
   TransferSessionVMSchema,
+  TrashItemPageVMSchema,
+  FileMutationBatchResultVMSchema,
 } from "@sparkops/contracts/filesystem";
 
 function governedContext(organizationId: string, workspaceId?: string) {
@@ -101,6 +106,7 @@ export async function listFileNodes(
     q?: string;
     cursor?: string;
     limit?: number;
+    namespace_id?: string;
   } = {},
 ): Promise<FileNodePageVM> {
   const data = await ctx.upstream.filesystem.listFiles(workspaceId, query);
@@ -135,8 +141,15 @@ export async function renameFileNode(
   nodeId: string,
   input: RenameFileNodeCommand,
   idempotencyKey: string,
+  namespaceId?: string,
 ): Promise<void> {
-  await ctx.upstream.filesystem.renameFileNode(workspaceId, nodeId, input, idempotencyKey);
+  await ctx.upstream.filesystem.renameFileNode(
+    workspaceId,
+    nodeId,
+    input,
+    idempotencyKey,
+    namespaceId,
+  );
 }
 
 export async function moveFileNode(
@@ -145,12 +158,14 @@ export async function moveFileNode(
   nodeId: string,
   input: { parent_id: string | null; name: string },
   idempotencyKey: string,
+  namespaceId?: string,
 ): Promise<void> {
   await ctx.upstream.filesystem.moveFileNode(
     workspaceId,
     nodeId,
     input,
     idempotencyKey,
+    namespaceId,
   );
 }
 
@@ -167,6 +182,59 @@ export async function trashFileNode(
     idempotencyKey,
     namespaceId,
   );
+}
+
+export async function listTrashItems(
+  ctx: BffContext,
+  workspaceId: string,
+  query: TrashListQuery = {},
+): Promise<TrashItemPageVM> {
+  const data = await ctx.upstream.filesystem.listTrash(workspaceId, query);
+  return TrashItemPageVMSchema.parse(data);
+}
+
+export async function restoreFileNode(
+  ctx: BffContext,
+  workspaceId: string,
+  nodeId: string,
+  idempotencyKey: string,
+  namespaceId?: string,
+): Promise<void> {
+  await ctx.upstream.filesystem.restoreFileNode(
+    workspaceId,
+    nodeId,
+    idempotencyKey,
+    namespaceId,
+  );
+}
+
+export async function purgeFileNode(
+  ctx: BffContext,
+  workspaceId: string,
+  nodeId: string,
+  idempotencyKey: string,
+  namespaceId?: string,
+): Promise<void> {
+  await ctx.upstream.filesystem.purgeFileNode(
+    workspaceId,
+    nodeId,
+    idempotencyKey,
+    namespaceId,
+  );
+}
+
+export async function emptyTrash(
+  ctx: BffContext,
+  workspaceId: string,
+  idempotencyKey: string,
+  namespaceId?: string,
+): Promise<FileMutationBatchResultVM> {
+  const data = await ctx.upstream.filesystem.emptyTrash(
+    workspaceId,
+    idempotencyKey,
+    namespaceId,
+  );
+  return FileMutationBatchResultVMSchema.parse(data);
 }
 
 export async function listFileRevisions(

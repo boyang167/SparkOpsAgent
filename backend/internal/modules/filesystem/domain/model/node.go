@@ -2,6 +2,7 @@ package model
 
 import (
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/text/unicode/norm"
@@ -18,6 +19,8 @@ type Node struct {
 	State             NodeState
 	OwnerID           uuid.UUID
 	Classification    TransferClassification
+	DeletedAt         *time.Time
+	DeletedBy         *uuid.UUID
 }
 
 func NewFile(namespaceID, ownerID uuid.UUID, name string, parentID uuid.UUID) (*Node, error) {

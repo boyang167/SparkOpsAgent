@@ -98,8 +98,8 @@ export function FileExplorerPanel({
   }, [initialNodes, scopeKey]);
 
   const doRename = useMemo(
-    () => createPanelRenameHandler(workspaceId, onRename),
-    [onRename, workspaceId],
+    () => createPanelRenameHandler(workspaceId, namespaceId, onRename),
+    [namespaceId, onRename, workspaceId],
   );
   const doCreateDirectory = useCallback(
     async (name: string): Promise<FileNodeVM | void> => {
@@ -514,7 +514,7 @@ export function FileExplorerPanel({
               disabled={pending || dialog?.type !== "delete" || dialog.nodes.length === 0}
               onClick={() => void submitDelete()}
             >
-              {pending ? "删除中…" : "删除"}
+              {pending ? "移入中…" : "移入回收站"}
             </button>
           </div>
         }
